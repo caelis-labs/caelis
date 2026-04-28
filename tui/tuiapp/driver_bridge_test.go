@@ -12,7 +12,9 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
+	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
 func TestProgramSenderDropsAfterClose(t *testing.T) {
@@ -102,6 +104,70 @@ func TestSubagentForwarderExitsOnContextCancel(t *testing.T) {
 	}
 }
 
+func TestSlashDynamicAgentPassesApprovalRequester(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentList: []tuiadapterruntime.AgentCandidate{{Name: "claude"}},
+	}
+	result := slashDynamicAgentWithContext(context.Background(), driver, &ProgramSender{Send: func(tea.Msg) {}}, "claude", "inspect repo")
+	if result.Err != nil {
+		t.Fatalf("slashDynamicAgentWithContext() error = %v", result.Err)
+	}
+	if driver.lastStartedAgent != "claude" || driver.lastStartedPrompt != "inspect repo" {
+		t.Fatalf("started agent=%q prompt=%q", driver.lastStartedAgent, driver.lastStartedPrompt)
+	}
+	if driver.lastStartOptions.ApprovalRequester == nil {
+		t.Fatal("StartAgentSubagentWithOptions approval requester is nil")
+	}
+}
+
+func TestTUISubagentApprovalRequesterPromptsAndApproves(t *testing.T) {
+	prompts := make(chan PromptRequestMsg, 1)
+	requester := tuiSubagentApprovalRequester{send: func(msg tea.Msg) {
+		prompt, ok := msg.(PromptRequestMsg)
+		if !ok {
+			t.Fatalf("sent msg = %#v, want PromptRequestMsg", msg)
+		}
+		prompts <- prompt
+		prompt.Response <- PromptResponse{Line: "allow_once"}
+	}}
+
+	resp, err := requester.RequestApproval(context.Background(), sdkruntime.ApprovalRequest{
+		Tool: sdktool.Definition{Name: "BASH"},
+		Call: sdktool.Call{ID: "call-1", Name: "BASH"},
+		Approval: &sdksession.ProtocolApproval{
+			ToolCall: sdksession.ProtocolToolCall{
+				ID:       "call-1",
+				Name:     "BASH",
+				RawInput: map[string]any{"command": "git status"},
+			},
+			Options: []sdksession.ProtocolApprovalOption{
+				{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+				{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestApproval() error = %v", err)
+	}
+	if !resp.Approved || resp.Outcome != string(appgateway.ApprovalStatusSelected) || resp.OptionID != "allow_once" {
+		t.Fatalf("approval response = %#v, want selected allow_once", resp)
+	}
+	select {
+	case prompt := <-prompts:
+		if prompt.Prompt != "BASH" {
+			t.Fatalf("prompt title = %q, want BASH", prompt.Prompt)
+		}
+		if len(prompt.Choices) != 2 {
+			t.Fatalf("prompt choices = %#v, want two", prompt.Choices)
+		}
+		if len(prompt.Details) == 0 || !strings.Contains(prompt.Details[0].Value, "git status") {
+			t.Fatalf("prompt details = %#v, want command preview", prompt.Details)
+		}
+	default:
+		t.Fatal("approval prompt was not sent")
+	}
+}
+
 func TestDiagnosticsReportsProgramSenderDropsAfterClose(t *testing.T) {
 	sender := &ProgramSender{}
 	sender.Close()
@@ -149,7 +215,7 @@ func TestSlashHelpListsMinimalCoreCommands(t *testing.T) {
 	if !ok {
 		t.Fatalf("slashHelp() msg = %#v, want LogChunkMsg", msgs[0])
 	}
-	for _, want := range []string{"/agent list | /agent add <builtin> | /agent use <agent|local> | /agent remove <agent>", "/connect", "/model use <alias> | /model del <alias>", "/compact", "/resume [session-id]"} {
+	for _, want := range []string{"/agent list | /agent add <builtin> | /agent install <adapter> | /agent use <agent|local> | /agent remove <agent>", "/connect", "/model use <alias> | /model del <alias>", "/compact", "/resume [session-id]"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashHelp() chunk = %q, want substring %q", log.Chunk, want)
 		}
@@ -694,6 +760,47 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	}
 }
 
+func TestSlashAgentInstallPassesOptions(t *testing.T) {
+	driver := &bridgeTestDriver{}
+	var msgs []tea.Msg
+	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "install claude")
+	if result.Err != nil {
+		t.Fatalf("slashAgentWithContext(install) error = %v", result.Err)
+	}
+	if driver.lastAddedAgent != "claude" {
+		t.Fatalf("lastAddedAgent = %q, want claude", driver.lastAddedAgent)
+	}
+	if !driver.lastAddOptions.Install {
+		t.Fatal("AddAgentWithOptions Install = false, want true")
+	}
+	if len(msgs) == 0 {
+		t.Fatal("slashAgentWithContext(install) emitted no messages")
+	}
+}
+
+func TestSlashArgQueryAgentInstall(t *testing.T) {
+	command, query, ok := slashArgQueryAtEnd([]rune("/agent install c"))
+	if !ok {
+		t.Fatal("slashArgQueryAtEnd(/agent install c) ok = false")
+	}
+	if command != "agent install" || query != "c" {
+		t.Fatalf("slashArgQueryAtEnd(/agent install c) = command %q query %q, want agent install / c", command, query)
+	}
+	command, query, ok = slashArgQueryAtEnd([]rune("/agent install "))
+	if !ok {
+		t.Fatal("slashArgQueryAtEnd(/agent install ) ok = false")
+	}
+	if command != "agent install" || query != "" {
+		t.Fatalf("slashArgQueryAtEnd(/agent install ) = command %q query %q, want agent install / empty", command, query)
+	}
+}
+
+func TestAgentInstallSlashArgFallbackIsExecutable(t *testing.T) {
+	if !isExecutableSlashArgInput("/agent install claude") {
+		t.Fatal("isExecutableSlashArgInput(/agent install claude) = false, want true")
+	}
+}
+
 func TestSlashAgentHelpAndRecovery(t *testing.T) {
 	driver := &bridgeTestDriver{}
 	var msgs []tea.Msg
@@ -712,6 +819,41 @@ func TestSlashAgentHelpAndRecovery(t *testing.T) {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("slashAgent() output = %q, want substring %q", joined, want)
 		}
+	}
+}
+
+func TestFormatAgentStatusSnapshotHidesSelfDelegatedParticipants(t *testing.T) {
+	status := tuiadapterruntime.AgentStatusSnapshot{
+		SessionID:       "session-1",
+		ControllerKind:  "kernel",
+		ControllerLabel: "local",
+		HasActiveTurn:   true,
+		Participants: []tuiadapterruntime.AgentParticipantSnapshot{
+			{
+				ID:        "self-001",
+				Label:     "@jude",
+				AgentName: "self",
+				Kind:      string(sdksession.ParticipantKindSubagent),
+				Role:      string(sdksession.ParticipantRoleDelegated),
+				SessionID: "self-session",
+			},
+			{
+				ID:        "codex-001",
+				Label:     "@kate",
+				AgentName: "codex",
+				Kind:      string(sdksession.ParticipantKindSubagent),
+				Role:      string(sdksession.ParticipantRoleDelegated),
+				SessionID: "codex-session",
+			},
+		},
+	}
+
+	got := formatAgentStatusSnapshot(status)
+	if strings.Contains(got, "self-001") || strings.Contains(got, "@jude") {
+		t.Fatalf("formatAgentStatusSnapshot() = %q, should hide self delegated participant", got)
+	}
+	if !strings.Contains(got, "codex-001") || !strings.Contains(got, "@kate") {
+		t.Fatalf("formatAgentStatusSnapshot() = %q, want non-self participant", got)
 	}
 }
 
@@ -1307,12 +1449,14 @@ type bridgeTestDriver struct {
 	lastReasoningEffort          string
 	lastDeletedAlias             string
 	lastAddedAgent               string
+	lastAddOptions               tuiadapterruntime.AgentAddOptions
 	lastRemovedAgent             string
 	lastHandoffAgent             string
 	lastAskedAgent               string
 	lastAskedPrompt              string
 	lastStartedAgent             string
 	lastStartedPrompt            string
+	lastStartOptions             tuiadapterruntime.SubagentStartOptions
 	lastContinuedHandle          string
 	lastContinuedPrompt          string
 	subagentSnapshot             tuiadapterruntime.SubagentSnapshot
@@ -1405,6 +1549,9 @@ func (d *bridgeSubmitDriver) AgentStatus(context.Context) (tuiadapterruntime.Age
 func (d *bridgeSubmitDriver) AddAgent(context.Context, string) (tuiadapterruntime.AgentStatusSnapshot, error) {
 	return tuiadapterruntime.AgentStatusSnapshot{}, nil
 }
+func (d *bridgeSubmitDriver) AddAgentWithOptions(context.Context, string, tuiadapterruntime.AgentAddOptions) (tuiadapterruntime.AgentStatusSnapshot, error) {
+	return tuiadapterruntime.AgentStatusSnapshot{}, nil
+}
 func (d *bridgeSubmitDriver) RemoveAgent(context.Context, string) (tuiadapterruntime.AgentStatusSnapshot, error) {
 	return tuiadapterruntime.AgentStatusSnapshot{}, nil
 }
@@ -1415,6 +1562,9 @@ func (d *bridgeSubmitDriver) AskAgent(context.Context, string, string) (tuiadapt
 	return tuiadapterruntime.AgentStatusSnapshot{}, nil
 }
 func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string) (tuiadapterruntime.SubagentSnapshot, error) {
+	return tuiadapterruntime.SubagentSnapshot{}, nil
+}
+func (d *bridgeSubmitDriver) StartAgentSubagentWithOptions(context.Context, string, string, tuiadapterruntime.SubagentStartOptions) (tuiadapterruntime.SubagentSnapshot, error) {
 	return tuiadapterruntime.SubagentSnapshot{}, nil
 }
 func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string) (tuiadapterruntime.SubagentSnapshot, error) {
@@ -1507,8 +1657,12 @@ func (d *bridgeTestDriver) AgentStatus(context.Context) (tuiadapterruntime.Agent
 	return d.agentStatus, nil
 }
 func (d *bridgeTestDriver) AddAgent(_ context.Context, target string) (tuiadapterruntime.AgentStatusSnapshot, error) {
+	return d.AddAgentWithOptions(context.Background(), target, tuiadapterruntime.AgentAddOptions{})
+}
+func (d *bridgeTestDriver) AddAgentWithOptions(_ context.Context, target string, opts tuiadapterruntime.AgentAddOptions) (tuiadapterruntime.AgentStatusSnapshot, error) {
 	d.addAgentCalls++
 	d.lastAddedAgent = target
+	d.lastAddOptions = opts
 	return d.agentStatus, nil
 }
 func (d *bridgeTestDriver) RemoveAgent(_ context.Context, target string) (tuiadapterruntime.AgentStatusSnapshot, error) {
@@ -1528,8 +1682,12 @@ func (d *bridgeTestDriver) AskAgent(_ context.Context, target string, prompt str
 	return d.agentStatus, nil
 }
 func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string) (tuiadapterruntime.SubagentSnapshot, error) {
+	return d.StartAgentSubagentWithOptions(context.Background(), agent, prompt, tuiadapterruntime.SubagentStartOptions{})
+}
+func (d *bridgeTestDriver) StartAgentSubagentWithOptions(_ context.Context, agent string, prompt string, opts tuiadapterruntime.SubagentStartOptions) (tuiadapterruntime.SubagentSnapshot, error) {
 	d.lastStartedAgent = agent
 	d.lastStartedPrompt = prompt
+	d.lastStartOptions = opts
 	return d.subagentSnapshot, nil
 }
 func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string) (tuiadapterruntime.SubagentSnapshot, error) {

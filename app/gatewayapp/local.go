@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	sdkminimax "github.com/OnslaughtSnail/caelis/sdk/model/providers/minimax"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy/presets"
+	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	"github.com/OnslaughtSnail/caelis/sdk/runtime/agents/chat"
 	localruntime "github.com/OnslaughtSnail/caelis/sdk/runtime/local"
 	sdksandbox "github.com/OnslaughtSnail/caelis/sdk/sandbox"
@@ -110,6 +113,20 @@ type SandboxStatus struct {
 type ACPAgentInfo struct {
 	Name        string
 	Description string
+}
+
+type ACPAgentAddOption struct {
+	Value   string
+	Display string
+	Detail  string
+}
+
+type RegisterBuiltinACPAgentOptions struct {
+	Install bool
+}
+
+type StartSubagentOptions struct {
+	ApprovalRequester sdkruntime.ApprovalRequester
 }
 
 type stackRuntimeConfig struct {
@@ -352,12 +369,8 @@ func selfRuntimeArgs(cfg Config) []string {
 
 func builtInACPAgents() []sdkplugin.AgentConfig {
 	return []sdkplugin.AgentConfig{
-		{
-			Name:        "codex",
-			Description: "OpenAI Codex ACP agent",
-			Command:     "npx",
-			Args:        []string{"-y", "@zed-industries/codex-acp"},
-		},
+		npxACPAgentConfig("codex", "OpenAI Codex ACP agent", "@zed-industries/codex-acp"),
+		npxACPAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp"),
 		{
 			Name:        "copilot",
 			Description: "GitHub Copilot ACP agent",
@@ -373,19 +386,55 @@ func builtInACPAgents() []sdkplugin.AgentConfig {
 	}
 }
 
+type builtinACPAdapterPackage struct {
+	Package string
+	Bin     string
+}
+
+func npxACPAgentConfig(name string, description string, pkg string) sdkplugin.AgentConfig {
+	return sdkplugin.AgentConfig{
+		Name:        strings.TrimSpace(name),
+		Description: strings.TrimSpace(description),
+		Command:     "npx",
+		Args:        []string{"-y", strings.TrimSpace(pkg)},
+	}
+}
+
+func builtinACPAdapterPackageFor(name string) (builtinACPAdapterPackage, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "codex":
+		return builtinACPAdapterPackage{Package: "@zed-industries/codex-acp", Bin: "codex-acp"}, true
+	case "claude":
+		return builtinACPAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Bin: "claude-agent-acp"}, true
+	default:
+		return builtinACPAdapterPackage{}, false
+	}
+}
+
 func (s *Stack) RegisterBuiltinACPAgent(name string) error {
+	return s.RegisterBuiltinACPAgentWithOptions(context.Background(), name, RegisterBuiltinACPAgentOptions{})
+}
+
+func (s *Stack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, name string, opts RegisterBuiltinACPAgentOptions) error {
 	if s == nil || s.store == nil {
 		return fmt.Errorf("gatewayapp: app config store unavailable")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	if reservedSlashCommandName(name) {
 		return fmt.Errorf("gatewayapp: ACP agent %q conflicts with an existing slash command", strings.TrimSpace(name))
 	}
-	preset, ok := s.lookupRuntimeACPAgent(name)
-	if !ok {
-		preset, ok = lookupBuiltInACPAgent(name)
-	}
+	preset, ok := s.lookupRegisterableACPAgent(name)
 	if !ok {
 		return fmt.Errorf("gatewayapp: unknown builtin ACP agent %q", strings.TrimSpace(name))
+	}
+	if opts.Install {
+		installed, err := s.installBuiltinACPAgent(ctx, name, preset)
+		if err != nil {
+			return err
+		}
+		preset = installed
 	}
 	doc, err := s.store.Load()
 	if err != nil {
@@ -412,6 +461,14 @@ func (s *Stack) RegisterBuiltinACPAgent(name string) error {
 	return s.setConfiguredAgents(doc.Agents)
 }
 
+func (s *Stack) lookupRegisterableACPAgent(name string) (sdkplugin.AgentConfig, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if preset, ok := lookupBuiltInACPAgent(name); ok {
+		return preset, true
+	}
+	return s.lookupRuntimeACPAgent(name)
+}
+
 func (s *Stack) lookupRuntimeACPAgent(name string) (sdkplugin.AgentConfig, bool) {
 	if s == nil {
 		return sdkplugin.AgentConfig{}, false
@@ -425,6 +482,61 @@ func (s *Stack) lookupRuntimeACPAgent(name string) (sdkplugin.AgentConfig, bool)
 		}
 	}
 	return sdkplugin.AgentConfig{}, false
+}
+
+func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base sdkplugin.AgentConfig) (sdkplugin.AgentConfig, error) {
+	pkg, ok := builtinACPAdapterPackageFor(name)
+	if !ok {
+		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: ACP agent %q does not support local npm install", strings.TrimSpace(name))
+	}
+	if path, err := exec.LookPath(pkg.Bin); err == nil && strings.TrimSpace(path) != "" {
+		base.Command = path
+		base.Args = nil
+		return base, nil
+	}
+	npm, err := exec.LookPath("npm")
+	if err != nil || strings.TrimSpace(npm) == "" {
+		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: npm is required to install ACP agent %q", strings.TrimSpace(name))
+	}
+	root := s.managedACPAgentRoot()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return sdkplugin.AgentConfig{}, err
+	}
+	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, pkg.Package+"@latest")
+	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		out := strings.TrimSpace(string(output))
+		if out != "" {
+			return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q: %w\n%s", strings.TrimSpace(name), err, out)
+		}
+		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q: %w", strings.TrimSpace(name), err)
+	}
+	bin := managedACPAgentBinPath(root, pkg.Bin)
+	if info, err := os.Stat(bin); err != nil || info.IsDir() {
+		if err == nil {
+			err = fmt.Errorf("installed path is a directory")
+		}
+		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q did not produce %s: %w", strings.TrimSpace(name), bin, err)
+	}
+	base.Command = bin
+	base.Args = nil
+	return base, nil
+}
+
+func (s *Stack) managedACPAgentRoot() string {
+	if s == nil {
+		return ""
+	}
+	return filepath.Join(s.storeDir, "acp-agents", "npm")
+}
+
+func managedACPAgentBinPath(root string, bin string) string {
+	bin = strings.TrimSpace(bin)
+	if goruntime.GOOS == "windows" && !strings.HasSuffix(strings.ToLower(bin), ".cmd") {
+		bin += ".cmd"
+	}
+	return filepath.Join(strings.TrimSpace(root), "node_modules", ".bin", bin)
 }
 
 func (s *Stack) UnregisterACPAgent(name string) error {
@@ -536,6 +648,56 @@ func (s *Stack) ListBuiltinACPAgents() []ACPAgentInfo {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
 	return out
+}
+
+func (s *Stack) ListBuiltinACPAgentAddOptions() []ACPAgentAddOption {
+	builtins := builtInACPAgents()
+	out := make([]ACPAgentAddOption, 0, len(builtins))
+	for _, agent := range builtins {
+		name := strings.TrimSpace(agent.Name)
+		if name == "" {
+			continue
+		}
+		if _, ok := builtinACPAdapterPackageFor(name); ok {
+			out = append(out, ACPAgentAddOption{
+				Value:   name,
+				Display: name + " (npx)",
+				Detail:  strings.Join(append([]string{agent.Command}, agent.Args...), " "),
+			})
+			continue
+		}
+		out = append(out, ACPAgentAddOption{
+			Value:   name,
+			Display: name,
+			Detail:  firstNonEmpty(strings.TrimSpace(agent.Description), "built-in ACP agent"),
+		})
+	}
+	return out
+}
+
+func (s *Stack) ListInstallableACPAgentOptions() []ACPAgentAddOption {
+	builtins := builtInACPAgents()
+	out := make([]ACPAgentAddOption, 0, len(builtins))
+	for _, agent := range builtins {
+		name := strings.TrimSpace(agent.Name)
+		if name == "" {
+			continue
+		}
+		pkg, ok := builtinACPAdapterPackageFor(name)
+		if !ok {
+			continue
+		}
+		out = append(out, ACPAgentAddOption{
+			Value:   name,
+			Display: name + " (npm install)",
+			Detail:  s.builtinACPAgentInstallCommand(pkg),
+		})
+	}
+	return out
+}
+
+func (s *Stack) builtinACPAgentInstallCommand(pkg builtinACPAdapterPackage) string {
+	return strings.Join([]string{"npm", "install", "--prefix", s.managedACPAgentRoot(), pkg.Package + "@latest"}, " ")
 }
 
 func lookupBuiltInACPAgent(name string) (sdkplugin.AgentConfig, bool) {
@@ -940,6 +1102,17 @@ func (s *Stack) StartSubagent(
 	prompt string,
 	source string,
 ) (sdktask.Snapshot, error) {
+	return s.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
+}
+
+func (s *Stack) StartSubagentWithOptions(
+	ctx context.Context,
+	ref sdksession.SessionRef,
+	agent string,
+	prompt string,
+	source string,
+	opts StartSubagentOptions,
+) (sdktask.Snapshot, error) {
 	if s == nil {
 		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -949,7 +1122,9 @@ func (s *Stack) StartSubagent(
 	if engine == nil {
 		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
-	return engine.StartSubagent(ctx, ref, agent, prompt, source)
+	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, localruntime.StartSubagentOptions{
+		ApprovalRequester: opts.ApprovalRequester,
+	})
 }
 
 func (s *Stack) ContinueSubagentByHandle(

@@ -675,6 +675,9 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	status.HasActiveTurn = state.HasActiveTurn
 	status.Participants = make([]AgentParticipantSnapshot, 0, len(state.Participants))
 	for _, participant := range state.Participants {
+		if shouldHideSelfDelegatedParticipant(participant) {
+			continue
+		}
 		status.Participants = append(status.Participants, AgentParticipantSnapshot{
 			ID:        strings.TrimSpace(participant.ID),
 			Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
@@ -688,7 +691,13 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 }
 
 func (d *GatewayDriver) AddAgent(ctx context.Context, target string) (AgentStatusSnapshot, error) {
-	if err := d.stack.RegisterBuiltinACPAgent(target); err != nil {
+	return d.AddAgentWithOptions(ctx, target, AgentAddOptions{})
+}
+
+func (d *GatewayDriver) AddAgentWithOptions(ctx context.Context, target string, opts AgentAddOptions) (AgentStatusSnapshot, error) {
+	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{
+		Install: opts.Install,
+	}); err != nil {
 		return AgentStatusSnapshot{}, err
 	}
 	return d.AgentStatus(ctx)
@@ -764,6 +773,10 @@ func (d *GatewayDriver) AskAgent(ctx context.Context, target string, prompt stri
 }
 
 func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, prompt string) (SubagentSnapshot, error) {
+	return d.StartAgentSubagentWithOptions(ctx, target, prompt, SubagentStartOptions{})
+}
+
+func (d *GatewayDriver) StartAgentSubagentWithOptions(ctx context.Context, target string, prompt string, opts SubagentStartOptions) (SubagentSnapshot, error) {
 	session, err := d.ensureSession(ctx)
 	if err != nil {
 		return SubagentSnapshot{}, err
@@ -772,7 +785,9 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 	if err != nil {
 		return SubagentSnapshot{}, err
 	}
-	snapshot, err := d.stack.StartSubagent(ctx, session.SessionRef, agent, prompt, "slash_"+agent)
+	snapshot, err := d.stack.StartSubagentWithOptions(ctx, session.SessionRef, agent, prompt, "slash_"+agent, gatewayapp.StartSubagentOptions{
+		ApprovalRequester: opts.ApprovalRequester,
+	})
 	if err != nil {
 		return SubagentSnapshot{}, err
 	}
@@ -855,6 +870,9 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 		if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleDelegated {
 			continue
 		}
+		if shouldHideSelfDelegatedParticipant(participant) {
+			continue
+		}
 		handle := strings.TrimPrefix(strings.TrimSpace(participant.Label), "@")
 		if handle == "" {
 			continue
@@ -876,6 +894,15 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 		}
 	}
 	return out, nil
+}
+
+func shouldHideSelfDelegatedParticipant(participant appgateway.ParticipantState) bool {
+	if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleDelegated {
+		return false
+	}
+	agent := strings.ToLower(strings.TrimSpace(participant.AgentName))
+	id := strings.ToLower(strings.TrimSpace(participant.ID))
+	return agent == "self" || strings.HasPrefix(id, "self-")
 }
 
 func (d *GatewayDriver) CompleteFile(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
@@ -942,6 +969,10 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 	switch strings.TrimSpace(strings.ToLower(command)) {
 	case "agent add":
 		return d.completeBuiltInAgentCatalog(query, limit), nil
+	case "agent install":
+		return d.completeInstallableBuiltInAgentCatalog(query, limit), nil
+	case "agent add --install":
+		return d.completeInstallableBuiltInAgentCatalog(query, limit), nil
 	case "agent use":
 		return d.completeAgentHandoffTargets(ctx, query, limit)
 	case "agent remove":
@@ -1092,19 +1123,41 @@ func (d *GatewayDriver) completeAgentCatalog(query string, limit int) []SlashArg
 }
 
 func (d *GatewayDriver) completeBuiltInAgentCatalog(query string, limit int) []SlashArgCandidate {
-	agents := d.stack.ListBuiltinACPAgents()
-	if len(agents) == 0 {
+	options := d.stack.ListBuiltinACPAgentAddOptions()
+	if len(options) == 0 {
 		return nil
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(agents)))
-	for _, agent := range agents {
-		if query != "" && !hasSlashArgPrefix(query, agent.Name, agent.Description) {
+	out := make([]SlashArgCandidate, 0, min(limit, len(options)))
+	for _, option := range options {
+		if query != "" && !hasSlashArgPrefix(query, option.Value, option.Display, option.Detail) {
 			continue
 		}
 		out = append(out, SlashArgCandidate{
-			Value:   agent.Name,
-			Display: agent.Name,
-			Detail:  firstNonEmpty(agent.Description, "built-in ACP agent"),
+			Value:   option.Value,
+			Display: option.Display,
+			Detail:  firstNonEmpty(option.Detail, "built-in ACP agent"),
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (d *GatewayDriver) completeInstallableBuiltInAgentCatalog(query string, limit int) []SlashArgCandidate {
+	options := d.stack.ListInstallableACPAgentOptions()
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]SlashArgCandidate, 0, min(limit, len(options)))
+	for _, option := range options {
+		if query != "" && !hasSlashArgPrefix(query, option.Value, option.Display, option.Detail) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   option.Value,
+			Display: option.Display,
+			Detail:  firstNonEmpty(option.Detail, "install ACP agent adapter"),
 		})
 		if len(out) >= limit {
 			break
@@ -1430,6 +1483,7 @@ func defaultSlashArgCandidates(command string) []SlashArgCandidate {
 		return []SlashArgCandidate{
 			{Value: "list", Display: "list", Detail: "List registered ACP agents"},
 			{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
+			{Value: "install", Display: "install", Detail: "Install and register an external ACP adapter"},
 			{Value: "use", Display: "use", Detail: "Switch the main controller"},
 			{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
 		}

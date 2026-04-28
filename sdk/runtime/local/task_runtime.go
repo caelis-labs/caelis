@@ -332,8 +332,15 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 		})
 	}
 	toolName := strings.TrimSpace(req.ToolCall.Name)
-	if toolName == "" {
-		toolName = "UNKNOWN"
+	if toolName == "" || strings.EqualFold(toolName, "UNKNOWN") {
+		toolName = firstNonEmpty(req.ToolCall.Title, req.ToolCall.Kind, "UNKNOWN")
+	}
+	rawInput := maps.Clone(req.ToolCall.RawInput)
+	var callInput json.RawMessage
+	if len(rawInput) > 0 {
+		if data, err := json.Marshal(rawInput); err == nil {
+			callInput = data
+		}
 	}
 	resp, err := r.requester.RequestApproval(ctx, sdkruntime.ApprovalRequest{
 		SessionRef: r.sessionRef,
@@ -343,16 +350,18 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			Name: toolName,
 		},
 		Call: sdktool.Call{
-			ID:   strings.TrimSpace(req.ToolCall.ID),
-			Name: toolName,
+			ID:    strings.TrimSpace(req.ToolCall.ID),
+			Name:  toolName,
+			Input: callInput,
 		},
 		Approval: &sdksession.ProtocolApproval{
 			ToolCall: sdksession.ProtocolToolCall{
-				ID:     strings.TrimSpace(req.ToolCall.ID),
-				Name:   toolName,
-				Kind:   strings.TrimSpace(req.ToolCall.Kind),
-				Title:  strings.TrimSpace(req.ToolCall.Title),
-				Status: strings.TrimSpace(req.ToolCall.Status),
+				ID:       strings.TrimSpace(req.ToolCall.ID),
+				Name:     toolName,
+				Kind:     strings.TrimSpace(req.ToolCall.Kind),
+				Title:    strings.TrimSpace(req.ToolCall.Title),
+				Status:   strings.TrimSpace(req.ToolCall.Status),
+				RawInput: rawInput,
 			},
 			Options: options,
 		},
@@ -610,12 +619,27 @@ func resolveSpawnAgent(session sdksession.Session, requested string) (string, er
 	return requested, nil
 }
 
+type StartSubagentOptions struct {
+	ApprovalRequester sdkruntime.ApprovalRequester
+}
+
 func (r *Runtime) StartSubagent(
 	ctx context.Context,
 	ref sdksession.SessionRef,
 	agent string,
 	prompt string,
 	source string,
+) (sdktask.Snapshot, error) {
+	return r.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
+}
+
+func (r *Runtime) StartSubagentWithOptions(
+	ctx context.Context,
+	ref sdksession.SessionRef,
+	agent string,
+	prompt string,
+	source string,
+	opts StartSubagentOptions,
 ) (sdktask.Snapshot, error) {
 	if r == nil || r.sessions == nil || r.tasks == nil {
 		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: runtime is unavailable")
@@ -645,6 +669,7 @@ func (r *Runtime) StartSubagent(
 		ParentTool: "slash",
 		Source:     firstNonEmpty(strings.TrimSpace(source), "slash_agent"),
 		Mode:       strings.TrimSpace(r.defaultPolicyMode),
+		Approval:   newSubagentApprovalRequester(opts.ApprovalRequester, session, ref),
 	})
 	if err != nil || !snapshot.Running {
 		return snapshot, err

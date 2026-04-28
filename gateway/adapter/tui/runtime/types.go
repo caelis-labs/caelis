@@ -6,6 +6,7 @@ import (
 	"time"
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
@@ -105,6 +106,14 @@ type AgentStatusSnapshot struct {
 	Participants    []AgentParticipantSnapshot
 }
 
+type AgentAddOptions struct {
+	Install bool
+}
+
+type SubagentStartOptions struct {
+	ApprovalRequester sdkruntime.ApprovalRequester
+}
+
 type SubagentSnapshot struct {
 	Handle        string
 	Mention       string
@@ -181,10 +190,12 @@ type Driver interface {
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
 	AddAgent(context.Context, string) (AgentStatusSnapshot, error)
+	AddAgentWithOptions(context.Context, string, AgentAddOptions) (AgentStatusSnapshot, error)
 	RemoveAgent(context.Context, string) (AgentStatusSnapshot, error)
 	HandoffAgent(context.Context, string) (AgentStatusSnapshot, error)
 	AskAgent(context.Context, string, string) (AgentStatusSnapshot, error)
 	StartAgentSubagent(context.Context, string, string) (SubagentSnapshot, error)
+	StartAgentSubagentWithOptions(context.Context, string, string, SubagentStartOptions) (SubagentSnapshot, error)
 	ContinueSubagent(context.Context, string, string) (SubagentSnapshot, error)
 
 	CompleteMention(context.Context, string, int) ([]CompletionCandidate, error)

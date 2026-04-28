@@ -25,11 +25,12 @@ type ApprovalOption struct {
 
 // ApprovalToolCall is the child tool call asking for approval.
 type ApprovalToolCall struct {
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Kind   string `json:"kind,omitempty"`
-	Title  string `json:"title,omitempty"`
-	Status string `json:"status,omitempty"`
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name,omitempty"`
+	Kind     string         `json:"kind,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Status   string         `json:"status,omitempty"`
+	RawInput map[string]any `json:"raw_input,omitempty"`
 }
 
 // ApprovalRequest is one runtime-owned approval bridge payload for a spawned

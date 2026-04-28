@@ -158,10 +158,135 @@ func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
 	if !agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, "self") {
 		t.Fatalf("self agent missing from assembly: %#v", withoutAgents.runtime.Assembly.Agents)
 	}
-	for _, removed := range []string{"codex", "copilot", "gemini"} {
+	for _, removed := range []string{"claude", "codex", "copilot", "gemini"} {
 		if agentConfigSetHas(withoutAgents.runtime.Assembly.Agents, removed) {
 			t.Fatalf("unregistered built-in agent %q unexpectedly present: %#v", removed, withoutAgents.runtime.Assembly.Agents)
 		}
+	}
+}
+
+func TestLookupBuiltInACPAgentIncludesClaude(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	agent, ok := lookupBuiltInACPAgent("claude")
+	if !ok {
+		t.Fatal("lookupBuiltInACPAgent(claude) ok = false")
+	}
+	if agent.Name != "claude" {
+		t.Fatalf("claude agent name = %q", agent.Name)
+	}
+	if agent.Command != "npx" {
+		t.Fatalf("claude command = %q, want npx", agent.Command)
+	}
+	if got, want := strings.Join(agent.Args, " "), "-y @agentclientprotocol/claude-agent-acp"; got != want {
+		t.Fatalf("claude args = %q, want %q", got, want)
+	}
+	if len(agent.Env) != 0 {
+		t.Fatalf("claude env = %#v, want none", agent.Env)
+	}
+}
+
+func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) {
+	binDir := t.TempDir()
+	writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", binDir)
+
+	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	if err := stack.RegisterBuiltinACPAgent("claude"); err != nil {
+		t.Fatalf("RegisterBuiltinACPAgent(claude) error = %v", err)
+	}
+	doc, err := LoadAppConfig(stack.storeDir)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.Agents) != 1 {
+		t.Fatalf("stored agents = %#v, want one", doc.Agents)
+	}
+	agent := doc.Agents[0]
+	if agent.Command != "npx" {
+		t.Fatalf("stored command = %q, want npx", agent.Command)
+	}
+	if got, want := strings.Join(agent.Args, " "), "-y @agentclientprotocol/claude-agent-acp"; got != want {
+		t.Fatalf("stored args = %q, want %q", got, want)
+	}
+}
+
+func TestRegisterBuiltinACPAgentInstallUsesPATHAdapterBinary(t *testing.T) {
+	binDir := t.TempDir()
+	claudeBin := writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", binDir)
+
+	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
+		Install: true,
+	}); err != nil {
+		t.Fatalf("RegisterBuiltinACPAgentWithOptions(claude, install) error = %v", err)
+	}
+	doc, err := LoadAppConfig(stack.storeDir)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.Agents) != 1 {
+		t.Fatalf("stored agents = %#v, want one", doc.Agents)
+	}
+	agent := doc.Agents[0]
+	if agent.Command != claudeBin {
+		t.Fatalf("stored command = %q, want PATH binary %q", agent.Command, claudeBin)
+	}
+	if len(agent.Args) != 0 {
+		t.Fatalf("stored args = %#v, want none", agent.Args)
+	}
+}
+
+func TestRegisterBuiltinACPAgentInstallUsesManagedAdapter(t *testing.T) {
+	binDir := t.TempDir()
+	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
+		Install: true,
+	}); err != nil {
+		t.Fatalf("RegisterBuiltinACPAgentWithOptions(claude, install) error = %v", err)
+	}
+
+	doc, err := LoadAppConfig(stack.storeDir)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.Agents) != 1 {
+		t.Fatalf("stored agents = %#v, want one", doc.Agents)
+	}
+	agent := doc.Agents[0]
+	wantCommand := filepath.Join(stack.storeDir, "acp-agents", "npm", "node_modules", ".bin", "claude-agent-acp")
+	if agent.Command != wantCommand {
+		t.Fatalf("stored command = %q, want %q", agent.Command, wantCommand)
+	}
+	if len(agent.Args) != 0 {
+		t.Fatalf("stored args = %#v, want none", agent.Args)
+	}
+	if len(agent.Env) != 0 {
+		t.Fatalf("stored env = %#v, want none", agent.Env)
+	}
+}
+
+func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) {
+	binDir := t.TempDir()
+	writeExecutableForGatewayAppTest(t, binDir, "npm", "#!/bin/sh\necho install failed >&2\nexit 7\n")
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
+		Install: true,
+	})
+	if err == nil {
+		t.Fatal("RegisterBuiltinACPAgentWithOptions(claude, install) error = nil, want failure")
+	}
+	doc, loadErr := LoadAppConfig(stack.storeDir)
+	if loadErr != nil {
+		t.Fatalf("LoadAppConfig() error = %v", loadErr)
+	}
+	if len(doc.Agents) != 0 {
+		t.Fatalf("stored agents after failed install = %#v, want none", doc.Agents)
 	}
 }
 
@@ -306,4 +431,57 @@ func repoRootForGatewayAppTest(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+func writeExecutableForGatewayAppTest(t *testing.T, dir string, name string, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("Chmod(%s) error = %v", path, err)
+	}
+	return path
+}
+
+func writeFakeNPMInstallerForGatewayAppTest(t *testing.T, dir string) string {
+	t.Helper()
+	body := `#!/bin/sh
+set -eu
+prefix=""
+pkg=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --prefix)
+      shift
+      prefix="$1"
+      ;;
+    @*)
+      pkg="$1"
+      ;;
+  esac
+  shift || true
+done
+bin="$prefix/node_modules/.bin"
+mkdir -p "$bin"
+case "$pkg" in
+  @zed-industries/codex-acp@*)
+    name="codex-acp"
+    ;;
+  @agentclientprotocol/claude-agent-acp@*)
+    name="claude-agent-acp"
+    ;;
+  *)
+    echo "unexpected package: $pkg" >&2
+    exit 2
+    ;;
+esac
+cat > "$bin/$name" <<'SCRIPT'
+#!/bin/sh
+exit 0
+SCRIPT
+chmod +x "$bin/$name"
+`
+	return writeExecutableForGatewayAppTest(t, dir, "npm", body)
 }

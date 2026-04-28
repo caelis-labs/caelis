@@ -78,7 +78,7 @@ func (m *Model) viewportRenderCacheMatchesDocument(ctx BlockRenderContext) bool 
 
 func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRenderContext) viewportRenderEntry {
 	m.observeBlockRender(block.Kind())
-	styledLines, plainLines, clickTokens := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width)
+	styledLines, plainLines, clickTokens := m.wrapRenderedRowsForViewport(block, block.Render(ctx), ctx.Width, ctx)
 	return viewportRenderEntry{
 		blockID:     block.BlockID(),
 		cacheKey:    cacheKey,
@@ -89,7 +89,7 @@ func (m *Model) renderViewportEntry(block Block, cacheKey string, ctx BlockRende
 	}
 }
 
-func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int) ([]string, []string, []string) {
+func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, wrapWidth int, ctx BlockRenderContext) ([]string, []string, []string) {
 	if wrapWidth <= 0 {
 		wrapWidth = 1
 	}
@@ -100,6 +100,20 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 	for _, row := range rawRows {
 		styledLine := m.adaptHistoryLineForViewport(row.Styled, wrapWidth)
 		plainLine := strings.TrimRight(ansi.Strip(styledLine), " ")
+		if isACPTranscriptBlockKind(block.Kind()) {
+			sourcePlain := strings.TrimRight(row.Plain, " ")
+			if strings.TrimSpace(sourcePlain) == "" {
+				sourcePlain = plainLine
+			}
+			if wrappedPlain, wrappedStyled, ok := wrapACPTranscriptHeaderForViewport(sourcePlain, wrapWidth, ctx); ok {
+				styledLines = append(styledLines, wrappedStyled...)
+				plainLines = append(plainLines, wrappedPlain...)
+				for range wrappedStyled {
+					clickTokens = append(clickTokens, row.ClickToken)
+				}
+				continue
+			}
+		}
 
 		var wrappedStyled string
 		var plainParts []string
@@ -145,6 +159,63 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 	}
 
 	return styledLines, plainLines, clickTokens
+}
+
+func isACPTranscriptBlockKind(kind BlockKind) bool {
+	return kind == BlockMainACPTurn || kind == BlockParticipantTurn
+}
+
+func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRenderContext) ([]string, []string, bool) {
+	if width <= 0 {
+		width = 1
+	}
+	prefix, detail, ok := splitACPTranscriptHeaderPrefix(plain)
+	if !ok || strings.TrimSpace(detail) == "" {
+		return nil, nil, false
+	}
+	bodyWidth := maxInt(1, width-displayColumns(prefix))
+	rawLines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(detail, "\r\n", "\n"), "\r", "\n"), "\n")
+	indent := strings.Repeat(" ", displayColumns(prefix))
+	plainLines := make([]string, 0, len(rawLines)+2)
+	for i, raw := range rawLines {
+		text := strings.TrimSpace(raw)
+		if text == "" {
+			continue
+		}
+		segments := graphemeWordWrap(text, bodyWidth)
+		for j, segment := range segments {
+			if i == 0 && j == 0 {
+				plainLines = append(plainLines, prefix+segment)
+			} else {
+				plainLines = append(plainLines, indent+segment)
+			}
+		}
+	}
+	if len(plainLines) == 0 {
+		return nil, nil, false
+	}
+	styledLines := make([]string, 0, len(plainLines))
+	for i, line := range plainLines {
+		if i == 0 {
+			styledLines = append(styledLines, styleACPTranscriptHeader(ctx, line))
+			continue
+		}
+		styledLines = append(styledLines, ctx.Theme.SecondaryTextStyle().Render(line))
+	}
+	return plainLines, styledLines, true
+}
+
+func splitACPTranscriptHeaderPrefix(plain string) (prefix string, detail string, ok bool) {
+	plain = strings.TrimRight(plain, " ")
+	if !strings.HasPrefix(plain, "• ") {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(plain, "• ")
+	verb, detail, found := strings.Cut(rest, " ")
+	if !found || strings.TrimSpace(verb) == "" {
+		return "", "", false
+	}
+	return "• " + verb + " ", detail, true
 }
 
 func (m *Model) rebuildViewportLineCaches(ctx BlockRenderContext) {

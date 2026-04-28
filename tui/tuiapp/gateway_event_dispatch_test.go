@@ -831,6 +831,74 @@ func TestGatewayConsecutiveTaskControlsMergeIntoOneInstructionRow(t *testing.T) 
 	}
 }
 
+func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
+	model := newGatewayEventTestModel()
+	longInput := "line one\nline two\nline three with TASK_WRITE_TAIL_MARKER"
+	for _, item := range []struct {
+		callID string
+		raw    map[string]any
+	}{
+		{
+			callID: "task-write",
+			raw: map[string]any{
+				"action":  "write",
+				"task_id": "task-hidden-write",
+				"input":   longInput,
+			},
+		},
+		{
+			callID: "task-wait",
+			raw: map[string]any{
+				"action":        "wait",
+				"task_id":       "task-hidden-wait",
+				"yield_time_ms": 500,
+			},
+		},
+		{
+			callID: "task-cancel",
+			raw: map[string]any{
+				"action":  "cancel",
+				"task_id": "task-hidden-cancel",
+			},
+		},
+	} {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindToolCall,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				ToolCall: &appgateway.ToolCallPayload{
+					CallID:   item.callID,
+					ToolName: "TASK",
+					Status:   appgateway.ToolStatusRunning,
+					Scope:    appgateway.EventScopeMain,
+					RawInput: item.raw,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{
+		`WRITE "line one\nline two\nline three with TASK_WRITE_TAIL_MARKER"`,
+		"WAIT 500 ms",
+		"CANCEL",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want %q", joined, want)
+		}
+	}
+	for _, forbidden := range []string{"task-hidden-write", "task-hidden-wait", "task-hidden-cancel", "..."} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
+		}
+	}
+}
+
 func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []appgateway.EventEnvelope{
@@ -914,6 +982,80 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
 		}
+	}
+}
+
+func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	model.viewport.SetWidth(46)
+	model.viewport.SetHeight(20)
+	command := "printf '%s\\n' BRANCH && git branch --show-current && printf '%s\\n' TRACKED && echo TERMINAL_ARG_TAIL_MARKER"
+	updated, _ := model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "bash-full-args",
+				ToolName: "BASH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"command": command},
+			},
+		},
+	})
+	model = updated.(*Model)
+	model.syncViewportContent()
+
+	joined := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(joined, "TERMINAL_ARG_TAIL_MARKER") {
+		t.Fatalf("viewport lines = %#v, want full BASH command tail", model.viewportPlainLines)
+	}
+	if strings.Contains(joined, "echo ...") || strings.Contains(joined, "TERMINAL_ARG_TAIL...") {
+		t.Fatalf("viewport lines = %#v, command was truncated", model.viewportPlainLines)
+	}
+	headerIdx := indexPlainLineContaining(model.viewportPlainLines, "• Ran ")
+	tailIdx := indexPlainLineContaining(model.viewportPlainLines, "TERMINAL_ARG_TAIL_MARKER")
+	if headerIdx < 0 || tailIdx <= headerIdx {
+		t.Fatalf("viewport lines = %#v, want wrapped BASH header", model.viewportPlainLines)
+	}
+	if !strings.HasPrefix(model.viewportPlainLines[tailIdx], "      ") {
+		t.Fatalf("wrapped tail line = %q, want continuation indentation", model.viewportPlainLines[tailIdx])
+	}
+}
+
+func TestGatewaySpawnArgumentsRenderFullPrompt(t *testing.T) {
+	model := newGatewayEventTestModel()
+	prompt := strings.Repeat("写一个完整参数展示测试。", 8) + "SPAWN_PROMPT_TAIL_MARKER"
+	updated, _ := model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "spawn-full-args",
+				ToolName: "SPAWN",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{
+					"agent":  "self",
+					"prompt": prompt,
+				},
+			},
+		},
+	})
+	model = updated.(*Model)
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 180, TermWidth: 180, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{`"agent":"self"`, "SPAWN_PROMPT_TAIL_MARKER"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, "...") {
+		t.Fatalf("rendered rows = %q, SPAWN args should not be truncated", joined)
 	}
 }
 
@@ -1648,6 +1790,38 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 	}
 	if !participantTurnIsTerminal(secondTurn.Status) {
 		t.Fatalf("second turn status = %q, want terminal after task result", secondTurn.Status)
+	}
+}
+
+func TestParticipantTurnCompletionDoesNotRenderTwoDurationDividers(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	model.viewport.SetWidth(60)
+	model.viewport.SetHeight(20)
+	start := time.Now().Add(-2 * time.Minute)
+	end := start.Add(45 * time.Second)
+	block := NewParticipantTurnBlock("task-1:1", "@codex")
+	block.StartedAt = start
+	block.EndedAt = end
+	block.Status = "completed"
+	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "side answer", Done: true})
+	model.doc.Append(block)
+	model.participantTurnIDs = map[string]string{block.SessionID: block.BlockID()}
+	model.activeParticipantTurnSessionID = block.SessionID
+	model.showTurnDivider = true
+	model.runStartedAt = time.Now().Add(-75 * time.Second)
+
+	updated, _ := model.Update(TaskResultMsg{})
+	model = updated.(*Model)
+	model.syncViewportContent()
+
+	dividerCount := 0
+	for _, line := range model.viewportPlainLines {
+		if strings.Contains(line, "─") {
+			dividerCount++
+		}
+	}
+	if dividerCount != 1 {
+		t.Fatalf("viewport lines = %#v, want one duration divider, got %d", model.viewportPlainLines, dividerCount)
 	}
 }
 

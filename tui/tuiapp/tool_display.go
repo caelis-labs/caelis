@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -43,8 +44,13 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 				return action
 			}
 		}
+		if name == "SPAWN" {
+			if display := spawnDisplayArgs(raw); display != "" {
+				return display
+			}
+		}
 		if command := firstTrimmed(asString(raw["command"]), asString(raw["cmd"])); command != "" {
-			return truncateTailDisplay(command, 120)
+			return normalizeToolDisplayArg(command)
 		}
 	}
 	if summary := genericToolArgs(raw); summary != "" {
@@ -152,6 +158,17 @@ func taskControlDisplay(raw map[string]any) string {
 	}
 }
 
+func spawnDisplayArgs(raw map[string]any) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	return normalizeToolDisplayArg(string(data))
+}
+
 func genericToolOutput(output map[string]any, isErr bool) string {
 	if len(output) == 0 {
 		return ""
@@ -172,12 +189,15 @@ func genericToolOutput(output map[string]any, isErr bool) string {
 }
 
 func formatTaskWriteInput(input string) string {
-	input = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(input, "\r\n", "\n"), "\r", "\n"))
+	input = normalizeToolDisplayArg(input)
 	if input == "" {
 		return ""
 	}
-	input = truncateTailDisplay(input, 48)
 	return strconv.Quote(input)
+}
+
+func normalizeToolDisplayArg(input string) string {
+	return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(input, "\r\n", "\n"), "\r", "\n"))
 }
 
 func formatDurationMS(ms int) string {

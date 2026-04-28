@@ -428,7 +428,7 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 		if len(fields) == 2 {
 			if hasTrailingDelimiter {
 				switch action {
-				case "add", "rm", "use":
+				case "add", "install", "remove", "rm", "use":
 					return "agent " + action, "", true
 				case "list":
 					return "", "", false
@@ -447,15 +447,21 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 			return "agent", action, true
 		}
 		switch action {
-		case "add", "rm", "use":
+		case "add", "install", "remove", "rm", "use":
 		default:
 			return "", "", false
 		}
 		if len(fields) == 3 {
 			if hasTrailingDelimiter {
+				if action == "add" && strings.EqualFold(strings.TrimSpace(fields[2]), "--install") {
+					return "agent add --install", "", true
+				}
 				return "", "", false
 			}
 			return "agent " + action, strings.TrimSpace(fields[2]), true
+		}
+		if action == "add" && len(fields) == 4 && strings.EqualFold(strings.TrimSpace(fields[2]), "--install") {
+			return "agent add --install", strings.TrimSpace(fields[3]), true
 		}
 		return "", "", false
 	case "sandbox":

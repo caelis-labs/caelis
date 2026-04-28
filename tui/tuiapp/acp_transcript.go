@@ -865,7 +865,11 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		return nil, end
 	}
 
-	start.Args = compactACPToolInline(start.Args, width)
+	if isTerminalPanelToolEvent(start) {
+		start.Args = normalizeACPToolInline(start.Args)
+	} else {
+		start.Args = compactACPToolInline(start.Args, width)
+	}
 	panelExpanded := true
 	if opts.ToolPanelExpanded != nil {
 		panelExpanded = opts.ToolPanelExpanded(start.CallID)
@@ -984,7 +988,11 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 			header.Name = name
 		}
 		if args := strings.TrimSpace(final.Args); args != "" {
-			header.Args = compactACPToolInline(args, acpToolInlineArgsMaxWidth+12)
+			if isTerminalPanelToolEvent(header) {
+				header.Args = normalizeACPToolInline(args)
+			} else {
+				header.Args = compactACPToolInline(args, acpToolInlineArgsMaxWidth+12)
+			}
 		}
 	}
 	return header
@@ -1537,6 +1545,10 @@ func compactACPToolInline(text string, width int) string {
 		return text
 	}
 	return truncateTailDisplay(text, budget)
+}
+
+func normalizeACPToolInline(text string) string {
+	return strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"))
 }
 
 func wrapACPToolDetailText(text string, width int) []string {

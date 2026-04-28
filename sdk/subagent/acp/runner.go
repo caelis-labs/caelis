@@ -367,11 +367,12 @@ func translateApprovalRequest(
 		Agent:      firstNonEmpty(strings.TrimSpace(cfg.Name), strings.TrimSpace(agentID)),
 		Mode:       strings.TrimSpace(spawn.Mode),
 		ToolCall: sdksubagent.ApprovalToolCall{
-			ID:     strings.TrimSpace(req.ToolCall.ToolCallID),
-			Name:   acputil.ToolCallName(req.ToolCall),
-			Kind:   trimStringPtr(req.ToolCall.Kind),
-			Title:  trimStringPtr(req.ToolCall.Title),
-			Status: trimStringPtr(req.ToolCall.Status),
+			ID:       strings.TrimSpace(req.ToolCall.ToolCallID),
+			Name:     acputil.ToolCallName(req.ToolCall),
+			Kind:     trimStringPtr(req.ToolCall.Kind),
+			Title:    trimStringPtr(req.ToolCall.Title),
+			Status:   trimStringPtr(req.ToolCall.Status),
+			RawInput: acpRawMap(req.ToolCall.RawInput),
 		},
 		Options: options,
 	}

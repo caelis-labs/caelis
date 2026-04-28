@@ -5,6 +5,7 @@ package tuiapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -16,6 +17,8 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
+	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
+	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
 // ProgramSender is set after the tea.Program is created so that the
@@ -778,7 +781,9 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuiadapterruntime.
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	snapshot, err := driver.StartAgentSubagent(ctx, agent, prompt)
+	snapshot, err := driver.StartAgentSubagentWithOptions(ctx, agent, prompt, tuiadapterruntime.SubagentStartOptions{
+		ApprovalRequester: tuiSubagentApprovalRequester{send: send},
+	})
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}
 	}
@@ -858,19 +863,37 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		sendNotice(send, formatAgentList(agents, status))
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "status":
-		sendNotice(send, "usage: /agent list | add <builtin> | use <agent|local> | remove <agent>")
+		sendNotice(send, "usage: /agent list | add <builtin> | install <adapter> | use <agent|local> | remove <agent>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "add":
-		target := strings.TrimSpace(rest)
-		if target == "" {
+		addArgs, ok := parseAgentAddArgs(rest)
+		if !ok || addArgs.Target == "" {
 			sendNotice(send, "usage: /agent add <name>")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		status, err := driver.AddAgent(ctx, target)
+		status, err := driver.AddAgentWithOptions(ctx, addArgs.Target, tuiadapterruntime.AgentAddOptions{Install: addArgs.Install})
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent add", err)}
 		}
-		sendNotice(send, fmt.Sprintf("agent registered: %s", target))
+		if addArgs.Install {
+			sendNotice(send, fmt.Sprintf("agent registered with local adapter: %s", addArgs.Target))
+		} else {
+			sendNotice(send, fmt.Sprintf("agent registered: %s", addArgs.Target))
+		}
+		sendNotice(send, formatAgentStatusSnapshot(status))
+		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	case "install":
+		target := strings.TrimSpace(rest)
+		if target == "" {
+			sendNotice(send, "usage: /agent install <adapter>")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
+		status, err := driver.AddAgentWithOptions(ctx, target, tuiadapterruntime.AgentAddOptions{Install: true})
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("agent install", err)}
+		}
+		sendNotice(send, fmt.Sprintf("agent installed and registered: %s", target))
 		sendNotice(send, formatAgentStatusSnapshot(status))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -902,7 +925,7 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		sendNotice(send, formatAgentStatusSnapshot(status))
 		return TaskResultMsg{SuppressTurnDivider: true}
 	default:
-		sendNotice(send, "usage: /agent list | add <builtin> | use <agent|local> | remove <agent>")
+		sendNotice(send, "usage: /agent list | add <builtin> | install <adapter> | use <agent|local> | remove <agent>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 }
@@ -1504,6 +1527,106 @@ func refreshStatusViaSendWithContext(ctx context.Context, driver tuiadapterrunti
 	sendStatusUpdate(send, status)
 }
 
+type tuiSubagentApprovalRequester struct {
+	send func(tea.Msg)
+}
+
+func (r tuiSubagentApprovalRequester) RequestApproval(ctx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+	if r.send == nil {
+		return runtimeApprovalResponseFromDecision(rejectionApprovalDecision(nil)), nil
+	}
+	ctx = contextOrBackground(ctx)
+	payload := approvalPayloadFromRuntimeRequest(req)
+	if payload == nil {
+		payload = &appgateway.ApprovalPayload{Status: appgateway.ApprovalStatusPending}
+	}
+	responses := make(chan PromptResponse, 1)
+	r.send(approvalToPromptRequest(payload, responses))
+	select {
+	case <-ctx.Done():
+		return sdkruntime.ApprovalResponse{}, ctx.Err()
+	case response, ok := <-responses:
+		if !ok {
+			return runtimeApprovalResponseFromDecision(rejectionApprovalDecision(payload)), nil
+		}
+		return runtimeApprovalResponseFromDecision(approvalDecisionFromPrompt(payload, response)), nil
+	}
+}
+
+func approvalPayloadFromRuntimeRequest(req sdkruntime.ApprovalRequest) *appgateway.ApprovalPayload {
+	payload := &appgateway.ApprovalPayload{
+		ToolName: strings.TrimSpace(req.Tool.Name),
+		Status:   appgateway.ApprovalStatusPending,
+	}
+	if payload.ToolName == "" {
+		payload.ToolName = strings.TrimSpace(req.Call.Name)
+	}
+	if req.Approval != nil {
+		if name := strings.TrimSpace(req.Approval.ToolCall.Name); name != "" {
+			payload.ToolName = name
+		}
+		if payload.ToolName == "" || strings.EqualFold(payload.ToolName, "UNKNOWN") {
+			payload.ToolName = firstNonEmpty(req.Approval.ToolCall.Title, req.Approval.ToolCall.Kind, payload.ToolName)
+		}
+		payload.CommandPreview = approvalCommandPreview(req.Approval.ToolCall.RawInput)
+		if len(req.Approval.Options) > 0 {
+			payload.Options = make([]appgateway.ApprovalOption, 0, len(req.Approval.Options))
+			for _, option := range req.Approval.Options {
+				payload.Options = append(payload.Options, appgateway.ApprovalOption{
+					ID:   strings.TrimSpace(option.ID),
+					Name: strings.TrimSpace(option.Name),
+					Kind: strings.TrimSpace(option.Kind),
+				})
+			}
+		}
+	}
+	if payload.CommandPreview == "" {
+		payload.CommandPreview = approvalCommandPreviewFromJSON(string(req.Call.Input))
+	}
+	if payload.ToolName == "" && payload.CommandPreview == "" && len(payload.Options) == 0 {
+		return nil
+	}
+	return payload
+}
+
+func runtimeApprovalResponseFromDecision(decision appgateway.ApprovalDecision) sdkruntime.ApprovalResponse {
+	return sdkruntime.ApprovalResponse{
+		Outcome:  strings.TrimSpace(decision.Outcome),
+		OptionID: strings.TrimSpace(decision.OptionID),
+		Approved: decision.Approved,
+	}
+}
+
+func approvalCommandPreview(raw map[string]any) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	for _, key := range []string{"command", "cmd", "file_path", "path", "query", "url", "pattern", "text"} {
+		if value, ok := raw[key].(string); ok && strings.TrimSpace(value) != "" {
+			return compactString(strings.TrimSpace(key)+": "+value, 240)
+		}
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return ""
+	}
+	return compactString(string(data), 240)
+}
+
+func approvalCommandPreviewFromJSON(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
+		if preview := approvalCommandPreview(decoded); preview != "" {
+			return preview
+		}
+	}
+	return compactString(raw, 240)
+}
+
 func sendApprovalPrompt(ctx context.Context, turn tuiadapterruntime.Turn, req *appgateway.ApprovalPayload, send func(tea.Msg)) {
 	if turn == nil || req == nil || send == nil {
 		return
@@ -1600,6 +1723,30 @@ func splitFirst(text string) (first, rest string) {
 	return
 }
 
+type agentAddArgs struct {
+	Target  string
+	Install bool
+}
+
+func parseAgentAddArgs(args string) (agentAddArgs, bool) {
+	var out agentAddArgs
+	for _, field := range strings.Fields(args) {
+		switch strings.ToLower(strings.TrimSpace(field)) {
+		case "--install", "-i":
+			out.Install = true
+		default:
+			if strings.HasPrefix(field, "-") {
+				return agentAddArgs{}, false
+			}
+			if out.Target != "" {
+				return agentAddArgs{}, false
+			}
+			out.Target = strings.TrimSpace(field)
+		}
+	}
+	return out, true
+}
+
 func parseConnectArgs(args string) tuiadapterruntime.ConnectConfig {
 	parts := strings.Fields(args)
 	cfg := tuiadapterruntime.ConnectConfig{}
@@ -1683,6 +1830,7 @@ func agentHelpText() string {
 		"/agent commands:",
 		"  /agent list          list registered ACP agents and current controller",
 		"  /agent add NAME      register a built-in ACP agent",
+		"  /agent install NAME  install an external ACP adapter and register it",
 		"  /agent use NAME      switch the main controller to a registered ACP agent",
 		"  /agent use local     return the main controller to the local kernel",
 		"  /agent remove NAME   unregister an ACP agent",
@@ -1732,22 +1880,47 @@ func formatAgentStatusSnapshot(status tuiadapterruntime.AgentStatusSnapshot) str
 	lines = append(lines, fmt.Sprintf("  controller:  %s", firstNonEmpty(strings.TrimSpace(status.ControllerLabel), strings.TrimSpace(status.ControllerKind), "local kernel")))
 	lines = append(lines, fmt.Sprintf("  kind:        %s", firstNonEmpty(strings.TrimSpace(status.ControllerKind), "kernel")))
 	lines = append(lines, fmt.Sprintf("  active turn: %t", status.HasActiveTurn))
-	if len(status.Participants) == 0 {
+	participants := displayableAgentParticipants(status.Participants)
+	if len(participants) == 0 {
 		lines = append(lines, "  participants: none")
 	} else {
 		lines = append(lines, "  participants:")
-		for _, participant := range status.Participants {
+		for _, participant := range participants {
 			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), firstNonEmpty(strings.TrimSpace(participant.Label), "-"), strings.TrimSpace(participant.Role)))
 		}
 	}
 	if len(status.AvailableAgents) == 0 {
 		lines = append(lines, "next: no ACP agents are configured")
-	} else if len(status.Participants) == 0 && strings.TrimSpace(status.ControllerKind) == "" {
+	} else if len(participants) == 0 && strings.TrimSpace(status.ControllerKind) == "" {
 		lines = append(lines, "next: run /agent add <builtin> to register an ACP agent")
-	} else if len(status.Participants) == 0 {
+	} else if len(participants) == 0 {
 		lines = append(lines, "next: run /<agent> <prompt> to start a child subagent")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func displayableAgentParticipants(participants []tuiadapterruntime.AgentParticipantSnapshot) []tuiadapterruntime.AgentParticipantSnapshot {
+	if len(participants) == 0 {
+		return nil
+	}
+	out := make([]tuiadapterruntime.AgentParticipantSnapshot, 0, len(participants))
+	for _, participant := range participants {
+		if isSelfDelegatedAgentParticipant(participant) {
+			continue
+		}
+		out = append(out, participant)
+	}
+	return out
+}
+
+func isSelfDelegatedAgentParticipant(participant tuiadapterruntime.AgentParticipantSnapshot) bool {
+	if !strings.EqualFold(strings.TrimSpace(participant.Kind), string(sdksession.ParticipantKindSubagent)) ||
+		!strings.EqualFold(strings.TrimSpace(participant.Role), string(sdksession.ParticipantRoleDelegated)) {
+		return false
+	}
+	agent := strings.ToLower(strings.TrimSpace(participant.AgentName))
+	id := strings.ToLower(strings.TrimSpace(participant.ID))
+	return agent == "self" || strings.HasPrefix(id, "self-")
 }
 
 func deriveProviderFromAlias(alias string) string {

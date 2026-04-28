@@ -509,7 +509,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 			m.commitLine(errLine)
 		}
 	}
-	if m.showTurnDivider && !msg.SuppressTurnDivider && m.doc.Len() > 0 {
+	if m.showTurnDivider && !msg.SuppressTurnDivider && m.doc.Len() > 0 && !m.lastBlockHasParticipantTurnFooter() {
 		last := m.doc.Last()
 		hasContent := false
 		if last != nil {
@@ -531,4 +531,15 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+func (m *Model) lastBlockHasParticipantTurnFooter() bool {
+	if m == nil || m.doc == nil {
+		return false
+	}
+	block, _ := m.doc.Last().(*ParticipantTurnBlock)
+	if block == nil || !block.Expanded {
+		return false
+	}
+	return participantTurnIsTerminal(block.Status)
 }

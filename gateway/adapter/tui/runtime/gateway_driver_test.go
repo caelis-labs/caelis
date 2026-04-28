@@ -905,9 +905,26 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(agent add) error = %v", err)
 	}
-	for _, want := range []string{"codex", "copilot", "gemini"} {
+	for _, want := range []string{"claude", "codex", "copilot", "gemini"} {
 		if !slashCandidatesHaveValue(addCandidates, want) {
 			t.Fatalf("agent add candidates = %#v, want %q", addCandidates, want)
+		}
+	}
+	if slashCandidatesHaveValue(addCandidates, "--install claude") || slashCandidatesHaveValue(addCandidates, "--install codex") {
+		t.Fatalf("agent add candidates = %#v, want no install variants", addCandidates)
+	}
+	installCandidates, err := driver.CompleteSlashArg(ctx, "agent install", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(agent install) error = %v", err)
+	}
+	for _, want := range []string{"claude", "codex"} {
+		if !slashCandidatesHaveValue(installCandidates, want) {
+			t.Fatalf("agent install candidates = %#v, want %q", installCandidates, want)
+		}
+	}
+	for _, notInstallable := range []string{"copilot", "gemini"} {
+		if slashCandidatesHaveValue(installCandidates, notInstallable) {
+			t.Fatalf("agent install candidates = %#v, want no %q", installCandidates, notInstallable)
 		}
 	}
 
@@ -1526,12 +1543,33 @@ func TestGatewayDriverCompleteMentionReturnsDelegatedParticipants(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("PutParticipant() error = %v", err)
 	}
+	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
+			ID:           "self-001",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleDelegated,
+			AgentName:    "self",
+			Label:        "@jude",
+			SessionID:    "self-child-1",
+			DelegationID: "task-self",
+		},
+	}); err != nil {
+		t.Fatalf("PutParticipant(self) error = %v", err)
+	}
 	candidates, err := driver.CompleteMention(ctx, "j", 8)
 	if err != nil {
 		t.Fatalf("CompleteMention() error = %v", err)
 	}
 	if len(candidates) != 1 || candidates[0].Value != "jeff" {
 		t.Fatalf("CompleteMention() = %#v, want jeff delegated target", candidates)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus() error = %v", err)
+	}
+	if len(status.Participants) != 1 || status.Participants[0].ID != "task-1" {
+		t.Fatalf("AgentStatus().Participants = %#v, want only non-self participant", status.Participants)
 	}
 }
 
