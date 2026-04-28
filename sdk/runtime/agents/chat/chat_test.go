@@ -64,6 +64,67 @@ func TestChatAgentUsesSessionMessages(t *testing.T) {
 	}
 }
 
+func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T) {
+	t.Parallel()
+
+	model := &recordingModel{}
+	agent, err := New("chat", model, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-1"},
+		},
+		Events: []*sdksession.Event{
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "main user")),
+				Text:    "main user",
+			},
+			{
+				Type:    sdksession.EventTypeAssistant,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "side acp")),
+				Text:    "side acp",
+				Scope: &sdksession.EventScope{
+					Source: "acp_participant",
+					Participant: sdksession.ParticipantRef{
+						ID:   "side-acp",
+						Kind: sdksession.ParticipantKindACP,
+					},
+				},
+			},
+			{
+				Type:    sdksession.EventTypeAssistant,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "spawn child")),
+				Text:    "spawn child",
+				Scope: &sdksession.EventScope{
+					Source: "agent_spawn",
+					Participant: sdksession.ParticipantRef{
+						ID:   "child-1",
+						Kind: sdksession.ParticipantKindSubagent,
+					},
+				},
+			},
+		},
+	})
+
+	for _, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+
+	if got := len(model.last.Messages); got != 1 {
+		t.Fatalf("len(Messages) = %d, want only main context message", got)
+	}
+	if got := model.last.Messages[0].TextContent(); got != "main user" {
+		t.Fatalf("message text = %q, want main user", got)
+	}
+}
+
 func TestFactoryMetadataSystemPromptOverridesFactoryDefault(t *testing.T) {
 	t.Parallel()
 

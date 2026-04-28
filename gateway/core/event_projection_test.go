@@ -168,6 +168,54 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 			},
 		},
 		{
+			name: "reasoning stream preserves whitespace without message",
+			ev: &sdksession.Event{
+				ID:         "reasoning-space-no-message",
+				Type:       sdksession.EventTypeAssistant,
+				Text:       " ",
+				Visibility: sdksession.VisibilityUIOnly,
+				Protocol: &sdksession.EventProtocol{
+					UpdateType: string(sdksession.ProtocolUpdateTypeAgentThought),
+				},
+			},
+			want: func(t *testing.T, env EventEnvelope) {
+				t.Helper()
+				if env.Event.Narrative == nil {
+					t.Fatal("event.Narrative = nil, want payload")
+				}
+				if env.Event.Narrative.Text != "" {
+					t.Fatalf("event.Narrative.Text = %q, want empty reasoning-only answer text", env.Event.Narrative.Text)
+				}
+				if env.Event.Narrative.ReasoningText != " " {
+					t.Fatalf("event.Narrative.ReasoningText = %q, want single space", env.Event.Narrative.ReasoningText)
+				}
+			},
+		},
+		{
+			name: "assistant stream preserves whitespace without message",
+			ev: &sdksession.Event{
+				ID:         "assistant-space-no-message",
+				Type:       sdksession.EventTypeAssistant,
+				Text:       " ",
+				Visibility: sdksession.VisibilityUIOnly,
+				Protocol: &sdksession.EventProtocol{
+					UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+				},
+			},
+			want: func(t *testing.T, env EventEnvelope) {
+				t.Helper()
+				if env.Event.Narrative == nil {
+					t.Fatal("event.Narrative = nil, want payload")
+				}
+				if env.Event.Narrative.Text != " " {
+					t.Fatalf("event.Narrative.Text = %q, want single space", env.Event.Narrative.Text)
+				}
+				if env.Event.Narrative.Final {
+					t.Fatal("event.Narrative.Final = true, want streaming UI-only payload")
+				}
+			},
+		},
+		{
 			name: "plan",
 			ev: &sdksession.Event{
 				ID:   "plan-1",
@@ -524,6 +572,74 @@ func TestProjectSessionEventExportsSingleCanonicalEnvelope(t *testing.T) {
 	}
 	if env.Event.Origin == nil || env.Event.Origin.Scope != EventScopeSubagent || env.Event.Narrative == nil || env.Event.Narrative.Text != "structured side output" {
 		t.Fatalf("env.Event = %#v, want subagent assistant narrative", env.Event)
+	}
+}
+
+func TestProjectSessionEventPreservesMainACPSource(t *testing.T) {
+	t.Parallel()
+
+	env, ok := ProjectSessionEvent(sdksession.SessionRef{SessionID: "root-session"}, &sdksession.Event{
+		Type:       sdksession.EventTypeAssistant,
+		Visibility: sdksession.VisibilityCanonical,
+		Text:       "main acp output",
+		Scope: &sdksession.EventScope{
+			Source: "acp",
+		},
+	})
+	if !ok {
+		t.Fatal("ProjectSessionEvent() ok = false, want true")
+	}
+	if env.Event.Origin == nil || env.Event.Origin.Scope != EventScopeMain || env.Event.Origin.Source != "acp" {
+		t.Fatalf("origin = %#v, want main ACP source", env.Event.Origin)
+	}
+}
+
+func TestProjectSessionEventACPMessageChunkIsStreamingDelta(t *testing.T) {
+	t.Parallel()
+
+	env, ok := ProjectSessionEvent(sdksession.SessionRef{SessionID: "root-session"}, &sdksession.Event{
+		Type:       sdksession.EventTypeAssistant,
+		Visibility: sdksession.VisibilityCanonical,
+		Text:       "上海",
+		Scope:      &sdksession.EventScope{Source: "acp_participant"},
+		Protocol:   &sdksession.EventProtocol{UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage)},
+	})
+	if !ok {
+		t.Fatal("ProjectSessionEvent() ok = false, want true")
+	}
+	if env.Event.Narrative == nil {
+		t.Fatalf("projected event = %#v, want narrative payload", env.Event)
+	}
+	if env.Event.Narrative.Final {
+		t.Fatalf("narrative.Final = true, want ACP agent_message_chunk to stay streaming")
+	}
+	if env.Event.Narrative.Text != "上海" {
+		t.Fatalf("narrative.Text = %q, want streamed chunk", env.Event.Narrative.Text)
+	}
+}
+
+func TestProjectSessionEventPersistedACPMessageChunkIsReplayFinal(t *testing.T) {
+	t.Parallel()
+
+	env, ok := ProjectSessionEvent(sdksession.SessionRef{SessionID: "root-session"}, &sdksession.Event{
+		ID:         "evt-1",
+		Type:       sdksession.EventTypeAssistant,
+		Visibility: sdksession.VisibilityCanonical,
+		Text:       "上海今天小雨。",
+		Scope:      &sdksession.EventScope{Source: "acp_participant"},
+		Protocol:   &sdksession.EventProtocol{UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage)},
+	})
+	if !ok {
+		t.Fatal("ProjectSessionEvent() ok = false, want true")
+	}
+	if env.Event.Narrative == nil {
+		t.Fatalf("projected event = %#v, want narrative payload", env.Event)
+	}
+	if !env.Event.Narrative.Final {
+		t.Fatalf("narrative.Final = false, want persisted ACP replay chunk to be final")
+	}
+	if env.Event.Narrative.Text != "上海今天小雨。" {
+		t.Fatalf("narrative.Text = %q, want persisted assistant text", env.Event.Narrative.Text)
 	}
 }
 

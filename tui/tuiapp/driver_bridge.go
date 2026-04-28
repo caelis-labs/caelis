@@ -782,9 +782,11 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuiadapterruntime.
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}
 	}
-	sendDynamicSubagentStarted(send, snapshot, true)
 	startDynamicSubagentOutputBridge(ctx, driver, sender, snapshot)
-	return TaskResultMsg{SuppressTurnDivider: true}
+	if snapshot.Running {
+		return TaskResultMsg{SuppressTurnDivider: true, ContinueRunning: true}
+	}
+	return TaskResultMsg{}
 }
 
 func isRegisteredAgentCommand(driver tuiadapterruntime.Driver, agent string) bool {
@@ -829,9 +831,11 @@ func dispatchMentionCommandWithContext(ctx context.Context, driver tuiadapterrun
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("@"+handle, err)}
 	}
-	sendDynamicSubagentStarted(send, snapshot, false)
 	startDynamicSubagentOutputBridge(ctx, driver, sender, snapshot)
-	return TaskResultMsg{SuppressTurnDivider: true}
+	if snapshot.Running {
+		return TaskResultMsg{SuppressTurnDivider: true, ContinueRunning: true}
+	}
+	return TaskResultMsg{}
 }
 
 func slashAgent(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
@@ -1173,22 +1177,6 @@ func sendNotice(send func(tea.Msg), text string) {
 	}
 }
 
-func sendDynamicSubagentStarted(send func(tea.Msg), snapshot tuiadapterruntime.SubagentSnapshot, started bool) {
-	if send == nil {
-		return
-	}
-	mention := subagentMention(snapshot)
-	if mention == "" {
-		return
-	}
-	agent := strings.TrimSpace(snapshot.Agent)
-	if started {
-		sendNotice(send, fmt.Sprintf("subagent %s started: %s", mention, agent))
-		return
-	}
-	sendNotice(send, fmt.Sprintf("subagent %s continued: %s", mention, agent))
-}
-
 func startDynamicSubagentOutputBridge(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, snapshot tuiadapterruntime.SubagentSnapshot) {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
@@ -1208,29 +1196,42 @@ func startDynamicSubagentOutputBridge(ctx context.Context, driver tuiadapterrunt
 	}
 	if streamer, ok := driver.(subagentStreamDriver); ok {
 		if frames, ok := streamer.SubscribeSubagentStream(ctx, taskID); ok && frames != nil {
-			actor := subagentMention(snapshot)
 			start := func() {
+				finished := false
+				finish := func(msg TaskResultMsg) {
+					if finished {
+						return
+					}
+					finished = true
+					send(msg)
+				}
 				for {
 					select {
 					case <-ctx.Done():
 						return
 					case frame, ok := <-frames:
 						if !ok {
+							finish(TaskResultMsg{})
 							return
 						}
-						if frame.Event != nil && gatewayEnvelopeHasRenderableTranscript(*frame.Event) {
-							send(*frame.Event)
-							continue
+						if frame.Event != nil {
+							env := normalizeDynamicSubagentGatewayEvent(*frame.Event, snapshot, frame)
+							if gatewayEnvelopeHasRenderableTranscript(env) {
+								send(env)
+								if !frame.Running && frame.Closed {
+									finish(TaskResultMsg{})
+									return
+								}
+								continue
+							}
 						}
-						if strings.TrimSpace(frame.Text) == "" {
-							continue
+						if frame.Text != "" {
+							send(dynamicSubagentTranscriptMessage(snapshot, frame))
 						}
-						send(AssistantStreamMsg{
-							Kind:  firstNonEmpty(strings.TrimSpace(frame.Stream), "answer"),
-							Actor: actor,
-							Text:  frame.Text,
-							Final: !frame.Running && frame.Closed,
-						})
+						if !frame.Running && frame.Closed {
+							finish(TaskResultMsg{})
+							return
+						}
 					}
 				}
 			}
@@ -1262,16 +1263,14 @@ func sendDynamicSubagentSnapshotOutput(send func(tea.Msg), snapshot tuiadapterru
 	if send == nil {
 		return false
 	}
-	output := strings.TrimSpace(firstNonEmpty(snapshot.Result, snapshot.OutputPreview))
+	output := strings.TrimSpace(snapshot.Result)
+	if output == "" && !snapshot.Running {
+		output = strings.TrimSpace(snapshot.OutputPreview)
+	}
 	if output == "" {
 		return false
 	}
-	send(AssistantStreamMsg{
-		Kind:  "answer",
-		Actor: subagentMention(snapshot),
-		Text:  output,
-		Final: !snapshot.Running,
-	})
+	send(dynamicSubagentSnapshotTranscriptMessage(snapshot, output))
 	return true
 }
 
@@ -1300,10 +1299,12 @@ func startDynamicSubagentSnapshotWatcher(ctx context.Context, driver tuiadapterr
 					return
 				}
 				sendNotice(send, fmt.Sprintf("subagent %s wait failed: %v", taskID, err))
+				send(TaskResultMsg{Err: err})
 				return
 			}
 			sendDynamicSubagentSnapshotOutput(send, next)
 			if !next.Running {
+				send(TaskResultMsg{})
 				return
 			}
 		}
@@ -1324,6 +1325,86 @@ func subagentMention(snapshot tuiadapterruntime.SubagentSnapshot) string {
 		return "@" + strings.TrimPrefix(handle, "@")
 	}
 	return ""
+}
+
+func dynamicSubagentScopeID(snapshot tuiadapterruntime.SubagentSnapshot, frame tuiadapterruntime.SubagentStreamFrame) string {
+	return firstNonEmpty(
+		strings.TrimSpace(frame.TurnID),
+		strings.TrimSpace(snapshot.TurnID),
+		strings.TrimSpace(frame.TaskID),
+		strings.TrimSpace(snapshot.TaskID),
+		strings.TrimSpace(snapshot.Mention),
+		strings.TrimPrefix(strings.TrimSpace(snapshot.Handle), "@"),
+	)
+}
+
+func dynamicSubagentActor(snapshot tuiadapterruntime.SubagentSnapshot) string {
+	return firstNonEmpty(subagentMention(snapshot), strings.TrimSpace(snapshot.Agent))
+}
+
+func normalizeDynamicSubagentGatewayEvent(env appgateway.EventEnvelope, snapshot tuiadapterruntime.SubagentSnapshot, frame tuiadapterruntime.SubagentStreamFrame) appgateway.EventEnvelope {
+	scopeID := dynamicSubagentScopeID(snapshot, frame)
+	if env.Event.Origin == nil {
+		env.Event.Origin = &appgateway.EventOrigin{}
+	}
+	env.Event.Origin.Scope = appgateway.EventScopeParticipant
+	if scopeID != "" {
+		env.Event.Origin.ScopeID = scopeID
+		if strings.TrimSpace(env.Event.Origin.ParticipantID) == "" {
+			env.Event.Origin.ParticipantID = scopeID
+		}
+	}
+	env.Event.Origin.Source = firstNonEmpty(strings.TrimSpace(env.Event.Origin.Source), "acp_participant")
+	env.Event.Origin.ParticipantKind = firstNonEmpty(strings.TrimSpace(env.Event.Origin.ParticipantKind), "acp")
+	if actor := dynamicSubagentActor(snapshot); actor != "" {
+		env.Event.Origin.Actor = actor
+	}
+	if actor := dynamicSubagentActor(snapshot); actor != "" {
+		if env.Event.Narrative != nil {
+			env.Event.Narrative.Actor = actor
+		}
+		if env.Event.ToolCall != nil {
+			env.Event.ToolCall.Actor = actor
+		}
+		if env.Event.ToolResult != nil {
+			env.Event.ToolResult.Actor = actor
+		}
+		if env.Event.Lifecycle != nil {
+			env.Event.Lifecycle.Actor = actor
+		}
+	}
+	return env
+}
+
+func dynamicSubagentTranscriptMessage(snapshot tuiadapterruntime.SubagentSnapshot, frame tuiadapterruntime.SubagentStreamFrame) TranscriptEventsMsg {
+	narrativeKind := TranscriptNarrativeAssistant
+	switch strings.ToLower(strings.TrimSpace(frame.Stream)) {
+	case "reasoning", "thought", "stderr":
+		narrativeKind = TranscriptNarrativeReasoning
+	}
+	scopeID := dynamicSubagentScopeID(snapshot, frame)
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionParticipant,
+		ScopeID:       scopeID,
+		Actor:         dynamicSubagentActor(snapshot),
+		OccurredAt:    frame.UpdatedAt,
+		NarrativeKind: narrativeKind,
+		Text:          frame.Text,
+		Final:         !frame.Running && frame.Closed,
+	}}}
+}
+
+func dynamicSubagentSnapshotTranscriptMessage(snapshot tuiadapterruntime.SubagentSnapshot, output string) TranscriptEventsMsg {
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionParticipant,
+		ScopeID:       firstNonEmpty(strings.TrimSpace(snapshot.TurnID), strings.TrimSpace(snapshot.TaskID), strings.TrimSpace(snapshot.Mention), strings.TrimPrefix(strings.TrimSpace(snapshot.Handle), "@")),
+		Actor:         dynamicSubagentActor(snapshot),
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          output,
+		Final:         !snapshot.Running,
+	}}}
 }
 
 func appendAgentSlashCommands(driver tuiadapterruntime.Driver, commands []string) []string {

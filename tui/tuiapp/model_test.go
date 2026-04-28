@@ -203,6 +203,25 @@ func TestKnownSlashCommandKeepsControlPromptBehavior(t *testing.T) {
 	}
 }
 
+func TestDynamicAgentSlashCommandUsesNormalTurnBehavior(t *testing.T) {
+	model := NewModel(Config{
+		Commands:    append(DefaultCommands(), "codex"),
+		ExecuteLine: func(Submission) TaskResultMsg { return TaskResultMsg{} },
+	})
+	line := "/codex 查询一下上海今天的天气"
+
+	_, cmd := model.submitLine(line)
+	if cmd == nil {
+		t.Fatal("submitLine() command = nil, want ExecuteLine command")
+	}
+	if !model.showTurnDivider {
+		t.Fatal("showTurnDivider = false, want agent slash prompt to behave like a normal user turn")
+	}
+	if len(model.history) != 1 || model.history[0] != line {
+		t.Fatalf("history = %#v, want agent slash prompt recorded", model.history)
+	}
+}
+
 func TestReasoningAndAnswerBlocksRemainAdjacentAndIndependent(t *testing.T) {
 	model := NewModel(Config{})
 

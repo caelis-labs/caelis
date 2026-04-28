@@ -61,6 +61,35 @@ func TestVisibilityRules(t *testing.T) {
 	}
 }
 
+func TestMainInvocationVisibleExcludesParticipantScopedEvents(t *testing.T) {
+	t.Parallel()
+
+	main := &Event{
+		Type:    EventTypeAssistant,
+		Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "main")),
+	}
+	if !IsMainInvocationVisibleEvent(main) {
+		t.Fatal("main event should be visible to the main invocation")
+	}
+
+	participant := &Event{
+		Type:    EventTypeAssistant,
+		Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "side")),
+		Scope: &EventScope{
+			Participant: ParticipantRef{
+				ID:   "side-acp",
+				Kind: ParticipantKindACP,
+			},
+		},
+	}
+	if !IsInvocationVisibleEvent(participant) {
+		t.Fatal("participant event should remain invocation-visible for non-main consumers")
+	}
+	if IsMainInvocationVisibleEvent(participant) {
+		t.Fatal("participant event must not be visible to the main invocation")
+	}
+}
+
 func TestFilterEvents(t *testing.T) {
 	t.Parallel()
 
@@ -134,6 +163,27 @@ func TestCloneEventPreservesCompactEnvelope(t *testing.T) {
 	}
 	if got := event.Meta["raw"]; got != "ok" {
 		t.Fatalf("source meta raw = %v, want %q", got, "ok")
+	}
+}
+
+func TestCloneEventPreservesTextWhitespace(t *testing.T) {
+	t.Parallel()
+
+	event := &Event{
+		Type:       EventTypeAssistant,
+		Text:       " thought boundary ",
+		Visibility: VisibilityUIOnly,
+		Protocol: &EventProtocol{
+			UpdateType: string(ProtocolUpdateTypeAgentThought),
+		},
+	}
+
+	cloned := CloneEvent(event)
+	if cloned == nil {
+		t.Fatal("CloneEvent() = nil")
+	}
+	if got := cloned.Text; got != event.Text {
+		t.Fatalf("cloned.Text = %q, want exact source text %q", got, event.Text)
 	}
 }
 

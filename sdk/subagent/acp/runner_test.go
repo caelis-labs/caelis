@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,11 +106,16 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	if got := len(sink.frames); got != 3 {
 		t.Fatalf("stream frames = %#v, want three structured updates", sink.frames)
 	}
+	for i, frame := range sink.frames {
+		if frame.Text != "" {
+			t.Fatalf("structured frame %d text = %q, want empty text fallback", i, frame.Text)
+		}
+	}
 	callEvent := sink.frames[0].Event
 	if callEvent == nil || callEvent.Type != sdksession.EventTypeToolCall || callEvent.Protocol == nil || callEvent.Protocol.ToolCall == nil {
 		t.Fatalf("tool call event = %#v", callEvent)
 	}
-	if callEvent.Protocol.ToolCall.Name != "BASH" || callEvent.Protocol.ToolCall.RawInput["command"] != "go test ./tui/tuiapp/..." {
+	if callEvent.Protocol.ToolCall.Name != "run go test" || callEvent.Protocol.ToolCall.Kind != "execute" || callEvent.Protocol.ToolCall.RawInput["command"] != "go test ./tui/tuiapp/..." {
 		t.Fatalf("tool call payload = %#v", callEvent.Protocol.ToolCall)
 	}
 	resultEvent := sink.frames[1].Event
@@ -125,6 +131,136 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	}
 	if len(planEvent.Protocol.Plan.Entries) != 1 || planEvent.Protocol.Plan.Entries[0].Content != "Run tests" {
 		t.Fatalf("plan entries = %#v", planEvent.Protocol.Plan.Entries)
+	}
+}
+
+func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  sdkdelegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "codex", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   sdkdelegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, sdkacpclient.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: sdkacpclient.ToolCallUpdate{
+			SessionUpdate: sdkacpclient.UpdateToolCallState,
+			ToolCallID:    "ws_1",
+			Kind:          stringPtr("fetch"),
+			Title:         stringPtr("Searching for: weather: Shanghai, China"),
+			Status:        stringPtr("in_progress"),
+			RawInput:      map[string]any{"query": "weather: Shanghai, China"},
+		},
+	})
+
+	if got := len(sink.frames); got != 1 {
+		t.Fatalf("stream frames = %#v, want one structured search update", sink.frames)
+	}
+	frame := sink.frames[0]
+	if frame.Text != "" {
+		t.Fatalf("stream frame text = %q, want no fallback text", frame.Text)
+	}
+	event := frame.Event
+	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+		t.Fatalf("stream event = %#v, want structured tool call", event)
+	}
+	if got := event.Protocol.ToolCall.Name; got != "Searching for: weather: Shanghai, China" {
+		t.Fatalf("tool name = %q, want ACP title", got)
+	}
+	if got := event.Protocol.ToolCall.Kind; got != "fetch" {
+		t.Fatalf("tool kind = %q, want fetch", got)
+	}
+	if got := event.Protocol.ToolCall.RawInput["query"]; got != "weather: Shanghai, China" {
+		t.Fatalf("raw input query = %#v", got)
+	}
+}
+
+func TestRunnerCodexACPWebSearchLiveE2E(t *testing.T) {
+	if strings.TrimSpace(os.Getenv("CAELIS_CODEX_ACP_E2E")) != "1" {
+		t.Skip("set CAELIS_CODEX_ACP_E2E=1 to run local Codex ACP live E2E")
+	}
+	if _, err := exec.LookPath("npx"); err != nil {
+		t.Skip("npx is not installed")
+	}
+
+	repo := repoRootForRunnerTest(t)
+	registry, err := NewRegistry([]AgentConfig{{
+		Name:        "codex",
+		Description: "local Codex ACP",
+		Command:     "npx",
+		Args:        []string{"--yes", "@zed-industries/codex-acp@^0.12.0"},
+		WorkDir:     repo,
+		Env: map[string]string{
+			"npm_config_cache": "/tmp/caelis-npm-cache",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	sink := &recordingStreams{}
+	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewRunner() error = %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
+	defer cancel()
+	anchor, first, err := runner.Spawn(ctx, sdksubagent.SpawnContext{
+		TaskID:  "live-codex-weather",
+		CWD:     repo,
+		Streams: sink,
+	}, sdkdelegation.Request{
+		Agent:  "codex",
+		Prompt: "查询一下上海今天的天气",
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	if !first.Running {
+		t.Fatalf("Spawn() result = %+v, want yielded running task", first)
+	}
+	result, err := runner.Wait(ctx, anchor, 180_000)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if result.State != sdkdelegation.StateCompleted {
+		t.Fatalf("Wait() result = %+v, want completed", result)
+	}
+
+	var sawFetchTool bool
+	var sawAssistant bool
+	for i, frame := range sink.frames {
+		if frame.Event != nil && frame.Event.Protocol != nil && frame.Event.Protocol.ToolCall != nil {
+			call := frame.Event.Protocol.ToolCall
+			t.Logf("frame[%d] tool text=%q name=%q kind=%q title=%q status=%q", i, frame.Text, call.Name, call.Kind, call.Title, call.Status)
+			if strings.EqualFold(strings.TrimSpace(call.Kind), "fetch") {
+				sawFetchTool = true
+			}
+			if frame.Text != "" {
+				t.Fatalf("frame[%d] structured tool text = %q, want empty text fallback", i, frame.Text)
+			}
+			continue
+		}
+		if frame.Text != "" {
+			t.Logf("frame[%d] text stream=%q text=%q", i, frame.Stream, frame.Text)
+			if strings.Contains(frame.Text, "Searching the Web") || strings.Contains(frame.Text, "Searching for:") {
+				t.Fatalf("frame[%d] rendered ACP tool activity as text: %q", i, frame.Text)
+			}
+			if strings.Contains(frame.Text, "上海") {
+				sawAssistant = true
+			}
+		}
+	}
+	if !sawFetchTool {
+		t.Fatalf("live frames did not include a structured fetch tool event; frames=%#v", sink.frames)
+	}
+	if !sawAssistant || !strings.Contains(result.Result, "上海") {
+		t.Fatalf("live result = %+v, sawAssistant=%v", result, sawAssistant)
 	}
 }
 
@@ -188,6 +324,33 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 	}
 	if got.Event == nil || got.Event.Protocol == nil || got.Event.Protocol.UpdateType != sdkacpclient.UpdateAgentThought || got.Event.Text != "thinking about the command" {
 		t.Fatalf("stream event = %#v, want structured thought event", got.Event)
+	}
+}
+
+func TestRunnerHandleUpdatePreservesWhitespaceThoughtChunk(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  sdkdelegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "copilot", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   sdkdelegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, contentUpdate(t, sdkacpclient.UpdateAgentThought, " "))
+
+	if len(sink.frames) != 1 {
+		t.Fatalf("stream frames = %#v, want one whitespace thought frame", sink.frames)
+	}
+	got := sink.frames[0]
+	if got.Stream != "reasoning" || got.Text != " " {
+		t.Fatalf("stream frame = %#v, want single-space reasoning chunk", got)
+	}
+	if got.Event == nil || got.Event.Text != " " {
+		t.Fatalf("stream event = %#v, want single-space structured thought event", got.Event)
 	}
 }
 

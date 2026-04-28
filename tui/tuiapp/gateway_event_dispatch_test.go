@@ -62,6 +62,42 @@ func TestModelUpdateConsumesGatewayAssistantEventIntoMainTurnBlock(t *testing.T)
 	}
 }
 
+func TestGatewayReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
+	model := NewModel(Config{NoColor: true, StreamTickInterval: 16 * time.Millisecond})
+	model.viewport.SetWidth(80)
+	model.viewport.SetHeight(20)
+
+	now := time.Now()
+	for _, text := range []string{"The", " ", "sandbox"} {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Narrative: &appgateway.NarrativePayload{
+					Role:          appgateway.NarrativeRoleAssistant,
+					ReasoningText: text,
+					Final:         false,
+					Visibility:    string(sdksession.VisibilityUIOnly),
+					UpdateType:    string(sdksession.ProtocolUpdateTypeAgentThought),
+					Scope:         appgateway.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+		updated, _ = model.Update(frameTickMsg{kind: frameTickRenderDrain, at: now})
+		model = updated.(*Model)
+		now = now.Add(16 * time.Millisecond)
+	}
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %T, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	if got := block.Events[0].Text; got != "The sandbox" {
+		t.Fatalf("reasoning stream text = %q, want whitespace-only delta preserved", got)
+	}
+}
+
 func TestGatewayContextCanceledRendersUserInterrupt(t *testing.T) {
 	model := newGatewayEventTestModel()
 
@@ -339,13 +375,24 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
 		t.Fatalf("rendered rows = %q, want exploration details hidden while collapsed", joined)
 	}
-	if strings.Contains(joined, "Now let me explore more") {
-		t.Fatalf("rendered rows = %q, want leading exploration reasoning hidden while collapsed", joined)
+	if strings.Contains(joined, "Now let me explore more") || strings.Contains(joined, "Let me search the event kind references next") {
+		t.Fatalf("rendered rows = %q, want exploration reasoning hidden while collapsed", joined)
 	}
-	if !strings.Contains(joined, "> Let me patch the hook implementation next.") {
-		t.Fatalf("rendered rows = %q, want first action-loop reasoning after exploration folded", joined)
+	exploreTailIdx := indexOfRowContaining(plain, "List tui/tuiapp")
+	patchReasonIdx := indexOfRowContaining(plain, "> Let me patch the hook implementation next.")
+	patchIdx := indexOfRowContaining(plain, "• Patched hooks.go")
+	if exploreTailIdx < 0 || patchReasonIdx < 0 || patchIdx < 0 {
+		t.Fatalf("rendered rows = %#v, want exploration summary, patch reasoning, and patch tool", plain)
 	}
-	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_exploration_stage:read-1,rg-1,list-1") {
+	if !hasBlankRowBetween(plain, exploreTailIdx, patchReasonIdx) {
+		t.Fatalf("rendered rows = %#v, want blank after exploration stage", plain)
+	}
+	if hasBlankRowBetween(plain, patchReasonIdx, patchIdx) {
+		t.Fatalf("rendered rows = %#v, want patch reasoning attached to patch tool", plain)
+	}
+
+	key := "read-1,rg-1,list-1"
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_exploration_stage:"+key) {
 		t.Fatal("expected exploration summary click token to expand grouped stage")
 	}
 	rows = block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})
@@ -365,6 +412,65 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
 		t.Fatalf("expanded rows = %q, should show compact calls rather than raw outputs", joined)
+	}
+}
+
+func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
+	model := newGatewayEventTestModel()
+	sendACPTool := func(id string, name string, args string, output string) {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindToolCall,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+				ToolCall: &appgateway.ToolCallPayload{
+					CallID:   id,
+					ToolName: name,
+					ArgsText: args,
+					Status:   appgateway.ToolStatusRunning,
+					Scope:    appgateway.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+		updated, _ = model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindToolResult,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+				ToolResult: &appgateway.ToolResultPayload{
+					CallID:     id,
+					ToolName:   name,
+					OutputText: output,
+					Status:     appgateway.ToolStatusCompleted,
+					Scope:      appgateway.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+
+	sendACPTool("read-1", "READ", "gateway/core/types.go", "type Event struct{}")
+	sendACPTool("search-1", "SEARCH", "EventKind", "42 matches")
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})
+	var plain []string
+	for _, row := range rows {
+		plain = append(plain, row.Plain)
+	}
+	joined := strings.Join(plain, "\n")
+	if strings.Contains(joined, "• Explored") {
+		t.Fatalf("rendered rows = %q, want ACP tools to stay out of compact exploration grouping", joined)
+	}
+	if !strings.Contains(joined, "READ gateway/core/types.go") || !strings.Contains(joined, "SEARCH EventKind") {
+		t.Fatalf("rendered rows = %q, want standard tool rows", joined)
+	}
+	if !block.toolPanelExpanded("read-1") || !block.toolPanelExpanded("search-1") {
+		t.Fatalf("ACP tool panels should not default collapse; expanded map = %#v", block.ExpandedTools)
 	}
 }
 
@@ -1204,9 +1310,13 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 	if strings.Contains(joined, "Thought a few seconds") {
 		t.Fatalf("rendered rows = %q, should not show reasoning duration", joined)
 	}
+	reasonIdx := indexOfRowContaining(plain, "> thinking through the command choice")
 	bashIdx := indexOfRowContaining(plain, "• Ran go test ./tui/...")
-	if bashIdx <= 0 || plain[bashIdx-1] != "" {
-		t.Fatalf("rendered rows = %#v, want blank row before attention tool loop", plain)
+	if reasonIdx < 0 || bashIdx < 0 {
+		t.Fatalf("rendered rows = %#v, want folded reasoning and attention tool", plain)
+	}
+	if hasBlankRowBetween(plain, reasonIdx, bashIdx) {
+		t.Fatalf("rendered rows = %#v, want folded reasoning attached to attention tool", plain)
 	}
 
 	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_reasoning:0") {
@@ -1423,6 +1533,121 @@ func TestGatewayStreamingNarrativeKeepsReasoningAnswerBoundaries(t *testing.T) {
 		if block.Events[i].Kind != wantKinds[i] || block.Events[i].Text != wantTexts[i] {
 			t.Fatalf("block.Events[%d] = %#v, want kind=%v text=%q", i, block.Events[i], wantKinds[i], wantTexts[i])
 		}
+	}
+}
+
+func TestGatewayParticipantStreamingChunksAppendInsteadOfReplace(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	send := func(text string) {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin: &appgateway.EventOrigin{
+					Scope:         appgateway.EventScopeParticipant,
+					ScopeID:       "codex-001",
+					Actor:         "codex-001",
+					ParticipantID: "codex-001",
+				},
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleAssistant,
+					Actor: "codex-001",
+					Text:  text,
+					Final: false,
+					Scope: appgateway.EventScopeParticipant,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+
+	send("上海今天")
+	send("阴有小雨")
+	send("。")
+
+	block, ok := model.doc.Blocks()[0].(*ParticipantTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want ParticipantTurnBlock", model.doc.Blocks()[0])
+	}
+	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant {
+		t.Fatalf("participant events = %#v, want one assistant stream", block.Events)
+	}
+	if got := block.Events[0].Text; got != "上海今天阴有小雨。" {
+		t.Fatalf("participant assistant text = %q, want appended chunks", got)
+	}
+}
+
+func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	sendUser := func(text string) {
+		updated, _ := model.Update(UserMessageMsg{Text: text})
+		model = updated.(*Model)
+	}
+	sendParticipant := func(scopeID string, text string) {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin: &appgateway.EventOrigin{
+					Scope:   appgateway.EventScopeParticipant,
+					ScopeID: scopeID,
+					Actor:   "@kate",
+				},
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleAssistant,
+					Actor: "codex-001",
+					Text:  text,
+					Final: false,
+					Scope: appgateway.EventScopeParticipant,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+
+	sendUser("/codex 查询一下上海今天的天气")
+	sendParticipant("task-1:1", "first")
+	sendUser("@kate 帮我清理一下/tmp目录")
+	sendParticipant("task-1:2", "second")
+	updated, _ := model.Update(TaskResultMsg{SuppressTurnDivider: true})
+	model = updated.(*Model)
+
+	blocks := model.doc.Blocks()
+	var participantBlocks []*ParticipantTurnBlock
+	var secondUserIndex = -1
+	var secondTurnIndex = -1
+	for i, block := range blocks {
+		if transcript, ok := block.(*TranscriptBlock); ok && strings.Contains(transcript.Raw, "@kate 帮我清理") {
+			secondUserIndex = i
+		}
+		if turn, ok := block.(*ParticipantTurnBlock); ok {
+			participantBlocks = append(participantBlocks, turn)
+			if turn.SessionID == "task-1:2" {
+				secondTurnIndex = i
+			}
+		}
+	}
+	if len(participantBlocks) != 2 {
+		t.Fatalf("participant blocks = %#v, want two prompt turns", participantBlocks)
+	}
+	firstTurn := participantBlocks[0]
+	secondTurn := participantBlocks[1]
+	if firstTurn.SessionID == secondTurn.SessionID {
+		t.Fatalf("participant turn session ids both %q, want separate prompt scopes", firstTurn.SessionID)
+	}
+	if secondUserIndex < 0 || secondTurnIndex < 0 || secondTurnIndex <= secondUserIndex {
+		t.Fatalf("second user index=%d second turn index=%d blocks=%#v", secondUserIndex, secondTurnIndex, blocks)
+	}
+	if firstTurn.Actor != "@kate" || secondTurn.Actor != "@kate" {
+		t.Fatalf("actors = %q/%q, want @kate", firstTurn.Actor, secondTurn.Actor)
+	}
+	if got := secondTurn.Events[0].Text; got != "second" {
+		t.Fatalf("second turn text = %q, want second", got)
+	}
+	if !participantTurnIsTerminal(secondTurn.Status) {
+		t.Fatalf("second turn status = %q, want terminal after task result", secondTurn.Status)
 	}
 }
 

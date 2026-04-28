@@ -58,24 +58,27 @@ func TestProjectGatewayEventToTranscriptEvents_DoesNotPersistApproval(t *testing
 	}
 }
 
-func TestProjectACPProjectionToTranscriptEvents_ToolLifecycle(t *testing.T) {
+func TestProjectGatewayEventToTranscriptEvents_ACPToolDisablesExplorationGrouping(t *testing.T) {
 	t.Parallel()
 
-	events := ProjectACPProjectionToTranscriptEvents(ACPProjectionMsg{
-		Scope:      ACPProjectionMain,
-		ScopeID:    "root-session",
-		ToolCallID: "call-1",
-		ToolName:   "BASH",
-		ToolArgs:   map[string]any{"_display": `echo "hi"`},
-		ToolResult: map[string]any{"summary": "ok"},
-		ToolStatus: "completed",
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:       appgateway.EventKindToolResult,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+		ToolResult: &appgateway.ToolResultPayload{
+			CallID:     "read-1",
+			ToolName:   "READ",
+			OutputText: "type Event struct{}",
+			Status:     appgateway.ToolStatusCompleted,
+			Scope:      appgateway.EventScopeMain,
+		},
 	})
 
 	if got := len(events); got != 1 {
 		t.Fatalf("len(events) = %d, want 1", got)
 	}
-	if events[0].Kind != TranscriptEventTool || !events[0].Final || events[0].ToolOutput != "ok" || events[0].ToolArgs != `echo "hi"` {
-		t.Fatalf("events[0] = %#v, want finalized tool event", events[0])
+	if !events[0].DisableToolGrouping {
+		t.Fatalf("event = %#v, want ACP tool grouping disabled", events[0])
 	}
 }
 
@@ -122,33 +125,48 @@ func TestTranscriptSnapshots(t *testing.T) {
 		{
 			name: "tool call output result",
 			run: func(m *Model) *Model {
-				updated, _ := m.Update(ACPProjectionMsg{
-					Scope:      ACPProjectionMain,
-					ScopeID:    "root-session",
-					ToolCallID: "call-1",
-					ToolName:   "BASH",
-					ToolArgs:   map[string]any{"_display": `echo "hi"`},
-					ToolStatus: "running",
+				updated, _ := m.Update(appgateway.EventEnvelope{
+					Event: appgateway.Event{
+						Kind:       appgateway.EventKindToolCall,
+						SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+						Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+						ToolCall: &appgateway.ToolCallPayload{
+							CallID:   "call-1",
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": `echo "hi"`},
+							Status:   appgateway.ToolStatusRunning,
+						},
+					},
 				})
 				m = updated.(*Model)
-				updated, _ = m.Update(ACPProjectionMsg{
-					Scope:      ACPProjectionMain,
-					ScopeID:    "root-session",
-					ToolCallID: "call-1",
-					ToolName:   "BASH",
-					ToolArgs:   map[string]any{"_display": `echo "hi"`},
-					ToolResult: map[string]any{"summary": "line 1"},
-					ToolStatus: "running",
+				updated, _ = m.Update(appgateway.EventEnvelope{
+					Event: appgateway.Event{
+						Kind:       appgateway.EventKindToolResult,
+						SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+						Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+						ToolResult: &appgateway.ToolResultPayload{
+							CallID:    "call-1",
+							ToolName:  "BASH",
+							RawInput:  map[string]any{"command": `echo "hi"`},
+							RawOutput: map[string]any{"text": "line 1"},
+							Status:    appgateway.ToolStatusRunning,
+						},
+					},
 				})
 				m = updated.(*Model)
-				updated, _ = m.Update(ACPProjectionMsg{
-					Scope:      ACPProjectionMain,
-					ScopeID:    "root-session",
-					ToolCallID: "call-1",
-					ToolName:   "BASH",
-					ToolArgs:   map[string]any{"_display": `echo "hi"`},
-					ToolResult: map[string]any{"summary": "done"},
-					ToolStatus: "completed",
+				updated, _ = m.Update(appgateway.EventEnvelope{
+					Event: appgateway.Event{
+						Kind:       appgateway.EventKindToolResult,
+						SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+						Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+						ToolResult: &appgateway.ToolResultPayload{
+							CallID:    "call-1",
+							ToolName:  "BASH",
+							RawInput:  map[string]any{"command": `echo "hi"`},
+							RawOutput: map[string]any{"text": "done"},
+							Status:    appgateway.ToolStatusCompleted,
+						},
+					},
 				})
 				return updated.(*Model)
 			},
@@ -200,12 +218,17 @@ func TestTranscriptSnapshots(t *testing.T) {
 					},
 				})
 				m = updated.(*Model)
-				updated, _ = m.Update(ACPProjectionMsg{
-					Scope:      ACPProjectionSubagent,
-					ScopeID:    "spawn-1",
-					Stream:     "answer",
-					FullText:   "subagent answer",
-					ToolCallID: "",
+				updated, _ = m.Update(appgateway.EventEnvelope{
+					Event: appgateway.Event{
+						Kind:       appgateway.EventKindAssistantMessage,
+						SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+						Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeSubagent, ScopeID: "spawn-1", Actor: "copilot"},
+						Narrative: &appgateway.NarrativePayload{
+							Role:  appgateway.NarrativeRoleAssistant,
+							Text:  "subagent answer",
+							Final: true,
+						},
+					},
 				})
 				m = updated.(*Model)
 				updated, _ = m.Update(SubagentStatusMsg{SpawnID: "spawn-1", State: "completed"})
@@ -371,6 +394,41 @@ func TestStructuredSubagentGatewayToolRendersThroughTranscriptModel(t *testing.T
 	want := "Subagent(spawn=child-1,status=running)\n  tool(call-1,BASH,done,args=go test ./tui/tuiapp/...,output=ok)"
 	if got != want {
 		t.Fatalf("snapshot mismatch\nwant:\n%s\n\ngot:\n%s", want, got)
+	}
+}
+
+func TestProjectGatewayEventACPFetchToolUsesReadableQueryArgs(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:   appgateway.EventKindToolCall,
+		Origin: &appgateway.EventOrigin{Source: "acp_participant", Scope: appgateway.EventScopeParticipant, ScopeID: "codex-001"},
+		ToolCall: &appgateway.ToolCallPayload{
+			CallID:    "ws-1",
+			ToolTitle: "Searching the Web",
+			ToolKind:  "fetch",
+			Status:    appgateway.ToolStatusRunning,
+			RawInput: map[string]any{
+				"query": "weather: Shanghai, China",
+				"action": map[string]any{
+					"type":  "search",
+					"query": "weather: Shanghai, China",
+				},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolName != "Searching the Web" || got.ToolKind != "fetch" {
+		t.Fatalf("tool identity = name %q kind %q, want ACP title/kind", got.ToolName, got.ToolKind)
+	}
+	if got.ToolArgs != `"weather: Shanghai, China"` {
+		t.Fatalf("tool args = %q, want readable query", got.ToolArgs)
+	}
+	if !got.DisableToolGrouping {
+		t.Fatal("DisableToolGrouping = false, want ACP tool to bypass exploration grouping")
 	}
 }
 

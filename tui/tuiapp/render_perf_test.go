@@ -190,8 +190,8 @@ func BenchmarkRenderSchedulerMixedStreams(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		for _, msg := range []tea.Msg{
-			AssistantStreamMsg{Kind: "answer", Actor: "assistant", Text: "answer "},
-			ReasoningStreamMsg{Actor: "assistant", Text: "reason "},
+			perfGatewayNarrativeFrame("answer "),
+			perfGatewayReasoningFrame("reason "),
 			LogChunkMsg{Chunk: "log line\n"},
 			perfGatewayNarrativeFrame("gateway "),
 			perfTerminalFrame("terminal\n", int64(i+1)),
@@ -282,6 +282,25 @@ func perfGatewayNarrativeFrame(text string) appgateway.EventEnvelope {
 				Visibility: string(sdksession.VisibilityUIOnly),
 				UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
 				Scope:      appgateway.EventScopeMain,
+			},
+		},
+	}
+}
+
+func perfGatewayReasoningFrame(text string) appgateway.EventEnvelope {
+	return appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindAssistantMessage,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+			SessionRef: sdksession.SessionRef{SessionID: "session-1"},
+			Narrative: &appgateway.NarrativePayload{
+				Role:          appgateway.NarrativeRoleAssistant,
+				ReasoningText: text,
+				Visibility:    string(sdksession.VisibilityUIOnly),
+				UpdateType:    string(sdksession.ProtocolUpdateTypeAgentThought),
+				Scope:         appgateway.EventScopeMain,
 			},
 		},
 	}

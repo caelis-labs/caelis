@@ -715,10 +715,11 @@ func normalizeACPUpdateEvent(
 				UpdateType: typed.SessionUpdate,
 				ToolCall: &sdksession.ProtocolToolCall{
 					ID:       strings.TrimSpace(typed.ToolCallID),
+					Name:     acpToolDisplayName(typed.Kind, typed.Title),
 					Kind:     strings.TrimSpace(typed.Kind),
 					Title:    strings.TrimSpace(typed.Title),
 					Status:   strings.TrimSpace(typed.Status),
-					RawInput: cloneMap(typed.RawInput),
+					RawInput: acpToolRawInput(typed.Kind, typed.Title, typed.RawInput),
 				},
 			},
 		}
@@ -735,11 +736,12 @@ func normalizeACPUpdateEvent(
 				UpdateType: typed.SessionUpdate,
 				ToolCall: &sdksession.ProtocolToolCall{
 					ID:        strings.TrimSpace(typed.ToolCallID),
+					Name:      acpToolDisplayName(derefString(typed.Kind), derefString(typed.Title)),
 					Kind:      strings.TrimSpace(derefString(typed.Kind)),
 					Title:     strings.TrimSpace(derefString(typed.Title)),
 					Status:    strings.TrimSpace(derefString(typed.Status)),
-					RawInput:  cloneMap(typed.RawInput),
-					RawOutput: cloneMap(typed.RawOutput),
+					RawInput:  acpToolRawInput(derefString(typed.Kind), derefString(typed.Title), typed.RawInput),
+					RawOutput: acpToolRawOutput(typed.RawOutput, typed.Content),
 				},
 			},
 		}
@@ -764,9 +766,109 @@ func normalizeACPUpdateEvent(
 func contentChunkText(chunk sdkacpclient.ContentChunk) string {
 	var text sdkacpclient.TextChunk
 	if err := json.Unmarshal(chunk.Content, &text); err == nil {
-		return strings.TrimSpace(text.Text)
+		if text.Text != "" {
+			return text.Text
+		}
+		return textFromRawContent(chunk.Content)
 	}
-	return strings.TrimSpace(string(chunk.Content))
+	return textFromRawContent(chunk.Content)
+}
+
+func textFromRawContent(raw json.RawMessage) string {
+	var content any
+	if err := json.Unmarshal(raw, &content); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return textFromContentValue(content)
+}
+
+func textFromContentValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case []any:
+		var out strings.Builder
+		for _, item := range typed {
+			out.WriteString(textFromContentValue(item))
+		}
+		return out.String()
+	case map[string]any:
+		for _, key := range []string{"text", "content", "detailedContent"} {
+			if nested, ok := typed[key]; ok {
+				if text := textFromContentValue(nested); text != "" {
+					return text
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func acpToolDisplayName(kind string, title string) string {
+	if title = strings.TrimSpace(title); title != "" {
+		return title
+	}
+	return strings.TrimSpace(kind)
+}
+
+func acpToolRawInput(kind string, title string, raw any) map[string]any {
+	out := acpRawMap(raw)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func acpToolRawOutput(raw any, content []sdkacpclient.ToolCallContent) map[string]any {
+	out := acpRawMap(raw)
+	if out == nil {
+		out = map[string]any{}
+	}
+	if text := strings.TrimSpace(acpToolContentText(content)); text != "" {
+		if _, exists := out["text"]; !exists {
+			out["text"] = text
+		}
+	}
+	for _, item := range content {
+		if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+			out["terminal_id"] = terminalID
+			break
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func acpRawMap(raw any) map[string]any {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case map[string]any:
+		return maps.Clone(typed)
+	default:
+		if text := strings.TrimSpace(textFromContentValue(typed)); text != "" {
+			return map[string]any{"text": text}
+		}
+		if text := strings.TrimSpace(fmt.Sprint(typed)); text != "" && text != "<nil>" {
+			return map[string]any{"text": text}
+		}
+		return nil
+	}
+}
+
+func acpToolContentText(content []sdkacpclient.ToolCallContent) string {
+	if len(content) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(content))
+	for _, item := range content {
+		if text := strings.TrimSpace(textFromContentValue(item.Content)); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
 }
 
 func messageForContentChunk(chunk sdkacpclient.ContentChunk, text string) sdkmodel.Message {
@@ -845,14 +947,6 @@ func buildPromptParts(input string, parts []sdkmodel.ContentPart) []json.RawMess
 
 func ptrMessage(msg sdkmodel.Message) *sdkmodel.Message {
 	return &msg
-}
-
-func cloneMap(in any) map[string]any {
-	values, ok := in.(map[string]any)
-	if !ok || len(values) == 0 {
-		return nil
-	}
-	return maps.Clone(values)
 }
 
 func firstNonEmpty(values ...string) string {

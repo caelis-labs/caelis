@@ -72,6 +72,61 @@ func TestActiveReasoningBufferDoesNotMutateRawUntilFinal(t *testing.T) {
 	}
 }
 
+func TestActiveReasoningBufferPreservesWhitespaceOnlyDeltas(t *testing.T) {
+	m := NewModel(Config{NoColor: true})
+	m.viewport.SetWidth(80)
+	m.viewport.SetHeight(20)
+
+	_, _ = m.handleStreamBlock("reasoning", "assistant", "The", false)
+	_, _ = m.handleStreamBlock("reasoning", "assistant", " ", false)
+	_, _ = m.handleStreamBlock("reasoning", "assistant", "sandbox", false)
+	block, ok := m.doc.Blocks()[0].(*ReasoningBlock)
+	if !ok {
+		t.Fatalf("block = %T, want ReasoningBlock", m.doc.Blocks()[0])
+	}
+
+	_, _ = m.Update(frameTickMsg{kind: frameTickViewportSync, at: time.Now()})
+	if joined := strings.Join(m.viewportPlainLines, "\n"); !strings.Contains(joined, "The sandbox") {
+		t.Fatalf("active reasoning render = %q, want whitespace-only delta preserved", joined)
+	}
+
+	_, _ = m.handleStreamBlock("reasoning", "assistant", "", true)
+	if got := block.Raw; got != "The sandbox" {
+		t.Fatalf("final reasoning Raw = %q, want whitespace-only delta preserved", got)
+	}
+}
+
+func TestScheduledReasoningStreamPreservesWhitespaceOnlyDeltas(t *testing.T) {
+	m := NewModel(Config{NoColor: true, StreamTickInterval: 16 * time.Millisecond})
+	m.viewport.SetWidth(80)
+	m.viewport.SetHeight(20)
+
+	now := time.Now()
+	for _, text := range []string{"The", " ", "sandbox"} {
+		updated, _ := m.Update(perfGatewayReasoningFrame(text))
+		m = updated.(*Model)
+		updated, _ = m.Update(frameTickMsg{kind: frameTickRenderDrain, at: now})
+		m = updated.(*Model)
+		now = now.Add(16 * time.Millisecond)
+	}
+
+	block, ok := m.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("block = %T, want MainACPTurnBlock", m.doc.Blocks()[0])
+	}
+	if len(block.Events) != 1 || block.Events[0].Kind != SEReasoning {
+		t.Fatalf("main ACP events = %#v, want one reasoning event", block.Events)
+	}
+	if got := block.Events[0].Text; got != "The sandbox" {
+		t.Fatalf("scheduled reasoning text = %q, want whitespace-only delta preserved", got)
+	}
+
+	_, _ = m.Update(frameTickMsg{kind: frameTickViewportSync, at: now})
+	if joined := strings.Join(m.viewportPlainLines, "\n"); !strings.Contains(joined, "The sandbox") {
+		t.Fatalf("scheduled active reasoning render = %q, want whitespace-only delta preserved", joined)
+	}
+}
+
 func TestActiveNarrativeBufferDoesNotRerenderCompletedHistory(t *testing.T) {
 	m := newPerfTestModel()
 	seedLongTranscript(m, 120)

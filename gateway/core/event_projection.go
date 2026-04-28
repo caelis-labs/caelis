@@ -154,17 +154,19 @@ func usageSnapshotFromSessionEvent(event *sdksession.Event) *UsageSnapshot {
 
 func canonicalOriginFromSessionEvent(ref sdksession.SessionRef, event *sdksession.Event) *EventOrigin {
 	scope := scopeFromSessionEvent(event)
+	source := sourceFromSessionEvent(event)
 	participantID := participantIDFromSessionEvent(event)
 	participantKind := participantKindFromSessionEvent(event)
 	participantSessionID := participantSessionIDFromSessionEvent(event)
 	scopeID := canonicalScopeID(ref, scope, participantID, participantSessionID, turnIDFromSessionEvent(event))
-	actor := actorIDFromSessionEvent(event)
-	if scope == EventScopeMain && scopeID == "" && actor == "" && participantID == "" && participantKind == "" && participantSessionID == "" {
+	actor := actorDisplayFromSessionEvent(event)
+	if scope == EventScopeMain && scopeID == "" && source == "" && actor == "" && participantID == "" && participantKind == "" && participantSessionID == "" {
 		return nil
 	}
 	return &EventOrigin{
 		Scope:                scope,
 		ScopeID:              scopeID,
+		Source:               source,
 		Actor:                actor,
 		ParticipantID:        participantID,
 		ParticipantKind:      participantKind,
@@ -217,6 +219,7 @@ func canonicalOriginFromApproval(req *sdkruntime.ApprovalRequest, fallbackRef sd
 	return &EventOrigin{
 		Scope:                scope,
 		ScopeID:              scopeID,
+		Source:               metadataString(req.Metadata, "source"),
 		Actor:                metadataString(req.Metadata, "agent"),
 		ParticipantID:        participantID,
 		ParticipantKind:      participantKind,
@@ -238,6 +241,13 @@ func participantKindFromSessionEvent(event *sdksession.Event) string {
 		return ""
 	}
 	return strings.TrimSpace(string(event.Scope.Participant.Kind))
+}
+
+func sourceFromSessionEvent(event *sdksession.Event) string {
+	if event == nil || event.Scope == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Scope.Source)
 }
 
 func participantSessionIDFromSessionEvent(event *sdksession.Event) string {
@@ -308,7 +318,7 @@ func canonicalNarrativePayload(event *sdksession.Event) *NarrativePayload {
 	case sdksession.EventTypeAssistant:
 		payload.Role = NarrativeRoleAssistant
 		payload.Text = assistantTextFromSessionEvent(event)
-		payload.Final = event.Visibility != sdksession.VisibilityUIOnly
+		payload.Final = event.Visibility != sdksession.VisibilityUIOnly && !isLiveStreamingNarrativeUpdate(event)
 	case sdksession.EventTypeSystem:
 		payload.Role = NarrativeRoleSystem
 		payload.Text = strings.TrimSpace(event.Text)
@@ -329,6 +339,32 @@ func canonicalNarrativePayload(event *sdksession.Event) *NarrativePayload {
 		return nil
 	}
 	return payload
+}
+
+func isLiveStreamingNarrativeUpdate(event *sdksession.Event) bool {
+	if event == nil || strings.TrimSpace(event.ID) != "" {
+		return false
+	}
+	if !sessionEventFromACP(event) {
+		return false
+	}
+	updateType := strings.TrimSpace(updateTypeFromSessionEvent(event))
+	switch updateType {
+	case string(sdksession.ProtocolUpdateTypeAgentMessage), string(sdksession.ProtocolUpdateTypeAgentThought):
+		return true
+	default:
+		return false
+	}
+}
+
+func sessionEventFromACP(event *sdksession.Event) bool {
+	if event == nil || event.Scope == nil {
+		return false
+	}
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
+		return true
+	}
+	return event.Scope.Controller.Kind == sdksession.ControllerKindACP
 }
 
 func hasNarrativePayloadContent(event *sdksession.Event, payload *NarrativePayload) bool {
@@ -357,6 +393,8 @@ func canonicalToolCallPayload(event *sdksession.Event) *ToolCallPayload {
 	return &ToolCallPayload{
 		CallID:         callID,
 		ToolName:       toolName,
+		ToolKind:       canonicalToolKind(event),
+		ToolTitle:      canonicalToolTitle(event),
 		ArgsText:       argsText,
 		CommandPreview: commandPreview,
 		RawInput:       canonicalToolRawInput(event),
@@ -379,6 +417,8 @@ func canonicalToolResultPayload(event *sdksession.Event) *ToolResultPayload {
 	return &ToolResultPayload{
 		CallID:         callID,
 		ToolName:       toolName,
+		ToolKind:       canonicalToolKind(event),
+		ToolTitle:      canonicalToolTitle(event),
 		OutputText:     outputText,
 		CommandPreview: commandPreview,
 		RawInput:       canonicalToolRawInput(event),
@@ -504,12 +544,15 @@ func assistantTextFromSessionEvent(event *sdksession.Event) string {
 		if text := event.Message.TextContent(); text != "" {
 			return text
 		}
-		if strings.TrimSpace(event.Message.ReasoningText()) != "" {
+		if event.Message.ReasoningText() != "" {
 			return ""
 		}
 	}
-	if updateTypeFromSessionEvent(event) == string(sdksession.ProtocolUpdateTypeAgentThought) {
+	switch updateTypeFromSessionEvent(event) {
+	case string(sdksession.ProtocolUpdateTypeAgentThought):
 		return ""
+	case string(sdksession.ProtocolUpdateTypeAgentMessage):
+		return event.Text
 	}
 	return strings.TrimSpace(event.Text)
 }
@@ -518,15 +561,15 @@ func reasoningTextFromSessionEvent(event *sdksession.Event) string {
 	if event == nil {
 		return ""
 	}
-	if updateTypeFromSessionEvent(event) == string(sdksession.ProtocolUpdateTypeAgentThought) {
-		if strings.TrimSpace(event.Text) != "" {
-			return event.Text
+	if event.Message != nil {
+		if reasoning := event.Message.ReasoningText(); reasoning != "" {
+			return reasoning
 		}
 	}
-	if event.Message == nil {
-		return ""
+	if updateTypeFromSessionEvent(event) == string(sdksession.ProtocolUpdateTypeAgentThought) {
+		return event.Text
 	}
-	return event.Message.ReasoningText()
+	return ""
 }
 
 func updateTypeFromSessionEvent(event *sdksession.Event) string {
@@ -541,6 +584,13 @@ func actorIDFromSessionEvent(event *sdksession.Event) string {
 		return ""
 	}
 	return strings.TrimSpace(event.Actor.ID)
+}
+
+func actorDisplayFromSessionEvent(event *sdksession.Event) string {
+	if event == nil {
+		return ""
+	}
+	return firstNonEmpty(strings.TrimSpace(event.Actor.Name), strings.TrimSpace(event.Actor.ID))
 }
 
 func participantIDFromSessionEvent(event *sdksession.Event) string {
@@ -587,6 +637,20 @@ func canonicalToolFields(event *sdksession.Event) (callID string, toolName strin
 		}
 	}
 	return "", "", "", "", ""
+}
+
+func canonicalToolKind(event *sdksession.Event) string {
+	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Protocol.ToolCall.Kind)
+}
+
+func canonicalToolTitle(event *sdksession.Event) string {
+	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Protocol.ToolCall.Title)
 }
 
 func canonicalToolOutput(event *sdksession.Event) (string, bool) {

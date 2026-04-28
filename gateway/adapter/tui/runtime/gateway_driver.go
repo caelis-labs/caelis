@@ -103,7 +103,7 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 			if err != nil || frame == nil {
 				return
 			}
-			if strings.TrimSpace(frame.Text) == "" {
+			if frame.Text == "" {
 				continue
 			}
 			env := appgateway.StreamFrameEvent(req, sdkstream.CloneFrame(*frame))
@@ -161,7 +161,7 @@ func (d *GatewayDriver) SubscribeSubagentStream(ctx context.Context, taskID stri
 			if err != nil || frame == nil {
 				return
 			}
-			if strings.TrimSpace(frame.Text) == "" && frame.Event == nil && !frame.Closed {
+			if frame.Text == "" && frame.Event == nil && !frame.Closed {
 				continue
 			}
 			item := subagentStreamFrameFromStreamFrame(session.SessionRef, taskID, sdkstream.CloneFrame(*frame))
@@ -182,8 +182,13 @@ func subagentStreamFrameFromStreamFrame(sessionRef sdksession.SessionRef, taskID
 			event = &projected
 		}
 	}
+	turnID := strings.TrimSpace(frame.Ref.TerminalID)
+	if frame.Event != nil && frame.Event.Scope != nil {
+		turnID = firstNonEmpty(strings.TrimSpace(frame.Event.Scope.TurnID), turnID)
+	}
 	return SubagentStreamFrame{
 		TaskID:    firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(taskID)),
+		TurnID:    turnID,
 		Stream:    strings.TrimSpace(frame.Stream),
 		Text:      frame.Text,
 		State:     strings.TrimSpace(frame.State),
@@ -809,10 +814,14 @@ func subagentSnapshotFromTask(snapshot sdktask.Snapshot) SubagentSnapshot {
 		Mention:       strings.TrimSpace(mention),
 		Agent:         stringFromAny(firstNonNil(snapshot.Result["agent"], snapshot.Metadata["agent"])),
 		TaskID:        strings.TrimSpace(snapshot.Ref.TaskID),
+		TurnID:        stringFromAny(firstNonNil(snapshot.Result["turn_id"], snapshot.Metadata["turn_id"])),
 		State:         string(snapshot.State),
 		Running:       snapshot.Running,
 		OutputPreview: stringFromAny(firstNonNil(snapshot.Result["output_preview"], snapshot.Metadata["output_preview"])),
 		Result:        stringFromAny(snapshot.Result["result"]),
+		StdoutCursor:  snapshot.StdoutCursor,
+		StderrCursor:  snapshot.StderrCursor,
+		EventCursor:   snapshot.EventCursor,
 	}
 }
 

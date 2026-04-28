@@ -444,17 +444,14 @@ func (r *Runner) handleUpdate(run *childRun, env sdkacpclient.UpdateEnvelope) {
 			}
 		}
 	case sdkacpclient.ToolCall:
-		streamText = toolActivity(update.Title, update.Kind, update.Status) + "\n"
-		run.outputPreview = compactPreview(streamText)
+		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
 	case sdkacpclient.ToolCallUpdate:
-		streamText = toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)) + "\n"
-		run.outputPreview = compactPreview(streamText)
+		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
 	case sdkacpclient.PlanUpdate:
-		streamText = "updating plan\n"
-		run.outputPreview = streamText
+		run.outputPreview = "updating plan"
 	}
 	event = run.acpUpdateEvent(env, run.updatedAt)
-	if strings.TrimSpace(streamText) != "" || event != nil {
+	if streamText != "" || event != nil {
 		run.emitLocked(sdkstream.Frame{
 			Ref: sdkstream.Ref{
 				TaskID:    firstNonEmpty(run.taskID, run.anchor.TaskID),
@@ -520,7 +517,7 @@ func (run *childRun) acpUpdateEvent(env sdkacpclient.UpdateEnvelope, at time.Tim
 	switch update := env.Update.(type) {
 	case sdkacpclient.ContentChunk:
 		text := chunkText(update)
-		if strings.TrimSpace(text) == "" {
+		if text == "" {
 			return nil
 		}
 		switch strings.TrimSpace(update.SessionUpdate) {
@@ -572,39 +569,14 @@ func acpToolEventType(status string) sdksession.EventType {
 }
 
 func acpToolDisplayName(kind string, title string) string {
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "read":
-		return "READ"
-	case "edit", "delete", "move":
-		return "PATCH"
-	case "search":
-		return "SEARCH"
-	case "execute":
-		return "BASH"
-	case "fetch":
-		return "FETCH"
-	case "think":
-		return "THINK"
-	case "switch_mode":
-		return "TASK"
-	}
 	if title = strings.TrimSpace(title); title != "" {
-		return strings.ToUpper(strings.Fields(title)[0])
+		return title
 	}
-	return strings.ToUpper(strings.TrimSpace(kind))
+	return strings.TrimSpace(kind)
 }
 
 func acpToolRawInput(kind string, title string, raw any) map[string]any {
 	out := acpRawMap(raw)
-	if out == nil {
-		out = map[string]any{}
-	}
-	if strings.TrimSpace(kind) != "" {
-		out["_acp_kind"] = strings.TrimSpace(kind)
-	}
-	if strings.TrimSpace(title) != "" {
-		out["_acp_title"] = strings.TrimSpace(title)
-	}
 	if len(out) == 0 {
 		return nil
 	}
@@ -686,7 +658,7 @@ func (run *childRun) appendAgentMessageLocked(text string) string {
 	if run == nil {
 		return ""
 	}
-	if strings.TrimSpace(text) == "" {
+	if text == "" {
 		return ""
 	}
 	if run.agentText == "" {
@@ -735,10 +707,10 @@ func longestSuffixPrefixOverlap(left string, right string) int {
 func chunkText(chunk sdkacpclient.ContentChunk) string {
 	var text sdkacpclient.TextChunk
 	if err := json.Unmarshal(chunk.Content, &text); err == nil {
-		if strings.TrimSpace(text.Text) == "" {
-			return textFromRawContent(chunk.Content)
+		if text.Text != "" {
+			return text.Text
 		}
-		return text.Text
+		return textFromRawContent(chunk.Content)
 	}
 	return textFromRawContent(chunk.Content)
 }
@@ -764,7 +736,7 @@ func textFromContentValue(value any) string {
 	case map[string]any:
 		for _, key := range []string{"text", "content", "detailedContent"} {
 			if nested, ok := typed[key]; ok {
-				if text := textFromContentValue(nested); strings.TrimSpace(text) != "" {
+				if text := textFromContentValue(nested); text != "" {
 					return text
 				}
 			}

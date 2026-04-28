@@ -59,6 +59,69 @@ func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	if continued.StdoutCursor != int64(len("follow-up done")) {
 		t.Fatalf("continued stdout cursor = %d, want only follow-up output length", continued.StdoutCursor)
 	}
+	if got, want := taskStringValue(continued.Result["turn_id"]), started.Ref.TaskID+":2"; got != want {
+		t.Fatalf("continued turn_id = %q, want %q", got, want)
+	}
+}
+
+func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    sdkdelegation.Result{State: sdkdelegation.StateCompleted},
+		waitResult:     sdkdelegation.Result{State: sdkdelegation.StateCompleted},
+		continueResult: sdkdelegation.Result{State: sdkdelegation.StateRunning, Running: true},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "first",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.PublishStream(sdkstream.Frame{
+		Ref:     sdkstream.Ref{TaskID: started.Ref.TaskID},
+		Stream:  "stdout",
+		Text:    "first streamed\n",
+		State:   string(sdkdelegation.StateCompleted),
+		Running: false,
+	})
+	first, err := runtime.Streams().Read(ctx, sdkstream.ReadRequest{
+		Ref: sdkstream.Ref{SessionID: session.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(first) error = %v", err)
+	}
+	if len(first.Frames) != 1 || first.Frames[0].Text != "first streamed\n" {
+		t.Fatalf("first frames = %#v, want first streamed frame", first.Frames)
+	}
+
+	if _, err := runtime.tasks.Write(ctx, session.SessionRef, sdktask.ControlRequest{
+		TaskID: started.Ref.TaskID,
+		Input:  "next prompt",
+	}); err != nil {
+		t.Fatalf("Write(completed spawn) error = %v", err)
+	}
+	runtime.tasks.PublishStream(sdkstream.Frame{
+		Ref:     sdkstream.Ref{TaskID: started.Ref.TaskID},
+		Stream:  "stdout",
+		Text:    "second streamed",
+		State:   string(sdkdelegation.StateRunning),
+		Running: true,
+	})
+	second, err := runtime.Streams().Read(ctx, sdkstream.ReadRequest{
+		Ref: sdkstream.Ref{SessionID: session.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(second) error = %v", err)
+	}
+	if len(second.Frames) != 1 || second.Frames[0].Text != "second streamed" {
+		t.Fatalf("second frames = %#v, want only follow-up output", second.Frames)
+	}
+	if strings.Contains(second.Frames[0].Text, "first streamed") {
+		t.Fatalf("second read replayed previous turn output: %#v", second.Frames)
+	}
 }
 
 func TestTaskWriteRejectsRunningSpawnChildWithWaitHint(t *testing.T) {
@@ -171,6 +234,103 @@ func TestSubagentStreamsAppendsIncrementalTerminalFrames(t *testing.T) {
 	}
 	if len(second.Frames) != 1 || second.Frames[0].Text != "line two\n" {
 		t.Fatalf("second frames = %#v, want line two", second.Frames)
+	}
+}
+
+func TestSubagentStreamsExposeStructuredEventFramesWithoutPreviewFallback(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateRunning, Running: true},
+		waitResult:  sdkdelegation.Result{State: sdkdelegation.StateRunning, Running: true, OutputPreview: "Searching the Web"},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "weather",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.PublishStream(sdkstream.Frame{
+		Ref:     sdkstream.Ref{TaskID: started.Ref.TaskID},
+		Running: true,
+		State:   string(sdkdelegation.StateRunning),
+		Event: &sdksession.Event{
+			Type: sdksession.EventTypeToolCall,
+			Protocol: &sdksession.EventProtocol{ToolCall: &sdksession.ProtocolToolCall{
+				ID:     "ws-1",
+				Name:   "Searching the Web",
+				Kind:   "fetch",
+				Title:  "Searching the Web",
+				Status: "running",
+			}},
+		},
+	})
+
+	snap, err := runtime.Streams().Read(ctx, sdkstream.ReadRequest{
+		Ref: sdkstream.Ref{SessionID: session.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(subagent structured stream) error = %v", err)
+	}
+	if len(snap.Frames) != 1 {
+		t.Fatalf("subagent structured frames = %#v, want one event frame", snap.Frames)
+	}
+	frame := snap.Frames[0]
+	if frame.Text != "" {
+		t.Fatalf("structured event frame text = %q, want no preview fallback text", frame.Text)
+	}
+	if frame.Event == nil || frame.Event.Protocol == nil || frame.Event.Protocol.ToolCall == nil {
+		t.Fatalf("structured event frame = %#v, want tool call event", frame)
+	}
+	if frame.Event.Protocol.ToolCall.Kind != "fetch" {
+		t.Fatalf("tool kind = %q, want fetch", frame.Event.Protocol.ToolCall.Kind)
+	}
+}
+
+func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateRunning, Running: true},
+		waitResult:  sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "final answer"},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "weather",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	runtime.tasks.PublishStream(sdkstream.Frame{
+		Ref:     sdkstream.Ref{TaskID: started.Ref.TaskID},
+		Running: true,
+		State:   string(sdkdelegation.StateRunning),
+		Event: &sdksession.Event{
+			Type: sdksession.EventTypeToolCall,
+			Protocol: &sdksession.EventProtocol{ToolCall: &sdksession.ProtocolToolCall{
+				ID:     "ws-1",
+				Name:   "Searching the Web",
+				Kind:   "fetch",
+				Title:  "Searching the Web",
+				Status: "running",
+			}},
+		},
+	})
+
+	first, err := runtime.Streams().Read(ctx, sdkstream.ReadRequest{
+		Ref: sdkstream.Ref{SessionID: session.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(first structured frame) error = %v", err)
+	}
+	if len(first.Frames) != 2 || first.Frames[0].Event == nil || first.Frames[1].Text != "final answer" {
+		t.Fatalf("first frames = %#v, want tool frame followed by final answer", first.Frames)
+	}
+	if first.Frames[0].Text != "" {
+		t.Fatalf("first frame text = %q, want no final result mixed into tool frame", first.Frames[0].Text)
 	}
 }
 

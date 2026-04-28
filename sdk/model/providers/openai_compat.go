@@ -29,9 +29,10 @@ type openAICompatLLM struct {
 }
 
 type openAICompatOptions struct {
-	IncludeReasoningContent       bool
-	EmitEmptyReasoningForToolCall bool
-	ApplyReasoning                func(*openAICompatRequest, model.ReasoningConfig)
+	IncludeReasoningContent        bool
+	EmitEmptyReasoningForToolCall  bool
+	EmitEmptyReasoningForAssistant bool
+	ApplyReasoning                 func(*openAICompatRequest, model.ReasoningConfig)
 }
 
 func defaultOpenAICompatOptions() openAICompatOptions {
@@ -489,7 +490,7 @@ func (l *openAICompatLLM) fromKernelMessage(m model.Message) openAICompatReqMsg 
 		return openAICompatReqMsg{
 			Role:             string(m.Role),
 			Content:          content,
-			ReasoningContent: l.reasoningContentField(m.ReasoningText(), true),
+			ReasoningContent: l.reasoningContentField(m.ReasoningText(), true, true),
 			ToolCalls:        calls,
 		}
 	}
@@ -517,11 +518,11 @@ func (l *openAICompatLLM) fromKernelMessage(m model.Message) openAICompatReqMsg 
 	return openAICompatReqMsg{
 		Role:             string(m.Role),
 		Content:          m.TextContent(),
-		ReasoningContent: l.reasoningContentField(m.ReasoningText(), false),
+		ReasoningContent: l.reasoningContentField(m.ReasoningText(), false, m.Role == model.RoleAssistant),
 	}
 }
 
-func (l *openAICompatLLM) reasoningContentField(reasoning string, hasToolCalls bool) *string {
+func (l *openAICompatLLM) reasoningContentField(reasoning string, hasToolCalls bool, assistant bool) *string {
 	if l == nil || !l.options.IncludeReasoningContent {
 		return nil
 	}
@@ -529,6 +530,10 @@ func (l *openAICompatLLM) reasoningContentField(reasoning string, hasToolCalls b
 		return &reasoning
 	}
 	if hasToolCalls && l.options.EmitEmptyReasoningForToolCall {
+		empty := ""
+		return &empty
+	}
+	if assistant && l.options.EmitEmptyReasoningForAssistant {
 		empty := ""
 		return &empty
 	}

@@ -6,7 +6,6 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	"github.com/OnslaughtSnail/caelis/tui/acpprojector"
-	"github.com/OnslaughtSnail/caelis/tui/tuikit"
 )
 
 type TranscriptEventKind string
@@ -43,14 +42,17 @@ type TranscriptEvent struct {
 	Text          string
 	Final         bool
 
-	ToolCallID string
-	ToolName   string
-	ToolArgs   string
-	ToolOutput string
-	ToolStream string
-	ToolStatus string
-	ToolError  bool
-	ToolTaskID string
+	ToolCallID          string
+	ToolName            string
+	ToolKind            string
+	ToolTitle           string
+	ToolArgs            string
+	ToolOutput          string
+	ToolStream          string
+	ToolStatus          string
+	ToolError           bool
+	ToolTaskID          string
+	DisableToolGrouping bool
 
 	PlanEntries []PlanEntry
 
@@ -67,6 +69,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 	scope := gatewayEventScope(ev)
 	scopeID := gatewayEventScopeID(ev)
 	occurredAt := ev.OccurredAt
+	disableToolGrouping := gatewayEventFromACP(ev)
 	out := make([]TranscriptEvent, 0, 4)
 
 	appendUsage := func() {
@@ -99,7 +102,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 	case appgateway.EventKindAssistantMessage:
 		payload := ev.Narrative
 		if payload != nil {
-			actor := strings.TrimSpace(payload.Actor)
+			actor := gatewayDisplayActor(ev, payload.Actor)
 			switch payload.Role {
 			case appgateway.NarrativeRoleUser:
 				if text := strings.TrimSpace(payload.Text); text != "" {
@@ -168,7 +171,8 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 		}
 	case appgateway.EventKindToolCall:
 		if payload := ev.ToolCall; payload != nil {
-			if strings.EqualFold(strings.TrimSpace(payload.ToolName), "PLAN") {
+			toolName := gatewayToolDisplayName(payload.ToolName, payload.ToolTitle, payload.ToolKind)
+			if strings.EqualFold(strings.TrimSpace(toolName), "PLAN") {
 				break
 			}
 			status := strings.TrimSpace(string(payload.Status))
@@ -176,21 +180,25 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				status = string(appgateway.ToolStatusRunning)
 			}
 			out = append(out, TranscriptEvent{
-				Kind:       TranscriptEventTool,
-				Scope:      scope,
-				ScopeID:    scopeID,
-				Actor:      strings.TrimSpace(payload.Actor),
-				OccurredAt: occurredAt,
-				ToolCallID: strings.TrimSpace(payload.CallID),
-				ToolName:   strings.TrimSpace(payload.ToolName),
-				ToolArgs:   toolDisplayArgs(payload.ToolName, payload.RawInput, acpprojector.FormatToolStart(payload.ToolName, gatewayToolArgsMap(payload.CommandPreview, payload.ArgsText))),
-				ToolStatus: status,
-				ToolTaskID: toolDisplayTaskID(payload.RawInput, nil),
+				Kind:                TranscriptEventTool,
+				Scope:               scope,
+				ScopeID:             scopeID,
+				Actor:               gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt:          occurredAt,
+				ToolCallID:          strings.TrimSpace(payload.CallID),
+				ToolName:            toolName,
+				ToolKind:            strings.TrimSpace(payload.ToolKind),
+				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
+				ToolArgs:            toolDisplayArgs(toolSemanticName(toolName, payload.ToolKind), payload.RawInput, acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, payload.ArgsText))),
+				ToolStatus:          status,
+				ToolTaskID:          toolDisplayTaskID(payload.RawInput, nil),
+				DisableToolGrouping: disableToolGrouping,
 			})
 		}
 	case appgateway.EventKindToolResult:
 		if payload := ev.ToolResult; payload != nil {
-			if strings.EqualFold(strings.TrimSpace(payload.ToolName), "PLAN") {
+			toolName := gatewayToolDisplayName(payload.ToolName, payload.ToolTitle, payload.ToolKind)
+			if strings.EqualFold(strings.TrimSpace(toolName), "PLAN") {
 				break
 			}
 			status := strings.TrimSpace(string(payload.Status))
@@ -202,29 +210,33 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				}
 			}
 			toolErr := payload.Error || strings.EqualFold(status, string(appgateway.ToolStatusFailed))
-			toolOutput := toolDisplayOutput(payload.ToolName, payload.RawInput, payload.RawOutput, acpprojector.FormatToolResult(payload.ToolName, gatewayToolArgsMap(payload.CommandPreview, ""), gatewayToolResultMap(payload.OutputText, toolErr), status), status, toolErr)
-			toolArgs := toolDisplayArgs(payload.ToolName, payload.RawInput, acpprojector.FormatToolStart(payload.ToolName, gatewayToolArgsMap(payload.CommandPreview, "")))
+			semanticName := toolSemanticName(toolName, payload.ToolKind)
+			toolOutput := toolDisplayOutput(semanticName, payload.RawInput, payload.RawOutput, acpprojector.FormatToolResult(toolName, gatewayToolArgsMap(payload.CommandPreview, ""), gatewayToolResultMap(payload.OutputText, toolErr), status), status, toolErr)
+			toolArgs := toolDisplayArgs(semanticName, payload.RawInput, acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, "")))
 			if !toolErr && (len(payload.RawInput) > 0 || len(payload.RawOutput) > 0) {
-				if header := toolDisplayResultHeader(payload.ToolName, toolOutput); header != "" {
+				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
 				}
 			}
-			toolOutput = toolDisplayPanelOutput(payload.ToolName, toolOutput)
+			toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
 			out = append(out, TranscriptEvent{
-				Kind:       TranscriptEventTool,
-				Scope:      scope,
-				ScopeID:    scopeID,
-				Actor:      strings.TrimSpace(payload.Actor),
-				OccurredAt: occurredAt,
-				ToolCallID: strings.TrimSpace(payload.CallID),
-				ToolName:   strings.TrimSpace(payload.ToolName),
-				ToolArgs:   toolArgs,
-				ToolOutput: toolOutput,
-				ToolStream: transcriptToolStream(status, toolErr),
-				ToolStatus: status,
-				ToolError:  toolErr,
-				ToolTaskID: toolDisplayTaskID(payload.RawInput, payload.RawOutput),
-				Final:      transcriptToolStatusFinal(status, toolErr),
+				Kind:                TranscriptEventTool,
+				Scope:               scope,
+				ScopeID:             scopeID,
+				Actor:               gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt:          occurredAt,
+				ToolCallID:          strings.TrimSpace(payload.CallID),
+				ToolName:            toolName,
+				ToolKind:            strings.TrimSpace(payload.ToolKind),
+				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
+				ToolArgs:            toolArgs,
+				ToolOutput:          toolOutput,
+				ToolStream:          transcriptToolStream(status, toolErr),
+				ToolStatus:          status,
+				ToolError:           toolErr,
+				ToolTaskID:          toolDisplayTaskID(payload.RawInput, payload.RawOutput),
+				DisableToolGrouping: disableToolGrouping,
+				Final:               transcriptToolStatusFinal(status, toolErr),
 			})
 		}
 	case appgateway.EventKindPlanUpdate:
@@ -267,7 +279,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 					Kind:       TranscriptEventLifecycle,
 					Scope:      scope,
 					ScopeID:    scopeID,
-					Actor:      strings.TrimSpace(payload.Actor),
+					Actor:      gatewayDisplayActor(ev, payload.Actor),
 					OccurredAt: occurredAt,
 					State:      state,
 				})
@@ -301,80 +313,28 @@ func payloadNarrativeChunkHasContent(text string, final bool) bool {
 	return strings.TrimSpace(text) != ""
 }
 
-func ProjectACPProjectionToTranscriptEvents(msg ACPProjectionMsg) []TranscriptEvent {
-	scope := msg.Scope
-	scopeID := strings.TrimSpace(msg.ScopeID)
-	actor := strings.TrimSpace(msg.Actor)
-	occurredAt := msg.OccurredAt
-	out := make([]TranscriptEvent, 0, 2)
+func gatewayToolDisplayName(name string, title string, kind string) string {
+	return firstTrimmed(name, title, kind)
+}
 
-	if kind, text, final, ok := acpProjectionStreamPayload(msg); ok {
-		narrativeKind := TranscriptNarrativeAssistant
-		if kind == SEReasoning {
-			narrativeKind = TranscriptNarrativeReasoning
+func gatewayEventFromACP(ev appgateway.Event) bool {
+	if ev.Origin == nil {
+		return false
+	}
+	source := strings.ToLower(strings.TrimSpace(ev.Origin.Source))
+	if source == "acp" || source == "acp_participant" || source == "acp_subagent" || strings.HasPrefix(source, "acp_") {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(ev.Origin.ParticipantKind), "acp")
+}
+
+func gatewayDisplayActor(ev appgateway.Event, fallback string) string {
+	if ev.Origin != nil {
+		if actor := strings.TrimSpace(ev.Origin.Actor); actor != "" {
+			return actor
 		}
-		out = append(out, TranscriptEvent{
-			Kind:          TranscriptEventNarrative,
-			Scope:         scope,
-			ScopeID:       scopeID,
-			Actor:         actor,
-			OccurredAt:    occurredAt,
-			NarrativeKind: narrativeKind,
-			Text:          text,
-			Final:         final,
-		})
 	}
-	if msg.HasPlanUpdate {
-		entries := append([]PlanEntry(nil), msg.PlanEntries...)
-		out = append(out, TranscriptEvent{
-			Kind:        TranscriptEventPlan,
-			Scope:       scope,
-			ScopeID:     scopeID,
-			Actor:       actor,
-			OccurredAt:  occurredAt,
-			PlanEntries: entries,
-		})
-	}
-	if scope == ACPProjectionSubagent {
-		if stream, chunk, final, ok := acpProjectionSubagentToolPayload(msg); ok {
-			out = append(out, TranscriptEvent{
-				Kind:       TranscriptEventTool,
-				Scope:      scope,
-				ScopeID:    scopeID,
-				Actor:      actor,
-				OccurredAt: occurredAt,
-				ToolCallID: strings.TrimSpace(msg.ToolCallID),
-				ToolName:   strings.TrimSpace(msg.ToolName),
-				ToolArgs:   toolDisplayArgs(msg.ToolName, msg.ToolArgs, acpprojector.FormatToolStart(msg.ToolName, msg.ToolArgs)),
-				ToolOutput: tuikit.SanitizeLogText(chunk),
-				ToolStream: stream,
-				ToolStatus: strings.ToLower(strings.TrimSpace(msg.ToolStatus)),
-				ToolError:  stream == "stderr",
-				ToolTaskID: toolDisplayTaskID(msg.ToolArgs, msg.ToolResult),
-				Final:      final,
-			})
-		}
-		return out
-	}
-	if args, output, final, err, ok := acpProjectionToolPayload(msg); ok {
-		out = append(out, TranscriptEvent{
-			Kind:       TranscriptEventTool,
-			Scope:      scope,
-			ScopeID:    scopeID,
-			Actor:      actor,
-			OccurredAt: occurredAt,
-			ToolCallID: strings.TrimSpace(msg.ToolCallID),
-			ToolName:   strings.TrimSpace(msg.ToolName),
-			ToolArgs:   args,
-			ToolOutput: output,
-			ToolStream: transcriptToolStream(strings.ToLower(strings.TrimSpace(msg.ToolStatus)), err),
-			ToolStatus: strings.ToLower(strings.TrimSpace(msg.ToolStatus)),
-			ToolError:  err,
-			ToolTaskID: toolDisplayTaskID(msg.ToolArgs, msg.ToolResult),
-			Final:      final,
-		})
-	}
-	return out
+	return strings.TrimSpace(fallback)
 }
 
 func transcriptToolStream(status string, isErr bool) string {
@@ -393,78 +353,5 @@ func transcriptToolStatusFinal(status string, isErr bool) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-func acpProjectionStreamPayload(msg ACPProjectionMsg) (SubagentEventKind, string, bool, bool) {
-	if strings.TrimSpace(msg.Stream) == "" {
-		return 0, "", false, false
-	}
-	hasDelta := msg.DeltaText != ""
-	hasFull := msg.FullText != ""
-	text := msg.DeltaText
-	if !hasDelta {
-		text = msg.FullText
-	}
-	text = tuikit.SanitizeLogText(text)
-	if text == "" {
-		return 0, "", false, false
-	}
-	kind := SEAssistant
-	if normalizeStreamKind(msg.Stream) == "reasoning" {
-		kind = SEReasoning
-	}
-	return kind, text, !hasDelta && hasFull, true
-}
-
-func acpProjectionToolPayload(msg ACPProjectionMsg) (args string, output string, final bool, err bool, ok bool) {
-	callID := strings.TrimSpace(msg.ToolCallID)
-	toolName := strings.TrimSpace(msg.ToolName)
-	if callID == "" || toolName == "" {
-		return "", "", false, false, false
-	}
-	if strings.EqualFold(toolName, "PLAN") {
-		return "", "", false, false, false
-	}
-	args = toolDisplayArgs(msg.ToolName, msg.ToolArgs, acpprojector.FormatToolStart(msg.ToolName, msg.ToolArgs))
-	status := strings.ToLower(strings.TrimSpace(msg.ToolStatus))
-	switch status {
-	case "", "pending", "in_progress", "running":
-		return args, "", false, false, true
-	case "completed", "failed":
-		output = toolDisplayOutput(msg.ToolName, msg.ToolArgs, msg.ToolResult, acpprojector.FormatToolResult(msg.ToolName, msg.ToolArgs, msg.ToolResult, msg.ToolStatus), msg.ToolStatus, status == "failed")
-		if header := toolDisplayResultHeader(msg.ToolName, output); header != "" {
-			args = header
-		}
-		output = toolDisplayPanelOutput(msg.ToolName, output)
-		return args, output, true, status == "failed", true
-	default:
-		return "", "", false, false, false
-	}
-}
-
-func acpProjectionSubagentToolPayload(msg ACPProjectionMsg) (stream string, chunk string, final bool, ok bool) {
-	callID := strings.TrimSpace(msg.ToolCallID)
-	toolName := strings.TrimSpace(msg.ToolName)
-	if callID == "" || toolName == "" {
-		return "", "", false, false
-	}
-	status := strings.ToLower(strings.TrimSpace(msg.ToolStatus))
-	switch status {
-	case "completed":
-		return "stdout", toolDisplayPanelOutput(msg.ToolName, toolDisplayOutput(msg.ToolName, msg.ToolArgs, msg.ToolResult, acpprojector.FormatToolResult(msg.ToolName, msg.ToolArgs, msg.ToolResult, msg.ToolStatus), msg.ToolStatus, false)), true, true
-	case "failed":
-		return "stderr", toolDisplayPanelOutput(msg.ToolName, toolDisplayOutput(msg.ToolName, msg.ToolArgs, msg.ToolResult, acpprojector.FormatToolResult(msg.ToolName, msg.ToolArgs, msg.ToolResult, msg.ToolStatus), msg.ToolStatus, true)), true, true
-	case "", "pending", "in_progress", "running":
-		if msg.ToolResult == nil {
-			return "", "", false, true
-		}
-		stream = strings.TrimSpace(firstNonEmpty(asString(msg.ToolResult["stream"]), "stdout"))
-		if stream == "" {
-			stream = "stdout"
-		}
-		return stream, toolDisplayPanelOutput(msg.ToolName, toolDisplayOutput(msg.ToolName, msg.ToolArgs, msg.ToolResult, acpprojector.FormatToolResult(msg.ToolName, msg.ToolArgs, msg.ToolResult, msg.ToolStatus), msg.ToolStatus, false)), false, true
-	default:
-		return "", "", false, false
 	}
 }

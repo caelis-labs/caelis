@@ -124,6 +124,7 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if block == nil {
 			return m, nil
 		}
+		m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
 		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 			block.StartedAt = event.OccurredAt
 		}
@@ -158,6 +159,7 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if block == nil {
 			return m, nil
 		}
+		m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
 		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 			block.StartedAt = event.OccurredAt
 		}
@@ -181,7 +183,7 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" {
 			block.Status = "running"
 		}
-		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, ToolUpdateMeta{TaskID: event.ToolTaskID})
+		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, ToolUpdateMeta{TaskID: event.ToolTaskID, ToolKind: event.ToolKind, DisableGrouping: event.DisableToolGrouping})
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
@@ -200,7 +202,7 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 			state.ReviveFromTerminal()
 		}
 		panel.bindSession(state)
-		state.UpdateToolCallWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, firstNonEmpty(strings.TrimSpace(event.ToolStream), "stdout"), event.ToolOutput, event.Final, ToolUpdateMeta{TaskID: event.ToolTaskID})
+		state.UpdateToolCallWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, firstNonEmpty(strings.TrimSpace(event.ToolStream), "stdout"), event.ToolOutput, event.Final, ToolUpdateMeta{TaskID: event.ToolTaskID, ToolKind: event.ToolKind, DisableGrouping: event.DisableToolGrouping})
 		m.reviveSubagentPanel(panel, false)
 		m.syncSubagentSessionPanels(sessionKey)
 		m.markViewportBlockDirty(panel.BlockID())
@@ -213,7 +215,7 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 			block.StartedAt = event.OccurredAt
 		}
-		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, ToolUpdateMeta{TaskID: event.ToolTaskID})
+		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, ToolUpdateMeta{TaskID: event.ToolTaskID, ToolKind: event.ToolKind, DisableGrouping: event.DisableToolGrouping})
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}

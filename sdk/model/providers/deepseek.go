@@ -10,6 +10,7 @@ func newDeepSeek(cfg Config, token string) model.LLM {
 	llm := newOpenAICompat(cfg, token)
 	llm.options.IncludeReasoningContent = true
 	llm.options.EmitEmptyReasoningForToolCall = true
+	llm.options.EmitEmptyReasoningForAssistant = true
 	llm.options.ApplyReasoning = applyThinkingReasoning
 	return llm
 }
@@ -69,6 +70,9 @@ func clearDeepSeekReasoningFields(payload *openAICompatRequest) {
 	}
 	payload.Reasoning = nil
 	payload.ReasoningEffort = ""
+	for i := range payload.Messages {
+		payload.Messages[i].ReasoningContent = nil
+	}
 }
 
 func deepSeekModelSupportsThinking(modelName string) bool {

@@ -641,7 +641,7 @@ func messagesFromContext(ctx sdkruntime.Context) []sdkmodel.Message {
 	}
 	out := make([]sdkmodel.Message, 0, ctx.Events().Len())
 	for event := range ctx.Events().All() {
-		if !sdksession.IsInvocationVisibleEvent(event) || event == nil || event.Message == nil {
+		if !sdksession.IsMainInvocationVisibleEvent(event) || event == nil || event.Message == nil {
 			continue
 		}
 		out = append(out, sdkmodel.CloneMessage(*event.Message))

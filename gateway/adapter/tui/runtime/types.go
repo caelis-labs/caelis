@@ -110,14 +110,19 @@ type SubagentSnapshot struct {
 	Mention       string
 	Agent         string
 	TaskID        string
+	TurnID        string
 	State         string
 	Running       bool
 	OutputPreview string
 	Result        string
+	StdoutCursor  int64
+	StderrCursor  int64
+	EventCursor   int64
 }
 
 type SubagentStreamFrame struct {
 	TaskID    string
+	TurnID    string
 	Stream    string
 	Text      string
 	State     string

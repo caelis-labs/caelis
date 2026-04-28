@@ -103,6 +103,7 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 	stderr := sliceStringFromByteCursor(task.stderr, cursor.Stderr)
 	nextStdout := int64(len([]byte(task.stdout)))
 	nextStderr := int64(len([]byte(task.stderr)))
+	nextEvents := int64(len(task.streamFrames))
 	snap := sdkstream.Snapshot{
 		Ref: sdkstream.Ref{
 			SessionID:  strings.TrimSpace(task.sessionRef.SessionID),
@@ -112,6 +113,7 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 		Cursor: sdkstream.Cursor{
 			Stdout: nextStdout,
 			Stderr: nextStderr,
+			Events: nextEvents,
 		},
 		Running:       task.running,
 		SupportsInput: false,
@@ -125,7 +127,35 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 		}
 		snap.ExitCode = &code
 	}
-	if stdout != "" {
+	deliveredStdoutFrame := false
+	deliveredStderrFrame := false
+	if start := cursor.Events; start < nextEvents {
+		if start < 0 {
+			start = 0
+		}
+		for _, frame := range task.streamFrames[start:] {
+			cloned := sdkstream.CloneFrame(frame)
+			terminalID := strings.TrimSpace(cloned.Ref.TerminalID)
+			cloned.Ref = snap.Ref
+			if terminalID != "" {
+				cloned.Ref.TerminalID = terminalID
+			}
+			cloned.Cursor = snap.Cursor
+			if cloned.UpdatedAt.IsZero() {
+				cloned.UpdatedAt = snap.UpdatedAt
+			}
+			if cloned.Text != "" {
+				switch strings.ToLower(strings.TrimSpace(cloned.Stream)) {
+				case "stderr":
+					deliveredStderrFrame = true
+				default:
+					deliveredStdoutFrame = true
+				}
+			}
+			snap.Frames = append(snap.Frames, cloned)
+		}
+	}
+	if stdout != "" && !deliveredStdoutFrame {
 		snap.Frames = append(snap.Frames, sdkstream.Frame{
 			Ref:       snap.Ref,
 			Stream:    "stdout",
@@ -135,7 +165,7 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 			UpdatedAt: snap.UpdatedAt,
 		})
 	}
-	if stderr != "" {
+	if stderr != "" && !deliveredStderrFrame {
 		snap.Frames = append(snap.Frames, sdkstream.Frame{
 			Ref:       snap.Ref,
 			Stream:    "stderr",

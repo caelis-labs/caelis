@@ -243,7 +243,9 @@ type MainACPTurnBlock struct {
 }
 
 type ToolUpdateMeta struct {
-	TaskID string
+	TaskID          string
+	ToolKind        string
+	DisableGrouping bool
 }
 
 func NewMainACPTurnBlock(sessionID string) *MainACPTurnBlock {
@@ -302,11 +304,13 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	callID = strings.TrimSpace(callID)
 	name = strings.TrimSpace(name)
 	args = strings.TrimSpace(args)
-	if !isTerminalPanelTool(name) || final {
+	toolKind := strings.TrimSpace(meta.ToolKind)
+	if !isTerminalPanelToolKind(name, toolKind) || final {
 		output = strings.TrimSpace(output)
 	}
 	taskID := strings.TrimSpace(meta.TaskID)
-	if updateLinkedTerminalEvent(b.Events, name, taskID, output) {
+	disableGrouping := meta.DisableGrouping
+	if updateLinkedTerminalEvent(b.Events, toolSemanticName(name, toolKind), taskID, output) {
 		output = ""
 	}
 	if !final {
@@ -318,11 +322,17 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			if strings.TrimSpace(ev.Name) == "" {
 				ev.Name = name
 			}
+			if strings.TrimSpace(ev.ToolKind) == "" {
+				ev.ToolKind = toolKind
+			}
 			if strings.TrimSpace(ev.Args) == "" {
 				ev.Args = args
 			}
 			if ev.TaskID == "" {
 				ev.TaskID = taskID
+			}
+			if disableGrouping {
+				ev.DisableGrouping = true
 			}
 			if text := output; text != "" {
 				ev.Output = mergeSubagentStreamChunk(ev.Output, text)
@@ -330,24 +340,28 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			return
 		}
 		b.Events = append(b.Events, SubagentEvent{
-			Kind:   SEToolCall,
-			CallID: callID,
-			Name:   name,
-			Args:   args,
-			Output: output,
-			TaskID: taskID,
+			Kind:            SEToolCall,
+			CallID:          callID,
+			Name:            name,
+			ToolKind:        toolKind,
+			Args:            args,
+			Output:          output,
+			TaskID:          taskID,
+			DisableGrouping: disableGrouping,
 		})
 		return
 	}
 	finalEvent := SubagentEvent{
-		Kind:   SEToolCall,
-		CallID: callID,
-		Name:   name,
-		Args:   args,
-		Output: output,
-		Done:   true,
-		Err:    err,
-		TaskID: taskID,
+		Kind:            SEToolCall,
+		CallID:          callID,
+		Name:            name,
+		ToolKind:        toolKind,
+		Args:            args,
+		Output:          output,
+		Done:            true,
+		Err:             err,
+		TaskID:          taskID,
+		DisableGrouping: disableGrouping,
 	}
 	for i := len(b.Events) - 1; i >= 0; i-- {
 		ev := &b.Events[i]
@@ -361,7 +375,11 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			if strings.TrimSpace(finalEvent.Args) == "" {
 				finalEvent.Args = strings.TrimSpace(ev.Args)
 			}
+			if strings.TrimSpace(finalEvent.ToolKind) == "" {
+				finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
+			}
 			ev.Name = finalEvent.Name
+			ev.ToolKind = finalEvent.ToolKind
 			ev.Args = finalEvent.Args
 			ev.Output = finalEvent.Output
 			ev.Done = true
@@ -369,7 +387,11 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			if ev.TaskID == "" {
 				ev.TaskID = finalEvent.TaskID
 			}
-			if shouldDefaultCollapseToolPanel(finalEvent.Name) {
+			if ev.DisableGrouping {
+				finalEvent.DisableGrouping = true
+			}
+			ev.DisableGrouping = finalEvent.DisableGrouping
+			if shouldDefaultCollapseToolEvent(finalEvent) {
 				b.setToolPanelExpanded(callID, false)
 			}
 			return
@@ -380,10 +402,13 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		if strings.TrimSpace(finalEvent.Args) == "" {
 			finalEvent.Args = strings.TrimSpace(ev.Args)
 		}
+		if strings.TrimSpace(finalEvent.ToolKind) == "" {
+			finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
+		}
 		break
 	}
 	b.Events = append(b.Events, finalEvent)
-	if shouldDefaultCollapseToolPanel(finalEvent.Name) {
+	if shouldDefaultCollapseToolEvent(finalEvent) {
 		b.setToolPanelExpanded(callID, false)
 	}
 }
@@ -535,11 +560,13 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	callID = strings.TrimSpace(callID)
 	name = strings.TrimSpace(name)
 	args = strings.TrimSpace(args)
-	if !isTerminalPanelTool(name) || final {
+	toolKind := strings.TrimSpace(meta.ToolKind)
+	if !isTerminalPanelToolKind(name, toolKind) || final {
 		output = strings.TrimSpace(output)
 	}
 	taskID := strings.TrimSpace(meta.TaskID)
-	if updateLinkedTerminalEvent(b.Events, name, taskID, output) {
+	disableGrouping := meta.DisableGrouping
+	if updateLinkedTerminalEvent(b.Events, toolSemanticName(name, toolKind), taskID, output) {
 		output = ""
 	}
 	if !final {
@@ -551,11 +578,17 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			if strings.TrimSpace(ev.Name) == "" {
 				ev.Name = name
 			}
+			if strings.TrimSpace(ev.ToolKind) == "" {
+				ev.ToolKind = toolKind
+			}
 			if strings.TrimSpace(ev.Args) == "" {
 				ev.Args = args
 			}
 			if ev.TaskID == "" {
 				ev.TaskID = taskID
+			}
+			if disableGrouping {
+				ev.DisableGrouping = true
 			}
 			if text := output; text != "" {
 				ev.Output = mergeSubagentStreamChunk(ev.Output, text)
@@ -563,24 +596,28 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			return
 		}
 		b.Events = append(b.Events, SubagentEvent{
-			Kind:   SEToolCall,
-			CallID: callID,
-			Name:   name,
-			Args:   args,
-			Output: output,
-			TaskID: taskID,
+			Kind:            SEToolCall,
+			CallID:          callID,
+			Name:            name,
+			ToolKind:        toolKind,
+			Args:            args,
+			Output:          output,
+			TaskID:          taskID,
+			DisableGrouping: disableGrouping,
 		})
 		return
 	}
 	finalEvent := SubagentEvent{
-		Kind:   SEToolCall,
-		CallID: callID,
-		Name:   name,
-		Args:   args,
-		Output: output,
-		Done:   true,
-		Err:    err,
-		TaskID: taskID,
+		Kind:            SEToolCall,
+		CallID:          callID,
+		Name:            name,
+		ToolKind:        toolKind,
+		Args:            args,
+		Output:          output,
+		Done:            true,
+		Err:             err,
+		TaskID:          taskID,
+		DisableGrouping: disableGrouping,
 	}
 	for i := len(b.Events) - 1; i >= 0; i-- {
 		ev := &b.Events[i]
@@ -594,7 +631,11 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			if strings.TrimSpace(finalEvent.Args) == "" {
 				finalEvent.Args = strings.TrimSpace(ev.Args)
 			}
+			if strings.TrimSpace(finalEvent.ToolKind) == "" {
+				finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
+			}
 			ev.Name = finalEvent.Name
+			ev.ToolKind = finalEvent.ToolKind
 			ev.Args = finalEvent.Args
 			ev.Output = finalEvent.Output
 			ev.Done = true
@@ -602,7 +643,11 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			if ev.TaskID == "" {
 				ev.TaskID = finalEvent.TaskID
 			}
-			if shouldDefaultCollapseToolPanel(finalEvent.Name) {
+			if ev.DisableGrouping {
+				finalEvent.DisableGrouping = true
+			}
+			ev.DisableGrouping = finalEvent.DisableGrouping
+			if shouldDefaultCollapseToolEvent(finalEvent) {
 				b.setToolPanelExpanded(callID, false)
 			}
 			return
@@ -613,10 +658,13 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		if strings.TrimSpace(finalEvent.Args) == "" {
 			finalEvent.Args = strings.TrimSpace(ev.Args)
 		}
+		if strings.TrimSpace(finalEvent.ToolKind) == "" {
+			finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
+		}
 		break
 	}
 	b.Events = append(b.Events, finalEvent)
-	if shouldDefaultCollapseToolPanel(finalEvent.Name) {
+	if shouldDefaultCollapseToolEvent(finalEvent) {
 		b.setToolPanelExpanded(callID, false)
 	}
 }
@@ -996,15 +1044,19 @@ func collapseToolPanelsForEvents(state map[string]bool, events []SubagentEvent) 
 }
 
 func shouldDefaultCollapseCallID(events []SubagentEvent, callID string) bool {
+	var name string
 	for _, ev := range events {
 		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != strings.TrimSpace(callID) {
 			continue
 		}
-		if strings.TrimSpace(ev.Name) != "" {
-			return shouldDefaultCollapseToolPanel(ev.Name)
+		if ev.DisableGrouping {
+			return false
+		}
+		if name == "" {
+			name = strings.TrimSpace(ev.Name)
 		}
 	}
-	return false
+	return shouldDefaultCollapseToolPanel(name)
 }
 
 func collectToolPanelCallIDs(events []SubagentEvent) []string {
@@ -1037,6 +1089,13 @@ func shouldDefaultCollapseToolPanel(name string) bool {
 	default:
 		return false
 	}
+}
+
+func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
+	if ev.DisableGrouping {
+		return false
+	}
+	return shouldDefaultCollapseToolPanel(ev.Name)
 }
 
 func participantTurnStatusLabel(state string) string {
@@ -1261,13 +1320,12 @@ func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID s
 		return false
 	}
 	taskID = strings.TrimSpace(taskID)
-	output = strings.TrimSpace(output)
 	if taskID == "" || output == "" {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := &events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID || !isTerminalPanelTool(ev.Name) {
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID || !isTerminalPanelToolEvent(*ev) {
 			continue
 		}
 		ev.Output = output
@@ -1336,13 +1394,15 @@ type SubagentEvent struct {
 	EndedAt   time.Time
 
 	// ToolCall fields.
-	CallID string
-	Name   string
-	Args   string
-	Output string
-	TaskID string
-	Done   bool
-	Err    bool
+	CallID          string
+	Name            string
+	ToolKind        string
+	Args            string
+	Output          string
+	TaskID          string
+	Done            bool
+	Err             bool
+	DisableGrouping bool
 
 	// Plan fields.
 	PlanEntries []planEntryState
@@ -1472,8 +1532,10 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 	args = strings.TrimSpace(args)
 	stream = strings.ToLower(strings.TrimSpace(stream))
 	chunk = normalizeSubagentChunkBoundary("", chunk)
+	toolKind := strings.TrimSpace(meta.ToolKind)
 	taskID := strings.TrimSpace(meta.TaskID)
-	if updateLinkedTerminalEvent(s.Events, toolName, taskID, strings.TrimSpace(chunk)) {
+	disableGrouping := meta.DisableGrouping
+	if updateLinkedTerminalEvent(s.Events, toolSemanticName(toolName, toolKind), taskID, chunk) {
 		chunk = ""
 	}
 	if !final {
@@ -1485,11 +1547,17 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			if strings.TrimSpace(e.Name) == "" {
 				e.Name = toolName
 			}
+			if strings.TrimSpace(e.ToolKind) == "" {
+				e.ToolKind = toolKind
+			}
 			if strings.TrimSpace(e.Args) == "" {
 				e.Args = args
 			}
 			if e.TaskID == "" {
 				e.TaskID = taskID
+			}
+			if disableGrouping {
+				e.DisableGrouping = true
 			}
 			if chunk != "" {
 				e.Output = mergeSubagentStreamChunk(e.Output, chunk)
@@ -1498,26 +1566,30 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			return
 		}
 		s.Events = append(s.Events, SubagentEvent{
-			Kind:   SEToolCall,
-			Name:   toolName,
-			CallID: callID,
-			Args:   args,
-			Output: chunk,
-			TaskID: taskID,
+			Kind:            SEToolCall,
+			Name:            toolName,
+			ToolKind:        toolKind,
+			CallID:          callID,
+			Args:            args,
+			Output:          chunk,
+			TaskID:          taskID,
+			DisableGrouping: disableGrouping,
 		})
 		s.eventsGen++
 		return
 	}
 
 	finalEvent := SubagentEvent{
-		Kind:   SEToolCall,
-		Name:   toolName,
-		CallID: callID,
-		Args:   args,
-		Output: chunk,
-		Done:   true,
-		Err:    stream == "stderr",
-		TaskID: taskID,
+		Kind:            SEToolCall,
+		Name:            toolName,
+		ToolKind:        toolKind,
+		CallID:          callID,
+		Args:            args,
+		Output:          chunk,
+		Done:            true,
+		Err:             stream == "stderr",
+		TaskID:          taskID,
+		DisableGrouping: disableGrouping,
 	}
 	for i := len(s.Events) - 1; i >= 0; i-- {
 		e := &s.Events[i]
@@ -1531,7 +1603,11 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			if strings.TrimSpace(finalEvent.Args) == "" {
 				finalEvent.Args = e.Args
 			}
+			if strings.TrimSpace(finalEvent.ToolKind) == "" {
+				finalEvent.ToolKind = strings.TrimSpace(e.ToolKind)
+			}
 			e.Name = finalEvent.Name
+			e.ToolKind = finalEvent.ToolKind
 			e.Args = finalEvent.Args
 			e.Output = finalEvent.Output
 			e.Done = true
@@ -1539,6 +1615,10 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			if e.TaskID == "" {
 				e.TaskID = finalEvent.TaskID
 			}
+			if e.DisableGrouping {
+				finalEvent.DisableGrouping = true
+			}
+			e.DisableGrouping = finalEvent.DisableGrouping
 			s.eventsGen++
 			return
 		}
@@ -1547,6 +1627,9 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 		}
 		if strings.TrimSpace(finalEvent.Args) == "" {
 			finalEvent.Args = e.Args
+		}
+		if strings.TrimSpace(finalEvent.ToolKind) == "" {
+			finalEvent.ToolKind = strings.TrimSpace(e.ToolKind)
 		}
 		break
 	}

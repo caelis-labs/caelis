@@ -783,6 +783,9 @@ func TestDynamicAgentSlashWatchesRunningSubagentUntilOutput(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
+	if !result.ContinueRunning {
+		t.Fatalf("dynamic slash result = %#v, want running task to keep ticker active", result)
+	}
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
@@ -790,12 +793,8 @@ func TestDynamicAgentSlashWatchesRunningSubagentUntilOutput(t *testing.T) {
 			switch typed := msg.(type) {
 			case SubagentStartMsg:
 				t.Fatalf("dynamic slash emitted SPAWN panel start message: %#v", typed)
-			case RawDeltaMsg:
-				if typed.Target == RawDeltaTargetSubagent {
-					t.Fatalf("dynamic slash emitted SPAWN subagent delta: %#v", typed)
-				}
-			case AssistantStreamMsg:
-				if typed.Actor == "@mike" && strings.Contains(typed.Text, "copilot 子代理") {
+			case TranscriptEventsMsg:
+				if transcriptEventsContainText(typed.Events, "copilot 子代理") {
 					if driver.subagentStreamSubscribeCalls == 0 {
 						t.Fatal("SubscribeSubagentStream was not called for running dynamic slash child")
 					}
@@ -805,6 +804,168 @@ func TestDynamicAgentSlashWatchesRunningSubagentUntilOutput(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for watched subagent output; stream subscribe calls=%d wait calls=%d", driver.subagentStreamSubscribeCalls, driver.waitSubagentCalls)
 		}
+	}
+}
+
+func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentList: []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
+		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
+			Handle:        "iris",
+			Mention:       "@iris",
+			Agent:         "codex",
+			TaskID:        "task-1",
+			State:         "running",
+			Running:       true,
+			OutputPreview: "Searching the Web",
+		},
+		waitSubagentSnapshot: tuiadapterruntime.SubagentSnapshot{
+			Handle:  "iris",
+			Mention: "@iris",
+			Agent:   "codex",
+			TaskID:  "task-1",
+			State:   "completed",
+			Running: false,
+			Result:  "上海今天阴有小雨。",
+		},
+	}
+	msgs := make(chan tea.Msg, 16)
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/codex 查询上海天气")
+	if result.Err != nil {
+		t.Fatalf("dynamic slash error = %v", result.Err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case msg := <-msgs:
+			if transcript, ok := msg.(TranscriptEventsMsg); ok {
+				if transcriptEventsContainText(transcript.Events, "Searching the Web") {
+					t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
+				}
+				if transcriptEventsContainText(transcript.Events, "上海今天阴有小雨") {
+					return
+				}
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for final subagent output; wait calls=%d", driver.waitSubagentCalls)
+		}
+	}
+}
+
+func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentList: []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
+		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
+			Handle:  "kate",
+			Mention: "@kate",
+			Agent:   "codex",
+			TaskID:  "task-1",
+			State:   "completed",
+			Running: false,
+			Result:  "上海今天阴有小雨。",
+		},
+	}
+	msgs := make(chan tea.Msg, 8)
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/codex 查询上海天气")
+	if result.Err != nil {
+		t.Fatalf("dynamic slash error = %v", result.Err)
+	}
+	if result.SuppressTurnDivider {
+		t.Fatalf("dynamic slash result = %#v, want completed ACP agent turn to keep divider", result)
+	}
+	if result.ContinueRunning {
+		t.Fatalf("dynamic slash result = %#v, want completed turn", result)
+	}
+	close(msgs)
+	if len(msgs) == 0 {
+		t.Fatal("completed dynamic slash emitted no final transcript output")
+	}
+}
+
+func TestDynamicAgentSlashStreamCompletionKeepsDivider(t *testing.T) {
+	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 1)
+	stream <- tuiadapterruntime.SubagentStreamFrame{
+		TaskID:  "task-1",
+		TurnID:  "task-1:1",
+		Stream:  "stdout",
+		Text:    "上海今天阴有小雨。",
+		Running: false,
+		Closed:  true,
+	}
+	close(stream)
+	driver := &bridgeTestDriver{
+		agentList: []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
+		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
+			Handle:  "kate",
+			Mention: "@kate",
+			Agent:   "codex",
+			TaskID:  "task-1",
+			TurnID:  "task-1:1",
+			State:   "running",
+			Running: true,
+		},
+		subagentStream: stream,
+	}
+	msgs := make(chan tea.Msg, 8)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}
+	result := dispatchSlashCommand(driver, sender, "/codex 查询上海天气")
+	if result.Err != nil {
+		t.Fatalf("dynamic slash error = %v", result.Err)
+	}
+	if !result.ContinueRunning {
+		t.Fatalf("dynamic slash result = %#v, want running task while stream bridge drains", result)
+	}
+	if !sender.waitForwarders(time.Second) {
+		t.Fatal("subagent forwarder did not exit")
+	}
+	close(msgs)
+	foundTaskResult := false
+	for msg := range msgs {
+		if task, ok := msg.(TaskResultMsg); ok {
+			foundTaskResult = true
+			if task.SuppressTurnDivider {
+				t.Fatalf("stream completion task result = %#v, want divider kept", task)
+			}
+		}
+	}
+	if !foundTaskResult {
+		t.Fatal("stream completion emitted no TaskResultMsg")
+	}
+}
+
+func TestDynamicSubagentStreamPreservesWhitespaceFrames(t *testing.T) {
+	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 3)
+	stream <- tuiadapterruntime.SubagentStreamFrame{TaskID: "task-1", Stream: "stdout", Text: "The", Running: true}
+	stream <- tuiadapterruntime.SubagentStreamFrame{TaskID: "task-1", Stream: "stdout", Text: " ", Running: true}
+	stream <- tuiadapterruntime.SubagentStreamFrame{TaskID: "task-1", Stream: "stdout", Text: "sandbox", Running: false, Closed: true}
+	close(stream)
+
+	driver := &bridgeTestDriver{subagentStream: stream}
+	msgs := make(chan tea.Msg, 8)
+	sender := &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}
+
+	startDynamicSubagentOutputBridge(context.Background(), driver, sender, tuiadapterruntime.SubagentSnapshot{
+		TaskID:  "task-1",
+		Running: true,
+		Mention: "@worker",
+	})
+	if !sender.waitForwarders(time.Second) {
+		t.Fatal("subagent forwarder did not exit")
+	}
+	close(msgs)
+
+	var text strings.Builder
+	for msg := range msgs {
+		if transcript, ok := msg.(TranscriptEventsMsg); ok {
+			for _, event := range transcript.Events {
+				if event.Kind == TranscriptEventNarrative && event.Scope == ACPProjectionParticipant {
+					text.WriteString(event.Text)
+				}
+			}
+		}
+	}
+	if got := text.String(); got != "The sandbox" {
+		t.Fatalf("streamed text = %q, want whitespace-only frame preserved", got)
 	}
 }
 
@@ -857,8 +1018,8 @@ func TestDynamicAgentSlashPrefersStructuredSubagentEvents(t *testing.T) {
 	for {
 		select {
 		case msg := <-msgs:
-			if assistant, ok := msg.(AssistantStreamMsg); ok && strings.Contains(assistant.Text, "working") {
-				t.Fatalf("structured frame emitted plain assistant stream: %#v", assistant)
+			if transcript, ok := msg.(TranscriptEventsMsg); ok && transcriptEventsContainText(transcript.Events, "working") {
+				t.Fatalf("structured frame emitted fallback transcript text: %#v", transcript)
 			}
 			envMsg, ok := msg.(appgateway.EventEnvelope)
 			if !ok {
@@ -867,6 +1028,9 @@ func TestDynamicAgentSlashPrefersStructuredSubagentEvents(t *testing.T) {
 			if envMsg.Event.ToolCall == nil || envMsg.Event.ToolCall.ToolName != "BASH" {
 				t.Fatalf("event envelope = %#v, want BASH tool call", envMsg)
 			}
+			if envMsg.Event.Origin == nil || envMsg.Event.Origin.Scope != appgateway.EventScopeParticipant {
+				t.Fatalf("event origin = %#v, want dynamic side ACP participant scope", envMsg.Event.Origin)
+			}
 			if driver.subagentStreamSubscribeCalls == 0 {
 				t.Fatal("SubscribeSubagentStream was not called")
 			}
@@ -874,6 +1038,46 @@ func TestDynamicAgentSlashPrefersStructuredSubagentEvents(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("timed out waiting for structured subagent event; stream subscribe calls=%d", driver.subagentStreamSubscribeCalls)
 		}
+	}
+}
+
+func TestDynamicSubagentStructuredEventUsesMentionAndPromptTurnScope(t *testing.T) {
+	env := appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin: &appgateway.EventOrigin{
+				Scope:   appgateway.EventScopeSubagent,
+				ScopeID: "codex-001",
+				Actor:   "codex-001",
+			},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "call-1",
+				ToolName: "Searching the Web",
+				Actor:    "codex-001",
+				RawInput: map[string]any{"query": "weather: Shanghai"},
+				Status:   appgateway.ToolStatusRunning,
+			},
+		},
+	}
+	normalized := normalizeDynamicSubagentGatewayEvent(env, tuiadapterruntime.SubagentSnapshot{
+		TaskID:  "task-1",
+		TurnID:  "task-1:2",
+		Mention: "@kate",
+		Agent:   "codex",
+	}, tuiadapterruntime.SubagentStreamFrame{
+		TaskID: "task-1",
+		TurnID: "task-1:2",
+	})
+	events := ProjectGatewayEventToTranscriptEvents(normalized.Event)
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one transcript event", events)
+	}
+	if events[0].Scope != ACPProjectionParticipant || events[0].ScopeID != "task-1:2" {
+		t.Fatalf("event scope = %s/%q, want participant task-1:2", events[0].Scope, events[0].ScopeID)
+	}
+	if events[0].Actor != "@kate" {
+		t.Fatalf("event actor = %q, want @kate", events[0].Actor)
 	}
 }
 
@@ -918,8 +1122,8 @@ func TestDynamicAgentSlashFallsBackWhenStructuredEventIsNotRenderable(t *testing
 			if _, ok := msg.(appgateway.EventEnvelope); ok {
 				t.Fatalf("non-renderable structured event should not be emitted: %#v", msg)
 			}
-			assistant, ok := msg.(AssistantStreamMsg)
-			if ok && assistant.Actor == "@mike" && strings.Contains(assistant.Text, "fallback side output") {
+			transcript, ok := msg.(TranscriptEventsMsg)
+			if ok && transcriptEventsContainText(transcript.Events, "fallback side output") {
 				return
 			}
 		case <-deadline:
@@ -1070,6 +1274,15 @@ func TestSlashCompactRejectsArguments(t *testing.T) {
 	if !ok || !strings.Contains(log.Chunk, "usage: /compact") {
 		t.Fatalf("slashCompact() msg = %#v, want usage", msgs[0])
 	}
+}
+
+func transcriptEventsContainText(events []TranscriptEvent, text string) bool {
+	for _, event := range events {
+		if event.Kind == TranscriptEventNarrative && strings.Contains(event.Text, text) {
+			return true
+		}
+	}
+	return false
 }
 
 type bridgeTestDriver struct {

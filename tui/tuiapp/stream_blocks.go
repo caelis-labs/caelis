@@ -11,20 +11,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-func (m *Model) handleRawDelta(msg RawDeltaMsg) (tea.Model, tea.Cmd) {
-	switch msg.Target {
-	case RawDeltaTargetBTW:
-		return m.enqueueBTWDelta(msg.Text, msg.Final)
-	case RawDeltaTargetSubagent:
-		return m.enqueueSubagentDelta(msg.ScopeID, msg.Stream, msg.Text, msg.Final)
-	default:
-		if strings.TrimSpace(msg.ScopeID) != "" && strings.TrimSpace(msg.Actor) != "" {
-			return m.handleParticipantTurnStream(msg.ScopeID, msg.Stream, msg.Actor, msg.Text, msg.Final)
-		}
-		return m.enqueueMainDelta(msg.Stream, msg.Actor, msg.Text, msg.Final)
-	}
-}
-
 func (m *Model) queueLogChunk(chunk string) bool {
 	if m == nil || chunk == "" {
 		return false
@@ -691,6 +677,9 @@ func (m *Model) currentMainStreamRaw(state *streamSmoothingState) string {
 		if !ok || block == nil {
 			return ""
 		}
+		if block.Streaming && block.activeBuffer != nil && !block.activeBuffer.Empty() {
+			return block.activeBuffer.Text()
+		}
 		return block.Raw
 	default:
 		if m.activeAssistantID == "" {
@@ -699,6 +688,9 @@ func (m *Model) currentMainStreamRaw(state *streamSmoothingState) string {
 		block, ok := m.doc.Find(m.activeAssistantID).(*AssistantBlock)
 		if !ok || block == nil {
 			return ""
+		}
+		if block.Streaming && block.activeBuffer != nil && !block.activeBuffer.Empty() {
+			return block.activeBuffer.Text()
 		}
 		return block.Raw
 	}
@@ -1198,10 +1190,12 @@ func (m *Model) handleParticipantTurnStream(sessionID, kind, actor, text string,
 	if block == nil {
 		return m, nil
 	}
+	m.activeParticipantTurnSessionID = strings.TrimSpace(block.SessionID)
 	if !block.EndedAt.IsZero() {
 		block.EndedAt = time.Time{}
 	}
-	switch normalizeStreamKind(kind) {
+	streamKind := normalizeStreamKind(kind)
+	switch streamKind {
 	case "reasoning":
 		if final {
 			block.ReplaceFinalStreamChunk(SEReasoning, text, occurredAt...)
@@ -1218,7 +1212,10 @@ func (m *Model) handleParticipantTurnStream(sessionID, kind, actor, text string,
 			block.AppendStreamChunk(SEAssistant, text, occurredAt...)
 		}
 	}
-	if final && strings.EqualFold(strings.TrimSpace(block.Status), "waiting_approval") {
+	if final && streamKind != "reasoning" {
+		block.SetStatus("completed", "", "", narrativeEventTime(occurredAt...))
+		m.activeParticipantTurnSessionID = ""
+	} else if final && strings.EqualFold(strings.TrimSpace(block.Status), "waiting_approval") {
 		block.Status = "running"
 	} else if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" {
 		block.Status = "running"

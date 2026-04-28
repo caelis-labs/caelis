@@ -37,10 +37,6 @@ func (m *Model) shouldEnqueueRenderEvent(msg tea.Msg, policy renderEventPolicy) 
 		return false
 	}
 	switch typed := msg.(type) {
-	case AssistantStreamMsg:
-		return !typed.Final && typed.Text != ""
-	case ReasoningStreamMsg:
-		return !typed.Final && typed.Text != ""
 	case LogChunkMsg:
 		return typed.Chunk != ""
 	case appgateway.EventEnvelope:
@@ -98,22 +94,6 @@ func mergePendingRenderEvent(dst *pendingRenderEvent, src pendingRenderEvent) bo
 		return false
 	}
 	switch left := dst.msg.(type) {
-	case AssistantStreamMsg:
-		right, ok := src.msg.(AssistantStreamMsg)
-		if !ok || left.Final || right.Final || left.Kind != right.Kind || left.Actor != right.Actor {
-			return false
-		}
-		left.Text += right.Text
-		dst.msg = left
-		return true
-	case ReasoningStreamMsg:
-		right, ok := src.msg.(ReasoningStreamMsg)
-		if !ok || left.Final || right.Final || left.Actor != right.Actor {
-			return false
-		}
-		left.Text += right.Text
-		dst.msg = left
-		return true
 	case LogChunkMsg:
 		right, ok := src.msg.(LogChunkMsg)
 		if !ok {
@@ -160,10 +140,6 @@ func (m *Model) shouldFlushPendingRenderEventsBefore(msg tea.Msg, policy renderE
 	switch typed := msg.(type) {
 	case frameTickMsg:
 		return typed.kind != frameTickRenderDrain
-	case AssistantStreamMsg:
-		return typed.Final
-	case ReasoningStreamMsg:
-		return typed.Final
 	case appgateway.EventEnvelope:
 		return !gatewayEnvelopeShouldEnqueueForRenderDrain(typed)
 	case LogChunkMsg:
@@ -188,18 +164,6 @@ func (m *Model) drainPendingRenderEvents(time.Time) tea.Cmd {
 	var cmds []tea.Cmd
 	for _, item := range items {
 		switch typed := item.msg.(type) {
-		case AssistantStreamMsg:
-			model, cmd := m.handleStreamBlock(typed.Kind, typed.Actor, typed.Text, false)
-			if next, ok := model.(*Model); ok {
-				m = next
-			}
-			cmds = append(cmds, cmd)
-		case ReasoningStreamMsg:
-			model, cmd := m.handleStreamBlock("reasoning", typed.Actor, typed.Text, false)
-			if next, ok := model.(*Model); ok {
-				m = next
-			}
-			cmds = append(cmds, cmd)
 		case LogChunkMsg:
 			model, cmd := m.handleLogChunk(typed.Chunk)
 			if next, ok := model.(*Model); ok {

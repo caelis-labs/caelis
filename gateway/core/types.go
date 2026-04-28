@@ -331,6 +331,8 @@ const (
 type ToolCallPayload struct {
 	CallID         string         `json:"call_id,omitempty"`
 	ToolName       string         `json:"tool_name,omitempty"`
+	ToolKind       string         `json:"tool_kind,omitempty"`
+	ToolTitle      string         `json:"tool_title,omitempty"`
 	ArgsText       string         `json:"args_text,omitempty"`
 	CommandPreview string         `json:"command_preview,omitempty"`
 	RawInput       map[string]any `json:"raw_input,omitempty"`
@@ -343,6 +345,8 @@ type ToolCallPayload struct {
 type ToolResultPayload struct {
 	CallID         string         `json:"call_id,omitempty"`
 	ToolName       string         `json:"tool_name,omitempty"`
+	ToolKind       string         `json:"tool_kind,omitempty"`
+	ToolTitle      string         `json:"tool_title,omitempty"`
 	OutputText     string         `json:"output_text,omitempty"`
 	CommandPreview string         `json:"command_preview,omitempty"`
 	RawInput       map[string]any `json:"raw_input,omitempty"`
@@ -427,6 +431,7 @@ type LifecyclePayload struct {
 type EventOrigin struct {
 	Scope                EventScope `json:"scope,omitempty"`
 	ScopeID              string     `json:"scope_id,omitempty"`
+	Source               string     `json:"source,omitempty"`
 	Actor                string     `json:"actor,omitempty"`
 	ParticipantID        string     `json:"participant_id,omitempty"`
 	ParticipantKind      string     `json:"participant_kind,omitempty"`

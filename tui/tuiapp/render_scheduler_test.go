@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
 func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
@@ -12,9 +15,9 @@ func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
 	m.viewport.SetHeight(20)
 
 	for range 100 {
-		updated, _, handled := m.dispatchRenderEvent(AssistantStreamMsg{Kind: "answer", Actor: "assistant", Text: "x"})
+		updated, _, handled := m.dispatchRenderEvent(schedulerAssistantFrame("x"))
 		if !handled {
-			t.Fatal("AssistantStreamMsg was not handled")
+			t.Fatal("assistant gateway stream frame was not handled")
 		}
 		m = updated.(*Model)
 	}
@@ -29,6 +32,25 @@ func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
 	}
 	if got := m.diag.ViewportQueuedSyncs; got > 1 {
 		t.Fatalf("queued viewport syncs = %d, want <= 1", got)
+	}
+}
+
+func schedulerAssistantFrame(text string) appgateway.EventEnvelope {
+	return appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindAssistantMessage,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+			SessionRef: sdksession.SessionRef{SessionID: "session-1"},
+			Narrative: &appgateway.NarrativePayload{
+				Role:       appgateway.NarrativeRoleAssistant,
+				Text:       text,
+				Visibility: string(sdksession.VisibilityUIOnly),
+				UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+				Scope:      appgateway.EventScopeMain,
+			},
+		},
 	}
 }
 

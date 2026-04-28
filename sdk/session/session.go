@@ -554,6 +554,19 @@ func IsInvocationVisibleEvent(event *Event) bool {
 	return true
 }
 
+// IsMainInvocationVisibleEvent reports whether one event belongs to the main
+// controller context. Participant and subagent transcripts remain durable
+// session history, but they must not be replayed into the main agent prompt.
+func IsMainInvocationVisibleEvent(event *Event) bool {
+	if !IsInvocationVisibleEvent(event) {
+		return false
+	}
+	if event.Scope == nil {
+		return true
+	}
+	return strings.TrimSpace(event.Scope.Participant.ID) == ""
+}
+
 // EventTypeOf infers one event type from its content when not explicitly set.
 func EventTypeOf(event *Event) EventType {
 	if event == nil {
@@ -633,7 +646,7 @@ func CloneEvent(in *Event) *Event {
 		return nil
 	}
 	out := *in
-	out.Text = strings.TrimSpace(in.Text)
+	out.Text = in.Text
 	out.Meta = maps.Clone(in.Meta)
 	out.Actor = CloneActorRef(in.Actor)
 	if in.Scope != nil {

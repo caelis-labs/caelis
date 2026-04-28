@@ -346,6 +346,7 @@ func (r *Runtime) prepareInvocationContext(
 	if err != nil {
 		return nil, nil, err
 	}
+	events = mainInvocationEvents(events)
 	state, err := r.sessions.SnapshotState(ctx, ref)
 	if err != nil {
 		return nil, nil, err
@@ -1109,7 +1110,7 @@ func eventTextForCompaction(event *sdksession.Event) string {
 }
 
 func pendingEventsForCompaction(event *sdksession.Event) []*sdksession.Event {
-	if event == nil || !sdksession.IsInvocationVisibleEvent(event) {
+	if event == nil || !sdksession.IsMainInvocationVisibleEvent(event) {
 		return nil
 	}
 	return []*sdksession.Event{sdksession.CloneEvent(event)}
@@ -1122,7 +1123,21 @@ func promptEventsWithPending(promptEvents []*sdksession.Event, pendingEvents []*
 	out := make([]*sdksession.Event, 0, len(promptEvents)+len(pendingEvents))
 	out = append(out, promptEvents...)
 	for _, event := range pendingEvents {
-		if event == nil || !sdksession.IsInvocationVisibleEvent(event) {
+		if event == nil || !sdksession.IsMainInvocationVisibleEvent(event) {
+			continue
+		}
+		out = append(out, event)
+	}
+	return out
+}
+
+func mainInvocationEvents(events []*sdksession.Event) []*sdksession.Event {
+	if len(events) == 0 {
+		return events
+	}
+	out := make([]*sdksession.Event, 0, len(events))
+	for _, event := range events {
+		if !sdksession.IsMainInvocationVisibleEvent(event) {
 			continue
 		}
 		out = append(out, event)

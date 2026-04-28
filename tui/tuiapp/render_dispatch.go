@@ -40,21 +40,8 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicyForTranscriptEvents(typed), true
 	case LogChunkMsg:
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
-	case AssistantStreamMsg, RawDeltaMsg, ReasoningStreamMsg:
-		return renderEventPolicy{lane: renderLaneMainStream, flushLogChunks: true, dismissHints: true}, true
 	case ParticipantStatusMsg:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
-	case ACPProjectionMsg:
-		switch typed.Scope {
-		case ACPProjectionMain:
-			return renderEventPolicy{lane: renderLaneMainStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
-		case ACPProjectionParticipant:
-			return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
-		case ACPProjectionSubagent:
-			return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
-		default:
-			return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true}, true
-		}
 	case SubagentStartMsg:
 		return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
 	case SubagentStatusMsg, SubagentDoneMsg:
@@ -228,23 +215,8 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		}
 		return m, tea.Batch(policyCmd, m.ensureDeferredBatchTick()), true
 
-	case AssistantStreamMsg:
-		model, cmd := m.enqueueMainDelta(typed.Kind, typed.Actor, typed.Text, typed.Final)
-		return model, tea.Batch(policyCmd, cmd), true
-
-	case RawDeltaMsg:
-		model, cmd := m.handleRawDelta(typed)
-		return model, tea.Batch(policyCmd, cmd), true
-
-	case ReasoningStreamMsg:
-		model, cmd := m.enqueueMainDelta("reasoning", typed.Actor, typed.Text, typed.Final)
-		return model, tea.Batch(policyCmd, cmd), true
-
 	case ParticipantStatusMsg:
 		model, cmd := m.handleParticipantStatusMsg(typed)
-		return model, tea.Batch(policyCmd, cmd), true
-	case ACPProjectionMsg:
-		model, cmd := m.handleACPProjection(typed)
 		return model, tea.Batch(policyCmd, cmd), true
 
 	case SubagentStartMsg:
@@ -355,12 +327,8 @@ func (m *Model) invalidateUserDisplayDedup() {
 
 func shouldInvalidateUserDisplayDedup(msg tea.Msg) bool {
 	switch msg.(type) {
-	case AssistantStreamMsg,
-		RawDeltaMsg,
-		ReasoningStreamMsg,
-		TranscriptEventsMsg,
+	case TranscriptEventsMsg,
 		ParticipantStatusMsg,
-		ACPProjectionMsg,
 		SubagentStatusMsg,
 		SubagentDoneMsg:
 		return true
@@ -517,9 +485,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		m.finalizeReasoningBlock()
 	}
 	m.finalizeActiveMainACPTurn(msg.Interrupted, msg.Err)
-	if msg.SuppressTurnDivider {
-		m.finalizeActiveParticipantTurn(msg.Interrupted, msg.Err)
-	}
+	m.finalizeActiveParticipantTurn(msg.Interrupted, msg.Err)
 	if !m.runStartedAt.IsZero() {
 		m.lastRunDuration = time.Since(m.runStartedAt)
 		m.hasLastRunDuration = true

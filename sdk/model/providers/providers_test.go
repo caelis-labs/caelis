@@ -1807,6 +1807,39 @@ func TestDeepSeekThinkingPayload(t *testing.T) {
 	}
 }
 
+func TestDeepSeekThinkingPayload_IncludesEmptyReasoningForPlainAssistantHistory(t *testing.T) {
+	llm := newDeepSeek(Config{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-pro",
+		BaseURL:  "https://api.deepseek.com/v1",
+		Timeout:  time.Second,
+	}, "token").(*openAICompatLLM)
+	req := &model.Request{
+		Messages: []model.Message{
+			model.NewTextMessage(model.RoleAssistant, "plain assistant from controller handoff"),
+			model.NewTextMessage(model.RoleUser, "continue"),
+		},
+		Reasoning: model.ReasoningConfig{Effort: "high"},
+	}
+	payload := openAICompatRequest{
+		Model:    "deepseek-v4-pro",
+		Messages: llm.fromKernelMessages(nil, req.Messages),
+	}
+	llm.options.ApplyReasoning(&payload, req.Reasoning)
+	if len(payload.Messages) != 2 {
+		t.Fatalf("len(Messages) = %d, want 2", len(payload.Messages))
+	}
+	if payload.Messages[0].Role != string(model.RoleAssistant) || payload.Messages[0].ReasoningContent == nil {
+		t.Fatalf("assistant message = %#v, want explicit empty reasoning_content", payload.Messages[0])
+	}
+	if got := *payload.Messages[0].ReasoningContent; got != "" {
+		t.Fatalf("assistant reasoning_content = %q, want empty string", got)
+	}
+	if payload.Messages[1].ReasoningContent != nil {
+		t.Fatalf("user message reasoning_content = %#v, want nil", payload.Messages[1].ReasoningContent)
+	}
+}
+
 func TestDeepSeekThinkingPayload_SmallMaxTokensBumped(t *testing.T) {
 	llm := newDeepSeek(Config{
 		Provider:     "deepseek",
@@ -1895,7 +1928,10 @@ func TestDeepSeekThinkingPayload_DisabledCapsToChatRange(t *testing.T) {
 		MaxOutputTok: 400000,
 	}, "token").(*openAICompatLLM)
 	req := &model.Request{
-		Messages:  []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
+		Messages: []model.Message{
+			model.NewTextMessage(model.RoleAssistant, "previous assistant"),
+			model.NewTextMessage(model.RoleUser, "hi"),
+		},
 		Reasoning: model.ReasoningConfig{Effort: "none"},
 	}
 	payload := openAICompatRequest{
@@ -1909,6 +1945,11 @@ func TestDeepSeekThinkingPayload_DisabledCapsToChatRange(t *testing.T) {
 	}
 	if payload.MaxTokens != deepSeekMaxTokens {
 		t.Fatalf("expected MaxTokens capped to %d when thinking is disabled, got %d", deepSeekMaxTokens, payload.MaxTokens)
+	}
+	for i, msg := range payload.Messages {
+		if msg.ReasoningContent != nil {
+			t.Fatalf("message %d reasoning_content = %#v, want nil when thinking disabled", i, msg.ReasoningContent)
+		}
 	}
 }
 

@@ -594,8 +594,8 @@ func hasStreamingParagraphBoundary(raw string) bool {
 }
 
 func splitStableStreamingMarkdown(raw string) (stableRaw string, tailRaw string) {
-	raw = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n"))
-	if raw == "" {
+	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
+	if strings.TrimSpace(raw) == "" {
 		return "", ""
 	}
 	if utf8.RuneCountInString(raw) < streamingStableTailMinRunes*2 {

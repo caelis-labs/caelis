@@ -47,7 +47,29 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			return truncateTailDisplay(command, 120)
 		}
 	}
+	if summary := genericToolArgs(raw); summary != "" {
+		return summary
+	}
 	return firstTrimmed(fallback...)
+}
+
+func genericToolArgs(raw map[string]any) string {
+	query := firstTrimmed(asString(raw["query"]), asString(raw["q"]))
+	url := firstTrimmed(asString(raw["url"]), asString(raw["href"]))
+	if action, ok := raw["action"].(map[string]any); ok {
+		query = firstTrimmed(query, asString(action["query"]))
+		url = firstTrimmed(url, asString(action["url"]))
+	}
+	switch {
+	case query != "":
+		return strconv.Quote(truncateTailDisplay(query, 96))
+	case url != "":
+		return truncateTailDisplay(url, 120)
+	case toolPath(raw) != "":
+		return filepath.Base(toolPath(raw))
+	default:
+		return ""
+	}
 }
 
 func toolDisplayOutput(name string, input map[string]any, output map[string]any, fallback string, status string, isErr bool) string {
@@ -88,6 +110,9 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 			return terminalEmptySummary(name, output, isErr)
 		}
 	}
+	if summary := genericToolOutput(output, isErr); summary != "" {
+		return summary
+	}
 	if isErr {
 		if text := strings.TrimSpace(fallback); text != "" {
 			return text
@@ -125,6 +150,25 @@ func taskControlDisplay(raw map[string]any) string {
 	default:
 		return action
 	}
+}
+
+func genericToolOutput(output map[string]any, isErr bool) string {
+	if len(output) == 0 {
+		return ""
+	}
+	if isErr {
+		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
+			return stderr
+		}
+	}
+	return firstTrimmed(
+		asString(output["text"]),
+		asString(output["stdout"]),
+		asString(output["result"]),
+		asString(output["output"]),
+		asString(output["output_preview"]),
+		asString(output["stderr"]),
+	)
 }
 
 func formatTaskWriteInput(input string) string {

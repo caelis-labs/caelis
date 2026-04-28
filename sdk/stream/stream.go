@@ -20,6 +20,7 @@ type Ref struct {
 type Cursor struct {
 	Stdout int64 `json:"stdout,omitempty"`
 	Stderr int64 `json:"stderr,omitempty"`
+	Events int64 `json:"events,omitempty"`
 }
 
 // Frame is one output fragment delivered to one UI or adapter.
@@ -99,6 +100,9 @@ func CloneCursor(in Cursor) Cursor {
 	}
 	if in.Stderr < 0 {
 		in.Stderr = 0
+	}
+	if in.Events < 0 {
+		in.Events = 0
 	}
 	return in
 }

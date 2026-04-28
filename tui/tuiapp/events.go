@@ -94,23 +94,6 @@ type MentionCandidatesMsg struct {
 
 type TickStatusMsg struct{}
 
-type RawDeltaTarget string
-
-const (
-	RawDeltaTargetAssistant RawDeltaTarget = "assistant"
-	RawDeltaTargetBTW       RawDeltaTarget = "btw"
-	RawDeltaTargetSubagent  RawDeltaTarget = "subagent"
-)
-
-type RawDeltaMsg struct {
-	Target  RawDeltaTarget
-	ScopeID string
-	Stream  string
-	Actor   string
-	Text    string
-	Final   bool
-}
-
 type AttachmentCountMsg struct {
 	Count int
 }
@@ -137,38 +120,8 @@ const (
 	ACPProjectionSubagent    ACPProjectionScope = "subagent"
 )
 
-type ACPProjectionMsg struct {
-	Scope         ACPProjectionScope
-	ScopeID       string
-	Actor         string
-	OccurredAt    time.Time
-	Stream        string
-	DeltaText     string
-	FullText      string
-	ToolCallID    string
-	ToolName      string
-	ToolArgs      map[string]any
-	ToolResult    map[string]any
-	ToolStatus    string
-	PlanEntries   []PlanEntry
-	HasPlanUpdate bool
-}
-
 type TranscriptEventsMsg struct {
 	Events []TranscriptEvent
-}
-
-type AssistantStreamMsg struct {
-	Kind  string
-	Actor string
-	Text  string
-	Final bool
-}
-
-type ReasoningStreamMsg struct {
-	Actor string
-	Text  string
-	Final bool
 }
 
 type PlanEntry struct {

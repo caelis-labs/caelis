@@ -86,6 +86,8 @@ type subagentTask struct {
 	stderr       string
 	stdoutCursor int64
 	stderrCursor int64
+	turnSeq      int64
+	streamFrames []sdkstream.Frame
 }
 
 func newTaskRuntime(runtime *Runtime, store sdktask.Store) *taskRuntime {
@@ -542,6 +544,7 @@ func (tm *taskRuntime) StartSubagent(
 		createdAt:  now,
 		state:      taskStateFromDelegation(result.State),
 		running:    result.State == sdkdelegation.StateRunning,
+		turnSeq:    1,
 		metadata: map[string]any{
 			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"),
 		},
@@ -877,10 +880,17 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	previousStderr := task.stderr
 	previousStdoutCursor := task.stdoutCursor
 	previousStderrCursor := task.stderrCursor
+	previousStreamFrames := append([]sdkstream.Frame(nil), task.streamFrames...)
+	previousTurnSeq := task.turnSeq
+	task.turnSeq++
+	if task.turnSeq <= 0 {
+		task.turnSeq = 1
+	}
 	task.stdout = ""
 	task.stderr = ""
 	task.stdoutCursor = 0
 	task.stderrCursor = 0
+	task.streamFrames = nil
 	task.mu.Unlock()
 	result, err := task.runner.Continue(ctx, sdkdelegation.CloneAnchor(task.anchor), sdkdelegation.ContinueRequest{
 		Agent:       task.agent,
@@ -894,6 +904,8 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 			task.stderr = previousStderr
 			task.stdoutCursor = previousStdoutCursor
 			task.stderrCursor = previousStderrCursor
+			task.streamFrames = previousStreamFrames
+			task.turnSeq = previousTurnSeq
 		}
 		task.mu.Unlock()
 		return sdktask.Snapshot{}, err
@@ -1317,8 +1329,15 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *sdktask.Entry) *subagentTask
 		createdAt: entry.CreatedAt,
 		state:     entry.State,
 		running:   entry.Running,
+		turnSeq:   taskTurnSeqFromSpec(entry.Spec),
 		result:    maps.Clone(entry.Result),
 		metadata:  maps.Clone(entry.Metadata),
+	}
+	if task.turnSeq <= 0 {
+		task.turnSeq = taskTurnSeqFromSpec(entry.Metadata)
+	}
+	if task.turnSeq <= 0 {
+		task.turnSeq = 1
 	}
 	if task.runner == nil && task.running {
 		if task.result == nil {
@@ -1584,11 +1603,46 @@ func (t *subagentTask) seedStreamFromResult(result sdkdelegation.Result) {
 	if strings.TrimSpace(t.stdout) != "" || strings.TrimSpace(t.stderr) != "" {
 		return
 	}
-	text := strings.TrimSpace(firstNonEmpty(result.OutputPreview, result.Result))
+	text := strings.TrimSpace(result.Result)
+	if text != "" && subagentFramesContainAssistantText(t.streamFrames) {
+		return
+	}
+	if text == "" {
+		if len(t.streamFrames) > 0 {
+			return
+		}
+		text = strings.TrimSpace(result.OutputPreview)
+	}
 	if text == "" {
 		return
 	}
 	t.appendStreamLocked("stdout", text)
+}
+
+func subagentFramesContainAssistantText(frames []sdkstream.Frame) bool {
+	for _, frame := range frames {
+		if strings.TrimSpace(frame.Text) != "" {
+			return true
+		}
+		event := frame.Event
+		if event == nil || sdksession.EventTypeOf(event) != sdksession.EventTypeAssistant {
+			continue
+		}
+		if event.Message != nil && strings.TrimSpace(event.Message.TextContent()) != "" {
+			return true
+		}
+		updateType := ""
+		if event.Protocol != nil {
+			updateType = strings.TrimSpace(event.Protocol.UpdateType)
+		}
+		if updateType == string(sdksession.ProtocolUpdateTypeAgentThought) {
+			continue
+		}
+		if strings.TrimSpace(event.Text) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *subagentTask) applyStreamFrames(frames []sdkstream.Frame) {
@@ -1598,8 +1652,27 @@ func (t *subagentTask) applyStreamFrames(frames []sdkstream.Frame) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	for _, frame := range frames {
+		if frame.Event != nil || frame.Text != "" {
+			cloned := sdkstream.CloneFrame(frame)
+			cloned.Ref.TaskID = firstNonEmpty(strings.TrimSpace(cloned.Ref.TaskID), strings.TrimSpace(t.ref.TaskID))
+			cloned.Ref.SessionID = firstNonEmpty(strings.TrimSpace(cloned.Ref.SessionID), strings.TrimSpace(t.sessionRef.SessionID))
+			cloned.Ref.TerminalID = firstNonEmpty(strings.TrimSpace(cloned.Ref.TerminalID), subagentTurnID(t.ref.TaskID, t.turnSeq))
+			if cloned.Event != nil {
+				if cloned.Event.Scope == nil {
+					cloned.Event.Scope = &sdksession.EventScope{}
+				}
+				cloned.Event.Scope.TurnID = firstNonEmpty(strings.TrimSpace(cloned.Event.Scope.TurnID), subagentTurnID(t.ref.TaskID, t.turnSeq))
+			}
+			t.streamFrames = append(t.streamFrames, cloned)
+		}
 		text := frame.Text
-		if strings.TrimSpace(text) == "" {
+		if text == "" {
+			if frame.State != "" {
+				t.state = taskStateFromDelegation(sdkdelegation.State(frame.State))
+				t.running = frame.Running
+			} else if frame.Running {
+				t.running = true
+			}
 			continue
 		}
 		t.appendStreamLocked(frame.Stream, text)
@@ -1615,7 +1688,7 @@ func (t *subagentTask) applyStreamFrames(frames []sdkstream.Frame) {
 }
 
 func (t *subagentTask) appendStreamLocked(stream string, text string) {
-	if t == nil || strings.TrimSpace(text) == "" {
+	if t == nil || text == "" {
 		return
 	}
 	switch strings.ToLower(strings.TrimSpace(stream)) {
@@ -1632,6 +1705,19 @@ func (t *subagentTask) snapshot() sdktask.Snapshot {
 	if t == nil {
 		return sdktask.Snapshot{}
 	}
+	result := maps.Clone(t.result)
+	metadata := maps.Clone(t.metadata)
+	if result == nil {
+		result = map[string]any{}
+	}
+	if metadata == nil {
+		metadata = map[string]any{}
+	}
+	turnID := subagentTurnID(t.ref.TaskID, t.turnSeq)
+	result["turn_id"] = turnID
+	result["turn_seq"] = t.turnSeq
+	metadata["turn_id"] = turnID
+	metadata["turn_seq"] = t.turnSeq
 	return sdktask.CloneSnapshot(sdktask.Snapshot{
 		Ref:            t.ref,
 		Kind:           sdktask.KindSubagent,
@@ -1644,8 +1730,9 @@ func (t *subagentTask) snapshot() sdktask.Snapshot {
 		UpdatedAt:      time.Now(),
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
-		Result:         maps.Clone(t.result),
-		Metadata:       maps.Clone(t.metadata),
+		EventCursor:    int64(len(t.streamFrames)),
+		Result:         result,
+		Metadata:       metadata,
 	})
 }
 
@@ -1672,10 +1759,34 @@ func (t *subagentTask) entrySnapshot(now time.Time) *sdktask.Entry {
 			"agent_id":    t.anchor.AgentID,
 			"handle":      t.handle,
 			"terminal_id": t.ref.TerminalID,
+			"turn_seq":    t.turnSeq,
+			"turn_id":     subagentTurnID(t.ref.TaskID, t.turnSeq),
 		},
 		Result:   maps.Clone(t.result),
 		Metadata: maps.Clone(t.metadata),
 	}
+}
+
+func subagentTurnID(taskID string, seq int64) string {
+	taskID = strings.TrimSpace(taskID)
+	if seq <= 0 {
+		seq = 1
+	}
+	if taskID == "" {
+		return fmt.Sprintf("turn-%d", seq)
+	}
+	return fmt.Sprintf("%s:%d", taskID, seq)
+}
+
+func taskTurnSeqFromSpec(values map[string]any) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	value, ok := intArg(values, "turn_seq")
+	if !ok {
+		return 0
+	}
+	return int64(value)
 }
 
 func taskStateFromDelegation(state sdkdelegation.State) sdktask.State {
@@ -1879,6 +1990,8 @@ func parseIntArgValue(raw any) (int, bool) {
 		return int(typed), true
 	case int:
 		return typed, true
+	case int64:
+		return int(typed), true
 	default:
 		return 0, false
 	}

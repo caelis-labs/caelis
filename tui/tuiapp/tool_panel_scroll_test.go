@@ -69,11 +69,53 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 	rows := block.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "• Ran run long task") || !strings.Contains(joined, "line 12") {
+	if !strings.Contains(joined, "• Ran run long task") || !strings.Contains(joined, "line 01") || !strings.Contains(joined, "line 12") {
 		t.Fatalf("rendered rows = %q, want completed BASH output still expanded", joined)
 	}
-	if got := countRowsContaining(plain, "line "); got != acpTerminalPanelMaxLines {
-		t.Fatalf("visible terminal rows = %d, want %d\n%s", got, acpTerminalPanelMaxLines, joined)
+	for _, want := range []string{"line 01", "line 02", "... 8 lines hidden ...", "line 11", "line 12"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows missing %q\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "line 03") || strings.Contains(joined, "line 10") {
+		t.Fatalf("completed terminal output should keep first two and last two lines, got\n%s", joined)
+	}
+}
+
+func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+	block := NewParticipantTurnBlock("codex-001", "codex-001")
+	output := strings.Join([]string{
+		"result 01",
+		"result 02",
+		"result 03",
+		"result 04",
+		"result 05",
+		"result 06",
+	}, "\n")
+
+	block.UpdateToolWithMeta("ws-1", "Searching the Web", `"weather: Shanghai, China"`, output, true, false, ToolUpdateMeta{
+		ToolKind:        "fetch",
+		DisableGrouping: true,
+	})
+
+	rows := block.Render(ctx)
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, `• Searching the Web "weather: Shanghai, China"`) {
+		t.Fatalf("generic ACP tool should use standard header, got\n%s", joined)
+	}
+	if strings.Contains(joined, "▾ Searching the Web") || strings.Contains(joined, "{") {
+		t.Fatalf("generic ACP tool leaked old expandable/raw-json header, got\n%s", joined)
+	}
+	for _, want := range []string{"result 01", "result 02", "... 2 lines hidden ...", "result 05", "result 06"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("generic ACP tool output missing %q\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, "result 03") || strings.Contains(joined, "result 04") {
+		t.Fatalf("generic ACP tool final output should be summarized, got\n%s", joined)
 	}
 }
 
