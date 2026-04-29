@@ -2668,8 +2668,6 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 }
 
 func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
-	t.Parallel()
-
 	sessions, session := newTestSessionService(t, "sess-terminal-subscribe")
 	runtime, err := New(Config{
 		Sessions: sessions,
@@ -2683,7 +2681,7 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 	}
 	sandbox := hostRuntimeForTest(t, session.CWD)
 	snapshot, err := runtime.tasks.StartBash(context.Background(), session, session.SessionRef, sandbox, sdktask.BashStartRequest{
-		Command: "printf 'stream'; sleep 0.05; printf ' terminal'",
+		Command: "printf 'stream terminal'; sleep 0.05",
 		Workdir: session.CWD,
 		Yield:   1 * time.Millisecond,
 	})

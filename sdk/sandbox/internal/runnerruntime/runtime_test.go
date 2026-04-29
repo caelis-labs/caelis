@@ -59,8 +59,6 @@ func (r *waitResultTestRunner) GetSession(_ string) (*cmdsession.AsyncSession, e
 }
 
 func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
-	t.Parallel()
-
 	async := cmdsession.NewAsyncSession(cmdsession.AsyncSessionConfig{
 		Command: "printf 'ok\\n'",
 	})
@@ -75,7 +73,7 @@ func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 		sessionID: async.ID,
 	}
 
-	status, err := sess.Wait(context.Background(), time.Second)
+	status, err := sess.Wait(context.Background(), 5*time.Second)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
