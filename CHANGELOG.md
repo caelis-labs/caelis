@@ -18,6 +18,9 @@
 ### Documentation, Release Metadata, And Quality
 - Rewrote `README.md` around the current CLI, TUI, ACP agent, permission, session, and packaging surfaces instead of the older pre-refactor layout.
 - Bumped release metadata to `v0.1.0` in `VERSION`, refreshed npm manifests to `0.1.0`, and documented the version synchronization path.
+- Fixed the `golangci-lint` v2 config schema so CI can pass the action's `config verify` step.
+- Moved live/provider/acpx/ACP process E2E tests behind the `e2e` build tag and kept default CI on stable unit and light integration coverage.
+- Kept ordinary gateway/app tests on the host sandbox backend so platform-specific sandbox probing does not leak into the default test gate.
 - Validated the release branch with the repository quality gate and `git diff --check`.
 
 ## v0.0.39 - 2026-04-09

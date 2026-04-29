@@ -3,7 +3,7 @@ VERSION ?= $(if $(strip $(GIT_TAG)),$(strip $(GIT_TAG)),$(shell cat VERSION 2>/d
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 GOFILES := $(shell if command -v rg >/dev/null 2>&1; then rg --files -g '*.go'; else find . -type f -name '*.go' | sed 's|^\./||' | LC_ALL=C sort; fi)
-.PHONY: build build-cli finish fmt fmt-check install lint quality test tidy vet eval-light eval-nightly eval-real-matrix release-dry-run
+.PHONY: build build-cli finish fmt fmt-check install lint quality test test-e2e tidy vet eval-light eval-nightly eval-real-matrix release-dry-run
 
 tidy:
 	go mod tidy
@@ -36,6 +36,9 @@ finish: tidy fmt quality
 
 test:
 	go test ./...
+
+test-e2e:
+	go test -tags=e2e ./...
 
 eval-light:
 	go run ./eval/cmd -suite light

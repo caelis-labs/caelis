@@ -75,11 +75,10 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 }
 
 func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
-	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "sandbox-persist-test",
 		StoreDir:       root,
@@ -91,15 +90,15 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	status, err := stack.SetSandboxBackend(ctx, "auto")
-	if err != nil {
-		t.Fatalf("SetSandboxBackend(auto) error = %v", err)
+	if err := stack.saveSandboxConfig(); err != nil {
+		t.Fatalf("saveSandboxConfig() error = %v", err)
 	}
-	if status.RequestedBackend != "auto" {
-		t.Fatalf("requested backend = %q, want auto", status.RequestedBackend)
+	status := stack.SandboxStatus()
+	if status.RequestedBackend != "host" {
+		t.Fatalf("requested backend = %q, want host", status.RequestedBackend)
 	}
 
-	reloaded, err := NewLocalStack(Config{
+	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "sandbox-persist-test",
 		StoreDir:       root,
@@ -111,15 +110,15 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	if got := reloaded.SandboxStatus().RequestedBackend; got != "auto" {
-		t.Fatalf("SandboxStatus().RequestedBackend = %q, want auto", got)
+	if got := reloaded.SandboxStatus().RequestedBackend; got != "host" {
+		t.Fatalf("SandboxStatus().RequestedBackend = %q, want host", got)
 	}
 	doc, err := LoadAppConfig(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if got := doc.Sandbox.RequestedType; got != "auto" {
-		t.Fatalf("config sandbox requested_type = %q, want auto", got)
+	if got := doc.Sandbox.RequestedType; got != "host" {
+		t.Fatalf("config sandbox requested_type = %q, want host", got)
 	}
 }
 
@@ -159,7 +158,7 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 	ctx := context.Background()
 	workdir := t.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "delete-only-model-test",
 		StoreDir:       t.TempDir(),
@@ -236,7 +235,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "persist-test",
 		StoreDir:       root,
@@ -274,7 +273,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 		t.Fatalf("UseModel(minimax) error = %v", err)
 	}
 
-	reloaded, err := NewLocalStack(Config{
+	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "persist-test",
 		StoreDir:       root,
@@ -325,7 +324,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 }
 
 func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "empty-model-test",
 		StoreDir:       t.TempDir(),
@@ -345,7 +344,7 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	ctx := context.Background()
 	server := newGatewayAppCompactionOllamaServer(t)
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "auto-compact-test",
 		StoreDir:       t.TempDir(),
@@ -402,7 +401,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	ctx := context.Background()
 	server := newGatewayAppCompactionOllamaServer(t)
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "manual-compact-test",
 		StoreDir:       t.TempDir(),
@@ -459,7 +458,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 }
 
 func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "codefree-api-test",
 		StoreDir:       t.TempDir(),
@@ -499,7 +498,7 @@ func newLocalStateTestStack(t *testing.T) (*Stack, sdksession.Session) {
 	t.Helper()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "state-test",
 		StoreDir:       root,

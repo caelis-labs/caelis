@@ -1,0 +1,14 @@
+package gatewayapp
+
+import (
+	"strings"
+	"testing"
+)
+
+func newGatewayAppTestStack(t *testing.T, cfg Config) (*Stack, error) {
+	t.Helper()
+	if strings.TrimSpace(cfg.Sandbox.RequestedType) == "" {
+		cfg.Sandbox.RequestedType = "host"
+	}
+	return NewLocalStack(cfg)
+}

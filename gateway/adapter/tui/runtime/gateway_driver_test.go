@@ -40,6 +40,14 @@ func ptrRuntimeMessage(message sdkmodel.Message) *sdkmodel.Message {
 	return &message
 }
 
+func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
+	t.Helper()
+	if strings.TrimSpace(cfg.Sandbox.RequestedType) == "" {
+		cfg.Sandbox.RequestedType = "host"
+	}
+	return gatewayapp.NewLocalStack(cfg)
+}
+
 func TestSubagentStreamFrameProjectsStructuredSessionEvent(t *testing.T) {
 	t.Parallel()
 
@@ -85,7 +93,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "lazy-session-test",
 		StoreDir:       storeDir,
@@ -152,7 +160,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "resume-filter-test",
 		StoreDir:       t.TempDir(),
@@ -217,7 +225,7 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 	}
 	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
 
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "connect-test",
 		StoreDir:       t.TempDir(),
@@ -295,7 +303,7 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 
 func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "slash-test",
 		StoreDir:       t.TempDir(),
@@ -381,7 +389,7 @@ func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
 
 func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "model-reasoning-test",
 		StoreDir:       t.TempDir(),
@@ -443,7 +451,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "connect-defaults-test",
 		StoreDir:       root,
@@ -553,7 +561,7 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "connect-token-env-test",
 		StoreDir:       root,
@@ -601,7 +609,7 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 
 func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "codefree-no-reasoning-test",
 		StoreDir:       t.TempDir(),
@@ -650,7 +658,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	}
 	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
 
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "codefree-connect-test",
 		StoreDir:       t.TempDir(),
@@ -689,7 +697,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 
 func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "status-usage-test",
 		StoreDir:       t.TempDir(),
@@ -755,7 +763,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 
 func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "slash-test",
 		StoreDir:       t.TempDir(),
@@ -805,7 +813,7 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 
 func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "delete-only-model-test",
 		StoreDir:       t.TempDir(),
@@ -848,7 +856,7 @@ func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T
 
 func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "use-model-test",
 		StoreDir:       t.TempDir(),
@@ -890,7 +898,7 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	repo := repoRootForGatewayDriverTest(t)
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "agent-driver-test",
 		StoreDir:       root,
@@ -1028,7 +1036,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "status-startup-test",
 		StoreDir:       root,
@@ -1049,7 +1057,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	reloaded, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	reloaded, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "status-startup-test",
 		StoreDir:       root,
@@ -1076,7 +1084,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 
 func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "lazy-session-test",
 		StoreDir:       t.TempDir(),
@@ -1113,7 +1121,7 @@ func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 
 func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "binding-reset-test",
 		StoreDir:       t.TempDir(),
@@ -1157,7 +1165,7 @@ func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T
 
 func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "startup-resume-test",
 		StoreDir:       t.TempDir(),
@@ -1189,7 +1197,7 @@ func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 
 func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "lazy-session-mode-test",
 		StoreDir:       t.TempDir(),
@@ -1269,7 +1277,7 @@ func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
 
 func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "acp-model-fallback-test",
 		StoreDir:       t.TempDir(),
@@ -1327,7 +1335,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 
 func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "stale-session-alias-test",
 		StoreDir:       t.TempDir(),
@@ -1377,7 +1385,7 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 
 func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "prefix-test",
 		StoreDir:       t.TempDir(),
@@ -1434,7 +1442,7 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "multi-provider-test",
 		StoreDir:       root,
@@ -1542,7 +1550,7 @@ func TestGatewayDriverCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 		}
 	}
 
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "file-complete-test",
 		StoreDir:       t.TempDir(),
@@ -1601,7 +1609,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 		t.Fatalf("WriteFile(workspace SKILL.md) error = %v", err)
 	}
 
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "skill-complete-test",
 		StoreDir:       t.TempDir(),
@@ -1642,7 +1650,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 
 func TestGatewayDriverCompleteMentionReturnsDelegatedParticipants(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "mention-complete-test",
 		StoreDir:       t.TempDir(),
@@ -1708,7 +1716,7 @@ func TestGatewayDriverCompleteMentionReturnsDelegatedParticipants(t *testing.T) 
 func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "resume-complete-test",
 		StoreDir:       t.TempDir(),
@@ -1776,7 +1784,7 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 
 func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "delete-unknown-test",
 		StoreDir:       t.TempDir(),
@@ -1804,7 +1812,7 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 
 func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "connect-candidates-test",
 		StoreDir:       t.TempDir(),
@@ -1851,7 +1859,7 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 
 func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "missing-key-test",
 		StoreDir:       t.TempDir(),
@@ -1877,7 +1885,7 @@ func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.
 
 func TestGatewayDriverConnectRejectsInvalidBaseURL(t *testing.T) {
 	ctx := context.Background()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "invalid-baseurl-test",
 		StoreDir:       t.TempDir(),
@@ -1907,7 +1915,7 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "doctor-status-test",
 		StoreDir:       root,

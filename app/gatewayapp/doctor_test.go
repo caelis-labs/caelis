@@ -15,7 +15,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 
-	stack, err := NewLocalStack(Config{
+	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "doctor-test",
 		StoreDir:       root,
@@ -47,7 +47,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 		t.Fatalf("SetSessionMode() error = %v", err)
 	}
 
-	reloaded, err := NewLocalStack(Config{
+	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "doctor-test",
 		StoreDir:       root,

@@ -192,12 +192,16 @@ Caelis currently requires Go `1.25.1` as declared in `go.mod`.
 ```bash
 make quality
 make test
+make test-e2e
 make build
 ```
 
 - `make quality`: runs formatting check, `golangci-lint`, tests, `go vet`, and
   `go build ./...`
 - `make test`: runs `go test ./...`
+- `make test-e2e`: runs `go test -tags=e2e ./...` for live/provider/acpx/ACP
+  process integration checks; many are still guarded by explicit environment
+  variables.
 - `make build`: runs `go build ./...`
 
 When running in restricted environments, set writable cache roots:

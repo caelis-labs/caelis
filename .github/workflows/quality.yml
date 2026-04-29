@@ -41,8 +41,4 @@ jobs:
         run: make build
 
       - name: Test
-        env:
-          GOFLAGS: -p=1
-          GOMAXPROCS: 2
-          GOMEMLIMIT: 2GiB
         run: make test

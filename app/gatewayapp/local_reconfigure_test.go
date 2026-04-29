@@ -124,8 +124,8 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 			},
 			want: func(t *testing.T) {
 				t.Helper()
-				if got := stack.SandboxStatus().RequestedBackend; got != "auto" {
-					t.Fatalf("SandboxStatus().RequestedBackend = %q, want unchanged auto", got)
+				if got := stack.SandboxStatus().RequestedBackend; got != "host" {
+					t.Fatalf("SandboxStatus().RequestedBackend = %q, want unchanged host", got)
 				}
 			},
 		},
