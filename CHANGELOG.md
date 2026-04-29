@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## v0.1.0 - 2026-04-29
+
+### SDK, Gateway, And ACP Runtime
+- Consolidated the post-`v0.0.37` architecture around the current `sdk -> gateway -> app/gatewayapp -> adapters` stack, with the gateway event contract acting as the stable boundary for TUI, headless, ACP participant, and ACP controller flows.
+- Kept ACP tool identity protocol-shaped by preserving `kind` and `title` separately, while the TUI maps known kinds onto existing built-in display verbs such as `Ran`, `Read`, `Search`, and `Patched`.
+- Hardened ACP permission and approval paths so external controllers, child ACP agents, and local policy prompts share the same approval-aware runtime surface without treating approval overlays as durable transcript messages.
+
+### TUI Transcript, Tool Display, And Long-Session Behavior
+- Reworked ACP and built-in tool rendering through one transcript pipeline, including compact exploration summaries, expanded terminal/mutation tools, output tail condensation, full terminal-width layout, and smooth replay/resume behavior.
+- Improved shell command presentation with Codex-style `Ran` headers, wrapped continuation rows, command-token styling, and cleaner `SPAWN`/`BASH` output panels.
+- Fixed ACP tool argument extraction so transport details such as `unified_exec_startup` do not leak into the UI, title-only reads do not render as `read Read README.md`, and nested shell command arrays show the actual command body.
+- Fixed search/fetch result rendering so result text from `RawOutput["text"]` cannot replace the original search query in final headers.
+
+### Documentation, Release Metadata, And Quality
+- Rewrote `README.md` around the current CLI, TUI, ACP agent, permission, session, and packaging surfaces instead of the older pre-refactor layout.
+- Bumped release metadata to `v0.1.0` in `VERSION`, refreshed npm manifests to `0.1.0`, and documented the version synchronization path.
+- Fixed the `golangci-lint` v2 config schema so CI can pass the action's `config verify` step.
+- Moved live/provider/acpx/ACP process E2E tests behind the `e2e` build tag and kept default CI on stable unit and light integration coverage.
+- Kept ordinary gateway/app tests on the host sandbox backend so platform-specific sandbox probing does not leak into the default test gate.
+- Stopped a gateway driver unit test from waiting on a live provider failure path, keeping the default runtime test package fast and deterministic.
+- Pinned CLI stack-construction tests to the host sandbox backend through their temporary store config, avoiding platform sandbox auto-probes in `cmd/cli` unit coverage.
+- Reduced process-scheduling sensitivity in local runtime and sandbox runner tests by avoiding parallel shell-backed checks and fixed one terminal stream assertion to avoid final-output timing races.
+- Validated the release branch with the repository quality gate and `git diff --check`.
+
 ## v0.0.39 - 2026-04-09
 
 ### Kernel SDK Restructure And Runtime Slimming

@@ -1,179 +1,239 @@
 # caelis
 
-`caelis` is a terminal-first agent runtime with a Bubble Tea console, an ACP server mode, persistent sessions, sandbox-aware command execution, and resumable task and delegation flows.
+Current release target: `v0.1.0`.
+
+`caelis` is a terminal-first agent runtime with one local stack:
+`sdk -> gateway -> app/gatewayapp -> adapters -> tui/headless`.
+
+The project now treats the gateway event contract as the stable product boundary.
+The SDK owns runtime, session, model, sandbox, tool, delegation, and ACP
+integration primitives; adapters project that state into the Bubble Tea TUI or a
+headless one-shot runner.
 
 ## What It Does
 
-- Runs an interactive TUI coding agent in your terminal.
-- Supports headless single-shot execution for scripts and automation.
-- Exposes the same runtime over ACP for external clients.
-- Persists sessions, plans, tasks, and lifecycle state so interrupted work can be resumed safely.
-- Supports ACP-backed external agents that can be invoked as slash commands inside the console.
-- Routes shell execution through approval-aware sandboxed `default` mode or host `full_control`.
-- Ships built-in workspace tools, shell tools, and optional CLI LSP tools.
-- Assembles prompts from built-in runtime context, `AGENTS.md`, workspace metadata, and discovered local skills.
+- Starts an interactive TUI when launched from a TTY with no prompt input.
+- Runs a headless single-shot turn when given `-p` or piped stdin.
+- Persists sessions, provider config, and app config under `~/.caelis` by default.
+- Supports approval-aware tool execution in `default` permission mode and direct
+  host execution in `full_control`.
+- Connects external agents through the Agent Client Protocol (ACP) as
+  participants, subagents, or main-controller handoffs.
+- Projects built-in and ACP tools through one transcript renderer so `Ran`,
+  `Read`, `Search`, `Wrote`, `Patched`, `SPAWN`, `TASK`, and approval states stay
+  visually consistent.
+- Assembles prompts from built-in instructions, workspace `AGENTS.md`, global
+  `~/.agents/AGENTS.md`, and discovered local skills.
 
 ## Current Layout
 
-The codebase is organized around a small runtime kernel plus CLI-owned application wiring:
+- `cmd/cli`: flat-flag CLI entrypoint. Chooses TUI or headless mode; there are no
+  `console` or `acp` subcommands.
+- `sdk/`: reusable foundation for runtime, session, model/provider, tool,
+  sandbox, delegation, plugin, stream, and ACP contracts. Root packages stay
+  contract-first; concrete implementations live in subpackages such as
+  `sdk/runtime/local`, `sdk/session/file`, `sdk/tool/builtin`, and
+  `sdk/controller/acp`.
+- `gateway/`: product-facing API surface. `gateway/core` owns session, turn, event
+  replay, approval, and control-plane orchestration. `gateway/host` owns host and
+  remote-session lifecycle.
+- `app/gatewayapp`: local composition root that wires the SDK runtime, gateway
+  resolver, prompt assembly, config store, model catalog, and session store.
+- `gateway/adapter/headless`: one-shot adapter over the root `gateway` contract.
+- `gateway/adapter/tui/runtime`: gateway-to-TUI bridge used by the interactive
+  application.
+- `tui/`: presentation layer, including `tui/tuiapp`, `tui/tuikit`,
+  `tui/modelcatalog`, `tui/acpprojector`, and `tui/tuidiff`.
+- `acp/` and `acpbridge/`: ACP schema, client/server transport, fixtures, and
+  bridge helpers used by external-agent flows.
+- `npm/`: npm wrapper package plus platform-specific binary packages.
 
-- `cmd/cli`: console mode, ACP mode, config/session wiring, prompt assembly inputs.
-- `pkg/acpagent`: public ACP-backed main-controller adapter that implements `kernel/agent.Agent`.
-- `kernel/runservice`: public turn assembly facade over `kernel/runtime`.
-- `kernel/sessionsvc`: public session/workspace facade for channels and gateways.
-- `internal/app/assembly`: provider registration and tool/policy assembly.
-- `internal/app/prompting`: prompt fragment assembly.
-- `internal/app/skills`: skill metadata discovery and prompt rendering.
-- `internal/acp`: ACP protocol server, session state handling, prompt parsing, and streaming updates.
-- `kernel/runtime`: run loop, replay, lifecycle, compaction, tasks, delegation, and persistence.
-- `kernel/session`: session/event types, visibility rules, projections, and context windows.
-- `kernel/tool`: built-in tool implementations and tool capability metadata.
+Documentation map: [docs/README.md](docs/README.md)
 
-The older `internal/app/runservice` and `internal/app/sessionsvc` packages are retained as compatibility wrappers around the public kernel packages while call sites migrate.
+Architecture overview: [docs/architecture.md](docs/architecture.md)
 
-## Build
+Current design references:
+[docs/current_sdk_foundation_scope.md](docs/current_sdk_foundation_scope.md),
+[docs/unified_gateway_foundation_spec.md](docs/unified_gateway_foundation_spec.md)
 
-Requires Go `1.25.1`.
+## Install
+
+From npm:
 
 ```bash
-make build
-make vet
-make test
+npm i -g @onslaughtsnail/caelis@0.1.0
 ```
 
-Show version:
+or without a global install:
 
 ```bash
-go run ./cmd/cli -version
+npx @onslaughtsnail/caelis@0.1.0 --help
 ```
 
-## Quick Start
+Supported npm platforms: macOS/Linux (`x64`, `arm64`).
 
-Interactive console:
+From source:
 
 ```bash
-go run ./cmd/cli console \
-  -ui=tui \
-  -model openai-compatible/glm-5 \
-  -tool-providers workspace_tools,shell_tools \
-  -policy-providers default_allow \
+go install ./cmd/cli
+```
+
+The binary name is `caelis` in release artifacts and npm packages. Local source
+builds can also be run with `go run ./cmd/cli`.
+
+## CLI Entry
+
+`cmd/cli` uses one flat flag set. Run `go run ./cmd/cli -h` to inspect the
+current flags.
+
+Common flags:
+
+- `-p`: single-shot prompt text
+- `-format`: `text` or `json` for headless output
+- `-interactive`: force the TUI path even when stdin is piped
+- `-session`, `-store-dir`, `-workspace-key`, `-workspace-cwd`
+- `-permission-mode`: `default` or `full_control`
+- `-provider`, `-api`, `-model`, `-base-url`, `-token`, `-token-env`
+- `-auth-type`, `-header-key`
+- `-model-alias`, `-context-window`, `-max-output-tokens`
+- `-system-prompt`: append session-specific system guidance
+- `-doctor`: print runtime, session, and sandbox diagnostics
+
+Interactive TUI:
+
+```bash
+caelis \
+  -provider openai \
+  -model gpt-5 \
   -permission-mode default
 ```
 
-Headless single-shot run:
+Headless single-shot:
 
 ```bash
-go run ./cmd/cli console \
-  -model openai-compatible/glm-5 \
+caelis \
+  -provider openai \
+  -model gpt-5 \
+  -permission-mode default \
   -p "Summarize the repository layout."
 ```
 
-ACP server:
+Headless from stdin:
 
 ```bash
-go run ./cmd/cli acp \
-  -model openai-compatible/glm-5 \
-  -tool-providers workspace_tools,shell_tools \
-  -policy-providers default_allow \
-  -permission-mode default
+printf '%s\n' "Summarize the repository layout." | caelis \
+  -provider openai \
+  -model gpt-5 \
+  -format text
 ```
 
-If no local model is configured yet, start the console and run `/connect`. This is not required when the main conversation agent is switched to an external ACP controller.
+If no model is configured yet, start the TUI and use `/connect`.
+
+## TUI And ACP Agents
+
+The TUI is the primary local interface. It keeps prompt turns, external ACP
+participants, subagent tasks, tool calls, output panels, approvals, plans, and
+usage updates in one transcript pipeline.
+
+Current built-in slash commands:
+
+- `/help`
+- `/agent list`
+- `/agent add <builtin>`
+- `/agent install <adapter>`
+- `/agent use <agent|local>`
+- `/agent remove <agent>`
+- dynamic ACP child commands for registered agents, for example `/codex <prompt>`
+  and follow-up `@handle <prompt>`
+- `/connect`
+- `/model use <alias>` or `/model del <alias>`
+- `/sandbox [auto|seatbelt|bwrap|landlock]`
+- `/status`
+- `/new`
+- `/resume [session-id]`
+- `/compact`
+- `/exit`
+- `/quit`
+
+Notes:
+
+- `/agent` manages ACP-backed participants and main-controller handoff without
+  bypassing the gateway control plane.
+- ACP tool identity keeps the protocol `kind` and `title` separate. The TUI maps
+  known kinds into existing display verbs, such as `execute -> Ran`, `read ->
+  Read`, `search/fetch -> Search`, and `edit/delete/move -> Patched`.
+- Exploration-style tools are compact when safe; terminal and mutation tools stay
+  prominent and use condensed output panels for long-running work.
+- Completion is available for slash commands, `/agent` arguments, `#path`,
+  `$skill`, and `/resume` session ids.
 
 ## Runtime And Permissions
 
-`caelis` has two execution modes:
+`caelis` exposes one CLI permission switch:
 
-- `-permission-mode default`: commands run in a sandbox when available; host escalation requires approval.
-- `-permission-mode full_control`: commands run directly on the host with no approval gate.
+- `-permission-mode default`: use the local sandbox runtime when available and
+  require approval for host escalation.
+- `-permission-mode full_control`: execute directly on the host.
 
-Sandbox backend selection is controlled by `-sandbox-type` in `default` mode:
+Sandbox backend selection is resolved by the local runtime. The TUI exposes
+`/sandbox [auto|seatbelt|bwrap|landlock]` for inspection and selection. Sandbox
+permission failures are surfaced with backend-neutral denial metadata and the raw
+path-bearing error needed for recovery.
 
-- macOS: `seatbelt`
-- Linux: `bwrap`, then `landlock` fallback when available
+## Sessions
 
-If no supported sandbox backend is available, `caelis` falls back to host execution with approval and prints a warning.
+Interactive sessions are stored under `~/.caelis/sessions` by default. The TUI
+starts a fresh session unless `-session` is provided. Resume state is projected
+through the same gateway event stream used by live turns, including ACP
+participants, child tasks, plan updates, and tool panels.
 
-The console also exposes session modes:
+## Development
 
-- `default`: normal coding mode with execution enabled.
-- `plan`: planning-first mode that focuses on analysis before edits.
-- `full_access`: maps to `full_control` execution while keeping the session/UI state explicit.
+Caelis currently requires Go `1.25.1` as declared in `go.mod`.
 
-## Sessions And Interaction
+```bash
+make quality
+make test
+make test-e2e
+make build
+```
 
-Interactive console sessions are persisted under `~/.caelis/sessions` by default. The console starts a new session unless you pass `-session`, and you can switch or recover work with slash commands.
+- `make quality`: runs formatting check, `golangci-lint`, tests, `go vet`, and
+  `go build ./...`
+- `make test`: runs `go test ./...`
+- `make test-e2e`: runs `go test -tags=e2e ./...` for live/provider/acpx/ACP
+  process integration checks; many are still guarded by explicit environment
+  variables.
+- `make build`: runs `go build ./...`
 
-Current interactive slash commands:
+When running in restricted environments, set writable cache roots:
 
-- `/help`
-- `/agent list | add <builtin> | rm <name>`
-- `/btw <question>`
-- `/exit`
-- `/quit`
-- `/new`
-- `/fork`
-- `/compact [note]`
-- `/status`
-- `/sandbox [auto|<type>]`
-- `/model use <alias> [reasoning]`
-- `/model del [alias ...]`
-- `/connect`
-- `/resume [session-id]`
+```bash
+GOMODCACHE=/tmp/caelis-gomodcache \
+GOCACHE=/tmp/caelis-gocache \
+GOLANGCI_LINT_CACHE=/tmp/caelis-golangci-lint-cache \
+make quality
+```
 
-`/btw` runs an ephemeral side-question turn against the current context without persisting that exchange into conversation history.
+## Release And Packaging
 
-ACP agent presets can be managed with `/agent`. Once configured, ACP agent IDs are exposed as dynamic slash commands, so adding `codex`, `gemini`, or `claude` enables `/codex ...`, `/gemini ...`, or `/claude ...` turns in the console. These run as external participant sessions rather than replacing the main conversation agent.
+- `VERSION` carries the Go release tag, including the leading `v`.
+- npm package manifests carry the same version without the leading `v`.
+- Go release archives are produced from `./cmd/cli` by GoReleaser.
+- npm publishes a thin launcher package from `npm/` plus platform-specific binary
+  packages from `npm/packages/*`.
+- The npm wrapper is file-whitelisted so published artifacts do not include
+  workspace files such as `.env`, `.git`, `.superpowers`, caches, or temporary
+  build outputs.
 
-To switch the main conversation controller to an external ACP agent, set `mainAgent` in the CLI config to one of the configured ACP agent IDs. `defaultAgent` still controls the default `SPAWN` target; `mainAgent` controls who owns the root conversation turn loop.
+Synchronize npm manifests:
 
-## Prompt Assembly And Skills
+```bash
+node ./npm/scripts/set-version.mjs 0.1.0
+```
 
-Prompt assembly combines:
-
-1. Built-in identity and runtime instructions
-2. Global `AGENTS.md`
-3. Workspace `AGENTS.md`
-4. Session and runtime prompt fragments
-5. Discovered local skill metadata
-
-Skills are discovered from local `SKILL.md` files and rendered as metadata into the final system prompt. The CLI flag `-skills-dirs` is retained for compatibility, but current skill loading uses the standard local skills location under `~/.agents/skills`.
-
-## Tools
-
-The default console and ACP configuration uses:
-
-- `workspace_tools`
-- `shell_tools`
-
-Optional:
-
-- `lsp_tools` via `-experimental-lsp`
-
-Built-in tool families include file reads, writes, search, shell execution, planning, task control, and delegation.
-
-User-facing MCP tool loading is no longer supported in the CLI runtime. Older ACP protocol fields still exist for compatibility with session and client payloads, but the shipped console and ACP entry points no longer expose `mcp_tools` or `-mcp-config`.
-
-## Release
-
-- Current release: `v0.0.39`
-- Version source: git tag at release time, with `VERSION` used as the local fallback
-- Changelog: `CHANGELOG.md`
-
-Local dry run:
+Local release dry run:
 
 ```bash
 make release-dry-run
-```
-
-CI release is triggered by pushing a version tag such as `v0.0.39`.
-
-## npm Package
-
-The npm package lives under `npm/` and publishes as `@onslaughtsnail/caelis`.
-
-Platform-specific binaries publish as internal npm packages and are pulled in through `optionalDependencies`, so installs stay on the npm registry path instead of downloading GitHub Release assets during `postinstall`.
-
-```bash
-npm i -g @onslaughtsnail/caelis
 ```

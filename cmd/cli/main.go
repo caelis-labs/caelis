@@ -2,558 +2,448 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
-	launcherfull "github.com/OnslaughtSnail/caelis/cmd/launcher/full"
-	internalacp "github.com/OnslaughtSnail/caelis/internal/acp"
-	"github.com/OnslaughtSnail/caelis/internal/app/acpext"
-	appassembly "github.com/OnslaughtSnail/caelis/internal/app/assembly"
-	appbootstrap "github.com/OnslaughtSnail/caelis/internal/app/bootstrap"
-	"github.com/OnslaughtSnail/caelis/internal/version"
-	"github.com/OnslaughtSnail/caelis/kernel/agent"
-	toolexec "github.com/OnslaughtSnail/caelis/kernel/execenv"
-	"github.com/OnslaughtSnail/caelis/kernel/model"
-	modelproviders "github.com/OnslaughtSnail/caelis/kernel/model/providers"
-	"github.com/OnslaughtSnail/caelis/kernel/plugin"
-	"github.com/OnslaughtSnail/caelis/kernel/runtime"
-	"github.com/OnslaughtSnail/caelis/kernel/sessionsvc"
-
-	image "github.com/OnslaughtSnail/caelis/internal/cli/imageutil"
-	"github.com/OnslaughtSnail/caelis/internal/sandboxhelper"
+	"github.com/OnslaughtSnail/caelis/acp"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	headlessadapter "github.com/OnslaughtSnail/caelis/gateway/adapter/headless"
+	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
+	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
+	"github.com/OnslaughtSnail/caelis/sdk/sandbox/landlock"
 )
 
+type outputFormat string
+
+const (
+	outputText outputFormat = "text"
+	outputJSON outputFormat = "json"
+)
+
+type runResult struct {
+	SessionID    string `json:"session_id"`
+	Output       string `json:"output"`
+	PromptTokens int    `json:"prompt_tokens,omitempty"`
+}
+
+type doctorResult = gatewayapp.DoctorReport
+
 func main() {
-	if sandboxhelper.MaybeRun(os.Args[1:]) {
+	if landlock.MaybeRunInternalHelper(os.Args[1:]) {
 		return
 	}
-	launcher := launcherfull.NewLauncher(runCLI, runACP)
-	if err := launcher.Execute(context.Background(), os.Args[1:]); err != nil {
-		exitErr(err)
+	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
 	}
 }
 
-func runCLI(ctx context.Context, args []string) error {
-	if ctx == nil {
-		return fmt.Errorf("cli: context is required")
+func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	acpSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "acp")
+	if acpSubcommand {
+		args = args[1:]
 	}
-	initialAppName := appNameFromArgs(args, "caelis")
-	configStore, err := loadOrInitAppConfig(initialAppName)
-	if err != nil {
-		return err
+	doctorSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "doctor")
+	if doctorSubcommand {
+		args = args[1:]
 	}
-	defaultStoreDir, err := sessionStoreDir(initialAppName)
-	if err != nil {
-		return err
-	}
-	defaultSessionIndexPath, err := sessionIndexPath(initialAppName)
-	if err != nil {
-		return err
+	fs := flag.NewFlagSet("caelis", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+
+	cwd, _ := os.Getwd()
+	defaultWorkspaceKey := filepath.Base(cwd)
+	if defaultWorkspaceKey == "" || defaultWorkspaceKey == "." || defaultWorkspaceKey == string(filepath.Separator) {
+		defaultWorkspaceKey = "workspace"
 	}
 
-	fs := flag.NewFlagSet("console", flag.ContinueOnError)
 	var (
-		toolProviders    = fs.String("tool-providers", appassembly.ProviderWorkspaceTools+","+appassembly.ProviderShellTools, "Comma-separated tool providers")
-		policyProviders  = fs.String("policy-providers", appassembly.ProviderDefaultPolicy, "Comma-separated policy providers")
-		modelAlias       = fs.String("model", configStore.DefaultModel(), "Model alias")
-		uiMode           = fs.String("ui", string(uiModeAuto), "Interactive UI mode: auto|tui")
-		appName          = fs.String("app", initialAppName, "App name")
-		userID           = fs.String("user", "local-user", "User id")
-		sessionID        = fs.String("session", "default", "Session id")
-		prompt           = fs.String("p", "", "Single-shot prompt text (headless mode)")
-		outputFormat     = fs.String("format", string(headlessFormatText), "Output format for headless mode: text|json")
-		storeDir         = fs.String("store-dir", defaultStoreDir, "Local event store directory")
-		sessionIndexFile = fs.String("session-index", defaultSessionIndexPath, "Session index sqlite file path")
-		systemPrompt     = fs.String("system-prompt", "", "Base system prompt")
-		skillsDirs       = fs.String("skills-dirs", "~/.agents/skills", "Ignored; skills are loaded from ~/.agents/skills")
-		compactWatermark = fs.Float64("compact-watermark", 0.7, "Auto compaction watermark ratio (0.5-0.9)")
-		contextWindow    = fs.Int("context-window", 0, "Model context window tokens override")
-		permissionMode   = fs.String("permission-mode", configStore.PermissionMode(), "Permission mode: default|full_control")
-		sandboxType      = fs.String("sandbox-type", configStore.SandboxType(), "Sandbox backend type when permission-mode=default (Linux auto tries bwrap then landlock)")
-		experimentalLSP  = fs.Bool("experimental-lsp", false, "Enable experimental CLI LSP tools plugin")
-		showVersion      = fs.Bool("version", false, "Show version and exit")
-		verbose          = fs.Bool("verbose", false, "Enable verbose output with debug details")
-		noColor          = fs.Bool("no-color", false, "Disable colored output")
-		noAnimation      = fs.Bool("no-animation", defaultNoAnimation(), "Disable TUI animations")
+		prompt           = fs.String("p", "", "Single-shot prompt text")
+		format           = fs.String("format", string(outputText), "Output format: text|json")
+		appName          = fs.String("app", envOr("CAELIS_APP_NAME", "caelis"), "App name")
+		userID           = fs.String("user", envOr("CAELIS_USER_ID", "local-user"), "User id")
+		sessionID        = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
+		storeDir         = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
+		workspaceKey     = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
+		workspaceCWD     = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
+		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
+		permissionMode   = fs.String("permission-mode", envOr("CAELIS_PERMISSION_MODE", "default"), "Permission mode: default|full_control")
+		modelAlias       = fs.String("model-alias", envOr("CAELIS_MODEL_ALIAS", ""), "Model alias")
+		modelProvider    = fs.String("provider", envOr("CAELIS_MODEL_PROVIDER", ""), "Model provider name")
+		modelAPI         = fs.String("api", envOr("CAELIS_MODEL_API", ""), "Model API type")
+		modelName        = fs.String("model", envOr("CAELIS_MODEL_NAME", ""), "Model name")
+		baseURL          = fs.String("base-url", envOr("CAELIS_BASE_URL", ""), "Provider base URL")
+		token            = fs.String("token", envOr("CAELIS_API_TOKEN", ""), "Provider token")
+		tokenEnv         = fs.String("token-env", envOr("CAELIS_TOKEN_ENV", ""), "Environment variable for provider token")
+		authType         = fs.String("auth-type", envOr("CAELIS_AUTH_TYPE", ""), "Auth type")
+		headerKey        = fs.String("header-key", envOr("CAELIS_HEADER_KEY", ""), "Optional auth header key")
+		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
+		maxOutputTokens  = fs.Int("max-output-tokens", envInt("CAELIS_MAX_OUTPUT_TOKENS", 4096), "Max output tokens")
+		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
+		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
 	)
-	if err := rejectRemovedExecutionFlags(args); err != nil {
-		return err
-	}
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if *showVersion {
-		fmt.Println(version.String())
-		return nil
-	}
-
 	if len(fs.Args()) > 0 {
 		return fmt.Errorf("unknown arguments: %v", fs.Args())
 	}
-	stdinTTY := isTTY(os.Stdin)
-	stdoutTTY := isTTY(os.Stdout)
-	singleInput, singleShotMode, err := resolveSingleShotInput(*prompt, os.Stdin, stdinTTY, stdoutTTY)
-	if err != nil {
-		return err
-	}
-	outFormat, err := parseHeadlessOutputFormat(*outputFormat)
-	if err != nil {
-		return err
-	}
-	resolvedUIMode := uiModeTUI
-	if !singleShotMode {
-		mode, err := resolveInteractiveUIMode(*uiMode, stdinTTY, stdoutTTY)
-		if err != nil {
-			return err
-		}
-		resolvedUIMode = mode
-	}
-	if !flagProvided(args, "session") {
-		*sessionID = nextConversationSessionID()
-	}
-	credentials, err := loadOrInitCredentialStore(initialAppName, credentialStoreModeAuto)
-	if err != nil {
-		return err
-	}
-	workspace, err := resolveWorkspaceContext()
-	if err != nil {
-		return err
-	}
-	resolvedWorkspaceRoot, err := resolveWorkspaceRoot(workspace.CWD, "")
-	if err != nil {
-		return err
-	}
-	_ = skillsDirs
-	skillDirList := activeSkillDirs()
-	inputRefs, inputRefWarnings, err := newInputReferenceResolver(workspace.CWD, skillDirList)
-	if err != nil {
-		return err
-	}
-	for _, warn := range inputRefWarnings {
-		fmt.Fprintf(os.Stderr, "warn: %v\n", warn)
-	}
-	historyPath, err := historyFilePath(initialAppName, workspace.Key)
-	if err != nil {
-		return err
-	}
 
-	sandboxHelperPath, err := resolveSandboxHelperPath()
-	if err != nil {
-		return err
-	}
-	execRuntime, err := newExecutionRuntime(
-		toolexec.PermissionMode(strings.TrimSpace(*permissionMode)),
-		strings.TrimSpace(*sandboxType),
-		sandboxHelperPath,
-		configStore.SandboxPolicy(),
-	)
-	if err != nil {
-		return err
-	}
-	if flagProvided(args, "sandbox-type") &&
-		execRuntime.PermissionMode() == toolexec.PermissionModeDefault &&
-		execRuntime.FallbackToHost() {
-		requestedSandbox := sandboxTypeDisplayLabel(normalizeSandboxType(strings.TrimSpace(*sandboxType)))
-		if requestedSandbox == "" {
-			requestedSandbox = "auto"
-		}
-		_ = toolexec.Close(execRuntime)
-		return fmt.Errorf("sandbox type %q is unavailable: %s", requestedSandbox, execRuntime.FallbackReason())
-	}
-	defer func() {
-		if closeErr := toolexec.Close(execRuntime); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "warn: close execution runtime failed: %v\n", closeErr)
-		}
-	}()
-	execRuntimeView := newSwappableRuntime(execRuntime)
-	if err := configStore.SetRuntimeSettings(runtimeSettings{
+	cfg, err := normalizeConfig(gatewayapp.Config{
+		AppName:        *appName,
+		UserID:         *userID,
+		StoreDir:       *storeDir,
+		WorkspaceKey:   *workspaceKey,
+		WorkspaceCWD:   *workspaceCWD,
 		PermissionMode: *permissionMode,
-		SandboxType:    *sandboxType,
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: persist runtime settings failed: %v\n", err)
-	}
-	if execRuntime.FallbackToHost() {
-		fmt.Fprintf(os.Stderr, "warn: sandbox unavailable, fallback to host+approval: %s\n", execRuntime.FallbackReason())
-	}
-	pluginRegistry := plugin.NewRegistry()
-	if err := appassembly.RegisterBuiltinProviders(pluginRegistry, appassembly.RegisterOptions{
-		ExecutionRuntime: execRuntimeView,
-	}); err != nil {
-		return err
-	}
-	resolvedToolProviders := splitCSV(*toolProviders)
-	if *experimentalLSP {
-		resolvedToolProviders = appendProviderIfMissing(resolvedToolProviders, providerLSPTools)
-	}
-	if includesProvider(resolvedToolProviders, providerLSPTools) {
-		if err := registerCLILSPToolProvider(pluginRegistry, workspace.CWD, execRuntimeView); err != nil {
-			return err
-		}
-	}
-	resolved, err := appassembly.Assemble(ctx, appassembly.AssembleSpec{
-		Registry:        pluginRegistry,
-		ToolProviders:   resolvedToolProviders,
-		PolicyProviders: splitCSV(*policyProviders),
-	})
-	if err != nil {
-		return err
-	}
-	factory := buildModelFactory(configStore, credentials)
-
-	alias := resolveModelAliasFromConfig(*modelAlias, configStore)
-	modelRuntime := defaultModelRuntimeSettings()
-	if configStore != nil {
-		modelRuntime = configStore.ModelRuntimeSettings(alias)
-	}
-	var llm model.LLM
-	if alias != "" {
-		llm, err = factory.NewByAlias(alias)
-		if err != nil {
-			return err
-		}
-		if err := configStore.SetDefaultModel(alias); err != nil {
-			fmt.Fprintf(os.Stderr, "warn: update default model failed: %v\n", err)
-		}
-	}
-
-	sessionRT, err := setupSessionRuntime(ctx, *storeDir, workspace.Key, *appName, *userID, *sessionIndexFile, *compactWatermark, workspace)
-	if err != nil {
-		return err
-	}
-	store := sessionRT.Store
-	index := sessionRT.Index
-	if flagProvided(args, "session") {
-		if resolvedSessionID, ok, resolveErr := index.ResolveWorkspaceSessionIDContext(ctx, workspace.Key, *sessionID); resolveErr != nil {
-			return resolveErr
-		} else if ok {
-			*sessionID = resolvedSessionID
-		}
-	}
-	defer func() {
-		if closeErr := index.Close(); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "warn: close session index failed: %v\n", closeErr)
-		}
-		if sessionRT.DB != nil {
-			if closeErr := sessionRT.DB.Close(); closeErr != nil {
-				fmt.Fprintf(os.Stderr, "warn: close local store db failed: %v\n", closeErr)
-			}
-		}
-	}()
-	rt := sessionRT.Runtime
-	sessionModes := []internalacp.SessionMode{
-		{ID: "default", Name: "Default", Description: "Normal coding mode with execution enabled."},
-		{ID: "plan", Name: "Plan", Description: "Planning-first mode that focuses on analysis before making changes."},
-		{ID: "full_access", Name: "Full Access", Description: "Execute changes directly without interactive approval, while still blocking dangerous destructive commands."},
-	}
-	sessionConfig := buildACPSessionConfigOptions(sessionModes, factory, configStore, alias)
-	agentReg, err := configStore.AgentRegistry()
-	if err != nil {
-		return fmt.Errorf("invalid agent config: %w", err)
-	}
-	var newACPAdapter appbootstrap.ACPAdapterFactory
-	subagentRunnerFactory := acpext.NewACPSubagentRunnerFactory(acpext.Config{
-		Store:                store,
-		WorkspaceRoot:        resolvedWorkspaceRoot,
-		WorkspaceCWD:         workspace.CWD,
-		ClientRuntime:        execRuntimeView,
-		ResolveAgentRegistry: configStore.AgentRegistry,
-		NewAdapter: func(conn *internalacp.Conn) (internalacp.Adapter, error) {
-			if newACPAdapter == nil {
-				return nil, fmt.Errorf("self acp adapter is not initialized")
-			}
-			return newACPAdapter(conn)
-		},
-	})
-	serviceSet, err := appbootstrap.Build(appbootstrap.Config{
-		Runtime:               rt,
-		Store:                 store,
-		ACPRuntime:            sessionRT.ACPRuntime,
-		ACPStore:              sessionRT.ACPStore,
-		AppName:               *appName,
-		UserID:                *userID,
-		DefaultAgent:          configStore.DefaultAgent(),
-		WorkspaceCWD:          workspace.CWD,
-		Execution:             execRuntimeView,
-		Tools:                 resolved.Tools,
-		Policies:              resolved.Policies,
-		Resolved:              resolved,
-		EnablePlan:            true,
-		EnableSelfSpawn:       true,
-		Index:                 &cliSessionIndexAdapter{index: index},
-		SubagentRunnerFactory: subagentRunnerFactory,
-		ACP: &appbootstrap.ACPConfig{
-			WorkspaceRoot: resolvedWorkspaceRoot,
-			SessionModes:  sessionModes,
-			DefaultModeID: "default",
-			SessionConfig: sessionConfig,
-			BuildSystemPrompt: func(sessionCWD string) (string, error) {
-				return resolveSystemPrompt(buildAgentInput{
-					AppName:                     *appName,
-					PromptRole:                  promptRoleACPServer,
-					WorkspaceDir:                sessionCWD,
-					EnableExperimentalLSPPrompt: hasLSPTools(resolved.Tools),
-					BasePrompt:                  *systemPrompt,
-					SkillDirs:                   skillDirList,
-					DefaultAgent:                configStore.DefaultAgent(),
-					AgentDescriptors:            configStore.AgentDescriptors(),
-				})
-			},
-			SessionConfigState: func(sessionCfg internalacp.AgentSessionConfig, templates []internalacp.SessionConfigOptionTemplate) []internalacp.SessionConfigOption {
-				return buildACPSessionConfigState(templates, factory, configStore, alias, sessionCfg)
-			},
-			NormalizeConfig: func(sessionCfg internalacp.AgentSessionConfig) internalacp.AgentSessionConfig {
-				return normalizeACPSessionConfig(factory, configStore, alias, sessionCfg)
-			},
-			NewModel: func(sessionCfg internalacp.AgentSessionConfig) (model.LLM, error) {
-				selectedAlias := resolveACPSelectedModelAlias(alias, sessionCfg.ConfigValues, configStore)
-				return factory.NewByAlias(selectedAlias)
-			},
-			PromptImageEnabled: func() bool {
-				return true
-			},
-			SupportsPromptImage: func(sessionCfg internalacp.AgentSessionConfig) bool {
-				selectedAlias := resolveACPSelectedModelAlias(alias, sessionCfg.ConfigValues, configStore)
-				return acpModelSupportsImages(factory, selectedAlias)
-			},
-			ListSessions: func(ctx context.Context, req internalacp.SessionListRequest) (internalacp.SessionListResponse, error) {
-				return buildACPSessionList(ctx, index, workspace, req), nil
-			},
-			NewAgent: func(stream bool, sessionCWD string, frozenPrompt string, sessionCfg internalacp.AgentSessionConfig) (agent.Agent, error) {
-				selectedAlias := resolveACPSelectedModelAlias(alias, sessionCfg.ConfigValues, configStore)
-				sessionRuntime := modelRuntime
-				if configStore != nil {
-					sessionRuntime = configStore.ModelRuntimeSettings(selectedAlias)
-				}
-				resolvedReasoningEffort := resolveACPSessionReasoning(sessionRuntime, sessionCfg.ConfigValues)
-				return buildAgent(buildAgentInput{
-					AppName:                     *appName,
-					PromptRole:                  promptRoleACPServer,
-					WorkspaceDir:                sessionCWD,
-					EnableExperimentalLSPPrompt: hasLSPTools(resolved.Tools),
-					BasePrompt:                  *systemPrompt,
-					FrozenPrompt:                frozenPrompt,
-					SkillDirs:                   skillDirList,
-					DefaultAgent:                configStore.DefaultAgent(),
-					AgentDescriptors:            configStore.AgentDescriptors(),
-					StreamModel:                 stream,
-					ThinkingBudget:              sessionRuntime.ThinkingBudget,
-					ReasoningEffort:             resolvedReasoningEffort,
-					ModelProvider:               resolveProviderName(factory, selectedAlias),
-					ModelName:                   resolveModelName(factory, selectedAlias),
-					ModelConfig: func() modelproviders.Config {
-						if factory == nil {
-							return modelproviders.Config{}
-						}
-						cfg, _ := factory.ConfigForAlias(selectedAlias)
-						return cfg
-					}(),
-				})
-			},
-			NewSessionResources: func(ctx context.Context, acpConn *internalacp.Conn, sessionID string, sessionCWD string, caps internalacp.ClientCapabilities, modeResolver func() string) (*internalacp.SessionResources, error) {
-				execRuntimeACP := internalacp.NewRuntime(execRuntimeView, acpConn, sessionID, resolvedWorkspaceRoot, sessionCWD, caps, modeResolver)
-				registry := plugin.NewRegistry()
-				if err := appassembly.RegisterBuiltinProviders(registry, appassembly.RegisterOptions{
-					ExecutionRuntime: execRuntimeACP,
-				}); err != nil {
-					return nil, err
-				}
-				resolvedACPProviders := append([]string(nil), resolvedToolProviders...)
-				if includesProvider(resolvedACPProviders, providerLSPTools) {
-					if err := registerCLILSPToolProvider(registry, sessionCWD, execRuntimeACP); err != nil {
-						return nil, err
-					}
-				}
-				assembled, err := appassembly.Assemble(ctx, appassembly.AssembleSpec{
-					Registry:        registry,
-					ToolProviders:   resolvedACPProviders,
-					PolicyProviders: splitCSV(*policyProviders),
-				})
-				if err != nil {
-					return nil, err
-				}
-				return &internalacp.SessionResources{
-					Runtime:  execRuntimeACP,
-					Tools:    assembled.Tools,
-					Policies: assembled.Policies,
-					Close: func(closeCtx context.Context) error {
-						return assembled.Close(closeCtx)
-					},
-				}, nil
-			},
+		ContextWindow:  *contextWindow,
+		SystemPrompt:   *systemPrompt,
+		Model: gatewayapp.ModelConfig{
+			Alias:        *modelAlias,
+			Provider:     *modelProvider,
+			API:          sdkproviders.APIType(strings.TrimSpace(*modelAPI)),
+			Model:        *modelName,
+			BaseURL:      *baseURL,
+			Token:        *token,
+			TokenEnv:     *tokenEnv,
+			AuthType:     sdkproviders.AuthType(strings.TrimSpace(*authType)),
+			HeaderKey:    *headerKey,
+			MaxOutputTok: *maxOutputTokens,
 		},
 	})
 	if err != nil {
 		return err
 	}
-	newACPAdapter = serviceSet.NewACPAdapter
-	defer func() {
-		if closeErr := serviceSet.Close(context.WithoutCancel(ctx)); closeErr != nil {
-			fmt.Fprintf(os.Stderr, "warn: close assembled providers failed: %v\n", closeErr)
-		}
-	}()
-
-	if singleShotMode {
-		mainAgentInput := buildAgentInput{
-			AppName:                     *appName,
-			PromptRole:                  promptRoleMainSession,
-			WorkspaceDir:                workspace.CWD,
-			EnableExperimentalLSPPrompt: hasLSPTools(resolved.Tools),
-			BasePrompt:                  *systemPrompt,
-			SkillDirs:                   skillDirList,
-			MainAgent:                   configStore.MainAgent(),
-			DefaultAgent:                configStore.DefaultAgent(),
-			AgentDescriptors:            configStore.AgentDescriptors(),
-			StreamModel:                 true,
-			ThinkingBudget:              modelRuntime.ThinkingBudget,
-			ReasoningEffort:             modelRuntime.ReasoningEffort,
-			ModelProvider:               resolveProviderName(factory, alias),
-			ModelName:                   resolveModelName(factory, alias),
-			ModelConfig: func() modelproviders.Config {
-				if factory == nil {
-					return modelproviders.Config{}
-				}
-				cfg, _ := factory.ConfigForAlias(alias)
-				return cfg
-			}(),
-			WorkspaceRoot:    resolvedWorkspaceRoot,
-			ExecutionRuntime: execRuntimeView,
-			AppVersion:       version.String(),
-		}
-		_, usesACP, err := resolveMainSessionAgentDescriptor(mainAgentInput)
+	cfg.Assembly = assemblyFromEnv()
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil {
+		return err
+	}
+	if acpSubcommand {
+		agent, err := stack.NewACPAgent()
 		if err != nil {
 			return err
 		}
-		if !usesACP && llm == nil {
-			return fmt.Errorf("no model configured, run /connect first or pass -model with a configured provider/model")
+		return acp.ServeStdio(ctx, agent, stdin, stdout)
+	}
+	if doctorSubcommand || *doctor {
+		outFmt, err := parseOutputFormat(*format)
+		if err != nil {
+			return err
 		}
-		if strings.HasPrefix(strings.TrimSpace(singleInput), "/compact") {
-			note := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(singleInput), "/compact"))
-			beforeUsage, _ := rt.ContextUsage(ctx, runtime.UsageRequest{
-				AppName:             *appName,
-				UserID:              *userID,
-				SessionID:           *sessionID,
-				Model:               llm,
-				ContextWindowTokens: *contextWindow,
-			})
-			ev, compactErr := rt.Compact(ctx, runtime.CompactRequest{
-				AppName:             *appName,
-				UserID:              *userID,
-				SessionID:           *sessionID,
-				Model:               llm,
-				Note:                note,
-				ContextWindowTokens: *contextWindow,
-			})
-			if compactErr != nil {
-				return compactErr
+		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
+	}
+
+	stdinTTY := isTTY(os.Stdin)
+	input, singleShot, err := resolveTurnInput(*prompt, stdin, stdinTTY, *forceInteractive)
+	if err != nil {
+		return err
+	}
+	if singleShot {
+		outFmt, err := parseOutputFormat(*format)
+		if err != nil {
+			return err
+		}
+		return runHeadless(ctx, stack, preferredHeadlessSessionID(*sessionID), input, outFmt, stdout)
+	}
+	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
+}
+
+func assemblyFromEnv() sdkplugin.ResolvedAssembly {
+	cmd := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_CMD", ""))
+	if cmd == "" {
+		return sdkplugin.ResolvedAssembly{}
+	}
+	name := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_NAME", "self"))
+	if name == "" {
+		name = "self"
+	}
+	return sdkplugin.ResolvedAssembly{
+		Agents: []sdkplugin.AgentConfig{{
+			Name:        name,
+			Description: strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_DESC", "")),
+			Command:     "bash",
+			Args:        []string{"-lc", cmd},
+			WorkDir:     strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_WORKDIR", "")),
+		}},
+	}
+}
+
+func defaultStoreDir(cwd string) string {
+	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
+		return filepath.Join(home, ".caelis")
+	}
+	return filepath.Join(cwd, ".caelis")
+}
+
+func preferredInteractiveSessionID(sessionID string) string {
+	return strings.TrimSpace(sessionID)
+}
+
+func preferredHeadlessSessionID(sessionID string) string {
+	return strings.TrimSpace(sessionID)
+}
+
+func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string, input string, format outputFormat, stdout io.Writer) error {
+	session, err := stack.StartSession(ctx, sessionID, "cli-headless")
+	if err != nil {
+		return err
+	}
+	result, err := headlessadapter.RunOnce(ctx, stack.Gateway, appgateway.BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      input,
+		Surface:    "headless",
+	}, headlessadapter.Options{})
+	if err != nil {
+		return err
+	}
+	return writeResult(stdout, format, runResult{
+		SessionID:    session.SessionID,
+		Output:       strings.TrimSpace(result.Output),
+		PromptTokens: result.PromptTokens,
+	})
+}
+
+func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, format outputFormat, stdout io.Writer) error {
+	report, err := stack.Doctor(ctx, gatewayapp.DoctorRequest{
+		SessionID: strings.TrimSpace(sessionID),
+	})
+	if err != nil {
+		return err
+	}
+	return writeDoctorResult(stdout, format, report)
+}
+
+func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	_ = stderr
+	_ = cfg
+	return runTUI(ctx, stack, strings.TrimSpace(sessionID), displayModelText, stdin, stdout)
+}
+
+func renderModelText(cfg gatewayapp.Config) string {
+	provider := strings.TrimSpace(cfg.Model.Provider)
+	model := strings.TrimSpace(cfg.Model.Model)
+	switch {
+	case provider == "" && model == "":
+		return "not configured"
+	case provider == "":
+		return model
+	case model == "":
+		return provider
+	default:
+		return provider + "/" + model
+	}
+}
+
+func renderConfiguredModelText(alias string, provider string, model string) string {
+	if trimmedAlias := strings.TrimSpace(alias); trimmedAlias != "" {
+		return trimmedAlias
+	}
+	provider = strings.TrimSpace(provider)
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	if provider == "" {
+		return model
+	}
+	return provider + "/" + model
+}
+
+func streamHandle(ctx context.Context, handle appgateway.TurnHandle, stdout io.Writer, stderr io.Writer) error {
+	if handle == nil {
+		return nil
+	}
+	defer handle.Close()
+
+	for env := range handle.Events() {
+		if env.Err != nil {
+			return env.Err
+		}
+		if env.Event.Kind == appgateway.EventKindApprovalRequested {
+			fmt.Fprintln(stderr, "[approval] denied by default")
+			if err := handle.Submit(ctx, appgateway.SubmitRequest{
+				Kind:     appgateway.SubmissionKindApproval,
+				Approval: &appgateway.ApprovalDecision{Approved: false, Outcome: string(appgateway.ApprovalStatusRejected)},
+			}); err != nil {
+				return err
 			}
-			if ev == nil {
-				fmt.Println("compact: skipped (not enough history to compact)")
-			} else {
-				afterUsage, _ := rt.ContextUsage(ctx, runtime.UsageRequest{
-					AppName:             *appName,
-					UserID:              *userID,
-					SessionID:           *sessionID,
-					Model:               llm,
-					ContextWindowTokens: *contextWindow,
-				})
-				fmt.Printf("compact: success, %s -> %s tokens\n", formatCompactTokenUsage(beforeUsage.CurrentTokens), formatCompactTokenUsage(afterUsage.CurrentTokens))
-			}
+		}
+		if text := appgateway.AssistantText(env.Event); text != "" {
+			fmt.Fprintln(stdout, text)
+		}
+	}
+	return nil
+}
+
+func writeDoctorResult(w io.Writer, format outputFormat, result doctorResult) error {
+	switch format {
+	case outputJSON:
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(result)
+	default:
+		_, err := fmt.Fprintln(w, gatewayapp.FormatDoctorText(result))
+		return err
+	}
+}
+
+func writeResult(w io.Writer, format outputFormat, result runResult) error {
+	switch format {
+	case outputJSON:
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(result)
+	default:
+		if strings.TrimSpace(result.Output) == "" {
 			return nil
 		}
-		ag, err := buildMainSessionAgent(mainAgentInput)
-		if err != nil {
-			return err
-		}
-		resolvedInput := singleInput
-		var contentParts []model.ContentPart
-		if inputRefs != nil {
-			result, rewriteErr := inputRefs.RewriteInput(singleInput)
-			if rewriteErr != nil {
-				fmt.Fprintf(os.Stderr, "warn: input reference resolution skipped: %v\n", rewriteErr)
-			} else {
-				resolvedInput = result.Text
-				for _, note := range result.Notes {
-					fmt.Fprintf(os.Stderr, "note: %s\n", note)
-				}
-				for _, relPath := range result.ResolvedPaths {
-					if !image.IsImagePath(relPath) {
-						continue
-					}
-					absPath := inputRefs.AbsPath(relPath)
-					part, loadErr := image.LoadAsContentPart(absPath)
-					if loadErr != nil {
-						fmt.Fprintf(os.Stderr, "warn: image load skipped: %s: %v\n", relPath, loadErr)
-						continue
-					}
-					contentParts = append(contentParts, part)
-					fmt.Fprintf(os.Stderr, "note: attached image: %s\n", relPath)
-				}
-			}
-		}
-		headlessResult, runErr := runHeadlessOnce(ctx, serviceSet.SessionService, sessionsvc.RunTurnRequest{
-			SessionRef: sessionsvc.SessionRef{
-				AppName:      *appName,
-				UserID:       *userID,
-				SessionID:    *sessionID,
-				WorkspaceKey: workspace.Key,
-			},
-			Input:               resolvedInput,
-			ContentParts:        contentParts,
-			Agent:               ag,
-			Model:               llm,
-			ContextWindowTokens: *contextWindow,
-		})
-		if runErr != nil {
-			return runErr
-		}
-		return writeHeadlessResult(os.Stdout, outFormat, headlessResult)
+		_, err := fmt.Fprintln(w, result.Output)
+		return err
 	}
+}
 
-	console := newCLIConsole(cliConsoleConfig{
-		BaseContext:           ctx,
-		Runtime:               rt,
-		AppName:               *appName,
-		UserID:                *userID,
-		SessionID:             *sessionID,
-		ContextWindow:         *contextWindow,
-		Workspace:             workspace,
-		WorkspaceLine:         workspaceStatusLine(workspace.CWD),
-		WorkspaceRoot:         resolvedWorkspaceRoot,
-		Resolved:              resolved,
-		SessionStore:          store,
-		ExecRuntime:           execRuntime,
-		ExecRuntimeView:       execRuntimeView,
-		SandboxType:           strings.TrimSpace(*sandboxType),
-		SandboxPolicy:         configStore.SandboxPolicy(),
-		AppliedSandboxType:    strings.TrimSpace(*sandboxType),
-		SandboxHelperPath:     sandboxHelperPath,
-		ModelAlias:            alias,
-		Model:                 llm,
-		ModelFactory:          factory,
-		ConfigStore:           configStore,
-		CredentialStore:       credentials,
-		SessionIndex:          index,
-		SystemPrompt:          *systemPrompt,
-		EnableExperimentalLSP: hasLSPTools(resolved.Tools),
-		SkillDirs:             skillDirList,
-		ThinkingBudget:        modelRuntime.ThinkingBudget,
-		ReasoningEffort:       modelRuntime.ReasoningEffort,
-		InputRefs:             inputRefs,
-		TUIDiagnostics:        newTUIDiagnostics(),
-		HistoryFile:           historyPath,
-		Version:               version.String(),
-		NoColor:               *noColor,
-		NoAnimation:           *noAnimation,
-		Verbose:               *verbose,
-		UIMode:                string(resolvedUIMode),
-		AgentRegistry:         agentReg,
-		SessionService:        serviceSet.SessionService,
-		Gateway:               serviceSet.Gateway,
-		NewACPAdapter: func(conn *internalacp.Conn) (internalacp.Adapter, error) {
-			return serviceSet.NewACPAdapter(conn)
-		},
-	})
-	return console.loop(ctx)
+func resolveInput(prompt string, stdin io.Reader, stdinTTY bool) (string, bool, error) {
+	if trimmed := strings.TrimSpace(prompt); trimmed != "" {
+		return trimmed, true, nil
+	}
+	if !stdinTTY {
+		buf, err := io.ReadAll(stdin)
+		if err != nil {
+			return "", false, err
+		}
+		trimmed := strings.TrimSpace(string(buf))
+		if trimmed == "" {
+			return "", false, fmt.Errorf("stdin prompt is empty")
+		}
+		return trimmed, true, nil
+	}
+	return "", false, nil
+}
+
+func resolveTurnInput(prompt string, stdin io.Reader, stdinTTY bool, forceInteractive bool) (string, bool, error) {
+	if forceInteractive {
+		return "", false, nil
+	}
+	input, singleShot, err := resolveInput(prompt, stdin, stdinTTY)
+	if err != nil {
+		return "", false, err
+	}
+	if singleShot {
+		return input, true, nil
+	}
+	// TTY with no prompt → default to interactive TUI
+	if stdinTTY {
+		return "", false, nil
+	}
+	return "", false, nil
+}
+
+func parseOutputFormat(raw string) (outputFormat, error) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", string(outputText):
+		return outputText, nil
+	case string(outputJSON):
+		return outputJSON, nil
+	default:
+		return "", fmt.Errorf("invalid format %q, expected text|json", raw)
+	}
+}
+
+func isTTY(file *os.File) bool {
+	if file == nil {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func envOr(key string, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
+	}
+	return fallback
+}
+
+func envInt(key string, fallback int) int {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		var parsed int
+		if _, err := fmt.Sscanf(value, "%d", &parsed); err == nil {
+			return parsed
+		}
+	}
+	return fallback
+}
+
+func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
+	provider := strings.ToLower(strings.TrimSpace(cfg.Model.Provider))
+	switch provider {
+	case "", "minimax":
+		cfg.Model.Provider = "minimax"
+		if cfg.Model.TokenEnv == "" {
+			cfg.Model.TokenEnv = "MINIMAX_API_KEY"
+		}
+	case "deepseek":
+		cfg.Model.Provider = "deepseek"
+		if cfg.Model.API == "" {
+			cfg.Model.API = sdkproviders.APIDeepSeek
+		}
+		if cfg.Model.TokenEnv == "" {
+			cfg.Model.TokenEnv = "DEEPSEEK_API_KEY"
+		}
+	case "openai":
+		cfg.Model.Provider = "openai"
+		if cfg.Model.API == "" {
+			cfg.Model.API = sdkproviders.APIOpenAI
+		}
+		if cfg.Model.TokenEnv == "" {
+			cfg.Model.TokenEnv = "OPENAI_API_KEY"
+		}
+	case "anthropic":
+		cfg.Model.Provider = "anthropic"
+		if cfg.Model.API == "" {
+			cfg.Model.API = sdkproviders.APIAnthropic
+		}
+		if cfg.Model.TokenEnv == "" {
+			cfg.Model.TokenEnv = "ANTHROPIC_API_KEY"
+		}
+	case "ollama":
+		cfg.Model.Provider = "ollama"
+		if cfg.Model.API == "" {
+			cfg.Model.API = sdkproviders.APIOllama
+		}
+		cfg.Model.AuthType = sdkproviders.AuthNone
+	case "codefree":
+		cfg.Model.Provider = "codefree"
+		if cfg.Model.API == "" {
+			cfg.Model.API = sdkproviders.APICodeFree
+		}
+		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
+			cfg.Model.BaseURL = "https://www.srdcloud.cn"
+		}
+		cfg.Model.AuthType = sdkproviders.AuthNone
+	default:
+		if cfg.Model.API == "" {
+			return gatewayapp.Config{}, fmt.Errorf("provider %q requires --api", cfg.Model.Provider)
+		}
+	}
+	if strings.TrimSpace(cfg.Model.Model) == "" {
+		// Allow empty model for interactive TUI — user can configure via /connect wizard.
+		cfg.Model.Provider = ""
+		cfg.Model.API = ""
+		cfg.Model.BaseURL = ""
+		cfg.Model.Token = ""
+		cfg.Model.TokenEnv = ""
+		cfg.Model.AuthType = ""
+		cfg.Model.HeaderKey = ""
+	}
+	return cfg, nil
 }

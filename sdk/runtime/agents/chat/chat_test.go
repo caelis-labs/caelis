@@ -1,0 +1,759 @@
+package chat
+
+import (
+	"context"
+	"encoding/json"
+	"iter"
+	"strings"
+	"testing"
+	"time"
+
+	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
+	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
+	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
+)
+
+func TestChatAgentUsesSessionMessages(t *testing.T) {
+	t.Parallel()
+
+	model := &recordingModel{}
+	agent, err := New("chat", model, "Be terse.")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{
+				AppName:      "caelis",
+				UserID:       "user-1",
+				SessionID:    "sess-1",
+				WorkspaceKey: "ws-1",
+			},
+		},
+		Events: []*sdksession.Event{
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")),
+				Text:    "hello",
+			},
+		},
+	})
+
+	var final *sdksession.Event
+	for event, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		final = event
+	}
+
+	if got := len(model.last.Messages); got != 1 {
+		t.Fatalf("len(Messages) = %d, want 1", got)
+	}
+	if got := model.last.Messages[0].TextContent(); got != "hello" {
+		t.Fatalf("user text = %q, want %q", got, "hello")
+	}
+	if got := len(model.last.Instructions); got != 1 {
+		t.Fatalf("len(Instructions) = %d, want 1", got)
+	}
+	if final == nil || final.Text != "world" {
+		t.Fatalf("final event = %+v, want assistant world", final)
+	}
+}
+
+func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T) {
+	t.Parallel()
+
+	model := &recordingModel{}
+	agent, err := New("chat", model, "")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-1"},
+		},
+		Events: []*sdksession.Event{
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "main user")),
+				Text:    "main user",
+			},
+			{
+				Type:    sdksession.EventTypeAssistant,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "side acp")),
+				Text:    "side acp",
+				Scope: &sdksession.EventScope{
+					Source: "acp_participant",
+					Participant: sdksession.ParticipantRef{
+						ID:   "side-acp",
+						Kind: sdksession.ParticipantKindACP,
+					},
+				},
+			},
+			{
+				Type:    sdksession.EventTypeAssistant,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "spawn child")),
+				Text:    "spawn child",
+				Scope: &sdksession.EventScope{
+					Source: "agent_spawn",
+					Participant: sdksession.ParticipantRef{
+						ID:   "child-1",
+						Kind: sdksession.ParticipantKindSubagent,
+					},
+				},
+			},
+		},
+	})
+
+	for _, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+
+	if got := len(model.last.Messages); got != 1 {
+		t.Fatalf("len(Messages) = %d, want only main context message", got)
+	}
+	if got := model.last.Messages[0].TextContent(); got != "main user" {
+		t.Fatalf("message text = %q, want main user", got)
+	}
+}
+
+func TestFactoryMetadataSystemPromptOverridesFactoryDefault(t *testing.T) {
+	t.Parallel()
+
+	model := &recordingModel{}
+	agent, err := (Factory{SystemPrompt: "factory-default"}).NewAgent(context.Background(), sdkruntime.AgentSpec{
+		Name:  "chat",
+		Model: model,
+		Metadata: map[string]any{
+			"system_prompt": "assembly-override",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAgent() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-override"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")),
+			Text:    "hello",
+		}},
+	})
+
+	for _, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+	if got, want := len(model.last.Instructions), 1; got != want {
+		t.Fatalf("len(Instructions) = %d, want %d", got, want)
+	}
+	if model.last.Instructions[0].Kind != sdkmodel.PartKindText || model.last.Instructions[0].Text == nil {
+		t.Fatalf("instruction[0] = %+v, want text part", model.last.Instructions[0])
+	}
+	if got := model.last.Instructions[0].Text.Text; got != "assembly-override" {
+		t.Fatalf("instruction text = %q, want %q", got, "assembly-override")
+	}
+}
+
+func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
+	t.Parallel()
+
+	model := &toolLoopModel{}
+	tool := sdktool.NamedTool{
+		Def: sdktool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call sdktool.Call) (sdktool.Result, error) {
+			var payload map[string]any
+			_ = json.Unmarshal(call.Input, &payload)
+			return sdktool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []sdkmodel.Part{
+					sdkmodel.NewJSONPart([]byte(`{"value":"pong"}`)),
+				},
+			}, nil
+		},
+	}
+	agent, err := NewWithTools("chat", model, []sdktool.Tool{tool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-1"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "say pong")),
+			Text:    "say pong",
+		}},
+	})
+
+	var events []*sdksession.Event
+	for event, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		events = append(events, event)
+	}
+
+	if got, want := len(model.requests), 2; got != want {
+		t.Fatalf("len(model.requests) = %d, want %d", got, want)
+	}
+	if got, want := len(model.requests[0].Tools), 1; got != want {
+		t.Fatalf("len(first request tools) = %d, want %d", got, want)
+	}
+	if got, want := len(events), 3; got != want {
+		t.Fatalf("len(events) = %d, want %d", got, want)
+	}
+	if events[0].Type != sdksession.EventTypeToolCall {
+		t.Fatalf("events[0].Type = %q, want tool_call", events[0].Type)
+	}
+	if events[0].Protocol == nil || events[0].Protocol.ToolCall == nil || events[0].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeToolCall) {
+		t.Fatalf("events[0].Protocol = %+v, want tool_call protocol payload", events[0].Protocol)
+	}
+	if events[1].Type != sdksession.EventTypeToolResult {
+		t.Fatalf("events[1].Type = %q, want tool_result", events[1].Type)
+	}
+	if events[1].Protocol == nil || events[1].Protocol.ToolCall == nil || events[1].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeToolUpdate) {
+		t.Fatalf("events[1].Protocol = %+v, want tool_call_update protocol payload", events[1].Protocol)
+	}
+	caelis, ok := events[1].Meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("events[1].Meta = %#v, want caelis display extension", events[1].Meta)
+	}
+	display, ok := caelis["display"].(map[string]any)
+	if !ok {
+		t.Fatalf("events[1].Meta[caelis] = %#v, want display extension", caelis)
+	}
+	toolDisplay, ok := display["tool"].(map[string]any)
+	if !ok || toolDisplay["name"] != "ECHO" {
+		t.Fatalf("display.tool = %#v, want ECHO tool display", display["tool"])
+	}
+	if events[2].Type != sdksession.EventTypeAssistant || events[2].Text != "pong" {
+		t.Fatalf("events[2] = %+v, want final assistant pong", events[2])
+	}
+	if events[2].Protocol == nil || events[2].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeAgentMessage) {
+		t.Fatalf("events[2].Protocol = %+v, want agent_message protocol payload", events[2].Protocol)
+	}
+}
+
+func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
+	t.Parallel()
+
+	model := &toolLoopModel{}
+	release := make(chan struct{})
+	progressReported := make(chan struct{})
+	tool := sdktool.NamedTool{
+		Def: sdktool.Definition{
+			Name:        "ECHO",
+			Description: "fake tool with progress",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(ctx context.Context, call sdktool.Call) (sdktool.Result, error) {
+			if call.Observer == nil {
+				t.Fatal("tool observer missing from call")
+			}
+			call.Observer.ObserveToolResult(sdktool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Meta: map[string]any{
+					"task_id": "task-1",
+					"state":   "running",
+					"running": true,
+				},
+				Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"task_id":"task-1","state":"running","running":true}`))},
+			})
+			close(progressReported)
+			<-release
+			return sdktool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"result":"done","state":"completed"}`))},
+				Meta: map[string]any{
+					"result": "done",
+					"state":  "completed",
+				},
+			}, nil
+		},
+	}
+	agent, err := NewWithTools("chat", model, []sdktool.Tool{tool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-progress"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "run bash")),
+			Text:    "run bash",
+		}},
+	})
+
+	eventsCh := make(chan *sdksession.Event, 8)
+	errCh := make(chan error, 1)
+	go func() {
+		defer close(eventsCh)
+		for event, runErr := range agent.Run(ctx) {
+			if runErr != nil {
+				errCh <- runErr
+				return
+			}
+			eventsCh <- event
+		}
+	}()
+
+	var progress *sdksession.Event
+	deadline := time.After(2 * time.Second)
+	for progress == nil {
+		select {
+		case err := <-errCh:
+			t.Fatalf("Run() error before progress = %v", err)
+		case <-progressReported:
+		case event := <-eventsCh:
+			if event == nil {
+				t.Fatal("Run() ended before tool progress")
+			}
+			if event.Type == sdksession.EventTypeToolResult && event.Protocol != nil && event.Protocol.ToolCall != nil && event.Protocol.ToolCall.Status == "running" {
+				progress = event
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for running tool progress")
+		}
+	}
+	if progress.Visibility != sdksession.VisibilityUIOnly {
+		t.Fatalf("progress visibility = %q, want ui_only", progress.Visibility)
+	}
+	if progress.Message != nil {
+		t.Fatalf("progress message = %+v, want nil so it is not appended to model history", progress.Message)
+	}
+	if got, _ := progress.Meta["task_id"].(string); got != "task-1" {
+		t.Fatalf("progress task_id = %q, want task-1", got)
+	}
+
+	close(release)
+	var finalText string
+	for event := range eventsCh {
+		if event != nil && event.Type == sdksession.EventTypeAssistant {
+			finalText = strings.TrimSpace(event.Text)
+		}
+	}
+	select {
+	case err := <-errCh:
+		t.Fatalf("Run() error = %v", err)
+	default:
+	}
+	if finalText != "pong" {
+		t.Fatalf("finalText = %q, want pong", finalText)
+	}
+}
+
+func TestChatAgentStreamsAssistantChunksBeforeFinalMessage(t *testing.T) {
+	t.Parallel()
+
+	model := &streamingModel{}
+	agent, err := (Factory{SystemPrompt: "Be terse."}).NewAgent(context.Background(), sdkruntime.AgentSpec{
+		Name:  "chat",
+		Model: model,
+		Request: sdkruntime.ModelRequestOptions{
+			Stream: boolPtr(true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAgent() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-stream"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")),
+			Text:    "hello",
+		}},
+	})
+
+	var events []*sdksession.Event
+	for event, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		events = append(events, event)
+	}
+
+	if !model.last.Stream {
+		t.Fatal("model request Stream = false, want true")
+	}
+	if got, want := len(events), 4; got != want {
+		t.Fatalf("len(events) = %d, want %d", got, want)
+	}
+	if events[0].Visibility != sdksession.VisibilityUIOnly || events[0].Protocol == nil || events[0].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeAgentThought) || events[0].Text != "thinking..." {
+		t.Fatalf("events[0] = %+v, want ui-only reasoning chunk", events[0])
+	}
+	if events[1].Visibility != sdksession.VisibilityUIOnly || events[1].Protocol == nil || events[1].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeAgentMessage) || events[1].Text != "hel" {
+		t.Fatalf("events[1] = %+v, want ui-only assistant chunk hel", events[1])
+	}
+	if events[2].Visibility != sdksession.VisibilityUIOnly || events[2].Protocol == nil || events[2].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeAgentMessage) || events[2].Text != "lo" {
+		t.Fatalf("events[2] = %+v, want ui-only assistant chunk lo", events[2])
+	}
+	if events[3].Type != sdksession.EventTypeAssistant || events[3].Text != "hello" {
+		t.Fatalf("events[3] = %+v, want final assistant hello", events[3])
+	}
+	if events[3].Visibility != sdksession.VisibilityCanonical {
+		t.Fatalf("final event visibility = %q, want canonical", events[3].Visibility)
+	}
+}
+
+func TestChatAgentDefaultsToNonStreamingRequests(t *testing.T) {
+	t.Parallel()
+
+	model := &streamingModel{}
+	agent, err := New("chat", model, "Be terse.")
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-nonstream"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")),
+			Text:    "hello",
+		}},
+	})
+
+	var events []*sdksession.Event
+	for event, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		events = append(events, event)
+	}
+
+	if model.last.Stream {
+		t.Fatal("model request Stream = true, want false by default")
+	}
+	if got, want := len(events), 1; got != want {
+		t.Fatalf("len(events) = %d, want %d", got, want)
+	}
+	if events[0].Type != sdksession.EventTypeAssistant || events[0].Text != "hello" {
+		t.Fatalf("events[0] = %+v, want final assistant hello", events[0])
+	}
+}
+
+func TestChunkEventFromStreamEventPreservesBoundaryWhitespace(t *testing.T) {
+	t.Parallel()
+
+	reasoning := chunkEventFromStreamEvent(&sdkmodel.StreamEvent{
+		Type: sdkmodel.StreamEventPartDelta,
+		PartDelta: &sdkmodel.PartDelta{
+			Kind:      sdkmodel.PartKindReasoning,
+			TextDelta: "think ",
+		},
+	})
+	if reasoning == nil || reasoning.Text != "think " || reasoning.Message == nil || reasoning.Message.ReasoningText() != "think " {
+		t.Fatalf("reasoning chunk = %+v, want boundary whitespace preserved", reasoning)
+	}
+
+	space := chunkEventFromStreamEvent(&sdkmodel.StreamEvent{
+		Type: sdkmodel.StreamEventPartDelta,
+		PartDelta: &sdkmodel.PartDelta{
+			Kind:      sdkmodel.PartKindReasoning,
+			TextDelta: " ",
+		},
+	})
+	if space == nil || space.Text != " " || space.Message == nil || space.Message.ReasoningText() != " " {
+		t.Fatalf("space chunk = %+v, want whitespace-only reasoning chunk preserved", space)
+	}
+}
+
+func TestChatAgentDoesNotImposeFixedToolLoopCap(t *testing.T) {
+	t.Parallel()
+
+	model := &longToolLoopModel{}
+	tool := sdktool.NamedTool{
+		Def: sdktool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call sdktool.Call) (sdktool.Result, error) {
+			return sdktool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []sdkmodel.Part{
+					sdkmodel.NewJSONPart([]byte(`{"value":"pong"}`)),
+				},
+			}, nil
+		},
+	}
+	agent, err := NewWithTools("chat", model, []sdktool.Tool{tool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "sess-long-loop"}},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "loop")),
+			Text:    "loop",
+		}},
+	})
+
+	var (
+		final  *sdksession.Event
+		runErr error
+	)
+	for event, err := range agent.Run(ctx) {
+		if err != nil {
+			runErr = err
+			break
+		}
+		final = event
+	}
+	if runErr != nil {
+		t.Fatalf("Run() error = %v", runErr)
+	}
+	if final == nil || final.Text != "done" {
+		t.Fatalf("final event = %+v, want assistant done", final)
+	}
+	if got, want := model.calls, 10; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+}
+
+type recordingModel struct {
+	last sdkmodel.Request
+}
+
+func (m *recordingModel) Name() string { return "stub" }
+
+func (m *recordingModel) Generate(_ context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	if req != nil {
+		m.last = *req
+		m.last.Messages = sdkmodel.CloneMessages(req.Messages)
+		m.last.Instructions = sdkmodel.CloneParts(req.Instructions)
+	}
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "world"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
+func ptrMessage(message sdkmodel.Message) *sdkmodel.Message {
+	return &message
+}
+
+func boolPtr(v bool) *bool { return &v }
+
+type toolLoopModel struct {
+	requests []sdkmodel.Request
+}
+
+func (m *toolLoopModel) Name() string { return "tool-loop" }
+
+func (m *toolLoopModel) Generate(_ context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	if req != nil {
+		cp := *req
+		cp.Messages = sdkmodel.CloneMessages(req.Messages)
+		cp.Instructions = sdkmodel.CloneParts(req.Instructions)
+		cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
+		m.requests = append(m.requests, cp)
+	}
+	index := len(m.requests)
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		if index == 1 {
+			yield(&sdkmodel.StreamEvent{
+				Type: sdkmodel.StreamEventTurnDone,
+				Response: &sdkmodel.Response{
+					Message: sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{{
+						ID:   "call-1",
+						Name: "ECHO",
+						Args: `{"value":"pong"}`,
+					}}, ""),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       sdkmodel.ResponseStatusCompleted,
+					FinishReason: sdkmodel.FinishReasonToolCalls,
+				},
+			}, nil)
+			return
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "pong"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+				FinishReason: sdkmodel.FinishReasonStop,
+			},
+		}, nil)
+	}
+}
+
+type streamingModel struct {
+	last sdkmodel.Request
+}
+
+func (m *streamingModel) Name() string { return "streaming" }
+
+func (m *streamingModel) Generate(_ context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	if req != nil {
+		m.last = *req
+		m.last.Messages = sdkmodel.CloneMessages(req.Messages)
+		m.last.Instructions = sdkmodel.CloneParts(req.Instructions)
+	}
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventPartDelta,
+			PartDelta: &sdkmodel.PartDelta{
+				Kind:      sdkmodel.PartKindReasoning,
+				TextDelta: "thinking...",
+			},
+		}, nil)
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventPartDelta,
+			PartDelta: &sdkmodel.PartDelta{
+				Kind:      sdkmodel.PartKindText,
+				TextDelta: "hel",
+			},
+		}, nil)
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventPartDelta,
+			PartDelta: &sdkmodel.PartDelta{
+				Kind:      sdkmodel.PartKindText,
+				TextDelta: "lo",
+			},
+		}, nil)
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.MessageFromAssistantParts("hello", strings.TrimSpace("thinking..."), nil),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
+type blockingStreamingModel struct {
+	started      chan struct{}
+	releaseFinal chan struct{}
+}
+
+func (m *blockingStreamingModel) Name() string { return "blocking-streaming" }
+
+func (m *blockingStreamingModel) Generate(_ context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		if m.started != nil {
+			select {
+			case <-m.started:
+			default:
+				close(m.started)
+			}
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventPartDelta,
+			PartDelta: &sdkmodel.PartDelta{
+				Kind:      sdkmodel.PartKindText,
+				TextDelta: "hel",
+			},
+		}, nil)
+		if m.releaseFinal != nil {
+			select {
+			case <-m.releaseFinal:
+			case <-time.After(5 * time.Second):
+				yield(nil, context.DeadlineExceeded)
+				return
+			}
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "hello"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+			},
+		}, nil)
+		_ = req
+	}
+}
+
+type longToolLoopModel struct {
+	calls int
+}
+
+func (m *longToolLoopModel) Name() string { return "long-tool-loop" }
+
+func (m *longToolLoopModel) Generate(_ context.Context, _ *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	m.calls++
+	callIndex := m.calls
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		if callIndex <= 9 {
+			yield(&sdkmodel.StreamEvent{
+				Type: sdkmodel.StreamEventTurnDone,
+				Response: &sdkmodel.Response{
+					Message: sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{{
+						ID:   "call-loop",
+						Name: "ECHO",
+						Args: `{"value":"pong"}`,
+					}}, ""),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       sdkmodel.ResponseStatusCompleted,
+					FinishReason: sdkmodel.FinishReasonToolCalls,
+				},
+			}, nil)
+			return
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "done"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+				FinishReason: sdkmodel.FinishReasonStop,
+			},
+		}, nil)
+	}
+}
