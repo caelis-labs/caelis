@@ -79,6 +79,16 @@ func TestPreferredSessionIDDefaultsDifferBetweenInteractiveAndHeadless(t *testin
 	}
 }
 
+func cliTestStoreDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	data := []byte(`{"sandbox":{"requested_type":"host"}}`)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), data, 0o600); err != nil {
+		t.Fatalf("write CLI test config: %v", err)
+	}
+	return dir
+}
+
 func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 	handle := newFakeHandle([]appgateway.EventEnvelope{
 		{
@@ -121,7 +131,7 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	err := run(context.Background(), []string{
 		"-doctor",
 		"-format", "json",
-		"-store-dir", t.TempDir(),
+		"-store-dir", cliTestStoreDir(t),
 		"-workspace-key", "doctor-ws",
 		"-workspace-cwd", t.TempDir(),
 		"-provider", "minimax",
@@ -151,7 +161,7 @@ func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 	defer cancel()
 	err := run(ctx, []string{
 		"acp",
-		"-store-dir", t.TempDir(),
+		"-store-dir", cliTestStoreDir(t),
 		"-workspace-key", "acp-ws",
 		"-workspace-cwd", t.TempDir(),
 		"-provider", "ollama",
@@ -168,7 +178,7 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
 		"doctor",
-		"-store-dir", t.TempDir(),
+		"-store-dir", cliTestStoreDir(t),
 		"-workspace-key", "doctor-ws",
 		"-workspace-cwd", t.TempDir(),
 		"-provider", "deepseek",
