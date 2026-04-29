@@ -432,6 +432,31 @@ func TestProjectGatewayEventACPFetchToolUsesReadableQueryArgs(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventACPFetchWithoutRawQueryKeepsGenericSearchTitle(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:   appgateway.EventKindToolCall,
+		Origin: &appgateway.EventOrigin{Source: "acp_participant", Scope: appgateway.EventScopeParticipant, ScopeID: "codex-001"},
+		ToolCall: &appgateway.ToolCallPayload{
+			CallID:    "ws-1",
+			ToolTitle: "Searching the Web",
+			ToolKind:  "fetch",
+			Status:    appgateway.ToolStatusRunning,
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolArgs != "Searching the Web" {
+		t.Fatalf("tool args = %q, want original title", got.ToolArgs)
+	}
+	if strings.Contains(got.ToolArgs, `"the Web"`) {
+		t.Fatalf("tool args = %q, must not derive fake query from generic title", got.ToolArgs)
+	}
+}
+
 func TestProjectGatewayEventACPFetchResultKeepsInputQueryWhenOutputHasText(t *testing.T) {
 	t.Parallel()
 

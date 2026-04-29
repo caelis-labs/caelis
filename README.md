@@ -48,9 +48,11 @@ headless one-shot runner.
   bridge helpers used by external-agent flows.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 
+Documentation map: [docs/README.md](docs/README.md)
+
 Architecture overview: [docs/architecture.md](docs/architecture.md)
 
-Deeper design documents:
+Current design references:
 [docs/current_sdk_foundation_scope.md](docs/current_sdk_foundation_scope.md),
 [docs/unified_gateway_foundation_spec.md](docs/unified_gateway_foundation_spec.md)
 

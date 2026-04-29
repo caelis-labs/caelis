@@ -40,6 +40,30 @@ func ptrRuntimeMessage(message sdkmodel.Message) *sdkmodel.Message {
 	return &message
 }
 
+func closeGatewayDriverTestTurn(t *testing.T, turn Turn) {
+	t.Helper()
+	if turn == nil {
+		return
+	}
+	turn.Cancel()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case _, ok := <-turn.Events():
+			if !ok {
+				if err := turn.Close(); err != nil {
+					t.Fatalf("Close() error = %v", err)
+				}
+				return
+			}
+		case <-timer.C:
+			_ = turn.Close()
+			t.Fatal("turn did not close after cancel")
+		}
+	}
+}
+
 func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
 	t.Helper()
 	if strings.TrimSpace(cfg.Sandbox.RequestedType) == "" {
@@ -138,11 +162,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit() error = %v", err)
 	}
-	if turn != nil {
-		if err := turn.Close(); err != nil {
-			t.Fatalf("Close() error = %v", err)
-		}
-	}
+	closeGatewayDriverTestTurn(t, turn)
 	after, err := stack.Gateway.ListSessions(ctx, appgateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,

@@ -71,7 +71,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case "READ", "LIST":
 		return prefixedTitleDetail(title, "Read", "List")
 	case "SEARCH", "RG", "FIND":
-		if detail := prefixedTitleDetail(title, "Search", "Searching for:", "Searching"); detail != "" {
+		if detail := prefixedTitleDetail(title, "Search", "Searching for:"); detail != "" {
 			return fmt.Sprintf("%q", detail)
 		}
 		return title
@@ -88,7 +88,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 			return fmt.Sprintf("%q", detail)
 		}
 	case "fetch":
-		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:", "Searching"); detail != "" {
+		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:"); detail != "" {
 			return fmt.Sprintf("%q", detail)
 		}
 	}

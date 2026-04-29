@@ -67,4 +67,7 @@ That wiring should not leak upward into adapters or downward into the SDK.
 - [architecture.md](architecture.md): current codebase layering and entry flow
 - [unified_gateway_foundation_spec.md](unified_gateway_foundation_spec.md):
   gateway contract intent and deferred work
-- `docs/session_controller_event_model.md`: canonical event and controller model
+
+Historical implementation plans and migration prompts have been removed. Keep
+new durable rules in the current references above rather than adding dated plan
+documents.
