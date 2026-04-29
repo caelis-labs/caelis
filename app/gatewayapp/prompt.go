@@ -149,7 +149,7 @@ func builtInCapabilityGuidancePrompt(agents []sdkdelegation.Agent) string {
 	}
 	if len(agents) > 0 {
 		lines = append(lines,
-			"- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write only for a follow-up prompt after a SPAWN child has completed.",
+			"- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write to send stdin to a running BASH task or a follow-up prompt to a completed SPAWN child.",
 		)
 	}
 	return strings.Join(lines, "\n")

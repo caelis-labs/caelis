@@ -64,6 +64,85 @@ func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	}
 }
 
+func TestTaskWriteContinuesSpawnChildAfterWaitCompletes(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateRunning, OutputPreview: "working", Running: true},
+		waitResult:  sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "first done"},
+		continueResult: sdkdelegation.Result{
+			State:  sdkdelegation.StateCompleted,
+			Result: "follow-up done",
+		},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "first",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	completed, err := runtime.tasks.Wait(ctx, session.SessionRef, sdktask.ControlRequest{
+		TaskID: started.Ref.TaskID,
+	})
+	if err != nil {
+		t.Fatalf("Wait(spawn) error = %v", err)
+	}
+	if completed.State != sdktask.StateCompleted {
+		t.Fatalf("completed state = %q, want completed", completed.State)
+	}
+
+	continued, err := runtime.tasks.Write(ctx, session.SessionRef, sdktask.ControlRequest{
+		TaskID: started.Ref.TaskID,
+		Input:  "next prompt",
+	})
+	if err != nil {
+		t.Fatalf("Write(completed spawn after wait) error = %v", err)
+	}
+	if got, _ := continued.Result["result"].(string); got != "follow-up done" {
+		t.Fatalf("continued result = %q, want follow-up done", got)
+	}
+	if runner.continuePrompt != "next prompt" {
+		t.Fatalf("continue prompt = %q, want next prompt", runner.continuePrompt)
+	}
+}
+
+func TestTaskWriteCanContinueCompletedSpawnChildRepeatedly(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "first done"},
+		continueResult: sdkdelegation.Result{
+			State:  sdkdelegation.StateCompleted,
+			Result: "follow-up done",
+		},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "first",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if _, err := runtime.tasks.Write(ctx, session.SessionRef, sdktask.ControlRequest{
+		TaskID: started.Ref.TaskID,
+		Input:  "second prompt",
+	}); err != nil {
+		t.Fatalf("first Write(completed spawn) error = %v", err)
+	}
+	if _, err := runtime.tasks.Write(ctx, session.SessionRef, sdktask.ControlRequest{
+		TaskID: started.Ref.TaskID,
+		Input:  "third prompt",
+	}); err != nil {
+		t.Fatalf("second Write(completed spawn) error = %v", err)
+	}
+	if runner.continuePrompt != "third prompt" {
+		t.Fatalf("last continue prompt = %q, want third prompt", runner.continuePrompt)
+	}
+}
+
 func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{

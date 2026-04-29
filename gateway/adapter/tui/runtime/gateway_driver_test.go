@@ -7,8 +7,10 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -404,6 +406,52 @@ func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
 	deletes, handled := driver.completeACPControllerSlashArg(status, "model del", "", 10)
 	if !handled || len(deletes) != 0 {
 		t.Fatalf("ACP delete candidates = %#v handled=%v, want handled empty", deletes, handled)
+	}
+}
+
+func TestGatewayDriverCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
+	driver := &GatewayDriver{}
+	status := gatewayapp.ACPControllerStatus{
+		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
+			{Value: "gpt-5.5", Name: "GPT-5.5"},
+			{Value: "gpt-5.4", Name: "gpt-5.4"},
+		},
+		EffortOptions: []gatewayapp.ACPControllerConfigChoice{
+			{Value: "low", Name: "Low"},
+			{Value: "high", Name: "High"},
+		},
+	}
+	efforts, handled := driver.completeACPControllerSlashArg(status, "model use gpt-5.5", "", 10)
+	if !handled || len(efforts) != 2 || efforts[0].Value != "low" || efforts[1].Value != "high" {
+		t.Fatalf("ACP gpt-5.5 efforts = %#v handled=%v, want config low/high", efforts, handled)
+	}
+	efforts, handled = driver.completeACPControllerSlashArg(status, "model use gpt-5.4", "", 10)
+	if !handled || len(efforts) != 2 || efforts[0].Value != "low" || efforts[1].Value != "high" {
+		t.Fatalf("ACP gpt-5.4 efforts = %#v handled=%v, want config low/high", efforts, handled)
+	}
+}
+
+func TestGatewayDriverCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
+	driver := &GatewayDriver{}
+	status := gatewayapp.ACPControllerStatus{
+		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
+			{Value: "gpt-5.5", Name: "GPT-5.5"},
+			{Value: "gpt-5.4", Name: "gpt-5.4"},
+		},
+		EffortOptionsByModel: map[string][]gatewayapp.ACPControllerConfigChoice{
+			"gpt-5.4": {
+				{Value: "low", Name: "Low"},
+				{Value: "xhigh", Name: "Xhigh"},
+			},
+		},
+	}
+	efforts, handled := driver.completeACPControllerSlashArg(status, "model use gpt-5.4", "", 10)
+	if !handled || len(efforts) != 2 || efforts[0].Value != "low" || efforts[1].Value != "xhigh" {
+		t.Fatalf("ACP gpt-5.4 efforts = %#v handled=%v, want model-specific low/xhigh", efforts, handled)
+	}
+	efforts, handled = driver.completeACPControllerSlashArg(status, "model use gpt-5.5", "", 10)
+	if !handled || len(efforts) != 0 {
+		t.Fatalf("ACP gpt-5.5 efforts = %#v handled=%v, want no model-specific efforts", efforts, handled)
 	}
 }
 
@@ -1455,6 +1503,109 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	}
 	if got := candidateValues(deepseekLevels); !equalStrings(got, []string{"none", "high", "max"}) {
 		t.Fatalf("deepseek reasoning candidates = %#v, want none/high/max", deepseekLevels)
+	}
+}
+
+func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "agent-root-order-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      sdkproviders.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := NewGatewayDriver(ctx, stack, "agent-root-order-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	candidates, err := driver.CompleteSlashArg(ctx, "agent", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(agent) error = %v", err)
+	}
+	got := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		got = append(got, candidate.Value)
+	}
+	want := []string{"use", "add", "install", "list", "remove"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("agent root candidates = %#v, want %#v", got, want)
+	}
+}
+
+func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
+	ctx := context.Background()
+	binDir := t.TempDir()
+	started := filepath.Join(t.TempDir(), "npm-started")
+	npmPath := filepath.Join(binDir, "npm")
+	body := "#!/bin/sh\nprintf started > \"$CAELIS_NPM_STARTED\"\nwhile true; do /bin/sleep 1; done\n"
+	if err := os.WriteFile(npmPath, []byte(body), 0o755); err != nil {
+		t.Fatalf("WriteFile(npm) error = %v", err)
+	}
+	t.Setenv("PATH", binDir)
+	t.Setenv("CAELIS_NPM_STARTED", started)
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "agent-install-cancel-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      sdkproviders.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := NewGatewayDriver(ctx, stack, "agent-install-cancel-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := driver.AddAgentWithOptions(ctx, "claude", AgentAddOptions{Install: true})
+		done <- err
+	}()
+
+	deadline := time.After(5 * time.Second)
+	for {
+		if _, err := os.Stat(started); err == nil {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("AddAgentWithOptions returned before fake npm started: %v", err)
+		case <-deadline:
+			t.Fatal("fake npm did not start")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err := driver.Interrupt(ctx); err != nil {
+		t.Fatalf("Interrupt() error = %v", err)
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("AddAgentWithOptions error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("AddAgentWithOptions did not return after Interrupt")
 	}
 }
 

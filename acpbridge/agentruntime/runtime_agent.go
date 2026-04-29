@@ -12,8 +12,11 @@ import (
 	bridgeloader "github.com/OnslaughtSnail/caelis/acpbridge/loader"
 	bridgeprojector "github.com/OnslaughtSnail/caelis/acpbridge/projector"
 	bridgeterminal "github.com/OnslaughtSnail/caelis/acpbridge/terminal"
+	"github.com/OnslaughtSnail/caelis/internal/version"
+	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
 )
 
 // BuildAgentSpecFunc assembles the runtime-facing agent spec for one ACP
@@ -29,6 +32,9 @@ type Config struct {
 	Loader         acp.SessionLoader
 	Modes          acp.ModeProvider
 	Config         acp.ConfigProvider
+	Models         acp.ModelProvider
+	Commands       acp.CommandProvider
+	PromptCaps     acp.PromptCapabilitiesProvider
 	AppName        string
 	UserID         string
 	AgentInfo      *acp.Implementation
@@ -44,6 +50,9 @@ type RuntimeAgent struct {
 	loader         acp.SessionLoader
 	modes          acp.ModeProvider
 	config         acp.ConfigProvider
+	models         acp.ModelProvider
+	commands       acp.CommandProvider
+	promptCaps     acp.PromptCapabilitiesProvider
 	appName        string
 	userID         string
 	agentInfo      *acp.Implementation
@@ -94,25 +103,51 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		loader:         loader,
 		modes:          cfg.Modes,
 		config:         cfg.Config,
+		models:         cfg.Models,
+		commands:       cfg.Commands,
+		promptCaps:     cfg.PromptCaps,
 		appName:        appName,
 		userID:         userID,
-		agentInfo:      cfg.AgentInfo,
+		agentInfo:      normalizeAgentInfo(cfg.AgentInfo, appName),
 		cancels:        map[string]context.CancelFunc{},
 	}, nil
 }
 
-func (a *RuntimeAgent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
+func normalizeAgentInfo(info *acp.Implementation, appName string) *acp.Implementation {
+	normalized := acp.Implementation{}
+	if info != nil {
+		normalized = *info
+	}
+	if normalized.Name = strings.TrimSpace(normalized.Name); normalized.Name == "" {
+		normalized.Name = strings.TrimSpace(appName)
+	}
+	normalized.Title = strings.TrimSpace(normalized.Title)
+	if normalized.Version = strings.TrimSpace(normalized.Version); normalized.Version == "" {
+		normalized.Version = version.String()
+	}
+	return &normalized
+}
+
+func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) (acp.InitializeResponse, error) {
+	promptCaps := acp.PromptCapabilities{
+		Audio:           false,
+		EmbeddedContext: false,
+		Image:           false,
+	}
+	if a.promptCaps != nil {
+		caps, err := a.promptCaps.PromptCapabilities(ctx)
+		if err != nil {
+			return acp.InitializeResponse{}, err
+		}
+		promptCaps = caps
+	}
 	caps := acp.AgentCapabilities{
 		Auth: map[string]any{},
 		MCPCapabilities: acp.MCPCapabilities{
 			HTTP: false,
 			SSE:  false,
 		},
-		PromptCapabilities: acp.PromptCapabilities{
-			Audio:           false,
-			EmbeddedContext: false,
-			Image:           false,
-		},
+		PromptCapabilities:  promptCaps,
 		SessionCapabilities: map[string]json.RawMessage{},
 	}
 	if a.loader != nil {
@@ -167,6 +202,13 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 		}
 		resp.ConfigOptions = options
 	}
+	if a.models != nil {
+		models, err := a.models.SessionModels(ctx, session)
+		if err != nil {
+			return acp.NewSessionResponse{}, err
+		}
+		resp.Models = models
+	}
 	return resp, nil
 }
 
@@ -174,7 +216,22 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionReque
 	if a.loader == nil {
 		return acp.LoadSessionResponse{}, acp.ErrCapabilityUnsupported
 	}
-	return a.loader.LoadSession(ctx, req, cb)
+	resp, err := a.loader.LoadSession(ctx, req, cb)
+	if err != nil {
+		return acp.LoadSessionResponse{}, err
+	}
+	if a.models != nil {
+		session, err := a.session(ctx, req.SessionID)
+		if err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+		models, err := a.models.SessionModels(ctx, session)
+		if err != nil {
+			return acp.LoadSessionResponse{}, err
+		}
+		resp.Models = models
+	}
+	return resp, nil
 }
 
 func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {
@@ -191,13 +248,22 @@ func (a *RuntimeAgent) SetSessionConfigOption(ctx context.Context, req acp.SetSe
 	return a.config.SetSessionConfigOption(ctx, req)
 }
 
-func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp.PromptCallbacks) (acp.PromptResponse, error) {
-	ref := sdksession.SessionRef{
-		AppName:   a.appName,
-		UserID:    a.userID,
-		SessionID: strings.TrimSpace(req.SessionID),
+func (a *RuntimeAgent) SetSessionModel(ctx context.Context, req acp.SetSessionModelRequest) (acp.SetSessionModelResponse, error) {
+	if a.models == nil {
+		return acp.SetSessionModelResponse{}, acp.ErrCapabilityUnsupported
 	}
-	session, err := a.sessions.Session(ctx, ref)
+	return a.models.SetSessionModel(ctx, req)
+}
+
+func (a *RuntimeAgent) AvailableCommands(ctx context.Context, sessionID string) ([]acp.AvailableCommand, error) {
+	if a.commands == nil {
+		return nil, nil
+	}
+	return a.commands.AvailableCommands(ctx, sessionID)
+}
+
+func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp.PromptCallbacks) (acp.PromptResponse, error) {
+	session, err := a.session(ctx, req.SessionID)
 	if err != nil {
 		return acp.PromptResponse{}, err
 	}
@@ -205,9 +271,14 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	if err != nil {
 		return acp.PromptResponse{}, err
 	}
-	input, err := promptText(req.Prompt)
+	input, contentParts, err := promptContent(req.Prompt)
 	if err != nil {
 		return acp.PromptResponse{}, err
+	}
+	ref := sdksession.SessionRef{
+		AppName:   a.appName,
+		UserID:    a.userID,
+		SessionID: strings.TrimSpace(req.SessionID),
 	}
 
 	runCtx, cancel := context.WithCancel(ctx)
@@ -218,6 +289,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	result, err := a.runtime.Run(runCtx, sdkruntime.RunRequest{
 		SessionRef:        ref,
 		Input:             input,
+		ContentParts:      contentParts,
 		Request:           sdkruntime.ModelRequestOptions{Stream: boolPtr(true)},
 		ApprovalRequester: approvalRequester{callbacks: cb},
 		AgentSpec:         spec,
@@ -228,6 +300,10 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		}
 		return acp.PromptResponse{}, err
 	}
+	streamedAssistant := false
+	var lastLive liveChunkFingerprint
+	hasLastLive := false
+	bridgedTerminals := map[string]struct{}{}
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
 			if errors.Is(seqErr, context.Canceled) {
@@ -238,9 +314,25 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		if event == nil {
 			continue
 		}
+		if isLiveAssistantChunk(event) {
+			streamedAssistant = true
+		}
+		if fingerprint, ok := liveChunkFingerprintForEvent(event); ok {
+			if hasLastLive && fingerprint == lastLive {
+				continue
+			}
+			lastLive = fingerprint
+			hasLastLive = true
+		} else {
+			hasLastLive = false
+			if streamedAssistant && isFinalAssistantMessage(event) {
+				continue
+			}
+		}
 		if err := a.emitEvent(runCtx, cb, event); err != nil {
 			return acp.PromptResponse{}, err
 		}
+		a.maybeStartTerminalBridge(context.WithoutCancel(ctx), cb, event, bridgedTerminals)
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
@@ -253,6 +345,14 @@ func (a *RuntimeAgent) Cancel(_ context.Context, req acp.CancelNotification) err
 		cancel()
 	}
 	return nil
+}
+
+func (a *RuntimeAgent) session(ctx context.Context, sessionID string) (sdksession.Session, error) {
+	return a.sessions.Session(ctx, sdksession.SessionRef{
+		AppName:   a.appName,
+		UserID:    a.userID,
+		SessionID: strings.TrimSpace(sessionID),
+	})
 }
 
 func (a *RuntimeAgent) Output(ctx context.Context, req acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
@@ -309,6 +409,164 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 	return nil
 }
 
+func (a *RuntimeAgent) maybeStartTerminalBridge(ctx context.Context, cb acp.PromptCallbacks, event *sdksession.Event, active map[string]struct{}) {
+	if cb == nil || event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+		return
+	}
+	call := event.Protocol.ToolCall
+	if !terminalBridgeEligibleTool(call.Name) {
+		return
+	}
+	ref, ok := bridgeterminal.RefFromEvent(event)
+	if !ok {
+		return
+	}
+	displayTerminalID := strings.TrimSpace(call.ID)
+	if displayTerminalID == "" {
+		return
+	}
+	key := strings.TrimSpace(event.SessionID) + "\x00" + displayTerminalID
+	if _, exists := active[key]; exists {
+		return
+	}
+	active[key] = struct{}{}
+	go a.streamTerminalToACP(ctx, cb, strings.TrimSpace(event.SessionID), displayTerminalID, ref)
+}
+
+func (a *RuntimeAgent) streamTerminalToACP(ctx context.Context, cb acp.PromptCallbacks, sessionID string, displayTerminalID string, ref sdkstream.Ref) {
+	provider, ok := a.runtime.(sdkruntime.StreamProvider)
+	if !ok || provider.Streams() == nil {
+		return
+	}
+	for frame, err := range provider.Streams().Subscribe(ctx, sdkstream.SubscribeRequest{Ref: ref}) {
+		if err != nil {
+			return
+		}
+		if frame == nil {
+			continue
+		}
+		if frame.Text != "" {
+			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
+				SessionID: sessionID,
+				Update: acp.ToolCallUpdate{
+					SessionUpdate: acp.UpdateToolCallInfo,
+					ToolCallID:    displayTerminalID,
+					Meta: map[string]any{
+						"terminal_output": map[string]any{
+							"terminal_id": displayTerminalID,
+							"data":        frame.Text,
+						},
+					},
+				},
+			})
+		}
+		if frame.Closed {
+			status := acp.ToolStatusCompleted
+			if frame.ExitCode != nil && *frame.ExitCode != 0 {
+				status = acp.ToolStatusFailed
+			}
+			meta := map[string]any{
+				"terminal_id": displayTerminalID,
+				"signal":      nil,
+			}
+			if frame.ExitCode != nil {
+				meta["exit_code"] = *frame.ExitCode
+			}
+			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
+				SessionID: sessionID,
+				Update: acp.ToolCallUpdate{
+					SessionUpdate: acp.UpdateToolCallInfo,
+					ToolCallID:    displayTerminalID,
+					Status:        &status,
+					Meta:          map[string]any{"terminal_exit": meta},
+				},
+			})
+			return
+		}
+	}
+}
+
+func terminalBridgeEligibleTool(name string) bool {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "BASH", "SPAWN":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLiveAssistantChunk(event *sdksession.Event) bool {
+	return event != nil &&
+		event.Visibility == sdksession.VisibilityUIOnly &&
+		event.Protocol != nil &&
+		strings.TrimSpace(event.Protocol.UpdateType) == string(sdksession.ProtocolUpdateTypeAgentMessage)
+}
+
+func isFinalAssistantMessage(event *sdksession.Event) bool {
+	return event != nil &&
+		event.Visibility != sdksession.VisibilityUIOnly &&
+		event.Protocol != nil &&
+		strings.TrimSpace(event.Protocol.UpdateType) == string(sdksession.ProtocolUpdateTypeAgentMessage) &&
+		sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant
+}
+
+type liveChunkFingerprint struct {
+	updateType string
+	text       string
+}
+
+func liveChunkFingerprintForEvent(event *sdksession.Event) (liveChunkFingerprint, bool) {
+	if event == nil || event.Visibility != sdksession.VisibilityUIOnly || event.Protocol == nil {
+		return liveChunkFingerprint{}, false
+	}
+	updateType := strings.TrimSpace(event.Protocol.UpdateType)
+	var text string
+	switch updateType {
+	case string(sdksession.ProtocolUpdateTypeAgentMessage):
+		text = assistantTextForEvent(event)
+	case string(sdksession.ProtocolUpdateTypeAgentThought):
+		text = thoughtTextForEvent(event)
+	default:
+		return liveChunkFingerprint{}, false
+	}
+	if text == "" {
+		return liveChunkFingerprint{}, false
+	}
+	if len([]rune(strings.TrimSpace(text))) < 12 {
+		return liveChunkFingerprint{}, false
+	}
+	return liveChunkFingerprint{updateType: updateType, text: text}, true
+}
+
+func assistantTextForEvent(event *sdksession.Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Text != "" {
+		return event.Text
+	}
+	if event.Message != nil {
+		return event.Message.TextContent()
+	}
+	return ""
+}
+
+func thoughtTextForEvent(event *sdksession.Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Text != "" {
+		return event.Text
+	}
+	if event.Message == nil {
+		return ""
+	}
+	if text := event.Message.ReasoningText(); text != "" {
+		return text
+	}
+	return event.Message.TextContent()
+}
+
 func (a *RuntimeAgent) setCancel(sessionID string, cancel context.CancelFunc) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -323,27 +581,72 @@ func (a *RuntimeAgent) clearCancel(sessionID string) {
 
 func boolPtr(v bool) *bool { return &v }
 
-func promptText(prompt []json.RawMessage) (string, error) {
-	parts := make([]string, 0, len(prompt))
+func promptContent(prompt []json.RawMessage) (string, []sdkmodel.ContentPart, error) {
+	texts := make([]string, 0, len(prompt))
+	contentParts := make([]sdkmodel.ContentPart, 0, len(prompt))
+	hasMedia := false
 	for _, raw := range prompt {
 		if len(raw) == 0 {
 			continue
 		}
 		var item struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type     string `json:"type"`
+			Text     string `json:"text"`
+			MimeType string `json:"mimeType"`
+			Data     string `json:"data"`
+			Name     string `json:"name"`
+			URI      string `json:"uri"`
 		}
 		if err := json.Unmarshal(raw, &item); err != nil {
-			return "", fmt.Errorf("acpbridge/agentruntime: decode prompt content: %w", err)
+			return "", nil, fmt.Errorf("acpbridge/agentruntime: decode prompt content: %w", err)
 		}
 		switch strings.TrimSpace(item.Type) {
 		case "", "text":
 			if text := strings.TrimSpace(item.Text); text != "" {
-				parts = append(parts, text)
+				texts = append(texts, text)
+				contentParts = append(contentParts, sdkmodel.ContentPart{
+					Type: sdkmodel.ContentPartText,
+					Text: text,
+				})
 			}
+		case "image":
+			data := strings.TrimSpace(item.Data)
+			if data == "" && strings.TrimSpace(item.URI) != "" {
+				return "", nil, fmt.Errorf("acpbridge/agentruntime: image prompt content requires inline data")
+			}
+			if data == "" {
+				continue
+			}
+			mimeType, data := splitDataURL(strings.TrimSpace(item.MimeType), data)
+			contentParts = append(contentParts, sdkmodel.ContentPart{
+				Type:     sdkmodel.ContentPartImage,
+				MimeType: mimeType,
+				Data:     data,
+				FileName: strings.TrimSpace(item.Name),
+			})
+			hasMedia = true
 		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n")), nil
+	if !hasMedia {
+		contentParts = nil
+	}
+	return strings.TrimSpace(strings.Join(texts, "\n")), contentParts, nil
+}
+
+func splitDataURL(mimeType string, data string) (string, string) {
+	if strings.HasPrefix(data, "data:") {
+		header, payload, ok := strings.Cut(data, ",")
+		if ok {
+			if prefix, suffix, ok := strings.Cut(header, ";base64"); ok && suffix == "" {
+				mimeType = strings.TrimPrefix(prefix, "data:")
+			}
+			data = payload
+		}
+	}
+	if strings.TrimSpace(mimeType) == "" {
+		mimeType = "image/png"
+	}
+	return strings.TrimSpace(mimeType), strings.TrimSpace(data)
 }
 
 type approvalRequester struct {

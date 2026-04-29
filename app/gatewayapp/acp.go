@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/acpbridge/agentruntime"
 	bridgeassembly "github.com/OnslaughtSnail/caelis/acpbridge/assembly"
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/internal/version"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
@@ -34,6 +35,7 @@ func (s *Stack) NewACPAgent() (*agentruntime.RuntimeAgent, error) {
 		Assembly: assembly,
 		Sessions: s.Sessions,
 	})
+	surface := newGatewayACPSurface(s, modes, len(assembly.Modes) > 0, configs)
 	return agentruntime.New(agentruntime.Config{
 		Runtime:  rt,
 		Sessions: s.Sessions,
@@ -51,10 +53,13 @@ func (s *Stack) NewACPAgent() (*agentruntime.RuntimeAgent, error) {
 			}
 			return resolved.RunRequest.AgentSpec, nil
 		},
-		Modes:     modes,
-		Config:    configs,
-		AppName:   appName,
-		UserID:    userID,
-		AgentInfo: &acp.Implementation{Name: appName},
+		Modes:      surface,
+		Config:     surface,
+		Models:     surface,
+		Commands:   surface,
+		PromptCaps: surface,
+		AppName:    appName,
+		UserID:     userID,
+		AgentInfo:  &acp.Implementation{Name: appName, Version: version.String()},
 	})
 }

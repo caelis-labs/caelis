@@ -840,6 +840,50 @@ func TestSlashAgentInstallPassesOptions(t *testing.T) {
 	}
 }
 
+func TestSlashAgentInstallFailureEmitsBASHToolResult(t *testing.T) {
+	driver := &bridgeTestDriver{
+		addAgentErr: fmt.Errorf("gatewayapp: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
+		slashArgCandidates: map[string][]tuiadapterruntime.SlashArgCandidate{
+			"agent install": {{
+				Value:  "claude",
+				Detail: "npm install --prefix /tmp/caelis/acp-agents/npm @agentclientprotocol/claude-agent-acp@latest",
+			}},
+		},
+	}
+	var msgs []tea.Msg
+	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "install claude")
+	if result.Err == nil {
+		t.Fatal("slashAgentWithContext(install failure) error = nil, want failure")
+	}
+	var sawCall, sawResult bool
+	for _, msg := range msgs {
+		env, ok := msg.(appgateway.EventEnvelope)
+		if !ok {
+			continue
+		}
+		switch {
+		case env.Event.ToolCall != nil:
+			call := env.Event.ToolCall
+			if call.ToolName == "BASH" &&
+				call.Status == appgateway.ToolStatusRunning &&
+				strings.Contains(fmt.Sprint(call.RawInput["command"]), "npm install --prefix") {
+				sawCall = true
+			}
+		case env.Event.ToolResult != nil:
+			toolResult := env.Event.ToolResult
+			if toolResult.ToolName == "BASH" &&
+				toolResult.Status == appgateway.ToolStatusFailed &&
+				toolResult.Error &&
+				strings.Contains(toolResult.OutputText, "npm ERR install failed") {
+				sawResult = true
+			}
+		}
+	}
+	if !sawCall || !sawResult {
+		t.Fatalf("install failure messages sawCall=%v sawResult=%v msgs=%#v", sawCall, sawResult, msgs)
+	}
+}
+
 func TestSlashArgQueryAgentInstall(t *testing.T) {
 	command, query, ok := slashArgQueryAtEnd([]rune("/agent install c"))
 	if !ok {
@@ -916,6 +960,39 @@ func TestFormatAgentStatusSnapshotHidesSelfDelegatedParticipants(t *testing.T) {
 	}
 	if !strings.Contains(got, "codex-001") || !strings.Contains(got, "@kate") {
 		t.Fatalf("formatAgentStatusSnapshot() = %q, want non-self participant", got)
+	}
+	if strings.Contains(got, "agent status:") || strings.Contains(got, "active turn:") {
+		t.Fatalf("formatAgentStatusSnapshot() = %q, should use friendly labels", got)
+	}
+	if !strings.Contains(got, "Agent Controller") || !strings.Contains(got, "State") || !strings.Contains(got, "Children") {
+		t.Fatalf("formatAgentStatusSnapshot() = %q, want themed-friendly summary labels", got)
+	}
+}
+
+func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
+	got := formatStatusSnapshot(tuiadapterruntime.StatusSnapshot{
+		SessionID:      "sess-1",
+		Provider:       "acp",
+		ModelName:      "gpt-5.5",
+		Model:          "gpt-5.5 [high]",
+		ModeLabel:      "Default",
+		SandboxType:    "seatbelt",
+		Route:          "sandbox",
+		Workspace:      "/tmp/ws",
+		StoreDir:       "/tmp/store",
+		MissingAPIKey:  true,
+		HostExecution:  true,
+		FullAccessMode: true,
+	})
+	for _, forbidden := range []string{"status:", "provider:", "model:", "alias:"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
+		}
+	}
+	for _, want := range []string{"Session", "  Model", "  Mode", "warn: API key is missing", "/tmp/store"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
+		}
 	}
 }
 
@@ -1447,7 +1524,7 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	if !ok {
 		t.Fatalf("slashStatus() msg = %#v, want LogChunkMsg", msgs[0])
 	}
-	for _, want := range []string{"/connect", "warning: API key is missing", "warning: commands may run on the host", "/tmp/.caelis"} {
+	for _, want := range []string{"/connect", "warn: API key is missing", "warn: Commands may run on the host", "/tmp/.caelis"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashStatus() chunk = %q, want substring %q", log.Chunk, want)
 		}
@@ -1529,6 +1606,8 @@ type bridgeTestDriver struct {
 	waitSubagentSnapshot         tuiadapterruntime.SubagentSnapshot
 	agentList                    []tuiadapterruntime.AgentCandidate
 	agentStatus                  tuiadapterruntime.AgentStatusSnapshot
+	addAgentErr                  error
+	slashArgCandidates           map[string][]tuiadapterruntime.SlashArgCandidate
 }
 
 type bridgeTestTurn struct {
@@ -1725,6 +1804,9 @@ func (d *bridgeTestDriver) AddAgentWithOptions(_ context.Context, target string,
 	d.addAgentCalls++
 	d.lastAddedAgent = target
 	d.lastAddOptions = opts
+	if d.addAgentErr != nil {
+		return tuiadapterruntime.AgentStatusSnapshot{}, d.addAgentErr
+	}
 	return d.agentStatus, nil
 }
 func (d *bridgeTestDriver) RemoveAgent(_ context.Context, target string) (tuiadapterruntime.AgentStatusSnapshot, error) {
@@ -1785,6 +1867,9 @@ func (d *bridgeTestDriver) CompleteSkill(context.Context, string, int) ([]tuiada
 func (d *bridgeTestDriver) CompleteResume(context.Context, string, int) ([]tuiadapterruntime.ResumeCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) CompleteSlashArg(context.Context, string, string, int) ([]tuiadapterruntime.SlashArgCandidate, error) {
+func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _ string, _ int) ([]tuiadapterruntime.SlashArgCandidate, error) {
+	if d.slashArgCandidates != nil {
+		return d.slashArgCandidates[strings.TrimSpace(command)], nil
+	}
 	return nil, nil
 }

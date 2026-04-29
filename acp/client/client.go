@@ -89,6 +89,11 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 		ClientCapabilities: map[string]any{
 			"fs":       map[string]any{"readTextFile": true, "writeTextFile": true},
 			"terminal": true,
+			"auth":     map[string]any{"terminal": true},
+			"_meta": map[string]any{
+				"terminal_output": true,
+				"terminal-auth":   true,
+			},
 		},
 		ClientInfo: c.cfg.ClientInfo,
 	}, &resp)
@@ -131,6 +136,13 @@ func (c *Client) SetConfigOption(ctx context.Context, sessionID string, configID
 		Value:     value,
 	}, &resp)
 	return resp, err
+}
+
+func (c *Client) SetModel(ctx context.Context, sessionID string, modelID string) error {
+	return c.conn.Call(ctx, MethodSessionSetModel, SetSessionModelRequest{
+		SessionID: sessionID,
+		ModelID:   modelID,
+	}, &SetSessionModelResponse{})
 }
 
 func (c *Client) Prompt(ctx context.Context, sessionID string, text string, meta map[string]any) (PromptResponse, error) {

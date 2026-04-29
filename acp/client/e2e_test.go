@@ -91,9 +91,13 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 	defer cancel()
 
 	var (
-		mu              sync.Mutex
-		permissionCount int
-		terminalID      string
+		mu                    sync.Mutex
+		permissionCount       int
+		terminalID            string
+		displayTerminalInfo   bool
+		displayTerminalOutput bool
+		displayTerminalExit   bool
+		displayTerminalDone   bool
 	)
 	client := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
@@ -113,16 +117,32 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 			}, nil
 		},
 		OnUpdate: func(update sdkacpclient.UpdateEnvelope) {
-			call, ok := update.Update.(sdkacpclient.ToolCallUpdate)
-			if !ok {
-				return
-			}
-			for _, content := range call.Content {
-				if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
+			switch call := update.Update.(type) {
+			case sdkacpclient.ToolCall:
+				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && info["terminal_id"] == "bash-approval-1" {
 					mu.Lock()
-					terminalID = strings.TrimSpace(content.TerminalID)
+					displayTerminalInfo = true
 					mu.Unlock()
-					return
+				}
+			case sdkacpclient.ToolCallUpdate:
+				for _, content := range call.Content {
+					if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
+						mu.Lock()
+						terminalID = strings.TrimSpace(content.TerminalID)
+						mu.Unlock()
+						break
+					}
+				}
+				if output, ok := call.Meta["terminal_output"].(map[string]any); ok && output["terminal_id"] == "bash-approval-1" && output["data"] == "child approval ok" {
+					mu.Lock()
+					displayTerminalOutput = true
+					mu.Unlock()
+				}
+				if exit, ok := call.Meta["terminal_exit"].(map[string]any); ok && exit["terminal_id"] == "bash-approval-1" && exit["exit_code"] == float64(0) {
+					mu.Lock()
+					displayTerminalExit = true
+					displayTerminalDone = call.Status != nil && *call.Status == "completed"
+					mu.Unlock()
 				}
 			}
 		},
@@ -167,6 +187,23 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 	}
 	if err := client.TerminalRelease(ctx, session.SessionID, gotTerminalID); err != nil {
 		t.Fatalf("TerminalRelease() error = %v", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for {
+		mu.Lock()
+		gotInfo := displayTerminalInfo
+		gotOutput := displayTerminalOutput
+		gotExit := displayTerminalExit
+		gotDone := displayTerminalDone
+		mu.Unlock()
+		if gotInfo && gotOutput && gotExit && gotDone {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("display terminal meta info=%v output=%v exit=%v done=%v, want all true", gotInfo, gotOutput, gotExit, gotDone)
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 

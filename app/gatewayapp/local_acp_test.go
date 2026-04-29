@@ -2,11 +2,14 @@ package gatewayapp
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/acp"
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
@@ -108,10 +111,13 @@ func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) 
 	}
 }
 
-func TestRegisterBuiltinACPAgentInstallUsesPATHAdapterBinary(t *testing.T) {
+func TestRegisterBuiltinACPAgentInstallRunsNPMEvenWhenPATHAdapterExists(t *testing.T) {
 	binDir := t.TempDir()
-	claudeBin := writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
-	t.Setenv("PATH", binDir)
+	logPath := filepath.Join(t.TempDir(), "npm.log")
+	writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
+	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CAELIS_FAKE_NPM_LOG", logPath)
 
 	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
@@ -127,11 +133,55 @@ func TestRegisterBuiltinACPAgentInstallUsesPATHAdapterBinary(t *testing.T) {
 		t.Fatalf("stored agents = %#v, want one", doc.Agents)
 	}
 	agent := doc.Agents[0]
-	if agent.Command != claudeBin {
-		t.Fatalf("stored command = %q, want PATH binary %q", agent.Command, claudeBin)
+	wantCommand := filepath.Join(stack.storeDir, "acp-agents", "npm", "node_modules", ".bin", "claude-agent-acp")
+	if agent.Command != wantCommand {
+		t.Fatalf("stored command = %q, want managed adapter %q", agent.Command, wantCommand)
 	}
 	if len(agent.Args) != 0 {
 		t.Fatalf("stored args = %#v, want none", agent.Args)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(npm log) error = %v", err)
+	}
+	if got, want := strings.Count(string(logData), "@agentclientprotocol/claude-agent-acp@latest"), 1; got != want {
+		t.Fatalf("npm install count = %d, want %d; log=%q", got, want, string(logData))
+	}
+}
+
+func TestRegisterBuiltinACPAgentInstallUpdatesManagedAdapterOnRepeatedRuns(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "npm.log")
+	writeExecutableForGatewayAppTest(t, binDir, "codex-acp", "#!/bin/sh\nexit 0\n")
+	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CAELIS_FAKE_NPM_LOG", logPath)
+
+	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	for i := 0; i < 2; i++ {
+		if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "codex", RegisterBuiltinACPAgentOptions{
+			Install: true,
+		}); err != nil {
+			t.Fatalf("RegisterBuiltinACPAgentWithOptions(codex, install #%d) error = %v", i+1, err)
+		}
+	}
+	doc, err := LoadAppConfig(stack.storeDir)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.Agents) != 1 {
+		t.Fatalf("stored agents = %#v, want one", doc.Agents)
+	}
+	wantCommand := filepath.Join(stack.storeDir, "acp-agents", "npm", "node_modules", ".bin", "codex-acp")
+	if doc.Agents[0].Command != wantCommand {
+		t.Fatalf("stored command = %q, want managed adapter %q", doc.Agents[0].Command, wantCommand)
+	}
+	logData, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("ReadFile(npm log) error = %v", err)
+	}
+	if got, want := strings.Count(string(logData), "@zed-industries/codex-acp@latest"), 2; got != want {
+		t.Fatalf("npm install count = %d, want %d; log=%q", got, want, string(logData))
 	}
 }
 
@@ -188,6 +238,127 @@ func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) 
 	}
 }
 
+func TestNewACPAgentExposesZedSessionSurface(t *testing.T) {
+	ctx := context.Background()
+	workdir := t.TempDir()
+	stack, err := NewLocalStack(Config{
+		AppName:      "caelis",
+		UserID:       "acp-zed-test",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: workdir,
+		WorkspaceCWD: workdir,
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+		},
+		Model: ModelConfig{
+			Provider:        "openai",
+			Model:           "gpt-4o",
+			ReasoningEffort: "medium",
+			ReasoningLevels: []string{"low", "medium", "high"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	agent, err := stack.NewACPAgent()
+	if err != nil {
+		t.Fatalf("NewACPAgent() error = %v", err)
+	}
+
+	initResp, err := agent.Initialize(ctx, acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("Initialize() error = %v", err)
+	}
+	if initResp.AgentInfo == nil || initResp.AgentInfo.Version == "" || initResp.AgentInfo.Version == "dev" {
+		t.Fatalf("AgentInfo = %#v, want actual version metadata", initResp.AgentInfo)
+	}
+	if !initResp.AgentCapabilities.PromptCapabilities.Image {
+		t.Fatalf("PromptCapabilities.Image = false, want current model image support declared")
+	}
+
+	resp, err := agent.NewSession(ctx, acp.NewSessionRequest{CWD: workdir})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if resp.Modes == nil || resp.Modes.CurrentModeID != "default" {
+		t.Fatalf("Modes = %#v, want default Caelis session modes", resp.Modes)
+	}
+	if got, want := modeIDs(resp.Modes.AvailableModes), []string{"default", "plan", "full_access"}; !slices.Equal(got, want) {
+		t.Fatalf("mode ids = %#v, want %#v", got, want)
+	}
+	options := configOptionsByID(resp.ConfigOptions)
+	modeOption, ok := options["mode"]
+	if !ok {
+		t.Fatalf("configOptions missing mode: %#v", resp.ConfigOptions)
+	}
+	if modeOption.Category != "mode" || modeOption.CurrentValue != "default" {
+		t.Fatalf("mode option = %#v, want category mode and current default", modeOption)
+	}
+	if got, want := configOptionValues(modeOption.Options), []string{"default", "plan", "full_access"}; !slices.Equal(got, want) {
+		t.Fatalf("mode values = %#v, want %#v", got, want)
+	}
+	modelOption, ok := options["model"]
+	if !ok {
+		t.Fatalf("configOptions missing model: %#v", resp.ConfigOptions)
+	}
+	if modelOption.Category != "model" || modelOption.CurrentValue != "openai/gpt-4o" {
+		t.Fatalf("model option = %#v, want category model and current alias", modelOption)
+	}
+	reasoningOption, ok := options["reasoning_effort"]
+	if !ok {
+		t.Fatalf("configOptions missing reasoning_effort: %#v", resp.ConfigOptions)
+	}
+	if reasoningOption.Category != "thought_level" || reasoningOption.CurrentValue != "medium" {
+		t.Fatalf("reasoning option = %#v, want thought_level medium", reasoningOption)
+	}
+	if got, want := configOptionValues(reasoningOption.Options), []string{"low", "medium", "high"}; !slices.Equal(got, want) {
+		t.Fatalf("reasoning values = %#v, want %#v", got, want)
+	}
+	setModeResp, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
+		SessionID: resp.SessionID,
+		ConfigID:  "mode",
+		Value:     "plan",
+	})
+	if err != nil {
+		t.Fatalf("SetSessionConfigOption(mode) error = %v", err)
+	}
+	modeOption = configOptionsByID(setModeResp.ConfigOptions)["mode"]
+	if modeOption.CurrentValue != "plan" {
+		t.Fatalf("mode option after set = %#v, want current plan", modeOption)
+	}
+	state, err := stack.SessionRuntimeState(ctx, sdksession.SessionRef{
+		AppName:   "caelis",
+		UserID:    "acp-zed-test",
+		SessionID: resp.SessionID,
+	})
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.SessionMode != "plan" {
+		t.Fatalf("session mode = %q, want plan", state.SessionMode)
+	}
+
+	raw, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("Marshal(NewSessionResponse) error = %v", err)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		t.Fatalf("Unmarshal(NewSessionResponse) error = %v", err)
+	}
+	models, ok := envelope["models"].(map[string]any)
+	if !ok {
+		t.Fatalf("models = %#v, want ACP session model state", envelope["models"])
+	}
+	if got := models["currentModelId"]; got != "openai/gpt-4o" {
+		t.Fatalf("models.currentModelId = %#v, want openai/gpt-4o", got)
+	}
+	available, _ := models["availableModels"].([]any)
+	if len(available) == 0 {
+		t.Fatalf("models.availableModels = %#v, want configured model aliases", models["availableModels"])
+	}
+}
+
 func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	ctx := context.Background()
 	stack, session := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
@@ -227,6 +398,30 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "codex") {
 		t.Fatalf("SPAWN agent enum still includes codex after unregister")
 	}
+}
+
+func modeIDs(modes []acp.SessionMode) []string {
+	out := make([]string, 0, len(modes))
+	for _, mode := range modes {
+		out = append(out, mode.ID)
+	}
+	return out
+}
+
+func configOptionsByID(options []acp.SessionConfigOption) map[string]acp.SessionConfigOption {
+	out := make(map[string]acp.SessionConfigOption, len(options))
+	for _, option := range options {
+		out[option.ID] = option
+	}
+	return out
+}
+
+func configOptionValues(options []acp.SessionConfigSelectOption) []string {
+	out := make([]string, 0, len(options))
+	for _, option := range options {
+		out = append(out, option.Value)
+	}
+	return out
 }
 
 func newStackWithAssemblyForToolTest(t *testing.T, assembly sdkplugin.ResolvedAssembly) (*Stack, sdksession.Session) {
@@ -381,6 +576,9 @@ case "$pkg" in
     exit 2
     ;;
 esac
+if [ -n "${CAELIS_FAKE_NPM_LOG:-}" ]; then
+  printf '%s\n' "$pkg" >> "$CAELIS_FAKE_NPM_LOG"
+fi
 cat > "$bin/$name" <<'SCRIPT'
 #!/bin/sh
 exit 0

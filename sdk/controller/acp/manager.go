@@ -49,6 +49,7 @@ type controllerRun struct {
 	mu                sync.Mutex
 	commands          []sdkcontroller.ControllerCommand
 	configOptions     []sdkcontroller.ControllerConfigOption
+	models            *sdkacpclient.SessionModelState
 	mode              string
 	modeOptions       []sdkcontroller.ControllerMode
 	turnID            string
@@ -64,6 +65,7 @@ type controllerRun struct {
 type controllerClientState struct {
 	commands      []sdkcontroller.ControllerCommand
 	configOptions []sdkcontroller.ControllerConfigOption
+	models        *sdkacpclient.SessionModelState
 	mode          string
 	modeOptions   []sdkcontroller.ControllerMode
 	agentLabel    string
@@ -152,6 +154,7 @@ func (r *controllerRun) applyStartupStateLocked(client *sdkacpclient.Client, rem
 	r.remoteSessionID = strings.TrimSpace(remoteSessionID)
 	r.commands = mergeControllerCommands(r.commands, state.commands)
 	r.configOptions = fillControllerConfigOptions(r.configOptions, state.configOptions)
+	r.models = cloneACPSessionModelState(state.models)
 	if strings.TrimSpace(r.mode) == "" {
 		r.mode = strings.TrimSpace(state.mode)
 	}
@@ -409,6 +412,7 @@ func (m *Manager) startClient(
 	}
 	state := controllerClientState{
 		configOptions: controllerConfigOptionsFromACP(resp.ConfigOptions),
+		models:        cloneACPSessionModelState(resp.Models),
 		mode:          currentModeID(resp.Modes),
 		modeOptions:   controllerModesFromACP(resp.Modes),
 	}
@@ -640,6 +644,18 @@ func (r *controllerRun) controllerStatusLocked(ref sdksession.SessionRef) sdkcon
 		status.ReasoningEffort = strings.TrimSpace(effortOption.CurrentValue)
 		status.EffortOptions = cloneControllerConfigChoices(effortOption.Options)
 	}
+	status.EffortOptionsByModel = controllerEffortChoicesByModelFromModels(r.models)
+	if model, effort, ok := splitACPCurrentModelEffort(r.models); ok {
+		if status.Model == "" {
+			status.Model = model
+		}
+		if status.ReasoningEffort == "" && strings.EqualFold(strings.TrimSpace(status.Model), model) {
+			status.ReasoningEffort = effort
+		}
+	}
+	if len(status.EffortOptions) == 0 {
+		status.EffortOptions = controllerEffortChoicesFromMap(status.EffortOptionsByModel, status.Model)
+	}
 	return status
 }
 
@@ -656,45 +672,61 @@ func (r *controllerRun) setControllerModel(ctx context.Context, req sdkcontrolle
 	client := r.client
 	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
 	configOptions := cloneControllerConfigOptions(r.configOptions)
+	models := cloneACPSessionModelState(r.models)
 	r.mu.Unlock()
 	if client == nil || remoteSessionID == "" {
 		return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: active controller client is unavailable")
 	}
 
 	if model != "" {
-		option, ok := pickModelConfigOption(configOptions)
-		if !ok || option == nil {
+		modelOption, hasModelOption := pickModelConfigOption(configOptions)
+		if !hasModelOption || modelOption == nil {
 			return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: controller does not declare a model config option")
 		}
-		choice, ok := matchControllerConfigChoice(option.Options, model)
+		choice, ok := matchControllerConfigChoice(modelOption.Options, model)
 		if !ok {
 			return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: model %q is not declared by the controller", model)
 		}
-		resp, err := client.SetConfigOption(ctx, remoteSessionID, option.ID, choice.Value)
+		resp, err := client.SetConfigOption(ctx, remoteSessionID, modelOption.ID, choice.Value)
 		if err != nil {
 			return sdkcontroller.ControllerStatus{}, err
 		}
 		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
 	}
 	if effort != "" {
-		option, ok := pickEffortConfigOption(configOptions)
-		if !ok || option == nil {
-			return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: controller does not declare a reasoning effort config option")
+		effortOption, hasEffortOption := pickEffortConfigOption(configOptions)
+		if hasEffortOption && effortOption != nil {
+			choice, ok := matchControllerConfigChoice(effortOption.Options, effort)
+			if !ok {
+				return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: reasoning effort %q is not declared by the controller", effort)
+			}
+			resp, err := client.SetConfigOption(ctx, remoteSessionID, effortOption.ID, choice.Value)
+			if err != nil {
+				return sdkcontroller.ControllerStatus{}, err
+			}
+			configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
+		} else {
+			modelForEffort := firstNonEmpty(model, currentModelFromConfigOptions(configOptions))
+			modelID, ok := matchACPModelIDForEffort(models, modelForEffort, effort)
+			if !ok {
+				return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: reasoning effort %q is not declared by the controller", effort)
+			}
+			if err := client.SetModel(ctx, remoteSessionID, modelID); err != nil {
+				return sdkcontroller.ControllerStatus{}, err
+			}
+			modelBase, _, ok := splitACPCurrentModelEffort(&sdkacpclient.SessionModelState{CurrentModelID: modelID})
+			if !ok {
+				modelBase = modelForEffort
+			}
+			models = withACPCurrentModelID(models, modelID)
+			configOptions = setControllerConfigCurrentValue(configOptions, modelBase)
 		}
-		choice, ok := matchControllerConfigChoice(option.Options, effort)
-		if !ok {
-			return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/controller/acp: reasoning effort %q is not declared by the controller", effort)
-		}
-		resp, err := client.SetConfigOption(ctx, remoteSessionID, option.ID, choice.Value)
-		if err != nil {
-			return sdkcontroller.ControllerStatus{}, err
-		}
-		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.configOptions = cloneControllerConfigOptions(configOptions)
+	r.models = cloneACPSessionModelState(models)
 	if clock != nil {
 		r.updatedAt = clock()
 	} else {
@@ -1138,6 +1170,145 @@ func currentModeID(modes *sdkacpclient.SessionModeState) string {
 	return strings.TrimSpace(modes.CurrentModeID)
 }
 
+func splitACPCurrentModelEffort(models *sdkacpclient.SessionModelState) (string, string, bool) {
+	if models == nil {
+		return "", "", false
+	}
+	model, effort, hasEffort := splitACPModelIDEffort(models.CurrentModelID)
+	if hasEffort {
+		return model, effort, true
+	}
+	modelID := strings.TrimSpace(models.CurrentModelID)
+	return modelID, "", modelID != ""
+}
+
+func splitACPModelIDEffort(modelID string) (string, string, bool) {
+	modelID = strings.TrimSpace(modelID)
+	idx := strings.LastIndex(modelID, "/")
+	if idx <= 0 || idx == len(modelID)-1 {
+		return modelID, "", false
+	}
+	effort := strings.ToLower(strings.TrimSpace(modelID[idx+1:]))
+	if !isReasoningEffortValue(effort) {
+		return modelID, "", false
+	}
+	return strings.TrimSpace(modelID[:idx]), effort, true
+}
+
+func isReasoningEffortValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		return true
+	default:
+		return false
+	}
+}
+
+func controllerEffortChoicesFromModels(models *sdkacpclient.SessionModelState, model string) []sdkcontroller.ControllerConfigChoice {
+	return controllerEffortChoicesFromMap(controllerEffortChoicesByModelFromModels(models), model)
+}
+
+func controllerEffortChoicesByModelFromModels(models *sdkacpclient.SessionModelState) map[string][]sdkcontroller.ControllerConfigChoice {
+	if models == nil || len(models.AvailableModels) == 0 {
+		return nil
+	}
+	out := map[string][]sdkcontroller.ControllerConfigChoice{}
+	seen := map[string]map[string]struct{}{}
+	for _, item := range models.AvailableModels {
+		base, effort, hasEffort := splitACPModelIDEffort(item.ModelID)
+		base = strings.TrimSpace(base)
+		if !hasEffort || base == "" {
+			continue
+		}
+		modelKey := strings.ToLower(base)
+		key := strings.ToLower(strings.TrimSpace(effort))
+		if key == "" {
+			continue
+		}
+		if seen[modelKey] == nil {
+			seen[modelKey] = map[string]struct{}{}
+		}
+		if _, exists := seen[modelKey][key]; exists {
+			continue
+		}
+		seen[modelKey][key] = struct{}{}
+		out[modelKey] = append(out[modelKey], sdkcontroller.ControllerConfigChoice{
+			Value:       key,
+			Name:        reasoningEffortDisplayName(key),
+			Description: strings.TrimSpace(item.Description),
+		})
+	}
+	return out
+}
+
+func controllerEffortChoicesFromMap(options map[string][]sdkcontroller.ControllerConfigChoice, model string) []sdkcontroller.ControllerConfigChoice {
+	if len(options) == 0 {
+		return nil
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return nil
+	}
+	return cloneControllerConfigChoices(options[model])
+}
+
+func matchACPModelIDForEffort(models *sdkacpclient.SessionModelState, model string, effort string) (string, bool) {
+	if models == nil {
+		return "", false
+	}
+	model = strings.TrimSpace(model)
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	if model == "" {
+		model, _, _ = splitACPCurrentModelEffort(models)
+	}
+	if model == "" || effort == "" {
+		return "", false
+	}
+	if base, existingEffort, hasEffort := splitACPModelIDEffort(model); hasEffort {
+		return model, strings.EqualFold(existingEffort, effort) && base != ""
+	}
+	for _, item := range models.AvailableModels {
+		base, itemEffort, hasEffort := splitACPModelIDEffort(item.ModelID)
+		if !hasEffort {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(base), model) && strings.EqualFold(itemEffort, effort) {
+			return strings.TrimSpace(item.ModelID), true
+		}
+	}
+	return "", false
+}
+
+func withACPCurrentModelID(models *sdkacpclient.SessionModelState, modelID string) *sdkacpclient.SessionModelState {
+	out := cloneACPSessionModelState(models)
+	if out == nil {
+		out = &sdkacpclient.SessionModelState{}
+	}
+	out.CurrentModelID = strings.TrimSpace(modelID)
+	return out
+}
+
+func reasoningEffortDisplayName(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "xhigh":
+		return "Xhigh"
+	case "minimal":
+		return "Minimal"
+	case "low":
+		return "Low"
+	case "medium":
+		return "Medium"
+	case "high":
+		return "High"
+	case "max":
+		return "Max"
+	case "none":
+		return "None"
+	default:
+		return strings.TrimSpace(effort)
+	}
+}
+
 func controllerModesFromACP(modes *sdkacpclient.SessionModeState) []sdkcontroller.ControllerMode {
 	if modes == nil || len(modes.AvailableModes) == 0 {
 		return nil
@@ -1158,17 +1329,7 @@ func controllerModesFromACP(modes *sdkacpclient.SessionModeState) []sdkcontrolle
 }
 
 func pickModelConfigOption(options []sdkcontroller.ControllerConfigOption) (*sdkcontroller.ControllerConfigOption, bool) {
-	return pickControllerConfigOption(options, func(option sdkcontroller.ControllerConfigOption) (bool, int) {
-		id := strings.ToLower(strings.TrimSpace(option.ID))
-		haystack := controllerConfigOptionHaystack(option)
-		if id == "model" || id == "model_id" || id == "modelid" {
-			return true, 0
-		}
-		if strings.Contains(haystack, "model") && !strings.Contains(haystack, "reason") && !strings.Contains(haystack, "effort") {
-			return true, 1
-		}
-		return false, 0
-	})
+	return pickControllerConfigOption(options, matchModelConfigOption)
 }
 
 func pickEffortConfigOption(options []sdkcontroller.ControllerConfigOption) (*sdkcontroller.ControllerConfigOption, bool) {
@@ -1183,6 +1344,56 @@ func pickEffortConfigOption(options []sdkcontroller.ControllerConfigOption) (*sd
 			return true, 1
 		}
 		return false, 0
+	})
+}
+
+func matchModelConfigOption(option sdkcontroller.ControllerConfigOption) (bool, int) {
+	id := strings.ToLower(strings.TrimSpace(option.ID))
+	haystack := controllerConfigOptionHaystack(option)
+	if id == "model" || id == "model_id" || id == "modelid" {
+		return true, 0
+	}
+	if strings.Contains(haystack, "model") && !strings.Contains(haystack, "reason") && !strings.Contains(haystack, "effort") {
+		return true, 1
+	}
+	return false, 0
+}
+
+func currentModelFromConfigOptions(options []sdkcontroller.ControllerConfigOption) string {
+	if option, ok := pickModelConfigOption(options); ok && option != nil {
+		return strings.TrimSpace(option.CurrentValue)
+	}
+	return ""
+}
+
+func setControllerConfigCurrentValue(options []sdkcontroller.ControllerConfigOption, model string) []sdkcontroller.ControllerConfigOption {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return cloneControllerConfigOptions(options)
+	}
+	out := cloneControllerConfigOptions(options)
+	bestIndex := -1
+	bestScore := 1000
+	for i := range out {
+		ok, score := matchModelConfigOption(out[i])
+		if !ok {
+			continue
+		}
+		if bestIndex < 0 || score < bestScore {
+			bestIndex = i
+			bestScore = score
+		}
+	}
+	if bestIndex >= 0 {
+		out[bestIndex].CurrentValue = model
+		return out
+	}
+	return append(out, sdkcontroller.ControllerConfigOption{
+		ID:           "model",
+		Name:         "Model",
+		Type:         "select",
+		Category:     "model",
+		CurrentValue: model,
 	})
 }
 
@@ -1230,6 +1441,32 @@ func matchControllerConfigChoice(options []sdkcontroller.ControllerConfigChoice,
 	return sdkcontroller.ControllerConfigChoice{}, false
 }
 
+func mergeControllerConfigChoices(primary []sdkcontroller.ControllerConfigChoice, fallback []sdkcontroller.ControllerConfigChoice) []sdkcontroller.ControllerConfigChoice {
+	if len(primary) == 0 {
+		return cloneControllerConfigChoices(fallback)
+	}
+	out := cloneControllerConfigChoices(primary)
+	seen := map[string]struct{}{}
+	for _, item := range out {
+		if value := strings.ToLower(strings.TrimSpace(item.Value)); value != "" {
+			seen[value] = struct{}{}
+		}
+	}
+	for _, item := range fallback {
+		value := strings.TrimSpace(item.Value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		out = append(out, item)
+		seen[key] = struct{}{}
+	}
+	return out
+}
+
 func matchControllerMode(options []sdkcontroller.ControllerMode, requested string) (sdkcontroller.ControllerMode, bool) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
@@ -1265,13 +1502,35 @@ func mergeControllerConfigOptions(existing []sdkcontroller.ControllerConfigOptio
 		id := strings.ToLower(strings.TrimSpace(item.ID))
 		if id != "" {
 			if idx, exists := indexByID[id]; exists {
-				out[idx] = cloneControllerConfigOption(item)
+				out[idx] = mergeControllerConfigOption(out[idx], item)
 				continue
 			}
 			indexByID[id] = len(out)
 		}
 		out = append(out, cloneControllerConfigOption(item))
 	}
+	return out
+}
+
+func mergeControllerConfigOption(existing sdkcontroller.ControllerConfigOption, update sdkcontroller.ControllerConfigOption) sdkcontroller.ControllerConfigOption {
+	out := cloneControllerConfigOption(existing)
+	if value := strings.TrimSpace(update.ID); value != "" {
+		out.ID = value
+	}
+	if value := strings.TrimSpace(update.Name); value != "" {
+		out.Name = value
+	}
+	if value := strings.TrimSpace(update.Type); value != "" {
+		out.Type = value
+	}
+	if value := strings.TrimSpace(update.Category); value != "" {
+		out.Category = value
+	}
+	if value := strings.TrimSpace(update.Description); value != "" {
+		out.Description = value
+	}
+	out.CurrentValue = strings.TrimSpace(update.CurrentValue)
+	out.Options = mergeControllerConfigChoices(existing.Options, update.Options)
 	return out
 }
 
@@ -1283,22 +1542,47 @@ func fillControllerConfigOptions(existing []sdkcontroller.ControllerConfigOption
 		return cloneControllerConfigOptions(existing)
 	}
 	out := cloneControllerConfigOptions(existing)
-	indexByID := map[string]struct{}{}
-	for _, item := range out {
+	indexByID := map[string]int{}
+	for i, item := range out {
 		if id := strings.ToLower(strings.TrimSpace(item.ID)); id != "" {
-			indexByID[id] = struct{}{}
+			indexByID[id] = i
 		}
 	}
 	for _, item := range fallback {
 		id := strings.ToLower(strings.TrimSpace(item.ID))
 		if id != "" {
-			if _, exists := indexByID[id]; exists {
+			if idx, exists := indexByID[id]; exists {
+				out[idx] = fillControllerConfigOption(out[idx], item)
 				continue
 			}
-			indexByID[id] = struct{}{}
+			indexByID[id] = len(out)
 		}
 		out = append(out, cloneControllerConfigOption(item))
 	}
+	return out
+}
+
+func fillControllerConfigOption(existing sdkcontroller.ControllerConfigOption, fallback sdkcontroller.ControllerConfigOption) sdkcontroller.ControllerConfigOption {
+	out := cloneControllerConfigOption(existing)
+	if strings.TrimSpace(out.ID) == "" {
+		out.ID = strings.TrimSpace(fallback.ID)
+	}
+	if strings.TrimSpace(out.Name) == "" {
+		out.Name = strings.TrimSpace(fallback.Name)
+	}
+	if strings.TrimSpace(out.Type) == "" {
+		out.Type = strings.TrimSpace(fallback.Type)
+	}
+	if strings.TrimSpace(out.Category) == "" {
+		out.Category = strings.TrimSpace(fallback.Category)
+	}
+	if strings.TrimSpace(out.Description) == "" {
+		out.Description = strings.TrimSpace(fallback.Description)
+	}
+	if strings.TrimSpace(out.CurrentValue) == "" {
+		out.CurrentValue = strings.TrimSpace(fallback.CurrentValue)
+	}
+	out.Options = mergeControllerConfigChoices(existing.Options, fallback.Options)
 	return out
 }
 
@@ -1390,6 +1674,31 @@ func mergeControllerModes(existing []sdkcontroller.ControllerMode, fallback []sd
 			seen[id] = struct{}{}
 		}
 		out = append(out, mode)
+	}
+	return out
+}
+
+func cloneACPSessionModelState(in *sdkacpclient.SessionModelState) *sdkacpclient.SessionModelState {
+	if in == nil {
+		return nil
+	}
+	out := &sdkacpclient.SessionModelState{
+		CurrentModelID:  strings.TrimSpace(in.CurrentModelID),
+		AvailableModels: make([]sdkacpclient.ModelInfo, 0, len(in.AvailableModels)),
+	}
+	for _, item := range in.AvailableModels {
+		modelID := strings.TrimSpace(item.ModelID)
+		if modelID == "" {
+			continue
+		}
+		out.AvailableModels = append(out.AvailableModels, sdkacpclient.ModelInfo{
+			ModelID:     modelID,
+			Name:        strings.TrimSpace(item.Name),
+			Description: strings.TrimSpace(item.Description),
+		})
+	}
+	if out.CurrentModelID == "" && len(out.AvailableModels) == 0 {
+		return nil
 	}
 	return out
 }

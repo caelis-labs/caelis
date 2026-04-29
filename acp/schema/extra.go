@@ -41,16 +41,39 @@ type CurrentModeUpdate struct {
 	CurrentModeID string `json:"currentModeId"`
 }
 
+func (u CurrentModeUpdate) SessionUpdateType() string { return u.SessionUpdate }
+
 type ConfigOptionUpdate struct {
 	SessionUpdate string                `json:"sessionUpdate"`
 	ConfigOptions []SessionConfigOption `json:"configOptions"`
 }
+
+func (u ConfigOptionUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
 type SessionInfoUpdate struct {
 	SessionUpdate string  `json:"sessionUpdate"`
 	Title         *string `json:"title,omitempty"`
 	UpdatedAt     *string `json:"updatedAt,omitempty"`
 }
+
+func (u SessionInfoUpdate) SessionUpdateType() string { return u.SessionUpdate }
+
+type AvailableCommandInput struct {
+	Hint string `json:"hint,omitempty"`
+}
+
+type AvailableCommand struct {
+	Name        string                 `json:"name"`
+	Description string                 `json:"description,omitempty"`
+	Input       *AvailableCommandInput `json:"input"`
+}
+
+type AvailableCommandsUpdate struct {
+	SessionUpdate     string             `json:"sessionUpdate"`
+	AvailableCommands []AvailableCommand `json:"availableCommands"`
+}
+
+func (u AvailableCommandsUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
 type EnvVariable struct {
 	Name  string `json:"name"`

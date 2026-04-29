@@ -131,6 +131,46 @@ type RegisterBuiltinACPAgentOptions struct {
 	Install bool
 }
 
+type ACPAgentInstallError struct {
+	Agent   string
+	Command []string
+	Output  string
+	Err     error
+}
+
+func (e *ACPAgentInstallError) Error() string {
+	if e == nil {
+		return ""
+	}
+	agent := strings.TrimSpace(e.Agent)
+	if agent == "" {
+		agent = "unknown"
+	}
+	errText := "failed"
+	if e.Err != nil {
+		errText = e.Err.Error()
+	}
+	msg := fmt.Sprintf("gatewayapp: install ACP agent %q: %s", agent, errText)
+	if out := strings.TrimSpace(e.Output); out != "" {
+		msg += "\n" + out
+	}
+	return msg
+}
+
+func (e *ACPAgentInstallError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *ACPAgentInstallError) CommandString() string {
+	if e == nil {
+		return ""
+	}
+	return strings.Join(e.Command, " ")
+}
+
 type StartSubagentOptions struct {
 	ApprovalRequester sdkruntime.ApprovalRequester
 }
@@ -242,7 +282,7 @@ func delegationAgentsForSpawn(assembly sdkplugin.ResolvedAssembly, _ []sdksessio
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	guidance := "- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write only for a follow-up prompt after a SPAWN child has completed."
+	guidance := "- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write to send stdin to a running BASH task or a follow-up prompt to a completed SPAWN child."
 	if strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
 		return systemPrompt
 	}
@@ -495,16 +535,16 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base sd
 	if !ok {
 		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: ACP agent %q does not support local npm install", strings.TrimSpace(name))
 	}
-	if path, err := exec.LookPath(pkg.Bin); err == nil && strings.TrimSpace(path) != "" {
-		base.Command = path
-		base.Args = nil
-		return base, nil
-	}
+	root := s.managedACPAgentRoot()
+	installCommand := []string{"npm", "install", "--prefix", root, pkg.Package + "@latest"}
 	npm, err := exec.LookPath("npm")
 	if err != nil || strings.TrimSpace(npm) == "" {
-		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: npm is required to install ACP agent %q", strings.TrimSpace(name))
+		return sdkplugin.AgentConfig{}, &ACPAgentInstallError{
+			Agent:   strings.TrimSpace(name),
+			Command: installCommand,
+			Err:     fmt.Errorf("npm is required"),
+		}
 	}
-	root := s.managedACPAgentRoot()
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return sdkplugin.AgentConfig{}, err
 	}
@@ -512,11 +552,15 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base sd
 	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		out := strings.TrimSpace(string(output))
-		if out != "" {
-			return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q: %w\n%s", strings.TrimSpace(name), err, out)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
 		}
-		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q: %w", strings.TrimSpace(name), err)
+		return sdkplugin.AgentConfig{}, &ACPAgentInstallError{
+			Agent:   strings.TrimSpace(name),
+			Command: installCommand,
+			Output:  strings.TrimSpace(string(output)),
+			Err:     err,
+		}
 	}
 	bin := managedACPAgentBinPath(root, pkg.Bin)
 	if info, err := os.Stat(bin); err != nil || info.IsDir() {

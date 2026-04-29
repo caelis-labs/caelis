@@ -567,8 +567,14 @@ func (m *Model) updateSlashArgCandidates() {
 		// Non-wizard slash arg (simple single-step commands).
 		var parsedCmd string
 		parsedCmd, query, ok = slashArgQueryAtEnd([]rune(m.textarea.Value()))
-		if ok && parsedCmd != command {
-			ok = false
+		if ok {
+			if parsedCmd != command {
+				if isExactModelUseReasoningCommand(command, parsedCmd, query) {
+					query = ""
+				} else {
+					ok = false
+				}
+			}
 		}
 	}
 	if !ok {
@@ -591,9 +597,48 @@ func (m *Model) updateSlashArgCandidates() {
 		m.slashArgIndex = 0
 		return
 	}
+	if !m.isWizardActive() && command == "model use" {
+		if nextCommand, nextCandidates := m.exactModelUseReasoningCandidates(query, filtered); nextCommand != "" && len(nextCandidates) > 0 {
+			command = nextCommand
+			query = ""
+			filtered = nextCandidates
+			m.slashArgCommand = nextCommand
+		}
+	}
 	m.slashArgIndex = normalizeFilteredSelection(m.slashArgIndex, query, m.slashArgQuery, len(filtered))
 	m.slashArgQuery = query
 	m.slashArgCandidates = filtered
+}
+
+func isExactModelUseReasoningCommand(command string, parsedCmd string, query string) bool {
+	command = strings.TrimSpace(command)
+	parsedCmd = strings.TrimSpace(parsedCmd)
+	query = strings.TrimSpace(query)
+	if command == "" || query == "" || parsedCmd != "model use" || !strings.HasPrefix(command, "model use ") {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(command, "model use ")), query)
+}
+
+func (m *Model) exactModelUseReasoningCandidates(query string, candidates []SlashArgCandidate) (string, []SlashArgCandidate) {
+	query = strings.TrimSpace(query)
+	if query == "" || m == nil || m.cfg.SlashArgComplete == nil {
+		return "", nil
+	}
+	for _, candidate := range candidates {
+		value := strings.TrimSpace(candidate.Value)
+		display := strings.TrimSpace(candidate.Display)
+		if !strings.EqualFold(query, value) && !strings.EqualFold(query, display) {
+			continue
+		}
+		nextCommand := "model use " + value
+		next, err := m.cfg.SlashArgComplete(nextCommand, "", 200)
+		if err != nil || len(next) == 0 {
+			return "", nil
+		}
+		return nextCommand, filterSlashArgCandidates("", next)
+	}
+	return "", nil
 }
 
 func (m *Model) applySlashArgCompletion() {

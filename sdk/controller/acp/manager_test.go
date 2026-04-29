@@ -116,6 +116,223 @@ func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) 
 	}
 }
 
+func TestControllerRunStatusUsesConfigOptionsForModelAndEffort(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []sdkcontroller.ControllerConfigOption{
+			{
+				ID:           "model",
+				Name:         "Model",
+				CurrentValue: "gpt-5.5",
+				Options: []sdkcontroller.ControllerConfigChoice{
+					{Value: "gpt-5.5", Name: "GPT-5.5"},
+					{Value: "gpt-5.4", Name: "gpt-5.4"},
+				},
+			},
+			{
+				ID:           "reasoning_effort",
+				Name:         "Reasoning Effort",
+				CurrentValue: "xhigh",
+				Options: []sdkcontroller.ControllerConfigChoice{
+					{Value: "low", Name: "Low"},
+					{Value: "medium", Name: "Medium"},
+					{Value: "high", Name: "High"},
+					{Value: "xhigh", Name: "Xhigh"},
+				},
+			},
+		},
+	}, 0)
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if status.Model != "gpt-5.5" || status.ReasoningEffort != "xhigh" {
+		t.Fatalf("status model/effort = %q/%q, want gpt-5.5/xhigh", status.Model, status.ReasoningEffort)
+	}
+	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-5.5", "gpt-5.4"}) {
+		t.Fatalf("model options = %#v, want config model options", got)
+	}
+	if got := controllerChoiceValues(status.EffortOptions); !equalStrings(got, []string{"low", "medium", "high", "xhigh"}) {
+		t.Fatalf("effort options = %#v, want config effort options", got)
+	}
+}
+
+func TestControllerRunApplyStartupStateFillsPartialPreSessionConfigOptions(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(1, 0) }, sdkacpclient.ConfigOptionUpdate{
+		SessionUpdate: sdkacpclient.UpdateConfigOption,
+		ConfigOptions: []sdkacpclient.SessionConfigOption{
+			{ID: "model", Name: "Model"},
+			{ID: "reasoning_effort", Name: "Reasoning Effort"},
+		},
+	})
+
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []sdkcontroller.ControllerConfigOption{
+			{
+				ID:           "model",
+				Name:         "Model",
+				CurrentValue: "gpt-5.5",
+				Options: []sdkcontroller.ControllerConfigChoice{
+					{Value: "gpt-5.5", Name: "GPT-5.5"},
+					{Value: "gpt-5.4", Name: "gpt-5.4"},
+				},
+			},
+			{
+				ID:           "reasoning_effort",
+				Name:         "Reasoning Effort",
+				CurrentValue: "xhigh",
+				Options: []sdkcontroller.ControllerConfigChoice{
+					{Value: "low", Name: "Low"},
+					{Value: "medium", Name: "Medium"},
+					{Value: "high", Name: "High"},
+					{Value: "xhigh", Name: "Xhigh"},
+				},
+			},
+		},
+	}, 0)
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if status.Model != "gpt-5.5" || status.ReasoningEffort != "xhigh" {
+		t.Fatalf("status model/effort = %q/%q, want startup current values filled", status.Model, status.ReasoningEffort)
+	}
+	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-5.5", "gpt-5.4"}) {
+		t.Fatalf("model options = %#v, want startup model options filled", got)
+	}
+	if got := controllerChoiceValues(status.EffortOptions); !equalStrings(got, []string{"low", "medium", "high", "xhigh"}) {
+		t.Fatalf("effort options = %#v, want startup effort options filled", got)
+	}
+}
+
+func TestControllerRunStatusFillsCurrentModelEffortFromACPModelState(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []sdkcontroller.ControllerConfigOption{
+			{
+				ID: "model",
+				Options: []sdkcontroller.ControllerConfigChoice{
+					{Value: "gpt-5.5", Name: "GPT-5.5"},
+					{Value: "gpt-5.4", Name: "gpt-5.4"},
+				},
+			},
+			{
+				ID: "reasoning_effort",
+				Options: []sdkcontroller.ControllerConfigChoice{
+					{Value: "low", Name: "Low"},
+					{Value: "high", Name: "High"},
+					{Value: "xhigh", Name: "Xhigh"},
+				},
+			},
+		},
+		models: &sdkacpclient.SessionModelState{
+			CurrentModelID: "gpt-5.5/xhigh",
+		},
+	}, 0)
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if status.Model != "gpt-5.5" || status.ReasoningEffort != "xhigh" {
+		t.Fatalf("status model/effort = %q/%q, want gpt-5.5/xhigh", status.Model, status.ReasoningEffort)
+	}
+}
+
+func TestControllerRunStatusDerivesEffortOptionsFromACPModelState(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []sdkcontroller.ControllerConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			CurrentValue: "gpt-5.4",
+			Options: []sdkcontroller.ControllerConfigChoice{
+				{Value: "gpt-5.5", Name: "GPT-5.5"},
+				{Value: "gpt-5.4", Name: "gpt-5.4"},
+			},
+		}},
+		models: &sdkacpclient.SessionModelState{
+			CurrentModelID: "gpt-5.4/high",
+			AvailableModels: []sdkacpclient.ModelInfo{
+				{ModelID: "gpt-5.5", Name: "GPT-5.5"},
+				{ModelID: "gpt-5.4/low", Name: "gpt-5.4 (low)"},
+				{ModelID: "gpt-5.4/high", Name: "gpt-5.4 (high)"},
+				{ModelID: "gpt-5.4/xhigh", Name: "gpt-5.4 (xhigh)"},
+			},
+		},
+	}, 0)
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if status.Model != "gpt-5.4" || status.ReasoningEffort != "high" {
+		t.Fatalf("status model/effort = %q/%q, want gpt-5.4/high", status.Model, status.ReasoningEffort)
+	}
+	if got := controllerChoiceValues(status.EffortOptions); !equalStrings(got, []string{"low", "high", "xhigh"}) {
+		t.Fatalf("effort options = %#v, want model-derived low/high/xhigh", got)
+	}
+}
+
+func TestControllerRunStatusPreservesConfigChoicesAfterPartialUpdate(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []sdkcontroller.ControllerConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			CurrentValue: "gpt-5.5",
+			Options: []sdkcontroller.ControllerConfigChoice{
+				{Value: "gpt-5.5", Name: "GPT-5.5"},
+				{Value: "gpt-5.4", Name: "gpt-5.4"},
+			},
+		}},
+	}, 0)
+
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(2, 0) }, sdkacpclient.ConfigOptionUpdate{
+		SessionUpdate: sdkacpclient.UpdateConfigOption,
+		ConfigOptions: []sdkacpclient.SessionConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			CurrentValue: "gpt-5.4",
+			Options: []sdkacpclient.SessionConfigSelectOption{
+				{Value: "gpt-5.4", Name: "gpt-5.4"},
+			},
+		}},
+	})
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if status.Model != "gpt-5.4" {
+		t.Fatalf("model = %q, want updated current model", status.Model)
+	}
+	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-5.5", "gpt-5.4"}) {
+		t.Fatalf("model options = %#v, want preserved full choices", got)
+	}
+}
+
+func controllerChoiceValues(in []sdkcontroller.ControllerConfigChoice) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		out = append(out, item.Value)
+	}
+	return out
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func testStringPtr(value string) *string {
 	return &value
 }

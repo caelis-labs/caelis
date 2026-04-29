@@ -874,7 +874,7 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		return sdktask.Snapshot{}, err
 	}
-	if !snapshot.Running {
+	if shouldDropInactiveSubagentTask(snapshot) {
 		tm.mu.Lock()
 		delete(tm.subagents, task.ref.TaskID)
 		tm.mu.Unlock()
@@ -945,7 +945,7 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		return sdktask.Snapshot{}, err
 	}
-	if !snapshot.Running {
+	if shouldDropInactiveSubagentTask(snapshot) {
 		tm.mu.Lock()
 		delete(tm.subagents, task.ref.TaskID)
 		tm.mu.Unlock()
@@ -992,6 +992,10 @@ func (tm *taskRuntime) cancelSubagent(ctx context.Context, task *subagentTask) (
 	tm.mu.Unlock()
 	_ = tm.updateSubagentParticipant(ctx, task, "detached")
 	return snapshot, nil
+}
+
+func shouldDropInactiveSubagentTask(snapshot sdktask.Snapshot) bool {
+	return !snapshot.Running && snapshot.State != sdktask.StateCompleted
 }
 
 func (tm *taskRuntime) lookupBash(ctx context.Context, ref sdksession.SessionRef, taskID string) (*bashTask, error) {
@@ -1152,6 +1156,8 @@ func taskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 	}
 	if output, _ := snapshot.Result["result"].(string); strings.TrimSpace(output) != "" {
 		payload["result"] = strings.TrimSpace(output)
+	} else if output := compactFinalOutput(taskStringValue(snapshot.Result["stdout"]), taskStringValue(snapshot.Result["stderr"])); output != "" {
+		payload["result"] = output
 	}
 	if exitCode, ok := snapshot.Result["exit_code"]; ok {
 		payload["exit_code"] = exitCode

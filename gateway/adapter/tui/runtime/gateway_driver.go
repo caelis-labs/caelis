@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"runtime"
@@ -30,6 +31,8 @@ type GatewayDriver struct {
 	sessionMode         string
 	defaultSandboxType  string
 	sandboxType         string
+	activeCommandID     uint64
+	activeCommandCancel context.CancelFunc
 	streamSubscriptions map[string]struct{}
 }
 
@@ -439,15 +442,57 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 }
 
 func (d *GatewayDriver) Interrupt(ctx context.Context) error {
+	cancelCommand := d.activeCommandInterrupt()
+	if cancelCommand != nil {
+		cancelCommand()
+	}
 	session, ok := d.currentSession()
 	if !ok {
+		if cancelCommand != nil {
+			return nil
+		}
 		return fmt.Errorf("tui/runtime: no active session")
 	}
-	return d.stack.Gateway.Interrupt(ctx, appgateway.InterruptRequest{
+	if err := d.stack.Gateway.Interrupt(ctx, appgateway.InterruptRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 		Reason:     "tui interrupt",
-	})
+	}); err != nil {
+		if cancelCommand != nil {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (d *GatewayDriver) beginInterruptibleCommand(ctx context.Context) (context.Context, func()) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	commandCtx, cancel := context.WithCancel(ctx)
+	d.mu.Lock()
+	d.activeCommandID++
+	id := d.activeCommandID
+	d.activeCommandCancel = cancel
+	d.mu.Unlock()
+	return commandCtx, func() {
+		d.mu.Lock()
+		if d.activeCommandID == id {
+			d.activeCommandCancel = nil
+		}
+		d.mu.Unlock()
+		cancel()
+	}
+}
+
+func (d *GatewayDriver) activeCommandInterrupt() context.CancelFunc {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.activeCommandCancel
 }
 
 func (d *GatewayDriver) NewSession(ctx context.Context) (sdksession.Session, error) {
@@ -810,9 +855,17 @@ func (d *GatewayDriver) AddAgent(ctx context.Context, target string) (AgentStatu
 }
 
 func (d *GatewayDriver) AddAgentWithOptions(ctx context.Context, target string, opts AgentAddOptions) (AgentStatusSnapshot, error) {
+	if opts.Install {
+		var finish func()
+		ctx, finish = d.beginInterruptibleCommand(ctx)
+		defer finish()
+	}
 	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{
 		Install: opts.Install,
 	}); err != nil {
+		if opts.Install && errors.Is(ctx.Err(), context.Canceled) {
+			return AgentStatusSnapshot{}, context.Canceled
+		}
 		return AgentStatusSnapshot{}, err
 	}
 	return d.AgentStatus(ctx)
@@ -1149,7 +1202,8 @@ func (d *GatewayDriver) completeACPControllerSlashArg(status gatewayapp.ACPContr
 		return nil, true
 	}
 	if alias, ok := strings.CutPrefix(normalized, "model use "); ok && strings.TrimSpace(alias) != "" {
-		return controllerChoicesToSlashCandidates(status.EffortOptions, "remote ACP reasoning effort", query, limit), true
+		efforts := acpControllerEffortsForModel(status, alias)
+		return controllerChoicesToSlashCandidates(efforts, "remote ACP reasoning effort", query, limit), true
 	}
 	return nil, false
 }
@@ -1327,6 +1381,18 @@ func matchACPControllerMode(modes []gatewayapp.ACPControllerMode, requested stri
 
 func acpControllerModeLabel(mode gatewayapp.ACPControllerMode) string {
 	return firstNonEmpty(strings.TrimSpace(mode.Name), strings.TrimSpace(mode.ID))
+}
+
+func acpControllerEffortsForModel(status gatewayapp.ACPControllerStatus, model string) []gatewayapp.ACPControllerConfigChoice {
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model != "" {
+		for key, efforts := range status.EffortOptionsByModel {
+			if strings.EqualFold(strings.TrimSpace(key), model) {
+				return efforts
+			}
+		}
+	}
+	return status.EffortOptions
 }
 
 func controllerChoicesToSlashCandidates(choices []gatewayapp.ACPControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
@@ -1770,10 +1836,10 @@ func defaultSlashArgCandidates(command string) []SlashArgCandidate {
 	switch command {
 	case "agent":
 		return []SlashArgCandidate{
-			{Value: "list", Display: "list", Detail: "List registered ACP agents"},
+			{Value: "use", Display: "use", Detail: "Switch the main controller"},
 			{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
 			{Value: "install", Display: "install", Detail: "Install and register an external ACP adapter"},
-			{Value: "use", Display: "use", Detail: "Switch the main controller"},
+			{Value: "list", Display: "list", Detail: "List registered ACP agents"},
 			{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
 		}
 	case "sandbox":

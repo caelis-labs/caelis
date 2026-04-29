@@ -86,6 +86,33 @@ func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 	}
 }
 
+func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "model use":
+				return []SlashArgCandidate{{Value: "gpt-5.5", Display: "GPT-5.5"}}, nil
+			case "model use gpt-5.5":
+				return []SlashArgCandidate{{Value: "high", Display: "High"}, {Value: "xhigh", Display: "Xhigh"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+
+	model.setInputText("/model use gpt-5.5")
+	model.syncTextareaFromInput()
+	model.syncSlashInputOverlays()
+
+	if got := model.slashArgCommand; got != "model use gpt-5.5" {
+		t.Fatalf("slashArgCommand = %q, want reasoning picker command", got)
+	}
+	if len(model.slashArgCandidates) != 2 || model.slashArgCandidates[1].Value != "xhigh" {
+		t.Fatalf("reasoning candidates = %#v, want high/xhigh", model.slashArgCandidates)
+	}
+}
+
 func TestSlashCommandSelectionMovesWithArrowKeys(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),

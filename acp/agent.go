@@ -18,6 +18,7 @@ const (
 	MethodSessionLoad      = schema.MethodSessionLoad
 	MethodSessionSetMode   = schema.MethodSessionSetMode
 	MethodSessionSetConfig = schema.MethodSessionSetConfig
+	MethodSessionSetModel  = schema.MethodSessionSetModel
 	MethodSessionPrompt    = schema.MethodSessionPrompt
 	MethodSessionCancel    = schema.MethodSessionCancel
 
@@ -54,6 +55,19 @@ type ConfigProvider interface {
 	SetSessionConfigOption(context.Context, SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
 }
 
+type ModelProvider interface {
+	SessionModels(context.Context, sdksession.Session) (*SessionModelState, error)
+	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
+}
+
+type PromptCapabilitiesProvider interface {
+	PromptCapabilities(context.Context) (PromptCapabilities, error)
+}
+
+type CommandProvider interface {
+	AvailableCommands(context.Context, string) ([]AvailableCommand, error)
+}
+
 type Implementation = schema.Implementation
 type InitializeRequest = schema.InitializeRequest
 type AgentCapabilities = schema.AgentCapabilities
@@ -70,6 +84,10 @@ type SessionMode = schema.SessionMode
 type SessionModeState = schema.SessionModeState
 type SetSessionModeRequest = schema.SetSessionModeRequest
 type SetSessionModeResponse = schema.SetSessionModeResponse
+type ModelInfo = schema.ModelInfo
+type SessionModelState = schema.SessionModelState
+type SetSessionModelRequest = schema.SetSessionModelRequest
+type SetSessionModelResponse = schema.SetSessionModelResponse
 type SessionConfigSelectOption = schema.SessionConfigSelectOption
 type SessionConfigOption = schema.SessionConfigOption
 type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
@@ -77,3 +95,6 @@ type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
 type CancelNotification = schema.CancelNotification
+type AvailableCommandInput = schema.AvailableCommandInput
+type AvailableCommand = schema.AvailableCommand
+type AvailableCommandsUpdate = schema.AvailableCommandsUpdate

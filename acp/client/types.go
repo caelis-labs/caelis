@@ -16,6 +16,7 @@ const (
 	MethodSessionLoad          = schema.MethodSessionLoad
 	MethodSessionSetMode       = schema.MethodSessionSetMode
 	MethodSessionSetConfig     = schema.MethodSessionSetConfig
+	MethodSessionSetModel      = schema.MethodSessionSetModel
 	MethodSessionPrompt        = schema.MethodSessionPrompt
 	MethodSessionCancel        = schema.MethodSessionCancel
 	MethodSessionUpdate        = schema.MethodSessionUpdate
@@ -56,12 +57,16 @@ type LoadSessionRequest = schema.LoadSessionRequest
 type LoadSessionResponse = schema.LoadSessionResponse
 type SetSessionModeRequest = schema.SetSessionModeRequest
 type SetSessionModeResponse = schema.SetSessionModeResponse
+type SetSessionModelRequest = schema.SetSessionModelRequest
+type SetSessionModelResponse = schema.SetSessionModelResponse
 type SetSessionConfigOptionRequest = schema.SetSessionConfigOptionRequest
 type SetSessionConfigOptionResponse = schema.SetSessionConfigOptionResponse
 type PromptRequest = schema.PromptRequest
 type PromptResponse = schema.PromptResponse
 type SessionMode = schema.SessionMode
 type SessionModeState = schema.SessionModeState
+type ModelInfo = schema.ModelInfo
+type SessionModelState = schema.SessionModelState
 type SessionConfigSelectOption = schema.SessionConfigSelectOption
 type SessionConfigOption = schema.SessionConfigOption
 type CancelRequest = schema.CancelNotification
@@ -93,6 +98,8 @@ type WriteTextFileRequest = schema.WriteTextFileRequest
 type WriteTextFileResponse = schema.WriteTextFileResponse
 type TextContent = schema.TextContent
 type ImageContent = schema.ImageContent
+type AvailableCommand = schema.AvailableCommand
+type AvailableCommandInput = schema.AvailableCommandInput
 
 type CancelResponse struct{}
 

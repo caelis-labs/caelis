@@ -501,7 +501,7 @@ func toolKindForName(name string) string {
 		return "search"
 	case "PLAN":
 		return "other"
-	case "BASH", "TASK":
+	case "BASH", "SPAWN", "TASK":
 		return "execute"
 	default:
 		return "other"
@@ -519,6 +519,13 @@ func toolCallTitle(call sdkmodel.ToolCall) string {
 	case "BASH":
 		if command, _ := args["command"].(string); strings.TrimSpace(command) != "" {
 			return fmt.Sprintf("BASH %s", strings.TrimSpace(command))
+		}
+	case "SPAWN":
+		if agent, _ := args["agent"].(string); strings.TrimSpace(agent) != "" {
+			return fmt.Sprintf("SPAWN %s", strings.TrimSpace(agent))
+		}
+		if prompt, _ := args["prompt"].(string); strings.TrimSpace(prompt) != "" {
+			return fmt.Sprintf("SPAWN %s", strings.TrimSpace(prompt))
 		}
 	case "TASK":
 		action, _ := args["action"].(string)
