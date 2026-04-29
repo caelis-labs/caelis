@@ -81,7 +81,7 @@ func genericToolArgs(raw map[string]any) string {
 func toolDisplayOutput(name string, input map[string]any, output map[string]any, fallback string, status string, isErr bool) string {
 	name = strings.ToUpper(strings.TrimSpace(name))
 	if isErr && (name == "WRITE" || name == "PATCH") {
-		if text := strings.TrimSpace(fallback); text != "" {
+		if text := mutationErrorDisplay(output, fallback); text != "" {
 			return text
 		}
 	}
@@ -177,6 +177,12 @@ func genericToolOutput(output map[string]any, isErr bool) string {
 		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
 			return stderr
 		}
+		if errText := strings.TrimSpace(asString(output["error"])); errText != "" {
+			return errText
+		}
+		if summary := strings.TrimSpace(asString(output["summary"])); summary != "" {
+			return summary
+		}
 	}
 	return firstTrimmed(
 		asString(output["text"]),
@@ -185,7 +191,31 @@ func genericToolOutput(output map[string]any, isErr bool) string {
 		asString(output["output"]),
 		asString(output["output_preview"]),
 		asString(output["stderr"]),
+		asString(output["error"]),
+		asString(output["summary"]),
 	)
+}
+
+func mutationErrorDisplay(output map[string]any, fallback string) string {
+	if text := genericToolOutput(output, true); text != "" && !isGenericFailureText(text) {
+		return text
+	}
+	if text := strings.TrimSpace(fallback); text != "" && !isGenericFailureText(text) {
+		return text
+	}
+	if text := genericToolOutput(output, true); text != "" {
+		return text
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func isGenericFailureText(text string) bool {
+	switch strings.ToLower(strings.TrimSpace(text)) {
+	case "", "failed", "error":
+		return true
+	default:
+		return false
+	}
 }
 
 func formatTaskWriteInput(input string) string {
@@ -315,12 +345,20 @@ func mutationDisplaySummary(input map[string]any, output map[string]any) string 
 	if added > 0 || removed > 0 {
 		header += fmt.Sprintf(" +%d -%d", added, removed)
 	}
-	if hunk := strings.TrimSpace(asString(output["hunk"])); hunk != "" {
+	if diffLines := mutationStructuredDiffLines(output); len(diffLines) > 0 {
+		return strings.Join(append([]string{header, "diff / hunk"}, diffLines...), "\n")
+	}
+	oldText := strings.TrimSpace(asString(input["old"]))
+	newText := strings.TrimSpace(asString(input["new"]))
+	if hunk := strings.TrimSpace(asString(output["hunk"])); hunk != "" || oldText != "" || newText != "" {
+		if hunk == "" {
+			hunk = mutationSyntheticHunk(output)
+		}
 		diffLines := []string{header, "diff / hunk", hunk}
-		if oldText := strings.TrimSpace(asString(input["old"])); oldText != "" {
+		if oldText != "" {
 			diffLines = append(diffLines, prefixDiffLines("-", oldText)...)
 		}
-		if newText := strings.TrimSpace(asString(input["new"])); newText != "" {
+		if newText != "" {
 			diffLines = append(diffLines, prefixDiffLines("+", newText)...)
 		}
 		return strings.Join(diffLines, "\n")
@@ -333,6 +371,51 @@ func mutationDisplaySummary(input map[string]any, output map[string]any) string 
 		}
 	}
 	return header
+}
+
+type mutationDisplayDiffHunk struct {
+	Header string   `json:"header"`
+	Lines  []string `json:"lines"`
+}
+
+func mutationStructuredDiffLines(output map[string]any) []string {
+	raw, exists := output["diff_hunks"]
+	if !exists || raw == nil {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var hunks []mutationDisplayDiffHunk
+	if err := json.Unmarshal(data, &hunks); err != nil {
+		return nil
+	}
+	lines := make([]string, 0, len(hunks)*4)
+	for _, hunk := range hunks {
+		header := strings.TrimSpace(hunk.Header)
+		if header == "" && len(hunk.Lines) == 0 {
+			continue
+		}
+		if header != "" {
+			lines = append(lines, header)
+		}
+		lines = append(lines, hunk.Lines...)
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	if displayBool(output["diff_truncated"]) {
+		lines = append(lines, "@@ diff truncated @@")
+	}
+	return lines
+}
+
+func mutationSyntheticHunk(output map[string]any) string {
+	if replaced := displayInt(output["replaced"]); replaced > 0 {
+		return "@@ repeated replacement: " + pluralizeUnit(replaced, "match") + " @@"
+	}
+	return "@@ changed @@"
 }
 
 func prefixDiffLines(prefix string, text string) []string {

@@ -328,75 +328,75 @@ func defaultThemeVariant(trueColor bool) Theme {
 	return Theme{
 		Name:           "dark",
 		IsDark:         true,
-		AppBg:          themeColor(trueColor, "#111315", "233"),
-		PanelBorder:    themeColor(trueColor, "#3f4652", "240"),
-		PanelTitle:     themeColor(trueColor, "#f3f4f6", "255"),
-		TextPrimary:    themeColor(trueColor, "#f5f5f5", "255"),
-		TextSecondary:  themeColor(trueColor, "#a1a1aa", "248"),
-		SecondaryText:  themeColor(trueColor, "#c7cbd1", "250"),
-		MutedText:      themeColor(trueColor, "#7c8798", "245"),
-		Info:           themeColor(trueColor, "#d4d4d8", "252"),
-		Success:        themeColor(trueColor, "#56d364", "77"),
-		Warning:        themeColor(trueColor, "#f5c451", "221"),
-		Error:          themeColor(trueColor, "#ff7b72", "210"),
-		Accent:         themeColor(trueColor, "#8ab4f8", "117"),
-		Focus:          themeColor(trueColor, "#9ec6ff", "153"),
-		ModalBg:        themeColor(trueColor, "#15181d", "234"),
-		StatusBg:       themeColor(trueColor, "#111315", "233"),
-		StatusText:     themeColor(trueColor, "#d4d4d8", "252"),
-		CommandBg:      themeColor(trueColor, "#111315", "233"),
-		CommandActive:  themeColor(trueColor, "#111315", "233"),
-		CommandText:    themeColor(trueColor, "#f5f5f5", "255"),
-		CommandSubText: themeColor(trueColor, "#a1a1aa", "248"),
+		AppBg:          themeColor(trueColor, "#0f1117", "233"),
+		PanelBorder:    themeColor(trueColor, "#333b49", "240"),
+		PanelTitle:     themeColor(trueColor, "#f4f7fb", "255"),
+		TextPrimary:    themeColor(trueColor, "#e8edf4", "255"),
+		TextSecondary:  themeColor(trueColor, "#a8b3c5", "248"),
+		SecondaryText:  themeColor(trueColor, "#c6d0df", "250"),
+		MutedText:      themeColor(trueColor, "#7a8599", "245"),
+		Info:           themeColor(trueColor, "#7dd3fc", "117"),
+		Success:        themeColor(trueColor, "#5ee787", "78"),
+		Warning:        themeColor(trueColor, "#f4bf4f", "221"),
+		Error:          themeColor(trueColor, "#ff6b6b", "203"),
+		Accent:         themeColor(trueColor, "#7aa2f7", "111"),
+		Focus:          themeColor(trueColor, "#8bd5ff", "117"),
+		ModalBg:        themeColor(trueColor, "#151922", "234"),
+		StatusBg:       themeColor(trueColor, "#11141b", "233"),
+		StatusText:     themeColor(trueColor, "#d7deea", "252"),
+		CommandBg:      themeColor(trueColor, "#11141b", "233"),
+		CommandActive:  themeColor(trueColor, "#20283a", "236"),
+		CommandText:    themeColor(trueColor, "#f4f7fb", "255"),
+		CommandSubText: themeColor(trueColor, "#9aa6ba", "247"),
 
-		AssistantFg:        themeColor(trueColor, "#56d364", "77"),
-		ReasoningFg:        themeColor(trueColor, "#747e8f", "245"),
-		UserFg:             themeColor(trueColor, "#f5f5f5", "255"),
-		UserBg:             themeColor(trueColor, "#111315", "233"),
+		AssistantFg:        themeColor(trueColor, "#9ece6a", "114"),
+		ReasoningFg:        themeColor(trueColor, "#7f8ba3", "245"),
+		UserFg:             themeColor(trueColor, "#f4f7fb", "255"),
+		UserBg:             themeColor(trueColor, "#151922", "234"),
 		UserPrefixFg:       themeColor(trueColor, "#ffffff", "255"),
-		UserMentionFg:      themeColor(trueColor, "#f5f5f5", "255"),
-		ToolFg:             themeColor(trueColor, "#cbd5e1", "252"),
-		DiffAddFg:          themeColor(trueColor, "#56d364", "77"),
+		UserMentionFg:      themeColor(trueColor, "#8bd5ff", "117"),
+		ToolFg:             themeColor(trueColor, "#8bd5ff", "117"),
+		DiffAddFg:          themeColor(trueColor, "#5ee787", "78"),
 		DiffRemoveFg:       themeColor(trueColor, "#ff7b72", "210"),
-		DiffHeaderFg:       themeColor(trueColor, "#8d96a5", "246"),
-		DiffHunkFg:         themeColor(trueColor, "#d4d4d8", "252"),
-		DiffAddBg:          themeColor(trueColor, "#1d3328", "22"),
-		DiffAddStrongBg:    themeColor(trueColor, "#285f3a", "29"),
-		DiffRemoveBg:       themeColor(trueColor, "#3a2329", "52"),
-		DiffRemoveStrongBg: themeColor(trueColor, "#6e2b34", "88"),
-		DiffLineNoFg:       themeColor(trueColor, "#758195", "245"),
-		DiffGutterFg:       themeColor(trueColor, "#8d96a5", "246"),
-		DiffPanelBorder:    themeColor(trueColor, "#3f4652", "240"),
-		SectionFg:          themeColor(trueColor, "#f5f5f5", "255"),
-		KeyLabelFg:         themeColor(trueColor, "#e5e7eb", "254"),
-		NoteFg:             themeColor(trueColor, "#a1a1aa", "248"),
-		PromptFg:           themeColor(trueColor, "#f5f5f5", "255"),
+		DiffHeaderFg:       themeColor(trueColor, "#a8b3c5", "248"),
+		DiffHunkFg:         themeColor(trueColor, "#c6d0df", "250"),
+		DiffAddBg:          themeColor(trueColor, "#173423", "22"),
+		DiffAddStrongBg:    themeColor(trueColor, "#225f37", "29"),
+		DiffRemoveBg:       themeColor(trueColor, "#3a2028", "52"),
+		DiffRemoveStrongBg: themeColor(trueColor, "#762d39", "88"),
+		DiffLineNoFg:       themeColor(trueColor, "#748097", "245"),
+		DiffGutterFg:       themeColor(trueColor, "#9aa6ba", "247"),
+		DiffPanelBorder:    themeColor(trueColor, "#394352", "240"),
+		SectionFg:          themeColor(trueColor, "#f4f7fb", "255"),
+		KeyLabelFg:         themeColor(trueColor, "#c6d0df", "250"),
+		NoteFg:             themeColor(trueColor, "#8f9aad", "246"),
+		PromptFg:           themeColor(trueColor, "#8bd5ff", "117"),
 		CursorFg:           themeColor(trueColor, "#ffffff", "255"),
-		ScrollHintFg:       themeColor(trueColor, "#f5c451", "221"),
+		ScrollHintFg:       themeColor(trueColor, "#f4bf4f", "221"),
 
-		InputBarBg:          themeColor(trueColor, "#111315", "233"),
-		InputBarFg:          themeColor(trueColor, "#f5f5f5", "255"),
-		ToolOutputBg:        themeColor(trueColor, "#111315", "233"),
-		HelpHintFg:          themeColor(trueColor, "#a1a1aa", "248"),
-		SpinnerFg:           themeColor(trueColor, "#e5e7eb", "254"),
-		SeparatorFg:         themeColor(trueColor, "#303846", "239"),
-		RoleBorderFg:        themeColor(trueColor, "#3f4652", "240"),
-		NewMsgBg:            themeColor(trueColor, "#111315", "233"),
-		ComposerBorder:      themeColor(trueColor, "#3f4652", "240"),
-		ComposerBorderFocus: themeColor(trueColor, "#f3f4f6", "255"),
-		ScrollbarTrack:      themeColor(trueColor, "#1d2128", "234"),
-		ScrollbarThumb:      themeColor(trueColor, "#8d96a5", "246"),
-		LinkFg:              themeColor(trueColor, "#8ab4f8", "117"),
-		CodeFg:              themeColor(trueColor, "#f5c451", "221"),
-		CodeBg:              themeColor(trueColor, "#1b1f27", "234"),
-		CodeBlockFg:         themeColor(trueColor, "#d4d4d8", "252"),
-		CodeBlockBg:         themeColor(trueColor, "#171a20", "234"),
-		TranscriptRail:      themeColor(trueColor, "#465163", "240"),
-		TranscriptShell:     themeColor(trueColor, "#2a303a", "236"),
-		TranscriptPillBg:    themeColor(trueColor, "#202632", "236"),
-		CodeSurface:         themeColor(trueColor, "#171c23", "234"),
-		TableHeaderBg:       themeColor(trueColor, "#171c23", "234"),
-		TableBorder:         themeColor(trueColor, "#5b6472", "242"),
+		InputBarBg:          themeColor(trueColor, "#0f1117", "233"),
+		InputBarFg:          themeColor(trueColor, "#e8edf4", "255"),
+		ToolOutputBg:        themeColor(trueColor, "#151922", "234"),
+		HelpHintFg:          themeColor(trueColor, "#8f9aad", "246"),
+		SpinnerFg:           themeColor(trueColor, "#8bd5ff", "117"),
+		SeparatorFg:         themeColor(trueColor, "#293241", "238"),
+		RoleBorderFg:        themeColor(trueColor, "#333b49", "240"),
+		NewMsgBg:            themeColor(trueColor, "#1d2737", "236"),
+		ComposerBorder:      themeColor(trueColor, "#333b49", "240"),
+		ComposerBorderFocus: themeColor(trueColor, "#8bd5ff", "117"),
+		ScrollbarTrack:      themeColor(trueColor, "#1a202b", "234"),
+		ScrollbarThumb:      themeColor(trueColor, "#7a8599", "245"),
+		LinkFg:              themeColor(trueColor, "#8bd5ff", "117"),
+		CodeFg:              themeColor(trueColor, "#f4bf4f", "221"),
+		CodeBg:              themeColor(trueColor, "#20283a", "236"),
+		CodeBlockFg:         themeColor(trueColor, "#d7deea", "252"),
+		CodeBlockBg:         themeColor(trueColor, "#171c26", "234"),
+		TranscriptRail:      themeColor(trueColor, "#465268", "240"),
+		TranscriptShell:     themeColor(trueColor, "#293241", "238"),
+		TranscriptPillBg:    themeColor(trueColor, "#20283a", "236"),
+		CodeSurface:         themeColor(trueColor, "#171c26", "234"),
+		TableHeaderBg:       themeColor(trueColor, "#20283a", "236"),
+		TableBorder:         themeColor(trueColor, "#59657a", "242"),
 	}
 }
 
@@ -404,75 +404,75 @@ func defaultLightThemeVariant(trueColor bool) Theme {
 	return Theme{
 		Name:           "light",
 		IsDark:         false,
-		AppBg:          themeColor(trueColor, "#f8fafc", "255"),
-		PanelBorder:    themeColor(trueColor, "#64748b", "243"),
-		PanelTitle:     themeColor(trueColor, "#0f172a", "235"),
-		TextPrimary:    themeColor(trueColor, "#111827", "235"),
-		TextSecondary:  themeColor(trueColor, "#4b5563", "240"),
-		SecondaryText:  themeColor(trueColor, "#334155", "239"),
-		MutedText:      themeColor(trueColor, "#64748b", "243"),
-		Info:           themeColor(trueColor, "#334155", "239"),
-		Success:        themeColor(trueColor, "#15803d", "28"),
-		Warning:        themeColor(trueColor, "#b45309", "130"),
-		Error:          themeColor(trueColor, "#b91c1c", "124"),
-		Accent:         themeColor(trueColor, "#1d4ed8", "25"),
-		Focus:          themeColor(trueColor, "#1d4ed8", "25"),
+		AppBg:          themeColor(trueColor, "#fbfcfe", "255"),
+		PanelBorder:    themeColor(trueColor, "#c8d2df", "252"),
+		PanelTitle:     themeColor(trueColor, "#111827", "235"),
+		TextPrimary:    themeColor(trueColor, "#1f2937", "236"),
+		TextSecondary:  themeColor(trueColor, "#526071", "240"),
+		SecondaryText:  themeColor(trueColor, "#364152", "239"),
+		MutedText:      themeColor(trueColor, "#748094", "243"),
+		Info:           themeColor(trueColor, "#2563eb", "25"),
+		Success:        themeColor(trueColor, "#188a42", "28"),
+		Warning:        themeColor(trueColor, "#b86b00", "130"),
+		Error:          themeColor(trueColor, "#c2410c", "166"),
+		Accent:         themeColor(trueColor, "#2563eb", "25"),
+		Focus:          themeColor(trueColor, "#0284c7", "32"),
 		ModalBg:        themeColor(trueColor, "#ffffff", "231"),
-		StatusBg:       themeColor(trueColor, "#f8fafc", "255"),
-		StatusText:     themeColor(trueColor, "#0f172a", "235"),
-		CommandBg:      themeColor(trueColor, "#f8fafc", "255"),
-		CommandActive:  themeColor(trueColor, "#f8fafc", "255"),
+		StatusBg:       themeColor(trueColor, "#f3f6fb", "255"),
+		StatusText:     themeColor(trueColor, "#1f2937", "236"),
+		CommandBg:      themeColor(trueColor, "#ffffff", "231"),
+		CommandActive:  themeColor(trueColor, "#e7f0ff", "195"),
 		CommandText:    themeColor(trueColor, "#111827", "235"),
-		CommandSubText: themeColor(trueColor, "#4b5563", "240"),
+		CommandSubText: themeColor(trueColor, "#526071", "240"),
 
-		AssistantFg:        themeColor(trueColor, "#15803d", "28"),
+		AssistantFg:        themeColor(trueColor, "#188a42", "28"),
 		ReasoningFg:        themeColor(trueColor, "#6b7280", "242"),
 		UserFg:             themeColor(trueColor, "#111827", "235"),
-		UserBg:             themeColor(trueColor, "#f8fafc", "255"),
+		UserBg:             themeColor(trueColor, "#ffffff", "231"),
 		UserPrefixFg:       themeColor(trueColor, "#0f172a", "235"),
-		UserMentionFg:      themeColor(trueColor, "#111827", "235"),
-		ToolFg:             themeColor(trueColor, "#0f172a", "235"),
-		DiffAddFg:          themeColor(trueColor, "#15803d", "28"),
-		DiffRemoveFg:       themeColor(trueColor, "#b91c1c", "124"),
-		DiffHeaderFg:       themeColor(trueColor, "#475569", "239"),
-		DiffHunkFg:         themeColor(trueColor, "#0f172a", "235"),
-		DiffAddBg:          themeColor(trueColor, "#e8f5e9", "194"),
-		DiffAddStrongBg:    themeColor(trueColor, "#cce9d2", "151"),
-		DiffRemoveBg:       themeColor(trueColor, "#fdecec", "224"),
-		DiffRemoveStrongBg: themeColor(trueColor, "#f7d0d0", "217"),
-		DiffLineNoFg:       themeColor(trueColor, "#64748b", "243"),
+		UserMentionFg:      themeColor(trueColor, "#0f766e", "30"),
+		ToolFg:             themeColor(trueColor, "#0f766e", "30"),
+		DiffAddFg:          themeColor(trueColor, "#188a42", "28"),
+		DiffRemoveFg:       themeColor(trueColor, "#c2410c", "166"),
+		DiffHeaderFg:       themeColor(trueColor, "#526071", "240"),
+		DiffHunkFg:         themeColor(trueColor, "#1f2937", "236"),
+		DiffAddBg:          themeColor(trueColor, "#e8f7ed", "194"),
+		DiffAddStrongBg:    themeColor(trueColor, "#c7ead2", "151"),
+		DiffRemoveBg:       themeColor(trueColor, "#fff1ed", "224"),
+		DiffRemoveStrongBg: themeColor(trueColor, "#ffd8cc", "216"),
+		DiffLineNoFg:       themeColor(trueColor, "#748094", "243"),
 		DiffGutterFg:       themeColor(trueColor, "#64748b", "243"),
-		DiffPanelBorder:    themeColor(trueColor, "#94a3b8", "249"),
+		DiffPanelBorder:    themeColor(trueColor, "#c8d2df", "252"),
 		SectionFg:          themeColor(trueColor, "#111827", "235"),
-		KeyLabelFg:         themeColor(trueColor, "#0f172a", "235"),
+		KeyLabelFg:         themeColor(trueColor, "#364152", "239"),
 		NoteFg:             themeColor(trueColor, "#6b7280", "242"),
-		PromptFg:           themeColor(trueColor, "#0f172a", "235"),
-		CursorFg:           themeColor(trueColor, "#0f172a", "235"),
-		ScrollHintFg:       themeColor(trueColor, "#b45309", "130"),
+		PromptFg:           themeColor(trueColor, "#0284c7", "32"),
+		CursorFg:           themeColor(trueColor, "#111827", "235"),
+		ScrollHintFg:       themeColor(trueColor, "#b86b00", "130"),
 
-		InputBarBg:          themeColor(trueColor, "#f8fafc", "255"),
-		InputBarFg:          themeColor(trueColor, "#111827", "235"),
-		ToolOutputBg:        themeColor(trueColor, "#ffffff", "231"),
-		HelpHintFg:          themeColor(trueColor, "#6b7280", "242"),
-		SpinnerFg:           themeColor(trueColor, "#334155", "239"),
-		SeparatorFg:         themeColor(trueColor, "#64748b", "243"),
-		RoleBorderFg:        themeColor(trueColor, "#94a3b8", "249"),
-		NewMsgBg:            themeColor(trueColor, "#e2e8f0", "254"),
-		ComposerBorder:      themeColor(trueColor, "#64748b", "243"),
-		ComposerBorderFocus: themeColor(trueColor, "#1d4ed8", "25"),
-		ScrollbarTrack:      themeColor(trueColor, "#cbd5e1", "252"),
-		ScrollbarThumb:      themeColor(trueColor, "#64748b", "243"),
-		LinkFg:              themeColor(trueColor, "#1d4ed8", "25"),
-		CodeFg:              themeColor(trueColor, "#92400e", "130"),
-		CodeBg:              themeColor(trueColor, "#eef2ff", "189"),
-		CodeBlockFg:         themeColor(trueColor, "#1f2937", "236"),
-		CodeBlockBg:         themeColor(trueColor, "#f1f5f9", "255"),
-		TranscriptRail:      themeColor(trueColor, "#94a3b8", "249"),
-		TranscriptShell:     themeColor(trueColor, "#cbd5e1", "252"),
-		TranscriptPillBg:    themeColor(trueColor, "#e2e8f0", "254"),
-		CodeSurface:         themeColor(trueColor, "#f8fafc", "255"),
-		TableHeaderBg:       themeColor(trueColor, "#eef2f7", "254"),
-		TableBorder:         themeColor(trueColor, "#94a3b8", "249"),
+		InputBarBg:          themeColor(trueColor, "#ffffff", "231"),
+		InputBarFg:          themeColor(trueColor, "#1f2937", "236"),
+		ToolOutputBg:        themeColor(trueColor, "#f8fafc", "255"),
+		HelpHintFg:          themeColor(trueColor, "#748094", "243"),
+		SpinnerFg:           themeColor(trueColor, "#0284c7", "32"),
+		SeparatorFg:         themeColor(trueColor, "#d7dee8", "252"),
+		RoleBorderFg:        themeColor(trueColor, "#c8d2df", "252"),
+		NewMsgBg:            themeColor(trueColor, "#e7f0ff", "195"),
+		ComposerBorder:      themeColor(trueColor, "#c8d2df", "252"),
+		ComposerBorderFocus: themeColor(trueColor, "#0284c7", "32"),
+		ScrollbarTrack:      themeColor(trueColor, "#e2e8f0", "254"),
+		ScrollbarThumb:      themeColor(trueColor, "#8a98ab", "245"),
+		LinkFg:              themeColor(trueColor, "#2563eb", "25"),
+		CodeFg:              themeColor(trueColor, "#9a3412", "130"),
+		CodeBg:              themeColor(trueColor, "#fff7ed", "230"),
+		CodeBlockFg:         themeColor(trueColor, "#263241", "236"),
+		CodeBlockBg:         themeColor(trueColor, "#f3f6fb", "255"),
+		TranscriptRail:      themeColor(trueColor, "#b7c3d2", "250"),
+		TranscriptShell:     themeColor(trueColor, "#c8d2df", "252"),
+		TranscriptPillBg:    themeColor(trueColor, "#e7eef7", "254"),
+		CodeSurface:         themeColor(trueColor, "#f3f6fb", "255"),
+		TableHeaderBg:       themeColor(trueColor, "#eef4fb", "254"),
+		TableBorder:         themeColor(trueColor, "#a7b3c4", "249"),
 	}
 }
 
@@ -681,14 +681,30 @@ func (t Theme) ReasoningStyle() lipgloss.Style {
 	return lipgloss.NewStyle().Foreground(t.ReasoningFg).Italic(true)
 }
 
-// ToolStyle renders tool call/result prefixes (cyan).
+// ToolStyle renders tool call/result prefixes.
 func (t Theme) ToolStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.ToolFg)
+	return t.Tokens().ToolIcon
 }
 
-// ToolNameStyle renders tool names (bold + cyan).
+// ToolNameStyle renders tool names.
 func (t Theme) ToolNameStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.ToolFg).Bold(true)
+	return t.Tokens().ToolName
+}
+
+func (t Theme) ToolArgsStyle() lipgloss.Style {
+	return t.Tokens().ToolArgs
+}
+
+func (t Theme) ToolResultStyle() lipgloss.Style {
+	return t.Tokens().ToolResult
+}
+
+func (t Theme) ToolErrorStyle() lipgloss.Style {
+	return t.Tokens().ToolError
+}
+
+func (t Theme) ToolOutputStyle() lipgloss.Style {
+	return t.Tokens().ToolOutput
 }
 
 // UserStyle renders user messages in a subtle chat bubble-like background.
@@ -797,14 +813,43 @@ func (t Theme) CodeSurfaceStyle() lipgloss.Style {
 }
 
 func (t Theme) TableHeaderStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.TextPrimary).
-		Background(t.TableHeaderBg).
-		Bold(true)
+	return t.MarkdownTableHeaderStyle()
 }
 
 func (t Theme) TableBorderStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.TableBorder)
+	return t.MarkdownTableBorderStyle()
+}
+
+func (t Theme) MarkdownHeadingStyle() lipgloss.Style {
+	return t.Tokens().MarkdownHeading
+}
+
+func (t Theme) MarkdownLinkStyle() lipgloss.Style {
+	return t.Tokens().MarkdownLink
+}
+
+func (t Theme) MarkdownInlineCodeStyle() lipgloss.Style {
+	return t.Tokens().MarkdownInlineCode
+}
+
+func (t Theme) MarkdownCodeBlockStyle() lipgloss.Style {
+	return t.Tokens().MarkdownCodeBlock
+}
+
+func (t Theme) MarkdownQuoteStyle() lipgloss.Style {
+	return t.Tokens().MarkdownQuote
+}
+
+func (t Theme) MarkdownTableHeaderStyle() lipgloss.Style {
+	return t.Tokens().MarkdownTableHead
+}
+
+func (t Theme) MarkdownTableBorderStyle() lipgloss.Style {
+	return t.Tokens().MarkdownTableEdge
+}
+
+func (t Theme) MarkdownRuleStyle() lipgloss.Style {
+	return t.Tokens().MarkdownRule
 }
 
 // LogBlockStyle renders log/tool output lines with a subtle left border
@@ -928,5 +973,5 @@ func (t Theme) ScrollbarThumbStyle() lipgloss.Style {
 }
 
 func (t Theme) LinkStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.LinkFg).Underline(true)
+	return t.MarkdownLinkStyle()
 }

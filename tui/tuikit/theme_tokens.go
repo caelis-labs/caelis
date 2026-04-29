@@ -11,10 +11,9 @@ import (
 // colors. Every chrome, block-shell, composer, and overlay primitive
 // references tokens rather than Theme color fields directly.
 //
-// The token set is intentionally small: surface (elevation 0/1/2), text
-// hierarchy (primary/secondary/muted), semantic signals (accent/focus/
-// success/warning/danger), structural edges (border-subtle/strong), and
-// purpose-specific surfaces (chrome-bg, card-bg, code-bg, overlay-bg).
+// The token set is intentionally semantic: surface elevation, text hierarchy,
+// semantic signals, structural edges, chrome/composer/block primitives, and
+// transcript-specific roles for tools and markdown.
 //
 // Each Theme resolves tokens via ResolveTokens(). Components obtain tokens
 // through Theme.Tokens().
@@ -77,6 +76,24 @@ type Tokens struct {
 
 	// ── Separator ──────────────────────────────────────────────────
 	Separator lipgloss.Style // horizontal rule / divider character
+
+	// ── Tool transcript ────────────────────────────────────────────
+	ToolIcon   lipgloss.Style
+	ToolName   lipgloss.Style
+	ToolArgs   lipgloss.Style
+	ToolResult lipgloss.Style
+	ToolError  lipgloss.Style
+	ToolOutput lipgloss.Style
+
+	// ── Markdown / prose ───────────────────────────────────────────
+	MarkdownHeading    lipgloss.Style
+	MarkdownLink       lipgloss.Style
+	MarkdownInlineCode lipgloss.Style
+	MarkdownCodeBlock  lipgloss.Style
+	MarkdownQuote      lipgloss.Style
+	MarkdownTableHead  lipgloss.Style
+	MarkdownTableEdge  lipgloss.Style
+	MarkdownRule       lipgloss.Style
 }
 
 // resolveTokens derives Tokens from a fully populated Theme.
@@ -137,5 +154,23 @@ func resolveTokens(t Theme) Tokens {
 
 		// Separator
 		Separator: lipgloss.NewStyle().Foreground(t.PanelBorder),
+
+		// Tool transcript
+		ToolIcon:   lipgloss.NewStyle().Foreground(t.ToolFg),
+		ToolName:   lipgloss.NewStyle().Foreground(t.Focus).Bold(true),
+		ToolArgs:   lipgloss.NewStyle().Foreground(t.ReasoningFg),
+		ToolResult: lipgloss.NewStyle().Foreground(t.SecondaryText),
+		ToolError:  lipgloss.NewStyle().Foreground(t.Error).Bold(true),
+		ToolOutput: lipgloss.NewStyle().Foreground(t.TextSecondary),
+
+		// Markdown / prose
+		MarkdownHeading:    lipgloss.NewStyle().Foreground(t.Accent).Bold(true),
+		MarkdownLink:       lipgloss.NewStyle().Foreground(t.LinkFg).Underline(true),
+		MarkdownInlineCode: lipgloss.NewStyle().Foreground(t.CodeFg).Background(t.CodeBg),
+		MarkdownCodeBlock:  lipgloss.NewStyle().Foreground(t.CodeBlockFg).Background(t.CodeBlockBg),
+		MarkdownQuote:      lipgloss.NewStyle().Foreground(t.ReasoningFg).Italic(true),
+		MarkdownTableHead:  lipgloss.NewStyle().Foreground(t.TextPrimary).Background(t.TableHeaderBg).Bold(true),
+		MarkdownTableEdge:  lipgloss.NewStyle().Foreground(t.TableBorder),
+		MarkdownRule:       lipgloss.NewStyle().Foreground(t.MutedText),
 	}
 }

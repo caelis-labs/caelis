@@ -247,7 +247,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.ready = true
 			m.viewport.GotoBottom()
 		}
-		return m, nil
+		return m, m.requestBackgroundColorIfAutoCmd()
 
 	case tea.BackgroundColorMsg:
 		if !m.themeAuto {
@@ -277,7 +277,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.FocusMsg:
 		m.focused = true
-		return m, nil
+		return m, m.requestBackgroundColorIfAutoCmd()
 
 	case tea.BlurMsg:
 		m.focused = false
@@ -327,7 +327,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinnerTickScheduled = false
 		if m.running {
 			if m.shouldThrottleRunningAnimation() {
-				return m, nil
+				return m, m.scheduleSpinnerTick()
 			}
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
@@ -372,6 +372,13 @@ func (m *Model) applyTheme(theme tuikit.Theme) {
 	m.rethemeHistory()
 	m.syncTextareaChrome()
 	m.syncViewportContent()
+}
+
+func (m *Model) requestBackgroundColorIfAutoCmd() tea.Cmd {
+	if m == nil || !m.themeAuto {
+		return nil
+	}
+	return requestBackgroundColorCmd()
 }
 
 func (m *Model) applyPaletteTheme(theme tuikit.Theme) {

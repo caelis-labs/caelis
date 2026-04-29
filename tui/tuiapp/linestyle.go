@@ -194,7 +194,7 @@ func renderInlineText(text string, state inlineStyleState, base lipgloss.Style, 
 	style := base
 	switch {
 	case state.code:
-		style = lipgloss.NewStyle().Foreground(theme.CodeFg).Background(theme.CodeBg)
+		style = theme.MarkdownInlineCodeStyle()
 	case state.bold:
 		style = style.Bold(true)
 	}

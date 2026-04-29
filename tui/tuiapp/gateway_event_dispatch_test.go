@@ -416,6 +416,96 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 }
 
+func TestGatewayFailedExplorationToolStaysInCompactSummary(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.UpdateTool("glob-1", "GLOB", "**/public.gm_license.gen.go", "1 match", false, false)
+	block.UpdateTool("glob-1", "GLOB", "**/public.gm_license.gen.go", "1 match", true, false)
+	block.UpdateTool("search-1", "SEARCH", `"gm_license"`, "search failed", false, false)
+	block.UpdateTool("search-1", "SEARCH", `"gm_license"`, "search failed", true, true)
+	block.UpdateTool("search-2", "SEARCH", "", "failed", false, false)
+	block.UpdateTool("search-2", "SEARCH", "", "failed", true, true)
+	block.UpdateTool("patch-1", "PATCH", "public.gm_license.gen.go", "patched", false, false)
+	block.UpdateTool("patch-1", "PATCH", "public.gm_license.gen.go", "patched", true, false)
+
+	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	for _, want := range []string{
+		"• Explored",
+		"  └ Glob **/public.gm_license.gen.go",
+		`    Search "gm_license" failed`,
+		"• Patched public.gm_license.gen.go",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want %q", joined, want)
+		}
+	}
+	if strings.Contains(joined, `✗ SEARCH`) {
+		t.Fatalf("rendered rows = %q, failed exploration tool should stay inside Explored", joined)
+	}
+	if strings.Contains(joined, "failed failed") {
+		t.Fatalf("rendered rows = %q, failed exploration detail should not duplicate status", joined)
+	}
+
+	var searchRow RenderedRow
+	for _, row := range rows {
+		if strings.Contains(row.Plain, `Search "gm_license" failed`) {
+			searchRow = row
+			break
+		}
+	}
+	if searchRow.Plain == "" {
+		t.Fatalf("rendered rows = %#v, want failed search summary row", plain)
+	}
+	wantStyledDetail := model.theme.SecondaryTextStyle().Render(`"gm_license" `) + model.theme.ToolErrorStyle().Render("failed")
+	if !strings.Contains(searchRow.Styled, wantStyledDetail) {
+		t.Fatalf("styled search row = %q, want failed status styled separately from query", searchRow.Styled)
+	}
+}
+
+func TestExplorationToolDetailDoesNotDuplicateFailedStatus(t *testing.T) {
+	tests := []struct {
+		name string
+		ev   SubagentEvent
+		want string
+	}{
+		{
+			name: "args gain failed once",
+			ev:   SubagentEvent{Name: "SEARCH", Args: `"gm_license"`, Err: true},
+			want: `"gm_license" failed`,
+		},
+		{
+			name: "failed output stays single",
+			ev:   SubagentEvent{Name: "SEARCH", Output: "failed", Err: true},
+			want: "failed",
+		},
+		{
+			name: "concrete error output is not suffixed",
+			ev:   SubagentEvent{Name: "SEARCH", Output: "permission denied", Err: true},
+			want: "permission denied",
+		},
+		{
+			name: "error output starting with failed is not suffixed",
+			ev:   SubagentEvent{Name: "SEARCH", Output: "failed to read file", Err: true},
+			want: "failed to read file",
+		},
+		{
+			name: "preduplicated failed output is normalized",
+			ev:   SubagentEvent{Name: "SEARCH", Output: `"gm_license" failed failed`, Err: true},
+			want: `"gm_license" failed`,
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := explorationToolDetail(tt.ev); got != tt.want {
+				t.Fatalf("explorationToolDetail() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestGatewayCompletedExplorationSummaryWrapsAndAlignsDetails(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
@@ -726,6 +816,28 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			expandPanel: true,
 		},
 		{
+			name: "failed patch preserves concrete error reason",
+			call: &appgateway.ToolCallPayload{
+				CallID:   "patch-failed-1",
+				ToolName: "PATCH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
+			},
+			result: &appgateway.ToolResultPayload{
+				CallID:     "patch-failed-1",
+				ToolName:   "PATCH",
+				Status:     appgateway.ToolStatusFailed,
+				Scope:      appgateway.EventScopeMain,
+				OutputText: "failed",
+				RawInput:   map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
+				RawOutput:  map[string]any{"error": `tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
+			},
+			want:        []string{"• Patch failed gm_license.go", `└ tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
+			forbidden:   []string{"  └ failed", "╭", "╰"},
+			expandPanel: true,
+		},
+		{
 			name: "patch rich diff panel",
 			call: &appgateway.ToolCallPayload{
 				CallID:   "patch-1",
@@ -749,6 +861,68 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			},
 			want:        []string{"• Patched demo.py +1 -1", "diff / hunk", "-old line", "+new line"},
 			forbidden:   []string{"│", "╭", "╰", "demo.py +1 -1\n  demo.py +1 -1"},
+			expandPanel: true,
+		},
+		{
+			name: "patch replace all still renders old new diff",
+			call: &appgateway.ToolCallPayload{
+				CallID:   "patch-all-1",
+				ToolName: "PATCH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
+			},
+			result: &appgateway.ToolResultPayload{
+				CallID:   "patch-all-1",
+				ToolName: "PATCH",
+				Status:   appgateway.ToolStatusCompleted,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
+				RawOutput: map[string]any{
+					"path":          "/tmp/workspace/gm_license_repo.go",
+					"replaced":      28,
+					"added_lines":   28,
+					"removed_lines": 28,
+				},
+			},
+			want:        []string{"• Patched gm_license_repo.go +28 -28", "diff / hunk", "@@ repeated replacement: 28 matches @@", "-entity.GMLicense", "+entity.GmLicense"},
+			forbidden:   []string{"╭", "╰", "gm_license_repo.go +28 -28\n  gm_license_repo.go +28 -28"},
+			expandPanel: true,
+		},
+		{
+			name: "patch structured multi hunk diff panel",
+			call: &appgateway.ToolCallPayload{
+				CallID:   "patch-hunks-1",
+				ToolName: "PATCH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
+			},
+			result: &appgateway.ToolResultPayload{
+				CallID:   "patch-hunks-1",
+				ToolName: "PATCH",
+				Status:   appgateway.ToolStatusCompleted,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
+				RawOutput: map[string]any{
+					"path":          "/tmp/workspace/gm_license_repo.go",
+					"replaced":      2,
+					"added_lines":   2,
+					"removed_lines": 2,
+					"diff_hunks": []any{
+						map[string]any{
+							"header": "@@ -2,3 +2,3 @@",
+							"lines":  []any{" context-a", "-entity.GMLicense", "+entity.GmLicense", " context-b"},
+						},
+						map[string]any{
+							"header": "@@ -20,3 +20,3 @@",
+							"lines":  []any{" context-c", "-entity.GMLicense", "+entity.GmLicense", " context-d"},
+						},
+					},
+				},
+			},
+			want:        []string{"• Patched gm_license_repo.go +2 -2", "diff / hunk", "@@ -2,3 +2,3 @@", "@@ -20,3 +20,3 @@", "-entity.GMLicense", "+entity.GmLicense"},
+			forbidden:   []string{"@@ repeated replacement", "╭", "╰"},
 			expandPanel: true,
 		},
 	}
@@ -1576,6 +1750,29 @@ func TestGatewayExpandedReasoningReplacesFoldedPreviewInPlace(t *testing.T) {
 	}
 }
 
+func TestConsecutiveReasoningEventsFoldAsOnePreviewBeforeAttentionTool(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "First I need to inspect the repository. "},
+		SubagentEvent{Kind: SEReasoning, Text: "Then I will patch the failing field references."},
+		SubagentEvent{Kind: SEToolCall, CallID: "patch-1", Name: "PATCH", Args: "gm_license.go +1 -1", Output: "gm_license.go +1 -1\ndiff / hunk\n@@ -1,1 +1,1 @@\n-old\n+new", Done: true},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme})
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "> First I need to inspect the repository. Then I will patch the failing field references.") {
+		t.Fatalf("rendered rows = %q, want consecutive reasoning folded into one preview", joined)
+	}
+	if strings.Contains(joined, "· First I need") || strings.Contains(joined, "· Then I will") {
+		t.Fatalf("rendered rows = %q, consecutive reasoning should not remain expanded before PATCH", joined)
+	}
+	if hasBlankRowBetween(plain, indexOfRowContaining(plain, "> First I need"), indexOfRowContaining(plain, "• Patched gm_license.go")) {
+		t.Fatalf("rendered rows = %#v, folded reasoning should attach to PATCH", plain)
+	}
+}
+
 func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 	model := newGatewayEventTestModel()
 	start := time.Date(2026, 4, 27, 10, 0, 0, 0, time.UTC)
@@ -1859,6 +2056,20 @@ func TestParticipantTurnCompletionDoesNotRenderTwoDurationDividers(t *testing.T)
 	}
 	if dividerCount != 1 {
 		t.Fatalf("viewport lines = %#v, want one duration divider, got %d", model.viewportPlainLines, dividerCount)
+	}
+}
+
+func TestEmptyTerminalParticipantTurnDoesNotRenderArrowOrZeroDurationFooter(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	start := time.Date(2026, 4, 29, 12, 0, 0, 0, time.UTC)
+	block := NewParticipantTurnBlock("participant-empty", "")
+	block.StartedAt = start
+	block.EndedAt = start
+	block.Status = "completed"
+
+	rows := block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})
+	if len(rows) != 0 {
+		t.Fatalf("rendered rows = %#v, want empty terminal participant turn hidden", renderedPlainRows(rows))
 	}
 }
 

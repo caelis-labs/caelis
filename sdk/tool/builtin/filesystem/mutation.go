@@ -184,13 +184,6 @@ func planPatchMutation(fsys sdksandbox.FileSystem, args map[string]any) (fileMut
 	}, nil
 }
 
-func buildPatchHunk(lineStart, oldLines, newLines int) string {
-	if lineStart <= 0 {
-		return ""
-	}
-	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", lineStart, oldLines, lineStart, newLines)
-}
-
 func patchLineCount(text string) int {
 	if text == "" {
 		return 0

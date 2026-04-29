@@ -8,6 +8,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/glamour"
 	gansi "github.com/charmbracelet/glamour/ansi"
 	"github.com/charmbracelet/glamour/styles"
@@ -105,13 +106,13 @@ var glamourCache struct {
 	sync.Mutex
 	renderer *glamour.TermRenderer
 	width    int
-	dark     bool
+	themeKey string
 	role     tuikit.LineStyle
 }
 
 type streamingNarrativeCacheEntry struct {
 	width        int
-	dark         bool
+	themeKey     string
 	role         tuikit.LineStyle
 	stableRaw    string
 	rolePrefix   string
@@ -129,6 +130,7 @@ var glamourStreamingCache struct {
 func clearGlamourCache() {
 	glamourCache.Lock()
 	glamourCache.renderer = nil
+	glamourCache.themeKey = ""
 	glamourCache.Unlock()
 	glamourStreamingCache.Lock()
 	glamourStreamingCache.entries = nil
@@ -139,7 +141,8 @@ func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyl
 	glamourCache.Lock()
 	defer glamourCache.Unlock()
 
-	if glamourCache.renderer != nil && glamourCache.width == width && glamourCache.dark == theme.IsDark && glamourCache.role == roleStyle {
+	themeKey := themeRenderCacheKey(theme)
+	if glamourCache.renderer != nil && glamourCache.width == width && glamourCache.themeKey == themeKey && glamourCache.role == roleStyle {
 		return glamourCache.renderer
 	}
 
@@ -155,7 +158,7 @@ func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyl
 
 	glamourCache.renderer = renderer
 	glamourCache.width = width
-	glamourCache.dark = theme.IsDark
+	glamourCache.themeKey = themeKey
 	glamourCache.role = roleStyle
 	return renderer
 }
@@ -173,39 +176,39 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// No document-level margin; our layout handles outer spacing.
 	zero := uint(0)
 	style.Document.Margin = &zero
-	style.Document.Color = colorToAnsiPtr(theme.TextPrimary)
+	style.Document.Color = styleForegroundToAnsiPtr(theme.TextStyle())
 
 	// ---------------------------------------------------------------
 	// Headings — crush-style: H1 gets background pill, H2+ keep
 	// markdown prefix for scannability.
 	// ---------------------------------------------------------------
-	accentHex := colorToAnsiPtr(theme.Accent)
+	headingHex := styleForegroundToAnsiPtr(theme.MarkdownHeadingStyle())
 
 	style.Heading.BlockSuffix = "\n"
-	style.Heading.Color = accentHex
+	style.Heading.Color = headingHex
 	style.Heading.Bold = boolPtr(true)
 
 	style.H1.Prefix = " "
 	style.H1.Suffix = " "
-	style.H1.Color = colorToAnsiPtr(theme.TextPrimary)
-	style.H1.BackgroundColor = colorToAnsiPtr(theme.CodeBlockBg)
+	style.H1.Color = styleForegroundToAnsiPtr(theme.TextStyle())
+	style.H1.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
 	style.H1.Bold = boolPtr(true)
 	style.H1.Underline = boolPtr(false)
 
 	style.H2.Prefix = ""
-	style.H2.Color = accentHex
+	style.H2.Color = headingHex
 	style.H2.Bold = boolPtr(true)
 
 	style.H3.Prefix = ""
-	style.H3.Color = accentHex
+	style.H3.Color = headingHex
 	style.H3.Bold = boolPtr(true)
 
 	style.H4.Prefix = ""
-	style.H4.Color = accentHex
+	style.H4.Color = headingHex
 	style.H5.Prefix = ""
-	style.H5.Color = accentHex
+	style.H5.Color = headingHex
 	style.H6.Prefix = ""
-	style.H6.Color = colorToAnsiPtr(theme.MutedText)
+	style.H6.Color = styleForegroundToAnsiPtr(theme.TextStyle())
 
 	// ---------------------------------------------------------------
 	// Lists — bullet marker "• " for unordered, ". " for ordered
@@ -226,8 +229,8 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	style.Code.Prefix = " "
 	style.Code.Suffix = " "
-	style.Code.Color = colorToAnsiPtr(theme.CodeFg)
-	style.Code.BackgroundColor = colorToAnsiPtr(theme.CodeBg)
+	style.Code.Color = styleForegroundToAnsiPtr(theme.MarkdownInlineCodeStyle())
+	style.Code.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownInlineCodeStyle())
 
 	// ---------------------------------------------------------------
 	// Code blocks — Chroma syntax highlighting
@@ -236,16 +239,16 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	cbMargin := uint(0)
 	style.CodeBlock.Margin = &cbMargin
 	style.CodeBlock.Indent = &cbIndent
-	style.CodeBlock.Color = colorToAnsiPtr(theme.CodeBlockFg)
-	style.CodeBlock.BackgroundColor = colorToAnsiPtr(theme.CodeBlockBg)
+	style.CodeBlock.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	style.CodeBlock.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
 	if style.CodeBlock.Chroma == nil {
 		style.CodeBlock.Chroma = &gansi.Chroma{}
 	}
-	style.CodeBlock.Chroma.Text.Color = colorToAnsiPtr(theme.CodeBlockFg)
-	style.CodeBlock.Chroma.Background.BackgroundColor = colorToAnsiPtr(theme.CodeBlockBg)
-	style.CodeBlock.Chroma.Background.Color = colorToAnsiPtr(theme.CodeBlockFg)
-	style.CodeBlock.Chroma.Comment.Color = colorToAnsiPtr(theme.MutedText)
-	style.CodeBlock.Chroma.Keyword.Color = accentHex
+	style.CodeBlock.Chroma.Text.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	style.CodeBlock.Chroma.Background.BackgroundColor = styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	style.CodeBlock.Chroma.Background.Color = styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	style.CodeBlock.Chroma.Comment.Color = styleForegroundToAnsiPtr(theme.MutedTextStyle())
+	style.CodeBlock.Chroma.Keyword.Color = headingHex
 	style.CodeBlock.Chroma.KeywordType.Color = colorToAnsiPtr(theme.Success)
 	style.CodeBlock.Chroma.NameFunction.Color = colorToAnsiPtr(theme.Success)
 	style.CodeBlock.Chroma.LiteralString.Color = colorToAnsiPtr(theme.Warning)
@@ -259,18 +262,19 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	bqToken := "│ "
 	style.BlockQuote.Indent = &bqIndent
 	style.BlockQuote.IndentToken = &bqToken
+	style.BlockQuote.Color = styleForegroundToAnsiPtr(theme.MarkdownQuoteStyle())
 
 	// ---------------------------------------------------------------
 	// Links — colored + underline, link text bold
 	// ---------------------------------------------------------------
-	style.Link.Color = colorToAnsiPtr(theme.LinkFg)
+	style.Link.Color = styleForegroundToAnsiPtr(theme.MarkdownLinkStyle())
 	style.Link.Underline = boolPtr(true)
 	style.LinkText.Bold = boolPtr(true)
 
 	// ---------------------------------------------------------------
 	// Horizontal rule
 	// ---------------------------------------------------------------
-	style.HorizontalRule.Color = colorToAnsiPtr(theme.MutedText)
+	style.HorizontalRule.Color = styleForegroundToAnsiPtr(theme.MarkdownRuleStyle())
 	style.HorizontalRule.Format = "\n────────\n"
 
 	// ---------------------------------------------------------------
@@ -278,7 +282,7 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	tableMargin := uint(0)
 	style.Table.Margin = &tableMargin
-	style.Table.Color = colorToAnsiPtr(theme.TextPrimary)
+	style.Table.Color = styleForegroundToAnsiPtr(theme.TextStyle())
 	style.Table.CenterSeparator = stringPtr("┼")
 	style.Table.ColumnSeparator = stringPtr("│")
 	style.Table.RowSeparator = stringPtr("─")
@@ -327,9 +331,20 @@ func colorToAnsiPtr(c color.Color) *string {
 	if c == nil {
 		return nil
 	}
+	if _, ok := c.(lipgloss.NoColor); ok {
+		return nil
+	}
 	r, g, b, _ := c.RGBA()
 	s := fmt.Sprintf("#%02x%02x%02x", r>>8, g>>8, b>>8)
 	return &s
+}
+
+func styleForegroundToAnsiPtr(style lipgloss.Style) *string {
+	return colorToAnsiPtr(style.GetForeground())
+}
+
+func styleBackgroundToAnsiPtr(style lipgloss.Style) *string {
+	return colorToAnsiPtr(style.GetBackground())
 }
 
 func boolPtr(v bool) *bool { return &v }
@@ -349,12 +364,17 @@ func themeRenderCacheKey(theme tuikit.Theme) string {
 		themeColorCacheKey(theme.ReasoningFg),
 		themeColorCacheKey(theme.UserFg),
 		themeColorCacheKey(theme.UserPrefixFg),
+		themeColorCacheKey(theme.ToolFg),
 		themeColorCacheKey(theme.Accent),
+		themeColorCacheKey(theme.Focus),
 		themeColorCacheKey(theme.LinkFg),
 		themeColorCacheKey(theme.CodeFg),
 		themeColorCacheKey(theme.CodeBg),
 		themeColorCacheKey(theme.CodeBlockFg),
 		themeColorCacheKey(theme.CodeBlockBg),
+		themeColorCacheKey(theme.TableHeaderBg),
+		themeColorCacheKey(theme.TableBorder),
+		themeColorCacheKey(theme.Success),
 		themeColorCacheKey(theme.Warning),
 		themeColorCacheKey(theme.Error),
 	}
@@ -567,7 +587,8 @@ func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, r
 		glamourStreamingCache.entries = map[string]streamingNarrativeCacheEntry{}
 	}
 	if entry, ok := glamourStreamingCache.entries[blockID]; ok {
-		if entry.width == width && entry.dark == theme.IsDark && entry.role == roleStyle && entry.stableRaw == stableRaw && entry.rolePrefix == rolePrefix {
+		themeKey := themeRenderCacheKey(theme)
+		if entry.width == width && entry.themeKey == themeKey && entry.role == roleStyle && entry.stableRaw == stableRaw && entry.rolePrefix == rolePrefix {
 			return cloneRenderedRows(entry.renderedRows)
 		}
 	}
@@ -577,7 +598,7 @@ func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, r
 	}
 	glamourStreamingCache.entries[blockID] = streamingNarrativeCacheEntry{
 		width:        width,
-		dark:         theme.IsDark,
+		themeKey:     themeRenderCacheKey(theme),
 		role:         roleStyle,
 		stableRaw:    stableRaw,
 		rolePrefix:   rolePrefix,

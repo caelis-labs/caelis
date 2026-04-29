@@ -239,9 +239,32 @@ func NewToolUsePart(id, name string, input json.RawMessage) Part {
 		ToolUse: &ToolUsePart{
 			ID:    id,
 			Name:  name,
-			Input: append(json.RawMessage(nil), input...),
+			Input: normalizeToolUseInput(input),
 		},
 	}
+}
+
+const (
+	rawToolUseInputKey        = "__caelis_raw_tool_input"
+	rawToolUseInputWrappedKey = "__caelis_raw_tool_input_wrapped"
+)
+
+func normalizeToolUseInput(input json.RawMessage) json.RawMessage {
+	raw := strings.TrimSpace(string(input))
+	if raw == "" {
+		return nil
+	}
+	if json.Valid([]byte(raw)) {
+		return append(json.RawMessage(nil), raw...)
+	}
+	wrapped, err := json.Marshal(map[string]any{
+		rawToolUseInputWrappedKey: true,
+		rawToolUseInputKey:        raw,
+	})
+	if err != nil {
+		return nil
+	}
+	return json.RawMessage(wrapped)
 }
 
 func NewToolResultJSONPart(toolUseID, name string, value map[string]any, isError bool) Part {
@@ -560,11 +583,27 @@ func (m Message) ToolCalls() []ToolCall {
 		out = append(out, ToolCall{
 			ID:               use.ID,
 			Name:             use.Name,
-			Args:             strings.TrimSpace(string(use.Input)),
+			Args:             toolUseInputArgs(use.Input),
 			ThoughtSignature: replayToken(use.Replay),
 		})
 	}
 	return out
+}
+
+func toolUseInputArgs(input json.RawMessage) string {
+	raw := strings.TrimSpace(string(input))
+	if raw == "" {
+		return ""
+	}
+	var wrapped map[string]any
+	if err := json.Unmarshal(input, &wrapped); err == nil && len(wrapped) == 2 {
+		if wrapped[rawToolUseInputWrappedKey] == true {
+			if value, ok := wrapped[rawToolUseInputKey].(string); ok {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return raw
 }
 
 func (m Message) ToolResults() []ToolResultPart {

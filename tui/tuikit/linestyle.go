@@ -60,7 +60,11 @@ func DetectLineStyleWithContext(line string, prevStyle LineStyle) LineStyle {
 		return LineStyleUser
 	case strings.HasPrefix(trimmed, "▸"):
 		return LineStyleTool
+	case strings.HasPrefix(trimmed, "▾"):
+		return LineStyleTool
 	case strings.HasPrefix(trimmed, "✓"):
+		return LineStyleTool
+	case strings.HasPrefix(trimmed, "✗"):
 		return LineStyleTool
 	case strings.HasPrefix(trimmed, "? "):
 		return LineStyleTool
@@ -221,38 +225,33 @@ func isUserMentionRune(r rune) bool {
 func colorizeToolLine(line string, theme Theme) string {
 	trimmed := strings.TrimSpace(line)
 
-	// Tool call: "▸ TOOLNAME {args...}"
-	if strings.HasPrefix(trimmed, "▸ ") {
-		rest := trimmed[len("▸ "):]
+	if prefix, rest, ok := splitToolLifecyclePrefix(trimmed); ok {
 		parts := strings.SplitN(rest, " ", 2)
-		if len(parts) >= 1 {
-			toolName := parts[0]
-			suffix := ""
-			if len(parts) == 2 {
+		if len(parts) == 0 {
+			return theme.ToolStyle().Render(line)
+		}
+		toolName := parts[0]
+		suffix := ""
+		if len(parts) == 2 {
+			switch prefix {
+			case "✓":
+				suffix = " " + renderToolResultSuffix(toolName, parts[1], theme)
+			case "✗":
+				suffix = " " + theme.ToolErrorStyle().Render(LinkifyText(parts[1], theme.LinkStyle()))
+			default:
 				suffix = " " + renderToolCallSuffix(toolName, parts[1], theme)
 			}
-			return theme.ToolStyle().Render("▸ ") +
-				theme.ToolNameStyle().Render(toolName) +
-				suffix
 		}
-		return theme.ToolStyle().Render(line)
-	}
-
-	// Tool result: "✓ TOOLNAME summary"
-	if strings.HasPrefix(trimmed, "✓ ") {
-		rest := trimmed[len("✓ "):]
-		parts := strings.SplitN(rest, " ", 2)
-		if len(parts) >= 1 {
-			toolName := parts[0]
-			suffix := ""
-			if len(parts) == 2 {
-				suffix = " " + renderToolResultSuffix(toolName, parts[1], theme)
-			}
-			return theme.ToolStyle().Render("✓ ") +
-				theme.AssistantStyle().Render(toolName) +
-				suffix
+		prefixStyle := theme.ToolStyle()
+		nameStyle := theme.ToolNameStyle()
+		switch prefix {
+		case "✓":
+			prefixStyle = theme.AssistantStyle()
+		case "✗":
+			prefixStyle = theme.ToolErrorStyle()
+			nameStyle = theme.ToolErrorStyle()
 		}
-		return theme.ToolStyle().Render(line)
+		return prefixStyle.Render(prefix+" ") + nameStyle.Render(toolName) + suffix
 	}
 
 	// Approval prompt: "? ..."
@@ -260,27 +259,27 @@ func colorizeToolLine(line string, theme Theme) string {
 		return lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).Render(line)
 	}
 
-	return theme.ReasoningStyle().Render(line)
+	return theme.ToolOutputStyle().Render(LinkifyText(line, theme.LinkStyle()))
 }
 
 func renderToolCallSuffix(toolName string, suffix string, theme Theme) string {
 	if !strings.EqualFold(toolName, "PATCH") && !strings.EqualFold(toolName, "WRITE") {
-		return lipgloss.NewStyle().Foreground(theme.ReasoningFg).Render(LinkifyText(suffix, theme.LinkStyle()))
+		return theme.ToolArgsStyle().Render(LinkifyText(suffix, theme.LinkStyle()))
 	}
 	fields := strings.Fields(strings.TrimSpace(suffix))
 	if len(fields) < 3 {
-		return lipgloss.NewStyle().Foreground(theme.ReasoningFg).Render(LinkifyText(suffix, theme.LinkStyle()))
+		return theme.ToolArgsStyle().Render(LinkifyText(suffix, theme.LinkStyle()))
 	}
 	added := fields[len(fields)-2]
 	removed := fields[len(fields)-1]
 	if !strings.HasPrefix(added, "+") || !strings.HasPrefix(removed, "-") {
-		return lipgloss.NewStyle().Foreground(theme.ReasoningFg).Render(LinkifyText(suffix, theme.LinkStyle()))
+		return theme.ToolArgsStyle().Render(LinkifyText(suffix, theme.LinkStyle()))
 	}
 	target := strings.TrimSpace(strings.Join(fields[:len(fields)-2], " "))
 	if target == "" {
-		return lipgloss.NewStyle().Foreground(theme.ReasoningFg).Render(LinkifyText(suffix, theme.LinkStyle()))
+		return theme.ToolArgsStyle().Render(LinkifyText(suffix, theme.LinkStyle()))
 	}
-	targetText := lipgloss.NewStyle().Foreground(theme.ReasoningFg).Render(LinkifyText(target, theme.LinkStyle()))
+	targetText := theme.ToolArgsStyle().Render(LinkifyText(target, theme.LinkStyle()))
 	addedText := lipgloss.NewStyle().Foreground(theme.DiffAddFg).Render(added)
 	removedText := lipgloss.NewStyle().Foreground(theme.DiffRemoveFg).Render(removed)
 	return targetText + " " + addedText + " " + removedText
@@ -292,7 +291,7 @@ func renderToolResultSuffix(toolName string, suffix string, theme Theme) string 
 	}
 	fields := strings.Fields(strings.TrimSpace(suffix))
 	if len(fields) != 2 || !strings.HasPrefix(fields[0], "+") || !strings.HasPrefix(fields[1], "-") {
-		return LinkifyText(suffix, theme.LinkStyle())
+		return theme.ToolResultStyle().Render(LinkifyText(suffix, theme.LinkStyle()))
 	}
 	added := lipgloss.NewStyle().Foreground(theme.DiffAddFg).Render(fields[0])
 	removed := lipgloss.NewStyle().Foreground(theme.DiffRemoveFg).Render(fields[1])
@@ -305,7 +304,7 @@ func renderToolMetricSuffix(suffix string, theme Theme) string {
 		return ""
 	}
 	out := make([]string, 0, len(fields))
-	low := lipgloss.NewStyle().Foreground(theme.ReasoningFg)
+	low := theme.ToolResultStyle()
 	high := theme.TextStyle().Bold(true)
 	for _, field := range fields {
 		if isMetricToken(field) {
@@ -315,6 +314,16 @@ func renderToolMetricSuffix(suffix string, theme Theme) string {
 		out = append(out, low.Render(LinkifyText(field, theme.LinkStyle())))
 	}
 	return strings.Join(out, " ")
+}
+
+func splitToolLifecyclePrefix(line string) (prefix string, rest string, ok bool) {
+	for _, candidate := range []string{"▸", "▾", "✓", "✗"} {
+		withSpace := candidate + " "
+		if strings.HasPrefix(line, withSpace) {
+			return candidate, strings.TrimSpace(strings.TrimPrefix(line, withSpace)), true
+		}
+	}
+	return "", "", false
 }
 
 func isMetricToken(value string) bool {

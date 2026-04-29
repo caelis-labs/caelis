@@ -56,7 +56,7 @@ func (t *PatchTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result
 		return sdktool.Result{}, err
 	}
 	diffStats := CountLineDiff(plan.before, plan.after)
-	return toolutil.JSONResult(PatchToolName, map[string]any{
+	result, err := toolutil.JSONResult(PatchToolName, map[string]any{
 		"path":           plan.path,
 		"replaced":       plan.replaced,
 		"created":        plan.created,
@@ -65,6 +65,11 @@ func (t *PatchTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result
 		"removed_lines":  diffStats.Removed,
 		"hunk":           plan.hunk,
 	})
+	if err != nil {
+		return sdktool.Result{}, err
+	}
+	attachMutationDiffMeta(result.Meta, plan.before, plan.after, plan.hunk)
+	return result, nil
 }
 
 var _ sdktool.Tool = (*PatchTool)(nil)

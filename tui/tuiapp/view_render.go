@@ -641,7 +641,7 @@ func (m *Model) renderHintRow() string {
 }
 
 func (m *Model) hintRowText() string {
-	return composeStyledFooter(m.fixedRowContentWidth(), m.buildHintText(), "")
+	return composeStyledFooter(m.fixedRowContentWidth(), ansi.Strip(m.buildHintText()), "")
 }
 
 func (m *Model) renderHintRowStyledText() string {

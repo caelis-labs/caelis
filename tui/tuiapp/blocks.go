@@ -727,25 +727,34 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b == nil {
 		return nil
 	}
+	bodyRows := []RenderedRow(nil)
+	if b.Expanded {
+		bodyRows = renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
+			UseStatusPlaceholder:   true,
+			PlaceholderAsMeta:      true,
+			HideWaitingApprovalRow: true,
+			HideCompletedRow:       true,
+			ToolOutputPanels:       true,
+			ToolPanelExpanded:      b.toolPanelExpanded,
+			ToolPanelFullOutput:    b.toolPanelFullOutput,
+			ToolPanelRows:          b.renderToolPanelRows,
+			ExplorationExpanded:    b.explorationExpanded,
+			ToolPanelScrollState:   b.toolPanelScrollState,
+			ReasoningExpanded:      b.reasoningExpanded,
+		})
+	}
+	if len(bodyRows) == 0 && participantTurnIsTerminal(b.Status) && strings.TrimSpace(b.Actor) == "" {
+		return nil
+	}
 	rows := []RenderedRow{StyledRow(b.id, renderParticipantTurnHeader(b, ctx))}
 	if !b.Expanded {
 		return rows
 	}
-	rows = append(rows, renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
-		UseStatusPlaceholder:   true,
-		PlaceholderAsMeta:      true,
-		HideWaitingApprovalRow: true,
-		HideCompletedRow:       true,
-		ToolOutputPanels:       true,
-		ToolPanelExpanded:      b.toolPanelExpanded,
-		ToolPanelFullOutput:    b.toolPanelFullOutput,
-		ToolPanelRows:          b.renderToolPanelRows,
-		ExplorationExpanded:    b.explorationExpanded,
-		ToolPanelScrollState:   b.toolPanelScrollState,
-		ReasoningExpanded:      b.reasoningExpanded,
-	})...)
+	rows = append(rows, bodyRows...)
 	if b.Expanded && participantTurnIsTerminal(b.Status) {
-		rows = append(rows, StyledRow(b.id, renderParticipantTurnFooter(b, ctx)))
+		if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
+			rows = append(rows, StyledRow(b.id, footer))
+		}
 	}
 	return rows
 }
@@ -1338,8 +1347,11 @@ func participantTurnIsTerminal(state string) bool {
 
 func renderParticipantTurnFooter(b *ParticipantTurnBlock, ctx BlockRenderContext) string {
 	label := ""
-	if b != nil && !b.StartedAt.IsZero() && !b.EndedAt.IsZero() && !b.EndedAt.Before(b.StartedAt) {
+	if b != nil && !b.StartedAt.IsZero() && !b.EndedAt.IsZero() && b.EndedAt.After(b.StartedAt) {
 		label = formatTurnDuration(b.EndedAt.Sub(b.StartedAt))
+	}
+	if label == "" {
+		return ""
 	}
 	width := maxInt(12, ctx.Width)
 	return ctx.Theme.HelpHintTextStyle().Render(centeredDivider(width, label))

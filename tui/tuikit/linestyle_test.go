@@ -14,7 +14,9 @@ func TestDetectLineStyle(t *testing.T) {
 		{"│ thinking about it", LineStyleReasoning},
 		{"> user input", LineStyleUser},
 		{"▸ tool_call {}", LineStyleTool},
+		{"▾ tool_call {expanded}", LineStyleTool},
 		{"✓ tool_result ok", LineStyleTool},
+		{"✗ tool_result failed", LineStyleTool},
 		{"? Approval: run", LineStyleTool},
 		{"error: something broke", LineStyleError},
 		{"warn: be careful", LineStyleWarn},
@@ -77,6 +79,17 @@ func TestColorizeToolResult(t *testing.T) {
 	result := ColorizeLogLine("✓ read_file success", LineStyleTool, theme)
 	if result == "" {
 		t.Error("expected non-empty colored tool result output")
+	}
+}
+
+func TestColorizeToolFailure(t *testing.T) {
+	theme := DefaultTheme()
+	result := ColorizeLogLine("✗ BASH exit 1", LineStyleTool, theme)
+	if result == "" {
+		t.Fatal("expected non-empty colored tool failure output")
+	}
+	if !strings.Contains(result, "BASH") || !strings.Contains(result, "exit 1") {
+		t.Fatalf("expected tool failure text preserved, got %q", result)
 	}
 }
 

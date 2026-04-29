@@ -55,7 +55,7 @@ func (t *WriteTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result
 		return sdktool.Result{}, err
 	}
 	diffStats := CountLineDiff(plan.before, plan.after)
-	return toolutil.JSONResult(WriteToolName, map[string]any{
+	result, err := toolutil.JSONResult(WriteToolName, map[string]any{
 		"path":           plan.path,
 		"created":        plan.created,
 		"previous_empty": plan.before == "",
@@ -64,6 +64,11 @@ func (t *WriteTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result
 		"added_lines":    diffStats.Added,
 		"removed_lines":  diffStats.Removed,
 	})
+	if err != nil {
+		return sdktool.Result{}, err
+	}
+	attachMutationDiffMeta(result.Meta, plan.before, plan.after, plan.hunk)
+	return result, nil
 }
 
 func lineCount(text string) int {

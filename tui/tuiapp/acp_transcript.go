@@ -67,26 +67,31 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				continue
 			}
 			if ev.Text != "" {
+				shouldFoldReasoning := reasoningShouldFold(visible, i, status)
 				text := ev.Text
-				if reasoningShouldFold(visible, i, status) {
+				reasoningEnd := i
+				if shouldFoldReasoning {
+					text, reasoningEnd = collectConsecutiveReasoning(visible, i)
 					expanded := reasoningExpanded(opts, reasoningFoldKey(i))
 					if !expanded {
 						rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-						rows = append(rows, renderACPReasoningSummaryRow(blockID, visible[i], i, width, ctx, expanded))
+						rows = append(rows, renderACPReasoningSummaryRow(blockID, SubagentEvent{Text: text}, i, width, ctx, expanded))
 						hasContent = true
 						lastGroup = acpTranscriptGroupNarrative
+						i = reasoningEnd
 						continue
 					}
 				}
-				if !reasoningShouldFold(visible, i, status) {
+				if !shouldFoldReasoning {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-					rows = append(rows, renderParticipantTurnNarrativeRows(blockID, text, tuikit.LineStyleReasoning, width, ctx, participantNarrativeEventActive(visible, i, status))...)
+					rows = append(rows, renderParticipantTurnNarrativeRows(blockID, text, tuikit.LineStyleReasoning, width, ctx, participantNarrativeEventActive(visible, reasoningEnd, status))...)
 				} else {
 					rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupNarrative, false)
-					rows = append(rows, renderACPReasoningExpandedRows(blockID, text, i, width, ctx, participantNarrativeEventActive(visible, i, status))...)
+					rows = append(rows, renderACPReasoningExpandedRows(blockID, text, i, width, ctx, participantNarrativeEventActive(visible, reasoningEnd, status))...)
 				}
 				hasContent = true
 				lastGroup = acpTranscriptGroupNarrative
+				i = reasoningEnd
 			}
 		case SEAssistant:
 			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, width, ctx, opts); ok {
@@ -227,13 +232,29 @@ func reasoningShouldFold(events []SubagentEvent, idx int, _ string) bool {
 	for i := idx + 1; i < len(events); i++ {
 		ev := events[i]
 		if ev.Kind == SEReasoning {
-			return false
+			continue
 		}
 		if ev.Kind == SEToolCall && ev.Done && isAttentionLoopTool(ev.Name) {
 			return true
 		}
 	}
 	return false
+}
+
+func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) {
+	if idx < 0 || idx >= len(events) || events[idx].Kind != SEReasoning {
+		return "", idx
+	}
+	text := ""
+	end := idx
+	for i := idx; i < len(events); i++ {
+		if events[i].Kind != SEReasoning {
+			break
+		}
+		text = appendDeltaStreamChunk(text, events[i].Text)
+		end = i
+	}
+	return collapseRepeatedNarrativeText(text), end
 }
 
 func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, width int, ctx BlockRenderContext, expanded bool) RenderedRow {
@@ -536,17 +557,14 @@ func renderExplorationToolRow(blockID string, ev SubagentEvent, width int, ctx B
 	if verb == "" {
 		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
-	detail := strings.TrimSpace(ev.Args)
-	if detail == "" {
-		detail = strings.TrimSpace(ev.Output)
-	}
+	detail := explorationToolDetail(ev)
 	prefix := explorationChildPrefix(first)
 	detail = truncateTailDisplay(detail, maxInt(16, width-displayColumns(prefix)-displayColumns(verb)-1))
 	plain := prefix + strings.TrimSpace(verb+" "+detail)
 	styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) +
 		toolActionStyle(ctx, verb).Render(verb)
 	if detail != "" {
-		styled += " " + ctx.Theme.SecondaryTextStyle().Render(detail)
+		styled += " " + styleExplorationDetail(detail, ctx)
 	}
 	return StyledPlainClickableRow(blockID, plain, styled, token)
 }
@@ -615,7 +633,7 @@ func compactExplorationGroup(events []SubagentEvent, idx int, opts acpTranscript
 }
 
 func isCompactExplorationTool(ev SubagentEvent) bool {
-	if ev.Kind != SEToolCall || !ev.Done || ev.Err {
+	if ev.Kind != SEToolCall || !ev.Done {
 		return false
 	}
 	if ev.DisableGrouping {
@@ -638,10 +656,7 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 		if _, ok := grouped[verb]; !ok {
 			order = append(order, verb)
 		}
-		item := strings.TrimSpace(ev.Args)
-		if item == "" {
-			item = strings.ToUpper(strings.TrimSpace(ev.Name))
-		}
+		item := explorationToolDetail(ev)
 		if item != "" {
 			grouped[verb] = append(grouped[verb], item)
 		}
@@ -664,6 +679,41 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 		rows = append(rows, wrapExplorationSummaryDetail(prefix, verb, detail, width)...)
 	}
 	return rows
+}
+
+func explorationToolDetail(ev SubagentEvent) string {
+	item := strings.TrimSpace(ev.Args)
+	fromArgs := item != ""
+	if item == "" {
+		item = strings.TrimSpace(ev.Output)
+	}
+	fromOutput := !fromArgs && item != ""
+	if item == "" {
+		item = strings.ToUpper(strings.TrimSpace(ev.Name))
+	}
+	item = normalizeExplorationFailedDetail(item)
+	if ev.Err && item != "" && !fromOutput && !hasExplorationFailedStatus(item) {
+		item = strings.TrimSpace(item + " failed")
+	}
+	return item
+}
+
+func normalizeExplorationFailedDetail(detail string) string {
+	trimmed := strings.TrimSpace(detail)
+	lower := strings.ToLower(trimmed)
+	if lower == "failed failed" {
+		return "failed"
+	}
+	const duplicateSuffix = " failed failed"
+	if strings.HasSuffix(lower, duplicateSuffix) {
+		return strings.TrimSpace(trimmed[:len(trimmed)-len(duplicateSuffix)] + " failed")
+	}
+	return trimmed
+}
+
+func hasExplorationFailedStatus(detail string) bool {
+	_, ok := splitExplorationFailedStatus(detail)
+	return ok
 }
 
 func wrapExplorationSummaryDetail(prefix string, verb string, detail string, width int) []string {
@@ -724,9 +774,71 @@ func styleExplorationSummaryRow(row string, ctx BlockRenderContext) string {
 		styled += toolActionStyle(ctx, verb).Render(verb)
 	}
 	if detail != "" {
-		styled += " " + ctx.Theme.SecondaryTextStyle().Render(detail)
+		styled += " " + styleExplorationDetail(detail, ctx)
 	}
 	return styled
+}
+
+func styleExplorationDetail(detail string, ctx BlockRenderContext) string {
+	if !containsExplorationFailedWord(detail) {
+		return ctx.Theme.SecondaryTextStyle().Render(detail)
+	}
+	var styled strings.Builder
+	remaining := detail
+	for len(remaining) > 0 {
+		idx := nextExplorationFailedWordIndex(remaining)
+		if idx < 0 {
+			styled.WriteString(ctx.Theme.SecondaryTextStyle().Render(remaining))
+			break
+		}
+		if idx > 0 {
+			styled.WriteString(ctx.Theme.SecondaryTextStyle().Render(remaining[:idx]))
+		}
+		styled.WriteString(ctx.Theme.ToolErrorStyle().Render(remaining[idx : idx+len("failed")]))
+		remaining = remaining[idx+len("failed"):]
+	}
+	return styled.String()
+}
+
+func splitExplorationFailedStatus(detail string) (string, bool) {
+	trimmed := strings.TrimSpace(detail)
+	lower := strings.ToLower(trimmed)
+	if lower == "failed" {
+		return "", true
+	}
+	const suffix = " failed"
+	if strings.HasSuffix(lower, suffix) {
+		return strings.TrimSpace(trimmed[:len(trimmed)-len(suffix)]), true
+	}
+	return "", false
+}
+
+func containsExplorationFailedWord(detail string) bool {
+	return nextExplorationFailedWordIndex(detail) >= 0
+}
+
+func nextExplorationFailedWordIndex(detail string) int {
+	lower := strings.ToLower(detail)
+	const marker = "failed"
+	for offset := 0; offset < len(lower); {
+		idx := strings.Index(lower[offset:], marker)
+		if idx < 0 {
+			return -1
+		}
+		idx += offset
+		beforeOK := idx == 0 || !isASCIIAlphaNum(lower[idx-1])
+		after := idx + len(marker)
+		afterOK := after >= len(lower) || !isASCIIAlphaNum(lower[after])
+		if beforeOK && afterOK {
+			return idx
+		}
+		offset = idx + len(marker)
+	}
+	return -1
+}
+
+func isASCIIAlphaNum(ch byte) bool {
+	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9'
 }
 
 func isExplorationSummaryVerb(verb string) bool {
@@ -1253,8 +1365,19 @@ func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID str
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
 		return rows
 	}
+	if mutationPanelTextIsHeaderOnly(ev, text) {
+		return rows
+	}
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, text, width, ctx, err, opts)...)
 	return rows
+}
+
+func mutationPanelTextIsHeaderOnly(ev SubagentEvent, text string) bool {
+	text = strings.TrimSpace(text)
+	if text == "" || strings.Contains(text, "\n") {
+		return false
+	}
+	return strings.EqualFold(text, strings.TrimSpace(ev.Args))
 }
 
 func mutationLifecycleHeader(ev SubagentEvent, err bool) string {
@@ -1299,7 +1422,7 @@ func styleACPTranscriptHeader(ctx BlockRenderContext, plain string) string {
 		styled += " " + toolActionStyle(ctx, verb).Render(verb)
 	}
 	if detail != "" {
-		styled += " " + ctx.Theme.SecondaryTextStyle().Render(detail)
+		styled += " " + ctx.Theme.ToolArgsStyle().Render(detail)
 	}
 	return styled
 }
@@ -1339,9 +1462,9 @@ func renderACPFullTerminalPanelRows(blockID string, callID string, text string, 
 }
 
 func renderACPFullTerminalPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {
-	style := ctx.Theme.SecondaryTextStyle()
+	style := ctx.Theme.ToolOutputStyle()
 	if err {
-		style = ctx.Theme.ErrorStyle()
+		style = ctx.Theme.ToolErrorStyle()
 	}
 	lines := nonEmptyToolOutputLines(text)
 	out := make([]string, 0, len(lines))
@@ -1364,9 +1487,9 @@ func renderACPFullTerminalPanelBody(text string, width int, ctx BlockRenderConte
 }
 
 func renderACPTerminalPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {
-	style := ctx.Theme.SecondaryTextStyle()
+	style := ctx.Theme.ToolOutputStyle()
 	if err {
-		style = ctx.Theme.ErrorStyle()
+		style = ctx.Theme.ToolErrorStyle()
 	}
 	segments := tailWrappedTerminalSegments(text, width, acpTerminalPanelMaxLines)
 	lines := make([]string, 0, len(segments))
@@ -1599,7 +1722,7 @@ func renderACPToolPanelBody(text string, width int, ctx BlockRenderContext, err 
 
 func toolPanelLineStyle(raw string, ctx BlockRenderContext, err bool) lipgloss.Style {
 	if err {
-		return ctx.Theme.ErrorStyle()
+		return ctx.Theme.ToolErrorStyle()
 	}
 	trimmed := strings.TrimSpace(raw)
 	switch {
@@ -1614,7 +1737,7 @@ func toolPanelLineStyle(raw string, ctx BlockRenderContext, err bool) lipgloss.S
 	case strings.EqualFold(trimmed, "diff / hunk"):
 		return ctx.Theme.TranscriptMetaStyle()
 	default:
-		return ctx.Theme.SecondaryTextStyle()
+		return ctx.Theme.ToolOutputStyle()
 	}
 }
 

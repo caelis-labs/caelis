@@ -201,7 +201,7 @@ func renderToolEventViewModelPlain(vm ToolEventViewModel) (string, tuikit.LineSt
 		if vm.Output != "" {
 			line += " " + vm.Output
 		}
-		return line, tuikit.LineStyleError
+		return line, tuikit.LineStyleTool
 	}
 	line := "✓ " + name
 	if vm.Output != "" {

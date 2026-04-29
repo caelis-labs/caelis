@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"image/color"
 	"strings"
 	"testing"
 
@@ -98,6 +99,46 @@ func TestModelViewDoesNotCallModeLabelCallback(t *testing.T) {
 	view := updated.View().Content
 	if !strings.Contains(view, "plan") {
 		t.Fatalf("expected cached mode label in view, got %q", view)
+	}
+}
+
+func TestAutoThemeRequestsBackgroundOnFocusAndResize(t *testing.T) {
+	t.Setenv("CAELIS_THEME", "auto")
+	model := NewModel(Config{})
+
+	_, focusCmd := model.Update(tea.FocusMsg{})
+	if focusCmd == nil {
+		t.Fatal("expected focus to request background color in auto theme")
+	}
+
+	_, resizeCmd := model.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	if resizeCmd == nil {
+		t.Fatal("expected resize to request background color in auto theme")
+	}
+}
+
+func TestExplicitThemeDoesNotRequestBackgroundOnFocus(t *testing.T) {
+	t.Setenv("CAELIS_THEME", "light")
+	model := NewModel(Config{})
+
+	_, cmd := model.Update(tea.FocusMsg{})
+	if cmd != nil {
+		t.Fatal("expected explicit theme to skip background color request")
+	}
+}
+
+func TestAutoThemeAppliesBackgroundColorMessage(t *testing.T) {
+	t.Setenv("CAELIS_THEME", "auto")
+	model := NewModel(Config{})
+	model.applyTheme(tuikit.ResolveThemeWithState(true, false, model.colorProfile))
+
+	updated, _ := model.Update(tea.BackgroundColorMsg{Color: color.White})
+	m := updated.(*Model)
+	if m.theme.IsDark {
+		t.Fatal("expected light theme after light background color message")
+	}
+	if got := m.theme.Name; got != "light" {
+		t.Fatalf("theme name = %q, want light", got)
 	}
 }
 

@@ -581,13 +581,15 @@ func caelisToolDisplayMeta(name string, status string, rawInput map[string]any, 
 		})
 	case "WRITE", "PATCH":
 		display["diff"] = compactMetaMap(map[string]any{
-			"path":          firstNonEmpty(metaString(rawOutput, "path"), metaString(rawInput, "path")),
-			"hunk":          rawOutput["hunk"],
-			"old":           rawInput["old"],
-			"new":           rawInput["new"],
-			"added_lines":   rawOutput["added_lines"],
-			"removed_lines": rawOutput["removed_lines"],
-			"created":       rawOutput["created"],
+			"path":           firstNonEmpty(metaString(rawOutput, "path"), metaString(rawInput, "path")),
+			"hunk":           rawOutput["hunk"],
+			"diff_hunks":     rawOutput["diff_hunks"],
+			"diff_truncated": rawOutput["diff_truncated"],
+			"old":            rawInput["old"],
+			"new":            rawInput["new"],
+			"added_lines":    rawOutput["added_lines"],
+			"removed_lines":  rawOutput["removed_lines"],
+			"created":        rawOutput["created"],
 		})
 	case "BASH", "SPAWN", "TASK":
 		display["terminal"] = compactMetaMap(map[string]any{

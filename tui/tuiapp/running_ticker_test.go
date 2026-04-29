@@ -1,6 +1,11 @@
 package tuiapp
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
 
 func TestRunningTickerUsesStaticHintWhenAnimationIsThrottled(t *testing.T) {
 	m := NewModel(Config{NoColor: true, NoAnimation: true})
@@ -46,5 +51,31 @@ func TestRunningTickerStyleCacheInvalidatesOnThemeChange(t *testing.T) {
 	}
 	if got := m.diag.RunningTickerStyleCacheMisses; got != 2 {
 		t.Fatalf("style cache misses = %d, want 2 after theme change", got)
+	}
+}
+
+func TestRunningHintPlainRowDoesNotExposeANSI(t *testing.T) {
+	m := NewModel(Config{})
+	m.running = true
+
+	plain := m.hintRowText()
+	if plain != ansi.Strip(plain) || strings.Contains(plain, "[38;") {
+		t.Fatalf("hintRowText() = %q, want plain clipboard-safe text", plain)
+	}
+}
+
+func TestSpinnerTickReschedulesWhenRunningAnimationIsThrottled(t *testing.T) {
+	m := NewModel(Config{})
+	m.running = true
+	m.selecting = true
+	m.spinnerTickScheduled = true
+
+	updated, cmd := m.Update(m.spinner.Tick())
+	next := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("throttled spinner tick should keep scheduling future ticks")
+	}
+	if !next.spinnerTickScheduled {
+		t.Fatal("spinnerTickScheduled = false, want true after throttled tick")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/tui/tuikit"
+	"github.com/charmbracelet/colorprofile"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -23,6 +24,25 @@ func TestNormalizeTerminalMarkdownSplitsGluedMarkdownTable(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Fatalf("normalized markdown missing %q\ngot:\n%s", want, got)
 		}
+	}
+}
+
+func TestGlamourNarrativeRendererCacheUsesFullThemeKey(t *testing.T) {
+	raw := "## Heading\n\nUse `code` and [link](https://example.com)."
+	dark := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	light := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
+
+	darkRendered := glamourRenderNarrative(raw, 96, dark, tuikit.LineStyleAssistant)
+	lightRendered := glamourRenderNarrative(raw, 96, light, tuikit.LineStyleAssistant)
+
+	if darkRendered == "" || lightRendered == "" {
+		t.Fatal("expected both themed glamour renders to produce output")
+	}
+	if darkRendered == lightRendered {
+		t.Fatalf("expected light and dark renders to use different ANSI styling; got identical output %q", darkRendered)
+	}
+	if ansi.Strip(darkRendered) != ansi.Strip(lightRendered) {
+		t.Fatalf("theme should not change rendered markdown text\n dark=%q\nlight=%q", ansi.Strip(darkRendered), ansi.Strip(lightRendered))
 	}
 }
 

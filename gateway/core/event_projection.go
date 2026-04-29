@@ -790,14 +790,16 @@ func caelisDiffDisplayMeta(toolName string, input map[string]any, output map[str
 		return nil
 	}
 	return compactMap(map[string]any{
-		"path":          path,
-		"short_path":    filepath.Base(path),
-		"created":       output["created"],
-		"hunk":          output["hunk"],
-		"old":           input["old"],
-		"new":           input["new"],
-		"added_lines":   intValue(output["added_lines"]),
-		"removed_lines": intValue(output["removed_lines"]),
+		"path":           path,
+		"short_path":     filepath.Base(path),
+		"created":        output["created"],
+		"hunk":           output["hunk"],
+		"diff_hunks":     output["diff_hunks"],
+		"diff_truncated": output["diff_truncated"],
+		"old":            input["old"],
+		"new":            input["new"],
+		"added_lines":    intValue(output["added_lines"]),
+		"removed_lines":  intValue(output["removed_lines"]),
 	})
 }
 
