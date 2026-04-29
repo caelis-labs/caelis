@@ -83,6 +83,7 @@ type ToolCall struct {
 	RawOutput     any                `json:"rawOutput,omitempty"`
 	Content       []ToolCallContent  `json:"content,omitempty"`
 	Locations     []ToolCallLocation `json:"locations,omitempty"`
+	Meta          map[string]any     `json:"_meta,omitempty"`
 }
 
 func (u ToolCall) SessionUpdateType() string { return u.SessionUpdate }
@@ -97,6 +98,7 @@ type ToolCallUpdate struct {
 	RawOutput     any                `json:"rawOutput,omitempty"`
 	Content       []ToolCallContent  `json:"content,omitempty"`
 	Locations     []ToolCallLocation `json:"locations,omitempty"`
+	Meta          map[string]any     `json:"_meta,omitempty"`
 }
 
 func (u ToolCallUpdate) SessionUpdateType() string { return u.SessionUpdate }

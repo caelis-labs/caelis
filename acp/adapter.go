@@ -17,6 +17,16 @@ type SessionConfigAdapter interface {
 	SetSessionConfigOption(context.Context, SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
 }
 
+// SessionModelAdapter exposes the optional session/set_model surface.
+type SessionModelAdapter interface {
+	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
+}
+
+// SessionCommandAdapter exposes available slash commands for one session.
+type SessionCommandAdapter interface {
+	AvailableCommands(context.Context, string) ([]AvailableCommand, error)
+}
+
 func AsLoadSessionAdapter(agent Agent) (LoadSessionAdapter, bool) {
 	adapter, ok := agent.(LoadSessionAdapter)
 	return adapter, ok
@@ -29,6 +39,16 @@ func AsSessionModeAdapter(agent Agent) (SessionModeAdapter, bool) {
 
 func AsSessionConfigAdapter(agent Agent) (SessionConfigAdapter, bool) {
 	adapter, ok := agent.(SessionConfigAdapter)
+	return adapter, ok
+}
+
+func AsSessionModelAdapter(agent Agent) (SessionModelAdapter, bool) {
+	adapter, ok := agent.(SessionModelAdapter)
+	return adapter, ok
+}
+
+func AsSessionCommandAdapter(agent Agent) (SessionCommandAdapter, bool) {
+	adapter, ok := agent.(SessionCommandAdapter)
 	return adapter, ok
 }
 

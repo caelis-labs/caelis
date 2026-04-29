@@ -200,7 +200,16 @@ func explicitToolCallUpdates(event *sdksession.Event) []Update {
 	if err != nil || !ok {
 		return out
 	}
+	toolName := ""
+	if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		toolName = event.Protocol.ToolCall.Name
+	}
+	rawInput := anyStringMap(call.RawInput)
+	call = withDisplayTerminal(call, toolName, rawInput)
 	out = append(out, call)
+	if update, ok := displayTerminalInitialOutputUpdate(call.ToolCallID, toolName, rawInput); ok {
+		out = append(out, update)
+	}
 	return out
 }
 
@@ -237,14 +246,19 @@ func inferredToolCallUpdates(event *sdksession.Event) []Update {
 	}
 	for _, call := range event.Message.ToolCalls() {
 		args := parseObject(call.Args)
-		out = append(out, ToolCall{
+		update := ToolCall{
 			SessionUpdate: UpdateToolCall,
 			ToolCallID:    strings.TrimSpace(call.ID),
 			Title:         summarizeToolCallTitle(call.Name, args),
 			Kind:          toolKindForName(call.Name),
 			Status:        ToolStatusPending,
 			RawInput:      args,
-		})
+		}
+		update = withDisplayTerminal(update, call.Name, args)
+		out = append(out, update)
+		if terminalUpdate, ok := displayTerminalInitialOutputUpdate(update.ToolCallID, call.Name, args); ok {
+			out = append(out, terminalUpdate)
+		}
 	}
 	return out
 }
@@ -265,13 +279,14 @@ func toolCallForEvent(event *sdksession.Event) (ToolCall, bool, error) {
 	}
 	if event.Protocol != nil && event.Protocol.ToolCall != nil {
 		call := event.Protocol.ToolCall
+		rawInput := cloneAnyMap(call.RawInput)
 		return ToolCall{
 			SessionUpdate: UpdateToolCall,
 			ToolCallID:    strings.TrimSpace(call.ID),
-			Title:         firstNonEmpty(strings.TrimSpace(call.Title), strings.TrimSpace(call.Name)),
+			Title:         firstNonEmpty(strings.TrimSpace(call.Title), summarizeToolCallTitle(call.Name, rawInput), strings.TrimSpace(call.Name)),
 			Kind:          firstNonEmpty(strings.TrimSpace(call.Kind), toolKindForName(call.Name)),
 			Status:        firstNonEmpty(strings.TrimSpace(call.Status), ToolStatusPending),
-			RawInput:      cloneAnyMap(call.RawInput),
+			RawInput:      rawInput,
 			RawOutput:     cloneAnyMap(call.RawOutput),
 		}, true, nil
 	}
@@ -283,14 +298,16 @@ func toolCallForEvent(event *sdksession.Event) (ToolCall, bool, error) {
 		return ToolCall{}, false, nil
 	}
 	args := parseObject(calls[0].Args)
-	return ToolCall{
+	call := ToolCall{
 		SessionUpdate: UpdateToolCall,
 		ToolCallID:    strings.TrimSpace(calls[0].ID),
 		Title:         summarizeToolCallTitle(calls[0].Name, args),
 		Kind:          toolKindForName(calls[0].Name),
 		Status:        ToolStatusPending,
 		RawInput:      args,
-	}, true, nil
+	}
+	call = withDisplayTerminal(call, calls[0].Name, args)
+	return call, true, nil
 }
 
 func toolCallUpdateForEvent(event *sdksession.Event) (ToolCallUpdate, bool, error) {
@@ -343,6 +360,8 @@ func toolCallUpdateFromProtocol(call sdksession.ProtocolToolCall) (ToolCallUpdat
 		ToolCallID:    id,
 	}
 	if title := strings.TrimSpace(call.Title); title != "" {
+		update.Title = stringPtr(title)
+	} else if title := summarizeToolCallTitle(call.Name, call.RawInput); title != "" {
 		update.Title = stringPtr(title)
 	}
 	if kind := firstNonEmpty(strings.TrimSpace(call.Kind), toolKindForName(call.Name)); kind != "" {
@@ -437,6 +456,116 @@ func parseObject(raw string) map[string]any {
 	return out
 }
 
+func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {
+	terminalID, ok := displayTerminalID(call.ToolCallID, name)
+	if !ok {
+		return call
+	}
+	call.Content = append(call.Content, ToolCallContent{
+		Type:       "terminal",
+		TerminalID: terminalID,
+	})
+	call.Meta = mergeMeta(call.Meta, displayTerminalInfoMeta(terminalID, args))
+	return call
+}
+
+func displayTerminalInitialOutputUpdate(toolCallID string, name string, args map[string]any) (ToolCallUpdate, bool) {
+	terminalID, ok := displayTerminalID(toolCallID, name)
+	if !ok {
+		return ToolCallUpdate{}, false
+	}
+	text := displayTerminalInitialOutput(name, args)
+	if text == "" {
+		return ToolCallUpdate{}, false
+	}
+	return ToolCallUpdate{
+		SessionUpdate: UpdateToolCallInfo,
+		ToolCallID:    strings.TrimSpace(toolCallID),
+		Meta:          displayTerminalOutputMeta(terminalID, text),
+	}, true
+}
+
+func displayTerminalID(toolCallID string, name string) (string, bool) {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "BASH", "SPAWN":
+		if id := strings.TrimSpace(toolCallID); id != "" {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func displayTerminalInfoMeta(terminalID string, args map[string]any) map[string]any {
+	terminalID = strings.TrimSpace(terminalID)
+	if terminalID == "" {
+		return nil
+	}
+	info := map[string]any{"terminal_id": terminalID}
+	if cwd := firstNonEmpty(mapString(args, "workdir"), mapString(args, "cwd")); cwd != "" {
+		info["cwd"] = cwd
+	}
+	return map[string]any{"terminal_info": info}
+}
+
+func displayTerminalOutputMeta(terminalID string, data string) map[string]any {
+	terminalID = strings.TrimSpace(terminalID)
+	if terminalID == "" || data == "" {
+		return nil
+	}
+	return map[string]any{
+		"terminal_output": map[string]any{
+			"terminal_id": terminalID,
+			"data":        data,
+		},
+	}
+}
+
+func displayTerminalInitialOutput(name string, args map[string]any) string {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "SPAWN":
+		agent := strings.TrimSpace(mapString(args, "agent"))
+		prompt := strings.TrimSpace(mapString(args, "prompt"))
+		switch {
+		case agent != "" && prompt != "":
+			return "SPAWN agent=" + agent + "\n" + prompt + "\n"
+		case agent != "":
+			return "SPAWN agent=" + agent + "\n"
+		case prompt != "":
+			return "SPAWN\n" + prompt + "\n"
+		}
+	}
+	return ""
+}
+
+func mergeMeta(base map[string]any, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	out := maps.Clone(base)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range extra {
+		out[key] = value
+	}
+	return out
+}
+
+func mapString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
+}
+
+func anyStringMap(value any) map[string]any {
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	return nil
+}
+
 func summarizeToolCallTitle(name string, args map[string]any) string {
 	name = strings.TrimSpace(strings.ToUpper(name))
 	switch name {
@@ -454,6 +583,13 @@ func summarizeToolCallTitle(name string, args map[string]any) string {
 			}
 			return strings.TrimSpace(name + " " + action)
 		}
+	case "SPAWN":
+		if agent, _ := args["agent"].(string); strings.TrimSpace(agent) != "" {
+			return strings.TrimSpace(name + " " + agent)
+		}
+		if prompt, _ := args["prompt"].(string); strings.TrimSpace(prompt) != "" {
+			return strings.TrimSpace(name + " " + prompt)
+		}
 	}
 	return name
 }
@@ -466,7 +602,7 @@ func toolKindForName(name string) string {
 		return ToolKindEdit
 	case "SEARCH", "GLOB", "LIST":
 		return ToolKindSearch
-	case "BASH", "TASK":
+	case "BASH", "SPAWN", "TASK":
 		return ToolKindExecute
 	default:
 		return ToolKindOther

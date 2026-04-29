@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
+	"github.com/OnslaughtSnail/caelis/internal/version"
 	tuiapp "github.com/OnslaughtSnail/caelis/tui/tuiapp"
 )
 
@@ -23,7 +24,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 	cfg := tuiapp.ConfigFromDriver(driver, sender, tuiapp.Config{
 		Context:         programCtx,
 		AppName:         "CAELIS",
-		Version:         envOr("CAELIS_VERSION", "dev"),
+		Version:         version.String(),
 		Workspace:       stack.Workspace.CWD,
 		ModelAlias:      modelText,
 		ShowWelcomeCard: true,

@@ -547,6 +547,9 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 		}
 		if event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
 			liveTexts = append(liveTexts, event.Text)
+			if event.SessionID != session.SessionID {
+				t.Fatalf("live ACP chunk session ID = %q, want %q", event.SessionID, session.SessionID)
+			}
 			if strings.TrimSpace(event.ID) != "" {
 				t.Fatalf("live ACP chunk ID = %q, want empty live event ID", event.ID)
 			}
@@ -2664,6 +2667,22 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 	payload := string(taskResult.Content[0].JSON.Value)
 	if !strings.Contains(payload, "hello Codex") {
 		t.Fatalf("task write result = %s, want interactive read to receive input line", payload)
+	}
+}
+
+func TestTaskToolPayloadFallsBackToCompletedStdout(t *testing.T) {
+	payload := taskToolPayload(sdktask.Snapshot{
+		Ref:     sdktask.Ref{TaskID: "task-1", TerminalID: "term-1"},
+		Kind:    sdktask.KindBash,
+		State:   sdktask.StateCompleted,
+		Running: false,
+		Result: map[string]any{
+			"stdout":    "waiting\nhello Codex\n",
+			"exit_code": 0,
+		},
+	})
+	if got, _ := payload["result"].(string); !strings.Contains(got, "hello Codex") {
+		t.Fatalf("taskToolPayload result = %q, want fallback from stdout", got)
 	}
 }
 

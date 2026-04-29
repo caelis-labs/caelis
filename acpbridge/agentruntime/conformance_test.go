@@ -99,6 +99,51 @@ func TestRuntimeAgentConformancePromptOrdering(t *testing.T) {
 	}
 }
 
+func TestRuntimeAgentConformanceStreamsDeltasWithoutFinalDuplicate(t *testing.T) {
+	agent, _ := newTestRuntimeAgent(t, streamingTextModel{})
+	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+	})
+	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: resp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"stream hello"}`)},
+	}, rec); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	for _, notification := range rec.Notifications() {
+		if notification.SessionID != resp.SessionID {
+			t.Fatalf("notification sessionId = %q, want %q for update %#v", notification.SessionID, resp.SessionID, notification.Update)
+		}
+	}
+	if got, want := agentMessageTexts(rec.Notifications()), []string{"hel", "lo"}; !slices.Equal(got, want) {
+		t.Fatalf("agent message chunks = %#v, want streamed deltas only %#v", got, want)
+	}
+}
+
+func TestRuntimeAgentConformanceDropsAdjacentDuplicateStreamChunks(t *testing.T) {
+	agent, _ := newTestRuntimeAgent(t, duplicateStreamingTextModel{})
+	rec := fixture.NewRecorder(acp.RequestPermissionResponse{
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+	})
+	resp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: resp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"stream duplicate"}`)},
+	}, rec); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if got, want := agentMessageTexts(rec.Notifications()), []string{"Pipeline is running. Let me cancel it."}; !slices.Equal(got, want) {
+		t.Fatalf("agent message chunks = %#v, want adjacent duplicate dropped %#v", got, want)
+	}
+}
+
 func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	agent, _ := newTestRuntimeAgent(t, cancelModel{})
 	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
@@ -137,6 +182,64 @@ func TestRuntimeAgentConformanceCancellation(t *testing.T) {
 	}
 }
 
+type streamingTextModel struct{}
+
+func (streamingTextModel) Name() string { return "streaming-text" }
+
+func (streamingTextModel) Generate(context.Context, *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		for _, text := range []string{"hel", "lo"} {
+			if !yield(&sdkmodel.StreamEvent{
+				Type: sdkmodel.StreamEventPartDelta,
+				PartDelta: &sdkmodel.PartDelta{
+					Kind:      sdkmodel.PartKindText,
+					TextDelta: text,
+				},
+			}, nil) {
+				return
+			}
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "hello"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
+type duplicateStreamingTextModel struct{}
+
+func (duplicateStreamingTextModel) Name() string { return "duplicate-streaming-text" }
+
+func (duplicateStreamingTextModel) Generate(context.Context, *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		for _, text := range []string{"Pipeline is running. Let me cancel it.", "Pipeline is running. Let me cancel it."} {
+			if !yield(&sdkmodel.StreamEvent{
+				Type: sdkmodel.StreamEventPartDelta,
+				PartDelta: &sdkmodel.PartDelta{
+					Kind:      sdkmodel.PartKindText,
+					TextDelta: text,
+				},
+			}, nil) {
+				return
+			}
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "Pipeline is running. Let me cancel it."),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
 type staticModel struct{ text string }
 
 func (m staticModel) Name() string { return "stub" }
@@ -164,6 +267,22 @@ func (cancelModel) Generate(ctx context.Context, _ *sdkmodel.Request) iter.Seq2[
 		<-ctx.Done()
 		yield(nil, ctx.Err())
 	}
+}
+
+func agentMessageTexts(notifications []acp.SessionNotification) []string {
+	out := make([]string, 0, len(notifications))
+	for _, notification := range notifications {
+		chunk, ok := notification.Update.(acp.ContentChunk)
+		if !ok || chunk.SessionUpdate != acp.UpdateAgentMessage {
+			continue
+		}
+		content, ok := chunk.Content.(acp.TextContent)
+		if !ok {
+			continue
+		}
+		out = append(out, content.Text)
+	}
+	return out
 }
 
 func newTestRuntimeAgent(t *testing.T, model sdkmodel.LLM) (*agentruntime.RuntimeAgent, sdksession.Service) {

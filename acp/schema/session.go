@@ -12,6 +12,7 @@ const (
 	MethodSessionLoad      = "session/load"
 	MethodSessionSetMode   = "session/set_mode"
 	MethodSessionSetConfig = "session/set_config_option"
+	MethodSessionSetModel  = "session/set_model"
 	MethodSessionPrompt    = "session/prompt"
 	MethodSessionCancel    = "session/cancel"
 
@@ -20,9 +21,9 @@ const (
 )
 
 type Implementation struct {
-	Name    string `json:"name,omitempty"`
+	Name    string `json:"name"`
 	Title   string `json:"title,omitempty"`
-	Version string `json:"version,omitempty"`
+	Version string `json:"version"`
 }
 
 type InitializeRequest struct {
@@ -72,6 +73,7 @@ type NewSessionResponse struct {
 	SessionID     string                `json:"sessionId"`
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	Modes         *SessionModeState     `json:"modes,omitempty"`
+	Models        *SessionModelState    `json:"models,omitempty"`
 }
 
 type LoadSessionRequest struct {
@@ -83,6 +85,7 @@ type LoadSessionRequest struct {
 type LoadSessionResponse struct {
 	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
 	Modes         *SessionModeState     `json:"modes,omitempty"`
+	Models        *SessionModelState    `json:"models,omitempty"`
 }
 
 type SessionMode struct {
@@ -102,6 +105,24 @@ type SetSessionModeRequest struct {
 }
 
 type SetSessionModeResponse struct{}
+
+type ModelInfo struct {
+	ModelID     string `json:"modelId"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type SessionModelState struct {
+	CurrentModelID  string      `json:"currentModelId"`
+	AvailableModels []ModelInfo `json:"availableModels"`
+}
+
+type SetSessionModelRequest struct {
+	SessionID string `json:"sessionId"`
+	ModelID   string `json:"modelId"`
+}
+
+type SetSessionModelResponse struct{}
 
 type SessionConfigSelectOption struct {
 	Value       string `json:"value"`

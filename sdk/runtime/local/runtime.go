@@ -506,6 +506,9 @@ func normalizeEvent(session sdksession.Session, turnID string, event *sdksession
 	if event.Text == "" && event.Message != nil {
 		event.Text = event.Message.TextContent()
 	}
+	if strings.TrimSpace(event.SessionID) == "" {
+		event.SessionID = strings.TrimSpace(session.SessionID)
+	}
 	if event.Scope == nil {
 		scope := defaultScope(session, turnID)
 		event.Scope = &scope

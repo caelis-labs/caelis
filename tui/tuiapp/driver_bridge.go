@@ -6,6 +6,7 @@ package tuiapp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -910,10 +911,18 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 			sendNotice(send, "usage: /agent install <adapter>")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
+		command := agentInstallCommandForDisplay(ctx, driver, target)
+		callID := sendAgentInstallToolCall(send, target, command)
 		status, err := driver.AddAgentWithOptions(ctx, target, tuiadapterruntime.AgentAddOptions{Install: true})
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				sendAgentInstallToolResult(send, callID, command, appgateway.ToolStatusInterrupted, false, agentInstallErrorOutput(err))
+				return TaskResultMsg{Interrupted: true, SuppressTurnDivider: true}
+			}
+			sendAgentInstallToolResult(send, callID, command, appgateway.ToolStatusFailed, true, agentInstallErrorOutput(err))
 			return TaskResultMsg{Err: friendlyCommandError("agent install", err)}
 		}
+		sendAgentInstallToolResult(send, callID, command, appgateway.ToolStatusCompleted, false, "")
 		sendNotice(send, fmt.Sprintf("agent installed and registered: %s", target))
 		sendNotice(send, formatAgentStatusSnapshot(status))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
@@ -942,7 +951,6 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent use", err)}
 		}
-		sendNotice(send, fmt.Sprintf("controller switched: %s", target))
 		sendNotice(send, formatAgentStatusSnapshot(status))
 		if current, err := driver.Status(ctx); err == nil {
 			sendStatusUpdate(send, current)
@@ -953,6 +961,93 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		sendNotice(send, "usage: /agent list | add <builtin> | install <adapter> | use <agent|local> | remove <agent>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
+}
+
+func agentInstallCommandForDisplay(ctx context.Context, driver tuiadapterruntime.Driver, target string) string {
+	target = strings.TrimSpace(target)
+	if driver != nil {
+		if candidates, err := driver.CompleteSlashArg(ctx, "agent install", target, 20); err == nil {
+			for _, candidate := range candidates {
+				if !strings.EqualFold(strings.TrimSpace(candidate.Value), target) {
+					continue
+				}
+				if detail := strings.TrimSpace(candidate.Detail); detail != "" {
+					return detail
+				}
+			}
+		}
+	}
+	if target == "" {
+		return "npm install"
+	}
+	return "npm install " + target
+}
+
+func sendAgentInstallToolCall(send func(tea.Msg), target string, command string) string {
+	if send == nil {
+		return ""
+	}
+	callID := "agent-install-" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(target), " ", "-")) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	send(appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindToolCall,
+		OccurredAt: time.Now(),
+		ToolCall: &appgateway.ToolCallPayload{
+			CallID:   callID,
+			ToolName: "BASH",
+			Status:   appgateway.ToolStatusRunning,
+			Scope:    appgateway.EventScopeMain,
+			RawInput: map[string]any{"command": strings.TrimSpace(command)},
+		},
+	}})
+	return callID
+}
+
+func sendAgentInstallToolResult(send func(tea.Msg), callID string, command string, status appgateway.ToolStatus, isErr bool, output string) {
+	if send == nil || strings.TrimSpace(callID) == "" {
+		return
+	}
+	rawOutput := map[string]any{
+		"running": false,
+		"state":   string(status),
+	}
+	output = strings.TrimSpace(output)
+	if output != "" {
+		if isErr {
+			rawOutput["stderr"] = output
+		} else {
+			rawOutput["stdout"] = output
+		}
+	}
+	send(appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindToolResult,
+		OccurredAt: time.Now(),
+		ToolResult: &appgateway.ToolResultPayload{
+			CallID:     callID,
+			ToolName:   "BASH",
+			Status:     status,
+			Scope:      appgateway.EventScopeMain,
+			OutputText: output,
+			RawInput:   map[string]any{"command": strings.TrimSpace(command)},
+			RawOutput:  rawOutput,
+			Error:      isErr,
+		},
+	}})
+}
+
+func agentInstallErrorOutput(err error) string {
+	if err == nil {
+		return ""
+	}
+	if errors.Is(err, context.Canceled) {
+		return "User interrupt"
+	}
+	text := strings.TrimSpace(err.Error())
+	if idx := strings.Index(text, "\n"); idx >= 0 {
+		if out := strings.TrimSpace(text[idx+1:]); out != "" {
+			return out
+		}
+	}
+	return text
 }
 
 func slashNew(driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
@@ -1858,33 +1953,38 @@ func parseConnectArgs(args string) tuiadapterruntime.ConnectConfig {
 }
 
 func formatStatusSnapshot(status tuiadapterruntime.StatusSnapshot) string {
-	lines := []string{"status:"}
-	lines = append(lines, fmt.Sprintf("  session:   %s", firstNonEmpty(strings.TrimSpace(status.SessionID), "-")))
-	lines = append(lines, fmt.Sprintf("  provider:  %s", firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Model), "not configured")))
-	lines = append(lines, fmt.Sprintf("  model:     %s", firstNonEmpty(strings.TrimSpace(status.ModelName), deriveModelNameFromAlias(status.Model), "not configured")))
-	lines = append(lines, fmt.Sprintf("  alias:     %s", firstNonEmpty(strings.TrimSpace(status.Model), "-")))
-	lines = append(lines, fmt.Sprintf("  mode:      %s", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "default")))
-	lines = append(lines, fmt.Sprintf("  sandbox:   %s", firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), "auto")))
-	lines = append(lines, fmt.Sprintf("  route:     %s", firstNonEmpty(strings.TrimSpace(status.Route), "-")))
-	lines = append(lines, fmt.Sprintf("  workspace: %s", firstNonEmpty(strings.TrimSpace(status.Workspace), "-")))
-	lines = append(lines, fmt.Sprintf("  store:     %s", firstNonEmpty(strings.TrimSpace(status.StoreDir), "-")))
+	model := firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), deriveModelNameFromAlias(status.Model), "not configured")
+	provider := firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Model), "not configured")
+	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), "auto")
+	route := strings.TrimSpace(status.Route)
+	if route != "" && route != "-" {
+		sandbox += " via " + route
+	}
+	lines := []string{"Session"}
+	lines = append(lines, fmt.Sprintf("  Session    %s", firstNonEmpty(strings.TrimSpace(status.SessionID), "-")))
+	lines = append(lines, fmt.Sprintf("  Provider   %s", provider))
+	lines = append(lines, fmt.Sprintf("  Model      %s", model))
+	lines = append(lines, fmt.Sprintf("  Mode       %s", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "default")))
+	lines = append(lines, fmt.Sprintf("  Sandbox    %s", sandbox))
+	lines = append(lines, fmt.Sprintf("  Workspace  %s", firstNonEmpty(strings.TrimSpace(status.Workspace), "-")))
+	lines = append(lines, fmt.Sprintf("  Store      %s", firstNonEmpty(strings.TrimSpace(status.StoreDir), "-")))
 	if usage := formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens); usage != "" {
-		lines = append(lines, fmt.Sprintf("  context:   %s", usage))
+		lines = append(lines, fmt.Sprintf("  Context    %s", usage))
 	}
 	if status.FallbackReason != "" {
-		lines = append(lines, "  fallback:  "+strings.TrimSpace(status.FallbackReason))
+		lines = append(lines, "  Fallback   "+strings.TrimSpace(status.FallbackReason))
 	}
 	if strings.TrimSpace(status.Model) == "" && strings.TrimSpace(status.Provider) == "" && strings.TrimSpace(status.ModelName) == "" {
-		lines = append(lines, "next: run /connect to configure a provider and model")
+		lines = append(lines, "note: Run /connect to configure a provider and model")
 	}
 	if status.MissingAPIKey {
-		lines = append(lines, "warning: API key is missing; reconnect with a key or use env:YOUR_API_KEY")
+		lines = append(lines, "warn: API key is missing; reconnect with a key or use env:YOUR_API_KEY")
 	}
 	if status.HostExecution || status.FullAccessMode {
-		lines = append(lines, "warning: commands may run on the host with reduced sandbox isolation")
+		lines = append(lines, "warn: Commands may run on the host with reduced sandbox isolation")
 	}
 	if strings.TrimSpace(status.FallbackReason) != "" {
-		lines = append(lines, "warning: requested sandbox backend is unavailable and a fallback is in effect")
+		lines = append(lines, "warn: Requested sandbox backend is unavailable and a fallback is in effect")
 	}
 	return strings.Join(lines, "\n")
 }
@@ -1939,28 +2039,61 @@ func formatAgentList(agents []tuiadapterruntime.AgentCandidate, status tuiadapte
 }
 
 func formatAgentStatusSnapshot(status tuiadapterruntime.AgentStatusSnapshot) string {
-	lines := []string{"agent status:"}
-	lines = append(lines, fmt.Sprintf("  session:     %s", firstNonEmpty(strings.TrimSpace(status.SessionID), "-")))
-	lines = append(lines, fmt.Sprintf("  controller:  %s", firstNonEmpty(strings.TrimSpace(status.ControllerLabel), strings.TrimSpace(status.ControllerKind), "local kernel")))
-	lines = append(lines, fmt.Sprintf("  kind:        %s", firstNonEmpty(strings.TrimSpace(status.ControllerKind), "kernel")))
-	lines = append(lines, fmt.Sprintf("  active turn: %t", status.HasActiveTurn))
+	controller := firstNonEmpty(strings.TrimSpace(status.ControllerLabel), strings.TrimSpace(status.ControllerKind), "local kernel")
+	kind := firstNonEmpty(strings.TrimSpace(status.ControllerKind), "kernel")
+	state := "idle"
+	if status.HasActiveTurn {
+		state = "running"
+	}
+	lines := []string{"Agent Controller"}
+	lines = append(lines, fmt.Sprintf("  Active    %s", controller))
+	lines = append(lines, fmt.Sprintf("  Kind      %s", kind))
+	lines = append(lines, fmt.Sprintf("  Session   %s", firstNonEmpty(strings.TrimSpace(status.SessionID), "-")))
+	lines = append(lines, fmt.Sprintf("  State     %s", state))
+	if model := formatAgentControllerModel(status); model != "" {
+		lines = append(lines, fmt.Sprintf("  Model     %s", model))
+	}
 	participants := displayableAgentParticipants(status.Participants)
 	if len(participants) == 0 {
-		lines = append(lines, "  participants: none")
+		lines = append(lines, "  Children  none")
 	} else {
-		lines = append(lines, "  participants:")
+		lines = append(lines, "  Children")
 		for _, participant := range participants {
 			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), firstNonEmpty(strings.TrimSpace(participant.Label), "-"), strings.TrimSpace(participant.Role)))
 		}
 	}
 	if len(status.AvailableAgents) == 0 {
-		lines = append(lines, "next: no ACP agents are configured")
+		lines = append(lines, "note: No ACP agents are configured")
 	} else if len(participants) == 0 && strings.TrimSpace(status.ControllerKind) == "" {
-		lines = append(lines, "next: run /agent add <builtin> to register an ACP agent")
+		lines = append(lines, "note: Run /agent add <builtin> to register an ACP agent")
 	} else if len(participants) == 0 {
-		lines = append(lines, "next: run /<agent> <prompt> to start a child subagent")
+		lines = append(lines, fmt.Sprintf("note: Run %s <prompt> to start a child subagent", agentPromptCommand(status)))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatAgentControllerModel(status tuiadapterruntime.AgentStatusSnapshot) string {
+	model := strings.TrimSpace(status.ControllerModel)
+	effort := strings.TrimSpace(status.ControllerReasoningEffort)
+	if model == "" {
+		return ""
+	}
+	if effort == "" || strings.EqualFold(effort, "none") || strings.Contains(model, "[") {
+		return model
+	}
+	return model + " [" + effort + "]"
+}
+
+func agentPromptCommand(status tuiadapterruntime.AgentStatusSnapshot) string {
+	controller := strings.TrimSpace(firstNonEmpty(status.ControllerLabel, status.ControllerKind))
+	controller = strings.TrimPrefix(controller, "/")
+	if controller == "" || strings.EqualFold(controller, "kernel") || strings.EqualFold(controller, "local kernel") {
+		return "/<agent>"
+	}
+	if strings.ContainsAny(controller, " \t") {
+		return "/<agent>"
+	}
+	return "/" + controller
 }
 
 func displayableAgentParticipants(participants []tuiadapterruntime.AgentParticipantSnapshot) []tuiadapterruntime.AgentParticipantSnapshot {

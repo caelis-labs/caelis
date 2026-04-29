@@ -158,11 +158,14 @@ type ControllerStatus struct {
 	ModelOptions    []ControllerConfigChoice `json:"model_options,omitempty"`
 	ReasoningEffort string                   `json:"reasoning_effort,omitempty"`
 	EffortOptions   []ControllerConfigChoice `json:"effort_options,omitempty"`
-	Commands        []ControllerCommand      `json:"commands,omitempty"`
-	ConfigOptions   []ControllerConfigOption `json:"config_options,omitempty"`
-	Mode            string                   `json:"mode,omitempty"`
-	ModeOptions     []ControllerMode         `json:"mode_options,omitempty"`
-	UpdatedAt       time.Time                `json:"updated_at,omitempty"`
+	// EffortOptionsByModel is populated for ACP servers that expose model/effort
+	// combinations only through models.availableModels instead of configOptions.
+	EffortOptionsByModel map[string][]ControllerConfigChoice `json:"effort_options_by_model,omitempty"`
+	Commands             []ControllerCommand                 `json:"commands,omitempty"`
+	ConfigOptions        []ControllerConfigOption            `json:"config_options,omitempty"`
+	Mode                 string                              `json:"mode,omitempty"`
+	ModeOptions          []ControllerMode                    `json:"mode_options,omitempty"`
+	UpdatedAt            time.Time                           `json:"updated_at,omitempty"`
 }
 
 // SetControllerModelRequest changes the active remote ACP controller model
