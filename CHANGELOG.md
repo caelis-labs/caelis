@@ -21,6 +21,7 @@
 - Fixed the `golangci-lint` v2 config schema so CI can pass the action's `config verify` step.
 - Moved live/provider/acpx/ACP process E2E tests behind the `e2e` build tag and kept default CI on stable unit and light integration coverage.
 - Kept ordinary gateway/app tests on the host sandbox backend so platform-specific sandbox probing does not leak into the default test gate.
+- Stopped a gateway driver unit test from waiting on a live provider failure path, keeping the default runtime test package fast and deterministic.
 - Validated the release branch with the repository quality gate and `git diff --check`.
 
 ## v0.0.39 - 2026-04-09

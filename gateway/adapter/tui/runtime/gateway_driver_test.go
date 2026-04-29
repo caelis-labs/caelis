@@ -139,8 +139,8 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	if turn != nil {
-		defer turn.Close()
-		for range turn.Events() {
+		if err := turn.Close(); err != nil {
+			t.Fatalf("Close() error = %v", err)
 		}
 	}
 	after, err := stack.Gateway.ListSessions(ctx, appgateway.ListSessionsRequest{
