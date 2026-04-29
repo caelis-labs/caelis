@@ -42,5 +42,7 @@ jobs:
 
       - name: Test
         env:
-          GOFLAGS: -p=2
+          GOFLAGS: -p=1
+          GOMAXPROCS: 2
+          GOMEMLIMIT: 2GiB
         run: make test
