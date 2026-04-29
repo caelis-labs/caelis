@@ -421,14 +421,150 @@ func TestProjectGatewayEventACPFetchToolUsesReadableQueryArgs(t *testing.T) {
 		t.Fatalf("events = %#v, want one tool event", events)
 	}
 	got := events[0]
-	if got.ToolName != "Searching the Web" || got.ToolKind != "fetch" {
-		t.Fatalf("tool identity = name %q kind %q, want ACP title/kind", got.ToolName, got.ToolKind)
+	if got.ToolName != "fetch" || got.ToolKind != "fetch" || got.ToolTitle != "Searching the Web" {
+		t.Fatalf("tool identity = name %q kind %q title %q, want ACP kind plus title", got.ToolName, got.ToolKind, got.ToolTitle)
 	}
 	if got.ToolArgs != `"weather: Shanghai, China"` {
 		t.Fatalf("tool args = %q, want readable query", got.ToolArgs)
 	}
 	if !got.DisableToolGrouping {
 		t.Fatal("DisableToolGrouping = false, want ACP tool to bypass exploration grouping")
+	}
+}
+
+func TestProjectGatewayEventACPFetchResultKeepsInputQueryWhenOutputHasText(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:   appgateway.EventKindToolResult,
+		Origin: &appgateway.EventOrigin{Source: "acp_participant", Scope: appgateway.EventScopeParticipant, ScopeID: "codex-001"},
+		ToolResult: &appgateway.ToolResultPayload{
+			CallID:    "ws-1",
+			ToolTitle: "Searching the Web",
+			ToolKind:  "fetch",
+			Status:    appgateway.ToolStatusCompleted,
+			RawInput: map[string]any{
+				"query": "weather: Shanghai, China",
+			},
+			RawOutput: map[string]any{
+				"text": "result 01\nresult 02",
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolArgs != `"weather: Shanghai, China"` {
+		t.Fatalf("tool args = %q, want original query", got.ToolArgs)
+	}
+	if strings.Contains(got.ToolArgs, "result 01") {
+		t.Fatalf("tool args = %q, must not use result text as query", got.ToolArgs)
+	}
+}
+
+func TestProjectGatewayEventACPToolArgsUseKindAndDoNotLeakTransportSource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		title     string
+		kind      string
+		raw       map[string]any
+		wantName  string
+		wantArgs  string
+		forbidden []string
+	}{
+		{
+			name:     "codex read from parsed command",
+			title:    "Read README.md",
+			kind:     "read",
+			wantName: "read",
+			wantArgs: "README.md",
+			raw: map[string]any{
+				"command": []any{"/bin/zsh", "-lc", "cat README.md"},
+				"parsed_cmd": []any{map[string]any{
+					"type": "read",
+					"cmd":  "cat README.md",
+					"name": "README.md",
+					"path": "README.md",
+				}},
+				"source": "unified_exec_startup",
+			},
+			forbidden: []string{"unified_exec_startup", "Read README.md"},
+		},
+		{
+			name:     "codex search from parsed command",
+			title:    "Search func WithDbTransaction|WithDbTransaction in repository",
+			kind:     "search",
+			wantName: "search",
+			wantArgs: `"func WithDbTransaction|WithDbTransaction"`,
+			raw: map[string]any{
+				"command": []any{"/bin/zsh", "-lc", `rg -n "func WithDbTransaction|WithDbTransaction"`},
+				"parsed_cmd": []any{map[string]any{
+					"type":  "search",
+					"cmd":   "rg -n func WithDbTransaction|WithDbTransaction",
+					"query": "func WithDbTransaction|WithDbTransaction",
+				}},
+				"source": "unified_exec_startup",
+			},
+			forbidden: []string{"unified_exec_startup", "repository"},
+		},
+		{
+			name:     "execute from shell command array",
+			title:    "git status --short --branch",
+			kind:     "execute",
+			wantName: "execute",
+			wantArgs: "git status --short --branch",
+			raw: map[string]any{
+				"command": []any{"/bin/zsh", "-lc", "git status --short --branch"},
+				"source":  "unified_exec_startup",
+			},
+			forbidden: []string{"unified_exec_startup", "/bin/zsh -lc"},
+		},
+		{
+			name:      "read title fallback strips action prefix",
+			title:     "Read README.md",
+			kind:      "read",
+			wantName:  "read",
+			wantArgs:  "README.md",
+			raw:       nil,
+			forbidden: []string{"Read README.md"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+				Kind:   appgateway.EventKindToolCall,
+				Origin: &appgateway.EventOrigin{Source: "acp_participant", Scope: appgateway.EventScopeParticipant, ScopeID: "codex-001"},
+				ToolCall: &appgateway.ToolCallPayload{
+					CallID:    "call-1",
+					ToolTitle: tt.title,
+					ToolKind:  tt.kind,
+					Status:    appgateway.ToolStatusRunning,
+					RawInput:  tt.raw,
+				},
+			})
+			if len(events) != 1 {
+				t.Fatalf("events = %#v, want one tool event", events)
+			}
+			got := events[0]
+			if got.ToolName != tt.wantName {
+				t.Fatalf("tool name = %q, want %q", got.ToolName, tt.wantName)
+			}
+			if got.ToolTitle != tt.title {
+				t.Fatalf("tool title = %q, want %q", got.ToolTitle, tt.title)
+			}
+			if got.ToolArgs != tt.wantArgs {
+				t.Fatalf("tool args = %q, want %q", got.ToolArgs, tt.wantArgs)
+			}
+			for _, forbidden := range tt.forbidden {
+				if strings.Contains(got.ToolArgs, forbidden) {
+					t.Fatalf("tool args = %q, must not contain %q", got.ToolArgs, forbidden)
+				}
+			}
+		})
 	}
 }
 

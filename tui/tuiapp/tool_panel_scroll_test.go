@@ -110,7 +110,7 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 		"result 06",
 	}, "\n")
 
-	block.UpdateToolWithMeta("ws-1", "Searching the Web", `"weather: Shanghai, China"`, output, true, false, ToolUpdateMeta{
+	block.UpdateToolWithMeta("ws-1", "fetch", `"weather: Shanghai, China"`, output, true, false, ToolUpdateMeta{
 		ToolKind:        "fetch",
 		DisableGrouping: true,
 	})
@@ -118,7 +118,7 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	rows := block.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, `• Searching the Web "weather: Shanghai, China"`) {
+	if !strings.Contains(joined, `• Search "weather: Shanghai, China"`) {
 		t.Fatalf("generic ACP tool should use standard header, got\n%s", joined)
 	}
 	if strings.Contains(joined, "▾ Searching the Web") || strings.Contains(joined, "{") {

@@ -1,6 +1,6 @@
 {
   "name": "@onslaughtsnail/caelis-linux-x64",
-  "version": "0.0.33",
+  "version": "0.1.0",
   "description": "Platform-specific caelis binary for linux x64",
   "license": "Apache-2.0",
   "repository": {

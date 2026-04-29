@@ -173,21 +173,30 @@ func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRender
 	if !ok || strings.TrimSpace(detail) == "" {
 		return nil, nil, false
 	}
-	bodyWidth := maxInt(1, width-displayColumns(prefix))
+	verb := strings.TrimSpace(strings.TrimPrefix(prefix, "•"))
+	continuationPrefix := strings.Repeat(" ", displayColumns(prefix))
+	if acpTranscriptHeaderUsesRailContinuation(verb) {
+		continuationPrefix = "  │ "
+	}
+	firstBodyWidth := maxInt(1, width-displayColumns(prefix))
+	continuationBodyWidth := maxInt(1, width-displayColumns(continuationPrefix))
 	rawLines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(detail, "\r\n", "\n"), "\r", "\n"), "\n")
-	indent := strings.Repeat(" ", displayColumns(prefix))
 	plainLines := make([]string, 0, len(rawLines)+2)
 	for i, raw := range rawLines {
 		text := strings.TrimSpace(raw)
 		if text == "" {
 			continue
 		}
+		bodyWidth := firstBodyWidth
+		if len(plainLines) > 0 || i > 0 {
+			bodyWidth = continuationBodyWidth
+		}
 		segments := graphemeWordWrap(text, bodyWidth)
 		for j, segment := range segments {
 			if i == 0 && j == 0 {
 				plainLines = append(plainLines, prefix+segment)
 			} else {
-				plainLines = append(plainLines, indent+segment)
+				plainLines = append(plainLines, continuationPrefix+segment)
 			}
 		}
 	}
@@ -200,9 +209,30 @@ func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRender
 			styledLines = append(styledLines, styleACPTranscriptHeader(ctx, line))
 			continue
 		}
-		styledLines = append(styledLines, ctx.Theme.SecondaryTextStyle().Render(line))
+		styledLines = append(styledLines, styleACPTranscriptHeaderContinuation(ctx, verb, continuationPrefix, line))
 	}
 	return plainLines, styledLines, true
+}
+
+func acpTranscriptHeaderUsesRailContinuation(verb string) bool {
+	switch strings.ToLower(strings.TrimSpace(verb)) {
+	case "ran", "spawned":
+		return true
+	default:
+		return false
+	}
+}
+
+func styleACPTranscriptHeaderContinuation(ctx BlockRenderContext, verb string, prefix string, line string) string {
+	if prefix != "" && strings.HasPrefix(line, prefix) {
+		detail := strings.TrimPrefix(line, prefix)
+		styled := ctx.Theme.TranscriptMetaStyle().Render(prefix)
+		if strings.EqualFold(strings.TrimSpace(verb), "Ran") {
+			return styled + styleShellCommandText(ctx, detail)
+		}
+		return styled + ctx.Theme.ToolArgsStyle().Render(detail)
+	}
+	return ctx.Theme.SecondaryTextStyle().Render(line)
 }
 
 func splitACPTranscriptHeaderPrefix(plain string) (prefix string, detail string, ok bool) {

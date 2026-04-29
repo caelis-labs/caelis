@@ -7,6 +7,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/colorprofile"
+	"github.com/charmbracelet/x/ansi"
+
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
@@ -32,6 +35,18 @@ func hasBlankRowBetween(lines []string, start int, end int) bool {
 		}
 	}
 	return false
+}
+
+func TestRanHeaderStylesShellCommandTokens(t *testing.T) {
+	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	plain := "• Ran GOMODCACHE=/tmp/cache git status --short --branch"
+	styled := styleACPTranscriptHeader(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}, plain)
+	if got := ansi.Strip(styled); got != plain {
+		t.Fatalf("styled header strips to %q, want %q", got, plain)
+	}
+	if styled == plain || !strings.Contains(styled, "\x1b[") {
+		t.Fatalf("styled header = %q, want ANSI token styling", styled)
+	}
 }
 
 func TestModelUpdateConsumesGatewayAssistantEventIntoMainTurnBlock(t *testing.T) {
@@ -593,7 +608,7 @@ func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 	if strings.Contains(joined, "• Explored") {
 		t.Fatalf("rendered rows = %q, want ACP tools to stay out of compact exploration grouping", joined)
 	}
-	if !strings.Contains(joined, "READ gateway/core/types.go") || !strings.Contains(joined, "SEARCH EventKind") {
+	if !strings.Contains(joined, "Read gateway/core/types.go") || !strings.Contains(joined, "Search EventKind") {
 		t.Fatalf("rendered rows = %q, want standard tool rows", joined)
 	}
 	if !block.toolPanelExpanded("read-1") || !block.toolPanelExpanded("search-1") {
@@ -684,6 +699,32 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			},
 			want:        []string{`• Ran echo "hello"`, "  └ hello"},
 			forbidden:   []string{"session_id", "supports_input", "737bc26a"},
+			expandPanel: true,
+		},
+		{
+			name: "acp execute terminal panel uses ran verb",
+			call: &appgateway.ToolCallPayload{
+				CallID:   "acp-exec-1",
+				ToolName: "git",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeParticipant,
+				RawInput: map[string]any{"cmd": "git diff --cached -- file.go"},
+			},
+			result: &appgateway.ToolResultPayload{
+				CallID:   "acp-exec-1",
+				ToolName: "git",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusCompleted,
+				Scope:    appgateway.EventScopeParticipant,
+				RawInput: map[string]any{"cmd": "git diff --cached -- file.go"},
+				RawOutput: map[string]any{
+					"stdout":    "diff --git a/file.go b/file.go\n",
+					"exit_code": 0,
+				},
+			},
+			want:        []string{"• Ran git diff --cached -- file.go", "  └ diff --git a/file.go b/file.go"},
+			forbidden:   []string{"• git diff", "BASH diff", "╭", "╰"},
 			expandPanel: true,
 		},
 		{
@@ -1229,8 +1270,8 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 	if headerIdx < 0 || tailIdx <= headerIdx {
 		t.Fatalf("viewport lines = %#v, want wrapped BASH header", model.viewportPlainLines)
 	}
-	if !strings.HasPrefix(model.viewportPlainLines[tailIdx], "      ") {
-		t.Fatalf("wrapped tail line = %q, want continuation indentation", model.viewportPlainLines[tailIdx])
+	if !strings.HasPrefix(model.viewportPlainLines[tailIdx], "  │ ") {
+		t.Fatalf("wrapped tail line = %q, want terminal continuation rail", model.viewportPlainLines[tailIdx])
 	}
 }
 

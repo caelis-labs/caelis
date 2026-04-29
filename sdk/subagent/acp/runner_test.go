@@ -115,7 +115,7 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	if callEvent == nil || callEvent.Type != sdksession.EventTypeToolCall || callEvent.Protocol == nil || callEvent.Protocol.ToolCall == nil {
 		t.Fatalf("tool call event = %#v", callEvent)
 	}
-	if callEvent.Protocol.ToolCall.Name != "run go test" || callEvent.Protocol.ToolCall.Kind != "execute" || callEvent.Protocol.ToolCall.RawInput["command"] != "go test ./tui/tuiapp/..." {
+	if callEvent.Protocol.ToolCall.Name != "execute" || callEvent.Protocol.ToolCall.Title != "run go test" || callEvent.Protocol.ToolCall.Kind != "execute" || callEvent.Protocol.ToolCall.RawInput["command"] != "go test ./tui/tuiapp/..." {
 		t.Fatalf("tool call payload = %#v", callEvent.Protocol.ToolCall)
 	}
 	resultEvent := sink.frames[1].Event
@@ -170,8 +170,11 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
 		t.Fatalf("stream event = %#v, want structured tool call", event)
 	}
-	if got := event.Protocol.ToolCall.Name; got != "Searching for: weather: Shanghai, China" {
-		t.Fatalf("tool name = %q, want ACP title", got)
+	if got := event.Protocol.ToolCall.Name; got != "fetch" {
+		t.Fatalf("tool name = %q, want ACP kind", got)
+	}
+	if got := event.Protocol.ToolCall.Title; got != "Searching for: weather: Shanghai, China" {
+		t.Fatalf("tool title = %q, want ACP title", got)
 	}
 	if got := event.Protocol.ToolCall.Kind; got != "fetch" {
 		t.Fatalf("tool kind = %q, want fetch", got)

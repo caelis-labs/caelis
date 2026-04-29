@@ -179,6 +179,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			if status == "" || payload.Status == appgateway.ToolStatusStarted {
 				status = string(appgateway.ToolStatusRunning)
 			}
+			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			out = append(out, TranscriptEvent{
 				Kind:                TranscriptEventTool,
 				Scope:               scope,
@@ -189,7 +190,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				ToolName:            toolName,
 				ToolKind:            strings.TrimSpace(payload.ToolKind),
 				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:            toolDisplayArgs(toolSemanticName(toolName, payload.ToolKind), payload.RawInput, acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, payload.ArgsText))),
+				ToolArgs:            toolDisplayArgs(semanticName, payload.RawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, payload.ArgsText))),
 				ToolStatus:          status,
 				ToolTaskID:          toolDisplayTaskID(payload.RawInput, nil),
 				DisableToolGrouping: disableToolGrouping,
@@ -212,7 +213,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			toolErr := payload.Error || strings.EqualFold(status, string(appgateway.ToolStatusFailed))
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			toolOutput := toolDisplayOutput(semanticName, payload.RawInput, payload.RawOutput, acpprojector.FormatToolResult(toolName, gatewayToolArgsMap(payload.CommandPreview, ""), gatewayToolResultMap(payload.OutputText, toolErr), status), status, toolErr)
-			toolArgs := toolDisplayArgs(semanticName, payload.RawInput, acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, "")))
+			toolArgs := toolDisplayArgs(semanticName, payload.RawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, "")))
 			if !toolErr && (len(payload.RawInput) > 0 || len(payload.RawOutput) > 0) {
 				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
@@ -314,7 +315,13 @@ func payloadNarrativeChunkHasContent(text string, final bool) bool {
 }
 
 func gatewayToolDisplayName(name string, title string, kind string) string {
-	return firstTrimmed(name, title, kind)
+	if name = strings.TrimSpace(name); name != "" {
+		return name
+	}
+	if kind = strings.TrimSpace(kind); kind != "" {
+		return kind
+	}
+	return strings.TrimSpace(title)
 }
 
 func gatewayEventFromACP(ev appgateway.Event) bool {

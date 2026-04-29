@@ -45,8 +45,11 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
 		t.Fatalf("event = %#v, want structured tool update", event)
 	}
-	if got := event.Protocol.ToolCall.Name; got != "Searching for: weather: Shanghai, China" {
-		t.Fatalf("tool name = %q, want ACP title", got)
+	if got := event.Protocol.ToolCall.Name; got != "fetch" {
+		t.Fatalf("tool name = %q, want ACP kind", got)
+	}
+	if got := event.Protocol.ToolCall.Title; got != "Searching for: weather: Shanghai, China" {
+		t.Fatalf("tool title = %q, want ACP title", got)
 	}
 	if got := event.Protocol.ToolCall.Kind; got != "fetch" {
 		t.Fatalf("tool kind = %q, want fetch", got)

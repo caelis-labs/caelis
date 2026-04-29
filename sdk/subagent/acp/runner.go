@@ -570,10 +570,10 @@ func acpToolEventType(status string) sdksession.EventType {
 }
 
 func acpToolDisplayName(kind string, title string) string {
-	if title = strings.TrimSpace(title); title != "" {
-		return title
+	if kind = strings.TrimSpace(kind); kind != "" {
+		return kind
 	}
-	return strings.TrimSpace(kind)
+	return strings.TrimSpace(title)
 }
 
 func acpToolRawInput(kind string, title string, raw any) map[string]any {

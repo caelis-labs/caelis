@@ -240,11 +240,11 @@ func titleSummary(name string, kind string, title string) string {
 	if title == "" {
 		return ""
 	}
-	if strings.HasPrefix(strings.ToUpper(title), name+" ") {
-		return strings.TrimSpace(strings.TrimPrefix(title, name))
+	if prefix := name + " "; len(title) > len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
+		return strings.TrimSpace(title[len(prefix):])
 	}
-	if strings.HasPrefix(strings.ToLower(title), kind+" ") {
-		return strings.TrimSpace(strings.TrimPrefix(strings.ToLower(title), kind))
+	if prefix := kind + " "; len(title) > len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
+		return strings.TrimSpace(title[len(prefix):])
 	}
 	return title
 }

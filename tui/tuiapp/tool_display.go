@@ -24,7 +24,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			return pattern
 		}
 	case "SEARCH", "RG", "FIND":
-		query := firstTrimmed(asString(raw["query"]), asString(raw["pattern"]), asString(raw["text"]))
+		query := toolQuery(raw)
 		path := toolPath(raw)
 		switch {
 		case query != "" && path != "":
@@ -49,7 +49,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 				return display
 			}
 		}
-		if command := firstTrimmed(asString(raw["command"]), asString(raw["cmd"])); command != "" {
+		if command := terminalCommandDisplay(raw); command != "" {
 			return normalizeToolDisplayArg(command)
 		}
 	}
@@ -59,9 +59,202 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 	return firstTrimmed(fallback...)
 }
 
+func toolTitleDisplayArgs(name string, kind string, title string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return ""
+	}
+	name = strings.ToUpper(strings.TrimSpace(name))
+	switch name {
+	case "BASH":
+		return executeTitleDisplayArgs(title)
+	case "READ", "LIST":
+		return prefixedTitleDetail(title, "Read", "List")
+	case "SEARCH", "RG", "FIND":
+		if detail := prefixedTitleDetail(title, "Search", "Searching for:", "Searching"); detail != "" {
+			return fmt.Sprintf("%q", detail)
+		}
+		return title
+	case "WRITE", "PATCH":
+		return prefixedTitleDetail(title, "Write", "Edit", "Patch", "Delete", "Move")
+	}
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "execute":
+		return executeTitleDisplayArgs(title)
+	case "read":
+		return prefixedTitleDetail(title, "Read")
+	case "search":
+		if detail := prefixedTitleDetail(title, "Search"); detail != "" {
+			return fmt.Sprintf("%q", detail)
+		}
+	case "fetch":
+		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:", "Searching"); detail != "" {
+			return fmt.Sprintf("%q", detail)
+		}
+	}
+	return title
+}
+
+func executeTitleDisplayArgs(title string) string {
+	title = strings.TrimSpace(title)
+	if strings.EqualFold(title, "Terminal") {
+		return ""
+	}
+	if detail := prefixedTitleDetail(title, "Terminal", "Run", "Running"); detail != "" {
+		return detail
+	}
+	return title
+}
+
+func prefixedTitleDetail(title string, prefixes ...string) string {
+	title = strings.TrimSpace(title)
+	for _, prefix := range prefixes {
+		prefix = strings.TrimSpace(prefix)
+		if prefix == "" {
+			continue
+		}
+		if strings.HasSuffix(prefix, ":") {
+			if len(title) >= len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
+				return strings.TrimSpace(title[len(prefix):])
+			}
+			continue
+		}
+		if len(title) == len(prefix) && strings.EqualFold(title, prefix) {
+			return ""
+		}
+		withSpace := prefix + " "
+		if len(title) > len(withSpace) && strings.EqualFold(title[:len(withSpace)], withSpace) {
+			detail := strings.TrimSpace(title[len(withSpace):])
+			switch strings.ToLower(detail) {
+			case "", "file", "files", "repository", "terminal":
+				return ""
+			default:
+				return detail
+			}
+		}
+	}
+	return ""
+}
+
+func terminalCommandDisplay(raw map[string]any) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	if parts := terminalCommandParts(raw["command"]); len(parts) > 0 {
+		return commandWithArgsDisplay(parts[0], parts[1:])
+	}
+	command := firstTrimmed(asString(raw["command"]), asString(raw["cmd"]), asString(raw["executable"]), asString(raw["program"]))
+	args := terminalCommandArgs(raw["args"])
+	if command == "" {
+		if parsed := parsedCommandString(raw); parsed != "" {
+			return parsed
+		}
+		if len(args) == 0 {
+			return ""
+		}
+		return strings.Join(shellDisplayArgs(args), " ")
+	}
+	if display := commandWithArgsDisplay(command, args); display != "" {
+		return display
+	}
+	return command
+}
+
+func terminalCommandParts(raw any) []string {
+	switch typed := raw.(type) {
+	case []string:
+		return terminalCommandArgs(typed)
+	case []any:
+		return terminalCommandArgs(typed)
+	default:
+		return nil
+	}
+}
+
+func terminalCommandArgs(raw any) []string {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(asString(item)); trimmed != "" && trimmed != "<nil>" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case string:
+		if trimmed := strings.TrimSpace(typed); trimmed != "" {
+			return strings.Fields(trimmed)
+		}
+	}
+	return nil
+}
+
+func commandWithArgsDisplay(command string, args []string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	if len(args) == 0 {
+		return command
+	}
+	if shellBody := shellLCBody(command, args); shellBody != "" {
+		return shellBody
+	}
+	parts := append([]string{command}, shellDisplayArgs(args)...)
+	return strings.Join(parts, " ")
+}
+
+func shellLCBody(command string, args []string) string {
+	base := filepath.Base(strings.TrimSpace(command))
+	switch base {
+	case "sh", "bash", "zsh", "fish":
+	default:
+		return ""
+	}
+	for i := 0; i+1 < len(args); i++ {
+		switch strings.TrimSpace(args[i]) {
+		case "-c", "-lc":
+			return strings.TrimSpace(args[i+1])
+		}
+	}
+	return ""
+}
+
+func shellDisplayArgs(args []string) []string {
+	out := make([]string, 0, len(args))
+	for _, arg := range args {
+		arg = strings.TrimSpace(arg)
+		if arg == "" {
+			continue
+		}
+		out = append(out, shellDisplayArg(arg))
+	}
+	return out
+}
+
+func shellDisplayArg(arg string) string {
+	if arg == "" {
+		return `""`
+	}
+	if !strings.ContainsAny(arg, " \t\n\"'`$\\|&;<>()[]{}*?!") {
+		return arg
+	}
+	return strconv.Quote(arg)
+}
+
 func genericToolArgs(raw map[string]any) string {
-	query := firstTrimmed(asString(raw["query"]), asString(raw["q"]))
-	url := firstTrimmed(asString(raw["url"]), asString(raw["href"]))
+	query := firstTrimmed(toolQuery(raw), asString(raw["q"]))
+	url := toolURL(raw)
 	if action, ok := raw["action"].(map[string]any); ok {
 		query = firstTrimmed(query, asString(action["query"]))
 		url = firstTrimmed(url, asString(action["url"]))
@@ -315,7 +508,7 @@ func globDisplaySummary(input map[string]any, output map[string]any) string {
 }
 
 func searchDisplaySummary(input map[string]any, output map[string]any) string {
-	query := firstTrimmed(asString(output["query"]), asString(input["query"]), asString(input["pattern"]), asString(input["text"]))
+	query := firstTrimmed(toolResultQuery(output), toolQuery(input))
 	count := displayInt(output["count"])
 	files := displayInt(output["file_count"])
 	if query == "" && count <= 0 {
@@ -468,7 +661,88 @@ func looksLikeRawToolJSON(text string) bool {
 }
 
 func toolPath(raw map[string]any) string {
-	return firstTrimmed(asString(raw["path"]), asString(raw["target"]), asString(raw["source"]))
+	path := firstTrimmed(
+		asString(raw["path"]),
+		asString(raw["file_path"]),
+		asString(raw["filePath"]),
+		asString(raw["filepath"]),
+		asString(raw["target"]),
+		parsedCommandField(raw, "path"),
+		parsedCommandField(raw, "name"),
+	)
+	if path != "" {
+		return path
+	}
+	source := strings.TrimSpace(asString(raw["source"]))
+	if source != "" && !isTransportSourceValue(source) {
+		return source
+	}
+	return ""
+}
+
+func toolQuery(raw map[string]any) string {
+	return firstTrimmed(
+		asString(raw["query"]),
+		asString(raw["pattern"]),
+		asString(raw["text"]),
+		parsedCommandField(raw, "query"),
+		parsedCommandField(raw, "pattern"),
+		parsedCommandField(raw, "text"),
+	)
+}
+
+func toolResultQuery(raw map[string]any) string {
+	return firstTrimmed(
+		asString(raw["query"]),
+		asString(raw["pattern"]),
+		parsedCommandField(raw, "query"),
+		parsedCommandField(raw, "pattern"),
+	)
+}
+
+func toolURL(raw map[string]any) string {
+	return firstTrimmed(asString(raw["url"]), asString(raw["uri"]), asString(raw["href"]))
+}
+
+func parsedCommandString(raw map[string]any) string {
+	return parsedCommandField(raw, "cmd")
+}
+
+func parsedCommandField(raw map[string]any, key string) string {
+	for _, entry := range parsedCommandEntries(raw["parsed_cmd"]) {
+		if value := strings.TrimSpace(asString(entry[key])); value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
+}
+
+func parsedCommandEntries(raw any) []map[string]any {
+	switch typed := raw.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if entry, ok := item.(map[string]any); ok {
+				out = append(out, entry)
+			}
+		}
+		return out
+	case map[string]any:
+		return []map[string]any{typed}
+	default:
+		return nil
+	}
+}
+
+func isTransportSourceValue(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "unified_exec_startup", "unified_exec", "tool_call", "tool_call_update":
+		return true
+	default:
+		return false
+	}
 }
 
 func firstTrimmed(values ...string) string {

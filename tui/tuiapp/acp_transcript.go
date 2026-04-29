@@ -1189,7 +1189,7 @@ func finalPanelToolName(start SubagentEvent, final SubagentEvent, hasFinal bool)
 }
 
 func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, final bool, fullOutput bool) []RenderedRow {
-	header := terminalLifecycleHeader(ev)
+	header := standardToolLifecycleHeader(ev, err)
 	token := acpToolPanelClickToken(callID)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if final && fullOutput {
@@ -1205,6 +1205,46 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 	}
 	rows = append(rows, renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 	return rows
+}
+
+func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
+	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
+	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
+	case "BASH", "SPAWN":
+		ev.Name = semanticName
+		return terminalLifecycleHeader(ev)
+	case "WRITE", "PATCH":
+		ev.Name = semanticName
+		return mutationLifecycleHeader(ev, err)
+	case "READ":
+		return standardVerbLifecycleHeader("Read", ev.Args, err)
+	case "LIST":
+		return standardVerbLifecycleHeader("List", ev.Args, err)
+	case "GLOB":
+		return standardVerbLifecycleHeader("Glob", ev.Args, err)
+	case "SEARCH", "RG", "FIND":
+		return standardVerbLifecycleHeader("Search", ev.Args, err)
+	default:
+		return standardVerbLifecycleHeader(firstTrimmed(ev.Name, ev.ToolKind, "Tool"), ev.Args, err)
+	}
+}
+
+func standardVerbLifecycleHeader(verb string, args string, err bool) string {
+	verb = strings.TrimSpace(verb)
+	if verb == "" {
+		verb = "Tool"
+	}
+	args = strings.TrimSpace(args)
+	if err {
+		if args != "" {
+			return "• " + verb + " failed " + args
+		}
+		return "• " + verb + " failed"
+	}
+	if args != "" {
+		return "• " + verb + " " + args
+	}
+	return "• " + verb
 }
 
 func renderACPToolPanelRows(blockID string, callID string, toolName string, text string, width int, ctx BlockRenderContext, err bool, opts acpTranscriptRenderOptions) []RenderedRow {
@@ -1298,6 +1338,10 @@ func toolSemanticName(name string, kind string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "execute":
 		return "BASH"
+	case "read":
+		return "READ"
+	case "search", "fetch":
+		return "SEARCH"
 	case "edit", "delete", "move":
 		return "PATCH"
 	default:
@@ -1325,7 +1369,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		return rows
 	}
 	text = summarizeACPToolPanelText(text, final)
-	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, text, width, ctx, err, opts)...)
+	rows = append(rows, renderACPToolPanelRows(blockID, callID, toolSemanticName(ev.Name, ev.ToolKind), text, width, ctx, err, opts)...)
 	return rows
 }
 
@@ -1345,11 +1389,58 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 		}
 		return "• Spawned"
 	default:
+		if isExecuteToolKind(ev.ToolKind) {
+			if command := executeToolCommandDisplay(rawName, args); command != "" {
+				return "• Ran " + command
+			}
+			return "• Ran bash"
+		}
 		if args != "" {
 			return "• " + rawName + " " + args
 		}
 		return "• " + rawName
 	}
+}
+
+func isExecuteToolKind(kind string) bool {
+	return strings.EqualFold(strings.TrimSpace(kind), "execute")
+}
+
+func executeToolCommandDisplay(rawName string, args string) string {
+	rawName = strings.TrimSpace(rawName)
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return rawName
+	}
+	if shouldPrefixExecuteToolName(rawName, args) {
+		return strings.TrimSpace(rawName + " " + args)
+	}
+	return args
+}
+
+func shouldPrefixExecuteToolName(rawName string, args string) bool {
+	rawName = strings.TrimSpace(rawName)
+	if rawName == "" {
+		return false
+	}
+	if strings.ContainsAny(rawName, " \t\n\r") {
+		return false
+	}
+	switch strings.ToLower(rawName) {
+	case "bash", "sh", "zsh", "fish", "execute", "tool":
+		return false
+	}
+	first := firstShellExecutableToken(args)
+	return first == "" || !strings.EqualFold(first, rawName)
+}
+
+func firstShellExecutableToken(command string) string {
+	for _, token := range shellCommandTokens(command) {
+		if token.Class == shellTokenCommand {
+			return strings.Trim(token.Text, `"'`)
+		}
+	}
+	return ""
 }
 
 func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, opts acpTranscriptRenderOptions) []RenderedRow {
@@ -1422,9 +1513,197 @@ func styleACPTranscriptHeader(ctx BlockRenderContext, plain string) string {
 		styled += " " + toolActionStyle(ctx, verb).Render(verb)
 	}
 	if detail != "" {
-		styled += " " + ctx.Theme.ToolArgsStyle().Render(detail)
+		styled += " " + styleACPTranscriptHeaderDetail(ctx, verb, detail)
 	}
 	return styled
+}
+
+func styleACPTranscriptHeaderDetail(ctx BlockRenderContext, verb string, detail string) string {
+	if strings.EqualFold(strings.TrimSpace(verb), "Ran") {
+		return styleShellCommandText(ctx, detail)
+	}
+	return ctx.Theme.ToolArgsStyle().Render(detail)
+}
+
+type shellTokenClass int
+
+const (
+	shellTokenSpace shellTokenClass = iota
+	shellTokenCommand
+	shellTokenEnv
+	shellTokenFlag
+	shellTokenOperator
+	shellTokenArg
+	shellTokenQuoted
+)
+
+type shellCommandToken struct {
+	Text  string
+	Class shellTokenClass
+}
+
+func styleShellCommandText(ctx BlockRenderContext, text string) string {
+	tokens := shellCommandTokens(text)
+	if len(tokens) == 0 {
+		return ctx.Theme.ToolArgsStyle().Render(text)
+	}
+	var styled strings.Builder
+	for _, token := range tokens {
+		if token.Text == "" {
+			continue
+		}
+		if token.Class == shellTokenSpace {
+			styled.WriteString(token.Text)
+			continue
+		}
+		style := shellTokenStyle(ctx, token.Class)
+		styled.WriteString(style.Render(tuikit.LinkifyText(token.Text, ctx.Theme.LinkStyle())))
+	}
+	return styled.String()
+}
+
+func shellTokenStyle(ctx BlockRenderContext, class shellTokenClass) lipgloss.Style {
+	switch class {
+	case shellTokenCommand:
+		return ctx.Theme.ToolNameStyle()
+	case shellTokenEnv:
+		return ctx.Theme.NoteStyle()
+	case shellTokenFlag:
+		return ctx.Theme.TranscriptMetaStyle()
+	case shellTokenOperator:
+		return ctx.Theme.ToolStyle()
+	case shellTokenQuoted:
+		return ctx.Theme.ToolOutputStyle()
+	default:
+		return ctx.Theme.ToolArgsStyle()
+	}
+}
+
+func shellCommandTokens(text string) []shellCommandToken {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	if text == "" {
+		return nil
+	}
+	tokens := make([]shellCommandToken, 0, len(strings.Fields(text))*2+1)
+	expectCommand := true
+	for i := 0; i < len(text); {
+		if isShellWhitespace(text[i]) {
+			start := i
+			for i < len(text) && isShellWhitespace(text[i]) {
+				i++
+			}
+			tokens = append(tokens, shellCommandToken{Text: text[start:i], Class: shellTokenSpace})
+			continue
+		}
+		if op, n := shellOperatorAt(text[i:]); n > 0 {
+			tokens = append(tokens, shellCommandToken{Text: op, Class: shellTokenOperator})
+			i += n
+			if shellOperatorStartsCommand(op) {
+				expectCommand = true
+			}
+			continue
+		}
+		start := i
+		quoted := false
+		if text[i] == '\'' || text[i] == '"' || text[i] == '`' {
+			quoted = true
+			quote := text[i]
+			i++
+			for i < len(text) {
+				if text[i] == '\\' && i+1 < len(text) {
+					i += 2
+					continue
+				}
+				i++
+				if text[i-1] == quote {
+					break
+				}
+			}
+		} else {
+			for i < len(text) && !isShellWhitespace(text[i]) {
+				if _, n := shellOperatorAt(text[i:]); n > 0 {
+					break
+				}
+				i++
+			}
+		}
+		raw := text[start:i]
+		class := classifyShellToken(raw, quoted, expectCommand)
+		if class == shellTokenCommand {
+			expectCommand = false
+		}
+		if class != shellTokenEnv && class != shellTokenSpace && expectCommand {
+			expectCommand = false
+		}
+		tokens = append(tokens, shellCommandToken{Text: raw, Class: class})
+	}
+	return tokens
+}
+
+func classifyShellToken(token string, quoted bool, expectCommand bool) shellTokenClass {
+	if quoted {
+		return shellTokenQuoted
+	}
+	if isShellEnvAssignment(token) && expectCommand {
+		return shellTokenEnv
+	}
+	if expectCommand {
+		return shellTokenCommand
+	}
+	if strings.HasPrefix(token, "-") {
+		return shellTokenFlag
+	}
+	return shellTokenArg
+}
+
+func isShellWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\t' || ch == '\n'
+}
+
+func shellOperatorAt(text string) (string, int) {
+	for _, op := range []string{"&&", "||", ">>", "<<", "2>>", "2>", "|", ";", ">", "<", "(", ")"} {
+		if strings.HasPrefix(text, op) {
+			return op, len(op)
+		}
+	}
+	return "", 0
+}
+
+func shellOperatorStartsCommand(op string) bool {
+	switch op {
+	case "&&", "||", "|", ";", "(":
+		return true
+	default:
+		return false
+	}
+}
+
+func isShellEnvAssignment(token string) bool {
+	idx := strings.IndexByte(token, '=')
+	if idx <= 0 {
+		return false
+	}
+	for i := 0; i < idx; i++ {
+		ch := token[i]
+		if i == 0 {
+			if !isShellEnvNameStart(ch) {
+				return false
+			}
+			continue
+		}
+		if !isShellEnvNameChar(ch) {
+			return false
+		}
+	}
+	return true
+}
+
+func isShellEnvNameStart(ch byte) bool {
+	return ch == '_' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z'
+}
+
+func isShellEnvNameChar(ch byte) bool {
+	return isShellEnvNameStart(ch) || ch >= '0' && ch <= '9'
 }
 
 func toolActionStyle(ctx BlockRenderContext, action string) lipgloss.Style {
@@ -1682,7 +1961,7 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 	if !hasStart && !hasFinal {
 		return "", "", false, false
 	}
-	toolName = finalPanelToolName(start, final, hasFinal)
+	toolName = toolSemanticName(finalPanelToolName(start, final, hasFinal), firstNonEmpty(final.ToolKind, start.ToolKind))
 	text = strings.TrimSpace(preview)
 	err = false
 	if hasFinal {
