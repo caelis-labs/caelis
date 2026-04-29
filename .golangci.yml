@@ -19,7 +19,7 @@ linters:
       - common-false-positives
       - legacy
       - std-error-handling
-    rules:
+    rules: []
     paths:
       - third_party$
       - builtin$
