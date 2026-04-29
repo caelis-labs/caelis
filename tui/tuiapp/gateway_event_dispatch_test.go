@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -412,6 +413,42 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
 		t.Fatalf("expanded rows = %q, should show compact calls rather than raw outputs", joined)
+	}
+}
+
+func TestGatewayCompletedExplorationSummaryWrapsAndAlignsDetails(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	for i, name := range []string{
+		"common.go 1~126",
+		"register.go 1~20",
+		"resource.go 1~86",
+		"task.go 1~16",
+		"command.go 1~121",
+		"ebs.go 1~200",
+		"ebs_backup.go 1~200",
+	} {
+		callID := fmt.Sprintf("read-%d", i+1)
+		block.UpdateTool(callID, "READ", name, "ok", false, false)
+		block.UpdateTool(callID, "READ", name, "ok", true, false)
+	}
+
+	rows := block.Render(BlockRenderContext{Width: 58, TermWidth: 58, Theme: model.theme})
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "• Explored") {
+		t.Fatalf("rendered rows = %q, want compact exploration summary", joined)
+	}
+	if strings.Contains(joined, "...") {
+		t.Fatalf("exploration summary should wrap instead of truncating, got\n%s", joined)
+	}
+	readIdx := indexOfRowContaining(plain, "  └ Read common.go")
+	continuationIdx := indexOfRowContaining(plain, "task.go 1~16")
+	if readIdx < 0 || continuationIdx < 0 || continuationIdx <= readIdx {
+		t.Fatalf("rendered rows = %#v, want wrapped Read details", plain)
+	}
+	if !strings.HasPrefix(plain[continuationIdx], "       ") {
+		t.Fatalf("continuation row = %q, want detail-column alignment", plain[continuationIdx])
 	}
 }
 

@@ -22,6 +22,7 @@ type acpTranscriptRenderOptions struct {
 	HideCompletedRow       bool
 	ToolOutputPanels       bool
 	ToolPanelExpanded      func(callID string) bool
+	ToolPanelFullOutput    func(callID string) bool
 	ToolPanelRows          func(toolPanelRenderRequest) []RenderedRow
 	ExplorationExpanded    func(key string) bool
 	ToolPanelScrollState   func(callID string) toolPanelScrollState
@@ -650,8 +651,8 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 	}
 	rows := make([]string, 0, len(order))
 	for i, verb := range order {
-		text := strings.TrimSpace(verb + " " + strings.Join(grouped[verb], ", "))
-		if text == "" {
+		detail := strings.Join(grouped[verb], ", ")
+		if strings.TrimSpace(verb+" "+detail) == "" {
 			continue
 		}
 		prefix := "  "
@@ -660,8 +661,43 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 		} else {
 			prefix += "  "
 		}
-		budget := maxInt(16, width-displayColumns(prefix))
-		rows = append(rows, prefix+truncateTailDisplay(text, budget))
+		rows = append(rows, wrapExplorationSummaryDetail(prefix, verb, detail, width)...)
+	}
+	return rows
+}
+
+func wrapExplorationSummaryDetail(prefix string, verb string, detail string, width int) []string {
+	verb = strings.TrimSpace(verb)
+	detail = strings.Join(strings.Fields(strings.TrimSpace(detail)), " ")
+	if verb == "" {
+		if detail == "" {
+			return nil
+		}
+		available := maxInt(8, width-displayColumns(prefix))
+		segments := wrapToolOutputText(detail, available)
+		rows := make([]string, 0, len(segments))
+		for i, segment := range segments {
+			linePrefix := prefix
+			if i > 0 {
+				linePrefix = strings.Repeat(" ", displayColumns(prefix))
+			}
+			rows = append(rows, linePrefix+segment)
+		}
+		return rows
+	}
+	if detail == "" {
+		return []string{prefix + verb}
+	}
+	continuation := strings.Repeat(" ", displayColumns(prefix)+displayColumns(verb)+1)
+	available := maxInt(8, width-displayColumns(continuation))
+	segments := wrapToolOutputText(detail, available)
+	if len(segments) == 0 {
+		return []string{prefix + verb}
+	}
+	rows := make([]string, 0, len(segments))
+	rows = append(rows, prefix+verb+" "+segments[0])
+	for _, segment := range segments[1:] {
+		rows = append(rows, continuation+segment)
 	}
 	return rows
 }
@@ -681,6 +717,9 @@ func styleExplorationSummaryRow(row string, ctx BlockRenderContext) string {
 	}
 	verb, detail, _ := strings.Cut(strings.TrimSpace(content), " ")
 	styled := ctx.Theme.TranscriptMetaStyle().Render(plainPrefix)
+	if verb != "" && !isExplorationSummaryVerb(verb) {
+		return styled + ctx.Theme.SecondaryTextStyle().Render(content)
+	}
 	if verb != "" {
 		styled += toolActionStyle(ctx, verb).Render(verb)
 	}
@@ -688,6 +727,15 @@ func styleExplorationSummaryRow(row string, ctx BlockRenderContext) string {
 		styled += " " + ctx.Theme.SecondaryTextStyle().Render(detail)
 	}
 	return styled
+}
+
+func isExplorationSummaryVerb(verb string) bool {
+	switch strings.ToLower(strings.TrimSpace(verb)) {
+	case "read", "list", "glob", "search":
+		return true
+	default:
+		return false
+	}
 }
 
 func explorationToolVerb(name string) string {
@@ -874,15 +922,19 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	if opts.ToolPanelExpanded != nil {
 		panelExpanded = opts.ToolPanelExpanded(start.CallID)
 	}
+	fullOutput := false
+	if opts.ToolPanelFullOutput != nil {
+		fullOutput = opts.ToolPanelFullOutput(start.CallID)
+	}
 	rows := renderParticipantTurnToolRows(blockID, start, width, ctx)
 	if opts.ToolOutputPanels {
 		if start.DisableGrouping {
 			panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
-			return renderACPStandardToolLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, hasFinal), end
+			return renderACPStandardToolLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
 		}
 		if isTerminalPanelToolEvent(start) {
 			panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
-			return renderACPTerminalLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, opts), end
+			return renderACPTerminalLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, panelExpanded, hasFinal, fullOutput, opts), end
 		}
 		if isMutationPanelToolEvent(start) {
 			panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
@@ -925,15 +977,23 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	output := strings.TrimSpace(ev.Output)
 	if opts.ToolOutputPanels && ev.DisableGrouping {
-		return renderACPStandardToolLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, true)
+		fullOutput := false
+		if opts.ToolPanelFullOutput != nil {
+			fullOutput = opts.ToolPanelFullOutput(ev.CallID)
+		}
+		return renderACPStandardToolLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, true, fullOutput)
 	}
 	if opts.ToolOutputPanels && shouldRenderACPToolPanel(output, ev.Err) {
 		panelExpanded := true
 		if opts.ToolPanelExpanded != nil {
 			panelExpanded = opts.ToolPanelExpanded(ev.CallID)
 		}
+		fullOutput := false
+		if opts.ToolPanelFullOutput != nil {
+			fullOutput = opts.ToolPanelFullOutput(ev.CallID)
+		}
 		if isTerminalPanelToolEvent(ev) {
-			return renderACPTerminalLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, panelExpanded, true, opts)
+			return renderACPTerminalLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, panelExpanded, true, fullOutput, opts)
 		}
 		if isMutationPanelToolEvent(ev) {
 			return renderACPMutationLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, panelExpanded, opts)
@@ -1016,10 +1076,14 @@ func finalPanelToolName(start SubagentEvent, final SubagentEvent, hasFinal bool)
 	return start.Name
 }
 
-func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, final bool) []RenderedRow {
+func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, final bool, fullOutput bool) []RenderedRow {
 	header := terminalLifecycleHeader(ev)
 	token := acpToolPanelClickToken(callID)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
+	if final && fullOutput {
+		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
+		return rows
+	}
 	text = summarizeACPToolPanelText(text, final)
 	if strings.TrimSpace(text) == "" {
 		if !final || err {
@@ -1027,7 +1091,7 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 		}
 		text = "completed"
 	}
-	rows = append(rows, renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err)...)
+	rows = append(rows, renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 	return rows
 }
 
@@ -1060,7 +1124,7 @@ func (r toolPanelRenderRequest) renderUncached() []RenderedRow {
 		return renderACPDiffPanelRows(blockID, text, width, ctx)
 	}
 	if isTerminalPanelTool(toolName) {
-		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err)
+		return renderACPTerminalPanelRows(blockID, callID, text, width, ctx, err, "")
 	}
 	boxWidth := maxInt(20, width)
 	bodyWidth := maxInt(1, boxWidth-6)
@@ -1137,11 +1201,15 @@ func isAttentionLoopTool(name string) bool {
 	return !shouldDefaultCollapseToolPanel(name)
 }
 
-func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, opts acpTranscriptRenderOptions) []RenderedRow {
+func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, final bool, fullOutput bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	header := terminalLifecycleHeader(ev)
 	token := acpToolPanelClickToken(callID)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
+		return rows
+	}
+	if final && fullOutput {
+		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 		return rows
 	}
 	text = summarizeACPToolPanelText(text, final)
@@ -1250,14 +1318,49 @@ func toolActionStyle(ctx BlockRenderContext, action string) lipgloss.Style {
 	}
 }
 
-func renderACPTerminalPanelRows(blockID string, callID string, text string, width int, ctx BlockRenderContext, err bool) []RenderedRow {
+func renderACPTerminalPanelRows(blockID string, callID string, text string, width int, ctx BlockRenderContext, err bool, token string) []RenderedRow {
 	bodyWidth := maxInt(1, width)
 	lines := renderACPTerminalPanelBody(text, bodyWidth, ctx, err)
 	rows := make([]RenderedRow, 0, len(lines))
 	for _, line := range lines {
-		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, ansi.Strip(line), line, ""))
+		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, ansi.Strip(line), line, token))
 	}
 	return rows
+}
+
+func renderACPFullTerminalPanelRows(blockID string, callID string, text string, width int, ctx BlockRenderContext, err bool, token string) []RenderedRow {
+	bodyWidth := maxInt(1, width)
+	lines := renderACPFullTerminalPanelBody(text, bodyWidth, ctx, err)
+	rows := make([]RenderedRow, 0, len(lines))
+	for _, line := range lines {
+		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, ansi.Strip(line), line, token))
+	}
+	return rows
+}
+
+func renderACPFullTerminalPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {
+	style := ctx.Theme.SecondaryTextStyle()
+	if err {
+		style = ctx.Theme.ErrorStyle()
+	}
+	lines := nonEmptyToolOutputLines(text)
+	out := make([]string, 0, len(lines))
+	for _, raw := range lines {
+		prefix := "    "
+		if len(out) == 0 {
+			prefix = "  └ "
+		}
+		bodyWidth := maxInt(1, width-displayColumns(prefix))
+		segments := strings.Split(hardWrapDisplayLine(raw, bodyWidth), "\n")
+		for i, segment := range segments {
+			linePrefix := prefix
+			if i > 0 {
+				linePrefix = strings.Repeat(" ", displayColumns(prefix))
+			}
+			out = append(out, styleTerminalOutputLine(ctx, linePrefix, segment, style))
+		}
+	}
+	return out
 }
 
 func renderACPTerminalPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {

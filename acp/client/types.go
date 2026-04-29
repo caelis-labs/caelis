@@ -121,8 +121,8 @@ type AvailableCommandsUpdate struct {
 }
 
 type ConfigOptionUpdate struct {
-	SessionUpdate string `json:"sessionUpdate"`
-	ConfigOptions any    `json:"configOptions"`
+	SessionUpdate string                `json:"sessionUpdate"`
+	ConfigOptions []SessionConfigOption `json:"configOptions"`
 }
 
 type Update any

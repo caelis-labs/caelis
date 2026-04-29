@@ -55,8 +55,29 @@ func lookupSlashCommandSpec(name string) (slashCommandSpec, bool) {
 }
 
 func defaultHelpText() string {
+	return helpTextForCommands(DefaultCommands())
+}
+
+func helpTextForCommands(commands []string) string {
+	if len(commands) == 0 {
+		commands = DefaultCommands()
+	}
 	lines := []string{"available commands:"}
-	for _, spec := range visibleSlashCommandSpecs() {
+	seen := map[string]struct{}{}
+	for _, command := range commands {
+		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		spec, known := lookupSlashCommandSpec(name)
+		if !known {
+			lines = append(lines, "  /"+name)
+			continue
+		}
 		usage := strings.TrimSpace(spec.Usage)
 		description := strings.TrimSpace(spec.Description)
 		switch {

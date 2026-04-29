@@ -306,14 +306,7 @@ func ConfigFromDriver(driver tuiadapterruntime.Driver, sender *ProgramSender, ba
 			if err != nil {
 				return "", err
 			}
-			switch strings.ToLower(strings.TrimSpace(status.SessionMode)) {
-			case "plan":
-				return "plan mode enabled", nil
-			case "full_access":
-				return "full access mode enabled", nil
-			default:
-				return "default mode enabled", nil
-			}
+			return modeToggleHint(status), nil
 		}
 	}
 
@@ -717,7 +710,7 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuiadapterrunti
 
 	switch cmd {
 	case "help":
-		return slashHelp(send)
+		return slashHelpWithContext(ctx, driver, send)
 	case "agent":
 		return slashAgentWithContext(ctx, driver, send, args)
 	case "new":
@@ -745,10 +738,33 @@ func isDispatchableSlashCommand(driver tuiadapterruntime.Driver, text string) bo
 	return isDispatchableSlashCommandWithContext(context.Background(), driver, text)
 }
 
+func activeACPAgentStatus(ctx context.Context, driver tuiadapterruntime.Driver) (tuiadapterruntime.AgentStatusSnapshot, bool) {
+	if driver == nil {
+		return tuiadapterruntime.AgentStatusSnapshot{}, false
+	}
+	status, err := driver.AgentStatus(contextOrBackground(ctx))
+	if err != nil {
+		return tuiadapterruntime.AgentStatusSnapshot{}, false
+	}
+	return status, strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp")
+}
+
+func isCoreLocalSlashCommand(cmd string) bool {
+	switch strings.ToLower(strings.TrimSpace(cmd)) {
+	case "help", "agent", "status", "resume", "model", "exit", "quit":
+		return true
+	default:
+		return false
+	}
+}
+
 func isDispatchableSlashCommandWithContext(ctx context.Context, driver tuiadapterruntime.Driver, text string) bool {
 	cmd, _ := splitSlash(text)
 	if cmd == "" {
 		return false
+	}
+	if _, activeACP := activeACPAgentStatus(ctx, driver); activeACP {
+		return isCoreLocalSlashCommand(cmd)
 	}
 	if _, ok := lookupSlashCommandSpec(cmd); ok {
 		return true
@@ -758,6 +774,11 @@ func isDispatchableSlashCommandWithContext(ctx context.Context, driver tuiadapte
 
 func slashHelp(send func(tea.Msg)) TaskResultMsg {
 	sendNotice(send, defaultHelpText())
+	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func slashHelpWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
+	sendNotice(send, helpTextForCommands(appendAgentSlashCommandsWithContext(ctx, driver, DefaultCommands())))
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
@@ -923,6 +944,10 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		}
 		sendNotice(send, fmt.Sprintf("controller switched: %s", target))
 		sendNotice(send, formatAgentStatusSnapshot(status))
+		if current, err := driver.Status(ctx); err == nil {
+			sendStatusUpdate(send, current)
+		}
+		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	default:
 		sendNotice(send, "usage: /agent list | add <builtin> | install <adapter> | use <agent|local> | remove <agent>")
@@ -1094,11 +1119,16 @@ func slashModel(driver tuiadapterruntime.Driver, send func(tea.Msg), args string
 func slashModelWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	sub, rest := splitFirst(strings.TrimSpace(args))
+	_, activeACP := activeACPAgentStatus(ctx, driver)
 	switch sub {
 	case "use":
 		alias, reasoning := parseModelUseArgs(rest)
 		if alias == "" {
-			sendNotice(send, "usage: /model use <alias>")
+			if activeACP {
+				sendNotice(send, "usage: /model use <model> [effort]")
+			} else {
+				sendNotice(send, "usage: /model use <alias>")
+			}
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
 		status, err := driver.UseModel(ctx, alias, reasoning)
@@ -1112,6 +1142,10 @@ func slashModelWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		}
 		sendStatusUpdate(send, status)
 	case "del", "delete", "rm":
+		if activeACP {
+			sendNotice(send, "usage: /model use <model> [effort]")
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
 		alias := strings.TrimSpace(rest)
 		if alias == "" {
 			sendNotice(send, "usage: /model del <alias>")
@@ -1123,7 +1157,11 @@ func slashModelWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		sendNotice(send, fmt.Sprintf("model deleted: %s", alias))
 		refreshStatusViaSendWithContext(ctx, driver, send)
 	default:
-		sendNotice(send, "usage: /model use|del <alias>")
+		if activeACP {
+			sendNotice(send, "usage: /model use <model> [effort]")
+		} else {
+			sendNotice(send, "usage: /model use|del <alias>")
+		}
 	}
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
@@ -1439,6 +1477,9 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuiadapterr
 	if len(commands) == 0 {
 		commands = DefaultCommands()
 	}
+	if status, activeACP := activeACPAgentStatus(ctx, driver); activeACP {
+		return acpSlashCommands(status)
+	}
 	out := append([]string(nil), commands...)
 	seen := map[string]struct{}{}
 	for _, command := range out {
@@ -1450,6 +1491,29 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuiadapterr
 	}
 	for _, agent := range agents {
 		name := strings.ToLower(strings.TrimSpace(agent.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		out = append(out, name)
+		seen[name] = struct{}{}
+	}
+	return out
+}
+
+func acpSlashCommands(status tuiadapterruntime.AgentStatusSnapshot) []string {
+	out := []string{"help", "agent", "status", "resume", "model", "exit", "quit"}
+	seen := map[string]struct{}{}
+	for _, command := range out {
+		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
+	}
+	for _, command := range status.ControllerCommands {
+		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
+		if fields := strings.Fields(name); len(fields) > 0 {
+			name = fields[0]
+		}
 		if name == "" {
 			continue
 		}
@@ -1937,6 +2001,23 @@ func deriveModelNameFromAlias(alias string) string {
 		return ""
 	}
 	return strings.TrimSpace(right)
+}
+
+func modeToggleHint(status tuiadapterruntime.StatusSnapshot) string {
+	label := firstNonEmpty(strings.TrimSpace(status.ModeLabel), strings.TrimSpace(status.SessionMode), "default")
+	switch strings.ToLower(strings.TrimSpace(status.SessionMode)) {
+	case "plan":
+		return "plan mode enabled"
+	case "full_access":
+		return "full access mode enabled"
+	case "default":
+		return "default mode enabled"
+	default:
+		if strings.EqualFold(label, "default") {
+			return "default mode enabled"
+		}
+		return label + " mode enabled"
+	}
 }
 
 func friendlyCommandError(action string, err error) error {

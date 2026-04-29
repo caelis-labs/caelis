@@ -236,6 +236,7 @@ type MainACPTurnBlock struct {
 	EndedAt              time.Time
 	Events               []SubagentEvent
 	ExpandedTools        map[string]bool
+	ExpandedToolOutput   map[string]bool
 	ToolPanelScroll      map[string]toolPanelScrollState
 	ExpandedThought      map[string]bool
 	ExpandedExplore      map[string]bool
@@ -475,6 +476,7 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		HideCompletedRow:       true,
 		ToolOutputPanels:       true,
 		ToolPanelExpanded:      b.toolPanelExpanded,
+		ToolPanelFullOutput:    b.toolPanelFullOutput,
 		ToolPanelRows:          b.renderToolPanelRows,
 		ExplorationExpanded:    b.explorationExpanded,
 		ToolPanelScrollState:   b.toolPanelScrollState,
@@ -496,6 +498,7 @@ type ParticipantTurnBlock struct {
 	EndedAt              time.Time
 	Events               []SubagentEvent
 	ExpandedTools        map[string]bool
+	ExpandedToolOutput   map[string]bool
 	ToolPanelScroll      map[string]toolPanelScrollState
 	ExpandedThought      map[string]bool
 	ExpandedExplore      map[string]bool
@@ -735,6 +738,7 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		HideCompletedRow:       true,
 		ToolOutputPanels:       true,
 		ToolPanelExpanded:      b.toolPanelExpanded,
+		ToolPanelFullOutput:    b.toolPanelFullOutput,
 		ToolPanelRows:          b.renderToolPanelRows,
 		ExplorationExpanded:    b.explorationExpanded,
 		ToolPanelScrollState:   b.toolPanelScrollState,
@@ -787,6 +791,14 @@ func toolPanelExpanded(state map[string]bool, callID string) bool {
 	return expanded
 }
 
+func toolPanelFullOutput(state map[string]bool, callID string) bool {
+	callID = strings.TrimSpace(callID)
+	if callID == "" || state == nil {
+		return false
+	}
+	return state[callID]
+}
+
 func toggleToolPanelExpanded(state *map[string]bool, callID string) bool {
 	callID = strings.TrimSpace(callID)
 	if callID == "" {
@@ -798,6 +810,45 @@ func toggleToolPanelExpanded(state *map[string]bool, callID string) bool {
 	next := !toolPanelExpanded(*state, callID)
 	(*state)[callID] = next
 	return next
+}
+
+func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[string]bool, events []SubagentEvent, callID string) bool {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return false
+	}
+	if !toolPanelExpanded(mapValue(expandedState), callID) {
+		setToolPanelExpandedState(expandedState, callID, true)
+		return true
+	}
+	if toolPanelHasHiddenSummary(events, callID) {
+		if fullOutputState == nil {
+			return false
+		}
+		if *fullOutputState == nil {
+			*fullOutputState = map[string]bool{}
+		}
+		(*fullOutputState)[callID] = !(*fullOutputState)[callID]
+		return true
+	}
+	return toggleToolPanelExpanded(expandedState, callID)
+}
+
+func mapValue(ptr *map[string]bool) map[string]bool {
+	if ptr == nil {
+		return nil
+	}
+	return *ptr
+}
+
+func setToolPanelExpandedState(state *map[string]bool, callID string, expanded bool) {
+	if state == nil || strings.TrimSpace(callID) == "" {
+		return
+	}
+	if *state == nil {
+		*state = map[string]bool{}
+	}
+	(*state)[strings.TrimSpace(callID)] = expanded
 }
 
 type toolPanelScrollState struct {
@@ -849,6 +900,13 @@ func (b *MainACPTurnBlock) toolPanelExpanded(callID string) bool {
 	return toolPanelExpanded(b.ExpandedTools, callID)
 }
 
+func (b *MainACPTurnBlock) toolPanelFullOutput(callID string) bool {
+	if b == nil {
+		return false
+	}
+	return toolPanelFullOutput(b.ExpandedToolOutput, callID)
+}
+
 func (b *MainACPTurnBlock) renderToolPanelRows(request toolPanelRenderRequest) []RenderedRow {
 	if b == nil {
 		return request.renderUncached()
@@ -863,6 +921,13 @@ func (b *MainACPTurnBlock) toggleToolPanelExpanded(callID string) bool {
 	return toggleToolPanelExpanded(&b.ExpandedTools, callID)
 }
 
+func (b *MainACPTurnBlock) toggleToolPanelClick(callID string) bool {
+	if b == nil {
+		return false
+	}
+	return toggleToolPanelClick(&b.ExpandedTools, &b.ExpandedToolOutput, b.Events, callID)
+}
+
 func (b *MainACPTurnBlock) setToolPanelExpanded(callID string, expanded bool) {
 	if b == nil || strings.TrimSpace(callID) == "" {
 		return
@@ -871,6 +936,9 @@ func (b *MainACPTurnBlock) setToolPanelExpanded(callID string, expanded bool) {
 		b.ExpandedTools = map[string]bool{}
 	}
 	b.ExpandedTools[strings.TrimSpace(callID)] = expanded
+	if !expanded && b.ExpandedToolOutput != nil {
+		delete(b.ExpandedToolOutput, strings.TrimSpace(callID))
+	}
 }
 
 func (b *MainACPTurnBlock) reasoningExpanded(key string) bool {
@@ -941,6 +1009,13 @@ func (b *ParticipantTurnBlock) toolPanelExpanded(callID string) bool {
 	return toolPanelExpanded(b.ExpandedTools, callID)
 }
 
+func (b *ParticipantTurnBlock) toolPanelFullOutput(callID string) bool {
+	if b == nil {
+		return false
+	}
+	return toolPanelFullOutput(b.ExpandedToolOutput, callID)
+}
+
 func (b *ParticipantTurnBlock) renderToolPanelRows(request toolPanelRenderRequest) []RenderedRow {
 	if b == nil {
 		return request.renderUncached()
@@ -955,6 +1030,13 @@ func (b *ParticipantTurnBlock) toggleToolPanelExpanded(callID string) bool {
 	return toggleToolPanelExpanded(&b.ExpandedTools, callID)
 }
 
+func (b *ParticipantTurnBlock) toggleToolPanelClick(callID string) bool {
+	if b == nil {
+		return false
+	}
+	return toggleToolPanelClick(&b.ExpandedTools, &b.ExpandedToolOutput, b.Events, callID)
+}
+
 func (b *ParticipantTurnBlock) setToolPanelExpanded(callID string, expanded bool) {
 	if b == nil || strings.TrimSpace(callID) == "" {
 		return
@@ -963,6 +1045,9 @@ func (b *ParticipantTurnBlock) setToolPanelExpanded(callID string, expanded bool
 		b.ExpandedTools = map[string]bool{}
 	}
 	b.ExpandedTools[strings.TrimSpace(callID)] = expanded
+	if !expanded && b.ExpandedToolOutput != nil {
+		delete(b.ExpandedToolOutput, strings.TrimSpace(callID))
+	}
 }
 
 func (b *ParticipantTurnBlock) reasoningExpanded(key string) bool {
@@ -1057,6 +1142,35 @@ func shouldDefaultCollapseCallID(events []SubagentEvent, callID string) bool {
 		}
 	}
 	return shouldDefaultCollapseToolPanel(name)
+}
+
+func toolPanelHasHiddenSummary(events []SubagentEvent, callID string) bool {
+	final, ok := finalToolEventForCallID(events, callID)
+	if !ok {
+		return false
+	}
+	if !final.DisableGrouping && !isTerminalPanelToolEvent(final) {
+		return false
+	}
+	return len(nonEmptyToolOutputLines(final.Output)) > acpTerminalPanelMaxLines
+}
+
+func finalToolEventForCallID(events []SubagentEvent, callID string) (SubagentEvent, bool) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return SubagentEvent{}, false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != callID {
+			continue
+		}
+		if ev.Done {
+			return ev, true
+		}
+		return SubagentEvent{}, false
+	}
+	return SubagentEvent{}, false
 }
 
 func collectToolPanelCallIDs(events []SubagentEvent) []string {

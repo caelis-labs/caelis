@@ -6,6 +6,7 @@ import (
 	"time"
 
 	sdkacpclient "github.com/OnslaughtSnail/caelis/acp/client"
+	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
@@ -52,6 +53,63 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 	if got := event.Protocol.ToolCall.RawInput["query"]; got != "weather: Shanghai, China" {
 		t.Fatalf("raw input query = %#v", got)
+	}
+}
+
+func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(1, 0) }, sdkacpclient.AvailableCommandsUpdate{
+		SessionUpdate: sdkacpclient.UpdateAvailableCmds,
+		AvailableCommands: []map[string]any{
+			{"name": "/search", "description": "remote search"},
+		},
+	})
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(2, 0) }, sdkacpclient.ConfigOptionUpdate{
+		SessionUpdate: sdkacpclient.UpdateConfigOption,
+		ConfigOptions: []sdkacpclient.SessionConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			CurrentValue: "live-model",
+		}},
+	})
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(3, 0) }, sdkacpclient.CurrentModeUpdate{
+		SessionUpdate: sdkacpclient.UpdateCurrentMode,
+		CurrentModeID: "review",
+	})
+
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []sdkcontroller.ControllerConfigOption{
+			{ID: "model", Name: "Model", CurrentValue: "startup-model"},
+			{ID: "reasoning", Name: "Reasoning", CurrentValue: "medium"},
+		},
+		mode: "default",
+		modeOptions: []sdkcontroller.ControllerMode{
+			{ID: "default", Name: "Default"},
+			{ID: "review", Name: "Review"},
+		},
+		agentLabel: "Remote ACP",
+	}, 7)
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if len(status.Commands) != 1 || status.Commands[0].Name != "search" {
+		t.Fatalf("commands = %#v, want preserved startup update", status.Commands)
+	}
+	if status.Model != "live-model" {
+		t.Fatalf("model = %q, want live-model from update", status.Model)
+	}
+	if status.ReasoningEffort != "medium" {
+		t.Fatalf("reasoning effort = %q, want missing startup config filled", status.ReasoningEffort)
+	}
+	if status.Mode != "review" {
+		t.Fatalf("mode = %q, want review from update", status.Mode)
+	}
+	if len(status.ModeOptions) != 2 {
+		t.Fatalf("mode options = %#v, want startup options filled", status.ModeOptions)
+	}
+	if run.binding.RemoteSessionID != "remote-1" || run.binding.ContextSyncSeq != 7 || run.binding.Label != "Remote ACP" {
+		t.Fatalf("binding = %#v, want startup binding fields", run.binding)
 	}
 }
 

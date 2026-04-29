@@ -1149,8 +1149,27 @@ func (m *Model) isConfiguredSlashControlLine(line string) bool {
 	if name == "" {
 		return false
 	}
+	if !m.isCommandAvailable(name) {
+		return false
+	}
 	_, ok := lookupSlashCommandSpec(name)
 	return ok
+}
+
+func (m *Model) isCommandAvailable(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(name, "/")))
+	if name == "" {
+		return false
+	}
+	if len(m.cfg.Commands) == 0 {
+		return true
+	}
+	for _, command := range m.cfg.Commands {
+		if strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(command, "/")), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func slashCommandName(line string) string {

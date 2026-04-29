@@ -222,6 +222,13 @@ func TestSlashHelpListsMinimalCoreCommands(t *testing.T) {
 	}
 }
 
+func TestModeToggleHintUsesRemoteACPModeLabel(t *testing.T) {
+	got := modeToggleHint(tuiadapterruntime.StatusSnapshot{SessionMode: "review", ModeLabel: "Review"})
+	if got != "Review mode enabled" {
+		t.Fatalf("modeToggleHint() = %q, want Review mode enabled", got)
+	}
+}
+
 func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	var sent []tea.Msg
 	send := func(msg tea.Msg) {
@@ -749,7 +756,7 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "add copilot")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "remove copilot")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use copilot")
-	if driver.listAgentCalls != 3 || driver.agentStatusCalls != 1 || driver.addAgentCalls != 1 || driver.removeAgentCalls != 1 || driver.handoffAgentCalls != 1 || driver.askAgentCalls != 0 {
+	if driver.listAgentCalls != 1 || driver.agentStatusCalls != 4 || driver.addAgentCalls != 1 || driver.removeAgentCalls != 1 || driver.handoffAgentCalls != 1 || driver.askAgentCalls != 0 {
 		t.Fatalf("agent calls = list:%d status:%d add:%d remove:%d use:%d ask:%d", driver.listAgentCalls, driver.agentStatusCalls, driver.addAgentCalls, driver.removeAgentCalls, driver.handoffAgentCalls, driver.askAgentCalls)
 	}
 	if driver.lastAddedAgent != "copilot" || driver.lastRemovedAgent != "copilot" || driver.lastHandoffAgent != "copilot" || driver.lastAskedAgent != "" || driver.lastAskedPrompt != "" {
@@ -758,6 +765,61 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	if len(msgs) == 0 {
 		t.Fatal("slashAgent() emitted no messages")
 	}
+}
+
+func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentList: []tuiadapterruntime.AgentCandidate{{
+			Name:        "copilot",
+			Description: "local ACP agent",
+		}},
+		agentStatus: tuiadapterruntime.AgentStatusSnapshot{
+			ControllerKind:     "acp",
+			ControllerCommands: []string{"search", "/draft"},
+		},
+	}
+	commands := appendAgentSlashCommandsWithContext(context.Background(), driver, DefaultCommands())
+	for _, want := range []string{"help", "agent", "status", "resume", "model", "search", "draft"} {
+		if !stringSliceContains(commands, want) {
+			t.Fatalf("ACP commands = %#v, missing %q", commands, want)
+		}
+	}
+	for _, blocked := range []string{"connect", "sandbox", "compact", "new", "copilot"} {
+		if stringSliceContains(commands, blocked) {
+			t.Fatalf("ACP commands = %#v, should not include local command %q", commands, blocked)
+		}
+	}
+	if !isDispatchableSlashCommandWithContext(context.Background(), driver, "/status") {
+		t.Fatal("/status should remain locally dispatchable under ACP")
+	}
+	for _, remoteOrDisabled := range []string{"/search docs", "/draft note", "/connect"} {
+		if isDispatchableSlashCommandWithContext(context.Background(), driver, remoteOrDisabled) {
+			t.Fatalf("%s should be submitted to the ACP controller, not local dispatch", remoteOrDisabled)
+		}
+	}
+}
+
+func TestSlashModelDeleteDisabledForACPController(t *testing.T) {
+	driver := &bridgeTestDriver{
+		agentStatus: tuiadapterruntime.AgentStatusSnapshot{ControllerKind: "acp"},
+	}
+	var msgs []tea.Msg
+	slashModelWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
+	if driver.deleteModelCalls != 0 {
+		t.Fatalf("deleteModelCalls = %d, want 0 under ACP controller", driver.deleteModelCalls)
+	}
+	if len(msgs) == 0 {
+		t.Fatal("slashModel(del) emitted no usage message")
+	}
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), strings.TrimSpace(want)) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSlashAgentInstallPassesOptions(t *testing.T) {

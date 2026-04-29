@@ -144,6 +144,25 @@ func lastAssistantText(events []*sdksession.Event) string {
 
 func boolPtr(v bool) *bool { return &v }
 
+func TestAppendNarrativeTextKeepsTrueDeltaOverlap(t *testing.T) {
+	t.Parallel()
+
+	cumulative, delta := appendNarrativeText("hel", "lo")
+	if cumulative != "hello" || delta != "lo" {
+		t.Fatalf("append delta = (%q, %q), want (hello, lo)", cumulative, delta)
+	}
+
+	cumulative, delta = appendNarrativeText("hel", "hello")
+	if cumulative != "hello" || delta != "lo" {
+		t.Fatalf("append cumulative = (%q, %q), want (hello, lo)", cumulative, delta)
+	}
+
+	cumulative, delta = appendNarrativeText("hello", "hel")
+	if cumulative != "hello" || delta != "" {
+		t.Fatalf("append stale prefix = (%q, %q), want (hello, empty)", cumulative, delta)
+	}
+}
+
 func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	t.Parallel()
 
@@ -452,6 +471,109 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	}
 	if loaded.Events[1].Visibility != sdksession.VisibilityCanonical || loaded.Events[1].Text != "hello" {
 		t.Fatalf("loaded final event = %+v, want canonical assistant hello", loaded.Events[1])
+	}
+}
+
+func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
+	t.Parallel()
+
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+		SessionIDGenerator: func() string { return "sess-acp-deltas" },
+	}))
+	session, err := sessions.StartSession(context.Background(), sdksession.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: sdksession.WorkspaceRef{
+			Key: "ws-acp-deltas",
+			CWD: "/tmp/project",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	session, err = sessions.BindController(context.Background(), sdksession.BindControllerRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ControllerBinding{
+			Kind:         sdksession.ControllerKindACP,
+			ControllerID: "acp-main",
+			Label:        "ACP Main",
+			EpochID:      "epoch-delta",
+			Source:       "test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+
+	controller := stubACPController{
+		runTurn: func(context.Context, sdkcontroller.TurnRequest) (sdkcontroller.TurnResult, error) {
+			handle := newTestControllerTurnHandle(nil)
+			go func() {
+				handle.publishEvent(acpControllerChunk("hel"))
+				handle.publishEvent(acpControllerChunk("hello"))
+				handle.finish()
+			}()
+			return sdkcontroller.TurnResult{Handle: handle}, nil
+		},
+	}
+	runtime, err := New(Config{
+		Sessions:       sessions,
+		AgentFactory:   chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:    controller,
+		RunIDGenerator: func() string { return "run-acp-deltas" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), sdkruntime.RunRequest{
+		SessionRef: session.SessionRef,
+		Input:      "hello",
+		Request: sdkruntime.ModelRequestOptions{
+			Stream: boolPtr(true),
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	events, err := drainRunnerEvents(t, result.Handle)
+	if err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
+	var liveTexts []string
+	for _, event := range events {
+		if event == nil || event.Protocol == nil || event.Scope == nil {
+			continue
+		}
+		if event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
+			liveTexts = append(liveTexts, event.Text)
+			if strings.TrimSpace(event.ID) != "" {
+				t.Fatalf("live ACP chunk ID = %q, want empty live event ID", event.ID)
+			}
+		}
+	}
+	if !reflect.DeepEqual(liveTexts, []string{"hel", "lo"}) {
+		t.Fatalf("live ACP texts = %#v, want delta chunks", liveTexts)
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	var persistedTexts []string
+	for _, event := range loaded.Events {
+		if event == nil || event.Protocol == nil || event.Scope == nil {
+			continue
+		}
+		if event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
+			persistedTexts = append(persistedTexts, event.Text)
+			if strings.TrimSpace(event.ID) == "" {
+				t.Fatalf("persisted ACP chunk missing event ID")
+			}
+		}
+	}
+	if !reflect.DeepEqual(persistedTexts, []string{"hel", "hello"}) {
+		t.Fatalf("persisted ACP texts = %#v, want cumulative snapshots", persistedTexts)
 	}
 }
 
@@ -3085,6 +3207,26 @@ func assistantEvent(text string) *sdksession.Event {
 		Visibility: sdksession.VisibilityCanonical,
 		Message:    &message,
 		Text:       text,
+	}
+}
+
+func acpControllerChunk(text string) *sdksession.Event {
+	message := sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, text)
+	return &sdksession.Event{
+		Type:       sdksession.EventTypeAssistant,
+		Visibility: sdksession.VisibilityCanonical,
+		Message:    &message,
+		Text:       text,
+		Scope: &sdksession.EventScope{
+			Source: "acp",
+			ACP: sdksession.ACPRef{
+				SessionID: "remote-acp-main",
+				EventType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+			},
+		},
+		Protocol: &sdksession.EventProtocol{
+			UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+		},
 	}
 }
 

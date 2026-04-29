@@ -234,7 +234,35 @@ func (d *GatewayDriver) currentSession() (sdksession.Session, bool) {
 	return d.session, true
 }
 
-func (d *GatewayDriver) Status(_ context.Context) (StatusSnapshot, error) {
+func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (gatewayapp.ACPControllerStatus, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if d == nil || d.stack == nil {
+		return gatewayapp.ACPControllerStatus{}, false, nil
+	}
+	session, ok := d.currentSession()
+	if !ok || session.Controller.Kind != sdksession.ControllerKindACP {
+		return gatewayapp.ACPControllerStatus{}, false, nil
+	}
+	status, found, err := d.stack.ACPControllerStatus(ctx, session.SessionRef)
+	if err != nil {
+		return gatewayapp.ACPControllerStatus{}, false, err
+	}
+	if !found {
+		status = gatewayapp.ACPControllerStatus{
+			SessionRef:      session.SessionRef,
+			Agent:           firstNonEmpty(strings.TrimSpace(session.Controller.AgentName), strings.TrimSpace(session.Controller.Label), strings.TrimSpace(session.Controller.ControllerID)),
+			RemoteSessionID: strings.TrimSpace(session.Controller.RemoteSessionID),
+		}
+	}
+	return status, true, nil
+}
+
+func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
 	if d.stack != nil {
@@ -260,10 +288,24 @@ func (d *GatewayDriver) Status(_ context.Context) (StatusSnapshot, error) {
 			}
 		}
 	}
+	acpStatus, activeACP, acpStatusErr := d.activeACPControllerStatus(ctx)
+	if acpStatusErr != nil {
+		return StatusSnapshot{}, acpStatusErr
+	}
+	acpModeID := ""
+	acpModeLabel := ""
+	acpModelText := ""
+	if activeACP {
+		acpModelText = acpControllerModelText(acpStatus, session)
+		modelText = acpModelText
+		reasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
+		acpModeID = strings.TrimSpace(acpStatus.Mode)
+		acpModeLabel = acpControllerModeDisplay(acpStatus)
+	}
 	sandboxType = firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, sandboxType)
 	route := sandboxStatus.Route
 	securitySummary := sandboxStatus.SecuritySummary
-	if strings.EqualFold(strings.TrimSpace(sessionMode), "full_access") {
+	if !activeACP && strings.EqualFold(strings.TrimSpace(sessionMode), "full_access") {
 		route = "host"
 		securitySummary = "full access"
 	}
@@ -326,17 +368,35 @@ func (d *GatewayDriver) Status(_ context.Context) (StatusSnapshot, error) {
 			}
 		}
 		if status.ReasoningEffort == "" {
-			if cfg, ok := d.stack.ModelConfig(rawModelText); ok {
+			if activeACP {
+				status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
+				status.Model = formatReasoningModelDisplay(firstNonEmpty(strings.TrimSpace(acpStatus.Model), rawModelText), status.ReasoningEffort)
+			} else if cfg, ok := d.stack.ModelConfig(rawModelText); ok {
 				status.ReasoningEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
 				status.Model = formatReasoningModelDisplay(rawModelText, status.ReasoningEffort)
 			}
 		}
-		if ok {
+		if ok && !activeACP {
 			if usage, err := d.stack.SessionUsageSnapshot(context.Background(), session.SessionRef, rawModelText); err == nil {
 				status.TotalTokens = usage.TotalTokens
 				status.ContextWindowTokens = usage.ContextWindowTokens
 			}
 		}
+	}
+	if activeACP {
+		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
+		status.Model = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
+		status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
+		status.SessionMode = acpModeID
+		status.ModeLabel = firstNonEmpty(acpModeLabel, acpModeID)
+		status.Provider = "acp"
+		status.ModelName = strings.TrimSpace(acpStatus.Model)
+		status.MissingAPIKey = false
+		status.FullAccessMode = strings.EqualFold(acpModeID, "full_access")
+		status.PromptTokens = 0
+		status.CompletionTokens = 0
+		status.TotalTokens = 0
+		status.ContextWindowTokens = 0
 	}
 	if status.TotalTokens > 0 {
 		status.PromptTokens = status.TotalTokens
@@ -566,6 +626,22 @@ func (d *GatewayDriver) UseModel(ctx context.Context, model string, reasoningEff
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
+	if _, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
+		return StatusSnapshot{}, err
+	} else if activeACP {
+		reasoning := ""
+		if len(reasoningEffort) > 0 {
+			reasoning = strings.TrimSpace(reasoningEffort[0])
+		}
+		status, err := d.stack.SetACPControllerModel(ctx, session.SessionRef, strings.TrimSpace(model), reasoning)
+		if err != nil {
+			return StatusSnapshot{}, err
+		}
+		d.mu.Lock()
+		d.modelText = strings.TrimSpace(firstNonEmpty(status.Model, model))
+		d.mu.Unlock()
+		return d.Status(ctx)
+	}
 	alias, err := d.resolveStoredModelAlias(ctx, strings.TrimSpace(model))
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -613,6 +689,22 @@ func (d *GatewayDriver) CycleSessionMode(ctx context.Context) (StatusSnapshot, e
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
+	if acpStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
+		return StatusSnapshot{}, err
+	} else if activeACP {
+		next, err := nextACPControllerMode(acpStatus)
+		if err != nil {
+			return StatusSnapshot{}, err
+		}
+		status, err := d.stack.SetACPControllerMode(ctx, session.SessionRef, next.ID)
+		if err != nil {
+			return StatusSnapshot{}, err
+		}
+		d.mu.Lock()
+		d.sessionMode = strings.TrimSpace(firstNonEmpty(status.Mode, next.ID))
+		d.mu.Unlock()
+		return d.Status(ctx)
+	}
 	normalized, err := d.stack.CycleSessionMode(ctx, session.SessionRef)
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -638,6 +730,18 @@ func (d *GatewayDriver) SetSandboxMode(ctx context.Context, mode string) (Status
 	session, err := d.ensureSession(ctx)
 	if err != nil {
 		return StatusSnapshot{}, err
+	}
+	if _, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
+		return StatusSnapshot{}, err
+	} else if activeACP {
+		status, err := d.stack.SetACPControllerMode(ctx, session.SessionRef, strings.TrimSpace(mode))
+		if err != nil {
+			return StatusSnapshot{}, err
+		}
+		d.mu.Lock()
+		d.sessionMode = strings.TrimSpace(status.Mode)
+		d.mu.Unlock()
+		return d.Status(ctx)
 	}
 	normalized, err := d.stack.SetSessionMode(ctx, session.SessionRef, mode)
 	if err != nil {
@@ -673,6 +777,17 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	status.ControllerLabel = strings.TrimSpace(firstNonEmpty(state.Controller.AgentName, state.Controller.Label, state.Controller.ControllerID, string(state.Controller.Kind)))
 	status.ControllerEpoch = strings.TrimSpace(state.Controller.EpochID)
 	status.HasActiveTurn = state.HasActiveTurn
+	if state.Controller.Kind == sdksession.ControllerKindACP {
+		if controllerStatus, ok, err := d.activeACPControllerStatus(ctx); err != nil {
+			return AgentStatusSnapshot{}, err
+		} else if ok {
+			status.ControllerModel = strings.TrimSpace(controllerStatus.Model)
+			status.ControllerReasoningEffort = strings.TrimSpace(controllerStatus.ReasoningEffort)
+			status.ControllerCommands = controllerCommandNames(controllerStatus.Commands)
+			status.ControllerModels = controllerChoicesToSlashCandidates(controllerStatus.ModelOptions, "remote ACP model", "", 0)
+			status.ControllerEfforts = controllerChoicesToSlashCandidates(controllerStatus.EffortOptions, "remote ACP reasoning effort", "", 0)
+		}
+	}
 	status.Participants = make([]AgentParticipantSnapshot, 0, len(state.Participants))
 	for _, participant := range state.Participants {
 		if shouldHideSelfDelegatedParticipant(participant) {
@@ -742,9 +857,15 @@ func (d *GatewayDriver) HandoffAgent(ctx context.Context, target string) (AgentS
 		req.Agent = agent
 		req.Reason = "handoff to agent"
 	}
-	if _, err := d.stack.Gateway.HandoffController(ctx, req); err != nil {
+	updated, err := d.stack.Gateway.HandoffController(ctx, req)
+	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}
+	d.mu.Lock()
+	d.session = updated
+	d.hasSession = true
+	d.mu.Unlock()
+	d.refreshSessionDisplay(ctx, updated)
 	return d.AgentStatus(ctx)
 }
 
@@ -966,6 +1087,13 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		limit = 8
 	}
 	query = strings.TrimSpace(strings.ToLower(query))
+	if acpStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
+		return nil, err
+	} else if activeACP {
+		if candidates, handled := d.completeACPControllerSlashArg(acpStatus, command, query, limit); handled {
+			return candidates, nil
+		}
+	}
 	switch strings.TrimSpace(strings.ToLower(command)) {
 	case "agent add":
 		return d.completeBuiltInAgentCatalog(query, limit), nil
@@ -1000,6 +1128,30 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		}
 	}
 	return out, nil
+}
+
+func (d *GatewayDriver) completeACPControllerSlashArg(status gatewayapp.ACPControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {
+	normalized := strings.TrimSpace(strings.ToLower(command))
+	switch normalized {
+	case "model":
+		candidate := SlashArgCandidate{
+			Value:   "use",
+			Display: "use",
+			Detail:  "switch remote ACP model",
+		}
+		if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
+			return nil, true
+		}
+		return []SlashArgCandidate{candidate}, true
+	case "model use":
+		return controllerChoicesToSlashCandidates(status.ModelOptions, "remote ACP model", query, limit), true
+	case "model del", "model delete", "model rm":
+		return nil, true
+	}
+	if alias, ok := strings.CutPrefix(normalized, "model use "); ok && strings.TrimSpace(alias) != "" {
+		return controllerChoicesToSlashCandidates(status.EffortOptions, "remote ACP reasoning effort", query, limit), true
+	}
+	return nil, false
 }
 
 func (d *GatewayDriver) completeModelReasoningLevels(ctx context.Context, aliasQuery string, query string, limit int) ([]SlashArgCandidate, error) {
@@ -1068,6 +1220,143 @@ func modelReasoningLevelDetail(level string) string {
 	default:
 		return "reasoning option"
 	}
+}
+
+func controllerCommandNames(commands []gatewayapp.ACPControllerCommand) []string {
+	if len(commands) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(commands))
+	seen := map[string]struct{}{}
+	for _, command := range commands {
+		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command.Name, "/")))
+		if name == "" {
+			continue
+		}
+		if fields := strings.Fields(name); len(fields) > 0 {
+			name = fields[0]
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		out = append(out, name)
+		seen[name] = struct{}{}
+	}
+	return out
+}
+
+func acpControllerModelText(status gatewayapp.ACPControllerStatus, session sdksession.Session) string {
+	return firstNonEmpty(
+		strings.TrimSpace(status.Model),
+		strings.TrimSpace(status.Agent),
+		strings.TrimSpace(session.Controller.AgentName),
+		strings.TrimSpace(session.Controller.Label),
+		strings.TrimSpace(session.Controller.ControllerID),
+	)
+}
+
+func acpControllerModeDisplay(status gatewayapp.ACPControllerStatus) string {
+	current := strings.TrimSpace(status.Mode)
+	if current == "" {
+		return ""
+	}
+	if mode, ok := matchACPControllerMode(status.ModeOptions, current); ok {
+		return acpControllerModeLabel(mode)
+	}
+	return current
+}
+
+func nextACPControllerMode(status gatewayapp.ACPControllerStatus) (gatewayapp.ACPControllerMode, error) {
+	modes := compactACPControllerModes(status.ModeOptions)
+	if len(modes) == 0 {
+		return gatewayapp.ACPControllerMode{}, fmt.Errorf("tui/runtime: remote ACP controller did not declare session modes")
+	}
+	current := strings.TrimSpace(status.Mode)
+	if current == "" {
+		return modes[0], nil
+	}
+	for i, mode := range modes {
+		if strings.EqualFold(strings.TrimSpace(mode.ID), current) || strings.EqualFold(strings.TrimSpace(mode.Name), current) {
+			return modes[(i+1)%len(modes)], nil
+		}
+	}
+	return modes[0], nil
+}
+
+func compactACPControllerModes(modes []gatewayapp.ACPControllerMode) []gatewayapp.ACPControllerMode {
+	if len(modes) == 0 {
+		return nil
+	}
+	out := make([]gatewayapp.ACPControllerMode, 0, len(modes))
+	seen := map[string]struct{}{}
+	for _, mode := range modes {
+		id := strings.TrimSpace(mode.ID)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, gatewayapp.ACPControllerMode{
+			ID:          id,
+			Name:        strings.TrimSpace(mode.Name),
+			Description: strings.TrimSpace(mode.Description),
+		})
+	}
+	return out
+}
+
+func matchACPControllerMode(modes []gatewayapp.ACPControllerMode, requested string) (gatewayapp.ACPControllerMode, bool) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return gatewayapp.ACPControllerMode{}, false
+	}
+	for _, mode := range modes {
+		id := strings.TrimSpace(mode.ID)
+		if id == "" {
+			continue
+		}
+		if strings.EqualFold(id, requested) || strings.EqualFold(strings.TrimSpace(mode.Name), requested) {
+			return mode, true
+		}
+	}
+	return gatewayapp.ACPControllerMode{}, false
+}
+
+func acpControllerModeLabel(mode gatewayapp.ACPControllerMode) string {
+	return firstNonEmpty(strings.TrimSpace(mode.Name), strings.TrimSpace(mode.ID))
+}
+
+func controllerChoicesToSlashCandidates(choices []gatewayapp.ACPControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
+	if len(choices) == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = len(choices)
+	}
+	out := make([]SlashArgCandidate, 0, min(limit, len(choices)))
+	for _, choice := range choices {
+		value := strings.TrimSpace(choice.Value)
+		if value == "" {
+			continue
+		}
+		display := firstNonEmpty(strings.TrimSpace(choice.Name), value)
+		candidateDetail := firstNonEmpty(strings.TrimSpace(choice.Description), detail)
+		if query != "" && !hasSlashArgPrefix(query, value, display, candidateDetail) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   value,
+			Display: display,
+			Detail:  candidateDetail,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
 }
 
 func (d *GatewayDriver) completeModelAliases(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {

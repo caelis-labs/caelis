@@ -26,7 +26,7 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 	m.syncTextareaFromInput()
 	_, cmd := m.Update(keyPress("enter"))
 	if cmd != nil {
-		cmd()
+		findAndRunTaskResult(cmd(), m)
 	}
 	if called != "" {
 		t.Fatalf("ExecuteLine called with %q, want interactive wizard instead", called)
@@ -42,6 +42,36 @@ func TestConnectEnterStartsInteractiveWizardAndIgnoresTypedArgs(t *testing.T) {
 	}
 	if got := strings.TrimSpace(m.slashArgQuery); got != "openai-compatible" {
 		t.Fatalf("slashArgQuery = %q, want openai-compatible", got)
+	}
+}
+
+func TestConnectEnterSubmitsWhenCommandUnavailable(t *testing.T) {
+	called := ""
+	m := NewModel(Config{
+		Commands: []string{"help", "agent", "status", "resume", "model"},
+		ExecuteLine: func(submission Submission) TaskResultMsg {
+			called = submission.Text
+			return TaskResultMsg{}
+		},
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			if command == "connect" {
+				return []SlashArgCandidate{{Value: "openai-compatible", Display: "openai-compatible"}}, nil
+			}
+			return nil, nil
+		},
+	})
+	m.setInputText("/connect openai-compatible")
+	m.syncTextareaFromInput()
+	_, cmd := m.Update(keyPress("enter"))
+	if cmd != nil {
+		findAndRunTaskResult(cmd(), m)
+	}
+	if m.isWizardActive() {
+		t.Fatal("connect wizard should not start when /connect is unavailable")
+	}
+	if called != "/connect openai-compatible" {
+		t.Fatalf("ExecuteLine called with %q, want submitted ACP command", called)
 	}
 }
 

@@ -716,7 +716,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.submitLineWithDisplayAndAttachments(line, m.displayLineWithInputAttachments(line, attachments), inputAttachmentsToSubmission(attachments))
 		}
 		m.setInputAttachments(attachments)
-		if line == "/connect" || strings.HasPrefix(line, "/connect ") {
+		if (line == "/connect" || strings.HasPrefix(line, "/connect ")) && m.isCommandAvailable("connect") {
 			if def := m.findWizard("connect"); def != nil {
 				query := strings.TrimSpace(strings.TrimPrefix(line, "/connect"))
 				m.startWizardWithQuery(def, query)
@@ -975,11 +975,9 @@ func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
 	}
 	switch blk := m.doc.Find(strings.TrimSpace(blockID)).(type) {
 	case *ParticipantTurnBlock:
-		blk.toggleToolPanelExpanded(callID)
-		return true
+		return blk.toggleToolPanelClick(callID)
 	case *MainACPTurnBlock:
-		blk.toggleToolPanelExpanded(callID)
-		return true
+		return blk.toggleToolPanelClick(callID)
 	default:
 		return false
 	}
@@ -1207,11 +1205,17 @@ func centeredDivider(width int, label string) string {
 func (m *Model) tryOpenSlashArgPicker(line string) bool {
 	text := strings.TrimSpace(line)
 	if text == "/resume" {
+		if !m.isCommandAvailable("resume") {
+			return false
+		}
 		m.openResumePicker()
 		return len(m.resumeCandidates) > 0
 	}
 	if strings.HasPrefix(text, "/") && !strings.Contains(text, " ") {
 		cmd := strings.TrimPrefix(text, "/")
+		if !m.isCommandAvailable(cmd) {
+			return false
+		}
 		// Check registered wizards first, then well-known simple commands.
 		if m.findWizard(cmd) != nil {
 			m.openSlashArgPicker(cmd)

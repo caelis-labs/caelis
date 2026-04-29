@@ -7,6 +7,7 @@ import (
 	"time"
 
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
+	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
@@ -17,6 +18,44 @@ func (r *Runtime) Controllers() sdkcontroller.Backend {
 		return nil
 	}
 	return r.controllers
+}
+
+func (r *Runtime) ACPControllerStatus(ctx context.Context, ref sdksession.SessionRef) (sdkcontroller.ControllerStatus, bool, error) {
+	if r == nil || r.controllers == nil {
+		return sdkcontroller.ControllerStatus{}, false, nil
+	}
+	provider, ok := r.controllers.(sdkcontroller.ControllerStatusProvider)
+	if !ok || provider == nil {
+		return sdkcontroller.ControllerStatus{}, false, nil
+	}
+	return provider.ControllerStatus(ctx, sdksession.NormalizeSessionRef(ref))
+}
+
+func (r *Runtime) SetACPControllerModel(ctx context.Context, req sdkcontroller.SetControllerModelRequest) (sdkcontroller.ControllerStatus, error) {
+	if r == nil || r.controllers == nil {
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/runtime/local: ACP controller backend is not configured")
+	}
+	configurator, ok := r.controllers.(sdkcontroller.ControllerConfigurator)
+	if !ok || configurator == nil {
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/runtime/local: ACP controller backend does not expose model configuration")
+	}
+	req.SessionRef = sdksession.NormalizeSessionRef(req.SessionRef)
+	req.Model = strings.TrimSpace(req.Model)
+	req.ReasoningEffort = strings.TrimSpace(req.ReasoningEffort)
+	return configurator.SetControllerModel(ctx, req)
+}
+
+func (r *Runtime) SetACPControllerMode(ctx context.Context, req sdkcontroller.SetControllerModeRequest) (sdkcontroller.ControllerStatus, error) {
+	if r == nil || r.controllers == nil {
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/runtime/local: ACP controller backend is not configured")
+	}
+	configurator, ok := r.controllers.(sdkcontroller.ControllerConfigurator)
+	if !ok || configurator == nil {
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("sdk/runtime/local: ACP controller backend does not expose mode configuration")
+	}
+	req.SessionRef = sdksession.NormalizeSessionRef(req.SessionRef)
+	req.Mode = strings.TrimSpace(req.Mode)
+	return configurator.SetControllerMode(ctx, req)
 }
 
 func (r *Runtime) ensureSessionController(ctx context.Context, session sdksession.Session) (sdksession.Session, error) {
@@ -146,6 +185,7 @@ func (r *Runtime) executeACPControllerTurn(
 		return
 	}
 	if turnResult.Handle != nil {
+		accumulator := acpNarrativeAccumulator{}
 		for event, seqErr := range turnResult.Handle.Events() {
 			if seqErr != nil {
 				r.setRunState(ref.SessionID, sdkruntime.RunState{
@@ -160,6 +200,18 @@ func (r *Runtime) executeACPControllerTurn(
 			normalized := normalizeEvent(session, turnID, event)
 			if normalized == nil {
 				continue
+			}
+			publishEvent := normalized
+			if persistedEvent, liveEvent, ok := accumulator.normalize(normalized); ok {
+				if persistedEvent == nil {
+					continue
+				}
+				normalized = persistedEvent
+				if liveEvent != nil {
+					publishEvent = liveEvent
+				} else {
+					publishEvent = nil
+				}
 			}
 			if sdksession.IsCanonicalHistoryEvent(normalized) {
 				persisted, appendErr := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
@@ -188,7 +240,10 @@ func (r *Runtime) executeACPControllerTurn(
 				handle.publishError(err)
 				return
 			}
-			handle.publishEvent(normalized)
+			if publishEvent == nil {
+				publishEvent = normalized
+			}
+			handle.publishEvent(publishEvent)
 		}
 	}
 	r.setRunState(ref.SessionID, sdkruntime.RunState{
@@ -196,6 +251,114 @@ func (r *Runtime) executeACPControllerTurn(
 		ActiveRunID: runID,
 		UpdatedAt:   r.now(),
 	})
+}
+
+type acpNarrativeAccumulator struct {
+	assistantText string
+	reasoningText string
+}
+
+func (a *acpNarrativeAccumulator) normalize(event *sdksession.Event) (*sdksession.Event, *sdksession.Event, bool) {
+	if a == nil || !isACPControllerNarrativeChunk(event) {
+		return event, nil, false
+	}
+	updateType := strings.TrimSpace(event.Protocol.UpdateType)
+	raw := narrativeEventText(event, updateType)
+	cumulative, delta := a.append(updateType, raw)
+	if cumulative == "" && delta == "" {
+		return nil, nil, true
+	}
+	if delta == "" {
+		return nil, nil, true
+	}
+	persisted := sdksession.CloneEvent(event)
+	setNarrativeEventText(persisted, updateType, cumulative)
+	live := sdksession.CloneEvent(event)
+	live.ID = ""
+	setNarrativeEventText(live, updateType, delta)
+	return persisted, live, true
+}
+
+func (a *acpNarrativeAccumulator) append(updateType string, text string) (string, string) {
+	switch strings.TrimSpace(updateType) {
+	case string(sdksession.ProtocolUpdateTypeAgentThought):
+		cumulative, delta := appendNarrativeText(a.reasoningText, text)
+		a.reasoningText = cumulative
+		return cumulative, delta
+	default:
+		cumulative, delta := appendNarrativeText(a.assistantText, text)
+		a.assistantText = cumulative
+		return cumulative, delta
+	}
+}
+
+func isACPControllerNarrativeChunk(event *sdksession.Event) bool {
+	if event == nil || event.Protocol == nil || event.Scope == nil {
+		return false
+	}
+	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
+		return false
+	}
+	if event.Scope.Participant.ID != "" {
+		return false
+	}
+	switch strings.TrimSpace(event.Protocol.UpdateType) {
+	case string(sdksession.ProtocolUpdateTypeAgentMessage), string(sdksession.ProtocolUpdateTypeAgentThought):
+		return true
+	default:
+		return false
+	}
+}
+
+func narrativeEventText(event *sdksession.Event, updateType string) string {
+	if event == nil {
+		return ""
+	}
+	if event.Message != nil {
+		switch strings.TrimSpace(updateType) {
+		case string(sdksession.ProtocolUpdateTypeAgentThought):
+			if text := event.Message.ReasoningText(); text != "" {
+				return text
+			}
+		default:
+			if text := event.Message.TextContent(); text != "" {
+				return text
+			}
+		}
+	}
+	return event.Text
+}
+
+func setNarrativeEventText(event *sdksession.Event, updateType string, text string) {
+	if event == nil {
+		return
+	}
+	event.Text = text
+	switch strings.TrimSpace(updateType) {
+	case string(sdksession.ProtocolUpdateTypeAgentThought):
+		message := sdkmodel.NewReasoningMessage(sdkmodel.RoleAssistant, text, sdkmodel.ReasoningVisibilityVisible)
+		event.Message = &message
+	default:
+		message := sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, text)
+		event.Message = &message
+	}
+}
+
+func appendNarrativeText(existing string, incoming string) (string, string) {
+	if incoming == "" {
+		return existing, ""
+	}
+	if existing == "" {
+		return incoming, incoming
+	}
+	if strings.HasPrefix(incoming, existing) {
+		delta := incoming[len(existing):]
+		return incoming, delta
+	}
+	if strings.HasPrefix(existing, incoming) {
+		return existing, ""
+	}
+	return existing + incoming, incoming
 }
 
 func (r *Runtime) handleControllerPlanEvent(ctx context.Context, ref sdksession.SessionRef, event *sdksession.Event) error {

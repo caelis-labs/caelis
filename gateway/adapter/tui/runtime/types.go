@@ -97,13 +97,18 @@ type AgentParticipantSnapshot struct {
 }
 
 type AgentStatusSnapshot struct {
-	SessionID       string
-	ControllerKind  string
-	ControllerLabel string
-	ControllerEpoch string
-	HasActiveTurn   bool
-	AvailableAgents []AgentCandidate
-	Participants    []AgentParticipantSnapshot
+	SessionID                 string
+	ControllerKind            string
+	ControllerLabel           string
+	ControllerEpoch           string
+	ControllerModel           string
+	ControllerReasoningEffort string
+	ControllerCommands        []string
+	ControllerModels          []SlashArgCandidate
+	ControllerEfforts         []SlashArgCandidate
+	HasActiveTurn             bool
+	AvailableAgents           []AgentCandidate
+	Participants              []AgentParticipantSnapshot
 }
 
 type AgentAddOptions struct {

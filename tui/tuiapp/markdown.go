@@ -7,14 +7,17 @@ import (
 )
 
 var (
-	blockMathPattern  = regexp.MustCompile(`(?ms)(^|\n)\$\$\s*\n?(.*?)\n?\s*\$\$`)
-	inlineMathPattern = regexp.MustCompile(`(^|[^\\$])\$([^\n$]+?)\$`)
+	blockMathPattern        = regexp.MustCompile(`(?ms)(^|\n)\$\$\s*\n?(.*?)\n?\s*\$\$`)
+	inlineMathPattern       = regexp.MustCompile(`(^|[^\\$])\$([^\n$]+?)\$`)
+	gluedRuleHeadingPattern = regexp.MustCompile(`(?m)(^|\n)([-*_]{3,})(#{1,6}\s)`)
+	tableRowBoundaryPattern = regexp.MustCompile(`\|\s+\|`)
 )
 
 func normalizeTerminalMarkdown(input string) string {
 	if input == "" {
 		return ""
 	}
+	input = normalizeGluedMarkdownBlocks(input)
 	output := blockMathPattern.ReplaceAllStringFunc(input, func(match string) string {
 		sub := blockMathPattern.FindStringSubmatch(match)
 		if len(sub) != 3 {
@@ -28,6 +31,59 @@ func normalizeTerminalMarkdown(input string) string {
 		return prefix + body
 	})
 	return replaceInlineMath(output)
+}
+
+func normalizeGluedMarkdownBlocks(input string) string {
+	input = gluedRuleHeadingPattern.ReplaceAllString(input, "$1$2\n$3")
+	return normalizeInlineMarkdownTables(input)
+}
+
+func normalizeInlineMarkdownTables(input string) string {
+	lines := strings.Split(input, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		expanded := expandInlineMarkdownTableLine(line)
+		out = append(out, expanded...)
+	}
+	return strings.Join(out, "\n")
+}
+
+func expandInlineMarkdownTableLine(line string) []string {
+	if strings.Count(line, "|") < 4 {
+		return []string{line}
+	}
+	expanded := tableRowBoundaryPattern.ReplaceAllString(line, "|\n|")
+	parts := strings.Split(expanded, "\n")
+	if !containsMarkdownTableSeparator(parts) {
+		return []string{line}
+	}
+	out := make([]string, 0, len(parts)+1)
+	for _, part := range parts {
+		out = append(out, splitInlineTablePrefix(part)...)
+	}
+	return out
+}
+
+func containsMarkdownTableSeparator(lines []string) bool {
+	for _, line := range lines {
+		if isTableSeparatorLine(strings.TrimSpace(line)) {
+			return true
+		}
+	}
+	return false
+}
+
+func splitInlineTablePrefix(line string) []string {
+	firstPipe := strings.Index(line, "|")
+	if firstPipe <= 0 {
+		return []string{line}
+	}
+	prefix := strings.TrimSpace(line[:firstPipe])
+	table := strings.TrimSpace(line[firstPipe:])
+	if prefix == "" || !isPotentialTableRow(table) {
+		return []string{line}
+	}
+	return []string{strings.TrimRight(line[:firstPipe], " \t"), table}
 }
 
 func replaceInlineMath(text string) string {

@@ -348,6 +348,37 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
+	driver := &GatewayDriver{}
+	status := gatewayapp.ACPControllerStatus{
+		ModelOptions: []gatewayapp.ACPControllerConfigChoice{{
+			Value:       "claude-sonnet",
+			Name:        "Claude Sonnet",
+			Description: "remote model",
+		}},
+		EffortOptions: []gatewayapp.ACPControllerConfigChoice{{
+			Value: "high",
+			Name:  "High",
+		}},
+	}
+	actions, handled := driver.completeACPControllerSlashArg(status, "model", "", 10)
+	if !handled || len(actions) != 1 || actions[0].Value != "use" {
+		t.Fatalf("ACP model actions = %#v handled=%v, want only use", actions, handled)
+	}
+	models, handled := driver.completeACPControllerSlashArg(status, "model use", "claude", 10)
+	if !handled || len(models) != 1 || models[0].Value != "claude-sonnet" {
+		t.Fatalf("ACP model candidates = %#v handled=%v, want remote model", models, handled)
+	}
+	efforts, handled := driver.completeACPControllerSlashArg(status, "model use claude-sonnet", "", 10)
+	if !handled || len(efforts) != 1 || efforts[0].Value != "high" {
+		t.Fatalf("ACP effort candidates = %#v handled=%v, want remote effort", efforts, handled)
+	}
+	deletes, handled := driver.completeACPControllerSlashArg(status, "model del", "", 10)
+	if !handled || len(deletes) != 0 {
+		t.Fatalf("ACP delete candidates = %#v handled=%v, want handled empty", deletes, handled)
+	}
+}
+
 func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	ctx := context.Background()
 	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
@@ -1190,6 +1221,107 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	}
 	if status.SessionMode != "plan" {
 		t.Fatalf("session mode = %q, want plan", status.SessionMode)
+	}
+}
+
+func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
+	status := gatewayapp.ACPControllerStatus{
+		Mode: "default",
+		ModeOptions: []gatewayapp.ACPControllerMode{
+			{ID: "default", Name: "Default"},
+			{ID: "review", Name: "Review"},
+			{ID: "plan", Name: "Plan"},
+		},
+	}
+	next, err := nextACPControllerMode(status)
+	if err != nil {
+		t.Fatalf("nextACPControllerMode() error = %v", err)
+	}
+	if next.ID != "review" {
+		t.Fatalf("next mode = %#v, want review", next)
+	}
+
+	status.Mode = "Plan"
+	next, err = nextACPControllerMode(status)
+	if err != nil {
+		t.Fatalf("nextACPControllerMode(name) error = %v", err)
+	}
+	if next.ID != "default" {
+		t.Fatalf("next mode from name = %#v, want default", next)
+	}
+}
+
+func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
+	status := gatewayapp.ACPControllerStatus{
+		Mode: "review",
+		ModeOptions: []gatewayapp.ACPControllerMode{
+			{ID: "review", Name: "Review"},
+		},
+	}
+	if got := acpControllerModeDisplay(status); got != "Review" {
+		t.Fatalf("acpControllerModeDisplay() = %q, want Review", got)
+	}
+	status.ModeOptions = nil
+	if got := acpControllerModeDisplay(status); got != "review" {
+		t.Fatalf("acpControllerModeDisplay() fallback = %q, want review", got)
+	}
+}
+
+func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
+	ctx := context.Background()
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "acp-model-fallback-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+		Model: gatewayapp.ModelConfig{
+			Provider: "minimax",
+			Model:    "MiniMax-M2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	session, err := stack.StartSession(ctx, "acp-fallback-session", "surface")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	session, err = stack.Sessions.BindController(ctx, sdksession.BindControllerRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ControllerBinding{
+			Kind:            sdksession.ControllerKindACP,
+			ControllerID:    "codex",
+			Label:           "Codex ACP",
+			RemoteSessionID: "remote-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+
+	driver := &GatewayDriver{
+		stack:               stack,
+		session:             session,
+		hasSession:          true,
+		bindingKey:          "surface",
+		defaultSessionMode:  "default",
+		sessionMode:         "default",
+		defaultSandboxType:  "host",
+		sandboxType:         "host",
+		streamSubscriptions: map[string]struct{}{},
+	}
+	status, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.Provider != "acp" {
+		t.Fatalf("provider = %q, want acp", status.Provider)
+	}
+	if status.Model != "Codex ACP" {
+		t.Fatalf("model = %q, want ACP agent fallback instead of local model", status.Model)
 	}
 }
 

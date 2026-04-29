@@ -114,6 +114,85 @@ type TurnResult struct {
 	UpdatedAt time.Time  `json:"updated_at,omitempty"`
 }
 
+// ControllerCommand is one slash command declared by a remote ACP controller.
+type ControllerCommand struct {
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// ControllerConfigChoice is one selectable value declared by a remote ACP
+// session config option.
+type ControllerConfigChoice struct {
+	Value       string `json:"value,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// ControllerConfigOption is a normalized view of one remote ACP session config
+// option. The runtime keeps this generic so the TUI does not depend on ACP
+// schema structs directly.
+type ControllerConfigOption struct {
+	ID           string                   `json:"id,omitempty"`
+	Name         string                   `json:"name,omitempty"`
+	Type         string                   `json:"type,omitempty"`
+	Category     string                   `json:"category,omitempty"`
+	Description  string                   `json:"description,omitempty"`
+	CurrentValue string                   `json:"current_value,omitempty"`
+	Options      []ControllerConfigChoice `json:"options,omitempty"`
+}
+
+// ControllerMode is one remote ACP session mode declared by the controller.
+type ControllerMode struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// ControllerStatus summarizes the live remote ACP controller surface for
+// local UI state such as slash commands and remote model selection.
+type ControllerStatus struct {
+	SessionRef      sdksession.SessionRef    `json:"session_ref,omitempty"`
+	Agent           string                   `json:"agent,omitempty"`
+	RemoteSessionID string                   `json:"remote_session_id,omitempty"`
+	Model           string                   `json:"model,omitempty"`
+	ModelOptions    []ControllerConfigChoice `json:"model_options,omitempty"`
+	ReasoningEffort string                   `json:"reasoning_effort,omitempty"`
+	EffortOptions   []ControllerConfigChoice `json:"effort_options,omitempty"`
+	Commands        []ControllerCommand      `json:"commands,omitempty"`
+	ConfigOptions   []ControllerConfigOption `json:"config_options,omitempty"`
+	Mode            string                   `json:"mode,omitempty"`
+	ModeOptions     []ControllerMode         `json:"mode_options,omitempty"`
+	UpdatedAt       time.Time                `json:"updated_at,omitempty"`
+}
+
+// SetControllerModelRequest changes the active remote ACP controller model
+// using the server-declared config option surface.
+type SetControllerModelRequest struct {
+	SessionRef      sdksession.SessionRef `json:"session_ref,omitempty"`
+	Model           string                `json:"model,omitempty"`
+	ReasoningEffort string                `json:"reasoning_effort,omitempty"`
+}
+
+// SetControllerModeRequest changes the active remote ACP controller mode using
+// the server-declared session/set_mode surface.
+type SetControllerModeRequest struct {
+	SessionRef sdksession.SessionRef `json:"session_ref,omitempty"`
+	Mode       string                `json:"mode,omitempty"`
+}
+
+// ControllerStatusProvider is optionally implemented by controller backends
+// that expose remote session state to local UI surfaces.
+type ControllerStatusProvider interface {
+	ControllerStatus(context.Context, sdksession.SessionRef) (ControllerStatus, bool, error)
+}
+
+// ControllerConfigurator is optionally implemented by controller backends that
+// can update remote session config options.
+type ControllerConfigurator interface {
+	SetControllerModel(context.Context, SetControllerModelRequest) (ControllerStatus, error)
+	SetControllerMode(context.Context, SetControllerModeRequest) (ControllerStatus, error)
+}
+
 // Backend is the runtime-facing control-plane contract for ACP-backed main
 // controllers and sidecar participants.
 type Backend interface {

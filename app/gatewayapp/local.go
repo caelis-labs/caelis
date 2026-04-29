@@ -15,6 +15,7 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
+	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdkdelegation "github.com/OnslaughtSnail/caelis/sdk/delegation"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdkminimax "github.com/OnslaughtSnail/caelis/sdk/model/providers/minimax"
@@ -120,6 +121,11 @@ type ACPAgentAddOption struct {
 	Display string
 	Detail  string
 }
+
+type ACPControllerStatus = sdkcontroller.ControllerStatus
+type ACPControllerCommand = sdkcontroller.ControllerCommand
+type ACPControllerConfigChoice = sdkcontroller.ControllerConfigChoice
+type ACPControllerMode = sdkcontroller.ControllerMode
 
 type RegisterBuiltinACPAgentOptions struct {
 	Install bool
@@ -753,6 +759,40 @@ func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bin
 			Surface: strings.TrimSpace(bindingKey),
 			Owner:   s.AppName,
 		},
+	})
+}
+
+func (s *Stack) ACPControllerStatus(ctx context.Context, ref sdksession.SessionRef) (sdkcontroller.ControllerStatus, bool, error) {
+	if s == nil || s.engine == nil {
+		return sdkcontroller.ControllerStatus{}, false, nil
+	}
+	return s.engine.ACPControllerStatus(ctx, sdksession.NormalizeSessionRef(ref))
+}
+
+func (s *Stack) SetACPControllerModel(ctx context.Context, ref sdksession.SessionRef, model string, reasoningEffort string) (sdkcontroller.ControllerStatus, error) {
+	if s == nil || s.engine == nil {
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
+	}
+	if err := s.rejectReconfigureWhileActive("switch ACP model"); err != nil {
+		return sdkcontroller.ControllerStatus{}, err
+	}
+	return s.engine.SetACPControllerModel(ctx, sdkcontroller.SetControllerModelRequest{
+		SessionRef:      sdksession.NormalizeSessionRef(ref),
+		Model:           strings.TrimSpace(model),
+		ReasoningEffort: strings.TrimSpace(reasoningEffort),
+	})
+}
+
+func (s *Stack) SetACPControllerMode(ctx context.Context, ref sdksession.SessionRef, mode string) (sdkcontroller.ControllerStatus, error) {
+	if s == nil || s.engine == nil {
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
+	}
+	if err := s.rejectReconfigureWhileActive("switch ACP mode"); err != nil {
+		return sdkcontroller.ControllerStatus{}, err
+	}
+	return s.engine.SetACPControllerMode(ctx, sdkcontroller.SetControllerModeRequest{
+		SessionRef: sdksession.NormalizeSessionRef(ref),
+		Mode:       strings.TrimSpace(mode),
 	})
 }
 

@@ -37,9 +37,10 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 				Args:        []string{"run", "./acpbridge/cmd/e2eagent"},
 				WorkDir:     repo,
 				Env: map[string]string{
-					"SDK_ACP_STUB_REPLY":   "gateway acp main ok",
-					"SDK_ACP_SESSION_ROOT": filepath.Join(root, "controller-sessions"),
-					"SDK_ACP_TASK_ROOT":    filepath.Join(root, "controller-tasks"),
+					"SDK_ACP_STUB_REPLY":         "gateway acp main ok",
+					"SDK_ACP_ENABLE_MODE_CONFIG": "1",
+					"SDK_ACP_SESSION_ROOT":       filepath.Join(root, "controller-sessions"),
+					"SDK_ACP_TASK_ROOT":          filepath.Join(root, "controller-tasks"),
 				},
 			}},
 		},
@@ -79,6 +80,26 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	}
 	if state.Controller.Kind != sdksession.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("control state = %+v", state)
+	}
+	controllerStatus, found, err := stack.ACPControllerStatus(context.Background(), session.SessionRef)
+	if err != nil {
+		t.Fatalf("ACPControllerStatus() error = %v", err)
+	}
+	if !found {
+		t.Fatal("ACPControllerStatus() found = false")
+	}
+	if got := strings.TrimSpace(controllerStatus.Mode); got != "default" {
+		t.Fatalf("ACPControllerStatus().Mode = %q, want default", got)
+	}
+	if got := len(controllerStatus.ModeOptions); got != 2 {
+		t.Fatalf("len(ACPControllerStatus().ModeOptions) = %d, want 2", got)
+	}
+	updatedStatus, err := stack.SetACPControllerMode(context.Background(), session.SessionRef, "plan")
+	if err != nil {
+		t.Fatalf("SetACPControllerMode(plan) error = %v", err)
+	}
+	if got := strings.TrimSpace(updatedStatus.Mode); got != "plan" {
+		t.Fatalf("SetACPControllerMode(plan).Mode = %q, want plan", got)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
@@ -342,6 +363,12 @@ func newStackWithAssemblyForToolTest(t *testing.T, assembly sdkplugin.ResolvedAs
 		WorkspaceCWD:   workdir,
 		PermissionMode: "default",
 		Assembly:       assembly,
+		// These tests rewrite PATH to exercise ACP adapter lookup. Keep the
+		// sandbox on host so auto-probing does not execute the test binary as a
+		// landlock helper and recursively re-enter this package's tests.
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+		},
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",

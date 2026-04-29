@@ -146,6 +146,8 @@ func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyl
 	renderer, err := glamour.NewTermRenderer(
 		glamour.WithStyles(narrativeStyleConfig(theme, roleStyle)),
 		glamour.WithWordWrap(width),
+		glamour.WithTableWrap(true),
+		glamour.WithInlineTableLinks(true),
 	)
 	if err != nil {
 		return nil
@@ -272,6 +274,16 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	style.HorizontalRule.Format = "\n────────\n"
 
 	// ---------------------------------------------------------------
+	// Tables — keep compact box-drawing separators that fit the transcript.
+	// ---------------------------------------------------------------
+	tableMargin := uint(0)
+	style.Table.Margin = &tableMargin
+	style.Table.Color = colorToAnsiPtr(theme.TextPrimary)
+	style.Table.CenterSeparator = stringPtr("┼")
+	style.Table.ColumnSeparator = stringPtr("│")
+	style.Table.RowSeparator = stringPtr("─")
+
+	// ---------------------------------------------------------------
 	// Task list
 	// ---------------------------------------------------------------
 	style.Task.Ticked = "[✓] "
@@ -321,6 +333,8 @@ func colorToAnsiPtr(c color.Color) *string {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func stringPtr(v string) *string { return &v }
 
 func themeRenderCacheKey(theme tuikit.Theme) string {
 	parts := []string{

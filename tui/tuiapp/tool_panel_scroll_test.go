@@ -80,6 +80,21 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 	if strings.Contains(joined, "line 03") || strings.Contains(joined, "line 10") {
 		t.Fatalf("completed terminal output should keep first two and last two lines, got\n%s", joined)
 	}
+
+	if !block.toggleToolPanelClick("bash-1") {
+		t.Fatal("expected completed terminal summary click to expand full output")
+	}
+	rows = block.Render(ctx)
+	plain = renderedPlainRows(rows)
+	joined = strings.Join(plain, "\n")
+	if strings.Contains(joined, "lines hidden") {
+		t.Fatalf("expanded terminal output should remove hidden marker, got\n%s", joined)
+	}
+	for _, want := range []string{"line 03", "line 10"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expanded terminal output missing %q\n%s", want, joined)
+		}
+	}
 }
 
 func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *testing.T) {
@@ -116,6 +131,16 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	}
 	if strings.Contains(joined, "result 03") || strings.Contains(joined, "result 04") {
 		t.Fatalf("generic ACP tool final output should be summarized, got\n%s", joined)
+	}
+
+	if !block.toggleToolPanelClick("ws-1") {
+		t.Fatal("expected generic ACP summary click to expand full output")
+	}
+	rows = block.Render(ctx)
+	plain = renderedPlainRows(rows)
+	joined = strings.Join(plain, "\n")
+	if strings.Contains(joined, "lines hidden") || !strings.Contains(joined, "result 03") || !strings.Contains(joined, "result 04") {
+		t.Fatalf("expanded generic ACP tool output should show hidden lines, got\n%s", joined)
 	}
 }
 
