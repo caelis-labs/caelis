@@ -58,6 +58,96 @@ func TestProjectGatewayEventToTranscriptEvents_DoesNotPersistApproval(t *testing
 	}
 }
 
+func TestProjectGatewayEventToTranscriptEvents_SuppressesParticipantUserEcho(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		event appgateway.Event
+	}{
+		{
+			name: "user event",
+			event: appgateway.Event{
+				Kind:       appgateway.EventKindUserMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin: &appgateway.EventOrigin{
+					Scope:         appgateway.EventScopeParticipant,
+					ScopeID:       "participant-turn-1",
+					ParticipantID: "participant-1",
+					Actor:         "@jeff",
+				},
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleUser,
+					Text:  "总结一下工作",
+					Scope: appgateway.EventScopeParticipant,
+				},
+			},
+		},
+		{
+			name: "assistant user role",
+			event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin: &appgateway.EventOrigin{
+					Scope:         appgateway.EventScopeParticipant,
+					ScopeID:       "participant-turn-1",
+					ParticipantID: "participant-1",
+					Actor:         "@jeff",
+				},
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleUser,
+					Text:  "总结一下工作",
+					Scope: appgateway.EventScopeParticipant,
+				},
+			},
+		},
+		{
+			name: "payload scope without origin",
+			event: appgateway.Event{
+				Kind:       appgateway.EventKindUserMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Narrative: &appgateway.NarrativePayload{
+					Role:          appgateway.NarrativeRoleUser,
+					Text:          "总结一下工作",
+					Scope:         appgateway.EventScopeParticipant,
+					ParticipantID: "participant-1",
+				},
+			},
+		},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if events := ProjectGatewayEventToTranscriptEvents(tc.event); len(events) != 0 {
+				t.Fatalf("ProjectGatewayEventToTranscriptEvents() = %#v, want no participant user echo", events)
+			}
+		})
+	}
+}
+
+func TestProjectGatewayEventToTranscriptEvents_KeepsMainUserMessage(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:       appgateway.EventKindUserMessage,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+		Narrative: &appgateway.NarrativePayload{
+			Role:  appgateway.NarrativeRoleUser,
+			Text:  "/claude 总结一下工作",
+			Scope: appgateway.EventScopeMain,
+		},
+	})
+
+	if got := len(events); got != 1 {
+		t.Fatalf("len(events) = %d, want 1", got)
+	}
+	if events[0].Kind != TranscriptEventNarrative || events[0].NarrativeKind != TranscriptNarrativeUser || events[0].Text != "/claude 总结一下工作" {
+		t.Fatalf("events[0] = %#v, want main user narrative", events[0])
+	}
+}
+
 func TestProjectGatewayEventToTranscriptEvents_ACPToolDisablesExplorationGrouping(t *testing.T) {
 	t.Parallel()
 

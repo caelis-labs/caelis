@@ -162,6 +162,62 @@ func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 	}
 }
 
+func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
+	t.Parallel()
+
+	var contextCancelled bool
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+		cancel: func() bool {
+			contextCancelled = true
+			return true
+		},
+	})
+	runner := &recordingRunner{}
+	handle.setRunner(runner)
+
+	if !handle.Cancel() {
+		t.Fatal("Cancel() = false, want true")
+	}
+	if !contextCancelled {
+		t.Fatal("gateway context was not cancelled")
+	}
+	if !runner.cancelled {
+		t.Fatal("runner was not cancelled")
+	}
+	if handle.Cancel() {
+		t.Fatal("Cancel(second) = true, want false")
+	}
+}
+
+func TestTurnHandleSetRunnerAfterCancelCancelsRunner(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	if !handle.Cancel() {
+		t.Fatal("Cancel() = false, want true")
+	}
+	runner := &recordingRunner{}
+	handle.setRunner(runner)
+	if !runner.cancelled {
+		t.Fatal("late runner was not cancelled")
+	}
+}
+
 func TestTurnHandleCloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 

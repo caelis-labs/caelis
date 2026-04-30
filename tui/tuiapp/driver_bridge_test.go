@@ -12,9 +12,7 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
 func TestProgramSenderDropsAfterClose(t *testing.T) {
@@ -30,141 +28,6 @@ func TestProgramSenderDropsAfterClose(t *testing.T) {
 	}
 	if got := sender.DroppedAfterClose(); got != 1 {
 		t.Fatalf("DroppedAfterClose = %d, want 1", got)
-	}
-}
-
-func TestProgramSenderCloseCancelsSubagentForwarder(t *testing.T) {
-	ctx := context.Background()
-	frames := make(chan tuiadapterruntime.SubagentStreamFrame)
-	driver := &bridgeTestDriver{subagentStream: frames}
-	sender := &ProgramSender{}
-	var sent atomic.Int64
-	sender.Send = func(tea.Msg) { sent.Add(1) }
-
-	startDynamicSubagentOutputBridge(ctx, driver, sender, tuiadapterruntime.SubagentSnapshot{
-		TaskID:  "task-1",
-		Running: true,
-		Mention: "@worker",
-	})
-	deadline := time.After(2 * time.Second)
-	for driver.subagentStreamSubscribeCalls == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("SubscribeSubagentStream was not called")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	sender.Close()
-	select {
-	case frames <- tuiadapterruntime.SubagentStreamFrame{Text: "late", Running: true}:
-		t.Fatal("subagent forwarder still received after sender.Close")
-	case <-time.After(30 * time.Millisecond):
-	}
-	if got := sent.Load(); got != 0 {
-		t.Fatalf("late sends after close = %d, want 0", got)
-	}
-}
-
-func TestSubagentForwarderExitsOnContextCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	frames := make(chan tuiadapterruntime.SubagentStreamFrame)
-	driver := &bridgeTestDriver{subagentStream: frames}
-	sender := &ProgramSender{}
-	var sent atomic.Int64
-	sender.Send = func(tea.Msg) { sent.Add(1) }
-
-	startDynamicSubagentOutputBridge(ctx, driver, sender, tuiadapterruntime.SubagentSnapshot{
-		TaskID:  "task-1",
-		Running: true,
-		Mention: "@worker",
-	})
-	deadline := time.After(2 * time.Second)
-	for driver.subagentStreamSubscribeCalls == 0 {
-		select {
-		case <-deadline:
-			t.Fatal("SubscribeSubagentStream was not called")
-		default:
-			time.Sleep(time.Millisecond)
-		}
-	}
-
-	cancel()
-	if !sender.waitForwarders(time.Second) {
-		t.Fatal("subagent forwarder did not exit after context cancellation")
-	}
-	select {
-	case frames <- tuiadapterruntime.SubagentStreamFrame{Text: "late", Running: true}:
-		t.Fatal("subagent forwarder still received after context cancellation")
-	case <-time.After(30 * time.Millisecond):
-	}
-	if got := sent.Load(); got != 0 {
-		t.Fatalf("late sends after cancel = %d, want 0", got)
-	}
-}
-
-func TestSlashDynamicAgentPassesApprovalRequester(t *testing.T) {
-	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "claude"}},
-	}
-	result := slashDynamicAgentWithContext(context.Background(), driver, &ProgramSender{Send: func(tea.Msg) {}}, "claude", "inspect repo")
-	if result.Err != nil {
-		t.Fatalf("slashDynamicAgentWithContext() error = %v", result.Err)
-	}
-	if driver.lastStartedAgent != "claude" || driver.lastStartedPrompt != "inspect repo" {
-		t.Fatalf("started agent=%q prompt=%q", driver.lastStartedAgent, driver.lastStartedPrompt)
-	}
-	if driver.lastStartOptions.ApprovalRequester == nil {
-		t.Fatal("StartAgentSubagentWithOptions approval requester is nil")
-	}
-}
-
-func TestTUISubagentApprovalRequesterPromptsAndApproves(t *testing.T) {
-	prompts := make(chan PromptRequestMsg, 1)
-	requester := tuiSubagentApprovalRequester{send: func(msg tea.Msg) {
-		prompt, ok := msg.(PromptRequestMsg)
-		if !ok {
-			t.Fatalf("sent msg = %#v, want PromptRequestMsg", msg)
-		}
-		prompts <- prompt
-		prompt.Response <- PromptResponse{Line: "allow_once"}
-	}}
-
-	resp, err := requester.RequestApproval(context.Background(), sdkruntime.ApprovalRequest{
-		Tool: sdktool.Definition{Name: "BASH"},
-		Call: sdktool.Call{ID: "call-1", Name: "BASH"},
-		Approval: &sdksession.ProtocolApproval{
-			ToolCall: sdksession.ProtocolToolCall{
-				ID:       "call-1",
-				Name:     "BASH",
-				RawInput: map[string]any{"command": "git status"},
-			},
-			Options: []sdksession.ProtocolApprovalOption{
-				{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
-				{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("RequestApproval() error = %v", err)
-	}
-	if !resp.Approved || resp.Outcome != string(appgateway.ApprovalStatusSelected) || resp.OptionID != "allow_once" {
-		t.Fatalf("approval response = %#v, want selected allow_once", resp)
-	}
-	select {
-	case prompt := <-prompts:
-		if prompt.Prompt != "BASH" {
-			t.Fatalf("prompt title = %q, want BASH", prompt.Prompt)
-		}
-		if len(prompt.Choices) != 2 {
-			t.Fatalf("prompt choices = %#v, want two", prompt.Choices)
-		}
-		if len(prompt.Details) == 0 || !strings.Contains(prompt.Details[0].Value, "git status") {
-			t.Fatalf("prompt details = %#v, want command preview", prompt.Details)
-		}
-	default:
-		t.Fatal("approval prompt was not sent")
 	}
 }
 
@@ -756,11 +619,11 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "add copilot")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "remove copilot")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use copilot")
-	if driver.listAgentCalls != 1 || driver.agentStatusCalls != 4 || driver.addAgentCalls != 1 || driver.removeAgentCalls != 1 || driver.handoffAgentCalls != 1 || driver.askAgentCalls != 0 {
-		t.Fatalf("agent calls = list:%d status:%d add:%d remove:%d use:%d ask:%d", driver.listAgentCalls, driver.agentStatusCalls, driver.addAgentCalls, driver.removeAgentCalls, driver.handoffAgentCalls, driver.askAgentCalls)
+	if driver.listAgentCalls != 1 || driver.agentStatusCalls != 4 || driver.addAgentCalls != 1 || driver.removeAgentCalls != 1 || driver.handoffAgentCalls != 1 {
+		t.Fatalf("agent calls = list:%d status:%d add:%d remove:%d use:%d", driver.listAgentCalls, driver.agentStatusCalls, driver.addAgentCalls, driver.removeAgentCalls, driver.handoffAgentCalls)
 	}
-	if driver.lastAddedAgent != "copilot" || driver.lastRemovedAgent != "copilot" || driver.lastHandoffAgent != "copilot" || driver.lastAskedAgent != "" || driver.lastAskedPrompt != "" {
-		t.Fatalf("agent targets = add:%q remove:%q handoff:%q ask:%q prompt:%q", driver.lastAddedAgent, driver.lastRemovedAgent, driver.lastHandoffAgent, driver.lastAskedAgent, driver.lastAskedPrompt)
+	if driver.lastAddedAgent != "copilot" || driver.lastRemovedAgent != "copilot" || driver.lastHandoffAgent != "copilot" {
+		t.Fatalf("agent targets = add:%q remove:%q handoff:%q", driver.lastAddedAgent, driver.lastRemovedAgent, driver.lastHandoffAgent)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashAgent() emitted no messages")
@@ -1002,15 +865,8 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 
 func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:        "jeff",
-			Mention:       "@jeff",
-			Agent:         "copilot",
-			TaskID:        "task-1",
-			State:         "completed",
-			OutputPreview: "child ok",
-		},
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@jeff", "child ok")),
 	}
 	var msgs []tea.Msg
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/copilot inspect")
@@ -1032,123 +888,74 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	}
 }
 
-func TestDynamicAgentSlashWatchesRunningSubagentUntilOutput(t *testing.T) {
-	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 1)
-	stream <- tuiadapterruntime.SubagentStreamFrame{
-		TaskID:  "task-1",
-		Stream:  "stdout",
-		Text:    "我是 copilot 子代理",
-		Running: false,
-		Closed:  true,
-	}
-	close(stream)
+func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:  "mike",
-			Mention: "@mike",
-			Agent:   "copilot",
-			TaskID:  "task-1",
-			State:   "running",
-			Running: true,
-		},
-		subagentStream: stream,
-		waitSubagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:        "mike",
-			Mention:       "@mike",
-			Agent:         "copilot",
-			TaskID:        "task-1",
-			State:         "completed",
-			Running:       false,
-			OutputPreview: "我是 copilot 子代理",
-		},
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@mike", "我是 copilot 子代理")),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/copilot 介绍一下你自己")
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	if !result.ContinueRunning {
-		t.Fatalf("dynamic slash result = %#v, want running task to keep ticker active", result)
+	if result.ContinueRunning {
+		t.Fatalf("dynamic slash result = %#v, want participant turn to complete through gateway handle", result)
 	}
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case msg := <-msgs:
-			switch typed := msg.(type) {
-			case SubagentStartMsg:
-				t.Fatalf("dynamic slash emitted SPAWN panel start message: %#v", typed)
-			case TranscriptEventsMsg:
-				if transcriptEventsContainText(typed.Events, "copilot 子代理") {
-					if driver.subagentStreamSubscribeCalls == 0 {
-						t.Fatal("SubscribeSubagentStream was not called for running dynamic slash child")
-					}
-					return
-				}
+	close(msgs)
+	for msg := range msgs {
+		switch typed := msg.(type) {
+		case SubagentStartMsg:
+			t.Fatalf("dynamic slash emitted SPAWN panel start message: %#v", typed)
+		case TranscriptEventsMsg:
+			if transcriptEventsContainText(typed.Events, "copilot 子代理") {
+				return
 			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for watched subagent output; stream subscribe calls=%d wait calls=%d", driver.subagentStreamSubscribeCalls, driver.waitSubagentCalls)
+		case appgateway.EventEnvelope:
+			if transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(typed.Event), "copilot 子代理") {
+				return
+			}
 		}
 	}
+	t.Fatal("dynamic slash emitted no participant output")
 }
 
 func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:        "iris",
-			Mention:       "@iris",
-			Agent:         "codex",
-			TaskID:        "task-1",
-			State:         "running",
-			Running:       true,
-			OutputPreview: "Searching the Web",
-		},
-		waitSubagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:  "iris",
-			Mention: "@iris",
-			Agent:   "codex",
-			TaskID:  "task-1",
-			State:   "completed",
-			Running: false,
-			Result:  "上海今天阴有小雨。",
-		},
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@iris", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/codex 查询上海天气")
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	deadline := time.After(2 * time.Second)
-	for {
-		select {
-		case msg := <-msgs:
-			if transcript, ok := msg.(TranscriptEventsMsg); ok {
-				if transcriptEventsContainText(transcript.Events, "Searching the Web") {
-					t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
-				}
-				if transcriptEventsContainText(transcript.Events, "上海今天阴有小雨") {
-					return
-				}
+	close(msgs)
+	for msg := range msgs {
+		switch transcript := msg.(type) {
+		case TranscriptEventsMsg:
+			if transcriptEventsContainText(transcript.Events, "Searching the Web") {
+				t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
 			}
-		case <-deadline:
-			t.Fatalf("timed out waiting for final subagent output; wait calls=%d", driver.waitSubagentCalls)
+			if transcriptEventsContainText(transcript.Events, "上海今天阴有小雨") {
+				return
+			}
+		case appgateway.EventEnvelope:
+			events := ProjectGatewayEventToTranscriptEvents(transcript.Event)
+			if transcriptEventsContainText(events, "Searching the Web") {
+				t.Fatalf("running output preview was rendered as assistant text: %#v", transcript)
+			}
+			if transcriptEventsContainText(events, "上海今天阴有小雨") {
+				return
+			}
 		}
 	}
+	t.Fatal("final participant output was not rendered")
 }
 
 func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:  "kate",
-			Mention: "@kate",
-			Agent:   "codex",
-			TaskID:  "task-1",
-			State:   "completed",
-			Running: false,
-			Result:  "上海今天阴有小雨。",
-		},
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@kate", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 8)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/codex 查询上海天气")
@@ -1167,29 +974,10 @@ func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 	}
 }
 
-func TestDynamicAgentSlashStreamCompletionKeepsDivider(t *testing.T) {
-	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 1)
-	stream <- tuiadapterruntime.SubagentStreamFrame{
-		TaskID:  "task-1",
-		TurnID:  "task-1:1",
-		Stream:  "stdout",
-		Text:    "上海今天阴有小雨。",
-		Running: false,
-		Closed:  true,
-	}
-	close(stream)
+func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:  "kate",
-			Mention: "@kate",
-			Agent:   "codex",
-			TaskID:  "task-1",
-			TurnID:  "task-1:1",
-			State:   "running",
-			Running: true,
-		},
-		subagentStream: stream,
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "codex"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1:1", "@kate", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 8)
 	sender := &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}
@@ -1197,70 +985,38 @@ func TestDynamicAgentSlashStreamCompletionKeepsDivider(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	if !result.ContinueRunning {
-		t.Fatalf("dynamic slash result = %#v, want running task while stream bridge drains", result)
+	if result.ContinueRunning {
+		t.Fatalf("dynamic slash result = %#v, want participant turn to finish through gateway handle", result)
 	}
-	if !sender.waitForwarders(time.Second) {
-		t.Fatal("subagent forwarder did not exit")
+	if result.SuppressTurnDivider {
+		t.Fatalf("dynamic slash result = %#v, want divider kept", result)
 	}
 	close(msgs)
-	foundTaskResult := false
+	foundOutput := false
 	for msg := range msgs {
-		if task, ok := msg.(TaskResultMsg); ok {
-			foundTaskResult = true
-			if task.SuppressTurnDivider {
-				t.Fatalf("stream completion task result = %#v, want divider kept", task)
+		switch typed := msg.(type) {
+		case TranscriptEventsMsg:
+			if transcriptEventsContainText(typed.Events, "上海今天阴有小雨") {
+				foundOutput = true
+			}
+		case appgateway.EventEnvelope:
+			if transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(typed.Event), "上海今天阴有小雨") {
+				foundOutput = true
 			}
 		}
 	}
-	if !foundTaskResult {
-		t.Fatal("stream completion emitted no TaskResultMsg")
+	if !foundOutput {
+		t.Fatal("participant turn completion emitted no transcript output")
 	}
 }
 
-func TestDynamicSubagentStreamPreservesWhitespaceFrames(t *testing.T) {
-	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 3)
-	stream <- tuiadapterruntime.SubagentStreamFrame{TaskID: "task-1", Stream: "stdout", Text: "The", Running: true}
-	stream <- tuiadapterruntime.SubagentStreamFrame{TaskID: "task-1", Stream: "stdout", Text: " ", Running: true}
-	stream <- tuiadapterruntime.SubagentStreamFrame{TaskID: "task-1", Stream: "stdout", Text: "sandbox", Running: false, Closed: true}
-	close(stream)
-
-	driver := &bridgeTestDriver{subagentStream: stream}
-	msgs := make(chan tea.Msg, 8)
-	sender := &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}
-
-	startDynamicSubagentOutputBridge(context.Background(), driver, sender, tuiadapterruntime.SubagentSnapshot{
-		TaskID:  "task-1",
-		Running: true,
-		Mention: "@worker",
-	})
-	if !sender.waitForwarders(time.Second) {
-		t.Fatal("subagent forwarder did not exit")
-	}
-	close(msgs)
-
-	var text strings.Builder
-	for msg := range msgs {
-		if transcript, ok := msg.(TranscriptEventsMsg); ok {
-			for _, event := range transcript.Events {
-				if event.Kind == TranscriptEventNarrative && event.Scope == ACPProjectionParticipant {
-					text.WriteString(event.Text)
-				}
-			}
-		}
-	}
-	if got := text.String(); got != "The sandbox" {
-		t.Fatalf("streamed text = %q, want whitespace-only frame preserved", got)
-	}
-}
-
-func TestDynamicAgentSlashPrefersStructuredSubagentEvents(t *testing.T) {
+func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 	env := appgateway.EventEnvelope{
 		Event: appgateway.Event{
 			Kind:       appgateway.EventKindToolCall,
 			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 			Origin: &appgateway.EventOrigin{
-				Scope:   appgateway.EventScopeSubagent,
+				Scope:   appgateway.EventScopeParticipant,
 				ScopeID: "child-1",
 				Actor:   "copilot",
 			},
@@ -1269,30 +1025,13 @@ func TestDynamicAgentSlashPrefersStructuredSubagentEvents(t *testing.T) {
 				ToolName: "BASH",
 				RawInput: map[string]any{"command": "go test ./tui/tuiapp/..."},
 				Status:   appgateway.ToolStatusRunning,
-				Scope:    appgateway.EventScopeSubagent,
+				Scope:    appgateway.EventScopeParticipant,
 			},
 		},
 	}
-	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 1)
-	stream <- tuiadapterruntime.SubagentStreamFrame{
-		TaskID:  "task-1",
-		Stream:  "stdout",
-		Text:    "working",
-		Running: true,
-		Event:   &env,
-	}
-	close(stream)
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:  "mike",
-			Mention: "@mike",
-			Agent:   "copilot",
-			TaskID:  "task-1",
-			State:   "running",
-			Running: true,
-		},
-		subagentStream: stream,
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
+		subagentTurn: bridgeTurnWithEvents(env),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/copilot run tests")
@@ -1316,84 +1055,17 @@ func TestDynamicAgentSlashPrefersStructuredSubagentEvents(t *testing.T) {
 			if envMsg.Event.Origin == nil || envMsg.Event.Origin.Scope != appgateway.EventScopeParticipant {
 				t.Fatalf("event origin = %#v, want dynamic side ACP participant scope", envMsg.Event.Origin)
 			}
-			if driver.subagentStreamSubscribeCalls == 0 {
-				t.Fatal("SubscribeSubagentStream was not called")
-			}
 			return
 		case <-deadline:
-			t.Fatalf("timed out waiting for structured subagent event; stream subscribe calls=%d", driver.subagentStreamSubscribeCalls)
+			t.Fatal("timed out waiting for structured participant event")
 		}
 	}
 }
 
-func TestDynamicSubagentStructuredEventUsesMentionAndPromptTurnScope(t *testing.T) {
-	env := appgateway.EventEnvelope{
-		Event: appgateway.Event{
-			Kind:       appgateway.EventKindToolCall,
-			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
-			Origin: &appgateway.EventOrigin{
-				Scope:   appgateway.EventScopeSubagent,
-				ScopeID: "codex-001",
-				Actor:   "codex-001",
-			},
-			ToolCall: &appgateway.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "Searching the Web",
-				Actor:    "codex-001",
-				RawInput: map[string]any{"query": "weather: Shanghai"},
-				Status:   appgateway.ToolStatusRunning,
-			},
-		},
-	}
-	normalized := normalizeDynamicSubagentGatewayEvent(env, tuiadapterruntime.SubagentSnapshot{
-		TaskID:  "task-1",
-		TurnID:  "task-1:2",
-		Mention: "@kate",
-		Agent:   "codex",
-	}, tuiadapterruntime.SubagentStreamFrame{
-		TaskID: "task-1",
-		TurnID: "task-1:2",
-	})
-	events := ProjectGatewayEventToTranscriptEvents(normalized.Event)
-	if len(events) != 1 {
-		t.Fatalf("events = %#v, want one transcript event", events)
-	}
-	if events[0].Scope != ACPProjectionParticipant || events[0].ScopeID != "task-1:2" {
-		t.Fatalf("event scope = %s/%q, want participant task-1:2", events[0].Scope, events[0].ScopeID)
-	}
-	if events[0].Actor != "@kate" {
-		t.Fatalf("event actor = %q, want @kate", events[0].Actor)
-	}
-}
-
-func TestDynamicAgentSlashFallsBackWhenStructuredEventIsNotRenderable(t *testing.T) {
-	env := appgateway.EventEnvelope{
-		Event: appgateway.Event{
-			Kind:       appgateway.EventKindAssistantMessage,
-			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
-		},
-	}
-	stream := make(chan tuiadapterruntime.SubagentStreamFrame, 1)
-	stream <- tuiadapterruntime.SubagentStreamFrame{
-		TaskID:  "task-1",
-		Stream:  "stdout",
-		Text:    "fallback side output",
-		Running: false,
-		Closed:  true,
-		Event:   &env,
-	}
-	close(stream)
+func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
-		subagentSnapshot: tuiadapterruntime.SubagentSnapshot{
-			Handle:  "mike",
-			Mention: "@mike",
-			Agent:   "copilot",
-			TaskID:  "task-1",
-			State:   "running",
-			Running: true,
-		},
-		subagentStream: stream,
+		agentList:    []tuiadapterruntime.AgentCandidate{{Name: "copilot"}},
+		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@mike", "fallback side output")),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/copilot run tests")
@@ -1404,15 +1076,16 @@ func TestDynamicAgentSlashFallsBackWhenStructuredEventIsNotRenderable(t *testing
 	for {
 		select {
 		case msg := <-msgs:
-			if _, ok := msg.(appgateway.EventEnvelope); ok {
-				t.Fatalf("non-renderable structured event should not be emitted: %#v", msg)
-			}
 			transcript, ok := msg.(TranscriptEventsMsg)
 			if ok && transcriptEventsContainText(transcript.Events, "fallback side output") {
 				return
 			}
+			env, ok := msg.(appgateway.EventEnvelope)
+			if ok && transcriptEventsContainText(ProjectGatewayEventToTranscriptEvents(env.Event), "fallback side output") {
+				return
+			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for fallback side output; stream subscribe calls=%d", driver.subagentStreamSubscribeCalls)
+			t.Fatal("timed out waiting for fallback side output")
 		}
 	}
 }
@@ -1571,47 +1244,38 @@ func transcriptEventsContainText(events []TranscriptEvent, text string) bool {
 }
 
 type bridgeTestDriver struct {
-	status                       tuiadapterruntime.StatusSnapshot
-	connectStatus                tuiadapterruntime.StatusSnapshot
-	useModelStatus               tuiadapterruntime.StatusSnapshot
-	newSession                   sdksession.Session
-	resumedSession               sdksession.Session
-	replay                       []appgateway.EventEnvelope
-	connectCalls                 int
-	useModelCalls                int
-	deleteModelCalls             int
-	listAgentCalls               int
-	agentStatusCalls             int
-	addAgentCalls                int
-	removeAgentCalls             int
-	handoffAgentCalls            int
-	askAgentCalls                int
-	compactCalls                 int
-	lastConnect                  tuiadapterruntime.ConnectConfig
-	lastModelAlias               string
-	lastReasoningEffort          string
-	lastDeletedAlias             string
-	lastAddedAgent               string
-	lastAddOptions               tuiadapterruntime.AgentAddOptions
-	lastRemovedAgent             string
-	lastHandoffAgent             string
-	lastAskedAgent               string
-	lastAskedPrompt              string
-	lastStartedAgent             string
-	lastStartedPrompt            string
-	lastStartOptions             tuiadapterruntime.SubagentStartOptions
-	lastContinuedHandle          string
-	lastContinuedPrompt          string
-	subagentSnapshot             tuiadapterruntime.SubagentSnapshot
-	subagentStream               <-chan tuiadapterruntime.SubagentStreamFrame
-	subagentStreamSubscribeCalls int
-	waitSubagentCalls            int
-	lastWaitTaskID               string
-	waitSubagentSnapshot         tuiadapterruntime.SubagentSnapshot
-	agentList                    []tuiadapterruntime.AgentCandidate
-	agentStatus                  tuiadapterruntime.AgentStatusSnapshot
-	addAgentErr                  error
-	slashArgCandidates           map[string][]tuiadapterruntime.SlashArgCandidate
+	status              tuiadapterruntime.StatusSnapshot
+	connectStatus       tuiadapterruntime.StatusSnapshot
+	useModelStatus      tuiadapterruntime.StatusSnapshot
+	newSession          sdksession.Session
+	resumedSession      sdksession.Session
+	replay              []appgateway.EventEnvelope
+	connectCalls        int
+	useModelCalls       int
+	deleteModelCalls    int
+	listAgentCalls      int
+	agentStatusCalls    int
+	addAgentCalls       int
+	removeAgentCalls    int
+	handoffAgentCalls   int
+	compactCalls        int
+	lastConnect         tuiadapterruntime.ConnectConfig
+	lastModelAlias      string
+	lastReasoningEffort string
+	lastDeletedAlias    string
+	lastAddedAgent      string
+	lastAddOptions      tuiadapterruntime.AgentAddOptions
+	lastRemovedAgent    string
+	lastHandoffAgent    string
+	lastStartedAgent    string
+	lastStartedPrompt   string
+	lastContinuedHandle string
+	lastContinuedPrompt string
+	subagentTurn        tuiadapterruntime.Turn
+	agentList           []tuiadapterruntime.AgentCandidate
+	agentStatus         tuiadapterruntime.AgentStatusSnapshot
+	addAgentErr         error
+	slashArgCandidates  map[string][]tuiadapterruntime.SlashArgCandidate
 }
 
 type bridgeTestTurn struct {
@@ -1630,6 +1294,34 @@ func (t *bridgeTestTurn) Submit(context.Context, appgateway.SubmitRequest) error
 }
 func (t *bridgeTestTurn) Cancel() bool { return false }
 func (t *bridgeTestTurn) Close() error { return nil }
+
+func bridgeTurnWithEvents(envs ...appgateway.EventEnvelope) tuiadapterruntime.Turn {
+	events := make(chan appgateway.EventEnvelope, len(envs))
+	for _, env := range envs {
+		events <- env
+	}
+	close(events)
+	return &bridgeTestTurn{events: events}
+}
+
+func participantAssistantEnvelope(scopeID string, actor string, text string) appgateway.EventEnvelope {
+	return appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindAssistantMessage,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		Origin: &appgateway.EventOrigin{
+			Scope:   appgateway.EventScopeParticipant,
+			ScopeID: scopeID,
+			Actor:   actor,
+		},
+		Narrative: &appgateway.NarrativePayload{
+			Role:  appgateway.NarrativeRoleAssistant,
+			Actor: actor,
+			Text:  text,
+			Final: true,
+			Scope: appgateway.EventScopeParticipant,
+		},
+	}}
+}
 
 type bridgeSubmitDriver struct {
 	turn                   tuiadapterruntime.Turn
@@ -1703,17 +1395,11 @@ func (d *bridgeSubmitDriver) RemoveAgent(context.Context, string) (tuiadapterrun
 func (d *bridgeSubmitDriver) HandoffAgent(context.Context, string) (tuiadapterruntime.AgentStatusSnapshot, error) {
 	return tuiadapterruntime.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) AskAgent(context.Context, string, string) (tuiadapterruntime.AgentStatusSnapshot, error) {
-	return tuiadapterruntime.AgentStatusSnapshot{}, nil
+func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string) (tuiadapterruntime.Turn, error) {
+	return nil, nil
 }
-func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string) (tuiadapterruntime.SubagentSnapshot, error) {
-	return tuiadapterruntime.SubagentSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) StartAgentSubagentWithOptions(context.Context, string, string, tuiadapterruntime.SubagentStartOptions) (tuiadapterruntime.SubagentSnapshot, error) {
-	return tuiadapterruntime.SubagentSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string) (tuiadapterruntime.SubagentSnapshot, error) {
-	return tuiadapterruntime.SubagentSnapshot{}, nil
+func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string) (tuiadapterruntime.Turn, error) {
+	return nil, nil
 }
 func (d *bridgeSubmitDriver) CompleteMention(context.Context, string, int) ([]tuiadapterruntime.CompletionCandidate, error) {
 	return nil, nil
@@ -1823,41 +1509,21 @@ func (d *bridgeTestDriver) HandoffAgent(_ context.Context, target string) (tuiad
 	d.lastHandoffAgent = target
 	return d.agentStatus, nil
 }
-func (d *bridgeTestDriver) AskAgent(_ context.Context, target string, prompt string) (tuiadapterruntime.AgentStatusSnapshot, error) {
-	d.askAgentCalls++
-	d.lastAskedAgent = target
-	d.lastAskedPrompt = prompt
-	return d.agentStatus, nil
-}
-func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string) (tuiadapterruntime.SubagentSnapshot, error) {
-	return d.StartAgentSubagentWithOptions(context.Background(), agent, prompt, tuiadapterruntime.SubagentStartOptions{})
-}
-func (d *bridgeTestDriver) StartAgentSubagentWithOptions(_ context.Context, agent string, prompt string, opts tuiadapterruntime.SubagentStartOptions) (tuiadapterruntime.SubagentSnapshot, error) {
+func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string) (tuiadapterruntime.Turn, error) {
 	d.lastStartedAgent = agent
 	d.lastStartedPrompt = prompt
-	d.lastStartOptions = opts
-	return d.subagentSnapshot, nil
+	if d.subagentTurn != nil {
+		return d.subagentTurn, nil
+	}
+	return bridgeTurnWithEvents(), nil
 }
-func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string) (tuiadapterruntime.SubagentSnapshot, error) {
+func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string) (tuiadapterruntime.Turn, error) {
 	d.lastContinuedHandle = handle
 	d.lastContinuedPrompt = prompt
-	return d.subagentSnapshot, nil
-}
-func (d *bridgeTestDriver) SubscribeSubagentStream(_ context.Context, taskID string) (<-chan tuiadapterruntime.SubagentStreamFrame, bool) {
-	d.subagentStreamSubscribeCalls++
-	if d.subagentStream == nil {
-		return nil, false
+	if d.subagentTurn != nil {
+		return d.subagentTurn, nil
 	}
-	d.lastWaitTaskID = taskID
-	return d.subagentStream, true
-}
-func (d *bridgeTestDriver) WaitSubagent(_ context.Context, taskID string) (tuiadapterruntime.SubagentSnapshot, error) {
-	d.waitSubagentCalls++
-	d.lastWaitTaskID = taskID
-	if strings.TrimSpace(d.waitSubagentSnapshot.TaskID) == "" {
-		return d.subagentSnapshot, nil
-	}
-	return d.waitSubagentSnapshot, nil
+	return bridgeTurnWithEvents(), nil
 }
 func (d *bridgeTestDriver) CompleteMention(context.Context, string, int) ([]tuiadapterruntime.CompletionCandidate, error) {
 	return nil, nil

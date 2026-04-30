@@ -89,6 +89,9 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 
 	switch ev.Kind {
 	case appgateway.EventKindUserMessage:
+		if scope != ACPProjectionMain {
+			break
+		}
 		if text := strings.TrimSpace(gatewayUserText(ev)); text != "" {
 			out = append(out, TranscriptEvent{
 				Kind:          TranscriptEventNarrative,
@@ -106,6 +109,9 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			actor := gatewayDisplayActor(ev, payload.Actor)
 			switch payload.Role {
 			case appgateway.NarrativeRoleUser:
+				if scope != ACPProjectionMain {
+					break
+				}
 				if text := strings.TrimSpace(payload.Text); text != "" {
 					out = append(out, TranscriptEvent{
 						Kind:          TranscriptEventNarrative,

@@ -2,7 +2,9 @@ package local
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
@@ -192,6 +194,8 @@ func (r *Runtime) executeACPControllerTurn(
 		return
 	}
 	if turnResult.Handle != nil {
+		handle.setCancelHook(turnResult.Handle.Cancel)
+		defer turnResult.Handle.Close()
 		accumulator := acpNarrativeAccumulator{}
 		for event, seqErr := range turnResult.Handle.Events() {
 			if seqErr != nil {
@@ -552,83 +556,132 @@ func (r *Runtime) DetachACPParticipant(ctx context.Context, req sdkruntime.Detac
 	return r.sessions.Session(ctx, ref)
 }
 
-func (r *Runtime) PromptACPParticipant(ctx context.Context, req sdkruntime.PromptACPParticipantRequest) (sdksession.Session, error) {
+func (r *Runtime) PromptACPParticipant(ctx context.Context, req sdkruntime.PromptACPParticipantRequest) (sdkruntime.RunResult, error) {
 	if r == nil || r.controllers == nil {
-		return sdksession.Session{}, fmt.Errorf("sdk/runtime/local: ACP controller backend is not configured")
+		return sdkruntime.RunResult{}, fmt.Errorf("sdk/runtime/local: ACP controller backend is not configured")
 	}
 	ref := sdksession.NormalizeSessionRef(req.SessionRef)
 	session, err := r.sessions.Session(ctx, ref)
 	if err != nil {
-		return sdksession.Session{}, err
+		return sdkruntime.RunResult{}, err
 	}
 	session, err = r.ensureSessionController(ctx, session)
 	if err != nil {
-		return sdksession.Session{}, err
+		return sdkruntime.RunResult{}, err
 	}
 	binding, _ := participantBinding(session, strings.TrimSpace(req.ParticipantID))
 	contextPrelude := r.buildParticipantPromptContext(ctx, session, ref, binding)
 	turnID := r.nextID("participant-turn", nil)
+	runID := r.nextID("participant-run", nil)
+	runCtx, cancel := context.WithCancel(ctx)
+	handle := newRunner(runID, cancel)
+	go r.executeACPParticipantTurn(runCtx, session, ref, req, binding, contextPrelude, runID, turnID, handle)
+	return sdkruntime.RunResult{
+		Session: session,
+		Handle:  handle,
+	}, nil
+}
+
+func (r *Runtime) executeACPParticipantTurn(
+	ctx context.Context,
+	session sdksession.Session,
+	ref sdksession.SessionRef,
+	req sdkruntime.PromptACPParticipantRequest,
+	binding sdksession.ParticipantBinding,
+	contextPrelude string,
+	runID string,
+	turnID string,
+	handle *runner,
+) {
+	defer handle.finish()
+	participantID := strings.TrimSpace(req.ParticipantID)
 	if userEvent := participantPromptUserEvent(session, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.ContentParts, r.now()); userEvent != nil {
-		if _, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		persisted, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
 			SessionRef: ref,
 			Event:      userEvent,
-		}); err != nil {
-			return sdksession.Session{}, err
+		})
+		if err != nil {
+			handle.publishError(err)
+			return
 		}
+		handle.publishEvent(persisted)
 	}
 	turnResult, err := r.controllers.PromptParticipant(ctx, sdkcontroller.ParticipantPromptRequest{
-		SessionRef:     ref,
-		Session:        session,
-		TurnID:         turnID,
-		ParticipantID:  strings.TrimSpace(req.ParticipantID),
-		Input:          strings.TrimSpace(req.Input),
-		ContentParts:   req.ContentParts,
-		ContextPrelude: contextPrelude,
+		SessionRef:        ref,
+		Session:           session,
+		TurnID:            turnID,
+		ParticipantID:     participantID,
+		Input:             strings.TrimSpace(req.Input),
+		ContentParts:      req.ContentParts,
+		ContextPrelude:    contextPrelude,
+		Stream:            req.Stream,
+		Mode:              r.policyMode(sdkruntime.AgentSpec{}),
+		ApprovalRequester: controllerApprovalRequester{requester: req.ApprovalRequester, sessionRef: ref, session: session, runID: runID, turnID: turnID},
 	})
 	if err != nil {
-		return sdksession.Session{}, err
+		handle.publishError(err)
+		return
 	}
-	if turnResult.Handle != nil {
-		accumulator := acpNarrativeAccumulator{}
-		for event, seqErr := range turnResult.Handle.Events() {
-			if seqErr != nil {
-				return sdksession.Session{}, seqErr
-			}
-			normalized := normalizeEvent(session, strings.TrimSpace(req.ParticipantID), event)
-			if normalized == nil {
-				continue
-			}
-			if isACPParticipantUserEcho(normalized) {
-				continue
-			}
-			if persistedEvent, _, ok := accumulator.normalize(normalized); ok {
-				if persistedEvent == nil {
-					continue
-				}
-				normalized = persistedEvent
-			}
-			if sdksession.IsCanonicalHistoryEvent(normalized) {
-				if _, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
-					SessionRef: ref,
-					Event:      normalized,
-				}); err != nil {
-					return sdksession.Session{}, err
-				}
-			}
+	if turnResult.Handle == nil {
+		return
+	}
+	handle.setCancelHook(turnResult.Handle.Cancel)
+	defer turnResult.Handle.Close()
+	accumulator := acpNarrativeAccumulator{}
+	for event, seqErr := range turnResult.Handle.Events() {
+		if seqErr != nil {
+			handle.publishError(seqErr)
+			return
 		}
-		if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
-			if _, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		normalized := normalizeEvent(session, turnID, event)
+		if normalized == nil {
+			continue
+		}
+		if isACPParticipantUserEcho(normalized) {
+			continue
+		}
+		publishEvent := normalized
+		if persistedEvent, liveEvent, ok := accumulator.normalize(normalized); ok {
+			if liveEvent != nil {
+				handle.publishEvent(liveEvent)
+			}
+			if persistedEvent == nil {
+				continue
+			}
+			normalized = persistedEvent
+			publishEvent = nil
+		}
+		if sdksession.IsCanonicalHistoryEvent(normalized) {
+			persisted, appendErr := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
 				SessionRef: ref,
-				Event:      finalEvent,
-			}); err != nil {
-				return sdksession.Session{}, err
+				Event:      normalized,
+			})
+			if appendErr != nil {
+				handle.publishError(appendErr)
+				return
 			}
+			normalized = persisted
 		}
-		if err := r.updateParticipantContextCheckpoint(ctx, ref, strings.TrimSpace(req.ParticipantID)); err != nil {
-			return sdksession.Session{}, err
+		if publishEvent == nil {
+			publishEvent = normalized
 		}
+		handle.publishEvent(publishEvent)
 	}
-	return r.sessions.Session(ctx, ref)
+	if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
+		persisted, appendErr := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+			SessionRef: ref,
+			Event:      finalEvent,
+		})
+		if appendErr != nil {
+			handle.publishError(appendErr)
+			return
+		}
+		handle.publishEvent(persisted)
+	}
+	if err := r.updateParticipantContextCheckpoint(ctx, ref, participantID); err != nil {
+		handle.publishError(err)
+		return
+	}
 }
 
 func participantPromptUserEvent(
@@ -1194,6 +1247,14 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 			Kind: strings.TrimSpace(item.Kind),
 		})
 	}
+	toolName := firstNonEmpty(req.ToolCall.Name, req.ToolCall.Title, "ACP_TOOL")
+	rawInput := maps.Clone(req.ToolCall.RawInput)
+	var callInput json.RawMessage
+	if len(rawInput) > 0 {
+		if data, marshalErr := json.Marshal(rawInput); marshalErr == nil {
+			callInput = data
+		}
+	}
 	resp, err := r.requester.RequestApproval(ctx, sdkruntime.ApprovalRequest{
 		SessionRef: sdksession.NormalizeSessionRef(r.sessionRef),
 		Session:    sdksession.CloneSession(r.session),
@@ -1201,19 +1262,22 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		TurnID:     strings.TrimSpace(r.turnID),
 		Mode:       strings.TrimSpace(req.Mode),
 		Tool: sdktool.Definition{
-			Name:        firstNonEmpty(req.ToolCall.Name, req.ToolCall.Title, "ACP_TOOL"),
+			Name:        toolName,
 			Description: firstNonEmpty(req.ToolCall.Title, req.ToolCall.Kind, "ACP controller requested permission"),
 		},
 		Call: sdktool.Call{
-			ID:   strings.TrimSpace(req.ToolCall.ID),
-			Name: firstNonEmpty(req.ToolCall.Name, req.ToolCall.Title, "ACP_TOOL"),
+			ID:    strings.TrimSpace(req.ToolCall.ID),
+			Name:  toolName,
+			Input: callInput,
 		},
 		Approval: &sdksession.ProtocolApproval{
 			ToolCall: sdksession.ProtocolToolCall{
-				ID:     strings.TrimSpace(req.ToolCall.ID),
-				Kind:   strings.TrimSpace(req.ToolCall.Kind),
-				Title:  strings.TrimSpace(req.ToolCall.Title),
-				Status: strings.TrimSpace(req.ToolCall.Status),
+				ID:       strings.TrimSpace(req.ToolCall.ID),
+				Name:     toolName,
+				Kind:     strings.TrimSpace(req.ToolCall.Kind),
+				Title:    strings.TrimSpace(req.ToolCall.Title),
+				Status:   strings.TrimSpace(req.ToolCall.Status),
+				RawInput: rawInput,
 			},
 			Options: options,
 		},

@@ -79,11 +79,15 @@ type participantRun struct {
 	remoteSessionID string
 	binding         sdksession.ParticipantBinding
 
-	mu        sync.Mutex
-	turnID    string
-	handle    *turnHandle
-	events    []*sdksession.Event
-	updatedAt time.Time
+	mu                sync.Mutex
+	turnID            string
+	turnSession       sdksession.Session
+	turnStream        bool
+	turnMode          string
+	approvalRequester sdkcontroller.ApprovalRequester
+	handle            *turnHandle
+	events            []*sdksession.Event
+	updatedAt         time.Time
 }
 
 func NewManager(cfg Config) (*Manager, error) {
@@ -304,13 +308,15 @@ func (m *Manager) PromptParticipant(ctx context.Context, req sdkcontroller.Parti
 	go func() {
 		defer handle.finish()
 		if _, err := run.client.PromptParts(turnCtx, run.remoteSessionID, prompt, nil); err != nil {
-			run.finishPrompt()
+			_, _ = run.finishPrompt()
 			handle.publishError(err)
 			return
 		}
-		buffered := run.finishPrompt()
-		for _, event := range buffered {
-			handle.publishEvent(event)
+		buffered, stream := run.finishPrompt()
+		if !stream {
+			for _, event := range buffered {
+				handle.publishEvent(event)
+			}
 		}
 	}()
 	return sdkcontroller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
@@ -343,7 +349,12 @@ func (m *Manager) startParticipant(
 			run.handleUpdate(m.clock, env)
 		}
 	},
-		m.permissionHandler(sdksession.CloneSession(session), strings.TrimSpace(cfg.Name), "", nil),
+		func(ctx context.Context, req sdkacpclient.RequestPermissionRequest) (sdkacpclient.RequestPermissionResponse, error) {
+			if run != nil {
+				return run.permissionHandler(ctx, req)
+			}
+			return m.permissionHandler(sdksession.CloneSession(session), strings.TrimSpace(cfg.Name), "", nil)(ctx, req)
+		},
 	)
 	if err != nil {
 		return nil, err
@@ -493,11 +504,12 @@ func translateApprovalRequest(
 		Agent:      strings.TrimSpace(agent),
 		Mode:       strings.TrimSpace(mode),
 		ToolCall: sdkcontroller.ApprovalToolCall{
-			ID:     strings.TrimSpace(req.ToolCall.ToolCallID),
-			Name:   acputil.ToolCallName(req.ToolCall),
-			Kind:   derefString(req.ToolCall.Kind),
-			Title:  derefString(req.ToolCall.Title),
-			Status: derefString(req.ToolCall.Status),
+			ID:       strings.TrimSpace(req.ToolCall.ToolCallID),
+			Name:     acputil.ToolCallName(req.ToolCall),
+			Kind:     derefString(req.ToolCall.Kind),
+			Title:    derefString(req.ToolCall.Title),
+			Status:   derefString(req.ToolCall.Status),
+			RawInput: acpRawMap(req.ToolCall.RawInput),
 		},
 		Options: options,
 	}
@@ -793,13 +805,17 @@ func (r *participantRun) beginPrompt(req sdkcontroller.ParticipantPromptRequest,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.turnID = firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(req.ParticipantID), r.id)
+	r.turnSession = sdksession.CloneSession(req.Session)
+	r.turnStream = req.Stream
+	r.turnMode = strings.TrimSpace(req.Mode)
+	r.approvalRequester = req.ApprovalRequester
 	r.handle = handle
 	r.events = nil
 }
 
-func (r *participantRun) finishPrompt() []*sdksession.Event {
+func (r *participantRun) finishPrompt() ([]*sdksession.Event, bool) {
 	if r == nil {
-		return nil
+		return nil, false
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -807,10 +823,40 @@ func (r *participantRun) finishPrompt() []*sdksession.Event {
 	for _, event := range r.events {
 		buffered = append(buffered, sdksession.CloneEvent(event))
 	}
+	stream := r.turnStream
 	r.turnID = ""
+	r.turnSession = sdksession.Session{}
+	r.turnStream = false
+	r.turnMode = ""
+	r.approvalRequester = nil
 	r.handle = nil
 	r.events = nil
-	return buffered
+	return buffered, stream
+}
+
+func (r *participantRun) permissionHandler(ctx context.Context, req sdkacpclient.RequestPermissionRequest) (sdkacpclient.RequestPermissionResponse, error) {
+	if r == nil {
+		return acputil.RejectOnce(), nil
+	}
+	r.mu.Lock()
+	session := sdksession.CloneSession(r.turnSession)
+	mode := strings.TrimSpace(r.turnMode)
+	requester := r.approvalRequester
+	agent := strings.TrimSpace(r.agent)
+	r.mu.Unlock()
+	if auto, ok := acputil.AutoApproveAllOnce(mode, agent, req); ok {
+		return auto, nil
+	}
+	if requester != nil {
+		resp, err := requester.RequestControllerApproval(ctx, translateApprovalRequest(session, agent, mode, req))
+		if err != nil {
+			return sdkacpclient.RequestPermissionResponse{}, err
+		}
+		if selected, ok := acputil.SelectedOutcome(resp.Outcome, resp.OptionID); ok {
+			return selected, nil
+		}
+	}
+	return acputil.RejectOnce(), nil
 }
 
 func (r *participantRun) handleUpdate(clock func() time.Time, env sdkacpclient.UpdateEnvelope) {
@@ -823,6 +869,8 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env sdkacpclient.U
 		return
 	}
 	turnID := r.turnID
+	stream := r.turnStream
+	handle := r.handle
 	event := normalizeACPUpdateEvent(clock, sdksession.ControllerBinding{
 		Kind:         sdksession.ControllerKindACP,
 		ControllerID: r.agent,
@@ -848,6 +896,9 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env sdkacpclient.U
 	r.updatedAt = clock()
 	r.events = append(r.events, sdksession.CloneEvent(event))
 	r.mu.Unlock()
+	if stream && handle != nil {
+		handle.publishEvent(event)
+	}
 }
 
 type turnHandle struct {

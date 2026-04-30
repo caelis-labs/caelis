@@ -378,6 +378,60 @@ func TestInterruptCancelsActiveRunByBinding(t *testing.T) {
 	}
 }
 
+func TestPromptParticipantCancelCancelsRuntimeRunner(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		CWD: "/tmp/ws",
+	}
+	runner := &blockingCancelRunner{
+		eventsStarted: make(chan struct{}),
+		cancelled:     make(chan struct{}),
+		release:       make(chan struct{}),
+	}
+	rt := &controlPlaneRuntime{
+		session:    session,
+		attachResp: session,
+		promptResp: sdkruntime.RunResult{Session: session, Handle: runner},
+	}
+	svc := &recordingSessionService{startSessionResult: session, sessionResult: session}
+	gw, err := New(Config{
+		Sessions: svc,
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{}},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.PromptParticipant(context.Background(), PromptParticipantRequest{
+		SessionRef:    session.SessionRef,
+		ParticipantID: "side-1",
+		Input:         "hello",
+	})
+	if err != nil {
+		t.Fatalf("PromptParticipant() error = %v", err)
+	}
+	select {
+	case <-runner.eventsStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("runtime runner events were not attached")
+	}
+	if !result.Handle.Cancel() {
+		t.Fatal("participant turn Cancel() = false, want true")
+	}
+	select {
+	case <-runner.cancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant turn cancel did not cancel runtime runner")
+	}
+	close(runner.release)
+	for range result.Handle.Events() {
+	}
+}
+
 func TestHandoffControllerDelegatesToRuntimeControlPlaneAndUpdatesBinding(t *testing.T) {
 	t.Parallel()
 
@@ -1307,6 +1361,7 @@ type controlPlaneRuntime struct {
 	attachReq   sdkruntime.AttachACPParticipantRequest
 	attachResp  sdksession.Session
 	promptReq   sdkruntime.PromptACPParticipantRequest
+	promptResp  sdkruntime.RunResult
 	detachReq   sdkruntime.DetachACPParticipantRequest
 	detachResp  sdksession.Session
 }
@@ -1329,9 +1384,12 @@ func (r *controlPlaneRuntime) AttachACPParticipant(_ context.Context, req sdkrun
 	return r.attachResp, nil
 }
 
-func (r *controlPlaneRuntime) PromptACPParticipant(_ context.Context, req sdkruntime.PromptACPParticipantRequest) (sdksession.Session, error) {
+func (r *controlPlaneRuntime) PromptACPParticipant(_ context.Context, req sdkruntime.PromptACPParticipantRequest) (sdkruntime.RunResult, error) {
 	r.promptReq = req
-	return r.attachResp, nil
+	if r.promptResp.Handle != nil || r.promptResp.Session.SessionID != "" {
+		return r.promptResp, nil
+	}
+	return sdkruntime.RunResult{Session: r.attachResp}, nil
 }
 
 func (r *controlPlaneRuntime) DetachACPParticipant(_ context.Context, req sdkruntime.DetachACPParticipantRequest) (sdksession.Session, error) {
@@ -1538,6 +1596,35 @@ func (r blockingRunner) Events() iter.Seq2[*sdksession.Event, error] {
 func (blockingRunner) Submit(sdkruntime.Submission) error { return nil }
 func (blockingRunner) Cancel() bool                       { return true }
 func (blockingRunner) Close() error                       { return nil }
+
+type blockingCancelRunner struct {
+	eventsStarted chan struct{}
+	cancelled     chan struct{}
+	release       chan struct{}
+}
+
+func (r *blockingCancelRunner) RunID() string { return "run-blocking-cancel" }
+
+func (r *blockingCancelRunner) Events() iter.Seq2[*sdksession.Event, error] {
+	return func(yield func(*sdksession.Event, error) bool) {
+		close(r.eventsStarted)
+		<-r.release
+	}
+}
+
+func (r *blockingCancelRunner) Submit(sdkruntime.Submission) error { return nil }
+
+func (r *blockingCancelRunner) Cancel() bool {
+	select {
+	case <-r.cancelled:
+		return false
+	default:
+		close(r.cancelled)
+		return true
+	}
+}
+
+func (r *blockingCancelRunner) Close() error { return nil }
 
 func TestSanityTestClock(t *testing.T) {
 	t.Parallel()

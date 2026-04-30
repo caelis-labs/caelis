@@ -6,7 +6,6 @@ import (
 	"time"
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
@@ -119,37 +118,6 @@ type AgentAddOptions struct {
 	Install bool
 }
 
-type SubagentStartOptions struct {
-	ApprovalRequester sdkruntime.ApprovalRequester
-}
-
-type SubagentSnapshot struct {
-	Handle        string
-	Mention       string
-	Agent         string
-	TaskID        string
-	TurnID        string
-	State         string
-	Running       bool
-	OutputPreview string
-	Result        string
-	StdoutCursor  int64
-	StderrCursor  int64
-	EventCursor   int64
-}
-
-type SubagentStreamFrame struct {
-	TaskID    string
-	TurnID    string
-	Stream    string
-	Text      string
-	State     string
-	Running   bool
-	Closed    bool
-	Event     *appgateway.EventEnvelope
-	UpdatedAt time.Time
-}
-
 type ConnectConfig struct {
 	Provider            string
 	Model               string
@@ -202,10 +170,8 @@ type Driver interface {
 	AddAgentWithOptions(context.Context, string, AgentAddOptions) (AgentStatusSnapshot, error)
 	RemoveAgent(context.Context, string) (AgentStatusSnapshot, error)
 	HandoffAgent(context.Context, string) (AgentStatusSnapshot, error)
-	AskAgent(context.Context, string, string) (AgentStatusSnapshot, error)
-	StartAgentSubagent(context.Context, string, string) (SubagentSnapshot, error)
-	StartAgentSubagentWithOptions(context.Context, string, string, SubagentStartOptions) (SubagentSnapshot, error)
-	ContinueSubagent(context.Context, string, string) (SubagentSnapshot, error)
+	StartAgentSubagent(context.Context, string, string) (Turn, error)
+	ContinueSubagent(context.Context, string, string) (Turn, error)
 
 	CompleteMention(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteFile(context.Context, string, int) ([]CompletionCandidate, error)

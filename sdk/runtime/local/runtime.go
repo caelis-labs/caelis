@@ -804,6 +804,7 @@ type runner struct {
 	cancelled  bool
 	closed     bool
 	submitFunc func(sdkruntime.Submission) error
+	cancelHook func() bool
 }
 
 type runnerEvent struct {
@@ -843,15 +844,32 @@ func (r *runner) Submit(sub sdkruntime.Submission) error {
 
 func (r *runner) Cancel() bool {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.cancelled {
+		r.mu.Unlock()
 		return false
 	}
 	r.cancelled = true
-	if r.cancelFn != nil {
-		r.cancelFn()
+	cancelFn := r.cancelFn
+	cancelHook := r.cancelHook
+	r.mu.Unlock()
+
+	if cancelFn != nil {
+		cancelFn()
+	}
+	if cancelHook != nil {
+		cancelHook()
 	}
 	return true
+}
+
+func (r *runner) setCancelHook(fn func() bool) {
+	r.mu.Lock()
+	cancelled := r.cancelled
+	r.cancelHook = fn
+	r.mu.Unlock()
+	if cancelled && fn != nil {
+		fn()
+	}
 }
 
 func (r *runner) Close() error {

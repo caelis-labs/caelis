@@ -231,7 +231,12 @@ func (g *Gateway) ListSessions(ctx context.Context, req ListSessionsRequest) (sd
 }
 
 func (g *Gateway) Interrupt(ctx context.Context, req InterruptRequest) error {
-	_ = ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	ref, err := g.interruptTarget(req)
 	if err != nil {
 		return err
@@ -337,9 +342,9 @@ func (g *Gateway) DetachParticipant(ctx context.Context, req DetachParticipantRe
 	return session, nil
 }
 
-func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRequest) (sdksession.Session, error) {
+func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRequest) (BeginTurnResult, error) {
 	if g.control == nil {
-		return sdksession.Session{}, &Error{
+		return BeginTurnResult{}, &Error{
 			Kind:        KindUnsupported,
 			Code:        CodeControlPlaneUnsupported,
 			UserVisible: true,
@@ -348,20 +353,48 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 	}
 	ref, err := g.sessionTarget(req.SessionRef, req.BindingKey)
 	if err != nil {
-		return sdksession.Session{}, err
+		return BeginTurnResult{}, err
 	}
-	session, err := g.control.PromptACPParticipant(ctx, sdkruntime.PromptACPParticipantRequest{
-		SessionRef:    ref,
-		ParticipantID: strings.TrimSpace(req.ParticipantID),
-		Input:         strings.TrimSpace(req.Input),
-		ContentParts:  append([]sdkmodel.ContentPart(nil), req.ContentParts...),
-		Source:        strings.TrimSpace(req.Source),
-	})
+	session, err := g.sessions.Session(ctx, ref)
 	if err != nil {
-		return sdksession.Session{}, err
+		return BeginTurnResult{}, wrapSessionError(err)
 	}
 	g.bind(req.BindingKey, session.SessionRef, BindingDescriptor{})
-	return session, nil
+	runCtx, cancel := context.WithCancel(ctx)
+	cancelFn := sync.OnceValue(func() bool {
+		cancel()
+		return true
+	})
+	g.mu.Lock()
+	if _, ok := g.active[session.SessionID]; ok {
+		g.mu.Unlock()
+		return BeginTurnResult{}, &Error{
+			Kind:        KindConflict,
+			Code:        CodeActiveRunConflict,
+			UserVisible: true,
+			Message:     "gateway: session already has an active run",
+		}
+	}
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:   g.allocateID("handle"),
+		runID:      g.allocateID("participant-run"),
+		turnID:     g.allocateID("participant-turn"),
+		sessionRef: session.SessionRef,
+		createdAt:  g.clock(),
+		cancel: func() bool {
+			return cancelFn()
+		},
+	})
+	g.active[session.SessionID] = handle
+	g.noteActiveHandleLocked(session.SessionID, handle)
+	g.mu.Unlock()
+
+	go g.runParticipantTurn(runCtx, session, req, handle)
+
+	return BeginTurnResult{
+		Session: session,
+		Handle:  handle,
+	}, nil
 }
 
 func (g *Gateway) ControlPlaneState(ctx context.Context, req ControlPlaneStateRequest) (ControlPlaneState, error) {
@@ -544,7 +577,7 @@ func (g *Gateway) runTurn(
 	if len(runReq.ContentParts) == 0 && len(req.ContentParts) > 0 {
 		runReq.ContentParts = append([]sdkmodel.ContentPart(nil), req.ContentParts...)
 	}
-	runReq.ApprovalRequester = approvalRequesterFunc(func(req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
 		wait := handle.publishApproval(&req)
 		select {
 		case decision := <-wait:
@@ -553,12 +586,85 @@ func (g *Gateway) runTurn(
 				OptionID: decision.OptionID,
 				Approved: decision.Approved,
 			}, nil
+		case <-approvalCtx.Done():
+			return sdkruntime.ApprovalResponse{}, approvalCtx.Err()
 		case <-ctx.Done():
 			return sdkruntime.ApprovalResponse{}, ctx.Err()
 		}
 	})
 
 	result, err := g.runtime.Run(ctx, runReq)
+	if err != nil {
+		handle.publish(EventEnvelope{
+			Event: Event{
+				Kind:       EventKindLifecycle,
+				HandleID:   handle.handleID,
+				RunID:      handle.runID,
+				TurnID:     handle.turnID,
+				SessionRef: handle.sessionRef,
+			},
+			Err: EventError(err),
+		})
+		return
+	}
+	if result.Handle == nil {
+		return
+	}
+	handle.setRunner(result.Handle)
+	defer result.Handle.Close()
+	for event, seqErr := range result.Handle.Events() {
+		if seqErr != nil {
+			handle.publish(EventEnvelope{
+				Event: Event{
+					Kind:       EventKindLifecycle,
+					HandleID:   handle.handleID,
+					RunID:      handle.runID,
+					TurnID:     handle.turnID,
+					SessionRef: handle.sessionRef,
+				},
+				Err: EventError(seqErr),
+			})
+			return
+		}
+		handle.publishSessionEvent(event)
+		g.noteSessionCursor(session.SessionID, event.ID)
+	}
+}
+
+func (g *Gateway) runParticipantTurn(
+	ctx context.Context,
+	session sdksession.Session,
+	req PromptParticipantRequest,
+	handle *turnHandle,
+) {
+	defer handle.finish()
+	defer g.releaseActive(session.SessionID, handle)
+
+	runReq := sdkruntime.PromptACPParticipantRequest{
+		SessionRef:    session.SessionRef,
+		ParticipantID: strings.TrimSpace(req.ParticipantID),
+		Input:         strings.TrimSpace(req.Input),
+		ContentParts:  append([]sdkmodel.ContentPart(nil), req.ContentParts...),
+		Source:        strings.TrimSpace(req.Source),
+		Stream:        true,
+	}
+	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+		wait := handle.publishApproval(&req)
+		select {
+		case decision := <-wait:
+			return sdkruntime.ApprovalResponse{
+				Outcome:  decision.Outcome,
+				OptionID: decision.OptionID,
+				Approved: decision.Approved,
+			}, nil
+		case <-approvalCtx.Done():
+			return sdkruntime.ApprovalResponse{}, approvalCtx.Err()
+		case <-ctx.Done():
+			return sdkruntime.ApprovalResponse{}, ctx.Err()
+		}
+	})
+
+	result, err := g.control.PromptACPParticipant(ctx, runReq)
 	if err != nil {
 		handle.publish(EventEnvelope{
 			Event: Event{
@@ -831,10 +937,13 @@ func wrapSessionError(err error) error {
 	}
 }
 
-type approvalRequesterFunc func(sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error)
+type approvalRequesterFunc func(context.Context, sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error)
 
-func (f approvalRequesterFunc) RequestApproval(_ context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
-	return f(req)
+func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return f(ctx, req)
 }
 
 func (g *Gateway) ActiveCounts() (int, int) {

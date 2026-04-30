@@ -321,7 +321,14 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 		}
 	case "TASK":
 		return terminalDisplaySummary(output, isErr)
-	case "BASH", "SPAWN":
+	case "SPAWN":
+		if summary := spawnTerminalDisplaySummary(output, isErr); summary != "" {
+			return summary
+		}
+		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
+			return terminalEmptySummary(name, output, isErr)
+		}
+	case "BASH":
 		if summary := terminalDisplaySummary(output, isErr); summary != "" {
 			return summary
 		}
@@ -748,6 +755,25 @@ func terminalDisplaySummary(output map[string]any, isErr bool) string {
 		return text
 	}
 	return firstTrimmed(asString(output["stdout"]), asString(output["result"]), asString(output["output_preview"]), asString(output["stderr"]))
+}
+
+func spawnTerminalDisplaySummary(output map[string]any, isErr bool) string {
+	if isErr {
+		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
+			return stderr
+		}
+		if errText := strings.TrimSpace(asString(output["error"])); errText != "" {
+			return errText
+		}
+	}
+	return firstTrimmed(
+		asString(output["result"]),
+		asString(output["output"]),
+		asString(output["text"]),
+		asString(output["stdout"]),
+		asString(output["output_preview"]),
+		asString(output["stderr"]),
+	)
 }
 
 func terminalEmptySummary(name string, output map[string]any, isErr bool) string {

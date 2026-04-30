@@ -59,6 +59,32 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 }
 
+func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
+	t.Parallel()
+
+	req := translateApprovalRequest(sdksession.Session{
+		SessionRef: sdksession.SessionRef{SessionID: "sess-1"},
+	}, "codex", "default", sdkacpclient.RequestPermissionRequest{
+		SessionID: "remote-1",
+		ToolCall: sdkacpclient.ToolCallUpdate{
+			ToolCallID: "call-1",
+			Kind:       testStringPtr("execute"),
+			Title:      testStringPtr("Run command"),
+			Status:     testStringPtr("pending"),
+			RawInput: map[string]any{
+				"command": "pwd",
+				"workdir": "/tmp/project",
+			},
+		},
+	})
+	if req.ToolCall.RawInput["command"] != "pwd" {
+		t.Fatalf("ToolCall.RawInput[command] = %#v", req.ToolCall.RawInput["command"])
+	}
+	if req.ToolCall.RawInput["workdir"] != "/tmp/project" {
+		t.Fatalf("ToolCall.RawInput[workdir] = %#v", req.ToolCall.RawInput["workdir"])
+	}
+}
+
 func TestNormalizeACPUpdateEventMarksOnlySharedDialogueDurable(t *testing.T) {
 	t.Parallel()
 

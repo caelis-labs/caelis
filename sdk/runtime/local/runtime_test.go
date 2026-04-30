@@ -671,7 +671,11 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("participant prompt request was not sent")
 	}
-	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{SessionRef: updated.SessionRef})
+	if updated.Handle != nil {
+		for range updated.Handle.Events() {
+		}
+	}
+	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{SessionRef: updated.Session.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -704,6 +708,74 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 	}
 	if sideAssistants != 1 {
 		t.Fatalf("side assistant event count = %d, want one final side answer", sideAssistants)
+	}
+}
+
+func TestRuntimePromptACPParticipantCancelCancelsControllerTurn(t *testing.T) {
+	t.Parallel()
+
+	sessions, session := newTestSessionService(t, "sess-acp-side-cancel")
+	session, err := sessions.PutParticipant(context.Background(), sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
+			ID:        "emma",
+			Kind:      sdksession.ParticipantKindACP,
+			Role:      sdksession.ParticipantRoleSidecar,
+			Label:     "@emma",
+			AgentName: "claude",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutParticipant() error = %v", err)
+	}
+	controllerCancelled := make(chan struct{})
+	controllerHandle := newTestControllerTurnHandle(func() {
+		close(controllerCancelled)
+	})
+	turnReqCh := make(chan sdkcontroller.ParticipantPromptRequest, 1)
+	controller := stubACPController{
+		promptParticipant: func(ctx context.Context, req sdkcontroller.ParticipantPromptRequest) (sdkcontroller.TurnResult, error) {
+			_ = ctx
+			turnReqCh <- req
+			return sdkcontroller.TurnResult{Handle: controllerHandle}, nil
+		},
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:  controller,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.PromptACPParticipant(context.Background(), sdkruntime.PromptACPParticipantRequest{
+		SessionRef:    session.SessionRef,
+		ParticipantID: "emma",
+		Input:         "stop me",
+		Source:        "slash_claude",
+	})
+	if err != nil {
+		t.Fatalf("PromptACPParticipant() error = %v", err)
+	}
+	select {
+	case <-turnReqCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant prompt request was not sent")
+	}
+	if result.Handle == nil {
+		t.Fatal("PromptACPParticipant() handle = nil")
+	}
+	if !result.Handle.Cancel() {
+		t.Fatal("participant handle Cancel() = false, want true")
+	}
+	select {
+	case <-controllerCancelled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant handle cancel did not cancel controller turn")
+	}
+	controllerHandle.finish()
+	for range result.Handle.Events() {
 	}
 }
 
@@ -2855,6 +2927,56 @@ func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.
 	}
 	if state.Status != sdkruntime.RunLifecycleStatusCompleted {
 		t.Fatalf("final run state = %+v, want completed", state)
+	}
+}
+
+func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
+	t.Parallel()
+
+	var captured sdkruntime.ApprovalRequest
+	requester := controllerApprovalRequester{
+		requester: approvalRequesterFunc(func(_ context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+			captured = req
+			return sdkruntime.ApprovalResponse{
+				Outcome:  "selected",
+				OptionID: "allow_once",
+				Approved: true,
+			}, nil
+		}),
+		sessionRef: sdksession.SessionRef{SessionID: "sess-approval"},
+		session:    sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "sess-approval"}},
+		runID:      "run-1",
+		turnID:     "turn-1",
+	}
+	_, err := requester.RequestControllerApproval(context.Background(), sdkcontroller.ApprovalRequest{
+		Agent: "codex",
+		Mode:  "default",
+		ToolCall: sdkcontroller.ApprovalToolCall{
+			ID:     "call-1",
+			Name:   "BASH",
+			Kind:   "execute",
+			Title:  "Run command",
+			Status: "pending",
+			RawInput: map[string]any{
+				"command": "pwd",
+				"workdir": "/tmp/project",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestControllerApproval() error = %v", err)
+	}
+	if captured.Approval == nil {
+		t.Fatal("captured approval = nil")
+	}
+	if captured.Approval.ToolCall.RawInput["command"] != "pwd" {
+		t.Fatalf("Approval.ToolCall.RawInput[command] = %#v", captured.Approval.ToolCall.RawInput["command"])
+	}
+	if captured.Approval.ToolCall.RawInput["workdir"] != "/tmp/project" {
+		t.Fatalf("Approval.ToolCall.RawInput[workdir] = %#v", captured.Approval.ToolCall.RawInput["workdir"])
+	}
+	if captured.Call.Input == nil || !strings.Contains(string(captured.Call.Input), `"command":"pwd"`) {
+		t.Fatalf("Call.Input = %s, want command JSON", string(captured.Call.Input))
 	}
 }
 
