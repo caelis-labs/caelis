@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/acp"
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
@@ -400,6 +401,45 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	}
 }
 
+func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
+	workdir := t.TempDir()
+	stack, err := NewLocalStack(Config{
+		AppName:        "caelis",
+		UserID:         "self-model-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "default",
+		ContextWindow:  12345,
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+		},
+		Model: ModelConfig{
+			Provider:     "deepseek",
+			API:          sdkproviders.APIDeepSeek,
+			Model:        "deepseek-reasoner",
+			BaseURL:      "https://api.deepseek.example/v1",
+			TokenEnv:     "DEEPSEEK_TEST_TOKEN",
+			AuthType:     sdkproviders.AuthAPIKey,
+			HeaderKey:    "Authorization",
+			MaxOutputTok: 8192,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+
+	if err := stack.RegisterBuiltinACPAgent("codex"); err != nil {
+		t.Fatalf("RegisterBuiltinACPAgent(codex) error = %v", err)
+	}
+	assertSelfAgentArgsForModel(t, stack.runtime.Assembly.Agents)
+
+	if err := stack.UnregisterACPAgent("codex"); err != nil {
+		t.Fatalf("UnregisterACPAgent(codex) error = %v", err)
+	}
+	assertSelfAgentArgsForModel(t, stack.runtime.Assembly.Agents)
+}
+
 func modeIDs(modes []acp.SessionMode) []string {
 	out := make([]string, 0, len(modes))
 	for _, mode := range modes {
@@ -505,12 +545,40 @@ func attachAgentForToolTest(t *testing.T, stack *Stack, ref sdksession.SessionRe
 }
 
 func agentConfigSetHas(agents []sdkplugin.AgentConfig, name string) bool {
+	_, ok := agentConfigForToolTest(agents, name)
+	return ok
+}
+
+func agentConfigForToolTest(agents []sdkplugin.AgentConfig, name string) (sdkplugin.AgentConfig, bool) {
 	for _, agent := range agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Name), strings.TrimSpace(name)) {
-			return true
+			return agent, true
 		}
 	}
-	return false
+	return sdkplugin.AgentConfig{}, false
+}
+
+func assertSelfAgentArgsForModel(t *testing.T, agents []sdkplugin.AgentConfig) {
+	t.Helper()
+	self, ok := agentConfigForToolTest(agents, "self")
+	if !ok {
+		t.Fatalf("self agent missing from assembly: %#v", agents)
+	}
+	for _, want := range []string{
+		"-provider", "deepseek",
+		"-api", string(sdkproviders.APIDeepSeek),
+		"-model", "deepseek-reasoner",
+		"-base-url", "https://api.deepseek.example/v1",
+		"-token-env", "DEEPSEEK_TEST_TOKEN",
+		"-auth-type", string(sdkproviders.AuthAPIKey),
+		"-header-key", "Authorization",
+		"-context-window", "12345",
+		"-max-output-tokens", "8192",
+	} {
+		if !slices.Contains(self.Args, want) {
+			t.Fatalf("self args = %#v, missing %q", self.Args, want)
+		}
+	}
 }
 
 func repoRootForGatewayAppTest(t *testing.T) string {

@@ -114,6 +114,60 @@ func TestAppConfigStoreCanPersistTokenOnlyWhenExplicitlyEnabled(t *testing.T) {
 	}
 }
 
+func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CAELIS_CONFIG_STORE_TOKEN", "env-secret")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	raw := `{
+  "models": {
+    "default_alias": "deepseek/reasoner",
+    "configs": [
+      {
+        "alias": "deepseek/reasoner",
+        "provider": "deepseek",
+        "api": "deepseek",
+        "model": "deepseek-reasoner",
+        "token_env": "CAELIS_CONFIG_STORE_TOKEN"
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+	store := newAppConfigStore(root)
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(doc.Models.Configs) != 1 {
+		t.Fatalf("len(configs) = %d, want 1", len(doc.Models.Configs))
+	}
+	cfg := doc.Models.Configs[0]
+	if cfg.Token != "env-secret" {
+		t.Fatalf("loaded token = %q, want env token for runtime use", cfg.Token)
+	}
+	if cfg.PersistToken {
+		t.Fatal("loaded env token set PersistToken=true, want false")
+	}
+	doc.Agents = []AgentConfig{{
+		Name:    "helper",
+		Command: "true",
+	}}
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	persisted := readConfigFileForTest(t, root)
+	if strings.Contains(persisted, "env-secret") || strings.Contains(persisted, `"token"`) {
+		t.Fatalf("config persisted env token:\n%s", persisted)
+	}
+	if !strings.Contains(persisted, `"token_env": "CAELIS_CONFIG_STORE_TOKEN"`) {
+		t.Fatalf("config = %s, want token_env retained", persisted)
+	}
+}
+
 func TestAppConfigStoreLoadsLegacyUppercaseModelConfig(t *testing.T) {
 	t.Parallel()
 
