@@ -437,21 +437,27 @@ func (r *Runner) handleUpdate(run *childRun, env sdkacpclient.UpdateEnvelope) {
 			case sdkacpclient.UpdateAgentMessage:
 				streamText = run.appendAgentMessageLocked(text)
 				run.outputPreview = compactPreview(run.agentText)
+				if streamText != "" {
+					event = run.acpUpdateEvent(env, run.updatedAt, streamText)
+				}
 			case sdkacpclient.UpdateAgentThought:
 				streamName = "reasoning"
 				streamText = text
+				event = run.acpUpdateEvent(env, run.updatedAt, streamText)
 			default:
 				break
 			}
 		}
 	case sdkacpclient.ToolCall:
 		run.outputPreview = compactPreview(toolActivity(update.Title, update.Kind, update.Status))
+		event = run.acpUpdateEvent(env, run.updatedAt)
 	case sdkacpclient.ToolCallUpdate:
 		run.outputPreview = compactPreview(toolActivity(derefString(update.Title), derefString(update.Kind), derefString(update.Status)))
+		event = run.acpUpdateEvent(env, run.updatedAt)
 	case sdkacpclient.PlanUpdate:
 		run.outputPreview = "updating plan"
+		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
-	event = run.acpUpdateEvent(env, run.updatedAt)
 	if streamText != "" || event != nil {
 		run.emitLocked(sdkstream.Frame{
 			Ref: sdkstream.Ref{
@@ -468,7 +474,7 @@ func (r *Runner) handleUpdate(run *childRun, env sdkacpclient.UpdateEnvelope) {
 	}
 }
 
-func (run *childRun) acpUpdateEvent(env sdkacpclient.UpdateEnvelope, at time.Time) *sdksession.Event {
+func (run *childRun) acpUpdateEvent(env sdkacpclient.UpdateEnvelope, at time.Time, textOverride ...string) *sdksession.Event {
 	if run == nil {
 		return nil
 	}
@@ -506,30 +512,47 @@ func (run *childRun) acpUpdateEvent(env sdkacpclient.UpdateEnvelope, at time.Tim
 			Actor:      actor,
 			Scope:      &scopeCopy,
 			Text:       text,
-			Protocol:   &sdksession.EventProtocol{UpdateType: strings.TrimSpace(updateType)},
+			Protocol: &sdksession.EventProtocol{
+				UpdateType: strings.TrimSpace(updateType),
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: strings.TrimSpace(updateType),
+				},
+			},
 			Meta: map[string]any{
-				"task_id":    strings.TrimSpace(firstNonEmpty(run.taskID, run.anchor.TaskID)),
-				"agent":      strings.TrimSpace(run.anchor.Agent),
-				"agent_id":   strings.TrimSpace(run.anchor.AgentID),
-				"session_id": strings.TrimSpace(firstNonEmpty(env.SessionID, run.anchor.SessionID)),
+				"caelis": map[string]any{
+					"version": 1,
+					"runtime": map[string]any{
+						"subagent": map[string]any{
+							"task_id":    strings.TrimSpace(firstNonEmpty(run.taskID, run.anchor.TaskID)),
+							"agent":      strings.TrimSpace(run.anchor.Agent),
+							"agent_id":   strings.TrimSpace(run.anchor.AgentID),
+							"session_id": strings.TrimSpace(firstNonEmpty(env.SessionID, run.anchor.SessionID)),
+						},
+					},
+				},
 			},
 		}
 	}
 	switch update := env.Update.(type) {
 	case sdkacpclient.ContentChunk:
 		text := chunkText(update)
+		if len(textOverride) > 0 {
+			text = textOverride[0]
+		}
 		if text == "" {
 			return nil
 		}
 		switch strings.TrimSpace(update.SessionUpdate) {
 		case sdkacpclient.UpdateAgentMessage, sdkacpclient.UpdateAgentThought:
-			return base(update.SessionUpdate, sdksession.EventTypeAssistant, text)
+			event := base(update.SessionUpdate, sdksession.EventTypeAssistant, text)
+			event.Protocol.Update.Content = update.Content
+			return event
 		default:
 			return nil
 		}
 	case sdkacpclient.ToolCall:
 		event := base(update.SessionUpdate, sdksession.EventTypeToolCall, firstNonEmpty(strings.TrimSpace(update.Title), strings.TrimSpace(update.Kind), "tool call"))
-		event.Protocol.ToolCall = &sdksession.ProtocolToolCall{
+		tool := &sdksession.ProtocolToolCall{
 			ID:       strings.TrimSpace(update.ToolCallID),
 			Name:     acpToolDisplayName(update.Kind, update.Title),
 			Kind:     strings.TrimSpace(update.Kind),
@@ -537,11 +560,22 @@ func (run *childRun) acpUpdateEvent(env sdkacpclient.UpdateEnvelope, at time.Tim
 			Status:   firstNonEmpty(strings.TrimSpace(update.Status), "pending"),
 			RawInput: acpToolRawInput(update.Kind, update.Title, update.RawInput),
 		}
+		event.Protocol.ToolCall = tool
+		event.Protocol.Update = &sdksession.ProtocolUpdate{
+			SessionUpdate: strings.TrimSpace(update.SessionUpdate),
+			ToolCallID:    tool.ID,
+			Kind:          tool.Kind,
+			Title:         tool.Title,
+			Status:        tool.Status,
+			RawInput:      maps.Clone(tool.RawInput),
+			RawOutput:     maps.Clone(tool.RawOutput),
+			Meta:          maps.Clone(update.Meta),
+		}
 		return event
 	case sdkacpclient.ToolCallUpdate:
 		status := derefString(update.Status)
 		event := base(update.SessionUpdate, acpToolEventType(status), firstNonEmpty(derefString(update.Title), derefString(update.Kind), "tool update"))
-		event.Protocol.ToolCall = &sdksession.ProtocolToolCall{
+		tool := &sdksession.ProtocolToolCall{
 			ID:        strings.TrimSpace(update.ToolCallID),
 			Name:      acpToolDisplayName(derefString(update.Kind), derefString(update.Title)),
 			Kind:      derefString(update.Kind),
@@ -550,10 +584,25 @@ func (run *childRun) acpUpdateEvent(env sdkacpclient.UpdateEnvelope, at time.Tim
 			RawInput:  acpToolRawInput(derefString(update.Kind), derefString(update.Title), update.RawInput),
 			RawOutput: acpToolRawOutput(update.RawOutput, update.Content),
 		}
+		event.Protocol.ToolCall = tool
+		event.Protocol.Update = &sdksession.ProtocolUpdate{
+			SessionUpdate: strings.TrimSpace(update.SessionUpdate),
+			ToolCallID:    tool.ID,
+			Kind:          tool.Kind,
+			Title:         tool.Title,
+			Status:        tool.Status,
+			RawInput:      maps.Clone(tool.RawInput),
+			RawOutput:     maps.Clone(tool.RawOutput),
+			Meta:          maps.Clone(update.Meta),
+		}
 		return event
 	case sdkacpclient.PlanUpdate:
 		event := base(update.SessionUpdate, sdksession.EventTypePlan, "plan updated")
 		event.Protocol.Plan = &sdksession.ProtocolPlan{Entries: acpPlanEntries(update.Entries)}
+		event.Protocol.Update = &sdksession.ProtocolUpdate{
+			SessionUpdate: strings.TrimSpace(update.SessionUpdate),
+			Entries:       acpPlanEntries(update.Entries),
+		}
 		return event
 	default:
 		return nil
@@ -676,33 +725,9 @@ func (run *childRun) appendAgentMessageLocked(text string) string {
 	if strings.HasPrefix(run.agentText, text) {
 		return ""
 	}
-	overlap := longestSuffixPrefixOverlap(run.agentText, text)
-	delta := text
-	if overlap > 0 {
-		delta = text[overlap:]
-	}
-	run.agentText += delta
+	run.agentText += text
 	run.result = run.agentText
-	return delta
-}
-
-func longestSuffixPrefixOverlap(left string, right string) int {
-	if left == "" || right == "" {
-		return 0
-	}
-	best := 0
-	for idx := range right {
-		if idx == 0 || idx > len(left) {
-			continue
-		}
-		if strings.HasSuffix(left, right[:idx]) {
-			best = idx
-		}
-	}
-	if len(right) <= len(left) && strings.HasSuffix(left, right) {
-		best = len(right)
-	}
-	return best
+	return text
 }
 
 func chunkText(chunk sdkacpclient.ContentChunk) string {

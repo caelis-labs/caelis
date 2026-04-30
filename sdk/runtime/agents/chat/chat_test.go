@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -64,7 +65,7 @@ func TestChatAgentUsesSessionMessages(t *testing.T) {
 	}
 }
 
-func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T) {
+func TestChatAgentIncludesSideDialogueAndExcludesDelegatedSubagents(t *testing.T) {
 	t.Parallel()
 
 	model := &recordingModel{}
@@ -77,6 +78,19 @@ func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T
 		Context: context.Background(),
 		Session: sdksession.Session{
 			SessionRef: sdksession.SessionRef{SessionID: "sess-1"},
+			Participants: []sdksession.ParticipantBinding{{
+				ID:        "side-acp",
+				Kind:      sdksession.ParticipantKindACP,
+				Role:      sdksession.ParticipantRoleSidecar,
+				Label:     "@codex",
+				AgentName: "codex",
+			}, {
+				ID:        "child-1",
+				Kind:      sdksession.ParticipantKindSubagent,
+				Role:      sdksession.ParticipantRoleDelegated,
+				Label:     "@ella",
+				AgentName: "self",
+			}},
 		},
 		Events: []*sdksession.Event{
 			{
@@ -88,11 +102,13 @@ func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T
 				Type:    sdksession.EventTypeAssistant,
 				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "side acp")),
 				Text:    "side acp",
+				Actor:   sdksession.ActorRef{Kind: sdksession.ActorKindParticipant, ID: "side-acp", Name: "@codex"},
 				Scope: &sdksession.EventScope{
 					Source: "acp_participant",
 					Participant: sdksession.ParticipantRef{
 						ID:   "side-acp",
 						Kind: sdksession.ParticipantKindACP,
+						Role: sdksession.ParticipantRoleSidecar,
 					},
 				},
 			},
@@ -105,6 +121,7 @@ func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T
 					Participant: sdksession.ParticipantRef{
 						ID:   "child-1",
 						Kind: sdksession.ParticipantKindSubagent,
+						Role: sdksession.ParticipantRoleDelegated,
 					},
 				},
 			},
@@ -117,11 +134,14 @@ func TestChatAgentExcludesParticipantScopedMessagesFromModelContext(t *testing.T
 		}
 	}
 
-	if got := len(model.last.Messages); got != 1 {
-		t.Fatalf("len(Messages) = %d, want only main context message", got)
+	if got := len(model.last.Messages); got != 2 {
+		t.Fatalf("len(Messages) = %d, want main plus side final", got)
 	}
 	if got := model.last.Messages[0].TextContent(); got != "main user" {
 		t.Fatalf("message text = %q, want main user", got)
+	}
+	if got := model.last.Messages[1].TextContent(); got != "Assistant(@codex): side acp" {
+		t.Fatalf("side message text = %q", got)
 	}
 }
 
@@ -238,21 +258,248 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 	caelis, ok := events[1].Meta["caelis"].(map[string]any)
 	if !ok {
-		t.Fatalf("events[1].Meta = %#v, want caelis display extension", events[1].Meta)
+		t.Fatalf("events[1].Meta = %#v, want caelis extension", events[1].Meta)
 	}
-	display, ok := caelis["display"].(map[string]any)
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
 	if !ok {
-		t.Fatalf("events[1].Meta[caelis] = %#v, want display extension", caelis)
+		t.Fatalf("events[1].Meta[caelis] = %#v, want runtime extension", caelis)
 	}
-	toolDisplay, ok := display["tool"].(map[string]any)
-	if !ok || toolDisplay["name"] != "ECHO" {
-		t.Fatalf("display.tool = %#v, want ECHO tool display", display["tool"])
+	toolRuntime, ok := runtimeMeta["tool"].(map[string]any)
+	if !ok || toolRuntime["name"] != "ECHO" {
+		t.Fatalf("runtime.tool = %#v, want ECHO tool runtime name", runtimeMeta["tool"])
 	}
 	if events[2].Type != sdksession.EventTypeAssistant || events[2].Text != "pong" {
 		t.Fatalf("events[2] = %+v, want final assistant pong", events[2])
 	}
 	if events[2].Protocol == nil || events[2].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeAgentMessage) {
 		t.Fatalf("events[2].Protocol = %+v, want agent_message protocol payload", events[2].Protocol)
+	}
+}
+
+func TestToolCallEventsPersistAssistantTextInProtocolContent(t *testing.T) {
+	t.Parallel()
+
+	text := "I will inspect the files first."
+	message := sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{{
+		ID:   "call-1",
+		Name: "ECHO",
+		Args: `{"value":"one"}`,
+	}, {
+		ID:   "call-2",
+		Name: "ECHO",
+		Args: `{"value":"two"}`,
+	}}, text)
+	resp := &sdkmodel.Response{
+		Message: message,
+		Usage: sdkmodel.Usage{
+			PromptTokens:     10,
+			CompletionTokens: 2,
+			TotalTokens:      12,
+		},
+	}
+
+	events := modelToolCallEvents(message, resp)
+	if got, want := len(events), 2; got != want {
+		t.Fatalf("len(events) = %d, want %d", got, want)
+	}
+	if got := sdksession.EventText(events[0]); got != text {
+		t.Fatalf("first tool-call text = %q, want %q", got, text)
+	}
+	if got := sdksession.EventText(events[1]); got != "" {
+		t.Fatalf("second tool-call text = %q, want empty", got)
+	}
+	if usage := nestedMap(events[0].Meta, "caelis", "sdk", "usage"); usage == nil {
+		t.Fatalf("first tool-call meta = %#v, want usage", events[0].Meta)
+	}
+	if usage := nestedMap(events[1].Meta, "caelis", "sdk", "usage"); usage != nil {
+		t.Fatalf("second tool-call meta usage = %#v, want nil", usage)
+	}
+
+	raw, err := json.Marshal(events[0])
+	if err != nil {
+		t.Fatalf("Marshal(event) error = %v", err)
+	}
+	var decoded sdksession.Event
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal(event) error = %v", err)
+	}
+	if got := sdksession.EventText(&decoded); got != text {
+		t.Fatalf("round-tripped tool-call text = %q, want %q", got, text)
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "sess-tool-text"}},
+		Events: []*sdksession.Event{
+			&decoded,
+			persistedToolResultEvent("call-1", "ECHO", map[string]any{"value": "one"}, map[string]any{"value": "ok"}),
+		},
+	})
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("len(messages) = %d, want %d: %#v", got, want, messages)
+	}
+	if got := messages[0].TextContent(); got != text {
+		t.Fatalf("tool-call message text = %q, want %q", got, text)
+	}
+}
+
+func TestToolMetaCarriesOnlyRuntimeToolName(t *testing.T) {
+	t.Parallel()
+
+	meta := toolMeta("TASK")
+	caelis, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, want caelis wrapper", meta)
+	}
+	if _, ok := caelis["display"]; ok {
+		t.Fatalf("caelis = %#v, should not carry display semantics", caelis)
+	}
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("caelis = %#v, want runtime map", caelis)
+	}
+	toolRuntime, ok := runtimeMeta["tool"].(map[string]any)
+	if !ok || toolRuntime["name"] != "TASK" {
+		t.Fatalf("runtime.tool = %#v, want TASK tool name", runtimeMeta["tool"])
+	}
+}
+
+func TestMessagesFromContextGroupsConsecutiveToolCalls(t *testing.T) {
+	t.Parallel()
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "sess-tools"}},
+		Events: []*sdksession.Event{
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "demo async tools")),
+				Text:    "demo async tools",
+			},
+			persistedToolCallEvent("bash-1", "BASH", map[string]any{"command": "sleep 1", "yield_time_ms": 5}),
+			persistedToolCallEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}),
+			persistedToolResultEvent("bash-1", "BASH", map[string]any{"command": "sleep 1", "yield_time_ms": 5}, map[string]any{"task_id": "bash-task", "state": "running"}),
+			persistedToolResultEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}, map[string]any{"task_id": "spawn-task", "state": "running"}),
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "next turn")),
+				Text:    "next turn",
+			},
+		},
+	})
+
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 5; got != want {
+		t.Fatalf("len(messages) = %d, want %d (%#v)", got, want, messages)
+	}
+	calls := messages[1].ToolCalls()
+	if got, want := len(calls), 2; got != want {
+		t.Fatalf("len(tool calls) = %d, want %d: %#v", got, want, calls)
+	}
+	if calls[0].ID != "bash-1" || calls[1].ID != "spawn-1" {
+		t.Fatalf("tool call order = %#v, want bash then spawn", calls)
+	}
+	if got := messages[2].ToolResults()[0].ToolUseID; got != "bash-1" {
+		t.Fatalf("first tool result id = %q, want bash-1", got)
+	}
+	if got := messages[3].ToolResults()[0].ToolUseID; got != "spawn-1" {
+		t.Fatalf("second tool result id = %q, want spawn-1", got)
+	}
+	if got := messages[4].TextContent(); got != "next turn" {
+		t.Fatalf("final user text = %q, want next turn", got)
+	}
+}
+
+func TestMessagesFromContextDropsIncompleteToolCallRun(t *testing.T) {
+	t.Parallel()
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "sess-incomplete"}},
+		Events: []*sdksession.Event{
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "demo async tools")),
+				Text:    "demo async tools",
+			},
+			persistedToolCallEvent("bash-1", "BASH", map[string]any{"command": "sleep 1"}),
+			persistedToolCallEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}),
+			persistedToolResultEvent("bash-1", "BASH", map[string]any{"command": "sleep 1"}, map[string]any{"task_id": "bash-task", "state": "running"}),
+			{
+				Type:    sdksession.EventTypeUser,
+				Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "next turn")),
+				Text:    "next turn",
+			},
+		},
+	})
+
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("len(messages) = %d, want %d (%#v)", got, want, messages)
+	}
+	if len(messages[0].ToolCalls()) != 0 || len(messages[1].ToolCalls()) != 0 {
+		t.Fatalf("messages include unresolved tool call run: %#v", messages)
+	}
+	if got := messages[1].TextContent(); got != "next turn" {
+		t.Fatalf("final user text = %q, want next turn", got)
+	}
+}
+
+func TestMessagesFromContextUsesEventLocalParticipantLabel(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{SessionID: "sess-side-label"},
+		Participants: []sdksession.ParticipantBinding{{
+			ID:    "emma",
+			Kind:  sdksession.ParticipantKindACP,
+			Role:  sdksession.ParticipantRoleSidecar,
+			Label: "@renamed",
+		}},
+	}
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: session,
+		Events: []*sdksession.Event{{
+			Type:       sdksession.EventTypeUser,
+			Visibility: sdksession.VisibilityCanonical,
+			Message:    ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "刚才都做了什么？总结一下")),
+			Text:       "刚才都做了什么？总结一下",
+			Scope: &sdksession.EventScope{
+				Participant: sdksession.ParticipantRef{
+					ID:   "emma",
+					Kind: sdksession.ParticipantKindACP,
+					Role: sdksession.ParticipantRoleSidecar,
+				},
+			},
+			Meta: map[string]any{"mention": "@emma", "agent": "claude"},
+		}, {
+			Type:       sdksession.EventTypeAssistant,
+			Visibility: sdksession.VisibilityCanonical,
+			Message:    ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "会话总结")),
+			Text:       "会话总结",
+			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindParticipant, ID: "emma", Name: "@emma"},
+			Scope: &sdksession.EventScope{
+				Participant: sdksession.ParticipantRef{
+					ID:   "emma",
+					Kind: sdksession.ParticipantKindACP,
+					Role: sdksession.ParticipantRoleSidecar,
+				},
+			},
+			Meta: map[string]any{"mention": "@emma", "agent": "claude"},
+		}},
+	})
+
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 2; got != want {
+		t.Fatalf("len(messages) = %d, want %d (%#v)", got, want, messages)
+	}
+	if got := messages[0].TextContent(); got != "User to @emma: 刚才都做了什么？总结一下" {
+		t.Fatalf("side user message = %q", got)
+	}
+	if got := messages[1].TextContent(); got != "Assistant(@emma): 会话总结" {
+		t.Fatalf("side assistant message = %q", got)
 	}
 }
 
@@ -349,7 +596,11 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 	if progress.Message != nil {
 		t.Fatalf("progress message = %+v, want nil so it is not appended to model history", progress.Message)
 	}
-	if got, _ := progress.Meta["task_id"].(string); got != "task-1" {
+	update := sdksession.ProtocolUpdateOf(progress)
+	if update == nil {
+		t.Fatalf("progress protocol = %#v, want tool update", progress.Protocol)
+	}
+	if got, _ := update.RawOutput["task_id"].(string); got != "task-1" {
 		t.Fatalf("progress task_id = %q, want task-1", got)
 	}
 
@@ -578,6 +829,50 @@ func (m *recordingModel) Generate(_ context.Context, req *sdkmodel.Request) iter
 
 func ptrMessage(message sdkmodel.Message) *sdkmodel.Message {
 	return &message
+}
+
+func persistedToolCallEvent(id string, name string, input map[string]any) *sdksession.Event {
+	call := sdkmodel.ToolCall{
+		ID:   id,
+		Name: name,
+		Args: string(mustRawJSON(input)),
+	}
+	return &sdksession.Event{
+		Type:     sdksession.EventTypeToolCall,
+		Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolCall, "pending", maps.Clone(input), nil),
+		Meta:     mergeEventMeta(toolMeta(name)),
+	}
+}
+
+func persistedToolResultEvent(id string, name string, input map[string]any, output map[string]any) *sdksession.Event {
+	call := sdkmodel.ToolCall{
+		ID:   id,
+		Name: name,
+		Args: string(mustRawJSON(input)),
+	}
+	return &sdksession.Event{
+		Type:     sdksession.EventTypeToolResult,
+		Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolUpdate, "completed", maps.Clone(input), maps.Clone(output)),
+		Meta:     mergeEventMeta(toolMeta(name)),
+	}
+}
+
+func mustRawJSON(value map[string]any) json.RawMessage {
+	raw, _ := json.Marshal(value)
+	return raw
+}
+
+func nestedMap(values map[string]any, path ...string) map[string]any {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	out, _ := current.(map[string]any)
+	return out
 }
 
 func boolPtr(v bool) *bool { return &v }

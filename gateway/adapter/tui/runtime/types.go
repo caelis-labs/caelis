@@ -32,30 +32,34 @@ type Submission struct {
 }
 
 type StatusSnapshot struct {
-	SessionID               string
-	Workspace               string
-	StoreDir                string
-	Model                   string
-	ReasoningEffort         string
-	Provider                string
-	ModelName               string
-	ModeLabel               string
-	SessionMode             string
-	SandboxType             string
-	SandboxRequestedBackend string
-	SandboxResolvedBackend  string
-	Route                   string
-	FallbackReason          string
-	SecuritySummary         string
-	MissingAPIKey           bool
-	HostExecution           bool
-	FullAccessMode          bool
-	Surface                 string
-	PromptTokens            int
-	CompletionTokens        int
-	TotalTokens             int
-	ContextWindowTokens     int
-	Running                 bool
+	SessionID                string
+	Workspace                string
+	StoreDir                 string
+	Model                    string
+	ReasoningEffort          string
+	Provider                 string
+	ModelName                string
+	ModeLabel                string
+	SessionMode              string
+	SandboxType              string
+	SandboxRequestedBackend  string
+	SandboxResolvedBackend   string
+	Route                    string
+	FallbackReason           string
+	SecuritySummary          string
+	MissingAPIKey            bool
+	HostExecution            bool
+	FullAccessMode           bool
+	Surface                  string
+	PromptTokens             int
+	CompletionTokens         int
+	TotalTokens              int
+	ContextWindowTokens      int
+	SessionInputTokens       int
+	SessionCachedInputTokens int
+	SessionOutputTokens      int
+	SessionTotalTokens       int
+	Running                  bool
 }
 
 type ResumeCandidate struct {

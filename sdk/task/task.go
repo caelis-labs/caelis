@@ -80,20 +80,23 @@ type BashStartRequest struct {
 
 // SubagentStartRequest defines one yielded SPAWN launch request.
 type SubagentStartRequest struct {
-	Agent      string                        `json:"agent,omitempty"`
-	Prompt     string                        `json:"prompt,omitempty"`
-	ParentCall string                        `json:"parent_call,omitempty"`
-	ParentTool string                        `json:"parent_tool,omitempty"`
-	Source     string                        `json:"source,omitempty"`
-	Mode       string                        `json:"mode,omitempty"`
-	Approval   sdksubagent.ApprovalRequester `json:"-"`
+	Agent          string                        `json:"agent,omitempty"`
+	Prompt         string                        `json:"prompt,omitempty"`
+	ContextPrelude string                        `json:"context_prelude,omitempty"`
+	ParentCall     string                        `json:"parent_call,omitempty"`
+	ParentTool     string                        `json:"parent_tool,omitempty"`
+	Source         string                        `json:"source,omitempty"`
+	Mode           string                        `json:"mode,omitempty"`
+	Approval       sdksubagent.ApprovalRequester `json:"-"`
 }
 
 // ControlRequest defines one task control request.
 type ControlRequest struct {
-	TaskID string        `json:"task_id,omitempty"`
-	Yield  time.Duration `json:"yield,omitempty"`
-	Input  string        `json:"input,omitempty"`
+	TaskID         string        `json:"task_id,omitempty"`
+	Yield          time.Duration `json:"yield,omitempty"`
+	Input          string        `json:"input,omitempty"`
+	Source         string        `json:"source,omitempty"`
+	ContextPrelude string        `json:"context_prelude,omitempty"`
 }
 
 // Entry is one durable task persistence record.

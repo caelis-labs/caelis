@@ -162,7 +162,7 @@ func (s *Store) AppendEvent(
 		return nil, sdksession.ErrSessionNotFound
 	}
 
-	normalized := sdksession.CloneEvent(event)
+	normalized := sdksession.CanonicalizeEvent(event)
 	if normalized.ID == "" {
 		normalized.ID = s.nextID("event", s.eventIDGenerator)
 	}

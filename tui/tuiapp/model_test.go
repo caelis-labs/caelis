@@ -353,7 +353,7 @@ func TestPromptRequestKeepsGatewayToolContentVisible(t *testing.T) {
 			ToolCall: &appgateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
-				ArgsText: "/tmp/demo.txt",
+				RawInput: map[string]any{"path": "/tmp/demo.txt"},
 				Status:   "running",
 				Scope:    appgateway.EventScopeMain,
 			},
@@ -402,7 +402,7 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 			ToolCall: &appgateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "BASH",
-				ArgsText: `echo "hi"`,
+				RawInput: map[string]any{"command": `echo "hi"`},
 				Status:   "running",
 				Scope:    appgateway.EventScopeMain,
 			},
@@ -437,7 +437,7 @@ func TestPendingGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 			ToolCall: &appgateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "LIST",
-				ArgsText: `/tmp/workspace`,
+				RawInput: map[string]any{"path": `/tmp/workspace`},
 				Status:   "pending",
 				Scope:    appgateway.EventScopeMain,
 			},

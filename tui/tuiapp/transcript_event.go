@@ -47,6 +47,7 @@ type TranscriptEvent struct {
 	ToolKind            string
 	ToolTitle           string
 	ToolArgs            string
+	ToolFullArgs        string
 	ToolOutput          string
 	ToolStream          string
 	ToolStatus          string
@@ -180,6 +181,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				status = string(appgateway.ToolStatusRunning)
 			}
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
+			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
 			out = append(out, TranscriptEvent{
 				Kind:                TranscriptEventTool,
 				Scope:               scope,
@@ -190,9 +192,10 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				ToolName:            toolName,
 				ToolKind:            strings.TrimSpace(payload.ToolKind),
 				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:            toolDisplayArgs(semanticName, payload.RawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, payload.ArgsText))),
+				ToolArgs:            toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput)),
+				ToolFullArgs:        toolDisplayFullArgs(semanticName, rawInput),
 				ToolStatus:          status,
-				ToolTaskID:          toolDisplayTaskID(payload.RawInput, nil),
+				ToolTaskID:          toolDisplayTaskID(rawInput, nil),
 				DisableToolGrouping: disableToolGrouping,
 			})
 		}
@@ -212,9 +215,11 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			}
 			toolErr := payload.Error || strings.EqualFold(status, string(appgateway.ToolStatusFailed))
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
-			toolOutput := toolDisplayOutput(semanticName, payload.RawInput, payload.RawOutput, acpprojector.FormatToolResult(toolName, gatewayToolArgsMap(payload.CommandPreview, ""), gatewayToolResultMap(payload.OutputText, toolErr), status), status, toolErr)
-			toolArgs := toolDisplayArgs(semanticName, payload.RawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, gatewayToolArgsMap(payload.CommandPreview, "")))
-			if !toolErr && (len(payload.RawInput) > 0 || len(payload.RawOutput) > 0) {
+			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
+			rawOutput := gatewayProtocolRawOutput(ev, payload.RawOutput)
+			toolOutput := toolDisplayOutput(semanticName, rawInput, rawOutput, acpprojector.FormatToolResult(toolName, rawInput, rawOutput, status), status, toolErr)
+			toolArgs := toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput))
+			if !toolErr && (len(rawInput) > 0 || len(rawOutput) > 0) {
 				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
 				}
@@ -231,11 +236,12 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				ToolKind:            strings.TrimSpace(payload.ToolKind),
 				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
 				ToolArgs:            toolArgs,
+				ToolFullArgs:        toolDisplayFullArgs(semanticName, rawInput),
 				ToolOutput:          toolOutput,
 				ToolStream:          transcriptToolStream(status, toolErr),
 				ToolStatus:          status,
 				ToolError:           toolErr,
-				ToolTaskID:          toolDisplayTaskID(payload.RawInput, payload.RawOutput),
+				ToolTaskID:          toolDisplayTaskID(rawInput, rawOutput),
 				DisableToolGrouping: disableToolGrouping,
 				Final:               transcriptToolStatusFinal(status, toolErr),
 			})
@@ -361,4 +367,18 @@ func transcriptToolStatusFinal(status string, isErr bool) bool {
 	default:
 		return false
 	}
+}
+
+func gatewayProtocolRawInput(ev appgateway.Event, fallback map[string]any) map[string]any {
+	if ev.Protocol != nil && ev.Protocol.Update != nil && len(ev.Protocol.Update.RawInput) > 0 {
+		return cloneAnyMap(ev.Protocol.Update.RawInput)
+	}
+	return cloneAnyMap(fallback)
+}
+
+func gatewayProtocolRawOutput(ev appgateway.Event, fallback map[string]any) map[string]any {
+	if ev.Protocol != nil && ev.Protocol.Update != nil && len(ev.Protocol.Update.RawOutput) > 0 {
+		return cloneAnyMap(ev.Protocol.Update.RawOutput)
+	}
+	return cloneAnyMap(fallback)
 }

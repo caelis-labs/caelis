@@ -47,9 +47,9 @@ func TestProjectGatewayEventToTranscriptEvents_DoesNotPersistApproval(t *testing
 		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
 		ApprovalPayload: &appgateway.ApprovalPayload{
-			ToolName:       "BASH",
-			CommandPreview: "go test ./gateway/...",
-			Status:         appgateway.ApprovalStatusPending,
+			ToolName: "BASH",
+			RawInput: map[string]any{"command": "go test ./gateway/..."},
+			Status:   appgateway.ApprovalStatusPending,
 		},
 	})
 
@@ -66,11 +66,11 @@ func TestProjectGatewayEventToTranscriptEvents_ACPToolDisablesExplorationGroupin
 		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
 		ToolResult: &appgateway.ToolResultPayload{
-			CallID:     "read-1",
-			ToolName:   "READ",
-			OutputText: "type Event struct{}",
-			Status:     appgateway.ToolStatusCompleted,
-			Scope:      appgateway.EventScopeMain,
+			CallID:    "read-1",
+			ToolName:  "READ",
+			RawOutput: map[string]any{"text": "type Event struct{}"},
+			Status:    appgateway.ToolStatusCompleted,
+			Scope:     appgateway.EventScopeMain,
 		},
 	})
 
@@ -181,9 +181,9 @@ func TestTranscriptSnapshots(t *testing.T) {
 						SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 						Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
 						ApprovalPayload: &appgateway.ApprovalPayload{
-							ToolName:       "BASH",
-							CommandPreview: "rm -rf /tmp/demo",
-							Status:         appgateway.ApprovalStatusPending,
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": "rm -rf /tmp/demo"},
+							Status:   appgateway.ApprovalStatusPending,
 						},
 					},
 				})
@@ -283,7 +283,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 						ToolCall: &appgateway.ToolCallPayload{
 							CallID:   "call-1",
 							ToolName: "READ",
-							ArgsText: "/tmp/demo",
+							RawInput: map[string]any{"path": "/tmp/demo"},
 							Status:   appgateway.ToolStatusRunning,
 						},
 					},
@@ -314,7 +314,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 						ToolCall: &appgateway.ToolCallPayload{
 							CallID:   "call-1",
 							ToolName: "BASH",
-							ArgsText: "false",
+							RawInput: map[string]any{"command": "false"},
 							Status:   appgateway.ToolStatusRunning,
 						},
 					},
@@ -326,11 +326,12 @@ func TestTranscriptSnapshots(t *testing.T) {
 						SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 						Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
 						ToolResult: &appgateway.ToolResultPayload{
-							CallID:     "call-1",
-							ToolName:   "BASH",
-							OutputText: "exit 1",
-							Status:     appgateway.ToolStatusFailed,
-							Error:      true,
+							CallID:    "call-1",
+							ToolName:  "BASH",
+							RawInput:  map[string]any{"command": "false"},
+							RawOutput: map[string]any{"stderr": "exit 1"},
+							Status:    appgateway.ToolStatusFailed,
+							Error:     true,
 						},
 					},
 				})
@@ -590,6 +591,30 @@ func TestProjectGatewayEventACPToolArgsUseKindAndDoNotLeakTransportSource(t *tes
 				}
 			}
 		})
+	}
+}
+
+func TestProjectGatewayEventTaskArgsUseProtocolRawInput(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind: appgateway.EventKindToolCall,
+		ToolCall: &appgateway.ToolCallPayload{
+			CallID:   "task-call",
+			ToolName: "TASK",
+			Status:   appgateway.ToolStatusRunning,
+			RawInput: map[string]any{"action": "wait", "task_id": "emma", "yield_time_ms": 3000},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolArgs != "Wait emma 3s" {
+		t.Fatalf("ToolArgs = %q, want protocol-derived TASK args", got.ToolArgs)
+	}
+	if got.ToolTaskID != "emma" {
+		t.Fatalf("ToolTaskID = %q, want emma", got.ToolTaskID)
 	}
 }
 

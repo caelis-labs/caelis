@@ -190,6 +190,12 @@ func PromptEventsFromLatestCompact(events []*sdksession.Event) []*sdksession.Eve
 				Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
 				Message:    &msg,
 				Text:       msg.TextContent(),
+				Protocol: &sdksession.EventProtocol{
+					Update: &sdksession.ProtocolUpdate{
+						SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
+						Content:       sdksession.ProtocolTextContent(msg.TextContent()),
+					},
+				},
 				Meta: map[string]any{
 					MetaKeyCompact: map[string]any{"retained": true},
 				},
@@ -261,6 +267,14 @@ func normalizeReplacementHistory(events []*sdksession.Event) []*sdksession.Event
 		}
 		if clone.Text == "" && clone.Message != nil {
 			clone.Text = clone.Message.TextContent()
+		}
+		if clone.Protocol == nil && clone.Text != "" {
+			clone.Protocol = &sdksession.EventProtocol{
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
+					Content:       sdksession.ProtocolTextContent(clone.Text),
+				},
+			}
 		}
 		out = append(out, clone)
 	}

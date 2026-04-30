@@ -811,17 +811,17 @@ func renderCompactionEvent(event *sdksession.Event) string {
 	case sdksession.EventTypePlan:
 		return renderPlanEventForCompaction(event, text)
 	case sdksession.EventTypeToolCall:
-		if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		if update := sdksession.ProtocolUpdateOf(event); update != nil {
 			return fmt.Sprintf("TOOL_CALL %s: %s",
-				strings.TrimSpace(event.Protocol.ToolCall.Name),
-				compactText(stringifyAny(event.Protocol.ToolCall.RawInput), 220),
+				toolNameForCompaction(event, update),
+				compactText(stringifyAny(update.RawInput), 220),
 			)
 		}
 	case sdksession.EventTypeToolResult:
-		if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		if update := sdksession.ProtocolUpdateOf(event); update != nil {
 			return fmt.Sprintf("TOOL_RESULT %s: %s",
-				strings.TrimSpace(event.Protocol.ToolCall.Name),
-				compactText(stringifyAny(event.Protocol.ToolCall.RawOutput), 260),
+				toolNameForCompaction(event, update),
+				compactText(stringifyAny(update.RawOutput), 260),
 			)
 		}
 		return "TOOL_RESULT: " + compactText(text, 260)
@@ -831,6 +831,30 @@ func renderCompactionEvent(event *sdksession.Event) string {
 		}
 	}
 	return compactText(text, 220)
+}
+
+func toolNameForCompaction(event *sdksession.Event, update *sdksession.ProtocolUpdate) string {
+	if event != nil {
+		if runtimeMeta := nestedMap(event.Meta, "caelis", "runtime", "tool"); len(runtimeMeta) > 0 {
+			if name := strings.TrimSpace(stringifyAny(runtimeMeta["name"])); name != "" {
+				return name
+			}
+		}
+		if event.Protocol != nil && event.Protocol.ToolCall != nil {
+			if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
+				return name
+			}
+		}
+	}
+	if update != nil {
+		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			return title[0]
+		}
+		if kind := strings.TrimSpace(update.Kind); kind != "" {
+			return kind
+		}
+	}
+	return "tool"
 }
 
 func renderPlanEventForCompaction(event *sdksession.Event, fallback string) string {
@@ -875,6 +899,13 @@ func buildCompactEvent(session sdksession.Session, compactText string, data sdkc
 		Scope:      &scope,
 		Message:    &message,
 		Text:       message.TextContent(),
+		Protocol: &sdksession.EventProtocol{
+			Method: sdksession.ProtocolMethodContextCheckpoint,
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: "compact",
+				Content:       sdksession.ProtocolTextContent(message.TextContent()),
+			},
+		},
 		Meta: map[string]any{
 			sdkcompact.MetaKeyCompact: sdkcompact.CompactEventDataValue(data),
 		},
@@ -920,10 +951,7 @@ func compactTextFromEvent(event *sdksession.Event) string {
 	if event == nil {
 		return ""
 	}
-	if event.Message != nil {
-		return strings.TrimSpace(event.Message.TextContent())
-	}
-	return strings.TrimSpace(event.Text)
+	return strings.TrimSpace(sdksession.EventText(event))
 }
 
 func buildReplacementHistoryWithLimits(compactText string, retainedUsers []string, maxChars int, maxLines int) []*sdksession.Event {
@@ -936,6 +964,12 @@ func buildReplacementHistoryWithLimits(compactText string, retainedUsers []strin
 			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
 			Message:    &msg,
 			Text:       msg.TextContent(),
+			Protocol: &sdksession.EventProtocol{
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
+					Content:       sdksession.ProtocolTextContent(msg.TextContent()),
+				},
+			},
 		})
 	}
 	if replacementSummary := replacementHistorySummaryTextWithLimits(compactText, maxChars, maxLines); replacementSummary != "" {
@@ -1098,12 +1132,7 @@ func eventTextForCompaction(event *sdksession.Event) string {
 	if event == nil {
 		return ""
 	}
-	if event.Message != nil {
-		if text := strings.TrimSpace(event.Message.TextContent()); text != "" {
-			return text
-		}
-	}
-	if text := strings.TrimSpace(event.Text); text != "" {
+	if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 		return text
 	}
 	return ""
@@ -1285,6 +1314,19 @@ func providerPromptBaselineTokens(meta map[string]any) (int, bool, bool) {
 	if len(meta) == 0 {
 		return 0, false, false
 	}
+	if usage := nestedMap(meta, "caelis", "sdk", "usage"); len(usage) > 0 {
+		if value, ok := intFromAny(usage["prompt_tokens"]); ok && value > 0 {
+			return value, true, true
+		}
+		total, totalOK := intFromAny(usage["total_tokens"])
+		completion, completionOK := intFromAny(usage["completion_tokens"])
+		if totalOK && completionOK && total > 0 {
+			return max(total-completion, 0), true, true
+		}
+		if totalOK && total > 0 {
+			return total, false, true
+		}
+	}
 	if value, ok := intFromAny(meta["prompt_tokens"]); ok && value > 0 {
 		return value, true, true
 	}
@@ -1327,10 +1369,38 @@ func providerSnapshotSignature(event *sdksession.Event) string {
 	total, _ := intFromAny(event.Meta["total_tokens"])
 	provider := strings.TrimSpace(stringifyAny(event.Meta["provider"]))
 	model := strings.TrimSpace(stringifyAny(event.Meta["model"]))
+	if sdkMeta := nestedMap(event.Meta, "caelis", "sdk"); len(sdkMeta) > 0 {
+		provider = firstNonEmpty(provider, strings.TrimSpace(stringifyAny(sdkMeta["provider"])))
+		model = firstNonEmpty(model, strings.TrimSpace(stringifyAny(sdkMeta["model"])))
+		if usage := nestedMap(event.Meta, "caelis", "sdk", "usage"); len(usage) > 0 {
+			if value, ok := intFromAny(usage["prompt_tokens"]); ok {
+				prompt = value
+			}
+			if value, ok := intFromAny(usage["completion_tokens"]); ok {
+				completion = value
+			}
+			if value, ok := intFromAny(usage["total_tokens"]); ok {
+				total = value
+			}
+		}
+	}
 	if prompt <= 0 && completion <= 0 && total <= 0 && provider == "" && model == "" {
 		return ""
 	}
 	return fmt.Sprintf("%s|%s|%d|%d|%d", provider, model, prompt, completion, total)
+}
+
+func nestedMap(values map[string]any, path ...string) map[string]any {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	out, _ := current.(map[string]any)
+	return out
 }
 
 func estimateTokensFromIndex(events []*sdksession.Event, index int) int {
@@ -1359,7 +1429,7 @@ func estimatePromptEventTokens(event *sdksession.Event) int {
 	if event.Message != nil {
 		return estimateMessageTokens(*event.Message)
 	}
-	if text := strings.TrimSpace(event.Text); text != "" {
+	if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 		return estimateTextTokens(text)
 	}
 	return 0

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
 	"os"
 	"path/filepath"
@@ -102,7 +103,7 @@ func TestRuntimeRunPersistsMinimalChatTurn(t *testing.T) {
 	if got, want := len(loaded.Events), 2; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
 	}
-	if got := loaded.Events[1].Text; got != "world" {
+	if got := sdksession.EventText(loaded.Events[1]); got != "world" {
 		t.Fatalf("assistant text = %q, want %q", got, "world")
 	}
 
@@ -136,7 +137,7 @@ func lastAssistantText(events []*sdksession.Event) string {
 	for i := len(events) - 1; i >= 0; i-- {
 		event := events[i]
 		if event != nil && event.Type == sdksession.EventTypeAssistant {
-			return strings.TrimSpace(event.Text)
+			return strings.TrimSpace(sdksession.EventText(event))
 		}
 	}
 	return ""
@@ -268,7 +269,7 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 			switch {
 			case sdksession.EventTypeOf(event) == sdksession.EventTypeUser:
 				sawUser = true
-			case event.Protocol != nil && event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && event.Text == "hel":
+			case event.Protocol != nil && event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && sdksession.EventText(event) == "hel":
 				sawChunk = true
 			}
 		case <-deadline:
@@ -280,7 +281,7 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 
 	var final *sdksession.Event
 	for event := range eventCh {
-		if event != nil && sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant && strings.TrimSpace(event.Text) == "hello" {
+		if event != nil && sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant && strings.TrimSpace(sdksession.EventText(event)) == "hello" {
 			final = event
 		}
 	}
@@ -452,7 +453,7 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 
 	var final *sdksession.Event
 	for event := range eventCh {
-		if event != nil && sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant && strings.TrimSpace(event.Text) == "hello" {
+		if event != nil && sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant && strings.TrimSpace(sdksession.EventText(event)) == "hello" {
 			final = event
 		}
 	}
@@ -469,8 +470,240 @@ func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T)
 	if got, want := len(loaded.Events), 2; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
 	}
-	if loaded.Events[1].Visibility != sdksession.VisibilityCanonical || loaded.Events[1].Text != "hello" {
+	if loaded.Events[1].Visibility != sdksession.VisibilityCanonical || sdksession.EventText(loaded.Events[1]) != "hello" {
 		t.Fatalf("loaded final event = %+v, want canonical assistant hello", loaded.Events[1])
+	}
+}
+
+func TestRuntimeACPControllerTurnSendsUnsyncedSharedDialogue(t *testing.T) {
+	t.Parallel()
+
+	sessions, session := newTestSessionService(t, "sess-acp-shared-delta-turn")
+	if _, err := sessions.AppendEvent(context.Background(), sdksession.AppendEventRequest{
+		SessionRef: session.SessionRef,
+		Event:      userTextEvent("already synced"),
+	}); err != nil {
+		t.Fatalf("AppendEvent(initial) error = %v", err)
+	}
+	session, err := sessions.BindController(context.Background(), sdksession.BindControllerRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ControllerBinding{
+			Kind:           sdksession.ControllerKindACP,
+			ControllerID:   "acp-main",
+			Label:          "ACP Main",
+			EpochID:        "epoch-shared-delta",
+			Source:         "test",
+			ContextSyncSeq: 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+	if _, err := sessions.AppendEvent(context.Background(), sdksession.AppendEventRequest{
+		SessionRef: session.SessionRef,
+		Event: &sdksession.Event{
+			Type:       sdksession.EventTypeAssistant,
+			Visibility: sdksession.VisibilityCanonical,
+			Text:       "side result",
+			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindParticipant, Name: "jeff"},
+			Scope: &sdksession.EventScope{
+				Participant: sdksession.ParticipantRef{
+					ID:   "side-1",
+					Kind: sdksession.ParticipantKindSubagent,
+					Role: sdksession.ParticipantRoleSidecar,
+				},
+			},
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(side) error = %v", err)
+	}
+
+	turnReqCh := make(chan sdkcontroller.TurnRequest, 1)
+	controller := stubACPController{
+		runTurn: func(ctx context.Context, req sdkcontroller.TurnRequest) (sdkcontroller.TurnResult, error) {
+			turnReqCh <- req
+			handle := newTestControllerTurnHandle(nil)
+			go func() {
+				handle.publishEvent(&sdksession.Event{
+					Type:       sdksession.EventTypeAssistant,
+					Visibility: sdksession.VisibilityCanonical,
+					Text:       "main done",
+					Protocol: &sdksession.EventProtocol{
+						UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+					},
+				})
+				handle.finish()
+			}()
+			return sdkcontroller.TurnResult{Handle: handle}, nil
+		},
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:  controller,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), sdkruntime.RunRequest{
+		SessionRef: session.SessionRef,
+		Input:      "next prompt",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, result.Handle); err != nil {
+		t.Fatalf("drain runner: %v", err)
+	}
+	var turnReq sdkcontroller.TurnRequest
+	select {
+	case turnReq = <-turnReqCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("controller did not receive RunTurn request")
+	}
+	if turnReq.ContextSyncSeq != 2 {
+		t.Fatalf("ContextSyncSeq = %d, want checkpoint 2", turnReq.ContextSyncSeq)
+	}
+	if !strings.Contains(turnReq.ContextPrelude, "side result") || !strings.Contains(turnReq.ContextPrelude, "shared_dialogue_delta:") {
+		t.Fatalf("ContextPrelude = %q, want unsynced side dialogue", turnReq.ContextPrelude)
+	}
+	if strings.Contains(turnReq.ContextPrelude, "next prompt") {
+		t.Fatalf("ContextPrelude = %q, should not duplicate current user prompt", turnReq.ContextPrelude)
+	}
+	updated, err := sessions.Session(context.Background(), session.SessionRef)
+	if err != nil {
+		t.Fatalf("Session() error = %v", err)
+	}
+	if updated.Controller.ContextSyncSeq < 4 {
+		t.Fatalf("controller ContextSyncSeq = %d, want current shared ledger checkpoint", updated.Controller.ContextSyncSeq)
+	}
+}
+
+func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
+	t.Parallel()
+
+	sessions, session := newTestSessionService(t, "sess-acp-side-dialogue")
+	session, err := sessions.PutParticipant(context.Background(), sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
+			ID:        "emma",
+			Kind:      sdksession.ParticipantKindACP,
+			Role:      sdksession.ParticipantRoleSidecar,
+			Label:     "@emma",
+			AgentName: "claude",
+			Source:    "tui_agent_add",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutParticipant() error = %v", err)
+	}
+	turnReqCh := make(chan sdkcontroller.ParticipantPromptRequest, 1)
+	controller := stubACPController{
+		promptParticipant: func(ctx context.Context, req sdkcontroller.ParticipantPromptRequest) (sdkcontroller.TurnResult, error) {
+			turnReqCh <- req
+			handle := newTestControllerTurnHandle(nil)
+			go func() {
+				defer handle.finish()
+				handle.publishEvent(&sdksession.Event{
+					Type:       sdksession.EventTypeUser,
+					Visibility: sdksession.VisibilityCanonical,
+					Text:       req.Input,
+					Scope: &sdksession.EventScope{
+						Source: "acp_participant",
+						Participant: sdksession.ParticipantRef{
+							ID:   req.ParticipantID,
+							Kind: sdksession.ParticipantKindACP,
+							Role: sdksession.ParticipantRoleSidecar,
+						},
+					},
+					Protocol: &sdksession.EventProtocol{
+						UpdateType: string(sdksession.ProtocolUpdateTypeUserMessage),
+					},
+				})
+				handle.publishEvent(&sdksession.Event{
+					Type:       sdksession.EventTypeAssistant,
+					Visibility: sdksession.VisibilityUIOnly,
+					Text:       "emma summary",
+					Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindParticipant, ID: "emma", Name: "@emma"},
+					Scope: &sdksession.EventScope{
+						Source: "acp_participant",
+						Participant: sdksession.ParticipantRef{
+							ID:   req.ParticipantID,
+							Kind: sdksession.ParticipantKindACP,
+							Role: sdksession.ParticipantRoleSidecar,
+						},
+					},
+					Protocol: &sdksession.EventProtocol{
+						UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+					},
+				})
+			}()
+			return sdkcontroller.TurnResult{Handle: handle}, nil
+		},
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:  controller,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	updated, err := runtime.PromptACPParticipant(context.Background(), sdkruntime.PromptACPParticipantRequest{
+		SessionRef:    session.SessionRef,
+		ParticipantID: "emma",
+		Input:         "刚才都做了什么？总结一下",
+		Source:        "tui_agent_ask",
+	})
+	if err != nil {
+		t.Fatalf("PromptACPParticipant() error = %v", err)
+	}
+	select {
+	case req := <-turnReqCh:
+		if req.TurnID == "" {
+			t.Fatal("participant prompt TurnID is empty")
+		}
+		if strings.Contains(req.ContextPrelude, "current_user_request") || strings.Contains(req.ContextPrelude, req.Input) {
+			t.Fatalf("participant context prelude duplicated current prompt:\n%s", req.ContextPrelude)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant prompt request was not sent")
+	}
+	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{SessionRef: updated.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	var sideUsers, sideAssistants int
+	for _, event := range loaded.Events {
+		if event == nil || event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) != "emma" {
+			continue
+		}
+		switch sdksession.EventTypeOf(event) {
+		case sdksession.EventTypeUser:
+			sideUsers++
+			if got := strings.TrimSpace(sdksession.EventText(event)); got != "刚才都做了什么？总结一下" {
+				t.Fatalf("side user text = %q", got)
+			}
+			if !sdksession.IsMainInvocationVisibleEvent(event) {
+				t.Fatalf("side user event is not visible to main invocation: %#v", event)
+			}
+		case sdksession.EventTypeAssistant:
+			sideAssistants++
+			if got := strings.TrimSpace(sdksession.EventText(event)); got != "emma summary" {
+				t.Fatalf("side assistant text = %q", got)
+			}
+			if !sdksession.IsMainInvocationVisibleEvent(event) {
+				t.Fatalf("side assistant event is not visible to main invocation: %#v", event)
+			}
+		}
+	}
+	if sideUsers != 1 {
+		t.Fatalf("side user event count = %d, want one local public prompt and no ACP echo duplicate", sideUsers)
+	}
+	if sideAssistants != 1 {
+		t.Fatalf("side assistant event count = %d, want one final side answer", sideAssistants)
 	}
 }
 
@@ -545,8 +778,8 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 		if event == nil || event.Protocol == nil || event.Scope == nil {
 			continue
 		}
-		if event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
-			liveTexts = append(liveTexts, event.Text)
+		if event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") && event.Visibility == sdksession.VisibilityUIOnly {
+			liveTexts = append(liveTexts, sdksession.EventText(event))
 			if event.SessionID != session.SessionID {
 				t.Fatalf("live ACP chunk session ID = %q, want %q", event.SessionID, session.SessionID)
 			}
@@ -569,15 +802,127 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 			continue
 		}
 		if event.Protocol.UpdateType == string(sdksession.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
-			persistedTexts = append(persistedTexts, event.Text)
+			persistedTexts = append(persistedTexts, sdksession.EventText(event))
 			if strings.TrimSpace(event.ID) == "" {
 				t.Fatalf("persisted ACP chunk missing event ID")
 			}
 		}
 	}
-	if !reflect.DeepEqual(persistedTexts, []string{"hel", "hello"}) {
-		t.Fatalf("persisted ACP texts = %#v, want cumulative snapshots", persistedTexts)
+	if !reflect.DeepEqual(persistedTexts, []string{"hello"}) {
+		t.Fatalf("persisted ACP texts = %#v, want final assistant snapshot only", persistedTexts)
 	}
+}
+
+func TestBuildControllerHandoffContextUsesSharedDialogueOnly(t *testing.T) {
+	t.Parallel()
+
+	sessions, session := newTestSessionService(t, "sess-handoff-shared-ledger")
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	session, err = sessions.PutParticipant(context.Background(), sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
+			ID:           "participant-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleDelegated,
+			Label:        "@ella",
+			AgentName:    "codex",
+			DelegationID: "task-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutParticipant() error = %v", err)
+	}
+	events := []*sdksession.Event{
+		{Type: sdksession.EventTypeUser, Visibility: sdksession.VisibilityCanonical, Text: "user prompt"},
+		{Type: sdksession.EventTypeToolResult, Visibility: sdksession.VisibilityCanonical, Text: "tool output"},
+		{Type: sdksession.EventTypeAssistant, Visibility: sdksession.VisibilityCanonical, Text: "child answer", Actor: sdksession.ActorRef{Kind: sdksession.ActorKindParticipant, Name: "ella"}, Scope: &sdksession.EventScope{Participant: sdksession.ParticipantRef{ID: "participant-1", Kind: sdksession.ParticipantKindSubagent}}},
+		sdksession.MarkUIOnly(&sdksession.Event{Type: sdksession.EventTypeAssistant, Text: "live chunk"}),
+	}
+	for _, event := range events {
+		if _, err := sessions.AppendEvent(context.Background(), sdksession.AppendEventRequest{SessionRef: session.SessionRef, Event: event}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+
+	text, seq := runtime.buildControllerHandoffContext(context.Background(), session, session.SessionRef, sdksession.ControllerBinding{
+		Kind:           sdksession.ControllerKindACP,
+		Label:          "old",
+		ContextSyncSeq: 4,
+	}, 0, "")
+	if seq != 3 {
+		t.Fatalf("context seq = %d, want latest shared event checkpoint 3", seq)
+	}
+	for _, want := range []string{"shared_ledger_checkpoint: 3", "shared_dialogue_delta:", "[1] user:\nuser prompt", "[3] assistant(ella):\nchild answer", "- @ella agent=codex"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("handoff context missing %q:\n%s", want, text)
+		}
+	}
+	for _, forbidden := range []string{"canonical_tail", "tool output", "live chunk", "task-1"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("handoff context should not contain %q:\n%s", forbidden, text)
+		}
+	}
+}
+
+func TestSharedDialogueDeltaUsesCheckpointAndCompactBoundary(t *testing.T) {
+	t.Parallel()
+
+	compactMessage := sdkmodel.NewTextMessage(sdkmodel.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
+	events := []*sdksession.Event{
+		userTextEvent("old user"),
+		assistantEvent("old assistant"),
+		{
+			Type:       sdksession.EventTypeCompact,
+			Visibility: sdksession.VisibilityCanonical,
+			Message:    &compactMessage,
+			Text:       compactMessage.TextContent(),
+		},
+		userTextEvent("fresh user"),
+		assistantEvent("fresh assistant"),
+	}
+
+	first := sharedDialogueDeltaFromEvents(events, 0)
+	if first.Checkpoint != 5 {
+		t.Fatalf("checkpoint = %d, want 5", first.Checkpoint)
+	}
+	rendered := renderSharedDialogueDeltaForTest(first)
+	for _, want := range []string{
+		"[3] compact:\nCONTEXT CHECKPOINT\nObjective: compacted baseline",
+		"[4] user:\nfresh user",
+		"[5] assistant:\nfresh assistant",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("delta missing %q:\n%s", want, rendered)
+		}
+	}
+	for _, forbidden := range []string{"old user", "old assistant"} {
+		if strings.Contains(rendered, forbidden) {
+			t.Fatalf("delta should not replay pre-compact %q:\n%s", forbidden, rendered)
+		}
+	}
+
+	empty := sharedDialogueDeltaFromEvents(events, first.Checkpoint)
+	if len(empty.Entries) != 0 || empty.Checkpoint != first.Checkpoint {
+		t.Fatalf("empty delta = %+v, want no repeated entries at checkpoint %d", empty, first.Checkpoint)
+	}
+
+	next := sharedDialogueDeltaFromEvents(append(events, userTextEvent("next user")), first.Checkpoint)
+	rendered = renderSharedDialogueDeltaForTest(next)
+	if strings.Contains(rendered, "fresh user") || strings.Contains(rendered, "fresh assistant") || !strings.Contains(rendered, "[6] user:\nnext user") {
+		t.Fatalf("incremental delta should include only new event:\n%s", rendered)
+	}
+}
+
+func renderSharedDialogueDeltaForTest(delta sharedDialogueDelta) string {
+	var b strings.Builder
+	appendSharedDialogueDelta(&b, delta)
+	return b.String()
 }
 
 func TestRuntimeRunAppliesAssemblyModeAndConfigOverridesFromSessionState(t *testing.T) {
@@ -760,7 +1105,8 @@ func TestNewRejectsMixedAssemblyAndExplicitControlPlane(t *testing.T) {
 }
 
 type stubACPController struct {
-	runTurn func(context.Context, sdkcontroller.TurnRequest) (sdkcontroller.TurnResult, error)
+	runTurn           func(context.Context, sdkcontroller.TurnRequest) (sdkcontroller.TurnResult, error)
+	promptParticipant func(context.Context, sdkcontroller.ParticipantPromptRequest) (sdkcontroller.TurnResult, error)
 }
 
 func (stubACPController) Activate(context.Context, sdkcontroller.HandoffRequest) (sdksession.ControllerBinding, error) {
@@ -784,7 +1130,10 @@ func (stubACPController) Attach(context.Context, sdkcontroller.AttachRequest) (s
 	return sdksession.ParticipantBinding{}, nil
 }
 
-func (stubACPController) PromptParticipant(context.Context, sdkcontroller.ParticipantPromptRequest) (sdkcontroller.TurnResult, error) {
+func (s stubACPController) PromptParticipant(ctx context.Context, req sdkcontroller.ParticipantPromptRequest) (sdkcontroller.TurnResult, error) {
+	if s.promptParticipant != nil {
+		return s.promptParticipant(ctx, req)
+	}
 	handle := newTestControllerTurnHandle(nil)
 	handle.finish()
 	return sdkcontroller.TurnResult{Handle: handle}, nil
@@ -1027,7 +1376,7 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 	if got, want := len(loaded.Events), 4; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
 	}
-	if got := loaded.Events[3].Text; got != "history ok" {
+	if got := sdksession.EventText(loaded.Events[3]); got != "history ok" {
 		t.Fatalf("assistant replay text = %q, want %q", got, "history ok")
 	}
 }
@@ -1109,7 +1458,7 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 	for _, event := range loaded.Events {
 		if event != nil && event.Type == sdksession.EventTypeCompact {
 			sawCompact = true
-			compactText = strings.TrimSpace(event.Text)
+			compactText = strings.TrimSpace(sdksession.EventText(event))
 			break
 		}
 	}
@@ -1181,7 +1530,7 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 	var compactText string
 	for _, event := range loaded.Events {
 		if event != nil && event.Type == sdksession.EventTypeCompact {
-			compactText = strings.TrimSpace(event.Text)
+			compactText = strings.TrimSpace(sdksession.EventText(event))
 		}
 	}
 	if !strings.Contains(compactText, "preserve context continuity during very long coding sessions") {
@@ -1199,7 +1548,7 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 		t.Fatal("expected replacement history on compact event")
 	}
 	last := data.ReplacementHistory[len(data.ReplacementHistory)-1]
-	if last == nil || !strings.Contains(strings.ToLower(last.Text), "preserve context continuity during very long coding sessions") {
+	if last == nil || !strings.Contains(strings.ToLower(sdksession.EventText(last)), "preserve context continuity during very long coding sessions") {
 		t.Fatalf("replacement history summary = %+v, want compact continuity objective", last)
 	}
 	if data.Revision <= 0 {
@@ -1870,7 +2219,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 			t.Fatalf("runner error = %v", seqErr)
 		}
 		if event != nil && event.Type == sdksession.EventTypeAssistant {
-			finalText = strings.TrimSpace(event.Text)
+			finalText = strings.TrimSpace(sdksession.EventText(event))
 		}
 	}
 	if finalText != "recovered after compact" {
@@ -1893,8 +2242,8 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	for _, event := range loaded.Events {
 		if event != nil && event.Type == sdksession.EventTypeCompact {
 			sawCompact = true
-			if !strings.Contains(strings.ToLower(event.Text), "pong") {
-				t.Fatalf("compact event text = %q, want retained tool result summary", event.Text)
+			if !strings.Contains(strings.ToLower(sdksession.EventText(event)), "pong") {
+				t.Fatalf("compact event text = %q, want retained tool result summary", sdksession.EventText(event))
 			}
 		}
 	}
@@ -1911,7 +2260,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	}
 	foundPong := false
 	for _, event := range data.ReplacementHistory {
-		if event != nil && strings.Contains(strings.ToLower(event.Text), "pong") {
+		if event != nil && strings.Contains(strings.ToLower(sdksession.EventText(event)), "pong") {
 			foundPong = true
 			break
 		}
@@ -2065,8 +2414,8 @@ func TestRuntimeRunRetriesBeforeAnyEventIsEmitted(t *testing.T) {
 		count++
 		if sdksession.IsNotice(event) {
 			noticeCount++
-			if !strings.Contains(event.Text, "retrying") {
-				t.Fatalf("notice text = %q, want retry warning", event.Text)
+			if !strings.Contains(sdksession.EventText(event), "retrying") {
+				t.Fatalf("notice text = %q, want retry warning", sdksession.EventText(event))
 			}
 		}
 	}
@@ -2154,7 +2503,7 @@ func TestRuntimeRunDoesNotRetryAfterAnyEventIsEmitted(t *testing.T) {
 	if got, want := len(loaded.Events), 2; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
 	}
-	if got := loaded.Events[1].Text; got != "partial" {
+	if got := sdksession.EventText(loaded.Events[1]); got != "partial" {
 		t.Fatalf("assistant text = %q, want %q", got, "partial")
 	}
 
@@ -2247,7 +2596,7 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 	if loaded.Events[2].Protocol == nil || loaded.Events[2].Protocol.ToolCall == nil || loaded.Events[2].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeToolUpdate) {
 		t.Fatalf("loaded.Events[2].Protocol = %+v, want tool_call_update protocol payload", loaded.Events[2].Protocol)
 	}
-	if got := loaded.Events[3].Text; got != "pong" {
+	if got := sdksession.EventText(loaded.Events[3]); got != "pong" {
 		t.Fatalf("final assistant text = %q, want %q", got, "pong")
 	}
 	if loaded.Events[0].Protocol == nil || loaded.Events[0].Protocol.UpdateType != string(sdksession.ProtocolUpdateTypeUserMessage) {
@@ -2385,7 +2734,7 @@ func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
 	if toolResult.Type != sdksession.EventTypeToolResult {
 		t.Fatalf("tool result type = %q, want tool_result", toolResult.Type)
 	}
-	if got := toolResult.Meta["policy_action"]; got != "deny" {
+	if got := eventToolRawOutput(toolResult)["policy_action"]; got != "deny" {
 		t.Fatalf("policy_action = %v, want %q", got, "deny")
 	}
 }
@@ -2433,7 +2782,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousBash(t *testing.T) {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
 	toolResult := loaded.Events[2]
-	if got := toolResult.Meta["policy_action"]; got != "deny" {
+	if got := eventToolRawOutput(toolResult)["policy_action"]; got != "deny" {
 		t.Fatalf("policy_action = %v, want %q", got, "deny")
 	}
 }
@@ -2556,7 +2905,7 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 			runningToolUpdate = true
 		}
 		if event.Type == sdksession.EventTypeAssistant {
-			finalText = strings.TrimSpace(event.Text)
+			finalText = strings.TrimSpace(sdksession.EventText(event))
 		}
 	}
 	if !runningToolUpdate {
@@ -2583,10 +2932,10 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 	}
 	var sawTaskID bool
 	for _, event := range loaded.Events {
-		if event == nil || event.Type != sdksession.EventTypeToolResult || event.Meta == nil {
+		if event == nil || event.Type != sdksession.EventTypeToolResult {
 			continue
 		}
-		if taskID, _ := event.Meta["task_id"].(string); strings.TrimSpace(taskID) != "" {
+		if taskID := taskIDFromSessionEvent(event); strings.TrimSpace(taskID) != "" {
 			sawTaskID = true
 			break
 		}
@@ -2937,7 +3286,7 @@ func TestTaskSnapshotToolResultIncludesRunningTerminalCursor(t *testing.T) {
 	}
 }
 
-func TestTaskSnapshotToolResultIncludesSubagentHandleFields(t *testing.T) {
+func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
@@ -2963,13 +3312,114 @@ func TestTaskSnapshotToolResultIncludesSubagentHandleFields(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	for key, want := range map[string]string{"handle": "jeff", "mention": "@jeff", "agent": "codex"} {
-		if got := payload[key]; got != want {
-			t.Fatalf("payload[%s] = %#v, want %q", key, got, want)
+	if got := payload["task_id"]; got != "jeff" {
+		t.Fatalf("payload[task_id] = %#v, want handle jeff", got)
+	}
+	if got := payload["result"]; got != "done" {
+		t.Fatalf("payload[result] = %#v, want done", got)
+	}
+	if got := result.Meta["task_id"]; got != "jeff" {
+		t.Fatalf("meta[task_id] = %#v, want handle jeff", got)
+	}
+	for _, key := range []string{"handle", "mention", "agent", "agent_id", "internal_task_id", "terminal_id"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload contains %q: %#v", key, payload)
 		}
-		if got := result.Meta[key]; got != want {
-			t.Fatalf("meta[%s] = %#v, want %q", key, got, want)
+		if _, ok := result.Meta[key]; ok {
+			t.Fatalf("meta contains %q: %#v", key, result.Meta)
 		}
+	}
+}
+
+func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
+	t.Parallel()
+
+	_, session, runtime := newRuntimeBashToolTestHarness(t)
+	runtime.tasks.mu.Lock()
+	runtime.tasks.subagents["task-1"] = &subagentTask{
+		ref:        sdktask.Ref{TaskID: "task-1", SessionID: "child-session", TerminalID: "subagent-task-1"},
+		sessionRef: session.SessionRef,
+		agent:      "codex",
+		handle:     "ella",
+		createdAt:  time.Now(),
+		state:      sdktask.StateCompleted,
+		running:    false,
+		result: map[string]any{
+			"handle": "ella",
+			"result": "done",
+		},
+		metadata: map[string]any{
+			"handle": "ella",
+		},
+	}
+	runtime.tasks.mu.Unlock()
+
+	result := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":  "wait",
+		"task_id": "ella",
+	})
+	var payload map[string]any
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("task result content = %#v, want json payload", result.Content)
+	}
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	if got := payload["task_id"]; got != "ella" {
+		t.Fatalf("payload[task_id] = %#v, want handle ella", got)
+	}
+	if _, ok := result.Meta["internal_task_id"]; ok {
+		t.Fatalf("meta[internal_task_id] = %#v, want omitted", result.Meta["internal_task_id"])
+	}
+}
+
+func TestRuntimeTaskToolScopesSubagentHandleToSession(t *testing.T) {
+	t.Parallel()
+
+	_, session, runtime := newRuntimeBashToolTestHarness(t)
+	runtime.tasks.mu.Lock()
+	for i := 0; i < 32; i++ {
+		taskID := fmt.Sprintf("other-task-%02d", i)
+		runtime.tasks.subagents[taskID] = &subagentTask{
+			ref:        sdktask.Ref{TaskID: taskID, SessionID: "other-child"},
+			sessionRef: sdksession.SessionRef{SessionID: "other-session"},
+			handle:     "ella",
+			state:      sdktask.StateCompleted,
+			result:     map[string]any{"handle": "ella", "result": "wrong"},
+			metadata:   map[string]any{"handle": "ella"},
+		}
+	}
+	runtime.tasks.subagents["task-current"] = &subagentTask{
+		ref:        sdktask.Ref{TaskID: "task-current", SessionID: "child-session"},
+		sessionRef: session.SessionRef,
+		handle:     "ella",
+		state:      sdktask.StateCompleted,
+		result:     map[string]any{"handle": "ella", "result": "right"},
+		metadata:   map[string]any{"handle": "ella"},
+	}
+	runtime.tasks.mu.Unlock()
+
+	result := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":  "wait",
+		"task_id": "ella",
+	})
+	var payload map[string]any
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("task result content = %#v, want json payload", result.Content)
+	}
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	if got := payload["result"]; got != "right" {
+		t.Fatalf("payload[result] = %#v, want current-session result", got)
 	}
 }
 
@@ -3603,14 +4053,8 @@ func eventTextsForTest(events []*sdksession.Event) []string {
 		if event == nil {
 			continue
 		}
-		if text := strings.TrimSpace(event.Text); text != "" {
+		if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 			out = append(out, text)
-			continue
-		}
-		if event.Message != nil {
-			if text := strings.TrimSpace(event.Message.TextContent()); text != "" {
-				out = append(out, text)
-			}
 		}
 	}
 	return out
@@ -4052,14 +4496,37 @@ func (m *spawnProbeTaskLoopRuntimeModel) Generate(_ context.Context, req *sdkmod
 func mustSessionTaskID(t *testing.T, events []*sdksession.Event) string {
 	t.Helper()
 	for _, event := range events {
-		if event == nil || event.Meta == nil {
+		if event == nil {
 			continue
 		}
-		if taskID, _ := event.Meta["task_id"].(string); strings.TrimSpace(taskID) != "" {
-			return strings.TrimSpace(taskID)
+		if taskID := taskIDFromSessionEvent(event); strings.TrimSpace(taskID) != "" {
+			return taskID
 		}
 	}
 	t.Fatal("did not find task_id in persisted session events")
+	return ""
+}
+
+func eventToolRawOutput(event *sdksession.Event) map[string]any {
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return update.RawOutput
+	}
+	return nil
+}
+
+func eventToolRawInput(event *sdksession.Event) map[string]any {
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return update.RawInput
+	}
+	return nil
+}
+
+func taskIDFromSessionEvent(event *sdksession.Event) string {
+	for _, values := range []map[string]any{eventToolRawOutput(event), eventToolRawInput(event)} {
+		if taskID, _ := values["task_id"].(string); strings.TrimSpace(taskID) != "" {
+			return strings.TrimSpace(taskID)
+		}
+	}
 	return ""
 }
 

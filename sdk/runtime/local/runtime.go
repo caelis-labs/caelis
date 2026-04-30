@@ -485,7 +485,10 @@ func buildUserEvent(session sdksession.Session, turnID string, input string, par
 		Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
 		Scope:      ptrScope(defaultScope(session, turnID)),
 		Protocol: &sdksession.EventProtocol{
-			UpdateType: string(sdksession.ProtocolUpdateTypeUserMessage),
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
+				Content:       sdksession.ProtocolTextContent(message.TextContent()),
+			},
 		},
 		Message: &message,
 		Text:    message.TextContent(),
@@ -505,6 +508,33 @@ func normalizeEvent(session sdksession.Session, turnID string, event *sdksession
 	}
 	if event.Text == "" && event.Message != nil {
 		event.Text = event.Message.TextContent()
+	}
+	if event.Protocol == nil {
+		switch sdksession.EventTypeOf(event) {
+		case sdksession.EventTypeUser:
+			event.Protocol = &sdksession.EventProtocol{Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
+				Content:       sdksession.ProtocolTextContent(event.Text),
+			}}
+		case sdksession.EventTypeAssistant:
+			event.Protocol = &sdksession.EventProtocol{Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeAgentMessage),
+				Content:       sdksession.ProtocolTextContent(event.Text),
+			}}
+		}
+	} else {
+		protocol := sdksession.CloneEventProtocol(*event.Protocol)
+		if protocol.Update != nil && protocol.Update.Content == nil {
+			switch sdksession.EventTypeOf(event) {
+			case sdksession.EventTypeUser:
+				protocol.Update.SessionUpdate = string(sdksession.ProtocolUpdateTypeUserMessage)
+				protocol.Update.Content = sdksession.ProtocolTextContent(event.Text)
+			case sdksession.EventTypeAssistant:
+				protocol.Update.SessionUpdate = firstNonEmpty(protocol.Update.SessionUpdate, string(sdksession.ProtocolUpdateTypeAgentMessage))
+				protocol.Update.Content = sdksession.ProtocolTextContent(event.Text)
+			}
+			event.Protocol = &protocol
+		}
 	}
 	if strings.TrimSpace(event.SessionID) == "" {
 		event.SessionID = strings.TrimSpace(session.SessionID)

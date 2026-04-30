@@ -165,9 +165,10 @@ const (
 	CodeControlPlaneUnsupported = gatewaycore.CodeControlPlaneUnsupported
 )
 
-func AssistantText(event Event) string { return gatewaycore.AssistantText(event) }
-func PromptTokens(event Event) int     { return gatewaycore.PromptTokens(event) }
-func As(err error, target any) bool    { return gatewaycore.As(err, target) }
+func AssistantText(event Event) string  { return gatewaycore.AssistantText(event) }
+func PromptTokens(event Event) int      { return gatewaycore.PromptTokens(event) }
+func CachedInputTokens(event Event) int { return gatewaycore.CachedInputTokens(event) }
+func As(err error, target any) bool     { return gatewaycore.As(err, target) }
 func CurrentModelAlias(state map[string]any) string {
 	return gatewaycore.CurrentModelAlias(state)
 }

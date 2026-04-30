@@ -387,9 +387,10 @@ func geminiUsageFromResponse(out *genai.GenerateContentResponse) model.Usage {
 		return model.Usage{}
 	}
 	return model.Usage{
-		PromptTokens:     int(out.UsageMetadata.PromptTokenCount),
-		CompletionTokens: int(out.UsageMetadata.CandidatesTokenCount),
-		TotalTokens:      int(out.UsageMetadata.TotalTokenCount),
+		PromptTokens:      int(out.UsageMetadata.PromptTokenCount),
+		CachedInputTokens: int(out.UsageMetadata.CachedContentTokenCount),
+		CompletionTokens:  int(out.UsageMetadata.CandidatesTokenCount),
+		TotalTokens:       int(out.UsageMetadata.TotalTokenCount),
 	}
 }
 

@@ -364,9 +364,10 @@ func anthropicMessageToSDK(
 		normalizeFinishReason(resp.StopReason),
 		string(resp.StopReason),
 		sdkmodel.Usage{
-			PromptTokens:     int(resp.Usage.InputTokens),
-			CompletionTokens: int(resp.Usage.OutputTokens),
-			TotalTokens:      int(resp.Usage.InputTokens + resp.Usage.OutputTokens),
+			PromptTokens:      int(resp.Usage.InputTokens),
+			CachedInputTokens: int(resp.Usage.CacheReadInputTokens),
+			CompletionTokens:  int(resp.Usage.OutputTokens),
+			TotalTokens:       int(resp.Usage.InputTokens + resp.Usage.OutputTokens),
 		},
 		nil
 }

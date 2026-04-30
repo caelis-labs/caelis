@@ -61,7 +61,7 @@ func TestVisibilityRules(t *testing.T) {
 	}
 }
 
-func TestMainInvocationVisibleExcludesParticipantScopedEvents(t *testing.T) {
+func TestMainInvocationVisibleSharesSideDialogueAndExcludesDelegatedWork(t *testing.T) {
 	t.Parallel()
 
 	main := &Event{
@@ -72,21 +72,38 @@ func TestMainInvocationVisibleExcludesParticipantScopedEvents(t *testing.T) {
 		t.Fatal("main event should be visible to the main invocation")
 	}
 
-	participant := &Event{
+	sideAssistant := &Event{
 		Type:    EventTypeAssistant,
 		Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "side")),
 		Scope: &EventScope{
 			Participant: ParticipantRef{
-				ID:   "side-acp",
-				Kind: ParticipantKindACP,
+				ID:   "side-agent",
+				Kind: ParticipantKindSubagent,
+				Role: ParticipantRoleSidecar,
 			},
 		},
 	}
-	if !IsInvocationVisibleEvent(participant) {
-		t.Fatal("participant event should remain invocation-visible for non-main consumers")
+	if !IsInvocationVisibleEvent(sideAssistant) {
+		t.Fatal("side assistant event should remain invocation-visible for non-main consumers")
 	}
-	if IsMainInvocationVisibleEvent(participant) {
-		t.Fatal("participant event must not be visible to the main invocation")
+	if !IsMainInvocationVisibleEvent(sideAssistant) {
+		t.Fatal("side assistant final event should be visible to the main invocation")
+	}
+
+	delegatedAssistant := &Event{
+		Type:    EventTypeAssistant,
+		Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "spawn")),
+		Scope: &EventScope{
+			Source: "agent_spawn",
+			Participant: ParticipantRef{
+				ID:   "spawned-agent",
+				Kind: ParticipantKindSubagent,
+				Role: ParticipantRoleDelegated,
+			},
+		},
+	}
+	if IsMainInvocationVisibleEvent(delegatedAssistant) {
+		t.Fatal("delegated subagent event must not be visible to the main invocation")
 	}
 }
 

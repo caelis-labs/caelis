@@ -385,6 +385,14 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 				status.ContextWindowTokens = usage.ContextWindowTokens
 			}
 		}
+		if ok {
+			if usage, err := d.sessionTokenUsage(context.Background(), session.SessionRef); err == nil {
+				status.SessionInputTokens = usage.PromptTokens
+				status.SessionCachedInputTokens = usage.CachedInputTokens
+				status.SessionOutputTokens = usage.CompletionTokens
+				status.SessionTotalTokens = usage.TotalTokens
+			}
+		}
 	}
 	if activeACP {
 		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
@@ -412,6 +420,56 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		}
 	}
 	return status, nil
+}
+
+func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.SessionRef) (appgateway.UsageSnapshot, error) {
+	if d == nil || d.stack == nil || d.stack.Sessions == nil {
+		return appgateway.UsageSnapshot{}, nil
+	}
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return appgateway.UsageSnapshot{}, nil
+	}
+	events, err := d.stack.Sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
+	if err != nil {
+		return appgateway.UsageSnapshot{}, err
+	}
+	var usage appgateway.UsageSnapshot
+	lastToolCallUsageKey := ""
+	lastUsageWasToolCall := false
+	for _, event := range events {
+		one := appgateway.UsageSnapshotFromSessionEvent(event)
+		if one == nil {
+			if sdksession.EventTypeOf(event) != sdksession.EventTypeToolCall {
+				lastToolCallUsageKey = ""
+				lastUsageWasToolCall = false
+			}
+			continue
+		}
+		isToolCall := sdksession.EventTypeOf(event) == sdksession.EventTypeToolCall
+		usageKey := usageSnapshotDedupeKey(*one)
+		if isToolCall && lastUsageWasToolCall && usageKey != "" && usageKey == lastToolCallUsageKey {
+			continue
+		}
+		usage.PromptTokens += one.PromptTokens
+		usage.CachedInputTokens += one.CachedInputTokens
+		usage.CompletionTokens += one.CompletionTokens
+		usage.TotalTokens += one.TotalTokens
+		if isToolCall {
+			lastToolCallUsageKey = usageKey
+			lastUsageWasToolCall = true
+		} else {
+			lastToolCallUsageKey = ""
+			lastUsageWasToolCall = false
+		}
+	}
+	return usage, nil
+}
+
+func usageSnapshotDedupeKey(usage appgateway.UsageSnapshot) string {
+	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.TotalTokens)
 }
 
 func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn, error) {
@@ -835,6 +893,9 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	}
 	status.Participants = make([]AgentParticipantSnapshot, 0, len(state.Participants))
 	for _, participant := range state.Participants {
+		if participant.Kind == sdksession.ParticipantKindSubagent && participant.Role == sdksession.ParticipantRoleDelegated {
+			continue
+		}
 		if shouldHideSelfDelegatedParticipant(participant) {
 			continue
 		}
@@ -1041,10 +1102,10 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	query = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(query), "@"))
 	out := make([]CompletionCandidate, 0, min(limit, len(state.Participants)))
 	for _, participant := range state.Participants {
-		if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleDelegated {
+		if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleSidecar {
 			continue
 		}
-		if shouldHideSelfDelegatedParticipant(participant) {
+		if !isUserSideSubagentParticipant(participant) {
 			continue
 		}
 		handle := strings.TrimPrefix(strings.TrimSpace(participant.Label), "@")
@@ -1068,6 +1129,10 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 		}
 	}
 	return out, nil
+}
+
+func isUserSideSubagentParticipant(participant appgateway.ParticipantState) bool {
+	return participant.Kind == sdksession.ParticipantKindSubagent && participant.Role == sdksession.ParticipantRoleSidecar
 }
 
 func shouldHideSelfDelegatedParticipant(participant appgateway.ParticipantState) bool {

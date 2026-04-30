@@ -39,3 +39,17 @@ func TestReasoningBlockRenderSuppressesDefaultAssistantLabel(t *testing.T) {
 		t.Fatalf("reasoning row = %q, want no assistant label", rows[0].Plain)
 	}
 }
+
+func TestMergeSubagentStreamChunkPreservesOverlappingDelta(t *testing.T) {
+	got := mergeSubagentStreamChunk("abcabc", "abcXYZ")
+	if got != "abcabcabcXYZ" {
+		t.Fatalf("merged chunk = %q, want exact appended delta", got)
+	}
+}
+
+func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
+	got := mergeSubagentStreamChunk("你好", "你好，世界")
+	if got != "你好，世界" {
+		t.Fatalf("merged cumulative chunk = %q, want cumulative replacement", got)
+	}
+}

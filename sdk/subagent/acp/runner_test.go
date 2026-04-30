@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -202,17 +203,62 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want three agent delta updates", sink.frames)
 	}
 	var rendered string
+	var renderedEvents string
 	for _, frame := range sink.frames {
 		rendered += frame.Text
+		if frame.Event == nil {
+			t.Fatalf("stream frame event = nil, want structured delta event")
+		}
+		renderedEvents += frame.Event.Text
 	}
 	if rendered != "我来按步骤执行这个任务。" {
 		t.Fatalf("rendered stream = %q, want deduped final text", rendered)
+	}
+	if renderedEvents != "我来按步骤执行这个任务。" {
+		t.Fatalf("rendered event stream = %q, want deduped final text", renderedEvents)
 	}
 	run.mu.RLock()
 	result := run.result
 	run.mu.RUnlock()
 	if result != "我来按步骤执行这个任务。" {
 		t.Fatalf("run.result = %q, want deduped final text", result)
+	}
+}
+
+func TestRunnerAgentMessageDeltaMergeDoesNotUseOverlapHeuristic(t *testing.T) {
+	t.Parallel()
+
+	run := &childRun{}
+	if got := run.appendAgentMessageLocked("abcabc"); got != "abcabc" {
+		t.Fatalf("first delta = %q, want abcabc", got)
+	}
+	if got := run.appendAgentMessageLocked("abcXYZ"); got != "abcXYZ" {
+		t.Fatalf("overlapping delta = %q, want full incoming chunk", got)
+	}
+	if run.result != "abcabcabcXYZ" {
+		t.Fatalf("run.result = %q, want exact appended chunks", run.result)
+	}
+}
+
+func TestRunnerAgentMessageDeltaMergePreservesMixedLanguageChunks(t *testing.T) {
+	t.Parallel()
+
+	chunks := []string{
+		"Let me quickly inspect these files to understand the project.",
+		"\n\nNow I can summarize: ",
+		"这是一个包含 calc 和 hello 模块的 Python 项目，覆盖主模块功能和边界测试。",
+	}
+	run := &childRun{}
+	var rendered string
+	for _, chunk := range chunks {
+		rendered += run.appendAgentMessageLocked(chunk)
+	}
+	want := strings.Join(chunks, "")
+	if rendered != want {
+		t.Fatalf("rendered = %q, want %q", rendered, want)
+	}
+	if run.result != want {
+		t.Fatalf("run.result = %q, want %q", run.result, want)
 	}
 }
 

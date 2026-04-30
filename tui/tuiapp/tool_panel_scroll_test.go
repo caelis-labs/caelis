@@ -72,7 +72,7 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 	if !strings.Contains(joined, "• Ran run long task") || !strings.Contains(joined, "line 01") || !strings.Contains(joined, "line 12") {
 		t.Fatalf("rendered rows = %q, want completed BASH output still expanded", joined)
 	}
-	for _, want := range []string{"line 01", "line 02", "... 8 lines hidden ...", "line 11", "line 12"} {
+	for _, want := range []string{"line 01", "line 02", "... +8 lines", "line 11", "line 12"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows missing %q\n%s", want, joined)
 		}
@@ -87,7 +87,7 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 	rows = block.Render(ctx)
 	plain = renderedPlainRows(rows)
 	joined = strings.Join(plain, "\n")
-	if strings.Contains(joined, "lines hidden") {
+	if strings.Contains(joined, "... +") {
 		t.Fatalf("expanded terminal output should remove hidden marker, got\n%s", joined)
 	}
 	for _, want := range []string{"line 03", "line 10"} {
@@ -124,7 +124,7 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	if strings.Contains(joined, "▾ Searching the Web") || strings.Contains(joined, "{") {
 		t.Fatalf("generic ACP tool leaked old expandable/raw-json header, got\n%s", joined)
 	}
-	for _, want := range []string{"result 01", "result 02", "... 2 lines hidden ...", "result 05", "result 06"} {
+	for _, want := range []string{"result 01", "result 02", "... +2 lines", "result 05", "result 06"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("generic ACP tool output missing %q\n%s", want, joined)
 		}
@@ -139,7 +139,7 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	rows = block.Render(ctx)
 	plain = renderedPlainRows(rows)
 	joined = strings.Join(plain, "\n")
-	if strings.Contains(joined, "lines hidden") || !strings.Contains(joined, "result 03") || !strings.Contains(joined, "result 04") {
+	if strings.Contains(joined, "... +") || !strings.Contains(joined, "result 03") || !strings.Contains(joined, "result 04") {
 		t.Fatalf("expanded generic ACP tool output should show hidden lines, got\n%s", joined)
 	}
 }

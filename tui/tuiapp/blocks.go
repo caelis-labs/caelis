@@ -246,6 +246,7 @@ type MainACPTurnBlock struct {
 type ToolUpdateMeta struct {
 	TaskID          string
 	ToolKind        string
+	FullArgs        string
 	DisableGrouping bool
 }
 
@@ -306,6 +307,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	name = strings.TrimSpace(name)
 	args = strings.TrimSpace(args)
 	toolKind := strings.TrimSpace(meta.ToolKind)
+	fullArgs := strings.TrimSpace(meta.FullArgs)
 	if !isTerminalPanelToolKind(name, toolKind) || final {
 		output = strings.TrimSpace(output)
 	}
@@ -329,6 +331,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			if strings.TrimSpace(ev.Args) == "" {
 				ev.Args = args
 			}
+			if strings.TrimSpace(ev.FullArgs) == "" {
+				ev.FullArgs = fullArgs
+			}
 			if ev.TaskID == "" {
 				ev.TaskID = taskID
 			}
@@ -346,6 +351,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			Name:            name,
 			ToolKind:        toolKind,
 			Args:            args,
+			FullArgs:        fullArgs,
 			Output:          output,
 			TaskID:          taskID,
 			DisableGrouping: disableGrouping,
@@ -358,6 +364,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		Name:            name,
 		ToolKind:        toolKind,
 		Args:            args,
+		FullArgs:        fullArgs,
 		Output:          output,
 		Done:            true,
 		Err:             err,
@@ -376,12 +383,16 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			if strings.TrimSpace(finalEvent.Args) == "" {
 				finalEvent.Args = strings.TrimSpace(ev.Args)
 			}
+			if strings.TrimSpace(finalEvent.FullArgs) == "" {
+				finalEvent.FullArgs = strings.TrimSpace(ev.FullArgs)
+			}
 			if strings.TrimSpace(finalEvent.ToolKind) == "" {
 				finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
 			}
 			ev.Name = finalEvent.Name
 			ev.ToolKind = finalEvent.ToolKind
 			ev.Args = finalEvent.Args
+			ev.FullArgs = finalEvent.FullArgs
 			ev.Output = finalEvent.Output
 			ev.Done = true
 			ev.Err = finalEvent.Err
@@ -402,6 +413,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		}
 		if strings.TrimSpace(finalEvent.Args) == "" {
 			finalEvent.Args = strings.TrimSpace(ev.Args)
+		}
+		if strings.TrimSpace(finalEvent.FullArgs) == "" {
+			finalEvent.FullArgs = strings.TrimSpace(ev.FullArgs)
 		}
 		if strings.TrimSpace(finalEvent.ToolKind) == "" {
 			finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
@@ -564,6 +578,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	name = strings.TrimSpace(name)
 	args = strings.TrimSpace(args)
 	toolKind := strings.TrimSpace(meta.ToolKind)
+	fullArgs := strings.TrimSpace(meta.FullArgs)
 	if !isTerminalPanelToolKind(name, toolKind) || final {
 		output = strings.TrimSpace(output)
 	}
@@ -587,6 +602,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			if strings.TrimSpace(ev.Args) == "" {
 				ev.Args = args
 			}
+			if strings.TrimSpace(ev.FullArgs) == "" {
+				ev.FullArgs = fullArgs
+			}
 			if ev.TaskID == "" {
 				ev.TaskID = taskID
 			}
@@ -604,6 +622,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			Name:            name,
 			ToolKind:        toolKind,
 			Args:            args,
+			FullArgs:        fullArgs,
 			Output:          output,
 			TaskID:          taskID,
 			DisableGrouping: disableGrouping,
@@ -616,6 +635,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		Name:            name,
 		ToolKind:        toolKind,
 		Args:            args,
+		FullArgs:        fullArgs,
 		Output:          output,
 		Done:            true,
 		Err:             err,
@@ -634,12 +654,16 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			if strings.TrimSpace(finalEvent.Args) == "" {
 				finalEvent.Args = strings.TrimSpace(ev.Args)
 			}
+			if strings.TrimSpace(finalEvent.FullArgs) == "" {
+				finalEvent.FullArgs = strings.TrimSpace(ev.FullArgs)
+			}
 			if strings.TrimSpace(finalEvent.ToolKind) == "" {
 				finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
 			}
 			ev.Name = finalEvent.Name
 			ev.ToolKind = finalEvent.ToolKind
 			ev.Args = finalEvent.Args
+			ev.FullArgs = finalEvent.FullArgs
 			ev.Output = finalEvent.Output
 			ev.Done = true
 			ev.Err = finalEvent.Err
@@ -660,6 +684,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		}
 		if strings.TrimSpace(finalEvent.Args) == "" {
 			finalEvent.Args = strings.TrimSpace(ev.Args)
+		}
+		if strings.TrimSpace(finalEvent.FullArgs) == "" {
+			finalEvent.FullArgs = strings.TrimSpace(ev.FullArgs)
 		}
 		if strings.TrimSpace(finalEvent.ToolKind) == "" {
 			finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
@@ -828,6 +855,16 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 	}
 	if !toolPanelExpanded(mapValue(expandedState), callID) {
 		setToolPanelExpandedState(expandedState, callID, true)
+		return true
+	}
+	if toolPanelHasHiddenToolArgs(events, callID) {
+		if fullOutputState == nil {
+			return false
+		}
+		if *fullOutputState == nil {
+			*fullOutputState = map[string]bool{}
+		}
+		(*fullOutputState)[callID] = !(*fullOutputState)[callID]
 		return true
 	}
 	if toolPanelHasHiddenSummary(events, callID) {
@@ -1162,6 +1199,32 @@ func toolPanelHasHiddenSummary(events []SubagentEvent, callID string) bool {
 		return false
 	}
 	return len(nonEmptyToolOutputLines(final.Output)) > acpTerminalPanelMaxLines
+}
+
+func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {
+	ev, ok := latestToolEventForCallID(events, callID)
+	if !ok {
+		return false
+	}
+	fullArgs := strings.TrimSpace(ev.FullArgs)
+	if fullArgs == "" {
+		return false
+	}
+	return fullArgs != strings.TrimSpace(ev.Args)
+}
+
+func latestToolEventForCallID(events []SubagentEvent, callID string) (SubagentEvent, bool) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return SubagentEvent{}, false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind == SEToolCall && strings.TrimSpace(ev.CallID) == callID {
+			return ev, true
+		}
+	}
+	return SubagentEvent{}, false
 }
 
 func finalToolEventForCallID(events []SubagentEvent, callID string) (SubagentEvent, bool) {
@@ -1524,6 +1587,7 @@ type SubagentEvent struct {
 	Name            string
 	ToolKind        string
 	Args            string
+	FullArgs        string
 	Output          string
 	TaskID          string
 	Done            bool
@@ -1659,6 +1723,7 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 	stream = strings.ToLower(strings.TrimSpace(stream))
 	chunk = normalizeSubagentChunkBoundary("", chunk)
 	toolKind := strings.TrimSpace(meta.ToolKind)
+	fullArgs := strings.TrimSpace(meta.FullArgs)
 	taskID := strings.TrimSpace(meta.TaskID)
 	disableGrouping := meta.DisableGrouping
 	if updateLinkedTerminalEvent(s.Events, toolSemanticName(toolName, toolKind), taskID, chunk) {
@@ -1679,6 +1744,9 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			if strings.TrimSpace(e.Args) == "" {
 				e.Args = args
 			}
+			if strings.TrimSpace(e.FullArgs) == "" {
+				e.FullArgs = fullArgs
+			}
 			if e.TaskID == "" {
 				e.TaskID = taskID
 			}
@@ -1697,6 +1765,7 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			ToolKind:        toolKind,
 			CallID:          callID,
 			Args:            args,
+			FullArgs:        fullArgs,
 			Output:          chunk,
 			TaskID:          taskID,
 			DisableGrouping: disableGrouping,
@@ -1711,6 +1780,7 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 		ToolKind:        toolKind,
 		CallID:          callID,
 		Args:            args,
+		FullArgs:        fullArgs,
 		Output:          chunk,
 		Done:            true,
 		Err:             stream == "stderr",
@@ -1729,12 +1799,16 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			if strings.TrimSpace(finalEvent.Args) == "" {
 				finalEvent.Args = e.Args
 			}
+			if strings.TrimSpace(finalEvent.FullArgs) == "" {
+				finalEvent.FullArgs = e.FullArgs
+			}
 			if strings.TrimSpace(finalEvent.ToolKind) == "" {
 				finalEvent.ToolKind = strings.TrimSpace(e.ToolKind)
 			}
 			e.Name = finalEvent.Name
 			e.ToolKind = finalEvent.ToolKind
 			e.Args = finalEvent.Args
+			e.FullArgs = finalEvent.FullArgs
 			e.Output = finalEvent.Output
 			e.Done = true
 			e.Err = finalEvent.Err
@@ -1753,6 +1827,9 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 		}
 		if strings.TrimSpace(finalEvent.Args) == "" {
 			finalEvent.Args = e.Args
+		}
+		if strings.TrimSpace(finalEvent.FullArgs) == "" {
+			finalEvent.FullArgs = e.FullArgs
 		}
 		if strings.TrimSpace(finalEvent.ToolKind) == "" {
 			finalEvent.ToolKind = strings.TrimSpace(e.ToolKind)
@@ -1976,16 +2053,11 @@ func mergeSubagentStreamChunk(existing string, incoming string) string {
 	if incoming == existing {
 		return existing
 	}
-
-	const stableReplayThreshold = 12
-	if runeCount(existing) >= stableReplayThreshold && strings.HasPrefix(incoming, existing) {
+	if strings.HasPrefix(incoming, existing) {
 		return incoming
 	}
-	if runeCount(incoming) >= stableReplayThreshold && strings.HasPrefix(existing, incoming) {
+	if strings.HasPrefix(existing, incoming) {
 		return existing
-	}
-	if suffix := overlappingSubagentSuffix(existing, incoming, 6); suffix != incoming {
-		return existing + suffix
 	}
 	return existing + incoming
 }
@@ -2013,22 +2085,6 @@ func normalizeSubagentChunkBoundary(existing string, incoming string) string {
 	// Keep the fix narrow: only trim leading U+FFFD/FEFF on continuation chunks.
 	incoming = strings.TrimLeft(incoming, "\uFFFD\uFEFF")
 	return incoming
-}
-
-func overlappingSubagentSuffix(existing string, incoming string, minOverlap int) string {
-	existingRunes := []rune(existing)
-	incomingRunes := []rune(incoming)
-	limit := minInt(len(existingRunes), len(incomingRunes))
-	for overlap := limit; overlap >= minOverlap; overlap-- {
-		if string(existingRunes[len(existingRunes)-overlap:]) == string(incomingRunes[:overlap]) {
-			return string(incomingRunes[overlap:])
-		}
-	}
-	return incoming
-}
-
-func runeCount(text string) int {
-	return len([]rune(text))
 }
 
 // UpdateToolCall creates or updates a tool call event identified by callID.

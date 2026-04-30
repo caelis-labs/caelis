@@ -966,6 +966,9 @@ func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_stage:"); ok {
 		return m.tryToggleACPExplorationStageToken(blockID, key)
 	}
+	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_task_stage:"); ok {
+		return m.tryToggleACPExplorationStageToken(blockID, key)
+	}
 	if rawIDs, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_exploration_group:"); ok {
 		return m.tryToggleACPExplorationGroupToken(blockID, rawIDs)
 	}

@@ -61,7 +61,7 @@ func heuristicObjective(base State, events []*sdksession.Event) string {
 		if event == nil || event.Type != sdksession.EventTypeUser {
 			continue
 		}
-		if text := strings.TrimSpace(event.Text); text != "" {
+		if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 			return compactSentence(text, 200)
 		}
 	}
@@ -74,14 +74,15 @@ func heuristicConstraints(events []*sdksession.Event) []string {
 		if event == nil || event.Type != sdksession.EventTypeUser {
 			continue
 		}
-		text := strings.ToLower(strings.TrimSpace(event.Text))
+		eventText := strings.TrimSpace(sdksession.EventText(event))
+		text := strings.ToLower(eventText)
 		switch {
 		case strings.Contains(text, "exactly"):
-			out = append(out, compactSentence(event.Text, 180))
+			out = append(out, compactSentence(eventText, 180))
 		case strings.Contains(text, "must "):
-			out = append(out, compactSentence(event.Text, 180))
+			out = append(out, compactSentence(eventText, 180))
 		case strings.Contains(text, "do not "):
-			out = append(out, compactSentence(event.Text, 180))
+			out = append(out, compactSentence(eventText, 180))
 		}
 	}
 	return normalizeStringList(out, 8)
@@ -93,8 +94,10 @@ func heuristicDecisions(events []*sdksession.Event) []string {
 		if event == nil {
 			continue
 		}
-		if event.Type == sdksession.EventTypePlan && event.Text != "" {
-			out = append(out, "plan updated: "+compactSentence(event.Text, 160))
+		if event.Type == sdksession.EventTypePlan {
+			if text := sdksession.EventText(event); text != "" {
+				out = append(out, "plan updated: "+compactSentence(text, 160))
+			}
 		}
 		if event.Type == sdksession.EventTypeToolResult && event.Meta != nil {
 			if name, _ := event.Meta["tool_name"].(string); strings.TrimSpace(name) == "PLAN" {
@@ -113,7 +116,7 @@ func heuristicFacts(events []*sdksession.Event) []string {
 		}
 		switch event.Type {
 		case sdksession.EventTypeUser, sdksession.EventTypeAssistant:
-			if text := strings.TrimSpace(event.Text); text != "" {
+			if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 				out = append(out, compactSentence(text, 180))
 			}
 		case sdksession.EventTypeToolResult:
@@ -135,7 +138,7 @@ func heuristicProgress(events []*sdksession.Event, runtime RuntimeSnapshot) []st
 		}
 		switch event.Type {
 		case sdksession.EventTypeAssistant, sdksession.EventTypeToolResult:
-			if text := strings.TrimSpace(event.Text); text != "" {
+			if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 				out = append(out, compactSentence(text, 160))
 			}
 		}
@@ -149,7 +152,7 @@ func heuristicRisks(events []*sdksession.Event) []string {
 		if event == nil {
 			continue
 		}
-		text := strings.TrimSpace(event.Text)
+		text := strings.TrimSpace(sdksession.EventText(event))
 		lower := strings.ToLower(text)
 		switch {
 		case strings.Contains(lower, "blocked"):
@@ -173,7 +176,7 @@ func heuristicNextActions(runtime RuntimeSnapshot, events []*sdksession.Event) [
 		if event == nil || event.Type != sdksession.EventTypeUser {
 			continue
 		}
-		if text := strings.TrimSpace(event.Text); text != "" {
+		if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
 			out = append(out, "continue from: "+compactSentence(text, 160))
 		}
 	}
@@ -183,11 +186,12 @@ func heuristicNextActions(runtime RuntimeSnapshot, events []*sdksession.Event) [
 func heuristicFilesTouched(events []*sdksession.Event) []string {
 	out := []string{}
 	for _, event := range events {
-		if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+		update := sdksession.ProtocolUpdateOf(event)
+		if event == nil || update == nil {
 			continue
 		}
 		for _, key := range []string{"path", "workdir"} {
-			if value, ok := event.Protocol.ToolCall.RawInput[key].(string); ok && strings.TrimSpace(value) != "" {
+			if value, ok := update.RawInput[key].(string); ok && strings.TrimSpace(value) != "" {
 				out = append(out, strings.TrimSpace(value))
 			}
 		}
@@ -198,13 +202,14 @@ func heuristicFilesTouched(events []*sdksession.Event) []string {
 func heuristicCommandsRun(events []*sdksession.Event) []string {
 	out := []string{}
 	for _, event := range events {
-		if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+		update := sdksession.ProtocolUpdateOf(event)
+		if event == nil || update == nil {
 			continue
 		}
-		if !strings.EqualFold(strings.TrimSpace(event.Protocol.ToolCall.Name), "BASH") {
+		if !strings.EqualFold(strings.TrimSpace(update.Title), "BASH") && !strings.Contains(strings.ToUpper(strings.TrimSpace(update.Title)), "BASH") {
 			continue
 		}
-		if value, ok := event.Protocol.ToolCall.RawInput["command"].(string); ok && strings.TrimSpace(value) != "" {
+		if value, ok := update.RawInput["command"].(string); ok && strings.TrimSpace(value) != "" {
 			out = append(out, compactSentence(value, 180))
 		}
 	}

@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"maps"
-	"path/filepath"
 	"strings"
 
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
@@ -28,6 +27,7 @@ func projectSessionEvents(ref sdksession.SessionRef, events []*sdksession.Event)
 				SessionRef:  ref,
 				Origin:      canonicalOriginFromSessionEvent(ref, event),
 				Meta:        canonicalEventMeta(event),
+				Protocol:    canonicalProtocolPayload(event),
 				Usage:       usageSnapshotFromSessionEvent(event),
 				Narrative:   canonicalNarrativePayload(event),
 				ToolCall:    canonicalToolCallPayload(event),
@@ -39,6 +39,14 @@ func projectSessionEvents(ref sdksession.SessionRef, events []*sdksession.Event)
 		})
 	}
 	return out
+}
+
+func canonicalProtocolPayload(event *sdksession.Event) *sdksession.EventProtocol {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	protocol := sdksession.CloneEventProtocol(*event.Protocol)
+	return &protocol
 }
 
 // ProjectSessionEvent converts one canonical session event into the stable
@@ -131,25 +139,82 @@ func usageSnapshotFromSessionEvent(event *sdksession.Event) *UsageSnapshot {
 		if !ok {
 			return nil
 		}
-		usage := &UsageSnapshot{
-			PromptTokens:     intValue(payload["prompt_tokens"]),
-			CompletionTokens: intValue(payload["completion_tokens"]),
-			TotalTokens:      intValue(payload["total_tokens"]),
-		}
-		if usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+		usage := usageSnapshotFromPayload(payload)
+		if usage == nil {
 			return nil
 		}
 		return usage
 	}
-	usage := &UsageSnapshot{
-		PromptTokens:     intValue(event.Meta["prompt_tokens"]),
-		CompletionTokens: intValue(event.Meta["completion_tokens"]),
-		TotalTokens:      intValue(event.Meta["total_tokens"]),
+	if raw := nestedAny(event.Meta, "caelis", "sdk", "usage"); raw != nil {
+		payload, ok := raw.(map[string]any)
+		if ok {
+			if usage := usageSnapshotFromPayload(payload); usage != nil {
+				return usage
+			}
+		}
 	}
-	if usage.PromptTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+	return usageSnapshotFromPayload(event.Meta)
+}
+
+// UsageSnapshotFromSessionEvent projects provider token usage from a durable
+// session event into the canonical gateway usage contract.
+func UsageSnapshotFromSessionEvent(event *sdksession.Event) *UsageSnapshot {
+	return usageSnapshotFromSessionEvent(event)
+}
+
+func usageSnapshotFromPayload(payload map[string]any) *UsageSnapshot {
+	if payload == nil {
+		return nil
+	}
+	promptTokens := firstNonZeroInt(intValue(payload["prompt_tokens"]), intValue(payload["input_tokens"]))
+	completionTokens := firstNonZeroInt(intValue(payload["completion_tokens"]), intValue(payload["output_tokens"]))
+	totalTokens := intValue(payload["total_tokens"])
+	if totalTokens == 0 && (promptTokens != 0 || completionTokens != 0) {
+		totalTokens = promptTokens + completionTokens
+	}
+	usage := &UsageSnapshot{
+		PromptTokens:      promptTokens,
+		CachedInputTokens: cachedInputTokensFromPayload(payload),
+		CompletionTokens:  completionTokens,
+		TotalTokens:       totalTokens,
+	}
+	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
 		return nil
 	}
 	return usage
+}
+
+func cachedInputTokensFromPayload(payload map[string]any) int {
+	return firstNonZeroInt(
+		intValue(payload["cached_input_tokens"]),
+		intValue(payload["cached_prompt_tokens"]),
+		intValue(payload["cached_tokens"]),
+		intValue(payload["prompt_cache_hit_tokens"]),
+		intValue(payload["cache_read_input_tokens"]),
+		intValue(nestedAny(payload, "input_tokens_details", "cached_tokens")),
+		intValue(nestedAny(payload, "prompt_tokens_details", "cached_tokens")),
+	)
+}
+
+func firstNonZeroInt(values ...int) int {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
+}
+
+func nestedAny(values map[string]any, path ...string) any {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	return current
 }
 
 func canonicalOriginFromSessionEvent(ref sdksession.SessionRef, event *sdksession.Event) *EventOrigin {
@@ -298,6 +363,13 @@ func PromptTokens(event Event) int {
 	return event.Usage.PromptTokens
 }
 
+func CachedInputTokens(event Event) int {
+	if event.Usage == nil {
+		return 0
+	}
+	return event.Usage.CachedInputTokens
+}
+
 func canonicalNarrativePayload(event *sdksession.Event) *NarrativePayload {
 	if event == nil {
 		return nil
@@ -313,7 +385,7 @@ func canonicalNarrativePayload(event *sdksession.Event) *NarrativePayload {
 	switch sdksession.EventTypeOf(event) {
 	case sdksession.EventTypeUser:
 		payload.Role = NarrativeRoleUser
-		payload.Text = strings.TrimSpace(event.Text)
+		payload.Text = strings.TrimSpace(sdksession.EventText(event))
 		payload.Final = true
 	case sdksession.EventTypeAssistant:
 		payload.Role = NarrativeRoleAssistant
@@ -321,7 +393,7 @@ func canonicalNarrativePayload(event *sdksession.Event) *NarrativePayload {
 		payload.Final = event.Visibility != sdksession.VisibilityUIOnly && !isLiveStreamingNarrativeUpdate(event)
 	case sdksession.EventTypeSystem:
 		payload.Role = NarrativeRoleSystem
-		payload.Text = strings.TrimSpace(event.Text)
+		payload.Text = strings.TrimSpace(sdksession.EventText(event))
 		payload.Final = true
 	case sdksession.EventTypeNotice:
 		payload.Role = NarrativeRoleNotice
@@ -329,7 +401,7 @@ func canonicalNarrativePayload(event *sdksession.Event) *NarrativePayload {
 			payload.Text = strings.TrimSpace(notice.Text)
 		}
 		if payload.Text == "" {
-			payload.Text = strings.TrimSpace(event.Text)
+			payload.Text = strings.TrimSpace(sdksession.EventText(event))
 		}
 		payload.Final = true
 	default:
@@ -386,22 +458,28 @@ func canonicalToolCallPayload(event *sdksession.Event) *ToolCallPayload {
 	if event == nil || sdksession.EventTypeOf(event) != sdksession.EventTypeToolCall {
 		return nil
 	}
-	callID, toolName, rawStatus, argsText, commandPreview := canonicalToolFields(event)
-	if callID == "" && toolName == "" && argsText == "" && commandPreview == "" {
+	update := sdksession.ProtocolUpdateOf(event)
+	callID := ""
+	toolName := ""
+	rawStatus := ""
+	if update != nil {
+		callID = strings.TrimSpace(update.ToolCallID)
+		toolName = canonicalToolName(event, update)
+		rawStatus = strings.TrimSpace(update.Status)
+	}
+	if callID == "" && toolName == "" && len(canonicalToolRawInput(event)) == 0 {
 		return nil
 	}
 	return &ToolCallPayload{
-		CallID:         callID,
-		ToolName:       toolName,
-		ToolKind:       canonicalToolKind(event),
-		ToolTitle:      canonicalToolTitle(event),
-		ArgsText:       argsText,
-		CommandPreview: commandPreview,
-		RawInput:       canonicalToolRawInput(event),
-		Status:         canonicalToolCallStatus(rawStatus),
-		Actor:          actorIDFromSessionEvent(event),
-		Scope:          scopeFromSessionEvent(event),
-		ParticipantID:  participantIDFromSessionEvent(event),
+		CallID:        callID,
+		ToolName:      toolName,
+		ToolKind:      canonicalToolKind(event),
+		ToolTitle:     canonicalToolTitle(event),
+		RawInput:      canonicalToolRawInput(event),
+		Status:        canonicalToolCallStatus(rawStatus),
+		Actor:         actorIDFromSessionEvent(event),
+		Scope:         scopeFromSessionEvent(event),
+		ParticipantID: participantIDFromSessionEvent(event),
 	}
 }
 
@@ -409,25 +487,31 @@ func canonicalToolResultPayload(event *sdksession.Event) *ToolResultPayload {
 	if event == nil || sdksession.EventTypeOf(event) != sdksession.EventTypeToolResult {
 		return nil
 	}
-	callID, toolName, rawStatus, _, commandPreview := canonicalToolFields(event)
-	outputText, isErr := canonicalToolOutput(event)
-	if callID == "" && toolName == "" && outputText == "" {
+	update := sdksession.ProtocolUpdateOf(event)
+	callID := ""
+	toolName := ""
+	rawStatus := ""
+	if update != nil {
+		callID = strings.TrimSpace(update.ToolCallID)
+		toolName = canonicalToolName(event, update)
+		rawStatus = strings.TrimSpace(update.Status)
+	}
+	isErr := strings.EqualFold(rawStatus, "error") || strings.EqualFold(rawStatus, "failed")
+	if callID == "" && toolName == "" && len(canonicalToolRawOutput(event)) == 0 {
 		return nil
 	}
 	return &ToolResultPayload{
-		CallID:         callID,
-		ToolName:       toolName,
-		ToolKind:       canonicalToolKind(event),
-		ToolTitle:      canonicalToolTitle(event),
-		OutputText:     outputText,
-		CommandPreview: commandPreview,
-		RawInput:       canonicalToolRawInput(event),
-		RawOutput:      canonicalToolRawOutput(event),
-		Status:         canonicalToolResultStatus(rawStatus, isErr),
-		Error:          isErr,
-		Actor:          actorIDFromSessionEvent(event),
-		Scope:          scopeFromSessionEvent(event),
-		ParticipantID:  participantIDFromSessionEvent(event),
+		CallID:        callID,
+		ToolName:      toolName,
+		ToolKind:      canonicalToolKind(event),
+		ToolTitle:     canonicalToolTitle(event),
+		RawInput:      canonicalToolRawInput(event),
+		RawOutput:     canonicalToolRawOutput(event),
+		Status:        canonicalToolResultStatus(rawStatus, isErr),
+		Error:         isErr,
+		Actor:         actorIDFromSessionEvent(event),
+		Scope:         scopeFromSessionEvent(event),
+		ParticipantID: participantIDFromSessionEvent(event),
 	}
 }
 
@@ -446,7 +530,7 @@ func canonicalApprovalPayload(req *sdkruntime.ApprovalRequest) *ApprovalPayload 
 		if toolName := strings.TrimSpace(req.Approval.ToolCall.Name); toolName != "" {
 			payload.ToolName = toolName
 		}
-		payload.CommandPreview = compactJSONFields(req.Approval.ToolCall.RawInput)
+		payload.RawInput = maps.Clone(req.Approval.ToolCall.RawInput)
 		if len(req.Approval.Options) > 0 {
 			payload.Options = make([]ApprovalOption, 0, len(req.Approval.Options))
 			for _, option := range req.Approval.Options {
@@ -458,24 +542,31 @@ func canonicalApprovalPayload(req *sdkruntime.ApprovalRequest) *ApprovalPayload 
 			}
 		}
 	}
-	if payload.CommandPreview == "" {
-		payload.CommandPreview = commandPreviewFromJSONString(string(req.Call.Input))
+	if len(payload.RawInput) == 0 {
+		payload.RawInput = rawInputFromJSONString(string(req.Call.Input))
 	}
-	if payload.ToolName == "" && payload.CommandPreview == "" && len(payload.Options) == 0 {
+	if payload.ToolName == "" && len(payload.RawInput) == 0 && len(payload.Options) == 0 {
 		return nil
 	}
 	return payload
 }
 
 func canonicalPlanPayload(event *sdksession.Event) *PlanPayload {
-	if event == nil || event.Protocol == nil || event.Protocol.Plan == nil {
+	if event == nil || event.Protocol == nil {
 		return nil
 	}
-	if len(event.Protocol.Plan.Entries) == 0 {
+	entries := []sdksession.ProtocolPlanEntry(nil)
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		entries = update.Entries
+	}
+	if len(entries) == 0 && event.Protocol.Plan != nil {
+		entries = event.Protocol.Plan.Entries
+	}
+	if len(entries) == 0 {
 		return nil
 	}
-	payload := &PlanPayload{Entries: make([]PlanEntryPayload, 0, len(event.Protocol.Plan.Entries))}
-	for _, entry := range event.Protocol.Plan.Entries {
+	payload := &PlanPayload{Entries: make([]PlanEntryPayload, 0, len(entries))}
+	for _, entry := range entries {
 		content := strings.TrimSpace(entry.Content)
 		status := strings.TrimSpace(entry.Status)
 		priority := strings.TrimSpace(entry.Priority)
@@ -552,9 +643,9 @@ func assistantTextFromSessionEvent(event *sdksession.Event) string {
 	case string(sdksession.ProtocolUpdateTypeAgentThought):
 		return ""
 	case string(sdksession.ProtocolUpdateTypeAgentMessage):
-		return event.Text
+		return sdksession.EventText(event)
 	}
-	return strings.TrimSpace(event.Text)
+	return strings.TrimSpace(sdksession.EventText(event))
 }
 
 func reasoningTextFromSessionEvent(event *sdksession.Event) string {
@@ -567,7 +658,7 @@ func reasoningTextFromSessionEvent(event *sdksession.Event) string {
 		}
 	}
 	if updateTypeFromSessionEvent(event) == string(sdksession.ProtocolUpdateTypeAgentThought) {
-		return event.Text
+		return sdksession.EventText(event)
 	}
 	return ""
 }
@@ -575,6 +666,9 @@ func reasoningTextFromSessionEvent(event *sdksession.Event) string {
 func updateTypeFromSessionEvent(event *sdksession.Event) string {
 	if event == nil || event.Protocol == nil {
 		return ""
+	}
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return strings.TrimSpace(update.SessionUpdate)
 	}
 	return strings.TrimSpace(event.Protocol.UpdateType)
 }
@@ -613,33 +707,10 @@ func scopeFromSessionEvent(event *sdksession.Event) EventScope {
 	return EventScopeMain
 }
 
-func canonicalToolFields(event *sdksession.Event) (callID string, toolName string, status string, argsText string, commandPreview string) {
-	if event == nil {
-		return "", "", "", "", ""
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		tool := event.Protocol.ToolCall
-		return strings.TrimSpace(tool.ID),
-			strings.TrimSpace(tool.Name),
-			strings.TrimSpace(tool.Status),
-			compactJSONFields(tool.RawInput),
-			commandPreviewFromRaw(tool.RawInput)
-	}
-	if event.Message != nil {
-		calls := event.Message.ToolCalls()
-		if len(calls) > 0 {
-			call := calls[0]
-			return strings.TrimSpace(call.ID),
-				strings.TrimSpace(call.Name),
-				"",
-				strings.TrimSpace(call.Args),
-				commandPreviewFromJSONString(call.Args)
-		}
-	}
-	return "", "", "", "", ""
-}
-
 func canonicalToolKind(event *sdksession.Event) string {
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return strings.TrimSpace(update.Kind)
+	}
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
 		return ""
 	}
@@ -647,298 +718,87 @@ func canonicalToolKind(event *sdksession.Event) string {
 }
 
 func canonicalToolTitle(event *sdksession.Event) string {
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return strings.TrimSpace(update.Title)
+	}
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
 		return ""
 	}
 	return strings.TrimSpace(event.Protocol.ToolCall.Title)
 }
 
-func canonicalToolOutput(event *sdksession.Event) (string, bool) {
-	if event == nil {
-		return "", false
-	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		tool := event.Protocol.ToolCall
-		outputText := compactJSONFields(tool.RawOutput)
-		isErr := strings.EqualFold(strings.TrimSpace(tool.Status), "error") || strings.EqualFold(strings.TrimSpace(tool.Status), "failed")
-		return outputText, isErr
-	}
-	if event.Message != nil {
-		return strings.TrimSpace(event.Message.TextContent()), false
-	}
-	return strings.TrimSpace(event.Text), false
-}
-
 func canonicalToolRawInput(event *sdksession.Event) map[string]any {
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
-		return nil
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return maps.Clone(update.RawInput)
 	}
-	return maps.Clone(event.Protocol.ToolCall.RawInput)
+	return nil
 }
 
 func canonicalToolRawOutput(event *sdksession.Event) map[string]any {
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		return maps.Clone(update.RawOutput)
+	}
+	return nil
+}
+
+func canonicalToolName(event *sdksession.Event, update *sdksession.ProtocolUpdate) string {
+	if name := stringFromNestedMap(eventMeta(event), "caelis", "runtime", "tool", "name"); name != "" {
+		return name
+	}
+	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
+		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
+			return name
+		}
+	}
+	if update != nil {
+		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			return title[0]
+		}
+		return strings.TrimSpace(update.Kind)
+	}
+	return ""
+}
+
+func eventMeta(event *sdksession.Event) map[string]any {
+	if event == nil {
 		return nil
 	}
-	return maps.Clone(event.Protocol.ToolCall.RawOutput)
+	return event.Meta
+}
+
+func stringFromNestedMap(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
 }
 
 func canonicalEventMeta(event *sdksession.Event) map[string]any {
 	if event == nil {
 		return nil
 	}
-	meta := map[string]any{}
-	if existing := mapFromAny(event.Meta["caelis"]); existing != nil {
-		meta["caelis"] = existing
-	}
-	display := caelisDisplayMeta(event)
-	if len(display) > 0 {
-		caelis := mapFromAny(meta["caelis"])
-		if caelis == nil {
-			caelis = map[string]any{}
-		}
-		caelis["display"] = display
-		meta["caelis"] = caelis
-	}
-	if len(meta) == 0 {
+	if len(event.Meta) == 0 {
 		return nil
 	}
-	return meta
+	return maps.Clone(event.Meta)
 }
 
-func caelisDisplayMeta(event *sdksession.Event) map[string]any {
-	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
-		return nil
-	}
-	tool := event.Protocol.ToolCall
-	name := strings.ToUpper(strings.TrimSpace(tool.Name))
-	if name == "" {
-		name = strings.ToUpper(strings.TrimSpace(tool.Kind))
-	}
-	display := map[string]any{
-		"tool": map[string]any{
-			"name":   strings.TrimSpace(tool.Name),
-			"kind":   strings.TrimSpace(tool.Kind),
-			"title":  firstNonEmpty(strings.TrimSpace(tool.Title), commandPreviewFromRaw(tool.RawInput)),
-			"status": canonicalToolCallStatus(tool.Status),
-		},
-	}
-	if file := caelisFileDisplayMeta(name, tool.RawInput, tool.RawOutput); len(file) > 0 {
-		display["file"] = file
-	}
-	if diff := caelisDiffDisplayMeta(name, tool.RawInput, tool.RawOutput); len(diff) > 0 {
-		display["diff"] = diff
-	}
-	if terminal := caelisTerminalDisplayMeta(name, tool.RawInput, tool.RawOutput); len(terminal) > 0 {
-		display["terminal"] = terminal
-	}
-	return display
-}
-
-func caelisFileDisplayMeta(toolName string, input map[string]any, output map[string]any) map[string]any {
-	switch toolName {
-	case "READ":
-		path := firstNonEmpty(stringValue(output["path"]), stringValue(input["path"]))
-		if path == "" {
-			return nil
-		}
-		return compactMap(map[string]any{
-			"path":       path,
-			"short_path": filepath.Base(path),
-			"start_line": intValue(firstNonNil(output["start_line"], input["start_line"])),
-			"end_line":   intValue(firstNonNil(output["end_line"], input["end_line"])),
-			"has_more":   output["has_more"],
-		})
-	case "LIST":
-		path := firstNonEmpty(stringValue(output["path"]), stringValue(input["path"]))
-		if path == "" {
-			return nil
-		}
-		return compactMap(map[string]any{
-			"path":        path,
-			"short_path":  filepath.Base(path),
-			"entry_count": intValue(output["count"]),
-		})
-	case "GLOB":
-		pattern := firstNonEmpty(stringValue(output["pattern"]), stringValue(input["pattern"]))
-		return compactMap(map[string]any{
-			"pattern":     pattern,
-			"match_count": intValue(output["count"]),
-			"matches":     output["matches"],
-		})
-	case "SEARCH", "RG", "FIND":
-		return compactMap(map[string]any{
-			"path":       firstNonEmpty(stringValue(output["path"]), stringValue(input["path"])),
-			"query":      firstNonEmpty(stringValue(output["query"]), stringValue(input["query"]), stringValue(input["pattern"])),
-			"hit_count":  intValue(output["count"]),
-			"file_count": intValue(output["file_count"]),
-			"hits":       output["hits"],
-		})
-	default:
-		return nil
-	}
-}
-
-func caelisDiffDisplayMeta(toolName string, input map[string]any, output map[string]any) map[string]any {
-	switch toolName {
-	case "WRITE", "PATCH":
-	default:
-		return nil
-	}
-	path := firstNonEmpty(stringValue(output["path"]), stringValue(input["path"]))
-	if path == "" {
-		return nil
-	}
-	return compactMap(map[string]any{
-		"path":           path,
-		"short_path":     filepath.Base(path),
-		"created":        output["created"],
-		"hunk":           output["hunk"],
-		"diff_hunks":     output["diff_hunks"],
-		"diff_truncated": output["diff_truncated"],
-		"old":            input["old"],
-		"new":            input["new"],
-		"added_lines":    intValue(output["added_lines"]),
-		"removed_lines":  intValue(output["removed_lines"]),
-	})
-}
-
-func caelisTerminalDisplayMeta(toolName string, input map[string]any, output map[string]any) map[string]any {
-	switch toolName {
-	case "BASH", "SPAWN", "TASK":
-	default:
-		return nil
-	}
-	return compactMap(map[string]any{
-		"command":        firstNonEmpty(stringValue(input["command"]), stringValue(input["cmd"])),
-		"stdout":         output["stdout"],
-		"stderr":         output["stderr"],
-		"result":         output["result"],
-		"output_preview": output["output_preview"],
-		"text":           output["text"],
-		"stream":         output["stream"],
-		"exit_code":      output["exit_code"],
-		"state":          output["state"],
-		"running":        output["running"],
-		"task_id":        output["task_id"],
-		"terminal_id":    output["terminal_id"],
-		"stdout_cursor":  output["stdout_cursor"],
-		"stderr_cursor":  output["stderr_cursor"],
-	})
-}
-
-func compactMap(in map[string]any) map[string]any {
-	out := map[string]any{}
-	for key, value := range in {
-		if emptyMetaValue(value) {
-			continue
-		}
-		out[key] = value
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func emptyMetaValue(value any) bool {
-	switch typed := value.(type) {
-	case nil:
-		return true
-	case string:
-		return strings.TrimSpace(typed) == ""
-	case int:
-		return typed == 0
-	case int64:
-		return typed == 0
-	case float64:
-		return typed == 0
-	case []any:
-		return len(typed) == 0
-	case map[string]any:
-		return len(typed) == 0
-	default:
-		return false
-	}
-}
-
-func mapFromAny(value any) map[string]any {
-	if typed, ok := value.(map[string]any); ok {
-		return maps.Clone(typed)
-	}
-	return nil
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func stringValue(value any) string {
-	if text, ok := value.(string); ok {
-		return strings.TrimSpace(text)
-	}
-	return ""
-}
-
-func compactJSONFields(raw map[string]any) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	if cmd, ok := raw["command"].(string); ok && strings.TrimSpace(cmd) != "" {
-		return compactStringValue(cmd)
-	}
-	if path, ok := raw["path"].(string); ok && strings.TrimSpace(path) != "" {
-		return strings.TrimSpace(path)
-	}
-	data, err := json.Marshal(raw)
-	if err != nil {
-		return ""
-	}
-	return compactStringValue(string(data))
-}
-
-func commandPreviewFromRaw(raw map[string]any) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	if cmd, ok := raw["command"].(string); ok && strings.TrimSpace(cmd) != "" {
-		return compactStringValue(cmd)
-	}
-	if path, ok := raw["path"].(string); ok && strings.TrimSpace(path) != "" {
-		return strings.TrimSpace(path)
-	}
-	return ""
-}
-
-func commandPreviewFromJSONString(raw string) string {
+func rawInputFromJSONString(raw string) map[string]any {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return nil
 	}
 	var payload map[string]any
 	if err := json.Unmarshal([]byte(raw), &payload); err != nil {
-		return compactStringValue(raw)
+		return nil
 	}
-	if preview := commandPreviewFromRaw(payload); preview != "" {
-		return preview
-	}
-	return compactStringValue(raw)
-}
-
-func compactStringValue(s string) string {
-	s = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\r", "\n"))
-	s = strings.ReplaceAll(s, "\n", " ")
-	const maxCompactRunes = 120
-	runes := []rune(s)
-	if len(runes) > maxCompactRunes {
-		return string(runes[:maxCompactRunes-3]) + "..."
-	}
-	return s
+	return payload
 }
 
 func canonicalToolCallStatus(status string) ToolStatus {
