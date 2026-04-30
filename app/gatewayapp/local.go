@@ -178,6 +178,7 @@ type StartSubagentOptions struct {
 type stackRuntimeConfig struct {
 	PermissionMode string
 	ContextWindow  int
+	Model          ModelConfig
 	BaseAssembly   sdkplugin.ResolvedAssembly
 	Assembly       sdkplugin.ResolvedAssembly
 	BaseMetadata   map[string]any
@@ -246,6 +247,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		runtime: stackRuntimeConfig{
 			PermissionMode: cfg.PermissionMode,
 			ContextWindow:  cfg.ContextWindow,
+			Model:          cfg.Model,
 			BaseAssembly:   baseAssembly,
 			Assembly:       sdkplugin.CloneResolvedAssembly(cfg.Assembly),
 			BaseMetadata:   cloneMap(baseMetadata),
@@ -677,6 +679,7 @@ func (s *Stack) configuredAssembly(base sdkplugin.ResolvedAssembly, configured [
 			WorkspaceCWD:   s.Workspace.CWD,
 			PermissionMode: runtimeCfg.PermissionMode,
 			ContextWindow:  runtimeCfg.ContextWindow,
+			Model:          runtimeCfg.Model,
 		},
 		AppName:      s.AppName,
 		UserID:       s.UserID,
@@ -860,6 +863,12 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("gatewayapp: invalid model config: %w", err)
 	}
+	cfg.Alias = firstNonEmpty(strings.TrimSpace(cfg.Alias), alias)
+	s.mu.Lock()
+	runtimeCfg := s.runtime
+	runtimeCfg.Model = cfg
+	s.runtime = runtimeCfg
+	s.mu.Unlock()
 	resolver.SetModelLookup(s.lookup, s.lookup.DefaultAlias())
 	if err := s.saveModelConfigs(); err != nil {
 		return "", err

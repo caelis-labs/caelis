@@ -162,7 +162,7 @@ func (c *Client) PromptParts(ctx context.Context, sessionID string, prompt []jso
 }
 
 func (c *Client) Cancel(ctx context.Context, sessionID string) error {
-	return c.conn.Call(ctx, MethodSessionCancel, CancelRequest{SessionID: sessionID}, &CancelResponse{})
+	return c.conn.Notify(MethodSessionCancel, CancelRequest{SessionID: sessionID})
 }
 
 func (c *Client) TerminalOutput(ctx context.Context, sessionID, terminalID string) (TerminalOutputResponse, error) {
