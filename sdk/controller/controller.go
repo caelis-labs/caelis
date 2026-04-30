@@ -20,11 +20,12 @@ type ApprovalOption struct {
 
 // ApprovalToolCall describes the remote tool invocation asking for approval.
 type ApprovalToolCall struct {
-	ID     string `json:"id,omitempty"`
-	Name   string `json:"name,omitempty"`
-	Kind   string `json:"kind,omitempty"`
-	Title  string `json:"title,omitempty"`
-	Status string `json:"status,omitempty"`
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name,omitempty"`
+	Kind     string         `json:"kind,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Status   string         `json:"status,omitempty"`
+	RawInput map[string]any `json:"raw_input,omitempty"`
 }
 
 // ApprovalRequest is the runtime-owned approval bridge payload used by remote
@@ -97,13 +98,16 @@ type TurnRequest struct {
 // ParticipantPromptRequest sends one bounded prompt to an attached ACP
 // participant without changing the main controller.
 type ParticipantPromptRequest struct {
-	SessionRef     sdksession.SessionRef  `json:"session_ref,omitempty"`
-	Session        sdksession.Session     `json:"session,omitempty"`
-	TurnID         string                 `json:"turn_id,omitempty"`
-	ParticipantID  string                 `json:"participant_id,omitempty"`
-	Input          string                 `json:"input,omitempty"`
-	ContentParts   []sdkmodel.ContentPart `json:"content_parts,omitempty"`
-	ContextPrelude string                 `json:"context_prelude,omitempty"`
+	SessionRef        sdksession.SessionRef  `json:"session_ref,omitempty"`
+	Session           sdksession.Session     `json:"session,omitempty"`
+	TurnID            string                 `json:"turn_id,omitempty"`
+	ParticipantID     string                 `json:"participant_id,omitempty"`
+	Input             string                 `json:"input,omitempty"`
+	ContentParts      []sdkmodel.ContentPart `json:"content_parts,omitempty"`
+	ContextPrelude    string                 `json:"context_prelude,omitempty"`
+	Stream            bool                   `json:"stream,omitempty"`
+	Mode              string                 `json:"mode,omitempty"`
+	ApprovalRequester ApprovalRequester      `json:"-"`
 }
 
 type TurnHandle interface {
@@ -266,5 +270,7 @@ func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantP
 	out.Input = strings.TrimSpace(in.Input)
 	out.ContentParts = append([]sdkmodel.ContentPart(nil), in.ContentParts...)
 	out.ContextPrelude = strings.TrimSpace(in.ContextPrelude)
+	out.Stream = in.Stream
+	out.Mode = strings.TrimSpace(in.Mode)
 	return out
 }

@@ -32,6 +32,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				t.Helper()
 				if payload == nil {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
+					return
 				}
 				if payload.ToolName != "bash" {
 					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "bash")
@@ -61,6 +62,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				t.Helper()
 				if payload == nil {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
+					return
 				}
 				if payload.ToolName != "BASH" {
 					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "BASH")
@@ -572,6 +574,7 @@ func TestProjectSessionEventsPreservesProtocolToolCallID(t *testing.T) {
 	payload := events[0].Event.ToolCall
 	if payload == nil {
 		t.Fatal("tool call payload = nil, want canonical payload")
+		return
 	}
 	if payload.CallID != "call-1" {
 		t.Fatalf("payload.CallID = %q, want %q", payload.CallID, "call-1")

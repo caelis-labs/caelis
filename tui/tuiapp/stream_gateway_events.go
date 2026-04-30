@@ -50,10 +50,16 @@ func (m *Model) appendGatewayTranscript(text string) (tea.Model, tea.Cmd) {
 }
 
 func gatewayEventScope(ev appgateway.Event) ACPProjectionScope {
-	if ev.Origin == nil {
-		return ACPProjectionMain
+	if ev.Origin != nil && ev.Origin.Scope != "" {
+		return gatewayProjectionScope(ev.Origin.Scope)
 	}
-	return gatewayProjectionScope(ev.Origin.Scope)
+	if ev.Narrative != nil && ev.Narrative.Scope != "" {
+		return gatewayProjectionScope(ev.Narrative.Scope)
+	}
+	if ev.Participant != nil && ev.Participant.Scope != "" {
+		return gatewayProjectionScope(ev.Participant.Scope)
+	}
+	return ACPProjectionMain
 }
 
 func gatewayProjectionScope(scope appgateway.EventScope) ACPProjectionScope {

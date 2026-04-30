@@ -15,7 +15,6 @@ import (
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
-	sdktask "github.com/OnslaughtSnail/caelis/sdk/task"
 	"github.com/OnslaughtSnail/caelis/tui/modelcatalog"
 )
 
@@ -118,88 +117,6 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 		}
 	}()
 	return out, true
-}
-
-func (d *GatewayDriver) SubscribeSubagentStream(ctx context.Context, taskID string) (<-chan SubagentStreamFrame, bool) {
-	if d == nil || d.stack == nil || d.stack.Gateway == nil {
-		return nil, false
-	}
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" {
-		return nil, false
-	}
-	session, err := d.ensureSession(ctx)
-	if err != nil {
-		return nil, false
-	}
-	streams := d.stack.Gateway.Streams()
-	if streams == nil {
-		return nil, false
-	}
-	ref := sdkstream.Ref{
-		SessionID: strings.TrimSpace(session.SessionID),
-		TaskID:    taskID,
-	}
-	key := strings.Join([]string{"subagent", ref.SessionID, ref.TaskID}, "|")
-	d.mu.Lock()
-	if d.streamSubscriptions == nil {
-		d.streamSubscriptions = map[string]struct{}{}
-	}
-	if _, exists := d.streamSubscriptions[key]; exists {
-		d.mu.Unlock()
-		return nil, false
-	}
-	d.streamSubscriptions[key] = struct{}{}
-	d.mu.Unlock()
-
-	out := make(chan SubagentStreamFrame, 32)
-	go func() {
-		defer close(out)
-		defer func() {
-			d.mu.Lock()
-			delete(d.streamSubscriptions, key)
-			d.mu.Unlock()
-		}()
-		for frame, err := range streams.Subscribe(ctx, sdkstream.SubscribeRequest{Ref: ref}) {
-			if err != nil || frame == nil {
-				return
-			}
-			if frame.Text == "" && frame.Event == nil && !frame.Closed {
-				continue
-			}
-			item := subagentStreamFrameFromStreamFrame(session.SessionRef, taskID, sdkstream.CloneFrame(*frame))
-			select {
-			case out <- item:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-	return out, true
-}
-
-func subagentStreamFrameFromStreamFrame(sessionRef sdksession.SessionRef, taskID string, frame sdkstream.Frame) SubagentStreamFrame {
-	var event *appgateway.EventEnvelope
-	if frame.Event != nil {
-		if projected, ok := appgateway.ProjectSessionEvent(sessionRef, frame.Event); ok {
-			event = &projected
-		}
-	}
-	turnID := strings.TrimSpace(frame.Ref.TerminalID)
-	if frame.Event != nil && frame.Event.Scope != nil {
-		turnID = firstNonEmpty(strings.TrimSpace(frame.Event.Scope.TurnID), turnID)
-	}
-	return SubagentStreamFrame{
-		TaskID:    firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(taskID)),
-		TurnID:    turnID,
-		Stream:    strings.TrimSpace(frame.Stream),
-		Text:      frame.Text,
-		State:     strings.TrimSpace(frame.State),
-		Running:   frame.Running,
-		Closed:    frame.Closed,
-		Event:     event,
-		UpdatedAt: frame.UpdatedAt,
-	}
 }
 
 func (d *GatewayDriver) WorkspaceDir() string {
@@ -983,110 +900,170 @@ func (d *GatewayDriver) HandoffAgent(ctx context.Context, target string) (AgentS
 	return d.AgentStatus(ctx)
 }
 
-func (d *GatewayDriver) AskAgent(ctx context.Context, target string, prompt string) (AgentStatusSnapshot, error) {
+func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, prompt string) (Turn, error) {
 	session, err := d.ensureSession(ctx)
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return nil, err
 	}
-	participantID, err := d.resolveParticipantID(ctx, session.SessionRef, target)
+	agent, err := d.resolveAgentName(target)
 	if err != nil {
-		return AgentStatusSnapshot{}, err
+		return nil, err
 	}
-	if strings.TrimSpace(prompt) == "" {
-		return AgentStatusSnapshot{}, fmt.Errorf("agent ask: prompt is required")
+	label := d.allocateSideAgentLabel(ctx, session.SessionRef, agent)
+	updated, err := d.stack.Gateway.AttachParticipant(ctx, appgateway.AttachParticipantRequest{
+		SessionRef: session.SessionRef,
+		BindingKey: d.bindingKey,
+		Agent:      agent,
+		Role:       sdksession.ParticipantRoleSidecar,
+		Source:     "slash_" + agent,
+		Label:      label,
+	})
+	if err != nil {
+		return nil, err
 	}
-	if _, err := d.stack.Gateway.PromptParticipant(ctx, appgateway.PromptParticipantRequest{
+	d.mu.Lock()
+	d.session = updated
+	d.hasSession = true
+	d.mu.Unlock()
+	participantID, err := sideAgentParticipantID(updated, agent, label)
+	if err != nil {
+		if rollbackErr := d.detachSideAgentAfterPromptFailure(ctx, updated.SessionRef, participantID); rollbackErr != nil {
+			return nil, errors.Join(err, rollbackErr)
+		}
+		return nil, err
+	}
+	result, err := d.stack.Gateway.PromptParticipant(ctx, appgateway.PromptParticipantRequest{
+		SessionRef:    updated.SessionRef,
+		BindingKey:    d.bindingKey,
+		ParticipantID: participantID,
+		Input:         strings.TrimSpace(prompt),
+		Source:        "slash_" + agent,
+	})
+	if err != nil {
+		if rollbackErr := d.detachSideAgentAfterPromptFailure(ctx, updated.SessionRef, participantID); rollbackErr != nil {
+			return nil, errors.Join(err, rollbackErr)
+		}
+		return nil, err
+	}
+	if result.Handle == nil {
+		return nil, nil
+	}
+	return gatewayTurn{handle: result.Handle}, nil
+}
+
+func (d *GatewayDriver) detachSideAgentAfterPromptFailure(ctx context.Context, ref sdksession.SessionRef, participantID string) error {
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" || d == nil || d.stack == nil || d.stack.Gateway == nil {
+		return nil
+	}
+	updated, err := d.stack.Gateway.DetachParticipant(context.WithoutCancel(ctx), appgateway.DetachParticipantRequest{
+		SessionRef:    ref,
+		BindingKey:    d.bindingKey,
+		ParticipantID: participantID,
+		Source:        "side_agent_prompt_rollback",
+	})
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	d.session = updated
+	d.hasSession = true
+	d.mu.Unlock()
+	return nil
+}
+
+var sideAgentHandleNames = []string{
+	"jeff", "omna", "amy", "mike", "luna", "leo", "emma", "zoe",
+	"liam", "maya", "nora", "jack", "iris", "kate", "alex", "ella",
+	"owen", "ruby", "evan", "noah", "mia", "lucy", "jude", "cole",
+	"claire",
+}
+
+func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref sdksession.SessionRef, agent string) string {
+	used := map[string]struct{}{}
+	if d != nil && d.stack != nil && d.stack.Gateway != nil {
+		if state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
+			for _, participant := range state.Participants {
+				label := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(participant.Label), "@"))
+				if label != "" {
+					used[label] = struct{}{}
+				}
+			}
+		}
+	}
+	return "@" + allocateSideAgentHandle(used, agent)
+}
+
+func allocateSideAgentHandle(used map[string]struct{}, agent string) string {
+	for _, candidate := range sideAgentHandleNames {
+		candidate = strings.ToLower(strings.TrimSpace(candidate))
+		if candidate == "" {
+			continue
+		}
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
+	base := strings.ToLower(strings.TrimSpace(agent))
+	if base == "" {
+		base = "agent"
+	}
+	for i := 0; i < 1000; i++ {
+		candidate := base
+		if i > 0 {
+			candidate = fmt.Sprintf("%s%d", base, i+1)
+		}
+		if _, exists := used[candidate]; !exists {
+			return candidate
+		}
+	}
+	return base
+}
+
+func sideAgentParticipantID(session sdksession.Session, agent string, label string) (string, error) {
+	agent = strings.TrimSpace(agent)
+	label = strings.TrimSpace(label)
+	for i := len(session.Participants) - 1; i >= 0; i-- {
+		participant := session.Participants[i]
+		if participant.Role != sdksession.ParticipantRoleSidecar {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(participant.AgentName), agent) {
+			continue
+		}
+		if label != "" && !strings.EqualFold(strings.TrimSpace(participant.Label), label) {
+			continue
+		}
+		if id := strings.TrimSpace(participant.ID); id != "" {
+			return id, nil
+		}
+	}
+	return "", fmt.Errorf("tui/runtime: side ACP participant %q was not attached", agent)
+}
+
+func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, prompt string) (Turn, error) {
+	session, err := d.ensureSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	participantID, err := d.resolveParticipantID(ctx, session.SessionRef, handle)
+	if err != nil {
+		return nil, err
+	}
+	result, err := d.stack.Gateway.PromptParticipant(ctx, appgateway.PromptParticipantRequest{
 		SessionRef:    session.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
 		Input:         strings.TrimSpace(prompt),
-		Source:        "tui_agent_ask",
-	}); err != nil {
-		return AgentStatusSnapshot{}, err
-	}
-	return d.AgentStatus(ctx)
-}
-
-func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, prompt string) (SubagentSnapshot, error) {
-	return d.StartAgentSubagentWithOptions(ctx, target, prompt, SubagentStartOptions{})
-}
-
-func (d *GatewayDriver) StartAgentSubagentWithOptions(ctx context.Context, target string, prompt string, opts SubagentStartOptions) (SubagentSnapshot, error) {
-	session, err := d.ensureSession(ctx)
-	if err != nil {
-		return SubagentSnapshot{}, err
-	}
-	agent, err := d.resolveAgentName(target)
-	if err != nil {
-		return SubagentSnapshot{}, err
-	}
-	snapshot, err := d.stack.StartSubagentWithOptions(ctx, session.SessionRef, agent, prompt, "slash_"+agent, gatewayapp.StartSubagentOptions{
-		ApprovalRequester: opts.ApprovalRequester,
+		Source:        "user_side_agent",
 	})
 	if err != nil {
-		return SubagentSnapshot{}, err
+		return nil, err
 	}
-	return subagentSnapshotFromTask(snapshot), nil
-}
-
-func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, prompt string) (SubagentSnapshot, error) {
-	session, err := d.ensureSession(ctx)
-	if err != nil {
-		return SubagentSnapshot{}, err
+	if result.Handle == nil {
+		return nil, nil
 	}
-	snapshot, err := d.stack.ContinueSubagentByHandle(ctx, session.SessionRef, handle, prompt, 2*time.Second)
-	if err != nil {
-		return SubagentSnapshot{}, err
-	}
-	return subagentSnapshotFromTask(snapshot), nil
-}
-
-func (d *GatewayDriver) WaitSubagent(ctx context.Context, taskID string) (SubagentSnapshot, error) {
-	session, err := d.ensureSession(ctx)
-	if err != nil {
-		return SubagentSnapshot{}, err
-	}
-	snapshot, err := d.stack.WaitSubagentTask(ctx, session.SessionRef, taskID, 5*time.Second)
-	if err != nil {
-		return SubagentSnapshot{}, err
-	}
-	return subagentSnapshotFromTask(snapshot), nil
-}
-
-func subagentSnapshotFromTask(snapshot sdktask.Snapshot) SubagentSnapshot {
-	handle := stringFromAny(firstNonNil(snapshot.Result["handle"], snapshot.Metadata["handle"]))
-	mention := stringFromAny(firstNonNil(snapshot.Result["mention"], snapshot.Metadata["mention"]))
-	if mention == "" && handle != "" {
-		mention = "@" + strings.TrimPrefix(handle, "@")
-	}
-	return SubagentSnapshot{
-		Handle:        strings.TrimPrefix(strings.TrimSpace(handle), "@"),
-		Mention:       strings.TrimSpace(mention),
-		Agent:         stringFromAny(firstNonNil(snapshot.Result["agent"], snapshot.Metadata["agent"])),
-		TaskID:        strings.TrimSpace(snapshot.Ref.TaskID),
-		TurnID:        stringFromAny(firstNonNil(snapshot.Result["turn_id"], snapshot.Metadata["turn_id"])),
-		State:         string(snapshot.State),
-		Running:       snapshot.Running,
-		OutputPreview: stringFromAny(firstNonNil(snapshot.Result["output_preview"], snapshot.Metadata["output_preview"])),
-		Result:        stringFromAny(snapshot.Result["result"]),
-		StdoutCursor:  snapshot.StdoutCursor,
-		StderrCursor:  snapshot.StderrCursor,
-		EventCursor:   snapshot.EventCursor,
-	}
-}
-
-func firstNonNil(values ...any) any {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
-}
-
-func stringFromAny(value any) string {
-	text, _ := value.(string)
-	return strings.TrimSpace(text)
+	return gatewayTurn{handle: result.Handle}, nil
 }
 
 func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
@@ -1102,10 +1079,7 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	query = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(query), "@"))
 	out := make([]CompletionCandidate, 0, min(limit, len(state.Participants)))
 	for _, participant := range state.Participants {
-		if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleSidecar {
-			continue
-		}
-		if !isUserSideSubagentParticipant(participant) {
+		if !isUserSideParticipant(participant) {
 			continue
 		}
 		handle := strings.TrimPrefix(strings.TrimSpace(participant.Label), "@")
@@ -1131,8 +1105,11 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	return out, nil
 }
 
-func isUserSideSubagentParticipant(participant appgateway.ParticipantState) bool {
-	return participant.Kind == sdksession.ParticipantKindSubagent && participant.Role == sdksession.ParticipantRoleSidecar
+func isUserSideParticipant(participant appgateway.ParticipantState) bool {
+	if participant.Role != sdksession.ParticipantRoleSidecar {
+		return false
+	}
+	return participant.Kind == sdksession.ParticipantKindACP
 }
 
 func shouldHideSelfDelegatedParticipant(participant appgateway.ParticipantState) bool {
@@ -1731,16 +1708,20 @@ func (d *GatewayDriver) resolveParticipantID(ctx context.Context, ref sdksession
 	var exact string
 	prefixMatches := make([]string, 0, 2)
 	for _, participant := range state.Participants {
+		if participant.Kind != sdksession.ParticipantKindACP {
+			continue
+		}
 		id := strings.TrimSpace(participant.ID)
 		label := strings.TrimSpace(participant.Label)
+		handle := strings.TrimPrefix(label, "@")
 		sessionID := strings.TrimSpace(participant.SessionID)
 		if id == "" {
 			continue
 		}
-		if strings.EqualFold(id, input) || strings.EqualFold(label, input) || strings.EqualFold(sessionID, input) {
+		if strings.EqualFold(id, input) || strings.EqualFold(label, input) || strings.EqualFold(handle, input) || strings.EqualFold(sessionID, input) {
 			return id, nil
 		}
-		for _, candidate := range []string{id, label, sessionID} {
+		for _, candidate := range []string{id, label, handle, sessionID} {
 			candidate = strings.ToLower(strings.TrimSpace(candidate))
 			if candidate != "" && strings.HasPrefix(candidate, input) {
 				exact = id

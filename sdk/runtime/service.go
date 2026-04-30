@@ -87,11 +87,13 @@ type DetachACPParticipantRequest struct {
 }
 
 type PromptACPParticipantRequest struct {
-	SessionRef    sdksession.SessionRef  `json:"session_ref"`
-	ParticipantID string                 `json:"participant_id,omitempty"`
-	Input         string                 `json:"input,omitempty"`
-	ContentParts  []sdkmodel.ContentPart `json:"content_parts,omitempty"`
-	Source        string                 `json:"source,omitempty"`
+	SessionRef        sdksession.SessionRef  `json:"session_ref"`
+	ParticipantID     string                 `json:"participant_id,omitempty"`
+	Input             string                 `json:"input,omitempty"`
+	ContentParts      []sdkmodel.ContentPart `json:"content_parts,omitempty"`
+	Source            string                 `json:"source,omitempty"`
+	Stream            bool                   `json:"stream,omitempty"`
+	ApprovalRequester ApprovalRequester      `json:"-"`
 }
 
 // HandoffControllerRequest switches the active controller for one session. The
@@ -108,7 +110,7 @@ type HandoffControllerRequest struct {
 // as ACP sidecar attachment and controller handoff.
 type SessionControlPlane interface {
 	AttachACPParticipant(context.Context, AttachACPParticipantRequest) (sdksession.Session, error)
-	PromptACPParticipant(context.Context, PromptACPParticipantRequest) (sdksession.Session, error)
+	PromptACPParticipant(context.Context, PromptACPParticipantRequest) (RunResult, error)
 	DetachACPParticipant(context.Context, DetachACPParticipantRequest) (sdksession.Session, error)
 	HandoffController(context.Context, HandoffControllerRequest) (sdksession.Session, error)
 }

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -19,7 +18,6 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
@@ -141,14 +139,6 @@ func (s *ProgramSender) waitForwarders(timeout time.Duration) bool {
 
 type streamDriver interface {
 	SubscribeStream(context.Context, appgateway.EventEnvelope) (<-chan appgateway.EventEnvelope, bool)
-}
-
-type subagentWaitDriver interface {
-	WaitSubagent(context.Context, string) (tuiadapterruntime.SubagentSnapshot, error)
-}
-
-type subagentStreamDriver interface {
-	SubscribeSubagentStream(context.Context, string) (<-chan tuiadapterruntime.SubagentStreamFrame, bool)
 }
 
 // ConfigFromDriver populates legacy Config callbacks from an adapter runtime.Driver.
@@ -804,15 +794,19 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuiadapterruntime.
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	snapshot, err := driver.StartAgentSubagentWithOptions(ctx, agent, prompt, tuiadapterruntime.SubagentStartOptions{
-		ApprovalRequester: tuiSubagentApprovalRequester{send: send},
-	})
+	turn, err := driver.StartAgentSubagent(ctx, agent, prompt)
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}
 	}
-	startDynamicSubagentOutputBridge(ctx, driver, sender, snapshot)
-	if snapshot.Running {
-		return TaskResultMsg{SuppressTurnDivider: true, ContinueRunning: true}
+	if turn == nil {
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	defer turn.Close()
+	if send != nil {
+		forwardGatewayTurnEvents(ctx, driver, turn, sender)
+	} else {
+		for range turn.Events() {
+		}
 	}
 	return TaskResultMsg{}
 }
@@ -855,13 +849,19 @@ func dispatchMentionCommandWithContext(ctx context.Context, driver tuiadapterrun
 		sendNotice(send, "usage: @handle <prompt>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	snapshot, err := driver.ContinueSubagent(ctx, handle, prompt)
+	turn, err := driver.ContinueSubagent(ctx, handle, prompt)
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("@"+handle, err)}
 	}
-	startDynamicSubagentOutputBridge(ctx, driver, sender, snapshot)
-	if snapshot.Running {
-		return TaskResultMsg{SuppressTurnDivider: true, ContinueRunning: true}
+	if turn == nil {
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	defer turn.Close()
+	if send != nil {
+		forwardGatewayTurnEvents(ctx, driver, turn, sender)
+	} else {
+		for range turn.Events() {
+		}
 	}
 	return TaskResultMsg{}
 }
@@ -1333,236 +1333,6 @@ func sendNotice(send func(tea.Msg), text string) {
 	}
 }
 
-func startDynamicSubagentOutputBridge(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, snapshot tuiadapterruntime.SubagentSnapshot) {
-	ctx = contextOrBackground(ctx)
-	if sender != nil {
-		ctx = sender.bindContext(ctx)
-	}
-	send := sender.sendFunc()
-	if send == nil {
-		return
-	}
-	if !snapshot.Running && sendDynamicSubagentSnapshotOutput(send, snapshot) {
-		return
-	}
-	taskID := strings.TrimSpace(snapshot.TaskID)
-	if taskID == "" {
-		sendDynamicSubagentSnapshotOutput(send, snapshot)
-		return
-	}
-	if streamer, ok := driver.(subagentStreamDriver); ok {
-		if frames, ok := streamer.SubscribeSubagentStream(ctx, taskID); ok && frames != nil {
-			start := func() {
-				finished := false
-				finish := func(msg TaskResultMsg) {
-					if finished {
-						return
-					}
-					finished = true
-					send(msg)
-				}
-				for {
-					select {
-					case <-ctx.Done():
-						return
-					case frame, ok := <-frames:
-						if !ok {
-							finish(TaskResultMsg{})
-							return
-						}
-						if frame.Event != nil {
-							env := normalizeDynamicSubagentGatewayEvent(*frame.Event, snapshot, frame)
-							if gatewayEnvelopeHasRenderableTranscript(env) {
-								send(env)
-								if !frame.Running && frame.Closed {
-									finish(TaskResultMsg{})
-									return
-								}
-								continue
-							}
-						}
-						if frame.Text != "" {
-							send(dynamicSubagentTranscriptMessage(snapshot, frame))
-						}
-						if !frame.Running && frame.Closed {
-							finish(TaskResultMsg{})
-							return
-						}
-					}
-				}
-			}
-			if sender != nil {
-				sender.startForwarder(start)
-			} else {
-				go start()
-			}
-			return
-		}
-	}
-	sendDynamicSubagentSnapshotOutput(send, snapshot)
-	startDynamicSubagentSnapshotWatcher(ctx, driver, sender, snapshot)
-}
-
-func gatewayEnvelopeHasRenderableTranscript(env appgateway.EventEnvelope) bool {
-	if env.Err != nil {
-		return true
-	}
-	for _, event := range ProjectGatewayEventToTranscriptEvents(env.Event) {
-		if event.Kind != TranscriptEventUsage {
-			return true
-		}
-	}
-	return false
-}
-
-func sendDynamicSubagentSnapshotOutput(send func(tea.Msg), snapshot tuiadapterruntime.SubagentSnapshot) bool {
-	if send == nil {
-		return false
-	}
-	output := strings.TrimSpace(snapshot.Result)
-	if output == "" && !snapshot.Running {
-		output = strings.TrimSpace(snapshot.OutputPreview)
-	}
-	if output == "" {
-		return false
-	}
-	send(dynamicSubagentSnapshotTranscriptMessage(snapshot, output))
-	return true
-}
-
-func startDynamicSubagentSnapshotWatcher(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, snapshot tuiadapterruntime.SubagentSnapshot) {
-	ctx = contextOrBackground(ctx)
-	if sender != nil {
-		ctx = sender.bindContext(ctx)
-	}
-	send := sender.sendFunc()
-	if send == nil || !snapshot.Running || strings.TrimSpace(snapshot.TaskID) == "" {
-		return
-	}
-	waiter, ok := driver.(subagentWaitDriver)
-	if !ok {
-		return
-	}
-	taskID := strings.TrimSpace(snapshot.TaskID)
-	start := func() {
-		for {
-			if ctx.Err() != nil {
-				return
-			}
-			next, err := waiter.WaitSubagent(ctx, taskID)
-			if err != nil {
-				if ctx.Err() != nil {
-					return
-				}
-				sendNotice(send, fmt.Sprintf("subagent %s wait failed: %v", taskID, err))
-				send(TaskResultMsg{Err: err})
-				return
-			}
-			sendDynamicSubagentSnapshotOutput(send, next)
-			if !next.Running {
-				send(TaskResultMsg{})
-				return
-			}
-		}
-	}
-	if sender != nil {
-		sender.startForwarder(start)
-		return
-	}
-	go start()
-}
-
-func subagentMention(snapshot tuiadapterruntime.SubagentSnapshot) string {
-	mention := strings.TrimSpace(snapshot.Mention)
-	if mention != "" {
-		return mention
-	}
-	if handle := strings.TrimSpace(snapshot.Handle); handle != "" {
-		return "@" + strings.TrimPrefix(handle, "@")
-	}
-	return ""
-}
-
-func dynamicSubagentScopeID(snapshot tuiadapterruntime.SubagentSnapshot, frame tuiadapterruntime.SubagentStreamFrame) string {
-	return firstNonEmpty(
-		strings.TrimSpace(frame.TurnID),
-		strings.TrimSpace(snapshot.TurnID),
-		strings.TrimSpace(frame.TaskID),
-		strings.TrimSpace(snapshot.TaskID),
-		strings.TrimSpace(snapshot.Mention),
-		strings.TrimPrefix(strings.TrimSpace(snapshot.Handle), "@"),
-	)
-}
-
-func dynamicSubagentActor(snapshot tuiadapterruntime.SubagentSnapshot) string {
-	return firstNonEmpty(subagentMention(snapshot), strings.TrimSpace(snapshot.Agent))
-}
-
-func normalizeDynamicSubagentGatewayEvent(env appgateway.EventEnvelope, snapshot tuiadapterruntime.SubagentSnapshot, frame tuiadapterruntime.SubagentStreamFrame) appgateway.EventEnvelope {
-	scopeID := dynamicSubagentScopeID(snapshot, frame)
-	if env.Event.Origin == nil {
-		env.Event.Origin = &appgateway.EventOrigin{}
-	}
-	env.Event.Origin.Scope = appgateway.EventScopeParticipant
-	if scopeID != "" {
-		env.Event.Origin.ScopeID = scopeID
-		if strings.TrimSpace(env.Event.Origin.ParticipantID) == "" {
-			env.Event.Origin.ParticipantID = scopeID
-		}
-	}
-	env.Event.Origin.Source = firstNonEmpty(strings.TrimSpace(env.Event.Origin.Source), "acp_participant")
-	env.Event.Origin.ParticipantKind = firstNonEmpty(strings.TrimSpace(env.Event.Origin.ParticipantKind), "acp")
-	if actor := dynamicSubagentActor(snapshot); actor != "" {
-		env.Event.Origin.Actor = actor
-	}
-	if actor := dynamicSubagentActor(snapshot); actor != "" {
-		if env.Event.Narrative != nil {
-			env.Event.Narrative.Actor = actor
-		}
-		if env.Event.ToolCall != nil {
-			env.Event.ToolCall.Actor = actor
-		}
-		if env.Event.ToolResult != nil {
-			env.Event.ToolResult.Actor = actor
-		}
-		if env.Event.Lifecycle != nil {
-			env.Event.Lifecycle.Actor = actor
-		}
-	}
-	return env
-}
-
-func dynamicSubagentTranscriptMessage(snapshot tuiadapterruntime.SubagentSnapshot, frame tuiadapterruntime.SubagentStreamFrame) TranscriptEventsMsg {
-	narrativeKind := TranscriptNarrativeAssistant
-	switch strings.ToLower(strings.TrimSpace(frame.Stream)) {
-	case "reasoning", "thought", "stderr":
-		narrativeKind = TranscriptNarrativeReasoning
-	}
-	scopeID := dynamicSubagentScopeID(snapshot, frame)
-	return TranscriptEventsMsg{Events: []TranscriptEvent{{
-		Kind:          TranscriptEventNarrative,
-		Scope:         ACPProjectionParticipant,
-		ScopeID:       scopeID,
-		Actor:         dynamicSubagentActor(snapshot),
-		OccurredAt:    frame.UpdatedAt,
-		NarrativeKind: narrativeKind,
-		Text:          frame.Text,
-		Final:         !frame.Running && frame.Closed,
-	}}}
-}
-
-func dynamicSubagentSnapshotTranscriptMessage(snapshot tuiadapterruntime.SubagentSnapshot, output string) TranscriptEventsMsg {
-	return TranscriptEventsMsg{Events: []TranscriptEvent{{
-		Kind:          TranscriptEventNarrative,
-		Scope:         ACPProjectionParticipant,
-		ScopeID:       firstNonEmpty(strings.TrimSpace(snapshot.TurnID), strings.TrimSpace(snapshot.TaskID), strings.TrimSpace(snapshot.Mention), strings.TrimPrefix(strings.TrimSpace(snapshot.Handle), "@")),
-		Actor:         dynamicSubagentActor(snapshot),
-		NarrativeKind: TranscriptNarrativeAssistant,
-		Text:          output,
-		Final:         !snapshot.Running,
-	}}}
-}
-
 func appendAgentSlashCommands(driver tuiadapterruntime.Driver, commands []string) []string {
 	return appendAgentSlashCommandsWithContext(context.Background(), driver, commands)
 }
@@ -1684,76 +1454,6 @@ func refreshStatusViaSendWithContext(ctx context.Context, driver tuiadapterrunti
 		return
 	}
 	sendStatusUpdate(send, status)
-}
-
-type tuiSubagentApprovalRequester struct {
-	send func(tea.Msg)
-}
-
-func (r tuiSubagentApprovalRequester) RequestApproval(ctx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
-	if r.send == nil {
-		return runtimeApprovalResponseFromDecision(rejectionApprovalDecision(nil)), nil
-	}
-	ctx = contextOrBackground(ctx)
-	payload := approvalPayloadFromRuntimeRequest(req)
-	if payload == nil {
-		payload = &appgateway.ApprovalPayload{Status: appgateway.ApprovalStatusPending}
-	}
-	responses := make(chan PromptResponse, 1)
-	r.send(approvalToPromptRequest(payload, responses))
-	select {
-	case <-ctx.Done():
-		return sdkruntime.ApprovalResponse{}, ctx.Err()
-	case response, ok := <-responses:
-		if !ok {
-			return runtimeApprovalResponseFromDecision(rejectionApprovalDecision(payload)), nil
-		}
-		return runtimeApprovalResponseFromDecision(approvalDecisionFromPrompt(payload, response)), nil
-	}
-}
-
-func approvalPayloadFromRuntimeRequest(req sdkruntime.ApprovalRequest) *appgateway.ApprovalPayload {
-	payload := &appgateway.ApprovalPayload{
-		ToolName: strings.TrimSpace(req.Tool.Name),
-		Status:   appgateway.ApprovalStatusPending,
-	}
-	if payload.ToolName == "" {
-		payload.ToolName = strings.TrimSpace(req.Call.Name)
-	}
-	if req.Approval != nil {
-		if name := strings.TrimSpace(req.Approval.ToolCall.Name); name != "" {
-			payload.ToolName = name
-		}
-		if payload.ToolName == "" || strings.EqualFold(payload.ToolName, "UNKNOWN") {
-			payload.ToolName = firstNonEmpty(req.Approval.ToolCall.Title, req.Approval.ToolCall.Kind, payload.ToolName)
-		}
-		payload.RawInput = maps.Clone(req.Approval.ToolCall.RawInput)
-		if len(req.Approval.Options) > 0 {
-			payload.Options = make([]appgateway.ApprovalOption, 0, len(req.Approval.Options))
-			for _, option := range req.Approval.Options {
-				payload.Options = append(payload.Options, appgateway.ApprovalOption{
-					ID:   strings.TrimSpace(option.ID),
-					Name: strings.TrimSpace(option.Name),
-					Kind: strings.TrimSpace(option.Kind),
-				})
-			}
-		}
-	}
-	if len(payload.RawInput) == 0 {
-		payload.RawInput = approvalRawInputFromJSON(string(req.Call.Input))
-	}
-	if payload.ToolName == "" && len(payload.RawInput) == 0 && len(payload.Options) == 0 {
-		return nil
-	}
-	return payload
-}
-
-func runtimeApprovalResponseFromDecision(decision appgateway.ApprovalDecision) sdkruntime.ApprovalResponse {
-	return sdkruntime.ApprovalResponse{
-		Outcome:  strings.TrimSpace(decision.Outcome),
-		OptionID: strings.TrimSpace(decision.OptionID),
-		Approved: decision.Approved,
-	}
 }
 
 func approvalCommandPreview(raw map[string]any) string {

@@ -33,15 +33,17 @@ func TestDefaultWizardsCoverCoreConfigFlows(t *testing.T) {
 }
 
 func TestDefaultConnectWizardMatchesLegacyStepShape(t *testing.T) {
+	wizards := DefaultWizards()
 	var connect *WizardDef
-	for i := range DefaultWizards() {
-		if DefaultWizards()[i].Command == "connect" {
-			connect = &DefaultWizards()[i]
+	for i := range wizards {
+		if wizards[i].Command == "connect" {
+			connect = &wizards[i]
 			break
 		}
 	}
 	if connect == nil {
 		t.Fatalf("connect wizard not found")
+		return
 	}
 	if connect.DisplayLine != "/connect" {
 		t.Fatalf("DisplayLine = %q, want /connect", connect.DisplayLine)

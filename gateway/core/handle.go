@@ -33,6 +33,7 @@ type turnHandle struct {
 	eventsClosed      bool
 	closed            bool
 	finished          bool
+	cancelled         bool
 	runner            sdkruntime.Runner
 	pendingApprovalCh chan ApprovalDecision
 }
@@ -112,16 +113,23 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 }
 
 func (h *turnHandle) Cancel() bool {
-	if h.cancelFn != nil {
-		return h.cancelFn()
-	}
 	h.mu.Lock()
-	runner := h.runner
-	h.mu.Unlock()
-	if runner == nil {
+	if h.cancelled {
+		h.mu.Unlock()
 		return false
 	}
-	return runner.Cancel()
+	h.cancelled = true
+	cancelFn := h.cancelFn
+	runner := h.runner
+	h.mu.Unlock()
+
+	if cancelFn != nil {
+		cancelFn()
+	}
+	if runner != nil {
+		runner.Cancel()
+	}
+	return true
 }
 
 func (h *turnHandle) Close() error {
@@ -139,8 +147,12 @@ func (h *turnHandle) Close() error {
 
 func (h *turnHandle) setRunner(runner sdkruntime.Runner) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	cancelled := h.cancelled
 	h.runner = runner
+	h.mu.Unlock()
+	if cancelled && runner != nil {
+		runner.Cancel()
+	}
 }
 
 func (h *turnHandle) setPendingApproval() <-chan ApprovalDecision {

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -21,7 +22,6 @@ import (
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -90,44 +90,25 @@ func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp
 	return gatewayapp.NewLocalStack(cfg)
 }
 
-func TestSubagentStreamFrameProjectsStructuredSessionEvent(t *testing.T) {
-	t.Parallel()
+func TestAllocateSideAgentHandleUsesUniqueHumanHandles(t *testing.T) {
+	used := map[string]struct{}{}
 
-	frame := subagentStreamFrameFromStreamFrame(sdksession.SessionRef{SessionID: "root-session"}, "task-1", sdkstream.Frame{
-		Ref:     sdkstream.Ref{TaskID: "task-1", SessionID: "child-1"},
-		Stream:  "stdout",
-		Text:    "fallback text",
-		Running: true,
-		Event: &sdksession.Event{
-			Type:       sdksession.EventTypeToolCall,
-			Visibility: sdksession.VisibilityCanonical,
-			Text:       "run tests",
-			Scope: &sdksession.EventScope{
-				Participant: sdksession.ParticipantRef{ID: "child-1", Kind: sdksession.ParticipantKindSubagent, DelegationID: "task-1"},
-			},
-			Protocol: &sdksession.EventProtocol{
-				UpdateType: string(sdksession.ProtocolUpdateTypeToolCall),
-				ToolCall: &sdksession.ProtocolToolCall{
-					ID:       "call-1",
-					Name:     "BASH",
-					Status:   "pending",
-					RawInput: map[string]any{"command": "go test ./gateway/adapter/tui/runtime/..."},
-				},
-			},
-		},
-	})
-
-	if frame.Event == nil {
-		t.Fatal("frame.Event = nil, want projected gateway event")
+	if got := allocateSideAgentHandle(used, "claude"); got != "jeff" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want jeff", got)
 	}
-	if frame.Event.Event.Origin == nil || frame.Event.Event.Origin.Scope != appgateway.EventScopeSubagent {
-		t.Fatalf("projected origin = %#v, want subagent scope", frame.Event.Event.Origin)
+	used["jeff"] = struct{}{}
+	if got := allocateSideAgentHandle(used, "claude"); got != "omna" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want omna", got)
 	}
-	if frame.Event.Event.ToolCall == nil || frame.Event.Event.ToolCall.ToolName != "BASH" {
-		t.Fatalf("projected event = %#v, want BASH tool call", frame.Event.Event)
+	for _, name := range sideAgentHandleNames {
+		used[name] = struct{}{}
 	}
-	if frame.Text != "fallback text" || frame.TaskID != "task-1" {
-		t.Fatalf("frame = %#v, want fallback text and task id preserved", frame)
+	if got := allocateSideAgentHandle(used, "claude"); got != "claude" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want fallback agent handle", got)
+	}
+	used["claude"] = struct{}{}
+	if got := allocateSideAgentHandle(used, "claude"); got != "claude2" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want numbered fallback", got)
 	}
 }
 
@@ -1176,6 +1157,78 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing.T) {
+	ctx := context.Background()
+	repo := repoRootForGatewayDriverTest(t)
+	root := t.TempDir()
+	workdir := t.TempDir()
+	agentBin := filepath.Join(t.TempDir(), "e2eagent")
+	build := exec.Command("go", "build", "-o", agentBin, "./acpbridge/cmd/e2eagent")
+	build.Dir = repo
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("go build e2eagent error = %v\n%s", err, string(output))
+	}
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "agent-conflict-rollback-test",
+		StoreDir:       root,
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "default",
+		Assembly: sdkplugin.ResolvedAssembly{
+			Agents: []sdkplugin.AgentConfig{{
+				Name:        "copilot",
+				Description: "ACP sidecar agent.",
+				Command:     agentBin,
+				WorkDir:     repo,
+				Env: map[string]string{
+					"SDK_ACP_STUB_REPLY":    "slow sidecar",
+					"SDK_ACP_STUB_DELAY_MS": "2000",
+					"SDK_ACP_SESSION_ROOT":  filepath.Join(root, "agent-sessions"),
+					"SDK_ACP_TASK_ROOT":     filepath.Join(root, "agent-tasks"),
+				},
+			}},
+		},
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      sdkproviders.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := NewGatewayDriver(ctx, stack, "agent-conflict-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	first, err := driver.StartAgentSubagent(ctx, "copilot", "first prompt")
+	if err != nil {
+		t.Fatalf("StartAgentSubagent(first) error = %v", err)
+	}
+	defer closeGatewayDriverTestTurn(t, first)
+
+	_, err = driver.StartAgentSubagent(ctx, "copilot", "second prompt")
+	if err == nil {
+		t.Fatal("StartAgentSubagent(second) error = nil, want active run conflict")
+	}
+	var gwErr *appgateway.Error
+	if !appgateway.As(err, &gwErr) || gwErr.Code != appgateway.CodeActiveRunConflict {
+		t.Fatalf("StartAgentSubagent(second) error = %v, want active run conflict", err)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus() error = %v", err)
+	}
+	if len(status.Participants) != 1 {
+		t.Fatalf("AgentStatus().Participants = %#v, want only first sidecar after rollback", status.Participants)
+	}
+	if status.Participants[0].Label != "@jeff" {
+		t.Fatalf("remaining participant label = %q, want @jeff", status.Participants[0].Label)
+	}
+}
+
 func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -1895,7 +1948,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 	}
 }
 
-func TestGatewayDriverCompleteMentionReturnsUserSideSubagentsOnly(t *testing.T) {
+func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
@@ -1921,16 +1974,30 @@ func TestGatewayDriverCompleteMentionReturnsUserSideSubagentsOnly(t *testing.T) 
 		SessionRef: session.SessionRef,
 		Binding: sdksession.ParticipantBinding{
 			ID:           "side-1",
-			Kind:         sdksession.ParticipantKindSubagent,
+			Kind:         sdksession.ParticipantKindACP,
 			Role:         sdksession.ParticipantRoleSidecar,
 			AgentName:    "codex",
-			Label:        "jeff",
+			Label:        "@jeff",
 			SessionID:    "child-1",
 			Source:       "custom_codex",
 			DelegationID: "task-side",
 		},
 	}); err != nil {
 		t.Fatalf("PutParticipant(side) error = %v", err)
+	}
+	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
+			ID:           "legacy-side-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleSidecar,
+			AgentName:    "legacy",
+			Label:        "@jill",
+			SessionID:    "legacy-child-1",
+			DelegationID: "task-legacy",
+		},
+	}); err != nil {
+		t.Fatalf("PutParticipant(legacy-side) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
 		SessionRef: session.SessionRef,
@@ -1970,8 +2037,8 @@ func TestGatewayDriverCompleteMentionReturnsUserSideSubagentsOnly(t *testing.T) 
 	if err != nil {
 		t.Fatalf("AgentStatus() error = %v", err)
 	}
-	if len(status.Participants) != 1 || status.Participants[0].ID != "side-1" {
-		t.Fatalf("AgentStatus().Participants = %#v, want only side participant", status.Participants)
+	if len(status.Participants) != 2 || status.Participants[0].ID != "side-1" || status.Participants[1].ID != "legacy-side-1" {
+		t.Fatalf("AgentStatus().Participants = %#v, want visible side participants", status.Participants)
 	}
 }
 

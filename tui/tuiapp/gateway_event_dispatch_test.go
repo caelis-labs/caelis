@@ -769,11 +769,12 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"running":          false,
 					"state":            "completed",
 					"task_id":          "leo",
+					"stdout":           "用例| C输出欢迎 |\n_empty |\n|\n了根据），\n",
 					"result":           "child line 1\nchild line 2\n",
 				},
 			},
 			want:        []string{"• Spawned", "  └ child line 1", "    child line 2"},
-			forbidden:   []string{"task / running", "state completed", "spawn-task-1", "self-001", "internal_task_id", "@leo"},
+			forbidden:   []string{"task / running", "state completed", "spawn-task-1", "self-001", "internal_task_id", "@leo", "用例| C输出欢迎", "_empty", "了根据"},
 			expandPanel: true,
 		},
 		{
@@ -2189,6 +2190,44 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 	}
 	if !participantTurnIsTerminal(secondTurn.Status) {
 		t.Fatalf("second turn status = %q, want terminal after task result", secondTurn.Status)
+	}
+}
+
+func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	updated, _ := model.Update(UserMessageMsg{Text: "/claude 总结一下工作"})
+	model = updated.(*Model)
+	updated, _ = model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindUserMessage,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin: &appgateway.EventOrigin{
+				Scope:         appgateway.EventScopeParticipant,
+				ScopeID:       "participant-turn-1",
+				ParticipantID: "participant-1",
+				Actor:         "@jeff",
+			},
+			Narrative: &appgateway.NarrativePayload{
+				Role:  appgateway.NarrativeRoleUser,
+				Text:  "总结一下工作",
+				Scope: appgateway.EventScopeParticipant,
+			},
+		},
+	})
+	model = updated.(*Model)
+
+	var userLines []string
+	for _, block := range model.doc.Blocks() {
+		if transcript, ok := block.(*TranscriptBlock); ok && strings.HasPrefix(strings.TrimSpace(transcript.Raw), ">") {
+			userLines = append(userLines, transcript.Raw)
+		}
+	}
+	if len(userLines) != 1 || !strings.Contains(userLines[0], "/claude 总结一下工作") {
+		t.Fatalf("user lines = %#v, want only displayed slash prompt", userLines)
+	}
+	if strings.Contains(strings.Join(userLines, "\n"), "> 总结一下工作") {
+		t.Fatalf("user lines = %#v, should not render participant prompt echo", userLines)
 	}
 }
 
