@@ -42,6 +42,22 @@ func ptrRuntimeMessage(message sdkmodel.Message) *sdkmodel.Message {
 	return &message
 }
 
+func modelUsageMetaForRuntimeTest(prompt int, cached int, completion int, total int) map[string]any {
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"sdk": map[string]any{
+				"usage": map[string]any{
+					"prompt_tokens":       prompt,
+					"cached_input_tokens": cached,
+					"completion_tokens":   completion,
+					"total_tokens":        total,
+				},
+			},
+		},
+	}
+}
+
 func closeGatewayDriverTestTurn(t *testing.T, turn Turn) {
 	t.Helper()
 	if turn == nil {
@@ -806,11 +822,12 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 			Message: ptrRuntimeMessage(sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "world")),
 			Text:    "world",
 			Meta: map[string]any{
-				"provider":          "ollama",
-				"model":             "llama3",
-				"prompt_tokens":     12600,
-				"completion_tokens": 200,
-				"total_tokens":      12800,
+				"provider":            "ollama",
+				"model":               "llama3",
+				"prompt_tokens":       12600,
+				"cached_input_tokens": 9000,
+				"completion_tokens":   200,
+				"total_tokens":        12800,
 			},
 		},
 	}); err != nil {
@@ -826,6 +843,65 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	}
 	if status.ContextWindowTokens != 88000 {
 		t.Fatalf("status.ContextWindowTokens = %d, want 88000", status.ContextWindowTokens)
+	}
+	if status.SessionInputTokens != 12600 || status.SessionCachedInputTokens != 9000 || status.SessionOutputTokens != 200 || status.SessionTotalTokens != 12800 {
+		t.Fatalf("session token usage = input %d cached %d output %d total %d", status.SessionInputTokens, status.SessionCachedInputTokens, status.SessionOutputTokens, status.SessionTotalTokens)
+	}
+}
+
+func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "status-usage-dedupe-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      sdkproviders.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := NewGatewayDriver(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+	session, ok := driver.currentSession()
+	if !ok {
+		t.Fatal("expected active session")
+	}
+	for _, id := range []string{"call-1", "call-2"} {
+		if _, err := stack.Sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+			SessionRef: session.SessionRef,
+			Event: &sdksession.Event{
+				Type: sdksession.EventTypeToolCall,
+				Protocol: &sdksession.EventProtocol{Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeToolCall),
+					ToolCallID:    id,
+					Kind:          "BASH",
+					Title:         "BASH",
+					Status:        "pending",
+					RawInput:      map[string]any{"cmd": "pwd"},
+				}},
+				Meta: modelUsageMetaForRuntimeTest(10, 3, 2, 12),
+			},
+		}); err != nil {
+			t.Fatalf("AppendEvent(%s) error = %v", id, err)
+		}
+	}
+
+	usage, err := driver.sessionTokenUsage(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("sessionTokenUsage() error = %v", err)
+	}
+	if usage.PromptTokens != 10 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.TotalTokens != 12 {
+		t.Fatalf("usage = %+v, want one model response counted once", usage)
 	}
 }
 
@@ -1819,7 +1895,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 	}
 }
 
-func TestGatewayDriverCompleteMentionReturnsDelegatedParticipants(t *testing.T) {
+func TestGatewayDriverCompleteMentionReturnsUserSideSubagentsOnly(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
@@ -1844,15 +1920,30 @@ func TestGatewayDriverCompleteMentionReturnsDelegatedParticipants(t *testing.T) 
 	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
 		SessionRef: session.SessionRef,
 		Binding: sdksession.ParticipantBinding{
+			ID:           "side-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleSidecar,
+			AgentName:    "codex",
+			Label:        "jeff",
+			SessionID:    "child-1",
+			Source:       "custom_codex",
+			DelegationID: "task-side",
+		},
+	}); err != nil {
+		t.Fatalf("PutParticipant(side) error = %v", err)
+	}
+	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
 			ID:           "task-1",
 			Kind:         sdksession.ParticipantKindSubagent,
 			Role:         sdksession.ParticipantRoleDelegated,
-			Label:        "jeff",
-			SessionID:    "child-1",
+			Label:        "@jude",
+			SessionID:    "child-2",
 			DelegationID: "task-1",
 		},
 	}); err != nil {
-		t.Fatalf("PutParticipant() error = %v", err)
+		t.Fatalf("PutParticipant(delegated) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
 		SessionRef: session.SessionRef,
@@ -1873,14 +1964,14 @@ func TestGatewayDriverCompleteMentionReturnsDelegatedParticipants(t *testing.T) 
 		t.Fatalf("CompleteMention() error = %v", err)
 	}
 	if len(candidates) != 1 || candidates[0].Value != "jeff" {
-		t.Fatalf("CompleteMention() = %#v, want jeff delegated target", candidates)
+		t.Fatalf("CompleteMention() = %#v, want side target", candidates)
 	}
 	status, err := driver.AgentStatus(ctx)
 	if err != nil {
 		t.Fatalf("AgentStatus() error = %v", err)
 	}
-	if len(status.Participants) != 1 || status.Participants[0].ID != "task-1" {
-		t.Fatalf("AgentStatus().Participants = %#v, want only non-self participant", status.Participants)
+	if len(status.Participants) != 1 || status.Participants[0].ID != "side-1" {
+		t.Fatalf("AgentStatus().Participants = %#v, want only side participant", status.Participants)
 	}
 }
 

@@ -43,7 +43,7 @@ func approvalToolSummary(req *appgateway.ApprovalPayload) (string, string) {
 	if req == nil {
 		return "", ""
 	}
-	return strings.TrimSpace(req.ToolName), strings.TrimSpace(req.CommandPreview)
+	return strings.TrimSpace(req.ToolName), approvalCommandPreview(req.RawInput)
 }
 
 func compactString(s string, maxLen int) string {

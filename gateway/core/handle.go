@@ -166,6 +166,7 @@ func (h *turnHandle) publishSessionEvent(event *sdksession.Event) {
 			SessionRef:  h.sessionRef,
 			Origin:      canonicalOriginFromSessionEvent(h.sessionRef, event),
 			Meta:        canonicalEventMeta(event),
+			Protocol:    canonicalProtocolPayload(event),
 			Usage:       usageSnapshotFromSessionEvent(event),
 			Narrative:   canonicalNarrativePayload(event),
 			ToolCall:    canonicalToolCallPayload(event),

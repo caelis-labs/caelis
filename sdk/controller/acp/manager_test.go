@@ -59,6 +59,44 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 }
 
+func TestNormalizeACPUpdateEventMarksOnlySharedDialogueDurable(t *testing.T) {
+	t.Parallel()
+
+	clock := func() time.Time { return time.Unix(0, 0) }
+	binding := sdksession.ControllerBinding{Kind: sdksession.ControllerKindACP, ControllerID: "codex", Label: "codex"}
+	textRaw, err := json.Marshal(sdkacpclient.TextChunk{Type: "text", Text: "hello"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	user := normalizeACPUpdateEvent(clock, binding, "remote-1", "turn-1", sdkacpclient.ContentChunk{
+		SessionUpdate: sdkacpclient.UpdateUserMessage,
+		Content:       textRaw,
+	})
+	if user == nil || user.Visibility != sdksession.VisibilityCanonical || user.Type != sdksession.EventTypeUser {
+		t.Fatalf("user event = %#v, want canonical user", user)
+	}
+
+	assistant := normalizeACPUpdateEvent(clock, binding, "remote-1", "turn-1", sdkacpclient.ContentChunk{
+		SessionUpdate: sdkacpclient.UpdateAgentMessage,
+		Content:       textRaw,
+	})
+	if assistant == nil || assistant.Visibility != sdksession.VisibilityUIOnly || assistant.Type != sdksession.EventTypeAssistant {
+		t.Fatalf("assistant chunk = %#v, want ui-only assistant chunk", assistant)
+	}
+
+	tool := normalizeACPUpdateEvent(clock, binding, "remote-1", "turn-1", sdkacpclient.ToolCallUpdate{
+		SessionUpdate: sdkacpclient.UpdateToolCallState,
+		ToolCallID:    "tool-1",
+		Kind:          testStringPtr("execute"),
+		Status:        testStringPtr("completed"),
+		RawOutput:     map[string]any{"stdout": "ok"},
+	})
+	if tool == nil || tool.Visibility != sdksession.VisibilityUIOnly || tool.Protocol == nil || tool.Protocol.ToolCall == nil {
+		t.Fatalf("tool update = %#v, want ui-only structured tool update", tool)
+	}
+}
+
 func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) {
 	t.Parallel()
 

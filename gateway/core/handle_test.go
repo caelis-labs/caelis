@@ -52,9 +52,10 @@ func TestTurnHandleCanonicalizesAssistantEventAndUsage(t *testing.T) {
 		Text: "done",
 		Meta: map[string]any{
 			"usage": map[string]any{
-				"prompt_tokens":     12,
-				"completion_tokens": 5,
-				"total_tokens":      17,
+				"prompt_tokens":       12,
+				"cached_input_tokens": 7,
+				"completion_tokens":   5,
+				"total_tokens":        17,
 			},
 		},
 	})
@@ -72,7 +73,7 @@ func TestTurnHandleCanonicalizesAssistantEventAndUsage(t *testing.T) {
 	if got := AssistantText(replayed[0].Event); got != "done" {
 		t.Fatalf("AssistantText() = %q, want %q", got, "done")
 	}
-	if replayed[0].Event.Usage == nil || replayed[0].Event.Usage.PromptTokens != 12 || replayed[0].Event.Usage.CompletionTokens != 5 || replayed[0].Event.Usage.TotalTokens != 17 {
+	if replayed[0].Event.Usage == nil || replayed[0].Event.Usage.PromptTokens != 12 || replayed[0].Event.Usage.CachedInputTokens != 7 || replayed[0].Event.Usage.CompletionTokens != 5 || replayed[0].Event.Usage.TotalTokens != 17 {
 		t.Fatalf("usage = %+v", replayed[0].Event.Usage)
 	}
 	if replayed[0].Event.Narrative == nil {

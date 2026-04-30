@@ -599,7 +599,6 @@ func (m *Model) updateSlashArgCandidates() {
 	}
 	if !m.isWizardActive() && command == "model use" {
 		if nextCommand, nextCandidates := m.exactModelUseReasoningCandidates(query, filtered); nextCommand != "" && len(nextCandidates) > 0 {
-			command = nextCommand
 			query = ""
 			filtered = nextCandidates
 			m.slashArgCommand = nextCommand

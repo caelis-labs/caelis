@@ -13,11 +13,11 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 	switch name {
 	case "READ":
 		if path := toolPath(raw); path != "" {
-			return filepath.Base(path)
+			return compactPathDisplay(path)
 		}
 	case "LIST":
 		if path := toolPath(raw); path != "" {
-			return filepath.Base(path)
+			return compactPathDisplay(path)
 		}
 	case "GLOB":
 		if pattern := strings.TrimSpace(asString(raw["pattern"])); pattern != "" {
@@ -43,6 +43,9 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 			if action := taskControlDisplay(raw); action != "" {
 				return action
 			}
+			if action := taskControlDisplayFallback(fallback...); action != "" {
+				return action
+			}
 		}
 		if name == "SPAWN" {
 			if display := spawnDisplayArgs(raw); display != "" {
@@ -57,6 +60,23 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		return summary
 	}
 	return firstTrimmed(fallback...)
+}
+
+func compactPathDisplay(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return path
+}
+
+func toolDisplayFullArgs(name string, raw map[string]any) string {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "SPAWN":
+		return spawnFullDisplayArgs(raw)
+	default:
+		return ""
+	}
 }
 
 func toolTitleDisplayArgs(name string, kind string, title string) string {
@@ -331,35 +351,107 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 
 func taskControlDisplay(raw map[string]any) string {
 	action := strings.ToUpper(strings.TrimSpace(asString(raw["action"])))
+	handle := taskHandleDisplay(asString(raw["task_id"]))
 	switch action {
 	case "WAIT":
+		duration := ""
 		if ms := displayInt(raw["yield_time_ms"]); ms > 0 {
-			return "WAIT " + formatDurationMS(ms)
+			duration = formatDurationMS(ms)
 		}
-		return "WAIT"
+		parts := []string{"Wait"}
+		if handle != "" {
+			parts = append(parts, handle)
+		}
+		if duration != "" {
+			parts = append(parts, duration)
+		}
+		return strings.Join(parts, " ")
 	case "CANCEL":
-		return "CANCEL"
+		if handle != "" {
+			return "Cancel " + handle
+		}
+		return "Cancel"
 	case "WRITE":
 		if input := formatTaskWriteInput(asString(raw["input"])); input != "" {
-			return "WRITE " + input
+			return "Write " + input
 		}
-		return "WRITE"
+		if handle != "" {
+			return "Write " + handle
+		}
+		return "Write"
 	case "":
 		return ""
 	default:
-		return action
+		return strings.ToUpper(action[:1]) + strings.ToLower(action[1:])
 	}
+}
+
+func taskControlDisplayFallback(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		fields := strings.Fields(value)
+		if len(fields) == 0 {
+			continue
+		}
+		if strings.EqualFold(fields[0], "TASK") {
+			fields = fields[1:]
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		action := strings.ToUpper(fields[0])
+		details := make([]string, 0, len(fields)-1)
+		if len(fields) > 1 {
+			if detail := taskHandleDisplay(fields[1]); detail != "" {
+				details = append(details, detail)
+			}
+		}
+		if len(fields) > 2 {
+			details = append(details, fields[2:]...)
+		}
+		detail := strings.TrimSpace(strings.Join(details, " "))
+		switch action {
+		case "WAIT":
+			if detail != "" {
+				return "Wait " + detail
+			}
+			return "Wait"
+		case "CANCEL":
+			if detail != "" {
+				return "Cancel " + detail
+			}
+			return "Cancel"
+		case "WRITE":
+			return "Write"
+		}
+	}
+	return ""
 }
 
 func spawnDisplayArgs(raw map[string]any) string {
 	if len(raw) == 0 {
 		return ""
 	}
-	data, err := json.Marshal(raw)
-	if err != nil {
+	full := spawnFullDisplayArgs(raw)
+	if full == "" {
 		return ""
 	}
-	return normalizeToolDisplayArg(string(data))
+	return truncateReasoningPreviewMiddle(full, 96)
+}
+
+func spawnFullDisplayArgs(raw map[string]any) string {
+	prompt := strings.Join(strings.Fields(normalizeToolDisplayArg(asString(raw["prompt"]))), " ")
+	agent := strings.TrimSpace(asString(raw["agent"]))
+	if agent == "" {
+		return prompt
+	}
+	if prompt == "" {
+		return agent
+	}
+	return agent + ": " + prompt
 }
 
 func genericToolOutput(output map[string]any, isErr bool) string {
@@ -425,9 +517,9 @@ func normalizeToolDisplayArg(input string) string {
 
 func formatDurationMS(ms int) string {
 	if ms%1000 == 0 {
-		return strconv.Itoa(ms/1000) + " s"
+		return strconv.Itoa(ms/1000) + "s"
 	}
-	return strconv.Itoa(ms) + " ms"
+	return strconv.Itoa(ms) + "ms"
 }
 
 func toolDisplayPanelOutput(name string, output string) string {
@@ -442,7 +534,22 @@ func toolDisplayPanelOutput(name string, output string) string {
 }
 
 func toolDisplayTaskID(input map[string]any, output map[string]any) string {
-	return firstTrimmed(asString(output["task_id"]), asString(input["task_id"]))
+	return firstTrimmed(asString(output["handle"]), asString(output["task_id"]), asString(input["task_id"]))
+}
+
+func taskHandleDisplay(value string) string {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "@")
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "task-") || strings.Contains(lower, "-task-") {
+		return ""
+	}
+	if strings.ContainsAny(value, " \t\r\n") {
+		return ""
+	}
+	return value
 }
 
 func toolDisplayResultHeader(name string, output string) string {

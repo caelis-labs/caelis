@@ -129,19 +129,26 @@ func StreamFrameEvent(req StreamRequest, frame sdkstream.Frame) EventEnvelope {
 			Origin:     cloneEventOrigin(req.Origin),
 			Meta: map[string]any{
 				"caelis": map[string]any{
+					"version":   1,
 					"transient": true,
-					"display": map[string]any{
-						"terminal": map[string]any{
-							"mode":          "append",
-							"task_id":       output["task_id"],
-							"terminal_id":   output["terminal_id"],
-							"stream":        output["stream"],
-							"text":          frame.Text,
-							"running":       frame.Running,
-							"stdout_cursor": frame.Cursor.Stdout,
-							"stderr_cursor": frame.Cursor.Stderr,
+					"runtime": map[string]any{
+						"stream": map[string]any{
+							"mode": "append",
 						},
 					},
+				},
+			},
+			Protocol: &sdksession.EventProtocol{
+				Method:     sdksession.ProtocolMethodSessionUpdate,
+				UpdateType: string(sdksession.ProtocolUpdateTypeToolUpdate),
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeToolUpdate),
+					ToolCallID:    req.CallID,
+					Kind:          strings.TrimSpace(req.ToolName),
+					Title:         req.ToolName,
+					Status:        string(ToolStatusRunning),
+					RawInput:      maps.Clone(req.RawInput),
+					RawOutput:     output,
 				},
 			},
 			ToolResult: &ToolResultPayload{
@@ -224,4 +231,11 @@ func boolValue(value any) bool {
 	default:
 		return false
 	}
+}
+
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
 }

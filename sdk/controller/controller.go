@@ -87,6 +87,8 @@ type TurnRequest struct {
 	TurnID            string                 `json:"turn_id,omitempty"`
 	Input             string                 `json:"input,omitempty"`
 	ContentParts      []sdkmodel.ContentPart `json:"content_parts,omitempty"`
+	ContextPrelude    string                 `json:"context_prelude,omitempty"`
+	ContextSyncSeq    int                    `json:"context_sync_seq,omitempty"`
 	Stream            bool                   `json:"stream,omitempty"`
 	Mode              string                 `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester      `json:"-"`
@@ -95,11 +97,13 @@ type TurnRequest struct {
 // ParticipantPromptRequest sends one bounded prompt to an attached ACP
 // participant without changing the main controller.
 type ParticipantPromptRequest struct {
-	SessionRef    sdksession.SessionRef  `json:"session_ref,omitempty"`
-	Session       sdksession.Session     `json:"session,omitempty"`
-	ParticipantID string                 `json:"participant_id,omitempty"`
-	Input         string                 `json:"input,omitempty"`
-	ContentParts  []sdkmodel.ContentPart `json:"content_parts,omitempty"`
+	SessionRef     sdksession.SessionRef  `json:"session_ref,omitempty"`
+	Session        sdksession.Session     `json:"session,omitempty"`
+	TurnID         string                 `json:"turn_id,omitempty"`
+	ParticipantID  string                 `json:"participant_id,omitempty"`
+	Input          string                 `json:"input,omitempty"`
+	ContentParts   []sdkmodel.ContentPart `json:"content_parts,omitempty"`
+	ContextPrelude string                 `json:"context_prelude,omitempty"`
 }
 
 type TurnHandle interface {
@@ -247,6 +251,8 @@ func NormalizeTurnRequest(in TurnRequest) TurnRequest {
 	if len(in.ContentParts) > 0 {
 		out.ContentParts = append([]sdkmodel.ContentPart(nil), in.ContentParts...)
 	}
+	out.ContextPrelude = strings.TrimSpace(in.ContextPrelude)
+	out.ContextSyncSeq = in.ContextSyncSeq
 	out.Mode = strings.TrimSpace(in.Mode)
 	return out
 }
@@ -255,8 +261,10 @@ func NormalizeParticipantPromptRequest(in ParticipantPromptRequest) ParticipantP
 	out := in
 	out.SessionRef = sdksession.NormalizeSessionRef(in.SessionRef)
 	out.Session = sdksession.CloneSession(in.Session)
+	out.TurnID = strings.TrimSpace(in.TurnID)
 	out.ParticipantID = strings.TrimSpace(in.ParticipantID)
 	out.Input = strings.TrimSpace(in.Input)
 	out.ContentParts = append([]sdkmodel.ContentPart(nil), in.ContentParts...)
+	out.ContextPrelude = strings.TrimSpace(in.ContextPrelude)
 	return out
 }

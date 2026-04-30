@@ -255,6 +255,10 @@ func chunkEventFromStreamEvent(event *sdkmodel.StreamEvent) *sdksession.Event {
 			Text:    delta.TextDelta,
 			Protocol: &sdksession.EventProtocol{
 				UpdateType: string(sdksession.ProtocolUpdateTypeAgentThought),
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeAgentThought),
+					Content:       sdksession.ProtocolTextContent(delta.TextDelta),
+				},
 			},
 		})
 	case sdkmodel.PartKindText:
@@ -268,6 +272,10 @@ func chunkEventFromStreamEvent(event *sdkmodel.StreamEvent) *sdksession.Event {
 			Text:    delta.TextDelta,
 			Protocol: &sdksession.EventProtocol{
 				UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeAgentMessage),
+					Content:       sdksession.ProtocolTextContent(delta.TextDelta),
+				},
 			},
 		})
 	default:
@@ -283,17 +291,14 @@ func modelResponseEvent(message sdkmodel.Message, resp *sdkmodel.Response) *sdks
 		Text:       message.TextContent(),
 		Protocol: &sdksession.EventProtocol{
 			UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeAgentMessage),
+				Content:       sdksession.ProtocolTextContent(message.TextContent()),
+			},
 		},
 	}
 	if resp != nil {
-		out.Meta = map[string]any{
-			"model":             strings.TrimSpace(resp.Model),
-			"provider":          strings.TrimSpace(resp.Provider),
-			"finish_reason":     string(resp.FinishReason),
-			"prompt_tokens":     resp.Usage.PromptTokens,
-			"completion_tokens": resp.Usage.CompletionTokens,
-			"total_tokens":      resp.Usage.TotalTokens,
-		}
+		out.Meta = responseMeta(resp)
 	}
 	return out
 }
@@ -306,33 +311,23 @@ func modelToolCallEvents(message sdkmodel.Message, resp *sdkmodel.Response) []*s
 	out := make([]*sdksession.Event, 0, len(calls))
 	baseMeta := map[string]any{}
 	if resp != nil {
-		baseMeta["model"] = strings.TrimSpace(resp.Model)
-		baseMeta["provider"] = strings.TrimSpace(resp.Provider)
-		baseMeta["finish_reason"] = string(resp.FinishReason)
-		baseMeta["prompt_tokens"] = resp.Usage.PromptTokens
-		baseMeta["completion_tokens"] = resp.Usage.CompletionTokens
-		baseMeta["total_tokens"] = resp.Usage.TotalTokens
+		baseMeta = responseMeta(resp)
 	}
 	for i, call := range calls {
 		rawInput := mustObject(call.Args)
+		meta := toolMeta(call.Name)
+		if i == 0 {
+			meta = mergeEventMeta(baseMeta, meta)
+		}
 		event := &sdksession.Event{
-			Type: sdksession.EventTypeToolCall,
-			Protocol: &sdksession.EventProtocol{
-				UpdateType: string(sdksession.ProtocolUpdateTypeToolCall),
-				ToolCall: &sdksession.ProtocolToolCall{
-					ID:       strings.TrimSpace(call.ID),
-					Name:     strings.TrimSpace(call.Name),
-					Kind:     toolKindForName(call.Name),
-					Title:    toolCallTitle(call),
-					Status:   "pending",
-					RawInput: rawInput,
-				},
-			},
-			Meta: mergeEventMeta(baseMeta, caelisToolDisplayMeta(call.Name, "pending", rawInput, nil)),
+			Type:     sdksession.EventTypeToolCall,
+			Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolCall, "pending", rawInput, nil),
+			Meta:     meta,
 		}
 		if i == 0 {
 			event.Message = &message
 			event.Text = message.TextContent()
+			event.Protocol = protocolWithText(event.Protocol, event.Text)
 		}
 		out = append(out, event)
 	}
@@ -351,26 +346,11 @@ func (a *Agent) executeToolCall(ctx context.Context, call sdkmodel.ToolCall, obs
 			Content: []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(rawOutput))},
 		})
 		return message, &sdksession.Event{
-			Type:    sdksession.EventTypeToolResult,
-			Message: &message,
-			Text:    message.TextContent(),
-			Protocol: &sdksession.EventProtocol{
-				UpdateType: string(sdksession.ProtocolUpdateTypeToolUpdate),
-				ToolCall: &sdksession.ProtocolToolCall{
-					ID:        strings.TrimSpace(call.ID),
-					Name:      strings.TrimSpace(call.Name),
-					Kind:      toolKindForName(call.Name),
-					Title:     toolCallTitle(call),
-					Status:    "failed",
-					RawInput:  rawInput,
-					RawOutput: rawOutput,
-				},
-			},
-			Meta: mergeEventMeta(map[string]any{
-				"tool_name":    strings.TrimSpace(call.Name),
-				"tool_call_id": strings.TrimSpace(call.ID),
-				"is_error":     true,
-			}, caelisToolDisplayMeta(call.Name, "failed", rawInput, rawOutput)),
+			Type:     sdksession.EventTypeToolResult,
+			Message:  &message,
+			Text:     message.TextContent(),
+			Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolUpdate, "failed", rawInput, rawOutput),
+			Meta:     mergeEventMeta(toolMeta(call.Name)),
 		}, nil
 	}
 
@@ -397,28 +377,9 @@ func toolResultEvent(call sdkmodel.ToolCall, result sdktool.Result, message *sdk
 	rawInput := mustObject(call.Args)
 	rawOutput := maps.Clone(result.Meta)
 	event := &sdksession.Event{
-		Type: sdksession.EventTypeToolResult,
-		Protocol: &sdksession.EventProtocol{
-			UpdateType: string(sdksession.ProtocolUpdateTypeToolUpdate),
-			ToolCall: &sdksession.ProtocolToolCall{
-				ID:        strings.TrimSpace(call.ID),
-				Name:      strings.TrimSpace(call.Name),
-				Kind:      toolKindForName(call.Name),
-				Title:     toolCallTitle(call),
-				Status:    toolCallStatus(result),
-				RawInput:  rawInput,
-				RawOutput: rawOutput,
-			},
-		},
-		Meta: mergeEventMeta(
-			map[string]any{
-				"tool_name":    strings.TrimSpace(call.Name),
-				"tool_call_id": strings.TrimSpace(call.ID),
-				"is_error":     result.IsError,
-			},
-			result.Meta,
-			caelisToolDisplayMeta(call.Name, toolCallStatus(result), rawInput, rawOutput),
-		),
+		Type:     sdksession.EventTypeToolResult,
+		Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolUpdate, toolCallStatus(result), rawInput, rawOutput),
+		Meta:     mergeEventMeta(toolMeta(call.Name)),
 	}
 	if message != nil {
 		event.Message = message
@@ -554,6 +515,12 @@ func mergeEventMeta(parts ...map[string]any) map[string]any {
 	out := map[string]any{}
 	for _, part := range parts {
 		for key, value := range part {
+			if existing, ok := out[key].(map[string]any); ok {
+				if incoming, ok := value.(map[string]any); ok {
+					out[key] = mergeAnyMap(existing, incoming)
+					continue
+				}
+			}
 			out[key] = value
 		}
 	}
@@ -563,99 +530,416 @@ func mergeEventMeta(parts ...map[string]any) map[string]any {
 	return out
 }
 
-func caelisToolDisplayMeta(name string, status string, rawInput map[string]any, rawOutput map[string]any) map[string]any {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return nil
-	}
-	display := map[string]any{
-		"tool": map[string]any{
-			"name":   name,
-			"family": toolKindForName(name),
-			"status": strings.TrimSpace(status),
-		},
-	}
-	switch strings.ToUpper(name) {
-	case "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND":
-		display["file"] = compactMetaMap(map[string]any{
-			"path":       firstNonEmpty(metaString(rawOutput, "path"), metaString(rawInput, "path")),
-			"pattern":    firstNonEmpty(metaString(rawOutput, "pattern"), metaString(rawInput, "pattern")),
-			"query":      firstNonEmpty(metaString(rawOutput, "query"), metaString(rawInput, "query"), metaString(rawInput, "pattern")),
-			"start_line": rawOutput["start_line"],
-			"end_line":   rawOutput["end_line"],
-			"count":      rawOutput["count"],
-			"file_count": rawOutput["file_count"],
-		})
-	case "WRITE", "PATCH":
-		display["diff"] = compactMetaMap(map[string]any{
-			"path":           firstNonEmpty(metaString(rawOutput, "path"), metaString(rawInput, "path")),
-			"hunk":           rawOutput["hunk"],
-			"diff_hunks":     rawOutput["diff_hunks"],
-			"diff_truncated": rawOutput["diff_truncated"],
-			"old":            rawInput["old"],
-			"new":            rawInput["new"],
-			"added_lines":    rawOutput["added_lines"],
-			"removed_lines":  rawOutput["removed_lines"],
-			"created":        rawOutput["created"],
-		})
-	case "BASH", "SPAWN", "TASK":
-		display["terminal"] = compactMetaMap(map[string]any{
-			"command":        firstNonEmpty(metaString(rawInput, "command"), metaString(rawInput, "cmd")),
-			"stdout":         rawOutput["stdout"],
-			"stderr":         rawOutput["stderr"],
-			"result":         rawOutput["result"],
-			"output_preview": rawOutput["output_preview"],
-			"exit_code":      rawOutput["exit_code"],
-			"state":          rawOutput["state"],
-			"running":        rawOutput["running"],
-			"task_id":        rawOutput["task_id"],
-		})
-	}
-	return map[string]any{"caelis": map[string]any{"display": display}}
-}
-
-func compactMetaMap(in map[string]any) map[string]any {
-	out := map[string]any{}
-	for key, value := range in {
-		switch typed := value.(type) {
-		case nil:
-			continue
-		case string:
-			if strings.TrimSpace(typed) == "" {
+func mergeAnyMap(base map[string]any, overlay map[string]any) map[string]any {
+	out := maps.Clone(base)
+	for key, value := range overlay {
+		if existing, ok := out[key].(map[string]any); ok {
+			if incoming, ok := value.(map[string]any); ok {
+				out[key] = mergeAnyMap(existing, incoming)
 				continue
 			}
 		}
 		out[key] = value
 	}
-	if len(out) == 0 {
-		return nil
-	}
 	return out
 }
 
-func metaString(values map[string]any, key string) string {
-	if values == nil {
-		return ""
+func responseMeta(resp *sdkmodel.Response) map[string]any {
+	if resp == nil {
+		return nil
 	}
-	value, ok := values[key].(string)
-	if !ok {
-		return ""
+	usage := map[string]any{
+		"prompt_tokens":       resp.Usage.PromptTokens,
+		"cached_input_tokens": resp.Usage.CachedInputTokens,
+		"completion_tokens":   resp.Usage.CompletionTokens,
+		"total_tokens":        resp.Usage.TotalTokens,
 	}
-	return strings.TrimSpace(value)
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"sdk": map[string]any{
+				"model":         strings.TrimSpace(resp.Model),
+				"provider":      strings.TrimSpace(resp.Provider),
+				"finish_reason": string(resp.FinishReason),
+				"usage":         usage,
+			},
+		},
+	}
+}
+
+func toolMeta(name string) map[string]any {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				"tool": map[string]any{
+					"name": name,
+				},
+			},
+		},
+	}
+}
+
+func toolCallProtocol(call sdkmodel.ToolCall, updateType sdksession.ProtocolUpdateType, status string, rawInput map[string]any, rawOutput map[string]any) *sdksession.EventProtocol {
+	tool := &sdksession.ProtocolToolCall{
+		ID:        strings.TrimSpace(call.ID),
+		Name:      strings.TrimSpace(call.Name),
+		Kind:      toolKindForName(call.Name),
+		Title:     toolCallTitle(call),
+		Status:    strings.TrimSpace(status),
+		RawInput:  maps.Clone(rawInput),
+		RawOutput: maps.Clone(rawOutput),
+	}
+	return &sdksession.EventProtocol{
+		UpdateType: string(updateType),
+		ToolCall:   tool,
+		Update: &sdksession.ProtocolUpdate{
+			SessionUpdate: string(updateType),
+			ToolCallID:    tool.ID,
+			Kind:          tool.Kind,
+			Title:         tool.Title,
+			Status:        tool.Status,
+			RawInput:      maps.Clone(rawInput),
+			RawOutput:     maps.Clone(rawOutput),
+		},
+	}
+}
+
+func protocolWithText(protocol *sdksession.EventProtocol, text string) *sdksession.EventProtocol {
+	if strings.TrimSpace(text) == "" {
+		return protocol
+	}
+	out := cloneChatEventProtocol(protocol)
+	if out.Update == nil {
+		out.Update = &sdksession.ProtocolUpdate{}
+	}
+	if out.Update.Content == nil {
+		out.Update.Content = sdksession.ProtocolTextContent(text)
+	}
+	return &out
+}
+
+func cloneChatEventProtocol(protocol *sdksession.EventProtocol) sdksession.EventProtocol {
+	if protocol == nil {
+		return sdksession.EventProtocol{}
+	}
+	out := *protocol
+	if protocol.Update != nil {
+		update := *protocol.Update
+		update.RawInput = maps.Clone(protocol.Update.RawInput)
+		update.RawOutput = maps.Clone(protocol.Update.RawOutput)
+		out.Update = &update
+	}
+	if protocol.ToolCall != nil {
+		toolCall := *protocol.ToolCall
+		toolCall.RawInput = maps.Clone(protocol.ToolCall.RawInput)
+		toolCall.RawOutput = maps.Clone(protocol.ToolCall.RawOutput)
+		out.ToolCall = &toolCall
+	}
+	if protocol.Plan != nil {
+		plan := *protocol.Plan
+		plan.Entries = append([]sdksession.ProtocolPlanEntry(nil), protocol.Plan.Entries...)
+		out.Plan = &plan
+	}
+	return out
 }
 
 func messagesFromContext(ctx sdkruntime.Context) []sdkmodel.Message {
 	if ctx == nil {
 		return nil
 	}
-	out := make([]sdkmodel.Message, 0, ctx.Events().Len())
+	events := make([]*sdksession.Event, 0, ctx.Events().Len())
 	for event := range ctx.Events().All() {
-		if !sdksession.IsMainInvocationVisibleEvent(event) || event == nil || event.Message == nil {
+		events = append(events, event)
+	}
+	out := make([]sdkmodel.Message, 0, len(events))
+	for i := 0; i < len(events); {
+		event := events[i]
+		if event == nil || !sdksession.IsMainInvocationVisibleEvent(event) {
+			i++
 			continue
 		}
-		out = append(out, sdkmodel.CloneMessage(*event.Message))
+		if sdksession.EventTypeOf(event) == sdksession.EventTypeToolCall {
+			if message, next, ok := toolCallMessageFromEventRun(events, i); ok {
+				out = append(out, message)
+				i = next
+				continue
+			}
+		}
+		message, ok := messageFromInvocationEvent(event)
+		if !ok {
+			i++
+			continue
+		}
+		out = append(out, message)
+		i++
+	}
+	return normalizeToolCallHistory(out)
+}
+
+func toolCallMessageFromEventRun(events []*sdksession.Event, start int) (sdkmodel.Message, int, bool) {
+	if start < 0 || start >= len(events) {
+		return sdkmodel.Message{}, start + 1, false
+	}
+	calls := make([]sdkmodel.ToolCall, 0, 1)
+	text := ""
+	next := start
+	for next < len(events) {
+		event := events[next]
+		if event == nil || !sdksession.IsMainInvocationVisibleEvent(event) || sdksession.EventTypeOf(event) != sdksession.EventTypeToolCall {
+			break
+		}
+		if text == "" {
+			text = strings.TrimSpace(sdksession.EventText(event))
+		}
+		call, ok := toolCallFromProtocolEvent(event)
+		if !ok {
+			if event.Message != nil {
+				for _, item := range event.Message.ToolCalls() {
+					if strings.TrimSpace(item.ID) != "" && strings.TrimSpace(item.Name) != "" {
+						calls = append(calls, item)
+					}
+				}
+			}
+			next++
+			continue
+		}
+		calls = append(calls, call)
+		next++
+	}
+	if len(calls) == 0 {
+		return sdkmodel.Message{}, start + 1, false
+	}
+	return sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, calls, text), next, true
+}
+
+func toolCallFromProtocolEvent(event *sdksession.Event) (sdkmodel.ToolCall, bool) {
+	update := sdksession.ProtocolUpdateOf(event)
+	if update == nil {
+		return sdkmodel.ToolCall{}, false
+	}
+	call := sdkmodel.ToolCall{
+		ID:   strings.TrimSpace(update.ToolCallID),
+		Name: toolNameFromEvent(event),
+		Args: string(mustJSON(update.RawInput)),
+	}
+	if call.ID == "" || call.Name == "" {
+		return sdkmodel.ToolCall{}, false
+	}
+	return call, true
+}
+
+func normalizeToolCallHistory(messages []sdkmodel.Message) []sdkmodel.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]sdkmodel.Message, 0, len(messages))
+	for i := 0; i < len(messages); i++ {
+		calls := messages[i].ToolCalls()
+		if len(calls) == 0 {
+			if len(messages[i].ToolResults()) > 0 {
+				continue
+			}
+			out = append(out, messages[i])
+			continue
+		}
+		required := map[string]struct{}{}
+		for _, call := range calls {
+			if id := strings.TrimSpace(call.ID); id != "" {
+				required[id] = struct{}{}
+			}
+		}
+		if len(required) == 0 {
+			continue
+		}
+		run := []sdkmodel.Message{messages[i]}
+		next := i + 1
+		valid := true
+		for len(required) > 0 {
+			if next >= len(messages) {
+				valid = false
+				break
+			}
+			results := messages[next].ToolResults()
+			if len(results) == 0 {
+				valid = false
+				break
+			}
+			matched := false
+			for _, result := range results {
+				if id := strings.TrimSpace(result.ToolUseID); id != "" {
+					if _, ok := required[id]; ok {
+						delete(required, id)
+						matched = true
+					}
+				}
+			}
+			if !matched {
+				valid = false
+				break
+			}
+			run = append(run, messages[next])
+			next++
+		}
+		if valid {
+			out = append(out, run...)
+		}
+		for next < len(messages) && len(messages[next].ToolResults()) > 0 {
+			next++
+		}
+		i = next - 1
 	}
 	return out
+}
+
+func messageFromInvocationEvent(event *sdksession.Event) (sdkmodel.Message, bool) {
+	if event == nil || !sdksession.IsMainInvocationVisibleEvent(event) {
+		return sdkmodel.Message{}, false
+	}
+	if event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) == "" {
+		if event.Message != nil {
+			return sdkmodel.CloneMessage(*event.Message), true
+		}
+		return messageFromProtocolEvent(event)
+	}
+	text := strings.TrimSpace(sdksession.EventText(event))
+	if text == "" {
+		return sdkmodel.Message{}, false
+	}
+	label := participantInvocationLabel(*event)
+	switch sdksession.EventTypeOf(event) {
+	case sdksession.EventTypeUser:
+		return sdkmodel.NewTextMessage(sdkmodel.RoleUser, fmt.Sprintf("User to %s: %s", label, text)), true
+	case sdksession.EventTypeAssistant:
+		return sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, fmt.Sprintf("Assistant(%s): %s", label, text)), true
+	default:
+		if event.Message != nil {
+			return sdkmodel.CloneMessage(*event.Message), true
+		}
+		return messageFromProtocolEvent(event)
+	}
+}
+
+func messageFromProtocolEvent(event *sdksession.Event) (sdkmodel.Message, bool) {
+	update := sdksession.ProtocolUpdateOf(event)
+	switch sdksession.EventTypeOf(event) {
+	case sdksession.EventTypeUser:
+		if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
+			return sdkmodel.NewTextMessage(sdkmodel.RoleUser, text), true
+		}
+	case sdksession.EventTypeAssistant:
+		if text := strings.TrimSpace(sdksession.EventText(event)); text != "" {
+			return sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, text), true
+		}
+	case sdksession.EventTypeToolCall:
+		if update == nil {
+			return sdkmodel.Message{}, false
+		}
+		call := sdkmodel.ToolCall{
+			ID:   strings.TrimSpace(update.ToolCallID),
+			Name: toolNameFromEvent(event),
+			Args: string(mustJSON(update.RawInput)),
+		}
+		if call.ID == "" || call.Name == "" {
+			return sdkmodel.Message{}, false
+		}
+		return sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{call}, ""), true
+	case sdksession.EventTypeToolResult:
+		if update == nil {
+			return sdkmodel.Message{}, false
+		}
+		name := toolNameFromEvent(event)
+		if update.ToolCallID == "" || name == "" {
+			return sdkmodel.Message{}, false
+		}
+		message := sdkmodel.Message{
+			Role: sdkmodel.RoleTool,
+			Parts: []sdkmodel.Part{sdkmodel.NewToolResultJSONPart(
+				strings.TrimSpace(update.ToolCallID),
+				name,
+				maps.Clone(update.RawOutput),
+				strings.EqualFold(strings.TrimSpace(update.Status), "failed"),
+			)},
+		}
+		return message, true
+	}
+	return sdkmodel.Message{}, false
+}
+
+func toolNameFromEvent(event *sdksession.Event) string {
+	if event == nil {
+		return ""
+	}
+	if name := strings.TrimSpace(stringFromNestedMap(event.Meta, "caelis", "runtime", "tool", "name")); name != "" {
+		return name
+	}
+	if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
+			return name
+		}
+	}
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			return title[0]
+		}
+		return strings.TrimSpace(update.Kind)
+	}
+	return ""
+}
+
+func stringFromNestedMap(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
+}
+
+func participantInvocationLabel(event sdksession.Event) string {
+	if mention := strings.TrimSpace(stringFromFlatMap(event.Meta, "mention")); mention != "" {
+		return mention
+	}
+	if handle := strings.TrimSpace(stringFromFlatMap(event.Meta, "handle")); handle != "" {
+		if strings.HasPrefix(handle, "@") {
+			return handle
+		}
+		return "@" + handle
+	}
+	if agent := strings.TrimSpace(stringFromFlatMap(event.Meta, "agent")); agent != "" {
+		return agent
+	}
+	if name := strings.TrimSpace(event.Actor.Name); name != "" && !strings.EqualFold(name, "user") {
+		return name
+	}
+	if id := strings.TrimSpace(event.Actor.ID); id != "" && event.Actor.Kind == sdksession.ActorKindParticipant {
+		return id
+	}
+	if id := strings.TrimSpace(event.Actor.ID); id != "" {
+		return id
+	}
+	if event.Scope != nil {
+		if id := strings.TrimSpace(event.Scope.Participant.ID); id != "" {
+			return id
+		}
+	}
+	return "participant"
+}
+
+func stringFromFlatMap(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	text, _ := values[key].(string)
+	return strings.TrimSpace(text)
 }
 
 func instructionsFromContext(_ sdkruntime.Context, systemPrompt string) []sdkmodel.Part {

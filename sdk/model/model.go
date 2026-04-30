@@ -682,9 +682,10 @@ type Request struct {
 
 // Usage reports model token usage on a best-effort basis.
 type Usage struct {
-	PromptTokens     int `json:"prompt_tokens,omitempty"`
-	CompletionTokens int `json:"completion_tokens,omitempty"`
-	TotalTokens      int `json:"total_tokens,omitempty"`
+	PromptTokens      int `json:"prompt_tokens,omitempty"`
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	CompletionTokens  int `json:"completion_tokens,omitempty"`
+	TotalTokens       int `json:"total_tokens,omitempty"`
 }
 
 // FinishReason describes why a model turn ended.

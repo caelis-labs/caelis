@@ -148,11 +148,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 					FinishReason: normalizeOpenAICompatFinishReason(out.Choices[0].FinishReason),
 					Model:        out.Model,
 					Provider:     l.provider,
-					Usage: model.Usage{
-						PromptTokens:     out.Usage.PromptTokens,
-						CompletionTokens: out.Usage.CompletionTokens,
-						TotalTokens:      out.Usage.TotalTokens,
-					},
+					Usage:        out.Usage.toKernelUsage(),
 				},
 			}, nil)
 			return
@@ -170,12 +166,8 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				return err
 			}
-			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.TotalTokens > 0 {
-				usage = model.Usage{
-					PromptTokens:     chunk.Usage.PromptTokens,
-					CompletionTokens: chunk.Usage.CompletionTokens,
-					TotalTokens:      chunk.Usage.TotalTokens,
-				}
+			if chunk.Usage.hasAny() {
+				usage = chunk.Usage.toKernelUsage()
 			}
 			if len(chunk.Choices) == 0 {
 				return nil
@@ -348,11 +340,7 @@ type openAICompatResponse struct {
 		Message      openAICompatMsg `json:"message"`
 		FinishReason string          `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage openAICompatUsage `json:"usage"`
 }
 
 type openAICompatStreamChunk struct {
@@ -361,11 +349,7 @@ type openAICompatStreamChunk struct {
 		Delta        openAICompatMsg `json:"delta"`
 		FinishReason string          `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-		TotalTokens      int `json:"total_tokens"`
-	} `json:"usage"`
+	Usage openAICompatUsage `json:"usage"`
 }
 
 type openAIStreamAccumulator struct {

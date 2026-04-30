@@ -144,6 +144,11 @@ func (l *anthropicSDKLLM) generateStreaming(ctx context.Context, params anthropi
 			return
 		}
 		switch ev := event.AsAny().(type) {
+		case anthropic.MessageDeltaEvent:
+			acc.Usage.InputTokens = ev.Usage.InputTokens
+			acc.Usage.CacheCreationInputTokens = ev.Usage.CacheCreationInputTokens
+			acc.Usage.CacheReadInputTokens = ev.Usage.CacheReadInputTokens
+			acc.Usage.OutputTokens = ev.Usage.OutputTokens
 		case anthropic.ContentBlockStartEvent:
 			if !l.emitStreamingStartBlock(ev, yield) {
 				return
@@ -582,9 +587,10 @@ func anthropicMessageToKernel(provider string, resp *anthropic.Message) (model.M
 
 func anthropicUsageToKernel(usage anthropic.Usage) model.Usage {
 	return model.Usage{
-		PromptTokens:     int(usage.InputTokens),
-		CompletionTokens: int(usage.OutputTokens),
-		TotalTokens:      int(usage.InputTokens + usage.OutputTokens),
+		PromptTokens:      int(usage.InputTokens),
+		CachedInputTokens: int(usage.CacheReadInputTokens),
+		CompletionTokens:  int(usage.OutputTokens),
+		TotalTokens:       int(usage.InputTokens + usage.OutputTokens),
 	}
 }
 

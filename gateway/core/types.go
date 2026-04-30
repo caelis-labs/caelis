@@ -167,17 +167,18 @@ type ControllerState struct {
 }
 
 type ParticipantState struct {
-	ID            string                     `json:"id,omitempty"`
-	Kind          sdksession.ParticipantKind `json:"kind,omitempty"`
-	Role          sdksession.ParticipantRole `json:"role,omitempty"`
-	AgentName     string                     `json:"agent_name,omitempty"`
-	Label         string                     `json:"label,omitempty"`
-	SessionID     string                     `json:"session_id,omitempty"`
-	Source        string                     `json:"source,omitempty"`
-	ParentTurnID  string                     `json:"parent_turn_id,omitempty"`
-	DelegationID  string                     `json:"delegation_id,omitempty"`
-	AttachedAt    time.Time                  `json:"attached_at,omitempty"`
-	ControllerRef string                     `json:"controller_ref,omitempty"`
+	ID             string                     `json:"id,omitempty"`
+	Kind           sdksession.ParticipantKind `json:"kind,omitempty"`
+	Role           sdksession.ParticipantRole `json:"role,omitempty"`
+	AgentName      string                     `json:"agent_name,omitempty"`
+	Label          string                     `json:"label,omitempty"`
+	SessionID      string                     `json:"session_id,omitempty"`
+	Source         string                     `json:"source,omitempty"`
+	ParentTurnID   string                     `json:"parent_turn_id,omitempty"`
+	DelegationID   string                     `json:"delegation_id,omitempty"`
+	ContextSyncSeq int                        `json:"context_sync_seq,omitempty"`
+	AttachedAt     time.Time                  `json:"attached_at,omitempty"`
+	ControllerRef  string                     `json:"controller_ref,omitempty"`
 }
 
 type ACPProjectionState struct {
@@ -281,9 +282,10 @@ const (
 )
 
 type UsageSnapshot struct {
-	PromptTokens     int `json:"prompt_tokens,omitempty"`
-	CompletionTokens int `json:"completion_tokens,omitempty"`
-	TotalTokens      int `json:"total_tokens,omitempty"`
+	PromptTokens      int `json:"prompt_tokens,omitempty"`
+	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
+	CompletionTokens  int `json:"completion_tokens,omitempty"`
+	TotalTokens       int `json:"total_tokens,omitempty"`
 }
 
 type NarrativeRole string
@@ -329,33 +331,29 @@ const (
 )
 
 type ToolCallPayload struct {
-	CallID         string         `json:"call_id,omitempty"`
-	ToolName       string         `json:"tool_name,omitempty"`
-	ToolKind       string         `json:"tool_kind,omitempty"`
-	ToolTitle      string         `json:"tool_title,omitempty"`
-	ArgsText       string         `json:"args_text,omitempty"`
-	CommandPreview string         `json:"command_preview,omitempty"`
-	RawInput       map[string]any `json:"raw_input,omitempty"`
-	Status         ToolStatus     `json:"status,omitempty"`
-	Actor          string         `json:"actor,omitempty"`
-	Scope          EventScope     `json:"scope,omitempty"`
-	ParticipantID  string         `json:"participant_id,omitempty"`
+	CallID        string         `json:"call_id,omitempty"`
+	ToolName      string         `json:"tool_name,omitempty"`
+	ToolKind      string         `json:"tool_kind,omitempty"`
+	ToolTitle     string         `json:"tool_title,omitempty"`
+	RawInput      map[string]any `json:"raw_input,omitempty"`
+	Status        ToolStatus     `json:"status,omitempty"`
+	Actor         string         `json:"actor,omitempty"`
+	Scope         EventScope     `json:"scope,omitempty"`
+	ParticipantID string         `json:"participant_id,omitempty"`
 }
 
 type ToolResultPayload struct {
-	CallID         string         `json:"call_id,omitempty"`
-	ToolName       string         `json:"tool_name,omitempty"`
-	ToolKind       string         `json:"tool_kind,omitempty"`
-	ToolTitle      string         `json:"tool_title,omitempty"`
-	OutputText     string         `json:"output_text,omitempty"`
-	CommandPreview string         `json:"command_preview,omitempty"`
-	RawInput       map[string]any `json:"raw_input,omitempty"`
-	RawOutput      map[string]any `json:"raw_output,omitempty"`
-	Status         ToolStatus     `json:"status,omitempty"`
-	Error          bool           `json:"error,omitempty"`
-	Actor          string         `json:"actor,omitempty"`
-	Scope          EventScope     `json:"scope,omitempty"`
-	ParticipantID  string         `json:"participant_id,omitempty"`
+	CallID        string         `json:"call_id,omitempty"`
+	ToolName      string         `json:"tool_name,omitempty"`
+	ToolKind      string         `json:"tool_kind,omitempty"`
+	ToolTitle     string         `json:"tool_title,omitempty"`
+	RawInput      map[string]any `json:"raw_input,omitempty"`
+	RawOutput     map[string]any `json:"raw_output,omitempty"`
+	Status        ToolStatus     `json:"status,omitempty"`
+	Error         bool           `json:"error,omitempty"`
+	Actor         string         `json:"actor,omitempty"`
+	Scope         EventScope     `json:"scope,omitempty"`
+	ParticipantID string         `json:"participant_id,omitempty"`
 }
 
 type PlanEntryPayload struct {
@@ -384,10 +382,10 @@ const (
 )
 
 type ApprovalPayload struct {
-	ToolName       string           `json:"tool_name,omitempty"`
-	CommandPreview string           `json:"command_preview,omitempty"`
-	Status         ApprovalStatus   `json:"status,omitempty"`
-	Options        []ApprovalOption `json:"options,omitempty"`
+	ToolName string           `json:"tool_name,omitempty"`
+	RawInput map[string]any   `json:"raw_input,omitempty"`
+	Status   ApprovalStatus   `json:"status,omitempty"`
+	Options  []ApprovalOption `json:"options,omitempty"`
 }
 
 type ParticipantAction string
@@ -446,7 +444,11 @@ type Event struct {
 	OccurredAt time.Time             `json:"occurred_at,omitempty"`
 	SessionRef sdksession.SessionRef `json:"session_ref,omitempty"`
 	Origin     *EventOrigin          `json:"origin,omitempty"`
-	Meta       map[string]any        `json:"meta,omitempty"`
+	Meta       map[string]any        `json:"_meta,omitempty"`
+	// Protocol is the canonical ACP-shaped event payload. UI layers should use
+	// this plus _meta.caelis, not gateway display fallbacks, as their semantic
+	// source of truth.
+	Protocol *sdksession.EventProtocol `json:"protocol,omitempty"`
 	// Usage is the canonical token snapshot projected from one runtime/session
 	// event. It is stable across UI, headless, and adapter boundaries.
 	Usage *UsageSnapshot `json:"usage,omitempty"`
@@ -455,10 +457,10 @@ type Event struct {
 	// boundary without re-parsing raw provider events.
 	Narrative *NarrativePayload `json:"narrative,omitempty"`
 	// ToolCall is the stable canonical tool invocation view with normalized
-	// status, arguments text, and command preview.
+	// status and raw ACP-compatible input.
 	ToolCall *ToolCallPayload `json:"tool_call,omitempty"`
 	// ToolResult is the stable canonical tool result/update view with normalized
-	// status and summarized output.
+	// status and raw ACP-compatible output.
 	ToolResult *ToolResultPayload `json:"tool_result,omitempty"`
 	// Plan is the stable canonical plan snapshot for one event.
 	Plan *PlanPayload `json:"plan,omitempty"`

@@ -874,7 +874,7 @@ func TestSlashAgentInstallFailureEmitsBASHToolResult(t *testing.T) {
 			if toolResult.ToolName == "BASH" &&
 				toolResult.Status == appgateway.ToolStatusFailed &&
 				toolResult.Error &&
-				strings.Contains(toolResult.OutputText, "npm ERR install failed") {
+				strings.Contains(fmt.Sprint(toolResult.RawOutput["stderr"]), "npm ERR install failed") {
 				sawResult = true
 			}
 		}
@@ -971,25 +971,29 @@ func TestFormatAgentStatusSnapshotHidesSelfDelegatedParticipants(t *testing.T) {
 
 func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 	got := formatStatusSnapshot(tuiadapterruntime.StatusSnapshot{
-		SessionID:      "sess-1",
-		Provider:       "acp",
-		ModelName:      "gpt-5.5",
-		Model:          "gpt-5.5 [high]",
-		ModeLabel:      "Default",
-		SandboxType:    "seatbelt",
-		Route:          "sandbox",
-		Workspace:      "/tmp/ws",
-		StoreDir:       "/tmp/store",
-		MissingAPIKey:  true,
-		HostExecution:  true,
-		FullAccessMode: true,
+		SessionID:                "sess-1",
+		Provider:                 "acp",
+		ModelName:                "gpt-5.5",
+		Model:                    "gpt-5.5 [high]",
+		ModeLabel:                "Default",
+		SandboxType:              "seatbelt",
+		Route:                    "sandbox",
+		Workspace:                "/tmp/ws",
+		StoreDir:                 "/tmp/store",
+		MissingAPIKey:            true,
+		HostExecution:            true,
+		FullAccessMode:           true,
+		SessionInputTokens:       12600,
+		SessionCachedInputTokens: 9000,
+		SessionOutputTokens:      200,
+		SessionTotalTokens:       12800,
 	})
 	for _, forbidden := range []string{"status:", "provider:", "model:", "alias:"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"Session", "  Model", "  Mode", "warn: API key is missing", "/tmp/store"} {
+	for _, want := range []string{"Session", "  Model", "  Mode", "Tokens     input 12600, cached 9000, output 200, total 12800", "warn: API key is missing", "/tmp/store"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}

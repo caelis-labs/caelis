@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"maps"
 	"slices"
@@ -62,6 +63,15 @@ const (
 	ProtocolUpdateTypeToolUpdate   ProtocolUpdateType = "tool_call_update"
 	ProtocolUpdateTypePlan         ProtocolUpdateType = "plan"
 	ProtocolUpdateTypePermission   ProtocolUpdateType = "request_permission"
+)
+
+const (
+	ProtocolMethodSessionUpdate     = "session/update"
+	ProtocolMethodRequestPermission = "session/request_permission"
+	ProtocolMethodParticipantUpdate = "caelis/participant"
+	ProtocolMethodControllerHandoff = "caelis/handoff"
+	ProtocolMethodRuntimeLifecycle  = "caelis/lifecycle"
+	ProtocolMethodContextCheckpoint = "caelis/context_checkpoint"
 )
 
 // ControllerKind identifies the main controller family of one session epoch.
@@ -129,17 +139,18 @@ type ControllerBinding struct {
 
 // ParticipantBinding is the durable participant attachment for one session.
 type ParticipantBinding struct {
-	ID            string          `json:"id,omitempty"`
-	Kind          ParticipantKind `json:"kind,omitempty"`
-	Role          ParticipantRole `json:"role,omitempty"`
-	AgentName     string          `json:"agent_name,omitempty"`
-	Label         string          `json:"label,omitempty"`
-	SessionID     string          `json:"session_id,omitempty"`
-	Source        string          `json:"source,omitempty"`
-	ParentTurnID  string          `json:"parent_turn_id,omitempty"`
-	DelegationID  string          `json:"delegation_id,omitempty"`
-	AttachedAt    time.Time       `json:"attached_at,omitempty"`
-	ControllerRef string          `json:"controller_ref,omitempty"`
+	ID             string          `json:"id,omitempty"`
+	Kind           ParticipantKind `json:"kind,omitempty"`
+	Role           ParticipantRole `json:"role,omitempty"`
+	AgentName      string          `json:"agent_name,omitempty"`
+	Label          string          `json:"label,omitempty"`
+	SessionID      string          `json:"session_id,omitempty"`
+	Source         string          `json:"source,omitempty"`
+	ParentTurnID   string          `json:"parent_turn_id,omitempty"`
+	DelegationID   string          `json:"delegation_id,omitempty"`
+	ContextSyncSeq int             `json:"context_sync_seq,omitempty"`
+	AttachedAt     time.Time       `json:"attached_at,omitempty"`
+	ControllerRef  string          `json:"controller_ref,omitempty"`
 }
 
 // Session describes one session row.
@@ -330,6 +341,44 @@ type ProtocolToolCall struct {
 	RawOutput map[string]any `json:"raw_output,omitempty"`
 }
 
+// ProtocolToolCallLocation is the ACP tool-call location shape.
+type ProtocolToolCallLocation struct {
+	Path string `json:"path,omitempty"`
+	Line *int   `json:"line,omitempty"`
+}
+
+// ProtocolToolCallContent is the ACP tool-call content shape.
+type ProtocolToolCallContent struct {
+	Type       string `json:"type,omitempty"`
+	Content    any    `json:"content,omitempty"`
+	TerminalID string `json:"terminalId,omitempty"`
+}
+
+// ProtocolUpdate is the normalized ACP session/update payload carried by one
+// canonical event. Caelis-specific data belongs in Event.Meta["_meta"].caelis,
+// not in this protocol payload.
+type ProtocolUpdate struct {
+	SessionUpdate string                     `json:"sessionUpdate,omitempty"`
+	Content       any                        `json:"content,omitempty"`
+	ToolCallID    string                     `json:"toolCallId,omitempty"`
+	Title         string                     `json:"title,omitempty"`
+	Kind          string                     `json:"kind,omitempty"`
+	Status        string                     `json:"status,omitempty"`
+	RawInput      map[string]any             `json:"rawInput,omitempty"`
+	RawOutput     map[string]any             `json:"rawOutput,omitempty"`
+	Locations     []ProtocolToolCallLocation `json:"locations,omitempty"`
+	Entries       []ProtocolPlanEntry        `json:"entries,omitempty"`
+	Meta          map[string]any             `json:"_meta,omitempty"`
+}
+
+// ProtocolTextContent returns the standard ACP text content payload.
+func ProtocolTextContent(text string) map[string]any {
+	if text == "" {
+		return nil
+	}
+	return map[string]any{"type": "text", "text": text}
+}
+
 // ProtocolPlanEntry is one ACP-compatible plan row.
 type ProtocolPlanEntry struct {
 	Content  string `json:"content,omitempty"`
@@ -371,12 +420,40 @@ type ProtocolHandoff struct {
 // It groups protocol-shaped extensions under one nested object so Event itself
 // stays small and stable.
 type EventProtocol struct {
-	UpdateType  string               `json:"update_type,omitempty"`
-	ToolCall    *ProtocolToolCall    `json:"tool_call,omitempty"`
-	Plan        *ProtocolPlan        `json:"plan,omitempty"`
-	Approval    *ProtocolApproval    `json:"approval,omitempty"`
-	Participant *ProtocolParticipant `json:"participant,omitempty"`
-	Handoff     *ProtocolHandoff     `json:"handoff,omitempty"`
+	Method      string               `json:"method,omitempty"`
+	Update      *ProtocolUpdate      `json:"update,omitempty"`
+	Permission  *ProtocolApproval    `json:"permission,omitempty"`
+	UpdateType  string               `json:"-"`
+	ToolCall    *ProtocolToolCall    `json:"-"`
+	Plan        *ProtocolPlan        `json:"-"`
+	Approval    *ProtocolApproval    `json:"-"`
+	Participant *ProtocolParticipant `json:"-"`
+	Handoff     *ProtocolHandoff     `json:"-"`
+}
+
+func (p EventProtocol) MarshalJSON() ([]byte, error) {
+	type protocolJSON struct {
+		Method     string            `json:"method,omitempty"`
+		Update     *ProtocolUpdate   `json:"update,omitempty"`
+		Permission *ProtocolApproval `json:"permission,omitempty"`
+	}
+	normalized := CloneEventProtocol(p)
+	return json.Marshal(protocolJSON{
+		Method:     normalized.Method,
+		Update:     normalized.Update,
+		Permission: normalized.Permission,
+	})
+}
+
+func (p *EventProtocol) UnmarshalJSON(data []byte) error {
+	type protocolJSON EventProtocol
+	var decoded protocolJSON
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	normalized := CloneEventProtocol(EventProtocol(decoded))
+	*p = normalized
+	return nil
 }
 
 // Event is the compact canonical event envelope. Durable semantics live in
@@ -389,12 +466,12 @@ type Event struct {
 	Time       time.Time         `json:"time,omitempty"`
 	Actor      ActorRef          `json:"actor,omitempty"`
 	Scope      *EventScope       `json:"scope,omitempty"`
-	Message    *sdkmodel.Message `json:"message,omitempty"`
-	Notice     *EventNotice      `json:"notice,omitempty"`
-	Lifecycle  *EventLifecycle   `json:"lifecycle,omitempty"`
+	Message    *sdkmodel.Message `json:"-"`
+	Notice     *EventNotice      `json:"-"`
+	Lifecycle  *EventLifecycle   `json:"-"`
 	Protocol   *EventProtocol    `json:"protocol,omitempty"`
-	Text       string            `json:"text,omitempty"`
-	Meta       map[string]any    `json:"meta,omitempty"`
+	Text       string            `json:"-"`
+	Meta       map[string]any    `json:"_meta,omitempty"`
 }
 
 // MessageNotice recognizes one system-message runtime notice.
@@ -526,6 +603,58 @@ func IsNotice(event *Event) bool {
 	return ok
 }
 
+// ProtocolUpdateOf returns the normalized ACP session/update payload for one
+// event, accepting legacy in-memory aliases while keeping the durable JSON shape
+// centered on EventProtocol.Update.
+func ProtocolUpdateOf(event *Event) *ProtocolUpdate {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	protocol := CloneEventProtocol(*event.Protocol)
+	return protocol.Update
+}
+
+// EventText returns the user/assistant text carried by one canonical event.
+// Text/Message remain runtime-only conveniences; durable session text is read
+// from the normalized ACP content payload.
+func EventText(event *Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Message != nil {
+		if text := event.Message.TextContent(); text != "" {
+			return text
+		}
+	}
+	if event.Text != "" {
+		return event.Text
+	}
+	if event.Notice != nil {
+		if text := strings.TrimSpace(event.Notice.Text); text != "" {
+			return text
+		}
+	}
+	if update := ProtocolUpdateOf(event); update != nil {
+		return textFromProtocolContent(update.Content)
+	}
+	return ""
+}
+
+// CanonicalizeEvent returns a normalized event copy whose durable protocol
+// payload carries any user/assistant text that callers supplied through legacy
+// runtime-only Text/Message fields.
+func CanonicalizeEvent(event *Event) *Event {
+	out := CloneEvent(event)
+	if out == nil {
+		return nil
+	}
+	if out.Type == "" {
+		out.Type = EventTypeOf(out)
+	}
+	ensureProtocolText(out)
+	return out
+}
+
 // IsTransient reports whether one event is runtime-transient only.
 func IsTransient(event *Event) bool {
 	if event == nil {
@@ -554,9 +683,23 @@ func IsInvocationVisibleEvent(event *Event) bool {
 	return true
 }
 
+// IsSharedDialogueEvent reports whether one event belongs to the public
+// user/final-assistant ledger shared by all agents in the session.
+func IsSharedDialogueEvent(event *Event) bool {
+	if event == nil || !IsCanonicalHistoryEvent(event) {
+		return false
+	}
+	switch EventTypeOf(event) {
+	case EventTypeUser, EventTypeAssistant:
+		return true
+	default:
+		return false
+	}
+}
+
 // IsMainInvocationVisibleEvent reports whether one event belongs to the main
-// controller context. Participant and subagent transcripts remain durable
-// session history, but they must not be replayed into the main agent prompt.
+// controller context. Delegated subagent tool work remains private to its owner,
+// while public user/final assistant dialogue is visible across participants.
 func IsMainInvocationVisibleEvent(event *Event) bool {
 	if !IsInvocationVisibleEvent(event) {
 		return false
@@ -564,7 +707,17 @@ func IsMainInvocationVisibleEvent(event *Event) bool {
 	if event.Scope == nil {
 		return true
 	}
-	return strings.TrimSpace(event.Scope.Participant.ID) == ""
+	if strings.TrimSpace(event.Scope.Participant.ID) == "" {
+		return true
+	}
+	if event.Scope.Participant.Role == ParticipantRoleDelegated {
+		return false
+	}
+	source := strings.ToLower(strings.TrimSpace(event.Scope.Source))
+	if source == "agent_spawn" || strings.Contains(source, "spawn") {
+		return false
+	}
+	return IsSharedDialogueEvent(event)
 }
 
 // EventTypeOf infers one event type from its content when not explicitly set.
@@ -582,6 +735,30 @@ func EventTypeOf(event *Event) EventType {
 		return EventTypeLifecycle
 	}
 	if event.Protocol != nil {
+		switch strings.TrimSpace(event.Protocol.Method) {
+		case ProtocolMethodParticipantUpdate:
+			return EventTypeParticipant
+		case ProtocolMethodControllerHandoff:
+			return EventTypeHandoff
+		case ProtocolMethodRuntimeLifecycle, ProtocolMethodRequestPermission:
+			return EventTypeLifecycle
+		case ProtocolMethodContextCheckpoint:
+			return EventTypeCompact
+		}
+		if update := ProtocolUpdateOf(event); update != nil {
+			switch strings.TrimSpace(update.SessionUpdate) {
+			case string(ProtocolUpdateTypeUserMessage):
+				return EventTypeUser
+			case string(ProtocolUpdateTypeAgentMessage), string(ProtocolUpdateTypeAgentThought):
+				return EventTypeAssistant
+			case string(ProtocolUpdateTypeToolCall):
+				return EventTypeToolCall
+			case string(ProtocolUpdateTypeToolUpdate):
+				return EventTypeToolResult
+			case string(ProtocolUpdateTypePlan):
+				return EventTypePlan
+			}
+		}
 		switch {
 		case event.Protocol.Plan != nil || strings.EqualFold(strings.TrimSpace(event.Protocol.UpdateType), "plan"):
 			return EventTypePlan
@@ -616,6 +793,97 @@ func EventTypeOf(event *Event) EventType {
 	default:
 		return EventTypeCustom
 	}
+}
+
+func ensureProtocolText(event *Event) {
+	if event == nil {
+		return
+	}
+	text := runtimeText(event)
+	if text == "" {
+		return
+	}
+	updateType := ""
+	switch EventTypeOf(event) {
+	case EventTypeUser:
+		updateType = string(ProtocolUpdateTypeUserMessage)
+	case EventTypeAssistant:
+		if event.Protocol != nil {
+			updateType = firstNonEmpty(event.Protocol.UpdateType)
+		}
+		if updateType == "" {
+			updateType = string(ProtocolUpdateTypeAgentMessage)
+		}
+	case EventTypeToolCall:
+		updateType = string(ProtocolUpdateTypeToolCall)
+	case EventTypeCompact:
+		if event.Protocol == nil {
+			event.Protocol = &EventProtocol{Method: ProtocolMethodContextCheckpoint}
+		}
+		updateType = "compact"
+	default:
+		return
+	}
+	if event.Protocol == nil {
+		event.Protocol = &EventProtocol{}
+	}
+	protocol := CloneEventProtocol(*event.Protocol)
+	if protocol.Update == nil {
+		protocol.Update = &ProtocolUpdate{}
+	}
+	if protocol.Update.SessionUpdate == "" {
+		protocol.Update.SessionUpdate = updateType
+	}
+	if protocol.Update.Content == nil {
+		protocol.Update.Content = ProtocolTextContent(text)
+	}
+	event.Protocol = &protocol
+}
+
+func runtimeText(event *Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Message != nil {
+		if text := event.Message.TextContent(); text != "" {
+			return text
+		}
+	}
+	return event.Text
+}
+
+func textFromProtocolContent(content any) string {
+	switch typed := content.(type) {
+	case nil:
+		return ""
+	case string:
+		return typed
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return ""
+		}
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return string(typed)
+		}
+		return textFromProtocolContent(decoded)
+	case map[string]any:
+		if text, _ := typed["text"].(string); text != "" {
+			return text
+		}
+		if text, _ := typed["content"].(string); text != "" {
+			return text
+		}
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := textFromProtocolContent(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }
 
 // NormalizeSessionRef returns one normalized session ref.
@@ -732,17 +1000,18 @@ func CloneControllerBinding(in ControllerBinding) ControllerBinding {
 // CloneParticipantBinding returns one normalized participant binding copy.
 func CloneParticipantBinding(in ParticipantBinding) ParticipantBinding {
 	return ParticipantBinding{
-		ID:            strings.TrimSpace(in.ID),
-		Kind:          in.Kind,
-		Role:          in.Role,
-		AgentName:     strings.TrimSpace(in.AgentName),
-		Label:         strings.TrimSpace(in.Label),
-		SessionID:     strings.TrimSpace(in.SessionID),
-		Source:        strings.TrimSpace(in.Source),
-		ParentTurnID:  strings.TrimSpace(in.ParentTurnID),
-		DelegationID:  strings.TrimSpace(in.DelegationID),
-		AttachedAt:    in.AttachedAt,
-		ControllerRef: strings.TrimSpace(in.ControllerRef),
+		ID:             strings.TrimSpace(in.ID),
+		Kind:           in.Kind,
+		Role:           in.Role,
+		AgentName:      strings.TrimSpace(in.AgentName),
+		Label:          strings.TrimSpace(in.Label),
+		SessionID:      strings.TrimSpace(in.SessionID),
+		Source:         strings.TrimSpace(in.Source),
+		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
+		DelegationID:   strings.TrimSpace(in.DelegationID),
+		ContextSyncSeq: in.ContextSyncSeq,
+		AttachedAt:     in.AttachedAt,
+		ControllerRef:  strings.TrimSpace(in.ControllerRef),
 	}
 }
 
@@ -794,60 +1063,175 @@ func CloneEventScope(in EventScope) EventScope {
 // CloneEventProtocol returns one normalized event protocol payload copy.
 func CloneEventProtocol(in EventProtocol) EventProtocol {
 	out := EventProtocol{
+		Method:     strings.TrimSpace(in.Method),
 		UpdateType: strings.TrimSpace(in.UpdateType),
 	}
-	if in.ToolCall != nil {
-		call := *in.ToolCall
-		call.ID = strings.TrimSpace(call.ID)
-		call.Name = strings.TrimSpace(call.Name)
-		call.Kind = strings.TrimSpace(call.Kind)
-		call.Title = strings.TrimSpace(call.Title)
-		call.Status = strings.TrimSpace(call.Status)
-		call.RawInput = maps.Clone(call.RawInput)
-		call.RawOutput = maps.Clone(call.RawOutput)
-		out.ToolCall = &call
+	if in.Update != nil {
+		update := cloneProtocolUpdate(*in.Update)
+		out.Update = &update
 	}
-	if in.Plan != nil {
-		plan := ProtocolPlan{}
-		if len(in.Plan.Entries) > 0 {
-			plan.Entries = make([]ProtocolPlanEntry, 0, len(in.Plan.Entries))
-			for _, item := range in.Plan.Entries {
-				plan.Entries = append(plan.Entries, ProtocolPlanEntry{
-					Content:  strings.TrimSpace(item.Content),
-					Status:   strings.TrimSpace(item.Status),
-					Priority: strings.TrimSpace(item.Priority),
-				})
+	if out.Update == nil {
+		switch {
+		case in.ToolCall != nil:
+			call := cloneProtocolToolCall(*in.ToolCall)
+			out.Update = &ProtocolUpdate{
+				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypeToolCall)),
+				ToolCallID:    call.ID,
+				Title:         call.Title,
+				Kind:          firstNonEmpty(call.Kind, call.Name),
+				Status:        call.Status,
+				RawInput:      maps.Clone(call.RawInput),
+				RawOutput:     maps.Clone(call.RawOutput),
+			}
+		case in.Plan != nil:
+			out.Update = &ProtocolUpdate{
+				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypePlan)),
+				Entries:       cloneProtocolPlanEntries(in.Plan.Entries),
 			}
 		}
-		out.Plan = &plan
 	}
-	if in.Approval != nil {
-		approval := ProtocolApproval{
-			ToolCall: cloneProtocolToolCall(in.Approval.ToolCall),
+	if out.Update != nil {
+		update := cloneProtocolUpdate(*out.Update)
+		if update.SessionUpdate == "" {
+			update.SessionUpdate = out.UpdateType
 		}
-		if len(in.Approval.Options) > 0 {
-			approval.Options = make([]ProtocolApprovalOption, 0, len(in.Approval.Options))
-			for _, item := range in.Approval.Options {
-				approval.Options = append(approval.Options, ProtocolApprovalOption{
-					ID:   strings.TrimSpace(item.ID),
-					Name: strings.TrimSpace(item.Name),
-					Kind: strings.TrimSpace(item.Kind),
-				})
+		out.UpdateType = strings.TrimSpace(update.SessionUpdate)
+		out.Update = &update
+		switch update.SessionUpdate {
+		case string(ProtocolUpdateTypeToolCall), string(ProtocolUpdateTypeToolUpdate):
+			out.ToolCall = &ProtocolToolCall{
+				ID:        strings.TrimSpace(update.ToolCallID),
+				Name:      firstNonEmpty(strings.TrimSpace(update.Kind), strings.TrimSpace(update.Title)),
+				Kind:      strings.TrimSpace(update.Kind),
+				Title:     strings.TrimSpace(update.Title),
+				Status:    strings.TrimSpace(update.Status),
+				RawInput:  maps.Clone(update.RawInput),
+				RawOutput: maps.Clone(update.RawOutput),
 			}
+		case string(ProtocolUpdateTypePlan):
+			out.Plan = &ProtocolPlan{Entries: cloneProtocolPlanEntries(update.Entries)}
 		}
+	}
+	if in.Permission != nil {
+		approval := cloneProtocolApproval(*in.Permission)
+		out.Permission = &approval
 		out.Approval = &approval
+	}
+	if in.Approval != nil && out.Permission == nil {
+		approval := cloneProtocolApproval(*in.Approval)
+		out.Permission = &approval
+		out.Approval = &approval
+	}
+	if out.Method == "" {
+		switch {
+		case out.Permission != nil:
+			out.Method = ProtocolMethodRequestPermission
+		default:
+			out.Method = ProtocolMethodSessionUpdate
+		}
 	}
 	if in.Participant != nil {
 		participant := *in.Participant
 		participant.Action = strings.TrimSpace(participant.Action)
 		out.Participant = &participant
+		if out.Update == nil {
+			out.Method = ProtocolMethodParticipantUpdate
+			out.Update = &ProtocolUpdate{
+				SessionUpdate: strings.TrimSpace(participant.Action),
+			}
+		}
 	}
 	if in.Handoff != nil {
 		handoff := *in.Handoff
 		handoff.Phase = strings.TrimSpace(handoff.Phase)
 		out.Handoff = &handoff
+		if out.Update == nil {
+			out.Method = ProtocolMethodControllerHandoff
+			out.Update = &ProtocolUpdate{
+				SessionUpdate: strings.TrimSpace(handoff.Phase),
+			}
+		}
 	}
 	return out
+}
+
+func cloneProtocolUpdate(in ProtocolUpdate) ProtocolUpdate {
+	out := ProtocolUpdate{
+		SessionUpdate: strings.TrimSpace(in.SessionUpdate),
+		Content:       cloneProtocolAny(in.Content),
+		ToolCallID:    strings.TrimSpace(in.ToolCallID),
+		Title:         strings.TrimSpace(in.Title),
+		Kind:          strings.TrimSpace(in.Kind),
+		Status:        strings.TrimSpace(in.Status),
+		RawInput:      maps.Clone(in.RawInput),
+		RawOutput:     maps.Clone(in.RawOutput),
+		Meta:          maps.Clone(in.Meta),
+	}
+	if len(in.Locations) > 0 {
+		out.Locations = slices.Clone(in.Locations)
+	}
+	out.Entries = cloneProtocolPlanEntries(in.Entries)
+	return out
+}
+
+func cloneProtocolPlanEntries(in []ProtocolPlanEntry) []ProtocolPlanEntry {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ProtocolPlanEntry, 0, len(in))
+	for _, item := range in {
+		out = append(out, ProtocolPlanEntry{
+			Content:  strings.TrimSpace(item.Content),
+			Status:   strings.TrimSpace(item.Status),
+			Priority: strings.TrimSpace(item.Priority),
+		})
+	}
+	return out
+}
+
+func cloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
+	out := ProtocolApproval{
+		ToolCall: cloneProtocolToolCall(in.ToolCall),
+	}
+	if len(in.Options) > 0 {
+		out.Options = make([]ProtocolApprovalOption, 0, len(in.Options))
+		for _, item := range in.Options {
+			out.Options = append(out.Options, ProtocolApprovalOption{
+				ID:   strings.TrimSpace(item.ID),
+				Name: strings.TrimSpace(item.Name),
+				Kind: strings.TrimSpace(item.Kind),
+			})
+		}
+	}
+	return out
+}
+
+func cloneProtocolAny(in any) any {
+	switch typed := in.(type) {
+	case nil:
+		return nil
+	case json.RawMessage:
+		return slices.Clone(typed)
+	case map[string]any:
+		return maps.Clone(typed)
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, cloneProtocolAny(item))
+		}
+		return out
+	default:
+		return typed
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {

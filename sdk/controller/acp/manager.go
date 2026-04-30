@@ -196,6 +196,7 @@ func (m *Manager) RunTurn(ctx context.Context, req sdkcontroller.TurnRequest) (s
 
 	prompt := buildPromptParts(req.Input, req.ContentParts)
 	prompt = run.consumeContextPrelude(prompt)
+	prompt = prependACPContextPrelude(prompt, req.ContextPrelude)
 	turnCtx, cancel := context.WithCancel(ctx)
 	handle := newTurnHandle(cancel)
 	run.beginTurn(req, handle)
@@ -293,6 +294,7 @@ func (m *Manager) PromptParticipant(ctx context.Context, req sdkcontroller.Parti
 		return sdkcontroller.TurnResult{}, fmt.Errorf("sdk/controller/acp: participant %q not found", req.ParticipantID)
 	}
 	prompt := buildPromptParts(req.Input, req.ContentParts)
+	prompt = prependACPContextPrelude(prompt, req.ContextPrelude)
 	if len(prompt) == 0 {
 		return sdkcontroller.TurnResult{}, fmt.Errorf("sdk/controller/acp: participant prompt is required")
 	}
@@ -523,6 +525,9 @@ func (r *controllerRun) beginTurn(req sdkcontroller.TurnRequest, handle *turnHan
 	r.turnSession = sdksession.CloneSession(req.Session)
 	r.turnStream = req.Stream
 	r.turnMode = strings.TrimSpace(req.Mode)
+	if req.ContextSyncSeq > r.binding.ContextSyncSeq {
+		r.binding.ContextSyncSeq = req.ContextSyncSeq
+	}
 	r.approvalRequester = req.ApprovalRequester
 	r.handle = handle
 	r.events = nil
@@ -540,6 +545,14 @@ func (r *controllerRun) consumeContextPrelude(prompt []json.RawMessage) []json.R
 	}
 	r.mu.Unlock()
 	if !pending || prelude == "" {
+		return prompt
+	}
+	return prependACPContextPrelude(prompt, prelude)
+}
+
+func prependACPContextPrelude(prompt []json.RawMessage, prelude string) []json.RawMessage {
+	prelude = strings.TrimSpace(prelude)
+	if prelude == "" {
 		return prompt
 	}
 	raw, _ := json.Marshal(sdkacpclient.TextContent{
@@ -779,7 +792,7 @@ func (r *participantRun) beginPrompt(req sdkcontroller.ParticipantPromptRequest,
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.turnID = firstNonEmpty(strings.TrimSpace(req.ParticipantID), r.id)
+	r.turnID = firstNonEmpty(strings.TrimSpace(req.TurnID), strings.TrimSpace(req.ParticipantID), r.id)
 	r.handle = handle
 	r.events = nil
 }
@@ -947,13 +960,19 @@ func normalizeACPUpdateEvent(
 			return nil
 		}
 		event := &sdksession.Event{
-			Visibility: sdksession.VisibilityCanonical,
+			Visibility: acpContentChunkVisibility(typed.SessionUpdate),
 			Time:       now(),
 			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindController, Name: strings.TrimSpace(binding.Label)},
 			Scope:      scope,
 			Text:       text,
 			Message:    ptrMessage(messageForContentChunk(typed, text)),
-			Protocol:   &sdksession.EventProtocol{UpdateType: typed.SessionUpdate},
+			Protocol: &sdksession.EventProtocol{
+				UpdateType: typed.SessionUpdate,
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
+					Content:       typed.Content,
+				},
+			},
 		}
 		switch strings.TrimSpace(typed.SessionUpdate) {
 		case sdkacpclient.UpdateUserMessage:
@@ -966,44 +985,66 @@ func normalizeACPUpdateEvent(
 		return event
 	case sdkacpclient.ToolCall:
 		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
+		tool := &sdksession.ProtocolToolCall{
+			ID:       strings.TrimSpace(typed.ToolCallID),
+			Name:     acpToolDisplayName(typed.Kind, typed.Title),
+			Kind:     strings.TrimSpace(typed.Kind),
+			Title:    strings.TrimSpace(typed.Title),
+			Status:   strings.TrimSpace(typed.Status),
+			RawInput: acpToolRawInput(typed.Kind, typed.Title, typed.RawInput),
+		}
 		return &sdksession.Event{
 			Type:       sdksession.EventTypeToolCall,
-			Visibility: sdksession.VisibilityCanonical,
+			Visibility: sdksession.VisibilityUIOnly,
 			Time:       now(),
 			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindController, Name: strings.TrimSpace(binding.Label)},
 			Scope:      scope,
 			Text:       firstNonEmpty(strings.TrimSpace(typed.Title), strings.TrimSpace(typed.Kind), "tool call"),
 			Protocol: &sdksession.EventProtocol{
 				UpdateType: typed.SessionUpdate,
-				ToolCall: &sdksession.ProtocolToolCall{
-					ID:       strings.TrimSpace(typed.ToolCallID),
-					Name:     acpToolDisplayName(typed.Kind, typed.Title),
-					Kind:     strings.TrimSpace(typed.Kind),
-					Title:    strings.TrimSpace(typed.Title),
-					Status:   strings.TrimSpace(typed.Status),
-					RawInput: acpToolRawInput(typed.Kind, typed.Title, typed.RawInput),
+				ToolCall:   tool,
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
+					ToolCallID:    tool.ID,
+					Kind:          tool.Kind,
+					Title:         tool.Title,
+					Status:        tool.Status,
+					RawInput:      maps.Clone(tool.RawInput),
+					RawOutput:     maps.Clone(tool.RawOutput),
+					Meta:          maps.Clone(typed.Meta),
 				},
 			},
 		}
 	case sdkacpclient.ToolCallUpdate:
 		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
+		tool := &sdksession.ProtocolToolCall{
+			ID:        strings.TrimSpace(typed.ToolCallID),
+			Name:      acpToolDisplayName(derefString(typed.Kind), derefString(typed.Title)),
+			Kind:      strings.TrimSpace(derefString(typed.Kind)),
+			Title:     strings.TrimSpace(derefString(typed.Title)),
+			Status:    strings.TrimSpace(derefString(typed.Status)),
+			RawInput:  acpToolRawInput(derefString(typed.Kind), derefString(typed.Title), typed.RawInput),
+			RawOutput: acpToolRawOutput(typed.RawOutput, typed.Content),
+		}
 		return &sdksession.Event{
 			Type:       toolEventTypeFromStatus(derefString(typed.Status)),
-			Visibility: sdksession.VisibilityCanonical,
+			Visibility: sdksession.VisibilityUIOnly,
 			Time:       now(),
 			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindController, Name: strings.TrimSpace(binding.Label)},
 			Scope:      scope,
 			Text:       firstNonEmpty(strings.TrimSpace(derefString(typed.Title)), strings.TrimSpace(derefString(typed.Kind)), "tool update"),
 			Protocol: &sdksession.EventProtocol{
 				UpdateType: typed.SessionUpdate,
-				ToolCall: &sdksession.ProtocolToolCall{
-					ID:        strings.TrimSpace(typed.ToolCallID),
-					Name:      acpToolDisplayName(derefString(typed.Kind), derefString(typed.Title)),
-					Kind:      strings.TrimSpace(derefString(typed.Kind)),
-					Title:     strings.TrimSpace(derefString(typed.Title)),
-					Status:    strings.TrimSpace(derefString(typed.Status)),
-					RawInput:  acpToolRawInput(derefString(typed.Kind), derefString(typed.Title), typed.RawInput),
-					RawOutput: acpToolRawOutput(typed.RawOutput, typed.Content),
+				ToolCall:   tool,
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
+					ToolCallID:    tool.ID,
+					Kind:          tool.Kind,
+					Title:         tool.Title,
+					Status:        tool.Status,
+					RawInput:      maps.Clone(tool.RawInput),
+					RawOutput:     maps.Clone(tool.RawOutput),
+					Meta:          maps.Clone(typed.Meta),
 				},
 			},
 		}
@@ -1011,7 +1052,7 @@ func normalizeACPUpdateEvent(
 		scope.ACP.EventType = strings.TrimSpace(typed.SessionUpdate)
 		return &sdksession.Event{
 			Type:       sdksession.EventTypePlan,
-			Visibility: sdksession.VisibilityCanonical,
+			Visibility: sdksession.VisibilityUIOnly,
 			Time:       now(),
 			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindController, Name: strings.TrimSpace(binding.Label)},
 			Scope:      scope,
@@ -1019,10 +1060,23 @@ func normalizeACPUpdateEvent(
 			Protocol: &sdksession.EventProtocol{
 				UpdateType: typed.SessionUpdate,
 				Plan:       &sdksession.ProtocolPlan{Entries: planEntries(typed.Entries)},
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
+					Entries:       planEntries(typed.Entries),
+				},
 			},
 		}
 	}
 	return nil
+}
+
+func acpContentChunkVisibility(updateType string) sdksession.Visibility {
+	switch strings.TrimSpace(updateType) {
+	case sdkacpclient.UpdateUserMessage:
+		return sdksession.VisibilityCanonical
+	default:
+		return sdksession.VisibilityUIOnly
+	}
 }
 
 func contentChunkText(chunk sdkacpclient.ContentChunk) string {

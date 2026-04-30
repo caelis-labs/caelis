@@ -113,29 +113,10 @@ func gatewayNoticeText(ev appgateway.Event) string {
 
 func gatewayApprovalSummary(ev appgateway.Event) (string, string) {
 	if ev.ApprovalPayload != nil {
-		return strings.TrimSpace(ev.ApprovalPayload.ToolName), strings.TrimSpace(ev.ApprovalPayload.CommandPreview)
+		return strings.TrimSpace(ev.ApprovalPayload.ToolName), approvalCommandPreview(ev.ApprovalPayload.RawInput)
+	}
+	if ev.Protocol != nil && ev.Protocol.Permission != nil {
+		return strings.TrimSpace(ev.Protocol.Permission.ToolCall.Name), approvalCommandPreview(ev.Protocol.Permission.ToolCall.RawInput)
 	}
 	return "", ""
-}
-
-func gatewayToolArgsMap(commandPreview string, argsText string) map[string]any {
-	display := strings.TrimSpace(firstNonEmpty(commandPreview, argsText))
-	if display == "" {
-		return nil
-	}
-	return map[string]any{"_display": display}
-}
-
-func gatewayToolResultMap(output string, isErr bool) map[string]any {
-	output = strings.TrimSpace(output)
-	if output == "" {
-		if isErr {
-			return map[string]any{"summary": string(appgateway.ToolStatusFailed)}
-		}
-		return map[string]any{"summary": string(appgateway.ToolStatusCompleted)}
-	}
-	if isErr {
-		return map[string]any{"error": output, "summary": output}
-	}
-	return map[string]any{"summary": output}
 }

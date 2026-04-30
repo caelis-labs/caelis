@@ -954,7 +954,7 @@ func TestOpenAICompatStream_IncludesUsageRequestOptionAndPropagatesUsage(t *test
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"model\":\"test-model\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"model\":\"test-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"model\":\"test-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":9}}}\n\n")
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
@@ -989,7 +989,7 @@ func TestOpenAICompatStream_IncludesUsageRequestOptionAndPropagatesUsage(t *test
 	if !includeUsage {
 		t.Fatal("expected stream_options.include_usage=true in request payload")
 	}
-	if usage.PromptTokens != 11 || usage.CompletionTokens != 7 || usage.TotalTokens != 18 {
+	if usage.PromptTokens != 11 || usage.CachedInputTokens != 9 || usage.CompletionTokens != 7 || usage.TotalTokens != 18 {
 		t.Fatalf("unexpected usage: %+v", usage)
 	}
 }
@@ -1978,6 +1978,44 @@ func TestDeepSeekV4FlashSupportsReasoningAndCapsTokens(t *testing.T) {
 	}
 }
 
+func TestDeepSeekUsagePropagatesPromptCacheHitTokens(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"deepseek-v4-pro","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":42,"prompt_cache_hit_tokens":31,"prompt_cache_miss_tokens":11,"completion_tokens":8,"total_tokens":50}}`)
+	}))
+	defer server.Close()
+
+	llm := newDeepSeek(Config{
+		Provider:   "deepseek",
+		Model:      "deepseek-v4-pro",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+	}, "token")
+
+	var final *model.Response
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			final = event.Response
+		}
+	}
+	if final == nil {
+		t.Fatal("expected final response")
+	}
+	if final.Usage.PromptTokens != 42 || final.Usage.CachedInputTokens != 31 || final.Usage.CompletionTokens != 8 || final.Usage.TotalTokens != 50 {
+		t.Fatalf("usage = %+v, want DeepSeek cache-hit usage propagated", final.Usage)
+	}
+}
+
 func TestCodeFreeDoesNotApplyReasoningPayload(t *testing.T) {
 	llm := newCodeFree(Config{
 		Provider: "codefree",
@@ -2009,6 +2047,44 @@ func TestMimoProviderUsesThinkingPayload(t *testing.T) {
 	}
 	if payload.Reasoning != nil || payload.ReasoningEffort != "" {
 		t.Fatalf("did not expect openai reasoning fields for mimo payload")
+	}
+}
+
+func TestMimoUsagePropagatesPromptTokenDetailsCachedTokens(t *testing.T) {
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"mimo-v2-flash","choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":64,"completion_tokens":9,"total_tokens":73,"prompt_tokens_details":{"cached_tokens":48,"audio_tokens":0}}}`)
+	}))
+	defer server.Close()
+
+	llm := newMimo(Config{
+		Provider:   "xiaomi",
+		Model:      "mimo-v2-flash",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    time.Second,
+	}, "token")
+
+	var final *model.Response
+	for event, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil {
+			final = event.Response
+		}
+	}
+	if final == nil {
+		t.Fatal("expected final response")
+	}
+	if final.Usage.PromptTokens != 64 || final.Usage.CachedInputTokens != 48 || final.Usage.CompletionTokens != 9 || final.Usage.TotalTokens != 73 {
+		t.Fatalf("usage = %+v, want MiMo cached usage propagated", final.Usage)
 	}
 }
 
@@ -2290,7 +2366,7 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 		_, _ = fmt.Fprint(w, "event: content_block_stop\n")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n")
 		_, _ = fmt.Fprint(w, "event: message_delta\n")
-		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":0,\"server_tool_use\":{\"web_fetch_requests\":0,\"web_search_requests\":0}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\",\"stop_sequence\":\"\"},\"usage\":{\"input_tokens\":11,\"output_tokens\":7,\"cache_creation_input_tokens\":0,\"cache_read_input_tokens\":4,\"server_tool_use\":{\"web_fetch_requests\":0,\"web_search_requests\":0}}}\n\n")
 		_, _ = fmt.Fprint(w, "event: message_stop\n")
 		_, _ = fmt.Fprint(w, "data: {\"type\":\"message_stop\"}\n\n")
 	}))
@@ -2352,6 +2428,9 @@ func TestAnthropicSDKStream_MapsThinkingDeltasAndSignature(t *testing.T) {
 	}
 	if got := final.Message.TextContent(); got != "Hello world" {
 		t.Fatalf("unexpected final text %q", got)
+	}
+	if final.Usage.PromptTokens != 11 || final.Usage.CachedInputTokens != 4 || final.Usage.CompletionTokens != 7 || final.Usage.TotalTokens != 18 {
+		t.Fatalf("unexpected usage: %+v", final.Usage)
 	}
 	reasoningParts := final.Message.ReasoningParts()
 	if len(reasoningParts) != 1 || reasoningParts[0].Replay == nil || reasoningParts[0].Replay.Token != "sig-stream" {

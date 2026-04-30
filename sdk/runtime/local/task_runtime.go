@@ -409,6 +409,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call sdktool.Call) (sdktool.R
 		TaskID: strings.TrimSpace(taskID),
 		Yield:  time.Duration(yieldMS) * time.Millisecond,
 		Input:  input,
+		Source: "agent_tool",
 	}
 	var snapshot sdktask.Snapshot
 	switch strings.ToLower(strings.TrimSpace(action)) {
@@ -520,6 +521,7 @@ func (tm *taskRuntime) StartSubagent(
 	if mode == "" {
 		mode = strings.TrimSpace(tm.runtime.defaultPolicyMode)
 	}
+	childPrompt := subagentPromptWithContext(req.ContextPrelude, req.Prompt)
 	anchor, result, err := runner.Spawn(ctx, sdksubagent.SpawnContext{
 		SessionRef:        sdksession.NormalizeSessionRef(ref),
 		Session:           sdksession.CloneSession(session),
@@ -530,7 +532,7 @@ func (tm *taskRuntime) StartSubagent(
 		Streams:           tm,
 	}, sdkdelegation.Request{
 		Agent:  strings.TrimSpace(req.Agent),
-		Prompt: strings.TrimSpace(req.Prompt),
+		Prompt: childPrompt,
 	})
 	if err != nil {
 		return sdktask.Snapshot{}, err
@@ -555,7 +557,8 @@ func (tm *taskRuntime) StartSubagent(
 		running:    result.State == sdkdelegation.StateRunning,
 		turnSeq:    1,
 		metadata: map[string]any{
-			"source": firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"),
+			"source":      firstNonEmpty(strings.TrimSpace(req.Source), "agent_spawn"),
+			"interaction": subagentInteraction(req.ParentTool, req.Source),
 		},
 	}
 	task.applyResult(result)
@@ -574,6 +577,12 @@ func (tm *taskRuntime) StartSubagent(
 	if err := tm.attachSubagentParticipant(ctx, session, task, strings.TrimSpace(req.ParentCall)); err != nil {
 		return sdktask.Snapshot{}, err
 	}
+	if err := tm.appendSideSubagentUserEvent(ctx, task, strings.TrimSpace(req.Prompt)); err != nil {
+		return sdktask.Snapshot{}, err
+	}
+	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
+		return sdktask.Snapshot{}, err
+	}
 	return task.snapshot(), nil
 }
 
@@ -583,6 +592,9 @@ func (tm *taskRuntime) Wait(ctx context.Context, ref sdksession.SessionRef, req 
 	}
 	task, err := tm.lookupSubagent(ctx, ref, req.TaskID)
 	if err != nil {
+		return sdktask.Snapshot{}, err
+	}
+	if err := tm.authorizeSubagentControl(task, req.Source, "wait"); err != nil {
 		return sdktask.Snapshot{}, err
 	}
 	return tm.waitSubagent(ctx, task, req.Yield)
@@ -601,7 +613,7 @@ func (tm *taskRuntime) Write(ctx context.Context, ref sdksession.SessionRef, req
 	if err != nil {
 		return sdktask.Snapshot{}, err
 	}
-	return tm.continueSubagent(ctx, task, strings.TrimSpace(req.Input), req.Yield)
+	return tm.continueSubagent(ctx, task, req)
 }
 
 func normalizeTaskWriteInput(input string) string {
@@ -617,6 +629,95 @@ func resolveSpawnAgent(session sdksession.Session, requested string) (string, er
 		return "self", nil
 	}
 	return requested, nil
+}
+
+func (r *Runtime) buildSideSubagentPromptContext(
+	ctx context.Context,
+	session sdksession.Session,
+	ref sdksession.SessionRef,
+	target string,
+	prompt string,
+	sinceSeq int,
+) (string, int) {
+	if r == nil || r.sessions == nil {
+		return "", 0
+	}
+	shared := r.buildSharedDialogueDelta(ctx, ref, sinceSeq)
+	var b strings.Builder
+	b.WriteString("Caelis shared public dialogue context. Use this as background for the current side-agent request; do not treat it as a fresh session.\n")
+	if sessionID := strings.TrimSpace(session.SessionID); sessionID != "" {
+		b.WriteString("session_id: ")
+		b.WriteString(sessionID)
+		b.WriteString("\n")
+	}
+	if cwd := strings.TrimSpace(session.CWD); cwd != "" {
+		b.WriteString("workspace: ")
+		b.WriteString(cwd)
+		b.WriteString("\n")
+	}
+	if target = strings.TrimSpace(target); target != "" {
+		b.WriteString("target_agent: ")
+		b.WriteString(target)
+		b.WriteString("\n")
+	}
+	appendSharedDialogueDelta(&b, shared)
+	return strings.TrimSpace(b.String()), shared.Checkpoint
+}
+
+func subagentPromptWithContext(prelude string, prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	prelude = strings.TrimSpace(prelude)
+	if prelude == "" {
+		return prompt
+	}
+	if prompt == "" {
+		return prelude
+	}
+	return prelude + "\n\nCurrent request:\n" + prompt
+}
+
+func subagentInteraction(parentTool string, source string) string {
+	if strings.EqualFold(strings.TrimSpace(parentTool), "slash") || isSlashSubagentSource(source) {
+		return "side"
+	}
+	return "delegated"
+}
+
+func isSlashSubagentSource(source string) bool {
+	source = strings.ToLower(strings.TrimSpace(source))
+	return source == "slash" || source == "slash_agent" || strings.HasPrefix(source, "slash_")
+}
+
+func isSideSubagentTask(task *subagentTask) bool {
+	if task == nil {
+		return false
+	}
+	if strings.EqualFold(taskStringValue(task.metadata["interaction"]), "side") {
+		return true
+	}
+	return isSlashSubagentSource(taskStringValue(task.metadata["source"]))
+}
+
+func subagentParticipantRole(task *subagentTask) sdksession.ParticipantRole {
+	if isSideSubagentTask(task) {
+		return sdksession.ParticipantRoleSidecar
+	}
+	return sdksession.ParticipantRoleDelegated
+}
+
+func (tm *taskRuntime) authorizeSubagentControl(task *subagentTask, source string, action string) error {
+	source = strings.ToLower(strings.TrimSpace(source))
+	switch source {
+	case "agent_tool":
+		if isSideSubagentTask(task) {
+			return fmt.Errorf("sdk/runtime/local: TASK %s cannot control user-created side subagent %q", strings.TrimSpace(action), task.handle)
+		}
+	case "user_side_agent":
+		if !isSideSubagentTask(task) {
+			return fmt.Errorf("sdk/runtime/local: @handle can only target side subagents created with /<agent>")
+		}
+	}
+	return nil
 }
 
 type StartSubagentOptions struct {
@@ -663,13 +764,15 @@ func (r *Runtime) StartSubagentWithOptions(
 	if strings.TrimSpace(prompt) == "" {
 		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: subagent prompt is required")
 	}
+	contextPrelude, _ := r.buildSideSubagentPromptContext(ctx, session, ref, strings.TrimSpace(agent), strings.TrimSpace(prompt), 0)
 	snapshot, err := r.tasks.StartSubagent(ctx, session, ref, r.subagents, sdktask.SubagentStartRequest{
-		Agent:      strings.TrimSpace(agent),
-		Prompt:     strings.TrimSpace(prompt),
-		ParentTool: "slash",
-		Source:     firstNonEmpty(strings.TrimSpace(source), "slash_agent"),
-		Mode:       strings.TrimSpace(r.defaultPolicyMode),
-		Approval:   newSubagentApprovalRequester(opts.ApprovalRequester, session, ref),
+		Agent:          strings.TrimSpace(agent),
+		Prompt:         strings.TrimSpace(prompt),
+		ContextPrelude: contextPrelude,
+		ParentTool:     "slash",
+		Source:         firstNonEmpty(strings.TrimSpace(source), "slash_agent"),
+		Mode:           strings.TrimSpace(r.defaultPolicyMode),
+		Approval:       newSubagentApprovalRequester(opts.ApprovalRequester, session, ref),
 	})
 	if err != nil || !snapshot.Running {
 		return snapshot, err
@@ -677,6 +780,7 @@ func (r *Runtime) StartSubagentWithOptions(
 	return r.tasks.Wait(ctx, ref, sdktask.ControlRequest{
 		TaskID: snapshot.Ref.TaskID,
 		Yield:  2 * time.Second,
+		Source: "ui_side_agent",
 	})
 }
 
@@ -695,14 +799,17 @@ func (r *Runtime) ContinueSubagentByHandle(
 	if err != nil {
 		return sdktask.Snapshot{}, err
 	}
-	taskID, ok := subagentTaskIDForHandle(session, handle)
+	taskID, binding, ok := subagentTaskIDForHandle(session, handle)
 	if !ok {
 		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: subagent handle %q not found", strings.TrimSpace(handle))
 	}
+	contextPrelude, _ := r.buildSideSubagentPromptContext(ctx, session, ref, strings.TrimSpace(handle), strings.TrimSpace(prompt), binding.ContextSyncSeq)
 	return r.tasks.Write(ctx, ref, sdktask.ControlRequest{
-		TaskID: taskID,
-		Input:  strings.TrimSpace(prompt),
-		Yield:  yield,
+		TaskID:         taskID,
+		Input:          strings.TrimSpace(prompt),
+		Yield:          yield,
+		Source:         "user_side_agent",
+		ContextPrelude: contextPrelude,
 	})
 }
 
@@ -722,25 +829,26 @@ func (r *Runtime) WaitSubagentTask(
 	return r.tasks.Wait(ctx, sdksession.NormalizeSessionRef(ref), sdktask.ControlRequest{
 		TaskID: taskID,
 		Yield:  yield,
+		Source: "ui_side_agent",
 	})
 }
 
-func subagentTaskIDForHandle(session sdksession.Session, handle string) (string, bool) {
+func subagentTaskIDForHandle(session sdksession.Session, handle string) (string, sdksession.ParticipantBinding, bool) {
 	handle = normalizeSubagentHandle(handle)
 	if handle == "" {
-		return "", false
+		return "", sdksession.ParticipantBinding{}, false
 	}
 	for _, participant := range session.Participants {
-		if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleDelegated {
+		if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleSidecar {
 			continue
 		}
 		if normalizeSubagentHandle(participant.Label) != handle {
 			continue
 		}
 		taskID := strings.TrimSpace(participant.DelegationID)
-		return taskID, taskID != ""
+		return taskID, sdksession.CloneParticipantBinding(participant), taskID != ""
 	}
-	return "", false
+	return "", sdksession.ParticipantBinding{}, false
 }
 
 func (tm *taskRuntime) Cancel(ctx context.Context, ref sdksession.SessionRef, req sdktask.ControlRequest) (sdktask.Snapshot, error) {
@@ -752,6 +860,9 @@ func (tm *taskRuntime) Cancel(ctx context.Context, ref sdksession.SessionRef, re
 	}
 	task, err := tm.lookupSubagent(ctx, ref, req.TaskID)
 	if err != nil {
+		return sdktask.Snapshot{}, err
+	}
+	if err := tm.authorizeSubagentControl(task, req.Source, "cancel"); err != nil {
 		return sdktask.Snapshot{}, err
 	}
 	return tm.cancelSubagent(ctx, task)
@@ -806,10 +917,18 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	}
 
 	result, resultErr := task.session.Result(ctx)
+	stdoutText := result.Stdout
+	stderrText := result.Stderr
+	if strings.TrimSpace(stdoutText) == "" && len(stdout) > 0 {
+		stdoutText = string(stdout)
+	}
+	if strings.TrimSpace(stderrText) == "" && len(stderr) > 0 {
+		stderrText = string(stderr)
+	}
 	task.result = map[string]any{
-		"stdout":    result.Stdout,
-		"stderr":    result.Stderr,
-		"result":    compactFinalOutput(result.Stdout, result.Stderr),
+		"stdout":    stdoutText,
+		"stderr":    stderrText,
+		"result":    compactFinalOutput(stdoutText, stderrText),
 		"exit_code": result.ExitCode,
 		"state":     string(state),
 	}
@@ -874,6 +993,9 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
 		return sdktask.Snapshot{}, err
 	}
+	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
+		return sdktask.Snapshot{}, err
+	}
 	if shouldDropInactiveSubagentTask(snapshot) {
 		tm.mu.Lock()
 		delete(tm.subagents, task.ref.TaskID)
@@ -883,10 +1005,11 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 	return snapshot, nil
 }
 
-func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask, prompt string, yield time.Duration) (sdktask.Snapshot, error) {
+func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask, req sdktask.ControlRequest) (sdktask.Snapshot, error) {
 	if task == nil {
 		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: task is required")
 	}
+	prompt := strings.TrimSpace(req.Input)
 	if prompt == "" {
 		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: TASK write for SPAWN task %q requires a follow-up prompt", task.ref.TaskID)
 	}
@@ -899,6 +1022,9 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	}
 	if task.runner == nil {
 		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: SPAWN task %q cannot continue because its child session runner is unavailable", task.ref.TaskID)
+	}
+	if err := tm.authorizeSubagentControl(task, req.Source, "write"); err != nil {
+		return sdktask.Snapshot{}, err
 	}
 	task.mu.Lock()
 	previousStdout := task.stdout
@@ -916,11 +1042,15 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	task.stdoutCursor = 0
 	task.stderrCursor = 0
 	task.streamFrames = nil
+	if task.metadata != nil {
+		delete(task.metadata, "final_event_persisted")
+	}
 	task.mu.Unlock()
+	childPrompt := subagentPromptWithContext(req.ContextPrelude, prompt)
 	result, err := task.runner.Continue(ctx, sdkdelegation.CloneAnchor(task.anchor), sdkdelegation.ContinueRequest{
 		Agent:       task.agent,
-		Prompt:      prompt,
-		YieldTimeMS: int(yield / time.Millisecond),
+		Prompt:      childPrompt,
+		YieldTimeMS: int(req.Yield / time.Millisecond),
 	})
 	if err != nil {
 		task.mu.Lock()
@@ -935,6 +1065,9 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 		task.mu.Unlock()
 		return sdktask.Snapshot{}, err
 	}
+	if err := tm.appendSideSubagentUserEvent(ctx, task, prompt); err != nil {
+		return sdktask.Snapshot{}, err
+	}
 	task.mu.Lock()
 	task.prompt = prompt
 	task.applyResult(result)
@@ -943,6 +1076,9 @@ func (tm *taskRuntime) continueSubagent(ctx context.Context, task *subagentTask,
 	entry := task.entrySnapshot(tm.runtime.now())
 	task.mu.Unlock()
 	if err := tm.persistTaskEntry(ctx, entry); err != nil {
+		return sdktask.Snapshot{}, err
+	}
+	if err := tm.appendSideSubagentFinalEvent(ctx, task); err != nil {
 		return sdktask.Snapshot{}, err
 	}
 	if shouldDropInactiveSubagentTask(snapshot) {
@@ -1032,8 +1168,25 @@ func (tm *taskRuntime) lookupBash(ctx context.Context, ref sdksession.SessionRef
 }
 
 func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref sdksession.SessionRef, taskID string) (*subagentTask, error) {
+	lookupID := strings.TrimSpace(taskID)
 	tm.mu.RLock()
-	task, ok := tm.subagents[strings.TrimSpace(taskID)]
+	task, ok := tm.subagents[lookupID]
+	if !ok {
+		handle := normalizeSubagentHandle(lookupID)
+		for _, candidate := range tm.subagents {
+			if candidate == nil {
+				continue
+			}
+			if strings.TrimSpace(candidate.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
+				continue
+			}
+			if normalizeSubagentHandle(candidate.handle) == handle || normalizeSubagentHandle(taskStringValue(candidate.metadata["handle"])) == handle {
+				task = candidate
+				ok = true
+				break
+			}
+		}
+	}
 	tm.mu.RUnlock()
 	if ok && task != nil {
 		if strings.TrimSpace(task.sessionRef.SessionID) != strings.TrimSpace(ref.SessionID) {
@@ -1044,7 +1197,10 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref sdksession.Sessio
 	if tm.store == nil {
 		return nil, fmt.Errorf("sdk/runtime/local: task %q not found", taskID)
 	}
-	entry, err := tm.store.Get(ctx, strings.TrimSpace(taskID))
+	entry, err := tm.store.Get(ctx, lookupID)
+	if err != nil || entry == nil {
+		entry, err = tm.lookupStoredSubagentByHandle(ctx, ref, lookupID)
+	}
 	if err != nil || entry == nil {
 		return nil, fmt.Errorf("sdk/runtime/local: task %q not found", taskID)
 	}
@@ -1056,6 +1212,31 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref sdksession.Sessio
 	tm.subagents[rehydrated.ref.TaskID] = rehydrated
 	tm.mu.Unlock()
 	return rehydrated, nil
+}
+
+func (tm *taskRuntime) lookupStoredSubagentByHandle(ctx context.Context, ref sdksession.SessionRef, handle string) (*sdktask.Entry, error) {
+	if tm == nil || tm.store == nil {
+		return nil, fmt.Errorf("sdk/runtime/local: task %q not found", handle)
+	}
+	handle = normalizeSubagentHandle(handle)
+	if handle == "" {
+		return nil, fmt.Errorf("sdk/runtime/local: task %q not found", handle)
+	}
+	entries, err := tm.store.ListSession(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry == nil || entry.Kind != sdktask.KindSubagent {
+			continue
+		}
+		if normalizeSubagentHandle(taskSpecString(entry.Spec, "handle")) == handle ||
+			normalizeSubagentHandle(taskStringValue(entry.Metadata["handle"])) == handle ||
+			normalizeSubagentHandle(taskStringValue(entry.Result["handle"])) == handle {
+			return sdktask.CloneEntry(entry), nil
+		}
+	}
+	return nil, fmt.Errorf("sdk/runtime/local: task %q not found", handle)
 }
 
 func (t *bashTask) snapshotLocked(status sdksandbox.SessionStatus) sdktask.Snapshot {
@@ -1082,15 +1263,8 @@ func taskSnapshotToolResult(call sdktool.Call, def sdktool.Definition, snapshot 
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	meta := maps.Clone(snapshot.Metadata)
-	if meta == nil {
-		meta = map[string]any{}
-	}
-	for key, value := range snapshot.Result {
-		if _, exists := meta[key]; !exists {
-			meta[key] = value
-		}
-	}
+	visibleTaskID := taskVisibleID(snapshot)
+	meta := taskToolMeta(snapshot)
 	for key, value := range payload {
 		if _, exists := meta[key]; !exists {
 			meta[key] = value
@@ -1100,14 +1274,17 @@ func taskSnapshotToolResult(call sdktool.Call, def sdktool.Definition, snapshot 
 	meta["tool_call_id"] = strings.TrimSpace(call.ID)
 	meta["state"] = string(snapshot.State)
 	meta["running"] = snapshot.Running
-	meta["task_id"] = snapshot.Ref.TaskID
-	if snapshot.StdoutCursor > 0 {
+	meta["task_id"] = visibleTaskID
+	if internalTaskID := strings.TrimSpace(snapshot.Ref.TaskID); snapshot.Kind != sdktask.KindSubagent && internalTaskID != "" && internalTaskID != visibleTaskID {
+		meta["internal_task_id"] = internalTaskID
+	}
+	if snapshot.Kind != sdktask.KindSubagent && snapshot.StdoutCursor > 0 {
 		meta["stdout_cursor"] = snapshot.StdoutCursor
 	}
-	if snapshot.StderrCursor > 0 {
+	if snapshot.Kind != sdktask.KindSubagent && snapshot.StderrCursor > 0 {
 		meta["stderr_cursor"] = snapshot.StderrCursor
 	}
-	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID)); terminalID != "" {
+	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID)); snapshot.Kind != sdktask.KindSubagent && terminalID != "" {
 		meta["terminal_id"] = terminalID
 	}
 	raw, _ := json.Marshal(payload)
@@ -1121,9 +1298,29 @@ func taskSnapshotToolResult(call sdktool.Call, def sdktool.Definition, snapshot 
 	}
 }
 
+func taskToolMeta(snapshot sdktask.Snapshot) map[string]any {
+	if snapshot.Kind == sdktask.KindSubagent {
+		return map[string]any{}
+	}
+	meta := maps.Clone(snapshot.Metadata)
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	for key, value := range snapshot.Result {
+		if _, exists := meta[key]; !exists {
+			meta[key] = value
+		}
+	}
+	return meta
+}
+
 func taskToolPayload(snapshot sdktask.Snapshot) map[string]any {
+	if snapshot.Kind == sdktask.KindSubagent {
+		return subagentTaskToolPayload(snapshot)
+	}
+	visibleTaskID := taskVisibleID(snapshot)
 	payload := map[string]any{
-		"task_id":         snapshot.Ref.TaskID,
+		"task_id":         visibleTaskID,
 		"state":           string(snapshot.State),
 		"running":         snapshot.Running,
 		"supports_cancel": snapshot.SupportsCancel && snapshot.Running,
@@ -1169,6 +1366,39 @@ func taskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 		payload["sandbox_permission_denied"] = denied
 	}
 	return payload
+}
+
+func subagentTaskToolPayload(snapshot sdktask.Snapshot) map[string]any {
+	payload := map[string]any{
+		"task_id": taskVisibleID(snapshot),
+		"state":   string(snapshot.State),
+		"running": snapshot.Running,
+	}
+	if snapshot.Running {
+		payload["supports_cancel"] = snapshot.SupportsCancel
+		if preview := strings.TrimSpace(taskStringValue(snapshot.Result["output_preview"])); preview != "" {
+			payload["output_preview"] = preview
+		}
+		return payload
+	}
+	if output := strings.TrimSpace(taskStringValue(snapshot.Result["result"])); output != "" {
+		payload["result"] = output
+	} else if output := compactFinalOutput(taskStringValue(snapshot.Result["stdout"]), taskStringValue(snapshot.Result["stderr"])); output != "" {
+		payload["result"] = output
+	}
+	if errText := strings.TrimSpace(taskStringValue(snapshot.Result["error"])); errText != "" {
+		payload["error"] = errText
+	}
+	return payload
+}
+
+func taskVisibleID(snapshot sdktask.Snapshot) string {
+	if snapshot.Kind == sdktask.KindSubagent {
+		if handle := firstNonEmpty(taskStringValue(snapshot.Result["handle"]), taskStringValue(snapshot.Metadata["handle"])); handle != "" {
+			return normalizeSubagentHandle(handle)
+		}
+	}
+	return strings.TrimSpace(snapshot.Ref.TaskID)
 }
 
 func stateFromStatus(status sdksandbox.SessionStatus) sdktask.State {
@@ -1392,12 +1622,13 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, session sd
 		task.handle = handle
 	}
 	mention := "@" + strings.TrimPrefix(handle, "@")
+	role := subagentParticipantRole(task)
 	_, err := tm.runtime.sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
 		SessionRef: task.sessionRef,
 		Binding: sdksession.ParticipantBinding{
 			ID:            strings.TrimSpace(task.anchor.AgentID),
 			Kind:          sdksession.ParticipantKindSubagent,
-			Role:          sdksession.ParticipantRoleDelegated,
+			Role:          role,
 			AgentName:     strings.TrimSpace(task.agent),
 			Label:         mention,
 			SessionID:     strings.TrimSpace(task.anchor.SessionID),
@@ -1429,7 +1660,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, session sd
 				Participant: sdksession.ParticipantRef{
 					ID:           strings.TrimSpace(task.anchor.AgentID),
 					Kind:         sdksession.ParticipantKindSubagent,
-					Role:         sdksession.ParticipantRoleDelegated,
+					Role:         role,
 					DelegationID: strings.TrimSpace(task.ref.TaskID),
 				},
 			},
@@ -1451,6 +1682,7 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil {
 		return nil
 	}
+	role := subagentParticipantRole(task)
 	_, err := tm.runtime.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
 		SessionRef: task.sessionRef,
 		Event: &sdksession.Event{
@@ -1469,7 +1701,7 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 				Participant: sdksession.ParticipantRef{
 					ID:           strings.TrimSpace(task.anchor.AgentID),
 					Kind:         sdksession.ParticipantKindSubagent,
-					Role:         sdksession.ParticipantRoleDelegated,
+					Role:         role,
 					DelegationID: strings.TrimSpace(task.ref.TaskID),
 				},
 			},
@@ -1486,6 +1718,119 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 		},
 	})
 	return err
+}
+
+func (tm *taskRuntime) appendSideSubagentUserEvent(ctx context.Context, task *subagentTask, prompt string) error {
+	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil || !isSideSubagentTask(task) {
+		return nil
+	}
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return nil
+	}
+	role := subagentParticipantRole(task)
+	message := sdkmodel.NewTextMessage(sdkmodel.RoleUser, prompt)
+	_, err := tm.runtime.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		SessionRef: task.sessionRef,
+		Event: &sdksession.Event{
+			Type:       sdksession.EventTypeUser,
+			Visibility: sdksession.VisibilityCanonical,
+			Time:       tm.runtime.now(),
+			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
+			Scope: &sdksession.EventScope{
+				TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
+				Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "slash_agent"),
+				Participant: sdksession.ParticipantRef{
+					ID:           strings.TrimSpace(task.anchor.AgentID),
+					Kind:         sdksession.ParticipantKindSubagent,
+					Role:         role,
+					DelegationID: strings.TrimSpace(task.ref.TaskID),
+				},
+			},
+			Message: &message,
+			Text:    prompt,
+			Protocol: &sdksession.EventProtocol{
+				UpdateType: string(sdksession.ProtocolUpdateTypeUserMessage),
+			},
+			Meta: map[string]any{
+				"handle":  strings.TrimSpace(task.handle),
+				"mention": "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+				"agent":   strings.TrimSpace(task.agent),
+			},
+		},
+	})
+	return err
+}
+
+func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *subagentTask) error {
+	if tm == nil || tm.runtime == nil || tm.runtime.sessions == nil || task == nil || !isSideSubagentTask(task) {
+		return nil
+	}
+	task.mu.Lock()
+	if task.running || task.state != sdktask.StateCompleted || strings.EqualFold(taskStringValue(task.metadata["final_event_persisted"]), "true") {
+		task.mu.Unlock()
+		return nil
+	}
+	text := strings.TrimSpace(taskStringValue(task.result["result"]))
+	if text == "" {
+		text = compactFinalOutput(task.stdout, task.stderr)
+	}
+	if text == "" {
+		text = strings.TrimSpace(taskStringValue(task.result["output_preview"]))
+	}
+	if text == "" {
+		task.mu.Unlock()
+		return nil
+	}
+	role := subagentParticipantRole(task)
+	message := sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, text)
+	event := &sdksession.Event{
+		Type:       sdksession.EventTypeAssistant,
+		Visibility: sdksession.VisibilityCanonical,
+		Time:       tm.runtime.now(),
+		Actor: sdksession.ActorRef{
+			Kind: sdksession.ActorKindParticipant,
+			ID:   strings.TrimSpace(task.anchor.AgentID),
+			Role: string(role),
+			Name: "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+		},
+		Scope: &sdksession.EventScope{
+			TurnID: subagentTurnID(task.ref.TaskID, task.turnSeq),
+			Source: firstNonEmpty(taskStringValue(task.metadata["source"]), "slash_agent"),
+			Participant: sdksession.ParticipantRef{
+				ID:           strings.TrimSpace(task.anchor.AgentID),
+				Kind:         sdksession.ParticipantKindSubagent,
+				Role:         role,
+				DelegationID: strings.TrimSpace(task.ref.TaskID),
+			},
+		},
+		Message: &message,
+		Text:    text,
+		Protocol: &sdksession.EventProtocol{
+			UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+		},
+		Meta: map[string]any{
+			"handle":  strings.TrimSpace(task.handle),
+			"mention": "@" + strings.TrimPrefix(strings.TrimSpace(task.handle), "@"),
+			"agent":   strings.TrimSpace(task.agent),
+		},
+	}
+	task.mu.Unlock()
+
+	if _, err := tm.runtime.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{SessionRef: task.sessionRef, Event: event}); err != nil {
+		return err
+	}
+	if err := tm.runtime.updateParticipantContextCheckpoint(ctx, task.sessionRef, strings.TrimSpace(task.anchor.AgentID)); err != nil {
+		return err
+	}
+	task.mu.Lock()
+	if task.metadata == nil {
+		task.metadata = map[string]any{}
+	}
+	task.metadata["final_event_persisted"] = "true"
+	entry := task.entrySnapshot(tm.runtime.now())
+	task.mu.Unlock()
+	return tm.persistTaskEntry(ctx, entry)
 }
 
 func taskSpecString(values map[string]any, key string) string {
@@ -1594,7 +1939,8 @@ func (t *subagentTask) applyResult(result sdkdelegation.Result) {
 	if t.metadata == nil {
 		t.metadata = map[string]any{}
 	}
-	t.metadata["task_id"] = t.ref.TaskID
+	t.metadata["task_id"] = t.handle
+	t.metadata["internal_task_id"] = t.ref.TaskID
 	t.metadata["task_kind"] = string(sdktask.KindSubagent)
 	t.metadata["agent"] = t.agent
 	t.metadata["agent_id"] = t.anchor.AgentID
@@ -1619,7 +1965,7 @@ func (t *subagentTask) applyResult(result sdkdelegation.Result) {
 	} else if t.result != nil {
 		delete(t.result, "result")
 	}
-	t.result["task_id"] = t.ref.TaskID
+	t.result["task_id"] = t.handle
 	t.result["handle"] = t.handle
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent

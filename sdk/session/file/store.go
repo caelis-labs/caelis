@@ -211,7 +211,7 @@ func (s *Store) AppendEvent(
 		return nil, err
 	}
 
-	normalized := sdksession.CloneEvent(event)
+	normalized := sdksession.CanonicalizeEvent(event)
 	if normalized.ID == "" {
 		normalized.ID = s.nextID("event", s.eventIDGenerator)
 	}
@@ -231,8 +231,10 @@ func (s *Store) AppendEvent(
 
 	doc.Events = append(doc.Events, normalized)
 	doc.Session.UpdatedAt = normalized.Time
-	if doc.Session.Title == "" && normalized.Text != "" {
-		doc.Session.Title = truncateTitle(normalized.Text)
+	if doc.Session.Title == "" {
+		if text := sdksession.EventText(normalized); text != "" {
+			doc.Session.Title = truncateTitle(text)
+		}
 	}
 	if err := s.writeDocument(doc); err != nil {
 		return nil, err

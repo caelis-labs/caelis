@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	sdkdelegation "github.com/OnslaughtSnail/caelis/sdk/delegation"
+	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	"github.com/OnslaughtSnail/caelis/sdk/runtime/agents/chat"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
@@ -17,6 +18,106 @@ import (
 	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 	spawntool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/spawn"
 )
+
+func TestSlashSideSubagentReceivesSharedContextAndPublishesPublicDialogue(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "review result"},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+	userMessage := sdkmodel.NewTextMessage(sdkmodel.RoleUser, "previous request")
+	assistantMessage := sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "previous answer")
+	for _, event := range []*sdksession.Event{{
+		Type:       sdksession.EventTypeUser,
+		Visibility: sdksession.VisibilityCanonical,
+		Message:    &userMessage,
+		Text:       "previous request",
+	}, {
+		Type:       sdksession.EventTypeAssistant,
+		Visibility: sdksession.VisibilityCanonical,
+		Message:    &assistantMessage,
+		Text:       "previous answer",
+	}} {
+		if _, err := runtime.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{SessionRef: session.SessionRef, Event: event}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+
+	snapshot, err := runtime.StartSubagent(ctx, session.SessionRef, "helper", "review", "slash_helper")
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if snapshot.State != sdktask.StateCompleted {
+		t.Fatalf("snapshot state = %q, want completed", snapshot.State)
+	}
+	if prompt := runner.spawnRequest.Prompt; !strings.Contains(prompt, "shared_dialogue_delta:") ||
+		!strings.Contains(prompt, "[1] user:\nprevious request") ||
+		!strings.Contains(prompt, "[2] assistant:\nprevious answer") ||
+		!strings.Contains(prompt, "Current request:\nreview") {
+		t.Fatalf("spawn prompt missing shared side context:\n%s", prompt)
+	} else if strings.Contains(prompt, "current_user_request") {
+		t.Fatalf("spawn prompt duplicated current request in context prelude:\n%s", prompt)
+	}
+
+	loaded, err := runtime.sessions.LoadSession(ctx, sdksession.LoadSessionRequest{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	var sideUser, sideAssistant *sdksession.Event
+	for _, event := range loaded.Events {
+		if event == nil || event.Scope == nil || event.Scope.Participant.Role != sdksession.ParticipantRoleSidecar {
+			continue
+		}
+		switch sdksession.EventTypeOf(event) {
+		case sdksession.EventTypeUser:
+			sideUser = event
+		case sdksession.EventTypeAssistant:
+			sideAssistant = event
+		}
+	}
+	if sideUser == nil || strings.TrimSpace(sideUser.Text) != "review" || !sdksession.IsMainInvocationVisibleEvent(sideUser) {
+		t.Fatalf("side user event = %#v, want public review request", sideUser)
+	}
+	if sideAssistant == nil || strings.TrimSpace(sideAssistant.Text) != "review result" || !sdksession.IsMainInvocationVisibleEvent(sideAssistant) {
+		t.Fatalf("side assistant event = %#v, want public final result", sideAssistant)
+	}
+	updated, err := runtime.sessions.Session(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("Session() error = %v", err)
+	}
+	if len(updated.Participants) != 1 || updated.Participants[0].Role != sdksession.ParticipantRoleSidecar || updated.Participants[0].ContextSyncSeq == 0 {
+		t.Fatalf("participants = %#v, want sidecar subagent with context checkpoint", updated.Participants)
+	}
+}
+
+func TestSubagentTaskIDForHandleAllowsSidecarCustomSource(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		Participants: []sdksession.ParticipantBinding{{
+			ID:           "side-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleSidecar,
+			Label:        "@jeff",
+			Source:       "custom_codex",
+			DelegationID: "task-side",
+		}, {
+			ID:           "delegated-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleDelegated,
+			Label:        "@jude",
+			Source:       "agent_spawn",
+			DelegationID: "task-delegated",
+		}},
+	}
+	taskID, binding, ok := subagentTaskIDForHandle(session, "jeff")
+	if !ok || taskID != "task-side" || binding.ID != "side-1" {
+		t.Fatalf("subagentTaskIDForHandle(sidecar) = (%q, %#v, %v), want custom-source sidecar", taskID, binding, ok)
+	}
+	if _, _, ok := subagentTaskIDForHandle(session, "jude"); ok {
+		t.Fatal("subagentTaskIDForHandle(delegated) = ok, want hidden from @handle")
+	}
+}
 
 func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	ctx := context.Background()
@@ -61,6 +162,53 @@ func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	}
 	if got, want := taskStringValue(continued.Result["turn_id"]), started.Ref.TaskID+":2"; got != want {
 		t.Fatalf("continued turn_id = %q, want %q", got, want)
+	}
+}
+
+func TestSideAndDelegatedSubagentsHaveSeparateControlSurfaces(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult:    sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "side done"},
+		continueResult: sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "continued"},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	side, err := runtime.StartSubagent(ctx, session.SessionRef, "helper", "review", "slash_helper")
+	if err != nil {
+		t.Fatalf("StartSubagent(side) error = %v", err)
+	}
+	if _, err := runtime.tasks.Wait(ctx, session.SessionRef, sdktask.ControlRequest{
+		TaskID: taskStringValue(side.Result["handle"]),
+		Source: "agent_tool",
+	}); err == nil || !strings.Contains(err.Error(), "cannot control user-created side subagent") {
+		t.Fatalf("TASK wait on side err = %v, want isolation error", err)
+	}
+	if _, err := runtime.ContinueSubagentByHandle(ctx, session.SessionRef, taskStringValue(side.Result["handle"]), "follow up", 0); err != nil {
+		t.Fatalf("ContinueSubagentByHandle(side) error = %v", err)
+	}
+	if !strings.Contains(runner.continuePrompt, "shared_dialogue_delta:\n(none)") || !strings.Contains(runner.continuePrompt, "Current request:\nfollow up") {
+		t.Fatalf("side continuation prompt missing shared context:\n%s", runner.continuePrompt)
+	}
+	if strings.Contains(runner.continuePrompt, "current_user_request") {
+		t.Fatalf("side continuation duplicated current request in context prelude:\n%s", runner.continuePrompt)
+	}
+	if strings.Contains(runner.continuePrompt, "side done") {
+		t.Fatalf("side continuation repeated prior side final output:\n%s", runner.continuePrompt)
+	}
+
+	updatedSession, err := runtime.sessions.Session(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("Session() error = %v", err)
+	}
+	delegated, err := runtime.tasks.StartSubagent(ctx, updatedSession, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "internal task",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(delegated) error = %v", err)
+	}
+	if _, err := runtime.ContinueSubagentByHandle(ctx, session.SessionRef, taskStringValue(delegated.Result["handle"]), "user follow up", 0); err == nil {
+		t.Fatal("ContinueSubagentByHandle(delegated) succeeded, want not found")
 	}
 }
 

@@ -31,17 +31,18 @@ func buildControlPlaneState(session sdksession.Session, runState sdkruntime.RunS
 	state.Participants = make([]ParticipantState, 0, len(session.Participants))
 	for _, item := range session.Participants {
 		state.Participants = append(state.Participants, ParticipantState{
-			ID:            item.ID,
-			Kind:          item.Kind,
-			Role:          item.Role,
-			AgentName:     item.AgentName,
-			Label:         item.Label,
-			SessionID:     item.SessionID,
-			Source:        item.Source,
-			ParentTurnID:  item.ParentTurnID,
-			DelegationID:  item.DelegationID,
-			AttachedAt:    item.AttachedAt,
-			ControllerRef: item.ControllerRef,
+			ID:             item.ID,
+			Kind:           item.Kind,
+			Role:           item.Role,
+			AgentName:      item.AgentName,
+			Label:          item.Label,
+			SessionID:      item.SessionID,
+			Source:         item.Source,
+			ParentTurnID:   item.ParentTurnID,
+			DelegationID:   item.DelegationID,
+			ContextSyncSeq: item.ContextSyncSeq,
+			AttachedAt:     item.AttachedAt,
+			ControllerRef:  item.ControllerRef,
 		})
 	}
 	return state

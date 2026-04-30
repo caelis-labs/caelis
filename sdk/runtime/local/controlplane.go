@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
@@ -148,10 +149,14 @@ func (r *Runtime) executeACPControllerTurn(
 		Mode:              r.policyMode(req.AgentSpec),
 		ApprovalRequester: controllerApprovalRequester{requester: req.ApprovalRequester, sessionRef: ref, session: session, runID: runID, turnID: turnID},
 	}
+	if contextPrelude, contextSeq := r.buildControllerTurnContext(ctx, session, ref, turnID); contextSeq > session.Controller.ContextSyncSeq {
+		turnReq.ContextPrelude = contextPrelude
+		turnReq.ContextSyncSeq = contextSeq
+	}
 	turnResult, err := r.controllers.RunTurn(ctx, turnReq)
 	if err != nil && isMissingACPControllerRun(err) {
 		agent := firstNonEmpty(strings.TrimSpace(session.Controller.AgentName), strings.TrimSpace(session.Controller.ControllerID), strings.TrimSpace(session.Controller.Label))
-		contextPrelude, contextSeq := r.buildControllerHandoffContext(ctx, session, ref, session.Controller)
+		contextPrelude, contextSeq := r.buildControllerHandoffContext(ctx, session, ref, session.Controller, session.Controller.ContextSyncSeq, turnID)
 		binding, activateErr := r.controllers.Activate(ctx, sdkcontroller.HandoffRequest{
 			SessionRef:     ref,
 			Session:        session,
@@ -166,6 +171,8 @@ func (r *Runtime) executeACPControllerTurn(
 			session, bindErr = r.sessions.BindController(ctx, sdksession.BindControllerRequest{SessionRef: ref, Binding: binding})
 			if bindErr == nil {
 				turnReq.Session = session
+				turnReq.ContextPrelude = ""
+				turnReq.ContextSyncSeq = 0
 				turnResult, err = r.controllers.RunTurn(ctx, turnReq)
 			} else {
 				err = bindErr
@@ -201,17 +208,19 @@ func (r *Runtime) executeACPControllerTurn(
 			if normalized == nil {
 				continue
 			}
+			if isACPControllerUserEcho(normalized) {
+				continue
+			}
 			publishEvent := normalized
 			if persistedEvent, liveEvent, ok := accumulator.normalize(normalized); ok {
+				if liveEvent != nil {
+					handle.publishEvent(liveEvent)
+				}
 				if persistedEvent == nil {
 					continue
 				}
 				normalized = persistedEvent
-				if liveEvent != nil {
-					publishEvent = liveEvent
-				} else {
-					publishEvent = nil
-				}
+				publishEvent = nil
 			}
 			if sdksession.IsCanonicalHistoryEvent(normalized) {
 				persisted, appendErr := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
@@ -245,6 +254,33 @@ func (r *Runtime) executeACPControllerTurn(
 			}
 			handle.publishEvent(publishEvent)
 		}
+		if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
+			persisted, appendErr := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+				SessionRef: ref,
+				Event:      finalEvent,
+			})
+			if appendErr != nil {
+				r.setRunState(ref.SessionID, sdkruntime.RunState{
+					Status:      interruptedOrFailedStatus(ctx, appendErr),
+					ActiveRunID: runID,
+					LastError:   appendErr.Error(),
+					UpdatedAt:   r.now(),
+				})
+				handle.publishError(appendErr)
+				return
+			}
+			handle.publishEvent(persisted)
+		}
+		if err := r.updateControllerContextCheckpoint(ctx, ref); err != nil {
+			r.setRunState(ref.SessionID, sdkruntime.RunState{
+				Status:      interruptedOrFailedStatus(ctx, err),
+				ActiveRunID: runID,
+				LastError:   err.Error(),
+				UpdatedAt:   r.now(),
+			})
+			handle.publishError(err)
+			return
+		}
 	}
 	r.setRunState(ref.SessionID, sdkruntime.RunState{
 		Status:      sdkruntime.RunLifecycleStatusCompleted,
@@ -254,8 +290,9 @@ func (r *Runtime) executeACPControllerTurn(
 }
 
 type acpNarrativeAccumulator struct {
-	assistantText string
-	reasoningText string
+	assistantText      string
+	reasoningText      string
+	lastAssistantEvent *sdksession.Event
 }
 
 func (a *acpNarrativeAccumulator) normalize(event *sdksession.Event) (*sdksession.Event, *sdksession.Event, bool) {
@@ -264,6 +301,9 @@ func (a *acpNarrativeAccumulator) normalize(event *sdksession.Event) (*sdksessio
 	}
 	updateType := strings.TrimSpace(event.Protocol.UpdateType)
 	raw := narrativeEventText(event, updateType)
+	if updateType == string(sdksession.ProtocolUpdateTypeAgentMessage) {
+		a.lastAssistantEvent = sdksession.CloneEvent(event)
+	}
 	cumulative, delta := a.append(updateType, raw)
 	if cumulative == "" && delta == "" {
 		return nil, nil, true
@@ -271,12 +311,11 @@ func (a *acpNarrativeAccumulator) normalize(event *sdksession.Event) (*sdksessio
 	if delta == "" {
 		return nil, nil, true
 	}
-	persisted := sdksession.CloneEvent(event)
-	setNarrativeEventText(persisted, updateType, cumulative)
 	live := sdksession.CloneEvent(event)
 	live.ID = ""
+	live.Visibility = sdksession.VisibilityUIOnly
 	setNarrativeEventText(live, updateType, delta)
-	return persisted, live, true
+	return nil, live, true
 }
 
 func (a *acpNarrativeAccumulator) append(updateType string, text string) (string, string) {
@@ -292,14 +331,23 @@ func (a *acpNarrativeAccumulator) append(updateType string, text string) (string
 	}
 }
 
+func (a *acpNarrativeAccumulator) finalAssistantEvent() *sdksession.Event {
+	if a == nil || strings.TrimSpace(a.assistantText) == "" || a.lastAssistantEvent == nil {
+		return nil
+	}
+	event := sdksession.CloneEvent(a.lastAssistantEvent)
+	event.ID = ""
+	event.Visibility = sdksession.VisibilityCanonical
+	event.Type = sdksession.EventTypeAssistant
+	setNarrativeEventText(event, string(sdksession.ProtocolUpdateTypeAgentMessage), a.assistantText)
+	return event
+}
+
 func isACPControllerNarrativeChunk(event *sdksession.Event) bool {
 	if event == nil || event.Protocol == nil || event.Scope == nil {
 		return false
 	}
 	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp") {
-		return false
-	}
-	if event.Scope.Participant.ID != "" {
 		return false
 	}
 	switch strings.TrimSpace(event.Protocol.UpdateType) {
@@ -308,6 +356,32 @@ func isACPControllerNarrativeChunk(event *sdksession.Event) bool {
 	default:
 		return false
 	}
+}
+
+func isACPControllerUserEcho(event *sdksession.Event) bool {
+	if event == nil || event.Scope == nil {
+		return false
+	}
+	if sdksession.EventTypeOf(event) != sdksession.EventTypeUser {
+		return false
+	}
+	if event.Scope.Participant.ID != "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp")
+}
+
+func isACPParticipantUserEcho(event *sdksession.Event) bool {
+	if event == nil || event.Scope == nil {
+		return false
+	}
+	if sdksession.EventTypeOf(event) != sdksession.EventTypeUser {
+		return false
+	}
+	if strings.TrimSpace(event.Scope.Participant.ID) == "" {
+		return false
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(event.Scope.Source)), "acp")
 }
 
 func narrativeEventText(event *sdksession.Event, updateType string) string {
@@ -326,7 +400,7 @@ func narrativeEventText(event *sdksession.Event, updateType string) string {
 			}
 		}
 	}
-	return event.Text
+	return sdksession.EventText(event)
 }
 
 func setNarrativeEventText(event *sdksession.Event, updateType string, text string) {
@@ -334,6 +408,15 @@ func setNarrativeEventText(event *sdksession.Event, updateType string, text stri
 		return
 	}
 	event.Text = text
+	if event.Protocol != nil {
+		protocol := sdksession.CloneEventProtocol(*event.Protocol)
+		if protocol.Update == nil {
+			protocol.Update = &sdksession.ProtocolUpdate{}
+		}
+		protocol.Update.SessionUpdate = strings.TrimSpace(updateType)
+		protocol.Update.Content = sdksession.ProtocolTextContent(text)
+		event.Protocol = &protocol
+	}
 	switch strings.TrimSpace(updateType) {
 	case string(sdksession.ProtocolUpdateTypeAgentThought):
 		message := sdkmodel.NewReasoningMessage(sdkmodel.RoleAssistant, text, sdkmodel.ReasoningVisibilityVisible)
@@ -383,7 +466,7 @@ func (r *Runtime) handleControllerPlanEvent(ctx context.Context, ref sdksession.
 		state["plan"] = map[string]any{
 			"version":     1,
 			"entries":     out,
-			"explanation": strings.TrimSpace(event.Text),
+			"explanation": strings.TrimSpace(sdksession.EventText(event)),
 		}
 		return state, nil
 	})
@@ -482,17 +565,31 @@ func (r *Runtime) PromptACPParticipant(ctx context.Context, req sdkruntime.Promp
 	if err != nil {
 		return sdksession.Session{}, err
 	}
+	binding, _ := participantBinding(session, strings.TrimSpace(req.ParticipantID))
+	contextPrelude := r.buildParticipantPromptContext(ctx, session, ref, binding)
+	turnID := r.nextID("participant-turn", nil)
+	if userEvent := participantPromptUserEvent(session, binding, turnID, strings.TrimSpace(req.Source), req.Input, req.ContentParts, r.now()); userEvent != nil {
+		if _, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+			SessionRef: ref,
+			Event:      userEvent,
+		}); err != nil {
+			return sdksession.Session{}, err
+		}
+	}
 	turnResult, err := r.controllers.PromptParticipant(ctx, sdkcontroller.ParticipantPromptRequest{
-		SessionRef:    ref,
-		Session:       session,
-		ParticipantID: strings.TrimSpace(req.ParticipantID),
-		Input:         strings.TrimSpace(req.Input),
-		ContentParts:  req.ContentParts,
+		SessionRef:     ref,
+		Session:        session,
+		TurnID:         turnID,
+		ParticipantID:  strings.TrimSpace(req.ParticipantID),
+		Input:          strings.TrimSpace(req.Input),
+		ContentParts:   req.ContentParts,
+		ContextPrelude: contextPrelude,
 	})
 	if err != nil {
 		return sdksession.Session{}, err
 	}
 	if turnResult.Handle != nil {
+		accumulator := acpNarrativeAccumulator{}
 		for event, seqErr := range turnResult.Handle.Events() {
 			if seqErr != nil {
 				return sdksession.Session{}, seqErr
@@ -500,6 +597,15 @@ func (r *Runtime) PromptACPParticipant(ctx context.Context, req sdkruntime.Promp
 			normalized := normalizeEvent(session, strings.TrimSpace(req.ParticipantID), event)
 			if normalized == nil {
 				continue
+			}
+			if isACPParticipantUserEcho(normalized) {
+				continue
+			}
+			if persistedEvent, _, ok := accumulator.normalize(normalized); ok {
+				if persistedEvent == nil {
+					continue
+				}
+				normalized = persistedEvent
 			}
 			if sdksession.IsCanonicalHistoryEvent(normalized) {
 				if _, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
@@ -510,8 +616,81 @@ func (r *Runtime) PromptACPParticipant(ctx context.Context, req sdkruntime.Promp
 				}
 			}
 		}
+		if finalEvent := accumulator.finalAssistantEvent(); finalEvent != nil {
+			if _, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+				SessionRef: ref,
+				Event:      finalEvent,
+			}); err != nil {
+				return sdksession.Session{}, err
+			}
+		}
+		if err := r.updateParticipantContextCheckpoint(ctx, ref, strings.TrimSpace(req.ParticipantID)); err != nil {
+			return sdksession.Session{}, err
+		}
 	}
 	return r.sessions.Session(ctx, ref)
+}
+
+func participantPromptUserEvent(
+	session sdksession.Session,
+	binding sdksession.ParticipantBinding,
+	turnID string,
+	source string,
+	input string,
+	parts []sdkmodel.ContentPart,
+	now time.Time,
+) *sdksession.Event {
+	if strings.TrimSpace(input) == "" && len(parts) == 0 {
+		return nil
+	}
+	message := sdkmodel.MessageFromTextAndContentParts(sdkmodel.RoleUser, strings.TrimSpace(input), parts)
+	label := participantBindingLabel(binding)
+	meta := map[string]any{}
+	if label != "" {
+		meta["mention"] = label
+		meta["handle"] = strings.TrimPrefix(label, "@")
+	}
+	if agent := strings.TrimSpace(binding.AgentName); agent != "" {
+		meta["agent"] = agent
+	}
+	kind := binding.Kind
+	if kind == "" {
+		kind = sdksession.ParticipantKindACP
+	}
+	role := binding.Role
+	if role == "" {
+		role = sdksession.ParticipantRoleSidecar
+	}
+	return &sdksession.Event{
+		Type:       sdksession.EventTypeUser,
+		Visibility: sdksession.VisibilityCanonical,
+		Time:       now,
+		Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
+		Scope: &sdksession.EventScope{
+			TurnID: strings.TrimSpace(turnID),
+			Source: firstNonEmpty(strings.TrimSpace(source), "acp_participant"),
+			Controller: sdksession.ControllerRef{
+				Kind:    session.Controller.Kind,
+				ID:      session.Controller.ControllerID,
+				EpochID: session.Controller.EpochID,
+			},
+			Participant: sdksession.ParticipantRef{
+				ID:   strings.TrimSpace(binding.ID),
+				Kind: kind,
+				Role: role,
+			},
+		},
+		Message: &message,
+		Text:    message.TextContent(),
+		Protocol: &sdksession.EventProtocol{
+			UpdateType: string(sdksession.ProtocolUpdateTypeUserMessage),
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
+				Content:       sdksession.ProtocolTextContent(message.TextContent()),
+			},
+		},
+		Meta: meta,
+	}
 }
 
 func (r *Runtime) HandoffController(ctx context.Context, req sdkruntime.HandoffControllerRequest) (sdksession.Session, error) {
@@ -535,7 +714,11 @@ func (r *Runtime) HandoffController(ctx context.Context, req sdkruntime.HandoffC
 		if r.controllers == nil {
 			return sdksession.Session{}, fmt.Errorf("sdk/runtime/local: ACP controller backend is not configured")
 		}
-		contextPrelude, contextSeq := r.buildControllerHandoffContext(ctx, session, ref, from)
+		sinceSeq := 0
+		if from.Kind == sdksession.ControllerKindACP && sameControllerAgent(from, req.Agent) {
+			sinceSeq = from.ContextSyncSeq
+		}
+		contextPrelude, contextSeq := r.buildControllerHandoffContext(ctx, session, ref, from, sinceSeq, "")
 		to, err = r.controllers.Activate(ctx, sdkcontroller.HandoffRequest{
 			SessionRef:     ref,
 			Session:        session,
@@ -573,13 +756,32 @@ func (r *Runtime) HandoffController(ctx context.Context, req sdkruntime.HandoffC
 	return r.sessions.Session(ctx, ref)
 }
 
+func (r *Runtime) buildControllerTurnContext(
+	ctx context.Context,
+	session sdksession.Session,
+	ref sdksession.SessionRef,
+	excludeTurnID string,
+) (string, int) {
+	binding := sdksession.CloneControllerBinding(session.Controller)
+	if binding.Kind != sdksession.ControllerKindACP {
+		return "", binding.ContextSyncSeq
+	}
+	contextPrelude, contextSeq := r.buildControllerHandoffContext(ctx, session, ref, binding, binding.ContextSyncSeq, excludeTurnID)
+	if contextSeq <= binding.ContextSyncSeq {
+		return "", binding.ContextSyncSeq
+	}
+	return contextPrelude, contextSeq
+}
+
 func (r *Runtime) buildControllerHandoffContext(
 	ctx context.Context,
 	session sdksession.Session,
 	ref sdksession.SessionRef,
 	from sdksession.ControllerBinding,
+	sinceSeq int,
+	excludeTurnID string,
 ) (string, int) {
-	seq := from.ContextSyncSeq + 1
+	shared := r.buildSharedDialogueDeltaExcludingTurn(ctx, ref, sinceSeq, excludeTurnID)
 	var b strings.Builder
 	b.WriteString("Caelis controller handoff context. Continue the existing Caelis session; do not treat this as a fresh conversation.\n")
 	b.WriteString("session_id: ")
@@ -589,7 +791,7 @@ func (r *Runtime) buildControllerHandoffContext(
 	b.WriteString("\nprevious_controller: ")
 	b.WriteString(firstNonEmpty(strings.TrimSpace(from.AgentName), strings.TrimSpace(from.Label), strings.TrimSpace(from.ControllerID), string(from.Kind)))
 	b.WriteString("\ncontext_sync_seq: ")
-	fmt.Fprintf(&b, "%d", seq)
+	fmt.Fprintf(&b, "%d", shared.Checkpoint)
 	if len(session.Participants) > 0 {
 		b.WriteString("\nchild_handles:")
 		for _, participant := range session.Participants {
@@ -606,55 +808,273 @@ func (r *Runtime) buildControllerHandoffContext(
 				b.WriteString(" agent=")
 				b.WriteString(agent)
 			}
-			if taskID := strings.TrimSpace(participant.DelegationID); taskID != "" {
-				b.WriteString(" task_id=")
-				b.WriteString(taskID)
-			}
 		}
 	}
-	if r != nil && r.sessions != nil {
-		if events, err := r.sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref}); err == nil {
-			tail := canonicalTextTail(events, 24)
-			if len(tail) > 0 {
-				b.WriteString("\ncanonical_tail:")
-				for _, line := range tail {
-					b.WriteString("\n- ")
-					b.WriteString(line)
-				}
-			}
-		}
-	}
-	return b.String(), seq
+	appendSharedDialogueDelta(&b, shared)
+	return b.String(), shared.Checkpoint
 }
 
-func canonicalTextTail(events []*sdksession.Event, limit int) []string {
-	if limit <= 0 || len(events) == 0 {
+func (r *Runtime) buildParticipantPromptContext(
+	ctx context.Context,
+	session sdksession.Session,
+	ref sdksession.SessionRef,
+	binding sdksession.ParticipantBinding,
+) string {
+	shared := r.buildSharedDialogueDelta(ctx, ref, binding.ContextSyncSeq)
+	var b strings.Builder
+	b.WriteString("Caelis shared public dialogue context. Use this as background for the current side-agent request; do not treat it as a fresh session.\n")
+	if sessionID := strings.TrimSpace(session.SessionID); sessionID != "" {
+		b.WriteString("session_id: ")
+		b.WriteString(sessionID)
+		b.WriteString("\n")
+	}
+	if cwd := strings.TrimSpace(session.CWD); cwd != "" {
+		b.WriteString("workspace: ")
+		b.WriteString(cwd)
+		b.WriteString("\n")
+	}
+	if target := firstNonEmpty(strings.TrimSpace(binding.Label), strings.TrimSpace(binding.AgentName), strings.TrimSpace(binding.ID)); target != "" {
+		b.WriteString("target_agent: ")
+		b.WriteString(target)
+		b.WriteString("\n")
+	}
+	appendSharedDialogueDelta(&b, shared)
+	return strings.TrimSpace(b.String())
+}
+
+func (r *Runtime) updateControllerContextCheckpoint(ctx context.Context, ref sdksession.SessionRef) error {
+	if r == nil || r.sessions == nil {
 		return nil
 	}
-	out := make([]string, 0, limit)
-	for i := len(events) - 1; i >= 0 && len(out) < limit; i-- {
-		event := events[i]
-		if event == nil || !sdksession.IsCanonicalHistoryEvent(event) {
+	session, err := r.sessions.Session(ctx, ref)
+	if err != nil {
+		return err
+	}
+	binding := sdksession.CloneControllerBinding(session.Controller)
+	binding.ContextSyncSeq = r.sharedDialogueCheckpoint(ctx, ref)
+	_, err = r.sessions.BindController(ctx, sdksession.BindControllerRequest{
+		SessionRef: ref,
+		Binding:    binding,
+	})
+	return err
+}
+
+func (r *Runtime) updateParticipantContextCheckpoint(ctx context.Context, ref sdksession.SessionRef, participantID string) error {
+	if r == nil || r.sessions == nil {
+		return nil
+	}
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" {
+		return nil
+	}
+	session, err := r.sessions.Session(ctx, ref)
+	if err != nil {
+		return err
+	}
+	binding, ok := participantBinding(session, participantID)
+	if !ok {
+		return nil
+	}
+	binding.ContextSyncSeq = r.sharedDialogueCheckpoint(ctx, ref)
+	_, err = r.sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
+		SessionRef: ref,
+		Binding:    binding,
+	})
+	return err
+}
+
+func (r *Runtime) sharedDialogueCheckpoint(ctx context.Context, ref sdksession.SessionRef) int {
+	if r == nil || r.sessions == nil {
+		return 0
+	}
+	events, err := r.sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
+	if err != nil {
+		return 0
+	}
+	return sharedDialogueCheckpoint(events)
+}
+
+type sharedDialogueDelta struct {
+	Checkpoint int
+	Entries    []sharedDialogueEntry
+}
+
+type sharedDialogueEntry struct {
+	Seq  int
+	Role string
+	Text string
+}
+
+func (r *Runtime) buildSharedDialogueDelta(ctx context.Context, ref sdksession.SessionRef, sinceSeq int) sharedDialogueDelta {
+	return r.buildSharedDialogueDeltaExcludingTurn(ctx, ref, sinceSeq, "")
+}
+
+func (r *Runtime) buildSharedDialogueDeltaExcludingTurn(ctx context.Context, ref sdksession.SessionRef, sinceSeq int, excludeTurnID string) sharedDialogueDelta {
+	if r == nil || r.sessions == nil {
+		return sharedDialogueDelta{}
+	}
+	events, err := r.sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
+	if err != nil {
+		return sharedDialogueDelta{}
+	}
+	return sharedDialogueDeltaFromEventsExcludingTurn(events, sinceSeq, excludeTurnID)
+}
+
+func sharedDialogueDeltaFromEvents(events []*sdksession.Event, sinceSeq int) sharedDialogueDelta {
+	return sharedDialogueDeltaFromEventsExcludingTurn(events, sinceSeq, "")
+}
+
+func sharedDialogueDeltaFromEventsExcludingTurn(events []*sdksession.Event, sinceSeq int, excludeTurnID string) sharedDialogueDelta {
+	if sinceSeq < 0 {
+		sinceSeq = 0
+	}
+	excludeTurnID = strings.TrimSpace(excludeTurnID)
+	latestCompactSeq := latestCompactEventSeq(events)
+	startAfter := sinceSeq
+	if latestCompactSeq > 0 && sinceSeq < latestCompactSeq {
+		startAfter = latestCompactSeq - 1
+	}
+	out := sharedDialogueDelta{Checkpoint: sharedDialogueCheckpointExcludingTurn(events, excludeTurnID)}
+	for i, event := range events {
+		seq := i + 1
+		if seq <= startAfter {
 			continue
 		}
-		role := strings.TrimSpace(string(event.Type))
-		text := strings.TrimSpace(event.Text)
-		if text == "" && event.Message != nil {
-			text = strings.TrimSpace(event.Message.TextContent())
+		if latestCompactSeq > 0 && seq < latestCompactSeq {
+			continue
 		}
+		if excludeTurnID != "" && event != nil && event.Scope != nil && strings.TrimSpace(event.Scope.TurnID) == excludeTurnID {
+			continue
+		}
+		if !isSharedDialogueDeltaEvent(event, latestCompactSeq, seq) {
+			continue
+		}
+		text := sharedDialogueText(event)
 		if text == "" {
 			continue
 		}
-		text = strings.ReplaceAll(text, "\n", " ")
-		if len(text) > 500 {
-			text = text[:500]
-		}
-		out = append(out, role+": "+text)
-	}
-	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
-		out[i], out[j] = out[j], out[i]
+		out.Entries = append(out.Entries, sharedDialogueEntry{
+			Seq:  seq,
+			Role: sharedDialogueRole(event),
+			Text: text,
+		})
 	}
 	return out
+}
+
+func appendSharedDialogueDelta(b *strings.Builder, delta sharedDialogueDelta) {
+	if b == nil {
+		return
+	}
+	if delta.Checkpoint > 0 {
+		b.WriteString("\nshared_ledger_checkpoint: ")
+		fmt.Fprintf(b, "%d", delta.Checkpoint)
+	}
+	b.WriteString("\nshared_dialogue_delta:")
+	if len(delta.Entries) == 0 {
+		b.WriteString("\n(none)")
+		return
+	}
+	for _, entry := range delta.Entries {
+		b.WriteString("\n[")
+		fmt.Fprintf(b, "%d", entry.Seq)
+		b.WriteString("] ")
+		b.WriteString(entry.Role)
+		b.WriteString(":\n")
+		b.WriteString(entry.Text)
+	}
+}
+
+func isSharedDialogueDeltaEvent(event *sdksession.Event, latestCompactSeq int, seq int) bool {
+	if event == nil || !sdksession.IsCanonicalHistoryEvent(event) {
+		return false
+	}
+	if latestCompactSeq > 0 && seq == latestCompactSeq && sdkcompact.IsCompactEvent(event) {
+		return true
+	}
+	return isSharedDialogueEvent(event)
+}
+
+func latestCompactEventSeq(events []*sdksession.Event) int {
+	for i := len(events) - 1; i >= 0; i-- {
+		if sdkcompact.IsCompactEvent(events[i]) {
+			return i + 1
+		}
+	}
+	return 0
+}
+
+func sharedDialogueCheckpoint(events []*sdksession.Event) int {
+	return sharedDialogueCheckpointExcludingTurn(events, "")
+}
+
+func sharedDialogueCheckpointExcludingTurn(events []*sdksession.Event, excludeTurnID string) int {
+	excludeTurnID = strings.TrimSpace(excludeTurnID)
+	checkpoint := 0
+	latestCompactSeq := latestCompactEventSeq(events)
+	for i, event := range events {
+		seq := i + 1
+		if latestCompactSeq > 0 && seq < latestCompactSeq {
+			continue
+		}
+		if excludeTurnID != "" && event != nil && event.Scope != nil && strings.TrimSpace(event.Scope.TurnID) == excludeTurnID {
+			continue
+		}
+		if isSharedDialogueDeltaEvent(event, latestCompactSeq, seq) {
+			checkpoint = seq
+		}
+	}
+	return checkpoint
+}
+
+func isSharedDialogueEvent(event *sdksession.Event) bool {
+	if event == nil || !sdksession.IsCanonicalHistoryEvent(event) {
+		return false
+	}
+	switch sdksession.EventTypeOf(event) {
+	case sdksession.EventTypeUser, sdksession.EventTypeAssistant:
+		return true
+	default:
+		return false
+	}
+}
+
+func sharedDialogueRole(event *sdksession.Event) string {
+	if event == nil {
+		return ""
+	}
+	if sdkcompact.IsCompactEvent(event) {
+		return "compact"
+	}
+	role := strings.TrimSpace(string(sdksession.EventTypeOf(event)))
+	actor := strings.TrimSpace(event.Actor.Name)
+	if actor == "" {
+		actor = strings.TrimSpace(event.Actor.ID)
+	}
+	if actor == "" || strings.EqualFold(actor, role) {
+		return role
+	}
+	return role + "(" + actor + ")"
+}
+
+func sharedDialogueText(event *sdksession.Event) string {
+	if event == nil {
+		return ""
+	}
+	return strings.TrimSpace(sdksession.EventText(event))
+}
+
+func sameControllerAgent(binding sdksession.ControllerBinding, agent string) bool {
+	agent = strings.TrimSpace(agent)
+	if agent == "" {
+		return false
+	}
+	for _, candidate := range []string{binding.AgentName, binding.Label, binding.ControllerID} {
+		if strings.EqualFold(strings.TrimSpace(candidate), agent) {
+			return true
+		}
+	}
+	return false
 }
 
 func participantBinding(session sdksession.Session, participantID string) (sdksession.ParticipantBinding, bool) {
@@ -665,6 +1085,10 @@ func participantBinding(session sdksession.Session, participantID string) (sdkse
 		}
 	}
 	return sdksession.ParticipantBinding{}, false
+}
+
+func participantBindingLabel(binding sdksession.ParticipantBinding) string {
+	return firstNonEmpty(strings.TrimSpace(binding.Label), strings.TrimSpace(binding.AgentName), strings.TrimSpace(binding.ID))
 }
 
 func participantLifecycleEvent(session sdksession.Session, binding sdksession.ParticipantBinding, action string, now time.Time) *sdksession.Event {

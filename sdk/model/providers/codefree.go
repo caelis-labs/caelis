@@ -237,11 +237,7 @@ func (l *codeFreeLLM) Generate(ctx context.Context, req *model.Request) iter.Seq
 					FinishReason: normalizeOpenAICompatFinishReason(out.Choices[0].FinishReason),
 					Model:        out.Model,
 					Provider:     l.provider,
-					Usage: model.Usage{
-						PromptTokens:     out.Usage.PromptTokens,
-						CompletionTokens: out.Usage.CompletionTokens,
-						TotalTokens:      out.Usage.TotalTokens,
-					},
+					Usage:        out.Usage.toKernelUsage(),
 				},
 			}, nil)
 			return
@@ -266,12 +262,8 @@ func (l *codeFreeLLM) Generate(ctx context.Context, req *model.Request) iter.Seq
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				return err
 			}
-			if chunk.Usage.PromptTokens > 0 || chunk.Usage.CompletionTokens > 0 || chunk.Usage.TotalTokens > 0 {
-				usage = model.Usage{
-					PromptTokens:     chunk.Usage.PromptTokens,
-					CompletionTokens: chunk.Usage.CompletionTokens,
-					TotalTokens:      chunk.Usage.TotalTokens,
-				}
+			if chunk.Usage.hasAny() {
+				usage = chunk.Usage.toKernelUsage()
 			}
 			if len(chunk.Choices) == 0 {
 				return nil
@@ -394,11 +386,7 @@ func emitCodeFreeJSONTurnDone(reader *bufio.Reader, provider string, fallbackMod
 			FinishReason: normalizeOpenAICompatFinishReason(out.Choices[0].FinishReason),
 			Model:        modelName,
 			Provider:     provider,
-			Usage: model.Usage{
-				PromptTokens:     out.Usage.PromptTokens,
-				CompletionTokens: out.Usage.CompletionTokens,
-				TotalTokens:      out.Usage.TotalTokens,
-			},
+			Usage:        out.Usage.toKernelUsage(),
 		},
 	}, nil)
 	return nil

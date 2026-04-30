@@ -5,7 +5,6 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
@@ -37,8 +36,8 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				if payload.ToolName != "bash" {
 					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "bash")
 				}
-				if payload.CommandPreview != "echo hi" {
-					t.Fatalf("payload.CommandPreview = %q, want %q", payload.CommandPreview, "echo hi")
+				if payload.RawInput["command"] != "echo hi" {
+					t.Fatalf("payload.RawInput = %#v, want command", payload.RawInput)
 				}
 				if payload.Status != ApprovalStatusPending {
 					t.Fatalf("payload.Status = %q, want %q", payload.Status, ApprovalStatusPending)
@@ -66,8 +65,8 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				if payload.ToolName != "BASH" {
 					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "BASH")
 				}
-				if payload.CommandPreview != "rm -rf /tmp/demo" {
-					t.Fatalf("payload.CommandPreview = %q, want %q", payload.CommandPreview, "rm -rf /tmp/demo")
+				if payload.RawInput["command"] != "rm -rf /tmp/demo" {
+					t.Fatalf("payload.RawInput = %#v, want command", payload.RawInput)
 				}
 				if len(payload.Options) != 1 || payload.Options[0].ID != "allow_once" {
 					t.Fatalf("payload.Options = %#v, want allow_once option", payload.Options)
@@ -85,6 +84,50 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 			t.Parallel()
 			tt.want(t, canonicalApprovalPayload(tt.req))
 		})
+	}
+}
+
+func TestProjectSessionEventPreservesMinimalCaelisMeta(t *testing.T) {
+	t.Parallel()
+
+	env, ok := ProjectSessionEvent(sdksession.SessionRef{SessionID: "sess-1"}, &sdksession.Event{
+		ID:   "tool-call-task",
+		Type: sdksession.EventTypeToolCall,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": map[string]any{
+						"name": "TASK",
+					},
+				},
+			},
+		},
+		Protocol: &sdksession.EventProtocol{
+			ToolCall: &sdksession.ProtocolToolCall{
+				ID:     "call-task",
+				Name:   "TASK",
+				Status: "running",
+			},
+		},
+	})
+	if !ok || env.Event.ToolCall == nil {
+		t.Fatalf("ProjectSessionEvent() = (%#v, %v), want tool call", env, ok)
+	}
+	caelis, ok := env.Event.Meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("event.Meta = %#v, want caelis meta", env.Event.Meta)
+	}
+	if _, ok := caelis["display"]; ok {
+		t.Fatalf("meta.caelis = %#v, should not synthesize display data", caelis)
+	}
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta.caelis = %#v, want runtime map", caelis)
+	}
+	tool, ok := runtimeMeta["tool"].(map[string]any)
+	if !ok || tool["name"] != "TASK" {
+		t.Fatalf("runtime.tool = %#v, want TASK", runtimeMeta["tool"])
 	}
 }
 
@@ -262,8 +305,8 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				if env.Event.ToolCall.Status != ToolStatusStarted {
 					t.Fatalf("event.ToolCall.Status = %q, want %q", env.Event.ToolCall.Status, ToolStatusStarted)
 				}
-				if env.Event.ToolCall.CommandPreview != "/tmp/demo.txt" {
-					t.Fatalf("event.ToolCall.CommandPreview = %q, want %q", env.Event.ToolCall.CommandPreview, "/tmp/demo.txt")
+				if got := env.Event.ToolCall.RawInput["path"]; got != "/tmp/demo.txt" {
+					t.Fatalf("event.ToolCall.RawInput[path] = %#v, want /tmp/demo.txt", got)
 				}
 			},
 		},
@@ -317,14 +360,10 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 			},
 		},
 		{
-			name: "tool result preserves acp raw payload and caelis display meta",
+			name: "tool result preserves acp raw payload without synthesizing display meta",
 			ev: &sdksession.Event{
 				ID:   "tool-result-read-display",
 				Type: sdksession.EventTypeToolResult,
-				Meta: map[string]any{
-					"path":       "/tmp/demo.py",
-					"start_line": 1,
-				},
 				Protocol: &sdksession.EventProtocol{
 					ToolCall: &sdksession.ProtocolToolCall{
 						ID:       "call-read",
@@ -352,23 +391,15 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				if got := env.Event.ToolResult.RawOutput["start_line"]; got != 1 {
 					t.Fatalf("event.ToolResult.RawOutput[start_line] = %#v", got)
 				}
-				caelis, ok := env.Event.Meta["caelis"].(map[string]any)
-				if !ok {
-					t.Fatalf("event.Meta = %#v, want caelis map", env.Event.Meta)
-				}
 				if _, ok := env.Event.Meta["path"]; ok {
 					t.Fatalf("event.Meta = %#v, raw tool fields must stay under meta.caelis", env.Event.Meta)
 				}
-				display, ok := caelis["display"].(map[string]any)
-				if !ok {
-					t.Fatalf("meta.caelis = %#v, want display map", caelis)
-				}
-				file, ok := display["file"].(map[string]any)
-				if !ok {
-					t.Fatalf("meta.caelis.display = %#v, want file display", display)
-				}
-				if file["path"] != "/tmp/demo.py" || file["start_line"] != 1 || file["end_line"] != 100 {
-					t.Fatalf("display.file = %#v", file)
+				if env.Event.Meta != nil {
+					if caelis, ok := env.Event.Meta["caelis"].(map[string]any); ok {
+						if _, hasDisplay := caelis["display"]; hasDisplay {
+							t.Fatalf("meta.caelis = %#v, should not synthesize display data", caelis)
+						}
+					}
 				}
 			},
 		},
@@ -460,9 +491,10 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Text: "done",
 				Meta: map[string]any{
 					"usage": map[string]any{
-						"prompt_tokens":     12,
-						"completion_tokens": 5,
-						"total_tokens":      17,
+						"prompt_tokens":       12,
+						"cached_input_tokens": 7,
+						"completion_tokens":   5,
+						"total_tokens":        17,
 					},
 				},
 			},
@@ -471,7 +503,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				if env.Event.Usage == nil {
 					t.Fatal("event.Usage = nil, want payload")
 				}
-				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.TotalTokens != 17 {
+				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CachedInputTokens != 7 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.TotalTokens != 17 {
 					t.Fatalf("event.Usage = %+v", env.Event.Usage)
 				}
 			},
@@ -483,9 +515,10 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Type: sdksession.EventTypeAssistant,
 				Text: "done",
 				Meta: map[string]any{
-					"prompt_tokens":     12,
-					"completion_tokens": 5,
-					"total_tokens":      17,
+					"prompt_tokens":       12,
+					"cached_input_tokens": 7,
+					"completion_tokens":   5,
+					"total_tokens":        17,
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -493,7 +526,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				if env.Event.Usage == nil {
 					t.Fatal("event.Usage = nil, want payload")
 				}
-				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.TotalTokens != 17 {
+				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CachedInputTokens != 7 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.TotalTokens != 17 {
 					t.Fatalf("event.Usage = %+v", env.Event.Usage)
 				}
 			},
@@ -513,18 +546,22 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 	}
 }
 
-func TestProjectSessionEventsPreservesMessageToolCallID(t *testing.T) {
+func TestProjectSessionEventsPreservesProtocolToolCallID(t *testing.T) {
 	t.Parallel()
 
-	message := sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{{
-		ID:   "call-1",
-		Name: "BASH",
-		Args: `{"command":"echo hi"}`,
-	}}, "")
-
 	events := projectSessionEvents(sdksession.SessionRef{SessionID: "root-session"}, []*sdksession.Event{{
-		ID:      "tool-1",
-		Message: &message,
+		ID:   "tool-1",
+		Type: sdksession.EventTypeToolCall,
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "BASH"}}}},
+		Protocol: &sdksession.EventProtocol{
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeToolCall),
+				ToolCallID:    "call-1",
+				Kind:          "execute",
+				Title:         "BASH echo hi",
+				RawInput:      map[string]any{"command": "echo hi"},
+			},
+		},
 	}})
 	if len(events) != 1 {
 		t.Fatalf("projectSessionEvents() len = %d, want 1", len(events))
@@ -728,11 +765,11 @@ func TestEventEnvelopeJSONUsesStableProtocolNames(t *testing.T) {
 			RunID:    "run-1",
 			TurnID:   "turn-1",
 			ToolCall: &ToolCallPayload{
-				CallID:         "call-1",
-				ToolName:       "BASH",
-				CommandPreview: "go test ./gateway/...",
-				Status:         ToolStatusWaitingApproval,
-				Scope:          EventScopeMain,
+				CallID:   "call-1",
+				ToolName: "BASH",
+				RawInput: map[string]any{"command": "go test ./gateway/..."},
+				Status:   ToolStatusWaitingApproval,
+				Scope:    EventScopeMain,
 			},
 		},
 	}
@@ -760,7 +797,8 @@ func TestEventEnvelopeJSONUsesStableProtocolNames(t *testing.T) {
 	if !ok {
 		t.Fatalf("EventEnvelope JSON event = %#v, want tool_call object", event)
 	}
-	if tool["command_preview"] != "go test ./gateway/..." || tool["status"] != string(ToolStatusWaitingApproval) {
+	rawInput, _ := tool["raw_input"].(map[string]any)
+	if rawInput["command"] != "go test ./gateway/..." || tool["status"] != string(ToolStatusWaitingApproval) {
 		t.Fatalf("tool_call JSON = %#v", tool)
 	}
 }
@@ -817,21 +855,5 @@ func TestReplayAfterCursorReturnsCursorNotFound(t *testing.T) {
 	var gwErr *Error
 	if !As(err, &gwErr) || gwErr.Code != CodeCursorNotFound {
 		t.Fatalf("replayAfterCursor() error = %v, want cursor_not_found", err)
-	}
-}
-
-func TestCompactStringValueTruncatesUTF8Safely(t *testing.T) {
-	t.Parallel()
-
-	input := strings.Repeat("你", 130)
-	got := compactStringValue(input)
-	if !utf8.ValidString(got) {
-		t.Fatalf("compactStringValue() produced invalid UTF-8: %q", got)
-	}
-	if !strings.HasSuffix(got, "...") {
-		t.Fatalf("compactStringValue() = %q, want ellipsis suffix", got)
-	}
-	if len([]rune(got)) != 120 {
-		t.Fatalf("len([]rune(got)) = %d, want 120", len([]rune(got)))
 	}
 }

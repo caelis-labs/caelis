@@ -119,7 +119,7 @@ func TestSessionServiceE2E(t *testing.T) {
 	if got, want := len(loadedChild.Events), 1; got != want {
 		t.Fatalf("len(child events) = %d, want %d", got, want)
 	}
-	if got := loadedChild.Events[0].Text; got != "child running" {
+	if got := sdksession.EventText(loadedChild.Events[0]); got != "child running" {
 		t.Fatalf("child event text = %q, want %q", got, "child running")
 	}
 

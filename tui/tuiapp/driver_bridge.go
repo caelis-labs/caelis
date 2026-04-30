@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 	"sync"
@@ -1022,14 +1023,13 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 		Kind:       appgateway.EventKindToolResult,
 		OccurredAt: time.Now(),
 		ToolResult: &appgateway.ToolResultPayload{
-			CallID:     callID,
-			ToolName:   "BASH",
-			Status:     status,
-			Scope:      appgateway.EventScopeMain,
-			OutputText: output,
-			RawInput:   map[string]any{"command": strings.TrimSpace(command)},
-			RawOutput:  rawOutput,
-			Error:      isErr,
+			CallID:    callID,
+			ToolName:  "BASH",
+			Status:    status,
+			Scope:     appgateway.EventScopeMain,
+			RawInput:  map[string]any{"command": strings.TrimSpace(command)},
+			RawOutput: rawOutput,
+			Error:     isErr,
 		},
 	}})
 }
@@ -1727,7 +1727,7 @@ func approvalPayloadFromRuntimeRequest(req sdkruntime.ApprovalRequest) *appgatew
 		if payload.ToolName == "" || strings.EqualFold(payload.ToolName, "UNKNOWN") {
 			payload.ToolName = firstNonEmpty(req.Approval.ToolCall.Title, req.Approval.ToolCall.Kind, payload.ToolName)
 		}
-		payload.CommandPreview = approvalCommandPreview(req.Approval.ToolCall.RawInput)
+		payload.RawInput = maps.Clone(req.Approval.ToolCall.RawInput)
 		if len(req.Approval.Options) > 0 {
 			payload.Options = make([]appgateway.ApprovalOption, 0, len(req.Approval.Options))
 			for _, option := range req.Approval.Options {
@@ -1739,10 +1739,10 @@ func approvalPayloadFromRuntimeRequest(req sdkruntime.ApprovalRequest) *appgatew
 			}
 		}
 	}
-	if payload.CommandPreview == "" {
-		payload.CommandPreview = approvalCommandPreviewFromJSON(string(req.Call.Input))
+	if len(payload.RawInput) == 0 {
+		payload.RawInput = approvalRawInputFromJSON(string(req.Call.Input))
 	}
-	if payload.ToolName == "" && payload.CommandPreview == "" && len(payload.Options) == 0 {
+	if payload.ToolName == "" && len(payload.RawInput) == 0 && len(payload.Options) == 0 {
 		return nil
 	}
 	return payload
@@ -1772,18 +1772,16 @@ func approvalCommandPreview(raw map[string]any) string {
 	return compactString(string(data), 240)
 }
 
-func approvalCommandPreviewFromJSON(raw string) string {
+func approvalRawInputFromJSON(raw string) map[string]any {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return ""
+		return nil
 	}
 	var decoded map[string]any
-	if err := json.Unmarshal([]byte(raw), &decoded); err == nil {
-		if preview := approvalCommandPreview(decoded); preview != "" {
-			return preview
-		}
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return nil
 	}
-	return compactString(raw, 240)
+	return decoded
 }
 
 func sendApprovalPrompt(ctx context.Context, turn tuiadapterruntime.Turn, req *appgateway.ApprovalPayload, send func(tea.Msg)) {
@@ -1971,6 +1969,9 @@ func formatStatusSnapshot(status tuiadapterruntime.StatusSnapshot) string {
 	if usage := formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens); usage != "" {
 		lines = append(lines, fmt.Sprintf("  Context    %s", usage))
 	}
+	if usage := formatSessionTokenUsageStatus(status); usage != "" {
+		lines = append(lines, fmt.Sprintf("  Tokens     %s", usage))
+	}
 	if status.FallbackReason != "" {
 		lines = append(lines, "  Fallback   "+strings.TrimSpace(status.FallbackReason))
 	}
@@ -1987,6 +1988,26 @@ func formatStatusSnapshot(status tuiadapterruntime.StatusSnapshot) string {
 		lines = append(lines, "warn: Requested sandbox backend is unavailable and a fallback is in effect")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatSessionTokenUsageStatus(status tuiadapterruntime.StatusSnapshot) string {
+	inputTokens := max(status.SessionInputTokens, 0)
+	cachedTokens := max(status.SessionCachedInputTokens, 0)
+	outputTokens := max(status.SessionOutputTokens, 0)
+	totalTokens := max(status.SessionTotalTokens, 0)
+	if totalTokens == 0 && (inputTokens != 0 || outputTokens != 0) {
+		totalTokens = inputTokens + outputTokens
+	}
+	if inputTokens == 0 && cachedTokens == 0 && outputTokens == 0 && totalTokens == 0 {
+		return ""
+	}
+	return fmt.Sprintf(
+		"input %d, cached %d, output %d, total %d",
+		inputTokens,
+		cachedTokens,
+		outputTokens,
+		totalTokens,
+	)
 }
 
 func agentHelpText() string {
@@ -2177,7 +2198,7 @@ func friendlyCommandError(action string, err error) error {
 	case strings.Contains(lower, "agent ") && strings.Contains(lower, " is ambiguous"):
 		return fmt.Errorf("%s: agent name is ambiguous. Type more of the agent name or run /agent list", action)
 	case strings.Contains(lower, "subagent handle") && strings.Contains(lower, "not found"):
-		return fmt.Errorf("%s: handle was not found. Use @handle only for subagents created by /<agent> or SPAWN", action)
+		return fmt.Errorf("%s: handle was not found. Use @handle only for side subagents created by /<agent>", action)
 	case strings.Contains(lower, "participant id is required"), strings.Contains(lower, "participant ") && strings.Contains(lower, " is not attached"):
 		return fmt.Errorf("%s: participant was not found", action)
 	case strings.Contains(lower, "participant ") && strings.Contains(lower, " is ambiguous"):

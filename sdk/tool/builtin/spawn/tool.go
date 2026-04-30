@@ -43,7 +43,7 @@ func (t Tool) Definition() sdktool.Definition {
 	}
 	return sdktool.Definition{
 		Name:        ToolName,
-		Description: "Delegate a sub-task to self or one registered ACP agent. SPAWN starts a child session and returns task_id plus handle metadata; use TASK wait, cancel, or write for follow-up control.",
+		Description: "Delegate a sub-task to self or one registered ACP agent. SPAWN starts a child session and returns a task handle; use that handle with TASK wait, cancel, or write for follow-up control.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,

@@ -179,7 +179,7 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 			ToolCall: &appgateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
-				ArgsText: `/tmp/demo.txt`,
+				RawInput: map[string]any{"path": "/tmp/demo.txt"},
 				Status:   "running",
 				Scope:    appgateway.EventScopeMain,
 			},
@@ -191,11 +191,12 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 			Kind:       appgateway.EventKindToolResult,
 			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 			ToolResult: &appgateway.ToolResultPayload{
-				CallID:     "call-1",
-				ToolName:   "READ",
-				OutputText: "/tmp/demo.txt",
-				Status:     "completed",
-				Scope:      appgateway.EventScopeMain,
+				CallID:    "call-1",
+				ToolName:  "READ",
+				RawInput:  map[string]any{"path": "/tmp/demo.txt"},
+				RawOutput: map[string]any{"path": "/tmp/demo.txt"},
+				Status:    "completed",
+				Scope:     appgateway.EventScopeMain,
 			},
 		},
 	})
@@ -232,7 +233,7 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 			ToolCall: &appgateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "BASH",
-				ArgsText: `go test ./gateway/...`,
+				RawInput: map[string]any{"command": `go test ./gateway/...`},
 				Status:   appgateway.ToolStatusRunning,
 				Scope:    appgateway.EventScopeMain,
 			},
@@ -244,11 +245,12 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 			Kind:       appgateway.EventKindToolResult,
 			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 			ToolResult: &appgateway.ToolResultPayload{
-				CallID:     "call-1",
-				ToolName:   "BASH",
-				OutputText: "stdout resolving packages",
-				Status:     appgateway.ToolStatusRunning,
-				Scope:      appgateway.EventScopeMain,
+				CallID:    "call-1",
+				ToolName:  "BASH",
+				RawInput:  map[string]any{"command": `go test ./gateway/...`},
+				RawOutput: map[string]any{"stdout": "stdout resolving packages"},
+				Status:    appgateway.ToolStatusRunning,
+				Scope:     appgateway.EventScopeMain,
 			},
 		},
 	})
@@ -280,7 +282,7 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsed(t *testing.T) {
 			ToolCall: &appgateway.ToolCallPayload{
 				CallID:   "call-1",
 				ToolName: "READ",
-				ArgsText: "gateway/core/types.go",
+				RawInput: map[string]any{"path": "gateway/core/types.go"},
 				Status:   appgateway.ToolStatusRunning,
 				Scope:    appgateway.EventScopeMain,
 			},
@@ -292,11 +294,12 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsed(t *testing.T) {
 			Kind:       appgateway.EventKindToolResult,
 			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 			ToolResult: &appgateway.ToolResultPayload{
-				CallID:     "call-1",
-				ToolName:   "READ",
-				OutputText: "package core\n\ntype Event struct{}",
-				Status:     appgateway.ToolStatusCompleted,
-				Scope:      appgateway.EventScopeMain,
+				CallID:    "call-1",
+				ToolName:  "READ",
+				RawInput:  map[string]any{"path": "gateway/core/types.go"},
+				RawOutput: map[string]any{"text": "package core\n\ntype Event struct{}"},
+				Status:    appgateway.ToolStatusCompleted,
+				Scope:     appgateway.EventScopeMain,
 			},
 		},
 	})
@@ -320,6 +323,15 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsed(t *testing.T) {
 func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendTool := func(id string, name string, args string, output string) {
+		rawInput := map[string]any{"path": args}
+		switch strings.ToUpper(name) {
+		case "RG", "SEARCH", "FIND":
+			rawInput = map[string]any{"query": args}
+		case "LIST":
+			rawInput = map[string]any{"path": args}
+		case "PATCH", "WRITE":
+			rawInput = map[string]any{"path": args}
+		}
 		updated, _ := model.Update(appgateway.EventEnvelope{
 			Event: appgateway.Event{
 				Kind:       appgateway.EventKindToolCall,
@@ -327,7 +339,7 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 				ToolCall: &appgateway.ToolCallPayload{
 					CallID:   id,
 					ToolName: name,
-					ArgsText: args,
+					RawInput: rawInput,
 					Status:   appgateway.ToolStatusRunning,
 					Scope:    appgateway.EventScopeMain,
 				},
@@ -339,11 +351,12 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 				Kind:       appgateway.EventKindToolResult,
 				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 				ToolResult: &appgateway.ToolResultPayload{
-					CallID:     id,
-					ToolName:   name,
-					OutputText: output,
-					Status:     appgateway.ToolStatusCompleted,
-					Scope:      appgateway.EventScopeMain,
+					CallID:    id,
+					ToolName:  name,
+					RawInput:  rawInput,
+					RawOutput: map[string]any{"text": output},
+					Status:    appgateway.ToolStatusCompleted,
+					Scope:     appgateway.EventScopeMain,
 				},
 			},
 		})
@@ -383,9 +396,9 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "• Explored") ||
-		!strings.Contains(joined, "  └ Read gateway/core/types.go") ||
-		!strings.Contains(joined, "    Search EventKind") ||
-		!strings.Contains(joined, "    List tui/tuiapp") {
+		!strings.Contains(joined, "  └ Read types.go") ||
+		!strings.Contains(joined, `    Search "EventKind"`) ||
+		!strings.Contains(joined, "    List tuiapp") {
 		t.Fatalf("rendered rows = %q, want compact exploration summary", joined)
 	}
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
@@ -394,7 +407,7 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	if strings.Contains(joined, "Now let me explore more") || strings.Contains(joined, "Let me search the event kind references next") {
 		t.Fatalf("rendered rows = %q, want exploration reasoning hidden while collapsed", joined)
 	}
-	exploreTailIdx := indexOfRowContaining(plain, "List tui/tuiapp")
+	exploreTailIdx := indexOfRowContaining(plain, "List tuiapp")
 	patchReasonIdx := indexOfRowContaining(plain, "> Let me patch the hook implementation next.")
 	patchIdx := indexOfRowContaining(plain, "• Patched hooks.go")
 	if exploreTailIdx < 0 || patchReasonIdx < 0 || patchIdx < 0 {
@@ -421,9 +434,9 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 		!strings.Contains(joined, "    1. The service layer for config.") ||
 		!strings.Contains(joined, "    2. The rbac remote client.") ||
 		!strings.Contains(joined, "    Let me search the event kind references next.") ||
-		!strings.Contains(joined, "    Read gateway/core/types.go") ||
-		!strings.Contains(joined, "Search EventKind") ||
-		!strings.Contains(joined, "List tui/tuiapp") {
+		!strings.Contains(joined, "    Read types.go") ||
+		!strings.Contains(joined, `Search "EventKind"`) ||
+		!strings.Contains(joined, "List tuiapp") {
 		t.Fatalf("expanded rows = %q, want ordered exploration stage", joined)
 	}
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
@@ -560,6 +573,10 @@ func TestGatewayCompletedExplorationSummaryWrapsAndAlignsDetails(t *testing.T) {
 func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendACPTool := func(id string, name string, args string, output string) {
+		rawInput := map[string]any{"path": args}
+		if strings.EqualFold(name, "SEARCH") {
+			rawInput = map[string]any{"query": args}
+		}
 		updated, _ := model.Update(appgateway.EventEnvelope{
 			Event: appgateway.Event{
 				Kind:       appgateway.EventKindToolCall,
@@ -568,7 +585,7 @@ func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 				ToolCall: &appgateway.ToolCallPayload{
 					CallID:   id,
 					ToolName: name,
-					ArgsText: args,
+					RawInput: rawInput,
 					Status:   appgateway.ToolStatusRunning,
 					Scope:    appgateway.EventScopeMain,
 				},
@@ -581,11 +598,12 @@ func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 				Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
 				ToolResult: &appgateway.ToolResultPayload{
-					CallID:     id,
-					ToolName:   name,
-					OutputText: output,
-					Status:     appgateway.ToolStatusCompleted,
-					Scope:      appgateway.EventScopeMain,
+					CallID:    id,
+					ToolName:  name,
+					RawInput:  rawInput,
+					RawOutput: map[string]any{"text": output},
+					Status:    appgateway.ToolStatusCompleted,
+					Scope:     appgateway.EventScopeMain,
 				},
 			},
 		})
@@ -608,7 +626,7 @@ func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 	if strings.Contains(joined, "• Explored") {
 		t.Fatalf("rendered rows = %q, want ACP tools to stay out of compact exploration grouping", joined)
 	}
-	if !strings.Contains(joined, "Read gateway/core/types.go") || !strings.Contains(joined, "Search EventKind") {
+	if !strings.Contains(joined, "Read types.go") || !strings.Contains(joined, `Search "EventKind"`) {
 		t.Fatalf("rendered rows = %q, want standard tool rows", joined)
 	}
 	if !block.toolPanelExpanded("read-1") || !block.toolPanelExpanded("search-1") {
@@ -743,14 +761,19 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Scope:    appgateway.EventScopeMain,
 				RawInput: map[string]any{"prompt": "write fibonacci"},
 				RawOutput: map[string]any{
-					"running": false,
-					"state":   "completed",
-					"task_id": "spawn-task-1",
-					"result":  "child line 1\nchild line 2\n",
+					"agent":            "self",
+					"agent_id":         "self-001",
+					"handle":           "leo",
+					"internal_task_id": "spawn-task-1",
+					"mention":          "@leo",
+					"running":          false,
+					"state":            "completed",
+					"task_id":          "leo",
+					"result":           "child line 1\nchild line 2\n",
 				},
 			},
 			want:        []string{"• Spawned", "  └ child line 1", "    child line 2"},
-			forbidden:   []string{"task / running", "state completed", "spawn-task-1"},
+			forbidden:   []string{"task / running", "state completed", "spawn-task-1", "self-001", "internal_task_id", "@leo"},
 			expandPanel: true,
 		},
 		{
@@ -763,12 +786,11 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				RawInput: map[string]any{"command": `sleep 10`},
 			},
 			result: &appgateway.ToolResultPayload{
-				CallID:     "bash-task-1",
-				ToolName:   "BASH",
-				Status:     appgateway.ToolStatusRunning,
-				Scope:      appgateway.EventScopeMain,
-				OutputText: `{"running":true,"session_id":"556d7447-4554-4fb9-ad1c-bb5a2e0f85ac","state":"running","supports_input":true,"task_id":"task-9"}`,
-				RawInput:   map[string]any{"command": `sleep 10`},
+				CallID:   "bash-task-1",
+				ToolName: "BASH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"command": `sleep 10`},
 				RawOutput: map[string]any{
 					"running":        true,
 					"session_id":     "556d7447-4554-4fb9-ad1c-bb5a2e0f85ac",
@@ -791,12 +813,11 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				RawInput: map[string]any{"action": "wait", "task_id": "task-9", "yield_time_ms": 5000},
 			},
 			result: &appgateway.ToolResultPayload{
-				CallID:     "task-1",
-				ToolName:   "TASK",
-				Status:     appgateway.ToolStatusRunning,
-				Scope:      appgateway.EventScopeMain,
-				OutputText: `{"running":true,"session_id":"556d7447-4554-4fb9-ad1c-bb5a2e0f85ac","state":"running","supports_input":true,"task_id":"task-9"}`,
-				RawInput:   map[string]any{"action": "wait", "task_id": "task-9", "yield_time_ms": 5000},
+				CallID:   "task-1",
+				ToolName: "TASK",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"action": "wait", "task_id": "task-9", "yield_time_ms": 5000},
 				RawOutput: map[string]any{
 					"running":        true,
 					"session_id":     "556d7447-4554-4fb9-ad1c-bb5a2e0f85ac",
@@ -805,7 +826,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"task_id":        "task-9",
 				},
 			},
-			want:        []string{"• Task WAIT 5 s"},
+			want:        []string{"• Tasks", "  └ Wait 5s"},
 			forbidden:   []string{"TASK", "task-9", "task / control", "state running", "session_id", "supports_input", "556d7447"},
 			expandPanel: true,
 		},
@@ -845,12 +866,12 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				RawInput: map[string]any{"path": "/tmp/workspace/workflow.go", "content": "package workflow\n"},
 			},
 			result: &appgateway.ToolResultPayload{
-				CallID:     "write-failed-1",
-				ToolName:   "WRITE",
-				Status:     appgateway.ToolStatusFailed,
-				Scope:      appgateway.EventScopeMain,
-				OutputText: "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
-				RawInput:   map[string]any{"path": "/tmp/workspace/workflow.go", "content": "package workflow\n"},
+				CallID:    "write-failed-1",
+				ToolName:  "WRITE",
+				Status:    appgateway.ToolStatusFailed,
+				Scope:     appgateway.EventScopeMain,
+				RawInput:  map[string]any{"path": "/tmp/workspace/workflow.go", "content": "package workflow\n"},
+				RawOutput: map[string]any{"error": "Sandbox permission denied. Use a writable workspace path or request elevated permissions."},
 			},
 			want:        []string{"• Write failed workflow.go", "└ Sandbox permission denied"},
 			forbidden:   []string{"• Wrote workflow.go", "╭", "╰", "│ ! workflow.go"},
@@ -866,13 +887,12 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
 			},
 			result: &appgateway.ToolResultPayload{
-				CallID:     "patch-failed-1",
-				ToolName:   "PATCH",
-				Status:     appgateway.ToolStatusFailed,
-				Scope:      appgateway.EventScopeMain,
-				OutputText: "failed",
-				RawInput:   map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
-				RawOutput:  map[string]any{"error": `tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
+				CallID:    "patch-failed-1",
+				ToolName:  "PATCH",
+				Status:    appgateway.ToolStatusFailed,
+				Scope:     appgateway.EventScopeMain,
+				RawInput:  map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
+				RawOutput: map[string]any{"error": `tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
 			},
 			want:        []string{"• Patch failed gm_license.go", `└ tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
 			forbidden:   []string{"  └ failed", "╭", "╰"},
@@ -1015,19 +1035,36 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 	}
 }
 
-func TestGatewayConsecutiveTaskControlsMergeIntoOneInstructionRow(t *testing.T) {
+func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	model := newGatewayEventTestModel()
+	sendReasoning := func(text string) {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Narrative: &appgateway.NarrativePayload{
+					Role:          appgateway.NarrativeRoleAssistant,
+					ReasoningText: text,
+					Final:         true,
+					Scope:         appgateway.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+	sendReasoning("两个子任务已启动")
 	for _, item := range []struct {
 		callID  string
 		action  string
 		input   string
 		yieldMS int
+		handle  string
 	}{
-		{callID: "task-0", action: "write", input: "Alice"},
-		{callID: "task-1", action: "wait", yieldMS: 5000},
-		{callID: "task-2", action: "wait", yieldMS: 8000},
+		{callID: "task-0", action: "write", input: "Alice", handle: "task-9"},
+		{callID: "task-1", action: "wait", yieldMS: 5000, handle: "ella"},
+		{callID: "task-2", action: "wait", yieldMS: 8000, handle: "task-9"},
 	} {
-		rawInput := map[string]any{"action": item.action, "task_id": "task-9", "yield_time_ms": item.yieldMS}
+		rawInput := map[string]any{"action": item.action, "task_id": item.handle, "yield_time_ms": item.yieldMS}
 		if item.input != "" {
 			rawInput["input"] = item.input
 		}
@@ -1058,7 +1095,7 @@ func TestGatewayConsecutiveTaskControlsMergeIntoOneInstructionRow(t *testing.T) 
 					RawOutput: map[string]any{
 						"running": true,
 						"state":   "running",
-						"task_id": "task-9",
+						"task_id": item.handle,
 					},
 				},
 			},
@@ -1075,11 +1112,24 @@ func TestGatewayConsecutiveTaskControlsMergeIntoOneInstructionRow(t *testing.T) 
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, `• Task WRITE "Alice" · WAIT 5 s · WAIT 8 s`) {
+	if !strings.Contains(joined, "• Tasks") ||
+		!strings.Contains(joined, `  └ Write "Alice"`) ||
+		!strings.Contains(joined, `    Wait ella 5s`) ||
+		!strings.Contains(joined, `    Wait 8s`) {
 		t.Fatalf("rendered rows = %q, want merged TASK controls", joined)
 	}
 	if strings.Contains(joined, "TASK") || strings.Contains(joined, "task-9") {
 		t.Fatalf("rendered rows = %q, should hide raw TASK tool and task id", joined)
+	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_task_stage:tasks:task-0,task-1,task-2") {
+		t.Fatal("expected task stage click token to expand grouped TASK controls")
+	}
+	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, `  └ 两个子任务已启动`) ||
+		!strings.Contains(joined, `    Write "Alice"`) ||
+		!strings.Contains(joined, `    Wait ella 5s`) {
+		t.Fatalf("expanded rows = %q, want task stage narrative and controls", joined)
 	}
 }
 
@@ -1136,9 +1186,9 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
 	for _, want := range []string{
-		`WRITE "line one\nline two\nline three with TASK_WRITE_TAIL_MARKER"`,
-		"WAIT 500 ms",
-		"CANCEL",
+		`Write "line one\nline two\nline three with TASK_WRITE_TAIL_MARKER"`,
+		"Wait 500ms",
+		"Cancel",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
@@ -1148,6 +1198,68 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
 		}
+	}
+}
+
+func TestTaskControlFallbackHidesRawToolAndInternalTaskIDs(t *testing.T) {
+	t.Parallel()
+
+	cases := map[string]string{
+		"TASK wait task-4":       "Wait",
+		"TASK wait leo":          "Wait leo",
+		"TASK wait leo 10s":      "Wait leo 10s",
+		"TASK wait task-4 500ms": "Wait 500ms",
+		"TASK cancel task-4":     "Cancel",
+	}
+	for input, want := range cases {
+		if got := toolDisplayArgs("TASK", nil, input); got != want {
+			t.Fatalf("toolDisplayArgs(TASK, %q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
+	model := newGatewayEventTestModel()
+	for _, item := range []struct {
+		callID string
+		input  map[string]any
+	}{
+		{callID: "task-raw-1", input: map[string]any{"action": "wait", "yield_time_ms": 5000}},
+		{callID: "task-raw-2", input: map[string]any{"action": "wait", "task_id": "emma"}},
+		{callID: "task-raw-3", input: map[string]any{"action": "wait", "task_id": "emma"}},
+		{callID: "task-raw-4", input: map[string]any{"action": "wait", "task_id": "emma"}},
+	} {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindToolCall,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				ToolCall: &appgateway.ToolCallPayload{
+					CallID:   item.callID,
+					ToolName: "TASK",
+					Status:   appgateway.ToolStatusRunning,
+					Scope:    appgateway.EventScopeMain,
+					RawInput: item.input,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Tasks") || !strings.Contains(joined, "  └ Wait") || !strings.Contains(joined, "    Wait emma") {
+		t.Fatalf("rendered rows = %q, want cleaned task action rows", joined)
+	}
+	for _, forbidden := range []string{"TASK wait", "task-12"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
+		}
+	}
+	if got := strings.Count(joined, "Wait emma"); got != 1 {
+		t.Fatalf("rendered rows = %q, Wait emma count = %d, want 1", joined, got)
 	}
 }
 
@@ -1225,7 +1337,7 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	for _, want := range []string{"  └ 进度: 1/30", "    进度: 3/30", "• Task WAIT 5 s"} {
+	for _, want := range []string{"  └ 进度: 1/30", "    进度: 3/30", "• Tasks", "  └ Wait 5s"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
 		}
@@ -1275,7 +1387,7 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 	}
 }
 
-func TestGatewaySpawnArgumentsRenderFullPrompt(t *testing.T) {
+func TestGatewaySpawnArgumentsRenderPromptPreviewAndExpandsFullPrompt(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := strings.Repeat("写一个完整参数展示测试。", 8) + "SPAWN_PROMPT_TAIL_MARKER"
 	updated, _ := model.Update(appgateway.EventEnvelope{
@@ -1301,13 +1413,25 @@ func TestGatewaySpawnArgumentsRenderFullPrompt(t *testing.T) {
 	}
 	rows := block.Render(BlockRenderContext{Width: 180, TermWidth: 180, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{`"agent":"self"`, "SPAWN_PROMPT_TAIL_MARKER"} {
-		if !strings.Contains(joined, want) {
-			t.Fatalf("rendered rows = %q, want %q", joined, want)
-		}
+	if !strings.Contains(joined, "SPAWN_PROMPT_TAIL_MARKER") || !strings.Contains(joined, "...") {
+		t.Fatalf("rendered rows = %q, want abbreviated SPAWN prompt with tail marker", joined)
 	}
-	if strings.Contains(joined, "...") {
-		t.Fatalf("rendered rows = %q, SPAWN args should not be truncated", joined)
+	if !strings.Contains(joined, "• Spawned self:") || strings.Contains(joined, "• Spawned SPAWN") {
+		t.Fatalf("rendered rows = %q, want target agent after Spawned", joined)
+	}
+	if strings.Contains(joined, `"agent":"self"`) || strings.Contains(joined, `"prompt"`) {
+		t.Fatalf("rendered rows = %q, should not show raw SPAWN JSON", joined)
+	}
+	if !strings.Contains(joined, "(wait subagent output)") {
+		t.Fatalf("rendered rows = %q, want running SPAWN placeholder", joined)
+	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:spawn-full-args") {
+		t.Fatal("expected SPAWN header click to expand full prompt")
+	}
+	rows = block.Render(BlockRenderContext{Width: 220, TermWidth: 220, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, prompt) {
+		t.Fatalf("expanded rows = %q, want full SPAWN prompt", joined)
 	}
 }
 
