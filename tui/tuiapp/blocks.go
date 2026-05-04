@@ -245,6 +245,9 @@ type MainACPTurnBlock struct {
 
 type ToolUpdateMeta struct {
 	TaskID          string
+	TaskAction      string
+	TaskInput       string
+	TaskTargetKind  string
 	ToolKind        string
 	FullArgs        string
 	DisableGrouping bool
@@ -312,9 +315,19 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		output = strings.TrimSpace(output)
 	}
 	taskID := strings.TrimSpace(meta.TaskID)
+	taskAction := strings.ToLower(strings.TrimSpace(meta.TaskAction))
+	taskInput := strings.TrimSpace(meta.TaskInput)
+	taskTargetKind := strings.ToLower(strings.TrimSpace(meta.TaskTargetKind))
 	disableGrouping := meta.DisableGrouping
-	if updateLinkedTerminalEvent(b.Events, toolSemanticName(name, toolKind), taskID, output) {
+	semanticName := toolSemanticName(name, toolKind)
+	if updateLinkedTerminalEvent(b.Events, semanticName, taskID, output, final, err, meta) {
+		if strings.EqualFold(semanticName, "SPAWN") {
+			return
+		}
 		output = ""
+	}
+	if shouldIgnoreStaleTerminalUpdate(b.Events, callID, name, toolKind, final) {
+		return
 	}
 	if !final {
 		for i := len(b.Events) - 1; i >= 0; i-- {
@@ -330,12 +343,25 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			}
 			if strings.TrimSpace(ev.Args) == "" {
 				ev.Args = args
+			} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.Args, args) {
+				ev.Args = args
 			}
 			if strings.TrimSpace(ev.FullArgs) == "" {
+				ev.FullArgs = fullArgs
+			} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.FullArgs, fullArgs) {
 				ev.FullArgs = fullArgs
 			}
 			if ev.TaskID == "" {
 				ev.TaskID = taskID
+			}
+			if ev.TaskAction == "" {
+				ev.TaskAction = taskAction
+			}
+			if ev.TaskInput == "" {
+				ev.TaskInput = taskInput
+			}
+			if ev.TaskTargetKind == "" {
+				ev.TaskTargetKind = taskTargetKind
 			}
 			if disableGrouping {
 				ev.DisableGrouping = true
@@ -354,6 +380,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			FullArgs:        fullArgs,
 			Output:          output,
 			TaskID:          taskID,
+			TaskAction:      taskAction,
+			TaskInput:       taskInput,
+			TaskTargetKind:  taskTargetKind,
 			DisableGrouping: disableGrouping,
 		})
 		return
@@ -369,6 +398,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		Done:            true,
 		Err:             err,
 		TaskID:          taskID,
+		TaskAction:      taskAction,
+		TaskInput:       taskInput,
+		TaskTargetKind:  taskTargetKind,
 		DisableGrouping: disableGrouping,
 	}
 	for i := len(b.Events) - 1; i >= 0; i-- {
@@ -380,10 +412,10 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			if strings.TrimSpace(finalEvent.Name) == "" {
 				finalEvent.Name = strings.TrimSpace(ev.Name)
 			}
-			if strings.TrimSpace(finalEvent.Args) == "" {
+			if strings.TrimSpace(finalEvent.Args) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.Args, ev.Args) {
 				finalEvent.Args = strings.TrimSpace(ev.Args)
 			}
-			if strings.TrimSpace(finalEvent.FullArgs) == "" {
+			if strings.TrimSpace(finalEvent.FullArgs) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, ev.FullArgs) {
 				finalEvent.FullArgs = strings.TrimSpace(ev.FullArgs)
 			}
 			if strings.TrimSpace(finalEvent.ToolKind) == "" {
@@ -398,6 +430,15 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 			ev.Err = finalEvent.Err
 			if ev.TaskID == "" {
 				ev.TaskID = finalEvent.TaskID
+			}
+			if ev.TaskAction == "" {
+				ev.TaskAction = finalEvent.TaskAction
+			}
+			if ev.TaskInput == "" {
+				ev.TaskInput = finalEvent.TaskInput
+			}
+			if ev.TaskTargetKind == "" {
+				ev.TaskTargetKind = finalEvent.TaskTargetKind
 			}
 			if ev.DisableGrouping {
 				finalEvent.DisableGrouping = true
@@ -420,12 +461,71 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		if strings.TrimSpace(finalEvent.ToolKind) == "" {
 			finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
 		}
+		if shouldReplaceCompletedSpawnToolEvent(*ev, finalEvent) {
+			ev.Name = finalEvent.Name
+			ev.ToolKind = finalEvent.ToolKind
+			ev.Args = finalEvent.Args
+			ev.FullArgs = finalEvent.FullArgs
+			ev.Output = finalEvent.Output
+			ev.Done = true
+			ev.Err = finalEvent.Err
+			if ev.TaskID == "" {
+				ev.TaskID = finalEvent.TaskID
+			}
+			if ev.TaskAction == "" {
+				ev.TaskAction = finalEvent.TaskAction
+			}
+			if ev.TaskInput == "" {
+				ev.TaskInput = finalEvent.TaskInput
+			}
+			if ev.TaskTargetKind == "" {
+				ev.TaskTargetKind = finalEvent.TaskTargetKind
+			}
+			if ev.DisableGrouping {
+				finalEvent.DisableGrouping = true
+			}
+			ev.DisableGrouping = finalEvent.DisableGrouping
+			if shouldDefaultCollapseToolEvent(finalEvent) {
+				b.setToolPanelExpanded(callID, false)
+			}
+			return
+		}
 		break
 	}
 	b.Events = append(b.Events, finalEvent)
 	if shouldDefaultCollapseToolEvent(finalEvent) {
 		b.setToolPanelExpanded(callID, false)
 	}
+}
+
+func shouldReplaceSpawnDisplayArgs(existing string, incoming string) bool {
+	existing = sanitizeSpawnHeaderArgs(strings.TrimSpace(existing))
+	incoming = sanitizeSpawnHeaderArgs(strings.TrimSpace(incoming))
+	if incoming == "" || incoming == existing {
+		return false
+	}
+	if existing == "" {
+		return true
+	}
+	if !strings.Contains(existing, ":") && strings.Contains(incoming, ":") {
+		return true
+	}
+	return len([]rune(incoming)) > len([]rune(existing)) &&
+		(strings.HasPrefix(incoming, existing+":") || strings.Contains(incoming, ":"))
+}
+
+func shouldReplaceCompletedSpawnToolEvent(existing SubagentEvent, incoming SubagentEvent) bool {
+	if !existing.Done || !incoming.Done {
+		return false
+	}
+	if !strings.EqualFold(toolSemanticName(existing.Name, existing.ToolKind), "SPAWN") &&
+		!strings.EqualFold(toolSemanticName(incoming.Name, incoming.ToolKind), "SPAWN") {
+		return false
+	}
+	if strings.TrimSpace(existing.CallID) == "" || strings.TrimSpace(existing.CallID) != strings.TrimSpace(incoming.CallID) {
+		return false
+	}
+	return true
 }
 
 func (b *MainACPTurnBlock) UpdatePlan(entries []planEntryState) {
@@ -583,9 +683,19 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		output = strings.TrimSpace(output)
 	}
 	taskID := strings.TrimSpace(meta.TaskID)
+	taskAction := strings.ToLower(strings.TrimSpace(meta.TaskAction))
+	taskInput := strings.TrimSpace(meta.TaskInput)
+	taskTargetKind := strings.ToLower(strings.TrimSpace(meta.TaskTargetKind))
 	disableGrouping := meta.DisableGrouping
-	if updateLinkedTerminalEvent(b.Events, toolSemanticName(name, toolKind), taskID, output) {
+	semanticName := toolSemanticName(name, toolKind)
+	if updateLinkedTerminalEvent(b.Events, semanticName, taskID, output, final, err, meta) {
+		if strings.EqualFold(semanticName, "SPAWN") {
+			return
+		}
 		output = ""
+	}
+	if shouldIgnoreStaleTerminalUpdate(b.Events, callID, name, toolKind, final) {
+		return
 	}
 	if !final {
 		for i := len(b.Events) - 1; i >= 0; i-- {
@@ -601,12 +711,25 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			}
 			if strings.TrimSpace(ev.Args) == "" {
 				ev.Args = args
+			} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.Args, args) {
+				ev.Args = args
 			}
 			if strings.TrimSpace(ev.FullArgs) == "" {
+				ev.FullArgs = fullArgs
+			} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.FullArgs, fullArgs) {
 				ev.FullArgs = fullArgs
 			}
 			if ev.TaskID == "" {
 				ev.TaskID = taskID
+			}
+			if ev.TaskAction == "" {
+				ev.TaskAction = taskAction
+			}
+			if ev.TaskInput == "" {
+				ev.TaskInput = taskInput
+			}
+			if ev.TaskTargetKind == "" {
+				ev.TaskTargetKind = taskTargetKind
 			}
 			if disableGrouping {
 				ev.DisableGrouping = true
@@ -625,6 +748,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			FullArgs:        fullArgs,
 			Output:          output,
 			TaskID:          taskID,
+			TaskAction:      taskAction,
+			TaskInput:       taskInput,
+			TaskTargetKind:  taskTargetKind,
 			DisableGrouping: disableGrouping,
 		})
 		return
@@ -640,6 +766,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		Done:            true,
 		Err:             err,
 		TaskID:          taskID,
+		TaskAction:      taskAction,
+		TaskInput:       taskInput,
+		TaskTargetKind:  taskTargetKind,
 		DisableGrouping: disableGrouping,
 	}
 	for i := len(b.Events) - 1; i >= 0; i-- {
@@ -651,10 +780,10 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			if strings.TrimSpace(finalEvent.Name) == "" {
 				finalEvent.Name = strings.TrimSpace(ev.Name)
 			}
-			if strings.TrimSpace(finalEvent.Args) == "" {
+			if strings.TrimSpace(finalEvent.Args) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.Args, ev.Args) {
 				finalEvent.Args = strings.TrimSpace(ev.Args)
 			}
-			if strings.TrimSpace(finalEvent.FullArgs) == "" {
+			if strings.TrimSpace(finalEvent.FullArgs) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, ev.FullArgs) {
 				finalEvent.FullArgs = strings.TrimSpace(ev.FullArgs)
 			}
 			if strings.TrimSpace(finalEvent.ToolKind) == "" {
@@ -669,6 +798,15 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 			ev.Err = finalEvent.Err
 			if ev.TaskID == "" {
 				ev.TaskID = finalEvent.TaskID
+			}
+			if ev.TaskAction == "" {
+				ev.TaskAction = finalEvent.TaskAction
+			}
+			if ev.TaskInput == "" {
+				ev.TaskInput = finalEvent.TaskInput
+			}
+			if ev.TaskTargetKind == "" {
+				ev.TaskTargetKind = finalEvent.TaskTargetKind
 			}
 			if ev.DisableGrouping {
 				finalEvent.DisableGrouping = true
@@ -690,6 +828,35 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		}
 		if strings.TrimSpace(finalEvent.ToolKind) == "" {
 			finalEvent.ToolKind = strings.TrimSpace(ev.ToolKind)
+		}
+		if shouldReplaceCompletedSpawnToolEvent(*ev, finalEvent) {
+			ev.Name = finalEvent.Name
+			ev.ToolKind = finalEvent.ToolKind
+			ev.Args = finalEvent.Args
+			ev.FullArgs = finalEvent.FullArgs
+			ev.Output = finalEvent.Output
+			ev.Done = true
+			ev.Err = finalEvent.Err
+			if ev.TaskID == "" {
+				ev.TaskID = finalEvent.TaskID
+			}
+			if ev.TaskAction == "" {
+				ev.TaskAction = finalEvent.TaskAction
+			}
+			if ev.TaskInput == "" {
+				ev.TaskInput = finalEvent.TaskInput
+			}
+			if ev.TaskTargetKind == "" {
+				ev.TaskTargetKind = finalEvent.TaskTargetKind
+			}
+			if ev.DisableGrouping {
+				finalEvent.DisableGrouping = true
+			}
+			ev.DisableGrouping = finalEvent.DisableGrouping
+			if shouldDefaultCollapseToolEvent(finalEvent) {
+				b.setToolPanelExpanded(callID, false)
+			}
+			return
 		}
 		break
 	}
@@ -1504,12 +1671,17 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	return out
 }
 
-func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID string, output string) bool {
-	if !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
+func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID string, output string, final bool, err bool, meta ToolUpdateMeta) bool {
+	toolName = strings.TrimSpace(toolName)
+	taskID = strings.TrimSpace(taskID)
+	taskAction := strings.ToLower(strings.TrimSpace(meta.TaskAction))
+	if strings.EqualFold(toolName, "SPAWN") {
+		return updateLinkedTaskWriteEvent(events, taskID, output, final, err)
+	}
+	if !strings.EqualFold(toolName, "TASK") {
 		return false
 	}
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" || output == "" {
+	if taskID == "" || (output == "" && !final && taskAction != "write") {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
@@ -1517,8 +1689,90 @@ func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID s
 		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID || !isTerminalPanelToolEvent(*ev) {
 			continue
 		}
-		ev.Output = output
+		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+			return false
+		}
+		updated := false
+		if taskAction == "write" {
+			ev.Done = false
+			ev.Err = false
+			ev.Output = ""
+			updated = true
+		}
+		if output != "" {
+			ev.Output = output
+			updated = true
+		}
+		if final {
+			ev.Done = true
+			ev.Err = err
+			updated = true
+		}
+		return updated
+	}
+	return false
+}
+
+func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output string, final bool, err bool) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || (output == "" && !final) {
+		return false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := &events[i]
+		if ev.Kind != SEToolCall {
+			continue
+		}
+		if strings.TrimSpace(ev.TaskID) != taskID {
+			continue
+		}
+		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+			return false
+		}
+		if !strings.EqualFold(strings.TrimSpace(ev.Name), "TASK") || taskEventAction(*ev) != "write" {
+			continue
+		}
+		if output != "" {
+			if final || ev.Done {
+				ev.Output = strings.TrimSpace(output)
+			} else {
+				ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+			}
+		}
+		if final {
+			ev.Done = true
+			ev.Err = err
+		} else if output != "" {
+			ev.Done = false
+			ev.Err = false
+		}
 		return true
+	}
+	return false
+}
+
+func spawnContinuationDisplayArgs(existing string, prompt string) string {
+	prompt = strings.Join(strings.Fields(strings.TrimSpace(prompt)), " ")
+	if prompt == "" {
+		return strings.TrimSpace(existing)
+	}
+	existing = sanitizeSpawnHeaderArgs(existing)
+	if before, _, ok := strings.Cut(existing, ":"); ok && strings.TrimSpace(before) != "" {
+		return strings.TrimSpace(before) + ": " + prompt
+	}
+	return prompt
+}
+
+func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name string, toolKind string, final bool) bool {
+	if final || strings.TrimSpace(callID) == "" || !isTerminalPanelToolKind(name, toolKind) {
+		return false
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != strings.TrimSpace(callID) || !isTerminalPanelToolEvent(ev) {
+			continue
+		}
+		return ev.Done
 	}
 	return false
 }
@@ -1590,6 +1844,9 @@ type SubagentEvent struct {
 	FullArgs        string
 	Output          string
 	TaskID          string
+	TaskAction      string
+	TaskInput       string
+	TaskTargetKind  string
 	Done            bool
 	Err             bool
 	DisableGrouping bool
@@ -1725,9 +1982,20 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 	toolKind := strings.TrimSpace(meta.ToolKind)
 	fullArgs := strings.TrimSpace(meta.FullArgs)
 	taskID := strings.TrimSpace(meta.TaskID)
+	taskAction := strings.ToLower(strings.TrimSpace(meta.TaskAction))
+	taskInput := strings.TrimSpace(meta.TaskInput)
+	taskTargetKind := strings.ToLower(strings.TrimSpace(meta.TaskTargetKind))
 	disableGrouping := meta.DisableGrouping
-	if updateLinkedTerminalEvent(s.Events, toolSemanticName(toolName, toolKind), taskID, chunk) {
+	semanticName := toolSemanticName(toolName, toolKind)
+	if updateLinkedTerminalEvent(s.Events, semanticName, taskID, chunk, final, stream == "stderr", meta) {
+		if strings.EqualFold(semanticName, "SPAWN") {
+			s.eventsGen++
+			return
+		}
 		chunk = ""
+	}
+	if shouldIgnoreStaleTerminalUpdate(s.Events, callID, toolName, toolKind, final) {
+		return
 	}
 	if !final {
 		for i := len(s.Events) - 1; i >= 0; i-- {
@@ -1743,12 +2011,25 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			}
 			if strings.TrimSpace(e.Args) == "" {
 				e.Args = args
+			} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(e.Args, args) {
+				e.Args = args
 			}
 			if strings.TrimSpace(e.FullArgs) == "" {
+				e.FullArgs = fullArgs
+			} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(e.FullArgs, fullArgs) {
 				e.FullArgs = fullArgs
 			}
 			if e.TaskID == "" {
 				e.TaskID = taskID
+			}
+			if e.TaskAction == "" {
+				e.TaskAction = taskAction
+			}
+			if e.TaskInput == "" {
+				e.TaskInput = taskInput
+			}
+			if e.TaskTargetKind == "" {
+				e.TaskTargetKind = taskTargetKind
 			}
 			if disableGrouping {
 				e.DisableGrouping = true
@@ -1768,6 +2049,9 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			FullArgs:        fullArgs,
 			Output:          chunk,
 			TaskID:          taskID,
+			TaskAction:      taskAction,
+			TaskInput:       taskInput,
+			TaskTargetKind:  taskTargetKind,
 			DisableGrouping: disableGrouping,
 		})
 		s.eventsGen++
@@ -1785,6 +2069,9 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 		Done:            true,
 		Err:             stream == "stderr",
 		TaskID:          taskID,
+		TaskAction:      taskAction,
+		TaskInput:       taskInput,
+		TaskTargetKind:  taskTargetKind,
 		DisableGrouping: disableGrouping,
 	}
 	for i := len(s.Events) - 1; i >= 0; i-- {
@@ -1796,10 +2083,10 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			if strings.TrimSpace(finalEvent.Name) == "" {
 				finalEvent.Name = e.Name
 			}
-			if strings.TrimSpace(finalEvent.Args) == "" {
+			if strings.TrimSpace(finalEvent.Args) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.Args, e.Args) {
 				finalEvent.Args = e.Args
 			}
-			if strings.TrimSpace(finalEvent.FullArgs) == "" {
+			if strings.TrimSpace(finalEvent.FullArgs) == "" || shouldReplaceSpawnDisplayArgs(finalEvent.FullArgs, e.FullArgs) {
 				finalEvent.FullArgs = e.FullArgs
 			}
 			if strings.TrimSpace(finalEvent.ToolKind) == "" {
@@ -1814,6 +2101,15 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 			e.Err = finalEvent.Err
 			if e.TaskID == "" {
 				e.TaskID = finalEvent.TaskID
+			}
+			if e.TaskAction == "" {
+				e.TaskAction = finalEvent.TaskAction
+			}
+			if e.TaskInput == "" {
+				e.TaskInput = finalEvent.TaskInput
+			}
+			if e.TaskTargetKind == "" {
+				e.TaskTargetKind = finalEvent.TaskTargetKind
 			}
 			if e.DisableGrouping {
 				finalEvent.DisableGrouping = true
@@ -1833,6 +2129,33 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 		}
 		if strings.TrimSpace(finalEvent.ToolKind) == "" {
 			finalEvent.ToolKind = strings.TrimSpace(e.ToolKind)
+		}
+		if shouldReplaceCompletedSpawnToolEvent(*e, finalEvent) {
+			e.Name = finalEvent.Name
+			e.ToolKind = finalEvent.ToolKind
+			e.Args = finalEvent.Args
+			e.FullArgs = finalEvent.FullArgs
+			e.Output = finalEvent.Output
+			e.Done = true
+			e.Err = finalEvent.Err
+			if e.TaskID == "" {
+				e.TaskID = finalEvent.TaskID
+			}
+			if e.TaskAction == "" {
+				e.TaskAction = finalEvent.TaskAction
+			}
+			if e.TaskInput == "" {
+				e.TaskInput = finalEvent.TaskInput
+			}
+			if e.TaskTargetKind == "" {
+				e.TaskTargetKind = finalEvent.TaskTargetKind
+			}
+			if e.DisableGrouping {
+				finalEvent.DisableGrouping = true
+			}
+			e.DisableGrouping = finalEvent.DisableGrouping
+			s.eventsGen++
+			return
 		}
 		break
 	}

@@ -637,7 +637,14 @@ func mergeGatewayTerminalEnvelope(dst *appgateway.EventEnvelope, src appgateway.
 	if dstPayload.RawOutput == nil {
 		dstPayload.RawOutput = map[string]any{}
 	}
-	dstPayload.RawOutput["text"] = rawString(dstPayload.RawOutput, "text") + rawString(srcPayload.RawOutput, "text")
+	if text := rawString(srcPayload.RawOutput, "text"); text != "" {
+		existing := rawString(dstPayload.RawOutput, "text")
+		if strings.EqualFold(strings.TrimSpace(dstPayload.ToolName), "BASH") {
+			dstPayload.RawOutput["text"] = appendDeltaStreamChunk(existing, text)
+		} else {
+			dstPayload.RawOutput["text"] = mergeSubagentStreamChunk(existing, text)
+		}
+	}
 	for _, key := range []string{"running", "state", "stdout_cursor", "stderr_cursor", "exit_code"} {
 		if value, ok := srcPayload.RawOutput[key]; ok {
 			dstPayload.RawOutput[key] = value

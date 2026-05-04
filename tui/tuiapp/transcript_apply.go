@@ -135,6 +135,9 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
+		if !m.shouldRenderSubagentPanelEvent(event) {
+			return m, nil
+		}
 		sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
 		panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
 		if state == nil || panel == nil {
@@ -183,10 +186,13 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" {
 			block.Status = "running"
 		}
-		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, ToolUpdateMeta{TaskID: event.ToolTaskID, ToolKind: event.ToolKind, FullArgs: event.ToolFullArgs, DisableGrouping: event.DisableToolGrouping})
+		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, transcriptToolUpdateMeta(event))
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
+		if !m.shouldRenderSubagentPanelEvent(event) {
+			return m, nil
+		}
 		sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
 		panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
 		if state == nil || panel == nil {
@@ -202,7 +208,7 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 			state.ReviveFromTerminal()
 		}
 		panel.bindSession(state)
-		state.UpdateToolCallWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, firstNonEmpty(strings.TrimSpace(event.ToolStream), "stdout"), event.ToolOutput, event.Final, ToolUpdateMeta{TaskID: event.ToolTaskID, ToolKind: event.ToolKind, FullArgs: event.ToolFullArgs, DisableGrouping: event.DisableToolGrouping})
+		state.UpdateToolCallWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, firstNonEmpty(strings.TrimSpace(event.ToolStream), "stdout"), event.ToolOutput, event.Final, transcriptToolUpdateMeta(event))
 		m.reviveSubagentPanel(panel, false)
 		m.syncSubagentSessionPanels(sessionKey)
 		m.markViewportBlockDirty(panel.BlockID())
@@ -215,7 +221,7 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
 			block.StartedAt = event.OccurredAt
 		}
-		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, ToolUpdateMeta{TaskID: event.ToolTaskID, ToolKind: event.ToolKind, FullArgs: event.ToolFullArgs, DisableGrouping: event.DisableToolGrouping})
+		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, transcriptToolUpdateMeta(event))
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}
@@ -233,6 +239,9 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 			OccurredAt:      event.OccurredAt,
 		})
 	case ACPProjectionSubagent:
+		if !m.shouldRenderSubagentPanelEvent(event) {
+			return m, nil
+		}
 		return m.handleSubagentStatus(SubagentStatusMsg{
 			SpawnID:         event.ScopeID,
 			State:           firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"),
@@ -255,6 +264,9 @@ func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, te
 	m.prepareForTranscriptScope(event.Scope)
 	switch event.Scope {
 	case ACPProjectionSubagent:
+		if !m.shouldRenderSubagentPanelEvent(event) {
+			return m, nil
+		}
 		return m.handleSubagentStatus(SubagentStatusMsg{
 			SpawnID:    event.ScopeID,
 			State:      event.State,
@@ -279,6 +291,9 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 			OccurredAt: event.OccurredAt,
 		})
 	case ACPProjectionSubagent:
+		if !m.shouldRenderSubagentPanelEvent(event) {
+			return m, nil
+		}
 		return m.handleSubagentStatus(SubagentStatusMsg{
 			SpawnID:    event.ScopeID,
 			State:      event.State,
@@ -296,6 +311,9 @@ func (m *Model) applyTranscriptLifecycle(event TranscriptEvent) (tea.Model, tea.
 }
 
 func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	if !m.shouldRenderSubagentPanelEvent(event) {
+		return m, nil
+	}
 	sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
 	panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
 	if state == nil || panel == nil {
@@ -333,4 +351,20 @@ func (m *Model) applyTranscriptSubagentNarrative(event TranscriptEvent) (tea.Mod
 	m.syncSubagentSessionPanels(sessionKey)
 	m.markViewportBlockDirty(panel.BlockID())
 	return m, m.requestStreamViewportSync()
+}
+
+func (m *Model) shouldRenderSubagentPanelEvent(event TranscriptEvent) bool {
+	return strings.TrimSpace(event.AnchorToolCallID) == ""
+}
+
+func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
+	return ToolUpdateMeta{
+		TaskID:          event.ToolTaskID,
+		TaskAction:      event.ToolTaskAction,
+		TaskInput:       event.ToolTaskInput,
+		TaskTargetKind:  event.ToolTaskTargetKind,
+		ToolKind:        event.ToolKind,
+		FullArgs:        event.ToolFullArgs,
+		DisableGrouping: event.DisableToolGrouping,
+	}
 }

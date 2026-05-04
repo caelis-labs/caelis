@@ -53,6 +53,9 @@ type TranscriptEvent struct {
 	ToolStatus          string
 	ToolError           bool
 	ToolTaskID          string
+	ToolTaskAction      string
+	ToolTaskInput       string
+	ToolTaskTargetKind  string
 	DisableToolGrouping bool
 
 	PlanEntries []PlanEntry
@@ -64,6 +67,9 @@ type TranscriptEvent struct {
 	State string
 
 	Usage *appgateway.UsageSnapshot
+
+	AnchorToolCallID string
+	AnchorToolName   string
 }
 
 func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEvent {
@@ -71,6 +77,8 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 	scopeID := gatewayEventScopeID(ev)
 	occurredAt := ev.OccurredAt
 	disableToolGrouping := gatewayEventFromACP(ev)
+	anchorToolCallID := appgateway.EventMetaString(ev.Meta, "caelis", "runtime", "stream", "parent_call_id")
+	anchorToolName := appgateway.EventMetaString(ev.Meta, "caelis", "runtime", "stream", "parent_tool")
 	out := make([]TranscriptEvent, 0, 4)
 
 	appendUsage := func() {
@@ -201,7 +209,10 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				ToolArgs:            toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput)),
 				ToolFullArgs:        toolDisplayFullArgs(semanticName, rawInput),
 				ToolStatus:          status,
-				ToolTaskID:          toolDisplayTaskID(rawInput, nil),
+				ToolTaskID:          toolDisplayTaskID(rawInput, nil, ev.Meta),
+				ToolTaskAction:      toolDisplayTaskAction(rawInput, nil, ev.Meta),
+				ToolTaskInput:       toolDisplayTaskInput(rawInput, nil, ev.Meta),
+				ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
 				DisableToolGrouping: disableToolGrouping,
 			})
 		}
@@ -223,8 +234,12 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
 			rawOutput := gatewayProtocolRawOutput(ev, payload.RawOutput)
-			toolOutput := toolDisplayOutput(semanticName, rawInput, rawOutput, acpprojector.FormatToolResult(toolName, rawInput, rawOutput, status), status, toolErr)
-			toolArgs := toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput))
+			displayInput := rawInput
+			if strings.EqualFold(semanticName, "SPAWN") {
+				displayInput = spawnDisplayInputForResult(rawInput, rawOutput)
+			}
+			toolOutput := toolDisplayOutput(semanticName, displayInput, rawOutput, acpprojector.FormatToolResult(toolName, displayInput, rawOutput, status), status, toolErr)
+			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 			if !toolErr && (len(rawInput) > 0 || len(rawOutput) > 0) {
 				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
@@ -242,12 +257,15 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				ToolKind:            strings.TrimSpace(payload.ToolKind),
 				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
 				ToolArgs:            toolArgs,
-				ToolFullArgs:        toolDisplayFullArgs(semanticName, rawInput),
+				ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
 				ToolOutput:          toolOutput,
 				ToolStream:          transcriptToolStream(status, toolErr),
 				ToolStatus:          status,
 				ToolError:           toolErr,
-				ToolTaskID:          toolDisplayTaskID(rawInput, rawOutput),
+				ToolTaskID:          toolDisplayTaskID(rawInput, rawOutput, ev.Meta),
+				ToolTaskAction:      toolDisplayTaskAction(rawInput, rawOutput, ev.Meta),
+				ToolTaskInput:       toolDisplayTaskInput(rawInput, rawOutput, ev.Meta),
+				ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, rawOutput, ev.Meta),
 				DisableToolGrouping: disableToolGrouping,
 				Final:               transcriptToolStatusFinal(status, toolErr),
 			})
@@ -312,6 +330,10 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 		}
 	}
 
+	for i := range out {
+		out[i].AnchorToolCallID = anchorToolCallID
+		out[i].AnchorToolName = anchorToolName
+	}
 	appendUsage()
 	return out
 }
@@ -379,12 +401,18 @@ func gatewayProtocolRawInput(ev appgateway.Event, fallback map[string]any) map[s
 	if ev.Protocol != nil && ev.Protocol.Update != nil && len(ev.Protocol.Update.RawInput) > 0 {
 		return cloneAnyMap(ev.Protocol.Update.RawInput)
 	}
+	if ev.Protocol != nil && ev.Protocol.ToolCall != nil && len(ev.Protocol.ToolCall.RawInput) > 0 {
+		return cloneAnyMap(ev.Protocol.ToolCall.RawInput)
+	}
 	return cloneAnyMap(fallback)
 }
 
 func gatewayProtocolRawOutput(ev appgateway.Event, fallback map[string]any) map[string]any {
 	if ev.Protocol != nil && ev.Protocol.Update != nil && len(ev.Protocol.Update.RawOutput) > 0 {
 		return cloneAnyMap(ev.Protocol.Update.RawOutput)
+	}
+	if ev.Protocol != nil && ev.Protocol.ToolCall != nil && len(ev.Protocol.ToolCall.RawOutput) > 0 {
+		return cloneAnyMap(ev.Protocol.ToolCall.RawOutput)
 	}
 	return cloneAnyMap(fallback)
 }

@@ -22,6 +22,7 @@ import (
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -109,6 +110,37 @@ func TestAllocateSideAgentHandleUsesUniqueHumanHandles(t *testing.T) {
 	used["claude"] = struct{}{}
 	if got := allocateSideAgentHandle(used, "claude"); got != "claude2" {
 		t.Fatalf("allocateSideAgentHandle() = %q, want numbered fallback", got)
+	}
+}
+
+func TestGatewayDriverMapsTaskStreamToSpawnParent(t *testing.T) {
+	driver := &GatewayDriver{streamParents: map[string]terminalStreamParent{}}
+	spawnReq := appgateway.StreamRequest{
+		SessionRef: sdksession.SessionRef{SessionID: "session-1"},
+		CallID:     "spawn-call-1",
+		ToolName:   "SPAWN",
+		RawInput:   map[string]any{"agent": "self", "prompt": "first prompt"},
+		Ref:        sdkstream.Ref{SessionID: "session-1", TaskID: "liam"},
+	}
+	driver.bindTerminalStreamRequest(&spawnReq)
+
+	taskReq := appgateway.StreamRequest{
+		SessionRef: sdksession.SessionRef{SessionID: "session-1"},
+		CallID:     "task-write-1",
+		ToolName:   "TASK",
+		RawInput:   map[string]any{"action": "write", "task_id": "liam", "input": "follow up"},
+		Ref:        sdkstream.Ref{SessionID: "session-1", TaskID: "liam"},
+	}
+	driver.bindTerminalStreamRequest(&taskReq)
+
+	if taskReq.CallID != "spawn-call-1" || taskReq.ToolName != "SPAWN" {
+		t.Fatalf("mapped task request = %+v, want parent SPAWN call", taskReq)
+	}
+	if got, _ := taskReq.RawInput["agent"].(string); got != "self" {
+		t.Fatalf("mapped raw input agent = %q, want self", got)
+	}
+	if got, _ := taskReq.RawInput["prompt"].(string); got != "follow up" {
+		t.Fatalf("mapped raw input prompt = %q, want continuation prompt", got)
 	}
 }
 

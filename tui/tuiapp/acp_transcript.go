@@ -410,14 +410,14 @@ func compactTaskStage(events []SubagentEvent, idx int) ([]SubagentEvent, int) {
 	if idx < 0 || idx >= len(events) {
 		return nil, idx
 	}
-	if !isTaskControlEvent(events[idx]) && (!isTaskNarrativeEvent(events[idx]) || !hasLaterTaskControl(events, idx+1)) {
+	if !isGroupedTaskControlEvent(events, idx) && (!isTaskNarrativeEvent(events[idx]) || !hasLaterTaskControl(events, idx+1)) {
 		return nil, idx
 	}
 	stage := make([]SubagentEvent, 0, 6)
 	end := idx - 1
 	for i := idx; i < len(events); i++ {
 		ev := events[i]
-		if isTaskControlEvent(ev) {
+		if isGroupedTaskControlEvent(events, i) {
 			stage = append(stage, ev)
 			end = i
 			continue
@@ -595,7 +595,7 @@ func isTaskNarrativeEvent(ev SubagentEvent) bool {
 func hasLaterTaskControl(events []SubagentEvent, start int) bool {
 	for i := start; i < len(events); i++ {
 		ev := events[i]
-		if isTaskControlEvent(ev) {
+		if isGroupedTaskControlEvent(events, i) {
 			return true
 		}
 		if !isTaskNarrativeEvent(ev) {
@@ -657,6 +657,57 @@ func isTaskHandleDetail(value string) bool {
 
 func isTaskControlEvent(ev SubagentEvent) bool {
 	return ev.Kind == SEToolCall && strings.EqualFold(strings.TrimSpace(ev.Name), "TASK")
+}
+
+func isGroupedTaskControlEvent(events []SubagentEvent, idx int) bool {
+	if idx < 0 || idx >= len(events) {
+		return false
+	}
+	return isTaskControlEvent(events[idx]) && !isSubagentTaskWriteEvent(events, idx)
+}
+
+func isSubagentTaskWriteEvent(events []SubagentEvent, idx int) bool {
+	if idx < 0 || idx >= len(events) {
+		return false
+	}
+	ev := events[idx]
+	if !isTaskControlEvent(ev) || taskEventAction(ev) != "write" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(ev.TaskTargetKind), "subagent") {
+		return true
+	}
+	taskID := strings.TrimSpace(ev.TaskID)
+	if taskID == "" {
+		return false
+	}
+	for i := idx - 1; i >= 0; i-- {
+		prev := events[i]
+		if prev.Kind != SEToolCall || strings.TrimSpace(prev.TaskID) != taskID {
+			continue
+		}
+		if strings.EqualFold(toolSemanticName(prev.Name, prev.ToolKind), "SPAWN") {
+			return true
+		}
+		if isTerminalPanelToolEvent(prev) {
+			return false
+		}
+	}
+	return false
+}
+
+func isTaskWritePanelEvent(ev SubagentEvent) bool {
+	return isTaskControlEvent(ev) &&
+		taskEventAction(ev) == "write" &&
+		strings.EqualFold(strings.TrimSpace(ev.TaskTargetKind), "subagent")
+}
+
+func taskEventAction(ev SubagentEvent) string {
+	if action := strings.ToLower(strings.TrimSpace(ev.TaskAction)); action != "" {
+		return action
+	}
+	verb, _ := splitTaskAction(ev.Args)
+	return strings.ToLower(strings.TrimSpace(verb))
 }
 
 func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
@@ -1290,6 +1341,10 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	}
 	rows := renderParticipantTurnToolRows(blockID, start, width, ctx)
 	if opts.ToolOutputPanels {
+		if isSubagentTaskWriteEvent(events, idx) {
+			panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
+			return renderACPStandardToolLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
+		}
 		if start.DisableGrouping {
 			panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
 			return renderACPStandardToolLifecycleRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), callID, panelText, width, ctx, panelErr, hasFinal, fullOutput), end
@@ -1338,6 +1393,13 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 
 func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) []RenderedRow {
 	output := strings.TrimSpace(ev.Output)
+	if opts.ToolOutputPanels && isTaskWritePanelEvent(ev) {
+		fullOutput := false
+		if opts.ToolPanelFullOutput != nil {
+			fullOutput = opts.ToolPanelFullOutput(ev.CallID)
+		}
+		return renderACPStandardToolLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, true, fullOutput)
+	}
 	if opts.ToolOutputPanels && ev.DisableGrouping {
 		fullOutput := false
 		if opts.ToolPanelFullOutput != nil {
@@ -1409,6 +1471,21 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 		if name := strings.TrimSpace(final.Name); name != "" {
 			header.Name = name
 		}
+		if toolKind := strings.TrimSpace(final.ToolKind); toolKind != "" {
+			header.ToolKind = toolKind
+		}
+		if taskID := strings.TrimSpace(final.TaskID); taskID != "" {
+			header.TaskID = taskID
+		}
+		if action := strings.TrimSpace(final.TaskAction); action != "" {
+			header.TaskAction = action
+		}
+		if input := strings.TrimSpace(final.TaskInput); input != "" {
+			header.TaskInput = input
+		}
+		if targetKind := strings.TrimSpace(final.TaskTargetKind); targetKind != "" {
+			header.TaskTargetKind = targetKind
+		}
 		if args := strings.TrimSpace(final.Args); args != "" {
 			if isTerminalPanelToolEvent(header) {
 				header.Args = normalizeACPToolInline(args)
@@ -1463,6 +1540,11 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	case "BASH", "SPAWN":
 		ev.Name = semanticName
 		return terminalLifecycleHeader(ev)
+	case "TASK":
+		if taskEventAction(ev) == "write" {
+			return taskWriteLifecycleHeader(ev, err)
+		}
+		return standardVerbLifecycleHeader("Task", ev.Args, err)
 	case "WRITE", "PATCH":
 		ev.Name = semanticName
 		return mutationLifecycleHeader(ev, err)
@@ -1477,6 +1559,30 @@ func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	default:
 		return standardVerbLifecycleHeader(firstTrimmed(ev.Name, ev.ToolKind, "Tool"), ev.Args, err)
 	}
+}
+
+func taskWriteLifecycleHeader(ev SubagentEvent, err bool) string {
+	handle := taskHandleDisplay(ev.TaskID)
+	input := normalizeTaskWriteDisplayInput(ev.TaskInput)
+	if input == "" {
+		_, detail := splitTaskAction(ev.Args)
+		if before, after, ok := strings.Cut(detail, ":"); ok && taskHandleDisplay(before) != "" {
+			handle = firstNonEmpty(handle, taskHandleDisplay(before))
+			input = normalizeTaskWriteDisplayInput(after)
+		} else {
+			input = normalizeTaskWriteDisplayInput(detail)
+		}
+	}
+	args := ""
+	switch {
+	case handle != "" && input != "":
+		args = handle + ": " + input
+	case handle != "":
+		args = handle
+	case input != "":
+		args = input
+	}
+	return standardVerbLifecycleHeader("Write", args, err)
 }
 
 func standardVerbLifecycleHeader(verb string, args string, err bool) string {
@@ -1554,6 +1660,8 @@ func isTerminalPanelToolKind(name string, kind string) bool {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
 	case "BASH", "SPAWN":
 		return true
+	case "TASK":
+		return false
 	}
 	return strings.EqualFold(strings.TrimSpace(kind), "execute")
 }
@@ -1585,6 +1693,10 @@ func isMutationPanelToolEvent(ev SubagentEvent) bool {
 
 func toolSemanticName(name string, kind string) string {
 	name = strings.TrimSpace(name)
+	switch strings.ToUpper(name) {
+	case "BASH", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH":
+		return strings.ToUpper(name)
+	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "execute":
 		return "BASH"

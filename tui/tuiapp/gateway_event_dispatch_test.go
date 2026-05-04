@@ -12,6 +12,7 @@ import (
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
 )
 
 func newGatewayEventTestModel() *Model {
@@ -1436,6 +1437,382 @@ func TestGatewaySpawnArgumentsRenderPromptPreviewAndExpandsFullPrompt(t *testing
 	}
 }
 
+func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testing.T) {
+	model := newGatewayEventTestModel()
+	prompt := "在当前目录创建 hello_from_spawn.txt"
+	finalText := strings.Join([]string{
+		"### 已完成",
+		"---",
+		"- ✅ 创建 `hello_from_spawn.txt`",
+		"**内容：** `Hello from SPAWN child agent!`",
+		"| 文件 | 状态 |",
+		"| --- | --- |",
+		"| `hello_from_spawn.txt` | **created** |",
+		"报告位于 `spawn_report.md`",
+	}, "\n")
+	for _, env := range []appgateway.EventEnvelope{
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "spawn-clean-final",
+				ToolName: "SPAWN",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": prompt},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "spawn-clean-final",
+				ToolName: "SPAWN",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": prompt},
+				RawOutput: map[string]any{
+					"running": true,
+					"state":   "running",
+					"task_id": "jack",
+					"text":    "dirty process line\nls output that should not become final",
+				},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "spawn-clean-final",
+				ToolName: "SPAWN",
+				Status:   appgateway.ToolStatusCompleted,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": prompt},
+				RawOutput: map[string]any{
+					"running": false,
+					"state":   "completed",
+					"task_id": "jack",
+					"result":  finalText,
+				},
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{"• Spawned self:", "已完成", "✅ 创建 hello_from_spawn.txt", "... +2 lines", "hello_from_spawn.txt  created", "报告位于 spawn_report.md"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows missing %q:\n%s", want, joined)
+		}
+	}
+	for _, forbidden := range []string{"dirty process line", "ls output", "###", "**", "`", "| --- |"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows should not contain %q:\n%s", forbidden, joined)
+		}
+	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:spawn-clean-final") {
+		t.Fatal("expected SPAWN panel token to expand full cleaned result")
+	}
+	rows = block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "文件  状态") {
+		t.Fatalf("expanded rows missing cleaned table header:\n%s", joined)
+	}
+}
+
+func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) {
+	model := newGatewayEventTestModel()
+	prompt := "创建一个 Python 脚本并运行"
+	for _, env := range []appgateway.EventEnvelope{
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "spawn-running-json",
+				ToolName: "SPAWN",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "claude"},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "spawn-running-json",
+				ToolName: "SPAWN",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "claude"},
+				RawOutput: map[string]any{
+					"agent":       "claude",
+					"prompt":      prompt,
+					"running":     true,
+					"state":       "running",
+					"tool_output": `{"agent":"claude","prompt":"创建一个 Python 脚本并运行","running":true}`,
+				},
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Spawned claude: "+prompt) {
+		t.Fatalf("rendered rows missing upgraded SPAWN prompt:\n%s", joined)
+	}
+	for _, forbidden := range []string{`{"agent"`, `"prompt"`, `"running"`} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("running SPAWN rows should not expose raw JSON %q:\n%s", forbidden, joined)
+		}
+	}
+}
+
+func TestSpawnFinalJSONAnswerRemainsVisible(t *testing.T) {
+	t.Parallel()
+
+	for _, answer := range []string{`{"result":"ok"}`, `{"state":"done"}`} {
+		got := toolDisplayOutput("SPAWN", nil, map[string]any{"result": answer}, "", string(appgateway.ToolStatusCompleted), false)
+		if got != answer {
+			t.Fatalf("toolDisplayOutput(SPAWN JSON final %q) = %q, want original JSON", answer, got)
+		}
+	}
+}
+
+func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing.T) {
+	model := newGatewayEventTestModel()
+	prompt := "分析当前目录"
+	start := appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindToolCall,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		ToolCall: &appgateway.ToolCallPayload{
+			CallID:   "spawn-stream-final",
+			ToolName: "SPAWN",
+			Status:   appgateway.ToolStatusRunning,
+			Scope:    appgateway.EventScopeMain,
+			RawInput: map[string]any{"agent": "self", "prompt": prompt},
+		},
+	}}
+	updated, _ := model.Update(start)
+	model = updated.(*Model)
+
+	req := appgateway.StreamRequest{
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		CallID:     "spawn-stream-final",
+		ToolName:   "SPAWN",
+		RawInput:   map[string]any{"agent": "self", "prompt": prompt},
+		Ref:        sdkstream.Ref{SessionID: "root-session", TaskID: "liam"},
+		Scope:      appgateway.EventScopeMain,
+	}
+	for _, env := range appgateway.StreamFrameEvents(req, sdkstream.Frame{
+		Ref:     sdkstream.Ref{SessionID: "root-session", TaskID: "internal-task"},
+		Stream:  "stdout",
+		Text:    "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|",
+		Running: true,
+	}) {
+		updated, _ = model.Update(env)
+		model = updated.(*Model)
+	}
+	for _, env := range appgateway.StreamFrameEvents(req, sdkstream.Frame{
+		Ref:     sdkstream.Ref{SessionID: "root-session", TaskID: "internal-task"},
+		Closed:  true,
+		Running: false,
+		State:   "completed",
+		Result: map[string]any{
+			"result": "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
+		},
+	}) {
+		updated, _ = model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{"• Spawned self:", "摘要", "ool_demo_showcase.md 存在", "结论： 目录用于 SPAWN 演示"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows missing %q:\n%s", want, joined)
+		}
+	}
+	for _, forbidden := range []string{"总文件数", "###", "`", "**"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows should not contain %q:\n%s", forbidden, joined)
+		}
+	}
+}
+
+func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T) {
+	model := newGatewayEventTestModel()
+	for _, env := range []appgateway.EventEnvelope{
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "spawn-continue",
+				ToolName: "SPAWN",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "创建文件"},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "spawn-continue",
+				ToolName: "SPAWN",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusCompleted,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "创建文件"},
+				RawOutput: map[string]any{
+					"running": false,
+					"state":   "completed",
+					"task_id": "jack",
+					"result":  "old final answer",
+				},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "task-wait-before-write",
+				ToolName: "TASK",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusCompleted,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"action": "wait", "task_id": "jack", "yield_time_ms": 5000},
+				RawOutput: map[string]any{
+					"action":      "wait",
+					"running":     false,
+					"state":       "completed",
+					"task_id":     "jack",
+					"target_kind": "subagent",
+					"result":      "old final answer",
+				},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "task-write-continue",
+				ToolName: "TASK",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"action": "write", "task_id": "jack", "input": "检查刚才创建的文件"},
+				RawOutput: map[string]any{
+					"action":         "write",
+					"running":        true,
+					"state":          "running",
+					"task_id":        "jack",
+					"target_kind":    "subagent",
+					"output_preview": "正在读取 hello_from_spawn.txt",
+				},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   "spawn-continued-child",
+				ToolName: "SPAWN",
+				ToolKind: "execute",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "检查刚才创建的文件"},
+				RawOutput: map[string]any{
+					"running": true,
+					"state":   "running",
+					"task_id": "jack",
+					"text":    "正在读取 hello_from_spawn.txt",
+				},
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	for _, want := range []string{"• Spawned self: 创建文件", "old final answer", "• Tasks", "Wait jack", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("running continuation rows missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Count(joined, "• Spawned") != 1 || strings.Contains(joined, "  └ Write jack") {
+		t.Fatalf("TASK write should render separately without a second SPAWN or grouped Write row:\n%s", joined)
+	}
+
+	updated, _ := model.Update(appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindToolResult,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		ToolResult: &appgateway.ToolResultPayload{
+			CallID:   "spawn-continued-child",
+			ToolName: "SPAWN",
+			ToolKind: "execute",
+			Status:   appgateway.ToolStatusCompleted,
+			Scope:    appgateway.EventScopeMain,
+			RawInput: map[string]any{"agent": "self", "prompt": "检查刚才创建的文件"},
+			RawOutput: map[string]any{
+				"running": false,
+				"state":   "completed",
+				"task_id": "jack",
+				"result":  "### 检查完成\n- `hello_from_spawn.txt` 内容正确",
+			},
+		},
+	}})
+	model = updated.(*Model)
+	rows = block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "• Write jack: 检查刚才创建的文件") || !strings.Contains(joined, "检查完成") || !strings.Contains(joined, "hello_from_spawn.txt 内容正确") {
+		t.Fatalf("completed continuation rows missing cleaned final result:\n%s", joined)
+	}
+	if strings.Contains(joined, "正在读取 hello_from_spawn.txt") || strings.Contains(joined, "###") || strings.Contains(joined, "`") {
+		t.Fatalf("completed continuation should replace running stream with cleaned final:\n%s", joined)
+	}
+	if strings.Count(joined, "• Spawned") != 1 || strings.Contains(joined, "  └ Write jack") {
+		t.Fatalf("completed continuation should keep one original SPAWN and direct Write panel:\n%s", joined)
+	}
+	spawnCount := 0
+	writeCount := 0
+	for _, ev := range block.Events {
+		if ev.Kind == SEToolCall && strings.EqualFold(ev.Name, "SPAWN") {
+			spawnCount++
+		}
+		if ev.Kind == SEToolCall && strings.EqualFold(ev.Name, "TASK") && taskEventAction(ev) == "write" {
+			writeCount++
+		}
+	}
+	if spawnCount != 1 || writeCount != 1 {
+		t.Fatalf("block events = %#v, want one original SPAWN and one TASK write panel", block.Events)
+	}
+}
+
 func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []appgateway.EventEnvelope{
@@ -2336,6 +2713,53 @@ func TestGatewayInterleavedStreamingFinalReplacesMatchingNarrativeOnly(t *testin
 	for i := range wantKinds {
 		if block.Events[i].Kind != wantKinds[i] || block.Events[i].Text != wantTexts[i] {
 			t.Fatalf("block.Events[%d] = %#v, want kind=%v text=%q", i, block.Events[i], wantKinds[i], wantTexts[i])
+		}
+	}
+}
+
+func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing.T) {
+	model := newGatewayEventTestModel()
+	for _, env := range []appgateway.EventEnvelope{
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "spawn-1",
+				ToolName: "SPAWN",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"agent": "self", "prompt": "inspect"},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindAssistantMessage,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin: &appgateway.EventOrigin{
+				Scope:   appgateway.EventScopeSubagent,
+				ScopeID: "jack",
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"stream": map[string]any{
+							"parent_call_id": "spawn-1",
+							"parent_tool":    "SPAWN",
+						},
+					},
+				},
+			},
+			Narrative: &appgateway.NarrativePayload{
+				Role: appgateway.NarrativeRoleAssistant,
+				Text: "child output",
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+	for _, block := range model.doc.Blocks() {
+		if panel, ok := block.(*SubagentPanelBlock); ok {
+			t.Fatalf("anchored child stream created standalone panel: %#v", panel)
 		}
 	}
 }

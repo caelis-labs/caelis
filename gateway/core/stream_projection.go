@@ -49,7 +49,7 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 		return StreamRequest{}, false
 	}
 	toolName := strings.ToUpper(strings.TrimSpace(payload.ToolName))
-	if toolName != "BASH" && toolName != "SPAWN" {
+	if toolName != "BASH" && toolName != "SPAWN" && toolName != "TASK" {
 		return StreamRequest{}, false
 	}
 	if payload.Status != ToolStatusRunning && !boolValue(payload.RawOutput["running"]) && !strings.EqualFold(strings.TrimSpace(stringValue(payload.RawOutput["state"])), "running") {
@@ -127,17 +127,7 @@ func StreamFrameEvent(req StreamRequest, frame sdkstream.Frame) EventEnvelope {
 			OccurredAt: occurredAt,
 			SessionRef: req.SessionRef,
 			Origin:     cloneEventOrigin(req.Origin),
-			Meta: map[string]any{
-				"caelis": map[string]any{
-					"version":   1,
-					"transient": true,
-					"runtime": map[string]any{
-						"stream": map[string]any{
-							"mode": "append",
-						},
-					},
-				},
-			},
+			Meta:       streamFrameMeta("append"),
 			Protocol: &sdksession.EventProtocol{
 				Method:     sdksession.ProtocolMethodSessionUpdate,
 				UpdateType: string(sdksession.ProtocolUpdateTypeToolUpdate),
@@ -163,6 +153,328 @@ func StreamFrameEvent(req StreamRequest, frame sdkstream.Frame) EventEnvelope {
 			},
 		},
 	}
+}
+
+// StreamFrameEvents projects one runtime stream frame into all transient gateway
+// events needed by renderers. Structured child session events are preserved for
+// subagent panels, while the standard tool-result update remains available for
+// the owning SPAWN/BASH panel.
+func StreamFrameEvents(req StreamRequest, frame sdkstream.Frame) []EventEnvelope {
+	out := make([]EventEnvelope, 0, 2)
+	if frame.Event != nil {
+		if env, ok := streamFrameEmbeddedEvent(req, frame); ok {
+			out = append(out, env)
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(req.ToolName), "SPAWN") {
+		if env, ok := subagentStreamFrameEvent(req, frame); ok {
+			out = append(out, env)
+		}
+		return out
+	}
+	if frame.Closed {
+		out = append(out, streamFinalFrameEvent(req, frame))
+		return out
+	}
+	if frame.Text != "" && shouldProjectFrameTextToParentTool(frame) {
+		out = append(out, StreamFrameEvent(req, frame))
+	}
+	return out
+}
+
+func subagentStreamFrameEvent(req StreamRequest, frame sdkstream.Frame) (EventEnvelope, bool) {
+	if frame.Closed {
+		return subagentFinalFrameEvent(req, frame), true
+	}
+	if !frame.Running || frame.Text == "" || !shouldProjectFrameTextToParentTool(frame) {
+		return EventEnvelope{}, false
+	}
+	if taskID := strings.TrimSpace(req.Ref.TaskID); taskID != "" {
+		frame = sdkstream.CloneFrame(frame)
+		frame.Ref.TaskID = taskID
+	}
+	return StreamFrameEvent(req, frame), true
+}
+
+func streamFinalFrameEvent(req StreamRequest, frame sdkstream.Frame) EventEnvelope {
+	status, isErr := subagentFinalToolStatus(frame)
+	output := map[string]any{
+		"task_id":       firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID),
+		"terminal_id":   firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID),
+		"stream":        strings.TrimSpace(frame.Stream),
+		"running":       false,
+		"state":         string(status),
+		"stdout_cursor": frame.Cursor.Stdout,
+		"stderr_cursor": frame.Cursor.Stderr,
+	}
+	if state := strings.TrimSpace(frame.State); state != "" {
+		output["state"] = state
+	}
+	if text := strings.TrimSpace(frame.Text); text != "" {
+		output["text"] = text
+	}
+	for _, key := range []string{"target_kind", "handle", "mention", "agent", "prompt", "result", "final_message", "finalMessage", "output", "stdout", "stderr", "output_preview", "error"} {
+		if value := strings.TrimSpace(stringValue(frame.Result[key])); value != "" {
+			output[key] = value
+		}
+	}
+	if frame.ExitCode != nil {
+		output["exit_code"] = *frame.ExitCode
+	}
+	occurredAt := frame.UpdatedAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	return EventEnvelope{
+		Event: Event{
+			Kind:       EventKindToolResult,
+			HandleID:   req.HandleID,
+			RunID:      req.RunID,
+			TurnID:     req.TurnID,
+			OccurredAt: occurredAt,
+			SessionRef: req.SessionRef,
+			Origin:     cloneEventOrigin(req.Origin),
+			Meta:       streamFrameMeta("final"),
+			Protocol: &sdksession.EventProtocol{
+				Method:     sdksession.ProtocolMethodSessionUpdate,
+				UpdateType: string(sdksession.ProtocolUpdateTypeToolUpdate),
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeToolUpdate),
+					ToolCallID:    req.CallID,
+					Kind:          strings.TrimSpace(req.ToolName),
+					Title:         req.ToolName,
+					Status:        string(status),
+					RawInput:      maps.Clone(req.RawInput),
+					RawOutput:     output,
+				},
+			},
+			ToolResult: &ToolResultPayload{
+				CallID:        req.CallID,
+				ToolName:      req.ToolName,
+				RawInput:      maps.Clone(req.RawInput),
+				RawOutput:     output,
+				Status:        status,
+				Error:         isErr,
+				Actor:         req.Actor,
+				Scope:         req.Scope,
+				ParticipantID: req.ParticipantID,
+			},
+		},
+	}
+}
+
+func subagentFinalFrameEvent(req StreamRequest, frame sdkstream.Frame) EventEnvelope {
+	status, isErr := subagentFinalToolStatus(frame)
+	output := map[string]any{
+		"task_id":     firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID),
+		"terminal_id": firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID),
+		"running":     false,
+		"state":       string(status),
+	}
+	if state := strings.TrimSpace(frame.State); state != "" {
+		output["state"] = state
+	}
+	for _, key := range []string{"handle", "mention", "agent", "prompt"} {
+		if value := strings.TrimSpace(stringValue(frame.Result[key])); value != "" {
+			output[key] = value
+		}
+	}
+	if result := CleanSubagentFinalOutput(firstNonEmpty(
+		stringValue(frame.Result["result"]),
+		stringValue(frame.Result["final_message"]),
+		stringValue(frame.Result["finalMessage"]),
+		stringValue(frame.Result["output"]),
+		stringValue(frame.Result["stdout"]),
+		stringValue(frame.Result["output_preview"]),
+		frame.Text,
+	)); result != "" {
+		output["result"] = result
+	}
+	if errText := strings.TrimSpace(stringValue(frame.Result["error"])); errText != "" {
+		output["error"] = errText
+	}
+	if frame.ExitCode != nil {
+		output["exit_code"] = *frame.ExitCode
+	}
+	occurredAt := frame.UpdatedAt
+	if occurredAt.IsZero() {
+		occurredAt = time.Now()
+	}
+	return EventEnvelope{
+		Event: Event{
+			Kind:       EventKindToolResult,
+			HandleID:   req.HandleID,
+			RunID:      req.RunID,
+			TurnID:     req.TurnID,
+			OccurredAt: occurredAt,
+			SessionRef: req.SessionRef,
+			Origin:     cloneEventOrigin(req.Origin),
+			Meta:       streamFrameMeta("final"),
+			Protocol: &sdksession.EventProtocol{
+				Method:     sdksession.ProtocolMethodSessionUpdate,
+				UpdateType: string(sdksession.ProtocolUpdateTypeToolUpdate),
+				Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: string(sdksession.ProtocolUpdateTypeToolUpdate),
+					ToolCallID:    req.CallID,
+					Kind:          strings.TrimSpace(req.ToolName),
+					Title:         req.ToolName,
+					Status:        string(status),
+					RawInput:      maps.Clone(req.RawInput),
+					RawOutput:     output,
+				},
+			},
+			ToolResult: &ToolResultPayload{
+				CallID:        req.CallID,
+				ToolName:      req.ToolName,
+				RawInput:      maps.Clone(req.RawInput),
+				RawOutput:     output,
+				Status:        status,
+				Error:         isErr,
+				Actor:         req.Actor,
+				Scope:         req.Scope,
+				ParticipantID: req.ParticipantID,
+			},
+		},
+	}
+}
+
+func subagentFinalToolStatus(frame sdkstream.Frame) (ToolStatus, bool) {
+	state := strings.ToLower(strings.TrimSpace(firstNonEmpty(frame.State, stringValue(frame.Result["state"]))))
+	switch state {
+	case "failed":
+		return ToolStatusFailed, true
+	case "interrupted":
+		return ToolStatusInterrupted, true
+	case "cancelled", "canceled":
+		return ToolStatusCancelled, true
+	}
+	if frame.ExitCode != nil && *frame.ExitCode != 0 {
+		return ToolStatusFailed, true
+	}
+	return ToolStatusCompleted, false
+}
+
+func shouldProjectFrameTextToParentTool(frame sdkstream.Frame) bool {
+	if strings.EqualFold(strings.TrimSpace(frame.Stream), "reasoning") {
+		return false
+	}
+	if update := sdksession.ProtocolUpdateOf(frame.Event); update != nil &&
+		strings.TrimSpace(update.SessionUpdate) == string(sdksession.ProtocolUpdateTypeAgentThought) {
+		return false
+	}
+	if frame.Event != nil && frame.Event.Protocol != nil &&
+		strings.TrimSpace(frame.Event.Protocol.UpdateType) == string(sdksession.ProtocolUpdateTypeAgentThought) {
+		return false
+	}
+	return true
+}
+
+func streamFrameEmbeddedEvent(req StreamRequest, frame sdkstream.Frame) (EventEnvelope, bool) {
+	event := sdksession.CloneEvent(frame.Event)
+	if event == nil {
+		return EventEnvelope{}, false
+	}
+	if event.Scope != nil && event.Scope.Participant.Kind == sdksession.ParticipantKindSubagent {
+		taskID := firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID))
+		if taskID != "" {
+			if event.Scope.Participant.DelegationID == "" {
+				event.Scope.Participant.DelegationID = taskID
+			}
+		}
+	}
+	if event.Time.IsZero() {
+		event.Time = frame.UpdatedAt
+	}
+	env, ok := ProjectSessionEvent(req.SessionRef, event)
+	if !ok {
+		return EventEnvelope{}, false
+	}
+	if streamFrameEventIsParentToolEcho(req, env.Event) {
+		return EventEnvelope{}, false
+	}
+	if taskID := firstNonEmpty(strings.TrimSpace(frame.Ref.TaskID), strings.TrimSpace(req.Ref.TaskID)); taskID != "" &&
+		env.Event.Origin != nil && env.Event.Origin.Scope == EventScopeSubagent {
+		env.Event.Origin.ScopeID = taskID
+	}
+	env.Event.HandleID = firstNonEmpty(strings.TrimSpace(env.Event.HandleID), strings.TrimSpace(req.HandleID))
+	env.Event.RunID = firstNonEmpty(strings.TrimSpace(env.Event.RunID), strings.TrimSpace(req.RunID))
+	env.Event.SessionRef = req.SessionRef
+	env.Event.Meta = markStreamFrameTransient(env.Event.Meta)
+	env.Event.Meta = markStreamFrameAnchor(env.Event.Meta, req.CallID, req.ToolName)
+	if env.Event.OccurredAt.IsZero() {
+		env.Event.OccurredAt = frame.UpdatedAt
+	}
+	return env, true
+}
+
+func streamFrameEventIsParentToolEcho(req StreamRequest, ev Event) bool {
+	parentCallID := strings.TrimSpace(req.CallID)
+	if parentCallID == "" {
+		return false
+	}
+	callID := ""
+	toolName := ""
+	switch ev.Kind {
+	case EventKindToolCall:
+		if ev.ToolCall == nil {
+			return false
+		}
+		callID = strings.TrimSpace(ev.ToolCall.CallID)
+		toolName = strings.TrimSpace(ev.ToolCall.ToolName)
+	case EventKindToolResult:
+		if ev.ToolResult == nil {
+			return false
+		}
+		callID = strings.TrimSpace(ev.ToolResult.CallID)
+		toolName = strings.TrimSpace(ev.ToolResult.ToolName)
+	default:
+		return false
+	}
+	if callID == "" || callID != parentCallID {
+		return false
+	}
+	parentTool := strings.TrimSpace(req.ToolName)
+	return parentTool == "" || toolName == "" || strings.EqualFold(parentTool, toolName)
+}
+
+func markStreamFrameTransient(meta map[string]any) map[string]any {
+	out := withCaelisRuntimeSection(meta, EventMetaRuntimeStream, map[string]any{
+		EventMetaRuntimeStreamMode: "append",
+	})
+	caelis, _ := out[EventMetaRoot].(map[string]any)
+	caelis[EventMetaTransient] = true
+	return out
+}
+
+func streamFrameMeta(mode string) map[string]any {
+	out := withCaelisRuntimeSection(nil, EventMetaRuntimeStream, map[string]any{
+		EventMetaRuntimeStreamMode: strings.TrimSpace(mode),
+	})
+	caelis, _ := out[EventMetaRoot].(map[string]any)
+	caelis[EventMetaTransient] = true
+	return out
+}
+
+func markStreamFrameAnchor(meta map[string]any, callID string, toolName string) map[string]any {
+	callID = strings.TrimSpace(callID)
+	toolName = strings.TrimSpace(toolName)
+	if callID == "" && toolName == "" {
+		return meta
+	}
+	out := markStreamFrameTransient(meta)
+	caelis, _ := out[EventMetaRoot].(map[string]any)
+	runtimeMeta, _ := caelis[EventMetaRuntime].(map[string]any)
+	streamMeta, _ := runtimeMeta[EventMetaRuntimeStream].(map[string]any)
+	if callID != "" {
+		streamMeta[EventMetaRuntimeStreamParentCallID] = callID
+	}
+	if toolName != "" {
+		streamMeta[EventMetaRuntimeStreamParentTool] = toolName
+	}
+	runtimeMeta[EventMetaRuntimeStream] = streamMeta
+	caelis[EventMetaRuntime] = runtimeMeta
+	out[EventMetaRoot] = caelis
+	return out
 }
 
 func streamFrameState(frame sdkstream.Frame) string {

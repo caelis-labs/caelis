@@ -521,6 +521,7 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		}
 		if hasContent {
 			m.doc.Append(NewDividerBlock(m.userTurnDividerLabel()))
+			m.markViewportStructureDirty()
 		}
 	}
 	m.showTurnDivider = false

@@ -3286,6 +3286,77 @@ func TestRuntimeBashToolPassesExplicitYieldThrough(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
+func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
+	t.Parallel()
+
+	_, session, runtime := newRuntimeBashToolTestHarness(t)
+	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	bashTool := runtimeBashTool{
+		base:       mustRuntimeBashTool(t, fake),
+		session:    sdksession.CloneSession(session),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+		"command":       "printf 'ok'",
+		"workdir":       session.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := bashResult.Meta["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+	}
+
+	callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":  "wait",
+		"task_id": taskID,
+	})
+
+	if got := fake.session.lastWait; got != defaultBashYield {
+		t.Fatalf("omitted TASK wait yield = %v, want %v", got, defaultBashYield)
+	}
+}
+
+func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
+	t.Parallel()
+
+	_, session, runtime := newRuntimeBashToolTestHarness(t)
+	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	bashTool := runtimeBashTool{
+		base:       mustRuntimeBashTool(t, fake),
+		session:    sdksession.CloneSession(session),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+		"command":       "printf 'ok'",
+		"workdir":       session.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := bashResult.Meta["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+	}
+
+	callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":        "wait",
+		"task_id":       taskID,
+		"yield_time_ms": 0,
+	})
+
+	if got := fake.session.lastWait; got != 0 {
+		t.Fatalf("explicit zero TASK wait yield = %v, want 0", got)
+	}
+}
+
 func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
 	t.Parallel()
 
@@ -3419,6 +3490,9 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 			Kind:    sdktask.KindSubagent,
 			State:   sdktask.StateCompleted,
 			Running: false,
+			Metadata: map[string]any{
+				"prompt": "summarize startup output",
+			},
 			Result: map[string]any{
 				"handle":  "jeff",
 				"mention": "@jeff",
@@ -3442,6 +3516,12 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	}
 	if got := result.Meta["task_id"]; got != "jeff" {
 		t.Fatalf("meta[task_id] = %#v, want handle jeff", got)
+	}
+	if got := result.Meta["prompt"]; got != "summarize startup output" {
+		t.Fatalf("meta[prompt] = %#v, want prompt preserved for SPAWN display", got)
+	}
+	if _, ok := payload["prompt"]; ok {
+		t.Fatalf("payload contains prompt: %#v", payload)
 	}
 	for _, key := range []string{"handle", "mention", "agent", "agent_id", "internal_task_id", "terminal_id"} {
 		if _, ok := payload[key]; ok {
