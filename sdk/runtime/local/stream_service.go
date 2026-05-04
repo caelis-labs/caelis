@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"maps"
 	"strings"
 	"time"
 
@@ -126,6 +127,7 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 			code = 1
 		}
 		snap.ExitCode = &code
+		snap.Result = maps.Clone(task.result)
 	}
 	deliveredStdoutFrame := false
 	deliveredStderrFrame := false
@@ -207,6 +209,8 @@ func (s *streamService) Subscribe(ctx context.Context, req sdkstream.SubscribeRe
 						Cursor:    snap.Cursor,
 						Running:   false,
 						Closed:    true,
+						State:     streamClosedState(snap),
+						Result:    maps.Clone(snap.Result),
 						UpdatedAt: snap.UpdatedAt,
 					}
 					if snap.ExitCode != nil {
@@ -229,6 +233,16 @@ func (s *streamService) Subscribe(ctx context.Context, req sdkstream.SubscribeRe
 			}
 		}
 	}
+}
+
+func streamClosedState(snap sdkstream.Snapshot) string {
+	if state, _ := snap.Result["state"].(string); strings.TrimSpace(state) != "" {
+		return strings.TrimSpace(state)
+	}
+	if snap.ExitCode != nil && *snap.ExitCode != 0 {
+		return "failed"
+	}
+	return "completed"
 }
 
 func (s *streamService) Wait(ctx context.Context, ref sdkstream.Ref) (sdkstream.Snapshot, error) {

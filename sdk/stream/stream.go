@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"iter"
+	"maps"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ type Frame struct {
 	Stream    string            `json:"stream,omitempty"`
 	Text      string            `json:"text,omitempty"`
 	State     string            `json:"state,omitempty"`
+	Result    map[string]any    `json:"result,omitempty"`
 	Cursor    Cursor            `json:"cursor,omitempty"`
 	Running   bool              `json:"running,omitempty"`
 	Closed    bool              `json:"closed,omitempty"`
@@ -39,14 +41,15 @@ type Frame struct {
 
 // Snapshot is one point-in-time stream read result.
 type Snapshot struct {
-	Ref           Ref       `json:"ref,omitempty"`
-	Cursor        Cursor    `json:"cursor,omitempty"`
-	Frames        []Frame   `json:"frames,omitempty"`
-	Running       bool      `json:"running,omitempty"`
-	SupportsInput bool      `json:"supports_input,omitempty"`
-	ExitCode      *int      `json:"exit_code,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	Ref           Ref            `json:"ref,omitempty"`
+	Cursor        Cursor         `json:"cursor,omitempty"`
+	Frames        []Frame        `json:"frames,omitempty"`
+	Result        map[string]any `json:"result,omitempty"`
+	Running       bool           `json:"running,omitempty"`
+	SupportsInput bool           `json:"supports_input,omitempty"`
+	ExitCode      *int           `json:"exit_code,omitempty"`
+	StartedAt     time.Time      `json:"started_at,omitempty"`
+	UpdatedAt     time.Time      `json:"updated_at,omitempty"`
 }
 
 // ReadRequest asks for one incremental stream read from one cursor.
@@ -116,6 +119,7 @@ func CloneFrame(in Frame) Frame {
 		code := *in.ExitCode
 		out.ExitCode = &code
 	}
+	out.Result = maps.Clone(in.Result)
 	out.Event = sdksession.CloneEvent(in.Event)
 	return out
 }
@@ -129,6 +133,7 @@ func CloneSnapshot(in Snapshot) Snapshot {
 		code := *in.ExitCode
 		out.ExitCode = &code
 	}
+	out.Result = maps.Clone(in.Result)
 	if len(in.Frames) > 0 {
 		out.Frames = make([]Frame, 0, len(in.Frames))
 		for _, frame := range in.Frames {

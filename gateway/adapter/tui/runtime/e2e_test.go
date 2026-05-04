@@ -33,6 +33,7 @@ func TestGatewayDriverProviderLiveTurnE2E(t *testing.T) {
 		Model: gatewayapp.ModelConfig{
 			Provider: spec.Provider,
 			Model:    spec.Model,
+			BaseURL:  spec.BaseURL,
 			TokenEnv: providerTokenEnv(spec.Provider),
 		},
 	})
@@ -115,6 +116,7 @@ func TestGatewayDriverProviderConnectThenSubmitE2E(t *testing.T) {
 		Model: gatewayapp.ModelConfig{
 			Provider: spec.Provider,
 			Model:    spec.Model,
+			BaseURL:  spec.BaseURL,
 			TokenEnv: providerTokenEnv(spec.Provider),
 		},
 	})
@@ -177,6 +179,7 @@ func TestGatewayDriverProviderMultiTurnNewAndResumeE2E(t *testing.T) {
 		Model: gatewayapp.ModelConfig{
 			Provider: spec.Provider,
 			Model:    spec.Model,
+			BaseURL:  spec.BaseURL,
 			TokenEnv: providerTokenEnv(spec.Provider),
 		},
 	})

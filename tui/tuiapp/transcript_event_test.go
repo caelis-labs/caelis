@@ -708,6 +708,71 @@ func TestProjectGatewayEventTaskArgsUseProtocolRawInput(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventTaskWriteUsesCaelisMetaTarget(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind: appgateway.EventKindToolResult,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"tool": map[string]any{
+						"action":      "write",
+						"target_kind": "subagent",
+						"target_id":   "maya",
+						"input":       "请在文件末尾再加 2 行",
+					},
+				},
+			},
+		},
+		ToolResult: &appgateway.ToolResultPayload{
+			CallID:   "task-write",
+			ToolName: "TASK",
+			ToolKind: "execute",
+			Status:   appgateway.ToolStatusCompleted,
+			RawInput: map[string]any{"action": "write", "task_id": "internal-task", "input": "fallback"},
+			RawOutput: map[string]any{
+				"result": "已追加",
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolTaskAction != "write" || got.ToolTaskTargetKind != "subagent" || got.ToolTaskID != "maya" || got.ToolTaskInput != "请在文件末尾再加 2 行" {
+		t.Fatalf("task fields = action:%q target:%q id:%q input:%q", got.ToolTaskAction, got.ToolTaskTargetKind, got.ToolTaskID, got.ToolTaskInput)
+	}
+}
+
+func TestProjectGatewayEventPreservesStreamParentAnchor(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind: appgateway.EventKindAssistantMessage,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"stream": map[string]any{
+						"parent_call_id": "spawn-1",
+						"parent_tool":    "SPAWN",
+					},
+				},
+			},
+		},
+		Narrative: &appgateway.NarrativePayload{
+			Role: appgateway.NarrativeRoleAssistant,
+			Text: "child output",
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one narrative event", events)
+	}
+	if events[0].AnchorToolCallID != "spawn-1" || events[0].AnchorToolName != "SPAWN" {
+		t.Fatalf("anchor = (%q, %q), want spawn parent", events[0].AnchorToolCallID, events[0].AnchorToolName)
+	}
+}
+
 func snapshotTranscriptModel(m *Model) string {
 	lines := make([]string, 0, len(m.doc.Blocks())*2)
 	for _, block := range m.doc.Blocks() {

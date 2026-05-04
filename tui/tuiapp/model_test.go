@@ -4,6 +4,7 @@ import (
 	"image/color"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -260,6 +261,32 @@ func TestDynamicAgentSlashCommandUsesNormalTurnBehavior(t *testing.T) {
 	}
 	if len(model.history) != 1 || model.history[0] != line {
 		t.Fatalf("history = %#v, want agent slash prompt recorded", model.history)
+	}
+}
+
+func TestTaskResultDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	model.viewport.SetWidth(72)
+	model.viewport.SetHeight(20)
+
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events, SubagentEvent{Kind: SEAssistant, Text: "done", Done: true})
+	model.doc.Append(block)
+	model.activeMainACPTurnID = block.BlockID()
+	model.markViewportStructureDirty()
+	model.syncViewportContent()
+
+	model.showTurnDivider = true
+	model.runStartedAt = time.Now().Add(-3 * time.Second)
+	model.markViewportBlockDirty(block.BlockID())
+
+	updated, _ := model.Update(TaskResultMsg{})
+	model = updated.(*Model)
+	model.syncViewportContent()
+
+	joined := strings.Join(model.viewportPlainLines, "\n")
+	if !strings.Contains(joined, "─") || (!strings.Contains(joined, "3.") && !strings.Contains(joined, "3s")) {
+		t.Fatalf("viewport lines = %#v, want immediate completed-turn divider", model.viewportPlainLines)
 	}
 }
 

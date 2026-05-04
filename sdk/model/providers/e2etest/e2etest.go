@@ -22,6 +22,7 @@ type Config struct {
 type Spec struct {
 	Provider string
 	Model    string
+	BaseURL  string
 	LLM      sdkmodel.LLM
 }
 
@@ -246,6 +247,7 @@ func resolveCodeFree(cfg Config) (Spec, error) {
 	return Spec{
 		Provider: cfgRecord.Provider,
 		Model:    modelName,
+		BaseURL:  baseURL,
 		LLM:      llm,
 	}, nil
 }
@@ -314,6 +316,7 @@ func resolveFactoryProvider(cfg Config, spec providerSpec) (Spec, error) {
 	return Spec{
 		Provider: cfgRecord.Provider,
 		Model:    modelName,
+		BaseURL:  baseURL,
 		LLM:      llm,
 	}, nil
 }

@@ -379,7 +379,7 @@ func toolResultEvent(call sdkmodel.ToolCall, result sdktool.Result, message *sdk
 	event := &sdksession.Event{
 		Type:     sdksession.EventTypeToolResult,
 		Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolUpdate, toolCallStatus(result), rawInput, rawOutput),
-		Meta:     mergeEventMeta(toolMeta(call.Name)),
+		Meta:     mergeEventMeta(toolMeta(call.Name), result.Metadata),
 	}
 	if message != nil {
 		event.Message = message

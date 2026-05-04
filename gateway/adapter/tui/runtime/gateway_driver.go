@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"runtime"
 	"strings"
@@ -33,6 +34,13 @@ type GatewayDriver struct {
 	activeCommandID     uint64
 	activeCommandCancel context.CancelFunc
 	streamSubscriptions map[string]struct{}
+	streamParents       map[string]terminalStreamParent
+}
+
+type terminalStreamParent struct {
+	CallID   string
+	ToolName string
+	RawInput map[string]any
 }
 
 func NewGatewayDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
@@ -53,6 +61,7 @@ func NewGatewayDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSes
 		defaultSandboxType:  firstNonEmpty(stack.SandboxStatus().ResolvedBackend, stack.SandboxStatus().RequestedBackend, "auto"),
 		sandboxType:         firstNonEmpty(stack.SandboxStatus().ResolvedBackend, stack.SandboxStatus().RequestedBackend, "auto"),
 		streamSubscriptions: map[string]struct{}{},
+		streamParents:       map[string]terminalStreamParent{},
 	}
 	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
 		session, err := driver.stack.StartSession(ctx, preferredSessionID, driver.bindingKey)
@@ -74,6 +83,7 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 	if !ok {
 		return nil, false
 	}
+	d.bindTerminalStreamRequest(&req)
 	streams := d.stack.Gateway.Streams()
 	if streams == nil {
 		return nil, false
@@ -105,18 +115,113 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 			if err != nil || frame == nil {
 				return
 			}
-			if frame.Text == "" {
+			if frame.Text == "" && frame.Event == nil && !frame.Closed {
 				continue
 			}
-			env := appgateway.StreamFrameEvent(req, sdkstream.CloneFrame(*frame))
-			select {
-			case out <- env:
-			case <-ctx.Done():
-				return
+			for _, env := range appgateway.StreamFrameEvents(req, sdkstream.CloneFrame(*frame)) {
+				select {
+				case out <- env:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}()
 	return out, true
+}
+
+func (d *GatewayDriver) bindTerminalStreamRequest(req *appgateway.StreamRequest) {
+	if d == nil || req == nil {
+		return
+	}
+	toolName := strings.ToUpper(strings.TrimSpace(req.ToolName))
+	switch toolName {
+	case "SPAWN":
+		parent := terminalStreamParent{
+			CallID:   strings.TrimSpace(req.CallID),
+			ToolName: strings.TrimSpace(req.ToolName),
+			RawInput: maps.Clone(req.RawInput),
+		}
+		if parent.ToolName == "" {
+			parent.ToolName = "SPAWN"
+		}
+		d.mu.Lock()
+		if d.streamParents == nil {
+			d.streamParents = map[string]terminalStreamParent{}
+		}
+		for _, key := range terminalStreamParentKeys(*req) {
+			d.streamParents[key] = parent
+		}
+		d.mu.Unlock()
+	case "TASK":
+		d.mu.Lock()
+		parent, ok := d.lookupTerminalStreamParentLocked(*req)
+		d.mu.Unlock()
+		if !ok {
+			return
+		}
+		req.CallID = parent.CallID
+		req.ToolName = firstNonEmpty(parent.ToolName, "SPAWN")
+		req.RawInput = taskContinuationRawInput(parent.RawInput, req.RawInput, req.Ref.TaskID)
+	}
+}
+
+func (d *GatewayDriver) lookupTerminalStreamParentLocked(req appgateway.StreamRequest) (terminalStreamParent, bool) {
+	if d == nil || len(d.streamParents) == 0 {
+		return terminalStreamParent{}, false
+	}
+	for _, key := range terminalStreamParentKeys(req) {
+		if parent, ok := d.streamParents[key]; ok && strings.TrimSpace(parent.CallID) != "" {
+			return terminalStreamParent{
+				CallID:   parent.CallID,
+				ToolName: parent.ToolName,
+				RawInput: maps.Clone(parent.RawInput),
+			}, true
+		}
+	}
+	return terminalStreamParent{}, false
+}
+
+func terminalStreamParentKeys(req appgateway.StreamRequest) []string {
+	sessionID := strings.TrimSpace(req.SessionRef.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(req.Ref.SessionID)
+	}
+	keys := make([]string, 0, 2)
+	if taskID := strings.TrimSpace(req.Ref.TaskID); taskID != "" {
+		keys = append(keys, strings.Join([]string{sessionID, "task", taskID}, "\x00"))
+	}
+	if terminalID := strings.TrimSpace(req.Ref.TerminalID); terminalID != "" {
+		keys = append(keys, strings.Join([]string{sessionID, "terminal", terminalID}, "\x00"))
+	}
+	return keys
+}
+
+func taskContinuationRawInput(parent map[string]any, task map[string]any, taskID string) map[string]any {
+	out := maps.Clone(parent)
+	if out == nil {
+		out = map[string]any{}
+	}
+	if action := strings.ToLower(strings.TrimSpace(anyString(task["action"]))); action == "write" {
+		if prompt := strings.TrimSpace(anyString(task["input"])); prompt != "" {
+			out["prompt"] = prompt
+		}
+	}
+	if visibleTaskID := strings.TrimSpace(firstNonEmpty(anyString(task["task_id"]), taskID)); visibleTaskID != "" {
+		out["task_id"] = visibleTaskID
+	}
+	return out
+}
+
+func anyString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case fmt.Stringer:
+		return typed.String()
+	default:
+		return ""
+	}
 }
 
 func (d *GatewayDriver) WorkspaceDir() string {

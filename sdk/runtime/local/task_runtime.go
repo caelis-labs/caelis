@@ -286,7 +286,13 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call sdktool.Call) (sdktool.
 	if err != nil {
 		return sdktool.Result{}, err
 	}
-	return taskSnapshotToolResult(call, t.base.Definition(), snapshot), nil
+	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
+	if result.Meta == nil {
+		result.Meta = map[string]any{}
+	}
+	result.Meta["agent"] = strings.TrimSpace(agent)
+	result.Meta["prompt"] = strings.TrimSpace(prompt)
+	return result, nil
 }
 
 type runtimeTaskTool struct {
@@ -400,7 +406,13 @@ func (t runtimeTaskTool) Call(ctx context.Context, call sdktool.Call) (sdktool.R
 	if !ok || strings.TrimSpace(taskID) == "" {
 		return sdktool.Result{}, fmt.Errorf("tool: arg %q is required", "task_id")
 	}
-	yieldMS, _ := intArg(args, "yield_time_ms")
+	yieldMS := 0
+	if strings.EqualFold(strings.TrimSpace(action), "wait") {
+		yieldMS = int(defaultBashYield / time.Millisecond)
+	}
+	if parsed := optionalIntArg(args, "yield_time_ms"); parsed != nil {
+		yieldMS = *parsed
+	}
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
@@ -425,7 +437,43 @@ func (t runtimeTaskTool) Call(ctx context.Context, call sdktool.Call) (sdktool.R
 	if err != nil {
 		return sdktool.Result{}, err
 	}
-	return taskSnapshotToolResult(call, t.base.Definition(), snapshot), nil
+	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
+	if result.Meta == nil {
+		result.Meta = map[string]any{}
+	}
+	normalizedAction := strings.ToLower(strings.TrimSpace(action))
+	result.Meta["action"] = normalizedAction
+	if normalizedAction == "write" {
+		result.Meta["input"] = input
+	}
+	if normalizedAction == "wait" {
+		result.Meta["yield_time_ms"] = yieldMS
+	}
+	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, snapshot)
+	return result, nil
+}
+
+func taskToolResultEventMeta(existing map[string]any, action string, input string, snapshot sdktask.Snapshot) map[string]any {
+	out := maps.Clone(existing)
+	if out == nil {
+		out = map[string]any{}
+	}
+	toolMeta := map[string]any{
+		"name":        "TASK",
+		"action":      strings.ToLower(strings.TrimSpace(action)),
+		"target_kind": strings.TrimSpace(string(snapshot.Kind)),
+		"target_id":   taskVisibleID(snapshot),
+	}
+	if strings.EqualFold(strings.TrimSpace(action), "write") {
+		toolMeta["input"] = strings.TrimSpace(input)
+	}
+	out["caelis"] = map[string]any{
+		"version": 1,
+		"runtime": map[string]any{
+			"tool": toolMeta,
+		},
+	}
+	return out
 }
 
 func (tm *taskRuntime) StartBash(
@@ -1300,7 +1348,11 @@ func taskSnapshotToolResult(call sdktool.Call, def sdktool.Definition, snapshot 
 
 func taskToolMeta(snapshot sdktask.Snapshot) map[string]any {
 	if snapshot.Kind == sdktask.KindSubagent {
-		return map[string]any{}
+		meta := map[string]any{}
+		if prompt := firstNonEmpty(taskStringValue(snapshot.Metadata["prompt"]), taskStringValue(snapshot.Result["prompt"])); strings.TrimSpace(prompt) != "" {
+			meta["prompt"] = strings.TrimSpace(prompt)
+		}
+		return meta
 	}
 	meta := maps.Clone(snapshot.Metadata)
 	if meta == nil {
@@ -1946,6 +1998,7 @@ func (t *subagentTask) applyResult(result sdkdelegation.Result) {
 	t.metadata["agent_id"] = t.anchor.AgentID
 	t.metadata["handle"] = t.handle
 	t.metadata["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
+	t.metadata["prompt"] = t.prompt
 	t.metadata["session_id"] = t.anchor.SessionID
 	t.metadata["terminal_id"] = t.ref.TerminalID
 	t.metadata["state"] = string(t.state)

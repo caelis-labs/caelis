@@ -133,6 +133,47 @@ func TestProjectSessionEventPreservesMinimalCaelisMeta(t *testing.T) {
 	}
 }
 
+func TestProjectSessionEventParticipantPromptUsesTurnIDScope(t *testing.T) {
+	t.Parallel()
+
+	ref := sdksession.SessionRef{SessionID: "root-session"}
+	for _, turnID := range []string{"participant-turn-1", "participant-turn-2"} {
+		turnID := turnID
+		t.Run(turnID, func(t *testing.T) {
+			t.Parallel()
+
+			env, ok := ProjectSessionEvent(ref, &sdksession.Event{
+				ID:         turnID + "-assistant",
+				Type:       sdksession.EventTypeAssistant,
+				Text:       "done",
+				Visibility: sdksession.VisibilityCanonical,
+				Scope: &sdksession.EventScope{
+					TurnID: turnID,
+					Source: "acp_participant",
+					Participant: sdksession.ParticipantRef{
+						ID:   "participant-jeff",
+						Kind: sdksession.ParticipantKindACP,
+						Role: sdksession.ParticipantRoleSidecar,
+					},
+					ACP: sdksession.ACPRef{SessionID: "remote-jeff"},
+				},
+			})
+			if !ok {
+				t.Fatal("ProjectSessionEvent() ok = false, want true")
+			}
+			if env.Event.Origin == nil {
+				t.Fatal("event.Origin = nil, want participant origin")
+			}
+			if env.Event.Origin.ScopeID != turnID {
+				t.Fatalf("event.Origin.ScopeID = %q, want %q", env.Event.Origin.ScopeID, turnID)
+			}
+			if env.Event.Origin.ParticipantSessionID != "remote-jeff" {
+				t.Fatalf("event.Origin.ParticipantSessionID = %q, want remote session preserved", env.Event.Origin.ParticipantSessionID)
+			}
+		})
+	}
+}
+
 func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 	t.Parallel()
 
@@ -584,6 +625,40 @@ func TestProjectSessionEventsPreservesProtocolToolCallID(t *testing.T) {
 	}
 	if payload.Status != ToolStatusStarted {
 		t.Fatalf("payload.Status = %q, want %q", payload.Status, ToolStatusStarted)
+	}
+}
+
+func TestProjectSessionEventsFallsBackToMessageToolUseRawInput(t *testing.T) {
+	t.Parallel()
+
+	message := sdkmodel.MessageFromToolCalls(sdkmodel.RoleAssistant, []sdkmodel.ToolCall{{
+		ID:   "spawn-call",
+		Name: "SPAWN",
+		Args: `{"agent":"claude","prompt":"写一首四行英文短诗"}`,
+	}}, "")
+	events := projectSessionEvents(sdksession.SessionRef{SessionID: "root-session"}, []*sdksession.Event{{
+		ID:      "tool-1",
+		Type:    sdksession.EventTypeToolCall,
+		Message: &message,
+		Meta:    map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "SPAWN"}}}},
+		Protocol: &sdksession.EventProtocol{
+			ToolCall: &sdksession.ProtocolToolCall{
+				ID:     "spawn-call",
+				Name:   "SPAWN",
+				Kind:   "execute",
+				Status: "running",
+			},
+		},
+	}})
+	if len(events) != 1 || events[0].Event.ToolCall == nil {
+		t.Fatalf("projectSessionEvents() = %#v, want tool call", events)
+	}
+	payload := events[0].Event.ToolCall
+	if payload.CallID != "spawn-call" {
+		t.Fatalf("payload.CallID = %q, want spawn-call", payload.CallID)
+	}
+	if got := payload.RawInput["prompt"]; got != "写一首四行英文短诗" {
+		t.Fatalf("payload.RawInput = %#v, want prompt from Message.ToolCalls", payload.RawInput)
 	}
 }
 

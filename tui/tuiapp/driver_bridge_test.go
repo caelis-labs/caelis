@@ -125,7 +125,66 @@ func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	}
 }
 
+func TestGatewayTerminalBatcherMergesCumulativeRunningFrames(t *testing.T) {
+	var sent []tea.Msg
+	send := func(msg tea.Msg) {
+		sent = append(sent, msg)
+	}
+	var batcher gatewayTerminalBatcher
+
+	if !batcher.enqueue(testTerminalFrameForTool("SPAWN", "Let me write the script.", 1), send) {
+		t.Fatal("first running frame was not accepted for batching")
+	}
+	if !batcher.enqueue(testTerminalFrameForTool("SPAWN", "Let me write the script. Now let me run the script.", 2), send) {
+		t.Fatal("second running frame was not accepted for batching")
+	}
+
+	batcher.flush(send)
+	if len(sent) != 1 {
+		t.Fatalf("flush sent %d messages, want 1", len(sent))
+	}
+	env, ok := sent[0].(appgateway.EventEnvelope)
+	if !ok {
+		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
+	}
+	want := "Let me write the script. Now let me run the script."
+	if got := rawString(env.Event.ToolResult.RawOutput, "text"); got != want {
+		t.Fatalf("merged text = %q, want %q", got, want)
+	}
+}
+
+func TestGatewayTerminalBatcherPreservesBashPrefixDeltas(t *testing.T) {
+	var sent []tea.Msg
+	send := func(msg tea.Msg) {
+		sent = append(sent, msg)
+	}
+	var batcher gatewayTerminalBatcher
+
+	if !batcher.enqueue(testTerminalFrame("abc", 1), send) {
+		t.Fatal("first running frame was not accepted for batching")
+	}
+	if !batcher.enqueue(testTerminalFrame("abcdef", 2), send) {
+		t.Fatal("second running frame was not accepted for batching")
+	}
+
+	batcher.flush(send)
+	if len(sent) != 1 {
+		t.Fatalf("flush sent %d messages, want 1", len(sent))
+	}
+	env, ok := sent[0].(appgateway.EventEnvelope)
+	if !ok {
+		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
+	}
+	if got := rawString(env.Event.ToolResult.RawOutput, "text"); got != "abcabcdef" {
+		t.Fatalf("merged BASH text = %q, want both byte deltas preserved", got)
+	}
+}
+
 func testTerminalFrame(text string, cursor int64) appgateway.EventEnvelope {
+	return testTerminalFrameForTool("BASH", text, cursor)
+}
+
+func testTerminalFrameForTool(toolName string, text string, cursor int64) appgateway.EventEnvelope {
 	return appgateway.EventEnvelope{
 		Event: appgateway.Event{
 			Kind:       appgateway.EventKindToolResult,
@@ -135,7 +194,7 @@ func testTerminalFrame(text string, cursor int64) appgateway.EventEnvelope {
 			SessionRef: sdksession.SessionRef{SessionID: "s1"},
 			ToolResult: &appgateway.ToolResultPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: toolName,
 				RawOutput: map[string]any{
 					"running":       true,
 					"text":          text,

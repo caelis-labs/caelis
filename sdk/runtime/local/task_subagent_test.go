@@ -119,6 +119,27 @@ func TestSubagentTaskIDForHandleAllowsSidecarCustomSource(t *testing.T) {
 	}
 }
 
+func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
+	t.Parallel()
+
+	meta := taskToolResultEventMeta(nil, "write", "请追加两行", sdktask.Snapshot{
+		Ref:  sdktask.Ref{TaskID: "task-1"},
+		Kind: sdktask.KindSubagent,
+		Result: map[string]any{
+			"handle": "maya",
+		},
+	})
+	caelis, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, want caelis extension", meta)
+	}
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	tool, _ := runtimeMeta["tool"].(map[string]any)
+	if tool["name"] != "TASK" || tool["action"] != "write" || tool["target_kind"] != "subagent" || tool["target_id"] != "maya" || tool["input"] != "请追加两行" {
+		t.Fatalf("runtime.tool = %#v, want TASK write subagent target", tool)
+	}
+}
+
 func TestTaskWriteContinuesCompletedSpawnChild(t *testing.T) {
 	ctx := context.Background()
 	runner := &recordingSubagentRunner{
@@ -558,6 +579,45 @@ func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
 	}
 	if first.Frames[0].Text != "" {
 		t.Fatalf("first frame text = %q, want no final result mixed into tool frame", first.Frames[0].Text)
+	}
+}
+
+func TestSubagentStreamSubscribeClosedFrameCarriesFinalResult(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateRunning, Running: true},
+		waitResult:  sdkdelegation.Result{State: sdkdelegation.StateCompleted, Result: "### Done\n- `child.txt` written"},
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "write child",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	var closed *sdkstream.Frame
+	for frame, seqErr := range runtime.Streams().Subscribe(ctx, sdkstream.SubscribeRequest{
+		Ref: sdkstream.Ref{SessionID: session.SessionID, TaskID: started.Ref.TaskID},
+	}) {
+		if seqErr != nil {
+			t.Fatalf("Subscribe() error = %v", seqErr)
+		}
+		if frame != nil && frame.Closed {
+			copy := sdkstream.CloneFrame(*frame)
+			closed = &copy
+			break
+		}
+	}
+	if closed == nil {
+		t.Fatal("Subscribe() did not emit closed frame")
+	}
+	if closed.State != string(sdktask.StateCompleted) {
+		t.Fatalf("closed state = %q, want completed", closed.State)
+	}
+	if got, _ := closed.Result["result"].(string); got != "### Done\n- `child.txt` written" {
+		t.Fatalf("closed result = %#v, want final subagent result", closed.Result)
 	}
 }
 

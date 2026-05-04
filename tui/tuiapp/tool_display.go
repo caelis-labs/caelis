@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 )
 
 func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string {
@@ -293,6 +295,9 @@ func genericToolArgs(raw map[string]any) string {
 
 func toolDisplayOutput(name string, input map[string]any, output map[string]any, fallback string, status string, isErr bool) string {
 	name = strings.ToUpper(strings.TrimSpace(name))
+	if name == "SPAWN" {
+		output = normalizeSpawnDisplayRawMap(output)
+	}
 	if isErr && (name == "WRITE" || name == "PATCH") {
 		if text := mutationErrorDisplay(output, fallback); text != "" {
 			return text
@@ -320,10 +325,30 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 			return summary
 		}
 	case "TASK":
+		if strings.EqualFold(toolDisplayTaskAction(input, output, nil), "write") {
+			final := transcriptToolStatusFinal(status, isErr)
+			if final {
+				if summary := appgateway.CleanSubagentFinalOutput(firstTrimmed(
+					asString(output["result"]),
+					asString(output["final_message"]),
+					asString(output["finalMessage"]),
+					asString(output["text"]),
+					asString(output["output"]),
+					asString(output["stdout"]),
+					asString(output["output_preview"]),
+				)); summary != "" {
+					return summary
+				}
+			}
+		}
 		return terminalDisplaySummary(output, isErr)
 	case "SPAWN":
-		if summary := spawnTerminalDisplaySummary(output, isErr); summary != "" {
+		final := transcriptToolStatusFinal(status, isErr)
+		if summary := spawnTerminalDisplaySummary(output, isErr, final); summary != "" {
 			return summary
+		}
+		if !final && !isErr {
+			return ""
 		}
 		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
 			return terminalEmptySummary(name, output, isErr)
@@ -379,8 +404,13 @@ func taskControlDisplay(raw map[string]any) string {
 		}
 		return "Cancel"
 	case "WRITE":
-		if input := formatTaskWriteInput(asString(raw["input"])); input != "" {
-			return "Write " + input
+		rawInput := asString(raw["input"])
+		input := normalizeTaskWriteDisplayInput(rawInput)
+		if handle != "" && input != "" {
+			return "Write " + handle + ": " + input
+		}
+		if strings.TrimSpace(rawInput) != "" {
+			return "Write " + formatTaskWriteInput(rawInput)
 		}
 		if handle != "" {
 			return "Write " + handle
@@ -439,6 +469,7 @@ func taskControlDisplayFallback(values ...string) string {
 }
 
 func spawnDisplayArgs(raw map[string]any) string {
+	raw = normalizeSpawnDisplayRawMap(raw)
 	if len(raw) == 0 {
 		return ""
 	}
@@ -450,6 +481,7 @@ func spawnDisplayArgs(raw map[string]any) string {
 }
 
 func spawnFullDisplayArgs(raw map[string]any) string {
+	raw = normalizeSpawnDisplayRawMap(raw)
 	prompt := strings.Join(strings.Fields(normalizeToolDisplayArg(asString(raw["prompt"]))), " ")
 	agent := strings.TrimSpace(asString(raw["agent"]))
 	if agent == "" {
@@ -459,6 +491,77 @@ func spawnFullDisplayArgs(raw map[string]any) string {
 		return agent
 	}
 	return agent + ": " + prompt
+}
+
+func spawnDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
+	output = normalizeSpawnDisplayRawMap(output)
+	merged := normalizeSpawnDisplayRawMap(input)
+	if merged == nil {
+		merged = map[string]any{}
+	}
+	for _, key := range []string{"agent", "prompt", "handle", "task_id"} {
+		if strings.TrimSpace(asString(merged[key])) != "" {
+			continue
+		}
+		if value, ok := output[key]; ok {
+			merged[key] = value
+		}
+	}
+	return merged
+}
+
+func normalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
+	if len(raw) == 0 {
+		return cloneAnyMap(raw)
+	}
+	out := cloneAnyMap(raw)
+	for _, key := range []string{"text", "result", "output", "summary", "content", "stdout", "output_preview", "tool_output", "toolOutput", "raw_output", "rawOutput", "message"} {
+		text := asString(out[key])
+		decoded, remainder, ok := splitLeadingJSONObject(text)
+		if !ok || !isSpawnDisplayJSONObject(decoded) {
+			continue
+		}
+		for decodedKey, value := range decoded {
+			if _, exists := out[decodedKey]; !exists {
+				out[decodedKey] = value
+			}
+		}
+		if strings.TrimSpace(remainder) != "" {
+			out[key] = strings.TrimSpace(remainder)
+		} else {
+			delete(out, key)
+		}
+	}
+	return out
+}
+
+func splitLeadingJSONObject(text string) (map[string]any, string, bool) {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "{") {
+		return nil, text, false
+	}
+	decoder := json.NewDecoder(strings.NewReader(text))
+	var decoded map[string]any
+	if err := decoder.Decode(&decoded); err != nil || len(decoded) == 0 {
+		return nil, text, false
+	}
+	offset := int(decoder.InputOffset())
+	if offset < 0 || offset > len(text) {
+		return nil, text, false
+	}
+	return decoded, strings.TrimSpace(text[offset:]), true
+}
+
+func isSpawnDisplayJSONObject(decoded map[string]any) bool {
+	if len(decoded) == 0 {
+		return false
+	}
+	for _, key := range []string{"agent", "prompt", "task_id", "handle", "mention", "terminal_id", "running", "supports_input", "supports_cancel"} {
+		if _, ok := decoded[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func genericToolOutput(output map[string]any, isErr bool) string {
@@ -510,6 +613,14 @@ func isGenericFailureText(text string) bool {
 	}
 }
 
+func normalizeTaskWriteDisplayInput(input string) string {
+	input = normalizeToolDisplayArg(input)
+	if input == "" {
+		return ""
+	}
+	return strings.Join(strings.Fields(input), " ")
+}
+
 func formatTaskWriteInput(input string) string {
 	input = normalizeToolDisplayArg(input)
 	if input == "" {
@@ -540,8 +651,38 @@ func toolDisplayPanelOutput(name string, output string) string {
 	return output
 }
 
-func toolDisplayTaskID(input map[string]any, output map[string]any) string {
-	return firstTrimmed(asString(output["handle"]), asString(output["task_id"]), asString(input["task_id"]))
+func toolDisplayTaskID(input map[string]any, output map[string]any, meta map[string]any) string {
+	return firstTrimmed(
+		appgateway.EventMetaString(meta, "caelis", "runtime", "tool", "target_id"),
+		asString(output["handle"]),
+		asString(output["task_id"]),
+		asString(input["task_id"]),
+	)
+}
+
+func toolDisplayTaskAction(input map[string]any, output map[string]any, meta map[string]any) string {
+	return strings.ToLower(firstTrimmed(
+		appgateway.EventMetaString(meta, "caelis", "runtime", "tool", "action"),
+		asString(output["action"]),
+		asString(input["action"]),
+	))
+}
+
+func toolDisplayTaskInput(input map[string]any, output map[string]any, meta map[string]any) string {
+	return firstTrimmed(
+		appgateway.EventMetaString(meta, "caelis", "runtime", "tool", "input"),
+		asString(output["input"]),
+		asString(input["input"]),
+	)
+}
+
+func toolDisplayTaskTargetKind(input map[string]any, output map[string]any, meta map[string]any) string {
+	return strings.ToLower(firstTrimmed(
+		appgateway.EventMetaString(meta, "caelis", "runtime", "tool", "target_kind"),
+		asString(output["target_kind"]),
+		asString(output["kind"]),
+		asString(input["target_kind"]),
+	))
 }
 
 func taskHandleDisplay(value string) string {
@@ -757,7 +898,7 @@ func terminalDisplaySummary(output map[string]any, isErr bool) string {
 	return firstTrimmed(asString(output["stdout"]), asString(output["result"]), asString(output["output_preview"]), asString(output["stderr"]))
 }
 
-func spawnTerminalDisplaySummary(output map[string]any, isErr bool) string {
+func spawnTerminalDisplaySummary(output map[string]any, isErr bool, final bool) string {
 	if isErr {
 		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
 			return stderr
@@ -766,14 +907,36 @@ func spawnTerminalDisplaySummary(output map[string]any, isErr bool) string {
 			return errText
 		}
 	}
+	if final {
+		return appgateway.CleanSubagentFinalOutput(firstTrimmed(
+			spawnDisplayTextCandidate(asString(output["result"])),
+			spawnDisplayTextCandidate(asString(output["final_message"])),
+			spawnDisplayTextCandidate(asString(output["finalMessage"])),
+			spawnDisplayTextCandidate(asString(output["text"])),
+			spawnDisplayTextCandidate(asString(output["output"])),
+			spawnDisplayTextCandidate(asString(output["stdout"])),
+			spawnDisplayTextCandidate(asString(output["output_preview"])),
+			spawnDisplayTextCandidate(asString(output["stderr"])),
+		))
+	}
 	return firstTrimmed(
-		asString(output["result"]),
-		asString(output["output"]),
-		asString(output["text"]),
-		asString(output["stdout"]),
-		asString(output["output_preview"]),
-		asString(output["stderr"]),
+		spawnDisplayTextCandidate(asString(output["text"])),
+		spawnDisplayTextCandidate(asString(output["stdout"])),
+		spawnDisplayTextCandidate(asString(output["output_preview"])),
+		spawnDisplayTextCandidate(asString(output["stderr"])),
 	)
+}
+
+func spawnDisplayTextCandidate(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	decoded, remainder, ok := splitLeadingJSONObject(text)
+	if !ok || !isSpawnDisplayJSONObject(decoded) {
+		return text
+	}
+	return strings.TrimSpace(remainder)
 }
 
 func terminalEmptySummary(name string, output map[string]any, isErr bool) string {
