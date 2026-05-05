@@ -14,7 +14,7 @@ import (
 // backed by the SDK session service.
 type SessionServiceLoaderConfig struct {
 	Sessions  sdksession.Service
-	Projector acp.Projector
+	Projector bridgeprojector.Projector
 	AppName   string
 	UserID    string
 	Modes     acp.ModeProvider
@@ -25,7 +25,7 @@ type SessionServiceLoaderConfig struct {
 // session/update notifications.
 type SessionServiceLoader struct {
 	sessions  sdksession.Service
-	projector acp.Projector
+	projector bridgeprojector.Projector
 	appName   string
 	userID    string
 	modes     acp.ModeProvider

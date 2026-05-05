@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
+	modelcatalog "github.com/OnslaughtSnail/caelis/sdk/model/catalog"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	"github.com/OnslaughtSnail/caelis/tui/modelcatalog"
 )
 
 const (

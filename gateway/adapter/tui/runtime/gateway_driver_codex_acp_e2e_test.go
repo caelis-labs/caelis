@@ -50,9 +50,9 @@ func TestGatewayDriverCodexACPModelEffortE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "codex-acp-e2e-session", "surface", "gpt-5.5")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "codex-acp-e2e-session", "surface", "gpt-5.5")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	agentStatus, err := driver.HandoffAgent(ctx, "codex")

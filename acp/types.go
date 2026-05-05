@@ -5,6 +5,7 @@ import schema "github.com/OnslaughtSnail/caelis/acp/schema"
 const (
 	MethodSessionUpdate        = schema.MethodSessionUpdate
 	MethodSessionReqPermission = schema.MethodSessionReqPermission
+	MethodSessionList          = schema.MethodSessionList
 )
 
 const (
@@ -49,6 +50,9 @@ const (
 
 type Update = schema.Update
 type SessionNotification = schema.SessionNotification
+type SessionSummary = schema.SessionSummary
+type SessionListRequest = schema.SessionListRequest
+type SessionListResponse = schema.SessionListResponse
 type TextContent = schema.TextContent
 type ToolCallLocation = schema.ToolCallLocation
 type ToolCallContent = schema.ToolCallContent

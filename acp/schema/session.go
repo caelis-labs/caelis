@@ -10,6 +10,8 @@ const (
 	MethodAuthenticate     = "authenticate"
 	MethodSessionNew       = "session/new"
 	MethodSessionLoad      = "session/load"
+	MethodSessionResume    = "session/resume"
+	MethodSessionClose     = "session/close"
 	MethodSessionSetMode   = "session/set_mode"
 	MethodSessionSetConfig = "session/set_config_option"
 	MethodSessionSetModel  = "session/set_model"
@@ -87,6 +89,24 @@ type LoadSessionResponse struct {
 	Modes         *SessionModeState     `json:"modes,omitempty"`
 	Models        *SessionModelState    `json:"models,omitempty"`
 }
+
+type ResumeSessionRequest struct {
+	SessionID  string            `json:"sessionId"`
+	CWD        string            `json:"cwd"`
+	MCPServers []json.RawMessage `json:"mcpServers"`
+}
+
+type ResumeSessionResponse struct {
+	ConfigOptions []SessionConfigOption `json:"configOptions,omitempty"`
+	Modes         *SessionModeState     `json:"modes,omitempty"`
+	Models        *SessionModelState    `json:"models,omitempty"`
+}
+
+type CloseSessionRequest struct {
+	SessionID string `json:"sessionId"`
+}
+
+type CloseSessionResponse struct{}
 
 type SessionMode struct {
 	ID          string `json:"id"`

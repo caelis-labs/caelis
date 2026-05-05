@@ -35,7 +35,7 @@ func (s *Stack) NewACPAgent() (*agentruntime.RuntimeAgent, error) {
 		Assembly: assembly,
 		Sessions: s.Sessions,
 	})
-	surface := newGatewayACPSurface(s, modes, len(assembly.Modes) > 0, configs)
+	surface := s.ACPSurface(modes, len(assembly.Modes) > 0, configs)
 	return agentruntime.New(agentruntime.Config{
 		Runtime:  rt,
 		Sessions: s.Sessions,

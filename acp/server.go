@@ -66,6 +66,17 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 			return responseOrError(resp, err)
 		}
 		return c.withAvailableCommands(ctx, resp, resp.SessionID), nil
+	case MethodSessionList:
+		var req SessionListRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		handler, ok := AsSessionListAdapter(c.agent)
+		if !ok {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+		}
+		resp, err := handler.ListSessions(ctx, req)
+		return responseOrError(resp, err)
 	case MethodSessionLoad:
 		var req LoadSessionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -80,6 +91,31 @@ func (c *serverConn) handleRequest(ctx context.Context, msg jsonrpc.Message) (an
 			return responseOrError(resp, err)
 		}
 		return c.withAvailableCommands(ctx, resp, req.SessionID), nil
+	case MethodSessionResume:
+		var req ResumeSessionRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		handler, ok := AsResumeSessionAdapter(c.agent)
+		if !ok {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+		}
+		resp, err := handler.ResumeSession(ctx, req)
+		if err != nil {
+			return responseOrError(resp, err)
+		}
+		return c.withAvailableCommands(ctx, resp, req.SessionID), nil
+	case MethodSessionClose:
+		var req CloseSessionRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		handler, ok := AsCloseSessionAdapter(c.agent)
+		if !ok {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "Method not found"}
+		}
+		resp, err := handler.CloseSession(ctx, req)
+		return responseOrError(resp, err)
 	case MethodSessionSetMode:
 		var req SetSessionModeRequest
 		if err := decodeParams(msg.Params, &req); err != nil {

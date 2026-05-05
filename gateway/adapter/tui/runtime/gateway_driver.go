@@ -11,17 +11,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
+	modelcatalog "github.com/OnslaughtSnail/caelis/sdk/model/catalog"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkskill "github.com/OnslaughtSnail/caelis/sdk/skill"
 	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
-	"github.com/OnslaughtSnail/caelis/tui/modelcatalog"
 )
 
 type GatewayDriver struct {
 	mu                  sync.Mutex
-	stack               *gatewayapp.Stack
+	stack               *DriverStack
 	session             sdksession.Session
 	hasSession          bool
 	bindingKey          string
@@ -43,7 +44,7 @@ type terminalStreamParent struct {
 	RawInput map[string]any
 }
 
-func NewGatewayDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
+func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
 	if stack == nil {
 		return nil, fmt.Errorf("tui/runtime: stack is required")
 	}
@@ -259,23 +260,23 @@ func (d *GatewayDriver) currentSession() (sdksession.Session, bool) {
 	return d.session, true
 }
 
-func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (gatewayapp.ACPControllerStatus, bool, error) {
+func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (sdkcontroller.ControllerStatus, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if d == nil || d.stack == nil {
-		return gatewayapp.ACPControllerStatus{}, false, nil
+		return sdkcontroller.ControllerStatus{}, false, nil
 	}
 	session, ok := d.currentSession()
 	if !ok || session.Controller.Kind != sdksession.ControllerKindACP {
-		return gatewayapp.ACPControllerStatus{}, false, nil
+		return sdkcontroller.ControllerStatus{}, false, nil
 	}
 	status, found, err := d.stack.ACPControllerStatus(ctx, session.SessionRef)
 	if err != nil {
-		return gatewayapp.ACPControllerStatus{}, false, err
+		return sdkcontroller.ControllerStatus{}, false, err
 	}
 	if !found {
-		status = gatewayapp.ACPControllerStatus{
+		status = sdkcontroller.ControllerStatus{
 			SessionRef:      session.SessionRef,
 			Agent:           firstNonEmpty(strings.TrimSpace(session.Controller.AgentName), strings.TrimSpace(session.Controller.Label), strings.TrimSpace(session.Controller.ControllerID)),
 			RemoteSessionID: strings.TrimSpace(session.Controller.RemoteSessionID),
@@ -295,7 +296,7 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			modelText = alias
 		}
 	}
-	sandboxStatus := gatewayapp.SandboxStatus{}
+	sandboxStatus := SandboxStatus{}
 	if d.stack != nil {
 		sandboxStatus = d.stack.SandboxStatus()
 	}
@@ -364,7 +365,7 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		Surface:                 bindingKey,
 	}
 	if d.stack != nil {
-		req := gatewayapp.DoctorRequest{}
+		req := DoctorRequest{}
 		if ok {
 			req.SessionRef = session.SessionRef
 		}
@@ -626,7 +627,7 @@ func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCa
 	}
 	out := make([]ResumeCandidate, 0, len(result.Sessions))
 	for _, session := range result.Sessions {
-		candidate := enrichResumeCandidate(ctx, d.stack, session)
+		candidate := enrichResumeCandidate(ctx, d.stack.Sessions, session)
 		if strings.TrimSpace(candidate.Prompt) == "" && strings.TrimSpace(candidate.Title) == "" {
 			continue
 		}
@@ -713,7 +714,7 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	persistToken := strings.TrimSpace(cfg.APIKey) != "" && strings.TrimSpace(cfg.TokenEnv) == ""
 	reasoningLevels := normalizeReasoningLevels(cfg.ReasoningLevels)
 	defaultReasoningEffort := strings.TrimSpace(cfg.ReasoningEffort)
-	alias, err := d.stack.Connect(gatewayapp.ModelConfig{
+	alias, err := d.stack.Connect(ModelConfig{
 		Provider:               strings.TrimSpace(cfg.Provider),
 		API:                    tpl.api,
 		Model:                  cfg.Model,
@@ -943,7 +944,7 @@ func (d *GatewayDriver) AddAgentWithOptions(ctx context.Context, target string, 
 		ctx, finish = d.beginInterruptibleCommand(ctx)
 		defer finish()
 	}
-	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{
+	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, RegisterBuiltinACPAgentOptions{
 		Install: opts.Install,
 	}); err != nil {
 		if opts.Install && errors.Is(ctx.Err(), context.Canceled) {
@@ -1233,7 +1234,7 @@ func (d *GatewayDriver) CompleteFile(ctx context.Context, query string, limit in
 func (d *GatewayDriver) CompleteSkill(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 
-	skills, err := gatewayapp.DiscoverSkillMeta(nil, d.WorkspaceDir())
+	skills, err := sdkskill.DiscoverMeta(nil, d.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -1330,7 +1331,7 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 	return out, nil
 }
 
-func (d *GatewayDriver) completeACPControllerSlashArg(status gatewayapp.ACPControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {
+func (d *GatewayDriver) completeACPControllerSlashArg(status sdkcontroller.ControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {
 	normalized := strings.TrimSpace(strings.ToLower(command))
 	switch normalized {
 	case "model":
@@ -1395,7 +1396,7 @@ func (d *GatewayDriver) modelAliasSupportsReasoningLevel(alias string, level str
 	return false
 }
 
-func configuredModelReasoningLevels(cfg gatewayapp.ModelConfig) []string {
+func configuredModelReasoningLevels(cfg ModelConfig) []string {
 	levels := normalizeReasoningLevels(cfg.ReasoningLevels)
 	for _, level := range normalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(cfg.Provider, cfg.Model)) {
 		seen := false
@@ -1423,7 +1424,7 @@ func modelReasoningLevelDetail(level string) string {
 	}
 }
 
-func controllerCommandNames(commands []gatewayapp.ACPControllerCommand) []string {
+func controllerCommandNames(commands []sdkcontroller.ControllerCommand) []string {
 	if len(commands) == 0 {
 		return nil
 	}
@@ -1446,7 +1447,7 @@ func controllerCommandNames(commands []gatewayapp.ACPControllerCommand) []string
 	return out
 }
 
-func acpControllerModelText(status gatewayapp.ACPControllerStatus, session sdksession.Session) string {
+func acpControllerModelText(status sdkcontroller.ControllerStatus, session sdksession.Session) string {
 	return firstNonEmpty(
 		strings.TrimSpace(status.Model),
 		strings.TrimSpace(status.Agent),
@@ -1456,7 +1457,7 @@ func acpControllerModelText(status gatewayapp.ACPControllerStatus, session sdkse
 	)
 }
 
-func acpControllerModeDisplay(status gatewayapp.ACPControllerStatus) string {
+func acpControllerModeDisplay(status sdkcontroller.ControllerStatus) string {
 	current := strings.TrimSpace(status.Mode)
 	if current == "" {
 		return ""
@@ -1467,10 +1468,10 @@ func acpControllerModeDisplay(status gatewayapp.ACPControllerStatus) string {
 	return current
 }
 
-func nextACPControllerMode(status gatewayapp.ACPControllerStatus) (gatewayapp.ACPControllerMode, error) {
+func nextACPControllerMode(status sdkcontroller.ControllerStatus) (sdkcontroller.ControllerMode, error) {
 	modes := compactACPControllerModes(status.ModeOptions)
 	if len(modes) == 0 {
-		return gatewayapp.ACPControllerMode{}, fmt.Errorf("tui/runtime: remote ACP controller did not declare session modes")
+		return sdkcontroller.ControllerMode{}, fmt.Errorf("tui/runtime: remote ACP controller did not declare session modes")
 	}
 	current := strings.TrimSpace(status.Mode)
 	if current == "" {
@@ -1484,11 +1485,11 @@ func nextACPControllerMode(status gatewayapp.ACPControllerStatus) (gatewayapp.AC
 	return modes[0], nil
 }
 
-func compactACPControllerModes(modes []gatewayapp.ACPControllerMode) []gatewayapp.ACPControllerMode {
+func compactACPControllerModes(modes []sdkcontroller.ControllerMode) []sdkcontroller.ControllerMode {
 	if len(modes) == 0 {
 		return nil
 	}
-	out := make([]gatewayapp.ACPControllerMode, 0, len(modes))
+	out := make([]sdkcontroller.ControllerMode, 0, len(modes))
 	seen := map[string]struct{}{}
 	for _, mode := range modes {
 		id := strings.TrimSpace(mode.ID)
@@ -1500,7 +1501,7 @@ func compactACPControllerModes(modes []gatewayapp.ACPControllerMode) []gatewayap
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, gatewayapp.ACPControllerMode{
+		out = append(out, sdkcontroller.ControllerMode{
 			ID:          id,
 			Name:        strings.TrimSpace(mode.Name),
 			Description: strings.TrimSpace(mode.Description),
@@ -1509,10 +1510,10 @@ func compactACPControllerModes(modes []gatewayapp.ACPControllerMode) []gatewayap
 	return out
 }
 
-func matchACPControllerMode(modes []gatewayapp.ACPControllerMode, requested string) (gatewayapp.ACPControllerMode, bool) {
+func matchACPControllerMode(modes []sdkcontroller.ControllerMode, requested string) (sdkcontroller.ControllerMode, bool) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		return gatewayapp.ACPControllerMode{}, false
+		return sdkcontroller.ControllerMode{}, false
 	}
 	for _, mode := range modes {
 		id := strings.TrimSpace(mode.ID)
@@ -1523,14 +1524,14 @@ func matchACPControllerMode(modes []gatewayapp.ACPControllerMode, requested stri
 			return mode, true
 		}
 	}
-	return gatewayapp.ACPControllerMode{}, false
+	return sdkcontroller.ControllerMode{}, false
 }
 
-func acpControllerModeLabel(mode gatewayapp.ACPControllerMode) string {
+func acpControllerModeLabel(mode sdkcontroller.ControllerMode) string {
 	return firstNonEmpty(strings.TrimSpace(mode.Name), strings.TrimSpace(mode.ID))
 }
 
-func acpControllerEffortsForModel(status gatewayapp.ACPControllerStatus, model string) []gatewayapp.ACPControllerConfigChoice {
+func acpControllerEffortsForModel(status sdkcontroller.ControllerStatus, model string) []sdkcontroller.ControllerConfigChoice {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model != "" {
 		for key, efforts := range status.EffortOptionsByModel {
@@ -1542,7 +1543,7 @@ func acpControllerEffortsForModel(status gatewayapp.ACPControllerStatus, model s
 	return status.EffortOptions
 }
 
-func controllerChoicesToSlashCandidates(choices []gatewayapp.ACPControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
+func controllerChoicesToSlashCandidates(choices []sdkcontroller.ControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
 	if len(choices) == 0 {
 		return nil
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/acp/schema"
 	bridgeterminal "github.com/OnslaughtSnail/caelis/acpbridge/terminal"
+	"github.com/OnslaughtSnail/caelis/sdk/displaypolicy"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
@@ -24,6 +25,14 @@ type PlanEntry = schema.PlanEntry
 type PlanUpdate = schema.PlanUpdate
 type PermissionOption = schema.PermissionOption
 type RequestPermissionRequest = schema.RequestPermissionRequest
+
+// Projector converts canonical session events into ACP-compatible session/update
+// notifications and request_permission payloads.
+type Projector interface {
+	ProjectEvent(*sdksession.Event) ([]Update, error)
+	ProjectNotifications(*sdksession.Event) ([]SessionNotification, error)
+	ProjectPermissionRequest(*sdksession.Event) (*RequestPermissionRequest, bool, error)
+}
 
 const (
 	UpdateUserMessage  = schema.UpdateUserMessage
@@ -486,13 +495,7 @@ func displayTerminalInitialOutputUpdate(toolCallID string, name string, args map
 }
 
 func displayTerminalID(toolCallID string, name string) (string, bool) {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "BASH", "SPAWN":
-		if id := strings.TrimSpace(toolCallID); id != "" {
-			return id, true
-		}
-	}
-	return "", false
+	return displaypolicy.DisplayTerminalID(toolCallID, name)
 }
 
 func displayTerminalInfoMeta(terminalID string, args map[string]any) map[string]any {
@@ -521,20 +524,7 @@ func displayTerminalOutputMeta(terminalID string, data string) map[string]any {
 }
 
 func displayTerminalInitialOutput(name string, args map[string]any) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "SPAWN":
-		agent := strings.TrimSpace(mapString(args, "agent"))
-		prompt := strings.TrimSpace(mapString(args, "prompt"))
-		switch {
-		case agent != "" && prompt != "":
-			return "SPAWN agent=" + agent + "\n" + prompt + "\n"
-		case agent != "":
-			return "SPAWN agent=" + agent + "\n"
-		case prompt != "":
-			return "SPAWN\n" + prompt + "\n"
-		}
-	}
-	return ""
+	return displaypolicy.DisplayTerminalInitialOutput(name, args)
 }
 
 func mergeMeta(base map[string]any, extra map[string]any) map[string]any {
@@ -567,46 +557,11 @@ func anyStringMap(value any) map[string]any {
 }
 
 func summarizeToolCallTitle(name string, args map[string]any) string {
-	name = strings.TrimSpace(strings.ToUpper(name))
-	switch name {
-	case "READ", "WRITE", "PATCH", "SEARCH", "LIST", "GLOB":
-		if path, _ := args["path"].(string); strings.TrimSpace(path) != "" {
-			return strings.TrimSpace(name + " " + path)
-		}
-	case "BASH", "TASK":
-		if command, _ := args["command"].(string); strings.TrimSpace(command) != "" {
-			return strings.TrimSpace(name + " " + command)
-		}
-		if action, _ := args["action"].(string); strings.TrimSpace(action) != "" {
-			if taskID, _ := args["task_id"].(string); strings.TrimSpace(taskID) != "" {
-				return strings.TrimSpace(name + " " + action + " " + taskID)
-			}
-			return strings.TrimSpace(name + " " + action)
-		}
-	case "SPAWN":
-		if agent, _ := args["agent"].(string); strings.TrimSpace(agent) != "" {
-			return strings.TrimSpace(name + " " + agent)
-		}
-		if prompt, _ := args["prompt"].(string); strings.TrimSpace(prompt) != "" {
-			return strings.TrimSpace(name + " " + prompt)
-		}
-	}
-	return name
+	return displaypolicy.SummarizeToolCallTitle(name, args)
 }
 
 func toolKindForName(name string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ":
-		return ToolKindRead
-	case "WRITE", "PATCH":
-		return ToolKindEdit
-	case "SEARCH", "GLOB", "LIST":
-		return ToolKindSearch
-	case "BASH", "SPAWN", "TASK":
-		return ToolKindExecute
-	default:
-		return ToolKindOther
-	}
+	return displaypolicy.ToolKindForName(name)
 }
 
 func firstNonEmpty(values ...string) string {

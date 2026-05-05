@@ -30,6 +30,11 @@ func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
 	if !resp.AgentCapabilities.LoadSession {
 		t.Fatal("LoadSession capability = false, want true by default")
 	}
+	for _, capability := range []string{"list", "resume", "close"} {
+		if _, ok := resp.AgentCapabilities.SessionCapabilities[capability]; !ok {
+			t.Fatalf("sessionCapabilities[%q] missing", capability)
+		}
+	}
 }
 
 func TestRuntimeAgentInitializeFillsAgentInfoVersion(t *testing.T) {
@@ -171,6 +176,49 @@ func TestRuntimeAgentLoadSessionReplaysDurableEvents(t *testing.T) {
 	}
 	if got := cb.notifications[1].Update.SessionUpdateType(); got != acp.UpdateAgentMessage {
 		t.Fatalf("second replay update = %q, want %q", got, acp.UpdateAgentMessage)
+	}
+}
+
+func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
+	agent, sessions := newRuntimeAgentWithConfig(t, agentruntime.Config{
+		Modes:  testModeProvider{},
+		Config: testConfigProvider{},
+	})
+	ctx := context.Background()
+	session, err := sessions.StartSession(ctx, sdksession.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: sdksession.WorkspaceRef{
+			Key: "/tmp/acp-list",
+			CWD: "/tmp/acp-list",
+		},
+		Title: "Listed session",
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	list, err := agent.ListSessions(ctx, acp.SessionListRequest{CWD: "/tmp/acp-list"})
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(list.Sessions) != 1 || list.Sessions[0].SessionID != session.SessionID || list.Sessions[0].Title != "Listed session" {
+		t.Fatalf("ListSessions() = %#v, want listed session", list)
+	}
+
+	resumed, err := agent.ResumeSession(ctx, acp.ResumeSessionRequest{SessionID: session.SessionID, CWD: session.CWD})
+	if err != nil {
+		t.Fatalf("ResumeSession() error = %v", err)
+	}
+	if resumed.Modes == nil || resumed.Modes.CurrentModeID != "default" {
+		t.Fatalf("ResumeSession().Modes = %#v, want default mode", resumed.Modes)
+	}
+	if got, want := len(resumed.ConfigOptions), 1; got != want {
+		t.Fatalf("len(ResumeSession().ConfigOptions) = %d, want %d", got, want)
+	}
+
+	if _, err := agent.CloseSession(ctx, acp.CloseSessionRequest{SessionID: session.SessionID}); err != nil {
+		t.Fatalf("CloseSession() error = %v", err)
 	}
 }
 

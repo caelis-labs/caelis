@@ -158,6 +158,67 @@ func TestPromptCallbacksCallClientTerminalMethods(t *testing.T) {
 	}
 }
 
+func TestServeStdioHandlesStableSessionLifecycleMethods(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	agent := &stableLifecycleAgent{}
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, agent, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(context.Context, jsonrpc.Message) {})
+	}()
+
+	var listResp SessionListResponse
+	if err := conn.Call(ctx, MethodSessionList, SessionListRequest{CWD: "/tmp/project"}, &listResp); err != nil {
+		t.Fatalf("session/list call error = %v", err)
+	}
+	if len(listResp.Sessions) != 1 || listResp.Sessions[0].SessionID != "session-1" {
+		t.Fatalf("session/list response = %#v, want session-1", listResp)
+	}
+	if agent.listCWD != "/tmp/project" {
+		t.Fatalf("session/list cwd = %q, want /tmp/project", agent.listCWD)
+	}
+
+	var resumeResp ResumeSessionResponse
+	if err := conn.Call(ctx, MethodSessionResume, ResumeSessionRequest{SessionID: "session-1", CWD: "/tmp/project"}, &resumeResp); err != nil {
+		t.Fatalf("session/resume call error = %v", err)
+	}
+	if agent.resumeSessionID != "session-1" {
+		t.Fatalf("session/resume id = %q, want session-1", agent.resumeSessionID)
+	}
+
+	var closeResp CloseSessionResponse
+	if err := conn.Call(ctx, MethodSessionClose, CloseSessionRequest{SessionID: "session-1"}, &closeResp); err != nil {
+		t.Fatalf("session/close call error = %v", err)
+	}
+	if agent.closeSessionID != "session-1" {
+		t.Fatalf("session/close id = %q, want session-1", agent.closeSessionID)
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop after context cancellation")
+	}
+}
+
 type availableCommandsNotification struct {
 	SessionID string `json:"sessionId"`
 	Update    struct {
@@ -241,6 +302,35 @@ func (terminalClientAgent) Prompt(ctx context.Context, req PromptRequest, cb Pro
 		return PromptResponse{}, err
 	}
 	return PromptResponse{StopReason: StopReasonEndTurn}, nil
+}
+
+type stableLifecycleAgent struct {
+	commandAgent
+	listCWD         string
+	resumeSessionID string
+	closeSessionID  string
+}
+
+func (a *stableLifecycleAgent) ListSessions(_ context.Context, req SessionListRequest) (SessionListResponse, error) {
+	a.listCWD = req.CWD
+	return SessionListResponse{
+		Sessions: []SessionSummary{{
+			SessionID: "session-1",
+			CWD:       "/tmp/project",
+			Title:     "Existing session",
+			UpdatedAt: "2026-05-04T00:00:00Z",
+		}},
+	}, nil
+}
+
+func (a *stableLifecycleAgent) ResumeSession(_ context.Context, req ResumeSessionRequest) (ResumeSessionResponse, error) {
+	a.resumeSessionID = req.SessionID
+	return ResumeSessionResponse{}, nil
+}
+
+func (a *stableLifecycleAgent) CloseSession(_ context.Context, req CloseSessionRequest) (CloseSessionResponse, error) {
+	a.closeSessionID = req.SessionID
+	return CloseSessionResponse{}, nil
 }
 
 func intPtr(v int) *int {

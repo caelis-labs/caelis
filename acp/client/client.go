@@ -18,6 +18,19 @@ type RequestHandler func(context.Context, jsonrpc.Message) (any, *jsonrpc.RPCErr
 type NotificationHandler func(context.Context, jsonrpc.Message)
 type PermissionHandler func(context.Context, RequestPermissionRequest) (RequestPermissionResponse, error)
 
+type TerminalHandler interface {
+	CreateTerminal(context.Context, CreateTerminalRequest) (CreateTerminalResponse, error)
+	TerminalOutput(context.Context, TerminalOutputRequest) (TerminalOutputResponse, error)
+	TerminalWaitForExit(context.Context, WaitForTerminalExitRequest) (WaitForTerminalExitResponse, error)
+	TerminalKill(context.Context, KillTerminalRequest) error
+	TerminalRelease(context.Context, ReleaseTerminalRequest) error
+}
+
+type FileSystemHandler interface {
+	ReadTextFile(context.Context, ReadTextFileRequest) (ReadTextFileResponse, error)
+	WriteTextFile(context.Context, WriteTextFileRequest) (WriteTextFileResponse, error)
+}
+
 type Config struct {
 	Command             string
 	Args                []string
@@ -26,6 +39,8 @@ type Config struct {
 	ClientInfo          *Implementation
 	OnUpdate            func(UpdateEnvelope)
 	OnPermissionRequest PermissionHandler
+	Terminal            TerminalHandler
+	FileSystem          FileSystemHandler
 	OnRequest           RequestHandler
 	OnNotification      NotificationHandler
 }
@@ -84,18 +99,23 @@ func NewProcessClient(ctx context.Context, proc *stdio.Process, cfg Config) *Cli
 
 func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	var resp InitializeResponse
-	err := c.conn.Call(ctx, MethodInitialize, InitializeRequest{
-		ProtocolVersion: 1,
-		ClientCapabilities: map[string]any{
-			"fs":       map[string]any{"readTextFile": true, "writeTextFile": true},
-			"terminal": true,
-			"auth":     map[string]any{"terminal": true},
-			"_meta": map[string]any{
-				"terminal_output": true,
-				"terminal-auth":   true,
-			},
+	clientCapabilities := map[string]any{
+		"auth": map[string]any{"terminal": c.cfg.Terminal != nil},
+		"_meta": map[string]any{
+			"terminal_output": c.cfg.Terminal != nil,
+			"terminal-auth":   c.cfg.Terminal != nil,
 		},
-		ClientInfo: c.cfg.ClientInfo,
+	}
+	if c.cfg.FileSystem != nil {
+		clientCapabilities["fs"] = map[string]any{"readTextFile": true, "writeTextFile": true}
+	}
+	if c.cfg.Terminal != nil {
+		clientCapabilities["terminal"] = true
+	}
+	err := c.conn.Call(ctx, MethodInitialize, InitializeRequest{
+		ProtocolVersion:    1,
+		ClientCapabilities: clientCapabilities,
+		ClientInfo:         c.cfg.ClientInfo,
 	}, &resp)
 	return resp, err
 }
@@ -110,6 +130,12 @@ func (c *Client) NewSession(ctx context.Context, cwd string, meta map[string]any
 	return resp, err
 }
 
+func (c *Client) ListSessions(ctx context.Context, req SessionListRequest) (SessionListResponse, error) {
+	var resp SessionListResponse
+	err := c.conn.Call(ctx, MethodSessionList, req, &resp)
+	return resp, err
+}
+
 func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (LoadSessionResponse, error) {
 	var resp LoadSessionResponse
 	err := c.conn.Call(ctx, MethodSessionLoad, LoadSessionRequest{
@@ -119,6 +145,21 @@ func (c *Client) LoadSession(ctx context.Context, sessionID string, cwd string, 
 	}, &resp)
 	_ = meta
 	return resp, err
+}
+
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string, meta map[string]any) (ResumeSessionResponse, error) {
+	var resp ResumeSessionResponse
+	err := c.conn.Call(ctx, MethodSessionResume, ResumeSessionRequest{
+		SessionID:  sessionID,
+		CWD:        cwd,
+		MCPServers: []json.RawMessage{},
+	}, &resp)
+	_ = meta
+	return resp, err
+}
+
+func (c *Client) CloseSession(ctx context.Context, sessionID string) error {
+	return c.conn.Call(ctx, MethodSessionClose, CloseSessionRequest{SessionID: strings.TrimSpace(sessionID)}, &CloseSessionResponse{})
 }
 
 func (c *Client) SetMode(ctx context.Context, sessionID string, modeID string) error {
@@ -245,6 +286,74 @@ func (c *Client) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 			return resp, nil
 		}
 		return PermissionSelectedOutcome("reject_once"), nil
+	case MethodTerminalCreate:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req CreateTerminalRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		resp, err := c.cfg.Terminal.CreateTerminal(ctx, req)
+		return responseOrRPCError(resp, err)
+	case MethodTerminalOutput:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req TerminalOutputRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		resp, err := c.cfg.Terminal.TerminalOutput(ctx, req)
+		return responseOrRPCError(resp, err)
+	case MethodTerminalWaitForExit:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req WaitForTerminalExitRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		resp, err := c.cfg.Terminal.TerminalWaitForExit(ctx, req)
+		return responseOrRPCError(resp, err)
+	case MethodTerminalKill:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req KillTerminalRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		return responseOrRPCError(struct{}{}, c.cfg.Terminal.TerminalKill(ctx, req))
+	case MethodTerminalRelease:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req ReleaseTerminalRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		return responseOrRPCError(struct{}{}, c.cfg.Terminal.TerminalRelease(ctx, req))
+	case MethodReadTextFile:
+		if c.cfg.FileSystem == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req ReadTextFileRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		resp, err := c.cfg.FileSystem.ReadTextFile(ctx, req)
+		return responseOrRPCError(resp, err)
+	case MethodWriteTextFile:
+		if c.cfg.FileSystem == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req WriteTextFileRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+		}
+		resp, err := c.cfg.FileSystem.WriteTextFile(ctx, req)
+		return responseOrRPCError(resp, err)
 	default:
 		if c.cfg.OnRequest != nil {
 			return c.cfg.OnRequest(ctx, msg)
@@ -278,6 +387,13 @@ func decodeParams(raw json.RawMessage, out any) error {
 		return nil
 	}
 	return json.Unmarshal(raw, out)
+}
+
+func responseOrRPCError(resp any, err error) (any, *jsonrpc.RPCError) {
+	if err != nil {
+		return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+	}
+	return resp, nil
 }
 
 func decodeUpdate(raw json.RawMessage) (Update, error) {
