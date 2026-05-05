@@ -24,6 +24,8 @@ type promptConfig struct {
 	BasePrompt       string
 	SkillDirs        []string
 	DelegationAgents []sdkdelegation.Agent
+	PermissionMode   string
+	Sandbox          SandboxConfig
 }
 
 type promptFragmentKind string
@@ -88,6 +90,12 @@ func buildSystemPrompt(cfg promptConfig) (string, error) {
 			Content: builtInCapabilityGuidancePrompt(cfg.DelegationAgents),
 		},
 		{
+			Kind:    promptFragmentSystem,
+			Stage:   "permissions",
+			Source:  "app:permission-boundaries",
+			Content: builtInPermissionBoundariesPrompt(cfg.PermissionMode, cfg.Sandbox, workspaceDir),
+		},
+		{
 			Kind:    promptFragmentUser,
 			Stage:   "user_custom_instructions",
 			Source:  "app:user-custom-instructions",
@@ -148,6 +156,50 @@ func builtInCapabilityGuidancePrompt(agents []sdkdelegation.Agent) string {
 		lines = append(lines,
 			"- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write to send stdin to a running BASH task or a follow-up prompt to a completed SPAWN child.",
 		)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func builtInPermissionBoundariesPrompt(permissionMode string, sandboxCfg SandboxConfig, workspaceDir string) string {
+	mode := normalizeSessionModeOrDefault(permissionMode)
+	cfg := effectiveSandboxConfig(sandboxCfg, workspaceDir)
+	requested := firstNonEmpty(strings.TrimSpace(cfg.RequestedType), "auto")
+	lines := []string{
+		"## Permission Boundaries",
+		"",
+		"- Default permission mode: " + mode + ".",
+		"- Sandbox backend request: " + requested + ".",
+	}
+	switch {
+	case mode == "full_access":
+		lines = append(lines,
+			"- Default BASH execution uses the host route with `danger_full_access` and `network: inherit`.",
+			"- `workspace_write` sandbox write boundaries do not constrain default BASH execution in this mode.",
+			"- Avoid `sandbox_permissions=require_escalated` for default BASH execution; host execution is already the active mode.",
+		)
+	case strings.EqualFold(requested, "host"):
+		lines = append(lines,
+			"- Default BASH execution uses the host backend; it is not OS-sandboxed even when the policy request is `workspace_write`.",
+			"- Configured sandbox roots are policy intent for sandbox-capable backends and do not provide shell confinement while the host backend is active.",
+			"- Use `sandbox_permissions=require_escalated` with a short user-facing `justification` when a command should be surfaced as explicit host execution.",
+		)
+	default:
+		lines = append(lines,
+			"- Default BASH execution uses the sandbox route with `workspace_write` and `network: inherit`.",
+			"- `workspace_write` permits writes only in the workspace, temp root, configured writable roots, and approved per-command write roots.",
+			"- Read-only subpaths remain protected by the runtime sandbox policy.",
+			"- To request a narrow sandboxed grant, set `sandbox_permissions` to `with_additional_permissions` and use `additional_permissions.network.enabled`, `additional_permissions.file_system.read`, or `additional_permissions.file_system.write`.",
+			"- To request host execution, set `sandbox_permissions` to `require_escalated`, include a short user-facing `justification`, and only include a narrow `prefix_rule` when a reusable allow suggestion is useful.",
+		)
+	}
+	if len(cfg.ReadableRoots) > 0 {
+		lines = append(lines, "- Configured readable roots: "+strings.Join(cfg.ReadableRoots, ", ")+".")
+	}
+	if len(cfg.WritableRoots) > 0 {
+		lines = append(lines, "- Configured writable roots: "+strings.Join(cfg.WritableRoots, ", ")+".")
+	}
+	if len(cfg.ReadOnlySubpaths) > 0 {
+		lines = append(lines, "- Configured read-only subpaths: "+strings.Join(cfg.ReadOnlySubpaths, ", ")+".")
 	}
 	return strings.Join(lines, "\n")
 }

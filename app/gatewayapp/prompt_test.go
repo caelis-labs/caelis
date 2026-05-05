@@ -41,6 +41,9 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	for _, required := range []string{
 		"<system_instructions>",
 		"## Core Stable Rules",
+		"## Permission Boundaries",
+		"sandbox_permissions",
+		"`workspace_write`",
 		"<user_custom_instructions>",
 		"Workspace rule.",
 		"Global rule.",
@@ -48,6 +51,58 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"<cwd>" + workspace + "</cwd>",
 		"### Available skills",
 		"echo",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("prompt missing %q:\n%s", required, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptFullAccessModeDoesNotClaimSandboxedBash(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	prompt, err := buildSystemPrompt(promptConfig{
+		AppName:        "CAELIS",
+		WorkspaceDir:   workspace,
+		PermissionMode: "full_control",
+	})
+	if err != nil {
+		t.Fatalf("buildSystemPrompt() error = %v", err)
+	}
+	if strings.Contains(prompt, "Default BASH execution uses the sandbox route with `workspace_write`") {
+		t.Fatalf("prompt incorrectly claims sandboxed BASH in full access mode:\n%s", prompt)
+	}
+	for _, required := range []string{
+		"Default permission mode: full_access.",
+		"Default BASH execution uses the host route with `danger_full_access`",
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("prompt missing %q:\n%s", required, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptHostBackendDoesNotClaimOSSandboxedBash(t *testing.T) {
+	t.Parallel()
+
+	workspace := t.TempDir()
+	prompt, err := buildSystemPrompt(promptConfig{
+		AppName:      "CAELIS",
+		WorkspaceDir: workspace,
+		Sandbox: SandboxConfig{
+			RequestedType: "host",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildSystemPrompt() error = %v", err)
+	}
+	if strings.Contains(prompt, "Default BASH execution uses the sandbox route with `workspace_write`") {
+		t.Fatalf("prompt incorrectly claims sandboxed BASH with host backend:\n%s", prompt)
+	}
+	for _, required := range []string{
+		"Sandbox backend request: host.",
+		"Default BASH execution uses the host backend; it is not OS-sandboxed",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)

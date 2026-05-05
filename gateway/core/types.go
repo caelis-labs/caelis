@@ -382,10 +382,15 @@ const (
 )
 
 type ApprovalPayload struct {
-	ToolName string           `json:"tool_name,omitempty"`
-	RawInput map[string]any   `json:"raw_input,omitempty"`
-	Status   ApprovalStatus   `json:"status,omitempty"`
-	Options  []ApprovalOption `json:"options,omitempty"`
+	ToolName              string           `json:"tool_name,omitempty"`
+	RawInput              map[string]any   `json:"raw_input,omitempty"`
+	Reason                string           `json:"reason,omitempty"`
+	Justification         string           `json:"justification,omitempty"`
+	SandboxPermissions    string           `json:"sandbox_permissions,omitempty"`
+	PrefixRule            []string         `json:"prefix_rule,omitempty"`
+	AdditionalPermissions map[string]any   `json:"additional_permissions,omitempty"`
+	Status                ApprovalStatus   `json:"status,omitempty"`
+	Options               []ApprovalOption `json:"options,omitempty"`
 }
 
 type ParticipantAction string

@@ -59,7 +59,45 @@ func (t *BashTool) Definition() sdktool.Definition {
 				},
 				"with_escalation": map[string]any{
 					"type":        "boolean",
-					"description": "Request host execution outside the sandbox. This should only be used when sandboxed execution cannot complete the task.",
+					"description": "Deprecated alias for sandbox_permissions=require_escalated. Request host execution outside the sandbox only when sandboxed execution cannot complete the task.",
+				},
+				"sandbox_permissions": map[string]any{
+					"type":        "string",
+					"description": "Sandbox permissions for this command. Use \"with_additional_permissions\" to request a narrow sandboxed filesystem or network grant, or \"require_escalated\" to request host execution; defaults to \"use_default\".",
+					"enum":        []string{"use_default", "with_additional_permissions", "require_escalated"},
+				},
+				"additional_permissions": map[string]any{
+					"type":        "object",
+					"description": "Only set when sandbox_permissions is \"with_additional_permissions\". Requests extra permissions while keeping execution inside the sandbox.",
+					"properties": map[string]any{
+						"network": map[string]any{
+							"type":        "object",
+							"description": "Optional network permission overlay.",
+							"properties": map[string]any{
+								"enabled": map[string]any{"type": "boolean", "description": "Set to true to request network access."},
+							},
+							"additionalProperties": false,
+						},
+						"file_system": map[string]any{
+							"type":        "object",
+							"description": "Optional filesystem permission overlay.",
+							"properties": map[string]any{
+								"read":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Paths to grant read access to."},
+								"write": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Paths to grant write access to."},
+							},
+							"additionalProperties": false,
+						},
+					},
+					"additionalProperties": false,
+				},
+				"justification": map[string]any{
+					"type":        "string",
+					"description": "Only set when sandbox_permissions is \"require_escalated\". A short user-facing approval question explaining why host execution is needed.",
+				},
+				"prefix_rule": map[string]any{
+					"type":        "array",
+					"items":       map[string]any{"type": "string"},
+					"description": "Only set when sandbox_permissions is \"require_escalated\". Suggests a narrow reusable command prefix, for example [\"git\", \"pull\"] or [\"go\", \"test\"].",
 				},
 			},
 			"required": []string{"command"},
@@ -90,6 +128,12 @@ func (t *BashTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result,
 		return sdktool.Result{}, err
 	}
 	if _, err := argparse.Bool(args, "with_escalation", false); err != nil {
+		return sdktool.Result{}, err
+	}
+	if _, err := argparse.String(args, "sandbox_permissions", false); err != nil {
+		return sdktool.Result{}, err
+	}
+	if _, err := argparse.String(args, "justification", false); err != nil {
 		return sdktool.Result{}, err
 	}
 	timeoutMS, err := argparse.Int(args, "timeout_ms", int(t.cfg.Timeout/time.Millisecond))

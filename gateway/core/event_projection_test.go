@@ -78,6 +78,46 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "permission metadata",
+			req: &sdkruntime.ApprovalRequest{
+				Tool: sdktool.Definition{Name: "BASH"},
+				Call: sdktool.Call{
+					Name:  "BASH",
+					Input: json.RawMessage(`{"command":"make generate"}`),
+				},
+				Metadata: map[string]any{
+					"approval_reason":     "additional sandbox permissions require user approval",
+					"sandbox_permissions": "with_additional_permissions",
+					"justification":       "Do you want to grant a cache path?",
+					"prefix_rule":         []string{"make", "generate"},
+					"additional_permissions": map[string]any{
+						"network": map[string]any{"enabled": true},
+					},
+				},
+			},
+			want: func(t *testing.T, payload *ApprovalPayload) {
+				t.Helper()
+				if payload == nil {
+					t.Fatal("canonicalApprovalPayload() = nil, want payload")
+				}
+				if payload.Reason != "additional sandbox permissions require user approval" {
+					t.Fatalf("payload.Reason = %q", payload.Reason)
+				}
+				if payload.Justification != "Do you want to grant a cache path?" {
+					t.Fatalf("payload.Justification = %q", payload.Justification)
+				}
+				if payload.SandboxPermissions != "with_additional_permissions" {
+					t.Fatalf("payload.SandboxPermissions = %q", payload.SandboxPermissions)
+				}
+				if len(payload.PrefixRule) != 2 || payload.PrefixRule[0] != "make" || payload.PrefixRule[1] != "generate" {
+					t.Fatalf("payload.PrefixRule = %#v", payload.PrefixRule)
+				}
+				if payload.AdditionalPermissions["network"] == nil {
+					t.Fatalf("payload.AdditionalPermissions = %#v, want network grant", payload.AdditionalPermissions)
+				}
+			},
+		},
 	}
 
 	for _, tt := range tests {

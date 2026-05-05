@@ -79,8 +79,18 @@ func DefaultMode() sdkpolicy.Mode {
 				if commandLooksDangerous(commandArg(input)) {
 					return deny("dangerous command is blocked even in default mode"), nil
 				}
-				if wantsEscalation(input) {
-					return askEscalationApproval(input), nil
+				req, err := parseBashSandboxRequest(input)
+				if err != nil {
+					return deny(err.Error()), nil
+				}
+				switch req.SandboxPermissions {
+				case bashSandboxPermissionRequireEscalated:
+					return askEscalationApproval(input, req), nil
+				case bashSandboxPermissionWithAdditionalPermissions:
+					reason := "additional sandbox permissions require user approval"
+					decision := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+					decision.Metadata = req.approvalMetadata(reason)
+					return decision, nil
 				}
 				return allow(def), nil
 			default:
@@ -149,14 +159,17 @@ func askApproval(reason string, constraints sdksandbox.Constraints, input sdkpol
 	}
 }
 
-func askEscalationApproval(input sdkpolicy.ToolContext) sdkpolicy.Decision {
-	return askApproval("host execution requires user approval", sdksandbox.Constraints{
+func askEscalationApproval(input sdkpolicy.ToolContext, req bashSandboxRequest) sdkpolicy.Decision {
+	reason := "host execution requires user approval"
+	decision := askApproval(reason, sdksandbox.Constraints{
 		Route:      sdksandbox.RouteHost,
 		Backend:    sdksandbox.BackendHost,
 		Permission: sdksandbox.PermissionFullAccess,
 		Isolation:  sdksandbox.IsolationHost,
 		Network:    sdksandbox.NetworkInherit,
 	}, input)
+	decision.Metadata = req.approvalMetadata(reason)
+	return decision
 }
 
 func toolKind(name string) string {
@@ -353,16 +366,6 @@ func resolvePolicyPath(value string, workspaceRoot string) string {
 		base = string(filepath.Separator)
 	}
 	return filepath.Clean(filepath.Join(base, value))
-}
-
-func wantsEscalation(input sdkpolicy.ToolContext) bool {
-	args := sdkpolicy.CallArgs(input.Call)
-	raw, ok := args["with_escalation"]
-	if !ok || raw == nil {
-		return false
-	}
-	value, _ := raw.(bool)
-	return value
 }
 
 func globRoots(patterns []string, workspaceRoot string) []string {
