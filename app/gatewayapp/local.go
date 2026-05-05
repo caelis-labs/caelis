@@ -218,11 +218,9 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	sandboxCfg := mergeSandboxConfig(doc.Sandbox, cfg.Sandbox)
 	baseMetadata := map[string]any{}
 	systemPrompt, err := buildSystemPrompt(promptConfig{
-		AppName:        appName,
-		WorkspaceDir:   workspaceCWD,
-		BasePrompt:     cfg.SystemPrompt,
-		PermissionMode: cfg.PermissionMode,
-		Sandbox:        sandboxCfg,
+		AppName:      appName,
+		WorkspaceDir: workspaceCWD,
+		BasePrompt:   cfg.SystemPrompt,
 	})
 	if err != nil {
 		return nil, err

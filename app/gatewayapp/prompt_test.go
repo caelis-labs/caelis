@@ -41,9 +41,9 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	for _, required := range []string{
 		"<system_instructions>",
 		"## Core Stable Rules",
-		"## Permission Boundaries",
+		"## BASH Permissions",
 		"sandbox_permissions",
-		"`workspace_write`",
+		"Use default BASH permissions first",
 		"<user_custom_instructions>",
 		"Workspace rule.",
 		"Global rule.",
@@ -58,54 +58,40 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	}
 }
 
-func TestBuildSystemPromptFullAccessModeDoesNotClaimSandboxedBash(t *testing.T) {
-	t.Parallel()
-
-	workspace := t.TempDir()
-	prompt, err := buildSystemPrompt(promptConfig{
-		AppName:        "CAELIS",
-		WorkspaceDir:   workspace,
-		PermissionMode: "full_control",
-	})
-	if err != nil {
-		t.Fatalf("buildSystemPrompt() error = %v", err)
-	}
-	if strings.Contains(prompt, "Default BASH execution uses the sandbox route with `workspace_write`") {
-		t.Fatalf("prompt incorrectly claims sandboxed BASH in full access mode:\n%s", prompt)
-	}
-	for _, required := range []string{
-		"Default permission mode: full_access.",
-		"Default BASH execution uses the host route with `danger_full_access`",
-	} {
-		if !strings.Contains(prompt, required) {
-			t.Fatalf("prompt missing %q:\n%s", required, prompt)
-		}
-	}
-}
-
-func TestBuildSystemPromptHostBackendDoesNotClaimOSSandboxedBash(t *testing.T) {
+func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	t.Parallel()
 
 	workspace := t.TempDir()
 	prompt, err := buildSystemPrompt(promptConfig{
 		AppName:      "CAELIS",
 		WorkspaceDir: workspace,
-		Sandbox: SandboxConfig{
-			RequestedType: "host",
-		},
 	})
 	if err != nil {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
-	if strings.Contains(prompt, "Default BASH execution uses the sandbox route with `workspace_write`") {
-		t.Fatalf("prompt incorrectly claims sandboxed BASH with host backend:\n%s", prompt)
-	}
 	for _, required := range []string{
-		"Sandbox backend request: host.",
-		"Default BASH execution uses the host backend; it is not OS-sandboxed",
+		"Use default BASH permissions first for read-only commands and workspace-local builds or tests.",
+		"set `sandbox_permissions` to `with_additional_permissions`",
+		"set `sandbox_permissions` to `require_escalated` with a short `justification`",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)
+		}
+	}
+	for _, forbidden := range []string{
+		"Default permission mode:",
+		"Sandbox backend request:",
+		"Default BASH execution uses the sandbox route",
+		"Default BASH execution uses the host route",
+		"Default BASH execution uses the host backend",
+		"Configured readable roots:",
+		"Configured writable roots:",
+		"Configured read-only subpaths:",
+		"Base instructions are stable",
+		"Active permissions are runtime policy state",
+	} {
+		if strings.Contains(prompt, forbidden) {
+			t.Fatalf("prompt should not contain runtime-specific %q:\n%s", forbidden, prompt)
 		}
 	}
 }
