@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/OnslaughtSnail/caelis/sdk/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -1692,23 +1693,7 @@ func isMutationPanelToolEvent(ev SubagentEvent) bool {
 }
 
 func toolSemanticName(name string, kind string) string {
-	name = strings.TrimSpace(name)
-	switch strings.ToUpper(name) {
-	case "BASH", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH":
-		return strings.ToUpper(name)
-	}
-	switch strings.ToLower(strings.TrimSpace(kind)) {
-	case "execute":
-		return "BASH"
-	case "read":
-		return "READ"
-	case "search", "fetch":
-		return "SEARCH"
-	case "edit", "delete", "move":
-		return "PATCH"
-	default:
-		return name
-	}
+	return displaypolicy.SemanticToolName(name, kind)
 }
 
 func isAttentionLoopTool(name string) bool {
@@ -1755,7 +1740,7 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 		}
 		return "• Ran bash"
 	case "SPAWN":
-		args = sanitizeSpawnHeaderArgs(args)
+		args = displaypolicy.SanitizeSpawnHeaderArgs(args)
 		if args != "" {
 			return "• Spawned " + args
 		}
@@ -1775,16 +1760,7 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 }
 
 func sanitizeSpawnHeaderArgs(args string) string {
-	args = strings.TrimSpace(args)
-	if strings.EqualFold(args, "SPAWN") {
-		return ""
-	}
-	for _, prefix := range []string{"SPAWN ", "spawn "} {
-		if strings.HasPrefix(args, prefix) {
-			return strings.TrimSpace(strings.TrimPrefix(args, prefix))
-		}
-	}
-	return args
+	return displaypolicy.SanitizeSpawnHeaderArgs(args)
 }
 
 func isExecuteToolKind(kind string) bool {

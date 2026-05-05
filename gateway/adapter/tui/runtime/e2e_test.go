@@ -41,9 +41,9 @@ func TestGatewayDriverProviderLiveTurnE2E(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := NewGatewayDriver(context.Background(), stack, "tui-runtime-live", "cli-tui", spec.Provider+"/"+spec.Model)
+	driver, err := newGatewayDriverFromGatewayAppStack(context.Background(), stack, "tui-runtime-live", "cli-tui", spec.Provider+"/"+spec.Model)
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -124,9 +124,9 @@ func TestGatewayDriverProviderConnectThenSubmitE2E(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := NewGatewayDriver(context.Background(), stack, "tui-runtime-connect", "cli-tui", spec.Provider+"/"+spec.Model)
+	driver, err := newGatewayDriverFromGatewayAppStack(context.Background(), stack, "tui-runtime-connect", "cli-tui", spec.Provider+"/"+spec.Model)
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	connectCfg := ConnectConfig{
@@ -187,9 +187,9 @@ func TestGatewayDriverProviderMultiTurnNewAndResumeE2E(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := NewGatewayDriver(context.Background(), stack, "tui-runtime-session", "cli-tui", spec.Provider+"/"+spec.Model)
+	driver, err := newGatewayDriverFromGatewayAppStack(context.Background(), stack, "tui-runtime-session", "cli-tui", spec.Provider+"/"+spec.Model)
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)

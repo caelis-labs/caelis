@@ -12,9 +12,6 @@ func TestInterfaceArchitectureHasSingleProtocolOwners(t *testing.T) {
 
 	repo := filepath.Join("..")
 	forbidden := map[string][]string{
-		"acpbridge/projector/projector.go": {
-			"type Projector interface",
-		},
 		"acpbridge/terminal/terminal.go": {
 			"type TerminalAdapter interface",
 		},

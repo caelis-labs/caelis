@@ -42,6 +42,7 @@ type controllerRun struct {
 	agent                 string
 	client                *sdkacpclient.Client
 	remoteSessionID       string
+	supportsClose         bool
 	binding               sdksession.ControllerBinding
 	contextPrelude        string
 	contextPreludePending bool
@@ -52,6 +53,7 @@ type controllerRun struct {
 	models            *sdkacpclient.SessionModelState
 	mode              string
 	modeOptions       []sdkcontroller.ControllerMode
+	remoteTitle       string
 	turnID            string
 	turnSession       sdksession.Session
 	turnStream        bool
@@ -69,6 +71,7 @@ type controllerClientState struct {
 	mode          string
 	modeOptions   []sdkcontroller.ControllerMode
 	agentLabel    string
+	supportsClose bool
 }
 
 type participantRun struct {
@@ -126,7 +129,8 @@ func (m *Manager) Activate(ctx context.Context, req sdkcontroller.HandoffRequest
 		contextPreludePending: strings.TrimSpace(req.ContextPrelude) != "",
 		updatedAt:             m.clock(),
 	}
-	client, remoteSessionID, state, err := m.startClient(ctx, req.Session.CWD, cfg,
+	resumeRemoteSessionID := reusableControllerRemoteSessionID(req.Session, cfg.Name)
+	client, remoteSessionID, state, err := m.startClient(ctx, req.Session.CWD, cfg, resumeRemoteSessionID,
 		func(env sdkacpclient.UpdateEnvelope) {
 			run.handleUpdate(m.clock, env)
 		},
@@ -156,6 +160,7 @@ func (r *controllerRun) applyStartupStateLocked(client *sdkacpclient.Client, rem
 	defer r.mu.Unlock()
 	r.client = client
 	r.remoteSessionID = strings.TrimSpace(remoteSessionID)
+	r.supportsClose = state.supportsClose
 	r.commands = mergeControllerCommands(r.commands, state.commands)
 	r.configOptions = fillControllerConfigOptions(r.configOptions, state.configOptions)
 	r.models = cloneACPSessionModelState(state.models)
@@ -170,6 +175,21 @@ func (r *controllerRun) applyStartupStateLocked(client *sdkacpclient.Client, rem
 	}
 }
 
+func (r *controllerRun) closeRemoteSession(ctx context.Context) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	client := r.client
+	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
+	supportsClose := r.supportsClose
+	r.mu.Unlock()
+	if client == nil || remoteSessionID == "" || !supportsClose {
+		return
+	}
+	_ = client.CloseSession(ctx, remoteSessionID)
+}
+
 func (m *Manager) Deactivate(ctx context.Context, ref sdksession.SessionRef) error {
 	ref = sdksession.NormalizeSessionRef(ref)
 	if ref.SessionID == "" {
@@ -180,6 +200,7 @@ func (m *Manager) Deactivate(ctx context.Context, ref sdksession.SessionRef) err
 	delete(m.controllers, ref.SessionID)
 	m.mu.Unlock()
 	if run != nil && run.client != nil {
+		run.closeRemoteSession(context.WithoutCancel(ctx))
 		_ = run.client.Close(context.WithoutCancel(ctx))
 	}
 	return nil
@@ -344,7 +365,7 @@ func (m *Manager) startParticipant(
 	req sdkcontroller.AttachRequest,
 ) (*participantRun, error) {
 	var run *participantRun
-	client, remoteSessionID, _, err := m.startClient(ctx, session.CWD, cfg, func(env sdkacpclient.UpdateEnvelope) {
+	client, remoteSessionID, _, err := m.startClient(ctx, session.CWD, cfg, "", func(env sdkacpclient.UpdateEnvelope) {
 		if run != nil {
 			run.handleUpdate(m.clock, env)
 		}
@@ -396,6 +417,7 @@ func (m *Manager) startClient(
 	ctx context.Context,
 	cwd string,
 	cfg sdksubagentacp.AgentConfig,
+	resumeRemoteSessionID string,
 	onUpdate func(sdkacpclient.UpdateEnvelope),
 	onPermission func(context.Context, sdkacpclient.RequestPermissionRequest) (sdkacpclient.RequestPermissionResponse, error),
 ) (*sdkacpclient.Client, string, controllerClientState, error) {
@@ -418,6 +440,25 @@ func (m *Manager) startClient(
 		_ = client.Close(ctx)
 		return nil, "", controllerClientState{}, err
 	}
+	remoteSessionID := strings.TrimSpace(resumeRemoteSessionID)
+	if remoteSessionID != "" && acpSessionCapability(initResp, "resume") {
+		resp, err := client.ResumeSession(ctx, remoteSessionID, strings.TrimSpace(cwd), nil)
+		if err != nil {
+			_ = client.Close(ctx)
+			return nil, "", controllerClientState{}, err
+		}
+		state := controllerClientState{
+			configOptions: controllerConfigOptionsFromACP(resp.ConfigOptions),
+			models:        cloneACPSessionModelState(resp.Models),
+			mode:          currentModeID(resp.Modes),
+			modeOptions:   controllerModesFromACP(resp.Modes),
+			supportsClose: acpSessionCapability(initResp, "close"),
+		}
+		if initResp.AgentInfo != nil {
+			state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
+		}
+		return client, remoteSessionID, state, nil
+	}
 	resp, err := client.NewSession(ctx, strings.TrimSpace(cwd), nil)
 	if err != nil {
 		_ = client.Close(ctx)
@@ -428,11 +469,35 @@ func (m *Manager) startClient(
 		models:        cloneACPSessionModelState(resp.Models),
 		mode:          currentModeID(resp.Modes),
 		modeOptions:   controllerModesFromACP(resp.Modes),
+		supportsClose: acpSessionCapability(initResp, "close"),
 	}
 	if initResp.AgentInfo != nil {
 		state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
 	}
 	return client, strings.TrimSpace(resp.SessionID), state, nil
+}
+
+func reusableControllerRemoteSessionID(session sdksession.Session, agentName string) string {
+	binding := sdksession.CloneControllerBinding(session.Controller)
+	if binding.Kind != sdksession.ControllerKindACP {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(binding.AgentName), strings.TrimSpace(agentName)) {
+		return ""
+	}
+	return strings.TrimSpace(binding.RemoteSessionID)
+}
+
+func acpSessionCapability(resp sdkacpclient.InitializeResponse, name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	if resp.AgentCapabilities.SessionCapabilities == nil {
+		return false
+	}
+	_, ok := resp.AgentCapabilities.SessionCapabilities[name]
+	return ok
 }
 
 func (m *Manager) permissionHandler(
@@ -635,6 +700,16 @@ func (r *controllerRun) applySessionUpdateLocked(clock func() time.Time, update 
 		r.configOptions = mergeControllerConfigOptions(r.configOptions, controllerConfigOptionsFromACP(typed.ConfigOptions))
 	case sdkacpclient.CurrentModeUpdate:
 		r.mode = strings.TrimSpace(typed.CurrentModeID)
+	case sdkacpclient.SessionInfoUpdate:
+		if typed.Title != nil {
+			r.remoteTitle = strings.TrimSpace(*typed.Title)
+		}
+		if typed.UpdatedAt != nil {
+			if parsed, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(*typed.UpdatedAt)); err == nil {
+				r.updatedAt = parsed
+				return
+			}
+		}
 	default:
 		return
 	}
@@ -655,6 +730,7 @@ func (r *controllerRun) controllerStatusLocked(ref sdksession.SessionRef) sdkcon
 		SessionRef:      sdksession.NormalizeSessionRef(ref),
 		Agent:           strings.TrimSpace(r.agent),
 		RemoteSessionID: strings.TrimSpace(r.remoteSessionID),
+		RemoteTitle:     strings.TrimSpace(r.remoteTitle),
 		Commands:        cloneControllerCommands(r.commands),
 		ConfigOptions:   cloneControllerConfigOptions(r.configOptions),
 		Mode:            strings.TrimSpace(r.mode),

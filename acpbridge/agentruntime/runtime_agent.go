@@ -28,7 +28,7 @@ type Config struct {
 	Runtime        sdkruntime.Runtime
 	Sessions       sdksession.Service
 	BuildAgentSpec BuildAgentSpecFunc
-	Projector      acp.Projector
+	Projector      bridgeprojector.Projector
 	Loader         acp.SessionLoader
 	Modes          acp.ModeProvider
 	Config         acp.ConfigProvider
@@ -46,7 +46,7 @@ type RuntimeAgent struct {
 	runtime        sdkruntime.Runtime
 	sessions       sdksession.Service
 	buildAgentSpec BuildAgentSpecFunc
-	projector      acp.Projector
+	projector      bridgeprojector.Projector
 	loader         acp.SessionLoader
 	modes          acp.ModeProvider
 	config         acp.ConfigProvider
@@ -153,6 +153,9 @@ func (a *RuntimeAgent) Initialize(ctx context.Context, _ acp.InitializeRequest) 
 	if a.loader != nil {
 		caps.LoadSession = true
 	}
+	caps.SessionCapabilities["list"] = json.RawMessage(`{}`)
+	caps.SessionCapabilities["resume"] = json.RawMessage(`{}`)
+	caps.SessionCapabilities["close"] = json.RawMessage(`{}`)
 	return acp.InitializeResponse{
 		ProtocolVersion:   acp.CurrentProtocolVersion,
 		AgentCapabilities: caps,
@@ -212,6 +215,34 @@ func (a *RuntimeAgent) NewSession(ctx context.Context, req acp.NewSessionRequest
 	return resp, nil
 }
 
+func (a *RuntimeAgent) ListSessions(ctx context.Context, req acp.SessionListRequest) (acp.SessionListResponse, error) {
+	list, err := a.sessions.ListSessions(ctx, sdksession.ListSessionsRequest{
+		AppName:      a.appName,
+		UserID:       a.userID,
+		WorkspaceKey: strings.TrimSpace(req.CWD),
+		Cursor:       strings.TrimSpace(req.Cursor),
+	})
+	if err != nil {
+		return acp.SessionListResponse{}, err
+	}
+	resp := acp.SessionListResponse{
+		Sessions:   make([]acp.SessionSummary, 0, len(list.Sessions)),
+		NextCursor: strings.TrimSpace(list.NextCursor),
+	}
+	for _, session := range list.Sessions {
+		summary := acp.SessionSummary{
+			SessionID: strings.TrimSpace(session.SessionID),
+			CWD:       strings.TrimSpace(session.CWD),
+			Title:     strings.TrimSpace(session.Title),
+		}
+		if !session.UpdatedAt.IsZero() {
+			summary.UpdatedAt = session.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+		}
+		resp.Sessions = append(resp.Sessions, summary)
+	}
+	return resp, nil
+}
+
 func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest, cb acp.PromptCallbacks) (acp.LoadSessionResponse, error) {
 	if a.loader == nil {
 		return acp.LoadSessionResponse{}, acp.ErrCapabilityUnsupported
@@ -232,6 +263,47 @@ func (a *RuntimeAgent) LoadSession(ctx context.Context, req acp.LoadSessionReque
 		resp.Models = models
 	}
 	return resp, nil
+}
+
+func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionRequest) (acp.ResumeSessionResponse, error) {
+	session, err := a.session(ctx, req.SessionID)
+	if err != nil {
+		return acp.ResumeSessionResponse{}, err
+	}
+	resp := acp.ResumeSessionResponse{}
+	if a.modes != nil {
+		modes, err := a.modes.SessionModes(ctx, session)
+		if err != nil {
+			return acp.ResumeSessionResponse{}, err
+		}
+		resp.Modes = modes
+	}
+	if a.config != nil {
+		options, err := a.config.SessionConfigOptions(ctx, session)
+		if err != nil {
+			return acp.ResumeSessionResponse{}, err
+		}
+		resp.ConfigOptions = options
+	}
+	if a.models != nil {
+		models, err := a.models.SessionModels(ctx, session)
+		if err != nil {
+			return acp.ResumeSessionResponse{}, err
+		}
+		resp.Models = models
+	}
+	return resp, nil
+}
+
+func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	if err := a.Cancel(ctx, acp.CancelNotification{SessionID: req.SessionID}); err != nil {
+		return acp.CloseSessionResponse{}, err
+	}
+	sessionID := strings.TrimSpace(req.SessionID)
+	a.mu.Lock()
+	delete(a.cancels, sessionID)
+	a.mu.Unlock()
+	return acp.CloseSessionResponse{}, nil
 }
 
 func (a *RuntimeAgent) SetSessionMode(ctx context.Context, req acp.SetSessionModeRequest) (acp.SetSessionModeResponse, error) {

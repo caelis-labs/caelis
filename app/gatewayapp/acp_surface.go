@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/acp"
+	modelcatalog "github.com/OnslaughtSnail/caelis/sdk/model/catalog"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	"github.com/OnslaughtSnail/caelis/tui/modelcatalog"
 )
 
 const (

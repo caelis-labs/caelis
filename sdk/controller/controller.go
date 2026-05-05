@@ -162,6 +162,7 @@ type ControllerStatus struct {
 	SessionRef      sdksession.SessionRef    `json:"session_ref,omitempty"`
 	Agent           string                   `json:"agent,omitempty"`
 	RemoteSessionID string                   `json:"remote_session_id,omitempty"`
+	RemoteTitle     string                   `json:"remote_title,omitempty"`
 	Model           string                   `json:"model,omitempty"`
 	ModelOptions    []ControllerConfigChoice `json:"model_options,omitempty"`
 	ReasoningEffort string                   `json:"reasoning_effort,omitempty"`

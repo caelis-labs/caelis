@@ -165,9 +165,9 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -244,9 +244,9 @@ func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession(titled) error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	candidates, err := driver.ListSessions(ctx, 10)
 	if err != nil {
@@ -293,9 +293,9 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "connect-flow-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-flow-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	providers, err := driver.CompleteSlashArg(ctx, "connect", "", 20)
 	if err != nil {
@@ -372,9 +372,9 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := NewGatewayDriver(ctx, stack, "slash-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "slash-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	if _, err := driver.Connect(ctx, ConnectConfig{
@@ -503,9 +503,9 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "model-reasoning-session", "surface", "deepseek/deepseek-v4-pro")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "model-reasoning-session", "surface", "deepseek/deepseek-v4-pro")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	levels, err := driver.CompleteSlashArg(ctx, "model use deepseek/deepseek-v4-pro", "", 10)
@@ -560,9 +560,9 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "connect-defaults-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-defaults-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	status, err := driver.Connect(ctx, ConnectConfig{
@@ -670,9 +670,9 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "connect-token-env-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-token-env-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "deepseek",
@@ -723,9 +723,9 @@ func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "codefree-no-reasoning-session", "surface", "codefree/glm-5.1")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "codefree-no-reasoning-session", "surface", "codefree/glm-5.1")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	levels, err := driver.CompleteSlashArg(ctx, "model use codefree/glm-5.1", "", 10)
 	if err != nil {
@@ -772,9 +772,9 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "codefree-connect-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "codefree-connect-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	status, err := driver.Connect(ctx, ConnectConfig{
@@ -812,9 +812,9 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "status-usage-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "status-usage-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	session, ok := driver.currentSession()
 	if !ok {
@@ -881,9 +881,9 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	session, ok := driver.currentSession()
 	if !ok {
@@ -937,9 +937,9 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "delete-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "delete-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "ollama",
@@ -982,9 +982,9 @@ func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "delete-only-model-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "delete-only-model-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "ollama",
@@ -1030,9 +1030,9 @@ func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "use-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "use-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",
@@ -1085,9 +1085,9 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "agent-driver-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-driver-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	agents, err := driver.ListAgents(ctx, 10)
@@ -1230,9 +1230,9 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "agent-conflict-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-conflict-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	first, err := driver.StartAgentSubagent(ctx, "copilot", "first prompt")
@@ -1298,9 +1298,9 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, reloaded, "startup-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, reloaded, "startup-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1325,9 +1325,9 @@ func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	session, ok := driver.currentSession()
 	if !ok {
@@ -1366,9 +1366,9 @@ func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T
 	if err != nil {
 		t.Fatalf("StartSession(stale) error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1411,9 +1411,9 @@ func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 		t.Fatalf("StartSession(sticky-session) error = %v", err)
 	}
 
-	driver, err := NewGatewayDriver(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1438,9 +1438,9 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	startup, ok := driver.currentSession()
 	if !ok {
@@ -1540,7 +1540,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 	}
 
 	driver := &GatewayDriver{
-		stack:               stack,
+		stack:               gatewayAppStackForRuntimeTest(stack),
 		session:             session,
 		hasSession:          true,
 		bindingKey:          "surface",
@@ -1576,9 +1576,9 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "stale-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "stale-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	session, err := driver.NewSession(ctx)
 	if err != nil {
@@ -1631,9 +1631,9 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "prefix-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "prefix-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	modelActions, err := driver.CompleteSlashArg(ctx, "model", "de", 10)
@@ -1686,9 +1686,9 @@ func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "agent-root-order-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-root-order-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSlashArg(ctx, "agent", "", 10)
@@ -1733,9 +1733,9 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "agent-install-cancel-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-install-cancel-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	done := make(chan error, 1)
@@ -1786,9 +1786,9 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "multi-provider-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "multi-provider-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",
@@ -1894,9 +1894,9 @@ func TestGatewayDriverCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "file-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "file-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteFile(ctx, "src/ma", 10)
@@ -1953,9 +1953,9 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "skill-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "skill-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSkill(ctx, "", 10)
@@ -1994,9 +1994,9 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "mention-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "mention-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	session, err := driver.ensureSession(ctx)
 	if err != nil {
@@ -2124,9 +2124,9 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 		t.Fatalf("UpdateState(second) error = %v", err)
 	}
 
-	driver, err := NewGatewayDriver(ctx, stack, "resume-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "resume-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	candidates, err := driver.CompleteResume(ctx, "task", 10)
 	if err != nil {
@@ -2162,9 +2162,9 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "delete-unknown-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "delete-unknown-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if err := driver.DeleteModel(ctx, "minimax/minimax-m1"); err == nil {
 		t.Fatal("DeleteModel() error = nil, want unknown alias error")
@@ -2190,9 +2190,9 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "connect-candidates-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-candidates-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",
@@ -2232,9 +2232,9 @@ func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "missing-key-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "missing-key-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "openai",
@@ -2258,9 +2258,9 @@ func TestGatewayDriverConnectRejectsInvalidBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "invalid-baseurl-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "invalid-baseurl-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "openai-compatible",
@@ -2288,9 +2288,9 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := NewGatewayDriver(ctx, stack, "doctor-status-session", "surface", "")
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "doctor-status-session", "surface", "")
 	if err != nil {
-		t.Fatalf("NewGatewayDriver() error = %v", err)
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",

@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkskill "github.com/OnslaughtSnail/caelis/sdk/skill"
 )
 
 const (
@@ -46,6 +46,10 @@ var ignoredCompletionDirs = map[string]struct{}{
 type scoredCompletion struct {
 	candidate CompletionCandidate
 	score     int
+}
+
+type resumeSessionLoader interface {
+	LoadSession(context.Context, sdksession.LoadSessionRequest) (sdksession.LoadedSession, error)
 }
 
 func normalizeCompletionLimit(limit int) int {
@@ -245,7 +249,7 @@ func sortAndTrimCandidates(items []scoredCompletion, limit int) []CompletionCand
 	return out
 }
 
-func enrichResumeCandidate(ctx context.Context, stack *gatewayapp.Stack, summary sdksession.SessionSummary) ResumeCandidate {
+func enrichResumeCandidate(ctx context.Context, sessions resumeSessionLoader, summary sdksession.SessionSummary) ResumeCandidate {
 	candidate := ResumeCandidate{
 		SessionID: summary.SessionID,
 		Title:     strings.TrimSpace(summary.Title),
@@ -254,10 +258,10 @@ func enrichResumeCandidate(ctx context.Context, stack *gatewayapp.Stack, summary
 		Age:       humanAge(summary.UpdatedAt),
 		UpdatedAt: summary.UpdatedAt,
 	}
-	if stack == nil || stack.Sessions == nil {
+	if sessions == nil {
 		return candidate
 	}
-	loaded, err := stack.Sessions.LoadSession(ctx, sdksession.LoadSessionRequest{
+	loaded, err := sessions.LoadSession(ctx, sdksession.LoadSessionRequest{
 		SessionRef:       summary.SessionRef,
 		Limit:            0,
 		IncludeTransient: false,
@@ -282,7 +286,7 @@ func scoreResumeCandidate(query string, candidate ResumeCandidate) (int, bool) {
 	)
 }
 
-func scoreSkillMeta(query string, meta gatewayapp.SkillMeta, workspace string) (int, bool) {
+func scoreSkillMeta(query string, meta sdkskill.Meta, workspace string) (int, bool) {
 	return fuzzyMatchScore(query,
 		meta.Name,
 		meta.Description,

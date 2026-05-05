@@ -174,56 +174,14 @@ func (m *Model) applyTranscriptPlan(event TranscriptEvent) (tea.Model, tea.Cmd) 
 
 func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	m.prepareForTranscriptScope(event.Scope)
+	mutation := transcriptToolMutationFromEvent(event)
 	switch event.Scope {
 	case ACPProjectionParticipant:
-		block := m.ensureParticipantTurnBlock(event.ScopeID, event.Actor)
-		if block == nil {
-			return m, nil
-		}
-		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
-			block.StartedAt = event.OccurredAt
-		}
-		if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "initializing" || state == "prompting" {
-			block.Status = "running"
-		}
-		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, transcriptToolUpdateMeta(event))
-		m.markViewportBlockDirty(block.BlockID())
-		return m, m.requestStreamViewportSync()
+		return m.applyTranscriptToolToParticipant(event, mutation)
 	case ACPProjectionSubagent:
-		if !m.shouldRenderSubagentPanelEvent(event) {
-			return m, nil
-		}
-		sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
-		panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
-		if state == nil || panel == nil {
-			return m, nil
-		}
-		if !event.OccurredAt.IsZero() && (state.StartedAt.IsZero() || event.OccurredAt.Before(state.StartedAt)) {
-			state.StartedAt = event.OccurredAt
-		}
-		switch {
-		case strings.EqualFold(state.Status, "waiting_approval"):
-			state.Status = "running"
-		case isTerminalSubagentState(state.Status):
-			state.ReviveFromTerminal()
-		}
-		panel.bindSession(state)
-		state.UpdateToolCallWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, firstNonEmpty(strings.TrimSpace(event.ToolStream), "stdout"), event.ToolOutput, event.Final, transcriptToolUpdateMeta(event))
-		m.reviveSubagentPanel(panel, false)
-		m.syncSubagentSessionPanels(sessionKey)
-		m.markViewportBlockDirty(panel.BlockID())
-		return m, m.requestStreamViewportSync()
+		return m.applyTranscriptToolToSubagent(event, mutation)
 	default:
-		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
-		if block == nil {
-			return m, nil
-		}
-		if !event.OccurredAt.IsZero() && (block.StartedAt.IsZero() || event.OccurredAt.Before(block.StartedAt)) {
-			block.StartedAt = event.OccurredAt
-		}
-		block.UpdateToolWithMeta(event.ToolCallID, event.ToolName, event.ToolArgs, event.ToolOutput, event.Final, event.ToolError, transcriptToolUpdateMeta(event))
-		m.markViewportBlockDirty(block.BlockID())
-		return m, m.requestStreamViewportSync()
+		return m.applyTranscriptToolToMain(event, mutation)
 	}
 }
 

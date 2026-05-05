@@ -8,13 +8,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
+	"github.com/OnslaughtSnail/caelis/app/tuiadapter"
 	"github.com/OnslaughtSnail/caelis/internal/version"
 	tuiapp "github.com/OnslaughtSnail/caelis/tui/tuiapp"
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
-	driver, err := tuiadapterruntime.NewGatewayDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
+	driver, err := tuiadapter.NewGatewayDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
 	}

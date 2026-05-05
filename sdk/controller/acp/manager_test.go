@@ -180,6 +180,27 @@ func TestControllerRunApplyStartupStatePreservesPreSessionUpdates(t *testing.T) 
 	}
 }
 
+func TestControllerRunAppliesSessionInfoUpdate(t *testing.T) {
+	t.Parallel()
+
+	title := "Remote title"
+	updatedAt := "2026-05-04T12:34:56Z"
+	run := &controllerRun{}
+	run.applySessionUpdateLocked(func() time.Time { return time.Unix(1, 0) }, sdkacpclient.SessionInfoUpdate{
+		SessionUpdate: sdkacpclient.UpdateSessionInfo,
+		Title:         &title,
+		UpdatedAt:     &updatedAt,
+	})
+
+	status := run.controllerStatusLocked(sdksession.SessionRef{SessionID: "parent"})
+	if status.RemoteTitle != "Remote title" {
+		t.Fatalf("RemoteTitle = %q, want Remote title", status.RemoteTitle)
+	}
+	if got := status.UpdatedAt.Format(time.RFC3339); got != updatedAt {
+		t.Fatalf("UpdatedAt = %q, want %q", got, updatedAt)
+	}
+}
+
 func TestControllerRunStatusUsesConfigOptionsForModelAndEffort(t *testing.T) {
 	t.Parallel()
 
