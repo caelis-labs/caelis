@@ -944,9 +944,7 @@ func (d *GatewayDriver) AddAgentWithOptions(ctx context.Context, target string, 
 		ctx, finish = d.beginInterruptibleCommand(ctx)
 		defer finish()
 	}
-	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, RegisterBuiltinACPAgentOptions{
-		Install: opts.Install,
-	}); err != nil {
+	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, RegisterBuiltinACPAgentOptions(opts)); err != nil {
 		if opts.Install && errors.Is(ctx.Err(), context.Canceled) {
 			return AgentStatusSnapshot{}, context.Canceled
 		}

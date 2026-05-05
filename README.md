@@ -1,6 +1,6 @@
 # caelis
 
-Current release target: `v0.1.0`.
+Current release target: `v0.1.1`.
 
 `caelis` is a terminal-first agent runtime with one local stack:
 `sdk -> gateway -> app/gatewayapp -> adapters -> tui/headless`.
@@ -61,13 +61,13 @@ Current design references:
 From npm:
 
 ```bash
-npm i -g @onslaughtsnail/caelis@0.1.0
+npm i -g @onslaughtsnail/caelis@0.1.1
 ```
 
 or without a global install:
 
 ```bash
-npx @onslaughtsnail/caelis@0.1.0 --help
+npx @onslaughtsnail/caelis@0.1.1 --help
 ```
 
 Supported npm platforms: macOS/Linux (`x64`, `arm64`).
@@ -229,7 +229,7 @@ make quality
 Synchronize npm manifests:
 
 ```bash
-node ./npm/scripts/set-version.mjs 0.1.0
+node ./npm/scripts/set-version.mjs 0.1.1
 ```
 
 Local release dry run:

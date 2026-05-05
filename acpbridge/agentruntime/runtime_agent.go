@@ -296,7 +296,7 @@ func (a *RuntimeAgent) ResumeSession(ctx context.Context, req acp.ResumeSessionR
 }
 
 func (a *RuntimeAgent) CloseSession(ctx context.Context, req acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
-	if err := a.Cancel(ctx, acp.CancelNotification{SessionID: req.SessionID}); err != nil {
+	if err := a.Cancel(ctx, acp.CancelNotification(req)); err != nil {
 		return acp.CloseSessionResponse{}, err
 	}
 	sessionID := strings.TrimSpace(req.SessionID)
