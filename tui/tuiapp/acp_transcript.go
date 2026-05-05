@@ -242,20 +242,46 @@ func reasoningExpanded(opts acpTranscriptRenderOptions, key string) bool {
 	return opts.ReasoningExpanded(key)
 }
 
-func reasoningShouldFold(events []SubagentEvent, idx int, _ string) bool {
+func reasoningShouldFold(events []SubagentEvent, idx int, status string) bool {
 	if idx < 0 || idx >= len(events) || events[idx].Kind != SEReasoning {
 		return false
 	}
-	for i := idx + 1; i < len(events); i++ {
-		ev := events[i]
-		if ev.Kind == SEReasoning {
-			continue
-		}
-		if ev.Kind == SEToolCall && ev.Done && isAttentionLoopTool(ev.Name) {
+	text, end := collectConsecutiveReasoning(events, idx)
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	for i := end + 1; i < len(events); i++ {
+		if reasoningFoldBoundaryEvent(events[i]) {
 			return true
 		}
 	}
-	return false
+	return isTerminalACPTranscriptStatus(status)
+}
+
+func reasoningFoldBoundaryEvent(ev SubagentEvent) bool {
+	switch ev.Kind {
+	case SEReasoning:
+		return strings.TrimSpace(ev.Text) != ""
+	case SEAssistant:
+		return strings.TrimSpace(ev.Text) != ""
+	case SEToolCall:
+		return strings.TrimSpace(ev.Name) != "" || strings.TrimSpace(ev.Args) != "" || strings.TrimSpace(ev.Output) != ""
+	case SEPlan:
+		return len(ev.PlanEntries) > 0
+	case SEApproval:
+		return strings.TrimSpace(ev.ApprovalTool) != "" || strings.TrimSpace(ev.ApprovalCommand) != ""
+	default:
+		return false
+	}
+}
+
+func isTerminalACPTranscriptStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out":
+		return true
+	default:
+		return false
+	}
 }
 
 func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) {
@@ -455,17 +481,11 @@ func taskControlEvents(events []SubagentEvent) []SubagentEvent {
 
 func taskStageDetailRows(events []SubagentEvent, width int) []string {
 	rows := make([]string, 0, len(events))
-	seen := map[string]struct{}{}
 	for _, ev := range events {
 		verb, detail := splitTaskAction(ev.Args)
 		if verb == "" {
 			continue
 		}
-		key := strings.TrimSpace(strings.ToLower(verb + " " + detail))
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
 		prefix := "  "
 		if len(rows) == 0 {
 			prefix += "└ "

@@ -969,6 +969,16 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env sdkacpclient.U
 		Role:         r.binding.Role,
 		DelegationID: r.binding.DelegationID,
 	}
+	if event.Meta == nil {
+		event.Meta = map[string]any{}
+	}
+	if agent := strings.TrimSpace(r.agent); agent != "" {
+		event.Meta["agent"] = agent
+	}
+	if label := strings.TrimSpace(r.binding.Label); label != "" {
+		event.Meta["mention"] = label
+		event.Meta["handle"] = strings.TrimPrefix(label, "@")
+	}
 	r.updatedAt = clock()
 	r.events = append(r.events, sdksession.CloneEvent(event))
 	r.mu.Unlock()

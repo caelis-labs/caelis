@@ -652,6 +652,7 @@ func messagesFromContext(ctx sdkruntime.Context) []sdkmodel.Message {
 	if ctx == nil {
 		return nil
 	}
+	session := ctx.Session()
 	events := make([]*sdksession.Event, 0, ctx.Events().Len())
 	for event := range ctx.Events().All() {
 		events = append(events, event)
@@ -663,6 +664,7 @@ func messagesFromContext(ctx sdkruntime.Context) []sdkmodel.Message {
 			i++
 			continue
 		}
+		event = eventWithParticipantContextMeta(event, session)
 		if sdksession.EventTypeOf(event) == sdksession.EventTypeToolCall {
 			if message, next, ok := toolCallMessageFromEventRun(events, i); ok {
 				out = append(out, message)
@@ -679,6 +681,59 @@ func messagesFromContext(ctx sdkruntime.Context) []sdkmodel.Message {
 		i++
 	}
 	return normalizeToolCallHistory(out)
+}
+
+func eventWithParticipantContextMeta(event *sdksession.Event, session sdksession.Session) *sdksession.Event {
+	if event == nil || event.Scope == nil {
+		return event
+	}
+	participantID := strings.TrimSpace(event.Scope.Participant.ID)
+	if participantID == "" {
+		return event
+	}
+	binding, ok := chatParticipantBinding(session, participantID)
+	if !ok {
+		return event
+	}
+	agent := strings.TrimSpace(binding.AgentName)
+	label := strings.TrimSpace(binding.Label)
+	if agent == "" && label == "" {
+		return event
+	}
+	if stringFromFlatMap(event.Meta, "agent") != "" &&
+		stringFromFlatMap(event.Meta, "mention") != "" &&
+		stringFromFlatMap(event.Meta, "handle") != "" {
+		return event
+	}
+	cloned := sdksession.CloneEvent(event)
+	if cloned.Meta == nil {
+		cloned.Meta = map[string]any{}
+	}
+	if agent != "" && stringFromFlatMap(cloned.Meta, "agent") == "" {
+		cloned.Meta["agent"] = agent
+	}
+	if label != "" {
+		if stringFromFlatMap(cloned.Meta, "mention") == "" {
+			cloned.Meta["mention"] = label
+		}
+		if stringFromFlatMap(cloned.Meta, "handle") == "" {
+			cloned.Meta["handle"] = strings.TrimPrefix(label, "@")
+		}
+	}
+	return cloned
+}
+
+func chatParticipantBinding(session sdksession.Session, participantID string) (sdksession.ParticipantBinding, bool) {
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" {
+		return sdksession.ParticipantBinding{}, false
+	}
+	for _, item := range session.Participants {
+		if strings.TrimSpace(item.ID) == participantID {
+			return sdksession.CloneParticipantBinding(item), true
+		}
+	}
+	return sdksession.ParticipantBinding{}, false
 }
 
 func toolCallMessageFromEventRun(events []*sdksession.Event, start int) (sdkmodel.Message, int, bool) {
@@ -815,6 +870,9 @@ func messageFromInvocationEvent(event *sdksession.Event) (sdkmodel.Message, bool
 	case sdksession.EventTypeUser:
 		return sdkmodel.NewTextMessage(sdkmodel.RoleUser, fmt.Sprintf("User to %s: %s", label, text)), true
 	case sdksession.EventTypeAssistant:
+		if prefix := participantAssistantContextPrefix(*event); prefix != "" {
+			return sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, prefix+text), true
+		}
 		return sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, fmt.Sprintf("Assistant(%s): %s", label, text)), true
 	default:
 		if event.Message != nil {
@@ -932,6 +990,91 @@ func participantInvocationLabel(event sdksession.Event) string {
 		}
 	}
 	return "participant"
+}
+
+func participantAssistantContextPrefix(event sdksession.Event) string {
+	if event.Scope == nil {
+		return ""
+	}
+	participant := event.Scope.Participant
+	if strings.TrimSpace(participant.ID) == "" || participant.Role != sdksession.ParticipantRoleSidecar {
+		return ""
+	}
+	agent := stableAgentContextValue(participantAgentType(event))
+	if agent == "" {
+		agent = stableAgentContextValue(string(participant.Kind))
+	}
+	if agent == "" {
+		agent = "agent"
+	}
+	handle := stableAgentHandleValue(participantHandle(event))
+	if handle != "" {
+		return fmt.Sprintf("[agent_source agent=%s handle=%s]\n", agent, handle)
+	}
+	return fmt.Sprintf("[agent_source agent=%s]\n", agent)
+}
+
+func participantAgentType(event sdksession.Event) string {
+	if agent := strings.TrimSpace(stringFromFlatMap(event.Meta, "agent")); agent != "" {
+		return agent
+	}
+	if source := strings.ToLower(strings.TrimSpace(event.Scope.Source)); strings.HasPrefix(source, "slash_") {
+		return strings.TrimPrefix(source, "slash_")
+	}
+	if event.Scope.Participant.Kind != "" {
+		return string(event.Scope.Participant.Kind)
+	}
+	return ""
+}
+
+func participantHandle(event sdksession.Event) string {
+	for _, value := range []string{
+		stringFromFlatMap(event.Meta, "mention"),
+		stringFromFlatMap(event.Meta, "handle"),
+		event.Actor.Name,
+	} {
+		if text := strings.TrimSpace(value); text != "" && !strings.EqualFold(text, "user") {
+			return text
+		}
+	}
+	if event.Actor.Kind == sdksession.ActorKindParticipant {
+		if id := strings.TrimSpace(event.Actor.ID); id != "" {
+			return id
+		}
+	}
+	if event.Scope != nil {
+		return strings.TrimSpace(event.Scope.Participant.ID)
+	}
+	return ""
+}
+
+func stableAgentContextValue(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Join(fields, "_")
+}
+
+func stableAgentHandleValue(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	value = strings.Join(fields, "_")
+	value = strings.TrimPrefix(value, "@")
+	if value == "" {
+		return ""
+	}
+	return "@" + value
 }
 
 func stringFromFlatMap(values map[string]any, key string) string {

@@ -140,7 +140,7 @@ func TestChatAgentIncludesSideDialogueAndExcludesDelegatedSubagents(t *testing.T
 	if got := model.last.Messages[0].TextContent(); got != "main user" {
 		t.Fatalf("message text = %q, want main user", got)
 	}
-	if got := model.last.Messages[1].TextContent(); got != "Assistant(@codex): side acp" {
+	if got := model.last.Messages[1].TextContent(); got != "[agent_source agent=codex handle=@codex]\nside acp" {
 		t.Fatalf("side message text = %q", got)
 	}
 }
@@ -498,7 +498,7 @@ func TestMessagesFromContextUsesEventLocalParticipantLabel(t *testing.T) {
 	if got := messages[0].TextContent(); got != "User to @emma: 刚才都做了什么？总结一下" {
 		t.Fatalf("side user message = %q", got)
 	}
-	if got := messages[1].TextContent(); got != "Assistant(@emma): 会话总结" {
+	if got := messages[1].TextContent(); got != "[agent_source agent=claude handle=@emma]\n会话总结" {
 		t.Fatalf("side assistant message = %q", got)
 	}
 }
