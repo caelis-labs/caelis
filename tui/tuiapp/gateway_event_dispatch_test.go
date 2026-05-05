@@ -1227,9 +1227,9 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 		input  map[string]any
 	}{
 		{callID: "task-raw-1", input: map[string]any{"action": "wait", "yield_time_ms": 5000}},
-		{callID: "task-raw-2", input: map[string]any{"action": "wait", "task_id": "emma"}},
-		{callID: "task-raw-3", input: map[string]any{"action": "wait", "task_id": "emma"}},
-		{callID: "task-raw-4", input: map[string]any{"action": "wait", "task_id": "emma"}},
+		{callID: "task-raw-2", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
+		{callID: "task-raw-3", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
+		{callID: "task-raw-4", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
 	} {
 		updated, _ := model.Update(appgateway.EventEnvelope{
 			Event: appgateway.Event{
@@ -1252,7 +1252,7 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 	}
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "• Tasks") || !strings.Contains(joined, "  └ Wait") || !strings.Contains(joined, "    Wait emma") {
+	if !strings.Contains(joined, "• Tasks") || !strings.Contains(joined, "  └ Wait 5s") || !strings.Contains(joined, "    Wait nora 3s") {
 		t.Fatalf("rendered rows = %q, want cleaned task action rows", joined)
 	}
 	for _, forbidden := range []string{"TASK wait", "task-12"} {
@@ -1260,8 +1260,8 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
 		}
 	}
-	if got := strings.Count(joined, "Wait emma"); got != 1 {
-		t.Fatalf("rendered rows = %q, Wait emma count = %d, want 1", joined, got)
+	if got := strings.Count(joined, "Wait nora 3s"); got != 3 {
+		t.Fatalf("rendered rows = %q, Wait nora 3s count = %d, want 3", joined, got)
 	}
 }
 
@@ -2086,7 +2086,7 @@ func TestToolGroupsUseActionColorAndBlankSeparation(t *testing.T) {
 	}
 }
 
-func TestGatewayAssistantFinalKeepsReasoningVisible(t *testing.T) {
+func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 	model := newGatewayEventTestModel()
 
 	updated, _ := model.Update(appgateway.EventEnvelope{
@@ -2131,11 +2131,22 @@ func TestGatewayAssistantFinalKeepsReasoningVisible(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "thinking through the plan") {
-		t.Fatalf("rendered rows = %q, want reasoning text to remain visible", joined)
+	if !strings.Contains(joined, "> thinking through the plan") {
+		t.Fatalf("rendered rows = %q, want folded reasoning preview", joined)
+	}
+	if strings.Contains(joined, "· thinking through the plan") {
+		t.Fatalf("rendered rows = %q, should collapse reasoning body by default", joined)
 	}
 	if !strings.Contains(joined, "final answer") {
 		t.Fatalf("rendered rows = %q, want assistant text", joined)
+	}
+	if !m.tryToggleACPToolPanelToken(block.BlockID(), "acp_reasoning:0") {
+		t.Fatal("expected reasoning click token to toggle")
+	}
+	rows = block.Render(BlockRenderContext{Width: 80, TermWidth: 80, Theme: m.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "∨ thinking through the plan") {
+		t.Fatalf("expanded rows = %q, want expanded reasoning preview", joined)
 	}
 }
 
