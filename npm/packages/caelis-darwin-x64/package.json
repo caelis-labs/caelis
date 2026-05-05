@@ -1,6 +1,6 @@
 {
   "name": "@onslaughtsnail/caelis-darwin-x64",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Platform-specific caelis binary for darwin x64",
   "license": "Apache-2.0",
   "repository": {
