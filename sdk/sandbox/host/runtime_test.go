@@ -99,6 +99,33 @@ func TestRuntimeSessionReadOutputWithCursor(t *testing.T) {
 	}
 }
 
+func TestRuntimeWaitDrainsOutputBeforeCompletion(t *testing.T) {
+	t.Parallel()
+
+	rt, err := New(Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	session, err := rt.Start(context.Background(), commandRequest("i=0; while [ $i -lt 2000 ]; do printf 'line-%04d\\n' \"$i\"; i=$((i+1)); done"))
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	status, err := session.Wait(context.Background(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if status.Running {
+		t.Fatalf("status.Running = true, want false")
+	}
+	result, err := session.Result(context.Background())
+	if err != nil {
+		t.Fatalf("Result() error = %v", err)
+	}
+	if got := result.Stdout; !strings.Contains(got, "line-0000\n") || !strings.Contains(got, "line-1999\n") {
+		t.Fatalf("stdout missing drained output, len=%d tail=%q", len(got), tailString(got, 80))
+	}
+}
+
 func waitForStdoutContains(t *testing.T, session sdksandbox.Session, marker int64, want string) ([]byte, int64) {
 	t.Helper()
 
@@ -116,6 +143,13 @@ func waitForStdoutContains(t *testing.T, session sdksandbox.Session, marker int6
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func tailString(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	return value[len(value)-limit:]
 }
 
 func commandRequest(command string) sdksandbox.CommandRequest {

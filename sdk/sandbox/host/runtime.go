@@ -166,20 +166,33 @@ func (r *Runtime) Start(ctx context.Context, req sdksandbox.CommandRequest) (sdk
 		cancel()
 		return nil, fmt.Errorf("sdk/sandbox/host: create stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	stdout, stdoutWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
 		cancel()
 		return nil, fmt.Errorf("sdk/sandbox/host: create stdout pipe: %w", err)
 	}
-	stderr, err := cmd.StderrPipe()
+	stderr, stderrWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
 		cancel()
 		return nil, fmt.Errorf("sdk/sandbox/host: create stderr pipe: %w", err)
 	}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		_ = stderr.Close()
+		_ = stderrWriter.Close()
 		cancel()
 		return nil, err
 	}
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
 
 	now := time.Now()
 	session := &hostSession{
@@ -382,6 +395,9 @@ func (s *hostSession) Terminate(_ context.Context) error {
 
 func (s *hostSession) readStream(reader io.Reader, stream string) {
 	defer s.wg.Done()
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
+	}
 	buf := make([]byte, 8192)
 	for {
 		n, err := reader.Read(buf)
