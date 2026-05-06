@@ -1,14 +1,14 @@
 # caelis
 
-Current release target: `v0.1.1`.
+Current release target: `v0.1.3`.
 
-`caelis` is a terminal-first agent runtime with one local stack:
-`sdk -> gateway -> app/gatewayapp -> internal/cli -> tui/headless/acp`.
+`caelis` is a terminal-first agent runtime. The active local path is:
+`cmd/caelis -> internal/cli -> app/gatewayapp -> gateway`.
 
 The project now treats the gateway event contract as the stable product boundary.
 The SDK owns runtime, session, model, sandbox, tool, delegation, and ACP
-integration primitives; surface packages project that state into the Bubble Tea
-TUI, ACP stdio, or a headless one-shot runner.
+integration primitives; surface adapters project that state into the Bubble Tea
+TUI, ACP stdio, and the headless one-shot runner.
 
 ## What It Does
 
@@ -19,9 +19,14 @@ TUI, ACP stdio, or a headless one-shot runner.
   host execution in `full_control`.
 - Connects external agents through the Agent Client Protocol (ACP) as
   participants, subagents, or main-controller handoffs.
+- Keeps async `BASH` and `SPAWN` work addressable through `TASK wait`,
+  `TASK write`, and `TASK cancel`, including stdin writes to interactive shell
+  commands.
 - Projects built-in and ACP tools through one transcript renderer so `Ran`,
   `Read`, `Search`, `Wrote`, `Patched`, `SPAWN`, `TASK`, and approval states stay
   visually consistent.
+- Adapts TUI colors to dark and light terminal backgrounds, terminal color
+  profile, `NO_COLOR`, explicit theme selection, and optional accent overrides.
 - Assembles prompts from built-in instructions, workspace `AGENTS.md`, global
   `~/.agents/AGENTS.md`, and discovered local skills.
 
@@ -62,13 +67,13 @@ Current design references:
 From npm:
 
 ```bash
-npm i -g @onslaughtsnail/caelis@0.1.1
+npm i -g @onslaughtsnail/caelis@0.1.3
 ```
 
 or without a global install:
 
 ```bash
-npx @onslaughtsnail/caelis@0.1.1 --help
+npx @onslaughtsnail/caelis@0.1.3 --help
 ```
 
 Supported npm platforms: macOS/Linux (`x64`, `arm64`).
@@ -86,6 +91,11 @@ builds can also be run with `go run ./cmd/caelis`.
 
 `cmd/caelis` uses one flat flag set. Run `go run ./cmd/caelis -h` to inspect the
 current flags.
+
+Subcommands:
+
+- `caelis acp`: serve the local stack as an ACP stdio agent.
+- `caelis doctor`: print runtime, session, model, and sandbox diagnostics.
 
 Common flags:
 
@@ -148,6 +158,7 @@ Current built-in slash commands:
   and follow-up `@handle <prompt>`
 - `/connect`
 - `/model use <alias>` or `/model del <alias>`
+- `/approval [auto-review|manual]`
 - `/sandbox [auto|seatbelt|bwrap|landlock]`
 - `/status`
 - `/new`
@@ -167,6 +178,10 @@ Notes:
   prominent and use condensed output panels for long-running work.
 - Completion is available for slash commands, `/agent` arguments, `#path`,
   `$skill`, and `/resume` session ids.
+- The default theme auto-detects terminal background and color depth. Set
+  `CAELIS_THEME=dark|light|nord|solarized|dracula` to force a theme,
+  `CAELIS_THEME=auto` to return to background-aware defaults, `CAELIS_ACCENT`
+  to override the focus/accent color, or `NO_COLOR=1` to disable styling.
 
 ## Runtime And Permissions
 
@@ -230,7 +245,7 @@ make quality
 Synchronize npm manifests:
 
 ```bash
-node ./npm/scripts/set-version.mjs 0.1.1
+node ./npm/scripts/set-version.mjs v0.1.3
 ```
 
 Local release dry run:
@@ -238,3 +253,6 @@ Local release dry run:
 ```bash
 make release-dry-run
 ```
+
+Tagged releases are driven by annotated `vX.Y.Z` tags pushed after `main` has
+the matching `VERSION`, npm manifests, README, and changelog updates.

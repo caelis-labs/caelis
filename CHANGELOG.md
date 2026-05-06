@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## v0.1.3 - 2026-05-06
+
+### Runtime And CI Stability
+- Fixed host-backed async bash sessions so `Wait` only reports completion after stdout/stderr have drained, restoring reliable `TASK wait` and `TASK write` output on Linux CI.
+- Added regression coverage for completed host sessions returning full output after fast process exits.
+
+### TUI And Presentation
+- Improved adaptive TUI colors for dark and light terminal backgrounds, including better semantic tokens for chrome, transcript blocks, markdown, code, diff panels, and tool output.
+- Kept the default theme terminal-background-aware while preserving explicit theme and accent overrides.
+
+### Architecture And Documentation
+- Clarified the current entry flow around `cmd/caelis -> internal/cli -> app/gatewayapp -> gateway`, with TUI, headless, and ACP bridge adapters living at the edge.
+- Refreshed README installation, command, TUI, permission, and release notes for `v0.1.3`.
+- Bumped release metadata to `v0.1.3` in `VERSION` and npm package manifests.
+
 ## v0.1.0 - 2026-04-29
 
 ### SDK, Gateway, And ACP Runtime
