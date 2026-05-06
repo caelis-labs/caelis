@@ -16,20 +16,22 @@ import (
 )
 
 type Config struct {
-	Sessions      sdksession.Service
-	Runtime       sdkruntime.Runtime
-	Resolver      TurnResolver
-	RequestPolicy RequestPolicy
-	Clock         func() time.Time
+	Sessions         sdksession.Service
+	Runtime          sdkruntime.Runtime
+	Resolver         TurnResolver
+	RequestPolicy    RequestPolicy
+	ApprovalReviewer ApprovalReviewer
+	Clock            func() time.Time
 }
 
 type Gateway struct {
-	sessions sdksession.Service
-	runtime  sdkruntime.Runtime
-	control  sdkruntime.SessionControlPlane
-	resolver TurnResolver
-	request  RequestPolicy
-	clock    func() time.Time
+	sessions         sdksession.Service
+	runtime          sdkruntime.Runtime
+	control          sdkruntime.SessionControlPlane
+	resolver         TurnResolver
+	request          RequestPolicy
+	approvalReviewer ApprovalReviewer
+	clock            func() time.Time
 
 	mu       sync.Mutex
 	active   map[string]*turnHandle
@@ -68,15 +70,19 @@ func New(cfg Config) (*Gateway, error) {
 	if cfg.RequestPolicy == nil {
 		cfg.RequestPolicy = defaultRequestPolicy{}
 	}
+	if cfg.ApprovalReviewer == nil {
+		cfg.ApprovalReviewer = denyingApprovalReviewer{}
+	}
 	return &Gateway{
-		sessions: cfg.Sessions,
-		runtime:  cfg.Runtime,
-		control:  resolveControlPlane(cfg.Runtime),
-		resolver: cfg.Resolver,
-		request:  cfg.RequestPolicy,
-		clock:    cfg.Clock,
-		active:   map[string]*turnHandle{},
-		bindings: map[string]sessionBinding{},
+		sessions:         cfg.Sessions,
+		runtime:          cfg.Runtime,
+		control:          resolveControlPlane(cfg.Runtime),
+		resolver:         cfg.Resolver,
+		request:          cfg.RequestPolicy,
+		approvalReviewer: cfg.ApprovalReviewer,
+		clock:            cfg.Clock,
+		active:           map[string]*turnHandle{},
+		bindings:         map[string]sessionBinding{},
 	}, nil
 }
 
@@ -578,19 +584,7 @@ func (g *Gateway) runTurn(
 		runReq.ContentParts = append([]sdkmodel.ContentPart(nil), req.ContentParts...)
 	}
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
-		wait := handle.publishApproval(&req)
-		select {
-		case decision := <-wait:
-			return sdkruntime.ApprovalResponse{
-				Outcome:  decision.Outcome,
-				OptionID: decision.OptionID,
-				Approved: decision.Approved,
-			}, nil
-		case <-approvalCtx.Done():
-			return sdkruntime.ApprovalResponse{}, approvalCtx.Err()
-		case <-ctx.Done():
-			return sdkruntime.ApprovalResponse{}, ctx.Err()
-		}
+		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, runReq.AgentSpec.Model)
 	})
 
 	result, err := g.runtime.Run(ctx, runReq)
@@ -649,19 +643,7 @@ func (g *Gateway) runParticipantTurn(
 		Stream:        true,
 	}
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
-		wait := handle.publishApproval(&req)
-		select {
-		case decision := <-wait:
-			return sdkruntime.ApprovalResponse{
-				Outcome:  decision.Outcome,
-				OptionID: decision.OptionID,
-				Approved: decision.Approved,
-			}, nil
-		case <-approvalCtx.Done():
-			return sdkruntime.ApprovalResponse{}, approvalCtx.Err()
-		case <-ctx.Done():
-			return sdkruntime.ApprovalResponse{}, ctx.Err()
-		}
+		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, nil)
 	})
 
 	result, err := g.control.PromptACPParticipant(ctx, runReq)
@@ -944,6 +926,175 @@ func (f approvalRequesterFunc) RequestApproval(ctx context.Context, req sdkrunti
 		ctx = context.Background()
 	}
 	return f(ctx, req)
+}
+
+func (g *Gateway) resolveApprovalRequest(
+	turnCtx context.Context,
+	approvalCtx context.Context,
+	handle *turnHandle,
+	req *sdkruntime.ApprovalRequest,
+	reviewModel sdkmodel.LLM,
+) (sdkruntime.ApprovalResponse, error) {
+	if g == nil || handle == nil || req == nil {
+		return sdkruntime.ApprovalResponse{}, nil
+	}
+	mode := g.currentApprovalMode(turnCtx, req.SessionRef)
+	if mode == ApprovalModeManual {
+		wait := handle.publishApproval(req)
+		select {
+		case decision := <-wait:
+			return sdkruntime.ApprovalResponse{
+				Outcome:    decision.Outcome,
+				OptionID:   decision.OptionID,
+				Approved:   decision.Approved,
+				Reason:     decision.Reason,
+				ReviewText: decision.ReviewText,
+			}, nil
+		case <-approvalCtx.Done():
+			return sdkruntime.ApprovalResponse{}, approvalCtx.Err()
+		case <-turnCtx.Done():
+			return sdkruntime.ApprovalResponse{}, turnCtx.Err()
+		}
+	}
+
+	payload := canonicalApprovalPayload(req)
+	if payload == nil {
+		payload = &ApprovalPayload{
+			ToolName: strings.TrimSpace(firstNonEmpty(req.Tool.Name, req.Call.Name)),
+			Status:   ApprovalStatusPending,
+		}
+	}
+	reviewID := handle.nextApprovalReviewID()
+	payload.ReviewID = reviewID
+	payload.ReviewStatus = ApprovalReviewStatusInProgress
+	payload.DecisionSource = string(ApprovalModeAutoReview)
+	handle.publishApprovalReviewPayload(req, payload)
+
+	reviewer := g.approvalReviewer
+	if reviewer == nil {
+		reviewer = denyingApprovalReviewer{}
+	}
+	if reviewModel == nil {
+		reviewModel, _ = g.approvalReviewModel(turnCtx, req.SessionRef)
+	}
+	result, err := reviewer.ReviewApproval(approvalCtx, ApprovalReviewRequest{
+		SessionRef:     req.SessionRef,
+		RunID:          req.RunID,
+		TurnID:         req.TurnID,
+		Mode:           mode,
+		ReviewID:       reviewID,
+		Model:          reviewModel,
+		Approval:       cloneApprovalPayload(payload),
+		RuntimeRequest: *req,
+	})
+	if err != nil {
+		rationale := "automatic approval review failed: " + err.Error()
+		result = ApprovalReviewResult{
+			Approved:       false,
+			Outcome:        string(ApprovalStatusRejected),
+			Risk:           "unknown",
+			Authorization:  "unknown",
+			Rationale:      rationale,
+			DisplayText:    FormatApprovalReviewText(false, "unknown", "unknown", rationale),
+			DecisionSource: string(ApprovalModeAutoReview),
+		}
+	}
+	if strings.TrimSpace(result.OptionID) == "" {
+		result.OptionID = approvalOptionIDForDecision(payload.Options, result.Approved)
+	}
+	if strings.TrimSpace(result.OptionID) != "" {
+		result.Outcome = string(ApprovalStatusSelected)
+	} else if strings.TrimSpace(result.Outcome) == "" {
+		if result.Approved {
+			result.Outcome = string(ApprovalStatusApproved)
+		} else {
+			result.Outcome = string(ApprovalStatusRejected)
+		}
+	}
+	if strings.TrimSpace(result.DisplayText) == "" {
+		result.DisplayText = FormatApprovalReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
+	}
+	if strings.TrimSpace(result.DecisionSource) == "" {
+		result.DecisionSource = string(ApprovalModeAutoReview)
+	}
+
+	terminal := cloneApprovalPayload(payload)
+	terminal.Status = ApprovalStatusRejected
+	if result.Approved {
+		terminal.Status = ApprovalStatusApproved
+	}
+	terminal.ReviewStatus = approvalReviewTerminalStatus(result)
+	terminal.ReviewText = strings.TrimSpace(result.DisplayText)
+	terminal.Risk = strings.TrimSpace(result.Risk)
+	terminal.Authorization = strings.TrimSpace(result.Authorization)
+	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
+	handle.publishApprovalReviewPayload(req, terminal)
+
+	if handle.recordApprovalReviewDecision(result.Approved) {
+		return sdkruntime.ApprovalResponse{}, fmt.Errorf("automatic approval review rejected too many approval requests for this turn")
+	}
+	return sdkruntime.ApprovalResponse{
+		Outcome:    result.Outcome,
+		OptionID:   result.OptionID,
+		Approved:   result.Approved,
+		Reason:     strings.TrimSpace(result.Rationale),
+		ReviewText: strings.TrimSpace(result.DisplayText),
+	}, nil
+}
+
+func approvalOptionIDForDecision(options []ApprovalOption, approved bool) string {
+	wantKind := "reject_once"
+	wantID := "reject_once"
+	if approved {
+		wantKind = "allow_once"
+		wantID = "allow_once"
+	}
+	for _, option := range options {
+		kind := strings.ToLower(strings.TrimSpace(option.Kind))
+		id := strings.TrimSpace(option.ID)
+		if id == "" {
+			continue
+		}
+		if kind == wantKind {
+			return id
+		}
+	}
+	for _, option := range options {
+		id := strings.TrimSpace(option.ID)
+		if id == "" {
+			continue
+		}
+		if strings.EqualFold(id, wantID) {
+			return id
+		}
+	}
+	return ""
+}
+
+type approvalModelResolver interface {
+	ResolveApprovalModel(context.Context, sdksession.SessionRef) (sdkmodel.LLM, error)
+}
+
+func (g *Gateway) approvalReviewModel(ctx context.Context, ref sdksession.SessionRef) (sdkmodel.LLM, error) {
+	if g == nil || g.resolver == nil {
+		return nil, fmt.Errorf("gateway: approval review model resolver is unavailable")
+	}
+	resolver, ok := g.resolver.(approvalModelResolver)
+	if !ok || resolver == nil {
+		return nil, fmt.Errorf("gateway: approval review model resolver is unsupported")
+	}
+	return resolver.ResolveApprovalModel(ctx, ref)
+}
+
+func (g *Gateway) currentApprovalMode(ctx context.Context, ref sdksession.SessionRef) ApprovalMode {
+	if g == nil || g.sessions == nil {
+		return ApprovalModeAutoReview
+	}
+	state, err := g.sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return ApprovalModeAutoReview
+	}
+	return CurrentApprovalMode(state)
 }
 
 func (g *Gateway) ActiveCounts() (int, int) {

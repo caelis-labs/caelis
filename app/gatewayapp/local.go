@@ -1710,9 +1710,10 @@ func (s *Stack) rebuildGateway() error {
 		return err
 	}
 	gw, err := appgateway.New(appgateway.Config{
-		Sessions: s.Sessions,
-		Runtime:  rt,
-		Resolver: resolver,
+		Sessions:         s.Sessions,
+		Runtime:          rt,
+		Resolver:         resolver,
+		ApprovalReviewer: newModelApprovalReviewer(s.Sessions),
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()
@@ -1907,33 +1908,29 @@ func buildAlias(provider string, modelName string) string {
 
 func normalizeSessionMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "", "auto", "default":
-		return "default", nil
-	case "plan":
-		return "plan", nil
-	case "full_control", "full_access":
-		return "full_access", nil
+	case "manual":
+		return "manual", nil
+	case "", "auto", "default", "auto-review", "auto_review", "autoreview", "plan", "full_control", "full_access":
+		return "auto-review", nil
 	default:
-		return "", fmt.Errorf("gatewayapp: unknown session mode %q", mode)
+		return "auto-review", nil
 	}
 }
 
 func normalizeSessionModeOrDefault(mode string) string {
 	normalized, err := normalizeSessionMode(mode)
 	if err != nil {
-		return "default"
+		return "auto-review"
 	}
 	return normalized
 }
 
 func nextSessionMode(mode string) string {
 	switch normalizeSessionModeOrDefault(mode) {
-	case "plan":
-		return "full_access"
-	case "full_access":
-		return "default"
+	case "manual":
+		return "auto-review"
 	default:
-		return "plan"
+		return "manual"
 	}
 }
 
@@ -2063,10 +2060,12 @@ func dedupeNonEmptyStrings(values []string) []string {
 }
 
 func policyMode(raw string) string {
-	if strings.EqualFold(strings.TrimSpace(raw), "full_control") || strings.EqualFold(strings.TrimSpace(raw), "full_access") {
-		return sdkpolicy.ModeFullAccess
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "manual":
+		return sdkpolicy.ModeManual
+	default:
+		return sdkpolicy.ModeAutoReview
 	}
-	return sdkpolicy.ModeDefault
 }
 
 func firstNonEmpty(values ...string) string {

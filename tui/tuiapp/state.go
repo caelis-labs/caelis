@@ -383,12 +383,13 @@ type Model struct {
 	runningTickerStyles   []lipgloss.Style
 	runningTickerThemeKey string
 
-	statusModel     string
-	statusContext   string
-	statusModeLabel string
-	hint            string
-	hintEntries     []hintEntry
-	nextHintID      uint64
+	statusModel        string
+	statusContext      string
+	statusModeLabel    string
+	approvalReviewHint string
+	hint               string
+	hintEntries        []hintEntry
+	nextHintID         uint64
 
 	pendingInputAt     time.Time
 	inputLatencyWindow []time.Duration

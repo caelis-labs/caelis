@@ -108,8 +108,9 @@ func New(cfg Config) (*Runtime, error) {
 		r.policies = reg
 	}
 	if r.defaultPolicyMode == "" {
-		r.defaultPolicyMode = policypresets.ModeDefault
+		r.defaultPolicyMode = policypresets.ModeAutoReview
 	}
+	r.defaultPolicyMode = normalizePolicyMode(r.defaultPolicyMode)
 	if err := validateControlPlaneConfig(cfg); err != nil {
 		return nil, err
 	}
@@ -291,9 +292,13 @@ func (r *Runtime) resolveAgent(
 	spec := r.applyAssemblySpec(state, req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName := r.policyMode(spec)
+	grants := newPermissionGrantStore()
 	spec.Tools = r.wrapToolsForRuntime(session, ref, spec, runtimeToolContext{
 		mode:              modeName,
 		approvalRequester: req.ApprovalRequester,
+		runID:             strings.TrimSpace(runID),
+		turnID:            strings.TrimSpace(turnID),
+		grants:            grants,
 	})
 	spec.Tools = r.wrapToolsForPolicy(session, ref, state, spec, approvalContext{
 		ctx:        ctx,
@@ -303,6 +308,7 @@ func (r *Runtime) resolveAgent(
 		sessionRef: sdksession.NormalizeSessionRef(ref),
 		runID:      strings.TrimSpace(runID),
 		turnID:     strings.TrimSpace(turnID),
+		grants:     grants,
 	})
 	return r.agentFactory.NewAgent(ctx, spec)
 }
@@ -741,10 +747,24 @@ func stringValue(value any) string {
 func (r *Runtime) policyMode(spec sdkruntime.AgentSpec) string {
 	if raw, ok := spec.Metadata["policy_mode"].(string); ok {
 		if mode := strings.TrimSpace(raw); mode != "" {
-			return mode
+			return normalizePolicyMode(mode)
 		}
 	}
-	return r.defaultPolicyMode
+	return normalizePolicyMode(r.defaultPolicyMode)
+}
+
+func normalizePolicyMode(mode string) string {
+	mode = strings.TrimSpace(mode)
+	switch strings.ToLower(mode) {
+	case "":
+		return policypresets.ModeAutoReview
+	case "manual":
+		return policypresets.ModeManual
+	case "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
+		return policypresets.ModeAutoReview
+	default:
+		return mode
+	}
 }
 
 func modeOptionsFromSession(session sdksession.Session, spec sdkruntime.AgentSpec) sdkpolicy.ModeOptions {

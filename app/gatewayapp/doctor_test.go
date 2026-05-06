@@ -43,7 +43,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	if err := stack.UseModel(ctx, session.SessionRef, alias); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if _, err := stack.SetSessionMode(ctx, session.SessionRef, "full_access"); err != nil {
+	if _, err := stack.SetSessionMode(ctx, session.SessionRef, "manual"); err != nil {
 		t.Fatalf("SetSessionMode() error = %v", err)
 	}
 
@@ -72,8 +72,11 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	if !report.MissingAPIKey {
 		t.Fatal("Doctor().MissingAPIKey = false, want true after token is redacted from persisted config")
 	}
-	if !report.FullAccessMode {
-		t.Fatal("Doctor().FullAccessMode = false, want true")
+	if report.SessionMode != "manual" {
+		t.Fatalf("Doctor().SessionMode = %q, want manual", report.SessionMode)
+	}
+	if report.FullAccessMode {
+		t.Fatal("Doctor().FullAccessMode = true, want false after mode simplification")
 	}
 
 	text := FormatDoctorText(report)

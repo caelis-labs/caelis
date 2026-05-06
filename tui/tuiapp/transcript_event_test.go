@@ -58,6 +58,47 @@ func TestProjectGatewayEventToTranscriptEvents_DoesNotPersistApproval(t *testing
 	}
 }
 
+func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApprovalReview(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:       appgateway.EventKindApprovalReview,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+		ApprovalPayload: &appgateway.ApprovalPayload{
+			ToolName:       "request_permissions",
+			RawInput:       map[string]any{"reason": "need access"},
+			ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
+			DecisionSource: "auto-review",
+			ReviewText:     "Automatic approval review approved (risk: low, authorization: high): required by task.",
+		},
+	})
+
+	if got := len(events); got != 1 {
+		t.Fatalf("len(events) = %d, want 1", got)
+	}
+	if events[0].Kind != TranscriptEventApproval || events[0].ApprovalStatus != string(appgateway.ApprovalReviewStatusApproved) {
+		t.Fatalf("events[0] = %#v, want approval review transcript event", events[0])
+	}
+	if !strings.Contains(events[0].ApprovalText, "Automatic approval review approved") {
+		t.Fatalf("ApprovalText = %q, want review text", events[0].ApprovalText)
+	}
+
+	pending := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
+		Kind:       appgateway.EventKindApprovalReview,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+		ApprovalPayload: &appgateway.ApprovalPayload{
+			ToolName:       "request_permissions",
+			ReviewStatus:   appgateway.ApprovalReviewStatusInProgress,
+			DecisionSource: "auto-review",
+		},
+	})
+	if len(pending) != 0 {
+		t.Fatalf("pending approval review events = %#v, want no transcript events", pending)
+	}
+}
+
 func TestProjectGatewayEventToTranscriptEvents_SuppressesParticipantUserEcho(t *testing.T) {
 	t.Parallel()
 
@@ -825,7 +866,7 @@ func snapshotSubagentEvent(ev SubagentEvent) string {
 		}
 		return "plan:" + strings.Join(parts, ",")
 	case SEApproval:
-		return "approval:" + strings.TrimSpace(ev.ApprovalTool) + "|" + strings.TrimSpace(ev.ApprovalCommand)
+		return "approval:" + strings.TrimSpace(ev.ApprovalTool) + "|" + strings.TrimSpace(ev.ApprovalCommand) + "|" + strings.TrimSpace(ev.ApprovalStatus) + "|" + strings.TrimSpace(ev.ApprovalText)
 	default:
 		return "unknown"
 	}

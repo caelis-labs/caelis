@@ -188,6 +188,99 @@ func TestFactoryMetadataSystemPromptOverridesFactoryDefault(t *testing.T) {
 	}
 }
 
+func TestFactoryPassesOutputSpecToModelRequest(t *testing.T) {
+	t.Parallel()
+
+	model := &recordingModel{}
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"outcome": map[string]any{"type": "string"},
+		},
+		"required": []any{"outcome"},
+	}
+	agent, err := (Factory{SystemPrompt: "Return JSON."}).NewAgent(context.Background(), sdkruntime.AgentSpec{
+		Name:  "chat",
+		Model: model,
+		Request: sdkruntime.ModelRequestOptions{
+			Output: &sdkmodel.OutputSpec{
+				Mode:            sdkmodel.OutputModeSchema,
+				JSONSchema:      schema,
+				MaxOutputTokens: 128,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewAgent() error = %v", err)
+	}
+	schema["properties"].(map[string]any)["outcome"] = map[string]any{"type": "integer"}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-output"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")),
+			Text:    "hello",
+		}},
+	})
+
+	for _, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+
+	if model.last.Output == nil {
+		t.Fatal("model request Output = nil, want schema")
+	}
+	if model.last.Output.Mode != sdkmodel.OutputModeSchema {
+		t.Fatalf("Output.Mode = %q, want schema", model.last.Output.Mode)
+	}
+	if model.last.Output.MaxOutputTokens != 128 {
+		t.Fatalf("Output.MaxOutputTokens = %d, want 128", model.last.Output.MaxOutputTokens)
+	}
+	properties, _ := model.last.Output.JSONSchema["properties"].(map[string]any)
+	outcome, _ := properties["outcome"].(map[string]any)
+	if got := outcome["type"]; got != "string" {
+		t.Fatalf("schema properties.outcome.type = %v, want string", got)
+	}
+	if got := len(model.last.Tools); got != 0 {
+		t.Fatalf("len(Tools) = %d, want 0", got)
+	}
+}
+
+func TestModelRequestOptionsOutputSpecReturnsClone(t *testing.T) {
+	t.Parallel()
+
+	options := sdkruntime.ModelRequestOptions{
+		Output: &sdkmodel.OutputSpec{
+			Mode: sdkmodel.OutputModeSchema,
+			JSONSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"ok": map[string]any{"type": "boolean"},
+				},
+			},
+		},
+	}
+	first := options.OutputSpec()
+	first.JSONSchema["type"] = "array"
+	first.JSONSchema["properties"].(map[string]any)["ok"].(map[string]any)["type"] = "string"
+
+	second := options.OutputSpec()
+	if got := second.JSONSchema["type"]; got != "object" {
+		t.Fatalf("schema type = %v, want object", got)
+	}
+	properties, _ := second.JSONSchema["properties"].(map[string]any)
+	okSchema, _ := properties["ok"].(map[string]any)
+	if got := okSchema["type"]; got != "boolean" {
+		t.Fatalf("nested schema type = %v, want boolean", got)
+	}
+}
+
 func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	t.Parallel()
 
@@ -813,6 +906,7 @@ func (m *recordingModel) Generate(_ context.Context, req *sdkmodel.Request) iter
 		m.last = *req
 		m.last.Messages = sdkmodel.CloneMessages(req.Messages)
 		m.last.Instructions = sdkmodel.CloneParts(req.Instructions)
+		m.last.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
 	}
 	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
 		yield(&sdkmodel.StreamEvent{

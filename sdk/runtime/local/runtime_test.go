@@ -18,6 +18,7 @@ import (
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
+	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy"
 	policypresets "github.com/OnslaughtSnail/caelis/sdk/policy/presets"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	"github.com/OnslaughtSnail/caelis/sdk/runtime/agents/chat"
@@ -2808,6 +2809,115 @@ func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
 	}
 	if got := eventToolRawOutput(toolResult)["policy_action"]; got != "deny" {
 		t.Fatalf("policy_action = %v, want %q", got, "deny")
+	}
+}
+
+func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
+	t.Parallel()
+
+	sessions, session := newTestSessionService(t, "sess-policy-custom-mode")
+	_ = sessions
+	var sawMode string
+	registry, err := sdkpolicy.NewMemory(sdkpolicy.NamedMode{
+		ID: "locked-down",
+		Decide: func(_ context.Context, input sdkpolicy.ToolContext) (sdkpolicy.Decision, error) {
+			sawMode = input.Mode
+			return sdkpolicy.Decision{Action: sdkpolicy.ActionDeny, Reason: "custom denied"}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("sdkpolicy.NewMemory() error = %v", err)
+	}
+	runtime := &Runtime{
+		policies:          registry,
+		defaultPolicyMode: "locked-down",
+	}
+	tool := sdktool.NamedTool{
+		Def: sdktool.Definition{Name: "ECHO"},
+		Invoke: func(context.Context, sdktool.Call) (sdktool.Result, error) {
+			t.Fatal("custom policy should deny before invoking the tool")
+			return sdktool.Result{}, nil
+		},
+	}
+	wrapped := runtime.wrapToolsForPolicy(session, session.SessionRef, nil, sdkruntime.AgentSpec{
+		Tools: []sdktool.Tool{tool},
+	}, approvalContext{
+		ctx:        context.Background(),
+		session:    session,
+		sessionRef: session.SessionRef,
+	})
+	if got := len(wrapped); got != 1 {
+		t.Fatalf("len(wrapped) = %d, want 1", got)
+	}
+	result, err := wrapped[0].Call(context.Background(), sdktool.Call{ID: "call-1", Name: "ECHO"})
+	if err != nil {
+		t.Fatalf("wrapped tool Call() error = %v", err)
+	}
+	if sawMode != "locked-down" {
+		t.Fatalf("policy mode seen by custom mode = %q, want locked-down", sawMode)
+	}
+	if got := result.Meta["policy_mode"]; got != "locked-down" {
+		t.Fatalf("result policy_mode = %v, want locked-down", got)
+	}
+}
+
+func TestNormalizePolicyModeCollapsesLegacyAliasesButPreservesCustomNames(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"":            "auto-review",
+		"default":     "auto-review",
+		"plan":        "auto-review",
+		"full_access": "auto-review",
+		"auto_review": "auto-review",
+		"manual":      "manual",
+		"locked-down": "locked-down",
+		"TeamStrict":  "TeamStrict",
+	}
+	for input, want := range tests {
+		if got := normalizePolicyMode(input); got != want {
+			t.Fatalf("normalizePolicyMode(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestRuntimeReservesRequestPermissionsToolName(t *testing.T) {
+	t.Parallel()
+
+	_, session := newTestSessionService(t, "sess-request-permissions-reserved")
+	customCalled := false
+	custom := sdktool.NamedTool{
+		Def: sdktool.Definition{Name: "request_permissions"},
+		Invoke: func(context.Context, sdktool.Call) (sdktool.Result, error) {
+			customCalled = true
+			return sdktool.Result{Meta: map[string]any{"custom": true}}, nil
+		},
+	}
+	runtime := &Runtime{}
+	wrapped := runtime.wrapToolsForRuntime(session, session.SessionRef, sdkruntime.AgentSpec{
+		Tools: []sdktool.Tool{custom},
+	}, runtimeToolContext{
+		grants: newPermissionGrantStore(),
+	})
+	if got := len(wrapped); got != 1 {
+		t.Fatalf("len(wrapped) = %d, want 1", got)
+	}
+	if _, ok := wrapped[0].(requestPermissionsTool); !ok {
+		t.Fatalf("wrapped request_permissions tool = %T, want built-in requestPermissionsTool", wrapped[0])
+	}
+	raw := []byte(`{"reason":"need network","permissions":{"network":{"enabled":true}}}`)
+	result, err := wrapped[0].Call(context.Background(), sdktool.Call{ID: "perm-1", Name: "request_permissions", Input: raw})
+	if err != nil {
+		t.Fatalf("request_permissions Call() error = %v", err)
+	}
+	if customCalled {
+		t.Fatal("colliding custom request_permissions tool was invoked")
+	}
+	if !result.IsError {
+		t.Fatalf("request_permissions result IsError = false, want true without approval requester")
+	}
+	if !strings.Contains(fmt.Sprint(result.Meta["error"]), "no approval requester") {
+		t.Fatalf("request_permissions error = %v, want built-in approval requester error", result.Meta["error"])
 	}
 }
 

@@ -570,6 +570,20 @@ func canonicalApprovalPayload(req *sdkruntime.ApprovalRequest) *ApprovalPayload 
 	return payload
 }
 
+func cloneApprovalPayload(in *ApprovalPayload) *ApprovalPayload {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	out.RawInput = maps.Clone(in.RawInput)
+	out.PrefixRule = append([]string(nil), in.PrefixRule...)
+	out.AdditionalPermissions = maps.Clone(in.AdditionalPermissions)
+	if len(in.Options) > 0 {
+		out.Options = append([]ApprovalOption(nil), in.Options...)
+	}
+	return &out
+}
+
 func approvalRawString(raw map[string]any, key string) string {
 	if len(raw) == 0 {
 		return ""

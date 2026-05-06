@@ -102,7 +102,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 		{
 			name: "set session mode",
 			run: func() error {
-				_, err := stack.SetSessionMode(ctx, session.SessionRef, "plan")
+				_, err := stack.SetSessionMode(ctx, session.SessionRef, "manual")
 				return err
 			},
 			want: func(t *testing.T) {
@@ -111,8 +111,8 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 				if err != nil {
 					t.Fatalf("SessionRuntimeState() error = %v", err)
 				}
-				if state.SessionMode != "default" {
-					t.Fatalf("SessionMode = %q, want unchanged default", state.SessionMode)
+				if state.SessionMode != "auto-review" {
+					t.Fatalf("SessionMode = %q, want unchanged auto-review", state.SessionMode)
 				}
 			},
 		},

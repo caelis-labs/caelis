@@ -103,7 +103,8 @@ type AgentSpec struct {
 // ModelRequestOptions controls per-turn model request behavior independent of
 // provider implementation.
 type ModelRequestOptions struct {
-	Stream *bool `json:"stream,omitempty"`
+	Stream *bool                `json:"stream,omitempty"`
+	Output *sdkmodel.OutputSpec `json:"output,omitempty"`
 }
 
 func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelRequestOptions {
@@ -111,6 +112,9 @@ func (o ModelRequestOptions) WithDefaults(defaults ModelRequestOptions) ModelReq
 	if o.Stream != nil {
 		value := *o.Stream
 		out.Stream = &value
+	}
+	if o.Output != nil {
+		out.Output = cloneOutputSpec(o.Output)
 	}
 	return out
 }
@@ -120,6 +124,49 @@ func (o ModelRequestOptions) StreamEnabled(defaultValue bool) bool {
 		return defaultValue
 	}
 	return *o.Stream
+}
+
+func (o ModelRequestOptions) OutputSpec() *sdkmodel.OutputSpec {
+	return cloneOutputSpec(o.Output)
+}
+
+func cloneOutputSpec(in *sdkmodel.OutputSpec) *sdkmodel.OutputSpec {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	if in.JSONSchema != nil {
+		out.JSONSchema = cloneOutputJSONMap(in.JSONSchema)
+	}
+	return &out
+}
+
+func cloneOutputJSONMap(in map[string]any) map[string]any {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]any, len(in))
+	for key, value := range in {
+		out[key] = cloneOutputJSONValue(value)
+	}
+	return out
+}
+
+func cloneOutputJSONValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneOutputJSONMap(typed)
+	case []any:
+		out := make([]any, len(typed))
+		for i, item := range typed {
+			out[i] = cloneOutputJSONValue(item)
+		}
+		return out
+	case []string:
+		return append([]string(nil), typed...)
+	default:
+		return typed
+	}
 }
 
 type SubagentRunRequest = sdkdelegation.Request

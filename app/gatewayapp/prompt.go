@@ -147,8 +147,9 @@ func builtInCapabilityGuidancePrompt(agents []sdkdelegation.Agent) string {
 		"## Capability Guidance",
 		"",
 		"- Tool families: use READ/SEARCH/GLOB/LIST to inspect, WRITE/PATCH for targeted file changes, BASH for shell work, and TASK for async follow-up.",
+		"- Permissions: use request_permissions to request a narrow read/write directory or network grant before retrying file tools that need access outside the current workspace policy.",
 		"- Skills: load a skill only when its description clearly matches the current task; read the minimum needed from its `SKILL.md`.",
-		"- Modes: obey active session mode rules and avoid leaking planning-only behavior into execution turns.",
+		"- Modes: obey active approval mode rules; auto-review denials return a concrete reason without requiring user interaction.",
 	}
 	if len(agents) > 0 {
 		lines = append(lines,
@@ -165,7 +166,7 @@ func builtInPermissionBoundariesPrompt() string {
 		"- Use default BASH permissions first for read-only commands and workspace-local builds or tests.",
 		"- For extra sandboxed access, set `sandbox_permissions` to `with_additional_permissions` and include only the needed `additional_permissions.network.enabled`, `additional_permissions.file_system.read`, or `additional_permissions.file_system.write` entries.",
 		"- For host execution, set `sandbox_permissions` to `require_escalated` with a short `justification`; add `prefix_rule` only for a narrow reusable non-destructive command prefix.",
-		"- If policy denies a command, retry with a smaller scope or request the missing permission explicitly.",
+		"- If policy denies a command or file tool, retry with a smaller scope or request the missing permission explicitly with request_permissions.",
 	}, "\n")
 }
 

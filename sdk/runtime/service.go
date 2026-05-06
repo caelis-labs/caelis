@@ -33,9 +33,11 @@ type ApprovalRequest struct {
 
 // ApprovalResponse is one resolved approval outcome.
 type ApprovalResponse struct {
-	Outcome  string `json:"outcome,omitempty"`
-	OptionID string `json:"option_id,omitempty"`
-	Approved bool   `json:"approved,omitempty"`
+	Outcome    string `json:"outcome,omitempty"`
+	OptionID   string `json:"option_id,omitempty"`
+	Approved   bool   `json:"approved,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	ReviewText string `json:"review_text,omitempty"`
 }
 
 // ApprovalRequester bridges runtime approval decisions to an interactive client

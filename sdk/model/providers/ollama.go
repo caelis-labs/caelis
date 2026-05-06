@@ -34,6 +34,7 @@ type ollamaChatRequest struct {
 	Messages []ollamaChatMessage  `json:"messages"`
 	Tools    []openAICompatTool   `json:"tools,omitempty"`
 	Stream   bool                 `json:"stream"`
+	Format   any                  `json:"format,omitempty"`
 	Think    *bool                `json:"think,omitempty"`
 	Options  *ollamaRequestOption `json:"options,omitempty"`
 }
@@ -116,6 +117,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		if l.maxOutputTok > 0 {
 			payload.Options = &ollamaRequestOption{NumPredict: l.maxOutputTok}
 		}
+		applyOllamaOutput(&payload, req.Output)
 		raw, err := json.Marshal(payload)
 		if err != nil {
 			yield(nil, err)
@@ -307,6 +309,32 @@ func ollamaThinkValue(cfg model.ReasoningConfig) *bool {
 	}
 	value := effort != "none"
 	return &value
+}
+
+func applyOllamaOutput(payload *ollamaChatRequest, output *model.OutputSpec) {
+	if payload == nil || output == nil {
+		return
+	}
+	if output.MaxOutputTokens > 0 {
+		if payload.Options == nil {
+			payload.Options = &ollamaRequestOption{}
+		}
+		payload.Options.NumPredict = output.MaxOutputTokens
+	}
+	switch output.Mode {
+	case model.OutputModeJSON:
+		payload.Format = "json"
+	case model.OutputModeSchema:
+		if len(output.JSONSchema) > 0 {
+			payload.Format = cloneAnyMap(output.JSONSchema)
+		} else {
+			payload.Format = "json"
+		}
+	}
+	if payload.Format != nil && payload.Think == nil {
+		think := false
+		payload.Think = &think
+	}
 }
 
 func ollamaUsage(resp ollamaChatResponse) model.Usage {

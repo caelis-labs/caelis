@@ -57,8 +57,8 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 		bindingKey:          key,
 		defaultModelText:    strings.TrimSpace(modelText),
 		modelText:           strings.TrimSpace(modelText),
-		defaultSessionMode:  "default",
-		sessionMode:         "default",
+		defaultSessionMode:  "auto-review",
+		sessionMode:         "auto-review",
 		defaultSandboxType:  firstNonEmpty(stack.SandboxStatus().ResolvedBackend, stack.SandboxStatus().RequestedBackend, "auto"),
 		sandboxType:         firstNonEmpty(stack.SandboxStatus().ResolvedBackend, stack.SandboxStatus().RequestedBackend, "auto"),
 		streamSubscriptions: map[string]struct{}{},
@@ -331,10 +331,6 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	sandboxType = firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, sandboxType)
 	route := sandboxStatus.Route
 	securitySummary := sandboxStatus.SecuritySummary
-	if !activeACP && strings.EqualFold(strings.TrimSpace(sessionMode), "full_access") {
-		route = "host"
-		securitySummary = "full access"
-	}
 	d.mu.Lock()
 	sessionID := ""
 	if ok {
@@ -361,7 +357,7 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		FallbackReason:          sandboxStatus.FallbackReason,
 		SecuritySummary:         securitySummary,
 		HostExecution:           strings.EqualFold(strings.TrimSpace(route), "host"),
-		FullAccessMode:          strings.EqualFold(strings.TrimSpace(sessionMode), "full_access"),
+		FullAccessMode:          false,
 		Surface:                 bindingKey,
 	}
 	if d.stack != nil {
@@ -421,12 +417,16 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
 		status.Model = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
 		status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-		status.SessionMode = acpModeID
-		status.ModeLabel = firstNonEmpty(acpModeLabel, acpModeID)
+		if strings.TrimSpace(status.SessionMode) == "" {
+			status.SessionMode = acpModeID
+		}
+		if strings.TrimSpace(status.ModeLabel) == "" {
+			status.ModeLabel = firstNonEmpty(acpModeLabel, acpModeID)
+		}
 		status.Provider = "acp"
 		status.ModelName = strings.TrimSpace(acpStatus.Model)
 		status.MissingAPIKey = false
-		status.FullAccessMode = strings.EqualFold(acpModeID, "full_access")
+		status.FullAccessMode = false
 		status.PromptTokens = 0
 		status.CompletionTokens = 0
 		status.TotalTokens = 0
@@ -815,22 +815,6 @@ func (d *GatewayDriver) CycleSessionMode(ctx context.Context) (StatusSnapshot, e
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	if acpStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
-		return StatusSnapshot{}, err
-	} else if activeACP {
-		next, err := nextACPControllerMode(acpStatus)
-		if err != nil {
-			return StatusSnapshot{}, err
-		}
-		status, err := d.stack.SetACPControllerMode(ctx, session.SessionRef, next.ID)
-		if err != nil {
-			return StatusSnapshot{}, err
-		}
-		d.mu.Lock()
-		d.sessionMode = strings.TrimSpace(firstNonEmpty(status.Mode, next.ID))
-		d.mu.Unlock()
-		return d.Status(ctx)
-	}
 	normalized, err := d.stack.CycleSessionMode(ctx, session.SessionRef)
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -857,18 +841,6 @@ func (d *GatewayDriver) SetSandboxMode(ctx context.Context, mode string) (Status
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
-	if _, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
-		return StatusSnapshot{}, err
-	} else if activeACP {
-		status, err := d.stack.SetACPControllerMode(ctx, session.SessionRef, strings.TrimSpace(mode))
-		if err != nil {
-			return StatusSnapshot{}, err
-		}
-		d.mu.Lock()
-		d.sessionMode = strings.TrimSpace(status.Mode)
-		d.mu.Unlock()
-		return d.Status(ctx)
-	}
 	normalized, err := d.stack.SetSessionMode(ctx, session.SessionRef, mode)
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -876,7 +848,13 @@ func (d *GatewayDriver) SetSandboxMode(ctx context.Context, mode string) (Status
 	d.mu.Lock()
 	d.sessionMode = normalized
 	d.mu.Unlock()
-	return d.Status(ctx)
+	status, err := d.Status(ctx)
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
+	status.SessionMode = normalized
+	status.ModeLabel = normalized
+	return status, nil
 }
 
 func (d *GatewayDriver) ListAgents(ctx context.Context, limit int) ([]AgentCandidate, error) {
@@ -1994,6 +1972,11 @@ func defaultSlashArgCandidates(command string) []SlashArgCandidate {
 		}
 	case "sandbox":
 		return sandboxCandidates()
+	case "approval":
+		return []SlashArgCandidate{
+			{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
+			{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
+		}
 	case "model":
 		return []SlashArgCandidate{
 			{Value: "use", Display: "use", Detail: "Switch current model alias"},

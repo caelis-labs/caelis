@@ -37,6 +37,7 @@ type openRouterRequest struct {
 	Stream          bool                       `json:"stream"`
 	StreamOptions   *openAICompatStreamOptions `json:"stream_options,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
+	ResponseFormat  *openAIResponseFormat      `json:"response_format,omitempty"`
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 	Reasoning       *openAIReasoning           `json:"reasoning,omitempty"`
 	Transforms      []string                   `json:"transforms,omitempty"`
@@ -87,6 +88,32 @@ type openRouterStreamAccumulator struct {
 	toolCalls map[int]*openAICompatToolCall
 }
 
+func applyOpenRouterOutput(payload *openRouterRequest, output *model.OutputSpec, strategy openAICompatStructuredOutput) {
+	if payload == nil || output == nil {
+		return
+	}
+	if output.MaxOutputTokens > 0 {
+		payload.MaxTokens = output.MaxOutputTokens
+	}
+	switch output.Mode {
+	case model.OutputModeJSON:
+		payload.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+	case model.OutputModeSchema:
+		if strategy == openAICompatStructuredOutputJSONOutput {
+			payload.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+		} else if len(output.JSONSchema) > 0 {
+			payload.ResponseFormat = &openAIResponseFormat{
+				Type: "json_schema",
+				JSONSchema: &openAIJSONSchemaFormat{
+					Name:   "caelis_output",
+					Strict: openAICompatStrictSchema(output.JSONSchema),
+					Schema: cloneAnyMap(output.JSONSchema),
+				},
+			}
+		}
+	}
+}
+
 func newOpenRouter(cfg Config, token string) model.LLM {
 	return &openRouterLLM{
 		name:                cfg.Model,
@@ -133,6 +160,7 @@ func (l *openRouterLLM) Generate(ctx context.Context, req *model.Request) iter.S
 			Provider:   cloneAnyMap(l.config.Provider),
 			Plugins:    cloneMapSlice(l.config.Plugins),
 		}
+		applyOpenRouterOutput(&payload, req.Output, l.options.StructuredOutput)
 		if req.Stream {
 			payload.StreamOptions = &openAICompatStreamOptions{IncludeUsage: true}
 		}

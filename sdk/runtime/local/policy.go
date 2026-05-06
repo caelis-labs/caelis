@@ -25,6 +25,7 @@ type approvalContext struct {
 	sessionRef sdksession.SessionRef
 	runID      string
 	turnID     string
+	grants     *permissionGrantStore
 }
 
 type policyWrappedTool struct {
@@ -36,6 +37,7 @@ type policyWrappedTool struct {
 	options    sdkpolicy.ModeOptions
 	tool       sdktool.Tool
 	approval   approvalContext
+	grants     *permissionGrantStore
 }
 
 func (r *Runtime) wrapToolsForPolicy(
@@ -68,6 +70,7 @@ func (r *Runtime) wrapToolsForPolicy(
 			options:    sdkpolicy.CloneModeOptions(options),
 			tool:       one,
 			approval:   approval,
+			grants:     approval.grants,
 		})
 	}
 	return out
@@ -78,6 +81,7 @@ func (t policyWrappedTool) Definition() sdktool.Definition {
 }
 
 func (t policyWrappedTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result, error) {
+	options := t.effectiveOptions()
 	input := sdkpolicy.ToolContext{
 		Session: t.session,
 		State:   sdksession.CloneState(t.state),
@@ -85,12 +89,13 @@ func (t policyWrappedTool) Call(ctx context.Context, call sdktool.Call) (sdktool
 		Call:    sdktool.CloneCall(call),
 		Sandbox: t.describeSandbox(),
 		Mode:    t.mode,
-		Options: sdkpolicy.CloneModeOptions(t.options),
+		Options: options,
 	}
 	decision, err := t.policy.DecideTool(ctx, input)
 	if err != nil {
 		return sdktool.Result{}, err
 	}
+	decision.Constraints = t.applyGrantConstraints(decision.Constraints)
 	switch decision.Action {
 	case sdkpolicy.ActionAllow, "":
 		call = sdktool.CloneCall(call)
@@ -101,6 +106,20 @@ func (t policyWrappedTool) Call(ctx context.Context, call sdktool.Call) (sdktool
 	default:
 		return policyDecisionResult(call, t.tool.Definition(), t.mode, decision), nil
 	}
+}
+
+func (t policyWrappedTool) effectiveOptions() sdkpolicy.ModeOptions {
+	if t.grants == nil {
+		return sdkpolicy.CloneModeOptions(t.options)
+	}
+	return t.grants.applyToOptions(t.options)
+}
+
+func (t policyWrappedTool) applyGrantConstraints(constraints sdksandbox.Constraints) sdksandbox.Constraints {
+	if t.grants == nil {
+		return constraints
+	}
+	return t.grants.applyToConstraints(constraints)
 }
 
 func (t policyWrappedTool) requestApproval(
@@ -181,8 +200,9 @@ func policyDecisionResultWithOutcome(
 	outcome sdkruntime.ApprovalResponse,
 ) sdktool.Result {
 	approval := decision.Action == sdkpolicy.ActionAskApproval
+	errorText := strings.TrimSpace(firstNonEmpty(outcome.Reason, outcome.ReviewText, decision.Reason, "tool denied by policy"))
 	payload := map[string]any{
-		"error":         strings.TrimSpace(firstNonEmpty(decision.Reason, "tool denied by policy")),
+		"error":         errorText,
 		"policy_mode":   strings.TrimSpace(mode),
 		"policy_action": string(decision.Action),
 		"tool_name":     strings.TrimSpace(def.Name),
@@ -199,7 +219,6 @@ func policyDecisionResultWithOutcome(
 			},
 		}
 	}
-	raw, _ := json.Marshal(payload)
 	meta := map[string]any{
 		"error":         payload["error"],
 		"policy_mode":   payload["policy_mode"],
@@ -213,7 +232,16 @@ func policyDecisionResultWithOutcome(
 		if strings.TrimSpace(outcome.OptionID) != "" {
 			meta["approval_option_id"] = strings.TrimSpace(outcome.OptionID)
 		}
+		if strings.TrimSpace(outcome.Reason) != "" {
+			payload["approval_reason"] = strings.TrimSpace(outcome.Reason)
+			meta["approval_reason"] = strings.TrimSpace(outcome.Reason)
+		}
+		if strings.TrimSpace(outcome.ReviewText) != "" {
+			payload["approval_review_text"] = strings.TrimSpace(outcome.ReviewText)
+			meta["approval_review_text"] = strings.TrimSpace(outcome.ReviewText)
+		}
 	}
+	raw, _ := json.Marshal(payload)
 	return sdktool.Result{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(def.Name),

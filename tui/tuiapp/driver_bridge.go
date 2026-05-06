@@ -403,8 +403,10 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuiadapterruntime.Driv
 			}
 			send(env)
 			startTerminalStreamForwarder(ctx, driver, env, sender)
-			if env.Event.Kind == appgateway.EventKindApprovalRequested {
-				sendApprovalPrompt(ctx, turn, env.Event.ApprovalPayload, send)
+			if isApprovalGatewayEvent(env.Event.Kind) {
+				if !isAutomaticApprovalEvent(env.Event.ApprovalPayload) {
+					sendApprovalPrompt(ctx, turn, env.Event.ApprovalPayload, send)
+				}
 			}
 		}
 	}
@@ -722,6 +724,8 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuiadapterrunti
 		return slashConnectWithContext(ctx, driver, send, args)
 	case "model":
 		return slashModelWithContext(ctx, driver, send, args)
+	case "approval":
+		return slashApprovalWithContext(ctx, driver, send, args)
 	case "sandbox":
 		return slashSandboxWithContext(ctx, driver, send, args)
 	case "compact":
@@ -750,7 +754,7 @@ func activeACPAgentStatus(ctx context.Context, driver tuiadapterruntime.Driver) 
 
 func isCoreLocalSlashCommand(cmd string) bool {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
-	case "help", "agent", "status", "resume", "model", "exit", "quit":
+	case "help", "agent", "status", "resume", "model", "approval", "exit", "quit":
 		return true
 	default:
 		return false
@@ -1288,7 +1292,7 @@ func slashSandboxWithContext(ctx context.Context, driver tuiadapterruntime.Drive
 		lines := []string{
 			fmt.Sprintf("sandbox requested: %s", firstNonEmpty(strings.TrimSpace(status.SandboxRequestedBackend), "-")),
 			fmt.Sprintf("sandbox resolved: %s", firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), firstNonEmpty(strings.TrimSpace(status.SandboxType), "-"))),
-			fmt.Sprintf("session mode: %s", firstNonEmpty(strings.TrimSpace(status.SessionMode), "default")),
+			fmt.Sprintf("session mode: %s", firstNonEmpty(strings.TrimSpace(status.SessionMode), "auto-review")),
 			fmt.Sprintf("route: %s", firstNonEmpty(strings.TrimSpace(status.Route), "-")),
 		}
 		if status.FallbackReason != "" {
@@ -1304,11 +1308,33 @@ func slashSandboxWithContext(ctx context.Context, driver tuiadapterruntime.Drive
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("sandbox", err)}
 	}
-	if strings.EqualFold(strings.TrimSpace(status.SessionMode), "full_access") {
-		sendNotice(send, fmt.Sprintf("sandbox backend updated: %s (will apply in default/plan mode)", status.SandboxType))
-	} else {
-		sendNotice(send, fmt.Sprintf("sandbox backend: %s", status.SandboxType))
+	sendNotice(send, fmt.Sprintf("sandbox backend: %s", status.SandboxType))
+	sendStatusUpdate(send, status)
+	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func slashApprovalWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+	ctx = contextOrBackground(ctx)
+	mode := strings.TrimSpace(args)
+	if mode == "" {
+		status, err := driver.Status(ctx)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("approval", err)}
+		}
+		sendNotice(send, fmt.Sprintf("approval mode: %s", firstNonEmpty(strings.TrimSpace(status.SessionMode), "auto-review")))
+		return TaskResultMsg{SuppressTurnDivider: true}
 	}
+	switch strings.ToLower(mode) {
+	case "auto-review", "auto_review", "autoreview", "manual":
+	default:
+		sendNotice(send, "usage: /approval [auto-review|manual]")
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	status, err := driver.SetSandboxMode(ctx, mode)
+	if err != nil {
+		return TaskResultMsg{Err: friendlyCommandError("approval", err)}
+	}
+	sendNotice(send, modeToggleHint(status))
 	sendStatusUpdate(send, status)
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
@@ -1500,6 +1526,34 @@ func sendApprovalPrompt(ctx context.Context, turn tuiadapterruntime.Turn, req *a
 	go awaitApprovalPrompt(ctx, turn, req, responses, send)
 }
 
+func isAutomaticApprovalEvent(req *appgateway.ApprovalPayload) bool {
+	if req == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(req.DecisionSource), "auto-review") ||
+		strings.TrimSpace(string(req.ReviewStatus)) != "" ||
+		strings.TrimSpace(req.ReviewID) != ""
+}
+
+func isApprovalGatewayEvent(kind appgateway.EventKind) bool {
+	return kind == appgateway.EventKindApprovalRequested || kind == appgateway.EventKindApprovalReview
+}
+
+func automaticApprovalReviewDisplayText(req *appgateway.ApprovalPayload) string {
+	if req == nil {
+		return ""
+	}
+	switch req.ReviewStatus {
+	case appgateway.ApprovalReviewStatusApproved, appgateway.ApprovalReviewStatusDenied, appgateway.ApprovalReviewStatusTimedOut, appgateway.ApprovalReviewStatusFailed:
+		return "⚠ " + firstNonEmpty(strings.TrimSpace(req.ReviewText), "Automatic approval review "+strings.TrimSpace(string(req.ReviewStatus)))
+	default:
+		if text := strings.TrimSpace(req.ReviewText); text != "" {
+			return "⚠ " + text
+		}
+		return ""
+	}
+}
+
 func awaitApprovalPrompt(ctx context.Context, turn tuiadapterruntime.Turn, req *appgateway.ApprovalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	var response PromptResponse
@@ -1669,7 +1723,7 @@ func formatStatusSnapshot(status tuiadapterruntime.StatusSnapshot) string {
 	lines = append(lines, fmt.Sprintf("  Session    %s", firstNonEmpty(strings.TrimSpace(status.SessionID), "-")))
 	lines = append(lines, fmt.Sprintf("  Provider   %s", provider))
 	lines = append(lines, fmt.Sprintf("  Model      %s", model))
-	lines = append(lines, fmt.Sprintf("  Mode       %s", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "default")))
+	lines = append(lines, fmt.Sprintf("  Mode       %s", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "auto-review")))
 	lines = append(lines, fmt.Sprintf("  Sandbox    %s", sandbox))
 	lines = append(lines, fmt.Sprintf("  Workspace  %s", firstNonEmpty(strings.TrimSpace(status.Workspace), "-")))
 	lines = append(lines, fmt.Sprintf("  Store      %s", firstNonEmpty(strings.TrimSpace(status.StoreDir), "-")))
@@ -1865,17 +1919,15 @@ func deriveModelNameFromAlias(alias string) string {
 }
 
 func modeToggleHint(status tuiadapterruntime.StatusSnapshot) string {
-	label := firstNonEmpty(strings.TrimSpace(status.ModeLabel), strings.TrimSpace(status.SessionMode), "default")
+	label := firstNonEmpty(strings.TrimSpace(status.ModeLabel), strings.TrimSpace(status.SessionMode), "auto-review")
 	switch strings.ToLower(strings.TrimSpace(status.SessionMode)) {
-	case "plan":
-		return "plan mode enabled"
-	case "full_access":
-		return "full access mode enabled"
-	case "default":
-		return "default mode enabled"
+	case "manual":
+		return "manual approval mode enabled"
+	case "auto-review", "default", "plan", "full_access":
+		return "auto-review approval mode enabled"
 	default:
-		if strings.EqualFold(label, "default") {
-			return "default mode enabled"
+		if strings.EqualFold(label, "default") || strings.EqualFold(label, "plan") || strings.EqualFold(label, "full_access") {
+			return "auto-review approval mode enabled"
 		}
 		return label + " mode enabled"
 	}

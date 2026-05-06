@@ -11,6 +11,7 @@ func newMimo(cfg Config, token string) model.LLM {
 	llm.options.IncludeReasoningContent = true
 	llm.options.EmitEmptyReasoningForToolCall = true
 	llm.options.ApplyReasoning = applyMimoThinkingReasoning
+	llm.options.StructuredOutput = openAICompatStructuredOutputJSONOutput
 	return llm
 }
 

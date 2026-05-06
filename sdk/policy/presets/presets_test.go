@@ -11,7 +11,7 @@ import (
 	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
-func TestPlanModeAllowsMarkdownWriteOnly(t *testing.T) {
+func TestLegacyPlanModeMapsToAutoReview(t *testing.T) {
 	t.Parallel()
 
 	decision, err := PlanMode().DecideTool(context.Background(), writeCtx("/workspace/notes.md"))
@@ -26,8 +26,8 @@ func TestPlanModeAllowsMarkdownWriteOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
-	if decision.Action != sdkpolicy.ActionDeny {
-		t.Fatalf("Action = %q, want deny", decision.Action)
+	if decision.Action != sdkpolicy.ActionAllow {
+		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 }
 

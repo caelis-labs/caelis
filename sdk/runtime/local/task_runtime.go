@@ -105,6 +105,9 @@ func newTaskRuntime(runtime *Runtime, store sdktask.Store) *taskRuntime {
 type runtimeToolContext struct {
 	mode              string
 	approvalRequester sdkruntime.ApprovalRequester
+	runID             string
+	turnID            string
+	grants            *permissionGrantStore
 }
 
 func (r *Runtime) wrapToolsForRuntime(session sdksession.Session, ref sdksession.SessionRef, spec sdkruntime.AgentSpec, toolCtx runtimeToolContext) []sdktool.Tool {
@@ -115,12 +118,18 @@ func (r *Runtime) wrapToolsForRuntime(session sdksession.Session, ref sdksession
 	hasBash := false
 	hasSpawn := false
 	hasTask := false
+	hasRequestPermissions := false
 	for _, one := range spec.Tools {
 		if one == nil {
 			continue
 		}
 		name := strings.ToUpper(strings.TrimSpace(one.Definition().Name))
 		switch name {
+		case strings.ToUpper(requestPermissionsToolName):
+			if !hasRequestPermissions {
+				hasRequestPermissions = true
+				out = append(out, runtimeRequestPermissionsTool(session, ref, toolCtx))
+			}
 		case shelltool.BashToolName:
 			hasBash = true
 			if runtime, ok := sandboxRuntimeFromTool(one); ok {
@@ -161,7 +170,22 @@ func (r *Runtime) wrapToolsForRuntime(session sdksession.Session, ref sdksession
 			tasks:      r.tasks,
 		})
 	}
+	if !hasRequestPermissions {
+		out = append(out, runtimeRequestPermissionsTool(session, ref, toolCtx))
+	}
 	return out
+}
+
+func runtimeRequestPermissionsTool(session sdksession.Session, ref sdksession.SessionRef, toolCtx runtimeToolContext) requestPermissionsTool {
+	return requestPermissionsTool{
+		session:    sdksession.CloneSession(session),
+		sessionRef: sdksession.NormalizeSessionRef(ref),
+		mode:       strings.TrimSpace(toolCtx.mode),
+		runID:      strings.TrimSpace(toolCtx.runID),
+		turnID:     strings.TrimSpace(toolCtx.turnID),
+		approval:   toolCtx.approvalRequester,
+		grants:     toolCtx.grants,
+	}
 }
 
 func (tm *taskRuntime) registerSandboxRuntime(runtime sdksandbox.Runtime) {

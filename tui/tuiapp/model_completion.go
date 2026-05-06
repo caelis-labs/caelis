@@ -756,6 +756,8 @@ func isExecutableSlashArgInput(line string) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(fields[0])) {
+	case "/approval":
+		return len(fields) == 2
 	case "/agent":
 		action := ""
 		if len(fields) >= 2 {

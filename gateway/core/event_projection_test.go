@@ -838,6 +838,7 @@ func TestEventPublicContractDoesNotExposeRawCompatibilityFields(t *testing.T) {
 		EventKindNotice,
 		EventKindSystemMessage,
 		EventKindApprovalRequested,
+		EventKindApprovalReview,
 		EventKindLifecycle,
 	} {
 		if strings.Contains(string(kind), "session_") {

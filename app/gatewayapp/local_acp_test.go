@@ -281,10 +281,10 @@ func TestNewACPAgentExposesZedSessionSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if resp.Modes == nil || resp.Modes.CurrentModeID != "default" {
-		t.Fatalf("Modes = %#v, want default Caelis session modes", resp.Modes)
+	if resp.Modes == nil || resp.Modes.CurrentModeID != "auto-review" {
+		t.Fatalf("Modes = %#v, want auto-review Caelis session modes", resp.Modes)
 	}
-	if got, want := modeIDs(resp.Modes.AvailableModes), []string{"default", "plan", "full_access"}; !slices.Equal(got, want) {
+	if got, want := modeIDs(resp.Modes.AvailableModes), []string{"auto-review", "manual"}; !slices.Equal(got, want) {
 		t.Fatalf("mode ids = %#v, want %#v", got, want)
 	}
 	options := configOptionsByID(resp.ConfigOptions)
@@ -292,10 +292,10 @@ func TestNewACPAgentExposesZedSessionSurface(t *testing.T) {
 	if !ok {
 		t.Fatalf("configOptions missing mode: %#v", resp.ConfigOptions)
 	}
-	if modeOption.Category != "mode" || modeOption.CurrentValue != "default" {
-		t.Fatalf("mode option = %#v, want category mode and current default", modeOption)
+	if modeOption.Category != "mode" || modeOption.CurrentValue != "auto-review" {
+		t.Fatalf("mode option = %#v, want category mode and current auto-review", modeOption)
 	}
-	if got, want := configOptionValues(modeOption.Options), []string{"default", "plan", "full_access"}; !slices.Equal(got, want) {
+	if got, want := configOptionValues(modeOption.Options), []string{"auto-review", "manual"}; !slices.Equal(got, want) {
 		t.Fatalf("mode values = %#v, want %#v", got, want)
 	}
 	modelOption, ok := options["model"]
@@ -318,14 +318,14 @@ func TestNewACPAgentExposesZedSessionSurface(t *testing.T) {
 	setModeResp, err := agent.SetSessionConfigOption(ctx, acp.SetSessionConfigOptionRequest{
 		SessionID: resp.SessionID,
 		ConfigID:  "mode",
-		Value:     "plan",
+		Value:     "manual",
 	})
 	if err != nil {
 		t.Fatalf("SetSessionConfigOption(mode) error = %v", err)
 	}
 	modeOption = configOptionsByID(setModeResp.ConfigOptions)["mode"]
-	if modeOption.CurrentValue != "plan" {
-		t.Fatalf("mode option after set = %#v, want current plan", modeOption)
+	if modeOption.CurrentValue != "manual" {
+		t.Fatalf("mode option after set = %#v, want current manual", modeOption)
 	}
 	state, err := stack.SessionRuntimeState(ctx, sdksession.SessionRef{
 		AppName:   "caelis",
@@ -335,8 +335,8 @@ func TestNewACPAgentExposesZedSessionSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
-	if state.SessionMode != "plan" {
-		t.Fatalf("session mode = %q, want plan", state.SessionMode)
+	if state.SessionMode != "manual" {
+		t.Fatalf("session mode = %q, want manual", state.SessionMode)
 	}
 
 	raw, err := json.Marshal(resp)

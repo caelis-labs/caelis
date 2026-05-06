@@ -12,56 +12,42 @@ import (
 )
 
 const (
-	ModePlan       = "plan"
-	ModeDefault    = "default"
-	ModeFullAccess = "full_access"
+	ModeAutoReview = "auto-review"
+	ModeManual     = "manual"
+
+	// Deprecated compatibility aliases. Legacy sessions and configs collapse
+	// to auto-review instead of preserving the old sandbox/approval modes.
+	ModePlan       = ModeAutoReview
+	ModeDefault    = ModeAutoReview
+	ModeFullAccess = ModeAutoReview
 )
 
 func NewRegistry() (*sdkpolicy.MemoryRegistry, error) {
 	return sdkpolicy.NewMemory(
-		PlanMode(),
-		DefaultMode(),
-		FullAccessMode(),
+		AutoReviewMode(),
+		ManualMode(),
 	)
 }
 
 func PlanMode() sdkpolicy.Mode {
-	return sdkpolicy.NamedMode{
-		ID: ModePlan,
-		Decide: func(_ context.Context, input sdkpolicy.ToolContext) (sdkpolicy.Decision, error) {
-			def := baseStrictConstraints(input.Options)
-			switch toolName(input) {
-			case "PLAN", "SPAWN":
-				return allow(def), nil
-			case "READ", "SEARCH", "LIST", "GLOB":
-				if err := ensureReadPathsWithinRoots(input); err != nil {
-					return deny(err.Error()), nil
-				}
-				return allow(def), nil
-			case "WRITE", "PATCH":
-				if err := ensureWritePathsWithinRoots(input); err != nil {
-					return deny(err.Error()), nil
-				}
-				if err := ensureMarkdownOnly(input); err != nil {
-					return deny(err.Error()), nil
-				}
-				return allow(def), nil
-			case "BASH", "TASK":
-				return deny("plan mode does not allow shell or task execution"), nil
-			default:
-				return deny(fmt.Sprintf("tool %q is not allowed in plan mode", input.Tool.Name)), nil
-			}
-		},
-	}
+	return AutoReviewMode()
 }
 
 func DefaultMode() sdkpolicy.Mode {
+	return AutoReviewMode()
+}
+
+func FullAccessMode() sdkpolicy.Mode {
+	return AutoReviewMode()
+}
+
+func AutoReviewMode() sdkpolicy.Mode {
 	return sdkpolicy.NamedMode{
-		ID: ModeDefault,
+		ID: ModeAutoReview,
 		Decide: func(_ context.Context, input sdkpolicy.ToolContext) (sdkpolicy.Decision, error) {
 			def := baseStrictConstraints(input.Options)
 			switch toolName(input) {
-			case "PLAN", "SPAWN":
+			case "PLAN", "SPAWN", "REQUEST_PERMISSIONS":
 				return allow(def), nil
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
@@ -77,7 +63,7 @@ func DefaultMode() sdkpolicy.Mode {
 				return allow(def), nil
 			case "BASH":
 				if commandLooksDangerous(commandArg(input)) {
-					return deny("dangerous command is blocked even in default mode"), nil
+					return deny("dangerous command is blocked even in auto-review mode"), nil
 				}
 				req, err := parseBashSandboxRequest(input)
 				if err != nil {
@@ -94,29 +80,53 @@ func DefaultMode() sdkpolicy.Mode {
 				}
 				return allow(def), nil
 			default:
-				return deny(fmt.Sprintf("tool %q is not allowed in default mode", input.Tool.Name)), nil
+				return deny(fmt.Sprintf("tool %q is not allowed in auto-review mode", input.Tool.Name)), nil
 			}
 		},
 	}
 }
 
-func FullAccessMode() sdkpolicy.Mode {
+func ManualMode() sdkpolicy.Mode {
 	return sdkpolicy.NamedMode{
-		ID: ModeFullAccess,
+		ID: ModeManual,
 		Decide: func(_ context.Context, input sdkpolicy.ToolContext) (sdkpolicy.Decision, error) {
-			def := sdksandbox.Constraints{
-				Route:      sdksandbox.RouteHost,
-				Backend:    sdksandbox.BackendHost,
-				Permission: sdksandbox.PermissionFullAccess,
-				Isolation:  sdksandbox.IsolationHost,
-				Network:    sdksandbox.NetworkInherit,
-			}
-			if toolName(input) == "BASH" {
-				if commandLooksDangerous(commandArg(input)) {
-					return deny("dangerous command is blocked even in full_access mode"), nil
+			def := baseStrictConstraints(input.Options)
+			switch toolName(input) {
+			case "PLAN", "SPAWN", "REQUEST_PERMISSIONS":
+				return allow(def), nil
+			case "READ", "SEARCH", "LIST", "GLOB":
+				if err := ensureReadPathsWithinRoots(input); err != nil {
+					return deny(err.Error()), nil
 				}
+				return allow(def), nil
+			case "WRITE", "PATCH":
+				if err := ensureWritePathsWithinRoots(input); err != nil {
+					return deny(err.Error()), nil
+				}
+				return allow(def), nil
+			case "TASK":
+				return allow(def), nil
+			case "BASH":
+				if commandLooksDangerous(commandArg(input)) {
+					return deny("dangerous command is blocked even in manual mode"), nil
+				}
+				req, err := parseBashSandboxRequest(input)
+				if err != nil {
+					return deny(err.Error()), nil
+				}
+				switch req.SandboxPermissions {
+				case bashSandboxPermissionRequireEscalated:
+					return askEscalationApproval(input, req), nil
+				case bashSandboxPermissionWithAdditionalPermissions:
+					reason := "additional sandbox permissions require user approval"
+					decision := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+					decision.Metadata = req.approvalMetadata(reason)
+					return decision, nil
+				}
+				return allow(def), nil
+			default:
+				return deny(fmt.Sprintf("tool %q is not allowed in manual mode", input.Tool.Name)), nil
 			}
-			return allow(def), nil
 		},
 	}
 }

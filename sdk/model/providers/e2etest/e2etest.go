@@ -1,9 +1,12 @@
 package e2etest
 
 import (
+	"bufio"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,6 +42,8 @@ type providerSpec struct {
 	defaultContextTok int
 }
 
+var loadDotEnvOnce sync.Once
+
 func RequireLLM(t testing.TB, cfg Config) Spec {
 	t.Helper()
 	spec, err := ResolveLLM(cfg)
@@ -50,6 +55,7 @@ func RequireLLM(t testing.TB, cfg Config) Spec {
 }
 
 func ResolveLLM(cfg Config) (Spec, error) {
+	loadDotEnvOnce.Do(loadNearestDotEnv)
 	provider := normalizeProviderName(strings.TrimSpace(os.Getenv("SDK_E2E_PROVIDER")))
 	if provider == "" {
 		provider = normalizeProviderName(cfg.DefaultProvider)
@@ -162,7 +168,7 @@ func ResolveLLM(cfg Config) (Spec, error) {
 			defaultModel:      "mimo-v2-flash",
 			defaultBaseURL:    "https://api.xiaomimimo.com/v1",
 			defaultProvider:   "xiaomi",
-			defaultContextTok: 128000,
+			defaultContextTok: 262144,
 		})
 	case "volcengine":
 		return resolveFactoryProvider(cfg, providerSpec{
@@ -205,6 +211,67 @@ func ResolveLLM(cfg Config) (Spec, error) {
 	default:
 		return Spec{}, fmt.Errorf("SDK_E2E_PROVIDER=%q is not supported", provider)
 	}
+}
+
+func loadNearestDotEnv() {
+	dir, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	for {
+		path := filepath.Join(dir, ".env")
+		if loadDotEnvFile(path) {
+			return
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return
+		}
+		dir = parent
+	}
+}
+
+func loadDotEnvFile(path string) bool {
+	file, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer file.Close()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimSpace(strings.TrimPrefix(line, "export "))
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key == "" || strings.ContainsAny(key, " \t") {
+			continue
+		}
+		if strings.TrimSpace(os.Getenv(key)) != "" {
+			continue
+		}
+		_ = os.Setenv(key, trimDotEnvValue(value))
+	}
+	return true
+}
+
+func trimDotEnvValue(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		quote := value[0]
+		if (quote == '"' || quote == '\'') && value[len(value)-1] == quote {
+			return value[1 : len(value)-1]
+		}
+	}
+	if idx := strings.Index(value, " #"); idx >= 0 {
+		value = strings.TrimSpace(value[:idx])
+	}
+	return value
 }
 
 func resolveCodeFree(cfg Config) (Spec, error) {

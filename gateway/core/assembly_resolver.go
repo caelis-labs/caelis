@@ -121,16 +121,7 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	alias := strings.TrimSpace(intent.ModelHint)
-	if alias == "" {
-		alias = CurrentModelAlias(state)
-		if validator, ok := r.modelLookup.(modelAliasValidator); ok && alias != "" && !validator.HasAlias(alias) {
-			alias = ""
-		}
-	}
-	if alias == "" {
-		alias = r.defaultModelAlias
-	}
+	alias := r.resolveModelAlias(state, intent.ModelHint)
 	model, err := r.modelLookup.ResolveModel(ctx, alias, r.contextWindow)
 	if err != nil {
 		return ResolvedTurn{}, err
@@ -170,6 +161,37 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 			},
 		},
 	}, nil
+}
+
+// ResolveApprovalModel resolves the model currently selected for one session so
+// automatic approval review uses the same model surface as the main session.
+func (r *AssemblyResolver) ResolveApprovalModel(ctx context.Context, ref sdksession.SessionRef) (sdkmodel.LLM, error) {
+	if r == nil || r.modelLookup == nil {
+		return nil, fmt.Errorf("gateway: model lookup is required")
+	}
+	state, err := r.snapshotState(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	model, err := r.modelLookup.ResolveModel(ctx, r.resolveModelAlias(state, ""), r.contextWindow)
+	if err != nil {
+		return nil, err
+	}
+	return model.Model, nil
+}
+
+func (r *AssemblyResolver) resolveModelAlias(state map[string]any, hint string) string {
+	alias := strings.TrimSpace(hint)
+	if alias == "" {
+		alias = CurrentModelAlias(state)
+		if validator, ok := r.modelLookup.(modelAliasValidator); ok && alias != "" && !validator.HasAlias(alias) {
+			alias = ""
+		}
+	}
+	if alias == "" {
+		alias = r.defaultModelAlias
+	}
+	return alias
 }
 
 // ListModelAliases returns the known model aliases relevant to one session.
@@ -215,9 +237,7 @@ func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]a
 		return nil, err
 	}
 	if sessionMode := CurrentSessionMode(state); sessionMode != "" {
-		if _, ok := metadata["policy_mode"]; !ok || sessionMode != "default" {
-			metadata["policy_mode"] = sessionMode
-		}
+		metadata["policy_mode"] = sessionMode
 	}
 	if reasoning := firstNonEmptyString(
 		CurrentReasoningEffort(state),
@@ -268,7 +288,7 @@ func CurrentSandboxMode(state map[string]any) string {
 // sandbox-mode key for migration compatibility.
 func CurrentSessionMode(state map[string]any) string {
 	if state == nil {
-		return "default"
+		return string(ApprovalModeAutoReview)
 	}
 	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
 		return normalizeSessionMode(value)
@@ -277,16 +297,7 @@ func CurrentSessionMode(state map[string]any) string {
 }
 
 func normalizeSessionMode(mode string) string {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "plan":
-		return "plan"
-	case "full_control", "full_access":
-		return "full_access"
-	case "", "auto", "default":
-		return "default"
-	default:
-		return strings.TrimSpace(mode)
-	}
+	return string(NormalizeApprovalMode(mode))
 }
 
 func applyAssemblySelections(metadata map[string]any, assembly sdkplugin.ResolvedAssembly, requestedMode string, state map[string]any) error {

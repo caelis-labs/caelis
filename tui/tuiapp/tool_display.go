@@ -57,6 +57,10 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if command := terminalCommandDisplay(raw); command != "" {
 			return normalizeToolDisplayArg(command)
 		}
+	case "REQUEST_PERMISSIONS":
+		if summary := requestPermissionsDisplayArgs(raw); summary != "" {
+			return summary
+		}
 	}
 	if summary := genericToolArgs(raw); summary != "" {
 		return summary
@@ -360,6 +364,10 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
 			return terminalEmptySummary(name, output, isErr)
 		}
+	case "REQUEST_PERMISSIONS":
+		if summary := requestPermissionsDisplayOutput(output, isErr); summary != "" {
+			return summary
+		}
 	}
 	if summary := genericToolOutput(output, isErr); summary != "" {
 		return summary
@@ -379,6 +387,66 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 		return "completed"
 	}
 	return ""
+}
+
+func requestPermissionsDisplayArgs(raw map[string]any) string {
+	permissions, _ := raw["permissions"].(map[string]any)
+	if len(permissions) == 0 {
+		return ""
+	}
+	return permissionGrantDisplay(permissions)
+}
+
+func requestPermissionsDisplayOutput(output map[string]any, isErr bool) string {
+	if len(output) == 0 {
+		return ""
+	}
+	if isErr || !displayBool(output["approved"]) {
+		return firstTrimmed(asString(output["error"]), asString(output["review_text"]), "denied")
+	}
+	return "completed"
+}
+
+func permissionGrantDisplay(raw map[string]any) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, 3)
+	if fs, _ := raw["file_system"].(map[string]any); len(fs) > 0 {
+		if values := stringListValue(fs["write"]); len(values) > 0 {
+			parts = append(parts, "write "+strings.Join(values, ", "))
+		}
+		if values := stringListValue(fs["read"]); len(values) > 0 {
+			parts = append(parts, "read "+strings.Join(values, ", "))
+		}
+	}
+	if network, _ := raw["network"].(map[string]any); len(network) > 0 && displayBool(network["enabled"]) {
+		parts = append(parts, "network")
+	}
+	return strings.Join(parts, "; ")
+}
+
+func stringListValue(raw any) []string {
+	switch typed := raw.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, value := range typed {
+			if trimmed := strings.TrimSpace(asString(value)); trimmed != "" && trimmed != "<nil>" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func taskControlDisplay(raw map[string]any) string {

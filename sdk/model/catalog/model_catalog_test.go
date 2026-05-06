@@ -120,6 +120,50 @@ func TestDeepSeekStaticModelsExposeThinkingEfforts(t *testing.T) {
 	}
 }
 
+func TestMimoStaticModelsMatchBuiltInCatalog(t *testing.T) {
+	models := ListCatalogModels("xiaomi")
+	wantModels := []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}
+	for _, model := range wantModels {
+		if !containsString(models, model) {
+			t.Fatalf("ListCatalogModels(xiaomi) = %#v, missing %q", models, model)
+		}
+	}
+	for _, model := range []string{"mimo-v2-reasoner", "MiMo-VL-7B-RL"} {
+		if containsString(models, model) {
+			t.Fatalf("ListCatalogModels(xiaomi) = %#v, did not want stale model %q", models, model)
+		}
+	}
+
+	tests := []struct {
+		model       string
+		context     int
+		maxOutput   int
+		imageInputs bool
+	}{
+		{model: "mimo-v2.5-pro", context: 1048576, maxOutput: 131072},
+		{model: "mimo-v2-pro", context: 1048576, maxOutput: 131072},
+		{model: "mimo-v2.5", context: 1048576, maxOutput: 131072, imageInputs: true},
+		{model: "mimo-v2-omni", context: 262144, maxOutput: 131072, imageInputs: true},
+		{model: "mimo-v2-flash", context: 262144, maxOutput: 65536},
+	}
+	for _, tc := range tests {
+		caps, ok := LookupModelCapabilities("xiaomi", tc.model)
+		if !ok {
+			t.Fatalf("LookupModelCapabilities(xiaomi, %q) = false, want true", tc.model)
+		}
+		if caps.ContextWindowTokens != tc.context || caps.MaxOutputTokens != tc.maxOutput {
+			t.Fatalf("LookupModelCapabilities(xiaomi, %q) limits = %d/%d, want %d/%d",
+				tc.model, caps.ContextWindowTokens, caps.MaxOutputTokens, tc.context, tc.maxOutput)
+		}
+		if caps.SupportsImages != tc.imageInputs {
+			t.Fatalf("LookupModelCapabilities(xiaomi, %q).SupportsImages = %v, want %v", tc.model, caps.SupportsImages, tc.imageInputs)
+		}
+		if !caps.SupportsReasoning || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
+			t.Fatalf("LookupModelCapabilities(xiaomi, %q) caps = %#v, want reasoning/tools/json", tc.model, caps)
+		}
+	}
+}
+
 func TestListCatalogModelsUsesStaticCatalogOnly(t *testing.T) {
 	dynamicMu.Lock()
 	savedRemote := remoteCatalog

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -36,6 +37,10 @@ type turnHandle struct {
 	cancelled         bool
 	runner            sdkruntime.Runner
 	pendingApprovalCh chan ApprovalDecision
+
+	approvalReviewSeq            uint64
+	autoReviewConsecutiveDenials int
+	autoReviewTotalDenials       int
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
@@ -192,19 +197,51 @@ func (h *turnHandle) publishSessionEvent(event *sdksession.Event) {
 
 func (h *turnHandle) publishApproval(req *sdkruntime.ApprovalRequest) <-chan ApprovalDecision {
 	wait := h.setPendingApproval()
+	h.publishApprovalPayload(req, canonicalApprovalPayload(req))
+	return wait
+}
+
+func (h *turnHandle) publishApprovalPayload(req *sdkruntime.ApprovalRequest, payload *ApprovalPayload) {
+	h.publishApprovalEvent(req, payload, EventKindApprovalRequested)
+}
+
+func (h *turnHandle) publishApprovalReviewPayload(req *sdkruntime.ApprovalRequest, payload *ApprovalPayload) {
+	h.publishApprovalEvent(req, payload, EventKindApprovalReview)
+}
+
+func (h *turnHandle) publishApprovalEvent(req *sdkruntime.ApprovalRequest, payload *ApprovalPayload, kind EventKind) {
 	h.publish(EventEnvelope{
 		Cursor: h.allocateCursor(),
 		Event: Event{
-			Kind:            EventKindApprovalRequested,
+			Kind:            kind,
 			HandleID:        h.handleID,
 			RunID:           h.runID,
 			TurnID:          h.turnID,
 			SessionRef:      h.sessionRef,
 			Origin:          canonicalOriginFromApproval(req, h.sessionRef, h.turnID),
-			ApprovalPayload: canonicalApprovalPayload(req),
+			ApprovalPayload: cloneApprovalPayload(payload),
 		},
 	})
-	return wait
+}
+
+func (h *turnHandle) nextApprovalReviewID() string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.approvalReviewSeq++
+	return fmt.Sprintf("%s-approval-review-%d", h.handleID, h.approvalReviewSeq)
+}
+
+func (h *turnHandle) recordApprovalReviewDecision(approved bool) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if approved {
+		h.autoReviewConsecutiveDenials = 0
+		return false
+	}
+	h.autoReviewConsecutiveDenials++
+	h.autoReviewTotalDenials++
+	return h.autoReviewConsecutiveDenials >= defaultAutoReviewMaxConsecutiveDenials ||
+		h.autoReviewTotalDenials >= defaultAutoReviewMaxTotalDenials
 }
 
 func (h *turnHandle) publish(env EventEnvelope) {

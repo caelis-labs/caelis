@@ -3,11 +3,13 @@ package core
 import (
 	"context"
 	"iter"
+	"strings"
 	"testing"
 	"time"
 
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
 func TestNewRequiresSessionsRuntimeAndResolver(t *testing.T) {
@@ -947,8 +949,12 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 		},
 	}
 	rt := &approvalRuntime{session: session}
+	sessions := staticSessionService{
+		session: session,
+		state:   map[string]any{StateCurrentSessionMode: string(ApprovalModeManual)},
+	}
 	gw, err := New(Config{
-		Sessions: staticSessionService{session: session},
+		Sessions: sessions,
 		Runtime:  rt,
 		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: sdkruntime.RunRequest{}}},
 		Clock: func() time.Time {
@@ -983,6 +989,103 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	got := collectHandleEvents(t, result.Handle)
 	if len(got) == 0 {
 		t.Fatal("collectHandleEvents() = empty, want completion event stream")
+	}
+}
+
+func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &approvalRuntime{session: session}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: sdkruntime.RunRequest{}}},
+		ApprovalReviewer: staticApprovalReviewer{
+			result: ApprovalReviewResult{
+				Approved:      false,
+				Risk:          "medium",
+				Authorization: "medium",
+				Rationale:     "not narrow enough",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	events := collectHandleEvents(t, result.Handle)
+	if len(events) < 3 {
+		t.Fatalf("events len = %d, want in-progress, denied, and runtime completion", len(events))
+	}
+	if events[0].Event.Kind != EventKindApprovalReview {
+		t.Fatalf("first event kind = %q, want approval_review", events[0].Event.Kind)
+	}
+	if got := events[0].Event.ApprovalPayload.ReviewStatus; got != ApprovalReviewStatusInProgress {
+		t.Fatalf("first review status = %q, want in_progress", got)
+	}
+	if events[1].Event.Kind != EventKindApprovalReview {
+		t.Fatalf("terminal event kind = %q, want approval_review", events[1].Event.Kind)
+	}
+	if got := events[1].Event.ApprovalPayload.ReviewStatus; got != ApprovalReviewStatusDenied {
+		t.Fatalf("terminal review status = %q, want denied", got)
+	}
+	if text := events[1].Event.ApprovalPayload.ReviewText; !strings.Contains(text, "not narrow enough") {
+		t.Fatalf("review text = %q, want reviewer rationale", text)
+	}
+	if events[len(events)-1].Err != nil {
+		t.Fatalf("last event error = %v, want normal turn continuation", events[len(events)-1].Err)
+	}
+}
+
+func TestBeginTurnAutoReviewInterruptsAfterConsecutiveDenials(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &approvalRuntime{session: session, requests: defaultAutoReviewMaxConsecutiveDenials}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: sdkruntime.RunRequest{}}},
+		ApprovalReviewer: staticApprovalReviewer{
+			result: ApprovalReviewResult{
+				Approved:      false,
+				Risk:          "high",
+				Authorization: "low",
+				Rationale:     "repeated unsafe request",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	events := collectHandleEvents(t, result.Handle)
+	if len(events) == 0 || events[len(events)-1].Err == nil {
+		t.Fatalf("events = %#v, want terminal lifecycle error after repeated denials", events)
+	}
+	if !strings.Contains(events[len(events)-1].Err.Message, "too many approval requests") {
+		t.Fatalf("terminal error = %#v, want denial circuit breaker", events[len(events)-1].Err)
 	}
 }
 
@@ -1289,21 +1392,43 @@ func (r *recordingRuntime) RunState(context.Context, sdksession.SessionRef) (sdk
 }
 
 type approvalRuntime struct {
-	session sdksession.Session
+	session  sdksession.Session
+	requests int
 }
 
 func (r *approvalRuntime) Run(ctx context.Context, req sdkruntime.RunRequest) (sdkruntime.RunResult, error) {
 	if req.ApprovalRequester == nil {
 		return sdkruntime.RunResult{}, nil
 	}
-	_, err := req.ApprovalRequester.RequestApproval(ctx, sdkruntime.ApprovalRequest{
-		SessionRef: r.session.SessionRef,
-		Session:    r.session,
-		RunID:      "run-1",
-		TurnID:     "turn-1",
-	})
-	if err != nil {
-		return sdkruntime.RunResult{}, err
+	requests := r.requests
+	if requests <= 0 {
+		requests = 1
+	}
+	for range requests {
+		_, err := req.ApprovalRequester.RequestApproval(ctx, sdkruntime.ApprovalRequest{
+			SessionRef: r.session.SessionRef,
+			Session:    r.session,
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+			Tool:       sdktool.Definition{Name: "BASH"},
+			Call:       sdktool.Call{ID: "approval-call", Name: "BASH"},
+			Approval: &sdksession.ProtocolApproval{
+				ToolCall: sdksession.ProtocolToolCall{
+					ID:     "approval-call",
+					Name:   "BASH",
+					Kind:   "execute",
+					Title:  "BASH test",
+					Status: "pending",
+				},
+				Options: []sdksession.ProtocolApprovalOption{
+					{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+					{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
+				},
+			},
+		})
+		if err != nil {
+			return sdkruntime.RunResult{}, err
+		}
 	}
 	return sdkruntime.RunResult{
 		Session: r.session,
@@ -1315,6 +1440,14 @@ func (r *approvalRuntime) Run(ctx context.Context, req sdkruntime.RunRequest) (s
 
 func (r *approvalRuntime) RunState(context.Context, sdksession.SessionRef) (sdkruntime.RunState, error) {
 	return sdkruntime.RunState{}, nil
+}
+
+type staticApprovalReviewer struct {
+	result ApprovalReviewResult
+}
+
+func (r staticApprovalReviewer) ReviewApproval(context.Context, ApprovalReviewRequest) (ApprovalReviewResult, error) {
+	return r.result, nil
 }
 
 type blockingRuntime struct {
@@ -1399,6 +1532,7 @@ func (r *controlPlaneRuntime) DetachACPParticipant(_ context.Context, req sdkrun
 
 type staticSessionService struct {
 	session sdksession.Session
+	state   map[string]any
 }
 
 func (s staticSessionService) StartSession(context.Context, sdksession.StartSessionRequest) (sdksession.Session, error) {
@@ -1432,7 +1566,7 @@ func (s staticSessionService) RemoveParticipant(context.Context, sdksession.Remo
 	return s.session, nil
 }
 func (s staticSessionService) SnapshotState(context.Context, sdksession.SessionRef) (map[string]any, error) {
-	return map[string]any{}, nil
+	return cloneMap(s.state), nil
 }
 func (s staticSessionService) ReplaceState(context.Context, sdksession.SessionRef, map[string]any) error {
 	return nil

@@ -124,6 +124,45 @@ func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 	}
 }
 
+func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
+	handle := newFakeHandle([]appgateway.EventEnvelope{
+		{
+			Event: appgateway.Event{
+				Kind: appgateway.EventKindApprovalReview,
+				ApprovalPayload: &appgateway.ApprovalPayload{
+					Status:         appgateway.ApprovalStatusPending,
+					ReviewStatus:   appgateway.ApprovalReviewStatusInProgress,
+					DecisionSource: "auto-review",
+				},
+			},
+		},
+		{
+			Event: appgateway.Event{
+				Kind: appgateway.EventKindAssistantMessage,
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleAssistant,
+					Text:  "interactive ok",
+					Final: true,
+				},
+			},
+		},
+	})
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
+		t.Fatalf("streamHandle() error = %v", err)
+	}
+	if got := out.String(); !strings.Contains(got, "interactive ok") {
+		t.Fatalf("stdout = %q", got)
+	}
+	if got := errBuf.String(); got != "" {
+		t.Fatalf("stderr = %q, want empty", got)
+	}
+	if len(handle.submits) != 0 {
+		t.Fatalf("submits = %#v, want no manual decision for auto-review event", handle.submits)
+	}
+}
+
 func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var out bytes.Buffer

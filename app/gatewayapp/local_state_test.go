@@ -36,10 +36,10 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if err := stack.UseModel(ctx, session.SessionRef, alias); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if mode, err := stack.SetSessionMode(ctx, session.SessionRef, "full_access"); err != nil {
-		t.Fatalf("SetSessionMode(full_access) error = %v", err)
-	} else if mode != "full_access" {
-		t.Fatalf("SetSessionMode() = %q, want full_access", mode)
+	if mode, err := stack.SetSessionMode(ctx, session.SessionRef, "manual"); err != nil {
+		t.Fatalf("SetSessionMode(manual) error = %v", err)
+	} else if mode != "manual" {
+		t.Fatalf("SetSessionMode() = %q, want manual", mode)
 	}
 
 	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
@@ -49,17 +49,17 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if state.ModelAlias != alias {
 		t.Fatalf("model alias = %q, want %q", state.ModelAlias, alias)
 	}
-	if state.SessionMode != "full_access" {
-		t.Fatalf("session mode = %q, want full_access", state.SessionMode)
+	if state.SessionMode != "manual" {
+		t.Fatalf("session mode = %q, want manual", state.SessionMode)
 	}
 
 	if err := stack.DeleteModel(ctx, session.SessionRef, alias); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
-	if mode, err := stack.SetSessionMode(ctx, session.SessionRef, "default"); err != nil {
-		t.Fatalf("SetSessionMode(default) error = %v", err)
-	} else if mode != "default" {
-		t.Fatalf("SetSessionMode(default) = %q, want default", mode)
+	if mode, err := stack.SetSessionMode(ctx, session.SessionRef, "auto-review"); err != nil {
+		t.Fatalf("SetSessionMode(auto-review) error = %v", err)
+	} else if mode != "auto-review" {
+		t.Fatalf("SetSessionMode(auto-review) = %q, want auto-review", mode)
 	}
 
 	state, err = stack.SessionRuntimeState(ctx, session.SessionRef)
@@ -69,8 +69,8 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if state.ModelAlias != "" {
 		t.Fatalf("model alias after delete = %q, want empty", state.ModelAlias)
 	}
-	if state.SessionMode != "default" {
-		t.Fatalf("session mode after reset = %q, want default", state.SessionMode)
+	if state.SessionMode != "auto-review" {
+		t.Fatalf("session mode after reset = %q, want auto-review", state.SessionMode)
 	}
 }
 

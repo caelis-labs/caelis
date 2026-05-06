@@ -172,6 +172,7 @@ func (l *codeFreeLLM) Generate(ctx context.Context, req *model.Request) iter.Seq
 			Stream:    req.Stream,
 			MaxTokens: l.maxOutputTok,
 		}
+		applyOpenAICompatOutput(&payload, req.Output, openAICompatStructuredOutputJSONOutput)
 		if req.Stream {
 			payload.StreamOptions = &openAICompatStreamOptions{IncludeUsage: true}
 		}

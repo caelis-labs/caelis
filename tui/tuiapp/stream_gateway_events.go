@@ -20,7 +20,13 @@ func (m *Model) handleGatewayEventEnvelope(env appgateway.EventEnvelope) (tea.Mo
 		model, cmd := m.handleTaskResultMsg(TaskResultMsg{Err: env.Err})
 		return model, cmd
 	}
-	return m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectGatewayEventToTranscriptEvents(env.Event)})
+	var cmds []tea.Cmd
+	if cmd := m.applyAutomaticApprovalReviewHint(env.Event); cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	model, cmd := m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: ProjectGatewayEventToTranscriptEvents(env.Event)})
+	cmds = append(cmds, cmd)
+	return model, tea.Batch(cmds...)
 }
 
 func isUserInterruptError(err error) bool {
@@ -125,4 +131,25 @@ func gatewayApprovalSummary(ev appgateway.Event) (string, string) {
 		return strings.TrimSpace(ev.Protocol.Permission.ToolCall.Name), approvalCommandPreview(ev.Protocol.Permission.ToolCall.RawInput)
 	}
 	return "", ""
+}
+
+func (m *Model) applyAutomaticApprovalReviewHint(ev appgateway.Event) tea.Cmd {
+	if m == nil || ev.ApprovalPayload == nil || !isAutomaticApprovalEvent(ev.ApprovalPayload) {
+		return nil
+	}
+	switch ev.ApprovalPayload.ReviewStatus {
+	case appgateway.ApprovalReviewStatusInProgress:
+		tool := firstNonEmpty(strings.TrimSpace(ev.ApprovalPayload.ToolName), "approval request")
+		msg := ApprovalReviewHintMsg{Text: "Reviewing approval request: " + tool, Pending: true}
+		m.handleApprovalReviewHintMsg(msg)
+		return m.resumeRunningAnimationIfNeeded()
+	case appgateway.ApprovalReviewStatusApproved,
+		appgateway.ApprovalReviewStatusDenied,
+		appgateway.ApprovalReviewStatusTimedOut,
+		appgateway.ApprovalReviewStatusFailed:
+		m.handleApprovalReviewHintMsg(ApprovalReviewHintMsg{})
+		return nil
+	default:
+		return nil
+	}
 }

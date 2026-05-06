@@ -278,6 +278,7 @@ const (
 	EventKindNotice            EventKind = "notice"
 	EventKindSystemMessage     EventKind = "system_message"
 	EventKindApprovalRequested EventKind = "approval_requested"
+	EventKindApprovalReview    EventKind = "approval_review"
 	EventKindLifecycle         EventKind = "lifecycle"
 )
 
@@ -381,16 +382,32 @@ const (
 	ApprovalStatusSelected ApprovalStatus = "selected"
 )
 
+type ApprovalReviewStatus string
+
+const (
+	ApprovalReviewStatusInProgress ApprovalReviewStatus = "in_progress"
+	ApprovalReviewStatusApproved   ApprovalReviewStatus = "approved"
+	ApprovalReviewStatusDenied     ApprovalReviewStatus = "denied"
+	ApprovalReviewStatusTimedOut   ApprovalReviewStatus = "timed_out"
+	ApprovalReviewStatusFailed     ApprovalReviewStatus = "failed"
+)
+
 type ApprovalPayload struct {
-	ToolName              string           `json:"tool_name,omitempty"`
-	RawInput              map[string]any   `json:"raw_input,omitempty"`
-	Reason                string           `json:"reason,omitempty"`
-	Justification         string           `json:"justification,omitempty"`
-	SandboxPermissions    string           `json:"sandbox_permissions,omitempty"`
-	PrefixRule            []string         `json:"prefix_rule,omitempty"`
-	AdditionalPermissions map[string]any   `json:"additional_permissions,omitempty"`
-	Status                ApprovalStatus   `json:"status,omitempty"`
-	Options               []ApprovalOption `json:"options,omitempty"`
+	ToolName              string               `json:"tool_name,omitempty"`
+	RawInput              map[string]any       `json:"raw_input,omitempty"`
+	Reason                string               `json:"reason,omitempty"`
+	Justification         string               `json:"justification,omitempty"`
+	SandboxPermissions    string               `json:"sandbox_permissions,omitempty"`
+	PrefixRule            []string             `json:"prefix_rule,omitempty"`
+	AdditionalPermissions map[string]any       `json:"additional_permissions,omitempty"`
+	Status                ApprovalStatus       `json:"status,omitempty"`
+	Options               []ApprovalOption     `json:"options,omitempty"`
+	ReviewID              string               `json:"review_id,omitempty"`
+	ReviewStatus          ApprovalReviewStatus `json:"review_status,omitempty"`
+	ReviewText            string               `json:"review_text,omitempty"`
+	Risk                  string               `json:"risk,omitempty"`
+	Authorization         string               `json:"authorization,omitempty"`
+	DecisionSource        string               `json:"decision_source,omitempty"`
 }
 
 type ParticipantAction string
@@ -493,9 +510,11 @@ const (
 )
 
 type ApprovalDecision struct {
-	Outcome  string
-	OptionID string
-	Approved bool
+	Outcome    string
+	OptionID   string
+	Approved   bool
+	Reason     string
+	ReviewText string
 }
 
 type SubmitRequest struct {

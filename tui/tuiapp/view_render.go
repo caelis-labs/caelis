@@ -43,6 +43,9 @@ func (m *Model) buildHintText() string {
 	if m.activePrompt != nil {
 		return m.promptHintText()
 	}
+	if h := strings.TrimSpace(m.approvalReviewHint); h != "" {
+		return m.renderApprovalReviewHintText(h)
+	}
 	if m.running && m.activePrompt == nil {
 		return m.buildRunningHintText()
 	}
@@ -71,6 +74,18 @@ func (m *Model) buildHintText() string {
 		return m.overlayHintText("/")
 	}
 	return ""
+}
+
+func (m *Model) renderApprovalReviewHintText(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	frame := strings.TrimSpace(ansi.Strip(m.spinner.View()))
+	if frame == "" {
+		frame = "⠋"
+	}
+	return m.theme.SpinnerStyle().Render(frame) + " " + m.theme.WarnStyle().Render(text)
 }
 
 func (m *Model) primaryDrawerHeight() int {

@@ -161,7 +161,13 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			}
 			i = consumed
 		case SEApproval:
-			continue
+			approvalRows := renderACPApprovalReviewRows(blockID, ev, width, ctx)
+			if len(approvalRows) > 0 {
+				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupApproval, false)
+				rows = append(rows, approvalRows...)
+				hasContent = true
+				lastGroup = acpTranscriptGroupApproval
+			}
 		}
 	}
 	if !hasContent {
@@ -188,6 +194,7 @@ const (
 	acpTranscriptGroupNarrative
 	acpTranscriptGroupExploration
 	acpTranscriptGroupTool
+	acpTranscriptGroupApproval
 	acpTranscriptGroupTask
 	acpTranscriptGroupPlan
 )
@@ -1381,14 +1388,15 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		if hasFinal && shouldDefaultCollapseToolEvent(final) && !panelExpanded {
 			return renderParticipantTurnToolRows(blockID, final, width, ctx), end
 		}
+		panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
+		if !shouldRenderACPToolPanel(panelText, panelErr) {
+			return renderParticipantTurnToolRows(blockID, toolLifecycleHeaderEvent(start, final, hasFinal), width, ctx), end
+		}
 		rows = renderACPToolHeaderRows(blockID, start, width, ctx, panelExpanded)
 		if !panelExpanded {
 			return rows, end
 		}
-		panelText, panelErr := acpToolPanelText(preview, final, hasFinal)
-		if shouldRenderACPToolPanel(panelText, panelErr) {
-			rows = append(rows, renderACPToolPanelRows(blockID, callID, finalPanelToolName(start, final, hasFinal), panelText, width, ctx, panelErr, opts)...)
-		}
+		rows = append(rows, renderACPToolPanelRows(blockID, callID, finalPanelToolName(start, final, hasFinal), panelText, width, ctx, panelErr, opts)...)
 		return rows, end
 	}
 	if text := strings.TrimSpace(preview); text != "" {
@@ -2527,6 +2535,36 @@ func renderACPStatusRows(blockID string, status string, width int, ctx BlockRend
 		return nil
 	}
 	return []RenderedRow{StyledPlainRow(blockID, label, style.Render(label))}
+}
+
+func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {
+	text := strings.TrimSpace(ev.ApprovalText)
+	if text == "" {
+		return nil
+	}
+	style := approvalReviewLineStyle(ctx, ev.ApprovalStatus).Width(width)
+	segments := wrapToolOutputText(text, maxInt(1, width))
+	if len(segments) == 0 {
+		segments = []string{text}
+	}
+	rows := make([]RenderedRow, 0, len(segments))
+	for _, segment := range segments {
+		rows = append(rows, StyledPlainRow(blockID, segment, style.Render(segment)))
+	}
+	return rows
+}
+
+func approvalReviewLineStyle(ctx BlockRenderContext, status string) lipgloss.Style {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "approved":
+		return ctx.Theme.WarnStyle()
+	case "denied", "failed":
+		return ctx.Theme.ErrorStyle()
+	case "timed_out":
+		return ctx.Theme.WarnStyle()
+	default:
+		return ctx.Theme.WarnStyle()
+	}
 }
 
 func participantTurnEmptyPlaceholder(status string) string {

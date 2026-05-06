@@ -531,6 +531,19 @@ var builtinCatalog = []catalogEntry{
 	// ── Mimo ──────────────────────────────────────────────────────────────
 	{
 		provider: "xiaomi",
+		pattern:  "mimo-v2.5-pro",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    1048576,
+			MaxOutputTokens:        131072,
+			DefaultMaxOutputTokens: 32768,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			SupportsJSONOutput:     true,
+			SupportsImages:         false,
+		},
+	},
+	{
+		provider: "xiaomi",
 		pattern:  "mimo-v2-pro",
 		caps: ModelCapabilities{
 			ContextWindowTokens:    1048576,
@@ -544,23 +557,10 @@ var builtinCatalog = []catalogEntry{
 	},
 	{
 		provider: "xiaomi",
-		pattern:  "mimo-v2-flash",
+		pattern:  "mimo-v2.5",
 		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        32768,
-			DefaultMaxOutputTokens: 8192,
-			SupportsToolCalls:      true,
-			SupportsReasoning:      true,
-			SupportsJSONOutput:     true,
-			SupportsImages:         true,
-		},
-	},
-	{
-		provider: "xiaomi",
-		pattern:  "mimo-v2-reasoner",
-		caps: ModelCapabilities{
-			ContextWindowTokens:    128000,
-			MaxOutputTokens:        32768,
+			ContextWindowTokens:    1048576,
+			MaxOutputTokens:        131072,
 			DefaultMaxOutputTokens: 32768,
 			SupportsToolCalls:      true,
 			SupportsReasoning:      true,
@@ -570,15 +570,28 @@ var builtinCatalog = []catalogEntry{
 	},
 	{
 		provider: "xiaomi",
-		pattern:  "MiMo-VL-7B-RL",
+		pattern:  "mimo-v2-omni",
 		caps: ModelCapabilities{
-			ContextWindowTokens:    32000,
-			MaxOutputTokens:        16384,
-			DefaultMaxOutputTokens: 4096,
+			ContextWindowTokens:    262144,
+			MaxOutputTokens:        131072,
+			DefaultMaxOutputTokens: 32768,
 			SupportsToolCalls:      true,
 			SupportsReasoning:      true,
 			SupportsJSONOutput:     true,
 			SupportsImages:         true,
+		},
+	},
+	{
+		provider: "xiaomi",
+		pattern:  "mimo-v2-flash",
+		caps: ModelCapabilities{
+			ContextWindowTokens:    262144,
+			MaxOutputTokens:        65536,
+			DefaultMaxOutputTokens: 16384,
+			SupportsToolCalls:      true,
+			SupportsReasoning:      true,
+			SupportsJSONOutput:     true,
+			SupportsImages:         false,
 		},
 	},
 	// ── Volcengine Coding Plan ────────────────────────────────────────────

@@ -223,6 +223,9 @@ func (p *Provider) buildRequest(req *sdkmodel.Request) (anthropic.MessageNewPara
 		System:    toAnthropicSystem(req.Instructions),
 		Tools:     toAnthropicTools(sdkmodel.FunctionToolDefinitions(req.Tools)),
 	}
+	if req.Output != nil && req.Output.MaxOutputTokens > 0 {
+		params.MaxTokens = int64(req.Output.MaxOutputTokens)
+	}
 	if thinking := p.thinkingConfig(req.Reasoning); thinking != nil {
 		params.Thinking = *thinking
 	}

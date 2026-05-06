@@ -104,7 +104,10 @@ const (
 	ToolSpecKindMCP              ToolSpecKind = "mcp"
 )
 
-// OutputMode identifies one desired model output contract.
+// OutputMode identifies one provider-neutral desired output contract.
+// Providers translate this into their closest native request parameters, such
+// as response_format, response_schema, or format. Providers that do not support
+// a mode may ignore it and return ordinary text.
 type OutputMode string
 
 const (
@@ -532,7 +535,10 @@ func FunctionToolDefinitions(specs []ToolSpec) []ToolDefinition {
 	return out
 }
 
-// OutputSpec defines the desired output contract for one request.
+// OutputSpec defines the desired provider-neutral output contract for one
+// request. Callers should use the same spec across providers and parse the
+// returned content; provider implementations decide how much of the contract can
+// be enforced natively.
 type OutputSpec struct {
 	Mode            OutputMode     `json:"mode,omitempty"`
 	JSONSchema      map[string]any `json:"json_schema,omitempty"`

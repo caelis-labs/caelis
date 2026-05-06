@@ -1203,6 +1203,104 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 	}
 }
 
+func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T) {
+	model := newGatewayEventTestModel()
+	permissionInput := map[string]any{
+		"reason": "need directory access",
+		"permissions": map[string]any{
+			"file_system": map[string]any{
+				"read":  []any{"/tmp/outside"},
+				"write": []any{"/tmp/outside"},
+			},
+		},
+	}
+
+	updated, _ := model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "perm-1",
+				ToolName: "request_permissions",
+				Status:   appgateway.ToolStatusRunning,
+				RawInput: permissionInput,
+			},
+		},
+	})
+	model = updated.(*Model)
+	updated, _ = model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindApprovalReview,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &appgateway.ApprovalPayload{
+				ToolName:       "request_permissions",
+				RawInput:       map[string]any{"reason": "need directory access"},
+				ReviewStatus:   appgateway.ApprovalReviewStatusInProgress,
+				DecisionSource: "auto-review",
+			},
+		},
+	})
+	model = updated.(*Model)
+	if got := ansi.Strip(model.buildHintText()); !strings.Contains(got, "Reviewing approval request: request_permissions") {
+		t.Fatalf("approval hint = %q, want pending review hint", got)
+	}
+
+	reviewText := "Automatic approval review approved (risk: low, authorization: high): user requested it."
+	updated, _ = model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindApprovalReview,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &appgateway.ApprovalPayload{
+				ToolName:       "request_permissions",
+				RawInput:       map[string]any{"reason": "need directory access"},
+				ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
+				DecisionSource: "auto-review",
+				ReviewText:     reviewText,
+			},
+		},
+	})
+	model = updated.(*Model)
+	if got := ansi.Strip(model.buildHintText()); strings.Contains(got, "Reviewing approval request") {
+		t.Fatalf("approval hint = %q, want cleared pending review hint", got)
+	}
+	updated, _ = model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:    "perm-1",
+				ToolName:  "request_permissions",
+				Status:    appgateway.ToolStatusCompleted,
+				RawInput:  permissionInput,
+				RawOutput: map[string]any{"approved": true, "granted": permissionInput["permissions"]},
+			},
+		},
+	})
+	model = updated.(*Model)
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	plain := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside") {
+		t.Fatalf("rendered rows = %q, want request_permissions standard header", plain)
+	}
+	if !strings.Contains(plain, "⚠ "+reviewText) {
+		t.Fatalf("rendered rows = %q, want approval review result at transcript location", plain)
+	}
+	for _, forbidden := range []string{`"approved":true`, `"granted"`, "Automatic approval review pending"} {
+		if strings.Contains(plain, forbidden) {
+			t.Fatalf("rendered rows = %q, should not contain %q", plain, forbidden)
+		}
+	}
+}
+
 func TestTaskControlFallbackHidesRawToolAndInternalTaskIDs(t *testing.T) {
 	t.Parallel()
 

@@ -46,9 +46,8 @@ func (p gatewayACPSurface) SessionModes(ctx context.Context, session sdksession.
 	return &acp.SessionModeState{
 		CurrentModeID: normalizeSessionModeOrDefault(state.SessionMode),
 		AvailableModes: []acp.SessionMode{
-			{ID: "default", Name: "Default", Description: "Use the normal Caelis execution mode for this workspace."},
-			{ID: "plan", Name: "Plan", Description: "Plan and inspect before making changes."},
-			{ID: "full_access", Name: "Full Access", Description: "Allow broader execution when the session policy permits it."},
+			{ID: "auto-review", Name: "Auto Review", Description: "Use automatic AI approval review for sensitive requests."},
+			{ID: "manual", Name: "Manual", Description: "Prompt for user approval for sensitive requests."},
 		},
 	}, nil
 }
@@ -206,7 +205,7 @@ func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.Ava
 		{Name: "agent", Description: "Manage ACP agents", Input: commandInput("use|add|install|list|remove")},
 		{Name: "connect", Description: "Configure a model provider", Input: commandInput("provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]")},
 		{Name: "model", Description: "Switch or inspect models", Input: commandInput("use <alias> [reasoning]")},
-		{Name: "sandbox", Description: "Switch execution mode", Input: commandInput("default|plan|full_access")},
+		{Name: "approval", Description: "Switch approval mode", Input: commandInput("auto-review|manual")},
 		{Name: "status", Description: "Show current runtime status", Input: nil},
 		{Name: "resume", Description: "Resume a previous session", Input: commandInput("session id")},
 		{Name: "compact", Description: "Compact the current conversation", Input: nil},

@@ -1456,8 +1456,131 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	if status.SessionID != startup.SessionID {
 		t.Fatalf("session id = %q, want startup session %q", status.SessionID, startup.SessionID)
 	}
-	if status.SessionMode != "plan" {
-		t.Fatalf("session mode = %q, want plan", status.SessionMode)
+	if status.SessionMode != "manual" {
+		t.Fatalf("session mode = %q, want manual", status.SessionMode)
+	}
+}
+
+func TestGatewayDriverSetSandboxModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "acp-approval-mode-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	session, err := stack.StartSession(ctx, "acp-approval-session", "surface")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	session, err = stack.Sessions.BindController(ctx, sdksession.BindControllerRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ControllerBinding{
+			Kind:            sdksession.ControllerKindACP,
+			ControllerID:    "codex",
+			Label:           "Codex ACP",
+			RemoteSessionID: "remote-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+	driver := &GatewayDriver{
+		stack:               gatewayAppStackForRuntimeTest(stack),
+		session:             session,
+		hasSession:          true,
+		bindingKey:          "surface",
+		defaultSessionMode:  "auto-review",
+		sessionMode:         "auto-review",
+		defaultSandboxType:  "host",
+		sandboxType:         "host",
+		streamSubscriptions: map[string]struct{}{},
+	}
+
+	status, err := driver.SetSandboxMode(ctx, "manual")
+	if err != nil {
+		t.Fatalf("SetSandboxMode(manual) error = %v", err)
+	}
+	if status.SessionMode != "manual" {
+		t.Fatalf("status.SessionMode = %q, want manual", status.SessionMode)
+	}
+	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.SessionMode != "manual" {
+		t.Fatalf("state.SessionMode = %q, want manual", state.SessionMode)
+	}
+	status, err = driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.SessionMode != "manual" {
+		t.Fatalf("Status().SessionMode = %q, want manual", status.SessionMode)
+	}
+}
+
+func TestGatewayDriverCycleSessionModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "acp-cycle-approval-mode-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	session, err := stack.StartSession(ctx, "acp-cycle-approval-session", "surface")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	session, err = stack.Sessions.BindController(ctx, sdksession.BindControllerRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ControllerBinding{
+			Kind:            sdksession.ControllerKindACP,
+			ControllerID:    "codex",
+			Label:           "Codex ACP",
+			RemoteSessionID: "remote-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+	driver := &GatewayDriver{
+		stack:               gatewayAppStackForRuntimeTest(stack),
+		session:             session,
+		hasSession:          true,
+		bindingKey:          "surface",
+		defaultSessionMode:  "auto-review",
+		sessionMode:         "auto-review",
+		defaultSandboxType:  "host",
+		sandboxType:         "host",
+		streamSubscriptions: map[string]struct{}{},
+	}
+
+	status, err := driver.CycleSessionMode(ctx)
+	if err != nil {
+		t.Fatalf("CycleSessionMode() error = %v", err)
+	}
+	if status.SessionMode != "manual" {
+		t.Fatalf("status.SessionMode = %q, want manual", status.SessionMode)
+	}
+	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.SessionMode != "manual" {
+		t.Fatalf("state.SessionMode = %q, want manual", state.SessionMode)
 	}
 }
 
@@ -2299,7 +2422,7 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if _, err := driver.SetSandboxMode(ctx, "full_access"); err != nil {
+	if _, err := driver.SetSandboxMode(ctx, "manual"); err != nil {
 		t.Fatalf("SetSandboxMode() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
@@ -2315,8 +2438,8 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if !status.MissingAPIKey {
 		t.Fatal("status.MissingAPIKey = false, want true when token env is unset")
 	}
-	if !status.HostExecution || !status.FullAccessMode {
-		t.Fatalf("status host/full_access = %v/%v, want true/true", status.HostExecution, status.FullAccessMode)
+	if !status.HostExecution || status.FullAccessMode {
+		t.Fatalf("status host/full_access = %v/%v, want true/false", status.HostExecution, status.FullAccessMode)
 	}
 }
 

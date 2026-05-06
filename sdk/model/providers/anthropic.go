@@ -250,6 +250,9 @@ func (l *anthropicSDKLLM) buildRequest(req *model.Request) (anthropic.MessageNew
 		System:    toAnthropicSystem(req.Instructions),
 		Tools:     toAnthropicTools(model.FunctionToolDefinitions(req.Tools)),
 	}
+	if req.Output != nil && req.Output.MaxOutputTokens > 0 {
+		params.MaxTokens = int64(req.Output.MaxOutputTokens)
+	}
 	if thinking := anthropicThinkingConfig(l.provider, req.Reasoning); thinking != nil {
 		params.Thinking = *thinking
 	}

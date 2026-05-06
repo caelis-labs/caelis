@@ -579,6 +579,19 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	})
 }
 
+func (b *MainACPTurnBlock) AddApprovalReviewEvent(tool, command, status, text string) {
+	if b == nil {
+		return
+	}
+	b.Events = append(b.Events, SubagentEvent{
+		Kind:            SEApproval,
+		ApprovalTool:    strings.TrimSpace(tool),
+		ApprovalCommand: strings.TrimSpace(command),
+		ApprovalStatus:  strings.TrimSpace(status),
+		ApprovalText:    strings.TrimSpace(text),
+	})
+}
+
 func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b == nil {
 		return nil
@@ -914,6 +927,19 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 		Kind:            SEApproval,
 		ApprovalTool:    strings.TrimSpace(approvalTool),
 		ApprovalCommand: strings.TrimSpace(approvalCommand),
+	})
+}
+
+func (b *ParticipantTurnBlock) AddApprovalReviewEvent(tool, command, status, text string) {
+	if b == nil {
+		return
+	}
+	b.Events = append(b.Events, SubagentEvent{
+		Kind:            SEApproval,
+		ApprovalTool:    strings.TrimSpace(tool),
+		ApprovalCommand: strings.TrimSpace(command),
+		ApprovalStatus:  strings.TrimSpace(status),
+		ApprovalText:    strings.TrimSpace(text),
 	})
 }
 
@@ -1857,6 +1883,8 @@ type SubagentEvent struct {
 	// Approval fields (derived from context when status becomes waiting_approval).
 	ApprovalTool    string
 	ApprovalCommand string
+	ApprovalStatus  string
+	ApprovalText    string
 }
 
 func narrativeEventTime(values ...time.Time) time.Time {
@@ -2207,6 +2235,20 @@ func (s *SubagentSessionState) AddApprovalEvent(tool, command string) {
 	s.eventsGen++
 }
 
+func (s *SubagentSessionState) AddApprovalReviewEvent(tool, command, status, text string) {
+	if s == nil {
+		return
+	}
+	s.Events = append(s.Events, SubagentEvent{
+		Kind:            SEApproval,
+		ApprovalTool:    strings.TrimSpace(tool),
+		ApprovalCommand: strings.TrimSpace(command),
+		ApprovalStatus:  strings.TrimSpace(status),
+		ApprovalText:    strings.TrimSpace(text),
+	})
+	s.eventsGen++
+}
+
 func (s *SubagentSessionState) ReviveFromTerminal() {
 	if s == nil || !isTerminalSubagentState(s.Status) {
 		return
@@ -2436,6 +2478,12 @@ func (b *SubagentPanelBlock) UpdatePlan(entries []planEntryState) {
 func (b *SubagentPanelBlock) AddApprovalEvent(tool, command string) {
 	state := b.sessionState()
 	state.AddApprovalEvent(tool, command)
+	b.syncSessionMirror()
+}
+
+func (b *SubagentPanelBlock) AddApprovalReviewEvent(tool, command, status, text string) {
+	state := b.sessionState()
+	state.AddApprovalReviewEvent(tool, command, status, text)
 	b.syncSessionMirror()
 }
 

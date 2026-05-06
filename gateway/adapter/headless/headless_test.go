@@ -91,6 +91,59 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	}
 }
 
+func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
+	t.Parallel()
+
+	handle := newFakeHandle([]gateway.EventEnvelope{
+		{
+			Cursor: "r1",
+			Event: gateway.Event{
+				Kind: gateway.EventKindApprovalReview,
+				ApprovalPayload: &gateway.ApprovalPayload{
+					ToolName:       "bash",
+					ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
+					DecisionSource: "auto-review",
+				},
+			},
+		},
+		{
+			Cursor: "r2",
+			Event: gateway.Event{
+				Kind: gateway.EventKindAssistantMessage,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
+					Text:  "done",
+					Final: true,
+				},
+			},
+		},
+	})
+	gw := fakeStarter{
+		result: gateway.BeginTurnResult{
+			Session: sdksession.Session{SessionRef: sdksession.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+			}},
+			Handle: handle,
+		},
+	}
+
+	result, err := RunOnce(context.Background(), gw, gateway.BeginTurnRequest{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		Input: "hello",
+	}, Options{})
+	if err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if result.Output != "done" {
+		t.Fatalf("RunOnce() output = %q, want done", result.Output)
+	}
+	if len(handle.submissions) != 0 {
+		t.Fatalf("submissions = %d, want no manual decision for auto-review event", len(handle.submissions))
+	}
+}
+
 type fakeStarter struct {
 	result gateway.BeginTurnResult
 	err    error

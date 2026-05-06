@@ -70,7 +70,7 @@ func (f Factory) NewAgent(_ context.Context, spec sdkruntime.AgentSpec) (sdkrunt
 		return nil, err
 	}
 	agent.reasoning = reasoningFromMetadata(spec.Metadata)
-	agent.request = spec.Request
+	agent.request = spec.Request.WithDefaults(sdkruntime.ModelRequestOptions{})
 	return agent, nil
 }
 
@@ -87,6 +87,7 @@ func (a *Agent) Run(ctx sdkruntime.Context) iter.Seq2[*sdksession.Event, error] 
 				Messages:  messages,
 				Tools:     sdktool.ModelSpecs(a.tools),
 				Reasoning: a.reasoning,
+				Output:    a.request.OutputSpec(),
 				Stream:    stream,
 			}
 			request.Instructions = append(request.Instructions, instructionsFromContext(ctx, a.systemPrompt)...)

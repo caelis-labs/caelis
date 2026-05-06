@@ -33,13 +33,22 @@ type openAICompatOptions struct {
 	EmitEmptyReasoningForToolCall  bool
 	EmitEmptyReasoningForAssistant bool
 	ApplyReasoning                 func(*openAICompatRequest, model.ReasoningConfig)
+	StructuredOutput               openAICompatStructuredOutput
 }
 
 func defaultOpenAICompatOptions() openAICompatOptions {
 	return openAICompatOptions{
-		ApplyReasoning: applyOpenAIReasoning,
+		ApplyReasoning:   applyOpenAIReasoning,
+		StructuredOutput: openAICompatStructuredOutputSchema,
 	}
 }
+
+type openAICompatStructuredOutput string
+
+const (
+	openAICompatStructuredOutputSchema     openAICompatStructuredOutput = "schema"
+	openAICompatStructuredOutputJSONOutput openAICompatStructuredOutput = "json_object"
+)
 
 func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 	llm := &openAICompatLLM{
@@ -82,6 +91,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			Stream:    req.Stream,
 			MaxTokens: l.maxOutputTok,
 		}
+		applyOpenAICompatOutput(&payload, req.Output, l.options.StructuredOutput)
 		if req.Stream {
 			payload.StreamOptions = &openAICompatStreamOptions{IncludeUsage: true}
 		}
@@ -268,9 +278,103 @@ type openAICompatRequest struct {
 	Stream          bool                       `json:"stream"`
 	StreamOptions   *openAICompatStreamOptions `json:"stream_options,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
+	ResponseFormat  *openAIResponseFormat      `json:"response_format,omitempty"`
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 	Reasoning       *openAIReasoning           `json:"reasoning,omitempty"`
 	Thinking        *openAIThinking            `json:"thinking,omitempty"`
+}
+
+type openAIResponseFormat struct {
+	Type       string                  `json:"type"`
+	JSONSchema *openAIJSONSchemaFormat `json:"json_schema,omitempty"`
+}
+
+type openAIJSONSchemaFormat struct {
+	Name   string         `json:"name"`
+	Strict bool           `json:"strict,omitempty"`
+	Schema map[string]any `json:"schema"`
+}
+
+func applyOpenAICompatOutput(payload *openAICompatRequest, output *model.OutputSpec, strategy openAICompatStructuredOutput) {
+	if payload == nil || output == nil {
+		return
+	}
+	if output.MaxOutputTokens > 0 {
+		payload.MaxTokens = output.MaxOutputTokens
+	}
+	switch output.Mode {
+	case model.OutputModeJSON:
+		payload.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+	case model.OutputModeSchema:
+		if strategy == openAICompatStructuredOutputJSONOutput {
+			payload.ResponseFormat = &openAIResponseFormat{Type: "json_object"}
+		} else if len(output.JSONSchema) > 0 {
+			payload.ResponseFormat = &openAIResponseFormat{
+				Type: "json_schema",
+				JSONSchema: &openAIJSONSchemaFormat{
+					Name:   "caelis_output",
+					Strict: openAICompatStrictSchema(output.JSONSchema),
+					Schema: cloneAnyMap(output.JSONSchema),
+				},
+			}
+		}
+	}
+}
+
+func openAICompatStrictSchema(schema map[string]any) bool {
+	if len(schema) == 0 {
+		return false
+	}
+	typ, _ := schema["type"].(string)
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "object":
+		if additionalProperties, ok := schema["additionalProperties"].(bool); !ok || additionalProperties {
+			return false
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		if len(properties) == 0 {
+			return true
+		}
+		required := map[string]struct{}{}
+		for _, key := range stringSliceFromProviderAny(schema["required"]) {
+			required[key] = struct{}{}
+		}
+		for key, value := range properties {
+			if _, ok := required[key]; !ok {
+				return false
+			}
+			if nested, _ := value.(map[string]any); len(nested) > 0 && !openAICompatStrictSchema(nested) {
+				return false
+			}
+		}
+		return true
+	case "array":
+		if items, _ := schema["items"].(map[string]any); len(items) > 0 {
+			return openAICompatStrictSchema(items)
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+func stringSliceFromProviderAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, _ := item.(string)
+			text = strings.TrimSpace(text)
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 type openAICompatStreamOptions struct {

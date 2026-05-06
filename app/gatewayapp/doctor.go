@@ -74,7 +74,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 
 	ref := s.resolveDoctorSessionRef(ctx, req)
 	report.SessionID = strings.TrimSpace(ref.SessionID)
-	report.SessionMode = "default"
+	report.SessionMode = "auto-review"
 	alias := ""
 	if strings.TrimSpace(ref.SessionID) != "" {
 		state, err := s.SessionRuntimeState(ctx, ref)
@@ -108,10 +108,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	report.SandboxFallbackReason = strings.TrimSpace(sandbox.FallbackReason)
 	report.SandboxSecuritySummary = strings.TrimSpace(sandbox.SecuritySummary)
 	report.HostExecution = strings.EqualFold(report.SandboxRoute, "host") || strings.EqualFold(report.SandboxResolvedBackend, "host")
-	report.FullAccessMode = strings.EqualFold(report.SessionMode, "full_access")
-	if report.FullAccessMode {
-		report.Warnings = append(report.Warnings, "session is running in full_access mode")
-	}
+	report.FullAccessMode = false
 	if report.HostExecution {
 		report.Warnings = append(report.Warnings, "sandbox execution is using host route")
 	}
@@ -149,7 +146,7 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("config_dir_mode: %s", firstNonEmpty(strings.TrimSpace(report.ConfigDirMode), "-")),
 		fmt.Sprintf("config_file_mode: %s", firstNonEmpty(strings.TrimSpace(report.ConfigFileMode), "-")),
 		fmt.Sprintf("session_id: %s", firstNonEmpty(strings.TrimSpace(report.SessionID), "-")),
-		fmt.Sprintf("session_mode: %s", firstNonEmpty(strings.TrimSpace(report.SessionMode), "default")),
+		fmt.Sprintf("session_mode: %s", firstNonEmpty(strings.TrimSpace(report.SessionMode), "auto-review")),
 		fmt.Sprintf("active_model_alias: %s", firstNonEmpty(strings.TrimSpace(report.ActiveModelAlias), "-")),
 		fmt.Sprintf("active_provider: %s", firstNonEmpty(strings.TrimSpace(report.ActiveProvider), "-")),
 		fmt.Sprintf("active_model: %s", firstNonEmpty(strings.TrimSpace(report.ActiveModel), "-")),

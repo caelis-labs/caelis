@@ -12,6 +12,7 @@ func newDeepSeek(cfg Config, token string) model.LLM {
 	llm.options.EmitEmptyReasoningForToolCall = true
 	llm.options.EmitEmptyReasoningForAssistant = true
 	llm.options.ApplyReasoning = applyThinkingReasoning
+	llm.options.StructuredOutput = openAICompatStructuredOutputJSONOutput
 	return llm
 }
 

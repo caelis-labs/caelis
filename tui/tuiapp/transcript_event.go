@@ -63,6 +63,7 @@ type TranscriptEvent struct {
 	ApprovalTool    string
 	ApprovalCommand string
 	ApprovalStatus  string
+	ApprovalText    string
 
 	State string
 
@@ -286,8 +287,24 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 				})
 			}
 		}
-	case appgateway.EventKindApprovalRequested:
-		// Approval requests are transient composer overlays driven by
+	case appgateway.EventKindApprovalRequested, appgateway.EventKindApprovalReview:
+		if ev.Kind == appgateway.EventKindApprovalReview && ev.ApprovalPayload != nil && isAutomaticApprovalEvent(ev.ApprovalPayload) {
+			if text := automaticApprovalReviewDisplayText(ev.ApprovalPayload); text != "" {
+				out = append(out, TranscriptEvent{
+					Kind:            TranscriptEventApproval,
+					Scope:           scope,
+					ScopeID:         scopeID,
+					Actor:           gatewayDisplayActor(ev, ""),
+					OccurredAt:      occurredAt,
+					ApprovalTool:    strings.TrimSpace(ev.ApprovalPayload.ToolName),
+					ApprovalCommand: approvalCommandPreview(ev.ApprovalPayload.RawInput),
+					ApprovalStatus:  strings.TrimSpace(string(ev.ApprovalPayload.ReviewStatus)),
+					ApprovalText:    text,
+					Final:           true,
+				})
+			}
+		}
+		// Manual approval requests are transient composer overlays driven by
 		// PromptRequestMsg. They intentionally do not persist into transcript.
 	case appgateway.EventKindParticipant:
 		if payload := ev.Participant; payload != nil {

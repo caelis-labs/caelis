@@ -97,6 +97,58 @@ func TestOllamaRegisterAndCreate(t *testing.T) {
 	}
 }
 
+func TestOllamaStructuredOutputRequest(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"qwen3.5:4b","message":{"role":"assistant","content":"{\"outcome\":\"allow\"}"},"done":true}`)
+	}))
+	defer server.Close()
+
+	llm := newOllama(Config{
+		Provider:   "ollama",
+		Model:      "qwen3.5:4b",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+	}, "")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "review")},
+		Output: &model.OutputSpec{
+			Mode: model.OutputModeSchema,
+			JSONSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"outcome": map[string]any{"type": "string"},
+				},
+				"required": []any{"outcome"},
+			},
+			MaxOutputTokens: 64,
+		},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	format, _ := payload["format"].(map[string]any)
+	if got := format["type"]; got != "object" {
+		t.Fatalf("format.type = %v, want object", got)
+	}
+	if got := payload["think"]; got != false {
+		t.Fatalf("think = %v, want false for structured output", got)
+	}
+	options, _ := payload["options"].(map[string]any)
+	if got := options["num_predict"]; got != float64(64) {
+		t.Fatalf("options.num_predict = %v, want 64", got)
+	}
+}
+
 func TestOllamaAuthNoneAllowsEmptyToken(t *testing.T) {
 	factory := NewFactory()
 	cfg := Config{

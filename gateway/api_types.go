@@ -41,8 +41,13 @@ type ToolResultPayload = gatewaycore.ToolResultPayload
 type PlanEntryPayload = gatewaycore.PlanEntryPayload
 type PlanPayload = gatewaycore.PlanPayload
 type ApprovalStatus = gatewaycore.ApprovalStatus
+type ApprovalReviewStatus = gatewaycore.ApprovalReviewStatus
 type ApprovalOption = gatewaycore.ApprovalOption
 type ApprovalPayload = gatewaycore.ApprovalPayload
+type ApprovalMode = gatewaycore.ApprovalMode
+type ApprovalReviewRequest = gatewaycore.ApprovalReviewRequest
+type ApprovalReviewResult = gatewaycore.ApprovalReviewResult
+type ApprovalReviewer = gatewaycore.ApprovalReviewer
 type ParticipantAction = gatewaycore.ParticipantAction
 type ParticipantPayload = gatewaycore.ParticipantPayload
 type LifecycleStatus = gatewaycore.LifecycleStatus
@@ -71,6 +76,7 @@ var CleanSubagentFinalOutput = gatewaycore.CleanSubagentFinalOutput
 var ProjectSessionEvent = gatewaycore.ProjectSessionEvent
 var EventMetaString = gatewaycore.EventMetaString
 var EventMetaBool = gatewaycore.EventMetaBool
+var FormatApprovalReviewText = gatewaycore.FormatApprovalReviewText
 
 const (
 	StateCurrentModelAlias      = gatewaycore.StateCurrentModelAlias
@@ -115,6 +121,7 @@ const (
 	EventKindNotice            = gatewaycore.EventKindNotice
 	EventKindSystemMessage     = gatewaycore.EventKindSystemMessage
 	EventKindApprovalRequested = gatewaycore.EventKindApprovalRequested
+	EventKindApprovalReview    = gatewaycore.EventKindApprovalReview
 	EventKindLifecycle         = gatewaycore.EventKindLifecycle
 )
 
@@ -123,6 +130,19 @@ const (
 	ApprovalStatusApproved = gatewaycore.ApprovalStatusApproved
 	ApprovalStatusRejected = gatewaycore.ApprovalStatusRejected
 	ApprovalStatusSelected = gatewaycore.ApprovalStatusSelected
+)
+
+const (
+	ApprovalReviewStatusInProgress = gatewaycore.ApprovalReviewStatusInProgress
+	ApprovalReviewStatusApproved   = gatewaycore.ApprovalReviewStatusApproved
+	ApprovalReviewStatusDenied     = gatewaycore.ApprovalReviewStatusDenied
+	ApprovalReviewStatusTimedOut   = gatewaycore.ApprovalReviewStatusTimedOut
+	ApprovalReviewStatusFailed     = gatewaycore.ApprovalReviewStatusFailed
+)
+
+const (
+	ApprovalModeAutoReview = gatewaycore.ApprovalModeAutoReview
+	ApprovalModeManual     = gatewaycore.ApprovalModeManual
 )
 
 const (

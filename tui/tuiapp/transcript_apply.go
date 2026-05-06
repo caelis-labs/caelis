@@ -187,6 +187,9 @@ func (m *Model) applyTranscriptTool(event TranscriptEvent) (tea.Model, tea.Cmd) 
 
 func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.Cmd) {
 	m.prepareForTranscriptScope(event.Scope)
+	if strings.TrimSpace(event.ApprovalText) != "" {
+		return m.applyTranscriptApprovalReview(event)
+	}
 	switch event.Scope {
 	case ACPProjectionParticipant:
 		return m.handleParticipantStatusMsg(ParticipantStatusMsg{
@@ -213,6 +216,51 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 			return m, nil
 		}
 		block.SetStatus(firstNonEmpty(strings.TrimSpace(event.State), "waiting_approval"), event.ApprovalTool, event.ApprovalCommand, event.OccurredAt)
+		m.markViewportBlockDirty(block.BlockID())
+		return m, m.requestStreamViewportSync()
+	}
+}
+
+func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	switch event.Scope {
+	case ACPProjectionParticipant:
+		block := m.ensureParticipantTurnBlock(event.ScopeID, event.Actor)
+		if block == nil {
+			return m, nil
+		}
+		block.AddApprovalReviewEvent(event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
+		m.markViewportBlockDirty(block.BlockID())
+		return m, m.requestStreamViewportSync()
+	case ACPProjectionSubagent:
+		if !m.shouldRenderSubagentPanelEvent(event) {
+			return m, nil
+		}
+		sessionKey, state := m.ensureSubagentSessionState(event.ScopeID, "", "")
+		panel := m.ensureSubagentPanelBlock(event.ScopeID, "", "", "", "", false)
+		if state == nil || panel == nil {
+			return m, nil
+		}
+		switch {
+		case strings.EqualFold(state.Status, "waiting_approval"):
+			state.Status = "running"
+		case isTerminalSubagentState(state.Status):
+			state.ReviveFromTerminal()
+		}
+		panel.bindSession(state)
+		state.AddApprovalReviewEvent(event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
+		m.reviveSubagentPanel(panel, false)
+		m.syncSubagentSessionPanels(sessionKey)
+		m.markViewportBlockDirty(panel.BlockID())
+		return m, m.requestStreamViewportSync()
+	default:
+		block := m.ensureMainACPTurnBlock(strings.TrimSpace(event.ScopeID))
+		if block == nil {
+			return m, nil
+		}
+		if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "waiting_approval" {
+			block.Status = "running"
+		}
+		block.AddApprovalReviewEvent(event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}

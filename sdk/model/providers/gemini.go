@@ -80,6 +80,7 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 		if l.maxOutputTok > 0 {
 			cfg.MaxOutputTokens = int32(l.maxOutputTok)
 		}
+		applyGeminiOutput(cfg, req.Output)
 		if thinkingCfg := toGeminiThinkingConfig(l.name, req.Reasoning); thinkingCfg != nil {
 			cfg.ThinkingConfig = thinkingCfg
 		}
@@ -186,6 +187,96 @@ func (l *geminiLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 				Usage:        usage,
 			},
 		}, nil)
+	}
+}
+
+func applyGeminiOutput(cfg *genai.GenerateContentConfig, output *model.OutputSpec) {
+	if cfg == nil || output == nil {
+		return
+	}
+	if output.MaxOutputTokens > 0 {
+		cfg.MaxOutputTokens = int32(output.MaxOutputTokens)
+	}
+	switch output.Mode {
+	case model.OutputModeJSON:
+		cfg.ResponseMIMEType = "application/json"
+	case model.OutputModeSchema:
+		cfg.ResponseMIMEType = "application/json"
+		if schema := geminiSchemaFromMap(output.JSONSchema); schema != nil {
+			cfg.ResponseSchema = schema
+		}
+	}
+}
+
+func geminiSchemaFromMap(in map[string]any) *genai.Schema {
+	if len(in) == 0 {
+		return nil
+	}
+	out := &genai.Schema{}
+	if typ, _ := in["type"].(string); typ != "" {
+		out.Type = geminiSchemaType(typ)
+	}
+	if description, _ := in["description"].(string); description != "" {
+		out.Description = description
+	}
+	if enum := stringSliceFromAny(in["enum"]); len(enum) > 0 {
+		out.Enum = enum
+	}
+	if required := stringSliceFromAny(in["required"]); len(required) > 0 {
+		out.Required = required
+	}
+	if properties, _ := in["properties"].(map[string]any); len(properties) > 0 {
+		out.Properties = map[string]*genai.Schema{}
+		for key, value := range properties {
+			nested, _ := value.(map[string]any)
+			if schema := geminiSchemaFromMap(nested); schema != nil {
+				out.Properties[key] = schema
+			}
+		}
+	}
+	if item, _ := in["items"].(map[string]any); len(item) > 0 {
+		out.Items = geminiSchemaFromMap(item)
+	}
+	return out
+}
+
+func geminiSchemaType(value string) genai.Type {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "object":
+		return genai.TypeObject
+	case "array":
+		return genai.TypeArray
+	case "string":
+		return genai.TypeString
+	case "number":
+		return genai.TypeNumber
+	case "integer":
+		return genai.TypeInteger
+	case "boolean":
+		return genai.TypeBoolean
+	case "null":
+		return genai.TypeNULL
+	default:
+		return genai.TypeUnspecified
+	}
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, _ := item.(string)
+			text = strings.TrimSpace(text)
+			if text != "" {
+				out = append(out, text)
+			}
+		}
+		return out
+	default:
+		return nil
 	}
 }
 

@@ -37,6 +37,11 @@ type SetHintMsg struct {
 	ClearOnMessage bool
 }
 
+type ApprovalReviewHintMsg struct {
+	Text    string
+	Pending bool
+}
+
 type SetRunningMsg struct {
 	Running bool
 }

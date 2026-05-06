@@ -91,7 +91,7 @@ func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {
 	if got := meta["reasoning_budget_tokens"]; got != 64 {
 		t.Fatalf("reasoning_budget_tokens = %#v", got)
 	}
-	if got := meta["policy_mode"]; got != "workspace_write" {
+	if got := meta["policy_mode"]; got != "auto-review" {
 		t.Fatalf("policy_mode = %#v", got)
 	}
 }
@@ -205,10 +205,10 @@ func TestCurrentSessionModeMigratesLegacySandboxState(t *testing.T) {
 		state map[string]any
 		want  string
 	}{
-		{name: "empty defaults to default", state: map[string]any{}, want: "default"},
-		{name: "legacy auto becomes default", state: map[string]any{StateCurrentSandboxMode: "auto"}, want: "default"},
-		{name: "legacy full control becomes full_access", state: map[string]any{StateCurrentSandboxMode: "full_control"}, want: "full_access"},
-		{name: "new key wins", state: map[string]any{StateCurrentSandboxMode: "full_control", StateCurrentSessionMode: "plan"}, want: "plan"},
+		{name: "empty defaults to auto-review", state: map[string]any{}, want: "auto-review"},
+		{name: "legacy auto becomes auto-review", state: map[string]any{StateCurrentSandboxMode: "auto"}, want: "auto-review"},
+		{name: "legacy full control becomes auto-review", state: map[string]any{StateCurrentSandboxMode: "full_control"}, want: "auto-review"},
+		{name: "new manual key wins", state: map[string]any{StateCurrentSandboxMode: "full_control", StateCurrentSessionMode: "manual"}, want: "manual"},
 	}
 
 	for _, tt := range tests {

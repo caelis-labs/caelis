@@ -11,6 +11,7 @@ func newVolcengineCodingPlan(cfg Config, token string) model.LLM {
 	llm.options.IncludeReasoningContent = true
 	llm.options.EmitEmptyReasoningForToolCall = true
 	llm.options.ApplyReasoning = applyVolcengineThinkingReasoning
+	llm.options.StructuredOutput = openAICompatStructuredOutputJSONOutput
 	return llm
 }
 

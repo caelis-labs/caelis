@@ -994,6 +994,110 @@ func TestOpenAICompatStream_IncludesUsageRequestOptionAndPropagatesUsage(t *test
 	}
 }
 
+func TestOpenAICompatNonStream_IncludesStructuredOutputRequest(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"test-model","choices":[{"message":{"role":"assistant","content":"{\"outcome\":\"allow\"}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newOpenAICompat(Config{
+		Provider:     "openai-compatible",
+		Model:        "test-model",
+		BaseURL:      server.URL,
+		HTTPClient:   server.Client(),
+		MaxOutputTok: 2048,
+		Timeout:      2 * time.Second,
+	}, "token")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "review")},
+		Output: &model.OutputSpec{
+			Mode: model.OutputModeSchema,
+			JSONSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"outcome": map[string]any{"type": "string"},
+				},
+			},
+			MaxOutputTokens: 64,
+		},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	if got := payload["max_tokens"]; got != float64(64) {
+		t.Fatalf("max_tokens = %v, want 64", got)
+	}
+	responseFormat, _ := payload["response_format"].(map[string]any)
+	if got := responseFormat["type"]; got != "json_schema" {
+		t.Fatalf("response_format.type = %v, want json_schema", got)
+	}
+	jsonSchema, _ := responseFormat["json_schema"].(map[string]any)
+	if _, ok := jsonSchema["strict"]; ok {
+		t.Fatalf("json_schema.strict is present for optional schema: %#v", jsonSchema["strict"])
+	}
+	schema, _ := jsonSchema["schema"].(map[string]any)
+	if got := schema["type"]; got != "object" {
+		t.Fatalf("json_schema.schema.type = %v, want object", got)
+	}
+}
+
+func TestOpenAICompatNonStream_UsesStrictStructuredOutputOnlyForClosedRequiredSchema(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"test-model","choices":[{"message":{"role":"assistant","content":"{\"outcome\":\"allow\"}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newOpenAICompat(Config{
+		Provider:   "openai-compatible",
+		Model:      "test-model",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+	}, "token")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "review")},
+		Output: &model.OutputSpec{
+			Mode: model.OutputModeSchema,
+			JSONSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"properties": map[string]any{
+					"outcome": map[string]any{"type": "string"},
+				},
+				"required": []any{"outcome"},
+			},
+		},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	responseFormat, _ := payload["response_format"].(map[string]any)
+	jsonSchema, _ := responseFormat["json_schema"].(map[string]any)
+	if got := jsonSchema["strict"]; got != true {
+		t.Fatalf("json_schema.strict = %v, want true", got)
+	}
+}
+
 func TestOpenAICompatNonStream_PropagatesFinishReason(t *testing.T) {
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -1217,6 +1321,54 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 	}
 	if finalReasoning != "thinking..." {
 		t.Fatalf("expected native openrouter reasoning field, got %q", finalReasoning)
+	}
+}
+
+func TestOpenRouterRequest_DoesNotForceStrictForOptionalStructuredOutput(t *testing.T) {
+	var payload map[string]any
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"model":"openrouter/test","choices":[{"message":{"role":"assistant","content":"{\"outcome\":\"allow\"}"},"finish_reason":"stop"}]}`)
+	}))
+	defer server.Close()
+
+	llm := newOpenRouter(Config{
+		Provider:   "openrouter",
+		API:        APIOpenRouter,
+		Model:      "openrouter/test",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+	}, "token")
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "review")},
+		Output: &model.OutputSpec{
+			Mode: model.OutputModeSchema,
+			JSONSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"outcome":   map[string]any{"type": "string"},
+					"rationale": map[string]any{"type": "string"},
+				},
+				"required": []any{"outcome"},
+			},
+		},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+	}
+	responseFormat, _ := payload["response_format"].(map[string]any)
+	jsonSchema, _ := responseFormat["json_schema"].(map[string]any)
+	if _, ok := jsonSchema["strict"]; ok {
+		t.Fatalf("json_schema.strict is present for optional OpenRouter schema: %#v", jsonSchema["strict"])
 	}
 }
 
@@ -1804,6 +1956,72 @@ func TestDeepSeekThinkingPayload(t *testing.T) {
 	if payload.MaxTokens < thinkingModeMinTokens {
 		t.Fatalf("expected MaxTokens >= %d when thinking enabled, got %d",
 			thinkingModeMinTokens, payload.MaxTokens)
+	}
+}
+
+func TestOpenAICompatProviderSpecificStructuredOutputStrategy(t *testing.T) {
+	schema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"outcome": map[string]any{"type": "string"},
+		},
+		"required": []any{"outcome"},
+	}
+	tests := []struct {
+		name string
+		llm  *openAICompatLLM
+		want string
+	}{
+		{
+			name: "deepseek",
+			llm: newDeepSeek(Config{
+				Provider: "deepseek",
+				Model:    "deepseek-v4-pro",
+			}, "token").(*openAICompatLLM),
+			want: "json_object",
+		},
+		{
+			name: "mimo",
+			llm: newMimo(Config{
+				Provider: "xiaomi",
+				Model:    "mimo-v2-pro",
+			}, "token").(*openAICompatLLM),
+			want: "json_object",
+		},
+		{
+			name: "volcengine",
+			llm: newVolcengine(Config{
+				Provider: "volcengine",
+				Model:    "doubao-seed",
+			}, "token").(*openAICompatLLM),
+			want: "json_object",
+		},
+		{
+			name: "openai-compatible",
+			llm: newOpenAICompat(Config{
+				Provider: "openai-compatible",
+				Model:    "gpt-compatible",
+			}, "token"),
+			want: "json_schema",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := openAICompatRequest{}
+			applyOpenAICompatOutput(&payload, &model.OutputSpec{
+				Mode:       model.OutputModeSchema,
+				JSONSchema: schema,
+			}, tc.llm.options.StructuredOutput)
+			if payload.ResponseFormat == nil {
+				t.Fatal("ResponseFormat = nil")
+			}
+			if payload.ResponseFormat.Type != tc.want {
+				t.Fatalf("ResponseFormat.Type = %q, want %q", payload.ResponseFormat.Type, tc.want)
+			}
+			if tc.want == "json_object" && payload.ResponseFormat.JSONSchema != nil {
+				t.Fatalf("JSONSchema = %#v, want nil for json_object strategy", payload.ResponseFormat.JSONSchema)
+			}
+		})
 	}
 }
 

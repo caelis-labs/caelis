@@ -46,7 +46,7 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
 	case SubagentStatusMsg, SubagentDoneMsg:
 		return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true}, true
-	case PlanUpdateMsg, SetHintMsg, SetRunningMsg,
+	case PlanUpdateMsg, SetHintMsg, ApprovalReviewHintMsg, SetRunningMsg,
 		SetStatusMsg, SetCommandsMsg, AttachmentCountMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
 	case ClearHistoryMsg, UserMessageMsg, TaskResultMsg:
@@ -79,7 +79,7 @@ func renderEventPolicyForGatewayEnvelope(env appgateway.EventEnvelope) renderEve
 			return renderEventPolicy{lane: renderLaneMainStream, flushLogChunks: true, dismissHints: true}
 		}
 		return renderEventPolicy{lane: renderLaneMainStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	case appgateway.EventKindToolCall, appgateway.EventKindToolResult, appgateway.EventKindApprovalRequested:
+	case appgateway.EventKindToolCall, appgateway.EventKindToolResult, appgateway.EventKindApprovalRequested, appgateway.EventKindApprovalReview:
 		return renderEventPolicy{lane: renderLaneToolStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	case appgateway.EventKindPlanUpdate:
 		return renderEventPolicy{lane: renderLaneUIState, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
@@ -234,6 +234,9 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case SetHintMsg:
 		model, cmd := m.handleSetHintMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
+	case ApprovalReviewHintMsg:
+		model, cmd := m.handleApprovalReviewHintMsg(typed)
+		return model, tea.Batch(policyCmd, cmd), true
 	case SetRunningMsg:
 		return m.handleSetRunningMsg(typed), policyCmd, true
 	case SetStatusMsg:
@@ -311,7 +314,7 @@ func (m *Model) flushImmediateViewportSyncForMsg(msg tea.Msg) tea.Cmd {
 	switch typed := msg.(type) {
 	case appgateway.EventEnvelope:
 		switch typed.Event.Kind {
-		case appgateway.EventKindToolCall, appgateway.EventKindApprovalRequested, appgateway.EventKindPlanUpdate:
+		case appgateway.EventKindToolCall, appgateway.EventKindApprovalRequested, appgateway.EventKindApprovalReview, appgateway.EventKindPlanUpdate:
 			return m.flushPendingViewportSync()
 		}
 	}
@@ -368,6 +371,16 @@ func (m *Model) handleSetHintMsg(msg SetHintMsg) (tea.Model, tea.Cmd) {
 		clearOnMessage: msg.ClearOnMessage,
 		clearAfter:     after,
 	})
+}
+
+func (m *Model) handleApprovalReviewHintMsg(msg ApprovalReviewHintMsg) (tea.Model, tea.Cmd) {
+	if msg.Pending {
+		m.approvalReviewHint = strings.TrimSpace(msg.Text)
+	} else {
+		m.approvalReviewHint = ""
+	}
+	m.ensureViewportLayout()
+	return m, m.resumeRunningAnimationIfNeeded()
 }
 
 func (m *Model) handleSetRunningMsg(msg SetRunningMsg) tea.Model {
