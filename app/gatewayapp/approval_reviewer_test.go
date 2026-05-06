@@ -438,7 +438,7 @@ func (m *approvalReviewerProviderRecorder) Generate(ctx context.Context, req *sd
 	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
 		for event, err := range m.base.Generate(ctx, req) {
 			if event != nil && event.Response != nil {
-				m.recordUsage(event.Response.Usage)
+				m.recordUsage(event.Usage)
 			}
 			if !yield(event, err) {
 				return
