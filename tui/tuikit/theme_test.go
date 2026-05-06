@@ -61,10 +61,13 @@ func TestResolveThemeForBackground_SelectsLightTheme(t *testing.T) {
 	if theme.IsDark {
 		t.Fatal("expected light theme for light terminal background")
 	}
-	if got := stringifyColor(theme.TextPrimary); got != "#1f2937" {
-		t.Fatalf("expected readable light-theme text, got %q", got)
+	if theme.TextPrimary != nil {
+		t.Fatalf("expected light theme body text to inherit terminal foreground, got %v", theme.TextPrimary)
 	}
-	if got := stringifyColor(theme.PanelBorder); got != "#c8d2df" {
+	if got := stringifyColor(theme.Focus); got != "#0077aa" {
+		t.Fatalf("expected light-theme focus accent, got %q", got)
+	}
+	if got := stringifyColor(theme.PanelBorder); got != "#c9d1dc" {
 		t.Fatalf("expected light-theme border, got %q", got)
 	}
 }
@@ -97,42 +100,48 @@ func TestResolveThemeFromOptions_NoColor(t *testing.T) {
 	}
 }
 
-func TestDefaultThemeSoftensTranscriptSupportingColors(t *testing.T) {
+func TestAdaptiveDefaultThemeUsesTerminalNativeBodyAndSemanticAccents(t *testing.T) {
 	theme := ResolveThemeWithState(true, false, colorprofile.TrueColor)
-	if got := stringifyColor(theme.ReasoningFg); got != "#7f8ba3" {
-		t.Fatalf("expected softer reasoning color, got %q", got)
+	if theme.TextPrimary != nil {
+		t.Fatalf("expected default text to inherit terminal foreground, got %v", theme.TextPrimary)
 	}
-	if got := stringifyColor(theme.ToolFg); got != "#8bd5ff" {
-		t.Fatalf("expected quieter tool meta color, got %q", got)
+	if theme.AssistantFg != nil {
+		t.Fatalf("expected assistant text to inherit terminal foreground, got %v", theme.AssistantFg)
 	}
-	if got := stringifyColor(theme.TranscriptRail); got != "#465268" {
-		t.Fatalf("expected quieter transcript rail, got %q", got)
+	if theme.ReasoningFg != nil {
+		t.Fatalf("expected reasoning text to inherit terminal foreground plus faint/italic style, got %v", theme.ReasoningFg)
 	}
-	if got := stringifyColor(theme.SeparatorFg); got != "#293241" {
-		t.Fatalf("expected subtler separator, got %q", got)
+	if got := stringifyColor(theme.ToolFg); got != "#22d3ee" {
+		t.Fatalf("expected tool meta to use cyan focus color, got %q", got)
+	}
+	if got := stringifyColor(theme.Accent); got != "#d78bff" {
+		t.Fatalf("expected agent/model accent color, got %q", got)
+	}
+	if got := stringifyColor(theme.TranscriptRail); got != "#3b4352" {
+		t.Fatalf("expected subtle transcript rail, got %q", got)
 	}
 }
 
 func TestDefaultLightDarkPalettesExposeModernSemanticColors(t *testing.T) {
 	dark := ResolveThemeWithState(true, false, colorprofile.TrueColor)
-	if got := stringifyColor(dark.AppBg); got != "#0f1117" {
-		t.Fatalf("dark app bg = %q", got)
+	if dark.AppBg != nil {
+		t.Fatalf("dark app bg = %v", dark.AppBg)
 	}
-	if got := stringifyColor(dark.Focus); got != "#8bd5ff" {
+	if got := stringifyColor(dark.Focus); got != "#22d3ee" {
 		t.Fatalf("dark focus = %q", got)
 	}
-	if got := stringifyColor(dark.CodeBlockBg); got != "#171c26" {
+	if got := stringifyColor(dark.CodeBlockBg); got != "#141820" {
 		t.Fatalf("dark code block bg = %q", got)
 	}
 
 	light := ResolveThemeWithState(false, false, colorprofile.TrueColor)
-	if got := stringifyColor(light.AppBg); got != "#fbfcfe" {
-		t.Fatalf("light app bg = %q", got)
+	if light.AppBg != nil {
+		t.Fatalf("light app bg = %v", light.AppBg)
 	}
-	if got := stringifyColor(light.ToolFg); got != "#0f766e" {
+	if got := stringifyColor(light.ToolFg); got != "#0077aa" {
 		t.Fatalf("light tool fg = %q", got)
 	}
-	if got := stringifyColor(light.CodeBg); got != "#fff7ed" {
+	if got := stringifyColor(light.CodeBg); got != "#eef2f7" {
 		t.Fatalf("light inline code bg = %q", got)
 	}
 }
@@ -140,14 +149,54 @@ func TestDefaultLightDarkPalettesExposeModernSemanticColors(t *testing.T) {
 func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	theme := ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	tokens := theme.Tokens()
-	if got := stringifyColor(tokens.ToolName.GetForeground()); got != "#8bd5ff" {
+	if got := stringifyColor(tokens.ToolName.GetForeground()); got != "#22d3ee" {
 		t.Fatalf("tool name token foreground = %q", got)
 	}
-	if got := stringifyColor(tokens.MarkdownInlineCode.GetBackground()); got != "#20283a" {
+	if got := stringifyColor(tokens.MarkdownInlineCode.GetBackground()); got != "#1d2430" {
 		t.Fatalf("inline code token background = %q", got)
 	}
-	if got := stringifyColor(tokens.MarkdownTableEdge.GetForeground()); got != "#59657a" {
+	if got := stringifyColor(tokens.MarkdownTableEdge.GetForeground()); got != "#596579" {
 		t.Fatalf("table edge token foreground = %q", got)
+	}
+	if !tokens.TextSecondary.GetFaint() {
+		t.Fatal("expected terminal-native secondary text token to use faint style")
+	}
+}
+
+func TestResolveThemeWithBackgroundColorBlendsAdaptiveSurfaces(t *testing.T) {
+	dark := ResolveThemeWithBackgroundColor(color.RGBA{A: 255}, false, colorprofile.TrueColor)
+	if !dark.IsDark {
+		t.Fatal("expected black terminal background to select dark theme")
+	}
+	if got := stringifyColor(dark.ModalBg); got != "#141414" {
+		t.Fatalf("dark modal bg = %q", got)
+	}
+	if got := stringifyColor(dark.UserBg); got != "#1f1f1f" {
+		t.Fatalf("dark user bg = %q", got)
+	}
+
+	light := ResolveThemeWithBackgroundColor(color.RGBA{R: 255, G: 255, B: 255, A: 255}, false, colorprofile.TrueColor)
+	if light.IsDark {
+		t.Fatal("expected white terminal background to select light theme")
+	}
+	if got := stringifyColor(light.UserBg); got != "#f6f6f6" {
+		t.Fatalf("light user bg = %q", got)
+	}
+	if got := stringifyColor(light.CodeBg); got != "#f1f1f1" {
+		t.Fatalf("light code bg = %q", got)
+	}
+}
+
+func TestAdaptiveDefaultThemeDisablesRichBackgroundsForANSI(t *testing.T) {
+	theme := ResolveThemeWithState(true, false, colorprofile.ANSI)
+	if theme.DiffAddBg != nil || theme.DiffRemoveBg != nil || theme.CodeBg != nil || theme.CommandActive != nil {
+		t.Fatalf("expected ANSI theme to avoid rich backgrounds, got add=%v del=%v code=%v selection=%v", theme.DiffAddBg, theme.DiffRemoveBg, theme.CodeBg, theme.CommandActive)
+	}
+	if got := stringifyColor(theme.Focus); got != "6" {
+		t.Fatalf("expected ANSI focus cyan, got %q", got)
+	}
+	if got := stringifyColor(theme.Success); got != "2" {
+		t.Fatalf("expected ANSI success green, got %q", got)
 	}
 }
 

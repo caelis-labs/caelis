@@ -406,7 +406,7 @@ func (m *Model) runningTickerStyleSet() []lipgloss.Style {
 	m.runningTickerThemeKey = themeKey
 	m.runningTickerStyles = []lipgloss.Style{
 		m.theme.HelpHintTextStyle(),
-		lipgloss.NewStyle().Foreground(m.theme.TextSecondary),
+		m.theme.SecondaryTextStyle(),
 		lipgloss.NewStyle().Foreground(m.theme.Info),
 		lipgloss.NewStyle().Foreground(m.theme.SpinnerFg),
 		lipgloss.NewStyle().Foreground(m.theme.Focus),
@@ -1248,13 +1248,12 @@ func (m *Model) renderPromptChoiceLine(choice promptChoice, selected bool) strin
 		mainText += "  " + detail
 	}
 	mainText = truncateTailDisplay(mainText, contentWidth)
-	selectedLabelStyle := lipgloss.NewStyle().
-		Foreground(m.theme.CommandText).
-		Background(m.theme.CommandActive).
-		Bold(true)
-	selectedDetailStyle := lipgloss.NewStyle().
-		Foreground(m.theme.CommandSubText).
-		Background(m.theme.CommandActive)
+	selectedLabelStyle := lipgloss.NewStyle().Foreground(m.theme.Focus).Bold(true)
+	selectedDetailStyle := m.theme.HelpHintTextStyle()
+	if m.theme.CommandActive != nil {
+		selectedLabelStyle = selectedLabelStyle.Background(m.theme.CommandActive)
+		selectedDetailStyle = selectedDetailStyle.Background(m.theme.CommandActive)
+	}
 	if detail == "" {
 		if selected {
 			return m.theme.PromptStyle().Render(gutter) + selectedLabelStyle.Render(mainText)

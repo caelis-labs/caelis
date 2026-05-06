@@ -30,9 +30,9 @@ func NewModel(cfg Config) *Model {
 	palette.SetShowHelp(false)
 	palette.SetShowStatusBar(false)
 	palette.SetFilteringEnabled(true)
-	palette.Styles.Title = lipgloss.NewStyle().Foreground(theme.PanelTitle).Bold(true)
-	palette.Styles.PaginationStyle = lipgloss.NewStyle().Foreground(theme.TextSecondary)
-	palette.Styles.HelpStyle = lipgloss.NewStyle().Foreground(theme.TextSecondary)
+	palette.Styles.Title = theme.TitleStyle()
+	palette.Styles.PaginationStyle = theme.HelpHintTextStyle()
+	palette.Styles.HelpStyle = theme.HelpHintTextStyle()
 
 	ta := textarea.New()
 	ta.Placeholder = "Type your message, @agent, #path/to/file, or $skill"
@@ -253,10 +253,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.themeAuto {
 			return m, nil
 		}
-		nextTheme := tuikit.ResolveThemeWithState(typed.IsDark(), m.noColor, m.colorProfile)
-		if nextTheme.Name == m.theme.Name && nextTheme.IsDark == m.theme.IsDark {
-			return m, nil
-		}
+		nextTheme := tuikit.ResolveThemeWithBackgroundColor(typed.Color, m.noColor, m.colorProfile)
 		m.applyTheme(nextTheme)
 		return m, nil
 
@@ -383,9 +380,9 @@ func (m *Model) requestBackgroundColorIfAutoCmd() tea.Cmd {
 
 func (m *Model) applyPaletteTheme(theme tuikit.Theme) {
 	styles := m.palette.Styles
-	styles.Title = lipgloss.NewStyle().Foreground(theme.PanelTitle).Bold(true)
-	styles.PaginationStyle = lipgloss.NewStyle().Foreground(theme.TextSecondary)
-	styles.HelpStyle = lipgloss.NewStyle().Foreground(theme.TextSecondary)
+	styles.Title = theme.TitleStyle()
+	styles.PaginationStyle = theme.HelpHintTextStyle()
+	styles.HelpStyle = theme.HelpHintTextStyle()
 	m.palette.Styles = styles
 }
 

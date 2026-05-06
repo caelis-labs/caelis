@@ -1312,7 +1312,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	toolIdx := strings.Index(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside")
 	reviewIdx := strings.Index(plain, "⚠ "+reviewText)
 	assistantIdx := strings.Index(plain, "approval-dependent work finished")
-	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || !(toolIdx < reviewIdx && reviewIdx < assistantIdx) {
+	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
 		t.Fatalf("rendered rows = %q, want approval review next to tool before later assistant text", plain)
 	}
 	if len(block.Events) < 3 || block.Events[0].Kind != SEToolCall || block.Events[0].CallID != "perm-1" || block.Events[1].Kind != SEApproval || block.Events[1].CallID != "perm-1" || block.Events[2].Kind != SEAssistant {

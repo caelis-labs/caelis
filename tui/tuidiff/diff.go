@@ -442,12 +442,24 @@ func renderContent(spans []InlineSpan, kind RowKind, width int, theme tuikit.The
 func diffStylesForKind(kind RowKind, theme tuikit.Theme) (lipgloss.Style, lipgloss.Style) {
 	switch kind {
 	case RowAdd:
-		base := lipgloss.NewStyle().Foreground(theme.TextPrimary).Background(theme.DiffAddBg)
-		strong := lipgloss.NewStyle().Foreground(theme.TextPrimary).Background(theme.DiffAddStrongBg)
+		base := theme.TextStyle()
+		strong := theme.TextStyle()
+		if theme.DiffAddBg != nil {
+			base = base.Background(theme.DiffAddBg)
+		}
+		if theme.DiffAddStrongBg != nil {
+			strong = strong.Background(theme.DiffAddStrongBg)
+		}
 		return base, strong
 	case RowRemove:
-		base := lipgloss.NewStyle().Foreground(theme.TextPrimary).Background(theme.DiffRemoveBg)
-		strong := lipgloss.NewStyle().Foreground(theme.TextPrimary).Background(theme.DiffRemoveStrongBg)
+		base := theme.TextStyle()
+		strong := theme.TextStyle()
+		if theme.DiffRemoveBg != nil {
+			base = base.Background(theme.DiffRemoveBg)
+		}
+		if theme.DiffRemoveStrongBg != nil {
+			strong = strong.Background(theme.DiffRemoveStrongBg)
+		}
 		return base, strong
 	default:
 		empty := lipgloss.NewStyle()

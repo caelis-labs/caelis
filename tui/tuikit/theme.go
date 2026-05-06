@@ -2,6 +2,7 @@ package tuikit
 
 import (
 	"image/color"
+	"math"
 	"os"
 	"strings"
 
@@ -145,24 +146,37 @@ func ResolveThemeWithState(isDark bool, noColor bool, profile colorprofile.Profi
 	})
 }
 
+func ResolveThemeWithBackgroundColor(background color.Color, noColor bool, profile colorprofile.Profile) Theme {
+	return resolveTheme(themeResolveOptions{
+		backgroundKnown:      background != nil,
+		backgroundDark:       colorIsDark(background),
+		backgroundColorKnown: background != nil,
+		backgroundColor:      background,
+		noColor:              noColor,
+		colorProfileKnown:    profile != colorprofile.Unknown,
+		colorProfile:         profile,
+	})
+}
+
 func ThemeUsesAutoBackground() bool {
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_THEME")))
 	return name == "" || name == "auto" || name == "default"
 }
 
 type themeResolveOptions struct {
-	backgroundKnown   bool
-	backgroundDark    bool
-	colorProfileKnown bool
-	colorProfile      colorprofile.Profile
-	noColor           bool
+	backgroundKnown      bool
+	backgroundDark       bool
+	backgroundColorKnown bool
+	backgroundColor      color.Color
+	colorProfileKnown    bool
+	colorProfile         colorprofile.Profile
+	noColor              bool
 }
 
 func resolveTheme(opts themeResolveOptions) Theme {
 	profile := resolvedColorProfile(opts)
-	useTrueColor := profile == colorprofile.TrueColor
 	name := strings.ToLower(strings.TrimSpace(os.Getenv("CAELIS_THEME")))
-	theme := namedTheme(name, useTrueColor, resolvedDarkBackground(opts))
+	theme := namedTheme(name, profile, resolvedDarkBackground(opts), resolvedBackgroundColor(opts))
 	theme.Profile = profile
 	theme.NoColor = opts.noColor
 	if accent := strings.TrimSpace(os.Getenv("CAELIS_ACCENT")); accent != "" {
@@ -203,6 +217,13 @@ func resolvedDarkBackground(opts themeResolveOptions) bool {
 		return opts.backgroundDark
 	}
 	return lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
+}
+
+func resolvedBackgroundColor(opts themeResolveOptions) color.Color {
+	if opts.backgroundColorKnown {
+		return opts.backgroundColor
+	}
+	return nil
 }
 
 func supportsTrueColor() bool {
@@ -292,28 +313,23 @@ func stripThemeColors(theme Theme) Theme {
 	return theme
 }
 
-func namedTheme(name string, trueColor bool, darkBackground bool) Theme {
+func namedTheme(name string, profile colorprofile.Profile, darkBackground bool, background color.Color) Theme {
+	trueColor := profile == colorprofile.TrueColor
 	switch name {
 	case "", "auto", "default":
-		if darkBackground {
-			return defaultThemeVariant(trueColor)
-		}
-		return defaultLightThemeVariant(trueColor)
+		return defaultAdaptiveThemeVariant(profile, darkBackground, background)
 	case "dark":
-		return defaultThemeVariant(trueColor)
+		return defaultAdaptiveThemeVariant(profile, true, background)
 	case "light":
-		return defaultLightThemeVariant(trueColor)
+		return defaultAdaptiveThemeVariant(profile, false, background)
 	case "nord":
-		return nordTheme(trueColor)
+		return stripThemeBackgroundsForANSI(nordTheme(trueColor), profile)
 	case "solarized":
-		return solarizedTheme(trueColor)
+		return stripThemeBackgroundsForANSI(solarizedTheme(trueColor), profile)
 	case "dracula":
-		return draculaTheme(trueColor)
+		return stripThemeBackgroundsForANSI(draculaTheme(trueColor), profile)
 	default:
-		if darkBackground {
-			return defaultThemeVariant(trueColor)
-		}
-		return defaultLightThemeVariant(trueColor)
+		return defaultAdaptiveThemeVariant(profile, darkBackground, background)
 	}
 }
 
@@ -322,6 +338,318 @@ func themeColor(trueColor bool, rich string, fallback string) color.Color {
 		return lipgloss.Color(rich)
 	}
 	return lipgloss.Color(fallback)
+}
+
+func profileColor(profile colorprofile.Profile, rich string, ansi256 string, ansi16 string) color.Color {
+	switch profile {
+	case colorprofile.TrueColor:
+		if rich == "" {
+			return nil
+		}
+		return lipgloss.Color(rich)
+	case colorprofile.ANSI256:
+		if ansi256 == "" {
+			return nil
+		}
+		return lipgloss.Color(ansi256)
+	case colorprofile.ANSI:
+		if ansi16 == "" {
+			return nil
+		}
+		return lipgloss.Color(ansi16)
+	default:
+		return nil
+	}
+}
+
+func adaptiveBackgroundColor(profile colorprofile.Profile, terminal color.Color, dark bool, darkAlpha, lightAlpha float64, darkFallback, lightFallback, dark256, light256 string) color.Color {
+	if profile == colorprofile.TrueColor {
+		if r, g, b, ok := rgb8(terminal); ok {
+			top := [3]uint8{0, 0, 0}
+			alpha := lightAlpha
+			if dark {
+				top = [3]uint8{255, 255, 255}
+				alpha = darkAlpha
+			}
+			return lipgloss.Color(hexColor(blendRGB([3]uint8{r, g, b}, top, alpha)))
+		}
+		if dark {
+			return lipgloss.Color(darkFallback)
+		}
+		return lipgloss.Color(lightFallback)
+	}
+	if profile == colorprofile.ANSI256 {
+		if dark {
+			return lipgloss.Color(dark256)
+		}
+		return lipgloss.Color(light256)
+	}
+	return nil
+}
+
+func adaptiveTintColor(profile colorprofile.Profile, terminal color.Color, dark bool, darkTop, lightTop [3]uint8, darkAlpha, lightAlpha float64, darkFallback, lightFallback, dark256, light256 string) color.Color {
+	if profile == colorprofile.TrueColor {
+		if r, g, b, ok := rgb8(terminal); ok {
+			top := lightTop
+			alpha := lightAlpha
+			if dark {
+				top = darkTop
+				alpha = darkAlpha
+			}
+			return lipgloss.Color(hexColor(blendRGB([3]uint8{r, g, b}, top, alpha)))
+		}
+		if dark {
+			return lipgloss.Color(darkFallback)
+		}
+		return lipgloss.Color(lightFallback)
+	}
+	if profile == colorprofile.ANSI256 {
+		if dark {
+			return lipgloss.Color(dark256)
+		}
+		return lipgloss.Color(light256)
+	}
+	return nil
+}
+
+func blendRGB(base [3]uint8, top [3]uint8, alpha float64) [3]uint8 {
+	return [3]uint8{
+		blendChannel(base[0], top[0], alpha),
+		blendChannel(base[1], top[1], alpha),
+		blendChannel(base[2], top[2], alpha),
+	}
+}
+
+func blendChannel(base uint8, top uint8, alpha float64) uint8 {
+	value := (float64(top) * alpha) + (float64(base) * (1 - alpha))
+	return uint8(math.Round(value))
+}
+
+func hexColor(rgb [3]uint8) string {
+	const hex = "0123456789abcdef"
+	out := []byte{'#', '0', '0', '0', '0', '0', '0'}
+	for i, c := range rgb {
+		out[1+i*2] = hex[c>>4]
+		out[2+i*2] = hex[c&0x0f]
+	}
+	return string(out)
+}
+
+func rgb8(c color.Color) (uint8, uint8, uint8, bool) {
+	if c == nil {
+		return 0, 0, 0, false
+	}
+	r, g, b, _ := c.RGBA()
+	return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), true
+}
+
+func colorIsDark(c color.Color) bool {
+	r, g, b, ok := rgb8(c)
+	if !ok {
+		return true
+	}
+	luma := (0.2126 * float64(r)) + (0.7152 * float64(g)) + (0.0722 * float64(b))
+	return luma < 140
+}
+
+func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) Theme {
+	if profile != colorprofile.ANSI {
+		return theme
+	}
+	theme.AppBg = nil
+	theme.ModalBg = nil
+	theme.StatusBg = nil
+	theme.CommandBg = nil
+	theme.CommandActive = nil
+	theme.UserBg = nil
+	theme.DiffAddBg = nil
+	theme.DiffAddStrongBg = nil
+	theme.DiffRemoveBg = nil
+	theme.DiffRemoveStrongBg = nil
+	theme.InputBarBg = nil
+	theme.ToolOutputBg = nil
+	theme.NewMsgBg = nil
+	theme.CodeBg = nil
+	theme.CodeBlockBg = nil
+	theme.TranscriptPillBg = nil
+	theme.CodeSurface = nil
+	theme.TableHeaderBg = nil
+	return theme
+}
+
+func defaultAdaptiveThemeVariant(profile colorprofile.Profile, dark bool, background color.Color) Theme {
+	if dark {
+		return adaptiveDarkThemeVariant(profile, background)
+	}
+	return adaptiveLightThemeVariant(profile, background)
+}
+
+func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Color) Theme {
+	surface1 := adaptiveBackgroundColor(profile, background, true, 0.08, 0, "#141820", "", "234", "")
+	surface2 := adaptiveBackgroundColor(profile, background, true, 0.12, 0, "#1d2430", "", "236", "")
+	selection := adaptiveTintColor(profile, background, true, [3]uint8{34, 211, 238}, [3]uint8{}, 0.18, 0, "#18313a", "", "23", "")
+	addBg := adaptiveTintColor(profile, background, true, [3]uint8{46, 204, 113}, [3]uint8{}, 0.18, 0, "#213a2b", "", "22", "")
+	addStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{46, 204, 113}, [3]uint8{}, 0.28, 0, "#285139", "", "29", "")
+	delBg := adaptiveTintColor(profile, background, true, [3]uint8{255, 92, 87}, [3]uint8{}, 0.20, 0, "#4a221d", "", "52", "")
+	delStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{255, 92, 87}, [3]uint8{}, 0.30, 0, "#663027", "", "88", "")
+
+	return Theme{
+		Name:           "dark",
+		IsDark:         true,
+		AppBg:          nil,
+		PanelBorder:    profileColor(profile, "#3b4352", "240", "8"),
+		PanelTitle:     nil,
+		TextPrimary:    nil,
+		TextSecondary:  nil,
+		SecondaryText:  nil,
+		MutedText:      nil,
+		Info:           profileColor(profile, "#22d3ee", "44", "6"),
+		Success:        profileColor(profile, "#2ecc71", "35", "2"),
+		Warning:        profileColor(profile, "#d99a1e", "178", "3"),
+		Error:          profileColor(profile, "#ff5c57", "203", "1"),
+		Accent:         profileColor(profile, "#d78bff", "177", "5"),
+		Focus:          profileColor(profile, "#22d3ee", "44", "6"),
+		ModalBg:        surface1,
+		StatusBg:       surface1,
+		StatusText:     nil,
+		CommandBg:      nil,
+		CommandActive:  selection,
+		CommandText:    nil,
+		CommandSubText: nil,
+
+		AssistantFg:        nil,
+		ReasoningFg:        nil,
+		UserFg:             nil,
+		UserBg:             surface2,
+		UserPrefixFg:       profileColor(profile, "#22d3ee", "44", "6"),
+		UserMentionFg:      profileColor(profile, "#22d3ee", "44", "6"),
+		ToolFg:             profileColor(profile, "#22d3ee", "44", "6"),
+		DiffAddFg:          profileColor(profile, "#2ecc71", "35", "2"),
+		DiffRemoveFg:       profileColor(profile, "#ff5c57", "203", "1"),
+		DiffHeaderFg:       nil,
+		DiffHunkFg:         profileColor(profile, "#d78bff", "177", "5"),
+		DiffAddBg:          addBg,
+		DiffAddStrongBg:    addStrongBg,
+		DiffRemoveBg:       delBg,
+		DiffRemoveStrongBg: delStrongBg,
+		DiffLineNoFg:       nil,
+		DiffGutterFg:       nil,
+		DiffPanelBorder:    profileColor(profile, "#3b4352", "240", "8"),
+		SectionFg:          nil,
+		KeyLabelFg:         nil,
+		NoteFg:             nil,
+		PromptFg:           profileColor(profile, "#22d3ee", "44", "6"),
+		CursorFg:           nil,
+		ScrollHintFg:       profileColor(profile, "#d99a1e", "178", "3"),
+
+		InputBarBg:          nil,
+		InputBarFg:          nil,
+		ToolOutputBg:        nil,
+		HelpHintFg:          nil,
+		SpinnerFg:           profileColor(profile, "#22d3ee", "44", "6"),
+		SeparatorFg:         profileColor(profile, "#3b4352", "240", "8"),
+		RoleBorderFg:        profileColor(profile, "#3b4352", "240", "8"),
+		NewMsgBg:            selection,
+		ComposerBorder:      profileColor(profile, "#3b4352", "240", "8"),
+		ComposerBorderFocus: profileColor(profile, "#22d3ee", "44", "6"),
+		ScrollbarTrack:      profileColor(profile, "#303846", "238", "8"),
+		ScrollbarThumb:      profileColor(profile, "#7b8798", "245", "7"),
+		LinkFg:              profileColor(profile, "#22d3ee", "44", "6"),
+		CodeFg:              profileColor(profile, "#d99a1e", "178", "3"),
+		CodeBg:              surface2,
+		CodeBlockFg:         nil,
+		CodeBlockBg:         surface1,
+		TranscriptRail:      profileColor(profile, "#3b4352", "240", "8"),
+		TranscriptShell:     profileColor(profile, "#303846", "238", "8"),
+		TranscriptPillBg:    nil,
+		CodeSurface:         surface1,
+		TableHeaderBg:       surface1,
+		TableBorder:         profileColor(profile, "#596579", "242", "8"),
+	}
+}
+
+func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Color) Theme {
+	surface1 := adaptiveBackgroundColor(profile, background, false, 0, 0.035, "", "#f6f7f9", "", "255")
+	surface2 := adaptiveBackgroundColor(profile, background, false, 0, 0.055, "", "#eef2f7", "", "255")
+	selection := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{0, 119, 170}, 0, 0.10, "", "#e8f6fb", "", "195")
+	addBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{46, 204, 113}, 0, 0.16, "", "#dafbe1", "", "194")
+	addStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{46, 204, 113}, 0, 0.28, "", "#aceebb", "", "157")
+	delBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{255, 92, 87}, 0, 0.12, "", "#ffebe9", "", "224")
+	delStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{255, 92, 87}, 0, 0.22, "", "#ffcecb", "", "217")
+
+	return Theme{
+		Name:           "light",
+		IsDark:         false,
+		AppBg:          nil,
+		PanelBorder:    profileColor(profile, "#c9d1dc", "252", "8"),
+		PanelTitle:     nil,
+		TextPrimary:    nil,
+		TextSecondary:  nil,
+		SecondaryText:  nil,
+		MutedText:      nil,
+		Info:           profileColor(profile, "#0077aa", "32", "6"),
+		Success:        profileColor(profile, "#188a42", "28", "2"),
+		Warning:        profileColor(profile, "#a15c00", "130", "3"),
+		Error:          profileColor(profile, "#c2410c", "166", "1"),
+		Accent:         profileColor(profile, "#8a3ffc", "99", "5"),
+		Focus:          profileColor(profile, "#0077aa", "32", "6"),
+		ModalBg:        surface1,
+		StatusBg:       surface1,
+		StatusText:     nil,
+		CommandBg:      nil,
+		CommandActive:  selection,
+		CommandText:    nil,
+		CommandSubText: nil,
+
+		AssistantFg:        nil,
+		ReasoningFg:        nil,
+		UserFg:             nil,
+		UserBg:             surface1,
+		UserPrefixFg:       profileColor(profile, "#0077aa", "32", "6"),
+		UserMentionFg:      profileColor(profile, "#0077aa", "32", "6"),
+		ToolFg:             profileColor(profile, "#0077aa", "32", "6"),
+		DiffAddFg:          profileColor(profile, "#188a42", "28", "2"),
+		DiffRemoveFg:       profileColor(profile, "#c2410c", "166", "1"),
+		DiffHeaderFg:       nil,
+		DiffHunkFg:         profileColor(profile, "#8a3ffc", "99", "5"),
+		DiffAddBg:          addBg,
+		DiffAddStrongBg:    addStrongBg,
+		DiffRemoveBg:       delBg,
+		DiffRemoveStrongBg: delStrongBg,
+		DiffLineNoFg:       nil,
+		DiffGutterFg:       nil,
+		DiffPanelBorder:    profileColor(profile, "#c9d1dc", "252", "8"),
+		SectionFg:          nil,
+		KeyLabelFg:         nil,
+		NoteFg:             nil,
+		PromptFg:           profileColor(profile, "#0077aa", "32", "6"),
+		CursorFg:           nil,
+		ScrollHintFg:       profileColor(profile, "#a15c00", "130", "3"),
+
+		InputBarBg:          nil,
+		InputBarFg:          nil,
+		ToolOutputBg:        nil,
+		HelpHintFg:          nil,
+		SpinnerFg:           profileColor(profile, "#0077aa", "32", "6"),
+		SeparatorFg:         profileColor(profile, "#c9d1dc", "252", "8"),
+		RoleBorderFg:        profileColor(profile, "#c9d1dc", "252", "8"),
+		NewMsgBg:            selection,
+		ComposerBorder:      profileColor(profile, "#c9d1dc", "252", "8"),
+		ComposerBorderFocus: profileColor(profile, "#0077aa", "32", "6"),
+		ScrollbarTrack:      profileColor(profile, "#d8e0ea", "254", "8"),
+		ScrollbarThumb:      profileColor(profile, "#7f8b9a", "245", "7"),
+		LinkFg:              profileColor(profile, "#0077aa", "32", "6"),
+		CodeFg:              profileColor(profile, "#a15c00", "130", "3"),
+		CodeBg:              surface2,
+		CodeBlockFg:         nil,
+		CodeBlockBg:         surface1,
+		TranscriptRail:      profileColor(profile, "#c9d1dc", "252", "8"),
+		TranscriptShell:     profileColor(profile, "#d8e0ea", "254", "8"),
+		TranscriptPillBg:    nil,
+		CodeSurface:         surface1,
+		TableHeaderBg:       surface1,
+		TableBorder:         profileColor(profile, "#9aa7b8", "248", "8"),
+	}
 }
 
 func defaultThemeVariant(trueColor bool) Theme {
@@ -604,81 +932,69 @@ func draculaTheme(trueColor bool) Theme {
 }
 
 func (t Theme) FrameStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
+	return fgStyle(t.TextPrimary).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(t.PanelBorder).
-		Foreground(t.TextPrimary).
 		Padding(0, 1)
 }
 
 func (t Theme) StatusStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.StatusText).
-		Padding(0, StatusInset)
+	return fgStyle(t.StatusText).Padding(0, StatusInset)
 }
 
 func (t Theme) HintStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.TextSecondary)
+	return quietStyle(t, t.TextSecondary)
 }
 
 func (t Theme) SecondaryTextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.SecondaryText)
+	return quietStyle(t, t.SecondaryText)
 }
 
 func (t Theme) MutedTextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.MutedText)
+	return quietStyle(t, t.MutedText)
 }
 
 func (t Theme) HintRowStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.TextSecondary).
-		Padding(0, StatusInset)
+	return quietStyle(t, t.TextSecondary).Padding(0, StatusInset)
 }
 
 func (t Theme) TextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.TextPrimary)
+	return fgStyle(t.TextPrimary)
 }
 
 func (t Theme) TitleStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(t.PanelTitle)
+	return fgStyle(t.PanelTitle).Bold(true)
 }
 
 func (t Theme) ModalStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Background(t.ModalBg).
+	return withBg(lipgloss.NewStyle(), t.ModalBg).
 		BorderStyle(lipgloss.RoundedBorder()).
 		BorderForeground(t.Focus).
 		Padding(1, 2)
 }
 
 func (t Theme) CommandActiveStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.CommandText).
+	return withBg(fgStyle(t.Focus), t.CommandActive).
 		Bold(true).
-		Underline(true).
 		Padding(0, 1)
 }
 
 func (t Theme) CommandStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.CommandText).
-		Padding(0, 1)
+	return fgStyle(t.CommandText).Padding(0, 1)
 }
 
 // ---------------------------------------------------------------------------
 // Line-style rendering helpers
 // ---------------------------------------------------------------------------
 
-// AssistantStyle renders assistant text (green prefix).
+// AssistantStyle renders assistant text.
 func (t Theme) AssistantStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.AssistantFg)
+	return fgStyle(t.AssistantFg)
 }
 
 // ReasoningStyle renders reasoning/thinking text (dimmed + italic).
 func (t Theme) ReasoningStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.ReasoningFg).Italic(true)
+	return quietStyle(t, t.ReasoningFg).Italic(true)
 }
 
 // ToolStyle renders tool call/result prefixes.
@@ -709,89 +1025,87 @@ func (t Theme) ToolOutputStyle() lipgloss.Style {
 
 // UserStyle renders user messages in a subtle chat bubble-like background.
 func (t Theme) UserStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.UserFg).Bold(true)
+	return fgStyle(t.UserFg).Bold(true)
 }
 
 // UserPrefixStyle renders the leading "> " marker for user messages.
 func (t Theme) UserPrefixStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.UserPrefixFg).Bold(true)
+	return fgStyle(t.UserPrefixFg).Bold(true)
 }
 
 // UserMentionStyle renders @path mentions inside user messages.
 func (t Theme) UserMentionStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.UserMentionFg).Bold(true)
+	return fgStyle(t.UserMentionFg).Bold(true)
 }
 
 // DiffAddStyle renders added lines in diffs (green).
 func (t Theme) DiffAddStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffAddFg)
+	return fgStyle(t.DiffAddFg)
 }
 
 // DiffRemoveStyle renders removed lines in diffs (red).
 func (t Theme) DiffRemoveStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffRemoveFg)
+	return fgStyle(t.DiffRemoveFg)
 }
 
 // DiffHeaderStyle renders diff headers (dimmed + bold).
 func (t Theme) DiffHeaderStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffHeaderFg).Bold(true)
+	return quietStyle(t, t.DiffHeaderFg).Bold(true)
 }
 
 // DiffHunkStyle renders diff hunk headers (@@ ... @@) in blue.
 func (t Theme) DiffHunkStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffHunkFg).Bold(true)
+	return fgStyle(t.DiffHunkFg).Bold(true)
 }
 
 // DiffLineNoStyle renders diff line numbers.
 func (t Theme) DiffLineNoStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffLineNoFg)
+	return quietStyle(t, t.DiffLineNoFg)
 }
 
 // DiffGutterStyle renders diff markers/gutters.
 func (t Theme) DiffGutterStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffGutterFg)
+	return quietStyle(t, t.DiffGutterFg)
 }
 
 // DiffPanelBorderStyle renders split-view separator lines.
 func (t Theme) DiffPanelBorderStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.DiffPanelBorder)
+	return fgStyle(t.DiffPanelBorder)
 }
 
 // WarnStyle renders warning text (yellow).
 func (t Theme) WarnStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.Warning)
+	return fgStyle(t.Warning)
 }
 
 // ErrorStyle renders error text (red).
 func (t Theme) ErrorStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.Error)
+	return fgStyle(t.Error)
 }
 
 // NoteStyle renders note text (dimmed).
 func (t Theme) NoteStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.NoteFg)
+	return quietStyle(t, t.NoteFg)
 }
 
 func (t Theme) TranscriptRailStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.TranscriptRail)
+	return fgStyle(t.TranscriptRail)
 }
 
 func (t Theme) TranscriptShellStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.TranscriptShell)
+	return fgStyle(t.TranscriptShell)
 }
 
 func (t Theme) TranscriptMetaStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.MutedText)
+	return quietStyle(t, t.MutedText)
 }
 
 func (t Theme) TranscriptLabelStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.SecondaryText).Bold(true)
+	return quietStyle(t, t.SecondaryText).Bold(true)
 }
 
 func (t Theme) TranscriptPillStyle(tone string) lipgloss.Style {
-	style := lipgloss.NewStyle().
-		Foreground(t.SecondaryText).
-		Bold(true)
+	style := quietStyle(t, t.SecondaryText).Bold(true)
 	switch strings.ToLower(strings.TrimSpace(tone)) {
 	case "success":
 		return style.Foreground(t.Success)
@@ -802,14 +1116,12 @@ func (t Theme) TranscriptPillStyle(tone string) lipgloss.Style {
 	case "accent":
 		return style.Foreground(t.Accent)
 	default:
-		return style.Foreground(t.SecondaryText)
+		return style
 	}
 }
 
 func (t Theme) CodeSurfaceStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.CodeBlockFg).
-		Background(t.CodeSurface)
+	return withBg(fgStyle(t.CodeBlockFg), t.CodeSurface)
 }
 
 func (t Theme) TableHeaderStyle() lipgloss.Style {
@@ -855,29 +1167,27 @@ func (t Theme) MarkdownRuleStyle() lipgloss.Style {
 // LogBlockStyle renders log/tool output lines with a subtle left border
 // to visually separate them from narrative assistant text.
 func (t Theme) LogBlockStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.TextSecondary).
-		PaddingLeft(1)
+	return quietStyle(t, t.TextSecondary).PaddingLeft(1)
 }
 
 // SectionStyle renders section headers (bold).
 func (t Theme) SectionStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.SectionFg).Bold(true)
+	return fgStyle(t.SectionFg).Bold(true)
 }
 
 // KeyLabelStyle renders key labels in key-value pairs.
 func (t Theme) KeyLabelStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.KeyLabelFg)
+	return quietStyle(t, t.KeyLabelFg)
 }
 
 // PromptStyle renders the input prompt marker.
 func (t Theme) PromptStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.PromptFg).Bold(true)
+	return fgStyle(t.PromptFg).Bold(true)
 }
 
 // ScrollHintIndicator renders scroll hint text.
 func (t Theme) ScrollHintStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.ScrollHintFg)
+	return fgStyle(t.ScrollHintFg)
 }
 
 func ComposeFooter(width int, left string, right string) string {
@@ -924,14 +1234,11 @@ func ComposeFooter(width int, left string, right string) string {
 
 // InputBarStyle renders the input bar background.
 func (t Theme) InputBarStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.InputBarFg).
-		Padding(0, 0)
+	return fgStyle(t.InputBarFg).Padding(0, 0)
 }
 
 func (t Theme) ComposerStyle(focused bool) lipgloss.Style {
-	style := lipgloss.NewStyle().
-		Foreground(t.InputBarFg).
+	style := fgStyle(t.InputBarFg).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderLeft(true).
 		BorderForeground(t.ComposerBorder)
@@ -943,33 +1250,32 @@ func (t Theme) ComposerStyle(focused bool) lipgloss.Style {
 
 // HelpHintTextStyle renders help hint text (dimmed shortcut labels).
 func (t Theme) HelpHintTextStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.HelpHintFg)
+	return quietStyle(t, t.HelpHintFg)
 }
 
 // SpinnerStyle renders the spinner indicator.
 func (t Theme) SpinnerStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.SpinnerFg)
+	return fgStyle(t.SpinnerFg)
 }
 
 // SeparatorStyle renders horizontal separators.
 func (t Theme) SeparatorStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.SeparatorFg)
+	return fgStyle(t.SeparatorFg)
 }
 
 // NewMsgIndicatorStyle renders the "new messages" indicator.
 func (t Theme) NewMsgIndicatorStyle() lipgloss.Style {
-	return lipgloss.NewStyle().
-		Foreground(t.Warning).
+	return withBg(fgStyle(t.Warning), t.NewMsgBg).
 		Bold(true).
 		Padding(0, 1)
 }
 
 func (t Theme) ScrollbarTrackStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.ScrollbarTrack)
+	return fgStyle(t.ScrollbarTrack)
 }
 
 func (t Theme) ScrollbarThumbStyle() lipgloss.Style {
-	return lipgloss.NewStyle().Foreground(t.ScrollbarThumb)
+	return fgStyle(t.ScrollbarThumb)
 }
 
 func (t Theme) LinkStyle() lipgloss.Style {

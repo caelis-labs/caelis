@@ -1,6 +1,8 @@
 package tuikit
 
 import (
+	"image/color"
+
 	"charm.land/lipgloss/v2"
 )
 
@@ -100,77 +102,104 @@ type Tokens struct {
 func resolveTokens(t Theme) Tokens {
 	return Tokens{
 		// Surfaces
-		Surface0: lipgloss.NewStyle().Background(t.AppBg),
-		Surface1: lipgloss.NewStyle().Background(t.ModalBg),
-		Surface2: lipgloss.NewStyle().Background(t.StatusBg),
+		Surface0: bgStyle(t.AppBg),
+		Surface1: bgStyle(t.ModalBg),
+		Surface2: bgStyle(t.StatusBg),
 
 		// Text
-		TextPrimary:   lipgloss.NewStyle().Foreground(t.TextPrimary),
-		TextSecondary: lipgloss.NewStyle().Foreground(t.TextSecondary),
-		TextMuted:     lipgloss.NewStyle().Foreground(t.MutedText),
+		TextPrimary:   fgStyle(t.TextPrimary),
+		TextSecondary: quietStyle(t, t.TextSecondary),
+		TextMuted:     quietStyle(t, t.MutedText),
 
 		// Signals
-		Accent:  lipgloss.NewStyle().Foreground(t.Accent),
-		Focus:   lipgloss.NewStyle().Foreground(t.Focus),
-		Success: lipgloss.NewStyle().Foreground(t.Success),
-		Warning: lipgloss.NewStyle().Foreground(t.Warning),
-		Danger:  lipgloss.NewStyle().Foreground(t.Error),
+		Accent:  fgStyle(t.Accent),
+		Focus:   fgStyle(t.Focus),
+		Success: fgStyle(t.Success),
+		Warning: fgStyle(t.Warning),
+		Danger:  fgStyle(t.Error),
 
 		// Edges
-		BorderSubtle: lipgloss.NewStyle().Foreground(t.PanelBorder),
-		BorderStrong: lipgloss.NewStyle().Foreground(t.Focus),
+		BorderSubtle: fgStyle(t.PanelBorder),
+		BorderStrong: fgStyle(t.Focus),
 
 		// Surfaces
-		ChromeBg:  lipgloss.NewStyle().Background(t.StatusBg),
-		CardBg:    lipgloss.NewStyle().Background(t.ModalBg),
-		CodeBg:    lipgloss.NewStyle().Background(t.CodeBlockBg),
-		OverlayBg: lipgloss.NewStyle().Background(t.ModalBg),
+		ChromeBg:  bgStyle(t.StatusBg),
+		CardBg:    bgStyle(t.ModalBg),
+		CodeBg:    bgStyle(t.CodeBlockBg),
+		OverlayBg: bgStyle(t.ModalBg),
 
 		// Chrome text
-		ChromeTitle: lipgloss.NewStyle().Foreground(t.PanelTitle).Bold(true),
-		ChromeMeta:  lipgloss.NewStyle().Foreground(t.SecondaryText),
-		ChromeHint:  lipgloss.NewStyle().Foreground(t.TextSecondary),
+		ChromeTitle: fgStyle(t.PanelTitle).Bold(true),
+		ChromeMeta:  quietStyle(t, t.SecondaryText),
+		ChromeHint:  quietStyle(t, t.TextSecondary),
 
 		// Composer
-		ComposerBorder:      lipgloss.NewStyle().Foreground(t.ComposerBorder),
-		ComposerBorderFocus: lipgloss.NewStyle().Foreground(t.ComposerBorderFocus),
-		ComposerLabel:       lipgloss.NewStyle().Foreground(t.SecondaryText).Bold(true),
-		ComposerPlaceholder: lipgloss.NewStyle().Foreground(t.MutedText).Italic(true),
-		ComposerCounter:     lipgloss.NewStyle().Foreground(t.MutedText),
+		ComposerBorder:      fgStyle(t.ComposerBorder),
+		ComposerBorderFocus: fgStyle(t.ComposerBorderFocus),
+		ComposerLabel:       quietStyle(t, t.SecondaryText).Bold(true),
+		ComposerPlaceholder: quietStyle(t, t.MutedText).Italic(true),
+		ComposerCounter:     quietStyle(t, t.MutedText),
 
 		// Block shell
-		BlockRail:   lipgloss.NewStyle().Foreground(t.TranscriptRail),
-		BlockHeader: lipgloss.NewStyle().Foreground(t.PanelTitle).Bold(true),
-		BlockMeta:   lipgloss.NewStyle().Foreground(t.MutedText),
-		BlockBadge:  lipgloss.NewStyle().Foreground(t.SecondaryText).Bold(true),
+		BlockRail:   fgStyle(t.TranscriptRail),
+		BlockHeader: fgStyle(t.PanelTitle).Bold(true),
+		BlockMeta:   quietStyle(t, t.MutedText),
+		BlockBadge:  quietStyle(t, t.SecondaryText).Bold(true),
 
 		// Overlay
-		OverlayBorder: lipgloss.NewStyle().Foreground(t.Focus),
-		OverlayTitle:  lipgloss.NewStyle().Foreground(t.PanelTitle).Bold(true),
+		OverlayBorder: fgStyle(t.Focus),
+		OverlayTitle:  fgStyle(t.PanelTitle).Bold(true),
 
 		// Scrollbar
-		ScrollTrack: lipgloss.NewStyle().Foreground(t.ScrollbarTrack),
-		ScrollThumb: lipgloss.NewStyle().Foreground(t.ScrollbarThumb),
+		ScrollTrack: fgStyle(t.ScrollbarTrack),
+		ScrollThumb: fgStyle(t.ScrollbarThumb),
 
 		// Separator
-		Separator: lipgloss.NewStyle().Foreground(t.PanelBorder),
+		Separator: fgStyle(t.PanelBorder),
 
 		// Tool transcript
-		ToolIcon:   lipgloss.NewStyle().Foreground(t.ToolFg),
-		ToolName:   lipgloss.NewStyle().Foreground(t.Focus).Bold(true),
-		ToolArgs:   lipgloss.NewStyle().Foreground(t.ReasoningFg),
-		ToolResult: lipgloss.NewStyle().Foreground(t.SecondaryText),
-		ToolError:  lipgloss.NewStyle().Foreground(t.Error).Bold(true),
-		ToolOutput: lipgloss.NewStyle().Foreground(t.TextSecondary),
+		ToolIcon:   fgStyle(t.ToolFg),
+		ToolName:   fgStyle(t.Focus).Bold(true),
+		ToolArgs:   quietStyle(t, t.ReasoningFg),
+		ToolResult: quietStyle(t, t.SecondaryText),
+		ToolError:  fgStyle(t.Error).Bold(true),
+		ToolOutput: quietStyle(t, t.TextSecondary),
 
 		// Markdown / prose
-		MarkdownHeading:    lipgloss.NewStyle().Foreground(t.Accent).Bold(true),
-		MarkdownLink:       lipgloss.NewStyle().Foreground(t.LinkFg).Underline(true),
-		MarkdownInlineCode: lipgloss.NewStyle().Foreground(t.CodeFg).Background(t.CodeBg),
-		MarkdownCodeBlock:  lipgloss.NewStyle().Foreground(t.CodeBlockFg).Background(t.CodeBlockBg),
-		MarkdownQuote:      lipgloss.NewStyle().Foreground(t.ReasoningFg).Italic(true),
-		MarkdownTableHead:  lipgloss.NewStyle().Foreground(t.TextPrimary).Background(t.TableHeaderBg).Bold(true),
-		MarkdownTableEdge:  lipgloss.NewStyle().Foreground(t.TableBorder),
-		MarkdownRule:       lipgloss.NewStyle().Foreground(t.MutedText),
+		MarkdownHeading:    fgStyle(t.Accent).Bold(true),
+		MarkdownLink:       fgStyle(t.LinkFg).Underline(true),
+		MarkdownInlineCode: withBg(fgStyle(t.CodeFg), t.CodeBg),
+		MarkdownCodeBlock:  withBg(fgStyle(t.CodeBlockFg), t.CodeBlockBg),
+		MarkdownQuote:      quietStyle(t, t.ReasoningFg).Italic(true),
+		MarkdownTableHead:  withBg(fgStyle(t.TextPrimary), t.TableHeaderBg).Bold(true),
+		MarkdownTableEdge:  fgStyle(t.TableBorder),
+		MarkdownRule:       quietStyle(t, t.MutedText),
 	}
+}
+
+func fgStyle(c color.Color) lipgloss.Style {
+	style := lipgloss.NewStyle()
+	if c != nil {
+		style = style.Foreground(c)
+	}
+	return style
+}
+
+func bgStyle(c color.Color) lipgloss.Style {
+	return withBg(lipgloss.NewStyle(), c)
+}
+
+func withBg(style lipgloss.Style, c color.Color) lipgloss.Style {
+	if c != nil {
+		style = style.Background(c)
+	}
+	return style
+}
+
+func quietStyle(t Theme, c color.Color) lipgloss.Style {
+	style := fgStyle(c)
+	if c == nil && !t.NoColor {
+		style = style.Faint(true)
+	}
+	return style
 }
