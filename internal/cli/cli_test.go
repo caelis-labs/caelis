@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"bytes"
@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
@@ -90,18 +90,18 @@ func cliTestStoreDir(t *testing.T) string {
 }
 
 func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
-	handle := newFakeHandle([]appgateway.EventEnvelope{
+	handle := newFakeHandle([]gateway.EventEnvelope{
 		{
-			Event: appgateway.Event{
-				Kind:            appgateway.EventKindApprovalRequested,
-				ApprovalPayload: &appgateway.ApprovalPayload{Status: appgateway.ApprovalStatusPending},
+			Event: gateway.Event{
+				Kind:            gateway.EventKindApprovalRequested,
+				ApprovalPayload: &gateway.ApprovalPayload{Status: gateway.ApprovalStatusPending},
 			},
 		},
 		{
-			Event: appgateway.Event{
-				Kind: appgateway.EventKindAssistantMessage,
-				Narrative: &appgateway.NarrativePayload{
-					Role:  appgateway.NarrativeRoleAssistant,
+			Event: gateway.Event{
+				Kind: gateway.EventKindAssistantMessage,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Text:  "interactive ok",
 					Final: true,
 				},
@@ -125,22 +125,22 @@ func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 }
 
 func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
-	handle := newFakeHandle([]appgateway.EventEnvelope{
+	handle := newFakeHandle([]gateway.EventEnvelope{
 		{
-			Event: appgateway.Event{
-				Kind: appgateway.EventKindApprovalReview,
-				ApprovalPayload: &appgateway.ApprovalPayload{
-					Status:         appgateway.ApprovalStatusPending,
-					ReviewStatus:   appgateway.ApprovalReviewStatusInProgress,
+			Event: gateway.Event{
+				Kind: gateway.EventKindApprovalReview,
+				ApprovalPayload: &gateway.ApprovalPayload{
+					Status:         gateway.ApprovalStatusPending,
+					ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
 					DecisionSource: "auto-review",
 				},
 			},
 		},
 		{
-			Event: appgateway.Event{
-				Kind: appgateway.EventKindAssistantMessage,
-				Narrative: &appgateway.NarrativePayload{
-					Role:  appgateway.NarrativeRoleAssistant,
+			Event: gateway.Event{
+				Kind: gateway.EventKindAssistantMessage,
+				Narrative: &gateway.NarrativePayload{
+					Role:  gateway.NarrativeRoleAssistant,
 					Text:  "interactive ok",
 					Final: true,
 				},
@@ -238,14 +238,14 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 }
 
 type fakeHandle struct {
-	events    chan appgateway.EventEnvelope
-	submits   []appgateway.SubmitRequest
+	events    chan gateway.EventEnvelope
+	submits   []gateway.SubmitRequest
 	closed    bool
 	cancelled bool
 }
 
-func newFakeHandle(events []appgateway.EventEnvelope) *fakeHandle {
-	ch := make(chan appgateway.EventEnvelope, len(events))
+func newFakeHandle(events []gateway.EventEnvelope) *fakeHandle {
+	ch := make(chan gateway.EventEnvelope, len(events))
 	for _, event := range events {
 		ch <- event
 	}
@@ -260,13 +260,13 @@ func (h *fakeHandle) SessionRef() sdksession.SessionRef {
 	return sdksession.SessionRef{SessionID: "s1"}
 }
 func (h *fakeHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *fakeHandle) Events() <-chan appgateway.EventEnvelope {
+func (h *fakeHandle) Events() <-chan gateway.EventEnvelope {
 	return h.events
 }
-func (h *fakeHandle) EventsAfter(string) ([]appgateway.EventEnvelope, string, error) {
+func (h *fakeHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
 	return nil, "", nil
 }
-func (h *fakeHandle) Submit(_ context.Context, req appgateway.SubmitRequest) error {
+func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
 	h.submits = append(h.submits, req)
 	return nil
 }

@@ -50,6 +50,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 			req: &sdkruntime.ApprovalRequest{
 				Approval: &sdksession.ProtocolApproval{
 					ToolCall: sdksession.ProtocolToolCall{
+						ID:       "call-bash-approval",
 						Name:     "BASH",
 						RawInput: map[string]any{"command": "rm -rf /tmp/demo"},
 					},
@@ -66,6 +67,9 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				}
 				if payload.ToolName != "BASH" {
 					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "BASH")
+				}
+				if payload.ToolCallID != "call-bash-approval" {
+					t.Fatalf("payload.ToolCallID = %q, want %q", payload.ToolCallID, "call-bash-approval")
 				}
 				if payload.RawInput["command"] != "rm -rf /tmp/demo" {
 					t.Fatalf("payload.RawInput = %#v, want command", payload.RawInput)

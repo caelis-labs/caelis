@@ -1,6 +1,6 @@
 //go:build e2e
 
-package runtime
+package gatewaydriver
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	"github.com/OnslaughtSnail/caelis/sdk/model/providers/e2etest"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
@@ -71,7 +71,7 @@ func TestGatewayDriverProviderLiveTurnE2E(t *testing.T) {
 			t.Fatalf("turn event error = %v", env.Err)
 		}
 		payload := env.Event.Narrative
-		if payload == nil || payload.Role != appgateway.NarrativeRoleAssistant {
+		if payload == nil || payload.Role != gateway.NarrativeRoleAssistant {
 			continue
 		}
 		if firstEventAt.IsZero() {
@@ -251,7 +251,7 @@ func TestGatewayDriverProviderMultiTurnNewAndResumeE2E(t *testing.T) {
 	var replayedFinal string
 	for _, env := range replayed {
 		payload := env.Event.Narrative
-		if payload == nil || payload.Role != appgateway.NarrativeRoleAssistant {
+		if payload == nil || payload.Role != gateway.NarrativeRoleAssistant {
 			continue
 		}
 		if payload.Visibility == string(sdksession.VisibilityCanonical) {
@@ -271,7 +271,7 @@ func collectFinalAssistantText(t *testing.T, turn Turn) string {
 			t.Fatalf("turn event error = %v", env.Err)
 		}
 		payload := env.Event.Narrative
-		if payload == nil || payload.Role != appgateway.NarrativeRoleAssistant {
+		if payload == nil || payload.Role != gateway.NarrativeRoleAssistant {
 			continue
 		}
 		if payload.Visibility == string(sdksession.VisibilityCanonical) {

@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -8,13 +8,13 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/app/tuiadapter"
 	"github.com/OnslaughtSnail/caelis/internal/version"
+	"github.com/OnslaughtSnail/caelis/tui/gatewaydriver"
 	tuiapp "github.com/OnslaughtSnail/caelis/tui/tuiapp"
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
-	driver, err := tuiadapter.NewGatewayDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
+	driver, err := gatewaydriver.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
 	}

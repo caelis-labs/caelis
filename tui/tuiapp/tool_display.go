@@ -901,16 +901,40 @@ func spawnTerminalDisplaySummary(output map[string]any, isErr bool, final bool) 
 			spawnDisplayTextCandidate(asString(output["stderr"])),
 		))
 	}
-	return firstTrimmed(
-		spawnDisplayTextCandidate(asString(output["text"])),
-		spawnDisplayTextCandidate(asString(output["stdout"])),
-		spawnDisplayTextCandidate(asString(output["output_preview"])),
-		spawnDisplayTextCandidate(asString(output["stderr"])),
+	return firstNonEmpty(
+		spawnStreamDisplayTextCandidate(asString(output["text"])),
+		spawnStreamDisplayTextCandidate(asString(output["stdout"])),
+		spawnStreamDisplayTextCandidate(asString(output["output_preview"])),
+		spawnStreamDisplayTextCandidate(asString(output["stderr"])),
 	)
 }
 
 func spawnDisplayTextCandidate(text string) string {
 	return displaypolicy.SpawnDisplayTextCandidate(text)
+}
+
+func spawnStreamDisplayTextCandidate(text string) string {
+	if text == "" {
+		return ""
+	}
+	candidate := strings.TrimLeft(text, " \t\r\n")
+	if !strings.HasPrefix(candidate, "{") {
+		return text
+	}
+	decoder := json.NewDecoder(strings.NewReader(candidate))
+	var decoded map[string]any
+	if err := decoder.Decode(&decoded); err != nil || !isSpawnDisplayJSONObject(decoded) {
+		return text
+	}
+	offset := int(decoder.InputOffset())
+	if offset < 0 || offset > len(candidate) {
+		return text
+	}
+	remainder := candidate[offset:]
+	if strings.TrimSpace(remainder) == "" {
+		return ""
+	}
+	return strings.TrimLeft(remainder, "\r\n")
 }
 
 func terminalEmptySummary(name string, output map[string]any, isErr bool) string {

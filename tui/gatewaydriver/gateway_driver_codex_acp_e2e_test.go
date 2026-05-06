@@ -1,6 +1,6 @@
 //go:build e2e
 
-package runtime
+package gatewaydriver
 
 import (
 	"context"

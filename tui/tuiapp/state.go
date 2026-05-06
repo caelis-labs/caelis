@@ -10,7 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
-	tuiruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
+	"github.com/OnslaughtSnail/caelis/tui/driver"
 	"github.com/OnslaughtSnail/caelis/tui/tuikit"
 )
 
@@ -115,7 +115,7 @@ type Config struct {
 	InitialLogs          []string
 	Commands             []string
 	Wizards              []WizardDef
-	Driver               tuiruntime.Driver
+	Driver               tuidriver.Driver
 	ProgramSender        *ProgramSender
 	ExecuteLine          func(Submission) TaskResultMsg
 	CancelRunning        func() bool

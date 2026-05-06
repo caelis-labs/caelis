@@ -1235,6 +1235,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
 			ApprovalPayload: &appgateway.ApprovalPayload{
+				ToolCallID:     "perm-1",
 				ToolName:       "request_permissions",
 				RawInput:       map[string]any{"reason": "need directory access"},
 				ReviewStatus:   appgateway.ApprovalReviewStatusInProgress,
@@ -1250,24 +1251,6 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	reviewText := "Automatic approval review approved (risk: low, authorization: high): user requested it."
 	updated, _ = model.Update(appgateway.EventEnvelope{
 		Event: appgateway.Event{
-			Kind:       appgateway.EventKindApprovalReview,
-			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
-			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
-			ApprovalPayload: &appgateway.ApprovalPayload{
-				ToolName:       "request_permissions",
-				RawInput:       map[string]any{"reason": "need directory access"},
-				ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
-				DecisionSource: "auto-review",
-				ReviewText:     reviewText,
-			},
-		},
-	})
-	model = updated.(*Model)
-	if got := ansi.Strip(model.buildHintText()); strings.Contains(got, "Reviewing approval request") {
-		t.Fatalf("approval hint = %q, want cleared pending review hint", got)
-	}
-	updated, _ = model.Update(appgateway.EventEnvelope{
-		Event: appgateway.Event{
 			Kind:       appgateway.EventKindToolResult,
 			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
@@ -1281,6 +1264,38 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 		},
 	})
 	model = updated.(*Model)
+	updated, _ = model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindAssistantMessage,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			Narrative: &appgateway.NarrativePayload{
+				Role:  appgateway.NarrativeRoleAssistant,
+				Text:  "approval-dependent work finished",
+				Final: true,
+			},
+		},
+	})
+	model = updated.(*Model)
+	updated, _ = model.Update(appgateway.EventEnvelope{
+		Event: appgateway.Event{
+			Kind:       appgateway.EventKindApprovalReview,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &appgateway.ApprovalPayload{
+				ToolCallID:     "perm-1",
+				ToolName:       "request_permissions",
+				RawInput:       map[string]any{"reason": "need directory access"},
+				ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
+				DecisionSource: "auto-review",
+				ReviewText:     reviewText,
+			},
+		},
+	})
+	model = updated.(*Model)
+	if got := ansi.Strip(model.buildHintText()); strings.Contains(got, "Reviewing approval request") {
+		t.Fatalf("approval hint = %q, want cleared pending review hint", got)
+	}
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
@@ -1293,6 +1308,15 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	}
 	if !strings.Contains(plain, "⚠ "+reviewText) {
 		t.Fatalf("rendered rows = %q, want approval review result at transcript location", plain)
+	}
+	toolIdx := strings.Index(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside")
+	reviewIdx := strings.Index(plain, "⚠ "+reviewText)
+	assistantIdx := strings.Index(plain, "approval-dependent work finished")
+	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || !(toolIdx < reviewIdx && reviewIdx < assistantIdx) {
+		t.Fatalf("rendered rows = %q, want approval review next to tool before later assistant text", plain)
+	}
+	if len(block.Events) < 3 || block.Events[0].Kind != SEToolCall || block.Events[0].CallID != "perm-1" || block.Events[1].Kind != SEApproval || block.Events[1].CallID != "perm-1" || block.Events[2].Kind != SEAssistant {
+		t.Fatalf("events = %#v, want tool then matching approval then later assistant", block.Events)
 	}
 	for _, forbidden := range []string{`"approved":true`, `"granted"`, "Automatic approval review pending"} {
 		if strings.Contains(plain, forbidden) {
@@ -1688,6 +1712,64 @@ func TestSpawnFinalJSONAnswerRemainsVisible(t *testing.T) {
 		if got != answer {
 			t.Fatalf("toolDisplayOutput(SPAWN JSON final %q) = %q, want original JSON", answer, got)
 		}
+	}
+}
+
+func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
+	if got := toolDisplayOutput("SPAWN", nil, map[string]any{"text": " let"}, "", string(appgateway.ToolStatusRunning), false); got != " let" {
+		t.Fatalf("running SPAWN chunk = %q, want leading space preserved", got)
+	}
+
+	model := newGatewayEventTestModel()
+	prompt := "写分析报告"
+	start := appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindToolCall,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		ToolCall: &appgateway.ToolCallPayload{
+			CallID:   "spawn-space-stream",
+			ToolName: "SPAWN",
+			Status:   appgateway.ToolStatusRunning,
+			Scope:    appgateway.EventScopeMain,
+			RawInput: map[string]any{"agent": "self", "prompt": prompt},
+		},
+	}}
+	updated, _ := model.Update(start)
+	model = updated.(*Model)
+
+	req := appgateway.StreamRequest{
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		CallID:     "spawn-space-stream",
+		ToolName:   "SPAWN",
+		RawInput:   map[string]any{"agent": "self", "prompt": prompt},
+		Ref:        sdkstream.Ref{SessionID: "root-session", TaskID: "child-task"},
+		Scope:      appgateway.EventScopeMain,
+	}
+	for _, chunk := range []string{"Now", " let", " me", " write", " the", " report."} {
+		for _, env := range appgateway.StreamFrameEvents(req, sdkstream.Frame{
+			Ref:     sdkstream.Ref{SessionID: "root-session", TaskID: "child-task"},
+			Stream:  "stdout",
+			Text:    chunk,
+			Running: true,
+		}) {
+			updated, _ = model.Update(env)
+			model = updated.(*Model)
+		}
+	}
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one SPAWN event", block.Events)
+	}
+	if got, want := block.Events[0].Output, "Now let me write the report."; got != want {
+		t.Fatalf("SPAWN stream output = %q, want %q", got, want)
+	}
+	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "Now let me write the report.") || strings.Contains(joined, "Nowletmewrite") {
+		t.Fatalf("rendered rows lost chunk spaces:\n%s", joined)
 	}
 }
 

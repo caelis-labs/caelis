@@ -1,6 +1,6 @@
 //go:build e2e
 
-package main
+package cli
 
 import (
 	"context"
@@ -95,7 +95,7 @@ func runCLIACPXCommand(t *testing.T, repo string, workdir string, body string) s
 		`if [ -f "` + filepath.Join(repo, ".env") + `" ]; then set -a; source "` + filepath.Join(repo, ".env") + `"; set +a; fi`,
 		`export WORKDIR="` + workdir + `"`,
 		`export CODEFREE_E2E_MODEL="${CODEFREE_MODEL:-GLM-5.1}"`,
-		`export ACP_AGENT_CMD="bash -lc 'cd ` + repo + ` && go run ./cmd/cli acp -store-dir \"$WORKDIR/caelis\" -workspace-key acpx-cli -workspace-cwd \"$WORKDIR\" -provider codefree -model \"$CODEFREE_E2E_MODEL\"'"`,
+		`export ACP_AGENT_CMD="bash -lc 'cd ` + repo + ` && go run ./cmd/caelis acp -store-dir \"$WORKDIR/caelis\" -workspace-key acpx-cli -workspace-cwd \"$WORKDIR\" -provider codefree -model \"$CODEFREE_E2E_MODEL\"'"`,
 		body,
 	}, "\n")
 	cmd := exec.CommandContext(ctx, "bash", "-lc", script)

@@ -20,11 +20,11 @@ build:
 	go build ./...
 
 install:
-	go install -ldflags "$(LDFLAGS)" ./cmd/cli
+	go install -ldflags "$(LDFLAGS)" ./cmd/caelis
 
 build-cli:
 	mkdir -p ./.tmp/bin
-	go build -ldflags "$(LDFLAGS)" -o ./.tmp/bin/caelis ./cmd/cli
+	go build -ldflags "$(LDFLAGS)" -o ./.tmp/bin/caelis ./cmd/caelis
 
 vet:
 	go vet ./...

@@ -1,4 +1,4 @@
-package runtime
+package gatewaydriver
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
@@ -16,16 +16,16 @@ import (
 
 type GatewayService interface {
 	Streams() sdkstream.Service
-	BeginTurn(context.Context, appgateway.BeginTurnRequest) (appgateway.BeginTurnResult, error)
-	Interrupt(context.Context, appgateway.InterruptRequest) error
-	ResumeSession(context.Context, appgateway.ResumeSessionRequest) (sdksession.LoadedSession, error)
-	ListSessions(context.Context, appgateway.ListSessionsRequest) (sdksession.SessionList, error)
-	ReplayEvents(context.Context, appgateway.ReplayEventsRequest) (appgateway.ReplayEventsResult, error)
-	ControlPlaneState(context.Context, appgateway.ControlPlaneStateRequest) (appgateway.ControlPlaneState, error)
-	HandoffController(context.Context, appgateway.HandoffControllerRequest) (sdksession.Session, error)
-	AttachParticipant(context.Context, appgateway.AttachParticipantRequest) (sdksession.Session, error)
-	PromptParticipant(context.Context, appgateway.PromptParticipantRequest) (appgateway.BeginTurnResult, error)
-	DetachParticipant(context.Context, appgateway.DetachParticipantRequest) (sdksession.Session, error)
+	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
+	Interrupt(context.Context, gateway.InterruptRequest) error
+	ResumeSession(context.Context, gateway.ResumeSessionRequest) (sdksession.LoadedSession, error)
+	ListSessions(context.Context, gateway.ListSessionsRequest) (sdksession.SessionList, error)
+	ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error)
+	ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error)
+	HandoffController(context.Context, gateway.HandoffControllerRequest) (sdksession.Session, error)
+	AttachParticipant(context.Context, gateway.AttachParticipantRequest) (sdksession.Session, error)
+	PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error)
+	DetachParticipant(context.Context, gateway.DetachParticipantRequest) (sdksession.Session, error)
 }
 
 type ModelConfig struct {
@@ -139,7 +139,7 @@ type DriverStack struct {
 
 func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (sdksession.Session, error) {
 	if s == nil || s.StartSessionFn == nil {
-		return sdksession.Session{}, fmt.Errorf("tui/runtime: start session dependency is unavailable")
+		return sdksession.Session{}, fmt.Errorf("tui/gatewaydriver: start session dependency is unavailable")
 	}
 	return s.StartSessionFn(ctx, preferredSessionID, bindingKey)
 }
@@ -167,14 +167,14 @@ func (s *DriverStack) SandboxStatus() SandboxStatus {
 
 func (s *DriverStack) SessionRuntimeState(ctx context.Context, ref sdksession.SessionRef) (SessionRuntimeState, error) {
 	if s == nil || s.SessionRuntimeStateFn == nil {
-		return SessionRuntimeState{}, fmt.Errorf("tui/runtime: session runtime state dependency is unavailable")
+		return SessionRuntimeState{}, fmt.Errorf("tui/gatewaydriver: session runtime state dependency is unavailable")
 	}
 	return s.SessionRuntimeStateFn(ctx, ref)
 }
 
 func (s *DriverStack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
 	if s == nil || s.DoctorFn == nil {
-		return DoctorReport{}, fmt.Errorf("tui/runtime: doctor dependency is unavailable")
+		return DoctorReport{}, fmt.Errorf("tui/gatewaydriver: doctor dependency is unavailable")
 	}
 	return s.DoctorFn(ctx, req)
 }
@@ -188,91 +188,91 @@ func (s *DriverStack) ModelConfig(alias string) (ModelConfig, bool) {
 
 func (s *DriverStack) SessionUsageSnapshot(ctx context.Context, ref sdksession.SessionRef, modelText string) (sdkcompact.UsageSnapshot, error) {
 	if s == nil || s.SessionUsageSnapshotFn == nil {
-		return sdkcompact.UsageSnapshot{}, fmt.Errorf("tui/runtime: session usage dependency is unavailable")
+		return sdkcompact.UsageSnapshot{}, fmt.Errorf("tui/gatewaydriver: session usage dependency is unavailable")
 	}
 	return s.SessionUsageSnapshotFn(ctx, ref, modelText)
 }
 
 func (s *DriverStack) CompactSession(ctx context.Context, ref sdksession.SessionRef) error {
 	if s == nil || s.CompactSessionFn == nil {
-		return fmt.Errorf("tui/runtime: compact dependency is unavailable")
+		return fmt.Errorf("tui/gatewaydriver: compact dependency is unavailable")
 	}
 	return s.CompactSessionFn(ctx, ref)
 }
 
 func (s *DriverStack) Connect(cfg ModelConfig) (string, error) {
 	if s == nil || s.ConnectFn == nil {
-		return "", fmt.Errorf("tui/runtime: connect dependency is unavailable")
+		return "", fmt.Errorf("tui/gatewaydriver: connect dependency is unavailable")
 	}
 	return s.ConnectFn(cfg)
 }
 
 func (s *DriverStack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias string, reasoning ...string) error {
 	if s == nil || s.UseModelFn == nil {
-		return fmt.Errorf("tui/runtime: use model dependency is unavailable")
+		return fmt.Errorf("tui/gatewaydriver: use model dependency is unavailable")
 	}
 	return s.UseModelFn(ctx, ref, alias, reasoning...)
 }
 
 func (s *DriverStack) DeleteModel(ctx context.Context, ref sdksession.SessionRef, alias string) error {
 	if s == nil || s.DeleteModelFn == nil {
-		return fmt.Errorf("tui/runtime: delete model dependency is unavailable")
+		return fmt.Errorf("tui/gatewaydriver: delete model dependency is unavailable")
 	}
 	return s.DeleteModelFn(ctx, ref, alias)
 }
 
 func (s *DriverStack) SetACPControllerModel(ctx context.Context, ref sdksession.SessionRef, model string, reasoning string) (sdkcontroller.ControllerStatus, error) {
 	if s == nil || s.SetACPControllerModelFn == nil {
-		return sdkcontroller.ControllerStatus{}, fmt.Errorf("tui/runtime: ACP controller model dependency is unavailable")
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("tui/gatewaydriver: ACP controller model dependency is unavailable")
 	}
 	return s.SetACPControllerModelFn(ctx, ref, model, reasoning)
 }
 
 func (s *DriverStack) CycleSessionMode(ctx context.Context, ref sdksession.SessionRef) (string, error) {
 	if s == nil || s.CycleSessionModeFn == nil {
-		return "", fmt.Errorf("tui/runtime: cycle mode dependency is unavailable")
+		return "", fmt.Errorf("tui/gatewaydriver: cycle mode dependency is unavailable")
 	}
 	return s.CycleSessionModeFn(ctx, ref)
 }
 
 func (s *DriverStack) SetSandboxBackend(ctx context.Context, backend string) (SandboxStatus, error) {
 	if s == nil || s.SetSandboxBackendFn == nil {
-		return SandboxStatus{}, fmt.Errorf("tui/runtime: sandbox backend dependency is unavailable")
+		return SandboxStatus{}, fmt.Errorf("tui/gatewaydriver: sandbox backend dependency is unavailable")
 	}
 	return s.SetSandboxBackendFn(ctx, backend)
 }
 
 func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref sdksession.SessionRef, mode string) (sdkcontroller.ControllerStatus, error) {
 	if s == nil || s.SetACPControllerModeFn == nil {
-		return sdkcontroller.ControllerStatus{}, fmt.Errorf("tui/runtime: ACP controller mode dependency is unavailable")
+		return sdkcontroller.ControllerStatus{}, fmt.Errorf("tui/gatewaydriver: ACP controller mode dependency is unavailable")
 	}
 	return s.SetACPControllerModeFn(ctx, ref, mode)
 }
 
 func (s *DriverStack) SetSessionMode(ctx context.Context, ref sdksession.SessionRef, mode string) (string, error) {
 	if s == nil || s.SetSessionModeFn == nil {
-		return "", fmt.Errorf("tui/runtime: session mode dependency is unavailable")
+		return "", fmt.Errorf("tui/gatewaydriver: session mode dependency is unavailable")
 	}
 	return s.SetSessionModeFn(ctx, ref, mode)
 }
 
 func (s *DriverStack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
 	if s == nil || s.RegisterBuiltinACPAgentWithOptionsFn == nil {
-		return fmt.Errorf("tui/runtime: builtin ACP agent dependency is unavailable")
+		return fmt.Errorf("tui/gatewaydriver: builtin ACP agent dependency is unavailable")
 	}
 	return s.RegisterBuiltinACPAgentWithOptionsFn(ctx, target, opts)
 }
 
 func (s *DriverStack) UnregisterACPAgent(target string) error {
 	if s == nil || s.UnregisterACPAgentFn == nil {
-		return fmt.Errorf("tui/runtime: ACP agent unregister dependency is unavailable")
+		return fmt.Errorf("tui/gatewaydriver: ACP agent unregister dependency is unavailable")
 	}
 	return s.UnregisterACPAgentFn(target)
 }
 
 func (s *DriverStack) ListModelAliases(ctx context.Context, ref sdksession.SessionRef) ([]string, error) {
 	if s == nil || s.ListModelAliasesFn == nil {
-		return nil, fmt.Errorf("tui/runtime: model alias dependency is unavailable")
+		return nil, fmt.Errorf("tui/gatewaydriver: model alias dependency is unavailable")
 	}
 	return s.ListModelAliasesFn(ctx, ref)
 }

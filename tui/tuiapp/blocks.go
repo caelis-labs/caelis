@@ -309,6 +309,9 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	callID = strings.TrimSpace(callID)
 	name = strings.TrimSpace(name)
 	args = strings.TrimSpace(args)
+	defer func() {
+		b.Events, _ = relocateApprovalReviewEventsAfterTool(b.Events, callID)
+	}()
 	toolKind := strings.TrimSpace(meta.ToolKind)
 	fullArgs := strings.TrimSpace(meta.FullArgs)
 	if !isTerminalPanelToolKind(name, toolKind) || final {
@@ -579,17 +582,11 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	})
 }
 
-func (b *MainACPTurnBlock) AddApprovalReviewEvent(tool, command, status, text string) {
+func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
 	if b == nil {
 		return
 	}
-	b.Events = append(b.Events, SubagentEvent{
-		Kind:            SEApproval,
-		ApprovalTool:    strings.TrimSpace(tool),
-		ApprovalCommand: strings.TrimSpace(command),
-		ApprovalStatus:  strings.TrimSpace(status),
-		ApprovalText:    strings.TrimSpace(text),
-	})
+	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, text)
 }
 
 func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
@@ -690,6 +687,9 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	callID = strings.TrimSpace(callID)
 	name = strings.TrimSpace(name)
 	args = strings.TrimSpace(args)
+	defer func() {
+		b.Events, _ = relocateApprovalReviewEventsAfterTool(b.Events, callID)
+	}()
 	toolKind := strings.TrimSpace(meta.ToolKind)
 	fullArgs := strings.TrimSpace(meta.FullArgs)
 	if !isTerminalPanelToolKind(name, toolKind) || final {
@@ -930,17 +930,11 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	})
 }
 
-func (b *ParticipantTurnBlock) AddApprovalReviewEvent(tool, command, status, text string) {
+func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
 	if b == nil {
 		return
 	}
-	b.Events = append(b.Events, SubagentEvent{
-		Kind:            SEApproval,
-		ApprovalTool:    strings.TrimSpace(tool),
-		ApprovalCommand: strings.TrimSpace(command),
-		ApprovalStatus:  strings.TrimSpace(status),
-		ApprovalText:    strings.TrimSpace(text),
-	})
+	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, text)
 }
 
 func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
@@ -1803,6 +1797,125 @@ func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name
 	return false
 }
 
+func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, text string) ([]SubagentEvent, bool) {
+	review := SubagentEvent{
+		Kind:            SEApproval,
+		CallID:          strings.TrimSpace(callID),
+		ApprovalTool:    strings.TrimSpace(tool),
+		ApprovalCommand: strings.TrimSpace(command),
+		ApprovalStatus:  strings.TrimSpace(status),
+		ApprovalText:    strings.TrimSpace(text),
+	}
+	if review.CallID != "" {
+		for i := range events {
+			if events[i].Kind != SEApproval || strings.TrimSpace(events[i].CallID) != review.CallID {
+				continue
+			}
+			mergeApprovalReviewEvent(&events[i], review)
+			events, _ = relocateApprovalReviewEventsAfterTool(events, review.CallID)
+			return events, true
+		}
+		if toolIdx := latestToolEventIndexForCallID(events, review.CallID); toolIdx >= 0 {
+			return insertSubagentEvent(events, approvalReviewInsertIndex(events, toolIdx, review.CallID), review), true
+		}
+	}
+	return append(events, review), true
+}
+
+func mergeApprovalReviewEvent(target *SubagentEvent, review SubagentEvent) {
+	if target == nil {
+		return
+	}
+	target.Kind = SEApproval
+	if review.CallID != "" {
+		target.CallID = review.CallID
+	}
+	if review.ApprovalTool != "" {
+		target.ApprovalTool = review.ApprovalTool
+	}
+	if review.ApprovalCommand != "" {
+		target.ApprovalCommand = review.ApprovalCommand
+	}
+	if review.ApprovalStatus != "" {
+		target.ApprovalStatus = review.ApprovalStatus
+	}
+	if review.ApprovalText != "" {
+		target.ApprovalText = review.ApprovalText
+	}
+}
+
+func relocateApprovalReviewEventsAfterTool(events []SubagentEvent, callID string) ([]SubagentEvent, bool) {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return events, false
+	}
+	toolIdx := latestToolEventIndexForCallID(events, callID)
+	if toolIdx < 0 {
+		return events, false
+	}
+	changed := false
+	for {
+		insertIdx := approvalReviewInsertIndex(events, toolIdx, callID)
+		moveIdx := -1
+		for i, ev := range events {
+			if ev.Kind != SEApproval || strings.TrimSpace(ev.CallID) != callID {
+				continue
+			}
+			if i > toolIdx && i < insertIdx {
+				continue
+			}
+			moveIdx = i
+			break
+		}
+		if moveIdx < 0 {
+			return events, changed
+		}
+		review := events[moveIdx]
+		events = append(events[:moveIdx], events[moveIdx+1:]...)
+		if moveIdx < toolIdx {
+			toolIdx--
+		}
+		insertIdx = approvalReviewInsertIndex(events, toolIdx, callID)
+		events = insertSubagentEvent(events, insertIdx, review)
+		changed = true
+	}
+}
+
+func approvalReviewInsertIndex(events []SubagentEvent, toolIdx int, callID string) int {
+	insertIdx := toolIdx + 1
+	for insertIdx < len(events) {
+		ev := events[insertIdx]
+		if ev.Kind != SEApproval || strings.TrimSpace(ev.CallID) != callID {
+			break
+		}
+		insertIdx++
+	}
+	return insertIdx
+}
+
+func insertSubagentEvent(events []SubagentEvent, idx int, ev SubagentEvent) []SubagentEvent {
+	if idx < 0 || idx > len(events) {
+		idx = len(events)
+	}
+	events = append(events, SubagentEvent{})
+	copy(events[idx+1:], events[idx:])
+	events[idx] = ev
+	return events
+}
+
+func latestToolEventIndexForCallID(events []SubagentEvent, callID string) int {
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return -1
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind == SEToolCall && strings.TrimSpace(events[i].CallID) == callID {
+			return i
+		}
+	}
+	return -1
+}
+
 func hasApprovalEvent(events []SubagentEvent) bool {
 	for _, ev := range events {
 		if ev.Kind == SEApproval {
@@ -2005,6 +2118,13 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 	callID = strings.TrimSpace(callID)
 	toolName = strings.TrimSpace(toolName)
 	args = strings.TrimSpace(args)
+	defer func() {
+		updated, changed := relocateApprovalReviewEventsAfterTool(s.Events, callID)
+		if changed {
+			s.Events = updated
+			s.eventsGen++
+		}
+	}()
 	stream = strings.ToLower(strings.TrimSpace(stream))
 	chunk = normalizeSubagentChunkBoundary("", chunk)
 	toolKind := strings.TrimSpace(meta.ToolKind)
@@ -2235,18 +2355,15 @@ func (s *SubagentSessionState) AddApprovalEvent(tool, command string) {
 	s.eventsGen++
 }
 
-func (s *SubagentSessionState) AddApprovalReviewEvent(tool, command, status, text string) {
+func (s *SubagentSessionState) AddApprovalReviewEvent(callID, tool, command, status, text string) {
 	if s == nil {
 		return
 	}
-	s.Events = append(s.Events, SubagentEvent{
-		Kind:            SEApproval,
-		ApprovalTool:    strings.TrimSpace(tool),
-		ApprovalCommand: strings.TrimSpace(command),
-		ApprovalStatus:  strings.TrimSpace(status),
-		ApprovalText:    strings.TrimSpace(text),
-	})
-	s.eventsGen++
+	updated, changed := addApprovalReviewSubagentEvent(s.Events, callID, tool, command, status, text)
+	if changed {
+		s.Events = updated
+		s.eventsGen++
+	}
 }
 
 func (s *SubagentSessionState) ReviveFromTerminal() {
@@ -2481,9 +2598,9 @@ func (b *SubagentPanelBlock) AddApprovalEvent(tool, command string) {
 	b.syncSessionMirror()
 }
 
-func (b *SubagentPanelBlock) AddApprovalReviewEvent(tool, command, status, text string) {
+func (b *SubagentPanelBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
 	state := b.sessionState()
-	state.AddApprovalReviewEvent(tool, command, status, text)
+	state.AddApprovalReviewEvent(callID, tool, command, status, text)
 	b.syncSessionMirror()
 }
 

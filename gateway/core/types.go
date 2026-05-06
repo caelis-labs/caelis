@@ -393,6 +393,7 @@ const (
 )
 
 type ApprovalPayload struct {
+	ToolCallID            string               `json:"tool_call_id,omitempty"`
 	ToolName              string               `json:"tool_name,omitempty"`
 	RawInput              map[string]any       `json:"raw_input,omitempty"`
 	Reason                string               `json:"reason,omitempty"`

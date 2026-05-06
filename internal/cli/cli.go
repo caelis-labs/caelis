@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -11,12 +11,12 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/acp"
+	"github.com/OnslaughtSnail/caelis/acpbridge/gatewayagent"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	headlessadapter "github.com/OnslaughtSnail/caelis/gateway/adapter/headless"
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
+	"github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/headless"
+	"github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
-	"github.com/OnslaughtSnail/caelis/sdk/sandbox/landlock"
 )
 
 type outputFormat string
@@ -34,14 +34,8 @@ type runResult struct {
 
 type doctorResult = gatewayapp.DoctorReport
 
-func main() {
-	if landlock.MaybeRunInternalHelper(os.Args[1:]) {
-		return
-	}
-	if err := run(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(1)
-	}
+func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+	return run(ctx, args, stdin, stdout, stderr)
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -106,12 +100,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		Model: gatewayapp.ModelConfig{
 			Alias:        *modelAlias,
 			Provider:     *modelProvider,
-			API:          sdkproviders.APIType(strings.TrimSpace(*modelAPI)),
+			API:          providers.APIType(strings.TrimSpace(*modelAPI)),
 			Model:        *modelName,
 			BaseURL:      *baseURL,
 			Token:        *token,
 			TokenEnv:     *tokenEnv,
-			AuthType:     sdkproviders.AuthType(strings.TrimSpace(*authType)),
+			AuthType:     providers.AuthType(strings.TrimSpace(*authType)),
 			HeaderKey:    *headerKey,
 			MaxOutputTok: *maxOutputTokens,
 		},
@@ -125,7 +119,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	if acpSubcommand {
-		agent, err := stack.NewACPAgent()
+		agent, err := gatewayagent.New(stack)
 		if err != nil {
 			return err
 		}
@@ -194,11 +188,11 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
-	result, err := headlessadapter.RunOnce(ctx, stack.Gateway, appgateway.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.Gateway, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      input,
 		Surface:    "headless",
-	}, headlessadapter.Options{})
+	}, headless.Options{})
 	if err != nil {
 		return err
 	}
@@ -255,7 +249,7 @@ func renderConfiguredModelText(alias string, provider string, model string) stri
 	return provider + "/" + model
 }
 
-func streamHandle(ctx context.Context, handle appgateway.TurnHandle, stdout io.Writer, stderr io.Writer) error {
+func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writer, stderr io.Writer) error {
 	if handle == nil {
 		return nil
 	}
@@ -265,16 +259,16 @@ func streamHandle(ctx context.Context, handle appgateway.TurnHandle, stdout io.W
 		if env.Err != nil {
 			return env.Err
 		}
-		if env.Event.Kind == appgateway.EventKindApprovalRequested {
+		if env.Event.Kind == gateway.EventKindApprovalRequested {
 			fmt.Fprintln(stderr, "[approval] denied by default")
-			if err := handle.Submit(ctx, appgateway.SubmitRequest{
-				Kind:     appgateway.SubmissionKindApproval,
-				Approval: &appgateway.ApprovalDecision{Approved: false, Outcome: string(appgateway.ApprovalStatusRejected)},
+			if err := handle.Submit(ctx, gateway.SubmitRequest{
+				Kind:     gateway.SubmissionKindApproval,
+				Approval: &gateway.ApprovalDecision{Approved: false, Outcome: string(gateway.ApprovalStatusRejected)},
 			}); err != nil {
 				return err
 			}
 		}
-		if text := appgateway.AssistantText(env.Event); text != "" {
+		if text := gateway.AssistantText(env.Event); text != "" {
 			fmt.Fprintln(stdout, text)
 		}
 	}
@@ -394,7 +388,7 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 	case "deepseek":
 		cfg.Model.Provider = "deepseek"
 		if cfg.Model.API == "" {
-			cfg.Model.API = sdkproviders.APIDeepSeek
+			cfg.Model.API = providers.APIDeepSeek
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "DEEPSEEK_API_KEY"
@@ -402,7 +396,7 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 	case "openai":
 		cfg.Model.Provider = "openai"
 		if cfg.Model.API == "" {
-			cfg.Model.API = sdkproviders.APIOpenAI
+			cfg.Model.API = providers.APIOpenAI
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "OPENAI_API_KEY"
@@ -410,7 +404,7 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 	case "anthropic":
 		cfg.Model.Provider = "anthropic"
 		if cfg.Model.API == "" {
-			cfg.Model.API = sdkproviders.APIAnthropic
+			cfg.Model.API = providers.APIAnthropic
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "ANTHROPIC_API_KEY"
@@ -418,18 +412,18 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 	case "ollama":
 		cfg.Model.Provider = "ollama"
 		if cfg.Model.API == "" {
-			cfg.Model.API = sdkproviders.APIOllama
+			cfg.Model.API = providers.APIOllama
 		}
-		cfg.Model.AuthType = sdkproviders.AuthNone
+		cfg.Model.AuthType = providers.AuthNone
 	case "codefree":
 		cfg.Model.Provider = "codefree"
 		if cfg.Model.API == "" {
-			cfg.Model.API = sdkproviders.APICodeFree
+			cfg.Model.API = providers.APICodeFree
 		}
 		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
 			cfg.Model.BaseURL = "https://www.srdcloud.cn"
 		}
-		cfg.Model.AuthType = sdkproviders.AuthNone
+		cfg.Model.AuthType = providers.AuthNone
 	default:
 		if cfg.Model.API == "" {
 			return gatewayapp.Config{}, fmt.Errorf("provider %q requires --api", cfg.Model.Provider)

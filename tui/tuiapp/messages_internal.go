@@ -5,11 +5,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
+	"github.com/OnslaughtSnail/caelis/tui/driver"
 )
 
 type bootstrapMsg struct {
-	status tuiadapterruntime.StatusSnapshot
+	status tuidriver.StatusSnapshot
 	err    error
 }
 

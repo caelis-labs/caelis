@@ -534,13 +534,17 @@ func canonicalApprovalPayload(req *sdkruntime.ApprovalRequest) *ApprovalPayload 
 		return nil
 	}
 	payload := &ApprovalPayload{
-		ToolName: strings.TrimSpace(req.Tool.Name),
-		Status:   ApprovalStatusPending,
+		ToolCallID: strings.TrimSpace(req.Call.ID),
+		ToolName:   strings.TrimSpace(req.Tool.Name),
+		Status:     ApprovalStatusPending,
 	}
 	if payload.ToolName == "" {
 		payload.ToolName = strings.TrimSpace(req.Call.Name)
 	}
 	if req.Approval != nil {
+		if callID := strings.TrimSpace(req.Approval.ToolCall.ID); callID != "" {
+			payload.ToolCallID = callID
+		}
 		if toolName := strings.TrimSpace(req.Approval.ToolCall.Name); toolName != "" {
 			payload.ToolName = toolName
 		}

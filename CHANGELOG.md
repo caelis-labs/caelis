@@ -22,7 +22,7 @@
 - Moved live/provider/acpx/ACP process E2E tests behind the `e2e` build tag and kept default CI on stable unit and light integration coverage.
 - Kept ordinary gateway/app tests on the host sandbox backend so platform-specific sandbox probing does not leak into the default test gate.
 - Stopped a gateway driver unit test from waiting on a live provider failure path, keeping the default runtime test package fast and deterministic.
-- Pinned CLI stack-construction tests to the host sandbox backend through their temporary store config, avoiding platform sandbox auto-probes in `cmd/cli` unit coverage.
+- Pinned CLI stack-construction tests to the host sandbox backend through their temporary store config, avoiding platform sandbox auto-probes in `cmd/caelis` unit coverage.
 - Reduced process-scheduling sensitivity in local runtime and sandbox runner tests by avoiding parallel shell-backed checks and fixed one terminal stream assertion to avoid final-output timing races.
 - Validated the release branch with the repository quality gate and `git diff --check`.
 

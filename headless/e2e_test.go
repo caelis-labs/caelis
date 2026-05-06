@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	"github.com/OnslaughtSnail/caelis/sdk/model/providers/e2etest"
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy/presets"
@@ -48,7 +48,7 @@ func TestHeadlessGatewayProviderE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("local.New() error = %v", err)
 	}
-	gw, err := appgateway.New(appgateway.Config{
+	gw, err := gateway.New(gateway.Config{
 		Sessions: sessions,
 		Runtime:  rt,
 		Resolver: testResolver{
@@ -59,7 +59,7 @@ func TestHeadlessGatewayProviderE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("gateway.New() error = %v", err)
 	}
-	session, err := gw.StartSession(context.Background(), appgateway.StartSessionRequest{
+	session, err := gw.StartSession(context.Background(), gateway.StartSessionRequest{
 		AppName: "caelis",
 		UserID:  "user-1",
 		Workspace: sdksession.WorkspaceRef{
@@ -75,7 +75,7 @@ func TestHeadlessGatewayProviderE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 
-	result, err := RunOnce(ctx, gw, appgateway.BeginTurnRequest{
+	result, err := RunOnce(ctx, gw, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "Reply with exactly: headless gateway e2e ok",
 		Surface:    "headless-e2e",
@@ -93,8 +93,8 @@ type testResolver struct {
 	tools []sdktool.Tool
 }
 
-func (r testResolver) ResolveTurn(_ context.Context, intent appgateway.TurnIntent) (appgateway.ResolvedTurn, error) {
-	return appgateway.ResolvedTurn{
+func (r testResolver) ResolveTurn(_ context.Context, intent gateway.TurnIntent) (gateway.ResolvedTurn, error) {
+	return gateway.ResolvedTurn{
 		RunRequest: sdkruntime.RunRequest{
 			SessionRef: intent.SessionRef,
 			Input:      intent.Input,

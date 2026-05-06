@@ -296,6 +296,7 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 					ScopeID:         scopeID,
 					Actor:           gatewayDisplayActor(ev, ""),
 					OccurredAt:      occurredAt,
+					ToolCallID:      strings.TrimSpace(ev.ApprovalPayload.ToolCallID),
 					ApprovalTool:    strings.TrimSpace(ev.ApprovalPayload.ToolName),
 					ApprovalCommand: approvalCommandPreview(ev.ApprovalPayload.RawInput),
 					ApprovalStatus:  strings.TrimSpace(string(ev.ApprovalPayload.ReviewStatus)),

@@ -1,4 +1,4 @@
-package runtime
+package gatewaydriver
 
 import (
 	"bytes"
@@ -17,7 +17,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
@@ -115,7 +115,7 @@ func TestAllocateSideAgentHandleUsesUniqueHumanHandles(t *testing.T) {
 
 func TestGatewayDriverMapsTaskStreamToSpawnParent(t *testing.T) {
 	driver := &GatewayDriver{streamParents: map[string]terminalStreamParent{}}
-	spawnReq := appgateway.StreamRequest{
+	spawnReq := gateway.StreamRequest{
 		SessionRef: sdksession.SessionRef{SessionID: "session-1"},
 		CallID:     "spawn-call-1",
 		ToolName:   "SPAWN",
@@ -124,7 +124,7 @@ func TestGatewayDriverMapsTaskStreamToSpawnParent(t *testing.T) {
 	}
 	driver.bindTerminalStreamRequest(&spawnReq)
 
-	taskReq := appgateway.StreamRequest{
+	taskReq := gateway.StreamRequest{
 		SessionRef: sdksession.SessionRef{SessionID: "session-1"},
 		CallID:     "task-write-1",
 		ToolName:   "TASK",
@@ -176,7 +176,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if status.SessionID != "" {
 		t.Fatalf("Status().SessionID = %q, want empty before first submission", status.SessionID)
 	}
-	before, err := stack.Gateway.ListSessions(ctx, appgateway.ListSessionsRequest{
+	before, err := stack.Gateway.ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,
 		WorkspaceKey: stack.Workspace.Key,
@@ -194,7 +194,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		t.Fatalf("Submit() error = %v", err)
 	}
 	closeGatewayDriverTestTurn(t, turn)
-	after, err := stack.Gateway.ListSessions(ctx, appgateway.ListSessionsRequest{
+	after, err := stack.Gateway.ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      stack.AppName,
 		UserID:       stack.UserID,
 		WorkspaceKey: stack.Workspace.Key,
@@ -228,14 +228,14 @@ func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if _, err := stack.Gateway.StartSession(ctx, appgateway.StartSessionRequest{
+	if _, err := stack.Gateway.StartSession(ctx, gateway.StartSessionRequest{
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
 		Workspace: stack.Workspace,
 	}); err != nil {
 		t.Fatalf("StartSession(blank) error = %v", err)
 	}
-	titled, err := stack.Gateway.StartSession(ctx, appgateway.StartSessionRequest{
+	titled, err := stack.Gateway.StartSession(ctx, gateway.StartSessionRequest{
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
 		Workspace: stack.Workspace,
@@ -533,7 +533,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
-	if got := strings.TrimSpace(state[appgateway.StateCurrentReasoningEffort].(string)); got != "high" {
+	if got := strings.TrimSpace(state[gateway.StateCurrentReasoningEffort].(string)); got != "high" {
 		t.Fatalf("reasoning state = %q, want high", got)
 	}
 	cfg, ok := stack.ModelConfig("deepseek/deepseek-v4-pro")
@@ -1245,8 +1245,8 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if err == nil {
 		t.Fatal("StartAgentSubagent(second) error = nil, want active run conflict")
 	}
-	var gwErr *appgateway.Error
-	if !appgateway.As(err, &gwErr) || gwErr.Code != appgateway.CodeActiveRunConflict {
+	var gwErr *gateway.Error
+	if !gateway.As(err, &gwErr) || gwErr.Code != gateway.CodeActiveRunConflict {
 		t.Fatalf("StartAgentSubagent(second) error = %v, want active run conflict", err)
 	}
 	status, err := driver.AgentStatus(ctx)
@@ -2212,7 +2212,7 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	first, err := stack.Gateway.StartSession(ctx, appgateway.StartSessionRequest{
+	first, err := stack.Gateway.StartSession(ctx, gateway.StartSessionRequest{
 		AppName:    stack.AppName,
 		UserID:     stack.UserID,
 		Workspace:  stack.Workspace,
@@ -2224,12 +2224,12 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 	}
 	if err := stack.Sessions.UpdateState(ctx, first.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := sdksession.CloneState(state)
-		next[appgateway.StateCurrentModelAlias] = "openai/gpt-4o-mini"
+		next[gateway.StateCurrentModelAlias] = "openai/gpt-4o-mini"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(first) error = %v", err)
 	}
-	second, err := stack.Gateway.StartSession(ctx, appgateway.StartSessionRequest{
+	second, err := stack.Gateway.StartSession(ctx, gateway.StartSessionRequest{
 		AppName:    stack.AppName,
 		UserID:     stack.UserID,
 		Workspace:  stack.Workspace,
@@ -2241,7 +2241,7 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 	}
 	if err := stack.Sessions.UpdateState(ctx, second.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := sdksession.CloneState(state)
-		next[appgateway.StateCurrentModelAlias] = "deepseek/deepseek-v4-flash"
+		next[gateway.StateCurrentModelAlias] = "deepseek/deepseek-v4-flash"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(second) error = %v", err)

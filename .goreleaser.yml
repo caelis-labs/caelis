@@ -9,7 +9,7 @@ before:
 
 builds:
   - id: caelis
-    main: ./cmd/cli
+    main: ./cmd/caelis
     binary: caelis
     env:
       - CGO_ENABLED=0

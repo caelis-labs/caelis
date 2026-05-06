@@ -6,7 +6,13 @@ This document is the active contract reference for the SDK-backed gateway layer.
 
 The current local entry flow is:
 
-`cmd/cli -> app/gatewayapp -> gateway -> adapters -> tui/headless`
+`cmd/caelis -> internal/cli -> app/gatewayapp -> gateway`
+
+Current local surfaces live outside the gateway tree:
+
+- `headless`
+- `tui/gatewaydriver`
+- `acpbridge/gatewayagent`
 
 For the current package map, see [architecture.md](architecture.md). This file
 focuses on the gateway contract, canonical event semantics, and the remaining
@@ -45,17 +51,18 @@ The gateway does not own:
 - concrete sandbox/runtime construction
 - TUI rendering, grouping, or layout
 - ACP wire transport details
+- concrete surface adapters
 
-Those remain in `app/gatewayapp`, SDK implementation packages, adapters, or
-presentation code.
+Those remain in `app/gatewayapp`, SDK implementation packages, surface adapter
+packages, or presentation code.
 
 ## Layering Rules
 
-1. `gateway/` root exposes the adapter-facing contract.
+1. `gateway/` root exposes the surface-facing contract.
 2. `gateway/core` owns implementation details for local session, turn, replay,
    approval, and control-plane behavior.
-3. Adapters depend on the root `gateway` contract, not on `gateway/core`
-   internals.
+3. Surface adapters depend on the root `gateway` contract, not on
+   `gateway/core` internals, and do not live under `gateway/`.
 4. `app/gatewayapp` is the local composition root that wires SDK runtime,
    session store, model lookup, prompt assembly, sandbox policy, and gateway
    resolver.
@@ -106,13 +113,13 @@ The gateway treats ACP as an integration source, not a parallel product path.
 The local path is acceptable when:
 
 - headless and TUI entry both run through `app/gatewayapp` and `gateway`
-- adapters consume root `gateway` contracts
+- surface adapters consume root `gateway` contracts
 - replay and continuity use gateway-owned cursors and session references
 - canonical payloads cover TUI-visible narrative, tool, plan, approval,
   participant, handoff, compaction, and lifecycle events
 - control-plane state exposes local and ACP controller ownership through the
   gateway contract
-- tests cover the local gateway, adapters, and TUI projection paths
+- tests cover the local gateway, surface adapters, and TUI projection paths
 
 ## Deferred Surface Work
 
@@ -125,5 +132,5 @@ explicitly scopes them:
 - Telegram, Discord, webhook, or other remote adapters
 - multi-remote session hosting beyond the current host-oriented primitives
 
-These should enter through gateway/host or a future gateway adapter layer, not
-by bypassing the gateway contract.
+These should enter through gateway/host or future surface packages, not by
+bypassing the gateway contract.

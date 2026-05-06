@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	headlessadapter "github.com/OnslaughtSnail/caelis/gateway/adapter/headless"
+	headlessadapter "github.com/OnslaughtSnail/caelis/headless"
 	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"

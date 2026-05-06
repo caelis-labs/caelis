@@ -2,19 +2,30 @@
 
 ## Current Entry Flow
 
-The current local application path is:
+The current local binary path is:
 
-`cmd/cli -> app/gatewayapp -> gateway -> adapters -> tui/headless`
+`cmd/caelis -> internal/cli -> app/gatewayapp -> gateway`
 
-- `cmd/cli` parses one flat flag set and decides whether to enter headless or
-  interactive mode.
+Surfaces adapt that shared gateway path at the edge:
+
+`headless -> gateway`
+
+`tui/gatewaydriver -> tui/driver -> tui/tuiapp`
+
+`acpbridge/gatewayagent -> acpbridge/agentruntime -> acp`
+
+- `cmd/caelis` is the only production binary entrypoint and only handles process
+  startup.
+- `internal/cli` parses one flat flag set and routes doctor, headless, ACP stdio,
+  and interactive TUI modes.
 - `app/gatewayapp` assembles the local stack: prompt inputs, model lookup,
   sandbox/runtime selection, app config, and durable session storage.
 - `gateway/` exposes the stable product-facing contracts for sessions, turns,
   replay, continuity, bindings, and control-plane state.
-- `gateway/adapter/headless` runs one-shot turns over the gateway contract.
-- `gateway/adapter/tui/runtime` turns gateway events and actions into the driver
-  consumed by the Bubble Tea application in `tui/tuiapp`.
+- `headless` runs one-shot turns over the gateway contract.
+- `tui/gatewaydriver` implements the TUI driver contract consumed by the Bubble
+  Tea application in `tui/tuiapp`.
+- `acpbridge/gatewayagent` exposes the local stack as a standard ACP agent.
 
 ## Layering
 
@@ -45,8 +56,8 @@ The gateway is the product seam built only on the SDK.
 - `gateway/host` owns foreground/daemon host lifecycle and remote-session
   helpers.
 
-Adapters should depend on the root `gateway` contract, not on
-`gateway/core` internals.
+Concrete surface adapters do not live under `gateway/`. They should depend on
+the root `gateway` contract, not on `gateway/core` internals.
 
 ### 3. `app/gatewayapp/`
 
@@ -59,28 +70,43 @@ It is responsible for:
 - storing sessions under `~/.caelis/sessions`
 - assembling prompts from built-in text, `AGENTS.md`, and local skill metadata
 - persisting model and sandbox preferences for future turns
+- exposing narrow app services that surface adapters can bind to at the edge
 
-### 4. Adapters
+`app/gatewayapp` should not import TUI, headless, or ACP bridge adapters. It
+builds the local app stack; `internal/cli` and the surface packages decide how
+to expose that stack.
+
+There is intentionally no `app/tuiadapter` or `app/tuisurface` package. TUI
+driver construction belongs to `tui/gatewaydriver`.
+
+### 4. Surface Adapters
 
 Current local adapters are intentionally small:
 
-- `gateway/adapter/headless`: one-shot execution for `-p` or piped stdin
-- `gateway/adapter/tui/runtime`: bridge between gateway events and the TUI
-  driver
+- `headless`: one-shot execution for `-p` or piped stdin
+- `tui/gatewaydriver`: bridge between gateway events/app services and the TUI
+  driver contract
+- `acpbridge/gatewayagent`: bridge between the local stack and the standard ACP
+  agent runtime
 
 These adapters translate between surface-specific interaction models and the
-shared gateway contracts.
+shared gateway contracts. They should depend on the root `gateway` contract and
+the relevant surface contract, but not on `gateway/core` internals.
 
 ### 5. Presentation
 
 The top-level `tui/` tree remains presentation code:
 
 - `tui/tuiapp`: Bubble Tea application state machine and slash-command UX
+- `tui/driver`: presentation-facing driver contract consumed by the TUI and
+  implemented by adapters
 - `tui/tuikit`: UI primitives
 - `tui/modelcatalog`: model metadata used by `/connect`
 - `tui/tuidiff`: diff rendering helpers
 
-The TUI owns interaction and rendering, but not runtime orchestration.
+The TUI owns interaction, rendering, and its driver contract, but not runtime
+orchestration, config persistence, model lookup ownership, sandbox selection, or
+gateway stack assembly.
 
 ## Adjacent ACP Packages
 

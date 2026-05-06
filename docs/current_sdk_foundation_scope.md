@@ -6,7 +6,7 @@ The SDK foundation is no longer a purely future-facing branch of the design.
 
 The current local product path already runs through:
 
-`cmd/cli -> app/gatewayapp -> gateway -> sdk`
+`cmd/caelis -> internal/cli -> app/gatewayapp -> gateway -> sdk`
 
 This document now records the boundary rules that still matter while that stack
 continues to evolve.
@@ -18,7 +18,7 @@ gateway-layer design target, see
 ## What Must Stay True
 
 1. `sdk/` remains independent of product surfaces such as `tui/`,
-   `app/gatewayapp`, and `cmd/cli`.
+   `app/gatewayapp`, and `cmd/caelis`.
 2. Root `sdk` packages stay contract-first; concrete implementations live in
    subpackages such as `sdk/runtime/local` and `sdk/session/file`.
 3. `gateway/` remains the product-facing orchestration boundary built on the
@@ -26,8 +26,8 @@ gateway-layer design target, see
    directly into SDK internals.
 4. `app/gatewayapp` stays the local composition root for prompt assembly,
    config/session stores, model lookup, and sandbox/runtime wiring.
-5. Adapters keep consuming the stable root `gateway` contract instead of
-   importing `gateway/core` implementation details.
+5. Surface adapters keep consuming the stable root `gateway` contract instead
+   of importing `gateway/core` implementation details.
 
 ## Current Engineering Rules
 
@@ -48,8 +48,9 @@ or app-owned configuration persistence.
 The gateway layer translates SDK capabilities into product-facing session,
 turn, replay, continuity, and control-plane contracts.
 
-That means new product surfaces should normally plug into `gateway/` first,
-then adapt into presentation or transport code.
+That means new product surfaces should normally plug into the root gateway
+contract first, then adapt into presentation or transport code outside the
+`gateway/` tree.
 
 ### 3. Keep local assembly in app/gatewayapp
 
@@ -60,7 +61,8 @@ then adapt into presentation or transport code.
 - how prompt fragments are assembled
 - how model lookup and sandbox settings are persisted
 
-That wiring should not leak upward into adapters or downward into the SDK.
+That wiring should not leak upward into surface adapters or downward into the
+SDK.
 
 ## Related Documents
 

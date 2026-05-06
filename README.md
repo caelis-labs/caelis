@@ -3,12 +3,12 @@
 Current release target: `v0.1.1`.
 
 `caelis` is a terminal-first agent runtime with one local stack:
-`sdk -> gateway -> app/gatewayapp -> adapters -> tui/headless`.
+`sdk -> gateway -> app/gatewayapp -> internal/cli -> tui/headless/acp`.
 
 The project now treats the gateway event contract as the stable product boundary.
 The SDK owns runtime, session, model, sandbox, tool, delegation, and ACP
-integration primitives; adapters project that state into the Bubble Tea TUI or a
-headless one-shot runner.
+integration primitives; surface packages project that state into the Bubble Tea
+TUI, ACP stdio, or a headless one-shot runner.
 
 ## What It Does
 
@@ -27,8 +27,10 @@ headless one-shot runner.
 
 ## Current Layout
 
-- `cmd/cli`: flat-flag CLI entrypoint. Chooses TUI or headless mode; there are no
-  `console` or `acp` subcommands.
+- `cmd/caelis`: the single binary entrypoint. It delegates immediately to the
+  internal CLI runner.
+- `internal/cli`: flat-flag CLI runner. It routes doctor, ACP stdio, headless,
+  and interactive TUI modes through the local app stack.
 - `sdk/`: reusable foundation for runtime, session, model/provider, tool,
   sandbox, delegation, plugin, stream, and ACP contracts. Root packages stay
   contract-first; concrete implementations live in subpackages such as
@@ -36,16 +38,15 @@ headless one-shot runner.
   `sdk/controller/acp`.
 - `gateway/`: product-facing API surface. `gateway/core` owns session, turn, event
   replay, approval, and control-plane orchestration. `gateway/host` owns host and
-  remote-session lifecycle.
+  remote-session lifecycle. Concrete surface adapters live outside `gateway`.
 - `app/gatewayapp`: local composition root that wires the SDK runtime, gateway
   resolver, prompt assembly, config store, model catalog, and session store.
-- `gateway/adapter/headless`: one-shot adapter over the root `gateway` contract.
-- `gateway/adapter/tui/runtime`: gateway-to-TUI bridge used by the interactive
-  application.
-- `tui/`: presentation layer, including `tui/tuiapp`, `tui/tuikit`,
-  `tui/modelcatalog`, `tui/acpprojector`, and `tui/tuidiff`.
+- `headless`: one-shot CLI surface over the root `gateway` contract.
+- `tui/`: terminal presentation layer, including `tui/tuiapp`, `tui/driver`,
+  `tui/gatewaydriver`, `tui/tuikit`, `tui/acpprojector`, and `tui/tuidiff`.
 - `acp/` and `acpbridge/`: ACP schema, client/server transport, fixtures, and
-  bridge helpers used by external-agent flows.
+  bridge helpers used by external-agent flows. `acpbridge/gatewayagent` exposes
+  the local stack as an ACP agent.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 
 Documentation map: [docs/README.md](docs/README.md)
@@ -75,15 +76,15 @@ Supported npm platforms: macOS/Linux (`x64`, `arm64`).
 From source:
 
 ```bash
-go install ./cmd/cli
+go install ./cmd/caelis
 ```
 
 The binary name is `caelis` in release artifacts and npm packages. Local source
-builds can also be run with `go run ./cmd/cli`.
+builds can also be run with `go run ./cmd/caelis`.
 
 ## CLI Entry
 
-`cmd/cli` uses one flat flag set. Run `go run ./cmd/cli -h` to inspect the
+`cmd/caelis` uses one flat flag set. Run `go run ./cmd/caelis -h` to inspect the
 current flags.
 
 Common flags:
@@ -219,7 +220,7 @@ make quality
 
 - `VERSION` carries the Go release tag, including the leading `v`.
 - npm package manifests carry the same version without the leading `v`.
-- Go release archives are produced from `./cmd/cli` by GoReleaser.
+- Go release archives are produced from `./cmd/caelis` by GoReleaser.
 - npm publishes a thin launcher package from `npm/` plus platform-specific binary
   packages from `npm/packages/*`.
 - The npm wrapper is file-whitelisted so published artifacts do not include

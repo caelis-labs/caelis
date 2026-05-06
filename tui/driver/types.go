@@ -1,15 +1,12 @@
-package runtime
+package tuidriver
 
 import (
 	"context"
-	"errors"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
-
-var ErrMigrationPending = errors.New("tui/runtime: legacy tui migration wiring pending")
 
 type SubmissionMode string
 
@@ -137,14 +134,13 @@ type Turn interface {
 	RunID() string
 	TurnID() string
 	SessionRef() sdksession.SessionRef
-	Events() <-chan appgateway.EventEnvelope
-	Submit(context.Context, appgateway.SubmitRequest) error
+	Events() <-chan gateway.EventEnvelope
+	Submit(context.Context, gateway.SubmitRequest) error
 	Cancel() bool
 	Close() error
 }
 
-// Driver is the only backend boundary that the transplanted legacy-style TUI
-// shell should depend on.
+// Driver is the backend contract consumed by the Bubble Tea application.
 type Driver interface {
 	Status(context.Context) (StatusSnapshot, error)
 	WorkspaceDir() string
@@ -155,7 +151,7 @@ type Driver interface {
 	NewSession(context.Context) (sdksession.Session, error)
 	ResumeSession(context.Context, string) (sdksession.Session, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
-	ReplayEvents(context.Context) ([]appgateway.EventEnvelope, error)
+	ReplayEvents(context.Context) ([]gateway.EventEnvelope, error)
 	Compact(context.Context) error
 
 	Connect(context.Context, ConnectConfig) (StatusSnapshot, error)

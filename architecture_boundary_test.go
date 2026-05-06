@@ -66,9 +66,21 @@ func TestProductionImportBoundaries(t *testing.T) {
 
 func forbiddenProductionImport(rel string, importPath string) bool {
 	switch {
-	case strings.HasPrefix(rel, "gateway/adapter/") && strings.Contains(importPath, "/app/"):
+	case strings.HasPrefix(rel, "gateway/") && strings.Contains(importPath, "/app/"):
+		return true
+	case strings.HasPrefix(rel, "gateway/") && strings.Contains(importPath, "/headless"):
+		return true
+	case strings.HasPrefix(rel, "gateway/") && strings.Contains(importPath, "/tui/"):
+		return true
+	case strings.HasPrefix(rel, "gateway/") && strings.Contains(importPath, "/acpbridge/"):
 		return true
 	case strings.HasPrefix(rel, "app/gatewayapp/") && strings.Contains(importPath, "/tui/"):
+		return true
+	case strings.HasPrefix(rel, "app/gatewayapp/") && strings.Contains(importPath, "/headless"):
+		return true
+	case strings.HasPrefix(rel, "app/gatewayapp/") && strings.Contains(importPath, "/acpbridge/"):
+		return true
+	case strings.HasPrefix(rel, "tui/tuiapp/") && strings.Contains(importPath, "/tui/gatewaydriver"):
 		return true
 	case strings.HasPrefix(rel, "acp/") && strings.Contains(importPath, "/sdk/"):
 		return true

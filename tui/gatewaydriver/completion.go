@@ -1,4 +1,4 @@
-package runtime
+package gatewaydriver
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 	sdkskill "github.com/OnslaughtSnail/caelis/sdk/skill"
 )
@@ -24,7 +24,7 @@ const (
 	resumeCompletionTimeout = 250 * time.Millisecond
 )
 
-var errCompletionStopped = errors.New("tui/runtime: completion stopped")
+var errCompletionStopped = errors.New("tui/gatewaydriver: completion stopped")
 
 var ignoredCompletionDirs = map[string]struct{}{
 	".git":         {},
@@ -272,7 +272,7 @@ func enrichResumeCandidate(ctx context.Context, sessions resumeSessionLoader, su
 	candidate.Title = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Title)
 	candidate.Prompt = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Prompt)
 	candidate.Workspace = firstNonEmpty(strings.TrimSpace(loaded.Session.CWD), candidate.Workspace)
-	candidate.Model = strings.TrimSpace(appgateway.CurrentModelAlias(loaded.State))
+	candidate.Model = strings.TrimSpace(gateway.CurrentModelAlias(loaded.State))
 	return candidate
 }
 

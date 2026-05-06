@@ -1,4 +1,4 @@
-package runtime
+package gatewaydriver
 
 import (
 	"context"
@@ -7,14 +7,17 @@ import (
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
-func newGatewayDriverFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
-	return NewGatewayDriver(ctx, gatewayAppStackForRuntimeTest(stack), preferredSessionID, bindingKey, modelText)
+func NewLocalDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
+	return NewGatewayDriver(ctx, driverStack(stack), preferredSessionID, bindingKey, modelText)
 }
 
-func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *DriverStack {
+func driverStack(stack *gatewayapp.Stack) *DriverStack {
 	if stack == nil {
 		return nil
 	}
+	models := stack.Models()
+	agents := stack.Agents()
+	status := stack.Status()
 	return &DriverStack{
 		Gateway:   stack.Gateway,
 		Sessions:  stack.Sessions,
@@ -23,52 +26,54 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *DriverStack {
 		Workspace: stack.Workspace,
 
 		StartSessionFn:        stack.StartSession,
-		ACPControllerStatusFn: stack.ACPControllerStatus,
-		DefaultModelAliasFn:   stack.DefaultModelAlias,
-		SandboxStatusFn:       func() SandboxStatus { return testRuntimeSandboxStatus(stack.SandboxStatus()) },
+		ACPControllerStatusFn: agents.ControllerStatus,
+		DefaultModelAliasFn:   models.DefaultAlias,
+		SandboxStatusFn:       func() SandboxStatus { return toRuntimeSandboxStatus(status.Sandbox()) },
 		SessionRuntimeStateFn: func(ctx context.Context, ref sdksession.SessionRef) (SessionRuntimeState, error) {
-			return testRuntimeSessionRuntimeState(stack.SessionRuntimeState(ctx, ref))
+			return toRuntimeSessionRuntimeState(status.SessionRuntimeState(ctx, ref))
 		},
 		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-			return testRuntimeDoctorReport(stack.Doctor(ctx, testGatewayDoctorRequest(req)))
+			return toRuntimeDoctorReport(status.Doctor(ctx, toGatewayDoctorRequest(req)))
 		},
-		ModelConfigFn:           func(alias string) (ModelConfig, bool) { return testRuntimeModelConfigWithOK(stack.ModelConfig(alias)) },
-		SessionUsageSnapshotFn:  stack.SessionUsageSnapshot,
+		ModelConfigFn: func(alias string) (ModelConfig, bool) {
+			return toRuntimeModelConfigWithOK(models.Config(alias))
+		},
+		SessionUsageSnapshotFn:  models.UsageSnapshot,
 		CompactSessionFn:        stack.CompactSession,
-		ConnectFn:               func(cfg ModelConfig) (string, error) { return stack.Connect(testGatewayModelConfig(cfg)) },
-		UseModelFn:              stack.UseModel,
-		DeleteModelFn:           stack.DeleteModel,
-		SetACPControllerModelFn: stack.SetACPControllerModel,
-		CycleSessionModeFn:      stack.CycleSessionMode,
+		ConnectFn:               func(cfg ModelConfig) (string, error) { return models.Connect(toGatewayModelConfig(cfg)) },
+		UseModelFn:              models.Use,
+		DeleteModelFn:           models.Delete,
+		SetACPControllerModelFn: agents.SetControllerModel,
+		CycleSessionModeFn:      status.CycleSessionMode,
 		SetSandboxBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
-			return testRuntimeSandboxStatusWithError(stack.SetSandboxBackend(ctx, backend))
+			return toRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
 		},
-		SetACPControllerModeFn: stack.SetACPControllerMode,
-		SetSessionModeFn:       stack.SetSessionMode,
+		SetACPControllerModeFn: agents.SetControllerMode,
+		SetSessionModeFn:       status.SetSessionMode,
 		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-			return stack.RegisterBuiltinACPAgentWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
+			return agents.RegisterBuiltinWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
 		},
-		UnregisterACPAgentFn: stack.UnregisterACPAgent,
-		ListModelAliasesFn:   stack.ListModelAliases,
-		ListProviderModelsFn: stack.ListProviderModels,
+		UnregisterACPAgentFn: agents.Unregister,
+		ListModelAliasesFn:   models.ListAliases,
+		ListProviderModelsFn: models.ListProviderModels,
 		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
-			return testRuntimeACPAgentAddOptions(stack.ListBuiltinACPAgentAddOptions())
+			return toRuntimeACPAgentAddOptions(agents.BuiltinAddOptions())
 		},
 		ListInstallableACPAgentOptionsFn: func() []ACPAgentAddOption {
-			return testRuntimeACPAgentAddOptions(stack.ListInstallableACPAgentOptions())
+			return toRuntimeACPAgentAddOptions(agents.InstallableOptions())
 		},
-		ListACPAgentsFn: func() []ACPAgentInfo { return testRuntimeACPAgents(stack.ListACPAgents()) },
+		ListACPAgentsFn: func() []ACPAgentInfo { return toRuntimeACPAgents(agents.List()) },
 	}
 }
 
-func testRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfig, bool) {
+func toRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfig, bool) {
 	if !ok {
 		return ModelConfig{}, false
 	}
-	return testRuntimeModelConfig(cfg), true
+	return toRuntimeModelConfig(cfg), true
 }
 
-func testRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
+func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 	return ModelConfig{
 		Alias:                  cfg.Alias,
 		Provider:               cfg.Provider,
@@ -91,7 +96,7 @@ func testRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 	}
 }
 
-func testGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
+func toGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 	return gatewayapp.ModelConfig{
 		Alias:                  cfg.Alias,
 		Provider:               cfg.Provider,
@@ -114,7 +119,7 @@ func testGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 	}
 }
 
-func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
+func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	return SandboxStatus{
 		RequestedBackend: status.RequestedBackend,
 		ResolvedBackend:  status.ResolvedBackend,
@@ -124,11 +129,11 @@ func testRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	}
 }
 
-func testRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error) (SandboxStatus, error) {
-	return testRuntimeSandboxStatus(status), err
+func toRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error) (SandboxStatus, error) {
+	return toRuntimeSandboxStatus(status), err
 }
 
-func testRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
+func toRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
 	return SessionRuntimeState{
 		ModelAlias:      state.ModelAlias,
 		ReasoningEffort: state.ReasoningEffort,
@@ -137,7 +142,7 @@ func testRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err er
 	}, err
 }
 
-func testGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
+func toGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
 	return gatewayapp.DoctorRequest{
 		SessionRef: req.SessionRef,
 		SessionID:  req.SessionID,
@@ -145,7 +150,7 @@ func testGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
 	}
 }
 
-func testRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorReport, error) {
+func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorReport, error) {
 	return DoctorReport{
 		StoreDir:                report.StoreDir,
 		SessionID:               report.SessionID,
@@ -166,7 +171,7 @@ func testRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorR
 	}, err
 }
 
-func testRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAgentAddOption {
+func toRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAgentAddOption {
 	out := make([]ACPAgentAddOption, 0, len(options))
 	for _, option := range options {
 		out = append(out, ACPAgentAddOption{
@@ -178,7 +183,7 @@ func testRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACP
 	return out
 }
 
-func testRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
+func toRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
 	out := make([]ACPAgentInfo, 0, len(agents))
 	for _, agent := range agents {
 		out = append(out, ACPAgentInfo{

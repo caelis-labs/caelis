@@ -66,6 +66,7 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
 		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
 		ApprovalPayload: &appgateway.ApprovalPayload{
+			ToolCallID:     "perm-call-1",
 			ToolName:       "request_permissions",
 			RawInput:       map[string]any{"reason": "need access"},
 			ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
@@ -79,6 +80,9 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 	}
 	if events[0].Kind != TranscriptEventApproval || events[0].ApprovalStatus != string(appgateway.ApprovalReviewStatusApproved) {
 		t.Fatalf("events[0] = %#v, want approval review transcript event", events[0])
+	}
+	if events[0].ToolCallID != "perm-call-1" {
+		t.Fatalf("ToolCallID = %q, want %q", events[0].ToolCallID, "perm-call-1")
 	}
 	if !strings.Contains(events[0].ApprovalText, "Automatic approval review approved") {
 		t.Fatalf("ApprovalText = %q, want review text", events[0].ApprovalText)

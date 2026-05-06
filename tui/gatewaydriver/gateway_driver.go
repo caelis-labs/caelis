@@ -1,4 +1,4 @@
-package runtime
+package gatewaydriver
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
+	"github.com/OnslaughtSnail/caelis/gateway"
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	modelcatalog "github.com/OnslaughtSnail/caelis/sdk/model/catalog"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
@@ -46,7 +46,7 @@ type terminalStreamParent struct {
 
 func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
 	if stack == nil {
-		return nil, fmt.Errorf("tui/runtime: stack is required")
+		return nil, fmt.Errorf("tui/gatewaydriver: stack is required")
 	}
 	key := firstNonEmpty(strings.TrimSpace(bindingKey), "cli-tui")
 	if ctx == nil {
@@ -76,11 +76,11 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 	return driver, nil
 }
 
-func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.EventEnvelope) (<-chan appgateway.EventEnvelope, bool) {
+func (d *GatewayDriver) SubscribeStream(ctx context.Context, env gateway.EventEnvelope) (<-chan gateway.EventEnvelope, bool) {
 	if d == nil || d.stack == nil || d.stack.Gateway == nil {
 		return nil, false
 	}
-	req, ok := appgateway.StreamRequestFromEvent(env)
+	req, ok := gateway.StreamRequestFromEvent(env)
 	if !ok {
 		return nil, false
 	}
@@ -104,7 +104,7 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 	d.streamSubscriptions[key] = struct{}{}
 	d.mu.Unlock()
 
-	out := make(chan appgateway.EventEnvelope, 32)
+	out := make(chan gateway.EventEnvelope, 32)
 	go func() {
 		defer close(out)
 		defer func() {
@@ -119,7 +119,7 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 			if frame.Text == "" && frame.Event == nil && !frame.Closed {
 				continue
 			}
-			for _, env := range appgateway.StreamFrameEvents(req, sdkstream.CloneFrame(*frame)) {
+			for _, env := range gateway.StreamFrameEvents(req, sdkstream.CloneFrame(*frame)) {
 				select {
 				case out <- env:
 				case <-ctx.Done():
@@ -131,7 +131,7 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env appgateway.Even
 	return out, true
 }
 
-func (d *GatewayDriver) bindTerminalStreamRequest(req *appgateway.StreamRequest) {
+func (d *GatewayDriver) bindTerminalStreamRequest(req *gateway.StreamRequest) {
 	if d == nil || req == nil {
 		return
 	}
@@ -167,7 +167,7 @@ func (d *GatewayDriver) bindTerminalStreamRequest(req *appgateway.StreamRequest)
 	}
 }
 
-func (d *GatewayDriver) lookupTerminalStreamParentLocked(req appgateway.StreamRequest) (terminalStreamParent, bool) {
+func (d *GatewayDriver) lookupTerminalStreamParentLocked(req gateway.StreamRequest) (terminalStreamParent, bool) {
 	if d == nil || len(d.streamParents) == 0 {
 		return terminalStreamParent{}, false
 	}
@@ -183,7 +183,7 @@ func (d *GatewayDriver) lookupTerminalStreamParentLocked(req appgateway.StreamRe
 	return terminalStreamParent{}, false
 }
 
-func terminalStreamParentKeys(req appgateway.StreamRequest) []string {
+func terminalStreamParentKeys(req gateway.StreamRequest) []string {
 	sessionID := strings.TrimSpace(req.SessionRef.SessionID)
 	if sessionID == "" {
 		sessionID = strings.TrimSpace(req.Ref.SessionID)
@@ -237,7 +237,7 @@ func (d *GatewayDriver) ensureSession(ctx context.Context) (sdksession.Session, 
 		return session, nil
 	}
 	if d == nil || d.stack == nil {
-		return sdksession.Session{}, fmt.Errorf("tui/runtime: stack is unavailable")
+		return sdksession.Session{}, fmt.Errorf("tui/gatewaydriver: stack is unavailable")
 	}
 	session, err := d.stack.StartSession(ctx, "", d.bindingKey)
 	if err != nil {
@@ -445,22 +445,22 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	return status, nil
 }
 
-func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.SessionRef) (appgateway.UsageSnapshot, error) {
+func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.SessionRef) (gateway.UsageSnapshot, error) {
 	if d == nil || d.stack == nil || d.stack.Sessions == nil {
-		return appgateway.UsageSnapshot{}, nil
+		return gateway.UsageSnapshot{}, nil
 	}
 	if strings.TrimSpace(ref.SessionID) == "" {
-		return appgateway.UsageSnapshot{}, nil
+		return gateway.UsageSnapshot{}, nil
 	}
 	events, err := d.stack.Sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
 	if err != nil {
-		return appgateway.UsageSnapshot{}, err
+		return gateway.UsageSnapshot{}, err
 	}
-	var usage appgateway.UsageSnapshot
+	var usage gateway.UsageSnapshot
 	lastToolCallUsageKey := ""
 	lastUsageWasToolCall := false
 	for _, event := range events {
-		one := appgateway.UsageSnapshotFromSessionEvent(event)
+		one := gateway.UsageSnapshotFromSessionEvent(event)
 		if one == nil {
 			if sdksession.EventTypeOf(event) != sdksession.EventTypeToolCall {
 				lastToolCallUsageKey = ""
@@ -488,7 +488,7 @@ func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.Se
 	return usage, nil
 }
 
-func usageSnapshotDedupeKey(usage appgateway.UsageSnapshot) string {
+func usageSnapshotDedupeKey(usage gateway.UsageSnapshot) string {
 	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
 		return ""
 	}
@@ -500,7 +500,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	if err != nil {
 		return nil, err
 	}
-	result, err := d.stack.Gateway.BeginTurn(ctx, appgateway.BeginTurnRequest{
+	result, err := d.stack.Gateway.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      strings.TrimSpace(submission.Text),
 		Surface:    d.bindingKey,
@@ -532,9 +532,9 @@ func (d *GatewayDriver) Interrupt(ctx context.Context) error {
 		if cancelCommand != nil {
 			return nil
 		}
-		return fmt.Errorf("tui/runtime: no active session")
+		return fmt.Errorf("tui/gatewaydriver: no active session")
 	}
-	if err := d.stack.Gateway.Interrupt(ctx, appgateway.InterruptRequest{
+	if err := d.stack.Gateway.Interrupt(ctx, gateway.InterruptRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 		Reason:     "tui interrupt",
@@ -590,13 +590,13 @@ func (d *GatewayDriver) NewSession(ctx context.Context) (sdksession.Session, err
 }
 
 func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (sdksession.Session, error) {
-	result, err := d.stack.Gateway.ResumeSession(ctx, appgateway.ResumeSessionRequest{
+	result, err := d.stack.Gateway.ResumeSession(ctx, gateway.ResumeSessionRequest{
 		AppName:    d.stack.AppName,
 		UserID:     d.stack.UserID,
 		Workspace:  d.stack.Workspace,
 		SessionID:  strings.TrimSpace(sessionID),
 		BindingKey: d.bindingKey,
-		Binding: appgateway.BindingDescriptor{
+		Binding: gateway.BindingDescriptor{
 			Surface: d.bindingKey,
 			Owner:   d.stack.AppName,
 		},
@@ -616,7 +616,7 @@ func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCa
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
-	result, err := d.stack.Gateway.ListSessions(ctx, appgateway.ListSessionsRequest{
+	result, err := d.stack.Gateway.ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      d.stack.AppName,
 		UserID:       d.stack.UserID,
 		WorkspaceKey: d.stack.Workspace.Key,
@@ -636,12 +636,12 @@ func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCa
 	return out, nil
 }
 
-func (d *GatewayDriver) ReplayEvents(ctx context.Context) ([]appgateway.EventEnvelope, error) {
+func (d *GatewayDriver) ReplayEvents(ctx context.Context) ([]gateway.EventEnvelope, error) {
 	session, ok := d.currentSession()
 	if !ok {
-		return nil, fmt.Errorf("tui/runtime: no active session")
+		return nil, fmt.Errorf("tui/gatewaydriver: no active session")
 	}
-	result, err := d.stack.Gateway.ReplayEvents(ctx, appgateway.ReplayEventsRequest{
+	result, err := d.stack.Gateway.ReplayEvents(ctx, gateway.ReplayEventsRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 	})
@@ -654,7 +654,7 @@ func (d *GatewayDriver) ReplayEvents(ctx context.Context) ([]appgateway.EventEnv
 func (d *GatewayDriver) Compact(ctx context.Context) error {
 	session, ok := d.currentSession()
 	if !ok {
-		return fmt.Errorf("tui/runtime: no active session")
+		return fmt.Errorf("tui/gatewaydriver: no active session")
 	}
 	return d.stack.CompactSession(ctx, session.SessionRef)
 }
@@ -773,13 +773,13 @@ func (d *GatewayDriver) UseModel(ctx context.Context, model string, reasoningEff
 		return StatusSnapshot{}, err
 	}
 	if alias == "" {
-		return StatusSnapshot{}, fmt.Errorf("tui/runtime: model alias is required")
+		return StatusSnapshot{}, fmt.Errorf("tui/gatewaydriver: model alias is required")
 	}
 	reasoning := ""
 	if len(reasoningEffort) > 0 {
 		reasoning = strings.TrimSpace(reasoningEffort[0])
 		if reasoning != "" && !d.modelAliasSupportsReasoningLevel(alias, reasoning) {
-			return StatusSnapshot{}, fmt.Errorf("tui/runtime: model %q does not support reasoning level %q", alias, reasoning)
+			return StatusSnapshot{}, fmt.Errorf("tui/gatewaydriver: model %q does not support reasoning level %q", alias, reasoning)
 		}
 	}
 	if err := d.stack.UseModel(ctx, session.SessionRef, alias, reasoning); err != nil {
@@ -870,7 +870,7 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	if !ok {
 		return status, nil
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{
+	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
 		SessionRef: session.SessionRef,
 	})
 	if err != nil {
@@ -938,7 +938,7 @@ func (d *GatewayDriver) RemoveAgent(ctx context.Context, target string) (AgentSt
 		return AgentStatusSnapshot{}, err
 	}
 	if strings.EqualFold(strings.TrimSpace(status.ControllerKind), string(sdksession.ControllerKindACP)) {
-		return AgentStatusSnapshot{}, fmt.Errorf("tui/runtime: an ACP agent is the active controller; run /agent use local before removing registered agents")
+		return AgentStatusSnapshot{}, fmt.Errorf("tui/gatewaydriver: an ACP agent is the active controller; run /agent use local before removing registered agents")
 	}
 	if err := d.stack.UnregisterACPAgent(target); err != nil {
 		return AgentStatusSnapshot{}, err
@@ -952,7 +952,7 @@ func (d *GatewayDriver) HandoffAgent(ctx context.Context, target string) (AgentS
 		return AgentStatusSnapshot{}, err
 	}
 	target = strings.TrimSpace(target)
-	req := appgateway.HandoffControllerRequest{
+	req := gateway.HandoffControllerRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 		Source:     "tui_agent_handoff",
@@ -992,7 +992,7 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 		return nil, err
 	}
 	label := d.allocateSideAgentLabel(ctx, session.SessionRef, agent)
-	updated, err := d.stack.Gateway.AttachParticipant(ctx, appgateway.AttachParticipantRequest{
+	updated, err := d.stack.Gateway.AttachParticipant(ctx, gateway.AttachParticipantRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 		Agent:      agent,
@@ -1014,7 +1014,7 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 		}
 		return nil, err
 	}
-	result, err := d.stack.Gateway.PromptParticipant(ctx, appgateway.PromptParticipantRequest{
+	result, err := d.stack.Gateway.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    updated.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1038,7 +1038,7 @@ func (d *GatewayDriver) detachSideAgentAfterPromptFailure(ctx context.Context, r
 	if participantID == "" || d == nil || d.stack == nil || d.stack.Gateway == nil {
 		return nil
 	}
-	updated, err := d.stack.Gateway.DetachParticipant(context.WithoutCancel(ctx), appgateway.DetachParticipantRequest{
+	updated, err := d.stack.Gateway.DetachParticipant(context.WithoutCancel(ctx), gateway.DetachParticipantRequest{
 		SessionRef:    ref,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1064,7 +1064,7 @@ var sideAgentHandleNames = []string{
 func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref sdksession.SessionRef, agent string) string {
 	used := map[string]struct{}{}
 	if d != nil && d.stack != nil && d.stack.Gateway != nil {
-		if state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
+		if state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
 				label := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(participant.Label), "@"))
 				if label != "" {
@@ -1120,7 +1120,7 @@ func sideAgentParticipantID(session sdksession.Session, agent string, label stri
 			return id, nil
 		}
 	}
-	return "", fmt.Errorf("tui/runtime: side ACP participant %q was not attached", agent)
+	return "", fmt.Errorf("tui/gatewaydriver: side ACP participant %q was not attached", agent)
 }
 
 func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, prompt string) (Turn, error) {
@@ -1132,7 +1132,7 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 	if err != nil {
 		return nil, err
 	}
-	result, err := d.stack.Gateway.PromptParticipant(ctx, appgateway.PromptParticipantRequest{
+	result, err := d.stack.Gateway.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    session.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1154,7 +1154,7 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	if !ok {
 		return []CompletionCandidate{}, nil
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{SessionRef: session.SessionRef})
+	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: session.SessionRef})
 	if err != nil {
 		return nil, err
 	}
@@ -1187,14 +1187,14 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	return out, nil
 }
 
-func isUserSideParticipant(participant appgateway.ParticipantState) bool {
+func isUserSideParticipant(participant gateway.ParticipantState) bool {
 	if participant.Role != sdksession.ParticipantRoleSidecar {
 		return false
 	}
 	return participant.Kind == sdksession.ParticipantKindACP
 }
 
-func shouldHideSelfDelegatedParticipant(participant appgateway.ParticipantState) bool {
+func shouldHideSelfDelegatedParticipant(participant gateway.ParticipantState) bool {
 	if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleDelegated {
 		return false
 	}
@@ -1447,7 +1447,7 @@ func acpControllerModeDisplay(status sdkcontroller.ControllerStatus) string {
 func nextACPControllerMode(status sdkcontroller.ControllerStatus) (sdkcontroller.ControllerMode, error) {
 	modes := compactACPControllerModes(status.ModeOptions)
 	if len(modes) == 0 {
-		return sdkcontroller.ControllerMode{}, fmt.Errorf("tui/runtime: remote ACP controller did not declare session modes")
+		return sdkcontroller.ControllerMode{}, fmt.Errorf("tui/gatewaydriver: remote ACP controller did not declare session modes")
 	}
 	current := strings.TrimSpace(status.Mode)
 	if current == "" {
@@ -1650,7 +1650,7 @@ func (d *GatewayDriver) completeAgentParticipants(ctx context.Context, query str
 	if !ok {
 		return nil, nil
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{
+	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
 		SessionRef: session.SessionRef,
 	})
 	if err != nil {
@@ -1732,7 +1732,7 @@ func (d *GatewayDriver) resolveHandoffAgentName(ctx context.Context, ref sdksess
 	if err != nil {
 		return "", err
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}
@@ -1741,13 +1741,13 @@ func (d *GatewayDriver) resolveHandoffAgentName(ctx context.Context, ref sdksess
 			return strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)), nil
 		}
 	}
-	return "", fmt.Errorf("tui/runtime: participant %q is not attached", input)
+	return "", fmt.Errorf("tui/gatewaydriver: participant %q is not attached", input)
 }
 
 func (d *GatewayDriver) resolveAgentName(input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
-		return "", fmt.Errorf("tui/runtime: agent name is required")
+		return "", fmt.Errorf("tui/gatewaydriver: agent name is required")
 	}
 	var exact string
 	prefixMatches := make([]string, 0, 2)
@@ -1772,18 +1772,18 @@ func (d *GatewayDriver) resolveAgentName(input string) (string, error) {
 	case 1:
 		return prefixMatches[0], nil
 	case 0:
-		return "", fmt.Errorf("tui/runtime: agent %q is not configured", input)
+		return "", fmt.Errorf("tui/gatewaydriver: agent %q is not configured", input)
 	default:
-		return "", fmt.Errorf("tui/runtime: agent %q is ambiguous", input)
+		return "", fmt.Errorf("tui/gatewaydriver: agent %q is ambiguous", input)
 	}
 }
 
 func (d *GatewayDriver) resolveParticipantID(ctx context.Context, ref sdksession.SessionRef, input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
-		return "", fmt.Errorf("tui/runtime: participant id is required")
+		return "", fmt.Errorf("tui/gatewaydriver: participant id is required")
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, appgateway.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}
@@ -1816,16 +1816,16 @@ func (d *GatewayDriver) resolveParticipantID(ctx context.Context, ref sdksession
 	case 1:
 		return dedupeNonEmptyStrings(prefixMatches)[0], nil
 	case 0:
-		return "", fmt.Errorf("tui/runtime: participant %q is not attached", input)
+		return "", fmt.Errorf("tui/gatewaydriver: participant %q is not attached", input)
 	default:
-		return "", fmt.Errorf("tui/runtime: participant %q is ambiguous", input)
+		return "", fmt.Errorf("tui/gatewaydriver: participant %q is ambiguous", input)
 	}
 }
 
 func (d *GatewayDriver) resolveStoredModelAlias(ctx context.Context, input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
-		return "", fmt.Errorf("tui/runtime: model alias is required")
+		return "", fmt.Errorf("tui/gatewaydriver: model alias is required")
 	}
 	ref := sdksession.SessionRef{}
 	if session, ok := d.currentSession(); ok {
@@ -1857,9 +1857,9 @@ func (d *GatewayDriver) resolveStoredModelAlias(ctx context.Context, input strin
 	case 1:
 		return prefixMatches[0], nil
 	case 0:
-		return "", fmt.Errorf("tui/runtime: unknown model alias %q", input)
+		return "", fmt.Errorf("tui/gatewaydriver: unknown model alias %q", input)
 	default:
-		return "", fmt.Errorf("tui/runtime: ambiguous model alias %q", input)
+		return "", fmt.Errorf("tui/gatewaydriver: ambiguous model alias %q", input)
 	}
 }
 
@@ -1944,17 +1944,17 @@ func defaultTokenEnvName(provider string) string {
 }
 
 type gatewayTurn struct {
-	handle appgateway.TurnHandle
+	handle gateway.TurnHandle
 }
 
 func (t gatewayTurn) HandleID() string                  { return t.handle.HandleID() }
 func (t gatewayTurn) RunID() string                     { return t.handle.RunID() }
 func (t gatewayTurn) TurnID() string                    { return t.handle.TurnID() }
 func (t gatewayTurn) SessionRef() sdksession.SessionRef { return t.handle.SessionRef() }
-func (t gatewayTurn) Events() <-chan appgateway.EventEnvelope {
+func (t gatewayTurn) Events() <-chan gateway.EventEnvelope {
 	return t.handle.Events()
 }
-func (t gatewayTurn) Submit(ctx context.Context, req appgateway.SubmitRequest) error {
+func (t gatewayTurn) Submit(ctx context.Context, req gateway.SubmitRequest) error {
 	return t.handle.Submit(ctx, req)
 }
 func (t gatewayTurn) Cancel() bool { return t.handle.Cancel() }

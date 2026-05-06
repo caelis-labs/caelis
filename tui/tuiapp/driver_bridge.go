@@ -1,7 +1,7 @@
 package tuiapp
 
-// driver_bridge.go bridges the adapter runtime.Driver interface into the legacy
-// Config callback fields. This is the key migration adapter.
+// driver_bridge.go bridges the TUI driver contract into the legacy Config
+// callback fields. This is the key migration adapter.
 
 import (
 	"context"
@@ -17,8 +17,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	tuiadapterruntime "github.com/OnslaughtSnail/caelis/gateway/adapter/tui/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/tui/driver"
 )
 
 // ProgramSender is set after the tea.Program is created so that the
@@ -141,10 +141,10 @@ type streamDriver interface {
 	SubscribeStream(context.Context, appgateway.EventEnvelope) (<-chan appgateway.EventEnvelope, bool)
 }
 
-// ConfigFromDriver populates legacy Config callbacks from an adapter runtime.Driver.
+// ConfigFromDriver populates legacy Config callbacks from a TUI driver.
 // sender must be non-nil; its Send field is populated after Program creation
 // but before the user can trigger ExecuteLine.
-func ConfigFromDriver(driver tuiadapterruntime.Driver, sender *ProgramSender, base Config) Config {
+func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Config) Config {
 	base.Driver = driver
 	if base.StreamTickInterval <= 0 {
 		base.StreamTickInterval = streamSmoothingTickIntervalDefault
@@ -317,11 +317,11 @@ func ConfigFromDriver(driver tuiadapterruntime.Driver, sender *ProgramSender, ba
 // ExecuteLine: the single submission entry point
 // ---------------------------------------------------------------------------
 
-func executeLineViaDriver(driver tuiadapterruntime.Driver, sender *ProgramSender, sub Submission) TaskResultMsg {
+func executeLineViaDriver(driver tuidriver.Driver, sender *ProgramSender, sub Submission) TaskResultMsg {
 	return executeLineViaDriverWithContext(context.Background(), driver, sender, sub)
 }
 
-func executeLineViaDriverWithContext(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, sub Submission) TaskResultMsg {
+func executeLineViaDriverWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, sub Submission) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -337,10 +337,10 @@ func executeLineViaDriverWithContext(ctx context.Context, driver tuiadapterrunti
 	}
 
 	// Normal submission → Driver.Submit → streaming events.
-	turn, err := driver.Submit(ctx, tuiadapterruntime.Submission{
+	turn, err := driver.Submit(ctx, tuidriver.Submission{
 		Text:        sub.Text,
 		DisplayText: "",
-		Mode:        tuiadapterruntime.SubmissionMode(sub.Mode),
+		Mode:        tuidriver.SubmissionMode(sub.Mode),
 		Attachments: convertAttachments(sub.Attachments),
 	})
 	if err != nil {
@@ -369,7 +369,7 @@ type gatewayNarrativeBatcher struct {
 	key     string
 }
 
-func forwardGatewayTurnEvents(ctx context.Context, driver tuiadapterruntime.Driver, turn tuiadapterruntime.Turn, sender *ProgramSender) {
+func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender) {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -502,7 +502,7 @@ func mergeGatewayNarrativeEnvelope(dst *appgateway.EventEnvelope, src appgateway
 	dst.Event.Narrative.ReasoningText += src.Event.Narrative.ReasoningText
 }
 
-func startTerminalStreamForwarder(ctx context.Context, driver tuiadapterruntime.Driver, env appgateway.EventEnvelope, sender *ProgramSender) {
+func startTerminalStreamForwarder(ctx context.Context, driver tuidriver.Driver, env appgateway.EventEnvelope, sender *ProgramSender) {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -697,11 +697,11 @@ func cloneAnyMap(values map[string]any) map[string]any {
 // Slash command dispatch
 // ---------------------------------------------------------------------------
 
-func dispatchSlashCommand(driver tuiadapterruntime.Driver, sender *ProgramSender, text string) TaskResultMsg {
+func dispatchSlashCommand(driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
 	return dispatchSlashCommandWithContext(context.Background(), driver, sender, text)
 }
 
-func dispatchSlashCommandWithContext(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, text string) TaskResultMsg {
+func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -737,17 +737,17 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuiadapterrunti
 	}
 }
 
-func isDispatchableSlashCommand(driver tuiadapterruntime.Driver, text string) bool {
+func isDispatchableSlashCommand(driver tuidriver.Driver, text string) bool {
 	return isDispatchableSlashCommandWithContext(context.Background(), driver, text)
 }
 
-func activeACPAgentStatus(ctx context.Context, driver tuiadapterruntime.Driver) (tuiadapterruntime.AgentStatusSnapshot, bool) {
+func activeACPAgentStatus(ctx context.Context, driver tuidriver.Driver) (tuidriver.AgentStatusSnapshot, bool) {
 	if driver == nil {
-		return tuiadapterruntime.AgentStatusSnapshot{}, false
+		return tuidriver.AgentStatusSnapshot{}, false
 	}
 	status, err := driver.AgentStatus(contextOrBackground(ctx))
 	if err != nil {
-		return tuiadapterruntime.AgentStatusSnapshot{}, false
+		return tuidriver.AgentStatusSnapshot{}, false
 	}
 	return status, strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp")
 }
@@ -761,7 +761,7 @@ func isCoreLocalSlashCommand(cmd string) bool {
 	}
 }
 
-func isDispatchableSlashCommandWithContext(ctx context.Context, driver tuiadapterruntime.Driver, text string) bool {
+func isDispatchableSlashCommandWithContext(ctx context.Context, driver tuidriver.Driver, text string) bool {
 	cmd, _ := splitSlash(text)
 	if cmd == "" {
 		return false
@@ -780,16 +780,16 @@ func slashHelp(send func(tea.Msg)) TaskResultMsg {
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashHelpWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
+func slashHelpWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 	sendNotice(send, helpTextForCommands(appendAgentSlashCommandsWithContext(ctx, driver, DefaultCommands())))
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashDynamicAgent(driver tuiadapterruntime.Driver, send func(tea.Msg), agent string, prompt string) TaskResultMsg {
+func slashDynamicAgent(driver tuidriver.Driver, send func(tea.Msg), agent string, prompt string) TaskResultMsg {
 	return slashDynamicAgentWithContext(context.Background(), driver, &ProgramSender{Send: send}, agent, prompt)
 }
 
-func slashDynamicAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, agent string, prompt string) TaskResultMsg {
+func slashDynamicAgentWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, agent string, prompt string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -822,11 +822,11 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuiadapterruntime.
 	return TaskResultMsg{}
 }
 
-func isRegisteredAgentCommand(driver tuiadapterruntime.Driver, agent string) bool {
+func isRegisteredAgentCommand(driver tuidriver.Driver, agent string) bool {
 	return isRegisteredAgentCommandWithContext(context.Background(), driver, agent)
 }
 
-func isRegisteredAgentCommandWithContext(ctx context.Context, driver tuiadapterruntime.Driver, agent string) bool {
+func isRegisteredAgentCommandWithContext(ctx context.Context, driver tuidriver.Driver, agent string) bool {
 	ctx = contextOrBackground(ctx)
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if agent == "" {
@@ -844,11 +844,11 @@ func isRegisteredAgentCommandWithContext(ctx context.Context, driver tuiadapterr
 	return false
 }
 
-func dispatchMentionCommand(driver tuiadapterruntime.Driver, sender *ProgramSender, text string) TaskResultMsg {
+func dispatchMentionCommand(driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
 	return dispatchMentionCommandWithContext(context.Background(), driver, sender, text)
 }
 
-func dispatchMentionCommandWithContext(ctx context.Context, driver tuiadapterruntime.Driver, sender *ProgramSender, text string) TaskResultMsg {
+func dispatchMentionCommandWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -877,11 +877,11 @@ func dispatchMentionCommandWithContext(ctx context.Context, driver tuiadapterrun
 	return TaskResultMsg{}
 }
 
-func slashAgent(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashAgent(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	return slashAgentWithContext(context.Background(), driver, send, args)
 }
 
-func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	sub, rest := splitFirst(strings.TrimSpace(args))
 	switch sub {
@@ -905,7 +905,7 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 			sendNotice(send, "usage: /agent add <name>")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		status, err := driver.AddAgentWithOptions(ctx, addArgs.Target, tuiadapterruntime.AgentAddOptions{Install: addArgs.Install})
+		status, err := driver.AddAgentWithOptions(ctx, addArgs.Target, tuidriver.AgentAddOptions{Install: addArgs.Install})
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent add", err)}
 		}
@@ -925,7 +925,7 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 		}
 		command := agentInstallCommandForDisplay(ctx, driver, target)
 		callID := sendAgentInstallToolCall(send, target, command)
-		status, err := driver.AddAgentWithOptions(ctx, target, tuiadapterruntime.AgentAddOptions{Install: true})
+		status, err := driver.AddAgentWithOptions(ctx, target, tuidriver.AgentAddOptions{Install: true})
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
 				sendAgentInstallToolResult(send, callID, command, appgateway.ToolStatusInterrupted, false, agentInstallErrorOutput(err))
@@ -975,7 +975,7 @@ func slashAgentWithContext(ctx context.Context, driver tuiadapterruntime.Driver,
 	}
 }
 
-func agentInstallCommandForDisplay(ctx context.Context, driver tuiadapterruntime.Driver, target string) string {
+func agentInstallCommandForDisplay(ctx context.Context, driver tuidriver.Driver, target string) string {
 	target = strings.TrimSpace(target)
 	if driver != nil {
 		if candidates, err := driver.CompleteSlashArg(ctx, "agent install", target, 20); err == nil {
@@ -1061,11 +1061,11 @@ func agentInstallErrorOutput(err error) string {
 	return text
 }
 
-func slashNew(driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
+func slashNew(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 	return slashNewWithContext(context.Background(), driver, send)
 }
 
-func slashNewWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
+func slashNewWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	session, err := driver.NewSession(ctx)
 	if err != nil {
@@ -1079,11 +1079,11 @@ func slashNewWithContext(ctx context.Context, driver tuiadapterruntime.Driver, s
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashResume(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashResume(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	return slashResumeWithContext(context.Background(), driver, send, args)
 }
 
-func slashResumeWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashResumeWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	sessionID := strings.TrimSpace(args)
 	if sessionID == "" {
@@ -1181,11 +1181,11 @@ func shouldReplayEventInTUIResume(event appgateway.Event) bool {
 	}
 }
 
-func slashStatus(driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
+func slashStatus(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 	return slashStatusWithContext(context.Background(), driver, send)
 }
 
-func slashStatusWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg)) TaskResultMsg {
+func slashStatusWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1195,11 +1195,11 @@ func slashStatusWithContext(ctx context.Context, driver tuiadapterruntime.Driver
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashConnect(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnect(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	return slashConnectWithContext(context.Background(), driver, send, args)
 }
 
-func slashConnectWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashConnectWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	cfg := parseConnectArgs(args)
 	if cfg.Provider == "" || cfg.Model == "" {
@@ -1218,11 +1218,11 @@ func slashConnectWithContext(ctx context.Context, driver tuiadapterruntime.Drive
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashModel(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashModel(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	return slashModelWithContext(context.Background(), driver, send, args)
 }
 
-func slashModelWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashModelWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	sub, rest := splitFirst(strings.TrimSpace(args))
 	_, activeACP := activeACPAgentStatus(ctx, driver)
@@ -1277,11 +1277,11 @@ func parseModelUseArgs(args string) (alias string, reasoning string) {
 	return strings.TrimSpace(alias), strings.TrimSpace(rest)
 }
 
-func slashSandbox(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashSandbox(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	return slashSandboxWithContext(context.Background(), driver, send, args)
 }
 
-func slashSandboxWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	backend := strings.TrimSpace(args)
 	if backend == "" {
@@ -1313,7 +1313,7 @@ func slashSandboxWithContext(ctx context.Context, driver tuiadapterruntime.Drive
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashApprovalWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	mode := strings.TrimSpace(args)
 	if mode == "" {
@@ -1339,11 +1339,11 @@ func slashApprovalWithContext(ctx context.Context, driver tuiadapterruntime.Driv
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashCompact(driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashCompact(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	return slashCompactWithContext(context.Background(), driver, send, args)
 }
 
-func slashCompactWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg), args string) TaskResultMsg {
+func slashCompactWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if strings.TrimSpace(args) != "" {
 		sendNotice(send, "usage: /compact")
@@ -1366,11 +1366,11 @@ func sendNotice(send func(tea.Msg), text string) {
 	}
 }
 
-func appendAgentSlashCommands(driver tuiadapterruntime.Driver, commands []string) []string {
+func appendAgentSlashCommands(driver tuidriver.Driver, commands []string) []string {
 	return appendAgentSlashCommandsWithContext(context.Background(), driver, commands)
 }
 
-func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuiadapterruntime.Driver, commands []string) []string {
+func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuidriver.Driver, commands []string) []string {
 	ctx = contextOrBackground(ctx)
 	if len(commands) == 0 {
 		commands = DefaultCommands()
@@ -1401,7 +1401,7 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuiadapterr
 	return out
 }
 
-func acpSlashCommands(status tuiadapterruntime.AgentStatusSnapshot) []string {
+func acpSlashCommands(status tuidriver.AgentStatusSnapshot) []string {
 	out := []string{"help", "agent", "status", "resume", "model", "exit", "quit"}
 	seen := map[string]struct{}{}
 	for _, command := range out {
@@ -1424,18 +1424,18 @@ func acpSlashCommands(status tuiadapterruntime.AgentStatusSnapshot) []string {
 	return out
 }
 
-func refreshAgentSlashCommandsViaSend(driver tuiadapterruntime.Driver, send func(tea.Msg)) {
+func refreshAgentSlashCommandsViaSend(driver tuidriver.Driver, send func(tea.Msg)) {
 	refreshAgentSlashCommandsViaSendWithContext(context.Background(), driver, send)
 }
 
-func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg)) {
+func refreshAgentSlashCommandsViaSendWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) {
 	if send == nil {
 		return
 	}
 	send(SetCommandsMsg{Commands: appendAgentSlashCommandsWithContext(ctx, driver, DefaultCommands())})
 }
 
-func sendStatusUpdate(send func(tea.Msg), status tuiadapterruntime.StatusSnapshot) {
+func sendStatusUpdate(send func(tea.Msg), status tuidriver.StatusSnapshot) {
 	if send != nil {
 		send(SetStatusMsg{
 			Workspace: status.Workspace,
@@ -1476,11 +1476,11 @@ func formatCompactTokenCount(tokens int) string {
 	return strings.Replace(text, ".0k", "k", 1)
 }
 
-func refreshStatusViaSend(driver tuiadapterruntime.Driver, send func(tea.Msg)) {
+func refreshStatusViaSend(driver tuidriver.Driver, send func(tea.Msg)) {
 	refreshStatusViaSendWithContext(context.Background(), driver, send)
 }
 
-func refreshStatusViaSendWithContext(ctx context.Context, driver tuiadapterruntime.Driver, send func(tea.Msg)) {
+func refreshStatusViaSendWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1517,7 +1517,7 @@ func approvalRawInputFromJSON(raw string) map[string]any {
 	return decoded
 }
 
-func sendApprovalPrompt(ctx context.Context, turn tuiadapterruntime.Turn, req *appgateway.ApprovalPayload, send func(tea.Msg)) {
+func sendApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *appgateway.ApprovalPayload, send func(tea.Msg)) {
 	if turn == nil || req == nil || send == nil {
 		return
 	}
@@ -1554,7 +1554,7 @@ func automaticApprovalReviewDisplayText(req *appgateway.ApprovalPayload) string 
 	}
 }
 
-func awaitApprovalPrompt(ctx context.Context, turn tuiadapterruntime.Turn, req *appgateway.ApprovalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
+func awaitApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *appgateway.ApprovalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	var response PromptResponse
 	select {
@@ -1665,9 +1665,9 @@ func parseAgentAddArgs(args string) (agentAddArgs, bool) {
 	return out, true
 }
 
-func parseConnectArgs(args string) tuiadapterruntime.ConnectConfig {
+func parseConnectArgs(args string) tuidriver.ConnectConfig {
 	parts := strings.Fields(args)
-	cfg := tuiadapterruntime.ConnectConfig{}
+	cfg := tuidriver.ConnectConfig{}
 	if len(parts) >= 1 {
 		cfg.Provider = parts[0]
 	}
@@ -1711,7 +1711,7 @@ func parseConnectArgs(args string) tuiadapterruntime.ConnectConfig {
 	return cfg
 }
 
-func formatStatusSnapshot(status tuiadapterruntime.StatusSnapshot) string {
+func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	model := firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), deriveModelNameFromAlias(status.Model), "not configured")
 	provider := firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Model), "not configured")
 	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), "auto")
@@ -1751,7 +1751,7 @@ func formatStatusSnapshot(status tuiadapterruntime.StatusSnapshot) string {
 	return strings.Join(lines, "\n")
 }
 
-func formatSessionTokenUsageStatus(status tuiadapterruntime.StatusSnapshot) string {
+func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
 	inputTokens := max(status.SessionInputTokens, 0)
 	cachedTokens := max(status.SessionCachedInputTokens, 0)
 	outputTokens := max(status.SessionOutputTokens, 0)
@@ -1784,7 +1784,7 @@ func agentHelpText() string {
 	return strings.Join(lines, "\n")
 }
 
-func formatAgentCatalog(agents []tuiadapterruntime.AgentCandidate) string {
+func formatAgentCatalog(agents []tuidriver.AgentCandidate) string {
 	if len(agents) == 0 {
 		return "no ACP agents are registered\nnext: run /agent add <builtin>"
 	}
@@ -1800,7 +1800,7 @@ func formatAgentCatalog(agents []tuiadapterruntime.AgentCandidate) string {
 	return strings.Join(lines, "\n")
 }
 
-func formatAgentList(agents []tuiadapterruntime.AgentCandidate, status tuiadapterruntime.AgentStatusSnapshot) string {
+func formatAgentList(agents []tuidriver.AgentCandidate, status tuidriver.AgentStatusSnapshot) string {
 	lines := []string{"agent registry:"}
 	lines = append(lines, fmt.Sprintf("  controller: %s", firstNonEmpty(strings.TrimSpace(status.ControllerLabel), strings.TrimSpace(status.ControllerKind), "local")))
 	if len(agents) == 0 {
@@ -1820,7 +1820,7 @@ func formatAgentList(agents []tuiadapterruntime.AgentCandidate, status tuiadapte
 	return strings.Join(lines, "\n")
 }
 
-func formatAgentStatusSnapshot(status tuiadapterruntime.AgentStatusSnapshot) string {
+func formatAgentStatusSnapshot(status tuidriver.AgentStatusSnapshot) string {
 	controller := firstNonEmpty(strings.TrimSpace(status.ControllerLabel), strings.TrimSpace(status.ControllerKind), "local kernel")
 	kind := firstNonEmpty(strings.TrimSpace(status.ControllerKind), "kernel")
 	state := "idle"
@@ -1854,7 +1854,7 @@ func formatAgentStatusSnapshot(status tuiadapterruntime.AgentStatusSnapshot) str
 	return strings.Join(lines, "\n")
 }
 
-func formatAgentControllerModel(status tuiadapterruntime.AgentStatusSnapshot) string {
+func formatAgentControllerModel(status tuidriver.AgentStatusSnapshot) string {
 	model := strings.TrimSpace(status.ControllerModel)
 	effort := strings.TrimSpace(status.ControllerReasoningEffort)
 	if model == "" {
@@ -1866,7 +1866,7 @@ func formatAgentControllerModel(status tuiadapterruntime.AgentStatusSnapshot) st
 	return model + " [" + effort + "]"
 }
 
-func agentPromptCommand(status tuiadapterruntime.AgentStatusSnapshot) string {
+func agentPromptCommand(status tuidriver.AgentStatusSnapshot) string {
 	controller := strings.TrimSpace(firstNonEmpty(status.ControllerLabel, status.ControllerKind))
 	controller = strings.TrimPrefix(controller, "/")
 	if controller == "" || strings.EqualFold(controller, "kernel") || strings.EqualFold(controller, "local kernel") {
@@ -1878,11 +1878,11 @@ func agentPromptCommand(status tuiadapterruntime.AgentStatusSnapshot) string {
 	return "/" + controller
 }
 
-func displayableAgentParticipants(participants []tuiadapterruntime.AgentParticipantSnapshot) []tuiadapterruntime.AgentParticipantSnapshot {
+func displayableAgentParticipants(participants []tuidriver.AgentParticipantSnapshot) []tuidriver.AgentParticipantSnapshot {
 	if len(participants) == 0 {
 		return nil
 	}
-	out := make([]tuiadapterruntime.AgentParticipantSnapshot, 0, len(participants))
+	out := make([]tuidriver.AgentParticipantSnapshot, 0, len(participants))
 	for _, participant := range participants {
 		if isSelfDelegatedAgentParticipant(participant) {
 			continue
@@ -1892,7 +1892,7 @@ func displayableAgentParticipants(participants []tuiadapterruntime.AgentParticip
 	return out
 }
 
-func isSelfDelegatedAgentParticipant(participant tuiadapterruntime.AgentParticipantSnapshot) bool {
+func isSelfDelegatedAgentParticipant(participant tuidriver.AgentParticipantSnapshot) bool {
 	if !strings.EqualFold(strings.TrimSpace(participant.Kind), string(sdksession.ParticipantKindSubagent)) ||
 		!strings.EqualFold(strings.TrimSpace(participant.Role), string(sdksession.ParticipantRoleDelegated)) {
 		return false
@@ -1918,7 +1918,7 @@ func deriveModelNameFromAlias(alias string) string {
 	return strings.TrimSpace(right)
 }
 
-func modeToggleHint(status tuiadapterruntime.StatusSnapshot) string {
+func modeToggleHint(status tuidriver.StatusSnapshot) string {
 	label := firstNonEmpty(strings.TrimSpace(status.ModeLabel), strings.TrimSpace(status.SessionMode), "auto-review")
 	switch strings.ToLower(strings.TrimSpace(status.SessionMode)) {
 	case "manual":
@@ -2000,13 +2000,13 @@ func parseReasoningLevels(raw string) []string {
 	return out
 }
 
-func convertAttachments(items []Attachment) []tuiadapterruntime.Attachment {
+func convertAttachments(items []Attachment) []tuidriver.Attachment {
 	if len(items) == 0 {
 		return nil
 	}
-	out := make([]tuiadapterruntime.Attachment, len(items))
+	out := make([]tuidriver.Attachment, len(items))
 	for i, item := range items {
-		out[i] = tuiadapterruntime.Attachment{
+		out[i] = tuidriver.Attachment{
 			Name:   item.Name,
 			Offset: item.Offset,
 		}

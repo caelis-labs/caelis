@@ -10,7 +10,7 @@ import (
 	"time"
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	headlessadapter "github.com/OnslaughtSnail/caelis/gateway/adapter/headless"
+	headlessadapter "github.com/OnslaughtSnail/caelis/headless"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
