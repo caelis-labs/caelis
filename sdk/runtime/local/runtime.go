@@ -63,6 +63,7 @@ type Runtime struct {
 	idCounter         atomic.Uint64
 	mu                sync.RWMutex
 	runStates         map[string]sdkruntime.RunState
+	permissionGrants  map[string]*permissionGrantStore
 	tasks             *taskRuntime
 	terminals         *streamService
 }
@@ -87,6 +88,7 @@ func New(cfg Config) (*Runtime, error) {
 		controllers:       cfg.Controllers,
 		subagents:         cfg.Subagents,
 		runStates:         map[string]sdkruntime.RunState{},
+		permissionGrants:  map[string]*permissionGrantStore{},
 	}
 	if r.clock == nil {
 		r.clock = time.Now
@@ -283,12 +285,13 @@ func (r *Runtime) resolveAgent(
 	spec := r.applyAssemblySpec(state, req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName := r.policyMode(spec)
-	grants := newPermissionGrantStore()
+	grants := r.permissionGrantStoreForSession(ref)
 	spec.Tools = r.wrapToolsForRuntime(session, ref, spec, runtimeToolContext{
 		mode:              modeName,
 		approvalRequester: req.ApprovalRequester,
 		runID:             strings.TrimSpace(runID),
 		turnID:            strings.TrimSpace(turnID),
+		now:               r.now,
 		grants:            grants,
 	})
 	spec.Tools = r.wrapToolsForPolicy(session, ref, state, spec, approvalContext{
@@ -302,6 +305,46 @@ func (r *Runtime) resolveAgent(
 		grants:     grants,
 	})
 	return r.agentFactory.NewAgent(ctx, spec)
+}
+
+func (r *Runtime) permissionGrantStoreForSession(ref sdksession.SessionRef) *permissionGrantStore {
+	if r == nil {
+		return newPermissionGrantStore()
+	}
+	ref = sdksession.NormalizeSessionRef(ref)
+	sessionID := strings.TrimSpace(ref.SessionID)
+	if sessionID == "" {
+		return newPermissionGrantStore()
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.permissionGrants == nil {
+		r.permissionGrants = map[string]*permissionGrantStore{}
+	}
+	store := r.permissionGrants[sessionID]
+	if store == nil {
+		store = newPermissionGrantStore()
+		r.permissionGrants[sessionID] = store
+	}
+	return store
+}
+
+func (r *Runtime) PermissionGrantSnapshot(ref sdksession.SessionRef) PermissionGrantSnapshot {
+	if r == nil {
+		return PermissionGrantSnapshot{}
+	}
+	ref = sdksession.NormalizeSessionRef(ref)
+	sessionID := strings.TrimSpace(ref.SessionID)
+	if sessionID == "" {
+		return PermissionGrantSnapshot{}
+	}
+	r.mu.RLock()
+	store := r.permissionGrants[sessionID]
+	r.mu.RUnlock()
+	if store == nil {
+		return PermissionGrantSnapshot{}
+	}
+	return store.snapshot()
 }
 
 func (r *Runtime) setRunState(sessionID string, state sdkruntime.RunState) {

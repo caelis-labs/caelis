@@ -86,22 +86,26 @@ type DoctorRequest struct {
 }
 
 type DoctorReport struct {
-	StoreDir                string
-	SessionID               string
-	SessionMode             string
-	ActiveModelAlias        string
-	ActiveProvider          string
-	ActiveModel             string
-	MissingAPIKey           bool
-	SandboxRequestedBackend string
-	SandboxResolvedBackend  string
-	SandboxRoute            string
-	SandboxFallbackReason   string
-	SandboxSecuritySummary  string
-	HostExecution           bool
-	FullAccessMode          bool
-	ConfigPermissionsSecure bool
-	Warnings                []string
+	StoreDir                 string
+	SessionID                string
+	SessionMode              string
+	ActiveModelAlias         string
+	ActiveProvider           string
+	ActiveModel              string
+	MissingAPIKey            bool
+	SandboxRequestedBackend  string
+	SandboxResolvedBackend   string
+	SandboxRoute             string
+	SandboxFallbackReason    string
+	SandboxSecuritySummary   string
+	HostExecution            bool
+	FullAccessMode           bool
+	PermissionGrantCount     int
+	PermissionGrantNetwork   bool
+	PermissionReadRootCount  int
+	PermissionWriteRootCount int
+	ConfigPermissionsSecure  bool
+	Warnings                 []string
 }
 
 type RegisterBuiltinACPAgentOptions struct {

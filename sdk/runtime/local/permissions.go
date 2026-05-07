@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy"
@@ -25,6 +26,7 @@ type permissionGrantStore struct {
 	extraReadRoots  []string
 	extraWriteRoots []string
 	networkEnabled  bool
+	records         []permissionGrantRecord
 }
 
 type permissionGrantRequest struct {
@@ -34,19 +36,73 @@ type permissionGrantRequest struct {
 	NetworkEnabled bool
 }
 
+type permissionGrantMetadata struct {
+	Mode      string
+	RunID     string
+	TurnID    string
+	CreatedAt time.Time
+}
+
+type permissionGrantRecord struct {
+	Reason         string
+	ReadRoots      []string
+	WriteRoots     []string
+	NetworkEnabled bool
+	Mode           string
+	RunID          string
+	TurnID         string
+	CreatedAt      time.Time
+}
+
+type PermissionGrantSnapshot struct {
+	Count          int
+	NetworkGranted bool
+	ReadRootCount  int
+	WriteRootCount int
+}
+
 func newPermissionGrantStore() *permissionGrantStore {
 	return &permissionGrantStore{}
 }
 
-func (s *permissionGrantStore) add(req permissionGrantRequest) {
+func (s *permissionGrantStore) add(req permissionGrantRequest, meta permissionGrantMetadata) permissionGrantRecord {
 	if s == nil {
-		return
+		return permissionGrantRecord{}
+	}
+	record := permissionGrantRecord{
+		Reason:         strings.TrimSpace(req.Reason),
+		ReadRoots:      appendUniqueStrings(nil, req.ReadRoots...),
+		WriteRoots:     appendUniqueStrings(nil, req.WriteRoots...),
+		NetworkEnabled: req.NetworkEnabled,
+		Mode:           strings.TrimSpace(meta.Mode),
+		RunID:          strings.TrimSpace(meta.RunID),
+		TurnID:         strings.TrimSpace(meta.TurnID),
+		CreatedAt:      meta.CreatedAt,
+	}
+	if record.CreatedAt.IsZero() {
+		record.CreatedAt = time.Now()
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.extraReadRoots = appendUniqueStrings(s.extraReadRoots, req.ReadRoots...)
-	s.extraWriteRoots = appendUniqueStrings(s.extraWriteRoots, req.WriteRoots...)
+	s.extraReadRoots = appendUniqueStrings(s.extraReadRoots, record.ReadRoots...)
+	s.extraWriteRoots = appendUniqueStrings(s.extraWriteRoots, record.WriteRoots...)
 	s.networkEnabled = s.networkEnabled || req.NetworkEnabled
+	s.records = append(s.records, record)
+	return record
+}
+
+func (s *permissionGrantStore) snapshot() PermissionGrantSnapshot {
+	if s == nil {
+		return PermissionGrantSnapshot{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return PermissionGrantSnapshot{
+		Count:          len(s.records),
+		NetworkGranted: s.networkEnabled,
+		ReadRootCount:  len(s.extraReadRoots),
+		WriteRootCount: len(s.extraWriteRoots),
+	}
 }
 
 func (s *permissionGrantStore) applyToOptions(opts sdkpolicy.ModeOptions) sdkpolicy.ModeOptions {
@@ -145,6 +201,7 @@ type requestPermissionsTool struct {
 	mode       string
 	runID      string
 	turnID     string
+	now        func() time.Time
 	approval   sdkruntime.ApprovalRequester
 	grants     *permissionGrantStore
 }
@@ -248,10 +305,20 @@ func (t requestPermissionsTool) Call(ctx context.Context, call sdktool.Call) (sd
 			"outcome":     strings.TrimSpace(resp.Outcome),
 		})
 	}
-	t.grants.add(req)
+	createdAt := time.Now()
+	if t.now != nil {
+		createdAt = t.now()
+	}
+	record := t.grants.add(req, permissionGrantMetadata{
+		Mode:      t.mode,
+		RunID:     t.runID,
+		TurnID:    t.turnID,
+		CreatedAt: createdAt,
+	})
 	return jsonToolResult(call, requestPermissionsToolName, map[string]any{
 		"approved": true,
 		"granted":  permissionGrantAdditionalPermissions(req),
+		"grant":    permissionGrantPayload(record),
 	})
 }
 
@@ -375,6 +442,26 @@ func permissionGrantAdditionalPermissions(req permissionGrantRequest) map[string
 		out["network"] = map[string]any{"enabled": true}
 	}
 	return out
+}
+
+func permissionGrantPayload(record permissionGrantRecord) map[string]any {
+	payload := map[string]any{
+		"reason":                 strings.TrimSpace(record.Reason),
+		"additional_permissions": permissionGrantAdditionalPermissions(permissionGrantRequest{ReadRoots: record.ReadRoots, WriteRoots: record.WriteRoots, NetworkEnabled: record.NetworkEnabled}),
+	}
+	if mode := strings.TrimSpace(record.Mode); mode != "" {
+		payload["mode"] = mode
+	}
+	if runID := strings.TrimSpace(record.RunID); runID != "" {
+		payload["run_id"] = runID
+	}
+	if turnID := strings.TrimSpace(record.TurnID); turnID != "" {
+		payload["turn_id"] = turnID
+	}
+	if !record.CreatedAt.IsZero() {
+		payload["created_at"] = record.CreatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return payload
 }
 
 func jsonToolResult(call sdktool.Call, name string, payload map[string]any) (sdktool.Result, error) {

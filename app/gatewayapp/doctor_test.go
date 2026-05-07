@@ -163,3 +163,28 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatDoctorTextIncludesPermissionGrantSummaryWithoutPaths(t *testing.T) {
+	report := DoctorReport{
+		PermissionGrantCount:     2,
+		PermissionGrantNetwork:   true,
+		PermissionReadRootCount:  3,
+		PermissionWriteRootCount: 1,
+	}
+	out := FormatDoctorText(report)
+	for _, want := range []string{
+		"permission_grant_count: 2",
+		"permission_grant_network: true",
+		"permission_read_root_count: 3",
+		"permission_write_root_count: 1",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("FormatDoctorText() = %q, want %q", out, want)
+		}
+	}
+	for _, path := range []string{"/workspace", "/tmp", "secret"} {
+		if strings.Contains(out, path) {
+			t.Fatalf("FormatDoctorText() leaked permission path/detail %q in %q", path, out)
+		}
+	}
+}

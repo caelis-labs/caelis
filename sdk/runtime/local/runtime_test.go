@@ -2894,6 +2894,55 @@ func TestRuntimeReservesRequestPermissionsToolName(t *testing.T) {
 	}
 }
 
+func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
+	t.Parallel()
+
+	_, session := newTestSessionService(t, "sess-request-permissions-grant")
+	createdAt := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
+	store := newPermissionGrantStore()
+	runtime := &Runtime{clock: func() time.Time { return createdAt }}
+	wrapped := runtime.wrapToolsForRuntime(session, session.SessionRef, sdkruntime.AgentSpec{
+		Tools: []sdktool.Tool{sdktool.NamedTool{Def: sdktool.Definition{Name: "BASH"}}},
+	}, runtimeToolContext{
+		mode:   "manual",
+		runID:  "run-1",
+		turnID: "turn-1",
+		now:    runtime.now,
+		approvalRequester: approvalRequesterFunc(func(context.Context, sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+			return sdkruntime.ApprovalResponse{Approved: true}, nil
+		}),
+		grants: store,
+	})
+	var tool sdktool.Tool
+	for _, candidate := range wrapped {
+		if strings.EqualFold(candidate.Definition().Name, requestPermissionsToolName) {
+			tool = candidate
+			break
+		}
+	}
+	if tool == nil {
+		t.Fatal("wrapped tools missing request_permissions")
+	}
+	result, err := tool.Call(context.Background(), sdktool.Call{
+		ID:    "perm-1",
+		Name:  requestPermissionsToolName,
+		Input: []byte(`{"reason":"need network","permissions":{"network":{"enabled":true}}}`),
+	})
+	if err != nil {
+		t.Fatalf("request_permissions Call() error = %v", err)
+	}
+	grant, ok := result.Meta["grant"].(map[string]any)
+	if !ok {
+		t.Fatalf("grant payload = %#v, want map", result.Meta["grant"])
+	}
+	if grant["reason"] != "need network" || grant["mode"] != "manual" || grant["run_id"] != "run-1" || grant["turn_id"] != "turn-1" {
+		t.Fatalf("grant payload = %#v, want reason/mode/run/turn metadata", grant)
+	}
+	if store.snapshot().Count != 1 {
+		t.Fatalf("grant snapshot count = %d, want 1", store.snapshot().Count)
+	}
+}
+
 func TestRuntimePolicyFullAccessBlocksDangerousBash(t *testing.T) {
 	t.Parallel()
 

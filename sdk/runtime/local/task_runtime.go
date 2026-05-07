@@ -105,6 +105,7 @@ type runtimeToolContext struct {
 	approvalRequester sdkruntime.ApprovalRequester
 	runID             string
 	turnID            string
+	now               func() time.Time
 	grants            *permissionGrantStore
 }
 
@@ -181,6 +182,7 @@ func runtimeRequestPermissionsTool(session sdksession.Session, ref sdksession.Se
 		mode:       strings.TrimSpace(toolCtx.mode),
 		runID:      strings.TrimSpace(toolCtx.runID),
 		turnID:     strings.TrimSpace(toolCtx.turnID),
+		now:        toolCtx.now,
 		approval:   toolCtx.approvalRequester,
 		grants:     toolCtx.grants,
 	}
