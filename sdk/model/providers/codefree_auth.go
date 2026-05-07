@@ -606,24 +606,36 @@ func redactCodeFreeTokenDebug(raw []byte) string {
 }
 
 func redactCodeFreeSensitiveValue(key string, value any) any {
-	text, ok := value.(string)
-	if !ok {
+	if !isCodeFreeSensitiveField(key) {
 		return value
 	}
-	return redactCodeFreeSensitiveField(key, text)
+	if text, ok := value.(string); ok {
+		return redactCodeFreeSensitiveField(key, text)
+	}
+	if value == nil {
+		return nil
+	}
+	return "[redacted]"
 }
 
 func redactCodeFreeSensitiveField(key string, value string) string {
-	key = strings.ToLower(strings.TrimSpace(key))
 	value = strings.TrimSpace(value)
-	switch key {
-	case "access_token", "refresh_token", "id_token", "apikey", "api_key", "authorization", "code", "ori_token", "ori_session_id", "session_id":
+	if isCodeFreeSensitiveField(key) {
 		if value == "" {
 			return ""
 		}
 		return fmt.Sprintf("[redacted len=%d]", len(value))
+	}
+	return value
+}
+
+func isCodeFreeSensitiveField(key string) bool {
+	key = strings.ToLower(strings.TrimSpace(key))
+	switch key {
+	case "access_token", "refresh_token", "id_token", "apikey", "api_key", "authorization", "code", "ori_token", "ori_session_id", "session_id", "sessionid", "user_id", "userid":
+		return true
 	default:
-		return value
+		return false
 	}
 }
 

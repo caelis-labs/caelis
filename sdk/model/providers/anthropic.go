@@ -16,6 +16,14 @@ import (
 
 const anthropicReplayKindThinkingSignature = "thinking_signature"
 
+const defaultAnthropicBaseURL = "https://api.anthropic.com"
+
+type anthropicProviderDefaults struct {
+	provider     string
+	baseURL      string
+	maxOutputTok int
+}
+
 type anthropicSDKLLM struct {
 	name                string
 	provider            string
@@ -30,12 +38,29 @@ type anthropicSDKLLM struct {
 }
 
 func newAnthropic(cfg Config, token string) model.LLM {
+	return newAnthropicWithDefaults(cfg, token, anthropicProviderDefaults{
+		baseURL: defaultAnthropicBaseURL,
+	})
+}
+
+func newAnthropicWithDefaults(cfg Config, token string, defaults anthropicProviderDefaults) model.LLM {
+	if strings.TrimSpace(cfg.Provider) == "" && strings.TrimSpace(defaults.provider) != "" {
+		cfg.Provider = strings.TrimSpace(defaults.provider)
+	}
+	baseURL := strings.TrimSpace(cfg.BaseURL)
+	if baseURL == "" {
+		baseURL = defaults.baseURL
+	}
+	baseURL = anthropicSDKBaseURL(baseURL)
 	maxTok := cfg.MaxOutputTok
+	if maxTok <= 0 && defaults.maxOutputTok > 0 {
+		maxTok = defaults.maxOutputTok
+	}
 	if maxTok <= 0 {
 		maxTok = 1024
 	}
 	opts := make([]option.RequestOption, 0, 8+len(cfg.Headers))
-	opts = append(opts, option.WithBaseURL(anthropicSDKBaseURL(cfg.BaseURL)))
+	opts = append(opts, option.WithBaseURL(baseURL))
 	opts = append(opts, option.WithHTTPClient(coalesceHTTPClient(cfg.HTTPClient)))
 	opts = append(opts, anthropicAuthOptions(cfg, token)...)
 	for key, value := range cfg.Headers {
@@ -50,7 +75,7 @@ func newAnthropic(cfg Config, token string) model.LLM {
 	return &anthropicSDKLLM{
 		name:                cfg.Model,
 		provider:            cfg.Provider,
-		baseURL:             anthropicSDKBaseURL(cfg.BaseURL),
+		baseURL:             baseURL,
 		token:               token,
 		headers:             cloneHeaders(cfg.Headers),
 		auth:                cfg.Auth,

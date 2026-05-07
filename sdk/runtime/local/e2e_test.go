@@ -51,17 +51,6 @@ const (
 	providerCompactionVeryLongContextTimeout = 480 * time.Second
 )
 
-func providerCompactionRetryConfigForE2E() RetryConfig {
-	return RetryConfig{
-		MaxRetries:          8,
-		BaseDelay:           2 * time.Second,
-		MaxDelay:            30 * time.Second,
-		RateLimitMaxRetries: 8,
-		RateLimitBaseDelay:  4 * time.Second,
-		RateLimitMaxDelay:   30 * time.Second,
-	}
-}
-
 func testACPAssembly(configs ...sdkplugin.AgentConfig) (sdkplugin.ResolvedAssembly, []sdkdelegation.Agent) {
 	assembly := sdkplugin.ResolvedAssembly{
 		Agents: make([]sdkplugin.AgentConfig, 0, len(configs)),
@@ -504,7 +493,6 @@ func TestRuntimeProviderCompactionContinuityE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Answer tersely. When the user asks to restate session facts, preserve the key phrases faithfully.",
 		},
-		Retry: providerCompactionRetryConfigForE2E(),
 		Compaction: CompactionConfig{
 			Enabled:                    true,
 			WatermarkRatio:             0.7,
@@ -674,7 +662,6 @@ func TestRuntimeProviderCompactionPlanContinuityE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "When asked for a plan, you must call the PLAN tool before answering. When asked which plan step is currently in_progress, reply with that exact step content only and nothing else. Keep answers terse.",
 		},
-		Retry: providerCompactionRetryConfigForE2E(),
 		Compaction: CompactionConfig{
 			Enabled:                    true,
 			WatermarkRatio:             0.7,
@@ -785,7 +772,6 @@ func TestRuntimeProviderCompactionMultiCompactLongTaskE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Answer tersely. For ordinary status updates that do not ask a direct question, respond with a short acknowledgment. When asked to restate session facts, preserve the exact objective, blocker, next action, and latest completed milestone marker.",
 		},
-		Retry:      providerCompactionRetryConfigForE2E(),
 		Compaction: compactionCfg,
 	})
 	if err != nil {
@@ -920,7 +906,6 @@ func TestRuntimeProviderCompactionSegmentedRetryE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Answer tersely. For ordinary status updates that do not ask a direct question, respond with a short acknowledgment. Preserve exact objective, blocker, and next action when asked to restate them.",
 		},
-		Retry: providerCompactionRetryConfigForE2E(),
 		Compaction: CompactionConfig{
 			Enabled:                    true,
 			WatermarkRatio:             0.65,
@@ -1010,7 +995,6 @@ func TestRuntimeProviderCompactionPrefixStabilityE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Answer tersely. For ordinary status updates that do not ask a direct question, respond with a short acknowledgment. Preserve exact continuity anchors when asked to restate session facts.",
 		},
-		Retry: providerCompactionRetryConfigForE2E(),
 		Compaction: CompactionConfig{
 			Enabled:                    true,
 			WatermarkRatio:             0.7,

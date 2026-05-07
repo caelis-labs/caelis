@@ -27,7 +27,7 @@ func (f *Factory) Register(cfg Config) error {
 	if alias == "" {
 		return fmt.Errorf("providers: alias is required")
 	}
-	if cfg.API != APIOpenAI && cfg.API != APIOpenAICompatible && cfg.API != APIOpenRouter && cfg.API != APICodeFree && cfg.API != APIGemini && cfg.API != APIAnthropic && cfg.API != APIAnthropicCompatible && cfg.API != APIDeepSeek && cfg.API != APIMimo && cfg.API != APIVolcengine && cfg.API != APIVolcengineCoding && cfg.API != APIOllama {
+	if cfg.API != APIOpenAI && cfg.API != APIOpenAICompatible && cfg.API != APIOpenRouter && cfg.API != APICodeFree && cfg.API != APIGemini && cfg.API != APIAnthropic && cfg.API != APIAnthropicCompatible && cfg.API != APIDeepSeek && cfg.API != APIMiniMax && cfg.API != APIMimo && cfg.API != APIVolcengine && cfg.API != APIVolcengineCoding && cfg.API != APIOllama {
 		return fmt.Errorf("providers: unsupported api type %q", cfg.API)
 	}
 	authType := strings.TrimSpace(string(cfg.Auth.Type))
@@ -35,9 +35,12 @@ func (f *Factory) Register(cfg Config) error {
 		return fmt.Errorf("providers: unsupported auth type %q", cfg.Auth.Type)
 	}
 	if cfg.Auth.Type == "" {
-		if cfg.API == APIOllama || cfg.API == APICodeFree {
+		switch cfg.API {
+		case APIOllama, APICodeFree:
 			cfg.Auth.Type = AuthNone
-		} else {
+		case APIMiniMax:
+			cfg.Auth.Type = AuthBearerToken
+		default:
 			cfg.Auth.Type = AuthAPIKey
 		}
 	}
@@ -64,32 +67,36 @@ func (f *Factory) NewByAlias(alias string) (model.LLM, error) {
 		return nil, err
 	}
 
+	var llm model.LLM
 	switch cfg.API {
 	case APIDeepSeek:
-		return newDeepSeek(cfg, token), nil
+		llm = newDeepSeek(cfg, token)
+	case APIMiniMax:
+		llm = newMiniMax(cfg, token)
 	case APIMimo:
-		return newMimo(cfg, token), nil
+		llm = newMimo(cfg, token)
 	case APIVolcengine:
-		return newVolcengine(cfg, token), nil
+		llm = newVolcengine(cfg, token)
 	case APIVolcengineCoding:
-		return newVolcengineCodingPlan(cfg, token), nil
+		llm = newVolcengineCodingPlan(cfg, token)
 	case APIOpenAICompatible:
-		return newOpenAICompat(cfg, token), nil
+		llm = newOpenAICompat(cfg, token)
 	case APIOpenRouter:
-		return newOpenRouter(cfg, token), nil
+		llm = newOpenRouter(cfg, token)
 	case APICodeFree:
-		return newCodeFree(cfg), nil
+		llm = newCodeFree(cfg)
 	case APIOpenAI:
-		return newOpenAICompat(cfg, token), nil
+		llm = newOpenAICompat(cfg, token)
 	case APIAnthropic, APIAnthropicCompatible:
-		return newAnthropic(cfg, token), nil
+		llm = newAnthropic(cfg, token)
 	case APIGemini:
-		return newGemini(cfg, token), nil
+		llm = newGemini(cfg, token)
 	case APIOllama:
-		return newOllama(cfg, token), nil
+		llm = newOllama(cfg, token)
 	default:
 		return nil, fmt.Errorf("providers: unsupported api type %q", cfg.API)
 	}
+	return model.WithRetry(llm, cfg.Retry), nil
 }
 
 // NewByAlias creates a model provider from a new empty factory.

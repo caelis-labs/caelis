@@ -717,7 +717,7 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	if cfg.TimeoutSeconds <= 0 {
 		timeout = 60 * time.Second
 	}
-	authType := sdkproviders.AuthAPIKey
+	authType := defaultConnectAuthType(tpl.provider)
 	if strings.TrimSpace(cfg.AuthType) != "" {
 		authType = authTypeFromString(strings.TrimSpace(cfg.AuthType))
 	}
@@ -2008,6 +2008,15 @@ func defaultTokenEnvNameForConnect(provider string, baseURL string) string {
 		return "MIMO_TOKEN_PLAN_API_KEY"
 	}
 	return defaultTokenEnvName(provider)
+}
+
+func defaultConnectAuthType(provider string) sdkproviders.AuthType {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "minimax":
+		return sdkproviders.AuthBearerToken
+	default:
+		return sdkproviders.AuthAPIKey
+	}
 }
 
 func isXiaomiTokenPlanProvider(provider string) bool {

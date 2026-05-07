@@ -36,8 +36,6 @@ type Config struct {
 	AgentFactory      sdkruntime.AgentFactory
 	RunIDGenerator    func() string
 	Clock             func() time.Time
-	Sleep             func(context.Context, time.Duration) error
-	Retry             RetryConfig
 	Compaction        CompactionConfig
 	Compactor         sdkcompact.Engine
 	PolicyRegistry    sdkpolicy.Registry
@@ -54,8 +52,6 @@ type Runtime struct {
 	agentFactory      sdkruntime.AgentFactory
 	runIDGenerator    func() string
 	clock             func() time.Time
-	sleep             func(context.Context, time.Duration) error
-	retry             RetryConfig
 	compaction        CompactionConfig
 	compactor         sdkcompact.Engine
 	policies          sdkpolicy.Registry
@@ -84,8 +80,6 @@ func New(cfg Config) (*Runtime, error) {
 		agentFactory:      cfg.AgentFactory,
 		runIDGenerator:    cfg.RunIDGenerator,
 		clock:             cfg.Clock,
-		sleep:             cfg.Sleep,
-		retry:             normalizeRetryConfig(cfg.Retry),
 		compaction:        normalizeCompactionConfig(cfg.Compaction),
 		policies:          cfg.PolicyRegistry,
 		defaultPolicyMode: strings.TrimSpace(cfg.DefaultPolicyMode),
@@ -96,9 +90,6 @@ func New(cfg Config) (*Runtime, error) {
 	}
 	if r.clock == nil {
 		r.clock = time.Now
-	}
-	if r.sleep == nil {
-		r.sleep = sleepContext
 	}
 	if r.policies == nil {
 		reg, err := policypresets.NewRegistry()
@@ -245,7 +236,7 @@ func (r *Runtime) executeKernelTurn(
 
 	batch := make([]*sdksession.Event, 0, 4)
 	userEvent := buildUserEvent(session, turnID, req.Input, req.ContentParts)
-	if err := r.runWithRetry(ctx, session, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
+	if err := r.runWithOverflowRecovery(ctx, session, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
 		r.setRunState(ref.SessionID, sdkruntime.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),
 			ActiveRunID: runID,
@@ -319,7 +310,7 @@ func (r *Runtime) setRunState(sessionID string, state sdkruntime.RunState) {
 	r.runStates[strings.TrimSpace(sessionID)] = state
 }
 
-func (r *Runtime) runWithRetry(
+func (r *Runtime) runWithOverflowRecovery(
 	ctx context.Context,
 	session sdksession.Session,
 	ref sdksession.SessionRef,
@@ -330,10 +321,9 @@ func (r *Runtime) runWithRetry(
 	batch *[]*sdksession.Event,
 	sink *runner,
 ) error {
-	attempt := 0
 	overflowRecoveries := 0
 	for {
-		attemptBatch, emitted, inputPersisted, err := r.runAttempt(ctx, session, ref, runID, turnID, req, pendingInput, sink)
+		attemptBatch, _, inputPersisted, err := r.runAttempt(ctx, session, ref, runID, turnID, req, pendingInput, sink)
 		if inputPersisted {
 			pendingInput = nil
 		}
@@ -354,33 +344,10 @@ func (r *Runtime) runWithRetry(
 				return err
 			}
 			overflowRecoveries++
-			attempt = 0
 			continue
 		}
-		if emitted || !shouldRetry(err) {
-			*batch = append(*batch, attemptBatch...)
-			return err
-		}
-		if len(attemptBatch) > 0 {
-			*batch = append(*batch, attemptBatch...)
-		}
-		policy := retryPolicyForError(r.retry, err)
-		if attempt >= policy.maxRetries {
-			if policy.backpressure {
-				return fmt.Errorf("sdk/runtime/local: model request hit provider backpressure after %d retries: %w", policy.maxRetries, err)
-			}
-			return fmt.Errorf("sdk/runtime/local: model request failed after %d retries: %w", policy.maxRetries, err)
-		}
-		delay := retryDelayForAttemptWithBounds(attempt, policy.baseDelay, policy.maxDelay)
-		notice := buildRetryNoticeEvent(session, turnID, attempt+1, policy.maxRetries, delay, err)
-		*batch = append(*batch, notice)
-		if sink != nil {
-			sink.publishEvent(notice)
-		}
-		if sleepErr := r.sleep(ctx, delay); sleepErr != nil {
-			return sleepErr
-		}
-		attempt++
+		*batch = append(*batch, attemptBatch...)
+		return err
 	}
 }
 
@@ -559,18 +526,6 @@ func normalizeEvent(session sdksession.Session, turnID string, event *sdksession
 		event.Actor = defaultActorForEvent(event)
 	}
 	return event
-}
-
-func buildRetryNoticeEvent(session sdksession.Session, turnID string, attempt int, maxRetries int, delay time.Duration, cause error) *sdksession.Event {
-	text := retryWarningText(attempt, maxRetries, delay, cause)
-	message := sdkmodel.NewTextMessage(sdkmodel.RoleSystem, text)
-	return sdksession.MarkNotice(&sdksession.Event{
-		Type:    sdksession.EventTypeNotice,
-		Actor:   sdksession.ActorRef{Kind: sdksession.ActorKindSystem, Name: "runtime"},
-		Scope:   ptrScope(defaultScope(session, turnID)),
-		Message: &message,
-		Text:    text,
-	}, "warn", text)
 }
 
 func defaultScope(session sdksession.Session, turnID string) sdksession.EventScope {

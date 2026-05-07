@@ -382,6 +382,12 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 	switch provider {
 	case "", "minimax":
 		cfg.Model.Provider = "minimax"
+		if cfg.Model.API == "" {
+			cfg.Model.API = providers.APIMiniMax
+		}
+		if cfg.Model.AuthType == "" {
+			cfg.Model.AuthType = providers.AuthBearerToken
+		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "MINIMAX_API_KEY"
 		}

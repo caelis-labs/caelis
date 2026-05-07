@@ -1,6 +1,6 @@
 # caelis
 
-Current release target: `v0.1.3`.
+Current release target: `v0.1.4`.
 
 `caelis` is a terminal-first agent runtime. The active local path is:
 `cmd/caelis -> internal/cli -> app/gatewayapp -> gateway`.
@@ -245,7 +245,7 @@ make quality
 Synchronize npm manifests:
 
 ```bash
-node ./npm/scripts/set-version.mjs v0.1.3
+node ./npm/scripts/set-version.mjs v0.1.4
 ```
 
 Local release dry run:

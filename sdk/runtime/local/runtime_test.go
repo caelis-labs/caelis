@@ -2433,32 +2433,19 @@ func TestRuntimeRecoveryInterruptsOrphanedBashTask(t *testing.T) {
 	}
 }
 
-func TestRuntimeRunRetriesBeforeAnyEventIsEmitted(t *testing.T) {
+func TestRuntimeRunDoesNotRetryAgentLoopBeforeAnyEventIsEmitted(t *testing.T) {
 	t.Parallel()
 
 	sessions, session := newTestSessionService(t, "sess-retry")
 	factory := &attemptFactory{
 		agents: []sdkruntime.Agent{
 			seqAgent{err: errors.New("model: http status 529 body={\"error\":\"overloaded_error\"}")},
-			seqAgent{events: []*sdksession.Event{
-				assistantEvent("world"),
-			}},
 		},
 	}
-	var delays []time.Duration
 	runtime, err := New(Config{
 		Sessions:       sessions,
 		AgentFactory:   factory,
 		RunIDGenerator: func() string { return "run-retry" },
-		Sleep: func(context.Context, time.Duration) error {
-			delays = append(delays, 0)
-			return nil
-		},
-		Retry: RetryConfig{
-			MaxRetries: 2,
-			BaseDelay:  25 * time.Millisecond,
-			MaxDelay:   25 * time.Millisecond,
-		},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -2473,36 +2460,23 @@ func TestRuntimeRunRetriesBeforeAnyEventIsEmitted(t *testing.T) {
 		t.Fatalf("Run() error = %v", err)
 	}
 
-	var (
-		count       int
-		noticeCount int
-	)
-	for event, seqErr := range result.Handle.Events() {
-		if seqErr != nil {
-			t.Fatalf("runner error = %v", seqErr)
-		}
-		if event == nil {
-			continue
-		}
-		count++
+	events, seqErr := drainRunnerEvents(t, result.Handle)
+	if seqErr == nil {
+		t.Fatal("runner error = nil, want model failure")
+	}
+	if !strings.Contains(seqErr.Error(), "overloaded_error") {
+		t.Fatalf("runner error = %v, want original model failure", seqErr)
+	}
+	for _, event := range events {
 		if sdksession.IsNotice(event) {
-			noticeCount++
-			if !strings.Contains(sdksession.EventText(event), "retrying") {
-				t.Fatalf("notice text = %q, want retry warning", sdksession.EventText(event))
-			}
+			t.Fatalf("unexpected retry notice event: %q", sdksession.EventText(event))
 		}
 	}
-	if got, want := count, 3; got != want {
+	if got, want := len(events), 1; got != want {
 		t.Fatalf("runner event count = %d, want %d", got, want)
 	}
-	if got, want := noticeCount, 1; got != want {
-		t.Fatalf("notice count = %d, want %d", got, want)
-	}
-	if got, want := factory.Calls(), 2; got != want {
+	if got, want := factory.Calls(), 1; got != want {
 		t.Fatalf("factory calls = %d, want %d", got, want)
-	}
-	if got, want := len(delays), 1; got != want {
-		t.Fatalf("sleep call count = %d, want %d", got, want)
 	}
 
 	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{
@@ -2511,13 +2485,21 @@ func TestRuntimeRunRetriesBeforeAnyEventIsEmitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
-	if got, want := len(loaded.Events), 2; got != want {
+	if got, want := len(loaded.Events), 1; got != want {
 		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
 	}
 	for _, event := range loaded.Events {
 		if sdksession.IsNotice(event) {
 			t.Fatal("retry notice must not be persisted")
 		}
+	}
+
+	state, stateErr := runtime.RunState(context.Background(), session.SessionRef)
+	if stateErr != nil {
+		t.Fatalf("RunState() error = %v", stateErr)
+	}
+	if state.Status != sdkruntime.RunLifecycleStatusFailed {
+		t.Fatalf("state.Status = %q, want %q", state.Status, sdkruntime.RunLifecycleStatusFailed)
 	}
 }
 
@@ -2538,15 +2520,6 @@ func TestRuntimeRunDoesNotRetryAfterAnyEventIsEmitted(t *testing.T) {
 		Sessions:       sessions,
 		AgentFactory:   factory,
 		RunIDGenerator: func() string { return "run-no-retry" },
-		Sleep: func(context.Context, time.Duration) error {
-			t.Fatal("sleep should not be called after emitted event")
-			return nil
-		},
-		Retry: RetryConfig{
-			MaxRetries: 2,
-			BaseDelay:  time.Millisecond,
-			MaxDelay:   time.Millisecond,
-		},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

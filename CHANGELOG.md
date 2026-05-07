@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## v0.1.4 - 2026-05-07
+
+### Model Runtime Reliability
+- Moved transient retry handling to the provider-neutral LLM call boundary so 429, provider overload, CodeFree `retCode=51`, and network failures retry the same model request without rerunning the surrounding Agent Loop.
+- Removed the old runtime-level retry notices and loop replay behavior, keeping runtime recovery focused on context-overflow compaction.
+- Added shared retry classification, request cloning, and regression coverage for pre-stream retry, post-stream no-retry, and provider backpressure budgets.
+
+### Providers
+- Aligned CodeFree request behavior with its CLI protocol shape, including deterministic sampling defaults, mixed JSON/SSE response handling, redacted response diagnostics, and `retCode=51` backpressure classification.
+- Kept MiniMax as a first-class provider while routing it through the shared Anthropic-compatible construction path and provider factory, preserving one retry policy across all configured models.
+
 ## v0.1.3 - 2026-05-06
 
 ### Runtime And CI Stability

@@ -3,6 +3,8 @@ package providers
 import (
 	"net/http"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/sdk/model"
 )
 
 // APIType defines protocol dialect used by a model provider.
@@ -17,6 +19,7 @@ const (
 	APIAnthropic           APIType = "anthropic"
 	APIAnthropicCompatible APIType = "anthropic_compatible"
 	APIDeepSeek            APIType = "deepseek"
+	APIMiniMax             APIType = "minimax"
 	APIVolcengine          APIType = "volcengine"
 	APIMimo                APIType = "mimo"
 	APIVolcengineCoding    APIType = "volcengine_coding_plan"
@@ -74,4 +77,5 @@ type Config struct {
 	ReasoningEffort           string
 	OpenRouter                OpenRouterConfig
 	Auth                      AuthConfig
+	Retry                     model.RetryConfig
 }

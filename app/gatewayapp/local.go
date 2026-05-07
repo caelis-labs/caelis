@@ -21,7 +21,6 @@ import (
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdkdelegation "github.com/OnslaughtSnail/caelis/sdk/delegation"
 	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkminimax "github.com/OnslaughtSnail/caelis/sdk/model/providers/minimax"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy/presets"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
@@ -1530,23 +1529,6 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if !ok {
 		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
-	if cfg.Provider == "minimax" {
-		// MiniMax aliases still resolve through one concrete provider config.
-		return appgateway.ModelResolution{
-			Model: sdkminimax.New(sdkminimax.Config{
-				Model:           cfg.Model,
-				BaseURL:         cfg.BaseURL,
-				APIKey:          cfg.Token,
-				HeaderKey:       cfg.HeaderKey,
-				HTTPClient:      cfg.HTTPClient,
-				Timeout:         cfg.Timeout,
-				MaxTokens:       cfg.MaxOutputTok,
-				ReasoningEffort: cfg.ReasoningEffort,
-			}),
-			ReasoningEffort:        cfg.ReasoningEffort,
-			DefaultReasoningEffort: cfg.DefaultReasoningEffort,
-		}, nil
-	}
 	effectiveContextWindow := fallbackContextWindow
 	if cfg.ContextWindowTokens > 0 {
 		effectiveContextWindow = cfg.ContextWindowTokens
@@ -2059,6 +2041,9 @@ func normalizeModelConfig(cfg ModelConfig) ModelConfig {
 	cfg.ID = strings.ToLower(strings.TrimSpace(cfg.ID))
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 	cfg.Model = strings.TrimSpace(cfg.Model)
+	if cfg.Provider == "minimax" && cfg.API == sdkproviders.APIAnthropicCompatible {
+		cfg.API = sdkproviders.APIMiniMax
+	}
 	cfg.EndpointID = normalizeEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL, cfg.API)
 	cfg.ProfileID = strings.ToLower(strings.TrimSpace(cfg.ProfileID))
 	if cfg.ProfileID == "" {
@@ -2096,6 +2081,9 @@ func normalizeModelConfig(cfg ModelConfig) ModelConfig {
 func normalizeModelProfileConfig(profile ModelProfileConfig) ModelProfileConfig {
 	profile.ID = strings.ToLower(strings.TrimSpace(profile.ID))
 	profile.Provider = strings.ToLower(strings.TrimSpace(profile.Provider))
+	if profile.Provider == "minimax" && profile.API == sdkproviders.APIAnthropicCompatible {
+		profile.API = sdkproviders.APIMiniMax
+	}
 	profile.EndpointID = normalizeEndpointID(profile.Provider, profile.EndpointID, profile.BaseURL, profile.API)
 	if profile.ID == "" {
 		profile.ID = buildProfileID(profile.Provider, profile.EndpointID, profile.BaseURL)
@@ -2210,6 +2198,8 @@ func defaultModelAPIForProvider(provider string) sdkproviders.APIType {
 		return sdkproviders.APIAnthropic
 	case "anthropic-compatible":
 		return sdkproviders.APIAnthropicCompatible
+	case "minimax":
+		return sdkproviders.APIMiniMax
 	case "deepseek":
 		return sdkproviders.APIDeepSeek
 	case "xiaomi":
@@ -2280,6 +2270,8 @@ func sanitizePersistedModelProfile(profile ModelProfileConfig) ModelProfileConfi
 
 func defaultAuthTypeForProvider(provider string) sdkproviders.AuthType {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "minimax":
+		return sdkproviders.AuthBearerToken
 	case "ollama", "codefree":
 		return sdkproviders.AuthNone
 	default:

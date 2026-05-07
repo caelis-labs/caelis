@@ -12,7 +12,6 @@ import (
 
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	modelproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	"github.com/OnslaughtSnail/caelis/sdk/model/providers/minimax"
 )
 
 type Config struct {
@@ -65,7 +64,18 @@ func ResolveLLM(cfg Config) (Spec, error) {
 	}
 	switch provider {
 	case "minimax":
-		return resolveMiniMax(cfg)
+		return resolveFactoryProvider(cfg, providerSpec{
+			name:              "minimax",
+			api:               modelproviders.APIMiniMax,
+			authType:          modelproviders.AuthBearerToken,
+			tokenEnvKeys:      []string{"MINIMAX_API_KEY"},
+			modelEnvKeys:      []string{"MINIMAX_MODEL"},
+			baseURLEnvKeys:    []string{"MINIMAX_BASE_URL"},
+			defaultModel:      "MiniMax-M2",
+			defaultBaseURL:    "https://api.minimaxi.com/anthropic",
+			defaultProvider:   "minimax",
+			defaultContextTok: 204800,
+		})
 	case "openai":
 		return resolveFactoryProvider(cfg, providerSpec{
 			name:              "openai",
@@ -339,24 +349,6 @@ func codeFreeContextWindowTokensForE2E(modelName string) int {
 	return 88000
 }
 
-func resolveMiniMax(cfg Config) (Spec, error) {
-	apiKey := strings.TrimSpace(os.Getenv("MINIMAX_API_KEY"))
-	if apiKey == "" {
-		return Spec{}, fmt.Errorf("MINIMAX_API_KEY is not set")
-	}
-	modelName := resolveModelName(cfg, "minimax", []string{"MINIMAX_MODEL"}, "MiniMax-M2")
-	return Spec{
-		Provider: "minimax",
-		Model:    modelName,
-		LLM: minimax.New(minimax.Config{
-			Model:     modelName,
-			APIKey:    apiKey,
-			Timeout:   resolveTimeout(cfg),
-			MaxTokens: resolveMaxTokens(cfg),
-		}),
-	}, nil
-}
-
 func resolveFactoryProvider(cfg Config, spec providerSpec) (Spec, error) {
 	token := firstNonEmptyEnv(spec.tokenEnvKeys...)
 	if spec.authType != modelproviders.AuthNone && token == "" {
@@ -475,7 +467,7 @@ func buildAlias(provider string, model string) string {
 
 func requiresBaseURL(api modelproviders.APIType) bool {
 	switch api {
-	case modelproviders.APIGemini, modelproviders.APIAnthropic, modelproviders.APIAnthropicCompatible:
+	case modelproviders.APIGemini, modelproviders.APIAnthropic, modelproviders.APIAnthropicCompatible, modelproviders.APIMiniMax:
 		return false
 	default:
 		return true

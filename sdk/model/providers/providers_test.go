@@ -198,12 +198,20 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	t.Setenv(codeFreeClientVersionEnv, "0.3.6")
 
 	var seenHeaders http.Header
+	var seenPayload map[string]any
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != codeFreeChatCompletionsPath {
 			http.NotFound(w, r)
 			return
 		}
 		seenHeaders = r.Header.Clone()
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(rawBody, &seenPayload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = fmt.Fprint(w, `{"id":"resp","object":"chat.completion","created":1,"model":"GLM-4.7","choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":2,"total_tokens":12}}`)
 	}))
@@ -238,6 +246,9 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	if got := seenHeaders.Get("Authorization"); got != codeFreeAuthorizationValue {
 		t.Fatalf("authorization = %q, want %q", got, codeFreeAuthorizationValue)
 	}
+	if got := seenHeaders.Get("Accept"); got != "application/json" {
+		t.Fatalf("accept = %q, want application/json", got)
+	}
 	if got := seenHeaders.Get("Userid"); got != "272182" {
 		t.Fatalf("userid = %q, want %q", got, "272182")
 	}
@@ -252,6 +263,15 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 	}
 	if strings.TrimSpace(seenHeaders.Get("Sessionid")) == "" {
 		t.Fatal("expected sessionid header")
+	}
+	if got := seenPayload["temperature"]; got != float64(0) {
+		t.Fatalf("temperature = %#v, want 0", got)
+	}
+	if got := seenPayload["top_p"]; got != float64(1) {
+		t.Fatalf("top_p = %#v, want 1", got)
+	}
+	if _, ok := seenPayload["stream_options"]; ok {
+		t.Fatalf("non-stream payload unexpectedly included stream_options: %#v", seenPayload["stream_options"])
 	}
 }
 
@@ -307,10 +327,22 @@ func TestCodeFreeStream_ParsesSSE(t *testing.T) {
 	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
 	t.Setenv(codeFreeCredsPathEnv, credsPath)
 
+	var (
+		seenHeaders http.Header
+		seenPayload map[string]any
+	)
 	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != codeFreeChatCompletionsPath {
 			http.NotFound(w, r)
 			return
+		}
+		seenHeaders = r.Header.Clone()
+		rawBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read request body: %v", err)
+		}
+		if err := json.Unmarshal(rawBody, &seenPayload); err != nil {
+			t.Fatalf("decode request body: %v", err)
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-4.7\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\",\"role\":\"assistant\"},\"finish_reason\":\"\"}]}\n\n")
@@ -358,6 +390,19 @@ func TestCodeFreeStream_ParsesSSE(t *testing.T) {
 	}
 	if final.FinishReason != model.FinishReasonStop {
 		t.Fatalf("finish reason = %q, want %q", final.FinishReason, model.FinishReasonStop)
+	}
+	if got := seenHeaders.Get("Accept"); got != codeFreeStreamAcceptValue {
+		t.Fatalf("accept = %q, want %q", got, codeFreeStreamAcceptValue)
+	}
+	if got := seenPayload["temperature"]; got != float64(0) {
+		t.Fatalf("temperature = %#v, want 0", got)
+	}
+	if got := seenPayload["top_p"]; got != float64(1) {
+		t.Fatalf("top_p = %#v, want 1", got)
+	}
+	streamOptions, _ := seenPayload["stream_options"].(map[string]any)
+	if streamOptions["include_usage"] != true {
+		t.Fatalf("stream_options = %#v, want include_usage=true", seenPayload["stream_options"])
 	}
 }
 
@@ -418,6 +463,182 @@ func TestCodeFreeStream_FallsBackToJSONWhenBackendDoesNotUseSSE(t *testing.T) {
 	}
 	if final.FinishReason != model.FinishReasonStop {
 		t.Fatalf("finish reason = %q, want %q", final.FinishReason, model.FinishReasonStop)
+	}
+}
+
+func TestCodeFreeStream_RetriesRetCode51ControlPacket(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+
+	requests := 0
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != codeFreeChatCompletionsPath {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		if requests == 1 {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = fmt.Fprint(w, `{"retCode":51}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\",\"role\":\"assistant\"},\"finish_reason\":\"\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"id\":\"chunk-1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"GLM-5.1\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"},\"finish_reason\":\"stop\"}]}\n\n")
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer server.Close()
+
+	llm := newCodeFreeRetryTestModel(t, server, 2)
+
+	var (
+		gotErr error
+		final  *model.Response
+	)
+	for resp, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			gotErr = err
+			continue
+		}
+		if resp != nil && resp.Response != nil && resp.TurnComplete {
+			final = resp.Response
+		}
+	}
+	if gotErr != nil {
+		t.Fatalf("stream generate error: %v", gotErr)
+	}
+	if requests != 2 {
+		t.Fatalf("requests = %d, want 2", requests)
+	}
+	if final == nil {
+		t.Fatal("expected final response after retry")
+	}
+	if got := final.Message.TextContent(); got != "ok" {
+		t.Fatalf("final text = %q, want ok", got)
+	}
+}
+
+func TestCodeFreeRetCode51ExhaustionIsBackpressureError(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+
+	const retryMax = 2
+	requests := 0
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != codeFreeChatCompletionsPath {
+			http.NotFound(w, r)
+			return
+		}
+		requests++
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprint(w, `{"retCode":51}`)
+	}))
+	defer server.Close()
+
+	llm := newCodeFreeRetryTestModel(t, server, retryMax)
+
+	var gotErr error
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Stream:   true,
+	}) {
+		if err != nil {
+			gotErr = err
+		}
+	}
+	if gotErr == nil {
+		t.Fatal("expected retCode 51 error")
+	}
+	if requests != retryMax+1 {
+		t.Fatalf("requests = %d, want %d", requests, retryMax+1)
+	}
+	text := gotErr.Error()
+	for _, want := range []string{"model: llm request hit provider backpressure", "model: codefree server overloaded", "retCode=51", `body={"retCode":51}`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("error = %q, want %q", text, want)
+		}
+	}
+	if strings.Contains(text, "empty choices") {
+		t.Fatalf("error = %q, did not want empty choices", text)
+	}
+}
+
+func newCodeFreeRetryTestModel(t *testing.T, server *providerTestServer, retryMax int) model.LLM {
+	t.Helper()
+	factory := NewFactory()
+	cfg := Config{
+		Alias:      "codefree/glm-5.1",
+		Provider:   "codefree",
+		API:        APICodeFree,
+		Model:      "GLM-5.1",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+		Retry: model.RetryConfig{
+			MaxRetries:          retryMax,
+			BaseDelay:           time.Nanosecond,
+			MaxDelay:            time.Nanosecond,
+			RateLimitMaxRetries: retryMax,
+			RateLimitBaseDelay:  time.Nanosecond,
+			RateLimitMaxDelay:   time.Nanosecond,
+		},
+	}
+	if err := factory.Register(cfg); err != nil {
+		t.Fatalf("register codefree retry provider: %v", err)
+	}
+	llm, err := factory.NewByAlias(cfg.Alias)
+	if err != nil {
+		t.Fatalf("NewByAlias() error = %v", err)
+	}
+	return llm
+}
+
+func TestCodeFreeEmptyChoicesIncludesRedactedResponseBody(t *testing.T) {
+	credsPath := writeCodeFreeCredsForTest(t, "272182", "76475baf-3659-488a-932d-0971ae103591")
+	t.Setenv(codeFreeCredsPathEnv, credsPath)
+
+	server := newProviderTestServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != codeFreeChatCompletionsPath {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"choices":[],"error":{"message":"provider returned no candidate"},"apikey":"secret-api-key","userid":"272182","user_id":272182}`)
+	}))
+	defer server.Close()
+
+	llm := newCodeFree(Config{
+		Provider:   "codefree",
+		Model:      "GLM-5.1",
+		BaseURL:    server.URL,
+		HTTPClient: server.Client(),
+		Timeout:    2 * time.Second,
+	})
+
+	var gotErr error
+	for _, err := range llm.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
+		Stream:   false,
+	}) {
+		if err != nil {
+			gotErr = err
+		}
+	}
+	if gotErr == nil {
+		t.Fatal("expected empty choices error")
+	}
+	text := gotErr.Error()
+	if !strings.Contains(text, "model: empty choices") || !strings.Contains(text, "provider returned no candidate") {
+		t.Fatalf("error = %q, want empty choices with response summary", text)
+	}
+	if strings.Contains(text, "secret-api-key") || strings.Contains(text, "272182") {
+		t.Fatalf("error leaked sensitive response fields: %q", text)
+	}
+	if !strings.Contains(text, "[redacted len=") {
+		t.Fatalf("error = %q, want redacted sensitive fields", text)
 	}
 }
 
@@ -2724,6 +2945,28 @@ func TestMiniMaxStream_EmitsStartBlockTextWithoutSmoothingAtProviderLayer(t *tes
 	}
 	if got := final.Message.TextContent(); got != "MiniMax streaming should feel much smoother in the terminal output." {
 		t.Fatalf("unexpected final text %q", got)
+	}
+}
+
+func TestMiniMaxUsesAnthropicCompatibleConstructorDefaults(t *testing.T) {
+	llm := newMiniMax(Config{
+		Provider: "minimax",
+		API:      APIMiniMax,
+		Model:    "MiniMax-M2",
+		Auth: AuthConfig{
+			Type:  AuthBearerToken,
+			Token: "compat-token",
+		},
+	}, "compat-token")
+	typed, ok := llm.(*anthropicSDKLLM)
+	if !ok {
+		t.Fatalf("newAnthropic() = %T, want *anthropicSDKLLM", llm)
+	}
+	if typed.baseURL != miniMaxDefaultBaseURL {
+		t.Fatalf("baseURL = %q, want %q", typed.baseURL, miniMaxDefaultBaseURL)
+	}
+	if typed.maxOutputTok != 4096 {
+		t.Fatalf("maxOutputTok = %d, want 4096", typed.maxOutputTok)
 	}
 }
 

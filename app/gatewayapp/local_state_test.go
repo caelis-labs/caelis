@@ -78,6 +78,61 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 }
 
+func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("request path = %q, want /v1/messages", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer minimax-secret" {
+			t.Fatalf("authorization = %q, want bearer minimax token", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprint(w, `{"id":"msg_1","type":"message","role":"assistant","model":"MiniMax-M2","stop_reason":"end_turn","stop_sequence":"","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":3,"output_tokens":1}}`)
+	}))
+	defer server.Close()
+
+	lookup, err := newModelLookup(nil, ModelConfig{
+		Provider: "minimax",
+		Model:    "MiniMax-M2",
+		BaseURL:  server.URL,
+		Token:    "minimax-secret",
+	}, 204800)
+	if err != nil {
+		t.Fatalf("newModelLookup() error = %v", err)
+	}
+	cfg, ok := lookup.Config("minimax/minimax-m2")
+	if !ok {
+		t.Fatal("expected minimax config")
+	}
+	if cfg.API != sdkproviders.APIMiniMax {
+		t.Fatalf("cfg.API = %q, want %q", cfg.API, sdkproviders.APIMiniMax)
+	}
+	if cfg.AuthType != sdkproviders.AuthBearerToken {
+		t.Fatalf("cfg.AuthType = %q, want %q", cfg.AuthType, sdkproviders.AuthBearerToken)
+	}
+
+	resolved, err := lookup.ResolveModel(context.Background(), "minimax/minimax-m2", 0)
+	if err != nil {
+		t.Fatalf("ResolveModel() error = %v", err)
+	}
+	var finalText string
+	for event, err := range resolved.Model.Generate(context.Background(), &sdkmodel.Request{
+		Messages: []sdkmodel.Message{sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")},
+	}) {
+		if err != nil {
+			t.Fatalf("Generate() error = %v", err)
+		}
+		if event != nil && event.Response != nil && event.TurnComplete {
+			finalText = event.Response.Message.TextContent()
+		}
+	}
+	if finalText != "ok" {
+		t.Fatalf("final text = %q, want ok", finalText)
+	}
+}
+
 func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()

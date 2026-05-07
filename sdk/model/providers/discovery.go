@@ -26,6 +26,9 @@ func DiscoverModels(ctx context.Context, cfg Config) ([]RemoteModel, error) {
 	if ctx == nil {
 		return nil, fmt.Errorf("providers: context is required")
 	}
+	if cfg.API == APIMiniMax {
+		cfg = withMiniMaxDefaults(cfg)
+	}
 	token, err := resolveToken(cfg.Auth)
 	if err != nil {
 		return nil, err
@@ -47,7 +50,7 @@ func DiscoverModels(ctx context.Context, cfg Config) ([]RemoteModel, error) {
 		return discoverCodeFreeModels(ctx, client, cfg)
 	case APIGemini:
 		return discoverGeminiModels(ctx, client, cfg, token)
-	case APIAnthropic, APIAnthropicCompatible:
+	case APIAnthropic, APIAnthropicCompatible, APIMiniMax:
 		return discoverAnthropicModels(ctx, client, cfg, token)
 	case APIOllama:
 		return discoverOllamaModels(ctx, client, cfg)
@@ -386,7 +389,7 @@ func applyDefaultAuthHeader(req *http.Request, cfg Config, token string, geminiB
 			req.Header.Set("Authorization", "Bearer "+token)
 		}
 		return
-	case APIAnthropic, APIAnthropicCompatible:
+	case APIAnthropic, APIAnthropicCompatible, APIMiniMax:
 		if auth.Type == AuthOAuthToken || auth.Type == AuthBearerToken {
 			req.Header.Set("Authorization", "Bearer "+token)
 			return

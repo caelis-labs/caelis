@@ -278,6 +278,8 @@ type openAICompatRequest struct {
 	Stream          bool                       `json:"stream"`
 	StreamOptions   *openAICompatStreamOptions `json:"stream_options,omitempty"`
 	MaxTokens       int                        `json:"max_tokens,omitempty"`
+	Temperature     *float64                   `json:"temperature,omitempty"`
+	TopP            *float64                   `json:"top_p,omitempty"`
 	ResponseFormat  *openAIResponseFormat      `json:"response_format,omitempty"`
 	ReasoningEffort string                     `json:"reasoning_effort,omitempty"`
 	Reasoning       *openAIReasoning           `json:"reasoning,omitempty"`

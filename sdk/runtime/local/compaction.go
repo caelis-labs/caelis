@@ -309,8 +309,8 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 	var lastErr error
 	for attempt := 0; attempt < c.cfg.MaxRetryAttempts; attempt++ {
 		if attempt > 0 {
-			delay := retryDelayForAttemptWithBounds(attempt-1, c.cfg.RetryBaseDelay, c.cfg.RetryMaxDelay)
-			if err := sleepContext(ctx, delay); err != nil {
+			delay := sdkmodel.RetryDelayForAttempt(attempt-1, c.cfg.RetryBaseDelay, c.cfg.RetryMaxDelay)
+			if err := sleepCompactionRetryDelay(ctx, delay); err != nil {
 				return "", err
 			}
 		}
@@ -322,7 +322,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 			return "", err
 		}
 		lastErr = err
-		if !shouldRetry(err) {
+		if !sdkmodel.IsRetryableLLMError(err) {
 			break
 		}
 	}
@@ -330,6 +330,20 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 		lastErr = errors.New("compact generation failed")
 	}
 	return "", lastErr
+}
+
+func sleepCompactionRetryDelay(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (r *Runtime) prepareInvocationContext(
