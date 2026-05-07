@@ -902,14 +902,19 @@ func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 	case "add":
 		addArgs, ok := parseAgentAddArgs(rest)
 		if !ok || addArgs.Target == "" {
-			sendNotice(send, "usage: /agent add <name>")
+			sendNotice(send, "usage: /agent add <name> | /agent add custom <name> -- <command> [args...]")
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		status, err := driver.AddAgentWithOptions(ctx, addArgs.Target, tuidriver.AgentAddOptions{Install: addArgs.Install})
+		status, err := driver.AddAgentWithOptions(ctx, addArgs.Target, tuidriver.AgentAddOptions{
+			Install: addArgs.Install,
+			Custom:  addArgs.Custom,
+		})
 		if err != nil {
 			return TaskResultMsg{Err: friendlyCommandError("agent add", err)}
 		}
-		if addArgs.Install {
+		if addArgs.Custom != nil {
+			sendNotice(send, fmt.Sprintf("custom agent registered: %s", addArgs.Target))
+		} else if addArgs.Install {
 			sendNotice(send, fmt.Sprintf("agent registered with local adapter: %s", addArgs.Target))
 		} else {
 			sendNotice(send, fmt.Sprintf("agent registered: %s", addArgs.Target))
@@ -1644,11 +1649,44 @@ func splitFirst(text string) (first, rest string) {
 type agentAddArgs struct {
 	Target  string
 	Install bool
+	Custom  *tuidriver.CustomAgentConfig
 }
 
 func parseAgentAddArgs(args string) (agentAddArgs, bool) {
+	fields := strings.Fields(args)
 	var out agentAddArgs
-	for _, field := range strings.Fields(args) {
+	if len(fields) > 0 && strings.EqualFold(fields[0], "custom") {
+		if len(fields) < 4 {
+			return agentAddArgs{}, false
+		}
+		name := strings.TrimSpace(fields[1])
+		if name == "" || strings.HasPrefix(name, "-") {
+			return agentAddArgs{}, false
+		}
+		delim := -1
+		for i := 2; i < len(fields); i++ {
+			if fields[i] == "--" {
+				delim = i
+				break
+			}
+		}
+		if delim < 0 || delim+1 >= len(fields) {
+			return agentAddArgs{}, false
+		}
+		command := strings.TrimSpace(fields[delim+1])
+		if command == "" {
+			return agentAddArgs{}, false
+		}
+		return agentAddArgs{
+			Target: name,
+			Custom: &tuidriver.CustomAgentConfig{
+				Name:    name,
+				Command: command,
+				Args:    append([]string(nil), fields[delim+2:]...),
+			},
+		}, true
+	}
+	for _, field := range fields {
 		switch strings.ToLower(strings.TrimSpace(field)) {
 		case "--install", "-i":
 			out.Install = true

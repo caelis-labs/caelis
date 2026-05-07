@@ -497,6 +497,45 @@ func (s *Stack) RegisterBuiltinACPAgent(name string) error {
 	return s.RegisterBuiltinACPAgentWithOptions(context.Background(), name, RegisterBuiltinACPAgentOptions{})
 }
 
+func (s *Stack) RegisterACPAgent(ctx context.Context, cfg AgentConfig) error {
+	if s == nil || s.store == nil {
+		return fmt.Errorf("gatewayapp: app config store unavailable")
+	}
+	cfg = normalizeAgentConfig(cfg)
+	if cfg.Name == "" {
+		return fmt.Errorf("gatewayapp: ACP agent name is required")
+	}
+	if reservedSlashCommandName(cfg.Name) {
+		return fmt.Errorf("gatewayapp: ACP agent %q conflicts with an existing slash command", cfg.Name)
+	}
+	if strings.TrimSpace(cfg.Command) == "" {
+		return fmt.Errorf("gatewayapp: command is required for ACP agent %q", cfg.Name)
+	}
+	cfg.Builtin = false
+	doc, err := s.store.Load()
+	if err != nil {
+		return err
+	}
+	replaced := false
+	next := make([]AgentConfig, 0, len(doc.Agents)+1)
+	for _, existing := range doc.Agents {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), cfg.Name) {
+			next = append(next, cfg)
+			replaced = true
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !replaced {
+		next = append(next, cfg)
+	}
+	doc.Agents = next
+	if err := s.store.Save(doc); err != nil {
+		return err
+	}
+	return s.setConfiguredAgents(doc.Agents)
+}
+
 func (s *Stack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, name string, opts RegisterBuiltinACPAgentOptions) error {
 	if s == nil || s.store == nil {
 		return fmt.Errorf("gatewayapp: app config store unavailable")

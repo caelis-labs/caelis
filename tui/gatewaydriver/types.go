@@ -35,6 +35,8 @@ type AgentStatusSnapshot = tuidriver.AgentStatusSnapshot
 
 type AgentAddOptions = tuidriver.AgentAddOptions
 
+type CustomAgentConfig = tuidriver.CustomAgentConfig
+
 type ConnectConfig = tuidriver.ConnectConfig
 
 type Turn = tuidriver.Turn

@@ -762,6 +762,31 @@ func TestSlashAgentInstallPassesOptions(t *testing.T) {
 	}
 }
 
+func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
+	driver := &bridgeTestDriver{}
+	var msgs []tea.Msg
+	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "add custom helper -- helper-acp --stdio --model test")
+	if result.Err != nil {
+		t.Fatalf("slashAgentWithContext(add custom) error = %v", result.Err)
+	}
+	if driver.lastAddedAgent != "helper" {
+		t.Fatalf("lastAddedAgent = %q, want helper", driver.lastAddedAgent)
+	}
+	if driver.lastAddOptions.Custom == nil {
+		t.Fatal("AddAgentWithOptions Custom = nil, want config")
+	}
+	cfg := driver.lastAddOptions.Custom
+	if cfg.Name != "helper" || cfg.Command != "helper-acp" {
+		t.Fatalf("custom config = %#v, want helper/helper-acp", cfg)
+	}
+	if got, want := strings.Join(cfg.Args, " "), "--stdio --model test"; got != want {
+		t.Fatalf("custom args = %q, want %q", got, want)
+	}
+	if len(msgs) == 0 || !noticeMessagesContain(msgs, "custom agent registered: helper") {
+		t.Fatalf("slashAgentWithContext(add custom) messages = %#v, want registration notice", msgs)
+	}
+}
+
 func TestSlashAgentInstallFailureEmitsBASHToolResult(t *testing.T) {
 	driver := &bridgeTestDriver{
 		addAgentErr: fmt.Errorf("gatewayapp: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
@@ -1296,6 +1321,16 @@ func TestSlashCompactRejectsArguments(t *testing.T) {
 func transcriptEventsContainText(events []TranscriptEvent, text string) bool {
 	for _, event := range events {
 		if event.Kind == TranscriptEventNarrative && strings.Contains(event.Text, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func noticeMessagesContain(messages []tea.Msg, text string) bool {
+	for _, msg := range messages {
+		log, ok := msg.(LogChunkMsg)
+		if ok && strings.Contains(log.Chunk, text) {
 			return true
 		}
 	}

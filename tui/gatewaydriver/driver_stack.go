@@ -144,6 +144,7 @@ type DriverStack struct {
 	SetACPControllerModeFn               func(context.Context, sdksession.SessionRef, string) (sdkcontroller.ControllerStatus, error)
 	SetSessionModeFn                     func(context.Context, sdksession.SessionRef, string) (string, error)
 	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
+	RegisterACPAgentFn                   func(context.Context, CustomAgentConfig) error
 	UnregisterACPAgentFn                 func(string) error
 	ListModelAliasesFn                   func(context.Context, sdksession.SessionRef) ([]string, error)
 	ListModelChoicesFn                   func(context.Context, sdksession.SessionRef) ([]ModelChoice, error)
@@ -277,6 +278,13 @@ func (s *DriverStack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, ta
 		return fmt.Errorf("tui/gatewaydriver: builtin ACP agent dependency is unavailable")
 	}
 	return s.RegisterBuiltinACPAgentWithOptionsFn(ctx, target, opts)
+}
+
+func (s *DriverStack) RegisterACPAgent(ctx context.Context, cfg CustomAgentConfig) error {
+	if s == nil || s.RegisterACPAgentFn == nil {
+		return fmt.Errorf("tui/gatewaydriver: custom ACP agent dependency is unavailable")
+	}
+	return s.RegisterACPAgentFn(ctx, cfg)
 }
 
 func (s *DriverStack) UnregisterACPAgent(target string) error {

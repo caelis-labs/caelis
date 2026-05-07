@@ -278,6 +278,82 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	}
 }
 
+func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	oldGateway := stack.Gateway
+	oldEngine := stack.engine
+
+	cfg := AgentConfig{
+		Name:        "helper",
+		Description: "custom helper",
+		Command:     "helper-acp",
+		Args:        []string{"--stdio"},
+		Env:         map[string]string{"HELPER_MODE": "test"},
+		WorkDir:     "/tmp/helper",
+		Builtin:     true,
+	}
+	if err := stack.RegisterACPAgent(ctx, cfg); err != nil {
+		t.Fatalf("RegisterACPAgent(helper) error = %v", err)
+	}
+	if stack.Gateway != oldGateway {
+		t.Fatal("RegisterACPAgent rebuilt gateway")
+	}
+	if stack.engine != oldEngine {
+		t.Fatal("RegisterACPAgent rebuilt runtime engine")
+	}
+	doc, err := LoadAppConfig(stack.storeDir)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.Agents) != 1 {
+		t.Fatalf("stored agents = %#v, want one", doc.Agents)
+	}
+	agent := doc.Agents[0]
+	if agent.Name != "helper" || agent.Command != "helper-acp" || agent.Builtin {
+		t.Fatalf("stored custom agent = %#v, want custom helper", agent)
+	}
+	if got, want := strings.Join(agent.Args, " "), "--stdio"; got != want {
+		t.Fatalf("stored args = %q, want %q", got, want)
+	}
+	if got, want := agent.Env["HELPER_MODE"], "test"; got != want {
+		t.Fatalf("stored env HELPER_MODE = %q, want %q", got, want)
+	}
+	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(after custom register) error = %v", err)
+	}
+	if !spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
+		t.Fatalf("SPAWN agent enum missing helper after custom registry update")
+	}
+
+	replacement := AgentConfig{Name: "helper", Command: "helper-v2", Args: []string{"--json"}}
+	if err := stack.RegisterACPAgent(ctx, replacement); err != nil {
+		t.Fatalf("RegisterACPAgent(helper replacement) error = %v", err)
+	}
+	doc, err = LoadAppConfig(stack.storeDir)
+	if err != nil {
+		t.Fatalf("LoadAppConfig(after replacement) error = %v", err)
+	}
+	if len(doc.Agents) != 1 {
+		t.Fatalf("stored agents after replacement = %#v, want one", doc.Agents)
+	}
+	if got, want := doc.Agents[0].Command, "helper-v2"; got != want {
+		t.Fatalf("replacement command = %q, want %q", got, want)
+	}
+
+	if err := stack.UnregisterACPAgent("helper"); err != nil {
+		t.Fatalf("UnregisterACPAgent(helper) error = %v", err)
+	}
+	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("ResolveTurn(after custom unregister) error = %v", err)
+	}
+	if spawnToolHasAgent(resolved.RunRequest.AgentSpec.Tools, "helper") {
+		t.Fatalf("SPAWN agent enum still includes helper after unregister")
+	}
+}
+
 func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{

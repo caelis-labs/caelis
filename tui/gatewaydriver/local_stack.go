@@ -53,6 +53,20 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
 			return agents.RegisterBuiltinWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
 		},
+		RegisterACPAgentFn: func(ctx context.Context, cfg CustomAgentConfig) error {
+			env := make(map[string]string, len(cfg.Env))
+			for key, value := range cfg.Env {
+				env[key] = value
+			}
+			return agents.RegisterCustom(ctx, gatewayapp.AgentConfig{
+				Name:        cfg.Name,
+				Description: cfg.Description,
+				Command:     cfg.Command,
+				Args:        append([]string(nil), cfg.Args...),
+				Env:         env,
+				WorkDir:     cfg.WorkDir,
+			})
+		},
 		UnregisterACPAgentFn: agents.Unregister,
 		ListModelAliasesFn:   models.ListAliases,
 		ListModelChoicesFn: func(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {

@@ -958,12 +958,18 @@ func (d *GatewayDriver) AddAgent(ctx context.Context, target string) (AgentStatu
 }
 
 func (d *GatewayDriver) AddAgentWithOptions(ctx context.Context, target string, opts AgentAddOptions) (AgentStatusSnapshot, error) {
+	if opts.Custom != nil {
+		if err := d.stack.RegisterACPAgent(ctx, *opts.Custom); err != nil {
+			return AgentStatusSnapshot{}, err
+		}
+		return d.AgentStatus(ctx)
+	}
 	if opts.Install {
 		var finish func()
 		ctx, finish = d.beginInterruptibleCommand(ctx)
 		defer finish()
 	}
-	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, RegisterBuiltinACPAgentOptions(opts)); err != nil {
+	if err := d.stack.RegisterBuiltinACPAgentWithOptions(ctx, target, RegisterBuiltinACPAgentOptions{Install: opts.Install}); err != nil {
 		if opts.Install && errors.Is(ctx.Err(), context.Canceled) {
 			return AgentStatusSnapshot{}, context.Canceled
 		}

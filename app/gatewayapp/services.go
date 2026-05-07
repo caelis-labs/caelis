@@ -99,6 +99,10 @@ func (s AgentService) RegisterBuiltinWithOptions(ctx context.Context, name strin
 	return s.stack.RegisterBuiltinACPAgentWithOptions(ctx, name, opts)
 }
 
+func (s AgentService) RegisterCustom(ctx context.Context, cfg AgentConfig) error {
+	return s.stack.RegisterACPAgent(ctx, cfg)
+}
+
 func (s AgentService) Unregister(name string) error {
 	return s.stack.UnregisterACPAgent(name)
 }
