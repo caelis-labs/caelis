@@ -1943,9 +1943,13 @@ type shellTokenClass int
 const (
 	shellTokenSpace shellTokenClass = iota
 	shellTokenCommand
+	shellTokenKeyword
 	shellTokenEnv
 	shellTokenFlag
 	shellTokenOperator
+	shellTokenRedirect
+	shellTokenPath
+	shellTokenVariable
 	shellTokenArg
 	shellTokenQuoted
 )
@@ -1978,15 +1982,23 @@ func styleShellCommandText(ctx BlockRenderContext, text string) string {
 func shellTokenStyle(ctx BlockRenderContext, class shellTokenClass) lipgloss.Style {
 	switch class {
 	case shellTokenCommand:
-		return ctx.Theme.ToolNameStyle()
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Success).Bold(true)
+	case shellTokenKeyword:
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true)
 	case shellTokenEnv:
-		return ctx.Theme.NoteStyle()
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Accent)
 	case shellTokenFlag:
-		return ctx.Theme.TranscriptMetaStyle()
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning)
 	case shellTokenOperator:
-		return ctx.Theme.ToolStyle()
+		return ctx.Theme.TranscriptMetaStyle()
+	case shellTokenRedirect:
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning)
+	case shellTokenPath:
+		return lipgloss.NewStyle().Foreground(ctx.Theme.LinkFg)
+	case shellTokenVariable:
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Accent)
 	case shellTokenQuoted:
-		return ctx.Theme.ToolOutputStyle()
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning)
 	default:
 		return ctx.Theme.ToolArgsStyle()
 	}
@@ -1999,6 +2011,7 @@ func shellCommandTokens(text string) []shellCommandToken {
 	}
 	tokens := make([]shellCommandToken, 0, len(strings.Fields(text))*2+1)
 	expectCommand := true
+	afterRedirect := false
 	for i := 0; i < len(text); {
 		if isShellWhitespace(text[i]) {
 			start := i
@@ -2009,7 +2022,14 @@ func shellCommandTokens(text string) []shellCommandToken {
 			continue
 		}
 		if op, n := shellOperatorAt(text[i:]); n > 0 {
-			tokens = append(tokens, shellCommandToken{Text: op, Class: shellTokenOperator})
+			class := shellTokenOperator
+			if shellOperatorIsRedirect(op) {
+				class = shellTokenRedirect
+				afterRedirect = true
+			} else {
+				afterRedirect = false
+			}
+			tokens = append(tokens, shellCommandToken{Text: op, Class: class})
 			i += n
 			if shellOperatorStartsCommand(op) {
 				expectCommand = true
@@ -2041,30 +2061,51 @@ func shellCommandTokens(text string) []shellCommandToken {
 			}
 		}
 		raw := text[start:i]
-		class := classifyShellToken(raw, quoted, expectCommand)
-		if class == shellTokenCommand {
+		class := classifyShellToken(raw, quoted, expectCommand, afterRedirect)
+		switch {
+		case class == shellTokenCommand:
+			expectCommand = false
+		case class == shellTokenKeyword:
+			expectCommand = shellKeywordExpectsCommand(raw)
+		case class != shellTokenEnv && class != shellTokenSpace && expectCommand:
 			expectCommand = false
 		}
-		if class != shellTokenEnv && class != shellTokenSpace && expectCommand {
-			expectCommand = false
-		}
+		afterRedirect = false
 		tokens = append(tokens, shellCommandToken{Text: raw, Class: class})
 	}
 	return tokens
 }
 
-func classifyShellToken(token string, quoted bool, expectCommand bool) shellTokenClass {
+func classifyShellToken(token string, quoted bool, expectCommand bool, afterRedirect bool) shellTokenClass {
 	if quoted {
 		return shellTokenQuoted
+	}
+	if afterRedirect {
+		if isShellPathToken(token) {
+			return shellTokenPath
+		}
+		return shellTokenArg
 	}
 	if isShellEnvAssignment(token) && expectCommand {
 		return shellTokenEnv
 	}
 	if expectCommand {
+		if isShellKeyword(token) {
+			return shellTokenKeyword
+		}
 		return shellTokenCommand
+	}
+	if isShellKeyword(token) {
+		return shellTokenKeyword
+	}
+	if isShellVariableToken(token) {
+		return shellTokenVariable
 	}
 	if strings.HasPrefix(token, "-") {
 		return shellTokenFlag
+	}
+	if isShellPathToken(token) {
+		return shellTokenPath
 	}
 	return shellTokenArg
 }
@@ -2074,7 +2115,10 @@ func isShellWhitespace(ch byte) bool {
 }
 
 func shellOperatorAt(text string) (string, int) {
-	for _, op := range []string{"&&", "||", ">>", "<<", "2>>", "2>", "|", ";", ">", "<", "(", ")"} {
+	for _, op := range []string{
+		"2>&1", "1>&2", "&>>", "&>", "2>>", "1>>", ">>", "<<<", "<<", "2>", "1>", ">|",
+		"&&", "||", "|&", ";;", "|", ";", ">", "<", "(", ")", "{", "}",
+	} {
 		if strings.HasPrefix(text, op) {
 			return op, len(op)
 		}
@@ -2082,9 +2126,13 @@ func shellOperatorAt(text string) (string, int) {
 	return "", 0
 }
 
+func shellOperatorIsRedirect(op string) bool {
+	return strings.ContainsAny(op, "><")
+}
+
 func shellOperatorStartsCommand(op string) bool {
 	switch op {
-	case "&&", "||", "|", ";", "(":
+	case "&&", "||", "|", "|&", ";", ";;", "(":
 		return true
 	default:
 		return false
@@ -2109,6 +2157,49 @@ func isShellEnvAssignment(token string) bool {
 		}
 	}
 	return true
+}
+
+func isShellKeyword(token string) bool {
+	switch token {
+	case "if", "then", "else", "elif", "fi",
+		"for", "select", "while", "until", "do", "done",
+		"case", "in", "esac", "function", "time", "coproc":
+		return true
+	default:
+		return false
+	}
+}
+
+func shellKeywordExpectsCommand(token string) bool {
+	switch token {
+	case "then", "else", "elif", "do", "time", "coproc", "function":
+		return true
+	default:
+		return false
+	}
+}
+
+func isShellVariableToken(token string) bool {
+	if strings.HasPrefix(token, "$") {
+		return true
+	}
+	return strings.HasPrefix(token, "${")
+}
+
+func isShellPathToken(token string) bool {
+	token = strings.Trim(token, `"'`)
+	switch {
+	case token == "":
+		return false
+	case strings.HasPrefix(token, "/"):
+		return true
+	case strings.HasPrefix(token, "./"), strings.HasPrefix(token, "../"), strings.HasPrefix(token, "~/"):
+		return true
+	case strings.Contains(token, "/") && !strings.Contains(token, "://"):
+		return true
+	default:
+		return false
+	}
 }
 
 func isShellEnvNameStart(ch byte) bool {

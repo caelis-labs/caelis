@@ -149,6 +149,35 @@ func TestActiveNarrativeBufferDoesNotRerenderCompletedHistory(t *testing.T) {
 	}
 }
 
+func TestActiveMarkdownStreamUsesIncrementalSyncWithoutPerChunkGlamour(t *testing.T) {
+	m := newPerfTestModel()
+	seedLongTranscript(m, 120)
+
+	_, _ = m.handleStreamBlock("answer", "assistant", "```go\nfmt.Println(\"start\")\n", false)
+	_, _ = m.Update(frameTickMsg{kind: frameTickViewportSync, at: time.Now()})
+	beforeFullSyncs := m.diag.ViewportFullSyncs
+	beforeGlamourRenders := m.diag.GlamourRenderCalls
+	beforeTranscriptRenders := m.diag.BlockRenderCallsByKind[BlockTranscript]
+
+	for range 30 {
+		_, _ = m.handleStreamBlock("answer", "assistant", "// token\n", false)
+		_, _ = m.Update(frameTickMsg{kind: frameTickViewportSync, at: time.Now()})
+	}
+
+	if got := m.diag.BlockRenderCallsByKind[BlockTranscript]; got != beforeTranscriptRenders {
+		t.Fatalf("completed transcript block renders = %d, want %d", got, beforeTranscriptRenders)
+	}
+	if got := m.diag.ViewportFullSyncs; got != beforeFullSyncs {
+		t.Fatalf("active markdown stream full syncs = %d, want %d", got, beforeFullSyncs)
+	}
+	if got := m.diag.GlamourRenderCalls; got != beforeGlamourRenders {
+		t.Fatalf("active markdown stream Glamour renders = %d, want unchanged %d", got, beforeGlamourRenders)
+	}
+	if m.diag.ViewportIncrementalSyncs == 0 {
+		t.Fatal("active markdown stream should keep using incremental viewport sync")
+	}
+}
+
 func TestActiveTailViewportSyncDoesNotReplaceFullViewportContent(t *testing.T) {
 	m := newPerfTestModel()
 	seedLongTranscript(m, 120)

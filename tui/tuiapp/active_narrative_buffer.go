@@ -3,7 +3,6 @@ package tuiapp
 import (
 	"strconv"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/OnslaughtSnail/caelis/tui/tuikit"
 )
@@ -53,6 +52,7 @@ func (b *activeNarrativeBuffer) CacheKey() string {
 		return "active:0"
 	}
 	return "active:" +
+		streamingNarrativeRendererVersion + ":" +
 		strconv.FormatUint(b.version, 10) + ":" +
 		strconv.Itoa(len(b.stablePrefixRaw)) + ":" +
 		strconv.Itoa(len(b.tailRaw))
@@ -76,7 +76,6 @@ func (b *activeNarrativeBuffer) RenderRows(blockID, rolePrefix string, roleStyle
 		return b.cachedRows
 	}
 
-	ctx.observeGlamourRender()
 	rows := b.renderRows(blockID, rolePrefix, roleStyle, width, ctx.Theme)
 	b.cachedVersion = b.version
 	b.cachedWidth = width
@@ -117,17 +116,6 @@ func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle
 }
 
 func renderActiveNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
-	if utf8.RuneCountInString(strings.TrimSpace(raw)) >= streamingLightTailMinRunes {
-		prefixWidth := maxInt(graphemeWidth(rolePrefix), 0)
-		tailWidth := maxInt(1, width-prefixWidth)
-		if rows := renderStreamingNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, tailWidth, theme); len(rows) > 0 {
-			return rows
-		}
-	}
-	normalized := closeUnclosedCodeFences(raw)
-	if rows := glamourNarrativeRows(blockID, normalized, rolePrefix, roleStyle, width, theme); len(rows) > 0 {
-		return rows
-	}
 	prefixWidth := maxInt(graphemeWidth(rolePrefix), 0)
 	return renderStreamingNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, maxInt(1, width-prefixWidth), theme)
 }

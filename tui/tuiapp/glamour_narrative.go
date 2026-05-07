@@ -111,12 +111,13 @@ var glamourCache struct {
 }
 
 type streamingNarrativeCacheEntry struct {
-	width        int
-	themeKey     string
-	role         tuikit.LineStyle
-	stableRaw    string
-	rolePrefix   string
-	renderedRows []RenderedRow
+	width           int
+	themeKey        string
+	role            tuikit.LineStyle
+	rendererVersion string
+	stableRaw       string
+	rolePrefix      string
+	renderedRows    []RenderedRow
 }
 
 var glamourStreamingCache struct {
@@ -322,7 +323,115 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 		style.HorizontalRule.Color = mutedHex
 	}
 
+	normalizeNarrativeChromaStyle(style.CodeBlock.Chroma, theme, roleStyle)
+
 	return style
+}
+
+func normalizeNarrativeChromaStyle(chroma *gansi.Chroma, theme tuikit.Theme, roleStyle tuikit.LineStyle) {
+	if chroma == nil {
+		return
+	}
+	codeFg := styleForegroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	codeBg := styleBackgroundToAnsiPtr(theme.MarkdownCodeBlockStyle())
+	textFg := styleForegroundToAnsiPtr(theme.TextStyle())
+	mutedFg := styleForegroundToAnsiPtr(theme.MutedTextStyle())
+	headingFg := styleForegroundToAnsiPtr(theme.MarkdownHeadingStyle())
+	linkFg := styleForegroundToAnsiPtr(theme.MarkdownLinkStyle())
+	successFg := colorToAnsiPtr(theme.Success)
+	warningFg := colorToAnsiPtr(theme.Warning)
+	errorFg := colorToAnsiPtr(theme.Error)
+	diffAddFg := colorToAnsiPtr(theme.DiffAddFg)
+	diffRemoveFg := colorToAnsiPtr(theme.DiffRemoveFg)
+
+	if roleStyle == tuikit.LineStyleReasoning {
+		reasoningFg := colorToAnsiPtr(theme.ReasoningFg)
+		codeFg = firstAnsiPtr(reasoningFg, codeFg)
+		textFg = firstAnsiPtr(reasoningFg, textFg)
+		headingFg = firstAnsiPtr(reasoningFg, headingFg)
+		linkFg = firstAnsiPtr(reasoningFg, linkFg)
+		successFg = firstAnsiPtr(reasoningFg, successFg)
+		warningFg = firstAnsiPtr(reasoningFg, warningFg)
+		errorFg = firstAnsiPtr(reasoningFg, errorFg)
+		diffAddFg = firstAnsiPtr(reasoningFg, diffAddFg)
+		diffRemoveFg = firstAnsiPtr(reasoningFg, diffRemoveFg)
+	}
+
+	all := []*gansi.StylePrimitive{
+		&chroma.Text,
+		&chroma.Error,
+		&chroma.Comment,
+		&chroma.CommentPreproc,
+		&chroma.Keyword,
+		&chroma.KeywordReserved,
+		&chroma.KeywordNamespace,
+		&chroma.KeywordType,
+		&chroma.Operator,
+		&chroma.Punctuation,
+		&chroma.Name,
+		&chroma.NameBuiltin,
+		&chroma.NameTag,
+		&chroma.NameAttribute,
+		&chroma.NameClass,
+		&chroma.NameConstant,
+		&chroma.NameDecorator,
+		&chroma.NameException,
+		&chroma.NameFunction,
+		&chroma.NameOther,
+		&chroma.Literal,
+		&chroma.LiteralNumber,
+		&chroma.LiteralDate,
+		&chroma.LiteralString,
+		&chroma.LiteralStringEscape,
+		&chroma.GenericDeleted,
+		&chroma.GenericEmph,
+		&chroma.GenericInserted,
+		&chroma.GenericStrong,
+		&chroma.GenericSubheading,
+		&chroma.Background,
+	}
+	for _, primitive := range all {
+		primitive.BackgroundColor = codeBg
+	}
+
+	chroma.Text.Color = firstAnsiPtr(codeFg, textFg)
+	chroma.Background.Color = firstAnsiPtr(codeFg, textFg)
+	chroma.Comment.Color = firstAnsiPtr(mutedFg, codeFg, textFg)
+	chroma.CommentPreproc.Color = firstAnsiPtr(mutedFg, codeFg, textFg)
+	chroma.Keyword.Color = firstAnsiPtr(headingFg, codeFg, textFg)
+	chroma.KeywordReserved.Color = firstAnsiPtr(headingFg, codeFg, textFg)
+	chroma.KeywordNamespace.Color = firstAnsiPtr(headingFg, codeFg, textFg)
+	chroma.KeywordType.Color = firstAnsiPtr(successFg, headingFg, codeFg, textFg)
+	chroma.Operator.Color = firstAnsiPtr(errorFg, headingFg, codeFg, textFg)
+	chroma.Punctuation.Color = firstAnsiPtr(mutedFg, codeFg, textFg)
+	chroma.Name.Color = firstAnsiPtr(codeFg, textFg)
+	chroma.NameBuiltin.Color = firstAnsiPtr(linkFg, codeFg, textFg)
+	chroma.NameTag.Color = firstAnsiPtr(headingFg, codeFg, textFg)
+	chroma.NameAttribute.Color = firstAnsiPtr(linkFg, codeFg, textFg)
+	chroma.NameClass.Color = firstAnsiPtr(successFg, codeFg, textFg)
+	chroma.NameConstant.Color = firstAnsiPtr(warningFg, codeFg, textFg)
+	chroma.NameDecorator.Color = firstAnsiPtr(linkFg, codeFg, textFg)
+	chroma.NameException.Color = firstAnsiPtr(errorFg, codeFg, textFg)
+	chroma.NameFunction.Color = firstAnsiPtr(successFg, codeFg, textFg)
+	chroma.NameOther.Color = firstAnsiPtr(codeFg, textFg)
+	chroma.Literal.Color = firstAnsiPtr(warningFg, codeFg, textFg)
+	chroma.LiteralNumber.Color = firstAnsiPtr(warningFg, codeFg, textFg)
+	chroma.LiteralDate.Color = firstAnsiPtr(warningFg, codeFg, textFg)
+	chroma.LiteralString.Color = firstAnsiPtr(warningFg, codeFg, textFg)
+	chroma.LiteralStringEscape.Color = firstAnsiPtr(headingFg, warningFg, codeFg, textFg)
+	chroma.Error.Color = firstAnsiPtr(errorFg, codeFg, textFg)
+	chroma.GenericDeleted.Color = firstAnsiPtr(diffRemoveFg, errorFg, codeFg, textFg)
+	chroma.GenericInserted.Color = firstAnsiPtr(diffAddFg, successFg, codeFg, textFg)
+	chroma.GenericSubheading.Color = firstAnsiPtr(headingFg, codeFg, textFg)
+}
+
+func firstAnsiPtr(values ...*string) *string {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 // colorToAnsiPtr converts an image/color.Color to a hex "#rrggbb" pointer
@@ -481,11 +590,10 @@ func trimLeadingIndent(line string, width int) string {
 // Streaming-safe glamour rendering
 // ---------------------------------------------------------------------------
 
-// glamourStreamingNarrativeRows renders an active (still-streaming) narrative
-// block through glamour. It normalises unclosed markdown constructs (code
-// fences, HTML-style tags) so that glamour produces stable output.
-// Returns nil when glamour cannot produce usable output, letting the caller
-// fall back to the inline renderer.
+// glamourStreamingNarrativeRows renders an active narrative block with a
+// stable-prefix/full-Glamour plus unstable-tail/lightweight split. The tail
+// deliberately avoids Chroma because incomplete code and markdown can be
+// reclassified while tokens are still arriving.
 func glamourStreamingNarrativeRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
 	if strings.TrimSpace(raw) == "" {
 		return nil
@@ -495,18 +603,11 @@ func glamourStreamingNarrativeRows(blockID, raw, rolePrefix string, roleStyle tu
 	prefixWidth := maxInt(graphemeWidth(rolePrefix), 0)
 	glamourWidth := maxInt(1, width-prefixWidth)
 	if strings.TrimSpace(stableRaw) == "" {
-		if utf8.RuneCountInString(strings.TrimSpace(raw)) >= streamingLightTailMinRunes {
-			if rows := renderStreamingNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, glamourWidth, theme); len(rows) > 0 {
-				return rows
-			}
-		}
-		normalized := closeUnclosedCodeFences(raw)
-		return glamourNarrativeRows(blockID, normalized, rolePrefix, roleStyle, width, theme)
+		return renderStreamingNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, glamourWidth, theme)
 	}
 	prefixRows := cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix, roleStyle, width, theme)
 	if len(prefixRows) == 0 {
-		normalized := closeUnclosedCodeFences(raw)
-		return glamourNarrativeRows(blockID, normalized, rolePrefix, roleStyle, width, theme)
+		return renderStreamingNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, glamourWidth, theme)
 	}
 	tailRows := renderStreamingNarrativeTailRows(blockID, tailRaw, "", roleStyle, glamourWidth, theme)
 	if len(tailRows) == 0 {
@@ -527,16 +628,16 @@ func glamourStreamingNarrativeRows(blockID, raw, rolePrefix string, roleStyle tu
 }
 
 const streamingStableTailMinRunes = 96
-const streamingLightTailMinRunes = 160
+const streamingNarrativeRendererVersion = "stream-md-v2"
 
 func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
 	raw = strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
-	_, plainRows := buildNarrativeRows(raw)
-	if len(plainRows) == 0 {
-		if strings.TrimSpace(raw) == "" {
-			return nil
+	streamLines := buildStreamingNarrativeTailLines(raw)
+	if len(streamLines) == 0 {
+		if strings.TrimSpace(raw) != "" {
+			return []RenderedRow{{BlockID: blockID, PreWrapped: true}}
 		}
-		plainRows = []string{strings.TrimRight(raw, "\n")}
+		return nil
 	}
 	if width <= 0 {
 		width = 1
@@ -546,35 +647,103 @@ func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle
 	if rolePrefix != "" {
 		styledRolePrefix = tuikit.ColorizeLogLine(rolePrefix, roleStyle, theme)
 	}
-	rows := make([]RenderedRow, 0, len(plainRows)+4)
-	for idx, plainRow := range plainRows {
-		fullPlain := plainRow
-		prefixPlain := ""
-		prefixStyled := ""
-		if idx == 0 && rolePrefix != "" {
-			prefixPlain = rolePrefix
-			prefixStyled = styledRolePrefix
-			fullPlain = rolePrefix + plainRow
-		}
-		segments := graphemeWordWrap(fullPlain, width)
+	rows := make([]RenderedRow, 0, len(streamLines)+4)
+	for idx, line := range streamLines {
+		segments := graphemeWordWrap(line.Text, width)
 		if len(segments) == 0 {
-			segments = []string{fullPlain}
+			segments = []string{line.Text}
 		}
+		lineStyle := streamingNarrativeTailLineStyle(line.Kind, baseStyle, roleStyle, theme)
 		for segIdx, segment := range normalizeWrappedPlainSegments(segments) {
-			styled := renderInlineMarkdown(segment, baseStyle, theme)
-			if prefixPlain != "" && segIdx == 0 && strings.HasPrefix(segment, prefixPlain) {
-				body := strings.TrimPrefix(segment, prefixPlain)
-				styled = prefixStyled + renderInlineMarkdown(body, baseStyle, theme)
+			styled := renderStreamingNarrativeTailSegment(segment, lineStyle, line.Kind, theme)
+			plain := segment
+			if idx == 0 && rolePrefix != "" && segIdx == 0 {
+				plain = rolePrefix + segment
+				styled = styledRolePrefix + styled
 			}
 			rows = append(rows, RenderedRow{
 				Styled:     styled,
-				Plain:      segment,
+				Plain:      plain,
 				BlockID:    blockID,
 				PreWrapped: true,
 			})
 		}
 	}
 	return rows
+}
+
+func buildStreamingNarrativeTailLines(raw string) []NarrativeLine {
+	nls, _ := buildNarrativeRows(raw)
+	if len(nls) == 0 {
+		return nil
+	}
+	lines := make([]NarrativeLine, 0, len(nls))
+	for _, nl := range nls {
+		line, ok := streamingNarrativeTailPlainLine(nl)
+		if !ok {
+			continue
+		}
+		lines = append(lines, NarrativeLine{Kind: nl.Kind, Text: line})
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[0].Text) == "" {
+		lines = lines[1:]
+	}
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1].Text) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
+}
+
+func streamingNarrativeTailPlainLine(line NarrativeLine) (string, bool) {
+	switch line.Kind {
+	case NarrativeCodeFenceDelim:
+		return "", false
+	case NarrativeCodeFence:
+		return strings.TrimRight(line.Text, " \t"), true
+	case NarrativeHeading:
+		return stripHeadingMarker(line.Text), true
+	case NarrativeTableRow:
+		return formatTablePlainRow(line.Text), true
+	case NarrativeTableRule:
+		return formatTableRuleRow(line.Text), true
+	case NarrativeListItem, NarrativeBlockquote:
+		return simplifyInlineMarkers(strings.TrimRight(line.Text, " \t")), true
+	default:
+		return simplifyInlineMarkers(strings.TrimRight(line.Text, " \t")), true
+	}
+}
+
+func streamingNarrativeTailLineStyle(kind NarrativeBlockKind, base lipgloss.Style, roleStyle tuikit.LineStyle, theme tuikit.Theme) lipgloss.Style {
+	switch kind {
+	case NarrativeCodeFence:
+		style := theme.MarkdownCodeBlockStyle()
+		if roleStyle == tuikit.LineStyleReasoning {
+			style = style.Foreground(theme.ReasoningFg)
+		}
+		return style
+	case NarrativeHeading:
+		if roleStyle == tuikit.LineStyleReasoning {
+			return theme.ReasoningStyle().Bold(true)
+		}
+		return theme.MarkdownHeadingStyle().Bold(true)
+	case NarrativeBlockquote:
+		if roleStyle == tuikit.LineStyleReasoning {
+			return theme.ReasoningStyle()
+		}
+		return theme.MarkdownQuoteStyle()
+	default:
+		return base
+	}
+}
+
+func renderStreamingNarrativeTailSegment(segment string, style lipgloss.Style, kind NarrativeBlockKind, theme tuikit.Theme) string {
+	if segment == "" {
+		return ""
+	}
+	if kind == NarrativeCodeFence || kind == NarrativeTableRule {
+		return style.Render(segment)
+	}
+	return renderInlineMarkdown(segment, style, theme)
 }
 
 func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
@@ -588,7 +757,7 @@ func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, r
 	}
 	if entry, ok := glamourStreamingCache.entries[blockID]; ok {
 		themeKey := themeRenderCacheKey(theme)
-		if entry.width == width && entry.themeKey == themeKey && entry.role == roleStyle && entry.stableRaw == stableRaw && entry.rolePrefix == rolePrefix {
+		if entry.width == width && entry.themeKey == themeKey && entry.role == roleStyle && entry.rendererVersion == streamingNarrativeRendererVersion && entry.stableRaw == stableRaw && entry.rolePrefix == rolePrefix {
 			return cloneRenderedRows(entry.renderedRows)
 		}
 	}
@@ -597,12 +766,13 @@ func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, r
 		return nil
 	}
 	glamourStreamingCache.entries[blockID] = streamingNarrativeCacheEntry{
-		width:        width,
-		themeKey:     themeRenderCacheKey(theme),
-		role:         roleStyle,
-		stableRaw:    stableRaw,
-		rolePrefix:   rolePrefix,
-		renderedRows: cloneRenderedRows(rows),
+		width:           width,
+		themeKey:        themeRenderCacheKey(theme),
+		role:            roleStyle,
+		rendererVersion: streamingNarrativeRendererVersion,
+		stableRaw:       stableRaw,
+		rolePrefix:      rolePrefix,
+		renderedRows:    cloneRenderedRows(rows),
 	}
 	return rows
 }
