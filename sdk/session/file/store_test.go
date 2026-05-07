@@ -72,6 +72,47 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestStoreLargeEventListRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-large" },
+	})
+	ctx := context.Background()
+	session, err := store.GetOrCreate(ctx, sdksession.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	for i := 0; i < 300; i++ {
+		msg := sdkmodel.NewTextMessage(sdkmodel.RoleUser, "large event "+strings.Repeat("x", 128))
+		if _, err := store.AppendEvent(ctx, session.SessionRef, &sdksession.Event{
+			Type:       sdksession.EventTypeUser,
+			Visibility: sdksession.VisibilityCanonical,
+			Message:    &msg,
+			Text:       msg.TextContent(),
+		}); err != nil {
+			t.Fatalf("AppendEvent(%d) error = %v", i, err)
+		}
+	}
+
+	reloaded := NewStore(Config{RootDir: root})
+	events, err := reloaded.Events(ctx, sdksession.EventsRequest{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("Events(reloaded) error = %v", err)
+	}
+	if len(events) != 300 {
+		t.Fatalf("len(events) = %d, want 300", len(events))
+	}
+	if got := sdksession.EventText(events[len(events)-1]); !strings.Contains(got, "large event") {
+		t.Fatalf("last event text = %q, want large event payload", got)
+	}
+}
+
 func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 	t.Parallel()
 

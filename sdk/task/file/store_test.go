@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -77,6 +78,37 @@ func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
 	if got, want := len(blobs), 2; got != want {
 		t.Fatalf("blob line count = %d, want %d", got, want)
 	}
+
+	entry.UpdatedAt = time.Unix(30, 0)
+	entry.Result = map[string]any{
+		"stdout": "hello again\n",
+		"stderr": "warn again\n",
+		"state":  "completed",
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert(repeated final) error = %v", err)
+	}
+	listed, err = store.ListSession(context.Background(), sessionRef("sess-1"))
+	if err != nil {
+		t.Fatalf("ListSession(after repeated upsert) error = %v", err)
+	}
+	if got, want := len(listed), 1; got != want {
+		t.Fatalf("len(listed after repeated upsert) = %d, want %d", got, want)
+	}
+	got, err = store.Get(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("Get(after repeated upsert) error = %v", err)
+	}
+	if gotStdout, _ := got.Result["stdout"].(string); gotStdout != "hello again\n" {
+		t.Fatalf("hydrated repeated stdout = %q, want %q", gotStdout, "hello again\n")
+	}
+	if gotStderr, _ := got.Result["stderr"].(string); gotStderr != "warn again\n" {
+		t.Fatalf("hydrated repeated stderr = %q, want %q", gotStderr, "warn again\n")
+	}
+	blobs = readLines(t, filepath.Join(root, "sess-1.blobs.jsonl"))
+	if got, want := len(blobs), 2; got != want {
+		t.Fatalf("blob line count after repeated upsert = %d, want %d", got, want)
+	}
 }
 
 func TestStoreUpsertRunningTaskKeepsIndexOnly(t *testing.T) {
@@ -106,6 +138,46 @@ func TestStoreUpsertRunningTaskKeepsIndexOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "sess-2.blobs.jsonl")); !os.IsNotExist(err) {
 		t.Fatalf("blob file should not exist for running task, stat err = %v", err)
+	}
+}
+
+func TestStoreConcurrentUpsertKeepsAllTasks(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, Clock: fixedClock})
+	var wg sync.WaitGroup
+	for i := 0; i < 24; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			entry := &sdktask.Entry{
+				TaskID:    "task-concurrent-" + time.Unix(int64(i), 0).Format("150405"),
+				Kind:      sdktask.KindBash,
+				Session:   sessionRef("sess-concurrent"),
+				Title:     "BASH concurrent",
+				State:     sdktask.StateCompleted,
+				Running:   false,
+				UpdatedAt: time.Unix(int64(i), 0),
+				Result: map[string]any{
+					"stdout": "out\n",
+					"state":  "completed",
+				},
+			}
+			if err := store.Upsert(context.Background(), entry); err != nil {
+				t.Errorf("Upsert(%d) error = %v", i, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	listed, err := store.ListSession(context.Background(), sessionRef("sess-concurrent"))
+	if err != nil {
+		t.Fatalf("ListSession() error = %v", err)
+	}
+	if len(listed) != 24 {
+		t.Fatalf("len(listed) = %d, want 24", len(listed))
 	}
 }
 

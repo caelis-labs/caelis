@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	MetaKeyCompact = "compact"
+	MetaKeyCompact         = "compact"
+	CompactContractVersion = 1
 )
 
 type UsageSource string
@@ -82,14 +83,18 @@ type ForceEngine interface {
 }
 
 type CompactEventData struct {
-	Revision            int                 `json:"revision,omitempty"`
-	SummarizedThroughID string              `json:"summarized_through_id,omitempty"`
-	Generator           string              `json:"generator,omitempty"`
-	Trigger             string              `json:"trigger,omitempty"`
-	RetainedUserInputs  []string            `json:"retained_user_inputs,omitempty"`
-	ReplacementHistory  []*sdksession.Event `json:"replacement_history,omitempty"`
-	TotalTokens         int                 `json:"total_tokens,omitempty"`
-	ContextWindowTokens int                 `json:"context_window_tokens,omitempty"`
+	Revision                int                 `json:"revision,omitempty"`
+	ContractVersion         int                 `json:"contract_version,omitempty"`
+	SummarizedThroughID     string              `json:"summarized_through_id,omitempty"`
+	Generator               string              `json:"generator,omitempty"`
+	Trigger                 string              `json:"trigger,omitempty"`
+	SourceEventCount        int                 `json:"source_event_count,omitempty"`
+	RetainedUserCount       int                 `json:"retained_user_count,omitempty"`
+	ReplacementHistoryCount int                 `json:"replacement_history_count,omitempty"`
+	RetainedUserInputs      []string            `json:"retained_user_inputs,omitempty"`
+	ReplacementHistory      []*sdksession.Event `json:"replacement_history,omitempty"`
+	TotalTokens             int                 `json:"total_tokens,omitempty"`
+	ContextWindowTokens     int                 `json:"context_window_tokens,omitempty"`
 }
 
 type ContextWindowProvider interface {
@@ -146,6 +151,18 @@ func normalizeCompactEventData(in CompactEventData) CompactEventData {
 	in.SummarizedThroughID = strings.TrimSpace(in.SummarizedThroughID)
 	in.Generator = strings.TrimSpace(in.Generator)
 	in.Trigger = strings.TrimSpace(in.Trigger)
+	if in.ContractVersion < 0 {
+		in.ContractVersion = 0
+	}
+	if in.SourceEventCount < 0 {
+		in.SourceEventCount = 0
+	}
+	if in.RetainedUserCount < 0 {
+		in.RetainedUserCount = 0
+	}
+	if in.ReplacementHistoryCount < 0 {
+		in.ReplacementHistoryCount = 0
+	}
 	out := make([]string, 0, len(in.RetainedUserInputs))
 	seen := map[string]struct{}{}
 	for _, item := range in.RetainedUserInputs {
@@ -161,6 +178,12 @@ func normalizeCompactEventData(in CompactEventData) CompactEventData {
 	}
 	in.RetainedUserInputs = out
 	in.ReplacementHistory = normalizeReplacementHistory(in.ReplacementHistory)
+	if in.RetainedUserCount == 0 && len(in.RetainedUserInputs) > 0 {
+		in.RetainedUserCount = len(in.RetainedUserInputs)
+	}
+	if in.ReplacementHistoryCount == 0 && len(in.ReplacementHistory) > 0 {
+		in.ReplacementHistoryCount = len(in.ReplacementHistory)
+	}
 	return in
 }
 

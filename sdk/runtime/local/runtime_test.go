@@ -1627,6 +1627,12 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 	if data.Revision <= 0 {
 		t.Fatalf("compact revision = %d, want > 0", data.Revision)
 	}
+	if data.ContractVersion != sdkcompact.CompactContractVersion {
+		t.Fatalf("compact contract version = %d, want %d", data.ContractVersion, sdkcompact.CompactContractVersion)
+	}
+	if data.SourceEventCount == 0 || data.RetainedUserCount != len(data.RetainedUserInputs) || data.ReplacementHistoryCount != len(data.ReplacementHistory) {
+		t.Fatalf("compact contract counts = source:%d retained:%d/%d replacement:%d/%d", data.SourceEventCount, data.RetainedUserCount, len(data.RetainedUserInputs), data.ReplacementHistoryCount, len(data.ReplacementHistory))
+	}
 }
 
 func TestRuntimeManualCompactUsesStructuredReplacementHistory(t *testing.T) {
@@ -1702,6 +1708,9 @@ Next action: route manual compact through the model-backed compactor
 	}
 	if data.Trigger != "manual" {
 		t.Fatalf("compact trigger = %q, want manual", data.Trigger)
+	}
+	if data.ContractVersion != sdkcompact.CompactContractVersion || data.SourceEventCount == 0 || data.ReplacementHistoryCount == 0 {
+		t.Fatalf("compact metadata = version:%d source:%d replacement:%d, want contract metadata", data.ContractVersion, data.SourceEventCount, data.ReplacementHistoryCount)
 	}
 	if len(data.ReplacementHistory) == 0 {
 		t.Fatal("manual compact replacement history is empty")

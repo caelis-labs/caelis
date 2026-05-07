@@ -169,12 +169,16 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req sdkcompact.Reques
 	}
 	retainedUsers, replacementHistory, _ := c.fitReplacementHistoryToBudget(req, compactText, retainedUsers)
 	data := sdkcompact.CompactEventData{
-		Revision:            baseData.Revision + 1,
-		SummarizedThroughID: lastEventID(delta),
-		Generator:           "model_markdown",
-		Trigger:             strings.TrimSpace(trigger),
-		RetainedUserInputs:  retainedUsers,
-		ReplacementHistory:  replacementHistory,
+		Revision:                baseData.Revision + 1,
+		ContractVersion:         sdkcompact.CompactContractVersion,
+		SummarizedThroughID:     lastEventID(delta),
+		Generator:               "model_markdown",
+		Trigger:                 strings.TrimSpace(trigger),
+		SourceEventCount:        len(summaryEvents),
+		RetainedUserCount:       len(retainedUsers),
+		ReplacementHistoryCount: len(replacementHistory),
+		RetainedUserInputs:      retainedUsers,
+		ReplacementHistory:      replacementHistory,
 	}
 	compactEvent := buildCompactEvent(req.Session, compactText, data)
 	promptEvents := sdkcompact.PromptEventsFromLatestCompact([]*sdksession.Event{compactEvent})
