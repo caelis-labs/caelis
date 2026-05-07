@@ -9,6 +9,36 @@ import (
 
 const defaultConnectTimeoutSeconds = 60
 
+var connectWizardEndpointProviders = map[string]struct{}{
+	"volcengine": {},
+	"xiaomi":     {},
+}
+
+var connectWizardBaseURLProviders = map[string]struct{}{
+	"openai-compatible":    {},
+	"anthropic-compatible": {},
+}
+
+var connectWizardTokenEnvByProvider = map[string]string{
+	"minimax":              "MINIMAX_API_KEY",
+	"openai":               "OPENAI_API_KEY",
+	"openai-compatible":    "OPENAI_COMPATIBLE_API_KEY",
+	"openrouter":           "OPENROUTER_API_KEY",
+	"gemini":               "GEMINI_API_KEY",
+	"anthropic":            "ANTHROPIC_API_KEY",
+	"anthropic-compatible": "ANTHROPIC_COMPATIBLE_API_KEY",
+	"deepseek":             "DEEPSEEK_API_KEY",
+	"xiaomi":               "XIAOMI_API_KEY",
+	"volcengine":           "VOLCENGINE_API_KEY",
+}
+
+var connectWizardTokenEnvByEndpoint = map[string]string{
+	"xiaomi|https://api.xiaomimimo.com/v1":                       "XIAOMI_API_KEY",
+	"xiaomi|https://token-plan-cn.xiaomimimo.com/v1":             "MIMO_TOKEN_PLAN_API_KEY",
+	"volcengine|https://ark.cn-beijing.volces.com/api/v3":        "VOLCENGINE_API_KEY",
+	"volcengine|https://ark.cn-beijing.volces.com/api/coding/v3": "VOLCENGINE_API_KEY",
+}
+
 type slashCommandSpec struct {
 	Name        string
 	Usage       string
@@ -136,13 +166,13 @@ func connectWizard() WizardDef {
 			},
 			{
 				Key:          "endpoint",
-				HintLabel:    "/connect volcengine endpoint",
-				FreeformHint: "/connect volcengine endpoint: choose standard or coding-plan, or paste a custom Ark base URL",
+				HintLabel:    "/connect endpoint",
+				FreeformHint: "/connect endpoint: choose a provider endpoint, or paste a custom base URL",
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-baseurl:" + state["provider"]
 				},
 				ShouldSkip: func(state map[string]string) bool {
-					return !strings.EqualFold(strings.TrimSpace(state["provider"]), "volcengine")
+					return !connectWizardProviderHasEndpointStep(state["provider"])
 				},
 			},
 			{
@@ -153,24 +183,21 @@ func connectWizard() WizardDef {
 					return "connect-baseurl:" + state["provider"]
 				},
 				ShouldSkip: func(state map[string]string) bool {
-					switch strings.ToLower(strings.TrimSpace(state["provider"])) {
-					case "openai-compatible", "anthropic-compatible":
-						return false
-					default:
-						return true
-					}
+					return !connectWizardProviderHasBaseURLStep(state["provider"])
 				},
 			},
 			{
-				Key:          "apikey",
-				HintLabel:    "/connect api_key",
-				HideInput:    true,
-				FreeformHint: "/connect api_key: paste a key, or type env:OPENAI_API_KEY to use an environment variable",
+				Key:       "apikey",
+				HintLabel: "/connect api_key",
+				HideInput: true,
+				FreeformHintFunc: func(state map[string]string) string {
+					return "/connect api_key: paste a key, or type env:" + connectWizardTokenEnvHint(state) + " to use an environment variable"
+				},
 				CompletionCommand: func(state map[string]string) string {
 					return "connect-apikey:" + state["provider"]
 				},
 				ShouldSkip: func(state map[string]string) bool {
-					return state["_noauth"] == "true"
+					return state["_noauth"] == "true" || state["_reuseauth"] == "true"
 				},
 			},
 			{
@@ -220,12 +247,26 @@ func connectWizard() WizardDef {
 		OnStepConfirm: func(stepKey string, value string, candidate *SlashArgCandidate, state map[string]string) {
 			if stepKey == "provider" {
 				state["provider"] = strings.ToLower(strings.TrimSpace(value))
+				delete(state, "_reuseauth")
+				delete(state, "_noauth")
 			}
 			if stepKey == "provider" && candidate != nil && candidate.NoAuth {
 				state["_noauth"] = "true"
 			}
 			if stepKey == "endpoint" {
 				state["baseurl"] = strings.TrimSpace(value)
+				if candidate != nil && candidate.NoAuth {
+					state["_reuseauth"] = "true"
+				} else {
+					delete(state, "_reuseauth")
+				}
+			}
+			if stepKey == "baseurl" {
+				if candidate != nil && candidate.NoAuth {
+					state["_reuseauth"] = "true"
+				} else {
+					delete(state, "_reuseauth")
+				}
 			}
 			if stepKey == "model" {
 				if candidate != nil && strings.TrimSpace(candidate.Value) != "" && !strings.EqualFold(strings.TrimSpace(candidate.Value), "__custom_model__") {
@@ -258,6 +299,56 @@ func connectWizard() WizardDef {
 			return joinNonEmpty(parts, " ")
 		},
 	}
+}
+
+func connectWizardTokenEnvHint(state map[string]string) string {
+	provider := strings.ToLower(strings.TrimSpace(state["provider"]))
+	baseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(state["baseurl"]), "/"))
+	if env := connectWizardTokenEnvByEndpoint[provider+"|"+baseURL]; env != "" {
+		return env
+	}
+	if env := connectWizardTokenEnvForKnownEndpoint(provider, baseURL); env != "" {
+		return env
+	}
+	if env := connectWizardTokenEnvByProvider[provider]; env != "" {
+		return env
+	}
+	return "YOUR_API_KEY"
+}
+
+func connectWizardTokenEnvForKnownEndpoint(provider string, baseURL string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	host := ""
+	if parsed, err := url.Parse(strings.TrimSpace(baseURL)); err == nil {
+		host = strings.ToLower(strings.TrimSpace(parsed.Host))
+	}
+	if host == "" {
+		host = strings.ToLower(strings.TrimSpace(strings.Split(strings.TrimPrefix(baseURL, "//"), "/")[0]))
+	}
+	switch provider {
+	case "xiaomi":
+		switch host {
+		case "api.xiaomimimo.com":
+			return "XIAOMI_API_KEY"
+		case "token-plan-cn.xiaomimimo.com":
+			return "MIMO_TOKEN_PLAN_API_KEY"
+		}
+	case "volcengine":
+		if host == "ark.cn-beijing.volces.com" {
+			return "VOLCENGINE_API_KEY"
+		}
+	}
+	return ""
+}
+
+func connectWizardProviderHasEndpointStep(provider string) bool {
+	_, ok := connectWizardEndpointProviders[strings.ToLower(strings.TrimSpace(provider))]
+	return ok
+}
+
+func connectWizardProviderHasBaseURLStep(provider string) bool {
+	_, ok := connectWizardBaseURLProviders[strings.ToLower(strings.TrimSpace(provider))]
+	return ok
 }
 
 func buildConnectWizardPayload(state map[string]string) string {

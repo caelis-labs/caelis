@@ -14,7 +14,8 @@ import (
 
 const (
 	// StateCurrentModelAlias is the durable session-state key for a per-session
-	// model alias override selected by the TUI.
+	// model reference selected by the TUI. Newer clients store stable model IDs
+	// here; older session state may still contain visible model aliases.
 	StateCurrentModelAlias = "gateway.current_model_alias"
 	// StateCurrentSandboxMode is the legacy durable session-state key used by
 	// older TUI builds before session mode and sandbox backend were split.
@@ -253,8 +254,8 @@ func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]a
 	return metadata, nil
 }
 
-// CurrentModelAlias returns the selected per-session model alias override from
-// one session state snapshot.
+// CurrentModelAlias returns the selected per-session model reference from one
+// session state snapshot. The value may be a stable model ID or a legacy alias.
 func CurrentModelAlias(state map[string]any) string {
 	if state == nil {
 		return ""

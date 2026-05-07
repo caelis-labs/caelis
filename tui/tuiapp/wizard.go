@@ -34,6 +34,10 @@ type WizardStepDef struct {
 	// hint is used if candidates exist, or nothing otherwise.
 	FreeformHint string
 
+	// FreeformHintFunc is the state-aware variant of FreeformHint. When set and
+	// non-empty, it takes precedence over FreeformHint.
+	FreeformHintFunc func(state map[string]string) string
+
 	// HideInput masks the typed text in the input bar (e.g. for API keys).
 	HideInput bool
 
@@ -270,6 +274,11 @@ func (m *Model) wizardHintText() string {
 		return ""
 	}
 	if len(m.slashArgCandidates) == 0 {
+		if step.FreeformHintFunc != nil {
+			if hint := strings.TrimSpace(step.FreeformHintFunc(w.state)); hint != "" {
+				return hint
+			}
+		}
 		if step.FreeformHint != "" {
 			return step.FreeformHint
 		}

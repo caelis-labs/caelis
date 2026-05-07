@@ -47,8 +47,10 @@ type AgentProviderConfig struct {
 }
 
 type persistedModelConfig struct {
-	DefaultAlias string        `json:"default_alias,omitempty"`
-	Configs      []ModelConfig `json:"configs,omitempty"`
+	DefaultAlias string               `json:"default_alias,omitempty"`
+	DefaultID    string               `json:"default_model_id,omitempty"`
+	Profiles     []ModelProfileConfig `json:"profiles,omitempty"`
+	Configs      []ModelConfig        `json:"configs,omitempty"`
 }
 
 type appConfigStore struct {
@@ -90,6 +92,7 @@ func (s *appConfigStore) loadUnlocked() (AppConfig, error) {
 		if err := json.Unmarshal(data, &doc); err != nil {
 			return AppConfig{}, fmt.Errorf("gatewayapp: decode app config: %w", err)
 		}
+		doc.Models.Profiles = dedupeModelProfiles(doc.Models.Profiles)
 		doc.Models.Configs = dedupeModelConfigs(doc.Models.Configs)
 		doc.Agents = dedupeAgentConfigs(doc.Agents)
 		doc.Sandbox = normalizeSandboxConfig(doc.Sandbox)
@@ -107,7 +110,9 @@ func (s *appConfigStore) Save(doc AppConfig) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	doc.Models = normalizePersistedModelsForSave(doc.Models)
 	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
+	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
 	doc.Agents = dedupeAgentConfigs(doc.Agents)
 	doc.Sandbox = normalizeSandboxConfig(doc.Sandbox)
 	dir := filepath.Dir(s.path)
@@ -183,10 +188,10 @@ func dedupeModelConfigs(configs []ModelConfig) []ModelConfig {
 		if hadPersistedToken {
 			cfg.PersistToken = true
 		}
-		if cfg.Alias == "" {
+		if cfg.ID == "" {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(cfg.Alias))
+		key := strings.ToLower(strings.TrimSpace(cfg.ID))
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -194,6 +199,15 @@ func dedupeModelConfigs(configs []ModelConfig) []ModelConfig {
 		out = append(out, cfg)
 	}
 	return out
+}
+
+func normalizePersistedModelsForSave(models persistedModelConfig) persistedModelConfig {
+	for _, cfg := range models.Configs {
+		if modelConfigCarriesProfileFields(cfg) {
+			models.Profiles = append(models.Profiles, modelProfileFromModelConfig(cfg))
+		}
+	}
+	return models
 }
 
 func dedupeModelConfigsForSave(configs []ModelConfig) []ModelConfig {
@@ -204,15 +218,61 @@ func dedupeModelConfigsForSave(configs []ModelConfig) []ModelConfig {
 	seen := make(map[string]struct{}, len(configs))
 	for _, cfg := range configs {
 		cfg = sanitizePersistedModelConfig(cfg)
-		if cfg.Alias == "" {
+		if cfg.ID == "" {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(cfg.Alias))
+		key := strings.ToLower(strings.TrimSpace(cfg.ID))
 		if _, ok := seen[key]; ok {
 			continue
 		}
 		seen[key] = struct{}{}
 		out = append(out, cfg)
+	}
+	return out
+}
+
+func dedupeModelProfiles(profiles []ModelProfileConfig) []ModelProfileConfig {
+	if len(profiles) == 0 {
+		return nil
+	}
+	out := make([]ModelProfileConfig, 0, len(profiles))
+	seen := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		hadPersistedToken := strings.TrimSpace(profile.Token) != ""
+		profile = normalizeModelProfileConfig(profile)
+		if hadPersistedToken {
+			profile.PersistToken = true
+		}
+		if profile.ID == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(profile.ID))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, profile)
+	}
+	return out
+}
+
+func dedupeModelProfilesForSave(profiles []ModelProfileConfig) []ModelProfileConfig {
+	if len(profiles) == 0 {
+		return nil
+	}
+	out := make([]ModelProfileConfig, 0, len(profiles))
+	seen := make(map[string]struct{}, len(profiles))
+	for _, profile := range profiles {
+		profile = sanitizePersistedModelProfile(profile)
+		if profile.ID == "" {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(profile.ID))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, profile)
 	}
 	return out
 }

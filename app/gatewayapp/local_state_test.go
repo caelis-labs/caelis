@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/acp"
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
 	headlessadapter "github.com/OnslaughtSnail/caelis/headless"
 	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
@@ -46,8 +47,11 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
-	if state.ModelAlias != alias {
-		t.Fatalf("model alias = %q, want %q", state.ModelAlias, alias)
+	if state.ModelID != alias {
+		t.Fatalf("model id = %q, want %q", state.ModelID, alias)
+	}
+	if state.ModelAlias != "ollama/alt-model" {
+		t.Fatalf("model alias = %q, want ollama/alt-model", state.ModelAlias)
 	}
 	if state.SessionMode != "manual" {
 		t.Fatalf("session mode = %q, want manual", state.SessionMode)
@@ -152,6 +156,138 @@ func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	}
 	if got := stack.DefaultModelAlias(); got == alias {
 		t.Fatalf("default alias = %q, want deleted alias removed", got)
+	}
+}
+
+func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workdir := t.TempDir()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:        "caelis",
+		UserID:         "delete-profile-test",
+		StoreDir:       root,
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	session, err := stack.StartSession(ctx, "delete-profile-session", "surface")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	firstID, err := stack.Connect(ModelConfig{
+		Provider:     "deepseek",
+		API:          sdkproviders.APIDeepSeek,
+		Model:        "deepseek-v4-flash",
+		Token:        "secret",
+		PersistToken: true,
+	})
+	if err != nil {
+		t.Fatalf("Connect(first) error = %v", err)
+	}
+	secondID, err := stack.Connect(ModelConfig{
+		Provider: "deepseek",
+		API:      sdkproviders.APIDeepSeek,
+		Model:    "deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("Connect(second) error = %v", err)
+	}
+	if err := stack.DeleteModel(ctx, session.SessionRef, firstID); err != nil {
+		t.Fatalf("DeleteModel(first) error = %v", err)
+	}
+	doc, err := LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig(after first delete) error = %v", err)
+	}
+	if len(doc.Models.Profiles) != 1 {
+		t.Fatalf("profiles after deleting one model = %#v, want shared profile retained", doc.Models.Profiles)
+	}
+	if err := stack.DeleteModel(ctx, session.SessionRef, secondID); err != nil {
+		t.Fatalf("DeleteModel(second) error = %v", err)
+	}
+	doc, err = LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig(after second delete) error = %v", err)
+	}
+	if len(doc.Models.Profiles) != 0 {
+		t.Fatalf("profiles after deleting last model = %#v, want none", doc.Models.Profiles)
+	}
+}
+
+func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newLocalStateTestStack(t)
+
+	for _, cfg := range []ModelConfig{
+		{Provider: "xiaomi", API: sdkproviders.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://api.xiaomimimo.com/v1"},
+		{Provider: "xiaomi", API: sdkproviders.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
+	} {
+		if _, err := stack.Connect(cfg); err != nil {
+			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
+		}
+	}
+	if !stack.lookup.HasAlias("xiaomi/mimo-v2.5-pro") {
+		t.Fatal("HasAlias(duplicate visible alias) = false, want true")
+	}
+	err := stack.UseModel(ctx, session.SessionRef, "xiaomi/mimo-v2.5-pro")
+	if err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
+		t.Fatalf("UseModel(duplicate visible alias) error = %v, want ambiguity", err)
+	}
+}
+
+func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
+	ctx := context.Background()
+	stack, session := newLocalStateTestStack(t)
+	apiID, err := stack.Connect(ModelConfig{
+		Provider: "xiaomi",
+		API:      sdkproviders.APIMimo,
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  "https://api.xiaomimimo.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("Connect(api) error = %v", err)
+	}
+	tokenPlanID, err := stack.Connect(ModelConfig{
+		Provider: "xiaomi",
+		API:      sdkproviders.APIMimo,
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  "https://token-plan-cn.xiaomimimo.com/v1",
+	})
+	if err != nil {
+		t.Fatalf("Connect(token plan) error = %v", err)
+	}
+	surface := stack.ACPSurface(nil, false, nil)
+	models, err := surface.SessionModels(ctx, session)
+	if err != nil {
+		t.Fatalf("SessionModels() error = %v", err)
+	}
+	if models == nil {
+		t.Fatal("SessionModels() = nil, want models")
+	}
+	if models.CurrentModelID != tokenPlanID {
+		t.Fatalf("CurrentModelID = %q, want %q", models.CurrentModelID, tokenPlanID)
+	}
+	seen := map[string]string{}
+	for _, model := range models.AvailableModels {
+		seen[model.ModelID] = model.Name
+	}
+	if seen[apiID] != "xiaomi/mimo-v2.5-pro" || seen[tokenPlanID] != "xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("available models = %#v, want stable ids with visible alias names", models.AvailableModels)
+	}
+	if _, err := surface.SetSessionModel(ctx, acp.SetSessionModelRequest{SessionID: session.SessionID, ModelID: apiID}); err != nil {
+		t.Fatalf("SetSessionModel(stable id) error = %v", err)
+	}
+	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("SessionRuntimeState() error = %v", err)
+	}
+	if state.ModelID != apiID || state.ModelAlias != "xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("runtime state = %#v, want API profile selected by stable id", state)
 	}
 }
 
@@ -260,13 +396,12 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Connect(minimax) error = %v", err)
 	}
-	deepseekAlias, err := stack.Connect(ModelConfig{
+	if _, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
 		API:      sdkproviders.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "deepseek-secret",
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("Connect(deepseek) error = %v", err)
 	}
 	if err := stack.UseModel(ctx, session.SessionRef, minimaxAlias); err != nil {
@@ -296,21 +431,24 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	if len(aliases) < 2 {
 		t.Fatalf("reloaded aliases = %#v, want both minimax and deepseek aliases", aliases)
 	}
-	if !containsStringFold(aliases, minimaxAlias) {
-		t.Fatalf("reloaded aliases = %#v, missing %q", aliases, minimaxAlias)
+	if !containsStringFold(aliases, "minimax/minimax-m2.7-highspeed") {
+		t.Fatalf("reloaded aliases = %#v, missing minimax/minimax-m2.7-highspeed", aliases)
 	}
-	if !containsStringFold(aliases, deepseekAlias) {
-		t.Fatalf("reloaded aliases = %#v, missing %q", aliases, deepseekAlias)
+	if !containsStringFold(aliases, "deepseek/deepseek-v4-pro") {
+		t.Fatalf("reloaded aliases = %#v, missing deepseek/deepseek-v4-pro", aliases)
 	}
-	if got := reloaded.DefaultModelAlias(); got != minimaxAlias {
-		t.Fatalf("DefaultModelAlias(reloaded) = %q, want %q", got, minimaxAlias)
+	if got := reloaded.DefaultModelAlias(); got != "minimax/minimax-m2.7-highspeed" {
+		t.Fatalf("DefaultModelAlias(reloaded) = %q, want minimax/minimax-m2.7-highspeed", got)
 	}
 	doc, err := LoadAppConfig(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	if got := doc.Models.DefaultAlias; got != minimaxAlias {
-		t.Fatalf("config default alias = %q, want %q", got, minimaxAlias)
+	if got := doc.Models.DefaultAlias; got != "minimax/minimax-m2.7-highspeed" {
+		t.Fatalf("config default alias = %q, want minimax/minimax-m2.7-highspeed", got)
+	}
+	if got := doc.Models.DefaultID; got != minimaxAlias {
+		t.Fatalf("config default model id = %q, want %q", got, minimaxAlias)
 	}
 	if len(doc.Models.Configs) < 2 {
 		t.Fatalf("config models = %#v, want both minimax and deepseek configs", doc.Models.Configs)

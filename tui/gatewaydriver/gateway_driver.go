@@ -673,8 +673,17 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		cfg.TokenEnv = env
 		cfg.APIKey = ""
 	}
+	if cfg.BaseURL == "" {
+		cfg.BaseURL = tpl.defaultBaseURL
+	}
+	endpoint, hasEndpoint := connectEndpointForBaseURL(tpl, cfg.BaseURL)
+	if strings.TrimSpace(cfg.EndpointID) == "" && hasEndpoint {
+		cfg.EndpointID = endpoint.id
+	}
 	if err := validateConnectConfig(tpl, cfg); err != nil {
-		return StatusSnapshot{}, err
+		if !d.hasReusableConnectAuth(ctx, tpl.provider, cfg.BaseURL) {
+			return StatusSnapshot{}, err
+		}
 	}
 	if defaults, err := connectDefaultsForConfig(ctx, cfg); err == nil {
 		if cfg.ContextWindowTokens <= 0 {
@@ -691,8 +700,9 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		}
 	}
 	baseURL := strings.TrimSpace(cfg.BaseURL)
-	if baseURL == "" {
-		baseURL = tpl.defaultBaseURL
+	api := tpl.api
+	if hasEndpoint && strings.TrimSpace(string(endpoint.api)) != "" {
+		api = endpoint.api
 	}
 	if tpl.provider == "codefree" {
 		if _, err := sdkproviders.CodeFreeEnsureAuth(ctx, sdkproviders.CodeFreeEnsureAuthOptions{
@@ -707,7 +717,10 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	if cfg.TimeoutSeconds <= 0 {
 		timeout = 60 * time.Second
 	}
-	authType := authTypeFromString(strings.TrimSpace(cfg.AuthType))
+	authType := sdkproviders.AuthAPIKey
+	if strings.TrimSpace(cfg.AuthType) != "" {
+		authType = authTypeFromString(strings.TrimSpace(cfg.AuthType))
+	}
 	if tpl.noAuthRequired {
 		authType = sdkproviders.AuthNone
 	}
@@ -716,7 +729,8 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	defaultReasoningEffort := strings.TrimSpace(cfg.ReasoningEffort)
 	alias, err := d.stack.Connect(ModelConfig{
 		Provider:               strings.TrimSpace(cfg.Provider),
-		API:                    tpl.api,
+		EndpointID:             strings.TrimSpace(cfg.EndpointID),
+		API:                    api,
 		Model:                  cfg.Model,
 		BaseURL:                baseURL,
 		Token:                  cfg.APIKey,
@@ -745,6 +759,33 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	}
 	d.mu.Unlock()
 	return d.Status(ctx)
+}
+
+func (d *GatewayDriver) hasReusableConnectAuth(ctx context.Context, provider string, baseURL string) bool {
+	if d == nil || d.stack == nil {
+		return false
+	}
+	normalizedBaseURL := normalizedConnectBaseURL(baseURL)
+	if normalizedBaseURL == "" {
+		return false
+	}
+	ref := sdksession.SessionRef{}
+	if session, ok := d.currentSession(); ok {
+		ref = session.SessionRef
+	}
+	choices, err := d.stack.ListModelChoices(ctx, ref)
+	if err != nil {
+		return false
+	}
+	for _, choice := range choices {
+		if !strings.EqualFold(strings.TrimSpace(choice.Provider), strings.TrimSpace(provider)) {
+			continue
+		}
+		if normalizedConnectBaseURL(choice.BaseURL) == normalizedBaseURL {
+			return true
+		}
+	}
+	return false
 }
 
 func (d *GatewayDriver) UseModel(ctx context.Context, model string, reasoningEffort ...string) (StatusSnapshot, error) {
@@ -1554,23 +1595,24 @@ func (d *GatewayDriver) completeModelAliases(ctx context.Context, query string, 
 	if session, ok := d.currentSession(); ok {
 		ref = session.SessionRef
 	}
-	aliases, err := d.stack.ListModelAliases(ctx, ref)
+	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]SlashArgCandidate, 0, min(limit, len(aliases)))
-	for _, alias := range aliases {
-		display := strings.TrimSpace(alias)
+	out := make([]SlashArgCandidate, 0, min(limit, len(choices)))
+	for _, choice := range choices {
+		value := strings.TrimSpace(firstNonEmpty(choice.ID, choice.Alias))
+		display := strings.TrimSpace(firstNonEmpty(choice.Alias, choice.ID))
 		if display == "" {
 			continue
 		}
-		if query != "" && !hasSlashArgPrefix(query, display) {
+		if query != "" && !hasSlashArgPrefix(query, display) && !hasSlashArgPrefix(query, value) {
 			continue
 		}
 		out = append(out, SlashArgCandidate{
-			Value:   display,
+			Value:   value,
 			Display: display,
-			Detail:  "configured model alias",
+			Detail:  firstNonEmpty(strings.TrimSpace(choice.Detail), "configured model alias"),
 		})
 		if len(out) >= limit {
 			break
@@ -1831,28 +1873,44 @@ func (d *GatewayDriver) resolveStoredModelAlias(ctx context.Context, input strin
 	if session, ok := d.currentSession(); ok {
 		ref = session.SessionRef
 	}
-	aliases, err := d.stack.ListModelAliases(ctx, ref)
+	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {
 		return "", err
 	}
 	var exact string
+	exactAliasMatches := make([]string, 0, 2)
 	prefixMatches := make([]string, 0, 2)
-	for _, alias := range aliases {
-		normalized := strings.ToLower(strings.TrimSpace(alias))
-		if normalized == "" {
+	for _, choice := range choices {
+		id := strings.TrimSpace(firstNonEmpty(choice.ID, choice.Alias))
+		alias := strings.TrimSpace(choice.Alias)
+		normalizedID := strings.ToLower(id)
+		normalizedAlias := strings.ToLower(alias)
+		if normalizedID == "" && normalizedAlias == "" {
 			continue
 		}
-		if normalized == input {
-			exact = strings.TrimSpace(alias)
+		if normalizedID == input {
+			exact = id
 			break
 		}
-		if strings.HasPrefix(normalized, input) {
-			prefixMatches = append(prefixMatches, strings.TrimSpace(alias))
+		if normalizedAlias == input {
+			exactAliasMatches = append(exactAliasMatches, id)
+			continue
+		}
+		if strings.HasPrefix(normalizedID, input) || strings.HasPrefix(normalizedAlias, input) {
+			prefixMatches = append(prefixMatches, id)
 		}
 	}
 	if exact != "" {
 		return exact, nil
 	}
+	switch len(dedupeNonEmptyStrings(exactAliasMatches)) {
+	case 1:
+		return dedupeNonEmptyStrings(exactAliasMatches)[0], nil
+	case 0:
+	default:
+		return "", fmt.Errorf("tui/gatewaydriver: ambiguous model alias %q", input)
+	}
+	prefixMatches = dedupeNonEmptyStrings(prefixMatches)
 	switch len(prefixMatches) {
 	case 1:
 		return prefixMatches[0], nil
@@ -1895,7 +1953,7 @@ func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {
 	if strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.TokenEnv) != "" {
 		return nil
 	}
-	envHint := defaultTokenEnvName(tpl.provider)
+	envHint := defaultTokenEnvNameForConnect(tpl.provider, cfg.BaseURL)
 	if envHint == "" {
 		envHint = "YOUR_API_KEY"
 	}
@@ -1934,12 +1992,39 @@ func defaultTokenEnvName(provider string) string {
 		return "ANTHROPIC_COMPATIBLE_API_KEY"
 	case "deepseek":
 		return "DEEPSEEK_API_KEY"
+	case connectXiaomiTokenPlanCNAlias:
+		return "MIMO_TOKEN_PLAN_API_KEY"
 	case "xiaomi":
 		return "XIAOMI_API_KEY"
 	case "volcengine":
 		return "VOLCENGINE_API_KEY"
 	default:
 		return ""
+	}
+}
+
+func defaultTokenEnvNameForConnect(provider string, baseURL string) string {
+	if isXiaomiTokenPlanProvider(provider) || isXiaomiTokenPlanBaseURL(baseURL) {
+		return "MIMO_TOKEN_PLAN_API_KEY"
+	}
+	return defaultTokenEnvName(provider)
+}
+
+func isXiaomiTokenPlanProvider(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case connectXiaomiTokenPlanCNAlias:
+		return true
+	default:
+		return false
+	}
+}
+
+func isXiaomiTokenPlanBaseURL(baseURL string) bool {
+	switch normalizedConnectBaseURL(baseURL) {
+	case normalizedConnectBaseURL(connectXiaomiTokenPlanCNBaseURL):
+		return true
+	default:
+		return false
 	}
 }
 

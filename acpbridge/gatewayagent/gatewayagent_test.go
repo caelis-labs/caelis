@@ -74,8 +74,8 @@ func TestGatewayAgentExposesZedSessionSurface(t *testing.T) {
 	if !ok {
 		t.Fatalf("configOptions missing model: %#v", resp.ConfigOptions)
 	}
-	if modelOption.Category != "model" || modelOption.CurrentValue != "openai/gpt-4o" {
-		t.Fatalf("model option = %#v, want category model and current alias", modelOption)
+	if modelOption.Category != "model" || modelOption.CurrentValue != "openai@default/openai/gpt-4o" {
+		t.Fatalf("model option = %#v, want category model and current stable id", modelOption)
 	}
 	reasoningOption, ok := options["reasoning_effort"]
 	if !ok {
@@ -123,8 +123,8 @@ func TestGatewayAgentExposesZedSessionSurface(t *testing.T) {
 	if !ok {
 		t.Fatalf("models = %#v, want ACP session model state", envelope["models"])
 	}
-	if got := models["currentModelId"]; got != "openai/gpt-4o" {
-		t.Fatalf("models.currentModelId = %#v, want openai/gpt-4o", got)
+	if got := models["currentModelId"]; got != "openai@default/openai/gpt-4o" {
+		t.Fatalf("models.currentModelId = %#v, want stable model id", got)
 	}
 	available, _ := models["availableModels"].([]any)
 	if len(available) == 0 {

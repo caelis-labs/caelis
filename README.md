@@ -222,12 +222,12 @@ make build
   variables.
 - `make build`: runs `go build ./...`
 
-When running in restricted environments, set writable cache roots:
+The Makefile defaults Go and lint caches to `.tmp/cache` so local quality checks
+do not need writable global Go cache directories. Override the cache roots only
+when you need to share or relocate them:
 
 ```bash
-GOMODCACHE=/tmp/caelis-gomodcache \
-GOCACHE=/tmp/caelis-gocache \
-GOLANGCI_LINT_CACHE=/tmp/caelis-golangci-lint-cache \
+CACHE_ROOT=/tmp/caelis-cache \
 make quality
 ```
 

@@ -55,8 +55,16 @@ func (s ModelService) ListAliases(ctx context.Context, ref sdksession.SessionRef
 	return s.stack.ListModelAliases(ctx, ref)
 }
 
+func (s ModelService) ListChoices(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {
+	return s.stack.ListModelChoices(ctx, ref)
+}
+
 func (s ModelService) DefaultAlias() string {
 	return s.stack.DefaultModelAlias()
+}
+
+func (s ModelService) DefaultID() string {
+	return s.stack.DefaultModelID()
 }
 
 func (s ModelService) Config(alias string) (ModelConfig, bool) {

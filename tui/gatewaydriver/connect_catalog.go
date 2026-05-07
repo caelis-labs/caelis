@@ -16,6 +16,10 @@ import (
 const (
 	connectVolcengineStandardValue = "standard"
 	connectVolcengineCodingValue   = "coding-plan"
+
+	connectXiaomiAPIBaseURL         = "https://api.xiaomimimo.com/v1"
+	connectXiaomiTokenPlanCNBaseURL = "https://token-plan-cn.xiaomimimo.com/v1"
+	connectXiaomiTokenPlanCNAlias   = "xiaomi-token-plan-cn"
 )
 
 type providerTemplate struct {
@@ -23,11 +27,34 @@ type providerTemplate struct {
 	api                 sdkproviders.APIType
 	provider            string
 	description         string
+	defaultEndpointID   string
 	defaultBaseURL      string
 	defaultContextToken int
 	defaultMaxOutputTok int
 	noAuthRequired      bool
 	commonModels        []string
+	endpoints           []connectEndpointTemplate
+}
+
+type connectEndpointTemplate struct {
+	id       string
+	baseURL  string
+	display  string
+	detail   string
+	api      sdkproviders.APIType
+	tokenEnv string
+}
+
+var xiaomiMimoCommonModels = []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}
+
+var connectXiaomiEndpoints = []connectEndpointTemplate{
+	{id: "api-cn", baseURL: connectXiaomiAPIBaseURL, display: "api cn", detail: "Xiaomi MiMo API CN · OpenAI-compatible", api: sdkproviders.APIMimo, tokenEnv: "XIAOMI_API_KEY"},
+	{id: "token-plan-cn", baseURL: connectXiaomiTokenPlanCNBaseURL, display: "token plan cn", detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", api: sdkproviders.APIMimo, tokenEnv: "MIMO_TOKEN_PLAN_API_KEY"},
+}
+
+var connectVolcengineEndpoints = []connectEndpointTemplate{
+	{id: connectVolcengineStandardValue, baseURL: "https://ark.cn-beijing.volces.com/api/v3", display: "standard api", detail: "regular Ark endpoint", api: sdkproviders.APIVolcengine, tokenEnv: "VOLCENGINE_API_KEY"},
+	{id: connectVolcengineCodingValue, baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", display: "coding plan", detail: "Ark coding-plan endpoint", api: sdkproviders.APIVolcengineCoding, tokenEnv: "VOLCENGINE_API_KEY"},
 }
 
 type connectModelChoice struct {
@@ -60,9 +87,9 @@ var providerTemplates = []providerTemplate{
 	{label: "anthropic", api: sdkproviders.APIAnthropic, provider: "anthropic", description: "Anthropic Claude API", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024, commonModels: []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514"}},
 	{label: "anthropic-compatible", api: sdkproviders.APIAnthropicCompatible, provider: "anthropic-compatible", description: "Anthropic-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024},
 	{label: "deepseek", api: sdkproviders.APIDeepSeek, provider: "deepseek", description: "DeepSeek V4 models", defaultBaseURL: "https://api.deepseek.com/v1", defaultContextToken: 1048576, commonModels: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
-	{label: "xiaomi", api: sdkproviders.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultBaseURL: "https://api.xiaomimimo.com/v1", defaultContextToken: 262144, commonModels: []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}},
+	{label: "xiaomi", api: sdkproviders.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultEndpointID: "api-cn", defaultBaseURL: connectXiaomiAPIBaseURL, defaultContextToken: 262144, commonModels: xiaomiMimoCommonModels, endpoints: connectXiaomiEndpoints},
 	{label: "minimax", api: sdkproviders.APIAnthropicCompatible, provider: "minimax", description: "MiniMax models over an Anthropic-compatible API", defaultBaseURL: "https://api.minimaxi.com/anthropic", defaultContextToken: 204800, defaultMaxOutputTok: 8192, commonModels: []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"}},
-	{label: "volcengine", api: sdkproviders.APIVolcengine, provider: "volcengine", description: "Volcengine Ark standard or coding-plan endpoints", defaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", defaultContextToken: 128000},
+	{label: "volcengine", api: sdkproviders.APIVolcengine, provider: "volcengine", description: "Volcengine Ark standard or coding-plan endpoints", defaultEndpointID: connectVolcengineStandardValue, defaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", defaultContextToken: 128000, endpoints: connectVolcengineEndpoints},
 	{label: "ollama", api: sdkproviders.APIOllama, provider: "ollama", description: "Local Ollama runtime", defaultBaseURL: "http://localhost:11434", defaultContextToken: 128000, noAuthRequired: true, commonModels: []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"}},
 }
 
@@ -71,7 +98,7 @@ func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command str
 	case command == "connect":
 		return completeConnectProviders(query, limit), nil
 	case strings.HasPrefix(command, "connect-baseurl:"):
-		return completeConnectBaseURL(strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
+		return completeConnectBaseURL(ctx, driver, strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-timeout:"):
 		return completeConnectTimeout(strings.TrimPrefix(command, "connect-timeout:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-apikey:"):
@@ -116,21 +143,41 @@ func completeConnectProviders(query string, limit int) []SlashArgCandidate {
 	return out
 }
 
-func completeConnectBaseURL(provider string, query string, limit int) []SlashArgCandidate {
+func completeConnectBaseURL(ctx context.Context, driver *GatewayDriver, provider string, query string, limit int) []SlashArgCandidate {
 	tpl, ok := findProviderTemplate(provider)
 	if !ok {
 		return nil
 	}
-	var candidates []SlashArgCandidate
-	if tpl.provider == "volcengine" {
-		candidates = append(candidates,
-			SlashArgCandidate{Value: "https://ark.cn-beijing.volces.com/api/v3", Display: "standard api", Detail: "regular Ark endpoint"},
-			SlashArgCandidate{Value: "https://ark.cn-beijing.volces.com/api/coding/v3", Display: "coding plan", Detail: "Ark coding-plan endpoint"},
-		)
-	} else {
+	candidates := connectEndpointCandidates(tpl)
+	if len(candidates) == 0 {
 		candidates = append(candidates, SlashArgCandidate{Value: tpl.defaultBaseURL, Display: tpl.defaultBaseURL, Detail: "default base URL"})
 	}
+	for i := range candidates {
+		if driver != nil && driver.hasReusableConnectAuth(ctx, tpl.provider, candidates[i].Value) {
+			candidates[i].NoAuth = true
+			candidates[i].Detail = strings.Join(compactNonEmpty([]string{strings.TrimSpace(candidates[i].Detail), "configured auth"}), " · ")
+		}
+	}
 	return filterSlashArgCandidates(candidates, query, limit)
+}
+
+func connectEndpointCandidates(tpl providerTemplate) []SlashArgCandidate {
+	if len(tpl.endpoints) == 0 {
+		return nil
+	}
+	out := make([]SlashArgCandidate, 0, len(tpl.endpoints))
+	for _, endpoint := range tpl.endpoints {
+		detail := strings.TrimSpace(endpoint.detail)
+		if endpoint.tokenEnv != "" {
+			detail = strings.Join(compactNonEmpty([]string{detail, "env:" + endpoint.tokenEnv}), " · ")
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   endpoint.baseURL,
+			Display: endpoint.display,
+			Detail:  detail,
+		})
+	}
+	return out
 }
 
 func completeConnectTimeout(provider string, query string, limit int) []SlashArgCandidate {
@@ -337,7 +384,42 @@ func findProviderTemplate(value string) (providerTemplate, bool) {
 			return tpl, true
 		}
 	}
+	switch value {
+	case connectXiaomiTokenPlanCNAlias:
+		return providerTemplate{
+			label:               connectXiaomiTokenPlanCNAlias,
+			api:                 sdkproviders.APIMimo,
+			provider:            "xiaomi",
+			description:         "Xiaomi Mimo Token Plan CN over an OpenAI-compatible API",
+			defaultEndpointID:   "token-plan-cn",
+			defaultBaseURL:      connectXiaomiTokenPlanCNBaseURL,
+			defaultContextToken: 1048576,
+			commonModels:        xiaomiMimoCommonModels,
+			endpoints:           connectXiaomiEndpoints,
+		}, true
+	}
 	return providerTemplate{}, false
+}
+
+func normalizedConnectBaseURL(baseURL string) string {
+	return strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+}
+
+func connectEndpointForBaseURL(tpl providerTemplate, baseURL string) (connectEndpointTemplate, bool) {
+	normalized := normalizedConnectBaseURL(baseURL)
+	for _, endpoint := range tpl.endpoints {
+		if normalized != "" && normalized == normalizedConnectBaseURL(endpoint.baseURL) {
+			return endpoint, true
+		}
+	}
+	if normalized == "" {
+		for _, endpoint := range tpl.endpoints {
+			if strings.EqualFold(strings.TrimSpace(endpoint.id), strings.TrimSpace(tpl.defaultEndpointID)) {
+				return endpoint, true
+			}
+		}
+	}
+	return connectEndpointTemplate{}, false
 }
 
 func buildConnectModelChoices(provider string, fallbackModels []string) []connectModelChoice {

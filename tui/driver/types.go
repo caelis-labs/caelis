@@ -117,6 +117,7 @@ type AgentAddOptions struct {
 
 type ConnectConfig struct {
 	Provider            string
+	EndpointID          string
 	Model               string
 	BaseURL             string
 	TimeoutSeconds      int

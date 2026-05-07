@@ -2,6 +2,9 @@ package gatewayapp
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -38,6 +41,8 @@ import (
 	spawntool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/spawn"
 )
 
+var errAmbiguousModelAlias = errors.New("ambiguous model alias")
+
 type Config struct {
 	AppName        string
 	UserID         string
@@ -53,11 +58,14 @@ type Config struct {
 }
 
 type ModelConfig struct {
-	Alias    string               `json:"alias,omitempty"`
-	Provider string               `json:"provider,omitempty"`
-	API      sdkproviders.APIType `json:"api,omitempty"`
-	Model    string               `json:"model,omitempty"`
-	BaseURL  string               `json:"base_url,omitempty"`
+	ID         string               `json:"id,omitempty"`
+	Alias      string               `json:"alias,omitempty"`
+	Provider   string               `json:"provider,omitempty"`
+	ProfileID  string               `json:"profile_id,omitempty"`
+	EndpointID string               `json:"endpoint_id,omitempty"`
+	API        sdkproviders.APIType `json:"api,omitempty"`
+	Model      string               `json:"model,omitempty"`
+	BaseURL    string               `json:"base_url,omitempty"`
 	// HTTPClient is an in-memory transport override for this process. It is
 	// intentionally never persisted.
 	HTTPClient *http.Client `json:"-"`
@@ -79,6 +87,32 @@ type ModelConfig struct {
 	Timeout                time.Duration         `json:"timeout,omitempty"`
 }
 
+type ModelProfileConfig struct {
+	ID           string                `json:"id,omitempty"`
+	Provider     string                `json:"provider,omitempty"`
+	EndpointID   string                `json:"endpoint_id,omitempty"`
+	API          sdkproviders.APIType  `json:"api,omitempty"`
+	BaseURL      string                `json:"base_url,omitempty"`
+	HTTPClient   *http.Client          `json:"-"`
+	Token        string                `json:"token,omitempty"`
+	TokenEnv     string                `json:"token_env,omitempty"`
+	PersistToken bool                  `json:"persist_token,omitempty"`
+	AuthType     sdkproviders.AuthType `json:"auth_type,omitempty"`
+	HeaderKey    string                `json:"header_key,omitempty"`
+	Timeout      time.Duration         `json:"timeout,omitempty"`
+}
+
+type ModelChoice struct {
+	ID         string
+	Alias      string
+	Provider   string
+	Model      string
+	ProfileID  string
+	EndpointID string
+	BaseURL    string
+	Detail     string
+}
+
 type Stack struct {
 	Gateway   *appgateway.Gateway
 	Sessions  sdksession.Service
@@ -97,6 +131,7 @@ type Stack struct {
 }
 
 type SessionRuntimeState struct {
+	ModelID         string
 	ModelAlias      string
 	ReasoningEffort string
 	SessionMode     string
@@ -859,21 +894,21 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 	if resolver == nil {
 		return "", fmt.Errorf("gatewayapp: resolver not available")
 	}
-	alias, err := s.lookup.Upsert(cfg)
+	modelID, err := s.lookup.Upsert(cfg)
 	if err != nil {
 		return "", fmt.Errorf("gatewayapp: invalid model config: %w", err)
 	}
-	cfg.Alias = firstNonEmpty(strings.TrimSpace(cfg.Alias), alias)
+	cfg, _ = s.lookup.Config(modelID)
 	s.mu.Lock()
 	runtimeCfg := s.runtime
 	runtimeCfg.Model = cfg
 	s.runtime = runtimeCfg
 	s.mu.Unlock()
-	resolver.SetModelLookup(s.lookup, s.lookup.DefaultAlias())
+	resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
 	if err := s.saveModelConfigs(); err != nil {
 		return "", err
 	}
-	return alias, nil
+	return modelID, nil
 }
 
 // UseModel persists one per-session model alias override for subsequent turns.
@@ -888,20 +923,17 @@ func (s *Stack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias s
 	if alias == "" {
 		return fmt.Errorf("gatewayapp: model alias is required")
 	}
-	if s.lookup != nil && !s.lookup.HasAlias(alias) {
-		return fmt.Errorf("gatewayapp: unknown model alias %q", alias)
+	if s.lookup == nil {
+		return fmt.Errorf("gatewayapp: model lookup unavailable")
+	}
+	cfg, err := s.lookup.ResolveConfig(alias)
+	if err != nil {
+		return err
 	}
 	reasoning := ""
 	if len(reasoningEffort) > 0 {
 		reasoning = strings.TrimSpace(reasoningEffort[0])
 		if reasoning != "" {
-			if s.lookup == nil {
-				return fmt.Errorf("gatewayapp: model lookup unavailable")
-			}
-			cfg, ok := s.lookup.Config(alias)
-			if !ok {
-				return fmt.Errorf("gatewayapp: unknown model alias %q", alias)
-			}
 			if !modelConfigSupportsReasoningEffort(cfg, reasoning) {
 				return fmt.Errorf("gatewayapp: model %q does not support reasoning level %q", alias, reasoning)
 			}
@@ -909,18 +941,18 @@ func (s *Stack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias s
 	}
 	if s.lookup != nil {
 		if reasoning != "" {
-			cfg, ok := s.lookup.Config(alias)
-			if !ok {
-				return fmt.Errorf("gatewayapp: unknown model alias %q", alias)
+			cfg, err := s.lookup.ResolveConfig(alias)
+			if err != nil {
+				return err
 			}
 			cfg.ReasoningEffort = reasoning
 			if _, err := s.lookup.Upsert(cfg); err != nil {
 				return err
 			}
 		}
-		s.lookup.SetDefault(alias)
+		s.lookup.SetDefault(cfg.ID)
 		if resolver := s.Gateway.Resolver(); resolver != nil {
-			resolver.SetModelLookup(s.lookup, s.lookup.DefaultAlias())
+			resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
 		}
 		if err := s.saveModelConfigs(); err != nil {
 			return err
@@ -931,7 +963,7 @@ func (s *Stack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias s
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[appgateway.StateCurrentModelAlias] = alias
+		next[appgateway.StateCurrentModelAlias] = cfg.ID
 		if reasoning != "" {
 			next[appgateway.StateCurrentReasoningEffort] = reasoning
 		} else {
@@ -957,12 +989,16 @@ func (s *Stack) DeleteModel(ctx context.Context, ref sdksession.SessionRef, alia
 	if s.lookup == nil {
 		return fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
+	cfg, err := s.lookup.ResolveConfig(alias)
+	if err != nil {
+		return err
+	}
 	if err := s.lookup.Delete(alias); err != nil {
 		return err
 	}
-	hasDefault := strings.TrimSpace(s.lookup.DefaultAlias()) != ""
+	hasDefault := strings.TrimSpace(s.lookup.DefaultID()) != ""
 	if resolver := s.Gateway.Resolver(); resolver != nil {
-		resolver.SetModelLookup(s.lookup, s.lookup.DefaultAlias())
+		resolver.SetModelLookup(s.lookup, s.lookup.DefaultID())
 	}
 	if err := s.saveModelConfigs(); err != nil {
 		return err
@@ -973,7 +1009,7 @@ func (s *Stack) DeleteModel(ctx context.Context, ref sdksession.SessionRef, alia
 			next = map[string]any{}
 		}
 		current, _ := next[appgateway.StateCurrentModelAlias].(string)
-		if alias == "" || strings.EqualFold(strings.TrimSpace(current), alias) || !hasDefault {
+		if alias == "" || strings.EqualFold(strings.TrimSpace(current), cfg.ID) || strings.EqualFold(strings.TrimSpace(current), cfg.Alias) || !hasDefault {
 			delete(next, appgateway.StateCurrentModelAlias)
 			delete(next, appgateway.StateCurrentReasoningEffort)
 		}
@@ -1061,11 +1097,17 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref sdksession.SessionR
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
-	modelAlias := appgateway.CurrentModelAlias(state)
-	if s.lookup != nil && modelAlias != "" && !s.lookup.HasAlias(modelAlias) {
-		modelAlias = ""
+	modelRef := appgateway.CurrentModelAlias(state)
+	modelID := ""
+	modelAlias := ""
+	if s.lookup != nil && modelRef != "" {
+		if cfg, ok := s.lookup.Config(modelRef); ok {
+			modelID = cfg.ID
+			modelAlias = cfg.Alias
+		}
 	}
 	return SessionRuntimeState{
+		ModelID:         modelID,
 		ModelAlias:      modelAlias,
 		ReasoningEffort: appgateway.CurrentReasoningEffort(state),
 		SessionMode:     appgateway.CurrentSessionMode(state),
@@ -1119,14 +1161,38 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 // ListModelAliases returns the current session override plus resolver-known
 // model aliases for picker surfaces such as the TUI `/model` command.
 func (s *Stack) ListModelAliases(ctx context.Context, ref sdksession.SessionRef) ([]string, error) {
-	if s == nil || s.Gateway == nil {
+	choices, err := s.ListModelChoices(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	aliases := make([]string, 0, len(choices))
+	for _, choice := range choices {
+		aliases = append(aliases, choice.Alias)
+	}
+	return dedupeNonEmptyStrings(aliases), nil
+}
+
+func (s *Stack) ListModelChoices(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {
+	if s == nil || s.Sessions == nil {
 		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
-	resolver := s.Gateway.Resolver()
-	if resolver == nil {
-		return nil, fmt.Errorf("gatewayapp: resolver not available")
+	if s.lookup == nil {
+		return nil, fmt.Errorf("gatewayapp: model lookup unavailable")
 	}
-	return resolver.ListModelAliases(ctx, ref)
+	choices := make([]ModelChoice, 0, len(s.lookup.ListModelChoices())+1)
+	if strings.TrimSpace(ref.SessionID) != "" {
+		state, err := s.Sessions.SnapshotState(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		if modelRef := appgateway.CurrentModelAlias(state); modelRef != "" {
+			if cfg, ok := s.lookup.Config(modelRef); ok {
+				choices = append(choices, modelChoiceFromConfig(cfg))
+			}
+		}
+	}
+	choices = append(choices, s.lookup.ListModelChoices()...)
+	return dedupeModelChoices(choices), nil
 }
 
 func (s *Stack) DefaultModelAlias() string {
@@ -1134,6 +1200,13 @@ func (s *Stack) DefaultModelAlias() string {
 		return ""
 	}
 	return s.lookup.DefaultAlias()
+}
+
+func (s *Stack) DefaultModelID() string {
+	if s == nil || s.lookup == nil {
+		return ""
+	}
+	return s.lookup.DefaultID()
 }
 
 func (s *Stack) ModelConfig(alias string) (ModelConfig, bool) {
@@ -1295,13 +1368,15 @@ func defaultCompactionConfig(contextWindow int) localruntime.CompactionConfig {
 type modelLookup struct {
 	mu            sync.RWMutex
 	configs       map[string]ModelConfig
+	profiles      map[string]ModelProfileConfig
 	contextWindow int
-	defaultAlias  string
+	defaultID     string
 }
 
 func newModelLookup(store *appConfigStore, cfg ModelConfig, contextWindow int) (*modelLookup, error) {
 	lookup := &modelLookup{
 		configs:       map[string]ModelConfig{},
+		profiles:      map[string]ModelProfileConfig{},
 		contextWindow: contextWindow,
 	}
 	if store != nil {
@@ -1309,13 +1384,27 @@ func newModelLookup(store *appConfigStore, cfg ModelConfig, contextWindow int) (
 		if err != nil {
 			return nil, err
 		}
-		for _, item := range doc.Models.Configs {
-			if _, err := lookup.Upsert(item); err != nil {
+		for _, item := range doc.Models.Profiles {
+			if _, err := lookup.UpsertProfile(item); err != nil {
 				return nil, err
 			}
 		}
-		if strings.TrimSpace(doc.Models.DefaultAlias) != "" {
+		defaultFallback := ""
+		for _, item := range doc.Models.Configs {
+			id, err := lookup.upsert(item, false)
+			if err != nil {
+				return nil, err
+			}
+			if defaultFallback == "" {
+				defaultFallback = id
+			}
+		}
+		if strings.TrimSpace(doc.Models.DefaultID) != "" {
+			lookup.SetDefault(doc.Models.DefaultID)
+		} else if strings.TrimSpace(doc.Models.DefaultAlias) != "" {
 			lookup.SetDefault(doc.Models.DefaultAlias)
+		} else if defaultFallback != "" {
+			lookup.SetDefault(defaultFallback)
 		}
 	}
 	cfg = normalizeModelConfig(cfg)
@@ -1333,28 +1422,73 @@ func (l *modelLookup) DefaultAlias() string {
 	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.defaultAlias
+	cfg, ok := l.configs[strings.ToLower(strings.TrimSpace(l.defaultID))]
+	if !ok {
+		return ""
+	}
+	return cfg.Alias
+}
+
+func (l *modelLookup) DefaultID() string {
+	if l == nil {
+		return ""
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	return l.defaultID
 }
 
 func (l *modelLookup) ListModelAliases() []string {
+	choices := l.ListModelChoices()
+	aliases := make([]string, 0, len(choices))
+	for _, choice := range choices {
+		aliases = append(aliases, choice.Alias)
+	}
+	return dedupeNonEmptyStrings(aliases)
+}
+
+func (l *modelLookup) ListModelChoices() []ModelChoice {
 	if l == nil {
 		return nil
 	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	aliases := make([]string, 0, len(l.configs)+1)
-	if l.defaultAlias != "" {
-		aliases = append(aliases, l.defaultAlias)
-	}
-	rest := make([]string, 0, len(l.configs))
-	for alias := range l.configs {
-		if !strings.EqualFold(alias, l.defaultAlias) {
-			rest = append(rest, alias)
+	choices := make([]ModelChoice, 0, len(l.configs))
+	if l.defaultID != "" {
+		if cfg, ok := l.configs[strings.ToLower(l.defaultID)]; ok {
+			choices = append(choices, l.modelChoiceLocked(cfg))
 		}
 	}
-	sort.Strings(rest)
-	aliases = append(aliases, rest...)
-	return dedupeNonEmptyStrings(aliases)
+	rest := make([]ModelConfig, 0, len(l.configs))
+	for id, cfg := range l.configs {
+		if strings.EqualFold(id, l.defaultID) {
+			continue
+		}
+		rest = append(rest, cfg)
+	}
+	sort.Slice(rest, func(i, j int) bool {
+		left := strings.ToLower(strings.TrimSpace(rest[i].Alias + " " + rest[i].ID))
+		right := strings.ToLower(strings.TrimSpace(rest[j].Alias + " " + rest[j].ID))
+		return left < right
+	})
+	for _, cfg := range rest {
+		choices = append(choices, l.modelChoiceLocked(cfg))
+	}
+	return choices
+}
+
+func (l *modelLookup) modelChoiceLocked(cfg ModelConfig) ModelChoice {
+	cfg = l.hydrateModelConfigLocked(cfg)
+	return ModelChoice{
+		ID:         cfg.ID,
+		Alias:      cfg.Alias,
+		Provider:   cfg.Provider,
+		Model:      cfg.Model,
+		ProfileID:  cfg.ProfileID,
+		EndpointID: cfg.EndpointID,
+		BaseURL:    cfg.BaseURL,
+		Detail:     modelChoiceDetail(cfg),
+	}
 }
 
 func (l *modelLookup) ListProviderModels(provider string) []string {
@@ -1382,14 +1516,17 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: model lookup is nil")
 	}
 	l.mu.RLock()
-	alias = firstNonEmpty(strings.TrimSpace(alias), l.defaultAlias)
-	if alias == "" || len(l.configs) == 0 {
+	ref := firstNonEmpty(strings.TrimSpace(alias), l.defaultID)
+	if ref == "" || len(l.configs) == 0 {
 		l.mu.RUnlock()
 		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: no model configured; use /connect")
 	}
-	cfg, ok := l.configs[strings.ToLower(alias)]
+	cfg, ok, resolveErr := l.resolveConfigLocked(ref)
 	fallbackContextWindow := l.contextWindow
 	l.mu.RUnlock()
+	if resolveErr != nil {
+		return appgateway.ModelResolution{}, resolveErr
+	}
 	if !ok {
 		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
@@ -1419,7 +1556,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	}
 	factory := sdkproviders.NewFactory()
 	record := sdkproviders.Config{
-		Alias:                     cfg.Alias,
+		Alias:                     cfg.ID,
 		Provider:                  cfg.Provider,
 		API:                       cfg.API,
 		Model:                     cfg.Model,
@@ -1443,7 +1580,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if err := factory.Register(record); err != nil {
 		return appgateway.ModelResolution{}, err
 	}
-	llm, err := factory.NewByAlias(alias)
+	llm, err := factory.NewByAlias(cfg.ID)
 	if err != nil {
 		return appgateway.ModelResolution{}, err
 	}
@@ -1460,29 +1597,68 @@ func (l *modelLookup) HasAlias(alias string) bool {
 	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	_, ok := l.configs[strings.ToLower(strings.TrimSpace(alias))]
-	return ok
+	_, ok, err := l.resolveConfigLocked(alias)
+	return ok || errors.Is(err, errAmbiguousModelAlias)
 }
 
-func (l *modelLookup) Upsert(cfg ModelConfig) (string, error) {
+func (l *modelLookup) UpsertProfile(profile ModelProfileConfig) (string, error) {
 	if l == nil {
 		return "", fmt.Errorf("gatewayapp: model lookup is nil")
 	}
-	cfg = normalizeModelConfig(cfg)
-	if cfg.Provider == "" || cfg.Model == "" {
-		return "", fmt.Errorf("gatewayapp: provider and model are required")
+	profile = normalizeModelProfileConfig(profile)
+	if profile.Provider == "" {
+		return "", fmt.Errorf("gatewayapp: provider is required")
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.profiles == nil {
+		l.profiles = map[string]ModelProfileConfig{}
+	}
+	l.profiles[strings.ToLower(profile.ID)] = profile
+	return profile.ID, nil
+}
+
+func (l *modelLookup) Upsert(cfg ModelConfig) (string, error) {
+	return l.upsert(cfg, true)
+}
+
+func (l *modelLookup) upsert(cfg ModelConfig, setDefault bool) (string, error) {
+	if l == nil {
+		return "", fmt.Errorf("gatewayapp: model lookup is nil")
+	}
+	updatesProfileAuth := modelConfigCarriesProfileAuth(cfg)
+	cfg = normalizeModelConfig(cfg)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.configs == nil {
 		l.configs = map[string]ModelConfig{}
 	}
-	l.configs[strings.ToLower(cfg.Alias)] = cfg
-	l.defaultAlias = cfg.Alias
+	if l.profiles == nil {
+		l.profiles = map[string]ModelProfileConfig{}
+	}
+	profile, ok := l.profiles[strings.ToLower(strings.TrimSpace(cfg.ProfileID))]
+	if ok {
+		cfg.Provider = firstNonEmpty(cfg.Provider, profile.Provider)
+		cfg.EndpointID = firstNonEmpty(cfg.EndpointID, profile.EndpointID)
+		cfg = normalizeModelConfig(cfg)
+	}
+	if cfg.Provider == "" || cfg.Model == "" {
+		return "", fmt.Errorf("gatewayapp: provider and model are required")
+	}
+	if !ok || updatesProfileAuth {
+		profile = modelProfileFromModelConfig(cfg)
+	}
+	l.profiles[strings.ToLower(profile.ID)] = profile
+	cfg.ProfileID = profile.ID
+	cfg = mergeModelConfigProfile(cfg, profile)
+	l.configs[strings.ToLower(cfg.ID)] = cfg
+	if setDefault {
+		l.defaultID = cfg.ID
+	}
 	if cfg.ContextWindowTokens > 0 {
 		l.contextWindow = cfg.ContextWindowTokens
 	}
-	return cfg.Alias, nil
+	return cfg.ID, nil
 }
 
 func (l *modelLookup) Delete(alias string) error {
@@ -1495,19 +1671,26 @@ func (l *modelLookup) Delete(alias string) error {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if _, ok := l.configs[key]; !ok {
+	cfg, ok, resolveErr := l.resolveConfigLocked(alias)
+	if resolveErr != nil {
+		return resolveErr
+	}
+	if !ok {
 		return fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
-	delete(l.configs, key)
-	if strings.EqualFold(l.defaultAlias, alias) {
-		l.defaultAlias = ""
-		aliases := make([]string, 0, len(l.configs))
-		for one := range l.configs {
-			aliases = append(aliases, one)
+	delete(l.configs, strings.ToLower(cfg.ID))
+	if !l.profileReferencedLocked(cfg.ProfileID) {
+		delete(l.profiles, strings.ToLower(strings.TrimSpace(cfg.ProfileID)))
+	}
+	if strings.EqualFold(l.defaultID, cfg.ID) {
+		l.defaultID = ""
+		ids := make([]string, 0, len(l.configs))
+		for id := range l.configs {
+			ids = append(ids, id)
 		}
-		sort.Strings(aliases)
-		if len(aliases) > 0 {
-			l.defaultAlias = aliases[0]
+		sort.Strings(ids)
+		if len(ids) > 0 {
+			l.defaultID = l.configs[ids[0]].ID
 		}
 	}
 	return nil
@@ -1523,8 +1706,8 @@ func (l *modelLookup) SetDefault(alias string) {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if cfg, ok := l.configs[key]; ok {
-		l.defaultAlias = cfg.Alias
+	if cfg, ok, err := l.resolveConfigLocked(alias); err == nil && ok {
+		l.defaultID = cfg.ID
 	}
 }
 
@@ -1580,10 +1763,23 @@ func (l *modelLookup) Snapshot() persistedModelConfig {
 		configs = append(configs, cfg)
 	}
 	sort.Slice(configs, func(i, j int) bool {
-		return strings.ToLower(strings.TrimSpace(configs[i].Alias)) < strings.ToLower(strings.TrimSpace(configs[j].Alias))
+		return strings.ToLower(strings.TrimSpace(configs[i].Alias+" "+configs[i].ID)) < strings.ToLower(strings.TrimSpace(configs[j].Alias+" "+configs[j].ID))
 	})
+	profiles := make([]ModelProfileConfig, 0, len(l.profiles))
+	for _, profile := range l.profiles {
+		profiles = append(profiles, profile)
+	}
+	sort.Slice(profiles, func(i, j int) bool {
+		return strings.ToLower(strings.TrimSpace(profiles[i].ID)) < strings.ToLower(strings.TrimSpace(profiles[j].ID))
+	})
+	defaultAlias := ""
+	if cfg, ok := l.configs[strings.ToLower(strings.TrimSpace(l.defaultID))]; ok {
+		defaultAlias = cfg.Alias
+	}
 	return persistedModelConfig{
-		DefaultAlias: l.defaultAlias,
+		DefaultAlias: defaultAlias,
+		DefaultID:    l.defaultID,
+		Profiles:     profiles,
 		Configs:      configs,
 	}
 }
@@ -1598,11 +1794,135 @@ func (l *modelLookup) Config(alias string) (ModelConfig, bool) {
 	}
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	cfg, ok := l.configs[key]
-	if !ok {
+	cfg, ok, err := l.resolveConfigLocked(key)
+	if err != nil || !ok {
 		return ModelConfig{}, false
 	}
 	return cfg, true
+}
+
+func (l *modelLookup) ResolveConfig(alias string) (ModelConfig, error) {
+	if l == nil {
+		return ModelConfig{}, fmt.Errorf("gatewayapp: model lookup is nil")
+	}
+	key := strings.ToLower(strings.TrimSpace(alias))
+	if key == "" {
+		return ModelConfig{}, fmt.Errorf("gatewayapp: model alias is required")
+	}
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	cfg, ok, err := l.resolveConfigLocked(key)
+	if err != nil {
+		return ModelConfig{}, err
+	}
+	if !ok {
+		return ModelConfig{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
+	}
+	return cfg, nil
+}
+
+func (l *modelLookup) resolveConfigLocked(ref string) (ModelConfig, bool, error) {
+	ref = strings.ToLower(strings.TrimSpace(ref))
+	if ref == "" {
+		return ModelConfig{}, false, nil
+	}
+	if cfg, ok := l.configs[ref]; ok {
+		return l.hydrateModelConfigLocked(cfg), true, nil
+	}
+	var match ModelConfig
+	matches := 0
+	for _, cfg := range l.configs {
+		if strings.EqualFold(strings.TrimSpace(cfg.Alias), ref) {
+			match = cfg
+			matches++
+		}
+	}
+	if matches > 1 {
+		return ModelConfig{}, false, fmt.Errorf("gatewayapp: %w %q; use a profile-qualified model id", errAmbiguousModelAlias, ref)
+	}
+	if matches == 0 {
+		return ModelConfig{}, false, nil
+	}
+	return l.hydrateModelConfigLocked(match), true, nil
+}
+
+func (l *modelLookup) profileReferencedLocked(profileID string) bool {
+	profileID = strings.ToLower(strings.TrimSpace(profileID))
+	if profileID == "" {
+		return false
+	}
+	for _, cfg := range l.configs {
+		if strings.EqualFold(strings.TrimSpace(cfg.ProfileID), profileID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *modelLookup) hydrateModelConfigLocked(cfg ModelConfig) ModelConfig {
+	cfg = normalizeModelConfig(cfg)
+	if l == nil || strings.TrimSpace(cfg.ProfileID) == "" {
+		return cfg
+	}
+	profile, ok := l.profiles[strings.ToLower(strings.TrimSpace(cfg.ProfileID))]
+	if !ok {
+		return cfg
+	}
+	return mergeModelConfigProfile(cfg, profile)
+}
+
+func modelChoiceDetail(cfg ModelConfig) string {
+	parts := []string{}
+	if profileID := strings.TrimSpace(cfg.ProfileID); profileID != "" {
+		parts = append(parts, "profile:"+profileID)
+	}
+	if endpoint := strings.TrimSpace(cfg.EndpointID); endpoint != "" && endpoint != "default" {
+		parts = append(parts, endpoint)
+	}
+	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
+		parts = append(parts, baseURL)
+	}
+	if tokenEnv := strings.TrimSpace(cfg.TokenEnv); tokenEnv != "" {
+		parts = append(parts, "env:"+tokenEnv)
+	}
+	if len(parts) == 0 {
+		return "configured model"
+	}
+	return strings.Join(parts, " · ")
+}
+
+func modelChoiceFromConfig(cfg ModelConfig) ModelChoice {
+	cfg = normalizeModelConfig(cfg)
+	return ModelChoice{
+		ID:         cfg.ID,
+		Alias:      cfg.Alias,
+		Provider:   cfg.Provider,
+		Model:      cfg.Model,
+		ProfileID:  cfg.ProfileID,
+		EndpointID: cfg.EndpointID,
+		BaseURL:    cfg.BaseURL,
+		Detail:     modelChoiceDetail(cfg),
+	}
+}
+
+func dedupeModelChoices(choices []ModelChoice) []ModelChoice {
+	if len(choices) == 0 {
+		return nil
+	}
+	out := make([]ModelChoice, 0, len(choices))
+	seen := map[string]struct{}{}
+	for _, choice := range choices {
+		id := strings.ToLower(strings.TrimSpace(choice.ID))
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, choice)
+	}
+	return out
 }
 
 func (s *Stack) saveModelConfigs() error {
@@ -1674,7 +1994,7 @@ func (s *Stack) rebuildGateway() error {
 	resolver, err := appgateway.NewAssemblyResolver(appgateway.AssemblyResolverConfig{
 		Sessions:          s.Sessions,
 		Assembly:          runtimeCfg.Assembly,
-		DefaultModelAlias: s.lookup.DefaultAlias(),
+		DefaultModelAlias: s.lookup.DefaultID(),
 		ContextWindow:     runtimeCfg.ContextWindow,
 		ModelLookup:       s.lookup,
 		Tools:             tools,
@@ -1736,21 +2056,26 @@ func (s *Stack) rebuildGateway() error {
 }
 
 func normalizeModelConfig(cfg ModelConfig) ModelConfig {
+	cfg.ID = strings.ToLower(strings.TrimSpace(cfg.ID))
 	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
 	cfg.Model = strings.TrimSpace(cfg.Model)
+	cfg.EndpointID = normalizeEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL, cfg.API)
+	cfg.ProfileID = strings.ToLower(strings.TrimSpace(cfg.ProfileID))
+	if cfg.ProfileID == "" {
+		cfg.ProfileID = buildProfileID(cfg.Provider, cfg.EndpointID, cfg.BaseURL)
+	}
 	cfg.Alias = strings.ToLower(strings.TrimSpace(cfg.Alias))
 	if cfg.Alias == "" {
 		cfg.Alias = buildAlias(cfg.Provider, cfg.Model)
+	}
+	if id := buildModelID(cfg.ProfileID, cfg.Alias); id != "" {
+		cfg.ID = id
 	}
 	if cfg.API == "" {
 		cfg.API = defaultModelAPIForProvider(cfg.Provider)
 	}
 	if cfg.AuthType == "" {
-		if cfg.Provider == "ollama" || cfg.Provider == "codefree" {
-			cfg.AuthType = sdkproviders.AuthNone
-		} else {
-			cfg.AuthType = sdkproviders.AuthAPIKey
-		}
+		cfg.AuthType = defaultAuthTypeForProvider(cfg.Provider)
 	}
 	if cfg.DefaultReasoningEffort == "" && cfg.ReasoningEffort != "" {
 		cfg.DefaultReasoningEffort = cfg.ReasoningEffort
@@ -1766,6 +2091,84 @@ func normalizeModelConfig(cfg ModelConfig) ModelConfig {
 		cfg.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(cfg.TokenEnv)))
 	}
 	return cfg
+}
+
+func normalizeModelProfileConfig(profile ModelProfileConfig) ModelProfileConfig {
+	profile.ID = strings.ToLower(strings.TrimSpace(profile.ID))
+	profile.Provider = strings.ToLower(strings.TrimSpace(profile.Provider))
+	profile.EndpointID = normalizeEndpointID(profile.Provider, profile.EndpointID, profile.BaseURL, profile.API)
+	if profile.ID == "" {
+		profile.ID = buildProfileID(profile.Provider, profile.EndpointID, profile.BaseURL)
+	}
+	if profile.API == "" {
+		profile.API = defaultModelAPIForProvider(profile.Provider)
+	}
+	if profile.AuthType == "" {
+		profile.AuthType = defaultAuthTypeForProvider(profile.Provider)
+	}
+	if profile.Token == "" && strings.TrimSpace(profile.TokenEnv) != "" {
+		profile.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(profile.TokenEnv)))
+	}
+	return profile
+}
+
+func modelProfileFromModelConfig(cfg ModelConfig) ModelProfileConfig {
+	cfg = normalizeModelConfig(cfg)
+	return normalizeModelProfileConfig(ModelProfileConfig{
+		ID:           cfg.ProfileID,
+		Provider:     cfg.Provider,
+		EndpointID:   cfg.EndpointID,
+		API:          cfg.API,
+		BaseURL:      cfg.BaseURL,
+		HTTPClient:   cfg.HTTPClient,
+		Token:        cfg.Token,
+		TokenEnv:     cfg.TokenEnv,
+		PersistToken: cfg.PersistToken,
+		AuthType:     cfg.AuthType,
+		HeaderKey:    cfg.HeaderKey,
+		Timeout:      cfg.Timeout,
+	})
+}
+
+func modelConfigCarriesProfileFields(cfg ModelConfig) bool {
+	return strings.TrimSpace(cfg.Provider) != "" ||
+		strings.TrimSpace(cfg.EndpointID) != "" ||
+		strings.TrimSpace(cfg.BaseURL) != "" ||
+		strings.TrimSpace(cfg.Token) != "" ||
+		strings.TrimSpace(cfg.TokenEnv) != "" ||
+		strings.TrimSpace(cfg.HeaderKey) != "" ||
+		cfg.HTTPClient != nil ||
+		cfg.API != "" ||
+		cfg.AuthType != "" ||
+		cfg.Timeout > 0
+}
+
+func modelConfigCarriesProfileAuth(cfg ModelConfig) bool {
+	return strings.TrimSpace(cfg.Token) != "" ||
+		strings.TrimSpace(cfg.TokenEnv) != "" ||
+		strings.TrimSpace(cfg.HeaderKey) != "" ||
+		cfg.PersistToken ||
+		cfg.HTTPClient != nil
+}
+
+func mergeModelConfigProfile(cfg ModelConfig, profile ModelProfileConfig) ModelConfig {
+	cfg = normalizeModelConfig(cfg)
+	profile = normalizeModelProfileConfig(profile)
+	cfg.ProfileID = profile.ID
+	cfg.Provider = firstNonEmpty(profile.Provider, cfg.Provider)
+	cfg.EndpointID = profile.EndpointID
+	cfg.API = firstNonEmptyAPI(profile.API, cfg.API)
+	cfg.BaseURL = firstNonEmpty(profile.BaseURL, cfg.BaseURL)
+	cfg.HTTPClient = firstNonNilHTTPClient(profile.HTTPClient, cfg.HTTPClient)
+	cfg.Token = firstNonEmpty(profile.Token, cfg.Token)
+	cfg.TokenEnv = firstNonEmpty(profile.TokenEnv, cfg.TokenEnv)
+	cfg.PersistToken = profile.PersistToken || cfg.PersistToken
+	cfg.AuthType = firstNonEmptyAuthType(profile.AuthType, cfg.AuthType)
+	cfg.HeaderKey = firstNonEmpty(profile.HeaderKey, cfg.HeaderKey)
+	if profile.Timeout > 0 {
+		cfg.Timeout = profile.Timeout
+	}
+	return normalizeModelConfig(cfg)
 }
 
 func modelConfigSupportsReasoningEffort(cfg ModelConfig, effort string) bool {
@@ -1809,7 +2212,7 @@ func defaultModelAPIForProvider(provider string) sdkproviders.APIType {
 		return sdkproviders.APIAnthropicCompatible
 	case "deepseek":
 		return sdkproviders.APIDeepSeek
-	case "xiaomi", "mimo":
+	case "xiaomi":
 		return sdkproviders.APIMimo
 	case "volcengine":
 		return sdkproviders.APIVolcengine
@@ -1824,6 +2227,19 @@ func defaultModelAPIForProvider(provider string) sdkproviders.APIType {
 
 func sanitizePersistedModelConfig(cfg ModelConfig) ModelConfig {
 	cfg = normalizeModelConfig(cfg)
+	if cfg.ProfileID != "" {
+		cfg.Provider = ""
+		cfg.EndpointID = ""
+		cfg.API = ""
+		cfg.BaseURL = ""
+		cfg.HTTPClient = nil
+		cfg.Token = ""
+		cfg.TokenEnv = ""
+		cfg.PersistToken = false
+		cfg.AuthType = ""
+		cfg.HeaderKey = ""
+		cfg.Timeout = 0
+	}
 	if !cfg.PersistToken {
 		cfg.Token = ""
 	}
@@ -1843,6 +2259,23 @@ func sanitizePersistedModelConfig(cfg ModelConfig) ModelConfig {
 	cfg.HTTPClient = nil
 	cfg.Timeout = 0
 	return cfg
+}
+
+func sanitizePersistedModelProfile(profile ModelProfileConfig) ModelProfileConfig {
+	profile = normalizeModelProfileConfig(profile)
+	if !profile.PersistToken {
+		profile.Token = ""
+	}
+	if profile.API == defaultModelAPIForProvider(profile.Provider) {
+		profile.API = ""
+	}
+	if profile.AuthType == defaultAuthTypeForProvider(profile.Provider) {
+		profile.AuthType = ""
+	}
+	profile.PersistToken = false
+	profile.HTTPClient = nil
+	profile.Timeout = 0
+	return profile
 }
 
 func defaultAuthTypeForProvider(provider string) sdkproviders.AuthType {
@@ -1904,6 +2337,174 @@ func buildAlias(provider string, modelName string) string {
 		return provider
 	}
 	return strings.ToLower(provider + "/" + modelName)
+}
+
+func buildProfileID(provider string, endpointID string, baseURL string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	endpointID = sanitizeConfigIDPart(firstNonEmpty(strings.TrimSpace(endpointID), "default"))
+	if endpointID == "custom" || strings.HasPrefix(endpointID, "custom-") {
+		endpointID = "custom-" + shortConfigHash(normalizedConfigBaseURL(baseURL))
+	}
+	if provider == "" {
+		return endpointID
+	}
+	return provider + "@" + endpointID
+}
+
+func buildModelID(profileID string, alias string) string {
+	profileID = strings.ToLower(strings.TrimSpace(profileID))
+	alias = strings.ToLower(strings.TrimSpace(alias))
+	if profileID == "" {
+		return alias
+	}
+	if alias == "" {
+		return profileID
+	}
+	return profileID + "/" + alias
+}
+
+func normalizeEndpointID(provider string, endpointID string, baseURL string, api sdkproviders.APIType) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	endpointID = sanitizeConfigIDPart(endpointID)
+	if endpointID != "" {
+		return endpointID
+	}
+	normalizedBaseURL := normalizedConfigBaseURL(baseURL)
+	switch provider {
+	case "openai":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.openai.com/v1" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "openai-compatible":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.openai.com/v1" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "openrouter":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://openrouter.ai/api/v1" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "gemini":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://generativelanguage.googleapis.com/v1beta" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "anthropic":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "anthropic-compatible":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "deepseek":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.deepseek.com/v1" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "minimax":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.minimaxi.com/anthropic" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "codefree":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://www.srdcloud.cn" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "ollama":
+		if normalizedBaseURL == "" || normalizedBaseURL == "http://localhost:11434" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	case "xiaomi":
+		switch normalizedBaseURL {
+		case "https://api.xiaomimimo.com/v1", "":
+			return "api-cn"
+		case "https://token-plan-cn.xiaomimimo.com/v1":
+			return "token-plan-cn"
+		default:
+			return "custom-" + shortConfigHash(normalizedBaseURL)
+		}
+	case "volcengine":
+		if api == sdkproviders.APIVolcengineCoding || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/coding/v3" {
+			return "coding-plan"
+		}
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/v3" {
+			return "standard"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	default:
+		if normalizedBaseURL == "" {
+			return "default"
+		}
+		return "custom-" + shortConfigHash(normalizedBaseURL)
+	}
+}
+
+func normalizedConfigBaseURL(baseURL string) string {
+	return strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+}
+
+func sanitizeConfigIDPart(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if value == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
+		if ok {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func shortConfigHash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "default"
+	}
+	sum := sha256.Sum256([]byte(value))
+	return hex.EncodeToString(sum[:])[:10]
+}
+
+func firstNonEmptyAPI(values ...sdkproviders.APIType) sdkproviders.APIType {
+	for _, value := range values {
+		if strings.TrimSpace(string(value)) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyAuthType(values ...sdkproviders.AuthType) sdkproviders.AuthType {
+	for _, value := range values {
+		if strings.TrimSpace(string(value)) != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonNilHTTPClient(values ...*http.Client) *http.Client {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
 }
 
 func normalizeSessionMode(mode string) (string, error) {

@@ -304,6 +304,23 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 	if len(providers) == 0 || providers[0].Value == "" {
 		t.Fatalf("provider candidates = %#v, want non-empty", providers)
 	}
+	xiaomiEndpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:xiaomi", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
+	}
+	if !slashCandidatesHaveValue(xiaomiEndpoints, connectXiaomiAPIBaseURL) {
+		t.Fatalf("xiaomi endpoint candidates = %#v, missing api cn", xiaomiEndpoints)
+	}
+	var foundTokenPlan bool
+	for _, item := range xiaomiEndpoints {
+		if strings.EqualFold(strings.TrimSpace(item.Value), connectXiaomiTokenPlanCNBaseURL) &&
+			strings.Contains(item.Detail, "MIMO_TOKEN_PLAN_API_KEY") {
+			foundTokenPlan = true
+		}
+	}
+	if !foundTokenPlan {
+		t.Fatalf("xiaomi endpoint candidates = %#v, missing token-plan CN OpenAI detail", xiaomiEndpoints)
+	}
 
 	models, err := driver.CompleteSlashArg(ctx, "connect-model:minimax|https%3A%2F%2Fapi.minimaxi.com%2Fanthropic|60||", "", 20)
 	if err != nil {
@@ -391,8 +408,8 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	if len(useCandidates) < 2 {
 		t.Fatalf("model use candidates = %#v, want at least default and session aliases", useCandidates)
 	}
-	if got := useCandidates[0].Value; got != "ollama/alt-model" {
-		t.Fatalf("first model use candidate = %q, want ollama/alt-model", got)
+	if got := useCandidates[0].Display; got != "ollama/alt-model" {
+		t.Fatalf("first model use display = %q, want ollama/alt-model", got)
 	}
 
 	delCandidates, err := driver.CompleteSlashArg(ctx, "model del", "", 10)
@@ -402,8 +419,8 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	if len(delCandidates) < 2 {
 		t.Fatalf("model del candidates = %#v, want at least default and session aliases", delCandidates)
 	}
-	if got := delCandidates[0].Value; got != "ollama/alt-model" {
-		t.Fatalf("first model del candidate = %q, want ollama/alt-model", got)
+	if got := delCandidates[0].Display; got != "ollama/alt-model" {
+		t.Fatalf("first model del display = %q, want ollama/alt-model", got)
 	}
 }
 
@@ -594,11 +611,33 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if cfg.Alias == "" {
 		t.Fatalf("persisted configs = %#v, want deepseek/deepseek-v4-flash", doc.Models.Configs)
 	}
-	if cfg.Token != "secret" || !cfg.PersistToken {
-		t.Fatalf("persisted token/persist = %q/%v, want pasted API key persisted", cfg.Token, cfg.PersistToken)
+	if cfg.ID != "deepseek@default/deepseek/deepseek-v4-flash" {
+		t.Fatalf("persisted model id = %q, want readable profile/model alias id", cfg.ID)
 	}
-	if cfg.TokenEnv != "" {
-		t.Fatalf("persisted token_env = %q, want empty for pasted API key", cfg.TokenEnv)
+	if cfg.ProfileID != "deepseek@default" {
+		t.Fatalf("persisted profile id = %q, want deepseek@default", cfg.ProfileID)
+	}
+	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
+		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
+	}
+	var conn gatewayapp.ModelProfileConfig
+	for _, item := range doc.Models.Profiles {
+		if strings.EqualFold(item.ID, cfg.ProfileID) {
+			conn = item
+			break
+		}
+	}
+	if conn.ID == "" {
+		t.Fatalf("persisted profiles = %#v, missing %q", doc.Models.Profiles, cfg.ProfileID)
+	}
+	if conn.Provider != "deepseek" {
+		t.Fatalf("persisted profile provider = %q, want deepseek", conn.Provider)
+	}
+	if conn.Token != "secret" || !conn.PersistToken {
+		t.Fatalf("persisted profile token/persist = %q/%v, want pasted API key persisted", conn.Token, conn.PersistToken)
+	}
+	if conn.TokenEnv != "" {
+		t.Fatalf("persisted profile token_env = %q, want empty for pasted API key", conn.TokenEnv)
 	}
 	if cfg.ContextWindowTokens != 1048576 {
 		t.Fatalf("persisted context window = %d, want 1048576", cfg.ContextWindowTokens)
@@ -640,7 +679,11 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
+		`"profiles": [`,
+		`"id": "deepseek@default"`,
+		`"id": "deepseek@default/deepseek/deepseek-v4-flash"`,
 		`"alias": "deepseek/deepseek-v4-flash"`,
+		`"profile_id": "deepseek@default"`,
 		`"provider": "deepseek"`,
 		`"model": "deepseek-v4-flash"`,
 		`"base_url": "https://api.deepseek.com/v1"`,
@@ -696,11 +739,21 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 	if cfg.Alias == "" {
 		t.Fatalf("persisted configs = %#v, want deepseek/deepseek-v4-flash", doc.Models.Configs)
 	}
-	if cfg.Token != "" || cfg.PersistToken {
-		t.Fatalf("persisted token/persist = %q/%v, want no plaintext token for env auth", cfg.Token, cfg.PersistToken)
+	var conn gatewayapp.ModelProfileConfig
+	for _, item := range doc.Models.Profiles {
+		if strings.EqualFold(item.ID, cfg.ProfileID) {
+			conn = item
+			break
+		}
 	}
-	if cfg.TokenEnv != "DEEPSEEK_API_KEY" {
-		t.Fatalf("persisted token_env = %q, want DEEPSEEK_API_KEY", cfg.TokenEnv)
+	if conn.ID == "" {
+		t.Fatalf("persisted profiles = %#v, missing %q", doc.Models.Profiles, cfg.ProfileID)
+	}
+	if conn.Token != "" || conn.PersistToken {
+		t.Fatalf("persisted profile token/persist = %q/%v, want no plaintext token for env auth", conn.Token, conn.PersistToken)
+	}
+	if conn.TokenEnv != "DEEPSEEK_API_KEY" {
+		t.Fatalf("persisted profile token_env = %q, want DEEPSEEK_API_KEY", conn.TokenEnv)
 	}
 }
 
@@ -1778,7 +1831,7 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(model use, dee) error = %v", err)
 	}
-	if len(modelAliases) == 0 || modelAliases[0].Value != "deepseek/deepseek-v4-pro" {
+	if len(modelAliases) == 0 || modelAliases[0].Display != "deepseek/deepseek-v4-pro" {
 		t.Fatalf("model alias candidates = %#v, want deepseek/deepseek-v4-pro first", modelAliases)
 	}
 	deepseekLevels, err := driver.CompleteSlashArg(ctx, "model use deepseek/deepseek-v4-pro", "", 10)
@@ -1934,12 +1987,12 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	if len(candidates) < 2 {
 		t.Fatalf("model use candidates = %#v, want both providers", candidates)
 	}
-	if candidates[0].Value != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("first candidate = %q, want deepseek/deepseek-v4-pro", candidates[0].Value)
+	if candidates[0].Display != "deepseek/deepseek-v4-pro" {
+		t.Fatalf("first candidate display = %q, want deepseek/deepseek-v4-pro", candidates[0].Display)
 	}
 	foundMinimax := false
 	for _, candidate := range candidates {
-		if candidate.Value == "minimax/minimax-m2.7-highspeed" {
+		if candidate.Display == "minimax/minimax-m2.7-highspeed" {
 			foundMinimax = true
 			break
 		}
@@ -1961,6 +2014,261 @@ func TestFindProviderTemplateSupportsOpenAICompatible(t *testing.T) {
 	}
 	if tpl.defaultBaseURL == "" {
 		t.Fatal("defaultBaseURL = empty, want non-empty")
+	}
+}
+
+func TestFindProviderTemplateSupportsXiaomiTokenPlanCN(t *testing.T) {
+	t.Parallel()
+
+	tpl, ok := findProviderTemplate(connectXiaomiTokenPlanCNAlias)
+	if !ok {
+		t.Fatalf("findProviderTemplate(%q) = false, want true", connectXiaomiTokenPlanCNAlias)
+	}
+	if tpl.provider != "xiaomi" {
+		t.Fatalf("provider = %q, want xiaomi", tpl.provider)
+	}
+	if tpl.api != sdkproviders.APIMimo {
+		t.Fatalf("api = %q, want %q", tpl.api, sdkproviders.APIMimo)
+	}
+	if tpl.defaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
+		t.Fatalf("defaultBaseURL = %q, want %q", tpl.defaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
+	}
+}
+
+func TestFindProviderTemplateRejectsMimoProviderAliases(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"mimo", "mimo-token-plan-cn"} {
+		if tpl, ok := findProviderTemplate(provider); ok {
+			t.Fatalf("findProviderTemplate(%q) = %#v, want unsupported", provider, tpl)
+		}
+	}
+}
+
+func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T) {
+	t.Parallel()
+
+	tpl, ok := findProviderTemplate("xiaomi")
+	if !ok {
+		t.Fatal("findProviderTemplate(xiaomi) = false, want true")
+	}
+	err := validateConnectConfig(tpl, ConnectConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  connectXiaomiTokenPlanCNBaseURL,
+	})
+	if err == nil || !strings.Contains(err.Error(), "env:MIMO_TOKEN_PLAN_API_KEY") {
+		t.Fatalf("validateConnectConfig() error = %v, want MIMO_TOKEN_PLAN_API_KEY hint", err)
+	}
+}
+
+func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "xiaomi-token-plan-connect-test",
+		StoreDir:       root,
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "xiaomi-token-plan-connect-session", "surface", "")
+	if err != nil {
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+	}
+	if _, err := driver.Connect(ctx, ConnectConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  connectXiaomiTokenPlanCNBaseURL,
+		APIKey:   "env:MIMO_TOKEN_PLAN_API_KEY",
+	}); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+
+	doc, err := gatewayapp.LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	var cfg gatewayapp.ModelConfig
+	for _, item := range doc.Models.Configs {
+		if strings.EqualFold(item.Alias, "xiaomi/mimo-v2.5-pro") {
+			cfg = item
+			break
+		}
+	}
+	if cfg.Alias == "" {
+		t.Fatalf("persisted configs = %#v, want xiaomi alias", doc.Models.Configs)
+	}
+	if cfg.ID != "xiaomi@token-plan-cn/xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("persisted model id = %q, want readable profile/model alias id", cfg.ID)
+	}
+	if cfg.ProfileID != "xiaomi@token-plan-cn" {
+		t.Fatalf("persisted profile id = %q, want xiaomi@token-plan-cn", cfg.ProfileID)
+	}
+	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
+		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
+	}
+	var profile gatewayapp.ModelProfileConfig
+	for _, item := range doc.Models.Profiles {
+		if strings.EqualFold(item.ID, cfg.ProfileID) {
+			profile = item
+			break
+		}
+	}
+	if profile.ID == "" {
+		t.Fatalf("persisted profiles = %#v, missing %q", doc.Models.Profiles, cfg.ProfileID)
+	}
+	if profile.Provider != "xiaomi" {
+		t.Fatalf("profile provider = %q, want xiaomi", profile.Provider)
+	}
+	if profile.BaseURL != connectXiaomiTokenPlanCNBaseURL {
+		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, connectXiaomiTokenPlanCNBaseURL)
+	}
+	if profile.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" {
+		t.Fatalf("profile token_env = %q, want MIMO_TOKEN_PLAN_API_KEY", profile.TokenEnv)
+	}
+}
+
+func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "xiaomi-endpoint-coexist-test",
+		StoreDir:       root,
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "xiaomi-endpoint-coexist-session", "surface", "")
+	if err != nil {
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+	}
+	for _, cfg := range []ConnectConfig{
+		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
+		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiTokenPlanCNBaseURL, APIKey: "env:MIMO_TOKEN_PLAN_API_KEY"},
+	} {
+		if _, err := driver.Connect(ctx, cfg); err != nil {
+			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
+		}
+	}
+
+	doc, err := gatewayapp.LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	var sameAlias int
+	for _, item := range doc.Models.Configs {
+		if strings.EqualFold(item.Alias, "xiaomi/mimo-v2.5-pro") {
+			sameAlias++
+		}
+	}
+	if sameAlias != 2 {
+		t.Fatalf("persisted configs = %#v, want two xiaomi/mimo-v2.5-pro bindings", doc.Models.Configs)
+	}
+	if len(doc.Models.Profiles) != 2 {
+		t.Fatalf("persisted profiles = %#v, want two endpoint profiles", doc.Models.Profiles)
+	}
+
+	candidates, err := driver.CompleteSlashArg(ctx, "model use", "xiaomi/mimo-v2.5-pro", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(model use) error = %v", err)
+	}
+	var apiCandidate, tokenPlanCandidate SlashArgCandidate
+	for _, candidate := range candidates {
+		if candidate.Display != "xiaomi/mimo-v2.5-pro" {
+			continue
+		}
+		switch {
+		case strings.Contains(candidate.Detail, "api-cn"):
+			apiCandidate = candidate
+		case strings.Contains(candidate.Detail, "token-plan-cn"):
+			tokenPlanCandidate = candidate
+		}
+	}
+	if apiCandidate.Value == "" || tokenPlanCandidate.Value == "" || apiCandidate.Value == tokenPlanCandidate.Value {
+		t.Fatalf("model use candidates = %#v, want distinct hidden ids for both endpoints", candidates)
+	}
+	if apiCandidate.Value != "xiaomi@api-cn/xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("api candidate value = %q, want readable api profile/model id", apiCandidate.Value)
+	}
+	if tokenPlanCandidate.Value != "xiaomi@token-plan-cn/xiaomi/mimo-v2.5-pro" {
+		t.Fatalf("token-plan candidate value = %q, want readable token-plan profile/model id", tokenPlanCandidate.Value)
+	}
+	if _, err := driver.UseModel(ctx, "xiaomi/mimo-v2.5-pro"); err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
+		t.Fatalf("UseModel(visible alias) error = %v, want ambiguity", err)
+	}
+	if _, err := driver.UseModel(ctx, tokenPlanCandidate.Value); err != nil {
+		t.Fatalf("UseModel(token-plan hidden id) error = %v", err)
+	}
+}
+
+func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "connect-reuse-auth-test",
+		StoreDir:       root,
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-reuse-auth-session", "surface", "")
+	if err != nil {
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+	}
+	if _, err := driver.Connect(ctx, ConnectConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  connectXiaomiAPIBaseURL,
+		APIKey:   "env:XIAOMI_API_KEY",
+	}); err != nil {
+		t.Fatalf("Connect(first model) error = %v", err)
+	}
+	endpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:xiaomi", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
+	}
+	var foundReusable bool
+	for _, endpoint := range endpoints {
+		if endpoint.Value == connectXiaomiAPIBaseURL && endpoint.NoAuth && strings.Contains(endpoint.Detail, "configured auth") {
+			foundReusable = true
+			break
+		}
+	}
+	if !foundReusable {
+		t.Fatalf("endpoint candidates = %#v, want reusable auth marker for api cn", endpoints)
+	}
+	if _, err := driver.Connect(ctx, ConnectConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2-pro",
+		BaseURL:  connectXiaomiAPIBaseURL,
+	}); err != nil {
+		t.Fatalf("Connect(second model without key) error = %v", err)
+	}
+	doc, err := gatewayapp.LoadAppConfig(root)
+	if err != nil {
+		t.Fatalf("LoadAppConfig() error = %v", err)
+	}
+	if len(doc.Models.Profiles) != 1 {
+		t.Fatalf("persisted profiles = %#v, want one shared profile", doc.Models.Profiles)
+	}
+	if got := doc.Models.Profiles[0].TokenEnv; got != "XIAOMI_API_KEY" {
+		t.Fatalf("shared profile token_env = %q, want XIAOMI_API_KEY", got)
 	}
 }
 

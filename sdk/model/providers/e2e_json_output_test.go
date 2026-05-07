@@ -18,7 +18,11 @@ func TestProviderJSONOutputE2E_DeepSeek(t *testing.T) {
 }
 
 func TestProviderJSONOutputE2E_MiMo(t *testing.T) {
-	runProviderJSONOutputE2E(t, "mimo", "mimo-v2-flash")
+	runProviderJSONOutputE2E(t, "xiaomi", "mimo-v2-flash")
+}
+
+func TestProviderJSONOutputE2E_MiMoTokenPlanCN(t *testing.T) {
+	runProviderJSONOutputE2E(t, "xiaomi-token-plan-cn", "mimo-v2.5-pro")
 }
 
 func TestProviderJSONOutputE2E_Ollama(t *testing.T) {
@@ -34,7 +38,8 @@ func runProviderJSONOutputE2E(t *testing.T, provider string, defaultModel string
 		Timeout:         90 * time.Second,
 		MaxTokens:       128,
 	})
-	if !strings.EqualFold(spec.Provider, provider) && !(provider == "mimo" && strings.EqualFold(spec.Provider, "xiaomi")) {
+	acceptsXiaomiProvider := provider == "xiaomi-token-plan-cn"
+	if !strings.EqualFold(spec.Provider, provider) && !(acceptsXiaomiProvider && strings.EqualFold(spec.Provider, "xiaomi")) {
 		t.Fatalf("provider = %q, want %q", spec.Provider, provider)
 	}
 

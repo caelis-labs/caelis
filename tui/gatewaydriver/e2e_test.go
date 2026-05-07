@@ -34,7 +34,7 @@ func TestGatewayDriverProviderLiveTurnE2E(t *testing.T) {
 			Provider: spec.Provider,
 			Model:    spec.Model,
 			BaseURL:  spec.BaseURL,
-			TokenEnv: providerTokenEnv(spec.Provider),
+			TokenEnv: providerTokenEnv(spec),
 		},
 	})
 	if err != nil {
@@ -87,7 +87,7 @@ func TestGatewayDriverProviderLiveTurnE2E(t *testing.T) {
 	if firstEventAt.IsZero() {
 		t.Fatal("expected at least one live turn event")
 	}
-	if delay, maxDelay := firstEventAt.Sub(start), providerFirstEventMaxDelay(spec.Provider); delay > maxDelay {
+	if delay, maxDelay := firstEventAt.Sub(start), providerFirstEventMaxDelay(spec); delay > maxDelay {
 		t.Fatalf("first turn event arrived after %s, want under %s", delay, maxDelay)
 	}
 	if !sawChunk {
@@ -117,7 +117,7 @@ func TestGatewayDriverProviderConnectThenSubmitE2E(t *testing.T) {
 			Provider: spec.Provider,
 			Model:    spec.Model,
 			BaseURL:  spec.BaseURL,
-			TokenEnv: providerTokenEnv(spec.Provider),
+			TokenEnv: providerTokenEnv(spec),
 		},
 	})
 	if err != nil {
@@ -132,7 +132,8 @@ func TestGatewayDriverProviderConnectThenSubmitE2E(t *testing.T) {
 	connectCfg := ConnectConfig{
 		Provider: spec.Provider,
 		Model:    spec.Model,
-		APIKey:   strings.TrimSpace(os.Getenv(providerTokenEnv(spec.Provider))),
+		BaseURL:  spec.BaseURL,
+		APIKey:   strings.TrimSpace(os.Getenv(providerTokenEnv(spec))),
 	}
 	status, err := driver.Connect(context.Background(), connectCfg)
 	if err != nil {
@@ -180,7 +181,7 @@ func TestGatewayDriverProviderMultiTurnNewAndResumeE2E(t *testing.T) {
 			Provider: spec.Provider,
 			Model:    spec.Model,
 			BaseURL:  spec.BaseURL,
-			TokenEnv: providerTokenEnv(spec.Provider),
+			TokenEnv: providerTokenEnv(spec),
 		},
 	})
 	if err != nil {
@@ -281,8 +282,11 @@ func collectFinalAssistantText(t *testing.T, turn Turn) string {
 	return finalText
 }
 
-func providerTokenEnv(provider string) string {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
+func providerTokenEnv(spec e2etest.Spec) string {
+	if normalizedConnectBaseURL(spec.BaseURL) == normalizedConnectBaseURL(connectXiaomiTokenPlanCNBaseURL) {
+		return "MIMO_TOKEN_PLAN_API_KEY"
+	}
+	switch strings.ToLower(strings.TrimSpace(spec.Provider)) {
 	case "minimax":
 		return "MINIMAX_API_KEY"
 	case "openai":
@@ -299,7 +303,7 @@ func providerTokenEnv(provider string) string {
 		return "ANTHROPIC_COMPATIBLE_API_KEY"
 	case "deepseek":
 		return "DEEPSEEK_API_KEY"
-	case "xiaomi", "mimo":
+	case "xiaomi":
 		return "XIAOMI_API_KEY"
 	case "volcengine", "volcengine-coding-plan", "volcengine_coding_plan":
 		return "VOLCENGINE_API_KEY"
@@ -308,8 +312,12 @@ func providerTokenEnv(provider string) string {
 	}
 }
 
-func providerFirstEventMaxDelay(provider string) time.Duration {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
+func providerFirstEventMaxDelay(spec e2etest.Spec) time.Duration {
+	switch {
+	case normalizedConnectBaseURL(spec.BaseURL) == normalizedConnectBaseURL(connectXiaomiTokenPlanCNBaseURL):
+		return 10 * time.Second
+	}
+	switch strings.ToLower(strings.TrimSpace(spec.Provider)) {
 	case "codefree":
 		return 5 * time.Second
 	default:

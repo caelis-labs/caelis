@@ -29,8 +29,11 @@ type GatewayService interface {
 }
 
 type ModelConfig struct {
+	ID                     string
 	Alias                  string
 	Provider               string
+	ProfileID              string
+	EndpointID             string
 	API                    sdkproviders.APIType
 	Model                  string
 	BaseURL                string
@@ -49,7 +52,19 @@ type ModelConfig struct {
 	Timeout                time.Duration
 }
 
+type ModelChoice struct {
+	ID         string
+	Alias      string
+	Provider   string
+	Model      string
+	ProfileID  string
+	EndpointID string
+	BaseURL    string
+	Detail     string
+}
+
 type SessionRuntimeState struct {
+	ModelID         string
 	ModelAlias      string
 	ReasoningEffort string
 	SessionMode     string
@@ -131,6 +146,7 @@ type DriverStack struct {
 	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
 	UnregisterACPAgentFn                 func(string) error
 	ListModelAliasesFn                   func(context.Context, sdksession.SessionRef) ([]string, error)
+	ListModelChoicesFn                   func(context.Context, sdksession.SessionRef) ([]ModelChoice, error)
 	ListProviderModelsFn                 func(string) []string
 	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
@@ -275,6 +291,21 @@ func (s *DriverStack) ListModelAliases(ctx context.Context, ref sdksession.Sessi
 		return nil, fmt.Errorf("tui/gatewaydriver: model alias dependency is unavailable")
 	}
 	return s.ListModelAliasesFn(ctx, ref)
+}
+
+func (s *DriverStack) ListModelChoices(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {
+	if s == nil || s.ListModelChoicesFn == nil {
+		aliases, err := s.ListModelAliases(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		choices := make([]ModelChoice, 0, len(aliases))
+		for _, alias := range aliases {
+			choices = append(choices, ModelChoice{ID: alias, Alias: alias})
+		}
+		return choices, nil
+	}
+	return s.ListModelChoicesFn(ctx, ref)
 }
 
 func (s *DriverStack) ListProviderModels(provider string) []string {

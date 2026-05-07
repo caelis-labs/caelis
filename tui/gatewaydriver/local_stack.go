@@ -55,6 +55,9 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		},
 		UnregisterACPAgentFn: agents.Unregister,
 		ListModelAliasesFn:   models.ListAliases,
+		ListModelChoicesFn: func(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {
+			return toRuntimeModelChoices(models.ListChoices(ctx, ref))
+		},
 		ListProviderModelsFn: models.ListProviderModels,
 		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
 			return toRuntimeACPAgentAddOptions(agents.BuiltinAddOptions())
@@ -75,8 +78,11 @@ func toRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfi
 
 func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 	return ModelConfig{
+		ID:                     cfg.ID,
 		Alias:                  cfg.Alias,
 		Provider:               cfg.Provider,
+		ProfileID:              cfg.ProfileID,
+		EndpointID:             cfg.EndpointID,
 		API:                    cfg.API,
 		Model:                  cfg.Model,
 		BaseURL:                cfg.BaseURL,
@@ -98,8 +104,11 @@ func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 
 func toGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 	return gatewayapp.ModelConfig{
+		ID:                     cfg.ID,
 		Alias:                  cfg.Alias,
 		Provider:               cfg.Provider,
+		ProfileID:              cfg.ProfileID,
+		EndpointID:             cfg.EndpointID,
 		API:                    cfg.API,
 		Model:                  cfg.Model,
 		BaseURL:                cfg.BaseURL,
@@ -135,11 +144,32 @@ func toRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error)
 
 func toRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
 	return SessionRuntimeState{
+		ModelID:         state.ModelID,
 		ModelAlias:      state.ModelAlias,
 		ReasoningEffort: state.ReasoningEffort,
 		SessionMode:     state.SessionMode,
 		SandboxMode:     state.SandboxMode,
 	}, err
+}
+
+func toRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]ModelChoice, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := make([]ModelChoice, 0, len(choices))
+	for _, choice := range choices {
+		out = append(out, ModelChoice{
+			ID:         choice.ID,
+			Alias:      choice.Alias,
+			Provider:   choice.Provider,
+			Model:      choice.Model,
+			ProfileID:  choice.ProfileID,
+			EndpointID: choice.EndpointID,
+			BaseURL:    choice.BaseURL,
+			Detail:     choice.Detail,
+		})
+	}
+	return out, nil
 }
 
 func toGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {

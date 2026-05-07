@@ -42,8 +42,11 @@ func TestAppConfigStoreSaveUsesSecurePermissionsAndRedactsTokenByDefault(t *test
 	if got := doc.Models.Configs[0].Token; got != "" {
 		t.Fatalf("persisted token = %q, want redacted empty token", got)
 	}
-	if got := doc.Models.Configs[0].TokenEnv; got != "MINIMAX_API_KEY" {
-		t.Fatalf("persisted token_env = %q, want MINIMAX_API_KEY", got)
+	if len(doc.Models.Profiles) != 1 {
+		t.Fatalf("len(doc.Models.Profiles) = %d, want 1", len(doc.Models.Profiles))
+	}
+	if got := doc.Models.Profiles[0].TokenEnv; got != "MINIMAX_API_KEY" {
+		t.Fatalf("persisted profile token_env = %q, want MINIMAX_API_KEY", got)
 	}
 	raw := readConfigFileForTest(t, root)
 	for _, forbidden := range []string{"Token", "TokenEnv", "AuthType", "HeaderKey", "PersistToken", "MaxOutputTok"} {
@@ -100,8 +103,8 @@ func TestAppConfigStoreCanPersistTokenOnlyWhenExplicitlyEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error = %v", err)
 	}
-	if len(doc.Models.Configs) != 1 || doc.Models.Configs[0].Token != "persist-me" {
-		t.Fatalf("persisted configs = %#v, want explicit token persistence", doc.Models.Configs)
+	if len(doc.Models.Profiles) != 1 || doc.Models.Profiles[0].Token != "persist-me" {
+		t.Fatalf("persisted profiles = %#v, want explicit token persistence", doc.Models.Profiles)
 	}
 	raw := readConfigFileForTest(t, root)
 	if !strings.Contains(raw, `"token": "persist-me"`) {
@@ -165,6 +168,47 @@ func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
 	}
 	if !strings.Contains(persisted, `"token_env": "CAELIS_CONFIG_STORE_TOKEN"`) {
 		t.Fatalf("config = %s, want token_env retained", persisted)
+	}
+}
+
+func TestAppConfigStoreIgnoresIntermediateConnectionsConfig(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	raw := `{
+  "models": {
+    "connections": [
+      {
+        "id": "xiaomi@token-plan-cn",
+        "provider": "xiaomi",
+        "endpoint_id": "token-plan-cn",
+        "api": "mimo",
+        "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+        "token_env": "MIMO_TOKEN_PLAN_API_KEY"
+      }
+    ]
+  }
+}`
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+	store := newAppConfigStore(root)
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(doc.Models.Profiles) != 0 {
+		t.Fatalf("profiles loaded from intermediate connections = %#v, want none", doc.Models.Profiles)
+	}
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	persisted := readConfigFileForTest(t, root)
+	if strings.Contains(persisted, `"connections"`) || strings.Contains(persisted, "MIMO_TOKEN_PLAN_API_KEY") {
+		t.Fatalf("config persisted intermediate connections data:\n%s", persisted)
 	}
 }
 

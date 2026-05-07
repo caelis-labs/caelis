@@ -157,7 +157,7 @@ func ResolveLLM(cfg Config) (Spec, error) {
 			defaultProvider:   "deepseek",
 			defaultContextTok: 128000,
 		})
-	case "xiaomi", "mimo":
+	case "xiaomi":
 		return resolveFactoryProvider(cfg, providerSpec{
 			name:              "xiaomi",
 			api:               modelproviders.APIMimo,
@@ -169,6 +169,19 @@ func ResolveLLM(cfg Config) (Spec, error) {
 			defaultBaseURL:    "https://api.xiaomimimo.com/v1",
 			defaultProvider:   "xiaomi",
 			defaultContextTok: 262144,
+		})
+	case "xiaomi-token-plan-cn":
+		return resolveFactoryProvider(cfg, providerSpec{
+			name:              "xiaomi-token-plan-cn",
+			api:               modelproviders.APIMimo,
+			authType:          modelproviders.AuthAPIKey,
+			tokenEnvKeys:      []string{"MIMO_TOKEN_PLAN_API_KEY", "XIAOMI_TOKEN_PLAN_API_KEY"},
+			modelEnvKeys:      []string{"MIMO_TOKEN_PLAN_MODEL", "XIAOMI_TOKEN_PLAN_MODEL", "MIMO_MODEL", "XIAOMI_MODEL"},
+			baseURLEnvKeys:    []string{"MIMO_TOKEN_PLAN_BASE_URL", "XIAOMI_TOKEN_PLAN_BASE_URL"},
+			defaultModel:      "mimo-v2.5-pro",
+			defaultBaseURL:    "https://token-plan-cn.xiaomimimo.com/v1",
+			defaultProvider:   "xiaomi",
+			defaultContextTok: 1048576,
 		})
 	case "volcengine":
 		return resolveFactoryProvider(cfg, providerSpec{
@@ -397,6 +410,8 @@ func normalizeProviderName(raw string) string {
 		return "openai-compatible"
 	case "anthropic_compatible":
 		return "anthropic-compatible"
+	case "xiaomi_token_plan_cn":
+		return "xiaomi-token-plan-cn"
 	case "volcengine_coding_plan":
 		return "volcengine-coding-plan"
 	default:

@@ -167,7 +167,7 @@ func (p gatewayACPSurface) SessionModels(ctx context.Context, session sdksession
 	models := make([]acp.ModelInfo, 0, len(snapshot.Configs))
 	for _, cfg := range snapshot.Configs {
 		models = append(models, acp.ModelInfo{
-			ModelID:     cfg.Alias,
+			ModelID:     cfg.ID,
 			Name:        cfg.Alias,
 			Description: modelDescription(cfg),
 		})
@@ -276,12 +276,12 @@ func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session sdkse
 	if err != nil {
 		return "", ModelConfig{}, false, err
 	}
-	alias := firstNonEmpty(state.ModelAlias, snapshot.DefaultAlias)
-	if cfg, ok := configByAlias(snapshot.Configs, alias); ok {
-		return cfg.Alias, cfg, true, nil
+	ref := firstNonEmpty(state.ModelID, state.ModelAlias, snapshot.DefaultID, snapshot.DefaultAlias)
+	if cfg, ok := configByRef(snapshot.Configs, ref); ok {
+		return cfg.ID, cfg, true, nil
 	}
 	cfg := snapshot.Configs[0]
-	return cfg.Alias, cfg, true, nil
+	return cfg.ID, cfg, true, nil
 }
 
 func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session sdksession.Session, cfg ModelConfig, levels []string) string {
@@ -369,7 +369,7 @@ func modelSelectOptions(configs []ModelConfig) []acp.SessionConfigSelectOption {
 	options := make([]acp.SessionConfigSelectOption, 0, len(configs))
 	for _, cfg := range configs {
 		options = append(options, acp.SessionConfigSelectOption{
-			Value:       cfg.Alias,
+			Value:       cfg.ID,
 			Name:        cfg.Alias,
 			Description: modelDescription(cfg),
 		})
@@ -388,17 +388,25 @@ func reasoningSelectOptions(levels []string) []acp.SessionConfigSelectOption {
 	return options
 }
 
-func configByAlias(configs []ModelConfig, alias string) (ModelConfig, bool) {
-	alias = strings.TrimSpace(alias)
-	if alias == "" {
+func configByRef(configs []ModelConfig, ref string) (ModelConfig, bool) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
 		return ModelConfig{}, false
 	}
 	for _, cfg := range configs {
-		if strings.EqualFold(strings.TrimSpace(cfg.Alias), alias) {
+		if strings.EqualFold(strings.TrimSpace(cfg.ID), ref) {
 			return cfg, true
 		}
 	}
-	return ModelConfig{}, false
+	var match ModelConfig
+	matches := 0
+	for _, cfg := range configs {
+		if strings.EqualFold(strings.TrimSpace(cfg.Alias), ref) {
+			match = cfg
+			matches++
+		}
+	}
+	return match, matches == 1
 }
 
 func reasoningLevelsForACPModel(cfg ModelConfig) []string {

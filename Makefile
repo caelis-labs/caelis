@@ -5,9 +5,19 @@ DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BUILD_VERSION := $(if $(filter command line,$(origin VERSION)),$(VERSION),$(if $(strip $(GIT_TAG)),$(strip $(GIT_TAG)),$(shell cat VERSION 2>/dev/null || echo dev)))
 LDFLAGS ?= -X github.com/OnslaughtSnail/caelis/internal/version.Version=$(BUILD_VERSION) -X github.com/OnslaughtSnail/caelis/internal/version.Commit=$(COMMIT) -X github.com/OnslaughtSnail/caelis/internal/version.Date=$(DATE)
 GOFILES := $(shell if command -v rg >/dev/null 2>&1; then rg --files -g '*.go'; else find . -type f -name '*.go' | sed 's|^\./||' | LC_ALL=C sort; fi)
-.PHONY: build build-cli finish fmt fmt-check install lint quality test test-e2e tidy vet eval-light eval-nightly eval-real-matrix release-dry-run
+CACHE_ROOT ?= $(CURDIR)/.tmp/cache
+GOMODCACHE ?= $(CACHE_ROOT)/gomod
+GOCACHE ?= $(CACHE_ROOT)/gocache
+GOTMPDIR ?= $(CACHE_ROOT)/gotmp
+GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
+XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
+export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
+.PHONY: build build-cli cache-dirs finish fmt fmt-check install lint quality test test-e2e tidy vet eval-light eval-nightly eval-real-matrix release-dry-run
 
-tidy:
+cache-dirs:
+	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
+
+tidy: cache-dirs
 	go mod tidy
 
 fmt:
@@ -16,40 +26,40 @@ fmt:
 fmt-check:
 	@test -z "$$(gofmt -l $(GOFILES))"
 
-build:
+build: cache-dirs
 	go build ./...
 
-install:
+install: cache-dirs
 	go install -ldflags "$(LDFLAGS)" ./cmd/caelis
 
-build-cli:
+build-cli: cache-dirs
 	mkdir -p ./.tmp/bin
 	go build -ldflags "$(LDFLAGS)" -o ./.tmp/bin/caelis ./cmd/caelis
 
-vet:
+vet: cache-dirs
 	go vet ./...
 
-lint:
+lint: cache-dirs
 	golangci-lint run ./...
 
 quality: fmt-check lint vet test build
 
 finish: tidy fmt quality
 
-test:
+test: cache-dirs
 	go test ./...
 
-test-e2e:
+test-e2e: cache-dirs
 	go test -tags=e2e ./...
 
-eval-light:
+eval-light: cache-dirs
 	go run ./eval/cmd -suite light
 
-eval-nightly:
+eval-nightly: cache-dirs
 	go run ./eval/cmd -suite nightly
 
-eval-real-matrix:
+eval-real-matrix: cache-dirs
 	go run ./eval/cmd -suite light -models "deepseek-v4-flash,gemini-3.1-flash-lite-preview" -stream-modes both -thinking-modes both -thinking-budget 1024
 
-release-dry-run:
+release-dry-run: cache-dirs
 	goreleaser release --clean --snapshot

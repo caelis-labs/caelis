@@ -76,6 +76,7 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	report.SessionID = strings.TrimSpace(ref.SessionID)
 	report.SessionMode = "auto-review"
 	alias := ""
+	modelRef := ""
 	if strings.TrimSpace(ref.SessionID) != "" {
 		state, err := s.SessionRuntimeState(ctx, ref)
 		if err != nil {
@@ -85,12 +86,14 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 			report.SessionMode = strings.TrimSpace(state.SessionMode)
 		}
 		alias = strings.TrimSpace(state.ModelAlias)
+		modelRef = strings.TrimSpace(firstNonEmpty(state.ModelID, state.ModelAlias))
 	}
 	if alias == "" && s.lookup != nil {
 		alias = strings.TrimSpace(s.lookup.DefaultAlias())
+		modelRef = strings.TrimSpace(s.lookup.DefaultID())
 	}
 	report.ActiveModelAlias = alias
-	if cfg, ok := s.modelConfigForAlias(alias); ok {
+	if cfg, ok := s.modelConfigForAlias(firstNonEmpty(modelRef, alias)); ok {
 		report.ActiveProvider = strings.TrimSpace(cfg.Provider)
 		report.ActiveModel = strings.TrimSpace(cfg.Model)
 		report.MissingAPIKey = modelConfigMissingAPIKey(cfg)
