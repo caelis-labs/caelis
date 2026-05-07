@@ -875,13 +875,23 @@ func TestSlashAgentHelpAndRecovery(t *testing.T) {
 	}
 }
 
-func TestFormatAgentStatusSnapshotHidesSelfDelegatedParticipants(t *testing.T) {
+func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 	status := tuidriver.AgentStatusSnapshot{
 		SessionID:       "session-1",
 		ControllerKind:  "kernel",
 		ControllerLabel: "local",
 		HasActiveTurn:   true,
 		Participants: []tuidriver.AgentParticipantSnapshot{
+			{
+				ID:        "side-001",
+				Label:     "@codex",
+				AgentName: "codex",
+				Kind:      string(sdksession.ParticipantKindACP),
+				Role:      string(sdksession.ParticipantRoleSidecar),
+				SessionID: "side-session",
+			},
+		},
+		DelegatedParticipants: []tuidriver.AgentParticipantSnapshot{
 			{
 				ID:        "self-001",
 				Label:     "@jude",
@@ -902,16 +912,16 @@ func TestFormatAgentStatusSnapshotHidesSelfDelegatedParticipants(t *testing.T) {
 	}
 
 	got := formatAgentStatusSnapshot(status)
-	if strings.Contains(got, "self-001") || strings.Contains(got, "@jude") {
-		t.Fatalf("formatAgentStatusSnapshot() = %q, should hide self delegated participant", got)
+	if !strings.Contains(got, "side-001") || !strings.Contains(got, "@codex") {
+		t.Fatalf("formatAgentStatusSnapshot() = %q, want side agent participant", got)
 	}
-	if !strings.Contains(got, "codex-001") || !strings.Contains(got, "@kate") {
-		t.Fatalf("formatAgentStatusSnapshot() = %q, want non-self participant", got)
+	if !strings.Contains(got, "self-001") || !strings.Contains(got, "@jude") || !strings.Contains(got, "codex-001") || !strings.Contains(got, "@kate") {
+		t.Fatalf("formatAgentStatusSnapshot() = %q, want delegated task summary", got)
 	}
 	if strings.Contains(got, "agent status:") || strings.Contains(got, "active turn:") {
 		t.Fatalf("formatAgentStatusSnapshot() = %q, should use friendly labels", got)
 	}
-	if !strings.Contains(got, "Agent Controller") || !strings.Contains(got, "State") || !strings.Contains(got, "Children") {
+	if !strings.Contains(got, "Agent Controller") || !strings.Contains(got, "State") || !strings.Contains(got, "Side agents") || !strings.Contains(got, "Delegated tasks") {
 		t.Fatalf("formatAgentStatusSnapshot() = %q, want themed-friendly summary labels", got)
 	}
 }

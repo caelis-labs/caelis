@@ -17,7 +17,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 	"github.com/OnslaughtSnail/caelis/tui/driver"
 )
 
@@ -1814,6 +1813,7 @@ func agentHelpText() string {
 		"/agent commands:",
 		"  /agent list          list registered ACP agents and current controller",
 		"  /agent add NAME      register a built-in ACP agent",
+		"  /agent add custom NAME -- COMMAND [ARGS...]",
 		"  /agent install NAME  install an external ACP adapter and register it",
 		"  /agent use NAME      switch the main controller to a registered ACP agent",
 		"  /agent use local     return the main controller to the local kernel",
@@ -1875,11 +1875,20 @@ func formatAgentStatusSnapshot(status tuidriver.AgentStatusSnapshot) string {
 	}
 	participants := displayableAgentParticipants(status.Participants)
 	if len(participants) == 0 {
-		lines = append(lines, "  Children  none")
+		lines = append(lines, "  Side agents  none")
 	} else {
-		lines = append(lines, "  Children")
+		lines = append(lines, "  Side agents")
 		for _, participant := range participants {
 			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), firstNonEmpty(strings.TrimSpace(participant.Label), "-"), strings.TrimSpace(participant.Role)))
+		}
+	}
+	delegated := displayableAgentParticipants(status.DelegatedParticipants)
+	if len(delegated) == 0 {
+		lines = append(lines, "  Delegated tasks  none")
+	} else {
+		lines = append(lines, "  Delegated tasks")
+		for _, participant := range delegated {
+			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), firstNonEmpty(strings.TrimSpace(participant.Label), "-"), strings.TrimSpace(participant.AgentName)))
 		}
 	}
 	if len(status.AvailableAgents) == 0 {
@@ -1920,24 +1929,7 @@ func displayableAgentParticipants(participants []tuidriver.AgentParticipantSnaps
 	if len(participants) == 0 {
 		return nil
 	}
-	out := make([]tuidriver.AgentParticipantSnapshot, 0, len(participants))
-	for _, participant := range participants {
-		if isSelfDelegatedAgentParticipant(participant) {
-			continue
-		}
-		out = append(out, participant)
-	}
-	return out
-}
-
-func isSelfDelegatedAgentParticipant(participant tuidriver.AgentParticipantSnapshot) bool {
-	if !strings.EqualFold(strings.TrimSpace(participant.Kind), string(sdksession.ParticipantKindSubagent)) ||
-		!strings.EqualFold(strings.TrimSpace(participant.Role), string(sdksession.ParticipantRoleDelegated)) {
-		return false
-	}
-	agent := strings.ToLower(strings.TrimSpace(participant.AgentName))
-	id := strings.ToLower(strings.TrimSpace(participant.ID))
-	return agent == "self" || strings.HasPrefix(id, "self-")
+	return append([]tuidriver.AgentParticipantSnapshot(nil), participants...)
 }
 
 func deriveProviderFromAlias(alias string) string {

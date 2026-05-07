@@ -2,11 +2,9 @@ package local
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"maps"
-	"math/big"
 	"strings"
 	"sync"
 	"time"
@@ -621,7 +619,7 @@ func (tm *taskRuntime) StartSubagent(
 		anchor:     sdkdelegation.CloneAnchor(anchor),
 		runner:     runner,
 		agent:      strings.TrimSpace(anchor.Agent),
-		handle:     allocateSubagentHandle(session),
+		handle:     allocateSubagentHandle(session, anchor.Agent),
 		title:      spawntool.ToolName + " " + strings.TrimSpace(anchor.Agent),
 		prompt:     strings.TrimSpace(req.Prompt),
 		createdAt:  now,
@@ -1738,7 +1736,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, session sd
 	}
 	handle := strings.TrimSpace(task.handle)
 	if handle == "" {
-		handle = allocateSubagentHandle(session)
+		handle = allocateSubagentHandle(session, task.agent)
 		task.handle = handle
 	}
 	mention := "@" + strings.TrimPrefix(handle, "@")
@@ -1975,13 +1973,7 @@ func subagentTerminalID(taskID string) string {
 	return "subagent-" + taskID
 }
 
-var subagentHandleNames = []string{
-	"jeff", "amy", "mike", "luna", "leo", "emma", "zoe", "liam",
-	"maya", "nora", "jack", "iris", "kate", "alex", "ella", "owen",
-	"ruby", "evan", "noah", "mia", "lucy", "jude", "cole", "claire",
-}
-
-func allocateSubagentHandle(session sdksession.Session) string {
+func allocateSubagentHandle(session sdksession.Session, agent string) string {
 	used := map[string]struct{}{}
 	for _, participant := range session.Participants {
 		handle := normalizeSubagentHandle(participant.Label)
@@ -1989,29 +1981,50 @@ func allocateSubagentHandle(session sdksession.Session) string {
 			used[handle] = struct{}{}
 		}
 	}
-	for attempt := 0; attempt < len(subagentHandleNames)*2; attempt++ {
-		name := subagentHandleNames[randomIndex(len(subagentHandleNames))]
+	base := normalizeSubagentHandleBase(agent)
+	if base == "" {
+		base = "agent"
+	}
+	for i := 0; i < 1000; i++ {
+		name := base
+		if i > 0 {
+			name = fmt.Sprintf("%s%d", base, i+1)
+		}
 		if _, exists := used[name]; !exists {
 			return name
 		}
 	}
-	for i := 1; ; i++ {
-		name := fmt.Sprintf("agent%d", i)
-		if _, exists := used[name]; !exists {
-			return name
-		}
-	}
+	return base
 }
 
-func randomIndex(n int) int {
-	if n <= 1 {
-		return 0
+func normalizeSubagentHandleBase(value string) string {
+	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		var keep rune
+		switch {
+		case r >= 'a' && r <= 'z':
+			keep = r
+		case r >= '0' && r <= '9':
+			keep = r
+		case r == '-' || r == '_':
+			keep = r
+		case r == '/' || r == '.' || r == ' ' || r == '\t':
+			if !lastDash && b.Len() > 0 {
+				keep = '-'
+				lastDash = true
+			}
+		}
+		if keep == 0 {
+			continue
+		}
+		if keep != '-' {
+			lastDash = false
+		}
+		b.WriteRune(keep)
 	}
-	value, err := rand.Int(rand.Reader, big.NewInt(int64(n)))
-	if err != nil {
-		return 0
-	}
-	return int(value.Int64())
+	return strings.Trim(b.String(), "-_")
 }
 
 func normalizeSubagentHandle(value string) string {

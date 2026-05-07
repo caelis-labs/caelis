@@ -109,6 +109,7 @@ type AgentStatusSnapshot struct {
 	HasActiveTurn             bool
 	AvailableAgents           []AgentCandidate
 	Participants              []AgentParticipantSnapshot
+	DelegatedParticipants     []AgentParticipantSnapshot
 }
 
 type CustomAgentConfig struct {

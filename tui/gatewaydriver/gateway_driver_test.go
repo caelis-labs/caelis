@@ -91,25 +91,25 @@ func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp
 	return gatewayapp.NewLocalStack(cfg)
 }
 
-func TestAllocateSideAgentHandleUsesUniqueHumanHandles(t *testing.T) {
+func TestAllocateSideAgentHandleUsesAgentDerivedHandles(t *testing.T) {
 	used := map[string]struct{}{}
 
-	if got := allocateSideAgentHandle(used, "claude"); got != "jeff" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want jeff", got)
-	}
-	used["jeff"] = struct{}{}
-	if got := allocateSideAgentHandle(used, "claude"); got != "omna" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want omna", got)
-	}
-	for _, name := range sideAgentHandleNames {
-		used[name] = struct{}{}
-	}
 	if got := allocateSideAgentHandle(used, "claude"); got != "claude" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want fallback agent handle", got)
+		t.Fatalf("allocateSideAgentHandle() = %q, want claude", got)
 	}
 	used["claude"] = struct{}{}
 	if got := allocateSideAgentHandle(used, "claude"); got != "claude2" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want numbered fallback", got)
+		t.Fatalf("allocateSideAgentHandle() = %q, want claude2", got)
+	}
+	used["claude2"] = struct{}{}
+	if got := allocateSideAgentHandle(used, "claude"); got != "claude3" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want claude3", got)
+	}
+	if got := allocateSideAgentHandle(used, "anthropic/Claude Agent"); got != "anthropic-claude-agent" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want normalized agent handle", got)
+	}
+	if got := allocateSideAgentHandle(used, "!!!"); got != "agent" {
+		t.Fatalf("allocateSideAgentHandle() = %q, want generic fallback", got)
 	}
 }
 
@@ -1309,8 +1309,8 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if len(status.Participants) != 1 {
 		t.Fatalf("AgentStatus().Participants = %#v, want only first sidecar after rollback", status.Participants)
 	}
-	if status.Participants[0].Label != "@jeff" {
-		t.Fatalf("remaining participant label = %q, want @jeff", status.Participants[0].Label)
+	if status.Participants[0].Label != "@copilot" {
+		t.Fatalf("remaining participant label = %q, want @copilot", status.Participants[0].Label)
 	}
 }
 
@@ -2502,6 +2502,9 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	}
 	if len(status.Participants) != 2 || status.Participants[0].ID != "side-1" || status.Participants[1].ID != "legacy-side-1" {
 		t.Fatalf("AgentStatus().Participants = %#v, want visible side participants", status.Participants)
+	}
+	if len(status.DelegatedParticipants) != 2 || status.DelegatedParticipants[0].ID != "task-1" || status.DelegatedParticipants[1].ID != "self-001" {
+		t.Fatalf("AgentStatus().DelegatedParticipants = %#v, want delegated task summary", status.DelegatedParticipants)
 	}
 }
 

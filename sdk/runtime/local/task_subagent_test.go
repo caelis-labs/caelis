@@ -120,6 +120,24 @@ func TestSubagentTaskIDForHandleAllowsSidecarCustomSource(t *testing.T) {
 	}
 }
 
+func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{Participants: []sdksession.ParticipantBinding{
+		{Label: "@codex"},
+		{Label: "@codex2"},
+	}}
+	if got := allocateSubagentHandle(session, "codex"); got != "codex3" {
+		t.Fatalf("allocateSubagentHandle() = %q, want codex3", got)
+	}
+	if got := allocateSubagentHandle(sdksession.Session{}, "Anthropic/Claude Agent"); got != "anthropic-claude-agent" {
+		t.Fatalf("allocateSubagentHandle() = %q, want normalized agent handle", got)
+	}
+	if got := allocateSubagentHandle(sdksession.Session{}, "!!!"); got != "agent" {
+		t.Fatalf("allocateSubagentHandle() = %q, want generic fallback", got)
+	}
+}
+
 func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
 	t.Parallel()
 

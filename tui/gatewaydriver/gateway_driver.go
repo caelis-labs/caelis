@@ -934,23 +934,27 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 		}
 	}
 	status.Participants = make([]AgentParticipantSnapshot, 0, len(state.Participants))
+	status.DelegatedParticipants = make([]AgentParticipantSnapshot, 0)
 	for _, participant := range state.Participants {
+		snapshot := agentParticipantSnapshot(participant)
 		if participant.Kind == sdksession.ParticipantKindSubagent && participant.Role == sdksession.ParticipantRoleDelegated {
+			status.DelegatedParticipants = append(status.DelegatedParticipants, snapshot)
 			continue
 		}
-		if shouldHideSelfDelegatedParticipant(participant) {
-			continue
-		}
-		status.Participants = append(status.Participants, AgentParticipantSnapshot{
-			ID:        strings.TrimSpace(participant.ID),
-			Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
-			AgentName: strings.TrimSpace(firstNonEmpty(participant.AgentName, participant.Label, participant.ID)),
-			Kind:      string(participant.Kind),
-			Role:      string(participant.Role),
-			SessionID: strings.TrimSpace(participant.SessionID),
-		})
+		status.Participants = append(status.Participants, snapshot)
 	}
 	return status, nil
+}
+
+func agentParticipantSnapshot(participant gateway.ParticipantState) AgentParticipantSnapshot {
+	return AgentParticipantSnapshot{
+		ID:        strings.TrimSpace(participant.ID),
+		Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
+		AgentName: strings.TrimSpace(firstNonEmpty(participant.AgentName, participant.Label, participant.ID)),
+		Kind:      string(participant.Kind),
+		Role:      string(participant.Role),
+		SessionID: strings.TrimSpace(participant.SessionID),
+	}
 }
 
 func (d *GatewayDriver) AddAgent(ctx context.Context, target string) (AgentStatusSnapshot, error) {
@@ -1101,13 +1105,6 @@ func (d *GatewayDriver) detachSideAgentAfterPromptFailure(ctx context.Context, r
 	return nil
 }
 
-var sideAgentHandleNames = []string{
-	"jeff", "omna", "amy", "mike", "luna", "leo", "emma", "zoe",
-	"liam", "maya", "nora", "jack", "iris", "kate", "alex", "ella",
-	"owen", "ruby", "evan", "noah", "mia", "lucy", "jude", "cole",
-	"claire",
-}
-
 func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref sdksession.SessionRef, agent string) string {
 	used := map[string]struct{}{}
 	if d != nil && d.stack != nil && d.stack.Gateway != nil {
@@ -1124,16 +1121,7 @@ func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref sdksessi
 }
 
 func allocateSideAgentHandle(used map[string]struct{}, agent string) string {
-	for _, candidate := range sideAgentHandleNames {
-		candidate = strings.ToLower(strings.TrimSpace(candidate))
-		if candidate == "" {
-			continue
-		}
-		if _, exists := used[candidate]; !exists {
-			return candidate
-		}
-	}
-	base := strings.ToLower(strings.TrimSpace(agent))
+	base := normalizeAgentHandleBase(agent)
 	if base == "" {
 		base = "agent"
 	}
@@ -1147,6 +1135,36 @@ func allocateSideAgentHandle(used map[string]struct{}, agent string) string {
 		}
 	}
 	return base
+}
+
+func normalizeAgentHandleBase(value string) string {
+	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		var keep rune
+		switch {
+		case r >= 'a' && r <= 'z':
+			keep = r
+		case r >= '0' && r <= '9':
+			keep = r
+		case r == '-' || r == '_':
+			keep = r
+		case r == '/' || r == '.' || r == ' ' || r == '\t':
+			if !lastDash && b.Len() > 0 {
+				keep = '-'
+				lastDash = true
+			}
+		}
+		if keep == 0 {
+			continue
+		}
+		if keep != '-' {
+			lastDash = false
+		}
+		b.WriteRune(keep)
+	}
+	return strings.Trim(b.String(), "-_")
 }
 
 func sideAgentParticipantID(session sdksession.Session, agent string, label string) (string, error) {
@@ -1239,15 +1257,6 @@ func isUserSideParticipant(participant gateway.ParticipantState) bool {
 		return false
 	}
 	return participant.Kind == sdksession.ParticipantKindACP
-}
-
-func shouldHideSelfDelegatedParticipant(participant gateway.ParticipantState) bool {
-	if participant.Kind != sdksession.ParticipantKindSubagent || participant.Role != sdksession.ParticipantRoleDelegated {
-		return false
-	}
-	agent := strings.ToLower(strings.TrimSpace(participant.AgentName))
-	id := strings.ToLower(strings.TrimSpace(participant.ID))
-	return agent == "self" || strings.HasPrefix(id, "self-")
 }
 
 func (d *GatewayDriver) CompleteFile(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
