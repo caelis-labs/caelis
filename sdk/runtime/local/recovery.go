@@ -65,21 +65,10 @@ func (r *Runtime) recoverSubagentEntry(ctx context.Context, entry *sdktask.Entry
 	if r == nil || r.tasks == nil || entry == nil || !entry.Running {
 		return nil
 	}
-	if r.subagents != nil {
+	if r.tasks.hasActiveSubagentTask(entry) {
 		return nil
 	}
-	next := sdktask.CloneEntry(entry)
-	next.Running = false
-	next.State = sdktask.StateInterrupted
-	if next.Result == nil {
-		next.Result = map[string]any{}
-	}
-	next.Result["state"] = string(sdktask.StateInterrupted)
-	next.Result["result"] = subagentInterruptedSummary(entry)
-	if next.Metadata == nil {
-		next.Metadata = map[string]any{}
-	}
-	next.Metadata["state"] = string(sdktask.StateInterrupted)
+	next := interruptedSubagentEntry(entry, subagentInterruptedSummary(entry))
 	return r.tasks.persistTaskEntry(ctx, next)
 }
 

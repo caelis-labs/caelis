@@ -96,6 +96,12 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 			task.applyResult(result)
 			task.seedStreamFromResult(result)
 			task.mu.Unlock()
+		} else if ctx.Err() != nil {
+			return sdkstream.Snapshot{}, ctx.Err()
+		} else if task.isRunning() && s != nil && s.tasks != nil {
+			if _, interruptErr := s.tasks.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery: "+strings.TrimSpace(err.Error())); interruptErr != nil {
+				return sdkstream.Snapshot{}, interruptErr
+			}
 		}
 	}
 	task.mu.Lock()

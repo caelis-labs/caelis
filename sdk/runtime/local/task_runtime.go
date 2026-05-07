@@ -1033,28 +1033,17 @@ func (tm *taskRuntime) waitSubagent(ctx context.Context, task *subagentTask, yie
 		task.mu.Unlock()
 		return snapshot, nil
 	}
+	if !task.isRunning() {
+		task.mu.Lock()
+		snapshot := task.snapshot()
+		task.mu.Unlock()
+		return snapshot, nil
+	}
 	result, err := task.runner.Wait(ctx, sdkdelegation.CloneAnchor(task.anchor), int(yield/time.Millisecond))
 	if err != nil {
-		task.mu.Lock()
-		if task.running {
-			task.running = false
-			task.state = sdktask.StateInterrupted
-			if task.result == nil {
-				task.result = map[string]any{}
-			}
-			task.result["state"] = string(sdktask.StateInterrupted)
-			task.result["error"] = "subagent session interrupted during recovery: " + strings.TrimSpace(err.Error())
-			task.result["result"] = "subagent session interrupted during recovery"
-			snapshot := task.snapshot()
-			entry := task.entrySnapshot(tm.runtime.now())
-			task.mu.Unlock()
-			if persistErr := tm.persistTaskEntry(ctx, entry); persistErr != nil {
-				return sdktask.Snapshot{}, persistErr
-			}
-			_ = tm.updateSubagentParticipant(ctx, task, "updated")
-			return snapshot, nil
+		if task.isRunning() {
+			return tm.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery: "+strings.TrimSpace(err.Error()))
 		}
-		task.mu.Unlock()
 		return sdktask.Snapshot{}, err
 	}
 	task.mu.Lock()
@@ -1497,6 +1486,67 @@ func (tm *taskRuntime) persistTaskEntry(ctx context.Context, entry *sdktask.Entr
 	return tm.store.Upsert(ctx, entry)
 }
 
+func (tm *taskRuntime) hasActiveSubagentTask(entry *sdktask.Entry) bool {
+	if tm == nil || entry == nil {
+		return false
+	}
+	taskID := strings.TrimSpace(entry.TaskID)
+	sessionID := strings.TrimSpace(entry.Session.SessionID)
+	if taskID == "" || sessionID == "" {
+		return false
+	}
+	tm.mu.RLock()
+	task := tm.subagents[taskID]
+	tm.mu.RUnlock()
+	if task == nil || strings.TrimSpace(task.sessionRef.SessionID) != sessionID {
+		return false
+	}
+	task.mu.Lock()
+	defer task.mu.Unlock()
+	return task.running
+}
+
+func interruptedSubagentEntry(entry *sdktask.Entry, reason string) *sdktask.Entry {
+	next := sdktask.CloneEntry(entry)
+	if next == nil {
+		return nil
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "subagent interrupted during resume"
+	}
+	next.Running = false
+	next.State = sdktask.StateInterrupted
+	if next.Result == nil {
+		next.Result = map[string]any{}
+	}
+	next.Result["state"] = string(sdktask.StateInterrupted)
+	next.Result["error"] = reason
+	next.Result["result"] = reason
+	if next.Metadata == nil {
+		next.Metadata = map[string]any{}
+	}
+	next.Metadata["state"] = string(sdktask.StateInterrupted)
+	next.Metadata["interrupted_reason"] = reason
+	return next
+}
+
+func (tm *taskRuntime) interruptSubagentTask(ctx context.Context, task *subagentTask, reason string) (sdktask.Snapshot, error) {
+	if task == nil {
+		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: task is required")
+	}
+	task.mu.Lock()
+	task.applyInterruptedLocked(reason)
+	snapshot := task.snapshot()
+	entry := task.entrySnapshot(tm.runtime.now())
+	task.mu.Unlock()
+	if err := tm.persistTaskEntry(ctx, entry); err != nil {
+		return sdktask.Snapshot{}, err
+	}
+	_ = tm.updateSubagentParticipant(ctx, task, "updated")
+	return snapshot, nil
+}
+
 func (tm *taskRuntime) PublishStream(frame sdkstream.Frame) {
 	if tm == nil {
 		return
@@ -1677,13 +1727,7 @@ func (tm *taskRuntime) rehydrateSubagentTask(entry *sdktask.Entry) *subagentTask
 		task.turnSeq = 1
 	}
 	if task.runner == nil && task.running {
-		if task.result == nil {
-			task.result = map[string]any{}
-		}
-		task.running = false
-		task.state = sdktask.StateInterrupted
-		task.result["output_preview"] = "subagent session requires reconnect"
-		task.result["state"] = string(sdktask.StateInterrupted)
+		task.applyInterruptedLocked("subagent session requires reconnect")
 	}
 	return task
 }
@@ -2048,6 +2092,54 @@ func (t *subagentTask) applyResult(result sdkdelegation.Result) {
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
 	t.result["supports_cancel"] = t.running
+}
+
+func (t *subagentTask) isRunning() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.running
+}
+
+func (t *subagentTask) applyInterruptedLocked(reason string) {
+	if t == nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = "subagent interrupted during resume"
+	}
+	t.running = false
+	t.state = sdktask.StateInterrupted
+	if t.result == nil {
+		t.result = map[string]any{}
+	}
+	if t.metadata == nil {
+		t.metadata = map[string]any{}
+	}
+	t.result["state"] = string(sdktask.StateInterrupted)
+	t.result["error"] = reason
+	t.result["result"] = reason
+	t.result["output_preview"] = reason
+	t.result["supports_cancel"] = false
+	t.result["task_id"] = t.handle
+	t.result["handle"] = t.handle
+	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
+	t.result["agent"] = t.agent
+	t.metadata["state"] = string(sdktask.StateInterrupted)
+	t.metadata["interrupted_reason"] = reason
+	t.metadata["task_id"] = t.handle
+	t.metadata["internal_task_id"] = t.ref.TaskID
+	t.metadata["task_kind"] = string(sdktask.KindSubagent)
+	t.metadata["agent"] = t.agent
+	t.metadata["agent_id"] = t.anchor.AgentID
+	t.metadata["handle"] = t.handle
+	t.metadata["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
+	t.metadata["prompt"] = t.prompt
+	t.metadata["session_id"] = t.anchor.SessionID
+	t.metadata["terminal_id"] = t.ref.TerminalID
 }
 
 func (t *subagentTask) seedStreamFromResult(result sdkdelegation.Result) {

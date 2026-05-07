@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
@@ -649,6 +650,53 @@ func TestStartSubagentKeepsEarlyStreamPublishedBeforeTaskRegistration(t *testing
 	}
 }
 
+func TestSubagentStreamReadInterruptsStaleRunningChild(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: sdkdelegation.Result{State: sdkdelegation.StateRunning, Running: true, OutputPreview: "starting"},
+		waitErr:     errors.New("sdk/subagent/acp: child session \"child-1\" not found"),
+	}
+	runtime, session := newSubagentTaskTestRuntime(t, runner)
+
+	started, err := runtime.tasks.StartSubagent(ctx, session, session.SessionRef, runner, sdktask.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "first",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent() error = %v", err)
+	}
+	if !started.Running {
+		t.Fatalf("started.Running = false, want true")
+	}
+
+	snap, err := runtime.Streams().Read(ctx, sdkstream.ReadRequest{
+		Ref: sdkstream.Ref{SessionID: session.SessionID, TaskID: started.Ref.TaskID},
+	})
+	if err != nil {
+		t.Fatalf("Read(stale subagent) error = %v", err)
+	}
+	if snap.Running {
+		t.Fatalf("stream snapshot Running = true, want false")
+	}
+	if snap.ExitCode == nil || *snap.ExitCode == 0 {
+		t.Fatalf("stream snapshot ExitCode = %#v, want non-zero", snap.ExitCode)
+	}
+	if got, _ := snap.Result["state"].(string); got != string(sdktask.StateInterrupted) {
+		t.Fatalf("stream snapshot state = %q, want interrupted", got)
+	}
+	if got, _ := snap.Result["error"].(string); !strings.Contains(got, "child session") {
+		t.Fatalf("stream snapshot error = %q, want child session detail", got)
+	}
+
+	waited, err := runtime.tasks.Wait(ctx, session.SessionRef, sdktask.ControlRequest{TaskID: started.Ref.TaskID})
+	if err != nil {
+		t.Fatalf("Wait(interrupted subagent) error = %v", err)
+	}
+	if waited.Running || waited.State != sdktask.StateInterrupted {
+		t.Fatalf("Wait() = running %v state %q, want interrupted", waited.Running, waited.State)
+	}
+}
+
 func TestUpdateACPAgentsPreservesRunnerAndControllerInstances(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime, err := New(Config{
@@ -753,6 +801,7 @@ type recordingSubagentRunner struct {
 	spawnRequest    sdkdelegation.Request
 	continueAnchor  sdkdelegation.Anchor
 	continuePrompt  string
+	waitErr         error
 	publishOnSpawn  bool
 	spawnStreamText string
 }
@@ -778,6 +827,9 @@ func (r *recordingSubagentRunner) Continue(_ context.Context, anchor sdkdelegati
 }
 
 func (r *recordingSubagentRunner) Wait(context.Context, sdkdelegation.Anchor, int) (sdkdelegation.Result, error) {
+	if r.waitErr != nil {
+		return sdkdelegation.Result{}, r.waitErr
+	}
 	return sdkdelegation.CloneResult(r.waitResult), nil
 }
 
