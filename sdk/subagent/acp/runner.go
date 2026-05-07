@@ -427,8 +427,8 @@ func (r *Runner) handleUpdate(run *childRun, env sdkacpclient.UpdateEnvelope) {
 	var streamText string
 	streamName := "stdout"
 	var event *sdksession.Event
+	var frame *sdkstream.Frame
 	run.mu.Lock()
-	defer run.mu.Unlock()
 	run.updatedAt = r.clock()
 	switch update := env.Update.(type) {
 	case sdkacpclient.ContentChunk:
@@ -459,7 +459,7 @@ func (r *Runner) handleUpdate(run *childRun, env sdkacpclient.UpdateEnvelope) {
 		event = run.acpUpdateEvent(env, run.updatedAt)
 	}
 	if streamText != "" || event != nil {
-		run.emitLocked(sdkstream.Frame{
+		next := sdkstream.Frame{
 			Ref: sdkstream.Ref{
 				TaskID:    firstNonEmpty(run.taskID, run.anchor.TaskID),
 				SessionID: firstNonEmpty(strings.TrimSpace(env.SessionID), run.anchor.SessionID),
@@ -470,7 +470,12 @@ func (r *Runner) handleUpdate(run *childRun, env sdkacpclient.UpdateEnvelope) {
 			Running:   run.running,
 			Event:     event,
 			UpdatedAt: run.updatedAt,
-		})
+		}
+		frame = &next
+	}
+	run.mu.Unlock()
+	if frame != nil {
+		run.emit(*frame)
 	}
 }
 
@@ -697,7 +702,7 @@ func acpPlanEntries(in []sdkacpclient.PlanEntry) []sdksession.ProtocolPlanEntry 
 	return out
 }
 
-func (run *childRun) emitLocked(frame sdkstream.Frame) {
+func (run *childRun) emit(frame sdkstream.Frame) {
 	if run == nil || run.sink == nil {
 		return
 	}

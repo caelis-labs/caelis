@@ -316,6 +316,54 @@ func TestRunnerHandleUpdatePreservesWhitespaceThoughtChunk(t *testing.T) {
 	}
 }
 
+func TestRunnerHandleUpdateDoesNotHoldRunLockWhilePublishing(t *testing.T) {
+	t.Parallel()
+
+	sink := &blockingStreams{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	run := &childRun{
+		anchor:  sdkdelegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "self", AgentID: "self-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   sdkdelegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	done := make(chan struct{})
+	go func() {
+		runner.handleUpdate(run, contentUpdate(t, sdkacpclient.UpdateAgentMessage, "blocked output"))
+		close(done)
+	}()
+	select {
+	case <-sink.entered:
+	case <-time.After(time.Second):
+		t.Fatal("PublishStream was not called")
+	}
+
+	locked := make(chan struct{})
+	go func() {
+		run.mu.Lock()
+		run.outputPreview = "lock was available"
+		run.mu.Unlock()
+		close(locked)
+	}()
+	select {
+	case <-locked:
+	case <-time.After(time.Second):
+		t.Fatal("run lock stayed held while PublishStream was blocked")
+	}
+
+	close(sink.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handleUpdate did not return after releasing PublishStream")
+	}
+}
+
 func TestRunnerHandleUpdateAcceptsStringContentChunks(t *testing.T) {
 	t.Parallel()
 
@@ -380,6 +428,16 @@ type recordingStreams struct {
 
 func (s *recordingStreams) PublishStream(frame sdkstream.Frame) {
 	s.frames = append(s.frames, sdkstream.CloneFrame(frame))
+}
+
+type blockingStreams struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (s *blockingStreams) PublishStream(sdkstream.Frame) {
+	close(s.entered)
+	<-s.release
 }
 
 func repoRootForRunnerTest(t *testing.T) string {
