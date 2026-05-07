@@ -15,8 +15,8 @@ TUI, ACP stdio, and the headless one-shot runner.
 - Starts an interactive TUI when launched from a TTY with no prompt input.
 - Runs a headless single-shot turn when given `-p` or piped stdin.
 - Persists sessions, provider config, and app config under `~/.caelis` by default.
-- Supports approval-aware tool execution in `default` permission mode and direct
-  host execution in `full_control`.
+- Supports approval-aware tool execution; sandbox route, status, and doctor
+  output report whether execution is isolated or using the host.
 - Connects external agents through the Agent Client Protocol (ACP) as
   participants, subagents, or main-controller handoffs.
 - Keeps async `BASH` and `SPAWN` work addressable through `TASK wait`,
@@ -67,13 +67,13 @@ Current design references:
 From npm:
 
 ```bash
-npm i -g @onslaughtsnail/caelis@0.1.3
+npm i -g @onslaughtsnail/caelis@0.1.4
 ```
 
 or without a global install:
 
 ```bash
-npx @onslaughtsnail/caelis@0.1.3 --help
+npx @onslaughtsnail/caelis@0.1.4 --help
 ```
 
 Supported npm platforms: macOS/Linux (`x64`, `arm64`).
@@ -189,7 +189,9 @@ Notes:
 
 - `-permission-mode default`: use the local sandbox runtime when available and
   require approval for host escalation.
-- `-permission-mode full_control`: execute directly on the host.
+- `-permission-mode full_control`: accepted compatibility mode for permissive
+  review policy; actual execution route still depends on sandbox backend
+  resolution and is reflected by `/status` and `caelis doctor`.
 
 Sandbox backend selection is resolved by the local runtime. The TUI exposes
 `/sandbox [auto|seatbelt|bwrap|landlock]` for inspection and selection. Sandbox
@@ -253,6 +255,15 @@ Local release dry run:
 ```bash
 make release-dry-run
 ```
+
+Release hygiene checklist:
+
+- Keep `VERSION`, npm manifests, README install examples, and changelog entries
+  aligned.
+- Run `make quality` and `git diff --check` before publishing.
+- Push the release commit before creating a tag.
+- For a published release, verify the tag workflow, GitHub Release, and npm
+  package versions after publication.
 
 Tagged releases are driven by annotated `vX.Y.Z` tags pushed after `main` has
 the matching `VERSION`, npm manifests, README, and changelog updates.

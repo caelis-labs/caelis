@@ -5,7 +5,7 @@ Install `caelis` from npm.
 ## Install
 
 ```bash
-npm i -g @onslaughtsnail/caelis@0.1.3
+npm i -g @onslaughtsnail/caelis@0.1.4
 ```
 
 Supported platforms: macOS/Linux (`x64`, `arm64`).
@@ -13,7 +13,7 @@ Supported platforms: macOS/Linux (`x64`, `arm64`).
 or run without global install:
 
 ```bash
-npx @onslaughtsnail/caelis@0.1.3 --help
+npx @onslaughtsnail/caelis@0.1.4 --help
 ```
 
 ## How it works
