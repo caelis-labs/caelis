@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -254,6 +255,43 @@ func TestTurnHandleCloseAfterFinishDoesNotDoubleClose(t *testing.T) {
 	handle.finish()
 	if err := handle.Close(); err != nil {
 		t.Fatalf("Close(after finish) error = %v", err)
+	}
+}
+
+func TestTurnHandlePublishDoesNotBlockWhenEventChannelIsFull(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 64; i++ {
+			handle.publishSessionEvent(&sdksession.Event{ID: fmt.Sprintf("e%d", i), Type: sdksession.EventTypeAssistant})
+		}
+		handle.finish()
+		handle.publishSessionEvent(&sdksession.Event{ID: "late", Type: sdksession.EventTypeAssistant})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("publish blocked with a full event channel")
+	}
+
+	replayed, next, err := handle.EventsAfter("")
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(replayed) != 65 || next != "late" {
+		t.Fatalf("replayed len/next = %d/%q, want 65/late", len(replayed), next)
 	}
 }
 

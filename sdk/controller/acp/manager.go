@@ -990,9 +990,9 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env sdkacpclient.U
 type turnHandle struct {
 	cancelFn  context.CancelFunc
 	eventsCh  chan turnHandleEvent
-	closeOnce sync.Once
 	mu        sync.Mutex
 	cancelled bool
+	closed    bool
 }
 
 type turnHandleEvent struct {
@@ -1050,10 +1050,14 @@ func (h *turnHandle) publish(item turnHandleEvent) {
 	if h == nil {
 		return
 	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
 	select {
 	case h.eventsCh <- item:
 	default:
-		h.eventsCh <- item
 	}
 }
 
@@ -1061,9 +1065,13 @@ func (h *turnHandle) finish() {
 	if h == nil {
 		return
 	}
-	h.closeOnce.Do(func() {
-		close(h.eventsCh)
-	})
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.closed {
+		return
+	}
+	h.closed = true
+	close(h.eventsCh)
 }
 
 func normalizeACPUpdateEvent(

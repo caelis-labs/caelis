@@ -395,6 +395,28 @@ func TestControllerRunStatusPreservesConfigChoicesAfterPartialUpdate(t *testing.
 	}
 }
 
+func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(nil)
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < 128; i++ {
+			handle.publishEvent(&sdksession.Event{ID: "event", Type: sdksession.EventTypeAssistant})
+		}
+		handle.finish()
+		for i := 0; i < 8; i++ {
+			handle.publishEvent(&sdksession.Event{ID: "late", Type: sdksession.EventTypeAssistant})
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("turn handle publish blocked with a full or finished channel")
+	}
+}
+
 func controllerChoiceValues(in []sdkcontroller.ControllerConfigChoice) []string {
 	if len(in) == 0 {
 		return nil

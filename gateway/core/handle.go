@@ -246,17 +246,19 @@ func (h *turnHandle) recordApprovalReviewDecision(approved bool) bool {
 
 func (h *turnHandle) publish(env EventEnvelope) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	if env.Cursor == "" {
 		env.Cursor = h.allocateCursorLocked()
 	}
 	h.events = append(h.events, env)
 	if h.closed || h.finished {
-		h.mu.Unlock()
 		return
 	}
 	ch := h.eventsCh
-	h.mu.Unlock()
-	ch <- env
+	select {
+	case ch <- env:
+	default:
+	}
 }
 
 func (h *turnHandle) allocateCursor() string {
