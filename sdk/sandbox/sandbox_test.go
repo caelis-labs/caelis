@@ -219,8 +219,6 @@ func TestNormalizeConfigTreatsAutoBackendAsUnset(t *testing.T) {
 }
 
 func TestNewAutoBackendPrefersSandboxCandidate(t *testing.T) {
-	t.Parallel()
-
 	wantCandidates, err := candidateBackends("")
 	if err != nil {
 		t.Fatalf("candidateBackends(\"\") error = %v", err)
@@ -260,13 +258,64 @@ func TestNewAutoBackendPrefersSandboxCandidate(t *testing.T) {
 	}
 }
 
+func TestNewAutoBackendReportsSkippedSandboxCandidate(t *testing.T) {
+	candidates, err := candidateBackends("")
+	if err != nil {
+		t.Fatalf("candidateBackends(\"\") error = %v", err)
+	}
+	if len(candidates) < 2 {
+		t.Skip("auto backend has no secondary sandbox candidate on this platform")
+	}
+	failed := candidates[0]
+	resolved := candidates[1]
+
+	backendFactoriesMu.Lock()
+	original := maps.Clone(backendFactories)
+	backendFactories = map[Backend]BackendFactory{
+		BackendHost: fakeBackendFactory{backend: BackendHost},
+		failed:      fakeBackendFactory{backend: failed, err: errors.New("probe blocked by AppArmor")},
+		resolved:    fakeBackendFactory{backend: resolved},
+	}
+	backendFactoriesMu.Unlock()
+	t.Cleanup(func() {
+		backendFactoriesMu.Lock()
+		backendFactories = original
+		backendFactoriesMu.Unlock()
+	})
+
+	rt, err := New(Config{RequestedBackend: "auto"})
+	if err != nil {
+		t.Fatalf("New(auto) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = rt.Close()
+	})
+
+	status := rt.Status()
+	if status.ResolvedBackend != resolved {
+		t.Fatalf("Status().ResolvedBackend = %q, want %q", status.ResolvedBackend, resolved)
+	}
+	if status.FallbackToHost {
+		t.Fatalf("Status().FallbackToHost = true, want false for sandbox backend fallback")
+	}
+	for _, want := range []string{string(failed), "probe blocked by AppArmor"} {
+		if !strings.Contains(status.FallbackReason, want) {
+			t.Fatalf("FallbackReason = %q, want to contain %q", status.FallbackReason, want)
+		}
+	}
+}
+
 type fakeBackendFactory struct {
 	backend Backend
+	err     error
 }
 
 func (f fakeBackendFactory) Backend() Backend { return f.backend }
 
 func (f fakeBackendFactory) Build(Config) (Runtime, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
 	return &fakeRuntime{backend: f.backend}, nil
 }
 

@@ -73,7 +73,7 @@ func New(cfg Config) (Runtime, error) {
 		rt.backends[candidate] = backendRuntime
 		rt.status.ResolvedBackend = candidate
 		rt.status.FallbackToHost = false
-		rt.status.FallbackReason = ""
+		rt.status.FallbackReason = strings.Join(failures, "; ")
 		return rt, nil
 	}
 

@@ -3,8 +3,10 @@ package tuiapp
 import (
 	"errors"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultWriteClipboardTextUsesOSC52ForSSH(t *testing.T) {
@@ -124,6 +126,24 @@ func TestOSC52UsesScreenWrapperOnlyForScreen(t *testing.T) {
 	}
 }
 
+func TestRunClipboardCommandTimesOut(t *testing.T) {
+	if _, err := exec.LookPath("sleep"); err != nil {
+		t.Skip("sleep command is unavailable")
+	}
+
+	restore := stubClipboardEnv(t, nil)
+	defer restore()
+
+	clipboardCommandTimeout = 20 * time.Millisecond
+	err := runClipboardCommand(clipboardCommand{name: "sleep", args: []string{"1"}}, "")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "sleep 1: timed out after") {
+		t.Fatalf("expected timeout diagnostic, got %q", err.Error())
+	}
+}
+
 func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 	t.Helper()
 
@@ -133,6 +153,7 @@ func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 	oldRunCommand := clipboardRunCommand
 	oldWriter := clipboardOSC52Writer
 	oldOpenTerminal := clipboardOpenTerminal
+	oldTimeout := clipboardCommandTimeout
 
 	clipboardGOOS = "linux"
 	clipboardGetenv = func(key string) string {
@@ -157,6 +178,7 @@ func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 		clipboardRunCommand = oldRunCommand
 		clipboardOSC52Writer = oldWriter
 		clipboardOpenTerminal = oldOpenTerminal
+		clipboardCommandTimeout = oldTimeout
 	}
 }
 

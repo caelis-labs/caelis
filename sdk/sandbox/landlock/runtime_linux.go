@@ -452,18 +452,20 @@ func applyLandlockFilesystemPolicy(p sandboxpolicy.Policy, policyCWD string) err
 
 	if readableRoots := sandboxpolicy.ShellReadableRoots(p, policyCWD); len(readableRoots) > 0 {
 		for _, root := range readableRoots {
-			if err := landlockAddPathRule(rulesetFD, root, landlockReadOnlyMaskForABI(abi)); err != nil {
+			access := landlockReadOnlyAccessForPath(root, abi)
+			if err := landlockAddPathRule(rulesetFD, root, access); err != nil {
 				return fmt.Errorf("allow readable root %s: %w", root, err)
 			}
 		}
-	} else if err := landlockAddPathRule(rulesetFD, "/", landlockReadOnlyMaskForABI(abi)); err != nil {
+	} else if err := landlockAddPathRule(rulesetFD, "/", landlockReadOnlyAccessForPath("/", abi)); err != nil {
 		return fmt.Errorf("allow read-only root: %w", err)
 	}
 	if err := landlockAddPathRule(rulesetFD, "/dev/null", landlockFileReadWriteMaskForABI(abi)); err != nil {
 		return fmt.Errorf("allow /dev/null writes: %w", err)
 	}
 	for _, root := range landlockWritableRoots(p, policyCWD) {
-		if err := landlockAddPathRule(rulesetFD, root, landlockReadWriteMaskForABI(abi)); err != nil {
+		access := landlockReadWriteAccessForPath(root, abi)
+		if err := landlockAddPathRule(rulesetFD, root, access); err != nil {
 			return fmt.Errorf("allow writable root %s: %w", root, err)
 		}
 	}
@@ -481,7 +483,7 @@ func landlockWritableRoots(p sandboxpolicy.Policy, workDir string) []string {
 	for _, one := range p.WritableRoots {
 		resolved := sandboxpolicy.ResolveSandboxPath(workDir, one)
 		if resolved != "" {
-			roots = append(roots, resolved)
+			roots = append(roots, landlockWritableRoot(resolved))
 		}
 	}
 	roots = append(roots, "/tmp", "/var/tmp")
@@ -490,6 +492,22 @@ func landlockWritableRoots(p sandboxpolicy.Policy, workDir string) []string {
 		roots = append(roots, filepath.Join(home, ".cache"))
 	}
 	return sandboxpolicy.FilterExistingPaths(roots)
+}
+
+func landlockWritableRoot(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(path)
+	if info, err := os.Stat(cleaned); err == nil && info.IsDir() {
+		return cleaned
+	}
+	parent := filepath.Dir(cleaned)
+	if parent == "." || parent == "" || parent == string(filepath.Separator) {
+		return cleaned
+	}
+	return parent
 }
 
 func landlockABI() (int, error) {
@@ -590,6 +608,28 @@ func landlockFileReadWriteMaskForABI(abi int) uint64 {
 	if abi >= 3 {
 		mask |= unix.LANDLOCK_ACCESS_FS_TRUNCATE
 	}
+	if abi >= 5 {
+		mask |= unix.LANDLOCK_ACCESS_FS_IOCTL_DEV
+	}
+	return mask
+}
+
+func landlockReadOnlyAccessForPath(path string, abi int) uint64 {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return landlockFileReadOnlyMaskForABI(abi)
+	}
+	return landlockReadOnlyMaskForABI(abi)
+}
+
+func landlockReadWriteAccessForPath(path string, abi int) uint64 {
+	if info, err := os.Stat(path); err == nil && !info.IsDir() {
+		return landlockFileReadWriteMaskForABI(abi)
+	}
+	return landlockReadWriteMaskForABI(abi)
+}
+
+func landlockFileReadOnlyMaskForABI(abi int) uint64 {
+	mask := uint64(unix.LANDLOCK_ACCESS_FS_READ_FILE)
 	if abi >= 5 {
 		mask |= unix.LANDLOCK_ACCESS_FS_IOCTL_DEV
 	}

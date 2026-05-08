@@ -23,6 +23,7 @@ type Policy struct {
 	NetworkAccess    bool
 	ReadableRoots    []string
 	WritableRoots    []string
+	HiddenRoots      []string
 	ReadOnlySubpaths []string
 }
 
@@ -40,6 +41,7 @@ func Default(cfg sdksandbox.Config, constraints sdksandbox.Constraints) Policy {
 		p.NetworkAccess = true
 		p.ReadableRoots = nil
 		p.WritableRoots = nil
+		p.HiddenRoots = nil
 		p.ReadOnlySubpaths = nil
 	default:
 		if len(p.WritableRoots) == 0 {
@@ -55,6 +57,7 @@ func Default(cfg sdksandbox.Config, constraints sdksandbox.Constraints) Policy {
 	}
 	p.ReadableRoots = normalizeStringList(p.ReadableRoots)
 	p.WritableRoots = normalizeStringList(p.WritableRoots)
+	p.HiddenRoots = normalizeStringList(p.HiddenRoots)
 	p.ReadOnlySubpaths = normalizeStringList(p.ReadOnlySubpaths)
 	return p
 }
@@ -73,6 +76,8 @@ func applyPathRules(p *Policy, rules []sdksandbox.PathRule) {
 			p.WritableRoots = append(p.WritableRoots, path)
 		case sdksandbox.PathAccessReadOnly:
 			p.ReadableRoots = append(p.ReadableRoots, path)
+		case sdksandbox.PathAccessHidden:
+			p.HiddenRoots = append(p.HiddenRoots, path)
 		}
 	}
 }

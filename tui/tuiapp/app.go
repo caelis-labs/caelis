@@ -284,6 +284,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.removeHintByID(typed.id)
 		return m, nil
 
+	case clipboardCopyResultMsg:
+		return m, m.handleClipboardCopyResult(typed)
+
 	case ctrlCExpireMsg:
 		if m.ctrlCArmSeq == typed.seq && m.lastCtrlCAt.Equal(typed.armedAt) {
 			m.ctrlCArmed = false

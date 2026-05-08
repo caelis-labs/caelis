@@ -5,6 +5,7 @@ package tuiapp
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/aymanbagabas/go-osc52/v2"
 )
@@ -22,12 +24,13 @@ type clipboardCommand struct {
 }
 
 var (
-	clipboardGOOS         = runtime.GOOS
-	clipboardGetenv       = os.Getenv
-	clipboardReadFile     = os.ReadFile
-	clipboardRunCommand   = runClipboardCommand
-	clipboardOSC52Writer  io.Writer
-	clipboardOpenTerminal = func() (io.WriteCloser, error) {
+	clipboardGOOS           = runtime.GOOS
+	clipboardGetenv         = os.Getenv
+	clipboardReadFile       = os.ReadFile
+	clipboardRunCommand     = runClipboardCommand
+	clipboardOSC52Writer    io.Writer
+	clipboardCommandTimeout = 2 * time.Second
+	clipboardOpenTerminal   = func() (io.WriteCloser, error) {
 		return os.OpenFile("/dev/tty", os.O_WRONLY, 0)
 	}
 )
@@ -137,25 +140,44 @@ func writeClipboardCommands() []clipboardCommand {
 }
 
 func runClipboardCommand(spec clipboardCommand, input string) error {
-	cmd := exec.Command(spec.name, spec.args...)
+	ctx, cancel := clipboardCommandContext()
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, spec.name, spec.args...)
 	cmd.Stdin = strings.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return formatClipboardCommandError(spec, stderr.String(), fmt.Errorf("timed out after %s", clipboardCommandTimeout))
+		}
 		return formatClipboardCommandError(spec, stderr.String(), err)
 	}
 	return nil
 }
 
 func runClipboardOutputCommand(spec clipboardCommand) ([]byte, error) {
-	cmd := exec.Command(spec.name, spec.args...)
+	ctx, cancel := clipboardCommandContext()
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, spec.name, spec.args...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return nil, formatClipboardCommandError(spec, stderr.String(), fmt.Errorf("timed out after %s", clipboardCommandTimeout))
+		}
 		return nil, formatClipboardCommandError(spec, stderr.String(), err)
 	}
 	return out, nil
+}
+
+func clipboardCommandContext() (context.Context, context.CancelFunc) {
+	if clipboardCommandTimeout <= 0 {
+		return context.WithCancel(context.Background())
+	}
+	return context.WithTimeout(context.Background(), clipboardCommandTimeout)
 }
 
 func formatClipboardCommandError(spec clipboardCommand, stderr string, err error) error {

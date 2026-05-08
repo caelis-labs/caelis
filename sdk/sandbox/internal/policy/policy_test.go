@@ -26,6 +26,26 @@ func TestDefaultMergesConstraintPathRules(t *testing.T) {
 	if !slices.Contains(p.ReadableRoots, "/read-only") {
 		t.Fatalf("ReadableRoots = %#v, want /read-only from constraints", p.ReadableRoots)
 	}
+	if slices.Contains(p.HiddenRoots, "/hidden") {
+		t.Fatalf("HiddenRoots = %#v, did not expect /hidden without hidden path rule", p.HiddenRoots)
+	}
+}
+
+func TestDefaultMergesHiddenPathRules(t *testing.T) {
+	t.Parallel()
+
+	p := Default(sdksandbox.Config{
+		CWD: "/sandbox-cwd",
+	}, sdksandbox.Constraints{
+		Permission: sdksandbox.PermissionWorkspaceWrite,
+		PathRules: []sdksandbox.PathRule{
+			{Path: "/hidden", Access: sdksandbox.PathAccessHidden},
+		},
+	})
+
+	if !slices.Contains(p.HiddenRoots, "/hidden") {
+		t.Fatalf("HiddenRoots = %#v, want /hidden from constraints", p.HiddenRoots)
+	}
 }
 
 func TestDefaultFullAccessIgnoresConstraintPathRules(t *testing.T) {

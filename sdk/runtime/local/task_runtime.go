@@ -127,7 +127,7 @@ func (r *Runtime) wrapToolsForRuntime(session sdksession.Session, ref sdksession
 		case strings.ToUpper(requestPermissionsToolName):
 			if !hasRequestPermissions {
 				hasRequestPermissions = true
-				out = append(out, runtimeRequestPermissionsTool(session, ref, toolCtx))
+				out = append(out, runtimeRequestPermissionsTool(r.sessions, session, ref, toolCtx))
 			}
 		case shelltool.BashToolName:
 			hasBash = true
@@ -170,15 +170,16 @@ func (r *Runtime) wrapToolsForRuntime(session sdksession.Session, ref sdksession
 		})
 	}
 	if !hasRequestPermissions {
-		out = append(out, runtimeRequestPermissionsTool(session, ref, toolCtx))
+		out = append(out, runtimeRequestPermissionsTool(r.sessions, session, ref, toolCtx))
 	}
 	return out
 }
 
-func runtimeRequestPermissionsTool(session sdksession.Session, ref sdksession.SessionRef, toolCtx runtimeToolContext) requestPermissionsTool {
+func runtimeRequestPermissionsTool(sessions sdksession.Service, session sdksession.Session, ref sdksession.SessionRef, toolCtx runtimeToolContext) requestPermissionsTool {
 	return requestPermissionsTool{
 		session:    sdksession.CloneSession(session),
 		sessionRef: sdksession.NormalizeSessionRef(ref),
+		sessions:   sessions,
 		mode:       strings.TrimSpace(toolCtx.mode),
 		runID:      strings.TrimSpace(toolCtx.runID),
 		turnID:     strings.TrimSpace(toolCtx.turnID),

@@ -2,6 +2,7 @@ package presets
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -335,6 +336,9 @@ func parseBashAdditionalFileSystem(raw any, input sdkpolicy.ToolContext) ([]sdks
 			if resolved == "" {
 				return fmt.Errorf("%s contains an empty path", label)
 			}
+			if access == sdksandbox.PathAccessReadWrite {
+				resolved = shellWritableRoot(resolved)
+			}
 			rules = mergePathRules(rules, []sdksandbox.PathRule{{Path: resolved, Access: access}})
 		}
 		return nil
@@ -384,6 +388,22 @@ func additionalPermissionBasePath(input sdkpolicy.ToolContext) string {
 		return filepath.Clean(root)
 	}
 	return string(filepath.Separator)
+}
+
+func shellWritableRoot(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(path)
+	if info, err := os.Stat(cleaned); err == nil && info.IsDir() {
+		return cleaned
+	}
+	parent := filepath.Dir(cleaned)
+	if parent == "." || parent == "" || parent == string(filepath.Separator) {
+		return cleaned
+	}
+	return parent
 }
 
 func stringList(raw any, label string) ([]string, error) {

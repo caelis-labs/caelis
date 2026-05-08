@@ -101,6 +101,35 @@ func TestWriteAllowedByConstraintPathRule(t *testing.T) {
 	}
 }
 
+func TestHiddenPathRuleDeniesReadAndWrite(t *testing.T) {
+	t.Parallel()
+
+	hidden := deniedAbsoluteTestPath("sandbox-hidden")
+	target := filepath.Join(hidden, "token")
+	fsys := New(testFileSystem{
+		wd:   deniedAbsoluteTestPath("sandbox-cwd"),
+		home: deniedAbsoluteTestPath("sandbox-home"),
+	}, func() policy.Policy {
+		return policy.Default(sdksandbox.Config{
+			CWD: deniedAbsoluteTestPath("sandbox-cwd"),
+		}, sdksandbox.Constraints{
+			Permission: sdksandbox.PermissionWorkspaceWrite,
+			PathRules: []sdksandbox.PathRule{
+				{Path: hidden, Access: sdksandbox.PathAccessReadOnly},
+				{Path: hidden, Access: sdksandbox.PathAccessReadWrite},
+				{Path: hidden, Access: sdksandbox.PathAccessHidden},
+			},
+		})
+	})
+
+	if _, err := fsys.ReadFile(target); err == nil || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("ReadFile() error = %v, want permission", err)
+	}
+	if err := fsys.WriteFile(target, []byte("x"), 0o600); err == nil || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("WriteFile() error = %v, want permission", err)
+	}
+}
+
 func deniedAbsoluteTestPath(elem ...string) string {
 	volume := filepath.VolumeName(os.TempDir())
 	root := string(filepath.Separator)

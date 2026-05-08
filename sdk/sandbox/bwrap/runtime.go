@@ -365,7 +365,7 @@ func bwrapWritableRoots(p policy.Policy, workDir string) []string {
 	roots := make([]string, 0, len(p.WritableRoots)+8)
 	for _, one := range p.WritableRoots {
 		if resolved := resolveBwrapPath(workDir, one); resolved != "" {
-			roots = append(roots, resolved)
+			roots = append(roots, bwrapWritableRoot(resolved))
 		}
 	}
 	roots = append(roots, "/tmp", "/var/tmp")
@@ -373,6 +373,22 @@ func bwrapWritableRoots(p policy.Policy, workDir string) []string {
 		roots = append(roots, filepath.Join(home, ".cache"))
 	}
 	return filterExistingPaths(normalizeStringList(roots))
+}
+
+func bwrapWritableRoot(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	cleaned := filepath.Clean(path)
+	if info, err := os.Stat(cleaned); err == nil && info.IsDir() {
+		return cleaned
+	}
+	parent := filepath.Dir(cleaned)
+	if parent == "." || parent == "" || parent == string(filepath.Separator) {
+		return cleaned
+	}
+	return parent
 }
 
 func bwrapReadOnlySubpaths(p policy.Policy, workDir string) []string {
@@ -526,6 +542,15 @@ func bwrapProbeFailureDetail(
 		}
 	}
 	if readFileFn != nil {
+		if value, ok := readFirstLineInt(readFileFn, "/proc/sys/kernel/apparmor_restrict_unprivileged_userns"); ok && value == 1 {
+			parts = append(parts, "kernel.apparmor_restrict_unprivileged_userns=1")
+			if !apparmorBwrapProfileLoaded(readFileFn, bwrapPath) {
+				parts = append(parts,
+					"AppArmor bwrap profile not detected",
+					"fix: create /etc/apparmor.d/bwrap with a userns rule and reload it with sudo apparmor_parser -r /etc/apparmor.d/bwrap, or use sandbox.requested_type=landlock",
+				)
+			}
+		}
 		if value, ok := readFirstLineInt(readFileFn, "/proc/sys/kernel/unprivileged_userns_clone"); ok && value == 0 {
 			parts = append(parts, "kernel.unprivileged_userns_clone=0")
 		}
@@ -535,6 +560,42 @@ func bwrapProbeFailureDetail(
 	}
 	parts = append(parts, "docs="+bubblewrapDocsURL)
 	return strings.Join(parts, "; ")
+}
+
+func apparmorBwrapProfileLoaded(readFileFn func(string) ([]byte, error), bwrapPath string) bool {
+	if readFileFn == nil {
+		return false
+	}
+	data, err := readFileFn("/sys/kernel/security/apparmor/profiles")
+	if err != nil {
+		return false
+	}
+	candidates := map[string]struct{}{
+		"bwrap":          {},
+		"/usr/bin/bwrap": {},
+	}
+	if trimmed := strings.TrimSpace(bwrapPath); trimmed != "" {
+		candidates[trimmed] = struct{}{}
+		if base := filepath.Base(trimmed); base != "" && base != "." {
+			candidates[base] = struct{}{}
+		}
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		name := strings.TrimSpace(line)
+		if name == "" {
+			continue
+		}
+		if before, _, ok := strings.Cut(name, " ("); ok {
+			name = strings.TrimSpace(before)
+		}
+		if _, ok := candidates[name]; ok {
+			return true
+		}
+		if strings.HasSuffix(name, "/bwrap") {
+			return true
+		}
+	}
+	return false
 }
 
 func bubblewrapInstallHint(readFileFn func(string) ([]byte, error)) string {

@@ -286,6 +286,9 @@ func (r *Runtime) resolveAgent(
 	spec.Request = req.Request.WithDefaults(spec.Request)
 	modeName := r.policyMode(spec)
 	grants := r.permissionGrantStoreForSession(ref)
+	if err := r.hydratePermissionGrantStore(ctx, ref, grants); err != nil {
+		return nil, err
+	}
 	spec.Tools = r.wrapToolsForRuntime(session, ref, spec, runtimeToolContext{
 		mode:              modeName,
 		approvalRequester: req.ApprovalRequester,
@@ -345,6 +348,18 @@ func (r *Runtime) PermissionGrantSnapshot(ref sdksession.SessionRef) PermissionG
 		return PermissionGrantSnapshot{}
 	}
 	return store.snapshot()
+}
+
+func (r *Runtime) hydratePermissionGrantStore(ctx context.Context, ref sdksession.SessionRef, store *permissionGrantStore) error {
+	if r == nil || r.sessions == nil || store == nil {
+		return nil
+	}
+	state, err := r.sessions.SnapshotState(ctx, ref)
+	if err != nil {
+		return err
+	}
+	store.hydrate(permissionGrantRecordsFromState(state[permissionGrantStateKey]))
+	return nil
 }
 
 func (r *Runtime) setRunState(sessionID string, state sdkruntime.RunState) {

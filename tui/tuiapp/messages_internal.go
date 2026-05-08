@@ -17,6 +17,10 @@ type clearHintMsg struct {
 	id uint64
 }
 
+type clipboardCopyResultMsg struct {
+	err error
+}
+
 type ctrlCExpireMsg struct {
 	armedAt time.Time
 	seq     uint64

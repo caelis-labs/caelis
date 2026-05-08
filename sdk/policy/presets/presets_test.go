@@ -3,6 +3,7 @@ package presets
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -48,6 +49,77 @@ func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 	}
 	if decision.Action != sdkpolicy.ActionDeny {
 		t.Fatalf("Action = %q, want deny", decision.Action)
+	}
+}
+
+func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
+	home := "/home/caelis-policy-test"
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".config", "ghostty", "config")
+
+	decision, err := DefaultMode().DecideTool(context.Background(), readCtx(configPath))
+	if err != nil {
+		t.Fatalf("READ DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionAllow {
+		t.Fatalf("READ action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+	}
+
+	decision, err = DefaultMode().DecideTool(context.Background(), writeCtx(configPath))
+	if err != nil {
+		t.Fatalf("WRITE DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionDeny {
+		t.Fatalf("WRITE action = %q, want deny without explicit grant", decision.Action)
+	}
+}
+
+func TestDefaultModeReadConstraintsIncludeDefaultUserRootsWithExtraReadRoot(t *testing.T) {
+	home := "/home/caelis-policy-test"
+	t.Setenv("HOME", home)
+	configPath := filepath.Join(home, ".config", "ghostty", "config")
+	input := readCtx(configPath)
+	input.Options.ExtraReadRoots = []string{"/var/log"}
+
+	decision, err := DefaultMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("READ DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionAllow {
+		t.Fatalf("READ action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+	}
+	if !hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config"), sdksandbox.PathAccessReadOnly) {
+		t.Fatalf("PathRules = %#v, want default user config read root", decision.Constraints.PathRules)
+	}
+	if !hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sdksandbox.PathAccessHidden) {
+		t.Fatalf("PathRules = %#v, want sensitive user config hidden root", decision.Constraints.PathRules)
+	}
+}
+
+func TestDefaultModeDeniesSensitiveUserConfigReadsWithoutExplicitGrant(t *testing.T) {
+	home := "/home/caelis-policy-test"
+	t.Setenv("HOME", home)
+	secretPath := filepath.Join(home, ".config", "gh", "hosts.yml")
+
+	decision, err := DefaultMode().DecideTool(context.Background(), readCtx(secretPath))
+	if err != nil {
+		t.Fatalf("READ DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionDeny {
+		t.Fatalf("READ action = %q, want deny for hidden path", decision.Action)
+	}
+
+	input := readCtx(secretPath)
+	input.Options.ExtraReadRoots = []string{filepath.Join(home, ".config", "gh")}
+	decision, err = DefaultMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("READ with grant DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionAllow {
+		t.Fatalf("READ with grant action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
+	}
+	if hasPathRule(decision.Constraints.PathRules, filepath.Join(home, ".config", "gh"), sdksandbox.PathAccessHidden) {
+		t.Fatalf("PathRules = %#v, did not expect hidden rule for explicitly granted root", decision.Constraints.PathRules)
 	}
 }
 
@@ -152,8 +224,8 @@ func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
 	if !hasPathRule(decision.Constraints.PathRules, "/var/log", sdksandbox.PathAccessReadOnly) {
 		t.Fatalf("PathRules = %#v, want read-only /var/log", decision.Constraints.PathRules)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, "/workspace/subdir/generated", sdksandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, want read-write /workspace/subdir/generated", decision.Constraints.PathRules)
+	if !hasPathRule(decision.Constraints.PathRules, "/workspace/subdir", sdksandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want read-write /workspace/subdir shell write root", decision.Constraints.PathRules)
 	}
 	if decision.Approval == nil {
 		t.Fatal("Approval = nil, want protocol approval payload")
@@ -170,8 +242,8 @@ func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
 		t.Fatalf("additional_permissions.file_system = %#v, want map", additional["file_system"])
 	}
 	writePaths, ok := fileSystem["write"].([]string)
-	if !ok || len(writePaths) != 1 || writePaths[0] != "/workspace/subdir/generated" {
-		t.Fatalf("additional_permissions.file_system.write = %#v, want resolved path", fileSystem["write"])
+	if !ok || len(writePaths) != 1 || writePaths[0] != "/workspace/subdir" {
+		t.Fatalf("additional_permissions.file_system.write = %#v, want shell write root", fileSystem["write"])
 	}
 }
 

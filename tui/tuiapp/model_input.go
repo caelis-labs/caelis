@@ -377,9 +377,19 @@ func (m *Model) handleFixedAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, t
 }
 
 func (m *Model) copySelectionToClipboard(text string) tea.Cmd {
+	writer := m.cfg.WriteClipboardText
+	if writer == nil {
+		writer = defaultWriteClipboardText
+	}
+	return func() tea.Msg {
+		return clipboardCopyResultMsg{err: writer(text)}
+	}
+}
+
+func (m *Model) handleClipboardCopyResult(msg clipboardCopyResultMsg) tea.Cmd {
 	const copyHint = "selected text copied to clipboard"
-	if err := m.writeClipboardText(text); err != nil {
-		return m.reportClipboardError("copy", err)
+	if msg.err != nil {
+		return m.reportClipboardError("copy", msg.err)
 	}
 	return m.showHint(copyHint, hintOptions{
 		priority:       HintPriorityNormal,

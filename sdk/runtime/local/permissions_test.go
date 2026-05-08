@@ -10,6 +10,7 @@ import (
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksandbox "github.com/OnslaughtSnail/caelis/sdk/sandbox"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/sdk/session/inmemory"
 	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
@@ -112,6 +113,71 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	}
 }
 
+func TestRequestPermissionsToolPersistsGrantInSessionState(t *testing.T) {
+	ctx := context.Background()
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	session, err := sessions.StartSession(ctx, sdksession.StartSessionRequest{
+		AppName: "caelis-test",
+		UserID:  "user",
+		Workspace: sdksession.WorkspaceRef{
+			Key: "workspace",
+			CWD: "/workspace",
+		},
+		PreferredSessionID: "sess-grants",
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	target := "/home/test/.config/ghostty/config"
+	store := newPermissionGrantStore()
+	tool := requestPermissionsTool{
+		session:    session,
+		sessionRef: session.SessionRef,
+		sessions:   sessions,
+		mode:       "manual",
+		runID:      "run-1",
+		turnID:     "turn-1",
+		approval: approvalRequesterFunc(func(context.Context, sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+			return sdkruntime.ApprovalResponse{Approved: true}, nil
+		}),
+		grants: store,
+	}
+
+	result, err := tool.Call(ctx, sdktool.Call{
+		ID:    "perm-1",
+		Name:  requestPermissionsToolName,
+		Input: []byte(fmt.Sprintf(`{"reason":"edit ghostty","permissions":{"file_system":{"write":[%q]}}}`, target)),
+	})
+	if err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if result.IsError {
+		t.Fatalf("Call() IsError = true: %#v", result.Meta)
+	}
+
+	state, err := sessions.SnapshotState(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	records := permissionGrantRecordsFromState(state[permissionGrantStateKey])
+	if len(records) != 1 {
+		t.Fatalf("persisted records len = %d, want 1: %#v", len(records), records)
+	}
+	if records[0].WriteRoots[0] != target {
+		t.Fatalf("WriteRoots = %#v, want %q", records[0].WriteRoots, target)
+	}
+	if want := "/home/test/.config/ghostty"; records[0].ShellWriteRoots[0] != want {
+		t.Fatalf("ShellWriteRoots = %#v, want %q", records[0].ShellWriteRoots, want)
+	}
+
+	hydrated := newPermissionGrantStore()
+	hydrated.hydrate(records)
+	constraints := hydrated.applyToConstraints(sdksandbox.Constraints{})
+	if !hasSandboxPathRule(constraints.PathRules, "/home/test/.config/ghostty", sdksandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want parent dir shell write root", constraints.PathRules)
+	}
+}
+
 func TestRuntimePermissionGrantsAreSessionScoped(t *testing.T) {
 	runtime := &Runtime{}
 	first := runtime.permissionGrantStoreForSession(sdksession.SessionRef{SessionID: "sess-1"})
@@ -130,4 +196,13 @@ func TestRuntimePermissionGrantsAreSessionScoped(t *testing.T) {
 	if got := runtime.PermissionGrantSnapshot(sdksession.SessionRef{SessionID: "sess-2"}); got.Count != 0 || got.NetworkGranted {
 		t.Fatalf("sess-2 snapshot = %+v, want no grants", got)
 	}
+}
+
+func hasSandboxPathRule(rules []sdksandbox.PathRule, path string, access sdksandbox.PathAccess) bool {
+	for _, rule := range rules {
+		if rule.Path == path && rule.Access == access {
+			return true
+		}
+	}
+	return false
 }

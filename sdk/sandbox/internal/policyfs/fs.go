@@ -91,6 +91,9 @@ func (f *policyFileSystem) checkWritePath(path string) error {
 	if targetPath == "" {
 		return nil
 	}
+	if fsboundary.IsWithinRoots(targetPath, p.HiddenRoots, f.base) {
+		return permissionError("write", targetPath, "path is hidden by sandbox policy")
+	}
 	if fsboundary.IsWithinReadOnlySubpaths(targetPath, p.ReadOnlySubpaths, f.base) {
 		return permissionError("write", targetPath, "path is under read-only sandbox subpath")
 	}
@@ -109,6 +112,9 @@ func (f *policyFileSystem) checkReadPath(path string) error {
 	targetPath := fsboundary.ResolveAbsPath(path, f.base)
 	if targetPath == "" {
 		return nil
+	}
+	if fsboundary.IsWithinRoots(targetPath, p.HiddenRoots, f.base) {
+		return permissionError("read", targetPath, "path is hidden by sandbox policy")
 	}
 	if len(p.ReadableRoots) == 0 {
 		return nil

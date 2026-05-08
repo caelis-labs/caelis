@@ -3,7 +3,9 @@ package presets
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy"
@@ -53,7 +55,7 @@ func AutoReviewMode() sdkpolicy.Mode {
 				if err := ensureReadPathsWithinRoots(input); err != nil {
 					return deny(err.Error()), nil
 				}
-				return allow(def), nil
+				return allow(readStrictConstraints(input.Options)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
 					return deny(err.Error()), nil
@@ -98,7 +100,7 @@ func ManualMode() sdkpolicy.Mode {
 				if err := ensureReadPathsWithinRoots(input); err != nil {
 					return deny(err.Error()), nil
 				}
-				return allow(def), nil
+				return allow(readStrictConstraints(input.Options)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
 					return deny(err.Error()), nil
@@ -249,6 +251,21 @@ func baseStrictConstraints(opts sdkpolicy.ModeOptions) sdksandbox.Constraints {
 	}
 }
 
+func readStrictConstraints(opts sdkpolicy.ModeOptions) sdksandbox.Constraints {
+	out := baseStrictConstraints(opts)
+	for _, path := range defaultUserReadableRoots() {
+		out.PathRules = append(out.PathRules, sdksandbox.PathRule{Path: path, Access: sdksandbox.PathAccessReadOnly})
+	}
+	approvedRoots := approvedOverrideRoots(opts)
+	for _, path := range defaultHiddenUserRoots() {
+		if overlapsAnyRoot(path, approvedRoots) {
+			continue
+		}
+		out.PathRules = append(out.PathRules, sdksandbox.PathRule{Path: path, Access: sdksandbox.PathAccessHidden})
+	}
+	return out
+}
+
 func toolName(input sdkpolicy.ToolContext) string {
 	return strings.ToUpper(strings.TrimSpace(input.Tool.Name))
 }
@@ -266,10 +283,16 @@ func ensureMarkdownOnly(input sdkpolicy.ToolContext) error {
 }
 
 func ensureReadPathsWithinRoots(input sdkpolicy.ToolContext) error {
+	if err := ensurePathsOutsideDefaultHiddenRoots(candidatePaths(input), approvedOverrideRoots(input.Options), "read"); err != nil {
+		return err
+	}
 	return ensurePathsWithinRoots(candidatePaths(input), readableRoots(input.Options), "read")
 }
 
 func ensureWritePathsWithinRoots(input sdkpolicy.ToolContext) error {
+	if err := ensurePathsOutsideDefaultHiddenRoots(candidatePaths(input), approvedOverrideRoots(input.Options), "write"); err != nil {
+		return err
+	}
 	return ensurePathsWithinRoots(candidatePaths(input), writableRoots(input.Options), "write")
 }
 
@@ -290,6 +313,7 @@ func readableRoots(opts sdkpolicy.ModeOptions) []string {
 	roots = appendNonEmpty(roots, opts.WorkspaceRoot, opts.TempRoot)
 	roots = appendNonEmpty(roots, opts.ExtraWriteRoots...)
 	roots = appendNonEmpty(roots, opts.ExtraReadRoots...)
+	roots = appendNonEmpty(roots, defaultUserReadableRoots()...)
 	return roots
 }
 
@@ -309,6 +333,68 @@ func appendNonEmpty(dst []string, values ...string) []string {
 	return dst
 }
 
+func approvedOverrideRoots(opts sdkpolicy.ModeOptions) []string {
+	roots := make([]string, 0, len(opts.ExtraReadRoots)+len(opts.ExtraWriteRoots))
+	roots = appendNonEmpty(roots, opts.ExtraWriteRoots...)
+	roots = appendNonEmpty(roots, opts.ExtraReadRoots...)
+	return roots
+}
+
+func ensurePathsOutsideDefaultHiddenRoots(paths []string, approvedRoots []string, action string) error {
+	for _, one := range paths {
+		target := normalizeTarget(one)
+		if target == "" {
+			continue
+		}
+		if withinAnyRoot(target, approvedRoots) {
+			continue
+		}
+		if withinAnyRoot(target, defaultHiddenUserRoots()) {
+			return fmt.Errorf("%s target %q is under a sensitive user configuration path; request explicit permission for that path", action, one)
+		}
+	}
+	return nil
+}
+
+func defaultUserReadableRoots() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	roots := []string{
+		filepath.Join(home, ".config"),
+		filepath.Join(home, ".local", "share"),
+		filepath.Join(home, ".local", "state"),
+		filepath.Join(home, ".cache"),
+	}
+	if runtime.GOOS == "darwin" {
+		roots = append(roots,
+			filepath.Join(home, "Library", "Application Support"),
+			filepath.Join(home, "Library", "Preferences"),
+			filepath.Join(home, "Library", "Caches"),
+		)
+	}
+	return roots
+}
+
+func defaultHiddenUserRoots() []string {
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(home, ".ssh"),
+		filepath.Join(home, ".gnupg"),
+		filepath.Join(home, ".aws"),
+		filepath.Join(home, ".kube"),
+		filepath.Join(home, ".docker"),
+		filepath.Join(home, ".netrc"),
+		filepath.Join(home, ".npmrc"),
+		filepath.Join(home, ".config", "gh"),
+		filepath.Join(home, ".config", "gcloud"),
+	}
+}
+
 func withinAnyRoot(target string, roots []string) bool {
 	target = normalizeTarget(target)
 	if target == "" {
@@ -320,6 +406,25 @@ func withinAnyRoot(target string, roots []string) bool {
 			continue
 		}
 		if target == root || strings.HasPrefix(target, root+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+func overlapsAnyRoot(path string, roots []string) bool {
+	path = normalizeTarget(path)
+	if path == "" {
+		return true
+	}
+	for _, root := range roots {
+		root = normalizeTarget(root)
+		if root == "" {
+			continue
+		}
+		if path == root || root == path ||
+			strings.HasPrefix(path, root+string(filepath.Separator)) ||
+			strings.HasPrefix(root, path+string(filepath.Separator)) {
 			return true
 		}
 	}
