@@ -1,7 +1,5 @@
 # caelis
 
-Current release target: `v0.1.4`.
-
 `caelis` is a terminal-first agent runtime. The active local path is:
 `cmd/caelis -> internal/cli -> app/gatewayapp -> gateway`.
 
@@ -67,13 +65,13 @@ Current design references:
 From npm:
 
 ```bash
-npm i -g @onslaughtsnail/caelis@0.1.4
+npm i -g @onslaughtsnail/caelis
 ```
 
 or without a global install:
 
 ```bash
-npx @onslaughtsnail/caelis@0.1.4 --help
+npx @onslaughtsnail/caelis --help
 ```
 
 Supported npm platforms: macOS/Linux (`x64`, `arm64`).
@@ -212,16 +210,12 @@ Caelis currently requires Go `1.25.1` as declared in `go.mod`.
 ```bash
 make quality
 make test
-make test-e2e
 make build
 ```
 
 - `make quality`: runs formatting check, `golangci-lint`, tests, `go vet`, and
   `go build ./...`
 - `make test`: runs `go test ./...`
-- `make test-e2e`: runs `go test -tags=e2e ./...` for live/provider/acpx/ACP
-  process integration checks; many are still guarded by explicit environment
-  variables.
 - `make build`: runs `go build ./...`
 
 The Makefile defaults Go and lint caches to `.tmp/cache` so local quality checks
@@ -235,20 +229,15 @@ make quality
 
 ## Release And Packaging
 
-- `VERSION` carries the Go release tag, including the leading `v`.
-- npm package manifests carry the same version without the leading `v`.
+- Release identity comes from the annotated git tag, such as `vX.Y.Z`.
+- Binary version metadata is injected from the git tag at build/release time.
+- npm package manifests are rewritten from the tag inside the release workflow.
 - Go release archives are produced from `./cmd/caelis` by GoReleaser.
 - npm publishes a thin launcher package from `npm/` plus platform-specific binary
   packages from `npm/packages/*`.
 - The npm wrapper is file-whitelisted so published artifacts do not include
   workspace files such as `.env`, `.git`, `.superpowers`, caches, or temporary
   build outputs.
-
-Synchronize npm manifests:
-
-```bash
-node ./npm/scripts/set-version.mjs v0.1.4
-```
 
 Local release dry run:
 
@@ -258,12 +247,14 @@ make release-dry-run
 
 Release hygiene checklist:
 
-- Keep `VERSION`, npm manifests, README install examples, and changelog entries
-  aligned.
-- Run `make quality` and `git diff --check` before publishing.
-- Push the release commit before creating a tag.
+- Keep commit messages descriptive; release notes are generated from git history.
+- Keep README stable and update it only when the architecture or public usage
+  contract changes.
+- Run `make quality`, `git diff --check`, and a release dry run before
+  publishing.
+- Push `main` before creating a tag.
 - For a published release, verify the tag workflow, GitHub Release, and npm
   package versions after publication.
 
-Tagged releases are driven by annotated `vX.Y.Z` tags pushed after `main` has
-the matching `VERSION`, npm manifests, README, and changelog updates.
+Tagged releases are driven by annotated `vX.Y.Z` tags pushed at the exact `main`
+commit intended for publication.

@@ -21,7 +21,7 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/OnslaughtSnail/caelis/internal/version.Version={{ .Version }}
+      - -X github.com/OnslaughtSnail/caelis/internal/version.Version={{ .Tag }}
       - -X github.com/OnslaughtSnail/caelis/internal/version.Commit={{ .Commit }}
       - -X github.com/OnslaughtSnail/caelis/internal/version.Date={{ .Date }}
 
@@ -35,7 +35,3 @@ checksum:
 changelog:
   use: git
   sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"

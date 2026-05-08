@@ -8,6 +8,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/acp"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/internal/version"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
@@ -42,8 +43,8 @@ func TestGatewayAgentExposesZedSessionSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize() error = %v", err)
 	}
-	if initResp.AgentInfo == nil || initResp.AgentInfo.Version == "" || initResp.AgentInfo.Version == "dev" {
-		t.Fatalf("AgentInfo = %#v, want actual version metadata", initResp.AgentInfo)
+	if initResp.AgentInfo == nil || initResp.AgentInfo.Version != version.String() {
+		t.Fatalf("AgentInfo = %#v, want version %q", initResp.AgentInfo, version.String())
 	}
 	if !initResp.AgentCapabilities.PromptCapabilities.Image {
 		t.Fatalf("PromptCapabilities.Image = false, want current model image support declared")
