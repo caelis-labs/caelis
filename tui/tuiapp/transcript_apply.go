@@ -228,7 +228,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		if block == nil {
 			return m, nil
 		}
-		block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
+		block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	case ACPProjectionSubagent:
@@ -247,7 +247,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 			state.ReviveFromTerminal()
 		}
 		panel.bindSession(state)
-		state.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
+		state.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
 		m.reviveSubagentPanel(panel, false)
 		m.syncSubagentSessionPanels(sessionKey)
 		m.markViewportBlockDirty(panel.BlockID())
@@ -260,7 +260,7 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		if state := strings.ToLower(strings.TrimSpace(block.Status)); state == "waiting_approval" {
 			block.Status = "running"
 		}
-		block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalText)
+		block.AddApprovalReviewEvent(event.ToolCallID, event.ApprovalTool, event.ApprovalCommand, event.ApprovalStatus, event.ApprovalRisk, event.ApprovalAuth, event.ApprovalText)
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}

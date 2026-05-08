@@ -2685,33 +2685,166 @@ func renderACPStatusRows(blockID string, status string, width int, ctx BlockRend
 }
 
 func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {
-	text := strings.TrimSpace(ev.ApprovalText)
-	if text == "" {
+	if strings.TrimSpace(ev.ApprovalText) == "" && strings.TrimSpace(ev.ApprovalStatus) == "" {
 		return nil
 	}
-	style := approvalReviewLineStyle(ctx, ev.ApprovalStatus).Width(width)
-	segments := wrapToolOutputText(text, maxInt(1, width))
-	if len(segments) == 0 {
-		segments = []string{text}
+	display := approvalReviewDisplayParts(ev)
+	if display.Status == "" && display.Rationale == "" {
+		return nil
 	}
+	prefixPlain, prefixStyled := approvalReviewPrefix(display, ctx)
+	if display.Rationale == "" {
+		return []RenderedRow{StyledPlainRow(blockID, prefixPlain, prefixStyled)}
+	}
+	separatorPlain := ": "
+	separatorStyled := ctx.Theme.TranscriptMetaStyle().Render(separatorPlain)
+	bodyWidth := maxInt(1, width-displayColumns(prefixPlain+separatorPlain))
+	segments := wrapToolOutputText(display.Rationale, bodyWidth)
+	if len(segments) == 0 {
+		segments = []string{display.Rationale}
+	}
+	bodyStyle := ctx.Theme.TranscriptMetaStyle()
 	rows := make([]RenderedRow, 0, len(segments))
-	for _, segment := range segments {
-		rows = append(rows, StyledPlainRow(blockID, segment, style.Render(segment)))
+	for i, segment := range segments {
+		if i == 0 {
+			plain := prefixPlain + separatorPlain + segment
+			styled := prefixStyled + separatorStyled + bodyStyle.Render(segment)
+			rows = append(rows, StyledPlainRow(blockID, plain, styled))
+			continue
+		}
+		prefix := strings.Repeat(" ", displayColumns(prefixPlain+separatorPlain))
+		plain := prefix + segment
+		styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) + bodyStyle.Render(segment)
+		rows = append(rows, StyledPlainRow(blockID, plain, styled))
 	}
 	return rows
 }
 
-func approvalReviewLineStyle(ctx BlockRenderContext, status string) lipgloss.Style {
+type approvalReviewDisplay struct {
+	Status        string
+	Risk          string
+	Authorization string
+	Rationale     string
+}
+
+func approvalReviewDisplayParts(ev SubagentEvent) approvalReviewDisplay {
+	text := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(ev.ApprovalText), "⚠"))
+	status := firstNonEmpty(strings.TrimSpace(ev.ApprovalStatus), approvalReviewStatusFromText(text), "reviewed")
+	return approvalReviewDisplay{
+		Status:        status,
+		Risk:          firstNonEmpty(strings.TrimSpace(ev.ApprovalRisk), approvalReviewValueFromText(text, "risk")),
+		Authorization: firstNonEmpty(strings.TrimSpace(ev.ApprovalAuth), approvalReviewValueFromText(text, "authorization")),
+		Rationale:     approvalReviewRationaleFromText(text),
+	}
+}
+
+func approvalReviewPrefix(display approvalReviewDisplay, ctx BlockRenderContext) (string, string) {
+	status := strings.TrimSpace(display.Status)
+	plain := "Automatic approval review"
+	styled := ctx.Theme.TranscriptMetaStyle().Render(plain)
+	if status != "" {
+		plain += " " + status
+		styled += " " + approvalReviewStatusStyle(ctx, status).Render(status)
+	}
+	meta := make([]string, 0, 2)
+	if risk := strings.TrimSpace(display.Risk); risk != "" {
+		meta = append(meta, "risk: "+risk)
+	}
+	if authorization := strings.TrimSpace(display.Authorization); authorization != "" {
+		meta = append(meta, "authorization: "+authorization)
+	}
+	if len(meta) == 0 {
+		return plain, styled
+	}
+	plain += " (" + strings.Join(meta, ", ") + ")"
+	styled += ctx.Theme.TranscriptMetaStyle().Render(" (")
+	if risk := strings.TrimSpace(display.Risk); risk != "" {
+		styled += ctx.Theme.TranscriptMetaStyle().Render("risk: ") + approvalReviewValueStyle(ctx, risk).Render(risk)
+		if strings.TrimSpace(display.Authorization) != "" {
+			styled += ctx.Theme.TranscriptMetaStyle().Render(", ")
+		}
+	}
+	if authorization := strings.TrimSpace(display.Authorization); authorization != "" {
+		styled += ctx.Theme.TranscriptMetaStyle().Render("authorization: ") + approvalReviewValueStyle(ctx, authorization).Render(authorization)
+	}
+	styled += ctx.Theme.TranscriptMetaStyle().Render(")")
+	return plain, styled
+}
+
+func approvalReviewStatusStyle(ctx BlockRenderContext, status string) lipgloss.Style {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "approved":
-		return ctx.Theme.WarnStyle()
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Success).Bold(true)
 	case "denied", "failed":
-		return ctx.Theme.ErrorStyle()
+		return ctx.Theme.ErrorStyle().Bold(true)
 	case "timed_out":
-		return ctx.Theme.WarnStyle()
+		return ctx.Theme.WarnStyle().Bold(true)
 	default:
-		return ctx.Theme.WarnStyle()
+		return ctx.Theme.TranscriptLabelStyle()
 	}
+}
+
+func approvalReviewValueStyle(ctx BlockRenderContext, value string) lipgloss.Style {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "low":
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Success)
+	case "medium":
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Accent).Bold(true)
+	case "high":
+		return lipgloss.NewStyle().Foreground(ctx.Theme.Warning).Bold(true)
+	case "critical":
+		return ctx.Theme.ErrorStyle().Bold(true)
+	default:
+		return ctx.Theme.TranscriptMetaStyle()
+	}
+}
+
+func approvalReviewStatusFromText(text string) string {
+	lower := strings.ToLower(strings.TrimSpace(text))
+	for _, status := range []string{"approved", "denied", "failed", "timed_out"} {
+		if strings.Contains(lower, "approval review "+status) {
+			return status
+		}
+	}
+	return ""
+}
+
+func approvalReviewValueFromText(text string, key string) string {
+	key = strings.ToLower(strings.TrimSpace(key))
+	if key == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	needle := key + ":"
+	idx := strings.Index(lower, needle)
+	if idx < 0 {
+		return ""
+	}
+	valueStart := idx + len(needle)
+	value := strings.TrimSpace(text[valueStart:])
+	for _, sep := range []string{",", ")"} {
+		if cut := strings.Index(value, sep); cut >= 0 {
+			value = value[:cut]
+		}
+	}
+	return strings.TrimSpace(value)
+}
+
+func approvalReviewRationaleFromText(text string) string {
+	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "⚠"))
+	if text == "" {
+		return ""
+	}
+	if before, after, ok := strings.Cut(text, "):"); ok && strings.Contains(strings.ToLower(before), "approval review") {
+		return strings.TrimSpace(after)
+	}
+	if before, after, ok := strings.Cut(text, ":"); ok && strings.Contains(strings.ToLower(before), "approval review") {
+		return strings.TrimSpace(after)
+	}
+	if strings.Contains(strings.ToLower(text), "approval review") {
+		return ""
+	}
+	return text
 }
 
 func participantTurnEmptyPlaceholder(status string) string {

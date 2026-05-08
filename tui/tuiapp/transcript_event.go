@@ -63,6 +63,8 @@ type TranscriptEvent struct {
 	ApprovalTool    string
 	ApprovalCommand string
 	ApprovalStatus  string
+	ApprovalRisk    string
+	ApprovalAuth    string
 	ApprovalText    string
 
 	State string
@@ -300,6 +302,8 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 					ApprovalTool:    strings.TrimSpace(ev.ApprovalPayload.ToolName),
 					ApprovalCommand: approvalCommandPreview(ev.ApprovalPayload.RawInput),
 					ApprovalStatus:  strings.TrimSpace(string(ev.ApprovalPayload.ReviewStatus)),
+					ApprovalRisk:    firstNonEmpty(strings.TrimSpace(ev.ApprovalPayload.Risk), approvalReviewValueFromText(text, "risk")),
+					ApprovalAuth:    firstNonEmpty(strings.TrimSpace(ev.ApprovalPayload.Authorization), approvalReviewValueFromText(text, "authorization")),
 					ApprovalText:    text,
 					Final:           true,
 				})

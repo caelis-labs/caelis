@@ -584,11 +584,11 @@ func (b *MainACPTurnBlock) SetStatus(state string, approvalTool string, approval
 	})
 }
 
-func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
+func (b *MainACPTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
 	if b == nil {
 		return
 	}
-	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, text)
+	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
 }
 
 func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
@@ -1011,11 +1011,11 @@ func (b *ParticipantTurnBlock) SetStatus(state string, approvalTool string, appr
 	})
 }
 
-func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
+func (b *ParticipantTurnBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
 	if b == nil {
 		return
 	}
-	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, text)
+	b.Events, _ = addApprovalReviewSubagentEvent(b.Events, callID, tool, command, status, risk, authorization, text)
 }
 
 func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
@@ -1879,13 +1879,15 @@ func shouldIgnoreStaleTerminalUpdate(events []SubagentEvent, callID string, name
 	return false
 }
 
-func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, text string) ([]SubagentEvent, bool) {
+func addApprovalReviewSubagentEvent(events []SubagentEvent, callID, tool, command, status, risk, authorization, text string) ([]SubagentEvent, bool) {
 	review := SubagentEvent{
 		Kind:            SEApproval,
 		CallID:          strings.TrimSpace(callID),
 		ApprovalTool:    strings.TrimSpace(tool),
 		ApprovalCommand: strings.TrimSpace(command),
 		ApprovalStatus:  strings.TrimSpace(status),
+		ApprovalRisk:    strings.TrimSpace(risk),
+		ApprovalAuth:    strings.TrimSpace(authorization),
 		ApprovalText:    strings.TrimSpace(text),
 	}
 	if review.CallID != "" {
@@ -1920,6 +1922,12 @@ func mergeApprovalReviewEvent(target *SubagentEvent, review SubagentEvent) {
 	}
 	if review.ApprovalStatus != "" {
 		target.ApprovalStatus = review.ApprovalStatus
+	}
+	if review.ApprovalRisk != "" {
+		target.ApprovalRisk = review.ApprovalRisk
+	}
+	if review.ApprovalAuth != "" {
+		target.ApprovalAuth = review.ApprovalAuth
 	}
 	if review.ApprovalText != "" {
 		target.ApprovalText = review.ApprovalText
@@ -2079,6 +2087,8 @@ type SubagentEvent struct {
 	ApprovalTool    string
 	ApprovalCommand string
 	ApprovalStatus  string
+	ApprovalRisk    string
+	ApprovalAuth    string
 	ApprovalText    string
 }
 
@@ -2437,11 +2447,11 @@ func (s *SubagentSessionState) AddApprovalEvent(tool, command string) {
 	s.eventsGen++
 }
 
-func (s *SubagentSessionState) AddApprovalReviewEvent(callID, tool, command, status, text string) {
+func (s *SubagentSessionState) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
 	if s == nil {
 		return
 	}
-	updated, changed := addApprovalReviewSubagentEvent(s.Events, callID, tool, command, status, text)
+	updated, changed := addApprovalReviewSubagentEvent(s.Events, callID, tool, command, status, risk, authorization, text)
 	if changed {
 		s.Events = updated
 		s.eventsGen++
@@ -2680,9 +2690,9 @@ func (b *SubagentPanelBlock) AddApprovalEvent(tool, command string) {
 	b.syncSessionMirror()
 }
 
-func (b *SubagentPanelBlock) AddApprovalReviewEvent(callID, tool, command, status, text string) {
+func (b *SubagentPanelBlock) AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text string) {
 	state := b.sessionState()
-	state.AddApprovalReviewEvent(callID, tool, command, status, text)
+	state.AddApprovalReviewEvent(callID, tool, command, status, risk, authorization, text)
 	b.syncSessionMirror()
 }
 

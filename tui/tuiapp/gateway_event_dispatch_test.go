@@ -1478,6 +1478,8 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
 				DecisionSource: "auto-review",
 				ReviewText:     reviewText,
+				Risk:           "low",
+				Authorization:  "high",
 			},
 		},
 	})
@@ -1495,11 +1497,14 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	if !strings.Contains(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside") {
 		t.Fatalf("rendered rows = %q, want request_permissions standard header", plain)
 	}
-	if !strings.Contains(plain, "⚠ "+reviewText) {
+	if !strings.Contains(plain, reviewText) {
 		t.Fatalf("rendered rows = %q, want approval review result at transcript location", plain)
 	}
+	if strings.Contains(plain, "⚠") {
+		t.Fatalf("rendered rows = %q, should not use warning prefix for approval review", plain)
+	}
 	toolIdx := strings.Index(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside")
-	reviewIdx := strings.Index(plain, "⚠ "+reviewText)
+	reviewIdx := strings.Index(plain, reviewText)
 	assistantIdx := strings.Index(plain, "approval-dependent work finished")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
 		t.Fatalf("rendered rows = %q, want approval review next to tool before later assistant text", plain)
@@ -1507,10 +1512,99 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	if len(block.Events) < 3 || block.Events[0].Kind != SEToolCall || block.Events[0].CallID != "perm-1" || block.Events[1].Kind != SEApproval || block.Events[1].CallID != "perm-1" || block.Events[2].Kind != SEAssistant {
 		t.Fatalf("events = %#v, want tool then matching approval then later assistant", block.Events)
 	}
+	if block.Events[1].ApprovalRisk != "low" || block.Events[1].ApprovalAuth != "high" {
+		t.Fatalf("approval event metadata = (%q, %q), want low/high", block.Events[1].ApprovalRisk, block.Events[1].ApprovalAuth)
+	}
 	for _, forbidden := range []string{`"approved":true`, `"granted"`, "Automatic approval review pending"} {
 		if strings.Contains(plain, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", plain, forbidden)
 		}
+	}
+}
+
+func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
+	model := newGatewayEventTestModel()
+	permissionInput := map[string]any{
+		"permissions": map[string]any{
+			"file_system": map[string]any{"write": []string{"/tmp/outside"}},
+		},
+	}
+	for _, env := range []appgateway.EventEnvelope{
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   "perm-denied",
+				ToolName: "request_permissions",
+				Status:   appgateway.ToolStatusRunning,
+				RawInput: permissionInput,
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:    "perm-denied",
+				ToolName:  "request_permissions",
+				Status:    appgateway.ToolStatusFailed,
+				Error:     true,
+				RawInput:  permissionInput,
+				RawOutput: map[string]any{"approved": false, "error": "permission request was rejected"},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindAssistantMessage,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			Narrative: &appgateway.NarrativePayload{
+				Role:  appgateway.NarrativeRoleAssistant,
+				Text:  "trying a safer path",
+				Final: true,
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindApprovalReview,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session"},
+			ApprovalPayload: &appgateway.ApprovalPayload{
+				ToolCallID:     "perm-denied",
+				ToolName:       "request_permissions",
+				RawInput:       map[string]any{"reason": "need broad access"},
+				ReviewStatus:   appgateway.ApprovalReviewStatusDenied,
+				DecisionSource: "auto-review",
+				ReviewText:     "Automatic approval review denied (risk: high, authorization: low): not narrow enough",
+				Risk:           "high",
+				Authorization:  "low",
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
+	plain := strings.Join(renderedPlainRows(rows), "\n")
+	reviewText := "Automatic approval review denied (risk: high, authorization: low): not narrow enough"
+	if !strings.Contains(plain, reviewText) {
+		t.Fatalf("rendered rows = %q, want denied approval review", plain)
+	}
+	if strings.Contains(plain, "⚠") {
+		t.Fatalf("rendered rows = %q, should not use warning prefix for denied review", plain)
+	}
+	toolIdx := strings.Index(plain, "request_permissions write /tmp/outside")
+	reviewIdx := strings.Index(plain, reviewText)
+	assistantIdx := strings.Index(plain, "trying a safer path")
+	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
+		t.Fatalf("rendered rows = %q, want denied review between tool and later assistant text", plain)
+	}
+	if len(block.Events) < 3 || block.Events[0].Kind != SEToolCall || block.Events[1].Kind != SEApproval || block.Events[1].ApprovalRisk != "high" || block.Events[1].ApprovalAuth != "low" || block.Events[2].Kind != SEAssistant {
+		t.Fatalf("events = %#v, want tool, denied approval metadata, assistant", block.Events)
 	}
 }
 
@@ -2363,6 +2457,28 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 			},
 			want:   []string{"  └ permission denied"},
 			forbid: []string{"|_", "BASH output", "│", "stderr permission denied", "ignored stdout", "exit 1"},
+		},
+		{
+			name:   "failed stdout diagnostics",
+			status: appgateway.ToolStatusFailed,
+			isErr:  true,
+			rawOutput: map[string]any{
+				"stdout":    "dangerous command is blocked even in auto-review mode\n",
+				"stderr":    "",
+				"error":     "exit status 1",
+				"exit_code": 1,
+			},
+			want:   []string{"  └ dangerous command is blocked even in auto-review mode"},
+			forbid: []string{"exit 1", "exit status 1"},
+		},
+		{
+			name:   "successful no output",
+			status: appgateway.ToolStatusCompleted,
+			rawOutput: map[string]any{
+				"exit_code": 0,
+			},
+			want:   []string{"  └ no output"},
+			forbid: []string{"exit 0"},
 		},
 	}
 	for _, tt := range tests {

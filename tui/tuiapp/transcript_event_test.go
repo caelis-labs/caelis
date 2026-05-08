@@ -72,6 +72,8 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 			ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
 			DecisionSource: "auto-review",
 			ReviewText:     "Automatic approval review approved (risk: low, authorization: high): required by task.",
+			Risk:           "low",
+			Authorization:  "high",
 		},
 	})
 
@@ -86,6 +88,12 @@ func TestProjectGatewayEventToTranscriptEvents_ProjectsTerminalAutomaticApproval
 	}
 	if !strings.Contains(events[0].ApprovalText, "Automatic approval review approved") {
 		t.Fatalf("ApprovalText = %q, want review text", events[0].ApprovalText)
+	}
+	if events[0].ApprovalRisk != "low" || events[0].ApprovalAuth != "high" {
+		t.Fatalf("approval metadata = (%q, %q), want risk low and authorization high", events[0].ApprovalRisk, events[0].ApprovalAuth)
+	}
+	if strings.Contains(events[0].ApprovalText, "⚠") {
+		t.Fatalf("ApprovalText = %q, should not use warning prefix", events[0].ApprovalText)
 	}
 
 	pending := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
@@ -870,7 +878,7 @@ func snapshotSubagentEvent(ev SubagentEvent) string {
 		}
 		return "plan:" + strings.Join(parts, ",")
 	case SEApproval:
-		return "approval:" + strings.TrimSpace(ev.ApprovalTool) + "|" + strings.TrimSpace(ev.ApprovalCommand) + "|" + strings.TrimSpace(ev.ApprovalStatus) + "|" + strings.TrimSpace(ev.ApprovalText)
+		return "approval:" + strings.TrimSpace(ev.ApprovalTool) + "|" + strings.TrimSpace(ev.ApprovalCommand) + "|" + strings.TrimSpace(ev.ApprovalStatus) + "|" + strings.TrimSpace(ev.ApprovalRisk) + "|" + strings.TrimSpace(ev.ApprovalAuth) + "|" + strings.TrimSpace(ev.ApprovalText)
 	default:
 		return "unknown"
 	}

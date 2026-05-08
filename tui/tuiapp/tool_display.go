@@ -358,7 +358,7 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 			return terminalEmptySummary(name, output, isErr)
 		}
 	case "BASH":
-		if summary := terminalDisplaySummary(output, isErr); summary != "" {
+		if summary := bashDisplaySummary(output, status, isErr); summary != "" {
 			return summary
 		}
 		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
@@ -878,6 +878,46 @@ func terminalDisplaySummary(output map[string]any, isErr bool) string {
 		return text
 	}
 	return firstTrimmed(asString(output["stdout"]), asString(output["result"]), asString(output["output_preview"]), asString(output["stderr"]))
+}
+
+func bashDisplaySummary(output map[string]any, status string, isErr bool) string {
+	final := transcriptToolStatusFinal(status, isErr)
+	if !final {
+		if text := asString(output["text"]); strings.TrimSpace(text) != "" {
+			return text
+		}
+	}
+	if isErr {
+		if summary := firstTrimmed(
+			asString(output["stderr"]),
+			asString(output["stdout"]),
+			asString(output["output_preview"]),
+			asString(output["result"]),
+			asString(output["text"]),
+			asString(output["output"]),
+			asString(output["error"]),
+		); summary != "" {
+			return summary
+		}
+		if exitCode := displayInt(output["exit_code"]); exitCode >= 0 {
+			return fmt.Sprintf("exit %d", exitCode)
+		}
+		return ""
+	}
+	if summary := firstTrimmed(
+		asString(output["stdout"]),
+		asString(output["result"]),
+		asString(output["output_preview"]),
+		asString(output["stderr"]),
+		asString(output["text"]),
+		asString(output["output"]),
+	); summary != "" {
+		return summary
+	}
+	if final {
+		return "no output"
+	}
+	return ""
 }
 
 func spawnTerminalDisplaySummary(output map[string]any, isErr bool, final bool) string {

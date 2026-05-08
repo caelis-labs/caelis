@@ -1549,10 +1549,10 @@ func automaticApprovalReviewDisplayText(req *appgateway.ApprovalPayload) string 
 	}
 	switch req.ReviewStatus {
 	case appgateway.ApprovalReviewStatusApproved, appgateway.ApprovalReviewStatusDenied, appgateway.ApprovalReviewStatusTimedOut, appgateway.ApprovalReviewStatusFailed:
-		return "⚠ " + firstNonEmpty(strings.TrimSpace(req.ReviewText), "Automatic approval review "+strings.TrimSpace(string(req.ReviewStatus)))
+		return firstNonEmpty(strings.TrimSpace(req.ReviewText), "Automatic approval review "+strings.TrimSpace(string(req.ReviewStatus)))
 	default:
 		if text := strings.TrimSpace(req.ReviewText); text != "" {
-			return "⚠ " + text
+			return text
 		}
 		return ""
 	}
