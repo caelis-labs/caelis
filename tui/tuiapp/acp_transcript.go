@@ -59,7 +59,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 			hasContent = hasContent || len(ev.PlanEntries) > 0
 			lastGroup = acpTranscriptGroupPlan
 		case SEReasoning:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
+			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
 				rows = append(rows, taskRows...)
 				hasContent = true
@@ -67,7 +67,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, width, ctx, opts); ok {
+			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
 				rows = append(rows, explorationRows...)
 				hasContent = true
@@ -103,7 +103,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = reasoningEnd
 			}
 		case SEAssistant:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
+			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
 				rows = append(rows, taskRows...)
 				hasContent = true
@@ -111,7 +111,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, width, ctx, opts); ok {
+			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
 				rows = append(rows, explorationRows...)
 				hasContent = true
@@ -127,7 +127,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				lastGroup = acpTranscriptGroupNarrative
 			}
 		case SEToolCall:
-			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, width, ctx, opts); ok {
+			if taskRows, consumed, ok := renderACPTaskStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupTask, false)
 				rows = append(rows, taskRows...)
 				hasContent = true
@@ -135,7 +135,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, width, ctx, opts); ok {
+			if explorationRows, consumed, ok := renderACPExplorationStageRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
 				rows = append(rows, explorationRows...)
 				hasContent = true
@@ -143,7 +143,7 @@ func renderACPTranscriptRows(blockID string, events []SubagentEvent, status stri
 				i = consumed
 				continue
 			}
-			if groupRows, consumed, ok := renderACPExplorationGroupRows(blockID, visible, i, width, ctx, opts); ok {
+			if groupRows, consumed, ok := renderACPExplorationGroupRows(blockID, visible, i, status, width, ctx, opts); ok {
 				rows = appendACPTranscriptGroupGap(rows, blockID, lastGroup, acpTranscriptGroupExploration, false)
 				rows = append(rows, groupRows...)
 				hasContent = true
@@ -257,6 +257,9 @@ func reasoningShouldFold(events []SubagentEvent, idx int, status string) bool {
 	if strings.TrimSpace(text) == "" {
 		return false
 	}
+	if liveTailHasPotentialDeferredCompactStage(events, idx, status) {
+		return false
+	}
 	for i := end + 1; i < len(events); i++ {
 		if reasoningFoldBoundaryEvent(events[i]) {
 			return true
@@ -289,6 +292,36 @@ func isTerminalACPTranscriptStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func liveTailHasPotentialDeferredCompactStage(events []SubagentEvent, idx int, status string) bool {
+	if idx < 0 || idx >= len(events) || isTerminalACPTranscriptStatus(status) {
+		return false
+	}
+	if stage, end := compactTaskStage(events, idx); len(taskControlEvents(stage)) > 0 && hasTaskNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
+		return true
+	}
+	if stage, end := compactExplorationStage(events, idx); compactExplorationStageHasSummary(stage) && hasExplorationNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
+		return true
+	}
+	return false
+}
+
+func shouldDeferLiveTailStageCompaction(events []SubagentEvent, end int, status string) bool {
+	if end < 0 || end >= len(events) || isTerminalACPTranscriptStatus(status) {
+		return false
+	}
+	return !hasLaterAssistantNarrative(events, end+1)
+}
+
+func hasLaterAssistantNarrative(events []SubagentEvent, start int) bool {
+	for i := maxInt(0, start); i < len(events); i++ {
+		ev := events[i]
+		if (ev.Kind == SEReasoning || ev.Kind == SEAssistant) && strings.TrimSpace(ev.Text) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) {
@@ -416,10 +449,13 @@ func applyClickTokenToRows(rows []RenderedRow, token string) []RenderedRow {
 	return out
 }
 
-func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	stage, end := compactTaskStage(events, idx)
 	actions := taskControlEvents(stage)
 	if len(actions) == 0 {
+		return nil, idx, false
+	}
+	if hasTaskNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
 		return nil, idx, false
 	}
 	key := taskStageKey(actions)
@@ -620,6 +656,15 @@ func isTaskNarrativeEvent(ev SubagentEvent) bool {
 	return ev.Kind == SEReasoning || ev.Kind == SEAssistant
 }
 
+func hasTaskNarrative(events []SubagentEvent) bool {
+	for _, ev := range events {
+		if isTaskNarrativeEvent(ev) {
+			return true
+		}
+	}
+	return false
+}
+
 func hasLaterTaskControl(events []SubagentEvent, start int) bool {
 	for i := start; i < len(events); i++ {
 		ev := events[i]
@@ -738,9 +783,12 @@ func taskEventAction(ev SubagentEvent) string {
 	return strings.ToLower(strings.TrimSpace(verb))
 }
 
-func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	stage, end := compactExplorationStage(events, idx)
-	if countExplorationTools(stage) == 0 || (countExplorationTools(stage) < 2 && !hasExplorationNarrative(stage)) {
+	if !compactExplorationStageHasSummary(stage) {
+		return nil, idx, false
+	}
+	if hasExplorationNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
 		return nil, idx, false
 	}
 	key := explorationStageKey(stage)
@@ -761,6 +809,11 @@ func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx i
 		rows = append(rows, StyledPlainClickableRow(blockID, detail, styleExplorationSummaryRow(detail, ctx), token))
 	}
 	return rows, end, true
+}
+
+func compactExplorationStageHasSummary(stage []SubagentEvent) bool {
+	count := countExplorationTools(stage)
+	return count > 0 && (count >= 2 || hasExplorationNarrative(stage))
 }
 
 func compactExplorationStage(events []SubagentEvent, idx int) ([]SubagentEvent, int) {
@@ -926,9 +979,12 @@ func acpExplorationStageClickToken(key string) string {
 	return "acp_exploration_stage:" + key
 }
 
-func renderACPExplorationGroupRows(blockID string, events []SubagentEvent, idx int, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
+func renderACPExplorationGroupRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
 	group, end := compactExplorationGroup(events, idx, opts)
 	if len(group) < 2 {
+		return nil, idx, false
+	}
+	if shouldDeferLiveTailStageCompaction(events, end, status) {
 		return nil, idx, false
 	}
 	summary := "• Explored"

@@ -69,6 +69,7 @@ const (
 
 type BlockRenderContext struct {
 	Width                 int          // viewport content width
+	Height                int          // viewport content height
 	TermWidth             int          // full terminal width
 	Theme                 tuikit.Theme // current theme
 	ThemeKey              string       // cached theme render key for hot render paths

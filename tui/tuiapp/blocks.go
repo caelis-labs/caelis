@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -241,6 +242,7 @@ type MainACPTurnBlock struct {
 	ExpandedThought      map[string]bool
 	ExpandedExplore      map[string]bool
 	toolPanelRenderCache map[string]toolOutputRenderCache
+	compactHeightBudget  compactHeightBudgetState
 }
 
 type ToolUpdateMeta struct {
@@ -593,7 +595,7 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b == nil {
 		return nil
 	}
-	return renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
+	rows := renderACPTranscriptRows(b.id, b.Events, b.Status, maxInt(8, ctx.Width), ctx, acpTranscriptRenderOptions{
 		UseStatusPlaceholder:   true,
 		PlaceholderAsMeta:      true,
 		HideWaitingApprovalRow: true,
@@ -606,6 +608,84 @@ func (b *MainACPTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		ToolPanelScrollState:   b.toolPanelScrollState,
 		ReasoningExpanded:      b.reasoningExpanded,
 	})
+	return b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
+}
+
+type compactHeightBudgetState struct {
+	contextKey          string
+	lastRows            int
+	lastHadDeferredTail bool
+	floorRows           int
+}
+
+func (s *compactHeightBudgetState) apply(blockID string, rows []RenderedRow, events []SubagentEvent, status string, ctx BlockRenderContext) []RenderedRow {
+	if s == nil {
+		return rows
+	}
+	contextKey := compactHeightBudgetContextKey(ctx)
+	if s.contextKey != contextKey {
+		*s = compactHeightBudgetState{contextKey: contextKey}
+	}
+	rowCount := len(rows)
+	terminal := isTerminalACPTranscriptStatus(status)
+	hadDeferredTail := hasDeferredLiveTailCompactStage(events, status)
+	switch {
+	case terminal:
+		s.floorRows = 0
+	case s.lastHadDeferredTail && !hadDeferredTail && s.lastRows > rowCount:
+		s.floorRows = minInt(s.lastRows, rowCount+compactHeightBudgetMaxRows(ctx))
+	case hadDeferredTail:
+		s.floorRows = 0
+	case s.floorRows <= rowCount:
+		s.floorRows = 0
+	}
+	if s.floorRows > rowCount {
+		s.floorRows = minInt(s.floorRows, rowCount+compactHeightBudgetMaxRows(ctx))
+	}
+	if !terminal && s.floorRows > rowCount {
+		rows = appendCompactHeightBudgetSpacerRows(rows, blockID, s.floorRows-rowCount)
+	}
+	s.lastRows = rowCount
+	s.lastHadDeferredTail = hadDeferredTail
+	return rows
+}
+
+func compactHeightBudgetContextKey(ctx BlockRenderContext) string {
+	return strings.Join([]string{
+		strconv.Itoa(ctx.Width),
+		strconv.Itoa(ctx.TermWidth),
+		ctx.renderThemeKey(),
+	}, "|")
+}
+
+func compactHeightBudgetMaxRows(ctx BlockRenderContext) int {
+	if ctx.Height > 0 {
+		return maxInt(1, ctx.Height)
+	}
+	return 8
+}
+
+func appendCompactHeightBudgetSpacerRows(rows []RenderedRow, blockID string, count int) []RenderedRow {
+	for i := 0; i < count; i++ {
+		rows = append(rows, PlainRow(blockID, ""))
+	}
+	return rows
+}
+
+func (s compactHeightBudgetState) heightSensitive() bool {
+	return s.floorRows > 0
+}
+
+func hasDeferredLiveTailCompactStage(events []SubagentEvent, status string) bool {
+	if isTerminalACPTranscriptStatus(status) {
+		return false
+	}
+	for i := range events {
+		if liveTailHasPotentialDeferredCompactStage(events, i, status) {
+			return true
+		}
+	}
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -627,6 +707,7 @@ type ParticipantTurnBlock struct {
 	ExpandedThought      map[string]bool
 	ExpandedExplore      map[string]bool
 	toolPanelRenderCache map[string]toolOutputRenderCache
+	compactHeightBudget  compactHeightBudgetState
 }
 
 func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
@@ -965,6 +1046,7 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 		return rows
 	}
 	rows = append(rows, bodyRows...)
+	rows = b.compactHeightBudget.apply(b.id, rows, b.Events, b.Status, ctx)
 	if b.Expanded && participantTurnIsTerminal(b.Status) {
 		if footer := renderParticipantTurnFooter(b, ctx); strings.TrimSpace(ansi.Strip(footer)) != "" {
 			rows = append(rows, StyledRow(b.id, footer))

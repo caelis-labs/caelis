@@ -237,6 +237,7 @@ func (m *Model) blockRenderContext(width int) BlockRenderContext {
 	}
 	return BlockRenderContext{
 		Width:                 width,
+		Height:                m.viewport.Height(),
 		TermWidth:             m.width,
 		Theme:                 m.theme,
 		ThemeKey:              m.cachedThemeRenderKey(),

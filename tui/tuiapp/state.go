@@ -416,6 +416,7 @@ type Model struct {
 	streamPlayback                 streamPlaybackMetrics
 	viewportRenderEntries          []viewportRenderEntry
 	lastViewportRenderContextKey   string
+	lastViewportRenderHeight       int
 	dirtyViewportBlocks            map[string]struct{}
 	viewportStructureDirty         bool
 	viewportContentVersion         uint64

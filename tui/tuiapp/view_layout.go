@@ -93,6 +93,9 @@ func (m *Model) syncViewportContent() {
 	m.offscreenViewportSyncAt = time.Time{}
 	wrapWidth := maxInt(1, m.viewport.Width())
 	ctx := m.blockRenderContext(wrapWidth)
+	if m.lastViewportRenderHeight != 0 && m.lastViewportRenderHeight != ctx.Height {
+		m.markCompactHeightBudgetBlocksDirty()
+	}
 	contextKey := viewportRenderContextKey(ctx)
 	activeTailOnly := m.dirtyViewportBlocksOnlyActiveNarrative()
 	incremental := false
@@ -121,6 +124,7 @@ func (m *Model) syncViewportContent() {
 		syncReason = "full_sync"
 	}
 	m.lastViewportRenderContextKey = contextKey
+	m.lastViewportRenderHeight = ctx.Height
 	clear(m.dirtyViewportBlocks)
 	m.viewportContentVersion++
 	m.lastViewportStreamLine = m.streamLine
@@ -495,6 +499,24 @@ func (m *Model) markViewportBlockDirty(blockID string) {
 		m.dirtyViewportBlocks = make(map[string]struct{})
 	}
 	m.dirtyViewportBlocks[blockID] = struct{}{}
+}
+
+func (m *Model) markCompactHeightBudgetBlocksDirty() {
+	if m == nil || m.doc == nil {
+		return
+	}
+	for _, block := range m.doc.Blocks() {
+		switch b := block.(type) {
+		case *MainACPTurnBlock:
+			if b.compactHeightBudget.heightSensitive() {
+				m.markViewportBlockDirty(b.BlockID())
+			}
+		case *ParticipantTurnBlock:
+			if b.compactHeightBudget.heightSensitive() {
+				m.markViewportBlockDirty(b.BlockID())
+			}
+		}
+	}
 }
 
 func (m *Model) markViewportStructureDirty() {

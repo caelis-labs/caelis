@@ -523,6 +523,104 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 }
 
+func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.T) {
+	model := newGatewayEventTestModel()
+	sendReasoning := func(text string) {
+		updated, _ := model.Update(appgateway.EventEnvelope{Event: appgateway.Event{
+			Kind:       appgateway.EventKindAssistantMessage,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Narrative: &appgateway.NarrativePayload{
+				Role:          appgateway.NarrativeRoleAssistant,
+				ReasoningText: text,
+				Final:         true,
+				Scope:         appgateway.EventScopeMain,
+			},
+		}})
+		model = updated.(*Model)
+	}
+	sendRead := func(id string, path string) {
+		rawInput := map[string]any{"path": path}
+		updated, _ := model.Update(appgateway.EventEnvelope{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   id,
+				ToolName: "READ",
+				RawInput: rawInput,
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+			},
+		}})
+		model = updated.(*Model)
+		updated, _ = model.Update(appgateway.EventEnvelope{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:    id,
+				ToolName:  "READ",
+				RawInput:  rawInput,
+				RawOutput: map[string]any{"text": "config contents"},
+				Status:    appgateway.ToolStatusCompleted,
+				Scope:     appgateway.EventScopeMain,
+			},
+		}})
+		model = updated.(*Model)
+	}
+
+	sendReasoning("I need to inspect the config before changing behavior.\nThis should remain readable while the READ result lands.")
+	sendRead("read-live", "config.go")
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	ctx := BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}
+	liveRows := block.Render(ctx)
+	liveJoined := strings.Join(renderedPlainRows(liveRows), "\n")
+	if !strings.Contains(liveJoined, "I need to inspect the config before changing behavior.") {
+		t.Fatalf("live rows = %q, want current reasoning to remain visible", liveJoined)
+	}
+	if strings.Contains(liveJoined, "• Explored") {
+		t.Fatalf("live rows = %q, should not compact the current exploration step before next assistant output", liveJoined)
+	}
+
+	sendReasoning("Now I can patch the rendering behavior.")
+	settledRows := block.Render(ctx)
+	settledJoined := strings.Join(renderedPlainRows(settledRows), "\n")
+	if !strings.Contains(settledJoined, "• Explored") ||
+		!strings.Contains(settledJoined, "  └ Read config.go") ||
+		!strings.Contains(settledJoined, "Now I can patch the rendering behavior.") {
+		t.Fatalf("settled rows = %q, want previous exploration compacted before new reasoning", settledJoined)
+	}
+	if strings.Contains(settledJoined, "· I need to inspect the config before changing behavior.") {
+		t.Fatalf("settled rows = %q, previous reasoning should be hidden in collapsed Explored", settledJoined)
+	}
+	if len(settledRows) < len(liveRows) {
+		t.Fatalf("settled row count = %d, live row count = %d; height budget should prevent immediate shrink", len(settledRows), len(liveRows))
+	}
+}
+
+func TestGatewayLiveExplorationCompactsAtTurnCompletion(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: "Inspect before finishing."},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-final", Name: "READ", Args: "final.go", Output: "done", Done: true},
+	)
+	ctx := BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}
+	live := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if strings.Contains(live, "• Explored") {
+		t.Fatalf("live rows = %q, should not compact before turn completion", live)
+	}
+	block.SetStatus("completed", "", "", time.Now())
+	settled := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(settled, "• Explored") || !strings.Contains(settled, "Read final.go") {
+		t.Fatalf("completed rows = %q, want final exploration compaction", settled)
+	}
+	if strings.Contains(settled, "Inspect before finishing.") {
+		t.Fatalf("completed rows = %q, collapsed completed rows should hide exploration reasoning", settled)
+	}
+}
+
 func TestGatewayFailedExplorationToolStaysInCompactSummary(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
@@ -1192,11 +1290,12 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "• Tasks") ||
+	if !strings.Contains(joined, "· 两个子任务已启动") ||
+		!strings.Contains(joined, "• Tasks") ||
 		!strings.Contains(joined, `  └ Write "Alice"`) ||
 		!strings.Contains(joined, `    Wait ella 5s`) ||
 		!strings.Contains(joined, `    Wait 8s`) {
-		t.Fatalf("rendered rows = %q, want merged TASK controls", joined)
+		t.Fatalf("rendered rows = %q, want live reasoning followed by merged TASK controls", joined)
 	}
 	if strings.Contains(joined, "TASK") || strings.Contains(joined, "task-9") {
 		t.Fatalf("rendered rows = %q, should hide raw TASK tool and task id", joined)
@@ -1206,10 +1305,22 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	}
 	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if strings.Contains(joined, `  └ 两个子任务已启动`) {
+		t.Fatalf("expanded live rows = %q, should keep live reasoning outside the TASK group", joined)
+	}
+	if !strings.Contains(joined, `· 两个子任务已启动`) ||
+		!strings.Contains(joined, `  └ Write "Alice"`) ||
+		!strings.Contains(joined, `    Wait ella 5s`) {
+		t.Fatalf("expanded live rows = %q, want visible reasoning and expanded controls", joined)
+	}
+	sendReasoning("继续处理")
+	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
 	if !strings.Contains(joined, `  └ 两个子任务已启动`) ||
 		!strings.Contains(joined, `    Write "Alice"`) ||
-		!strings.Contains(joined, `    Wait ella 5s`) {
-		t.Fatalf("expanded rows = %q, want task stage narrative and controls", joined)
+		!strings.Contains(joined, `    Wait ella 5s`) ||
+		!strings.Contains(joined, `· 继续处理`) {
+		t.Fatalf("settled rows = %q, want previous TASK step settled before new reasoning", joined)
 	}
 }
 

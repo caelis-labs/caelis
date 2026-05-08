@@ -81,6 +81,26 @@ func TestViewportCacheKeepsClickTokenLengthForStreamingLines(t *testing.T) {
 	}
 }
 
+func TestViewportHeightChangeDoesNotInvalidateGenericBlockCache(t *testing.T) {
+	m := NewModel(Config{NoColor: true})
+	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
+	m.viewport.SetWidth(80)
+	m.viewport.SetHeight(24)
+	for i := 0; i < 20; i++ {
+		m.doc.Append(NewTranscriptBlock("stable transcript line", tuikit.LineStyleDefault))
+	}
+
+	m.syncViewportContent()
+	fullSyncs := m.diag.ViewportFullSyncs
+
+	m.viewport.SetHeight(18)
+	m.syncViewportContent()
+
+	if got := m.diag.ViewportFullSyncs; got != fullSyncs {
+		t.Fatalf("height-only change full syncs = %d, want %d", got, fullSyncs)
+	}
+}
+
 func TestViewportMouseWheelUsesReadableScrollStep(t *testing.T) {
 	m := NewModel(Config{})
 	m.viewport.SetWidth(40)
