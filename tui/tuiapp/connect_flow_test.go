@@ -271,6 +271,115 @@ func TestConnectWizardTypedXiaomiAdvancesToEndpointStep(t *testing.T) {
 	}
 }
 
+func TestConnectWizardPrefixSelectsXiaomiCandidateAndKeepsModelCandidates(t *testing.T) {
+	const tokenPlanBaseURL = "https://token-plan-cn.xiaomimimo.com/v1"
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "connect":
+				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
+			case "connect-baseurl:xiaomi":
+				return []SlashArgCandidate{
+					{Value: "https://api.xiaomimimo.com/v1", Display: "api cn"},
+					{Value: tokenPlanBaseURL, Display: "token plan cn"},
+				}, nil
+			case "connect-apikey:xiaomi":
+				return nil, nil
+			case "connect-model:xiaomi|" + url.QueryEscape(tokenPlanBaseURL) + "|60|sk-test|":
+				return []SlashArgCandidate{{Value: "mimo-v2.5-pro", Display: "xiaomi/mimo-v2.5-pro"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+	m.setInputText("/connect x")
+	m.syncTextareaFromInput()
+	_, cmd := m.Update(keyPress("enter"))
+	if cmd != nil {
+		findAndRunTaskResult(cmd(), m)
+	}
+	if !m.isWizardActive() {
+		t.Fatal("expected connect wizard to start")
+	}
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("provider prefix selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-baseurl:xiaomi" {
+		t.Fatalf("slashArgCommand after xiaomi prefix = %q, want connect-baseurl:xiaomi", got)
+	}
+
+	m.setInputText("token")
+	m.syncTextareaFromInput()
+	m.updateSlashArgCandidates()
+	handled, cmd = m.handleWizardEnter()
+	if !handled {
+		t.Fatal("endpoint prefix selection was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect-apikey:xiaomi" {
+		t.Fatalf("slashArgCommand after token-plan prefix = %q, want connect-apikey:xiaomi", got)
+	}
+
+	m.setInputText("sk-test")
+	m.syncTextareaFromInput()
+	m.updateSlashArgCandidates()
+	handled, cmd = m.handleWizardEnter()
+	if !handled {
+		t.Fatal("apikey step was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	wantCommand := "connect-model:xiaomi|" + url.QueryEscape(tokenPlanBaseURL) + "|60|sk-test|"
+	if got := strings.TrimSpace(m.slashArgCommand); got != wantCommand {
+		t.Fatalf("slashArgCommand after api key = %q, want %q", got, wantCommand)
+	}
+	if len(m.slashArgCandidates) == 0 || m.slashArgCandidates[0].Value != "mimo-v2.5-pro" {
+		t.Fatalf("model candidates after api key = %#v, want mimo-v2.5-pro", m.slashArgCandidates)
+	}
+}
+
+func TestConnectWizardDoesNotAcceptUnknownProviderFreeform(t *testing.T) {
+	m := NewModel(Config{
+		Wizards: DefaultWizards(),
+		SlashArgComplete: func(command string, _ string, _ int) ([]SlashArgCandidate, error) {
+			if command == "connect" {
+				return []SlashArgCandidate{{Value: "xiaomi", Display: "xiaomi"}}, nil
+			}
+			return nil, nil
+		},
+	})
+	m.setInputText("/connect xiaomi token")
+	m.syncTextareaFromInput()
+	_, cmd := m.Update(keyPress("enter"))
+	if cmd != nil {
+		findAndRunTaskResult(cmd(), m)
+	}
+	if !m.isWizardActive() {
+		t.Fatal("expected connect wizard to start")
+	}
+	handled, cmd := m.handleWizardEnter()
+	if !handled {
+		t.Fatal("provider step enter was not handled")
+	}
+	if cmd != nil {
+		cmd()
+	}
+	if got := strings.TrimSpace(m.slashArgCommand); got != "connect" {
+		t.Fatalf("slashArgCommand after unknown provider input = %q, want to stay on connect provider step", got)
+	}
+	if got := strings.TrimSpace(m.wizard.state["provider"]); got != "" {
+		t.Fatalf("provider state = %q, want empty after rejected provider input", got)
+	}
+}
+
 func TestConnectWizardAddsEndpointStepForXiaomiTokenPlan(t *testing.T) {
 	const tokenPlanBaseURL = "https://token-plan-cn.xiaomimimo.com/v1"
 	called := ""

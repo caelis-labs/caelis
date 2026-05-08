@@ -157,9 +157,10 @@ func connectWizard() WizardDef {
 		DisplayLine: "/connect",
 		Steps: []WizardStepDef{
 			{
-				Key:          "provider",
-				HintLabel:    "/connect provider",
-				FreeformHint: "/connect provider: choose a provider; compatible endpoints may ask for a custom base URL",
+				Key:              "provider",
+				HintLabel:        "/connect provider",
+				FreeformHint:     "/connect provider: choose a provider; compatible endpoints may ask for a custom base URL",
+				RequireCandidate: true,
 				CompletionCommand: func(state map[string]string) string {
 					return "connect"
 				},

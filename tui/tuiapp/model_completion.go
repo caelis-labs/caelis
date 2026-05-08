@@ -897,7 +897,7 @@ func (m *Model) renderSlashArgList() string {
 			}
 			lines = append(lines, line)
 		} else {
-			line := prefix + m.theme.HelpHintTextStyle().Render(display)
+			line := prefix + m.theme.CommandStyle().Render(display)
 			if detail != "" {
 				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
 			}

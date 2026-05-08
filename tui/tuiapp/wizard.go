@@ -46,6 +46,11 @@ type WizardStepDef struct {
 	// implicitly true.
 	NoCompletion bool
 
+	// RequireCandidate accepts only an explicit completion candidate selection.
+	// It is useful for enumerated steps such as provider selection, while later
+	// steps can still allow custom base URLs or model names.
+	RequireCandidate bool
+
 	// CompletionCommand returns the command string passed to
 	// Config.SlashArgComplete for this step. It receives the accumulated
 	// state from previous steps. If it returns "", no completion is requested.
@@ -316,7 +321,11 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	if len(m.slashArgCandidates) > 0 && m.slashArgIndex >= 0 && m.slashArgIndex < len(m.slashArgCandidates) {
 		c := m.slashArgCandidates[m.slashArgIndex]
 		selectedValue := strings.TrimSpace(c.Value)
-		if value == "" || strings.EqualFold(value, selectedValue) || strings.EqualFold(value, strings.TrimSpace(c.Display)) {
+		selectedDisplay := strings.TrimSpace(c.Display)
+		if selectedDisplay == "" {
+			selectedDisplay = selectedValue
+		}
+		if value == "" || strings.EqualFold(value, selectedValue) || strings.EqualFold(value, selectedDisplay) || candidateMatchesPrefix(value, selectedValue, selectedDisplay, c.Detail) {
 			value = selectedValue
 			candidate = &c
 		}
@@ -325,6 +334,9 @@ func (m *Model) handleWizardEnter() (bool, tea.Cmd) {
 	// Validate.
 	if value == "" {
 		return true, nil // ignore empty enter
+	}
+	if step.RequireCandidate && candidate == nil {
+		return true, nil
 	}
 	if step.Validate != nil {
 		if err := step.Validate(value); err != nil {
