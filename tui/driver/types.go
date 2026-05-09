@@ -60,6 +60,7 @@ type StatusSnapshot struct {
 	SessionOutputTokens      int
 	SessionTotalTokens       int
 	ActiveJobs               int
+	ActiveTurnKind           string
 	Running                  bool
 }
 
@@ -112,6 +113,7 @@ type AgentStatusSnapshot struct {
 	ControllerModels          []SlashArgCandidate
 	ControllerEfforts         []SlashArgCandidate
 	HasActiveTurn             bool
+	ActiveTurnKind            string
 	AvailableAgents           []AgentCandidate
 	Participants              []AgentParticipantSnapshot
 	DelegatedParticipants     []AgentParticipantSnapshot

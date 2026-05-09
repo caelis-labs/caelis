@@ -508,9 +508,17 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		m.hasLastRunDuration = true
 		m.runStartedAt = time.Time{}
 	}
+	var nextPending pendingPrompt
+	hasNextPending := false
+	if msg.Err == nil && !msg.Interrupted && !msg.ExitNow {
+		nextPending, hasNextPending = m.takeNextDeferredPendingPrompt()
+	}
+	m.discardDispatchedPendingPrompts()
+	if !hasNextPending && (msg.Err != nil || msg.Interrupted || msg.ExitNow) {
+		m.pendingQueue = nil
+	}
 	m.running = false
 	m.stopRunningAnimation()
-	m.pendingQueue = nil
 	m.planEntries = m.planEntries[:0]
 	m.clearInputAttachments()
 	m.syncTextareaChrome()
@@ -547,6 +555,9 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 	if msg.ExitNow {
 		m.quit = true
 		return m, tea.Quit
+	}
+	if hasNextPending {
+		return m.submitPendingPrompt(nextPending)
 	}
 	return m, nil
 }

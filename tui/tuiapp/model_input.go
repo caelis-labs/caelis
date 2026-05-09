@@ -888,15 +888,24 @@ func (m *Model) submitLineWithDisplay(execLine string, displayLine string) (tea.
 }
 
 func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine string, attachments []Attachment) (tea.Model, tea.Cmd) {
+	return m.submitLineWithDisplayAndAttachmentsOptions(execLine, displayLine, attachments, submitLineOptions{recordHistory: true})
+}
+
+type submitLineOptions struct {
+	recordHistory bool
+}
+
+func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, displayLine string, attachments []Attachment, opts submitLineOptions) (tea.Model, tea.Cmd) {
 	alreadyRunning := m.running
 	mode := m.submissionModeForLine(execLine)
-	if alreadyRunning && mode != SubmissionModeOverlay {
+	if alreadyRunning && mode != SubmissionModeOverlay && m.isConfiguredSlashControlLine(execLine) {
 		return m, m.showHint("A turn is still running. Wait for it to finish or interrupt it before sending another prompt.", hintOptions{
 			priority:       HintPriorityHigh,
 			clearOnMessage: true,
 			clearAfter:     copyHintDuration,
 		})
 	}
+	deferUntilIdle := alreadyRunning && mode != SubmissionModeOverlay && !m.canSubmitRunningPromptNow()
 	layoutMayChange := mode == SubmissionModeOverlay
 	attachments = cloneAttachments(attachments)
 	displayLine = strings.TrimSpace(displayLine)
@@ -904,14 +913,23 @@ func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine
 	case SubmissionModeOverlay:
 		m.openBTWOverlay(execLine)
 	default:
-		m.commitUserDisplayLine(displayLine)
+		if alreadyRunning {
+			m.pendingQueue = append(m.pendingQueue, pendingPrompt{
+				execLine:    strings.TrimSpace(execLine),
+				displayLine: displayLine,
+				attachments: cloneAttachments(attachments),
+				dispatched:  !deferUntilIdle,
+			})
+		} else {
+			m.commitUserDisplayLine(displayLine)
+		}
 	}
 	if !alreadyRunning && m.shouldAutoFollowSubmittedSideACP(execLine, mode) {
 		m.setViewportFollowState(viewportFollowTail)
 	}
 
 	// Push to history.
-	if mode != SubmissionModeOverlay {
+	if opts.recordHistory && mode != SubmissionModeOverlay {
 		m.recordHistoryEntry(strings.TrimSpace(execLine), attachmentsToInputAttachments(attachments))
 		m.historyIndex = -1
 		m.historyDraft = ""
@@ -941,11 +959,18 @@ func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine
 		m.hasLastRunDuration = false
 		m.showTurnDivider = mode == SubmissionModeDefault && !m.isConfiguredSlashControlLine(execLine)
 		m.startRunningAnimation()
+	} else {
+		m.ensureViewportLayout()
 	}
 	m.syncViewportContent()
 
+	if deferUntilIdle {
+		return m, nil
+	}
 	if m.cfg.ExecuteLine == nil {
-		m.running = false
+		if !alreadyRunning {
+			m.running = false
+		}
 		return m, nil
 	}
 	cmds := []tea.Cmd{
@@ -955,6 +980,17 @@ func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine
 		m.scheduleSpinnerTick(),
 	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) canSubmitRunningPromptNow() bool {
+	if m == nil || m.cfg.CanSubmitRunningPrompt == nil {
+		return true
+	}
+	return m.cfg.CanSubmitRunningPrompt()
+}
+
+func (m *Model) submitPendingPrompt(prompt pendingPrompt) (tea.Model, tea.Cmd) {
+	return m.submitLineWithDisplayAndAttachmentsOptions(prompt.execLine, prompt.displayLine, prompt.attachments, submitLineOptions{})
 }
 
 func (m *Model) shouldAutoFollowSubmittedSideACP(line string, mode SubmissionMode) bool {

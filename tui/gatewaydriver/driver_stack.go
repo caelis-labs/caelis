@@ -17,6 +17,7 @@ import (
 type GatewayService interface {
 	Streams() sdkstream.Service
 	BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error)
+	SubmitActiveTurn(context.Context, gateway.SubmitActiveTurnRequest) error
 	Interrupt(context.Context, gateway.InterruptRequest) error
 	ResumeSession(context.Context, gateway.ResumeSessionRequest) (sdksession.LoadedSession, error)
 	ListSessions(context.Context, gateway.ListSessionsRequest) (sdksession.SessionList, error)

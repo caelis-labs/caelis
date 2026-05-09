@@ -80,6 +80,7 @@ type Context interface {
 	Session() sdksession.Session
 	Events() Events
 	ReadonlyState() ReadonlyState
+	DrainSubmissions() []Submission
 	Overlay() bool
 }
 
@@ -180,11 +181,12 @@ type AgentFactory interface {
 
 // ContextSpec builds one immutable default runtime context.
 type ContextSpec struct {
-	Context context.Context
-	Session sdksession.Session
-	Events  []*sdksession.Event
-	State   map[string]any
-	Overlay bool
+	Context          context.Context
+	Session          sdksession.Session
+	Events           []*sdksession.Event
+	State            map[string]any
+	DrainSubmissions func() []Submission
+	Overlay          bool
 }
 
 // NewContext returns one immutable runtime context implementation suitable for
@@ -195,11 +197,12 @@ func NewContext(spec ContextSpec) Context {
 		ctx = context.Background()
 	}
 	return &contextSnapshot{
-		Context: ctx,
-		session: sdksession.CloneSession(spec.Session),
-		events:  NewEvents(spec.Events),
-		state:   NewReadonlyState(spec.State),
-		overlay: spec.Overlay,
+		Context:          ctx,
+		session:          sdksession.CloneSession(spec.Session),
+		events:           NewEvents(spec.Events),
+		state:            NewReadonlyState(spec.State),
+		drainSubmissions: spec.DrainSubmissions,
+		overlay:          spec.Overlay,
 	}
 }
 
@@ -257,10 +260,11 @@ func (s readonlyStateSnapshot) Snapshot() map[string]any {
 
 type contextSnapshot struct {
 	context.Context
-	session sdksession.Session
-	events  Events
-	state   ReadonlyState
-	overlay bool
+	session          sdksession.Session
+	events           Events
+	state            ReadonlyState
+	drainSubmissions func() []Submission
+	overlay          bool
 }
 
 func (c *contextSnapshot) Session() sdksession.Session {
@@ -275,6 +279,32 @@ func (c *contextSnapshot) ReadonlyState() ReadonlyState {
 	return c.state
 }
 
+func (c *contextSnapshot) DrainSubmissions() []Submission {
+	if c == nil || c.drainSubmissions == nil {
+		return nil
+	}
+	return CloneSubmissions(c.drainSubmissions())
+}
+
 func (c *contextSnapshot) Overlay() bool {
 	return c != nil && c.overlay
+}
+
+func CloneSubmission(sub Submission) Submission {
+	return Submission{
+		Kind:     sub.Kind,
+		Text:     sub.Text,
+		Metadata: maps.Clone(sub.Metadata),
+	}
+}
+
+func CloneSubmissions(items []Submission) []Submission {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]Submission, 0, len(items))
+	for _, item := range items {
+		out = append(out, CloneSubmission(item))
+	}
+	return out
 }

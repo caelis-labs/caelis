@@ -382,11 +382,13 @@ func (g *Gateway) PromptParticipant(ctx context.Context, req PromptParticipantRe
 		}
 	}
 	handle := newTurnHandle(turnHandleConfig{
-		handleID:   g.allocateID("handle"),
-		runID:      g.allocateID("participant-run"),
-		turnID:     g.allocateID("participant-turn"),
-		sessionRef: session.SessionRef,
-		createdAt:  g.clock(),
+		handleID:                g.allocateID("handle"),
+		runID:                   g.allocateID("participant-run"),
+		turnID:                  g.allocateID("participant-turn"),
+		activeKind:              ActiveTurnKindParticipant,
+		sessionRef:              session.SessionRef,
+		createdAt:               g.clock(),
+		allowPendingSubmissions: true,
 		cancel: func() bool {
 			return cancelFn()
 		},
@@ -530,11 +532,13 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		}
 	}
 	handle := newTurnHandle(turnHandleConfig{
-		handleID:   g.allocateID("handle"),
-		runID:      g.allocateID("run"),
-		turnID:     g.allocateID("turn"),
-		sessionRef: session.SessionRef,
-		createdAt:  g.clock(),
+		handleID:                g.allocateID("handle"),
+		runID:                   g.allocateID("run"),
+		turnID:                  g.allocateID("turn"),
+		activeKind:              ActiveTurnKindKernel,
+		sessionRef:              session.SessionRef,
+		createdAt:               g.clock(),
+		allowPendingSubmissions: true,
 		cancel: func() bool {
 			return cancelFn()
 		},
@@ -1145,6 +1149,7 @@ func (g *Gateway) ActiveTurns() []ActiveTurnState {
 		}
 		out = append(out, ActiveTurnState{
 			SessionRef: ref,
+			Kind:       handle.ActiveKind(),
 			HandleID:   handle.HandleID(),
 			RunID:      handle.RunID(),
 			TurnID:     handle.TurnID(),
@@ -1174,11 +1179,50 @@ func (g *Gateway) ActiveTurn(sessionID string) (ActiveTurnState, bool) {
 	}
 	return ActiveTurnState{
 		SessionRef: ref,
+		Kind:       handle.ActiveKind(),
 		HandleID:   handle.HandleID(),
 		RunID:      handle.RunID(),
 		TurnID:     handle.TurnID(),
 		StartedAt:  handle.CreatedAt(),
 	}, true
+}
+
+func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequest) error {
+	if g == nil {
+		return &Error{
+			Kind:        KindInternal,
+			Code:        CodeInternal,
+			UserVisible: true,
+			Message:     "gateway: gateway is not configured",
+		}
+	}
+	ref := sdksession.NormalizeSessionRef(req.SessionRef)
+	sessionID := strings.TrimSpace(ref.SessionID)
+	if sessionID == "" {
+		return &Error{
+			Kind:        KindValidation,
+			Code:        CodeInvalidRequest,
+			UserVisible: true,
+			Message:     "gateway: session id is required for active turn submission",
+		}
+	}
+	g.mu.Lock()
+	handle := g.active[sessionID]
+	g.mu.Unlock()
+	if handle == nil {
+		return &Error{
+			Kind:        KindConflict,
+			Code:        CodeNoActiveRun,
+			UserVisible: true,
+			Message:     "gateway: no active run is available for this session",
+		}
+	}
+	return handle.Submit(ctx, SubmitRequest{
+		Kind:     req.Kind,
+		Text:     req.Text,
+		Metadata: cloneMap(req.Metadata),
+		Approval: req.Approval,
+	})
 }
 
 func (g *Gateway) CancelActiveTurns() {

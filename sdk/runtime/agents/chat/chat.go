@@ -107,6 +107,12 @@ func (a *Agent) Run(ctx sdkruntime.Context) iter.Seq2[*sdksession.Event, error] 
 				if !yield(assistantEvent, nil) {
 					return
 				}
+				messages = append(messages, assistantMessage)
+				if a.drainPendingSubmissions(ctx, &messages, func(event *sdksession.Event) bool {
+					return yield(event, nil)
+				}) {
+					continue
+				}
 				return
 			}
 			toolCallEvents := modelToolCallEvents(assistantMessage, final)
@@ -129,8 +135,60 @@ func (a *Agent) Run(ctx sdkruntime.Context) iter.Seq2[*sdksession.Event, error] 
 				}
 				messages = append(messages, toolMessage)
 			}
+			a.drainPendingSubmissions(ctx, &messages, func(event *sdksession.Event) bool {
+				return yield(event, nil)
+			})
 		}
 	}
+}
+
+func (a *Agent) drainPendingSubmissions(ctx sdkruntime.Context, messages *[]sdkmodel.Message, yield func(*sdksession.Event) bool) bool {
+	if ctx == nil {
+		return false
+	}
+	drained := ctx.DrainSubmissions()
+	accepted := false
+	for _, submission := range drained {
+		if !isConversationSubmission(submission) {
+			continue
+		}
+		text := strings.TrimSpace(submission.Text)
+		if text == "" {
+			continue
+		}
+		message := sdkmodel.NewTextMessage(sdkmodel.RoleUser, text)
+		event := &sdksession.Event{
+			Type:       sdksession.EventTypeUser,
+			Visibility: sdksession.VisibilityCanonical,
+			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
+			Message:    &message,
+			Text:       message.TextContent(),
+			Meta:       pendingSubmissionMeta(submission),
+		}
+		if !yield(event) {
+			return accepted
+		}
+		*messages = append(*messages, message)
+		accepted = true
+	}
+	return accepted
+}
+
+func isConversationSubmission(sub sdkruntime.Submission) bool {
+	switch strings.TrimSpace(sub.Kind) {
+	case "", "conversation":
+		return true
+	default:
+		return false
+	}
+}
+
+func pendingSubmissionMeta(sub sdkruntime.Submission) map[string]any {
+	meta := maps.Clone(sub.Metadata)
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
 }
 
 type toolObserver struct {

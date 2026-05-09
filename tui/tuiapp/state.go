@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
@@ -106,46 +107,47 @@ const (
 )
 
 type Config struct {
-	Context              context.Context
-	AppName              string
-	Version              string
-	Workspace            string
-	ModelAlias           string
-	ShowWelcomeCard      bool
-	InitialLogs          []string
-	Commands             []string
-	Wizards              []WizardDef
-	Driver               tuidriver.Driver
-	ProgramSender        *ProgramSender
-	ExecuteLine          func(Submission) TaskResultMsg
-	CancelRunning        func() bool
-	ToggleMode           func() (string, error)
-	ModeLabel            func() string
-	RefreshWorkspace     func() string
-	RefreshStatus        func() (string, string)
-	RefreshStatusView    func() StatusViewModel
-	MentionComplete      func(string, int) ([]CompletionCandidate, error)
-	FileComplete         func(string, int) ([]CompletionCandidate, error)
-	SkillComplete        func(string, int) ([]CompletionCandidate, error)
-	ResumeComplete       func(string, int) ([]ResumeCandidate, error)
-	SlashArgComplete     func(command string, query string, limit int) ([]SlashArgCandidate, error)
-	ReadClipboardText    func() (string, error)
-	WriteClipboardText   func(string) error
-	PasteClipboardImage  func() ([]string, string, error)
-	ClearAttachments     func() []string
-	SetAttachments       func([]string) []string
-	OnDiagnostics        func(Diagnostics)
-	DiagnosticsDebugFile string
-	StreamTickInterval   time.Duration
-	StreamWarmDelay      time.Duration
-	StreamNormalCPS      float64
-	StreamCatchupCPS     float64
-	StreamTargetLag      time.Duration
-	StreamThreshold      int
-	StreamNormalMaxTick  int
-	StreamCatchupMaxTick int
-	NoColor              bool
-	NoAnimation          bool
+	Context                context.Context
+	AppName                string
+	Version                string
+	Workspace              string
+	ModelAlias             string
+	ShowWelcomeCard        bool
+	InitialLogs            []string
+	Commands               []string
+	Wizards                []WizardDef
+	Driver                 tuidriver.Driver
+	ProgramSender          *ProgramSender
+	ExecuteLine            func(Submission) TaskResultMsg
+	CanSubmitRunningPrompt func() bool
+	CancelRunning          func() bool
+	ToggleMode             func() (string, error)
+	ModeLabel              func() string
+	RefreshWorkspace       func() string
+	RefreshStatus          func() (string, string)
+	RefreshStatusView      func() StatusViewModel
+	MentionComplete        func(string, int) ([]CompletionCandidate, error)
+	FileComplete           func(string, int) ([]CompletionCandidate, error)
+	SkillComplete          func(string, int) ([]CompletionCandidate, error)
+	ResumeComplete         func(string, int) ([]ResumeCandidate, error)
+	SlashArgComplete       func(command string, query string, limit int) ([]SlashArgCandidate, error)
+	ReadClipboardText      func() (string, error)
+	WriteClipboardText     func(string) error
+	PasteClipboardImage    func() ([]string, string, error)
+	ClearAttachments       func() []string
+	SetAttachments         func([]string) []string
+	OnDiagnostics          func(Diagnostics)
+	DiagnosticsDebugFile   string
+	StreamTickInterval     time.Duration
+	StreamWarmDelay        time.Duration
+	StreamNormalCPS        float64
+	StreamCatchupCPS       float64
+	StreamTargetLag        time.Duration
+	StreamThreshold        int
+	StreamNormalMaxTick    int
+	StreamCatchupMaxTick   int
+	NoColor                bool
+	NoAnimation            bool
 	// RenderFPS is a Bubble Tea renderer cap only. Stream coalescing remains
 	// owned by the TUI frame scheduler.
 	RenderFPS    int
@@ -252,6 +254,12 @@ type pendingPrompt struct {
 	execLine    string
 	displayLine string
 	attachments []Attachment
+	dispatched  bool
+}
+
+func (p pendingPrompt) matchesUserMessage(text string) bool {
+	text = strings.TrimSpace(text)
+	return text != "" && (text == strings.TrimSpace(p.execLine) || text == strings.TrimSpace(p.displayLine))
 }
 
 type inputAttachment struct {

@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -384,6 +385,60 @@ func TestTurnHandleSubmitRejectsUnsupportedWithoutRunner(t *testing.T) {
 	var gwErr *Error
 	if !As(err, &gwErr) || gwErr.Code != CodeSubmissionUnsupported {
 		t.Fatalf("Submit() error = %v, want submission unsupported", err)
+	}
+}
+
+func TestTurnHandlePendingSubmissionRespectsCancellation(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:                "h1",
+		runID:                   "run-1",
+		turnID:                  "turn-1",
+		activeKind:              ActiveTurnKindKernel,
+		sessionRef:              sdksession.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"},
+		createdAt:               time.Unix(100, 0),
+		allowPendingSubmissions: true,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := handle.Submit(ctx, SubmitRequest{
+		Kind: SubmissionKindConversation,
+		Text: "stale follow up",
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Submit() error = %v, want context canceled", err)
+	}
+	if len(handle.pendingSubmissions) != 0 {
+		t.Fatalf("pendingSubmissions = %#v, want empty after canceled submit", handle.pendingSubmissions)
+	}
+}
+
+func TestTurnHandleCancelledBeforeRunnerDropsPendingSubmissions(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID:                "h1",
+		runID:                   "run-1",
+		turnID:                  "turn-1",
+		activeKind:              ActiveTurnKindKernel,
+		sessionRef:              sdksession.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"},
+		createdAt:               time.Unix(100, 0),
+		allowPendingSubmissions: true,
+	})
+	if err := handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKindConversation,
+		Text: "queued follow up",
+	}); err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	handle.Cancel()
+	runner := &recordingRunner{}
+	handle.setRunner(runner)
+
+	if got := len(runner.submissions); got != 0 {
+		t.Fatalf("runner submissions = %#v, want canceled pending submission dropped", runner.submissions)
 	}
 }
 

@@ -148,11 +148,19 @@ type BindingStateRequest struct {
 
 type ActiveTurnState struct {
 	SessionRef sdksession.SessionRef `json:"session_ref"`
+	Kind       ActiveTurnKind        `json:"kind,omitempty"`
 	HandleID   string                `json:"handle_id,omitempty"`
 	RunID      string                `json:"run_id,omitempty"`
 	TurnID     string                `json:"turn_id,omitempty"`
 	StartedAt  time.Time             `json:"started_at,omitempty"`
 }
+
+type ActiveTurnKind string
+
+const (
+	ActiveTurnKindKernel      ActiveTurnKind = "kernel"
+	ActiveTurnKindParticipant ActiveTurnKind = "participant"
+)
 
 type ControllerState struct {
 	Kind            sdksession.ControllerKind `json:"kind,omitempty"`
@@ -522,6 +530,14 @@ type SubmitRequest struct {
 	Text     string
 	Metadata map[string]any
 	Approval *ApprovalDecision
+}
+
+type SubmitActiveTurnRequest struct {
+	SessionRef sdksession.SessionRef
+	Kind       SubmissionKind
+	Text       string
+	Metadata   map[string]any
+	Approval   *ApprovalDecision
 }
 
 type BeginTurnResult struct {

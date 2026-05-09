@@ -163,6 +163,11 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 			return executeLineViaDriverWithContext(ctx, driver, sender, sub)
 		}
 	}
+	if base.CanSubmitRunningPrompt == nil {
+		base.CanSubmitRunningPrompt = func() bool {
+			return driverCanSubmitRunningPrompt(ctx, driver)
+		}
+	}
 
 	if base.RefreshStatus == nil {
 		base.RefreshStatus = func() (string, string) {
@@ -354,7 +359,7 @@ func executeLineViaDriverWithContext(ctx context.Context, driver tuidriver.Drive
 		return TaskResultMsg{Err: friendlyCommandError("submit", err)}
 	}
 	if turn == nil {
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
 	}
 	defer turn.Close()
 
@@ -766,6 +771,23 @@ func isCoreLocalSlashCommand(cmd string) bool {
 	default:
 		return false
 	}
+}
+
+func driverCanSubmitRunningPrompt(ctx context.Context, driver tuidriver.Driver) bool {
+	if driver == nil {
+		return true
+	}
+	status, err := driver.AgentStatus(contextOrBackground(ctx))
+	if err != nil {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(status.ControllerKind), "acp") {
+		return false
+	}
+	if !status.HasActiveTurn {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(status.ActiveTurnKind), "kernel")
 }
 
 func isDispatchableSlashCommandWithContext(ctx context.Context, driver tuidriver.Driver, text string) bool {

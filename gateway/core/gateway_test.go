@@ -886,6 +886,68 @@ func TestGatewayActiveTurnsReportsSessionScopedState(t *testing.T) {
 	}
 }
 
+func TestGatewaySubmitActiveTurnForwardsConversationToRunner(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	runner := &submitRecordingBlockingRunner{release: make(chan struct{})}
+	rt := &recordingRuntime{
+		session: session,
+		result:  sdkruntime.RunResult{Session: session, Handle: runner},
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{}},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	defer result.Handle.Close()
+
+	if err := gw.SubmitActiveTurn(context.Background(), SubmitActiveTurnRequest{
+		SessionRef: session.SessionRef,
+		Kind:       SubmissionKindConversation,
+		Text:       "steer next step",
+		Metadata:   map[string]any{"source": "test"},
+	}); err != nil {
+		t.Fatalf("SubmitActiveTurn() error = %v", err)
+	}
+	deadline := time.After(2 * time.Second)
+	for len(runner.submissions) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("timed out waiting for active submission to reach runner")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if got, want := len(runner.submissions), 1; got != want {
+		t.Fatalf("len(submissions) = %d, want %d", got, want)
+	}
+	if got := runner.submissions[0].Text; got != "steer next step" {
+		t.Fatalf("submission text = %q, want steer text", got)
+	}
+	if got := runner.submissions[0].Metadata["source"]; got != "test" {
+		t.Fatalf("submission metadata[source] = %#v, want test", got)
+	}
+
+	close(runner.release)
+	collectHandleEvents(t, result.Handle)
+}
+
 func TestBeginTurnDefaultsToStreamingRequestsAtGatewayBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -2028,6 +2090,27 @@ func (r blockingRunner) Events() iter.Seq2[*sdksession.Event, error] {
 func (blockingRunner) Submit(sdkruntime.Submission) error { return nil }
 func (blockingRunner) Cancel() bool                       { return true }
 func (blockingRunner) Close() error                       { return nil }
+
+type submitRecordingBlockingRunner struct {
+	release     chan struct{}
+	submissions []sdkruntime.Submission
+}
+
+func (r *submitRecordingBlockingRunner) RunID() string { return "run-submit-blocking" }
+
+func (r *submitRecordingBlockingRunner) Events() iter.Seq2[*sdksession.Event, error] {
+	return func(yield func(*sdksession.Event, error) bool) {
+		<-r.release
+	}
+}
+
+func (r *submitRecordingBlockingRunner) Submit(sub sdkruntime.Submission) error {
+	r.submissions = append(r.submissions, sdkruntime.CloneSubmission(sub))
+	return nil
+}
+
+func (r *submitRecordingBlockingRunner) Cancel() bool { return true }
+func (r *submitRecordingBlockingRunner) Close() error { return nil }
 
 type blockingCancelRunner struct {
 	eventsStarted chan struct{}

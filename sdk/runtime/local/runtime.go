@@ -646,11 +646,16 @@ func (r *Runtime) runAttempt(
 	if err != nil {
 		return batch, false, inputPersisted, err
 	}
+	var drainSubmissions func() []sdkruntime.Submission
+	if sink != nil {
+		drainSubmissions = sink.drainSubmissions
+	}
 	runCtx := sdkruntime.NewContext(sdkruntime.ContextSpec{
-		Context: ctx,
-		Session: session,
-		Events:  events,
-		State:   state,
+		Context:          ctx,
+		Session:          session,
+		Events:           events,
+		State:            state,
+		DrainSubmissions: drainSubmissions,
 	})
 
 	emitted := false
@@ -1029,15 +1034,15 @@ func stringSliceMetadata(meta map[string]any, key string) ([]string, bool) {
 }
 
 type runner struct {
-	runID      string
-	cancelFn   context.CancelFunc
-	eventsCh   chan runnerEvent
-	closeOnce  sync.Once
-	mu         sync.Mutex
-	cancelled  bool
-	closed     bool
-	submitFunc func(sdkruntime.Submission) error
-	cancelHook func() bool
+	runID       string
+	cancelFn    context.CancelFunc
+	eventsCh    chan runnerEvent
+	closeOnce   sync.Once
+	mu          sync.Mutex
+	cancelled   bool
+	closed      bool
+	submissions []sdkruntime.Submission
+	cancelHook  func() bool
 }
 
 type runnerEvent struct {
@@ -1067,12 +1072,32 @@ func (r *runner) Events() iter.Seq2[*sdksession.Event, error] {
 
 func (r *runner) Submit(sub sdkruntime.Submission) error {
 	r.mu.Lock()
-	fn := r.submitFunc
-	r.mu.Unlock()
-	if fn == nil {
+	defer r.mu.Unlock()
+	if r.closed {
+		return errors.New("sdk/runtime/local: runner is closed")
+	}
+	r.submissions = append(r.submissions, sdkruntime.CloneSubmission(sub))
+	return nil
+}
+
+func (r *runner) drainSubmissions() []sdkruntime.Submission {
+	if r == nil {
 		return nil
 	}
-	return fn(sub)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := sdkruntime.CloneSubmissions(r.submissions)
+	r.submissions = nil
+	return out
+}
+
+func (r *runner) markClosed() {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.closed = true
+	r.mu.Unlock()
 }
 
 func (r *runner) Cancel() bool {
@@ -1106,9 +1131,7 @@ func (r *runner) setCancelHook(fn func() bool) {
 }
 
 func (r *runner) Close() error {
-	r.mu.Lock()
-	r.closed = true
-	r.mu.Unlock()
+	r.markClosed()
 	return nil
 }
 
@@ -1142,6 +1165,7 @@ func (r *runner) finish() {
 		return
 	}
 	r.closeOnce.Do(func() {
+		r.markClosed()
 		close(r.eventsCh)
 	})
 }

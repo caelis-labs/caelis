@@ -309,6 +309,108 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	}
 }
 
+func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
+	t.Parallel()
+
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{
+		SessionIDGenerator: func() string { return "sess-steer" },
+	}))
+	session, err := sessions.StartSession(context.Background(), sdksession.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: sdksession.WorkspaceRef{
+			Key: "ws-steer",
+			CWD: "/tmp/project",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	model := &steerRuntimeModel{
+		started:      make(chan struct{}),
+		releaseFirst: make(chan struct{}),
+	}
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Be terse.",
+		},
+		RunIDGenerator: func() string { return "run-steer" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), sdkruntime.RunRequest{
+		SessionRef: session.SessionRef,
+		Input:      "first prompt",
+		AgentSpec: sdkruntime.AgentSpec{
+			Name:  "chat",
+			Model: model,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	select {
+	case <-model.started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("model did not start")
+	}
+
+	if err := result.Handle.Submit(sdkruntime.Submission{
+		Kind: "conversation",
+		Text: "steer next step",
+	}); err != nil {
+		t.Fatalf("Submit() while running error = %v", err)
+	}
+	close(model.releaseFirst)
+
+	events, err := drainRunnerEvents(t, result.Handle)
+	if err != nil {
+		t.Fatalf("runner error = %v", err)
+	}
+	gotTexts := make([]string, 0, len(events))
+	for _, event := range events {
+		if event != nil && (event.Type == sdksession.EventTypeUser || event.Type == sdksession.EventTypeAssistant) {
+			gotTexts = append(gotTexts, sdksession.EventText(event))
+		}
+	}
+	wantTexts := []string{"first prompt", "first answer", "steer next step", "steered answer"}
+	if !reflect.DeepEqual(gotTexts, wantTexts) {
+		t.Fatalf("runner user/assistant texts = %#v, want %#v", gotTexts, wantTexts)
+	}
+
+	requests := model.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("model request count = %d, want %d", got, want)
+	}
+	if got := requests[1].Messages[len(requests[1].Messages)-1].TextContent(); got != "steer next step" {
+		t.Fatalf("second request last message = %q, want steer", got)
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{
+		SessionRef: session.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	gotPersisted := make([]string, 0, len(loaded.Events))
+	for _, event := range loaded.Events {
+		if event != nil && (event.Type == sdksession.EventTypeUser || event.Type == sdksession.EventTypeAssistant) {
+			gotPersisted = append(gotPersisted, sdksession.EventText(event))
+		}
+	}
+	if !reflect.DeepEqual(gotPersisted, wantTexts) {
+		t.Fatalf("persisted user/assistant texts = %#v, want %#v", gotPersisted, wantTexts)
+	}
+	if err := result.Handle.Submit(sdkruntime.Submission{Kind: "conversation", Text: "too late"}); err == nil {
+		t.Fatal("Submit() after runner completion error = nil, want closed-runner error")
+	}
+}
+
 func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 	t.Parallel()
 
@@ -3997,6 +4099,74 @@ func (m *gatedStreamingModel) Generate(context.Context, *sdkmodel.Request) iter.
 			},
 		}, nil)
 	}
+}
+
+type steerRuntimeModel struct {
+	started      chan struct{}
+	releaseFirst chan struct{}
+
+	mu       sync.Mutex
+	requests []sdkmodel.Request
+}
+
+func (m *steerRuntimeModel) Name() string { return "steer-runtime" }
+
+func (m *steerRuntimeModel) Generate(_ context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+	m.mu.Lock()
+	if req != nil {
+		cp := *req
+		cp.Messages = sdkmodel.CloneMessages(req.Messages)
+		cp.Instructions = sdkmodel.CloneParts(req.Instructions)
+		m.requests = append(m.requests, cp)
+	}
+	callIndex := len(m.requests)
+	m.mu.Unlock()
+
+	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+		if callIndex == 1 {
+			if m.started != nil {
+				select {
+				case <-m.started:
+				default:
+					close(m.started)
+				}
+			}
+			if m.releaseFirst != nil {
+				<-m.releaseFirst
+			}
+			yield(&sdkmodel.StreamEvent{
+				Type: sdkmodel.StreamEventTurnDone,
+				Response: &sdkmodel.Response{
+					Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "first answer"),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       sdkmodel.ResponseStatusCompleted,
+				},
+			}, nil)
+			return
+		}
+		yield(&sdkmodel.StreamEvent{
+			Type: sdkmodel.StreamEventTurnDone,
+			Response: &sdkmodel.Response{
+				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, "steered answer"),
+				TurnComplete: true,
+				StepComplete: true,
+				Status:       sdkmodel.ResponseStatusCompleted,
+			},
+		}, nil)
+	}
+}
+
+func (m *steerRuntimeModel) Requests() []sdkmodel.Request {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]sdkmodel.Request, len(m.requests))
+	for i, req := range m.requests {
+		out[i] = req
+		out[i].Messages = sdkmodel.CloneMessages(req.Messages)
+		out[i].Instructions = sdkmodel.CloneParts(req.Instructions)
+	}
+	return out
 }
 
 type historyReplayModel struct {

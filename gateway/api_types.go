@@ -20,6 +20,7 @@ type DetachParticipantRequest = gatewaycore.DetachParticipantRequest
 type ControlPlaneStateRequest = gatewaycore.ControlPlaneStateRequest
 type BindingStateRequest = gatewaycore.BindingStateRequest
 type ActiveTurnState = gatewaycore.ActiveTurnState
+type ActiveTurnKind = gatewaycore.ActiveTurnKind
 type ControllerState = gatewaycore.ControllerState
 type ParticipantState = gatewaycore.ParticipantState
 type ACPProjectionState = gatewaycore.ACPProjectionState
@@ -59,6 +60,7 @@ type StreamRequest = gatewaycore.StreamRequest
 type SubmissionKind = gatewaycore.SubmissionKind
 type ApprovalDecision = gatewaycore.ApprovalDecision
 type SubmitRequest = gatewaycore.SubmitRequest
+type SubmitActiveTurnRequest = gatewaycore.SubmitActiveTurnRequest
 type BeginTurnResult = gatewaycore.BeginTurnResult
 type TurnHandle = gatewaycore.TurnHandle
 type ErrorKind = gatewaycore.ErrorKind
@@ -162,6 +164,9 @@ const (
 	SubmissionKindConversation = gatewaycore.SubmissionKindConversation
 	SubmissionKindOverlay      = gatewaycore.SubmissionKindOverlay
 	SubmissionKindApproval     = gatewaycore.SubmissionKindApproval
+
+	ActiveTurnKindKernel      = gatewaycore.ActiveTurnKindKernel
+	ActiveTurnKindParticipant = gatewaycore.ActiveTurnKindParticipant
 )
 
 const (

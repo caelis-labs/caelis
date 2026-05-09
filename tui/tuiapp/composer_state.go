@@ -22,6 +22,6 @@ type Composer struct {
 	historyIndex            int
 	historyDraft            string
 	historyDraftAttachments []inputAttachment
-	pendingQueue            *pendingPrompt
+	pendingQueue            []pendingPrompt
 	wizard                  *wizardRuntime
 }

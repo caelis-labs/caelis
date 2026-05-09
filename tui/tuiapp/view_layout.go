@@ -688,7 +688,7 @@ func (m *Model) primaryDrawerOffsetHeight() int {
 }
 
 func (m *Model) pendingQueueSectionHeight() int {
-	if m.pendingQueue == nil || m.width <= 0 {
+	if len(m.pendingQueue) == 0 || m.width <= 0 {
 		return 0
 	}
 	return 3

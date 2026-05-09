@@ -251,6 +251,94 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	gw := &activeSubmitGatewayService{
+		active: []gateway.ActiveTurnState{{
+			SessionRef: session.SessionRef,
+			Kind:       gateway.ActiveTurnKindKernel,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+		}},
+	}
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		GatewayFn:       func() GatewayService { return gw },
+		Workspace:       sdksession.WorkspaceRef{Key: "ws", CWD: session.CWD},
+		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		StartSessionFn: func(context.Context, string, string) (sdksession.Session, error) {
+			return session, nil
+		},
+	}, session.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	turn, err := driver.Submit(ctx, Submission{Text: "  steer next step  "})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if turn != nil {
+		t.Fatalf("Submit() turn = %#v, want nil for active-turn guidance", turn)
+	}
+	if gw.beginCalls != 0 {
+		t.Fatalf("BeginTurn calls = %d, want 0", gw.beginCalls)
+	}
+	if got, want := len(gw.activeSubmits), 1; got != want {
+		t.Fatalf("active submits = %d, want %d", got, want)
+	}
+	if got := gw.activeSubmits[0].Text; got != "steer next step" {
+		t.Fatalf("active submit text = %q, want trimmed guidance", got)
+	}
+}
+
+func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "user-1", SessionID: "active-session", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	gw := &activeSubmitGatewayService{
+		active: []gateway.ActiveTurnState{{
+			SessionRef: session.SessionRef,
+			Kind:       gateway.ActiveTurnKindParticipant,
+			HandleID:   "handle-1",
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+		}},
+	}
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		GatewayFn:       func() GatewayService { return gw },
+		Workspace:       sdksession.WorkspaceRef{Key: "ws", CWD: session.CWD},
+		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
+		StartSessionFn: func(context.Context, string, string) (sdksession.Session, error) {
+			return session, nil
+		},
+	}, session.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	_, err = driver.Submit(ctx, Submission{Text: "  main prompt after side run  "})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if got := len(gw.activeSubmits); got != 0 {
+		t.Fatalf("active submits = %d, want 0 for participant active turn", got)
+	}
+	if gw.beginCalls != 1 {
+		t.Fatalf("BeginTurn calls = %d, want 1 fallback main turn attempt", gw.beginCalls)
+	}
+}
+
 func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
@@ -2823,6 +2911,64 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	if status.PermissionGrantCount != 2 || !status.PermissionGrantNetwork || status.PermissionReadRootCount != 3 || status.PermissionWriteRootCount != 1 {
 		t.Fatalf("permission grant summary = count:%d network:%v read:%d write:%d, want 2/true/3/1", status.PermissionGrantCount, status.PermissionGrantNetwork, status.PermissionReadRootCount, status.PermissionWriteRootCount)
 	}
+}
+
+type activeSubmitGatewayService struct {
+	active        []gateway.ActiveTurnState
+	activeSubmits []gateway.SubmitActiveTurnRequest
+	beginCalls    int
+}
+
+func (g *activeSubmitGatewayService) Streams() sdkstream.Service { return nil }
+
+func (g *activeSubmitGatewayService) BeginTurn(context.Context, gateway.BeginTurnRequest) (gateway.BeginTurnResult, error) {
+	g.beginCalls++
+	return gateway.BeginTurnResult{}, nil
+}
+
+func (g *activeSubmitGatewayService) SubmitActiveTurn(_ context.Context, req gateway.SubmitActiveTurnRequest) error {
+	g.activeSubmits = append(g.activeSubmits, req)
+	return nil
+}
+
+func (g *activeSubmitGatewayService) Interrupt(context.Context, gateway.InterruptRequest) error {
+	return nil
+}
+
+func (g *activeSubmitGatewayService) ResumeSession(context.Context, gateway.ResumeSessionRequest) (sdksession.LoadedSession, error) {
+	return sdksession.LoadedSession{}, nil
+}
+
+func (g *activeSubmitGatewayService) ListSessions(context.Context, gateway.ListSessionsRequest) (sdksession.SessionList, error) {
+	return sdksession.SessionList{}, nil
+}
+
+func (g *activeSubmitGatewayService) ReplayEvents(context.Context, gateway.ReplayEventsRequest) (gateway.ReplayEventsResult, error) {
+	return gateway.ReplayEventsResult{}, nil
+}
+
+func (g *activeSubmitGatewayService) ControlPlaneState(context.Context, gateway.ControlPlaneStateRequest) (gateway.ControlPlaneState, error) {
+	return gateway.ControlPlaneState{}, nil
+}
+
+func (g *activeSubmitGatewayService) HandoffController(context.Context, gateway.HandoffControllerRequest) (sdksession.Session, error) {
+	return sdksession.Session{}, nil
+}
+
+func (g *activeSubmitGatewayService) AttachParticipant(context.Context, gateway.AttachParticipantRequest) (sdksession.Session, error) {
+	return sdksession.Session{}, nil
+}
+
+func (g *activeSubmitGatewayService) PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error) {
+	return gateway.BeginTurnResult{}, nil
+}
+
+func (g *activeSubmitGatewayService) DetachParticipant(context.Context, gateway.DetachParticipantRequest) (sdksession.Session, error) {
+	return sdksession.Session{}, nil
+}
+
+func (g *activeSubmitGatewayService) ActiveTurns() []gateway.ActiveTurnState {
+	return append([]gateway.ActiveTurnState(nil), g.active...)
 }
 
 func repoRootForGatewayDriverTest(t *testing.T) string {

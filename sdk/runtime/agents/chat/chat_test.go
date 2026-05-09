@@ -369,6 +369,80 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 }
 
+func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
+	t.Parallel()
+
+	model := &toolLoopModel{}
+	tool := sdktool.NamedTool{
+		Def: sdktool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call sdktool.Call) (sdktool.Result, error) {
+			return sdktool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"value":"pong"}`))},
+			}, nil
+		},
+	}
+	agent, err := NewWithTools("chat", model, []sdktool.Tool{tool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	drained := false
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{
+			SessionRef: sdksession.SessionRef{SessionID: "sess-steer"},
+		},
+		Events: []*sdksession.Event{{
+			Type:    sdksession.EventTypeUser,
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "say pong")),
+			Text:    "say pong",
+		}},
+		DrainSubmissions: func() []sdkruntime.Submission {
+			if drained {
+				return nil
+			}
+			drained = true
+			return []sdkruntime.Submission{{
+				Kind: "conversation",
+				Text: "focus on the follow-up",
+			}}
+		},
+	})
+
+	var userEvents []*sdksession.Event
+	for event, runErr := range agent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		if event != nil && event.Type == sdksession.EventTypeUser {
+			userEvents = append(userEvents, event)
+		}
+	}
+
+	if got, want := len(model.requests), 2; got != want {
+		t.Fatalf("len(model.requests) = %d, want %d", got, want)
+	}
+	second := model.requests[1].Messages
+	if got, want := len(second), 4; got != want {
+		t.Fatalf("len(second.Messages) = %d, want %d (%#v)", got, want, second)
+	}
+	if got := second[3].Role; got != sdkmodel.RoleUser {
+		t.Fatalf("second.Messages[3].Role = %q, want user", got)
+	}
+	if got := second[3].TextContent(); got != "focus on the follow-up" {
+		t.Fatalf("second.Messages[3] text = %q", got)
+	}
+	if len(userEvents) != 1 || userEvents[0].Text != "focus on the follow-up" {
+		t.Fatalf("emitted user events = %#v, want queued guidance echoed once", userEvents)
+	}
+}
+
 func TestToolCallEventsPersistAssistantTextInProtocolContent(t *testing.T) {
 	t.Parallel()
 

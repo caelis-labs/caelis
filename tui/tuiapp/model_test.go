@@ -264,27 +264,87 @@ func TestDynamicAgentSlashCommandUsesNormalTurnBehavior(t *testing.T) {
 	}
 }
 
-func TestRunningPromptSubmissionIsBlockedBeforeDriverSubmit(t *testing.T) {
-	called := false
+func TestRunningPromptSubmissionQueuesGuidanceForActiveTurn(t *testing.T) {
+	var submitted Submission
 	model := NewModel(Config{
-		ExecuteLine: func(Submission) TaskResultMsg {
-			called = true
-			return TaskResultMsg{}
+		CanSubmitRunningPrompt: func() bool { return true },
+		ExecuteLine: func(sub Submission) TaskResultMsg {
+			submitted = sub
+			return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
 		},
 	})
 	model.running = true
 
-	updated, _ := model.submitLine("new prompt while running")
+	updated, cmd := model.submitLine("new prompt while running")
 	model = updated.(*Model)
 
-	if called {
-		t.Fatal("ExecuteLine was called while another turn was running")
+	if cmd == nil {
+		t.Fatal("submitLine() command = nil, want active-turn submit command")
 	}
-	if model.pendingQueue != nil {
-		t.Fatalf("pendingQueue = %#v, want nil until guided follow-up prompts are implemented", model.pendingQueue)
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].execLine != "new prompt while running" {
+		t.Fatalf("pendingQueue = %#v, want queued prompt", model.pendingQueue)
 	}
-	if !strings.Contains(model.hint, "A turn is still running") {
-		t.Fatalf("hint = %q, want running-turn prompt block message", model.hint)
+	if !model.pendingQueue[0].dispatched {
+		t.Fatalf("pendingQueue[0].dispatched = false, want active-turn submission dispatched")
+	}
+	if model.hint != "" {
+		t.Fatalf("hint = %q, want no running-turn block hint", model.hint)
+	}
+	findAndRunTaskResult(cmd(), model)
+	if submitted.Text != "new prompt while running" {
+		t.Fatalf("submitted = %#v, want running guidance submission", submitted)
+	}
+	if !model.running {
+		t.Fatal("running = false after guidance submit result, want active turn to continue")
+	}
+
+	updated, _ = model.Update(UserMessageMsg{Text: "new prompt while running"})
+	model = updated.(*Model)
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after echoed user message = %#v, want empty", model.pendingQueue)
+	}
+}
+
+func TestRunningPromptSubmissionDefersForNonBuiltInAgentUntilIdle(t *testing.T) {
+	var submissions []Submission
+	model := NewModel(Config{
+		CanSubmitRunningPrompt: func() bool { return false },
+		ExecuteLine: func(sub Submission) TaskResultMsg {
+			submissions = append(submissions, sub)
+			return TaskResultMsg{ContinueRunning: true, SuppressTurnDivider: true}
+		},
+	})
+	model.running = true
+
+	updated, cmd := model.submitLine("prompt for next idle")
+	model = updated.(*Model)
+	if cmd != nil {
+		t.Fatal("submitLine() command != nil, want prompt queued until idle")
+	}
+	if len(submissions) != 0 {
+		t.Fatalf("submissions = %#v, want none while non-built-in agent is running", submissions)
+	}
+	if len(model.pendingQueue) != 1 || model.pendingQueue[0].execLine != "prompt for next idle" {
+		t.Fatalf("pendingQueue = %#v, want deferred prompt", model.pendingQueue)
+	}
+	if model.pendingQueue[0].dispatched {
+		t.Fatal("pendingQueue[0].dispatched = true, want deferred prompt waiting for idle")
+	}
+
+	updated, cmd = model.Update(TaskResultMsg{})
+	model = updated.(*Model)
+	if cmd == nil {
+		t.Fatal("TaskResultMsg command = nil, want deferred prompt submission")
+	}
+	if !model.running {
+		t.Fatal("running = false after deferred prompt dispatch, want new turn running")
+	}
+	if len(model.pendingQueue) != 0 {
+		t.Fatalf("pendingQueue after deferred dispatch = %#v, want empty", model.pendingQueue)
+	}
+	findAndRunTaskResult(cmd(), model)
+	if len(submissions) != 1 || submissions[0].Text != "prompt for next idle" {
+		t.Fatalf("submissions = %#v, want deferred prompt submitted after idle", submissions)
 	}
 }
 

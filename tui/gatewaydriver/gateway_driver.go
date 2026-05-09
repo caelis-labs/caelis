@@ -458,6 +458,9 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		active := gw.ActiveTurns()
 		status.ActiveJobs = len(active)
 		status.Running = len(active) > 0
+		if kind, ok := activeTurnKindForSession(active, session.SessionRef); ok {
+			status.ActiveTurnKind = kind
+		}
 	}
 	return status, nil
 }
@@ -521,6 +524,23 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	if err != nil {
 		return nil, err
 	}
+	if isBuiltInControllerSession(session) && activeKernelTurnForSession(gw.ActiveTurns(), session.SessionRef) {
+		err := gw.SubmitActiveTurn(ctx, gateway.SubmitActiveTurnRequest{
+			SessionRef: session.SessionRef,
+			Kind:       gateway.SubmissionKindConversation,
+			Text:       strings.TrimSpace(submission.Text),
+			Metadata: map[string]any{
+				"submission_mode": string(submission.Mode),
+				"display_text":    strings.TrimSpace(submission.DisplayText),
+			},
+		})
+		if err == nil {
+			return nil, nil
+		}
+		if !isNoActiveRunError(err) {
+			return nil, err
+		}
+	}
 	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      strings.TrimSpace(submission.Text),
@@ -541,6 +561,41 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 		return nil, nil
 	}
 	return gatewayTurn{handle: result.Handle}, nil
+}
+
+func activeKernelTurnForSession(active []gateway.ActiveTurnState, ref sdksession.SessionRef) bool {
+	kind, ok := activeTurnKindForSession(active, ref)
+	if !ok {
+		return false
+	}
+	return kind == "" || strings.EqualFold(kind, string(gateway.ActiveTurnKindKernel))
+}
+
+func activeTurnKindForSession(active []gateway.ActiveTurnState, ref sdksession.SessionRef) (string, bool) {
+	sessionID := strings.TrimSpace(ref.SessionID)
+	if sessionID == "" {
+		return "", false
+	}
+	for _, item := range active {
+		if strings.TrimSpace(item.SessionRef.SessionID) == sessionID {
+			return strings.TrimSpace(string(item.Kind)), true
+		}
+	}
+	return "", false
+}
+
+func isBuiltInControllerSession(session sdksession.Session) bool {
+	switch session.Controller.Kind {
+	case "", sdksession.ControllerKindKernel:
+		return true
+	default:
+		return false
+	}
+}
+
+func isNoActiveRunError(err error) bool {
+	var gwErr *gateway.Error
+	return errors.As(err, &gwErr) && gwErr.Code == gateway.CodeNoActiveRun
 }
 
 func (d *GatewayDriver) Interrupt(ctx context.Context) error {
@@ -963,6 +1018,10 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	status.ControllerLabel = strings.TrimSpace(firstNonEmpty(state.Controller.AgentName, state.Controller.Label, state.Controller.ControllerID, string(state.Controller.Kind)))
 	status.ControllerEpoch = strings.TrimSpace(state.Controller.EpochID)
 	status.HasActiveTurn = state.HasActiveTurn
+	if kind, ok := activeTurnKindForSession(gw.ActiveTurns(), session.SessionRef); ok {
+		status.HasActiveTurn = true
+		status.ActiveTurnKind = kind
+	}
 	if state.Controller.Kind == sdksession.ControllerKindACP {
 		if controllerStatus, ok, err := d.activeACPControllerStatus(ctx); err != nil {
 			return AgentStatusSnapshot{}, err

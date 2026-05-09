@@ -12,34 +12,39 @@ import (
 )
 
 type turnHandleConfig struct {
-	handleID   string
-	runID      string
-	turnID     string
-	sessionRef sdksession.SessionRef
-	createdAt  time.Time
-	cancel     func() bool
+	handleID                string
+	runID                   string
+	turnID                  string
+	activeKind              ActiveTurnKind
+	sessionRef              sdksession.SessionRef
+	createdAt               time.Time
+	cancel                  func() bool
+	allowPendingSubmissions bool
 }
 
 type turnHandle struct {
 	handleID   string
 	runID      string
 	turnID     string
+	activeKind ActiveTurnKind
 	sessionRef sdksession.SessionRef
 	createdAt  time.Time
 	cancelFn   func() bool
 
-	mu                sync.Mutex
-	events            []EventEnvelope
-	eventsCh          chan EventEnvelope
-	eventsCond        *sync.Cond
-	liveQueue         []EventEnvelope
-	eventsStarted     bool
-	eventsClosed      bool
-	closed            bool
-	finished          bool
-	cancelled         bool
-	runner            sdkruntime.Runner
-	pendingApprovalCh chan ApprovalDecision
+	mu                      sync.Mutex
+	events                  []EventEnvelope
+	eventsCh                chan EventEnvelope
+	eventsCond              *sync.Cond
+	liveQueue               []EventEnvelope
+	eventsStarted           bool
+	eventsClosed            bool
+	closed                  bool
+	finished                bool
+	cancelled               bool
+	runner                  sdkruntime.Runner
+	pendingSubmissions      []SubmitRequest
+	allowPendingSubmissions bool
+	pendingApprovalCh       chan ApprovalDecision
 
 	approvalReviewSeq            uint64
 	autoReviewConsecutiveDenials int
@@ -48,13 +53,15 @@ type turnHandle struct {
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 	h := &turnHandle{
-		handleID:   cfg.handleID,
-		runID:      cfg.runID,
-		turnID:     cfg.turnID,
-		sessionRef: cfg.sessionRef,
-		createdAt:  cfg.createdAt,
-		cancelFn:   cfg.cancel,
-		eventsCh:   make(chan EventEnvelope, 32),
+		handleID:                cfg.handleID,
+		runID:                   cfg.runID,
+		turnID:                  cfg.turnID,
+		activeKind:              cfg.activeKind,
+		sessionRef:              cfg.sessionRef,
+		createdAt:               cfg.createdAt,
+		cancelFn:                cfg.cancel,
+		allowPendingSubmissions: cfg.allowPendingSubmissions,
+		eventsCh:                make(chan EventEnvelope, 32),
 	}
 	h.eventsCond = sync.NewCond(&h.mu)
 	return h
@@ -63,6 +70,7 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 func (h *turnHandle) HandleID() string                  { return h.handleID }
 func (h *turnHandle) RunID() string                     { return h.runID }
 func (h *turnHandle) TurnID() string                    { return h.turnID }
+func (h *turnHandle) ActiveKind() ActiveTurnKind        { return h.activeKind }
 func (h *turnHandle) SessionRef() sdksession.SessionRef { return h.sessionRef }
 func (h *turnHandle) CreatedAt() time.Time              { return h.createdAt }
 func (h *turnHandle) Events() <-chan EventEnvelope {
@@ -91,6 +99,9 @@ func (h *turnHandle) EventsAfter(cursor string) ([]EventEnvelope, string, error)
 }
 
 func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if req.Kind == SubmissionKindApproval && req.Approval != nil {
 		h.mu.Lock()
 		wait := h.pendingApprovalCh
@@ -114,6 +125,20 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 
 	h.mu.Lock()
 	runner := h.runner
+	cancelled := h.cancelled
+	if err := ctx.Err(); err != nil {
+		h.mu.Unlock()
+		return err
+	}
+	if cancelled {
+		h.mu.Unlock()
+		return context.Canceled
+	}
+	if runner == nil && h.allowPendingSubmissions && !h.finished {
+		h.pendingSubmissions = append(h.pendingSubmissions, cloneSubmitRequest(req))
+		h.mu.Unlock()
+		return nil
+	}
 	h.mu.Unlock()
 	if runner == nil {
 		return &Error{
@@ -123,11 +148,7 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 			Message:     "gateway: submission is not available for this handle",
 		}
 	}
-	return runner.Submit(sdkruntime.Submission{
-		Kind:     string(req.Kind),
-		Text:     req.Text,
-		Metadata: cloneMap(req.Metadata),
-	})
+	return runner.Submit(runnerSubmissionFromSubmitRequest(req))
 }
 
 func (h *turnHandle) Cancel() bool {
@@ -167,9 +188,50 @@ func (h *turnHandle) setRunner(runner sdkruntime.Runner) {
 	h.mu.Lock()
 	cancelled := h.cancelled
 	h.runner = runner
+	pending := slices.Clone(h.pendingSubmissions)
+	h.pendingSubmissions = nil
 	h.mu.Unlock()
 	if cancelled && runner != nil {
 		runner.Cancel()
+		return
+	}
+	if runner == nil {
+		return
+	}
+	for _, req := range pending {
+		if err := runner.Submit(runnerSubmissionFromSubmitRequest(req)); err != nil {
+			h.publish(EventEnvelope{
+				Event: Event{
+					Kind:       EventKindLifecycle,
+					HandleID:   h.handleID,
+					RunID:      h.runID,
+					TurnID:     h.turnID,
+					SessionRef: h.sessionRef,
+				},
+				Err: EventError(err),
+			})
+		}
+	}
+}
+
+func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
+	out := SubmitRequest{
+		Kind:     req.Kind,
+		Text:     req.Text,
+		Metadata: cloneMap(req.Metadata),
+	}
+	if req.Approval != nil {
+		approval := *req.Approval
+		out.Approval = &approval
+	}
+	return out
+}
+
+func runnerSubmissionFromSubmitRequest(req SubmitRequest) sdkruntime.Submission {
+	return sdkruntime.Submission{
+		Kind:     string(req.Kind),
+		Text:     req.Text,
+		Metadata: cloneMap(req.Metadata),
 	}
 }
 
