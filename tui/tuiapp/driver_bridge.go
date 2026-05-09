@@ -1152,10 +1152,39 @@ func resumeTranscriptReplayEvents(events []appgateway.EventEnvelope) []appgatewa
 	if len(events) == 0 {
 		return nil
 	}
+	incompleteTurns := resumeIncompleteTurnIDs(events)
 	out := make([]appgateway.EventEnvelope, 0, len(events))
 	for _, env := range events {
-		if shouldReplayEventInTUIResume(env.Event) {
+		if shouldReplayEventInTUIResume(env.Event) || shouldReplayInterruptedTurnEvent(env.Event, incompleteTurns) {
 			out = append(out, env)
+		}
+	}
+	return out
+}
+
+func resumeIncompleteTurnIDs(events []appgateway.EventEnvelope) map[string]bool {
+	hasUser := map[string]bool{}
+	hasAssistantFinal := map[string]bool{}
+	for _, env := range events {
+		turnID := strings.TrimSpace(env.Event.TurnID)
+		if turnID == "" || gatewayEventScope(env.Event) != ACPProjectionMain {
+			continue
+		}
+		switch env.Event.Kind {
+		case appgateway.EventKindUserMessage:
+			if strings.TrimSpace(gatewayUserText(env.Event)) != "" {
+				hasUser[turnID] = true
+			}
+		case appgateway.EventKindAssistantMessage:
+			if completedResumeAssistant(env.Event) {
+				hasAssistantFinal[turnID] = true
+			}
+		}
+	}
+	out := map[string]bool{}
+	for turnID := range hasUser {
+		if !hasAssistantFinal[turnID] {
+			out[turnID] = true
 		}
 	}
 	return out
@@ -1174,20 +1203,55 @@ func shouldReplayEventInTUIResume(event appgateway.Event) bool {
 		case appgateway.NarrativeRoleUser:
 			return strings.TrimSpace(payload.Text) != ""
 		case appgateway.NarrativeRoleAssistant:
-			if !payload.Final || strings.TrimSpace(payload.Text) == "" {
-				return false
-			}
-			if strings.EqualFold(strings.TrimSpace(payload.Visibility), "ui_only") {
-				return false
-			}
-			scope := payload.Scope
-			if scope == "" && event.Origin != nil {
-				scope = event.Origin.Scope
-			}
-			return scope == "" || scope == appgateway.EventScopeMain
+			return replayableResumeAssistant(event)
 		default:
 			return false
 		}
+	default:
+		return false
+	}
+}
+
+func replayableResumeAssistant(event appgateway.Event) bool {
+	payload := event.Narrative
+	if payload == nil || payload.Role != appgateway.NarrativeRoleAssistant {
+		return false
+	}
+	if !payload.Final {
+		return false
+	}
+	if strings.TrimSpace(payload.Text) == "" && strings.TrimSpace(payload.ReasoningText) == "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(payload.Visibility), "ui_only") {
+		return false
+	}
+	scope := payload.Scope
+	if scope == "" && event.Origin != nil {
+		scope = event.Origin.Scope
+	}
+	return scope == "" || scope == appgateway.EventScopeMain
+}
+
+func completedResumeAssistant(event appgateway.Event) bool {
+	if !replayableResumeAssistant(event) {
+		return false
+	}
+	payload := event.Narrative
+	return payload == nil || !strings.EqualFold(strings.TrimSpace(payload.Visibility), "mirror")
+}
+
+func shouldReplayInterruptedTurnEvent(event appgateway.Event, incompleteTurns map[string]bool) bool {
+	turnID := strings.TrimSpace(event.TurnID)
+	if turnID == "" || !incompleteTurns[turnID] {
+		return false
+	}
+	if gatewayEventScope(event) != ACPProjectionMain {
+		return false
+	}
+	switch event.Kind {
+	case appgateway.EventKindPlanUpdate, appgateway.EventKindToolCall, appgateway.EventKindToolResult:
+		return true
 	default:
 		return false
 	}

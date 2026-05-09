@@ -437,16 +437,18 @@ func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (Re
 	events, err := g.sessions.Events(ctx, sdksession.EventsRequest{
 		SessionRef:       ref,
 		Limit:            0,
-		IncludeTransient: req.IncludeTransient,
+		IncludeTransient: true,
 	})
 	if err != nil {
 		return ReplayEventsResult{}, wrapSessionError(err)
 	}
+	replayEvents := replayTranscriptEvents(events, req.IncludeTransient)
+	controlEvents := replayControlPlaneEvents(events, req.IncludeTransient)
 	runState, err := g.runtime.RunState(ctx, ref)
 	if err != nil && !errors.Is(err, sdksession.ErrSessionNotFound) {
 		return ReplayEventsResult{}, err
 	}
-	projected := projectSessionEvents(ref, events)
+	projected := projectSessionEvents(ref, replayEvents)
 	projected, err = replayAfterCursor(projected, req.Cursor, req.Limit)
 	if err != nil {
 		return ReplayEventsResult{}, err
@@ -457,7 +459,7 @@ func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (Re
 		NextCursor:    lastCursor(projected),
 		Durable:       true,
 		HasLiveHandle: g.hasActiveHandle(ref.SessionID),
-		ControlPlane:  buildControlPlaneState(session, runState, events),
+		ControlPlane:  buildControlPlaneState(session, runState, controlEvents),
 	}
 	return out, nil
 }

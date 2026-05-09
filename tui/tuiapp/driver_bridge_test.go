@@ -247,7 +247,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 		replay: []appgateway.EventEnvelope{
 			{
 				Event: appgateway.Event{
-					Kind: appgateway.EventKindUserMessage,
+					Kind:   appgateway.EventKindUserMessage,
+					TurnID: "turn-complete",
 					Narrative: &appgateway.NarrativePayload{
 						Role: appgateway.NarrativeRoleUser,
 						Text: "history prompt",
@@ -256,7 +257,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 			},
 			{
 				Event: appgateway.Event{
-					Kind: appgateway.EventKindToolCall,
+					Kind:   appgateway.EventKindToolCall,
+					TurnID: "turn-complete",
 					ToolCall: &appgateway.ToolCallPayload{
 						CallID:   "bash-1",
 						ToolName: "BASH",
@@ -266,7 +268,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 			},
 			{
 				Event: appgateway.Event{
-					Kind: appgateway.EventKindAssistantMessage,
+					Kind:   appgateway.EventKindAssistantMessage,
+					TurnID: "turn-complete",
 					Narrative: &appgateway.NarrativePayload{
 						Role:       appgateway.NarrativeRoleAssistant,
 						Text:       "stream chunk",
@@ -277,7 +280,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 			},
 			{
 				Event: appgateway.Event{
-					Kind: appgateway.EventKindAssistantMessage,
+					Kind:   appgateway.EventKindAssistantMessage,
+					TurnID: "turn-complete",
 					Narrative: &appgateway.NarrativePayload{
 						Role:  appgateway.NarrativeRoleAssistant,
 						Text:  "history reply",
@@ -319,6 +323,64 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 	if !sawUserReplay || !sawAssistantReplay {
 		t.Fatalf("slashResume() messages = %#v, want user and final assistant replay", msgs)
+	}
+}
+
+func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
+	driver := &bridgeTestDriver{
+		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		resumedSession: sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "resumed-session"}},
+		replay: []appgateway.EventEnvelope{
+			{
+				Event: appgateway.Event{
+					Kind:   appgateway.EventKindUserMessage,
+					TurnID: "turn-interrupted",
+					Narrative: &appgateway.NarrativePayload{
+						Role: appgateway.NarrativeRoleUser,
+						Text: "history prompt",
+					},
+				},
+			},
+			{
+				Event: appgateway.Event{
+					Kind:   appgateway.EventKindToolCall,
+					TurnID: "turn-interrupted",
+					ToolCall: &appgateway.ToolCallPayload{
+						CallID:   "bash-1",
+						ToolName: "BASH",
+						Status:   appgateway.ToolStatusRunning,
+					},
+				},
+			},
+			{
+				Event: appgateway.Event{
+					Kind:   appgateway.EventKindAssistantMessage,
+					TurnID: "turn-interrupted",
+					Narrative: &appgateway.NarrativePayload{
+						Role:       appgateway.NarrativeRoleAssistant,
+						Text:       "partial answer",
+						Final:      true,
+						Visibility: string(sdksession.VisibilityMirror),
+						Scope:      appgateway.EventScopeMain,
+					},
+				},
+			},
+		},
+	}
+	var msgs []tea.Msg
+	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
+	var sawToolReplay bool
+	var sawMirrorReplay bool
+	for _, msg := range msgs {
+		if env, ok := msg.(appgateway.EventEnvelope); ok && env.Event.Kind == appgateway.EventKindToolCall {
+			sawToolReplay = true
+		}
+		if env, ok := msg.(appgateway.EventEnvelope); ok && env.Event.Narrative != nil && env.Event.Narrative.Text == "partial answer" {
+			sawMirrorReplay = true
+		}
+	}
+	if !sawToolReplay || !sawMirrorReplay {
+		t.Fatalf("slashResume() messages = %#v, want interrupted turn tool and mirror replay", msgs)
 	}
 }
 

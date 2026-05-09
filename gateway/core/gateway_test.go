@@ -1482,6 +1482,71 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 	}
 }
 
+func TestReplayEventsIncludesDurableMirrorTranscriptEvents(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	mirror := sdksession.MarkMirror(&sdksession.Event{
+		ID:   "e2",
+		Type: sdksession.EventTypeAssistant,
+		Text: "partial answer",
+		Scope: &sdksession.EventScope{
+			TurnID: "turn-1",
+		},
+		Protocol: &sdksession.EventProtocol{
+			UpdateType: string(sdksession.ProtocolUpdateTypeAgentMessage),
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeAgentMessage),
+				Content: map[string]any{
+					"type":          "assistant_snapshot",
+					"text":          "partial answer",
+					"reasoningText": "partial thought",
+				},
+			},
+		},
+	})
+	svc := &recordingSessionService{
+		sessionResult: session,
+		eventsResult: []*sdksession.Event{
+			{ID: "e1", Type: sdksession.EventTypeUser, Text: "prompt", Scope: &sdksession.EventScope{TurnID: "turn-1"}},
+			mirror,
+			sdksession.MarkUIOnly(&sdksession.Event{ID: "ui-1", Type: sdksession.EventTypeAssistant, Text: "live only"}),
+		},
+	}
+	gw, err := New(Config{
+		Sessions: svc,
+		Runtime:  mockRuntime{},
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	replayed, err := gw.ReplayEvents(context.Background(), ReplayEventsRequest{
+		SessionRef: session.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("ReplayEvents() error = %v", err)
+	}
+	if !svc.eventsReq.IncludeTransient {
+		t.Fatal("ReplayEvents() did not request durable transcript events")
+	}
+	if len(replayed.Events) != 2 {
+		t.Fatalf("ReplayEvents().Events = %#v, want user + mirror assistant", replayed.Events)
+	}
+	got := replayed.Events[1].Event.Narrative
+	if got == nil || got.Text != "partial answer" || got.ReasoningText != "partial thought" || got.Visibility != string(sdksession.VisibilityMirror) || !got.Final {
+		t.Fatalf("mirror replay narrative = %#v, want final mirror assistant text and reasoning", got)
+	}
+	if replayed.ControlPlane.Continuity.LastEventCursor != "e1" {
+		t.Fatalf("control continuity = %+v, want mirror ignored", replayed.ControlPlane.Continuity)
+	}
+}
+
 func TestReplayEventsResolvesBindingAndAppliesCursorLimit(t *testing.T) {
 	t.Parallel()
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"maps"
 	"os"
 	"strings"
 	"sync"
@@ -239,10 +240,14 @@ func (r *Runtime) executeKernelTurn(
 	batch := make([]*sdksession.Event, 0, 4)
 	userEvent := buildUserEvent(session, turnID, req.Input, req.ContentParts)
 	if err := r.runWithOverflowRecovery(ctx, session, ref, runID, turnID, req, userEvent, &batch, handle); err != nil {
+		stateErr := err
+		if replayErr := r.persistInterruptedAssistantReplay(context.WithoutCancel(ctx), session, ref, turnID, batch, err); replayErr != nil {
+			stateErr = errors.Join(err, replayErr)
+		}
 		r.setRunState(ref.SessionID, sdkruntime.RunState{
 			Status:      interruptedOrFailedStatus(ctx, err),
 			ActiveRunID: runID,
-			LastError:   err.Error(),
+			LastError:   stateErr.Error(),
 			UpdatedAt:   r.now(),
 		})
 		handle.publishError(err)
@@ -253,6 +258,201 @@ func (r *Runtime) executeKernelTurn(
 		ActiveRunID: runID,
 		UpdatedAt:   r.now(),
 	})
+}
+
+func (r *Runtime) persistInterruptedAssistantReplay(
+	ctx context.Context,
+	session sdksession.Session,
+	ref sdksession.SessionRef,
+	turnID string,
+	events []*sdksession.Event,
+	cause error,
+) error {
+	if r == nil || r.sessions == nil {
+		return nil
+	}
+	event := interruptedAssistantReplayEvent(session, turnID, events, cause)
+	if event == nil {
+		return nil
+	}
+	_, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		SessionRef: ref,
+		Event:      event,
+	})
+	return err
+}
+
+func interruptedAssistantReplayEvent(
+	session sdksession.Session,
+	turnID string,
+	events []*sdksession.Event,
+	cause error,
+) *sdksession.Event {
+	turnID = strings.TrimSpace(turnID)
+	var answer strings.Builder
+	var reasoning strings.Builder
+	var template *sdksession.Event
+	for _, event := range events {
+		if !mainTurnEvent(event, turnID) || sdksession.EventTypeOf(event) != sdksession.EventTypeAssistant {
+			continue
+		}
+		if sdksession.IsCanonicalHistoryEvent(event) && assistantEventHasReplayText(event) {
+			return nil
+		}
+		if event.Visibility != sdksession.VisibilityUIOnly {
+			continue
+		}
+		updateType := assistantReplayUpdateType(event)
+		text := narrativeEventText(event, updateType)
+		if text == "" {
+			continue
+		}
+		template = sdksession.CloneEvent(event)
+		switch updateType {
+		case string(sdksession.ProtocolUpdateTypeAgentThought):
+			reasoning.WriteString(text)
+		default:
+			answer.WriteString(text)
+		}
+	}
+	answerText := answer.String()
+	reasoningText := reasoning.String()
+	if strings.TrimSpace(answerText) == "" && strings.TrimSpace(reasoningText) == "" {
+		return nil
+	}
+	if template == nil {
+		return nil
+	}
+	return buildInterruptedAssistantReplayEvent(template, session, turnID, answerText, reasoningText, cause)
+}
+
+func buildInterruptedAssistantReplayEvent(
+	template *sdksession.Event,
+	session sdksession.Session,
+	turnID string,
+	answerText string,
+	reasoningText string,
+	cause error,
+) *sdksession.Event {
+	event := sdksession.CloneEvent(template)
+	if event == nil {
+		event = &sdksession.Event{}
+	}
+	event.ID = ""
+	event.Type = sdksession.EventTypeAssistant
+	event.Visibility = sdksession.VisibilityMirror
+	if event.Scope == nil {
+		scope := defaultScope(session, turnID)
+		event.Scope = &scope
+	} else {
+		scope := *event.Scope
+		if strings.TrimSpace(scope.TurnID) == "" {
+			scope.TurnID = strings.TrimSpace(turnID)
+		}
+		if scope.Controller.Kind == "" {
+			scope.Controller = defaultControllerRef(session)
+		}
+		event.Scope = &scope
+	}
+	if event.Actor.Kind == "" {
+		event.Actor = sdksession.ActorRef{Kind: sdksession.ActorKindController}
+	}
+	message := sdkmodel.MessageFromAssistantParts(answerText, reasoningText, nil)
+	event.Message = &message
+	event.Text = message.TextContent()
+	updateType := string(sdksession.ProtocolUpdateTypeAgentMessage)
+	content := interruptedAssistantReplayContent(answerText, reasoningText)
+	if strings.TrimSpace(answerText) == "" {
+		updateType = string(sdksession.ProtocolUpdateTypeAgentThought)
+		content = interruptedAssistantReplayContent("", reasoningText)
+	}
+	event.Protocol = &sdksession.EventProtocol{
+		UpdateType: updateType,
+		Update: &sdksession.ProtocolUpdate{
+			SessionUpdate: updateType,
+			Content:       content,
+		},
+	}
+	event.Meta = interruptedReplayMeta(event.Meta, cause)
+	return event
+}
+
+func interruptedAssistantReplayContent(answerText string, reasoningText string) map[string]any {
+	answerText = strings.TrimSpace(answerText)
+	reasoningText = strings.TrimSpace(reasoningText)
+	if answerText == "" && reasoningText == "" {
+		return nil
+	}
+	content := map[string]any{"type": "assistant_snapshot"}
+	if answerText != "" {
+		content["text"] = answerText
+	}
+	if reasoningText != "" {
+		content["reasoningText"] = reasoningText
+	}
+	return content
+}
+
+func mainTurnEvent(event *sdksession.Event, turnID string) bool {
+	if event == nil || event.Scope == nil {
+		return false
+	}
+	if strings.TrimSpace(event.Scope.TurnID) != strings.TrimSpace(turnID) {
+		return false
+	}
+	return strings.TrimSpace(event.Scope.Participant.ID) == ""
+}
+
+func assistantEventHasReplayText(event *sdksession.Event) bool {
+	if event == nil {
+		return false
+	}
+	if strings.TrimSpace(sdksession.EventText(event)) != "" {
+		return true
+	}
+	if event.Message != nil && strings.TrimSpace(event.Message.ReasoningText()) != "" {
+		return true
+	}
+	return false
+}
+
+func assistantReplayUpdateType(event *sdksession.Event) string {
+	if event != nil && event.Protocol != nil {
+		if updateType := strings.TrimSpace(event.Protocol.UpdateType); updateType != "" {
+			return updateType
+		}
+		if event.Protocol.Update != nil {
+			if updateType := strings.TrimSpace(event.Protocol.Update.SessionUpdate); updateType != "" {
+				return updateType
+			}
+		}
+	}
+	return string(sdksession.ProtocolUpdateTypeAgentMessage)
+}
+
+func interruptedReplayMeta(meta map[string]any, cause error) map[string]any {
+	out := maps.Clone(meta)
+	if out == nil {
+		out = map[string]any{}
+	}
+	caelis, _ := out["caelis"].(map[string]any)
+	caelis = maps.Clone(caelis)
+	if caelis == nil {
+		caelis = map[string]any{}
+	}
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	runtimeMeta = maps.Clone(runtimeMeta)
+	if runtimeMeta == nil {
+		runtimeMeta = map[string]any{}
+	}
+	replay := map[string]any{"interrupted": true}
+	if cause != nil && strings.TrimSpace(cause.Error()) != "" {
+		replay["reason"] = cause.Error()
+	}
+	runtimeMeta["replay"] = replay
+	caelis["runtime"] = runtimeMeta
+	out["caelis"] = caelis
+	return out
 }
 
 // RunState returns the last known run state for one session.

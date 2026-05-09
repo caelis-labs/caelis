@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -199,10 +200,14 @@ func (r *Runtime) executeACPControllerTurn(
 		accumulator := acpNarrativeAccumulator{}
 		for event, seqErr := range turnResult.Handle.Events() {
 			if seqErr != nil {
+				stateErr := seqErr
+				if replayErr := r.persistInterruptedACPAssistantReplay(context.WithoutCancel(ctx), session, ref, turnID, &accumulator, seqErr); replayErr != nil {
+					stateErr = errors.Join(seqErr, replayErr)
+				}
 				r.setRunState(ref.SessionID, sdkruntime.RunState{
 					Status:      interruptedOrFailedStatus(ctx, seqErr),
 					ActiveRunID: runID,
-					LastError:   seqErr.Error(),
+					LastError:   stateErr.Error(),
 					UpdatedAt:   r.now(),
 				})
 				handle.publishError(seqErr)
@@ -296,6 +301,7 @@ func (r *Runtime) executeACPControllerTurn(
 type acpNarrativeAccumulator struct {
 	assistantText      string
 	reasoningText      string
+	lastNarrativeEvent *sdksession.Event
 	lastAssistantEvent *sdksession.Event
 }
 
@@ -305,6 +311,7 @@ func (a *acpNarrativeAccumulator) normalize(event *sdksession.Event) (*sdksessio
 	}
 	updateType := strings.TrimSpace(event.Protocol.UpdateType)
 	raw := narrativeEventText(event, updateType)
+	a.lastNarrativeEvent = sdksession.CloneEvent(event)
 	if updateType == string(sdksession.ProtocolUpdateTypeAgentMessage) {
 		a.lastAssistantEvent = sdksession.CloneEvent(event)
 	}
@@ -345,6 +352,48 @@ func (a *acpNarrativeAccumulator) finalAssistantEvent() *sdksession.Event {
 	event.Type = sdksession.EventTypeAssistant
 	setNarrativeEventText(event, string(sdksession.ProtocolUpdateTypeAgentMessage), a.assistantText)
 	return event
+}
+
+func (r *Runtime) persistInterruptedACPAssistantReplay(
+	ctx context.Context,
+	session sdksession.Session,
+	ref sdksession.SessionRef,
+	turnID string,
+	accumulator *acpNarrativeAccumulator,
+	cause error,
+) error {
+	if r == nil || r.sessions == nil || accumulator == nil {
+		return nil
+	}
+	event := accumulator.interruptedAssistantReplayEvent(session, turnID, cause)
+	if event == nil {
+		return nil
+	}
+	_, err := r.sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		SessionRef: ref,
+		Event:      event,
+	})
+	return err
+}
+
+func (a *acpNarrativeAccumulator) interruptedAssistantReplayEvent(
+	session sdksession.Session,
+	turnID string,
+	cause error,
+) *sdksession.Event {
+	if a == nil {
+		return nil
+	}
+	answerText := a.assistantText
+	reasoningText := a.reasoningText
+	if strings.TrimSpace(answerText) == "" && strings.TrimSpace(reasoningText) == "" {
+		return nil
+	}
+	template := a.lastAssistantEvent
+	if template == nil {
+		template = a.lastNarrativeEvent
+	}
+	return buildInterruptedAssistantReplayEvent(template, session, turnID, answerText, reasoningText, cause)
 }
 
 func isACPControllerNarrativeChunk(event *sdksession.Event) bool {

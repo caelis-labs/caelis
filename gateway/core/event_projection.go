@@ -41,6 +41,35 @@ func projectSessionEvents(ref sdksession.SessionRef, events []*sdksession.Event)
 	return out
 }
 
+func replayTranscriptEvents(events []*sdksession.Event, includeTransient bool) []*sdksession.Event {
+	if includeTransient {
+		return events
+	}
+	out := make([]*sdksession.Event, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if sdksession.IsCanonicalHistoryEvent(event) || sdksession.IsMirror(event) {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
+func replayControlPlaneEvents(events []*sdksession.Event, includeTransient bool) []*sdksession.Event {
+	if includeTransient {
+		return events
+	}
+	out := make([]*sdksession.Event, 0, len(events))
+	for _, event := range events {
+		if sdksession.IsCanonicalHistoryEvent(event) {
+			out = append(out, event)
+		}
+	}
+	return out
+}
+
 func canonicalProtocolPayload(event *sdksession.Event) *sdksession.EventProtocol {
 	if event == nil || event.Protocol == nil {
 		return nil
@@ -789,8 +818,44 @@ func reasoningTextFromSessionEvent(event *sdksession.Event) string {
 			return reasoning
 		}
 	}
+	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+		if reasoning := reasoningTextFromProtocolContent(update.Content); reasoning != "" {
+			return reasoning
+		}
+	}
 	if updateTypeFromSessionEvent(event) == string(sdksession.ProtocolUpdateTypeAgentThought) {
 		return sdksession.EventText(event)
+	}
+	return ""
+}
+
+func reasoningTextFromProtocolContent(content any) string {
+	switch typed := content.(type) {
+	case nil:
+		return ""
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return ""
+		}
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return ""
+		}
+		return reasoningTextFromProtocolContent(decoded)
+	case map[string]any:
+		for _, key := range []string{"reasoningText", "reasoning_text", "reasoning", "thought"} {
+			if text, _ := typed[key].(string); strings.TrimSpace(text) != "" {
+				return text
+			}
+		}
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := reasoningTextFromProtocolContent(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
 	}
 	return ""
 }

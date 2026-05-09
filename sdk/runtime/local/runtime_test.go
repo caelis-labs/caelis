@@ -309,6 +309,115 @@ func TestRuntimeRunReturnsLiveRunnerBeforeModelCompletion(t *testing.T) {
 	}
 }
 
+func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
+	t.Parallel()
+
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-interrupted-replay" },
+	}))
+	session, err := sessions.StartSession(context.Background(), sdksession.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: sdksession.WorkspaceRef{
+			Key: "ws-interrupted-replay",
+			CWD: t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	thoughtType := string(sdksession.ProtocolUpdateTypeAgentThought)
+	thought := sdksession.MarkUIOnly(&sdksession.Event{
+		Type: sdksession.EventTypeAssistant,
+		Text: "partial thought",
+		Protocol: &sdksession.EventProtocol{
+			UpdateType: thoughtType,
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: thoughtType,
+				Content:       sdksession.ProtocolTextContent("partial thought"),
+			},
+		},
+	})
+	answerType := string(sdksession.ProtocolUpdateTypeAgentMessage)
+	chunk := sdksession.MarkUIOnly(&sdksession.Event{
+		Type: sdksession.EventTypeAssistant,
+		Text: "partial answer",
+		Protocol: &sdksession.EventProtocol{
+			UpdateType: answerType,
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: answerType,
+				Content:       sdksession.ProtocolTextContent("partial answer"),
+			},
+		},
+	})
+	factory := &attemptFactory{agents: []sdkruntime.Agent{seqAgent{
+		events: []*sdksession.Event{thought, chunk},
+		err:    context.Canceled,
+	}}}
+	runtime, err := New(Config{
+		Sessions:       sessions,
+		AgentFactory:   factory,
+		RunIDGenerator: func() string { return "run-interrupted-replay" },
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Run(context.Background(), sdkruntime.RunRequest{
+		SessionRef: session.SessionRef,
+		Input:      "hello",
+		AgentSpec:  sdkruntime.AgentSpec{Name: "seq"},
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, seqErr := drainRunnerEvents(t, result.Handle); !errors.Is(seqErr, context.Canceled) {
+		t.Fatalf("runner error = %v, want context canceled", seqErr)
+	}
+
+	history, err := sessions.Events(context.Background(), sdksession.EventsRequest{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if got, want := len(history), 1; got != want {
+		t.Fatalf("canonical history event count = %d, want %d", got, want)
+	}
+
+	transcript, err := sessions.Events(context.Background(), sdksession.EventsRequest{
+		SessionRef:       session.SessionRef,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatalf("Events(include transient) error = %v", err)
+	}
+	var replay *sdksession.Event
+	for _, event := range transcript {
+		if sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant && event.Visibility == sdksession.VisibilityMirror {
+			replay = event
+			break
+		}
+	}
+	if replay == nil {
+		t.Fatalf("transcript events = %#v, want mirror replay snapshot", transcript)
+	}
+	if got := sdksession.EventText(replay); got != "partial answer" {
+		t.Fatalf("mirror replay text = %q, want partial answer", got)
+	}
+	update := sdksession.ProtocolUpdateOf(replay)
+	if update == nil {
+		t.Fatalf("mirror replay protocol update = nil")
+	}
+	content, _ := update.Content.(map[string]any)
+	if got, _ := content["reasoningText"].(string); got != "partial thought" {
+		t.Fatalf("mirror replay reasoning content = %#v, want partial thought", update.Content)
+	}
+	if sdksession.IsInvocationVisibleEvent(replay) {
+		t.Fatalf("mirror replay snapshot must not be invocation-visible: %#v", replay)
+	}
+}
+
 func TestRuntimeACPControllerReturnsLiveRunnerBeforeTurnCompletion(t *testing.T) {
 	t.Parallel()
 
