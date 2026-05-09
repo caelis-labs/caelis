@@ -2618,6 +2618,46 @@ func TestOpenAICompatMessageTransform_SkipsInvalidToolResponses(t *testing.T) {
 	}
 }
 
+func TestOpenAICompatMessageTransformPreservesTerminalLikeBashPayload(t *testing.T) {
+	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
+	llm := newOpenAICompat(Config{
+		Provider: "openai-compatible",
+		Model:    "test-model",
+		BaseURL:  "https://example.com/v1",
+		Timeout:  time.Second,
+	}, "token")
+	messages := llm.fromKernelMessages(nil, []model.Message{
+		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+			ID:   "call_1",
+			Name: "BASH",
+			Args: jsonArgs(map[string]any{"command": "go build ./... 2>&1"}),
+		}}, ""),
+		{
+			Role: model.RoleTool,
+			Parts: []model.Part{model.NewToolResultJSONPart("call_1", "BASH", map[string]any{
+				"stdout":    "go: writing stat cache: open " + deniedPath + ": read-only file system\n",
+				"stderr":    "",
+				"exit_code": 1,
+			}, false)},
+		},
+	})
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 transformed messages, got %d", len(messages))
+	}
+	if messages[1].Role != string(model.RoleTool) || messages[1].ToolCallID != "call_1" {
+		t.Fatalf("unexpected tool message: %+v", messages[1])
+	}
+	content, _ := messages[1].Content.(string)
+	if strings.Contains(content, "sandbox_permission_denied") || strings.Contains(content, "Sandbox permission denied") {
+		t.Fatalf("tool content = %q, want terminal-like payload without sandbox flags", content)
+	}
+	if !strings.Contains(content, "stdout") ||
+		!strings.Contains(content, "exit_code") ||
+		!strings.Contains(content, deniedPath) {
+		t.Fatalf("tool content = %q, want terminal-like payload with denied path", content)
+	}
+}
+
 func TestAnthropicMessageTransform(t *testing.T) {
 	system := toAnthropicSystem([]model.Part{model.NewTextPart("sys")})
 	msgs := toAnthropicMessages([]model.Message{

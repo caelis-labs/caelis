@@ -890,21 +890,24 @@ func (m *Model) submitLineWithDisplay(execLine string, displayLine string) (tea.
 func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine string, attachments []Attachment) (tea.Model, tea.Cmd) {
 	alreadyRunning := m.running
 	mode := m.submissionModeForLine(execLine)
-	layoutMayChange := mode == SubmissionModeOverlay || alreadyRunning
+	if alreadyRunning && mode != SubmissionModeOverlay {
+		return m, m.showHint("A turn is still running. Wait for it to finish or interrupt it before sending another prompt.", hintOptions{
+			priority:       HintPriorityHigh,
+			clearOnMessage: true,
+			clearAfter:     copyHintDuration,
+		})
+	}
+	layoutMayChange := mode == SubmissionModeOverlay
 	attachments = cloneAttachments(attachments)
 	displayLine = strings.TrimSpace(displayLine)
-	replacedPending := alreadyRunning && m.pendingQueue != nil && mode != SubmissionModeOverlay
 	switch {
 	case mode == SubmissionModeOverlay:
 		m.openBTWOverlay(execLine)
-	case alreadyRunning:
-		m.pendingQueue = &pendingPrompt{
-			execLine:    strings.TrimSpace(execLine),
-			displayLine: displayLine,
-			attachments: cloneAttachments(attachments),
-		}
 	default:
 		m.commitUserDisplayLine(displayLine)
+	}
+	if !alreadyRunning && m.shouldAutoFollowSubmittedSideACP(execLine, mode) {
+		m.setViewportFollowState(viewportFollowTail)
 	}
 
 	// Push to history.
@@ -951,13 +954,34 @@ func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine
 		},
 		m.scheduleSpinnerTick(),
 	}
-	if replacedPending {
-		cmds = append(cmds, m.showHint("replaced pending follow-up message", hintOptions{
-			priority:   HintPriorityNormal,
-			clearAfter: 2 * time.Second,
-		}))
-	}
 	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) shouldAutoFollowSubmittedSideACP(line string, mode SubmissionMode) bool {
+	if mode != SubmissionModeDefault || m == nil || m.viewportFollowState == viewportSelecting || m.hasSelectionRange() {
+		return false
+	}
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "@") {
+		return true
+	}
+	return m.isKnownDynamicAgentSlashLine(trimmed)
+}
+
+func (m *Model) isKnownDynamicAgentSlashLine(line string) bool {
+	name := slashCommandName(line)
+	if name == "" || m == nil {
+		return false
+	}
+	if _, ok := lookupSlashCommandSpec(name); ok {
+		return false
+	}
+	for _, command := range m.cfg.Commands {
+		if strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(command, "/")), name) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) allowsBTWSubmission() bool {

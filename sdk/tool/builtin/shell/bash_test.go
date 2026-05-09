@@ -81,7 +81,7 @@ func TestBashCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	}
 }
 
-func TestBashCallReturnsStructuredCommandErrorWithDiagnostics(t *testing.T) {
+func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -104,8 +104,8 @@ func TestBashCallReturnsStructuredCommandErrorWithDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v, want structured tool error result", err)
 	}
-	if !result.IsError {
-		t.Fatal("result.IsError = false, want true")
+	if result.IsError {
+		t.Fatal("result.IsError = true for command exit status, want false")
 	}
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
 		t.Fatalf("result.Content = %#v, want json payload", result.Content)
@@ -120,15 +120,15 @@ func TestBashCallReturnsStructuredCommandErrorWithDiagnostics(t *testing.T) {
 	if exitCode, _ := payload["exit_code"].(float64); exitCode != 7 {
 		t.Fatalf("exit_code = %v, want 7", payload["exit_code"])
 	}
-	if message, _ := payload["error"].(string); !strings.Contains(message, "exit status") {
-		t.Fatalf("error = %q, want command failure detail", message)
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("payload contains error = %#v, want terminal-like stdout/stderr/exit_code only", payload["error"])
 	}
 	if denied, _ := payload["sandbox_permission_denied"].(bool); denied {
 		t.Fatal("sandbox_permission_denied = true for non-permission command failure")
 	}
 }
 
-func TestBashCallPrefixesSandboxPermissionErrorWithOriginalDetail(t *testing.T) {
+func TestBashCallPreservesSandboxPermissionStderrWithoutModelFlags(t *testing.T) {
 	t.Parallel()
 
 	rt := sandboxPermissionRuntime{result: sdksandbox.CommandResult{
@@ -151,27 +151,71 @@ func TestBashCallPrefixesSandboxPermissionErrorWithOriginalDetail(t *testing.T) 
 	if err != nil {
 		t.Fatalf("Call() error = %v, want structured tool error result", err)
 	}
-	if !result.IsError {
-		t.Fatal("result.IsError = false, want true")
+	if result.IsError {
+		t.Fatal("result.IsError = true for shell command exit status, want false")
 	}
 	var payload map[string]any
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if denied, _ := payload["sandbox_permission_denied"].(bool); !denied {
-		t.Fatalf("sandbox_permission_denied = %#v, want true", payload["sandbox_permission_denied"])
+	if _, ok := payload["sandbox_permission_denied"]; ok {
+		t.Fatalf("payload contains sandbox_permission_denied = %#v, want raw streams only", payload["sandbox_permission_denied"])
 	}
 	stderr, _ := payload["stderr"].(string)
 	if !strings.Contains(stderr, "/home/test/go/pkg/mod/cache") {
 		t.Fatalf("stderr = %q, want original denied path", stderr)
 	}
-	message, _ := payload["error"].(string)
-	if !strings.Contains(message, "Sandbox permission denied") ||
-		!strings.Contains(message, "/home/test/go/pkg/mod/cache") {
-		t.Fatalf("error = %q, want sandbox prefix plus original denied path", message)
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("payload contains error = %#v, want raw streams only", payload["error"])
 	}
-	if _, ok := payload["sandbox_diagnostic"]; ok {
-		t.Fatalf("sandbox_diagnostic present = %#v, want generic sandbox error only", payload["sandbox_diagnostic"])
+	if denied, _ := result.Meta["sandbox_permission_denied"].(bool); !denied {
+		t.Fatalf("meta sandbox_permission_denied = %#v, want true for UI/debug metadata", result.Meta["sandbox_permission_denied"])
+	}
+}
+
+func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
+	t.Parallel()
+
+	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
+	rt := sandboxPermissionRuntime{result: sdksandbox.CommandResult{
+		Stdout:   "go: writing stat cache: open " + deniedPath + ": read-only file system\n",
+		ExitCode: 1,
+		Route:    sdksandbox.RouteSandbox,
+		Backend:  sdksandbox.BackendBwrap,
+	}, err: fmt.Errorf("exit status 1")}
+	tool, err := NewBash(BashConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewBash() error = %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"command": "go build ./... 2>&1",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	result, err := tool.Call(context.Background(), sdktool.Call{Name: BashToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("Call() error = %v, want structured tool error result", err)
+	}
+	if result.IsError {
+		t.Fatal("result.IsError = true for shell command exit status, want false")
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if _, ok := payload["sandbox_permission_denied"]; ok {
+		t.Fatalf("payload contains sandbox_permission_denied = %#v, want raw streams only", payload["sandbox_permission_denied"])
+	}
+	stdout, _ := payload["stdout"].(string)
+	if !strings.Contains(stdout, deniedPath) {
+		t.Fatalf("stdout = %q, want original denied path", stdout)
+	}
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("payload contains error = %#v, want raw streams only", payload["error"])
+	}
+	if denied, _ := result.Meta["sandbox_permission_denied"].(bool); !denied {
+		t.Fatalf("meta sandbox_permission_denied = %#v, want true for UI/debug metadata", result.Meta["sandbox_permission_denied"])
 	}
 }
 
@@ -202,11 +246,11 @@ func TestBashCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if denied, _ := payload["sandbox_permission_denied"].(bool); denied {
-		t.Fatalf("sandbox_permission_denied = true for host permission failure: %#v", payload)
+	if _, ok := payload["sandbox_permission_denied"]; ok {
+		t.Fatalf("payload contains sandbox_permission_denied for host failure: %#v", payload)
 	}
-	if message, _ := payload["error"].(string); strings.Contains(message, "Sandbox permission denied") {
-		t.Fatalf("error = %q, should not suggest sandbox escalation for host failure", message)
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("payload contains error = %#v, want terminal-like stdout/stderr/exit_code only", payload["error"])
 	}
 }
 

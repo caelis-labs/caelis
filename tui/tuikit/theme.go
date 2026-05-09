@@ -602,7 +602,7 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 		CommandSubText: nil,
 
 		AssistantFg:        nil,
-		ReasoningFg:        nil,
+		ReasoningFg:        profileColor(profile, "#7f8ba3", "245", "8"),
 		UserFg:             nil,
 		UserBg:             surface2,
 		UserPrefixFg:       profileColor(profile, "#22d3ee", "44", "6"),
@@ -686,7 +686,7 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		CommandSubText: nil,
 
 		AssistantFg:        nil,
-		ReasoningFg:        nil,
+		ReasoningFg:        profileColor(profile, "#6b7280", "242", "8"),
 		UserFg:             nil,
 		UserBg:             surface1,
 		UserPrefixFg:       profileColor(profile, "#0077aa", "32", "6"),
@@ -908,7 +908,7 @@ func nordTheme(trueColor bool) Theme {
 	theme.StatusBg = themeColor(trueColor, "#2e3440", "236")
 	theme.StatusText = themeColor(trueColor, "#d8dee9", "252")
 	theme.AssistantFg = themeColor(trueColor, "#a3be8c", "108")
-	theme.ReasoningFg = themeColor(trueColor, "#81a1c1", "110")
+	theme.ReasoningFg = theme.MutedText
 	theme.ToolFg = themeColor(trueColor, "#88c0d0", "110")
 	theme.DiffAddBg = themeColor(trueColor, "#314236", "23")
 	theme.DiffAddStrongBg = themeColor(trueColor, "#45604e", "59")
@@ -950,7 +950,7 @@ func solarizedTheme(trueColor bool) Theme {
 	theme.StatusBg = themeColor(trueColor, "#002b36", "235")
 	theme.StatusText = themeColor(trueColor, "#93a1a1", "245")
 	theme.AssistantFg = themeColor(trueColor, "#859900", "100")
-	theme.ReasoningFg = themeColor(trueColor, "#6c71c4", "61")
+	theme.ReasoningFg = theme.MutedText
 	theme.ToolFg = themeColor(trueColor, "#2aa198", "36")
 	theme.DiffAddBg = themeColor(trueColor, "#173d1c", "22")
 	theme.DiffAddStrongBg = themeColor(trueColor, "#2f5f2f", "29")
@@ -993,7 +993,7 @@ func draculaTheme(trueColor bool) Theme {
 	theme.StatusBg = themeColor(trueColor, "#282a36", "236")
 	theme.StatusText = themeColor(trueColor, "#f8f8f2", "255")
 	theme.AssistantFg = themeColor(trueColor, "#50fa7b", "84")
-	theme.ReasoningFg = themeColor(trueColor, "#bd93f9", "141")
+	theme.ReasoningFg = theme.MutedText
 	theme.ToolFg = themeColor(trueColor, "#8be9fd", "123")
 	theme.DiffAddBg = themeColor(trueColor, "#21392a", "22")
 	theme.DiffAddStrongBg = themeColor(trueColor, "#2f5f43", "29")

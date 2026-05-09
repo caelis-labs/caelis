@@ -108,8 +108,8 @@ func TestAdaptiveDefaultThemeUsesTerminalNativeBodyAndSemanticAccents(t *testing
 	if theme.AssistantFg != nil {
 		t.Fatalf("expected assistant text to inherit terminal foreground, got %v", theme.AssistantFg)
 	}
-	if theme.ReasoningFg != nil {
-		t.Fatalf("expected reasoning text to inherit terminal foreground plus faint/italic style, got %v", theme.ReasoningFg)
+	if got := stringifyColor(theme.ReasoningFg); got != "#7f8ba3" {
+		t.Fatalf("expected reasoning text to use low-contrast theme color, got %q", got)
 	}
 	if got := stringifyColor(theme.ToolFg); got != "#22d3ee" {
 		t.Fatalf("expected tool meta to use cyan focus color, got %q", got)
@@ -160,6 +160,19 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	}
 	if !tokens.TextSecondary.GetFaint() {
 		t.Fatal("expected terminal-native secondary text token to use faint style")
+	}
+}
+
+func TestNamedThemesUseMutedReasoningText(t *testing.T) {
+	for _, name := range []string{"nord", "solarized", "dracula"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", "")
+			t.Setenv("CAELIS_THEME", name)
+			theme := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+			if got, want := stringifyColor(theme.ReasoningFg), stringifyColor(theme.MutedText); got != want {
+				t.Fatalf("reasoning fg = %q, want muted text %q", got, want)
+			}
+		})
 	}
 }
 

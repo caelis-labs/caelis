@@ -3391,7 +3391,7 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 	}
 }
 
-func TestTaskToolPayloadFallsBackToCompletedStdout(t *testing.T) {
+func TestTaskToolPayloadReturnsCompletedBashTerminalStreams(t *testing.T) {
 	payload := taskToolPayload(sdktask.Snapshot{
 		Ref:     sdktask.Ref{TaskID: "task-1", TerminalID: "term-1"},
 		Kind:    sdktask.KindBash,
@@ -3402,8 +3402,11 @@ func TestTaskToolPayloadFallsBackToCompletedStdout(t *testing.T) {
 			"exit_code": 0,
 		},
 	})
-	if got, _ := payload["result"].(string); !strings.Contains(got, "hello Codex") {
-		t.Fatalf("taskToolPayload result = %q, want fallback from stdout", got)
+	if got, _ := payload["stdout"].(string); !strings.Contains(got, "hello Codex") {
+		t.Fatalf("taskToolPayload stdout = %q, want terminal stdout", got)
+	}
+	if _, ok := payload["result"]; ok {
+		t.Fatalf("taskToolPayload contains result = %#v, want raw streams only", payload["result"])
 	}
 }
 
@@ -3648,7 +3651,7 @@ func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
 	}
 }
 
-func TestTaskSnapshotToolResultIncludesSandboxPermissionDetailInPayload(t *testing.T) {
+func TestTaskSnapshotToolResultKeepsSandboxDetailOutOfModelPayload(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
@@ -3659,6 +3662,7 @@ func TestTaskSnapshotToolResultIncludesSandboxPermissionDetailInPayload(t *testi
 			State:   sdktask.StateFailed,
 			Running: false,
 			Result: map[string]any{
+				"stdout":                    "go: writing stat cache: open /home/test/go/pkg/mod/cache: read-only file system",
 				"result":                    "touch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system",
 				"exit_code":                 1,
 				"error":                     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.\ntouch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system",
@@ -3666,6 +3670,9 @@ func TestTaskSnapshotToolResultIncludesSandboxPermissionDetailInPayload(t *testi
 			},
 		},
 	)
+	if result.IsError {
+		t.Fatal("result.IsError = true for shell command exit status, want false")
+	}
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
@@ -3673,19 +3680,21 @@ func TestTaskSnapshotToolResultIncludesSandboxPermissionDetailInPayload(t *testi
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if denied, _ := payload["sandbox_permission_denied"].(bool); !denied {
-		t.Fatalf("payload[sandbox_permission_denied] = %#v, want true", payload["sandbox_permission_denied"])
+	if _, ok := payload["sandbox_permission_denied"]; ok {
+		t.Fatalf("payload contains sandbox_permission_denied = %#v, want raw streams only", payload["sandbox_permission_denied"])
 	}
-	if message, _ := payload["error"].(string); !strings.Contains(message, "Sandbox permission denied") ||
-		!strings.Contains(message, "/home/test/go/pkg/mod/cache") {
-		t.Fatalf("payload[error] = %q, want sandbox prefix plus original denied path", message)
+	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, "/home/test/go/pkg/mod/cache") {
+		t.Fatalf("payload[stdout] = %q, want original stdout denied path", stdout)
 	}
-	if _, ok := payload["sandbox_diagnostic"]; ok {
-		t.Fatalf("payload[sandbox_diagnostic] = %#v, want omitted", payload["sandbox_diagnostic"])
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("payload contains error = %#v, want raw streams only", payload["error"])
+	}
+	if denied, _ := result.Meta["sandbox_permission_denied"].(bool); !denied {
+		t.Fatalf("meta[sandbox_permission_denied] = %#v, want true", result.Meta["sandbox_permission_denied"])
 	}
 }
 
-func TestTaskSnapshotToolResultIncludesRunningTerminalCursor(t *testing.T) {
+func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
@@ -3705,6 +3714,7 @@ func TestTaskSnapshotToolResultIncludesRunningTerminalCursor(t *testing.T) {
 			SupportsInput:  true,
 			SupportsCancel: true,
 			Result: map[string]any{
+				"stdout":          "already shown\n",
 				"output_preview":  "already shown\n",
 				"supports_input":  true,
 				"supports_cancel": true,
@@ -3728,14 +3738,17 @@ func TestTaskSnapshotToolResultIncludesRunningTerminalCursor(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if got := payload["terminal_id"]; got != "terminal-1" {
-		t.Fatalf("payload[terminal_id] = %#v, want terminal-1", got)
+	if got := payload["terminal_id"]; got != nil {
+		t.Fatalf("payload[terminal_id] = %#v, want omitted from model payload", got)
 	}
-	if got := payload["stdout_cursor"]; got != float64(12) {
-		t.Fatalf("payload[stdout_cursor] = %#v, want 12", got)
+	if got := payload["stdout_cursor"]; got != nil {
+		t.Fatalf("payload[stdout_cursor] = %#v, want omitted from model payload", got)
 	}
-	if got := payload["stderr_cursor"]; got != float64(3) {
-		t.Fatalf("payload[stderr_cursor] = %#v, want 3", got)
+	if got := payload["stderr_cursor"]; got != nil {
+		t.Fatalf("payload[stderr_cursor] = %#v, want omitted from model payload", got)
+	}
+	if got, _ := payload["stdout"].(string); got != "already shown\n" {
+		t.Fatalf("payload[stdout] = %q, want running stdout", got)
 	}
 }
 
@@ -3771,9 +3784,6 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	if got := payload["task_id"]; got != "jeff" {
 		t.Fatalf("payload[task_id] = %#v, want handle jeff", got)
 	}
-	if got := payload["result"]; got != "done" {
-		t.Fatalf("payload[result] = %#v, want done", got)
-	}
 	if got := payload["final_message"]; got != "done" {
 		t.Fatalf("payload[final_message] = %#v, want done", got)
 	}
@@ -3785,6 +3795,11 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	}
 	if _, ok := payload["prompt"]; ok {
 		t.Fatalf("payload contains prompt: %#v", payload)
+	}
+	for _, key := range []string{"result", "running", "supports_cancel"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload contains %q: %#v", key, payload)
+		}
 	}
 	for _, key := range []string{"handle", "mention", "agent", "agent_id", "internal_task_id", "terminal_id"} {
 		if _, ok := payload[key]; ok {
@@ -3883,8 +3898,8 @@ func TestRuntimeTaskToolScopesSubagentHandleToSession(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if got := payload["result"]; got != "right" {
-		t.Fatalf("payload[result] = %#v, want current-session result", got)
+	if got := payload["final_message"]; got != "right" {
+		t.Fatalf("payload[final_message] = %#v, want current-session final message", got)
 	}
 }
 

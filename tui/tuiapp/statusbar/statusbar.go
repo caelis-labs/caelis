@@ -16,7 +16,6 @@ type ViewModel struct {
 	Sandbox         string
 	Route           string
 	Security        string
-	Jobs            int
 	Tokens          string
 	MissingAPIKey   bool
 	Running         bool
@@ -33,12 +32,6 @@ func FromSnapshot(status tuidriver.StatusSnapshot) ViewModel {
 	case status.HostExecution:
 		security = firstNonEmpty(security, "host")
 	}
-	jobs := 0
-	if status.ActiveJobs > 0 {
-		jobs = status.ActiveJobs
-	} else if status.Running {
-		jobs = 1
-	}
 	return ViewModel{
 		Workspace:       strings.TrimSpace(status.Workspace),
 		Model:           model,
@@ -48,7 +41,6 @@ func FromSnapshot(status tuidriver.StatusSnapshot) ViewModel {
 		Sandbox:         sandbox,
 		Route:           strings.TrimSpace(status.Route),
 		Security:        security,
-		Jobs:            jobs,
 		Tokens:          formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens),
 		MissingAPIKey:   status.MissingAPIKey,
 		Running:         status.Running,
@@ -75,27 +67,11 @@ func (s ViewModel) FooterModeText(fallback string) string {
 }
 
 func (s ViewModel) FooterContextText(fallback string) string {
-	parts := compactNonEmpty([]string{
-		strings.TrimSpace(s.Tokens),
-		jobsText(s.Jobs, s.Running),
-	})
-	if len(parts) == 0 {
+	tokens := strings.TrimSpace(s.Tokens)
+	if tokens == "" {
 		return strings.TrimSpace(fallback)
 	}
-	return strings.Join(parts, " · ")
-}
-
-func jobsText(jobs int, running bool) string {
-	if jobs <= 0 && !running {
-		return ""
-	}
-	if jobs <= 0 {
-		jobs = 1
-	}
-	if jobs == 1 {
-		return "1 job"
-	}
-	return fmt.Sprintf("%d jobs", jobs)
+	return tokens
 }
 
 func formatContextUsageStatus(totalTokens, contextWindowTokens int) string {
@@ -131,16 +107,6 @@ func deriveProviderFromAlias(model string) string {
 		return strings.TrimSpace(before)
 	}
 	return ""
-}
-
-func compactNonEmpty(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			out = append(out, trimmed)
-		}
-	}
-	return out
 }
 
 func firstNonEmpty(values ...string) string {

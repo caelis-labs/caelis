@@ -3111,6 +3111,92 @@ func TestGatewayParticipantStreamingChunksAppendInsteadOfReplace(t *testing.T) {
 	}
 }
 
+func TestGatewayParticipantFinalCumulativeMessageReplacesCoveredLiveSegments(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	sendAssistant := func(text string, final bool) {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin: &appgateway.EventOrigin{
+					Scope:         appgateway.EventScopeParticipant,
+					ScopeID:       "codex-turn-1",
+					Actor:         "@codex",
+					ParticipantID: "codex-001",
+				},
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleAssistant,
+					Actor: "@codex",
+					Text:  text,
+					Final: final,
+					Scope: appgateway.EventScopeParticipant,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+	sendTool := func(kind appgateway.EventKind, status appgateway.ToolStatus) {
+		event := appgateway.Event{
+			Kind:       kind,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			Origin: &appgateway.EventOrigin{
+				Scope:         appgateway.EventScopeParticipant,
+				ScopeID:       "codex-turn-1",
+				Actor:         "@codex",
+				ParticipantID: "codex-001",
+			},
+		}
+		if kind == appgateway.EventKindToolCall {
+			event.ToolCall = &appgateway.ToolCallPayload{
+				CallID:   "call-1",
+				ToolName: "READ",
+				Status:   status,
+				Scope:    appgateway.EventScopeParticipant,
+			}
+		} else {
+			event.ToolResult = &appgateway.ToolResultPayload{
+				CallID:   "call-1",
+				ToolName: "READ",
+				Status:   status,
+				Scope:    appgateway.EventScopeParticipant,
+			}
+		}
+		updated, _ := model.Update(appgateway.EventEnvelope{Event: event})
+		model = updated.(*Model)
+	}
+
+	sendAssistant("I will inspect first.", false)
+	sendTool(appgateway.EventKindToolCall, appgateway.ToolStatusRunning)
+	sendTool(appgateway.EventKindToolResult, appgateway.ToolStatusCompleted)
+	sendAssistant("The final answer is ready.", false)
+	sendAssistant("I will inspect first.\n\nThe final answer is ready.", true)
+
+	block, ok := model.doc.Blocks()[0].(*ParticipantTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want ParticipantTurnBlock", model.doc.Blocks()[0])
+	}
+	var assistantTexts []string
+	var toolEvents int
+	for _, event := range block.Events {
+		switch event.Kind {
+		case SEAssistant:
+			assistantTexts = append(assistantTexts, event.Text)
+		case SEToolCall:
+			toolEvents++
+		}
+	}
+	if len(assistantTexts) != 1 {
+		t.Fatalf("assistant events = %#v, want only cumulative final assistant event", assistantTexts)
+	}
+	if assistantTexts[0] != "I will inspect first.\n\nThe final answer is ready." {
+		t.Fatalf("assistant final = %q, want cumulative final", assistantTexts[0])
+	}
+	if toolEvents == 0 {
+		t.Fatalf("participant events = %#v, want tool event preserved", block.Events)
+	}
+}
+
 func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 	model := newGatewayEventTestModel()
 

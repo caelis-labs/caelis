@@ -156,32 +156,49 @@ func (t *BashTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result,
 			},
 		})
 	}
-	if err != nil {
-		payload := map[string]any{
-			"stdout":    result.Stdout,
-			"stderr":    result.Stderr,
-			"exit_code": result.ExitCode,
-			"route":     result.Route,
-			"backend":   result.Backend,
-			"error":     err.Error(),
-		}
-		if detail, ok := sdksandbox.SandboxPermissionDetail(result, err); ok {
-			payload["sandbox_permission_denied"] = true
-			payload["error"] = detail
-		}
-		return toolutil.JSONErrorResult(BashToolName, payload)
+	payload := bashCommandPayload(result, err)
+	out, resultErr := toolutil.JSONResult(BashToolName, payload)
+	if out.Meta == nil {
+		out.Meta = map[string]any{}
 	}
-	return toolutil.JSONResult(BashToolName, map[string]any{
-		"stdout":    result.Stdout,
-		"stderr":    result.Stderr,
-		"exit_code": result.ExitCode,
-		"route":     result.Route,
-		"backend":   result.Backend,
-	})
+	if result.Route != "" {
+		out.Meta["route"] = result.Route
+	}
+	if result.Backend != "" {
+		out.Meta["backend"] = result.Backend
+	}
+	if err != nil {
+		out.Meta["error"] = strings.TrimSpace(err.Error())
+		if detail, ok := sdksandbox.SandboxPermissionDetail(result, err); ok {
+			out.Meta["sandbox_permission_denied"] = true
+			out.Meta["sandbox_permission_detail"] = detail
+		}
+	}
+	return out, resultErr
 }
 
 func (t *BashTool) SandboxRuntime() sdksandbox.Runtime {
 	return t.runtime
+}
+
+func bashCommandPayload(result sdksandbox.CommandResult, err error) map[string]any {
+	stdout := result.Stdout
+	stderr := result.Stderr
+	exitCode := result.ExitCode
+	if err != nil && strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+		stderr = strings.TrimSpace(err.Error())
+		if detail, ok := sdksandbox.SandboxPermissionDetail(result, err); ok {
+			stderr = detail
+		}
+		if exitCode == 0 {
+			exitCode = -1
+		}
+	}
+	return map[string]any{
+		"stdout":    stdout,
+		"stderr":    stderr,
+		"exit_code": exitCode,
+	}
 }
 
 func runtimeOrDefault(runtime sdksandbox.Runtime) (sdksandbox.Runtime, error) {

@@ -976,6 +976,8 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 		task.result = map[string]any{
 			"task_id":         task.ref.TaskID,
 			"state":           string(state),
+			"stdout":          string(stdout),
+			"stderr":          string(stderr),
 			"output_preview":  taskOutputPreview(stdout, stderr),
 			"supports_input":  status.SupportsInput,
 			"supports_cancel": true,
@@ -1350,11 +1352,9 @@ func taskSnapshotToolResult(call sdktool.Call, def sdktool.Definition, snapshot 
 		meta["terminal_id"] = terminalID
 	}
 	raw, _ := json.Marshal(payload)
-	isError := !snapshot.Running && snapshot.State != sdktask.StateCompleted
 	return sdktool.Result{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(def.Name),
-		IsError: isError,
 		Content: []sdkmodel.Part{sdkmodel.NewJSONPart(raw)},
 		Meta:    meta,
 	}
@@ -1384,58 +1384,41 @@ func taskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 	if snapshot.Kind == sdktask.KindSubagent {
 		return subagentTaskToolPayload(snapshot)
 	}
+	return bashTaskToolPayload(snapshot)
+}
+
+func bashTaskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 	visibleTaskID := taskVisibleID(snapshot)
-	payload := map[string]any{
-		"task_id":         visibleTaskID,
-		"state":           string(snapshot.State),
-		"running":         snapshot.Running,
-		"supports_cancel": snapshot.SupportsCancel && snapshot.Running,
-	}
-	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID)); terminalID != "" {
-		payload["terminal_id"] = terminalID
-	}
-	for _, key := range []string{"handle", "mention", "agent"} {
-		if value := firstNonEmpty(taskStringValue(snapshot.Result[key]), taskStringValue(snapshot.Metadata[key])); value != "" {
-			payload[key] = value
-		}
-	}
-	if snapshot.StdoutCursor > 0 {
-		payload["stdout_cursor"] = snapshot.StdoutCursor
-	}
-	if snapshot.StderrCursor > 0 {
-		payload["stderr_cursor"] = snapshot.StderrCursor
-	}
+	payload := map[string]any{}
 	if snapshot.Running {
-		if preview, _ := snapshot.Result["output_preview"].(string); strings.TrimSpace(preview) != "" {
-			payload["output_preview"] = strings.TrimSpace(preview)
+		payload["task_id"] = visibleTaskID
+		payload["state"] = string(snapshot.State)
+		if stdout, _ := snapshot.Result["stdout"].(string); stdout != "" {
+			payload["stdout"] = stdout
+		}
+		if stderr, _ := snapshot.Result["stderr"].(string); stderr != "" {
+			payload["stderr"] = stderr
 		}
 		if supportsInput, ok := snapshot.Result["supports_input"].(bool); ok {
-			payload["supports_input"] = supportsInput
-		}
-		if supportsCancel, ok := snapshot.Result["supports_cancel"].(bool); ok {
-			payload["supports_cancel"] = supportsCancel && snapshot.Running
+			if supportsInput {
+				payload["supports_input"] = true
+			}
 		}
 		return payload
 	}
-	if stdout, _ := snapshot.Result["stdout"].(string); stdout != "" {
-		payload["stdout"] = stdout
-	}
-	if stderr, _ := snapshot.Result["stderr"].(string); stderr != "" {
-		payload["stderr"] = stderr
-	}
-	if output, _ := snapshot.Result["result"].(string); strings.TrimSpace(output) != "" {
-		payload["result"] = strings.TrimSpace(output)
-	} else if output := compactFinalOutput(taskStringValue(snapshot.Result["stdout"]), taskStringValue(snapshot.Result["stderr"])); output != "" {
-		payload["result"] = output
+	stdout, _ := snapshot.Result["stdout"].(string)
+	stderr, _ := snapshot.Result["stderr"].(string)
+	payload["stdout"] = stdout
+	payload["stderr"] = stderr
+	if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
+		if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
+			payload["stderr"] = strings.TrimSpace(errText)
+		}
 	}
 	if exitCode, ok := snapshot.Result["exit_code"]; ok {
 		payload["exit_code"] = exitCode
-	}
-	if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
-		payload["error"] = strings.TrimSpace(errText)
-	}
-	if denied, ok := snapshot.Result["sandbox_permission_denied"].(bool); ok {
-		payload["sandbox_permission_denied"] = denied
+	} else if snapshot.State != sdktask.StateCompleted {
+		payload["exit_code"] = -1
 	}
 	return payload
 }
@@ -1444,10 +1427,8 @@ func subagentTaskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 	payload := map[string]any{
 		"task_id": taskVisibleID(snapshot),
 		"state":   string(snapshot.State),
-		"running": snapshot.Running,
 	}
 	if snapshot.Running {
-		payload["supports_cancel"] = snapshot.SupportsCancel
 		if preview := strings.TrimSpace(taskStringValue(snapshot.Result["output_preview"])); preview != "" {
 			payload["output_preview"] = preview
 		}
@@ -1456,9 +1437,6 @@ func subagentTaskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 	finalMessage := firstNonEmpty(taskStringValue(snapshot.Result["final_message"]), taskStringValue(snapshot.Result["result"]))
 	if strings.TrimSpace(finalMessage) != "" {
 		payload["final_message"] = strings.TrimSpace(finalMessage)
-	}
-	if result := strings.TrimSpace(taskStringValue(snapshot.Result["result"])); result != "" {
-		payload["result"] = result
 	}
 	if errText := strings.TrimSpace(taskStringValue(snapshot.Result["error"])); errText != "" {
 		payload["error"] = errText

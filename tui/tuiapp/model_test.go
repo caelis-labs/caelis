@@ -264,6 +264,30 @@ func TestDynamicAgentSlashCommandUsesNormalTurnBehavior(t *testing.T) {
 	}
 }
 
+func TestRunningPromptSubmissionIsBlockedBeforeDriverSubmit(t *testing.T) {
+	called := false
+	model := NewModel(Config{
+		ExecuteLine: func(Submission) TaskResultMsg {
+			called = true
+			return TaskResultMsg{}
+		},
+	})
+	model.running = true
+
+	updated, _ := model.submitLine("new prompt while running")
+	model = updated.(*Model)
+
+	if called {
+		t.Fatal("ExecuteLine was called while another turn was running")
+	}
+	if model.pendingQueue != nil {
+		t.Fatalf("pendingQueue = %#v, want nil until guided follow-up prompts are implemented", model.pendingQueue)
+	}
+	if !strings.Contains(model.hint, "A turn is still running") {
+		t.Fatalf("hint = %q, want running-turn prompt block message", model.hint)
+	}
+}
+
 func TestTaskResultDividerRendersImmediatelyWhenViewportHasDirtyBlock(t *testing.T) {
 	model := NewModel(Config{NoColor: true})
 	model.viewport.SetWidth(72)

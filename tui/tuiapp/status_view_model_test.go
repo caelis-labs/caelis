@@ -7,7 +7,7 @@ import (
 	tuidriver "github.com/OnslaughtSnail/caelis/tui/driver"
 )
 
-func TestStatusViewModelDisplaysActiveJobs(t *testing.T) {
+func TestStatusViewModelFooterOmitsActiveJobs(t *testing.T) {
 	vm := statusViewModelFromSnapshot(tuidriver.StatusSnapshot{
 		TotalTokens:         42000,
 		ContextWindowTokens: 128000,
@@ -15,11 +15,12 @@ func TestStatusViewModelDisplaysActiveJobs(t *testing.T) {
 		Running:             true,
 	})
 
-	if got := vm.Jobs; got != 3 {
-		t.Fatalf("Jobs = %d, want 3", got)
+	got := vm.FooterContextText("")
+	if !strings.Contains(got, "42k/128k(32%)") {
+		t.Fatalf("footerContextText() = %q, want token usage", got)
 	}
-	if got := vm.FooterContextText(""); !strings.Contains(got, "3 jobs") {
-		t.Fatalf("footerContextText() = %q, want active job count", got)
+	if strings.Contains(got, "job") {
+		t.Fatalf("footerContextText() = %q, should omit active job count", got)
 	}
 }
 

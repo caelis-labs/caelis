@@ -293,11 +293,13 @@ func (b *MainACPTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk
 	if idx := latestNarrativeFinalTargetIndex(b.Events, kind); idx >= 0 {
 		b.Events[idx].Text = collapseRepeatedNarrativeText(chunk)
 		markNarrativeTiming(&b.Events[idx], at)
+		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
 		return
 	}
 	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
 	markNarrativeTiming(&ev, at)
 	b.Events = append(b.Events, ev)
+	b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, len(b.Events)-1, kind)
 }
 
 func (b *MainACPTurnBlock) UpdateTool(callID, name, args, output string, final bool, err bool) {
@@ -750,11 +752,13 @@ func (b *ParticipantTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, c
 	if idx := latestNarrativeFinalTargetIndex(b.Events, kind); idx >= 0 {
 		b.Events[idx].Text = collapseRepeatedNarrativeText(chunk)
 		markNarrativeTiming(&b.Events[idx], at)
+		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
 		return
 	}
 	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
 	markNarrativeTiming(&ev, at)
 	b.Events = append(b.Events, ev)
+	b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, len(b.Events)-1, kind)
 }
 
 func (b *ParticipantTurnBlock) UpdateTool(callID, name, args, output string, final bool, err bool) {
@@ -1650,6 +1654,48 @@ func latestNarrativeFinalTargetIndex(events []SubagentEvent, kind SubagentEventK
 	return -1
 }
 
+func pruneNarrativeEventsCoveredByFinal(events []SubagentEvent, finalIdx int, kind SubagentEventKind) []SubagentEvent {
+	if finalIdx <= 0 || finalIdx >= len(events) {
+		return events
+	}
+	finalText := narrativeCoverageText(events[finalIdx].Text)
+	if finalText == "" {
+		return events
+	}
+	remove := make(map[int]struct{})
+	cursor := 0
+	for i := 0; i < finalIdx; i++ {
+		if events[i].Kind != kind {
+			continue
+		}
+		text := narrativeCoverageText(events[i].Text)
+		if text == "" {
+			continue
+		}
+		pos := strings.Index(finalText[cursor:], text)
+		if pos < 0 {
+			return events
+		}
+		cursor += pos + len(text)
+		remove[i] = struct{}{}
+	}
+	if len(remove) == 0 {
+		return events
+	}
+	out := events[:0]
+	for i, ev := range events {
+		if _, ok := remove[i]; ok {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out
+}
+
+func narrativeCoverageText(text string) string {
+	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+}
+
 func narrativeStreamBarrier(ev SubagentEvent) bool {
 	switch ev.Kind {
 	case SEApproval, SEAssistant, SEReasoning:
@@ -2190,12 +2236,14 @@ func (s *SubagentSessionState) ReplaceFinalStreamChunk(kind SubagentEventKind, c
 	if idx := latestNarrativeFinalTargetIndex(s.Events, kind); idx >= 0 {
 		s.Events[idx].Text = collapseRepeatedNarrativeText(chunk)
 		markNarrativeTiming(&s.Events[idx], at)
+		s.Events = pruneNarrativeEventsCoveredByFinal(s.Events, idx, kind)
 		s.eventsGen++
 		return
 	}
 	ev := SubagentEvent{Kind: kind, Text: collapseRepeatedNarrativeText(chunk)}
 	markNarrativeTiming(&ev, at)
 	s.Events = append(s.Events, ev)
+	s.Events = pruneNarrativeEventsCoveredByFinal(s.Events, len(s.Events)-1, kind)
 	s.eventsGen++
 }
 

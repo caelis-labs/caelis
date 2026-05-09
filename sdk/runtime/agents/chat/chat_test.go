@@ -596,6 +596,44 @@ func TestMessagesFromContextUsesEventLocalParticipantLabel(t *testing.T) {
 	}
 }
 
+func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T) {
+	t.Parallel()
+
+	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
+	message := toolResultMessage(sdkmodel.ToolCall{
+		ID:   "call-1",
+		Name: "BASH",
+	}, sdktool.Result{
+		ID:      "call-1",
+		Name:    "BASH",
+		Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"stdout":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp: read-only file system\n","stderr":"","exit_code":1}`))},
+	})
+
+	results := message.ToolResults()
+	if len(results) != 1 {
+		t.Fatalf("ToolResults() len = %d, want 1", len(results))
+	}
+	if results[0].IsError {
+		t.Fatal("tool result IsError = true for bash exit status, want false")
+	}
+	var payload map[string]any
+	if len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
+		t.Fatalf("tool result content = %#v, want JSON payload", results[0].Content)
+	}
+	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
+	}
+	if _, ok := payload["sandbox_permission_denied"]; ok {
+		t.Fatalf("sandbox_permission_denied present = %#v, want omitted from model payload", payload["sandbox_permission_denied"])
+	}
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("error present = %#v, want omitted from model payload", payload["error"])
+	}
+	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, deniedPath) {
+		t.Fatalf("stdout = %q, want original denied path", stdout)
+	}
+}
+
 func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 	t.Parallel()
 

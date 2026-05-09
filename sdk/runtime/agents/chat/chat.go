@@ -504,12 +504,48 @@ func toolCallStatus(result sdktool.Result) string {
 		switch strings.TrimSpace(state) {
 		case "running", "waiting_input", "waiting_approval":
 			return strings.TrimSpace(state)
+		case "failed", "interrupted", "cancelled", "canceled", "terminated":
+			return strings.TrimSpace(state)
 		}
+	}
+	if exitCode, ok := intValue(result.Meta["exit_code"]); ok && exitCode != 0 {
+		return "failed"
 	}
 	if result.IsError {
 		return "failed"
 	}
 	return "completed"
+}
+
+func intValue(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int8:
+		return int(typed), true
+	case int16:
+		return int(typed), true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case uint:
+		return int(typed), true
+	case uint8:
+		return int(typed), true
+	case uint16:
+		return int(typed), true
+	case uint32:
+		return int(typed), true
+	case uint64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	default:
+		return 0, false
+	}
 }
 
 func mergeEventMeta(parts ...map[string]any) map[string]any {

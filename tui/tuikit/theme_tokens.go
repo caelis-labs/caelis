@@ -162,7 +162,7 @@ func resolveTokens(t Theme) Tokens {
 		ToolName:   fgStyle(t.Focus).Bold(true),
 		ToolArgs:   quietStyle(t, t.ReasoningFg),
 		ToolResult: quietStyle(t, t.SecondaryText),
-		ToolError:  fgStyle(t.Error).Bold(true),
+		ToolError:  fgStyle(firstColor(t.MutedText, t.TextSecondary, t.Warning, t.Error)),
 		ToolOutput: quietStyle(t, t.TextSecondary),
 
 		// Markdown / prose

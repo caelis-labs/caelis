@@ -1463,7 +1463,7 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 		style := ctx.Theme.HelpHintTextStyle()
 		if final.Err {
 			prefix = "✗ "
-			style = ctx.Theme.ErrorStyle()
+			style = ctx.Theme.ToolErrorStyle()
 		}
 		text := strings.TrimSpace(final.Output)
 		if text == "" && !final.Err {
@@ -1531,7 +1531,7 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 	style := ctx.Theme.HelpHintTextStyle()
 	if ev.Err {
 		prefix = "✗ "
-		style = ctx.Theme.ErrorStyle()
+		style = ctx.Theme.ToolErrorStyle()
 	}
 	rows = append(rows, renderACPToolDetailRows(blockID, prefix, output, width, style)...)
 	return rows
@@ -1894,7 +1894,7 @@ func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID str
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if err {
 		if msg := strings.TrimSpace(text); msg != "" && msg != strings.TrimSpace(ev.Args) {
-			rows = append(rows, renderACPToolDetailRows(blockID, "  └ ", msg, width, ctx.Theme.ErrorStyle())...)
+			rows = append(rows, renderACPToolDetailRows(blockID, "  └ ", msg, width, ctx.Theme.ToolErrorStyle())...)
 		}
 		return rows
 	}
