@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -34,6 +35,8 @@ import (
 	sessionfile "github.com/OnslaughtSnail/caelis/sdk/session/file"
 	sdktask "github.com/OnslaughtSnail/caelis/sdk/task"
 	taskfile "github.com/OnslaughtSnail/caelis/sdk/task/file"
+	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
+	spawntool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/spawn"
 )
 
 var errAmbiguousModelAlias = errors.New("ambiguous model alias")
@@ -216,12 +219,13 @@ type StartSubagentOptions struct {
 }
 
 type stackRuntimeConfig struct {
-	PermissionMode string
-	ContextWindow  int
-	Model          ModelConfig
-	BaseAssembly   sdkplugin.ResolvedAssembly
-	Assembly       sdkplugin.ResolvedAssembly
-	BaseMetadata   map[string]any
+	PermissionMode              string
+	ContextWindow               int
+	Model                       ModelConfig
+	BaseAssembly                sdkplugin.ResolvedAssembly
+	Assembly                    sdkplugin.ResolvedAssembly
+	BaseMetadata                map[string]any
+	EstimatedPromptPrefixTokens int
 }
 
 func NewLocalStack(cfg Config) (*Stack, error) {
@@ -1836,9 +1840,81 @@ func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref sdksession.Session
 		alias = strings.TrimSpace(s.lookup.DefaultAlias())
 	}
 	contextWindow := s.currentContextWindowTokensForAlias(alias)
-	return localruntime.ComputeUsageSnapshot(events, nil, contextWindow, localruntime.CompactionConfig{
-		DefaultContextWindowTokens: contextWindow,
-	}), nil
+	cfg := defaultCompactionConfig(contextWindow)
+	cfg.EstimatedPromptPrefixTokens = s.estimatedPromptPrefixTokens(ctx, ref)
+	return localruntime.ComputeUsageSnapshot(events, nil, contextWindow, cfg), nil
+}
+
+func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref sdksession.SessionRef) int {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	runtimeCfg := s.runtime
+	runtimeCfg.Assembly = sdkplugin.CloneResolvedAssembly(runtimeCfg.Assembly)
+	runtimeCfg.BaseMetadata = cloneMap(runtimeCfg.BaseMetadata)
+	base := runtimeCfg.EstimatedPromptPrefixTokens
+	s.mu.RUnlock()
+	if base < 0 {
+		base = 0
+	}
+
+	var participants []sdksession.ParticipantBinding
+	if s.Sessions != nil && strings.TrimSpace(ref.SessionID) != "" {
+		if session, err := s.Sessions.Session(ctx, ref); err == nil {
+			participants = session.Participants
+		}
+	}
+	agents := delegationAgentsForSpawn(runtimeCfg.Assembly, participants)
+	if len(agents) == 0 {
+		return base
+	}
+
+	extra := 0
+	baseSystemPrompt := stringFromMap(runtimeCfg.BaseMetadata, "system_prompt")
+	withDelegation := systemPromptWithDelegationGuidance(baseSystemPrompt)
+	if delta := estimatePromptTextTokens(withDelegation) - estimatePromptTextTokens(baseSystemPrompt); delta > 0 {
+		extra += delta
+	}
+	extra += estimateToolPromptTokens([]sdktool.Tool{spawntool.New(agents)})
+	return base + extra
+}
+
+func estimateModelPromptPrefixTokens(metadata map[string]any, tools []sdktool.Tool) int {
+	total := estimatePromptTextTokens(stringFromMap(metadata, "system_prompt"))
+	total += estimateToolPromptTokens(tools)
+	if total > 0 {
+		total += 96
+	}
+	return total
+}
+
+func estimateToolPromptTokens(tools []sdktool.Tool) int {
+	specs := sdktool.ModelSpecs(tools)
+	if len(specs) == 0 {
+		return 0
+	}
+	raw, err := json.Marshal(specs)
+	if err != nil {
+		return len(specs) * 64
+	}
+	return estimatePromptTextTokens(string(raw)) + len(specs)*24
+}
+
+func estimatePromptTextTokens(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	runes := len([]rune(text))
+	tokens := runes / 4
+	if runes%4 != 0 {
+		tokens++
+	}
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
 }
 
 func (s *Stack) currentContextWindowTokensForAlias(alias string) int {

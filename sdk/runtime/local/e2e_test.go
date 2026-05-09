@@ -500,7 +500,6 @@ func TestRuntimeProviderCompactionContinuityE2E(t *testing.T) {
 			DefaultContextWindowTokens: 180,
 			ReserveOutputTokens:        64,
 			SafetyMarginTokens:         16,
-			RetainedUserTokenLimit:     200,
 			SegmentTokenBudget:         160,
 		},
 	})
@@ -511,9 +510,9 @@ func TestRuntimeProviderCompactionContinuityE2E(t *testing.T) {
 	defer cancel()
 
 	turns := []string{
-		"Session objective is: build compact runtime continuity. Current blocker is: provider intermittently returns 529 overloaded_error under long context. Next action is: validate with real e2e tests and tune prompt shape. Files touched include sdk/runtime/local/runtime.go and sdk/checkpoint/checkpoint.go. Keep all three items exact across compaction. Additional continuity note 1. Additional continuity note 2. Additional continuity note 3. Additional continuity note 4. Additional continuity note 5. Reply exactly: ack-1",
+		"Session objective is: build compact runtime continuity. Current blocker is: provider intermittently returns 529 overloaded_error under long context. Next action is: validate with real e2e tests and tune prompt shape. Files touched include sdk/runtime/local/runtime.go and sdk/runtime/local/compaction.go. Keep all three items exact across compaction. Additional continuity note 1. Additional continuity note 2. Additional continuity note 3. Additional continuity note 4. Additional continuity note 5. Reply exactly: ack-1",
 		"Keep preserving the exact same objective, blocker, and next action across compact. Add another continuity reminder about checkpoint durability, replay safety, provider variance, prompt repair, and regression coverage. Additional continuity note 6. Additional continuity note 7. Additional continuity note 8. Additional continuity note 9. Additional continuity note 10. Reply exactly: ack-2",
-		"Restate nothing yet, just keep the continuity anchors stable while the session grows. Mention sdk/runtime/local/compaction.go, sdk/runtime/local/e2e_test.go, sdk/checkpoint/render.go, and sdk/checkpoint/parse.go as touched areas. Additional continuity note 11. Additional continuity note 12. Additional continuity note 13. Additional continuity note 14. Additional continuity note 15. Reply exactly: ack-3",
+		"Restate nothing yet, just keep the continuity anchors stable while the session grows. Mention sdk/runtime/local/compaction.go, sdk/runtime/local/e2e_test.go, sdk/runtime/local/compaction.go, and sdk/compact/compact.go as touched areas. Additional continuity note 11. Additional continuity note 12. Additional continuity note 13. Additional continuity note 14. Additional continuity note 15. Reply exactly: ack-3",
 	}
 	for _, input := range turns {
 		if _, err := runtime.Run(ctx, sdkruntime.RunRequest{
@@ -565,7 +564,7 @@ func TestRuntimeProviderCompactionContinuityE2E(t *testing.T) {
 	if !containsMessageForE2E(wrapped.lastNormalMessages, "CONTEXT CHECKPOINT") {
 		t.Fatalf("last normal messages missing compact checkpoint: %v", wrapped.lastNormalMessages)
 	}
-	if containsMessageForE2E(wrapped.lastNormalMessages, "Session objective is: build compact runtime continuity. Current blocker is: provider intermittently returns 529 overloaded_error under long context. Next action is: validate with real e2e tests and tune prompt shape. Files touched include sdk/runtime/local/runtime.go and sdk/checkpoint/checkpoint.go. Keep all three items exact across compaction. Additional continuity note 1. Additional continuity note 2. Additional continuity note 3. Additional continuity note 4. Additional continuity note 5. Reply exactly: ack-1") {
+	if containsMessageForE2E(wrapped.lastNormalMessages, "Session objective is: build compact runtime continuity. Current blocker is: provider intermittently returns 529 overloaded_error under long context. Next action is: validate with real e2e tests and tune prompt shape. Files touched include sdk/runtime/local/runtime.go and sdk/runtime/local/compaction.go. Keep all three items exact across compaction. Additional continuity note 1. Additional continuity note 2. Additional continuity note 3. Additional continuity note 4. Additional continuity note 5. Reply exactly: ack-1") {
 		t.Fatalf("last normal messages still contain raw pre-compact objective turn: %v", wrapped.lastNormalMessages)
 	}
 
@@ -592,24 +591,18 @@ func TestRuntimeProviderCompactionContinuityE2E(t *testing.T) {
 	}
 	compactEvent, ok := latestCompactEventForTest(loaded.Events)
 	if !ok {
-		t.Fatal("expected compact event for replacement history assertions")
+		t.Fatal("expected compact event for checkpoint overlay assertions")
 	}
 	data, ok := sdkcompact.CompactEventDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("compact event meta missing compact payload: %+v", compactEvent.Meta)
 	}
-	if len(data.ReplacementHistory) == 0 {
-		t.Fatal("expected replacement history on compact event")
+	if data.SourceEventCount == 0 {
+		t.Fatalf("compact source event count = %d, want > 0", data.SourceEventCount)
 	}
-	foundSummary := false
-	for _, event := range data.ReplacementHistory {
-		if event != nil && strings.Contains(strings.ToLower(event.Text), "build compact runtime continuity") {
-			foundSummary = true
-			break
-		}
-	}
-	if !foundSummary {
-		t.Fatalf("replacement history missing continuity objective: %+v", data.ReplacementHistory)
+	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(sdksession.EventText(promptEvents[0])), "build compact runtime continuity") {
+		t.Fatalf("prompt events missing continuity objective in checkpoint overlay: %+v", promptEvents)
 	}
 	rawHistoryTokens := 0
 	for _, input := range turns {
@@ -669,7 +662,6 @@ func TestRuntimeProviderCompactionPlanContinuityE2E(t *testing.T) {
 			DefaultContextWindowTokens: 256,
 			ReserveOutputTokens:        64,
 			SafetyMarginTokens:         16,
-			RetainedUserTokenLimit:     200,
 			SegmentTokenBudget:         160,
 		},
 	})
@@ -764,7 +756,6 @@ func TestRuntimeProviderCompactionMultiCompactLongTaskE2E(t *testing.T) {
 		DefaultContextWindowTokens: 320,
 		ReserveOutputTokens:        64,
 		SafetyMarginTokens:         16,
-		RetainedUserTokenLimit:     220,
 		SegmentTokenBudget:         140,
 	}
 	runtime, err := New(Config{
@@ -783,7 +774,7 @@ func TestRuntimeProviderCompactionMultiCompactLongTaskE2E(t *testing.T) {
 	appendCanonicalDialogueForE2E(t, sessions, session.SessionRef, []string{
 		"Objective: finish sdk compact hardening. Blocker: remaining real-provider compact hardening coverage is incomplete. Next action: add multi-compaction, segmented retry, budget, compression, and prefix-stability e2e. Latest completed milestone: milestone-1.",
 		"Latest completed milestone: milestone-2. Keep the same exact objective, blocker, and next action. Note beta: prompt trimming, replay safety, and regression coverage.",
-		"Latest completed milestone: milestone-3. Keep the same exact objective, blocker, and next action. Note gamma: replacement history, budget tracking, and compact quality.",
+		"Latest completed milestone: milestone-3. Keep the same exact objective, blocker, and next action. Note gamma: checkpoint overlay, budget tracking, and compact quality.",
 		"Latest completed milestone: milestone-4. Keep the same exact objective, blocker, and next action. Note delta: segmented retry, overflow handling, and continuity anchors.",
 		"Keep the same exact objective, blocker, and next action. Note epsilon: prompt-budget assertions, compact trigger reliability, and append-only replay.",
 		"Keep the same exact objective, blocker, and next action. Note zeta: compact checkpoint density, replay safety, and long-task continuity.",
@@ -913,7 +904,6 @@ func TestRuntimeProviderCompactionSegmentedRetryE2E(t *testing.T) {
 			DefaultContextWindowTokens: 220,
 			ReserveOutputTokens:        64,
 			SafetyMarginTokens:         16,
-			RetainedUserTokenLimit:     64,
 			SegmentTokenBudget:         90,
 			MaxSegmentDepth:            8,
 		},
@@ -1002,7 +992,6 @@ func TestRuntimeProviderCompactionPrefixStabilityE2E(t *testing.T) {
 			DefaultContextWindowTokens: 360,
 			ReserveOutputTokens:        64,
 			SafetyMarginTokens:         16,
-			RetainedUserTokenLimit:     80,
 			SegmentTokenBudget:         140,
 		},
 	})
@@ -1014,9 +1003,9 @@ func TestRuntimeProviderCompactionPrefixStabilityE2E(t *testing.T) {
 
 	appendCanonicalDialogueForE2E(t, sessions, session.SessionRef, []string{
 		"Objective: prove prefix stability between compactions. Blocker: prompt prefix drift would reduce cache reuse and continuity confidence. Next action: verify the compact-prefix messages remain byte-stable until the next compact.",
-		"Keep the same exact objective, blocker, and next action. Note beta: stable replacement history and replay determinism.",
+		"Keep the same exact objective, blocker, and next action. Note beta: stable checkpoint overlay and replay determinism.",
 		"Keep the same exact objective, blocker, and next action. Note gamma: compacted baselines and low-drift prompt construction.",
-		"Keep the same exact objective, blocker, and next action. Note delta: retained user inputs and checkpoint continuity.",
+		"Keep the same exact objective, blocker, and next action. Note delta: checkpoint continuity inputs and checkpoint continuity.",
 		"Keep the same exact objective, blocker, and next action. Note epsilon: stable prefixes and context reuse.",
 		"Keep the same exact objective, blocker, and next action. Note zeta: compact baseline stability and prefix cache reuse.",
 		"Keep the same exact objective, blocker, and next action. Note eta: deterministic prompt baselines and compact checkpoint reuse.",
@@ -1083,7 +1072,7 @@ func TestRuntimeProviderCompactionPrefixStabilityE2E(t *testing.T) {
 	appendCanonicalDialogueForE2E(t, sessions, session.SessionRef, []string{
 		"Keep the same exact objective, blocker, and next action. Note iota: prefix stability, compact checkpoint density, and provider budget pressure.",
 		"Keep the same exact objective, blocker, and next action. Note kappa: append-only replay, cache reuse, and deterministic prompt baselines.",
-		"Keep the same exact objective, blocker, and next action. Note lambda: stable prompt prefixes, replacement-history durability, and post-compact replay growth.",
+		"Keep the same exact objective, blocker, and next action. Note lambda: stable prompt prefixes, checkpoint-overlay durability, and post-compact replay growth.",
 		"Keep the same exact objective, blocker, and next action. Note mu: fresh transcript growth should eventually force a later compact refresh.",
 	})
 	_ = runAndCollectAssistantTextForE2E(ctx, t, runtime, sdkruntime.RunRequest{

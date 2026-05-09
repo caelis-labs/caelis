@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,20 +15,20 @@ import (
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
 
-// CompactionConfig controls codex-style replacement-history compaction.
+// CompactionConfig controls codex-style checkpoint compaction.
 type CompactionConfig struct {
-	Enabled                    bool
-	WatermarkRatio             float64
-	ForceWatermarkRatio        float64
-	DefaultContextWindowTokens int
-	ReserveOutputTokens        int
-	SafetyMarginTokens         int
-	RetainedUserTokenLimit     int
-	SegmentTokenBudget         int
-	MaxSegmentDepth            int
-	MaxRetryAttempts           int
-	RetryBaseDelay             time.Duration
-	RetryMaxDelay              time.Duration
+	Enabled                     bool
+	WatermarkRatio              float64
+	ForceWatermarkRatio         float64
+	DefaultContextWindowTokens  int
+	ReserveOutputTokens         int
+	SafetyMarginTokens          int
+	SegmentTokenBudget          int
+	MaxSegmentDepth             int
+	MaxRetryAttempts            int
+	RetryBaseDelay              time.Duration
+	RetryMaxDelay               time.Duration
+	EstimatedPromptPrefixTokens int
 }
 
 func normalizeCompactionConfig(cfg CompactionConfig) CompactionConfig {
@@ -39,9 +40,6 @@ func normalizeCompactionConfig(cfg CompactionConfig) CompactionConfig {
 	}
 	if cfg.SafetyMarginTokens <= 0 {
 		cfg.SafetyMarginTokens = 2048
-	}
-	if cfg.RetainedUserTokenLimit <= 0 {
-		cfg.RetainedUserTokenLimit = 20000
 	}
 	if cfg.SegmentTokenBudget <= 0 {
 		cfg.SegmentTokenBudget = 24000
@@ -57,6 +55,9 @@ func normalizeCompactionConfig(cfg CompactionConfig) CompactionConfig {
 	}
 	if cfg.RetryMaxDelay <= 0 {
 		cfg.RetryMaxDelay = 8 * time.Second
+	}
+	if cfg.EstimatedPromptPrefixTokens < 0 {
+		cfg.EstimatedPromptPrefixTokens = 0
 	}
 	return cfg
 }
@@ -153,8 +154,7 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req sdkcompact.Reques
 			Usage:        c.snapshotUsage(req, promptEventsWithPending(promptEvents, req.PendingEvents)),
 		}, nil
 	}
-	retainedUsers, retainedUserIndexes := selectRetainedUserInputs(delta, c.cfg.RetainedUserTokenLimit)
-	summaryEvents := dropSelectedEvents(delta, retainedUserIndexes)
+	summaryEvents := sdksession.CloneEvents(delta)
 	if len(summaryEvents) == 0 {
 		promptEvents := sdkcompact.PromptEventsFromLatestCompact(req.Events)
 		return sdkcompact.Result{
@@ -163,22 +163,17 @@ func (c *codexStyleCompactor) compact(ctx context.Context, req sdkcompact.Reques
 		}, nil
 	}
 
-	compactText, err := c.generateCompactMarkdown(ctx, req.Model, baseText, summaryEvents, preferredCompactionAnchors(baseText, delta))
+	compactText, err := c.generateCompactMarkdown(ctx, req.Model, baseText, summaryEvents)
 	if err != nil {
 		return sdkcompact.Result{}, err
 	}
-	retainedUsers, replacementHistory, _ := c.fitReplacementHistoryToBudget(req, compactText, retainedUsers)
 	data := sdkcompact.CompactEventData{
-		Revision:                baseData.Revision + 1,
-		ContractVersion:         sdkcompact.CompactContractVersion,
-		SummarizedThroughID:     lastEventID(delta),
-		Generator:               "model_markdown",
-		Trigger:                 strings.TrimSpace(trigger),
-		SourceEventCount:        len(summaryEvents),
-		RetainedUserCount:       len(retainedUsers),
-		ReplacementHistoryCount: len(replacementHistory),
-		RetainedUserInputs:      retainedUsers,
-		ReplacementHistory:      replacementHistory,
+		Revision:            baseData.Revision + 1,
+		ContractVersion:     sdkcompact.CompactContractVersion,
+		SummarizedThroughID: lastEventID(delta),
+		Generator:           "model_markdown",
+		Trigger:             strings.TrimSpace(trigger),
+		SourceEventCount:    len(summaryEvents),
 	}
 	compactEvent := buildCompactEvent(req.Session, compactText, data)
 	promptEvents := sdkcompact.PromptEventsFromLatestCompact([]*sdksession.Event{compactEvent})
@@ -221,6 +216,7 @@ func snapshotUsageWithResolvedWindow(promptEvents []*sdksession.Event, window in
 
 	total := 0
 	delta := 0
+	prefix := 0
 	asOfEventID := ""
 	source := sdkcompact.UsageSourceEstimated
 	if snapshot, ok := latestProviderTokenSnapshot(promptEvents); ok {
@@ -230,15 +226,17 @@ func snapshotUsageWithResolvedWindow(promptEvents []*sdksession.Event, window in
 		asOfEventID = snapshot.EventID
 		source = sdkcompact.UsageSourceProvider
 	} else {
-		total = estimatePromptEventsTokens(promptEvents)
+		prefix = cfg.EstimatedPromptPrefixTokens
+		total = estimatePromptEventsTokens(promptEvents) + prefix
 	}
 	return sdkcompact.UsageSnapshot{
-		TotalTokens:          total,
-		ContextWindowTokens:  window,
-		EffectiveInputBudget: effective,
-		EstimatedDeltaTokens: delta,
-		Source:               source,
-		AsOfEventID:          asOfEventID,
+		TotalTokens:           total,
+		ContextWindowTokens:   window,
+		EffectiveInputBudget:  effective,
+		EstimatedDeltaTokens:  delta,
+		EstimatedPrefixTokens: prefix,
+		Source:                source,
+		AsOfEventID:           asOfEventID,
 	}
 }
 
@@ -247,17 +245,16 @@ func (c *codexStyleCompactor) generateCompactMarkdown(
 	model sdkmodel.LLM,
 	baseText string,
 	events []*sdksession.Event,
-	anchors compactionAnchors,
 ) (string, error) {
 	if len(events) == 0 {
-		return forceContinuityLead(normalizeCompactMarkdown(baseText), anchors), nil
+		return normalizeCompactMarkdown(baseText), nil
 	}
-	text, err := c.generateCompactMarkdownOnce(ctx, model, baseText, events, anchors)
+	text, err := c.generateCompactMarkdownOnce(ctx, model, baseText, events)
 	if err == nil {
 		return text, nil
 	}
 	if isCompactionOverflowError(err) {
-		return c.generateCompactMarkdownSegmented(ctx, model, baseText, events, anchors, 0)
+		return c.generateCompactMarkdownSegmented(ctx, model, baseText, events, 0)
 	}
 	return "", err
 }
@@ -267,11 +264,10 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 	model sdkmodel.LLM,
 	baseText string,
 	events []*sdksession.Event,
-	anchors compactionAnchors,
 	depth int,
 ) (string, error) {
 	if len(events) == 0 {
-		return forceContinuityLead(normalizeCompactMarkdown(baseText), anchors), nil
+		return normalizeCompactMarkdown(baseText), nil
 	}
 	if depth >= c.cfg.MaxSegmentDepth || len(events) <= 1 {
 		return "", &sdkmodel.ContextOverflowError{Cause: errors.New("compact segment still exceeds context budget")}
@@ -289,10 +285,10 @@ func (c *codexStyleCompactor) generateCompactMarkdownSegmented(
 		if len(segment) == 0 {
 			continue
 		}
-		update, err := c.generateCompactMarkdownOnce(ctx, model, current, segment, anchors)
+		update, err := c.generateCompactMarkdownOnce(ctx, model, current, segment)
 		if err != nil {
 			if isCompactionOverflowError(err) {
-				update, err = c.generateCompactMarkdownSegmented(ctx, model, current, segment, anchors, depth+1)
+				update, err = c.generateCompactMarkdownSegmented(ctx, model, current, segment, depth+1)
 			}
 			if err != nil {
 				return "", err
@@ -308,7 +304,6 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 	model sdkmodel.LLM,
 	baseText string,
 	events []*sdksession.Event,
-	anchors compactionAnchors,
 ) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < c.cfg.MaxRetryAttempts; attempt++ {
@@ -318,7 +313,7 @@ func (c *codexStyleCompactor) generateCompactMarkdownOnce(
 				return "", err
 			}
 		}
-		text, err := modelCompactMarkdown(ctx, model, baseText, events, anchors)
+		text, err := modelCompactMarkdown(ctx, model, baseText, events)
 		if err == nil {
 			return text, nil
 		}
@@ -477,31 +472,50 @@ func modelCompactMarkdown(
 	model sdkmodel.LLM,
 	baseText string,
 	events []*sdksession.Event,
-	anchors compactionAnchors,
 ) (string, error) {
 	input := renderCheckpointCompactionInput(baseText, events)
 	if strings.TrimSpace(input) == "" {
 		return "", errors.New("empty compaction input")
 	}
-	anchors = mergeCompactionAnchors(extractCompactionAnchorsFromEvents(events), anchors)
 	request := &sdkmodel.Request{
 		Instructions: []sdkmodel.Part{sdkmodel.NewTextPart(strings.TrimSpace(`
 You are performing a CONTEXT CHECKPOINT COMPACTION for a coding agent.
-Return only a plain-text handoff note. Do not return JSON. Do not use code fences.
+Return only one structured Markdown handoff note. Do not return JSON. Do not use code fences.
+
+Required shape:
+CONTEXT CHECKPOINT
+
+## Current Objective
+- ...
+
+## User Constraints And Corrections
+- Preserve every durable user requirement, correction, approval, or rejection from the compacted range.
+- Keep recent user wording verbatim when it changes what should happen next.
+
+## Current Plan And Progress
+- Preserve PLAN events as ordinary history, including item statuses when available.
+- Distinguish completed work from work that still needs action.
+
+## Key Files And Facts
+- Include file paths plus useful symbols or line ranges when they were learned from READ/SEARCH/GLOB/PATCH output.
+
+## Validation And Tool Results
+- Keep relevant build/test/vet results, sandbox failures, and unread or incomplete tool outcomes.
+
+## Open Questions Or Risks
+- ...
+
+## Next Actions
+1. ...
 
 Rules:
-- Start with these three lines when the source provides them:
-  Objective: ...
-  Blocker: ...
-  Next action: ...
-- Preserve the current objective, blocker, next action, and execution progress with very high fidelity.
-- If newer history explicitly states an objective, blocker, or next action, use the newer wording instead of the older checkpoint wording.
+- Preserve the current objective, blocker, next action, user constraints, and execution progress with very high fidelity.
+- If newer history changes the task, correction, approval state, blocker, or next action, the newer history wins over the old checkpoint.
 - Treat the existing compact checkpoint as a reference, not as text that must be kept verbatim.
-- Keep durable direction, blockers, and execution progress. Drop stale, repetitive, or superseded details.
-- Ignore acknowledgment-only turns such as "ack", "ok", or "done" unless they carry real progress.
+- Keep durable direction, blockers, file facts, handles, validation results, and execution progress. Drop stale, repetitive, or superseded detail.
+- Do not turn the checkpoint into a schema dump. Use concise Markdown headings and bullets.
+- Ignore acknowledgment-only turns such as "ack", "ok", or "done" unless they carry real progress or approve execution.
 - Ignore reply-format scaffolding such as "reply exactly" or "answer with exactly" when extracting durable state.
-- After the first lines, continue with a concise plain-text handoff note covering only the details needed to continue the task.
-- Prefer short bullets or short paragraphs. Keep task, participant, and blocker summaries short but concrete.
 `))},
 		Messages: []sdkmodel.Message{
 			sdkmodel.NewTextMessage(sdkmodel.RoleUser, input),
@@ -513,38 +527,14 @@ Rules:
 		return "", err
 	}
 	text := normalizeCompactMarkdown(strings.TrimSpace(final.Message.TextContent()))
-	text = forceContinuityLead(text, anchors)
-	if compactMarkdownLooksEmpty(text) || compactMarkdownMissingRequiredAnchors(text, anchors) {
-		salvaged, salvageErr := salvageCompactMarkdown(ctx, model, input, text, anchors)
-		if salvageErr == nil {
-			salvaged = forceContinuityLead(salvaged, anchors)
-		}
+	if compactMarkdownLooksEmpty(text) {
+		salvaged, salvageErr := salvageCompactMarkdown(ctx, model, input, text)
 		if salvageErr == nil && !compactMarkdownLooksEmpty(salvaged) {
 			return salvaged, nil
 		}
 		return "", fmt.Errorf("sdk/runtime/local: insufficient compact checkpoint payload: %s", compactText(text, 320))
 	}
 	return text, nil
-}
-
-func preferredCompactionAnchors(baseText string, events []*sdksession.Event) compactionAnchors {
-	return mergeCompactionAnchors(extractCompactionAnchorsFromText(baseText), extractCompactionAnchorsFromEvents(events))
-}
-
-func mergeCompactionAnchors(base compactionAnchors, override compactionAnchors) compactionAnchors {
-	if strings.TrimSpace(override.Objective) != "" {
-		base.Objective = strings.TrimSpace(override.Objective)
-	}
-	if strings.TrimSpace(override.Blocker) != "" {
-		base.Blocker = strings.TrimSpace(override.Blocker)
-	}
-	if strings.TrimSpace(override.NextAction) != "" {
-		base.NextAction = strings.TrimSpace(override.NextAction)
-	}
-	base.Objective = strings.TrimSpace(base.Objective)
-	base.Blocker = strings.TrimSpace(base.Blocker)
-	base.NextAction = strings.TrimSpace(base.NextAction)
-	return base
 }
 
 func compactMarkdownLooksEmpty(text string) bool {
@@ -555,24 +545,35 @@ func compactMarkdownLooksEmpty(text string) bool {
 	return len(text) < 24
 }
 
-func salvageCompactMarkdown(ctx context.Context, model sdkmodel.LLM, input string, prior string, anchors compactionAnchors) (string, error) {
-	anchorBlock := renderCompactionAnchors(anchors)
+func salvageCompactMarkdown(ctx context.Context, model sdkmodel.LLM, input string, prior string) (string, error) {
 	request := &sdkmodel.Request{
 		Instructions: []sdkmodel.Part{sdkmodel.NewTextPart(strings.TrimSpace(`
 You are repairing an empty or low-information context checkpoint for a coding agent.
-Return only a plain-text handoff note starting with:
-Objective: ...
-Blocker: ...
-Next action: ...
+Return only one structured Markdown handoff note. Do not return JSON.
+Start with:
+CONTEXT CHECKPOINT
+
+## Current Objective
+- ...
+
+## User Constraints And Corrections
+- ...
+
+## Current Plan And Progress
+- ...
+
+## Next Actions
+1. ...
 
 Rules:
 - Preserve exact wording for the current objective, blockers, and next actions when available.
 - Do not leave Objective or Next action empty if the source contains them.
+- Preserve durable user corrections and approvals from the compacted range.
 - Ignore acknowledgment-only turns and reply-format scaffolding.
-- After the first lines, add only the minimum extra detail needed to continue the task.
+- Add only the minimum extra detail needed to continue the task.
 `))},
 		Messages: []sdkmodel.Message{
-			sdkmodel.NewTextMessage(sdkmodel.RoleUser, strings.TrimSpace(input+"\n\nRequired anchors to preserve:\n"+anchorBlock+"\n\nPrevious invalid compact output:\n"+prior)),
+			sdkmodel.NewTextMessage(sdkmodel.RoleUser, strings.TrimSpace(input+"\n\nPrevious invalid compact output:\n"+prior)),
 		},
 		Stream: false,
 	}
@@ -583,203 +584,24 @@ Rules:
 	return normalizeCompactMarkdown(strings.TrimSpace(final.Message.TextContent())), nil
 }
 
-type compactionAnchors struct {
-	Objective  string
-	Blocker    string
-	NextAction string
-}
-
-func extractCompactionAnchorsFromEvents(events []*sdksession.Event) compactionAnchors {
-	anchors := compactionAnchors{}
-	for _, preferUser := range []bool{true, false} {
-		for i := len(events) - 1; i >= 0; i-- {
-			event := events[i]
-			if event == nil {
-				continue
-			}
-			if preferUser && sdksession.EventTypeOf(event) != sdksession.EventTypeUser {
-				continue
-			}
-			text := eventTextForCompaction(event)
-			if text == "" {
-				continue
-			}
-			if isSummaryHistoryMessage(text) {
-				continue
-			}
-			if anchors.Objective == "" {
-				anchors.Objective = extractLabeledClause(text, []string{"objective:", "session objective is:", "project objective:", "objective is:"})
-			}
-			if anchors.Blocker == "" {
-				anchors.Blocker = extractLabeledClause(text, []string{"blocker:", "current blocker is:", "current blocker:", "blocker is:"})
-			}
-			if anchors.NextAction == "" {
-				anchors.NextAction = extractLabeledClause(text, []string{"next action is:", "next action:"})
-			}
-			if anchors.Objective != "" && anchors.Blocker != "" && anchors.NextAction != "" {
-				return anchors
-			}
-		}
-	}
-	return anchors
-}
-
-func isSummaryHistoryMessage(text string) bool {
-	text = strings.TrimSpace(strings.ToUpper(text))
-	return strings.HasPrefix(text, "CONTEXT CHECKPOINT")
-}
-
-func extractCompactionAnchorsFromText(text string) compactionAnchors {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return compactionAnchors{}
-	}
-	return compactionAnchors{
-		Objective:  extractLabeledClause(text, []string{"objective:", "session objective is:", "project objective:", "objective is:"}),
-		Blocker:    extractLabeledClause(text, []string{"blocker:", "current blocker is:", "current blocker:", "blocker is:"}),
-		NextAction: extractLabeledClause(text, []string{"next action:", "next action is:"}),
-	}
-}
-
-func compactMarkdownMissingRequiredAnchors(text string, anchors compactionAnchors) bool {
-	if strings.TrimSpace(text) == "" {
-		return true
-	}
-	lower := strings.ToLower(text)
-	if anchorMissing(lower, anchors.Objective) {
-		return true
-	}
-	if anchorMissing(lower, anchors.Blocker) {
-		return true
-	}
-	if anchorMissing(lower, anchors.NextAction) {
-		return true
-	}
-	return false
-}
-
-func anchorMissing(compactLower, anchor string) bool {
-	anchor = strings.TrimSpace(anchor)
-	if anchor == "" {
-		return false
-	}
-	return !strings.Contains(compactLower, strings.ToLower(anchor))
-}
-
-func renderCompactionAnchors(anchors compactionAnchors) string {
-	lines := []string{}
-	if anchors.Objective != "" {
-		lines = append(lines, "- Objective: "+anchors.Objective)
-	}
-	if anchors.Blocker != "" {
-		lines = append(lines, "- Blocker: "+anchors.Blocker)
-	}
-	if anchors.NextAction != "" {
-		lines = append(lines, "- Next action: "+anchors.NextAction)
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-func extractLabeledClause(input string, labels []string) string {
-	if strings.TrimSpace(input) == "" {
-		return ""
-	}
-	lower := strings.ToLower(input)
-	start := -1
-	labelLen := 0
-	for _, label := range labels {
-		if idx := strings.Index(lower, label); idx >= 0 && (start < 0 || idx < start) {
-			start = idx
-			labelLen = len(label)
-		}
-	}
-	if start < 0 {
-		return ""
-	}
-	bodyStart := start + labelLen
-	bodyLower := lower[bodyStart:]
-	candidates := []string{
-		"session objective is:",
-		"project objective:",
-		"objective is:",
-		"current blocker is:",
-		"current blocker:",
-		"blocker is:",
-		"next action is:",
-		"next action:",
-	}
-	end := len(input)
-	for _, candidate := range candidates {
-		if idx := strings.Index(bodyLower, candidate); idx >= 0 {
-			next := bodyStart + idx
-			if next > bodyStart && next < end {
-				end = next
-			}
-		}
-	}
-	if idx := strings.IndexAny(input[bodyStart:end], "\n\r"); idx >= 0 {
-		end = min(end, bodyStart+idx)
-	}
-	if idx := firstSentenceBoundary(input[bodyStart:end]); idx >= 0 {
-		end = min(end, bodyStart+idx)
-	}
-	text := strings.TrimSpace(input[bodyStart:end])
-	text = strings.Trim(text, " .;,-")
-	return text
-}
-
-func firstSentenceBoundary(text string) int {
-	for i := 0; i < len(text)-1; i++ {
-		switch text[i] {
-		case '.', '!', '?':
-			if text[i+1] == ' ' || text[i+1] == '\n' || text[i+1] == '\r' {
-				return i + 1
-			}
-		}
-	}
-	return -1
-}
-
-func forceContinuityLead(text string, anchors compactionAnchors) string {
-	text = normalizeCompactMarkdown(text)
-	if text == "" {
-		return text
-	}
-	lines := []string{"CONTEXT CHECKPOINT"}
-	if anchors.Objective != "" {
-		lines = append(lines, "Objective: "+anchors.Objective)
-	}
-	if anchors.Blocker != "" {
-		lines = append(lines, "Blocker: "+anchors.Blocker)
-	}
-	if anchors.NextAction != "" {
-		lines = append(lines, "Next action: "+anchors.NextAction)
-	}
-	body := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "CONTEXT CHECKPOINT"))
-	if body != "" {
-		lines = append(lines, "", body)
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
 func renderCheckpointCompactionInput(
 	baseText string,
 	events []*sdksession.Event,
 ) string {
 	var b strings.Builder
 	if strings.TrimSpace(baseText) != "" {
-		b.WriteString("Existing compact checkpoint (reference only):\n")
+		b.WriteString("# Existing Compact Checkpoint (reference only)\n")
 		b.WriteString(strings.TrimSpace(baseText))
 		b.WriteString("\n\n")
 	}
-	b.WriteString("New history since the last compact checkpoint:\n")
+	b.WriteString("# Event Replay Since Last Compact\n")
 	for _, event := range events {
 		line := renderCompactionEvent(event)
 		if line == "" {
 			continue
 		}
 		b.WriteString(line)
-		b.WriteByte('\n')
+		b.WriteString("\n\n")
 	}
 	return strings.TrimSpace(b.String())
 }
@@ -823,32 +645,147 @@ func renderCompactionEvent(event *sdksession.Event) string {
 	text := eventTextForCompaction(event)
 	switch sdksession.EventTypeOf(event) {
 	case sdksession.EventTypeUser:
-		return "USER: " + compactText(text, 260)
+		return renderCompactionBlock("User Message", compactText(text, 4000))
 	case sdksession.EventTypeAssistant:
-		return "ASSISTANT: " + compactText(text, 260)
+		return renderCompactionBlock("Assistant Message", compactText(text, 5000))
 	case sdksession.EventTypePlan:
 		return renderPlanEventForCompaction(event, text)
 	case sdksession.EventTypeToolCall:
 		if update := sdksession.ProtocolUpdateOf(event); update != nil {
-			return fmt.Sprintf("TOOL_CALL %s: %s",
-				toolNameForCompaction(event, update),
-				compactText(stringifyAny(update.RawInput), 220),
-			)
+			return renderToolEventForCompaction("Tool Call", event, update, update.RawInput, 2000)
 		}
 	case sdksession.EventTypeToolResult:
 		if update := sdksession.ProtocolUpdateOf(event); update != nil {
-			return fmt.Sprintf("TOOL_RESULT %s: %s",
-				toolNameForCompaction(event, update),
-				compactText(stringifyAny(update.RawOutput), 260),
-			)
+			return renderToolEventForCompaction("Tool Result", event, update, update.RawOutput, 3500)
 		}
-		return "TOOL_RESULT: " + compactText(text, 260)
+		return renderCompactionBlock("Tool Result", compactText(text, 3500))
 	case sdksession.EventTypeParticipant:
 		if event.Meta != nil {
-			return "PARTICIPANT: " + compactText(stringifyAny(event.Meta), 220)
+			return renderCompactionBlock("Participant Update", compactText(renderCompactionValue(event.Meta, 1600), 1800))
 		}
 	}
-	return compactText(text, 220)
+	return renderCompactionBlock("Event", compactText(text, 1800))
+}
+
+func renderCompactionBlock(title string, body string) string {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "Event"
+	}
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return "## " + title
+	}
+	return "## " + title + "\n" + body
+}
+
+func renderToolEventForCompaction(kind string, event *sdksession.Event, update *sdksession.ProtocolUpdate, payload map[string]any, limit int) string {
+	toolName := toolNameForCompaction(event, update)
+	lines := []string{}
+	if toolName != "" {
+		lines = append(lines, "- tool: "+toolName)
+	}
+	if update != nil {
+		if title := strings.TrimSpace(update.Title); title != "" && !strings.EqualFold(title, toolName) {
+			lines = append(lines, "- title: "+title)
+		}
+		if status := strings.TrimSpace(update.Status); status != "" {
+			lines = append(lines, "- status: "+status)
+		}
+		if text := textFromProtocolContent(update.Content); text != "" {
+			lines = append(lines, "- content: "+compactText(text, 1200))
+		}
+	}
+	if len(payload) > 0 {
+		if rendered := renderCompactionMap(payload, limit); rendered != "" {
+			lines = append(lines, "", rendered)
+		}
+	} else if text := eventTextForCompaction(event); text != "" {
+		lines = append(lines, "", compactText(text, limit))
+	}
+	return renderCompactionBlock(kind, strings.Join(lines, "\n"))
+}
+
+func renderCompactionValue(value any, limit int) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return compactText(typed, limit)
+	case map[string]any:
+		return renderCompactionMap(typed, limit)
+	case []any:
+		items := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text := renderCompactionValue(item, max(limit/2, 200))
+			if text == "" {
+				continue
+			}
+			items = append(items, "- "+strings.ReplaceAll(text, "\n", "\n  "))
+		}
+		return compactText(strings.Join(items, "\n"), limit)
+	default:
+		return compactText(stringifyAny(value), limit)
+	}
+}
+
+func renderCompactionMap(values map[string]any, limit int) string {
+	if len(values) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, key := range keys {
+		text := renderCompactionValue(values[key], max(limit/len(keys), 240))
+		if text == "" {
+			continue
+		}
+		if strings.Contains(text, "\n") {
+			lines = append(lines, key+":\n  "+strings.ReplaceAll(text, "\n", "\n  "))
+		} else {
+			lines = append(lines, key+": "+text)
+		}
+	}
+	return compactText(strings.Join(lines, "\n"), limit)
+}
+
+func textFromProtocolContent(value any) string {
+	switch typed := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(typed)
+	case map[string]any:
+		if text, ok := typed["text"].(string); ok {
+			return strings.TrimSpace(text)
+		}
+		if content, ok := typed["content"].(string); ok {
+			return strings.TrimSpace(content)
+		}
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := textFromProtocolContent(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	case []sdksession.ProtocolToolCallContent:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := textFromProtocolContent(item.Content); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.TrimSpace(strings.Join(parts, "\n"))
+	}
+	return ""
 }
 
 func toolNameForCompaction(event *sdksession.Event, update *sdksession.ProtocolUpdate) string {
@@ -876,35 +813,38 @@ func toolNameForCompaction(event *sdksession.Event, update *sdksession.ProtocolU
 }
 
 func renderPlanEventForCompaction(event *sdksession.Event, fallback string) string {
-	parts := make([]string, 0, 2)
+	lines := make([]string, 0, 8)
 	if text := strings.TrimSpace(fallback); text != "" {
-		parts = append(parts, compactText(text, 140))
+		lines = append(lines, compactText(text, 1000))
 	}
-	if event != nil && event.Protocol != nil && event.Protocol.Plan != nil {
-		rendered := make([]string, 0, len(event.Protocol.Plan.Entries))
-		for _, entry := range event.Protocol.Plan.Entries {
-			content := strings.TrimSpace(entry.Content)
-			status := strings.TrimSpace(entry.Status)
-			if content == "" {
-				continue
-			}
-			if status != "" {
-				rendered = append(rendered, fmt.Sprintf("%s [%s]", content, status))
-			} else {
-				rendered = append(rendered, content)
-			}
-			if len(rendered) >= 4 {
-				break
-			}
+	for _, entry := range planEntriesForCompaction(event) {
+		content := strings.TrimSpace(entry.Content)
+		if content == "" {
+			continue
 		}
-		if len(rendered) > 0 {
-			parts = append(parts, "entries: "+strings.Join(rendered, "; "))
+		status := strings.TrimSpace(entry.Status)
+		if status == "" {
+			status = "unknown"
 		}
+		lines = append(lines, fmt.Sprintf("- [%s] %s", status, content))
 	}
-	if len(parts) == 0 {
-		return "PLAN"
+	if len(lines) == 0 {
+		return renderCompactionBlock("Plan Update", "")
 	}
-	return "PLAN: " + compactText(strings.Join(parts, " | "), 260)
+	return renderCompactionBlock("Plan Update", strings.Join(lines, "\n"))
+}
+
+func planEntriesForCompaction(event *sdksession.Event) []sdksession.ProtocolPlanEntry {
+	if event == nil || event.Protocol == nil {
+		return nil
+	}
+	if event.Protocol.Plan != nil && len(event.Protocol.Plan.Entries) > 0 {
+		return event.Protocol.Plan.Entries
+	}
+	if event.Protocol.Update != nil && len(event.Protocol.Update.Entries) > 0 {
+		return event.Protocol.Update.Entries
+	}
+	return nil
 }
 
 func buildCompactEvent(session sdksession.Session, compactText string, data sdkcompact.CompactEventData) *sdksession.Event {
@@ -930,148 +870,11 @@ func buildCompactEvent(session sdksession.Session, compactText string, data sdkc
 	}
 }
 
-func (c *codexStyleCompactor) fitReplacementHistoryToBudget(
-	req sdkcompact.Request,
-	compactText string,
-	retainedUsers []string,
-) ([]string, []*sdksession.Event, sdkcompact.UsageSnapshot) {
-	type summaryLimits struct {
-		maxChars int
-		maxLines int
-	}
-	limits := []summaryLimits{
-		{maxChars: 480, maxLines: 12},
-		{maxChars: 240, maxLines: 6},
-		{maxChars: 0, maxLines: 0},
-	}
-	bestRetained := append([]string(nil), retainedUsers...)
-	bestHistory := buildReplacementHistoryWithLimits(compactText, bestRetained, limits[0].maxChars, limits[0].maxLines)
-	bestUsage := c.snapshotUsage(req, promptEventsWithPending(bestHistory, req.PendingEvents))
-	for _, limit := range limits {
-		for drop := 0; drop <= len(retainedUsers); drop++ {
-			candidateRetained := append([]string(nil), retainedUsers[drop:]...)
-			history := buildReplacementHistoryWithLimits(compactText, candidateRetained, limit.maxChars, limit.maxLines)
-			usage := c.snapshotUsage(req, promptEventsWithPending(history, req.PendingEvents))
-			if bestUsage.TotalTokens <= 0 || usage.TotalTokens < bestUsage.TotalTokens {
-				bestRetained = candidateRetained
-				bestHistory = history
-				bestUsage = usage
-			}
-			if usage.TotalTokens <= usage.EffectiveInputBudget {
-				return candidateRetained, history, usage
-			}
-		}
-	}
-	return bestRetained, bestHistory, bestUsage
-}
-
 func compactTextFromEvent(event *sdksession.Event) string {
 	if event == nil {
 		return ""
 	}
 	return strings.TrimSpace(sdksession.EventText(event))
-}
-
-func buildReplacementHistoryWithLimits(compactText string, retainedUsers []string, maxChars int, maxLines int) []*sdksession.Event {
-	out := make([]*sdksession.Event, 0, len(retainedUsers)+1)
-	for _, text := range retainedUsers {
-		msg := sdkmodel.NewTextMessage(sdkmodel.RoleUser, text)
-		out = append(out, &sdksession.Event{
-			Type:       sdksession.EventTypeUser,
-			Visibility: sdksession.VisibilityOverlay,
-			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
-			Message:    &msg,
-			Text:       msg.TextContent(),
-			Protocol: &sdksession.EventProtocol{
-				Update: &sdksession.ProtocolUpdate{
-					SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
-					Content:       sdksession.ProtocolTextContent(msg.TextContent()),
-				},
-			},
-		})
-	}
-	if replacementSummary := replacementHistorySummaryTextWithLimits(compactText, maxChars, maxLines); replacementSummary != "" {
-		msg := sdkmodel.NewTextMessage(sdkmodel.RoleUser, replacementSummary)
-		out = append(out, &sdksession.Event{
-			Type:       sdksession.EventTypeUser,
-			Visibility: sdksession.VisibilityOverlay,
-			Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
-			Message:    &msg,
-			Text:       msg.TextContent(),
-		})
-	}
-	return out
-}
-
-func replacementHistorySummaryTextWithLimits(summaryText string, maxChars int, maxLines int) string {
-	text := normalizeCompactMarkdown(summaryText)
-	if text == "" {
-		return ""
-	}
-	anchors := extractCompactionAnchorsFromText(text)
-	lines := []string{"CONTEXT CHECKPOINT"}
-	if anchors.Objective != "" {
-		lines = append(lines, "Objective: "+anchors.Objective)
-	}
-	if anchors.Blocker != "" {
-		lines = append(lines, "Blocker: "+anchors.Blocker)
-	}
-	if anchors.NextAction != "" {
-		lines = append(lines, "Next action: "+anchors.NextAction)
-	}
-	bodyLines := []string{}
-	for _, rawLine := range strings.Split(text, "\n") {
-		line := strings.TrimSpace(rawLine)
-		if line == "" || strings.EqualFold(line, "CONTEXT CHECKPOINT") {
-			continue
-		}
-		lower := strings.ToLower(line)
-		if strings.HasPrefix(lower, "objective:") || strings.HasPrefix(lower, "blocker:") || strings.HasPrefix(lower, "next action:") {
-			continue
-		}
-		bodyLines = append(bodyLines, line)
-	}
-	body := strings.TrimSpace(strings.Join(bodyLines, "\n"))
-	if body != "" && maxChars > 0 && maxLines > 0 {
-		lines = append(lines, "", trimReplacementSummaryBody(bodyLines, maxChars, maxLines))
-	}
-	return strings.TrimSpace(strings.Join(lines, "\n"))
-}
-
-func trimReplacementSummaryBody(lines []string, maxChars int, maxLines int) string {
-	if maxChars <= 0 {
-		maxChars = 480
-	}
-	if maxLines <= 0 {
-		maxLines = 12
-	}
-	selected := make([]string, 0, min(len(lines), maxLines))
-	used := 0
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		nextCost := len(line)
-		if len(selected) > 0 {
-			nextCost++
-		}
-		if len(selected) >= maxLines || used+nextCost > maxChars {
-			if len(selected) == 0 {
-				line = strings.TrimSpace(line)
-				runes := []rune(line)
-				if len(runes) > maxChars {
-					line = strings.TrimSpace(string(runes[:maxChars]))
-				}
-				selected = append(selected, line)
-			}
-			selected = append(selected, "...")
-			break
-		}
-		selected = append(selected, line)
-		used += nextCost
-	}
-	return strings.TrimSpace(strings.Join(selected, "\n"))
 }
 
 func compactableEvents(events []*sdksession.Event) []*sdksession.Event {
@@ -1091,59 +894,6 @@ func compactableEvents(events []*sdksession.Event) []*sdksession.Event {
 
 func compactableEventCount(events []*sdksession.Event) int {
 	return len(compactableEvents(events))
-}
-
-func selectRetainedUserInputs(events []*sdksession.Event, tokenBudget int) ([]string, map[int]struct{}) {
-	if tokenBudget <= 0 {
-		return nil, nil
-	}
-	type retainedUser struct {
-		index int
-		text  string
-	}
-	selected := make([]retainedUser, 0, 4)
-	remaining := tokenBudget
-	for i := len(events) - 1; i >= 0; i-- {
-		event := events[i]
-		if event == nil || sdksession.EventTypeOf(event) != sdksession.EventTypeUser {
-			continue
-		}
-		text := eventTextForCompaction(event)
-		if text == "" || isSummaryHistoryMessage(text) {
-			continue
-		}
-		cost := estimateTextTokens(text)
-		if cost <= remaining {
-			selected = append(selected, retainedUser{
-				index: i,
-				text:  text,
-			})
-			remaining -= cost
-			if remaining <= 0 {
-				break
-			}
-			continue
-		}
-		truncated := truncateRetainedUserInput(text, remaining)
-		if truncated == "" {
-			break
-		}
-		selected = append(selected, retainedUser{
-			index: i,
-			text:  truncated,
-		})
-		break
-	}
-	if len(selected) == 0 {
-		return nil, nil
-	}
-	out := make([]string, 0, len(selected))
-	indexes := map[int]struct{}{}
-	for i := len(selected) - 1; i >= 0; i-- {
-		out = append(out, selected[i].text)
-		indexes[selected[i].index] = struct{}{}
-	}
-	return out, indexes
 }
 
 func eventTextForCompaction(event *sdksession.Event) string {
@@ -1192,30 +942,6 @@ func mainInvocationEvents(events []*sdksession.Event) []*sdksession.Event {
 	return out
 }
 
-func truncateRetainedUserInput(text string, tokenBudget int) string {
-	text = strings.TrimSpace(text)
-	if text == "" || tokenBudget <= 0 {
-		return ""
-	}
-	runes := []rune(text)
-	limit := tokenBudget * 4
-	if len(runes) <= limit {
-		return text
-	}
-	if limit <= 0 {
-		return ""
-	}
-	if limit <= 12 {
-		return strings.TrimSpace(string(runes[:limit]))
-	}
-	head := limit / 2
-	tail := limit - head - 3
-	if tail < 0 {
-		tail = 0
-	}
-	return strings.TrimSpace(string(runes[:head])) + "..." + strings.TrimSpace(string(runes[len(runes)-tail:]))
-}
-
 func (r *Runtime) compactAfterOverflow(
 	ctx context.Context,
 	session sdksession.Session,
@@ -1244,23 +970,6 @@ func (r *Runtime) compactAfterOverflow(
 		return false, err
 	}
 	return true, nil
-}
-
-func dropSelectedEvents(events []*sdksession.Event, selected map[int]struct{}) []*sdksession.Event {
-	if len(selected) == 0 {
-		return sdksession.CloneEvents(events)
-	}
-	out := make([]*sdksession.Event, 0, len(events))
-	for i, event := range events {
-		if event == nil {
-			continue
-		}
-		if _, ok := selected[i]; ok {
-			continue
-		}
-		out = append(out, sdksession.CloneEvent(event))
-	}
-	return out
 }
 
 func splitEventsByTokenBudget(events []*sdksession.Event, budget int) [][]*sdksession.Event {

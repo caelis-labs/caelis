@@ -1600,7 +1600,6 @@ func TestRuntimeCompactionInjectsCheckpointAndTrimsOldHistory(t *testing.T) {
 			DefaultContextWindowTokens: 64,
 			ReserveOutputTokens:        16,
 			SafetyMarginTokens:         8,
-			RetainedUserTokenLimit:     24,
 			SegmentTokenBudget:         80,
 		},
 	})
@@ -1678,7 +1677,6 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 			DefaultContextWindowTokens: 64,
 			ReserveOutputTokens:        16,
 			SafetyMarginTokens:         8,
-			RetainedUserTokenLimit:     24,
 			SegmentTokenBudget:         80,
 		},
 	})
@@ -1715,8 +1713,8 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 			compactText = strings.TrimSpace(sdksession.EventText(event))
 		}
 	}
-	if !strings.Contains(compactText, "preserve context continuity during very long coding sessions") {
-		t.Fatalf("compact event text = %q, want canonical continuity objective", compactText)
+	if !strings.Contains(compactText, "model checkpoint objective") {
+		t.Fatalf("compact event text = %q, want model-generated checkpoint objective", compactText)
 	}
 	compactEvent, ok := latestCompactEventForTest(loaded.Events)
 	if !ok {
@@ -1726,12 +1724,12 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 	if !ok {
 		t.Fatal("expected compact event metadata")
 	}
-	if len(data.ReplacementHistory) == 0 {
-		t.Fatal("expected replacement history on compact event")
+	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(sdksession.EventText(promptEvents[0])), "model checkpoint objective") {
+		t.Fatalf("prompt events after compact = %+v, want pure text checkpoint overlay", promptEvents)
 	}
-	last := data.ReplacementHistory[len(data.ReplacementHistory)-1]
-	if last == nil || !strings.Contains(strings.ToLower(sdksession.EventText(last)), "preserve context continuity during very long coding sessions") {
-		t.Fatalf("replacement history summary = %+v, want compact continuity objective", last)
+	if promptEvents[0].Message != nil || promptEvents[0].Protocol != nil {
+		t.Fatalf("checkpoint overlay should stay pure text, got message=%+v protocol=%+v", promptEvents[0].Message, promptEvents[0].Protocol)
 	}
 	if data.Revision <= 0 {
 		t.Fatalf("compact revision = %d, want > 0", data.Revision)
@@ -1739,12 +1737,12 @@ func TestRuntimeCompactionUsesModelGeneratedCheckpoint(t *testing.T) {
 	if data.ContractVersion != sdkcompact.CompactContractVersion {
 		t.Fatalf("compact contract version = %d, want %d", data.ContractVersion, sdkcompact.CompactContractVersion)
 	}
-	if data.SourceEventCount == 0 || data.RetainedUserCount != len(data.RetainedUserInputs) || data.ReplacementHistoryCount != len(data.ReplacementHistory) {
-		t.Fatalf("compact contract counts = source:%d retained:%d/%d replacement:%d/%d", data.SourceEventCount, data.RetainedUserCount, len(data.RetainedUserInputs), data.ReplacementHistoryCount, len(data.ReplacementHistory))
+	if data.SourceEventCount == 0 {
+		t.Fatalf("compact source event count = %d, want > 0", data.SourceEventCount)
 	}
 }
 
-func TestRuntimeManualCompactUsesStructuredReplacementHistory(t *testing.T) {
+func TestRuntimeManualCompactUsesPureTextCheckpointOverlay(t *testing.T) {
 	t.Parallel()
 
 	sessions, session := newTestSessionService(t, "sess-compact-manual")
@@ -1760,15 +1758,28 @@ func TestRuntimeManualCompactUsesStructuredReplacementHistory(t *testing.T) {
 			"make manual compact preserve context",
 		},
 		compactBody: `CONTEXT CHECKPOINT
-Objective: make manual compact preserve context instead of truncating history
-Blocker: bare compact events cause prompt replay to drop all prior context
-Next action: route manual compact through the model-backed compactor
 
-## Current Progress
+## Current Objective
+- make manual compact preserve context instead of truncating history
+
+## User Constraints And Corrections
+- keep user-facing compact handoff as structured Markdown, not JSON
+
+## Current Plan And Progress
 - manual compact is being aligned with auto compact
 
-## Open Questions / Risks
-- compact events without replacement history must not be emitted`,
+## Key Files And Facts
+- sdk/runtime/local/compaction.go:940-1120 owns checkpoint overlay rendering
+- license.go:30-100 is a line-index fact that must survive checkpoint overlay
+
+## Validation And Tool Results
+- not run yet
+
+## Open Questions Or Risks
+- compact events without checkpoint overlay must not be emitted
+
+## Next Actions
+1. route manual compact through the model-backed compactor`,
 	}
 	runtime, err := New(Config{
 		Sessions: sessions,
@@ -1776,8 +1787,7 @@ Next action: route manual compact through the model-backed compactor
 			SystemPrompt: "Be terse.",
 		},
 		Compaction: CompactionConfig{
-			RetainedUserTokenLimit: 24,
-			SegmentTokenBudget:     80,
+			SegmentTokenBudget: 80,
 		},
 	})
 	if err != nil {
@@ -1818,18 +1828,109 @@ Next action: route manual compact through the model-backed compactor
 	if data.Trigger != "manual" {
 		t.Fatalf("compact trigger = %q, want manual", data.Trigger)
 	}
-	if data.ContractVersion != sdkcompact.CompactContractVersion || data.SourceEventCount == 0 || data.ReplacementHistoryCount == 0 {
-		t.Fatalf("compact metadata = version:%d source:%d replacement:%d, want contract metadata", data.ContractVersion, data.SourceEventCount, data.ReplacementHistoryCount)
-	}
-	if len(data.ReplacementHistory) == 0 {
-		t.Fatal("manual compact replacement history is empty")
+	if data.ContractVersion != sdkcompact.CompactContractVersion || data.SourceEventCount == 0 {
+		t.Fatalf("compact metadata = version:%d source:%d, want contract metadata", data.ContractVersion, data.SourceEventCount)
 	}
 	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
 	if len(promptEvents) == 0 {
 		t.Fatal("prompt events empty after manual compact")
 	}
-	if strings.Contains(strings.Join(eventTextsForTest(promptEvents), "\n"), "Project objective: make manual compact preserve context instead of truncating history.") {
+	promptText := strings.Join(eventTextsForTest(promptEvents), "\n")
+	if strings.Contains(promptText, "Project objective: make manual compact preserve context instead of truncating history.") {
 		t.Fatalf("prompt events still replay raw pre-compact history: %+v", promptEvents)
+	}
+	for _, needle := range []string{
+		"## Current Objective",
+		"## Key Files And Facts",
+		"license.go:30-100",
+	} {
+		if !strings.Contains(promptText, needle) {
+			t.Fatalf("prompt events missing raw markdown checkpoint detail %q: %q", needle, promptText)
+		}
+	}
+	if strings.Contains(promptText, "Objective: make manual compact preserve context instead of truncating history") {
+		t.Fatalf("prompt events reconstructed labeled checkpoint fields instead of preserving markdown: %q", promptText)
+	}
+}
+
+func TestRuntimeManualCompactIncludesConfirmedUserMessage(t *testing.T) {
+	t.Parallel()
+
+	sessions, session := newTestSessionService(t, "sess-compact-user-confirm")
+	oldCompact := buildCompactEvent(session, `CONTEXT CHECKPOINT
+
+## Current Objective
+- Remove gm_license legacy behavior
+
+## Next Actions
+1. wait for explicit implementation approval`, sdkcompact.CompactEventData{
+		ContractVersion: sdkcompact.CompactContractVersion,
+		Generator:       "model_markdown",
+		Trigger:         "manual",
+	})
+	appendTestEvent(t, sessions, session.SessionRef, oldCompact)
+	appendTestEvent(t, sessions, session.SessionRef, assistantEvent("Plan prepared. Next action: wait for user confirmation before writing code."))
+	appendTestEvent(t, sessions, session.SessionRef, userTextEvent("开始实现"))
+
+	model := &contextProbeModel{
+		t: t,
+		wantCompactionInputContains: []string{
+			"# Existing Compact Checkpoint (reference only)",
+			"wait for user confirmation before writing code",
+			"开始实现",
+		},
+		compactBody: `CONTEXT CHECKPOINT
+
+## Current Objective
+- Implement the compact optimization now.
+
+## User Constraints And Corrections
+- 用户已经发送“开始实现”，下一步应立即实现，不再等待确认。
+
+## Current Plan And Progress
+- Plan was prepared before compact.
+
+## Next Actions
+1. Start editing sdk/runtime/local/compaction.go.`,
+	}
+	runtime, err := New(Config{
+		Sessions: sessions,
+		AgentFactory: chat.Factory{
+			SystemPrompt: "Be terse.",
+		},
+		Compaction: CompactionConfig{
+			SegmentTokenBudget: 80,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.Compact(context.Background(), CompactRequest{
+		SessionRef: session.SessionRef,
+		Model:      model,
+		Trigger:    "manual",
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if !result.Compacted {
+		t.Fatal("Compact() did not compact")
+	}
+	loaded, err := sessions.LoadSession(context.Background(), sdksession.LoadSessionRequest{
+		SessionRef: session.SessionRef,
+	})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	promptText := strings.Join(eventTextsForTest(sdkcompact.PromptEventsFromLatestCompact(loaded.Events)), "\n")
+	for _, needle := range []string{"开始实现", "下一步应立即实现", "Start editing sdk/runtime/local/compaction.go"} {
+		if !strings.Contains(promptText, needle) {
+			t.Fatalf("prompt after compact missing %q: %q", needle, promptText)
+		}
+	}
+	if strings.Contains(promptText, "Remove gm_license legacy behavior") {
+		t.Fatalf("prompt after compact retained stale old checkpoint objective: %q", promptText)
 	}
 }
 
@@ -1871,7 +1972,6 @@ func TestRuntimeCompactionReplaysFromEventsAfterReload(t *testing.T) {
 			DefaultContextWindowTokens: 64,
 			ReserveOutputTokens:        16,
 			SafetyMarginTokens:         8,
-			RetainedUserTokenLimit:     48,
 			SegmentTokenBudget:         80,
 		},
 	})
@@ -1928,7 +2028,6 @@ Next action: verify reload from file-backed events only
 			DefaultContextWindowTokens: 4096,
 			ReserveOutputTokens:        16,
 			SafetyMarginTokens:         8,
-			RetainedUserTokenLimit:     48,
 			SegmentTokenBudget:         80,
 		},
 	})
@@ -1963,31 +2062,6 @@ Next action: verify reload from file-backed events only
 	finalText := lastAssistantText(events)
 	if finalText != "replay ok" {
 		t.Fatalf("final assistant text = %q, want %q", finalText, "replay ok")
-	}
-}
-
-func TestSelectRetainedUserInputsIncludesNonContiguousRecentUsers(t *testing.T) {
-	t.Parallel()
-
-	keepBlocker := "Keep blocker continuity exact across compact."
-	validateE2E := "Validate real compact e2e output before changing heuristics."
-	events := []*sdksession.Event{
-		{ID: "user-1", Type: sdksession.EventTypeUser, Text: "Very old objective turn that should not be retained."},
-		{ID: "assistant-1", Type: sdksession.EventTypeAssistant, Text: "ack"},
-		{ID: "user-2", Type: sdksession.EventTypeUser, Text: keepBlocker},
-		{ID: "assistant-2", Type: sdksession.EventTypeAssistant, Text: "ack"},
-		{ID: "user-3", Type: sdksession.EventTypeUser, Text: validateE2E},
-	}
-
-	got, selected := selectRetainedUserInputs(events, estimateTextTokens(keepBlocker)+estimateTextTokens(validateE2E)+4)
-	if len(got) < 2 {
-		t.Fatalf("retained users = %v, want at least the two most recent user turns", got)
-	}
-	if !reflect.DeepEqual(got[len(got)-2:], []string{keepBlocker, validateE2E}) {
-		t.Fatalf("retained users tail = %v, want %v", got[len(got)-2:], []string{keepBlocker, validateE2E})
-	}
-	if len(selected) < 2 {
-		t.Fatalf("selected retained indexes = %v, want at least 2", selected)
 	}
 }
 
@@ -2096,7 +2170,6 @@ func TestPrepareCompactionFitsPendingInputWithinBudget(t *testing.T) {
 		DefaultContextWindowTokens: 192,
 		ReserveOutputTokens:        32,
 		SafetyMarginTokens:         16,
-		RetainedUserTokenLimit:     96,
 		SegmentTokenBudget:         80,
 	})}
 	events := []*sdksession.Event{
@@ -2134,8 +2207,8 @@ Next action: fit the pending user turn inside the compacted prompt
 	if !ok {
 		t.Fatal("expected compact event data")
 	}
-	if len(data.ReplacementHistory) == 0 {
-		t.Fatal("expected replacement history after compaction")
+	if data.SourceEventCount == 0 {
+		t.Fatalf("source event count = %d, want > 0", data.SourceEventCount)
 	}
 }
 
@@ -2192,7 +2265,6 @@ func TestRuntimeCompactionIgnoresStateOnlyPlanSnapshot(t *testing.T) {
 			DefaultContextWindowTokens: 64,
 			ReserveOutputTokens:        16,
 			SafetyMarginTokens:         8,
-			RetainedUserTokenLimit:     24,
 			SegmentTokenBudget:         80,
 		},
 	})
@@ -2232,6 +2304,10 @@ func TestRenderCompactionEventIncludesPlanEntries(t *testing.T) {
 				Entries: []sdksession.ProtocolPlanEntry{
 					{Content: "run provider compact e2e", Status: "in_progress"},
 					{Content: "verify append-only replay", Status: "pending"},
+					{Content: "preserve plan item three", Status: "pending"},
+					{Content: "preserve plan item four", Status: "pending"},
+					{Content: "preserve plan item five", Status: "pending"},
+					{Content: "preserve plan item six", Status: "pending"},
 				},
 			},
 		},
@@ -2239,46 +2315,15 @@ func TestRenderCompactionEventIncludesPlanEntries(t *testing.T) {
 
 	got := renderCompactionEvent(event)
 	for _, needle := range []string{
-		"PLAN:",
+		"## Plan Update",
 		"execution plan refreshed",
-		"run provider compact e2e [in_progress]",
-		"verify append-only replay [pending]",
+		"- [in_progress] run provider compact e2e",
+		"- [pending] verify append-only replay",
+		"- [pending] preserve plan item six",
 	} {
 		if !strings.Contains(got, needle) {
 			t.Fatalf("renderCompactionEvent() = %q, want substring %q", got, needle)
 		}
-	}
-}
-
-func TestPreferredCompactionAnchorsUseLatestExplicitHistory(t *testing.T) {
-	t.Parallel()
-
-	baseText := `CONTEXT CHECKPOINT
-
-Objective: stale compact objective
-Blocker: stale compact blocker
-Next action: stale compact next action
-
-- old noisy detail`
-	events := []*sdksession.Event{
-		userTextEvent("Objective: even older transcript objective"),
-		userTextEvent(`CONTEXT CHECKPOINT
-
-Objective: synthetic summary objective
-Blocker: synthetic summary blocker
-Next action: synthetic summary next action`),
-		userTextEvent("Objective: fresh runtime objective\nBlocker: waiting for e2e confirmation\nNext action: run the provider continuity test"),
-	}
-
-	anchors := preferredCompactionAnchors(baseText, events)
-	if anchors.Objective != "fresh runtime objective" {
-		t.Fatalf("anchors.Objective = %q, want %q", anchors.Objective, "fresh runtime objective")
-	}
-	if anchors.Blocker != "waiting for e2e confirmation" {
-		t.Fatalf("anchors.Blocker = %q, want %q", anchors.Blocker, "waiting for e2e confirmation")
-	}
-	if anchors.NextAction != "run the provider continuity test" {
-		t.Fatalf("anchors.NextAction = %q, want %q", anchors.NextAction, "run the provider continuity test")
 	}
 }
 
@@ -2323,32 +2368,6 @@ func TestRenderCompactionEventFallsBackToMessageText(t *testing.T) {
 	}
 }
 
-func TestSelectRetainedUserInputsTruncatesLongRecentUser(t *testing.T) {
-	t.Parallel()
-
-	longUser := strings.Repeat("latest user continuity detail ", 24)
-	events := []*sdksession.Event{
-		{ID: "user-long", Type: sdksession.EventTypeUser, Text: longUser},
-	}
-
-	got, selected := selectRetainedUserInputs(events, max(estimateTextTokens(longUser)/4, 8))
-	if len(got) != 1 {
-		t.Fatalf("retained user count = %d, want 1 (%v)", len(got), got)
-	}
-	if got[0] == longUser {
-		t.Fatalf("retained user text was not truncated: %q", got[0])
-	}
-	if !strings.Contains(got[0], "...") {
-		t.Fatalf("retained user text = %q, want ellipsis truncation", got[0])
-	}
-	if len(selected) != 1 {
-		t.Fatalf("selected retained indexes = %v, want 1", selected)
-	}
-	if estimateTextTokens(got[0]) > max(estimateTextTokens(longUser)/4, 8)+2 {
-		t.Fatalf("truncated retained text still exceeds budget: %q", got[0])
-	}
-}
-
 func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	t.Parallel()
 
@@ -2383,7 +2402,6 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 			DefaultContextWindowTokens: 128,
 			ReserveOutputTokens:        16,
 			SafetyMarginTokens:         8,
-			RetainedUserTokenLimit:     32,
 			SegmentTokenBudget:         80,
 		},
 	})
@@ -2433,7 +2451,7 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 	for _, event := range loaded.Events {
 		if event != nil && event.Type == sdksession.EventTypeCompact {
 			sawCompact = true
-			if !strings.Contains(strings.ToLower(sdksession.EventText(event)), "pong") {
+			if !strings.Contains(strings.ToLower(sdksession.EventText(event)), "auto-review policy") {
 				t.Fatalf("compact event text = %q, want retained tool result summary", sdksession.EventText(event))
 			}
 		}
@@ -2446,18 +2464,15 @@ func TestRuntimeRecoversFromContextOverflowByCompactingMidTurn(t *testing.T) {
 		t.Fatal("expected latest compact event")
 	}
 	data, ok := sdkcompact.CompactEventDataFromEvent(compactEvent)
-	if !ok || len(data.ReplacementHistory) == 0 {
-		t.Fatalf("compact metadata missing replacement history: %+v", compactEvent.Meta)
+	if !ok {
+		t.Fatalf("compact metadata missing compact payload: %+v", compactEvent.Meta)
 	}
-	foundPong := false
-	for _, event := range data.ReplacementHistory {
-		if event != nil && strings.Contains(strings.ToLower(sdksession.EventText(event)), "pong") {
-			foundPong = true
-			break
-		}
+	if data.SourceEventCount == 0 {
+		t.Fatalf("compact source event count = %d, want > 0", data.SourceEventCount)
 	}
-	if !foundPong {
-		t.Fatalf("replacement history = %+v, want tool result continuity", data.ReplacementHistory)
+	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || !strings.Contains(strings.ToLower(sdksession.EventText(promptEvents[0])), "auto-review policy") {
+		t.Fatalf("prompt events after compact = %+v, want tool result continuity in checkpoint overlay", promptEvents)
 	}
 }
 
@@ -4240,7 +4255,7 @@ func (m *contextProbeModel) Generate(_ context.Context, req *sdkmodel.Request) i
 - do not lose blocker continuity
 
 ## Durable Decisions
-- prefer compact event replacement history
+- prefer compact event checkpoint overlay
 
 ## Verified Facts
 - provider intermittently returns 529 overloaded_error when histories get too large
@@ -4374,7 +4389,7 @@ func (m *modelCheckpointProbe) Generate(_ context.Context, req *sdkmodel.Request
 	m.normalCalls++
 	found := false
 	for _, text := range requestMessageTexts(req) {
-		if strings.Contains(text, "preserve context continuity during very long coding sessions") {
+		if strings.Contains(text, "model checkpoint objective") {
 			found = true
 			break
 		}
@@ -4410,17 +4425,19 @@ func (m *overflowRecoveryModel) Generate(_ context.Context, req *sdkmodel.Reques
 	if strings.Contains(instructions, "CONTEXT CHECKPOINT COMPACTION") {
 		m.compactionCalls++
 		compactionInput := strings.Join(requestMessageTexts(req), "\n")
-		if !strings.Contains(compactionInput, "TOOL_RESULT ECHO") || !strings.Contains(compactionInput, "pong") {
+		if !strings.Contains(compactionInput, "## Tool Result") ||
+			!strings.Contains(compactionInput, "tool: ECHO") ||
+			!strings.Contains(compactionInput, "policy_action: deny") {
 			m.t.Fatalf("compaction input missing tool result continuity: %q", compactionInput)
 		}
 		body := `CONTEXT CHECKPOINT
 
 Objective: finish the tool-assisted turn after overflow
-Blocker: normal prompt overflowed after the tool result
+Blocker: normal prompt overflowed after the tool denial result
 Next action: resume from the compact checkpoint and return the final answer
 
 ## Current Progress
-- the ECHO tool already returned pong
+- the ECHO tool result was denied by auto-review policy
 
 ## Next Actions
 1. resume from the compact checkpoint and return the final answer`
@@ -4442,7 +4459,7 @@ Next action: resume from the compact checkpoint and return the final answer
 		}
 	}
 	for _, text := range requestMessageTexts(req) {
-		if strings.Contains(text, "CONTEXT CHECKPOINT") && strings.Contains(strings.ToLower(text), "pong") {
+		if strings.Contains(text, "CONTEXT CHECKPOINT") && strings.Contains(strings.ToLower(text), "auto-review policy") {
 			m.sawCheckpointOnRetry = true
 			return func(yield func(*sdkmodel.StreamEvent, error) bool) {
 				yield(&sdkmodel.StreamEvent{

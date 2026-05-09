@@ -77,11 +77,14 @@ func (s *Stack) rebuildGateway() error {
 		_ = sandboxRuntime.Close()
 		return err
 	}
+	estimatedPrefixTokens := estimateModelPromptPrefixTokens(runtimeCfg.BaseMetadata, tools)
+	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
+	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	rt, err := localruntime.New(localruntime.Config{
 		Sessions:          s.Sessions,
 		AgentFactory:      chat.Factory{},
 		DefaultPolicyMode: policyMode(runtimeCfg.PermissionMode),
-		Compaction:        defaultCompactionConfig(runtimeCfg.ContextWindow),
+		Compaction:        compactionCfg,
 		Assembly:          runtimeCfg.Assembly,
 		TaskStore:         s.taskStore,
 	})
@@ -143,6 +146,9 @@ func (s *Stack) rebuildGateway() error {
 	}
 	s.mu.Lock()
 	oldExec := s.exec
+	currentRuntime := s.runtime
+	currentRuntime.EstimatedPromptPrefixTokens = estimatedPrefixTokens
+	s.runtime = currentRuntime
 	s.Gateway = gw
 	s.exec = sandboxRuntime
 	s.engine = rt

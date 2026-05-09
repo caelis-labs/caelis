@@ -586,8 +586,54 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 		t.Fatal("missing compact event after auto compact")
 	}
 	data, ok := sdkcompact.CompactEventDataFromEvent(compactEvent)
-	if !ok || len(data.ReplacementHistory) == 0 {
-		t.Fatalf("auto compact event missing replacement history: meta=%+v", compactEvent.Meta)
+	if !ok || data.SourceEventCount == 0 {
+		t.Fatalf("auto compact event missing compact metadata: meta=%+v", compactEvent.Meta)
+	}
+	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || strings.TrimSpace(sdksession.EventText(promptEvents[0])) == "" {
+		t.Fatalf("auto compact prompt overlay missing checkpoint text: %+v", promptEvents)
+	}
+}
+
+func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
+	ctx := context.Background()
+	server := newGatewayAppCompactionOllamaServer(t)
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:        "caelis",
+		UserID:         "auto-compact-prefix-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		ContextWindow:  4096,
+		SystemPrompt:   strings.Repeat("stable prompt prefix token. ", 600),
+		Assembly:       sdkplugin.ResolvedAssembly{},
+		Model: ModelConfig{
+			Provider:   "ollama",
+			API:        sdkproviders.APIOllama,
+			Model:      "compact-test",
+			BaseURL:    server.URL,
+			HTTPClient: server.Client(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	session, err := stack.StartSession(ctx, "auto compact prefix session", "surface-auto-compact-prefix")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Short durable event."))
+
+	if _, err := headlessadapter.RunOnce(ctx, stack.Gateway, appgateway.BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "continue after prefix pressure",
+		Surface:    "headless-auto-compact-prefix-test",
+	}, headlessadapter.Options{}); err != nil {
+		t.Fatalf("RunOnce() error = %v", err)
+	}
+	if got := server.compactionCalls.Load(); got == 0 {
+		t.Fatal("expected prompt-prefix pressure to trigger auto compaction")
 	}
 }
 
@@ -618,7 +664,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Project objective: manual compact must preserve context with replacement history."))
+	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Project objective: manual compact must preserve context with checkpoint overlay."))
 	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppAssistantEvent("ack"))
 	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Current blocker: a bare manual compact event truncates all prior prompt-visible history."))
 	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppAssistantEvent("ack"))
@@ -645,8 +691,71 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if data.Trigger != "manual" {
 		t.Fatalf("compact trigger = %q, want manual", data.Trigger)
 	}
-	if len(data.ReplacementHistory) == 0 {
-		t.Fatal("manual compact replacement history is empty")
+	if data.SourceEventCount == 0 {
+		t.Fatalf("manual compact source event count = %d, want > 0", data.SourceEventCount)
+	}
+	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || strings.TrimSpace(sdksession.EventText(promptEvents[0])) == "" {
+		t.Fatalf("manual compact prompt overlay missing checkpoint text: %+v", promptEvents)
+	}
+}
+
+func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:        "caelis",
+		UserID:         "compact-usage-prefix-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		SystemPrompt:   strings.Repeat("count this stable prefix instruction. ", 2000),
+		Model: ModelConfig{
+			Provider:            "ollama",
+			API:                 sdkproviders.APIOllama,
+			Model:               "llama3",
+			ContextWindowTokens: 1000000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	session, err := stack.StartSession(ctx, "compact usage prefix session", "surface-compact-usage-prefix")
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	compactMessage := sdkmodel.NewTextMessage(sdkmodel.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
+	appendGatewayAppEvent(t, stack, session.SessionRef, &sdksession.Event{
+		Type:       sdksession.EventTypeCompact,
+		Visibility: sdksession.VisibilityCanonical,
+		Message:    &compactMessage,
+		Text:       compactMessage.TextContent(),
+		Protocol: &sdksession.EventProtocol{
+			Method: sdksession.ProtocolMethodContextCheckpoint,
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: "compact",
+				Content:       sdksession.ProtocolTextContent(compactMessage.TextContent()),
+			},
+		},
+		Meta: map[string]any{
+			sdkcompact.MetaKeyCompact: sdkcompact.CompactEventDataValue(sdkcompact.CompactEventData{
+				ContractVersion: sdkcompact.CompactContractVersion,
+			}),
+		},
+	})
+
+	usage, err := stack.SessionUsageSnapshot(ctx, session.SessionRef, "ollama/llama3")
+	if err != nil {
+		t.Fatalf("SessionUsageSnapshot() error = %v", err)
+	}
+	if usage.Source != sdkcompact.UsageSourceEstimated {
+		t.Fatalf("usage source = %q, want estimated after compact without provider baseline", usage.Source)
+	}
+	if usage.EstimatedPrefixTokens < 5000 {
+		t.Fatalf("estimated prefix tokens = %d, want stable prompt prefix included", usage.EstimatedPrefixTokens)
+	}
+	if usage.TotalTokens <= usage.EstimatedPrefixTokens {
+		t.Fatalf("total tokens = %d, want compact history plus prefix %d", usage.TotalTokens, usage.EstimatedPrefixTokens)
 	}
 }
 
@@ -744,7 +853,7 @@ func newGatewayAppCompactionOllamaServer(t *testing.T) *gatewayAppCompactionOlla
 		w.Header().Set("Content-Type", "application/json")
 		if strings.Contains(joined, "CONTEXT CHECKPOINT COMPACTION") {
 			out.compactionCalls.Add(1)
-			fmt.Fprint(w, `{"model":"compact-test","message":{"role":"assistant","content":"CONTEXT CHECKPOINT\nObjective: app compact preserves context\nBlocker: bare compact events truncate prompt-visible history\nNext action: continue from structured replacement history\n\n## Current Progress\n- app runtime used model-backed compaction"},"done":true,"prompt_eval_count":64,"eval_count":12}`)
+			fmt.Fprint(w, `{"model":"compact-test","message":{"role":"assistant","content":"CONTEXT CHECKPOINT\nObjective: app compact preserves context\nBlocker: bare compact events truncate prompt-visible history\nNext action: continue from structured checkpoint overlay\n\n## Current Progress\n- app runtime used model-backed compaction"},"done":true,"prompt_eval_count":64,"eval_count":12}`)
 			return
 		}
 		out.normalCalls.Add(1)

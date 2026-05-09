@@ -23,12 +23,13 @@ const (
 
 // UsageSnapshot captures the best-known prompt-budget view before one turn.
 type UsageSnapshot struct {
-	TotalTokens          int         `json:"total_tokens,omitempty"`
-	ContextWindowTokens  int         `json:"context_window_tokens,omitempty"`
-	EffectiveInputBudget int         `json:"effective_input_budget,omitempty"`
-	EstimatedDeltaTokens int         `json:"estimated_delta_tokens,omitempty"`
-	Source               UsageSource `json:"source,omitempty"`
-	AsOfEventID          string      `json:"as_of_event_id,omitempty"`
+	TotalTokens           int         `json:"total_tokens,omitempty"`
+	ContextWindowTokens   int         `json:"context_window_tokens,omitempty"`
+	EffectiveInputBudget  int         `json:"effective_input_budget,omitempty"`
+	EstimatedDeltaTokens  int         `json:"estimated_delta_tokens,omitempty"`
+	EstimatedPrefixTokens int         `json:"estimated_prefix_tokens,omitempty"`
+	Source                UsageSource `json:"source,omitempty"`
+	AsOfEventID           string      `json:"as_of_event_id,omitempty"`
 }
 
 type Request struct {
@@ -52,27 +53,6 @@ type TriggerDecision struct {
 	Reason        string
 }
 
-type BudgetProvider interface {
-	Snapshot(context.Context, Request, []*sdksession.Event) (UsageSnapshot, error)
-}
-
-type TriggerPolicy interface {
-	Decide(context.Context, UsageSnapshot, Request) (TriggerDecision, error)
-}
-
-type CheckpointGenerator interface {
-	Generate(context.Context, GenerateRequest) (string, error)
-}
-
-type GenerateRequest struct {
-	BaseCompactText string
-	Events          []*sdksession.Event
-}
-
-type SegmentCompactor interface {
-	CompactSegmented(context.Context, GenerateRequest) (string, error)
-}
-
 type Engine interface {
 	Prepare(context.Context, Request) (Result, error)
 	CompactOnOverflow(context.Context, Request, error) (Result, error)
@@ -83,18 +63,14 @@ type ForceEngine interface {
 }
 
 type CompactEventData struct {
-	Revision                int                 `json:"revision,omitempty"`
-	ContractVersion         int                 `json:"contract_version,omitempty"`
-	SummarizedThroughID     string              `json:"summarized_through_id,omitempty"`
-	Generator               string              `json:"generator,omitempty"`
-	Trigger                 string              `json:"trigger,omitempty"`
-	SourceEventCount        int                 `json:"source_event_count,omitempty"`
-	RetainedUserCount       int                 `json:"retained_user_count,omitempty"`
-	ReplacementHistoryCount int                 `json:"replacement_history_count,omitempty"`
-	RetainedUserInputs      []string            `json:"retained_user_inputs,omitempty"`
-	ReplacementHistory      []*sdksession.Event `json:"replacement_history,omitempty"`
-	TotalTokens             int                 `json:"total_tokens,omitempty"`
-	ContextWindowTokens     int                 `json:"context_window_tokens,omitempty"`
+	Revision            int    `json:"revision,omitempty"`
+	ContractVersion     int    `json:"contract_version,omitempty"`
+	SummarizedThroughID string `json:"summarized_through_id,omitempty"`
+	Generator           string `json:"generator,omitempty"`
+	Trigger             string `json:"trigger,omitempty"`
+	SourceEventCount    int    `json:"source_event_count,omitempty"`
+	TotalTokens         int    `json:"total_tokens,omitempty"`
+	ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
 }
 
 type ContextWindowProvider interface {
@@ -157,33 +133,6 @@ func normalizeCompactEventData(in CompactEventData) CompactEventData {
 	if in.SourceEventCount < 0 {
 		in.SourceEventCount = 0
 	}
-	if in.RetainedUserCount < 0 {
-		in.RetainedUserCount = 0
-	}
-	if in.ReplacementHistoryCount < 0 {
-		in.ReplacementHistoryCount = 0
-	}
-	out := make([]string, 0, len(in.RetainedUserInputs))
-	seen := map[string]struct{}{}
-	for _, item := range in.RetainedUserInputs {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, ok := seen[item]; ok {
-			continue
-		}
-		seen[item] = struct{}{}
-		out = append(out, item)
-	}
-	in.RetainedUserInputs = out
-	in.ReplacementHistory = normalizeReplacementHistory(in.ReplacementHistory)
-	if in.RetainedUserCount == 0 && len(in.RetainedUserInputs) > 0 {
-		in.RetainedUserCount = len(in.RetainedUserInputs)
-	}
-	if in.ReplacementHistoryCount == 0 && len(in.ReplacementHistory) > 0 {
-		in.ReplacementHistoryCount = len(in.ReplacementHistory)
-	}
 	return in
 }
 
@@ -196,35 +145,15 @@ func PromptEventsFromLatestCompact(events []*sdksession.Event) []*sdksession.Eve
 	if index < 0 {
 		return sdksession.CloneEvents(visible)
 	}
-	if data, ok := CompactEventDataFromEvent(visible[index]); ok {
-		if len(data.ReplacementHistory) > 0 {
-			out := normalizeReplacementHistory(data.ReplacementHistory)
-			for _, event := range visible[index+1:] {
-				out = append(out, sdksession.CloneEvent(event))
+	if _, ok := CompactEventDataFromEvent(visible[index]); ok {
+		out := make([]*sdksession.Event, 0, len(visible[index:]))
+		if legacy := legacyPromptEventsFromCompactEvent(visible[index]); len(legacy) > 0 {
+			out = append(out, legacy...)
+		} else {
+			if replacement := replacementTextEvent(sdksession.EventText(visible[index])); replacement != nil {
+				out = append(out, replacement)
 			}
-			return out
 		}
-		out := make([]*sdksession.Event, 0, len(visible[index:])+4)
-		for _, text := range data.RetainedUserInputs {
-			msg := sdkmodel.NewTextMessage(sdkmodel.RoleUser, text)
-			out = append(out, &sdksession.Event{
-				Type:       sdksession.EventTypeUser,
-				Visibility: sdksession.VisibilityOverlay,
-				Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
-				Message:    &msg,
-				Text:       msg.TextContent(),
-				Protocol: &sdksession.EventProtocol{
-					Update: &sdksession.ProtocolUpdate{
-						SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
-						Content:       sdksession.ProtocolTextContent(msg.TextContent()),
-					},
-				},
-				Meta: map[string]any{
-					MetaKeyCompact: map[string]any{"retained": true},
-				},
-			})
-		}
-		out = append(out, sdksession.CloneEvent(visible[index]))
 		for _, event := range visible[index+1:] {
 			out = append(out, sdksession.CloneEvent(event))
 		}
@@ -266,40 +195,115 @@ func lastCompactIndex(events []*sdksession.Event) int {
 	return -1
 }
 
-func normalizeReplacementHistory(events []*sdksession.Event) []*sdksession.Event {
-	if len(events) == 0 {
+func legacyPromptEventsFromCompactEvent(event *sdksession.Event) []*sdksession.Event {
+	if event == nil || event.Meta == nil {
 		return nil
 	}
-	out := make([]*sdksession.Event, 0, len(events))
-	for _, event := range events {
+	raw, ok := event.Meta[MetaKeyCompact]
+	if !ok {
+		return nil
+	}
+	meta := compactMetaMap(raw)
+	if len(meta) == 0 {
+		return nil
+	}
+	if out := legacyReplacementHistoryEvents(meta["replacement_history"]); len(out) > 0 {
+		return out
+	}
+	retained := legacyRetainedUserInputs(meta["retained_user_inputs"])
+	if len(retained) == 0 {
+		return nil
+	}
+	out := make([]*sdksession.Event, 0, len(retained)+1)
+	for _, text := range retained {
+		if replacement := replacementTextEvent(text); replacement != nil {
+			out = append(out, replacement)
+		}
+	}
+	if replacement := replacementTextEvent(sdksession.EventText(event)); replacement != nil {
+		out = append(out, replacement)
+	}
+	return out
+}
+
+func compactMetaMap(raw any) map[string]any {
+	switch typed := raw.(type) {
+	case map[string]any:
+		return typed
+	default:
+		buf, err := json.Marshal(raw)
+		if err != nil {
+			return nil
+		}
+		out := map[string]any{}
+		if err := json.Unmarshal(buf, &out); err != nil {
+			return nil
+		}
+		return out
+	}
+}
+
+func legacyReplacementHistoryEvents(raw any) []*sdksession.Event {
+	if raw == nil {
+		return nil
+	}
+	buf, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var decoded []*sdksession.Event
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return nil
+	}
+	out := make([]*sdksession.Event, 0, len(decoded))
+	for _, event := range decoded {
 		if event == nil || !sdksession.IsInvocationVisibleEvent(event) {
 			continue
 		}
-		clone := sdksession.CloneEvent(event)
-		clone.ID = ""
-		clone.SessionID = ""
-		clone.Scope = nil
-		clone.Meta = nil
-		clone.Notice = nil
-		clone.Lifecycle = nil
-		if clone.Type == "" {
-			clone.Type = sdksession.EventTypeOf(clone)
+		if replacement := replacementTextEvent(sdksession.EventText(event)); replacement != nil {
+			out = append(out, replacement)
 		}
-		if clone.Visibility == "" {
-			clone.Visibility = sdksession.VisibilityOverlay
-		}
-		if clone.Text == "" && clone.Message != nil {
-			clone.Text = clone.Message.TextContent()
-		}
-		if clone.Protocol == nil && clone.Text != "" {
-			clone.Protocol = &sdksession.EventProtocol{
-				Update: &sdksession.ProtocolUpdate{
-					SessionUpdate: string(sdksession.ProtocolUpdateTypeUserMessage),
-					Content:       sdksession.ProtocolTextContent(clone.Text),
-				},
-			}
-		}
-		out = append(out, clone)
 	}
 	return out
+}
+
+func legacyRetainedUserInputs(raw any) []string {
+	if raw == nil {
+		return nil
+	}
+	buf, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var decoded []string
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(decoded))
+	seen := map[string]struct{}{}
+	for _, item := range decoded {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func replacementTextEvent(text string) *sdksession.Event {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	return &sdksession.Event{
+		Type:       sdksession.EventTypeUser,
+		Visibility: sdksession.VisibilityOverlay,
+		Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "user"},
+		Text:       text,
+	}
 }

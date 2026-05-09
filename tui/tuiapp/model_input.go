@@ -900,8 +900,8 @@ func (m *Model) submitLineWithDisplayAndAttachments(execLine string, displayLine
 	layoutMayChange := mode == SubmissionModeOverlay
 	attachments = cloneAttachments(attachments)
 	displayLine = strings.TrimSpace(displayLine)
-	switch {
-	case mode == SubmissionModeOverlay:
+	switch mode {
+	case SubmissionModeOverlay:
 		m.openBTWOverlay(execLine)
 	default:
 		m.commitUserDisplayLine(displayLine)
