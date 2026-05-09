@@ -22,3 +22,22 @@ func TestStatusViewModelDisplaysActiveJobs(t *testing.T) {
 		t.Fatalf("footerContextText() = %q, want active job count", got)
 	}
 }
+
+func TestStatusViewModelFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
+	vm := statusViewModelFromSnapshot(tuidriver.StatusSnapshot{
+		ModeLabel:              "auto-review",
+		SandboxResolvedBackend: "bwrap",
+		Route:                  "sandbox",
+		SecuritySummary:        "bwrap",
+	})
+
+	got := vm.FooterModeText("")
+	if got != "auto-review" {
+		t.Fatalf("FooterModeText() = %q, want mode only", got)
+	}
+	for _, unexpected := range []string{"bwrap", "sandbox"} {
+		if strings.Contains(got, unexpected) {
+			t.Fatalf("FooterModeText() = %q, should omit %q", got, unexpected)
+		}
+	}
+}

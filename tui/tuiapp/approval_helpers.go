@@ -34,9 +34,6 @@ func approvalToPromptRequest(req *appgateway.ApprovalPayload, response chan Prom
 		if value := strings.TrimSpace(req.SandboxPermissions); value != "" {
 			msg.Details = append(msg.Details, PromptDetail{Label: "Sandbox", Value: value})
 		}
-		if len(req.PrefixRule) > 0 {
-			msg.Details = append(msg.Details, PromptDetail{Label: "Prefix rule", Value: strings.Join(req.PrefixRule, " ")})
-		}
 		if value := approvalPermissionsPreview(req.AdditionalPermissions); value != "" {
 			msg.Details = append(msg.Details, PromptDetail{Label: "Permissions", Value: value})
 		}

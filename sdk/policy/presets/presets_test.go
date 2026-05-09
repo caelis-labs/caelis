@@ -171,7 +171,6 @@ func TestDefaultModeEscalationApprovalCarriesPromptMetadata(t *testing.T) {
 		"command":             "go test ./...",
 		"sandbox_permissions": "require_escalated",
 		"justification":       "Do you want to run tests outside the sandbox?",
-		"prefix_rule":         []string{"go", "test"},
 	}))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
@@ -187,10 +186,6 @@ func TestDefaultModeEscalationApprovalCarriesPromptMetadata(t *testing.T) {
 	}
 	if got := decision.Metadata["sandbox_permissions"]; got != "require_escalated" {
 		t.Fatalf("Metadata[sandbox_permissions] = %#v", got)
-	}
-	prefix, ok := decision.Metadata["prefix_rule"].([]string)
-	if !ok || len(prefix) != 2 || prefix[0] != "go" || prefix[1] != "test" {
-		t.Fatalf("Metadata[prefix_rule] = %#v, want [go test]", decision.Metadata["prefix_rule"])
 	}
 }
 
@@ -266,14 +261,12 @@ func TestDefaultModeRejectsMisScopedSandboxPermissionFields(t *testing.T) {
 			want: "additional_permissions requires",
 		},
 		{
-			name: "broad prefix",
+			name: "additional mode without grant",
 			args: map[string]any{
-				"command":             "python3 script.py",
-				"sandbox_permissions": "require_escalated",
-				"justification":       "Do you want to run python outside the sandbox?",
-				"prefix_rule":         []string{"python3"},
+				"command":             "go test ./...",
+				"sandbox_permissions": "with_additional_permissions",
 			},
-			want: "too broad",
+			want: "requires non-empty additional_permissions",
 		},
 	}
 	for _, tt := range tests {
@@ -362,8 +355,13 @@ func writeCtx(path string) sdkpolicy.ToolContext {
 	}
 }
 
-func bashCtx(command string, withEscalation bool) sdkpolicy.ToolContext {
-	return bashCtxWithArgs(map[string]any{"command": command, "with_escalation": withEscalation})
+func bashCtx(command string, requireEscalated bool) sdkpolicy.ToolContext {
+	args := map[string]any{"command": command}
+	if requireEscalated {
+		args["sandbox_permissions"] = "require_escalated"
+		args["justification"] = "Do you want to run this command outside the sandbox?"
+	}
+	return bashCtxWithArgs(args)
 }
 
 func bashCtxWithArgs(args map[string]any) sdkpolicy.ToolContext {

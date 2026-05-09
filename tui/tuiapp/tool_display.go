@@ -351,15 +351,22 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 		if summary := spawnTerminalDisplaySummary(output, isErr, final); summary != "" {
 			return summary
 		}
-		if !final && !isErr {
+		if final {
+			return ""
+		}
+		if !isErr {
 			return ""
 		}
 		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
 			return terminalEmptySummary(name, output, isErr)
 		}
 	case "BASH":
+		final := transcriptToolStatusFinal(status, isErr)
 		if summary := bashDisplaySummary(output, status, isErr); summary != "" {
 			return summary
+		}
+		if final {
+			return ""
 		}
 		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
 			return terminalEmptySummary(name, output, isErr)
@@ -886,38 +893,31 @@ func bashDisplaySummary(output map[string]any, status string, isErr bool) string
 		if text := asString(output["text"]); strings.TrimSpace(text) != "" {
 			return text
 		}
+		return firstTrimmed(asString(output["stdout"]), asString(output["output_preview"]), asString(output["stderr"]))
 	}
-	if isErr {
-		if summary := firstTrimmed(
-			asString(output["stderr"]),
-			asString(output["stdout"]),
-			asString(output["output_preview"]),
-			asString(output["result"]),
-			asString(output["text"]),
-			asString(output["output"]),
-			asString(output["error"]),
-		); summary != "" {
-			return summary
+	_, hasStdout := output["stdout"]
+	_, hasStderr := output["stderr"]
+	if !hasStdout && !hasStderr {
+		if legacy := firstTrimmed(asString(output["result"]), asString(output["text"]), asString(output["error"])); legacy != "" {
+			return legacy
 		}
-		if exitCode := displayInt(output["exit_code"]); exitCode >= 0 {
-			return fmt.Sprintf("exit %d", exitCode)
-		}
-		return ""
 	}
-	if summary := firstTrimmed(
-		asString(output["stdout"]),
-		asString(output["result"]),
-		asString(output["output_preview"]),
-		asString(output["stderr"]),
-		asString(output["text"]),
-		asString(output["output"]),
-	); summary != "" {
-		return summary
+	return combinedTerminalStreams(asString(output["stdout"]), asString(output["stderr"]))
+}
+
+func combinedTerminalStreams(stdout, stderr string) string {
+	stdout = strings.TrimSpace(stdout)
+	stderr = strings.TrimSpace(stderr)
+	switch {
+	case stdout != "" && stderr != "":
+		return stdout + "\nstderr:\n" + stderr
+	case stdout != "":
+		return stdout
+	case stderr != "":
+		return stderr
+	default:
+		return "(no output)"
 	}
-	if final {
-		return "no output"
-	}
-	return ""
 }
 
 func spawnTerminalDisplaySummary(output map[string]any, isErr bool, final bool) string {
@@ -931,14 +931,11 @@ func spawnTerminalDisplaySummary(output map[string]any, isErr bool, final bool) 
 	}
 	if final {
 		return displaypolicy.CleanSubagentFinalOutput(firstTrimmed(
-			spawnDisplayTextCandidate(asString(output["result"])),
 			spawnDisplayTextCandidate(asString(output["final_message"])),
 			spawnDisplayTextCandidate(asString(output["finalMessage"])),
-			spawnDisplayTextCandidate(asString(output["text"])),
+			spawnDisplayTextCandidate(asString(output["result"])),
 			spawnDisplayTextCandidate(asString(output["output"])),
-			spawnDisplayTextCandidate(asString(output["stdout"])),
-			spawnDisplayTextCandidate(asString(output["output_preview"])),
-			spawnDisplayTextCandidate(asString(output["stderr"])),
+			spawnDisplayTextCandidate(asString(output["text"])),
 		))
 	}
 	return firstNonEmpty(

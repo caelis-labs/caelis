@@ -3633,6 +3633,16 @@ func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
 	if got, _ := result.Meta["stdout"].(string); got != "done\n" {
 		t.Fatalf("result.Meta[stdout] = %q, want terminal stdout", got)
 	}
+	var payload map[string]any
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
+	}
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	if got, _ := payload["stdout"].(string); got != "done\n" {
+		t.Fatalf("payload[stdout] = %q, want full terminal stdout", got)
+	}
 	if got := result.Meta["exit_code"]; got != 0 {
 		t.Fatalf("result.Meta[exit_code] = %#v, want 0", got)
 	}
@@ -3763,6 +3773,9 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	}
 	if got := payload["result"]; got != "done" {
 		t.Fatalf("payload[result] = %#v, want done", got)
+	}
+	if got := payload["final_message"]; got != "done" {
+		t.Fatalf("payload[final_message] = %#v, want done", got)
 	}
 	if got := result.Meta["task_id"]; got != "jeff" {
 		t.Fatalf("meta[task_id] = %#v, want handle jeff", got)
@@ -4607,10 +4620,11 @@ func (m *approveEscalatedBashRuntimeModel) Generate(context.Context, *sdkmodel.R
 						ID:   "bash-approve-1",
 						Name: shell.BashToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"command":         m.command,
-							"workdir":         ".",
-							"yield_time_ms":   200,
-							"with_escalation": true,
+							"command":             m.command,
+							"workdir":             ".",
+							"yield_time_ms":       200,
+							"sandbox_permissions": "require_escalated",
+							"justification":       "Do you want to run this command outside the sandbox?",
 						})),
 					}}, ""),
 					TurnComplete: true,

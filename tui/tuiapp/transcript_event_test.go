@@ -306,7 +306,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 							CallID:    "call-1",
 							ToolName:  "BASH",
 							RawInput:  map[string]any{"command": `echo "hi"`},
-							RawOutput: map[string]any{"text": "done"},
+							RawOutput: map[string]any{"stdout": "done"},
 							Status:    appgateway.ToolStatusCompleted,
 						},
 					},

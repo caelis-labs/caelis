@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy"
@@ -20,9 +19,7 @@ const (
 type bashSandboxRequest struct {
 	SandboxPermissions         string
 	ExplicitSandboxPermissions bool
-	LegacyEscalation           bool
 	Justification              string
-	PrefixRule                 []string
 	AdditionalPermissions      any
 	AdditionalPathRules        []sdksandbox.PathRule
 	AdditionalNetwork          sdksandbox.Network
@@ -45,34 +42,12 @@ func parseBashSandboxRequest(input sdkpolicy.ToolContext) (bashSandboxRequest, e
 		req.ExplicitSandboxPermissions = true
 	}
 
-	if raw, ok := args["with_escalation"]; ok && raw != nil {
-		value, ok := raw.(bool)
-		if !ok {
-			return req, fmt.Errorf("with_escalation must be a boolean")
-		}
-		req.LegacyEscalation = value
-		if value && !req.ExplicitSandboxPermissions {
-			req.SandboxPermissions = bashSandboxPermissionRequireEscalated
-		}
-	}
-	if req.LegacyEscalation && req.ExplicitSandboxPermissions && req.SandboxPermissions != bashSandboxPermissionRequireEscalated {
-		return req, fmt.Errorf("with_escalation conflicts with sandbox_permissions=%q", req.SandboxPermissions)
-	}
-
 	if raw, ok := args["justification"]; ok && raw != nil {
 		value, ok := raw.(string)
 		if !ok {
 			return req, fmt.Errorf("justification must be a string")
 		}
 		req.Justification = strings.TrimSpace(value)
-	}
-
-	if raw, ok := args["prefix_rule"]; ok && raw != nil {
-		prefix, err := parseBashPrefixRule(raw)
-		if err != nil {
-			return req, err
-		}
-		req.PrefixRule = prefix
 	}
 
 	if raw, ok := args["additional_permissions"]; ok && raw != nil {
@@ -87,9 +62,6 @@ func parseBashSandboxRequest(input sdkpolicy.ToolContext) (bashSandboxRequest, e
 
 	if req.SandboxPermissions != bashSandboxPermissionWithAdditionalPermissions && req.AdditionalPermissions != nil {
 		return req, fmt.Errorf("additional_permissions requires sandbox_permissions=%q", bashSandboxPermissionWithAdditionalPermissions)
-	}
-	if req.SandboxPermissions != bashSandboxPermissionRequireEscalated && len(req.PrefixRule) > 0 {
-		return req, fmt.Errorf("prefix_rule requires sandbox_permissions=%q", bashSandboxPermissionRequireEscalated)
 	}
 	if req.SandboxPermissions == bashSandboxPermissionRequireEscalated && req.ExplicitSandboxPermissions && req.Justification == "" {
 		return req, fmt.Errorf("sandbox_permissions=%q requires a non-empty justification", bashSandboxPermissionRequireEscalated)
@@ -124,9 +96,6 @@ func (r bashSandboxRequest) approvalMetadata(reason string) map[string]any {
 	}
 	if r.Justification != "" {
 		out["justification"] = r.Justification
-	}
-	if len(r.PrefixRule) > 0 {
-		out["prefix_rule"] = append([]string(nil), r.PrefixRule...)
 	}
 	if additional := r.normalizedAdditionalPermissions(); len(additional) > 0 {
 		out["additional_permissions"] = additional
@@ -206,52 +175,6 @@ func mergePathRules(base []sdksandbox.PathRule, extra []sdksandbox.PathRule) []s
 		}
 	}
 	return out
-}
-
-func parseBashPrefixRule(raw any) ([]string, error) {
-	values, err := stringList(raw, "prefix_rule")
-	if err != nil {
-		return nil, err
-	}
-	if len(values) == 0 {
-		return nil, nil
-	}
-	for _, value := range values {
-		if strings.ContainsAny(value, "\x00\r\n") {
-			return nil, fmt.Errorf("prefix_rule entries must be single shell tokens")
-		}
-	}
-	command := strings.ToLower(values[0])
-	if len(values) == 1 && slices.Contains(broadPrefixRuleCommands(), command) {
-		return nil, fmt.Errorf("prefix_rule %q is too broad", values[0])
-	}
-	return values, nil
-}
-
-func broadPrefixRuleCommands() []string {
-	return []string{
-		"bash",
-		"chmod",
-		"chown",
-		"cp",
-		"curl",
-		"dd",
-		"find",
-		"git",
-		"mv",
-		"node",
-		"npm",
-		"perl",
-		"python",
-		"python3",
-		"rm",
-		"ruby",
-		"sh",
-		"sudo",
-		"wget",
-		"xargs",
-		"zsh",
-	}
 }
 
 type parsedBashAdditionalPermissions struct {

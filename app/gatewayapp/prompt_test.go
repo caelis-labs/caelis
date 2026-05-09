@@ -43,7 +43,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"## Core Stable Rules",
 		"## BASH Permissions",
 		"sandbox_permissions",
-		"Use default BASH permissions first",
+		"Start each command with default sandbox permissions",
 		"<user_custom_instructions>",
 		"Workspace rule.",
 		"Global rule.",
@@ -70,9 +70,11 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
 	for _, required := range []string{
-		"Use default BASH permissions first for read-only commands and workspace-local builds or tests.",
-		"set `sandbox_permissions` to `with_additional_permissions`",
-		"set `sandbox_permissions` to `require_escalated` with a short `justification`",
+		"Use BASH for shell work that advances the current task.",
+		"Default BASH runs in the sandbox",
+		"workspace and temp directory are writable",
+		"Use `sandbox_permissions=with_additional_permissions` only",
+		"Use `sandbox_permissions=require_escalated` only when this command must run outside the sandbox",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)

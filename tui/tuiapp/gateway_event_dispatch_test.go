@@ -947,11 +947,12 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"state":            "completed",
 					"task_id":          "leo",
 					"stdout":           "用例| C输出欢迎 |\n_empty |\n|\n了根据），\n",
-					"result":           "child line 1\nchild line 2\n",
+					"result":           "stale result that is not the final message\n",
+					"final_message":    "child line 1\nchild line 2\n",
 				},
 			},
 			want:        []string{"• Spawned", "  └ child line 1", "    child line 2"},
-			forbidden:   []string{"task / running", "state completed", "spawn-task-1", "self-001", "internal_task_id", "@leo", "用例| C输出欢迎", "_empty", "了根据"},
+			forbidden:   []string{"task / running", "state completed", "spawn-task-1", "self-001", "internal_task_id", "@leo", "用例| C输出欢迎", "_empty", "了根据", "stale result"},
 			expandPanel: true,
 		},
 		{
@@ -1894,10 +1895,11 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 				Scope:    appgateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": prompt},
 				RawOutput: map[string]any{
-					"running": false,
-					"state":   "completed",
-					"task_id": "jack",
-					"result":  finalText,
+					"running":       false,
+					"state":         "completed",
+					"task_id":       "jack",
+					"result":        "dirty result that should not become final",
+					"final_message": finalText,
 				},
 			},
 		}},
@@ -1916,7 +1918,7 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 			t.Fatalf("rendered rows missing %q:\n%s", want, joined)
 		}
 	}
-	for _, forbidden := range []string{"dirty process line", "ls output", "###", "**", "`", "| --- |"} {
+	for _, forbidden := range []string{"dirty process line", "dirty result", "ls output", "###", "**", "`", "| --- |"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("rendered rows should not contain %q:\n%s", forbidden, joined)
 		}
@@ -1987,14 +1989,26 @@ func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) 
 	}
 }
 
-func TestSpawnFinalJSONAnswerRemainsVisible(t *testing.T) {
+func TestSpawnFinalMessageJSONAnswerRemainsVisible(t *testing.T) {
 	t.Parallel()
 
 	for _, answer := range []string{`{"result":"ok"}`, `{"state":"done"}`} {
-		got := toolDisplayOutput("SPAWN", nil, map[string]any{"result": answer}, "", string(appgateway.ToolStatusCompleted), false)
+		got := toolDisplayOutput("SPAWN", nil, map[string]any{"result": "stale", "final_message": answer}, "", string(appgateway.ToolStatusCompleted), false)
 		if got != answer {
 			t.Fatalf("toolDisplayOutput(SPAWN JSON final %q) = %q, want original JSON", answer, got)
 		}
+	}
+}
+
+func TestSpawnFinalLegacyResultFallbackRemainsVisible(t *testing.T) {
+	t.Parallel()
+
+	got := toolDisplayOutput("SPAWN", nil, map[string]any{
+		"result": "### Legacy summary\n- `done`",
+	}, "", string(appgateway.ToolStatusCompleted), false)
+	want := "Legacy summary\ndone"
+	if got != want {
+		t.Fatalf("toolDisplayOutput(SPAWN legacy result) = %q, want %q", got, want)
 	}
 }
 
@@ -2096,7 +2110,8 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 		Running: false,
 		State:   "completed",
 		Result: map[string]any{
-			"result": "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
+			"result":        "dirty result that should not become final",
+			"final_message": "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
 		},
 	}) {
 		updated, _ = model.Update(env)
@@ -2147,10 +2162,10 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				Scope:    appgateway.EventScopeMain,
 				RawInput: map[string]any{"agent": "self", "prompt": "创建文件"},
 				RawOutput: map[string]any{
-					"running": false,
-					"state":   "completed",
-					"task_id": "jack",
-					"result":  "old final answer",
+					"running":       false,
+					"state":         "completed",
+					"task_id":       "jack",
+					"final_message": "old final answer",
 				},
 			},
 		}},
@@ -2242,10 +2257,10 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 			Scope:    appgateway.EventScopeMain,
 			RawInput: map[string]any{"agent": "self", "prompt": "检查刚才创建的文件"},
 			RawOutput: map[string]any{
-				"running": false,
-				"state":   "completed",
-				"task_id": "jack",
-				"result":  "### 检查完成\n- `hello_from_spawn.txt` 内容正确",
+				"running":       false,
+				"state":         "completed",
+				"task_id":       "jack",
+				"final_message": "### 检查完成\n- `hello_from_spawn.txt` 内容正确",
 			},
 		},
 	}})
@@ -2447,7 +2462,7 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 			forbid: []string{"|_", "BASH output", "│", "task / running", "task task-7", "state running", "stdout 进度", "supports_input"},
 		},
 		{
-			name:   "failed stderr",
+			name:   "failed stdout stderr",
 			status: appgateway.ToolStatusFailed,
 			isErr:  true,
 			rawOutput: map[string]any{
@@ -2455,8 +2470,8 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 				"stdout":    "ignored stdout\n",
 				"exit_code": 1,
 			},
-			want:   []string{"  └ permission denied"},
-			forbid: []string{"|_", "BASH output", "│", "stderr permission denied", "ignored stdout", "exit 1"},
+			want:   []string{"  └ ignored stdout", "    stderr:", "    permission denied"},
+			forbid: []string{"|_", "BASH output", "│", "stderr permission denied", "exit 1"},
 		},
 		{
 			name:   "failed stdout diagnostics",
@@ -2472,13 +2487,53 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 			forbid: []string{"exit 1", "exit status 1"},
 		},
 		{
-			name:   "successful no output",
+			name:   "successful empty output",
 			status: appgateway.ToolStatusCompleted,
 			rawOutput: map[string]any{
 				"exit_code": 0,
 			},
-			want:   []string{"  └ no output"},
-			forbid: []string{"exit 0"},
+			want:   []string{"  └ (no output)"},
+			forbid: []string{"exit 0", "completed"},
+		},
+		{
+			name:   "successful stdout stderr",
+			status: appgateway.ToolStatusCompleted,
+			rawOutput: map[string]any{
+				"stdout":    "line one\nline two\n",
+				"stderr":    "warning\n",
+				"result":    "compact stale result",
+				"exit_code": 0,
+			},
+			want:   []string{"  └ line one", "    line two", "    stderr:", "    warning"},
+			forbid: []string{"compact stale result", "exit 0", "no output"},
+		},
+		{
+			name:   "legacy final result fallback",
+			status: appgateway.ToolStatusCompleted,
+			rawOutput: map[string]any{
+				"result": "legacy command output\n",
+			},
+			want:   []string{"  └ legacy command output"},
+			forbid: []string{"no output"},
+		},
+		{
+			name:   "legacy final text fallback",
+			status: appgateway.ToolStatusCompleted,
+			rawOutput: map[string]any{
+				"text": "legacy text output\n",
+			},
+			want:   []string{"  └ legacy text output"},
+			forbid: []string{"no output"},
+		},
+		{
+			name:   "legacy final error fallback",
+			status: appgateway.ToolStatusFailed,
+			isErr:  true,
+			rawOutput: map[string]any{
+				"error": "legacy error output",
+			},
+			want:   []string{"  └ legacy error output"},
+			forbid: []string{"no output"},
 		},
 	}
 	for _, tt := range tests {
@@ -2538,6 +2593,69 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
+	model := newGatewayEventTestModel()
+	callID := "bash-stream-final-empty"
+	for _, env := range []appgateway.EventEnvelope{
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolCall,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolCall: &appgateway.ToolCallPayload{
+				CallID:   callID,
+				ToolName: "BASH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"command": "git log --oneline -6"},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:   callID,
+				ToolName: "BASH",
+				Status:   appgateway.ToolStatusRunning,
+				Scope:    appgateway.EventScopeMain,
+				RawInput: map[string]any{"command": "git log --oneline -6"},
+				RawOutput: map[string]any{
+					"running":        true,
+					"state":          "running",
+					"task_id":        "task-7",
+					"output_preview": "stale streamed preview\n",
+				},
+			},
+		}},
+		{Event: appgateway.Event{
+			Kind:       appgateway.EventKindToolResult,
+			SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+			ToolResult: &appgateway.ToolResultPayload{
+				CallID:    callID,
+				ToolName:  "BASH",
+				Status:    appgateway.ToolStatusCompleted,
+				Scope:     appgateway.EventScopeMain,
+				RawInput:  map[string]any{"command": "git log --oneline -6"},
+				RawOutput: map[string]any{"exit_code": 0},
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	block.setToolPanelExpanded(callID, true)
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "(no output)") {
+		t.Fatalf("rendered rows = %q, want final empty output marker", joined)
+	}
+	if strings.Contains(joined, "stale streamed preview") {
+		t.Fatalf("rendered rows = %q, should replace streamed preview with final output", joined)
 	}
 }
 

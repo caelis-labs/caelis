@@ -638,6 +638,9 @@ func TestSubagentStreamSubscribeClosedFrameCarriesFinalResult(t *testing.T) {
 	if got, _ := closed.Result["result"].(string); got != "### Done\n- `child.txt` written" {
 		t.Fatalf("closed result = %#v, want final subagent result", closed.Result)
 	}
+	if got, _ := closed.Result["final_message"].(string); got != "### Done\n- `child.txt` written" {
+		t.Fatalf("closed final_message = %#v, want final subagent message", closed.Result)
+	}
 }
 
 func TestStartSubagentKeepsEarlyStreamPublishedBeforeTaskRegistration(t *testing.T) {

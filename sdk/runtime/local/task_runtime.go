@@ -1417,6 +1417,12 @@ func taskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 		}
 		return payload
 	}
+	if stdout, _ := snapshot.Result["stdout"].(string); stdout != "" {
+		payload["stdout"] = stdout
+	}
+	if stderr, _ := snapshot.Result["stderr"].(string); stderr != "" {
+		payload["stderr"] = stderr
+	}
 	if output, _ := snapshot.Result["result"].(string); strings.TrimSpace(output) != "" {
 		payload["result"] = strings.TrimSpace(output)
 	} else if output := compactFinalOutput(taskStringValue(snapshot.Result["stdout"]), taskStringValue(snapshot.Result["stderr"])); output != "" {
@@ -1447,10 +1453,12 @@ func subagentTaskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 		}
 		return payload
 	}
-	if output := strings.TrimSpace(taskStringValue(snapshot.Result["result"])); output != "" {
-		payload["result"] = output
-	} else if output := compactFinalOutput(taskStringValue(snapshot.Result["stdout"]), taskStringValue(snapshot.Result["stderr"])); output != "" {
-		payload["result"] = output
+	finalMessage := firstNonEmpty(taskStringValue(snapshot.Result["final_message"]), taskStringValue(snapshot.Result["result"]))
+	if strings.TrimSpace(finalMessage) != "" {
+		payload["final_message"] = strings.TrimSpace(finalMessage)
+	}
+	if result := strings.TrimSpace(taskStringValue(snapshot.Result["result"])); result != "" {
+		payload["result"] = result
 	}
 	if errText := strings.TrimSpace(taskStringValue(snapshot.Result["error"])); errText != "" {
 		payload["error"] = errText
@@ -2093,14 +2101,20 @@ func (t *subagentTask) applyResult(result sdkdelegation.Result) {
 	}
 	if text := strings.TrimSpace(result.Result); text != "" {
 		t.result["result"] = text
+		if !t.running {
+			t.result["final_message"] = text
+		}
 	} else if !t.running {
 		if preview := strings.TrimSpace(result.OutputPreview); preview != "" {
 			t.result["result"] = preview
+			t.result["final_message"] = preview
 		} else {
 			delete(t.result, "result")
+			delete(t.result, "final_message")
 		}
 	} else if t.result != nil {
 		delete(t.result, "result")
+		delete(t.result, "final_message")
 	}
 	t.result["task_id"] = t.handle
 	t.result["handle"] = t.handle

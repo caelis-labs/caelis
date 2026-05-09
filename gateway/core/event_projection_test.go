@@ -94,7 +94,6 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 					"approval_reason":     "additional sandbox permissions require user approval",
 					"sandbox_permissions": "with_additional_permissions",
 					"justification":       "Do you want to grant a cache path?",
-					"prefix_rule":         []string{"make", "generate"},
 					"additional_permissions": map[string]any{
 						"network": map[string]any{"enabled": true},
 					},
@@ -113,9 +112,6 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				}
 				if payload.SandboxPermissions != "with_additional_permissions" {
 					t.Fatalf("payload.SandboxPermissions = %q", payload.SandboxPermissions)
-				}
-				if len(payload.PrefixRule) != 2 || payload.PrefixRule[0] != "make" || payload.PrefixRule[1] != "generate" {
-					t.Fatalf("payload.PrefixRule = %#v", payload.PrefixRule)
 				}
 				if payload.AdditionalPermissions["network"] == nil {
 					t.Fatalf("payload.AdditionalPermissions = %#v, want network grant", payload.AdditionalPermissions)

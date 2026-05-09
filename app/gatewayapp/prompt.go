@@ -163,9 +163,10 @@ func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
 		"## BASH Permissions",
 		"",
-		"- Use default BASH permissions first for read-only commands and workspace-local builds or tests.",
-		"- For extra sandboxed access, set `sandbox_permissions` to `with_additional_permissions` and include only the needed `additional_permissions.network.enabled`, `additional_permissions.file_system.read`, or `additional_permissions.file_system.write` entries.",
-		"- For host execution, set `sandbox_permissions` to `require_escalated` with a short `justification`; add `prefix_rule` only for a narrow reusable non-destructive command prefix.",
+		"- Use BASH for shell work that advances the current task. Start each command with default sandbox permissions.",
+		"- Default BASH runs in the sandbox: the workspace and temp directory are writable, and workspace-local reads, builds, tests, and inspections should stay default.",
+		"- Use `sandbox_permissions=with_additional_permissions` only for a narrow extra read/write path or network access, with the smallest required `additional_permissions`.",
+		"- Use `sandbox_permissions=require_escalated` only when this command must run outside the sandbox; include a short `justification`.",
 		"- If policy denies a command or file tool, retry with a smaller scope or request the missing permission explicitly with request_permissions.",
 	}, "\n")
 }

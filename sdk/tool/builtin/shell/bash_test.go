@@ -33,7 +33,7 @@ func TestBashDefinitionExposesMinimalArguments(t *testing.T) {
 	if _, ok := properties["yield_time_ms"]; !ok {
 		t.Fatal("yield_time_ms property missing")
 	}
-	for _, key := range []string{"sandbox_permissions", "additional_permissions", "justification", "prefix_rule", "with_escalation"} {
+	for _, key := range []string{"sandbox_permissions", "additional_permissions", "justification"} {
 		if _, ok := properties[key]; !ok {
 			t.Fatalf("%s property missing", key)
 		}

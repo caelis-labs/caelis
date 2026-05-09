@@ -595,7 +595,6 @@ func canonicalApprovalPayload(req *sdkruntime.ApprovalRequest) *ApprovalPayload 
 	payload.Reason = firstNonEmpty(metadataString(req.Metadata, "approval_reason"), approvalRawString(payload.RawInput, "approval_reason"))
 	payload.Justification = firstNonEmpty(metadataString(req.Metadata, "justification"), approvalRawString(payload.RawInput, "justification"))
 	payload.SandboxPermissions = firstNonEmpty(metadataString(req.Metadata, "sandbox_permissions"), approvalRawString(payload.RawInput, "sandbox_permissions"))
-	payload.PrefixRule = firstNonEmptyStringSlice(metadataStringSlice(req.Metadata, "prefix_rule"), approvalRawStringSlice(payload.RawInput, "prefix_rule"))
 	payload.AdditionalPermissions = firstNonEmptyMap(metadataAnyMap(req.Metadata, "additional_permissions"), approvalRawMap(payload.RawInput, "additional_permissions"))
 	if payload.ToolName == "" && len(payload.RawInput) == 0 && len(payload.Options) == 0 && payload.Reason == "" {
 		return nil
@@ -609,7 +608,6 @@ func cloneApprovalPayload(in *ApprovalPayload) *ApprovalPayload {
 	}
 	out := *in
 	out.RawInput = maps.Clone(in.RawInput)
-	out.PrefixRule = append([]string(nil), in.PrefixRule...)
 	out.AdditionalPermissions = maps.Clone(in.AdditionalPermissions)
 	if len(in.Options) > 0 {
 		out.Options = append([]ApprovalOption(nil), in.Options...)
@@ -632,47 +630,6 @@ func approvalRawString(raw map[string]any, key string) string {
 	return strings.TrimSpace(text)
 }
 
-func metadataStringSlice(meta map[string]any, key string) []string {
-	if len(meta) == 0 {
-		return nil
-	}
-	return stringSliceValue(meta[key])
-}
-
-func approvalRawStringSlice(raw map[string]any, key string) []string {
-	if len(raw) == 0 {
-		return nil
-	}
-	return stringSliceValue(raw[key])
-}
-
-func stringSliceValue(value any) []string {
-	switch typed := value.(type) {
-	case []string:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if trimmed := strings.TrimSpace(item); trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	case []any:
-		out := make([]string, 0, len(typed))
-		for _, item := range typed {
-			text, ok := item.(string)
-			if !ok {
-				continue
-			}
-			if trimmed := strings.TrimSpace(text); trimmed != "" {
-				out = append(out, trimmed)
-			}
-		}
-		return out
-	default:
-		return nil
-	}
-}
-
 func metadataAnyMap(meta map[string]any, key string) map[string]any {
 	if len(meta) == 0 {
 		return nil
@@ -690,15 +647,6 @@ func approvalRawMap(raw map[string]any, key string) map[string]any {
 func anyMapValue(value any) map[string]any {
 	if typed, ok := value.(map[string]any); ok {
 		return maps.Clone(typed)
-	}
-	return nil
-}
-
-func firstNonEmptyStringSlice(values ...[]string) []string {
-	for _, value := range values {
-		if len(value) > 0 {
-			return append([]string(nil), value...)
-		}
 	}
 	return nil
 }

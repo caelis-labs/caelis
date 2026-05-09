@@ -86,7 +86,7 @@ func TestACPXApprovalE2E(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "approved.txt")
 	output := runACPXCommand(t, repo, dir,
-		`acpx --agent "$ACP_AGENT_CMD" --cwd "$WORKDIR" --approve-all --timeout 180 exec "Use the BASH tool with with_escalation=true to create `+target+` containing exactly approved by acpx approval e2e, then reply with exactly: acpx approval ok"`)
+		`acpx --agent "$ACP_AGENT_CMD" --cwd "$WORKDIR" --approve-all --timeout 180 exec "Use the BASH tool with sandbox_permissions=require_escalated and a short justification to create `+target+` containing exactly approved by acpx approval e2e, then reply with exactly: acpx approval ok"`)
 	if !strings.Contains(output, "acpx approval ok") {
 		t.Fatalf("acpx output = %q, want assistant reply", output)
 	}

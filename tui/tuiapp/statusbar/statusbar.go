@@ -71,13 +71,7 @@ func (s ViewModel) HeaderModelText(fallback string) string {
 }
 
 func (s ViewModel) FooterModeText(fallback string) string {
-	parts := compactNonEmpty([]string{
-		firstNonEmpty(strings.TrimSpace(s.Mode), strings.TrimSpace(fallback)),
-		strings.TrimSpace(s.Sandbox),
-		strings.TrimSpace(s.Route),
-		strings.TrimSpace(s.Security),
-	})
-	return strings.Join(parts, " · ")
+	return firstNonEmpty(strings.TrimSpace(s.Mode), strings.TrimSpace(fallback))
 }
 
 func (s ViewModel) FooterContextText(fallback string) string {

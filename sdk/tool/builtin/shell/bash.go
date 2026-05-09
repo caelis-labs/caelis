@@ -57,13 +57,9 @@ func (t *BashTool) Definition() sdktool.Definition {
 					"type":        "integer",
 					"description": "Optional wait window before control returns when runtime-backed async execution is available.",
 				},
-				"with_escalation": map[string]any{
-					"type":        "boolean",
-					"description": "Deprecated alias for sandbox_permissions=require_escalated. Request host execution outside the sandbox only when sandboxed execution cannot complete the task.",
-				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Sandbox permissions for this command. Use \"with_additional_permissions\" to request a narrow sandboxed filesystem or network grant, or \"require_escalated\" to request host execution; defaults to \"use_default\".",
+					"description": "Sandbox permissions for this command. Omit for default sandboxed execution. Use \"with_additional_permissions\" for a narrow sandboxed filesystem or network grant, or \"require_escalated\" when this command must run outside the sandbox.",
 					"enum":        []string{"use_default", "with_additional_permissions", "require_escalated"},
 				},
 				"additional_permissions": map[string]any{
@@ -94,11 +90,6 @@ func (t *BashTool) Definition() sdktool.Definition {
 					"type":        "string",
 					"description": "Only set when sandbox_permissions is \"require_escalated\". A short user-facing approval question explaining why host execution is needed.",
 				},
-				"prefix_rule": map[string]any{
-					"type":        "array",
-					"items":       map[string]any{"type": "string"},
-					"description": "Only set when sandbox_permissions is \"require_escalated\". Suggests a narrow reusable command prefix, for example [\"git\", \"pull\"] or [\"go\", \"test\"].",
-				},
 			},
 			"required": []string{"command"},
 		},
@@ -125,9 +116,6 @@ func (t *BashTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result,
 		workingDir, _ = t.runtime.FileSystem().Getwd()
 	}
 	if _, err := argparse.Int(args, "yield_time_ms", 0); err != nil {
-		return sdktool.Result{}, err
-	}
-	if _, err := argparse.Bool(args, "with_escalation", false); err != nil {
 		return sdktool.Result{}, err
 	}
 	if _, err := argparse.String(args, "sandbox_permissions", false); err != nil {

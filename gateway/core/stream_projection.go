@@ -279,16 +279,14 @@ func subagentFinalFrameEvent(req StreamRequest, frame sdkstream.Frame) EventEnve
 			output[key] = value
 		}
 	}
-	if result := CleanSubagentFinalOutput(firstNonEmpty(
-		stringValue(frame.Result["result"]),
+	if finalMessage := CleanSubagentFinalOutput(firstNonEmpty(
 		stringValue(frame.Result["final_message"]),
 		stringValue(frame.Result["finalMessage"]),
-		stringValue(frame.Result["output"]),
-		stringValue(frame.Result["stdout"]),
-		stringValue(frame.Result["output_preview"]),
+		stringValue(frame.Result["result"]),
 		frame.Text,
-	)); result != "" {
-		output["result"] = result
+	)); finalMessage != "" {
+		output["final_message"] = finalMessage
+		output["result"] = finalMessage
 	}
 	if errText := strings.TrimSpace(stringValue(frame.Result["error"])); errText != "" {
 		output["error"] = errText

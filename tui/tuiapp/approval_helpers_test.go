@@ -15,7 +15,6 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 		Reason:             "additional sandbox permissions require user approval",
 		Justification:      "Do you want to grant a cache path?",
 		SandboxPermissions: "with_additional_permissions",
-		PrefixRule:         []string{"make", "generate"},
 		AdditionalPermissions: map[string]any{
 			"network": map[string]any{"enabled": true},
 			"file_system": map[string]any{
@@ -34,7 +33,6 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 		{Label: "Reason", Value: "additional sandbox permissions require user approval"},
 		{Label: "Justification", Value: "Do you want to grant a cache path?"},
 		{Label: "Sandbox", Value: "with_additional_permissions"},
-		{Label: "Prefix rule", Value: "make generate"},
 		{Label: "Permissions", Value: "network: enabled; write: /tmp/cache"},
 		{Label: "Default", Value: "Allow once"},
 	} {
