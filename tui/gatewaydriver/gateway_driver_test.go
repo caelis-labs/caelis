@@ -100,6 +100,9 @@ func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 		WorkspaceKey:   "driver-workspace",
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
+		Sandbox: gatewayapp.SandboxConfig{
+			HelperPath: filepath.Join(t.TempDir(), "missing-landlock-helper"),
+		},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			API:      sdkproviders.APIOllama,
@@ -117,6 +120,8 @@ func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 	if got, err := driver.gateway(); err != nil || got != before {
 		t.Fatalf("driver.gateway() before rebuild = %p, %v; want %p", got, err, before)
 	}
+	// This test only needs to force a gateway rebuild; the missing helper keeps
+	// auto landlock fallback from recursively executing this test binary in CI.
 	if _, err := stack.SetSandboxBackend(ctx, "auto"); err != nil {
 		t.Fatalf("SetSandboxBackend(auto) error = %v", err)
 	}
