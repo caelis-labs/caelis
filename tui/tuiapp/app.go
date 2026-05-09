@@ -128,6 +128,9 @@ func NewModel(cfg Config) *Model {
 		m.statusModel = normalizeStatusModel(modelText)
 		m.statusContext = strings.TrimSpace(contextText)
 	}
+	if cfg.RefreshStatusView != nil {
+		m.statusView = cfg.RefreshStatusView()
+	}
 	m.refreshModeLabelFromConfig()
 	if cfg.RefreshWorkspace != nil {
 		if workspace := strings.TrimSpace(cfg.RefreshWorkspace()); workspace != "" {

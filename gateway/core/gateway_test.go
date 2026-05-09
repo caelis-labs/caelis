@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"iter"
 	"strings"
 	"testing"
@@ -697,6 +698,66 @@ func TestBeginTurnRejectsSecondActiveRunForSameSession(t *testing.T) {
 	}
 }
 
+func TestBeginTurnChecksActiveConflictBeforeResolver(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &blockingRuntime{session: session}
+	resolver := &recordingResolver{resolved: ResolvedTurn{}}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session},
+		Runtime:  rt,
+		Resolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	first, err := gw.BeginTurn(context.Background(), BeginTurnRequest{SessionRef: session.SessionRef, Input: "first"})
+	if err != nil {
+		t.Fatalf("BeginTurn(first) error = %v", err)
+	}
+	defer first.Handle.Close()
+	resolver.calls = 0
+
+	_, err = gw.BeginTurn(context.Background(), BeginTurnRequest{SessionRef: session.SessionRef, Input: "second"})
+	if err == nil {
+		t.Fatal("BeginTurn(second) error = nil, want conflict")
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("resolver calls = %d, want 0 for active conflict", resolver.calls)
+	}
+}
+
+func TestBeginTurnRejectsInvalidSessionBeforeResolver(t *testing.T) {
+	t.Parallel()
+
+	resolver := &recordingResolver{resolved: ResolvedTurn{}}
+	gw, err := New(Config{
+		Sessions: &recordingSessionService{sessionErr: errors.New("missing session")},
+		Runtime:  mockRuntime{},
+		Resolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	_, err = gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: sdksession.SessionRef{SessionID: "missing"},
+		Input:      "hello",
+	})
+	if err == nil {
+		t.Fatal("BeginTurn() error = nil, want session error")
+	}
+	if resolver.calls != 0 {
+		t.Fatalf("resolver calls = %d, want 0 for invalid session", resolver.calls)
+	}
+}
+
 func TestBeginTurnPassesIntentToResolver(t *testing.T) {
 	t.Parallel()
 
@@ -992,6 +1053,51 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	}
 }
 
+func TestBeginTurnApprovalModeSnapshotErrorFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &approvalRuntime{session: session}
+	gw, err := New(Config{
+		Sessions: &recordingSessionService{
+			sessionResult: session,
+			snapshotErr:   errors.New("state unavailable"),
+		},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: sdkruntime.RunRequest{}}},
+		ApprovalReviewer: staticApprovalReviewer{
+			result: ApprovalReviewResult{Approved: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	first := <-result.Handle.Events()
+	if first.Event.Kind != EventKindApprovalRequested {
+		t.Fatalf("first event kind = %q, want manual approval request on state read failure", first.Event.Kind)
+	}
+	if err := result.Handle.Submit(context.Background(), SubmitRequest{
+		Kind:     SubmissionKindApproval,
+		Approval: &ApprovalDecision{Approved: false, Outcome: string(ApprovalStatusRejected)},
+	}); err != nil {
+		t.Fatalf("Submit(approval) error = %v", err)
+	}
+	for range result.Handle.Events() {
+	}
+}
+
 func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	t.Parallel()
 
@@ -1187,6 +1293,119 @@ func TestBeginTurnUpdatesBindingReplayState(t *testing.T) {
 	}
 	if state.LastEventCursor != "e1" || state.LastHandleID == "" || state.LastRunID == "" || state.LastTurnID == "" {
 		t.Fatalf("binding replay state = %+v", state)
+	}
+}
+
+func TestBeginTurnResolveFailurePreservesBindingReplayState(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	runner := &recordingRunner{
+		events: []*sdksession.Event{{ID: "e1", Type: sdksession.EventTypeAssistant}},
+	}
+	resolver := &recordingResolver{resolved: ResolvedTurn{}}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session},
+		Runtime: &recordingRuntime{
+			session: session,
+			result:  sdkruntime.RunResult{Session: session, Handle: runner},
+		},
+		Resolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	if err := gw.BindSession(context.Background(), BindSessionRequest{
+		SessionRef: session.SessionRef,
+		BindingKey: "surface-1",
+		Binding:    BindingDescriptor{Surface: "interactive"},
+	}); err != nil {
+		t.Fatalf("BindSession() error = %v", err)
+	}
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "first",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn(first) error = %v", err)
+	}
+	_ = collectHandleEvents(t, result.Handle)
+	before, err := gw.LookupBinding(BindingStateRequest{BindingKey: "surface-1"})
+	if err != nil {
+		t.Fatalf("LookupBinding(before) error = %v", err)
+	}
+	if before.LastHandleID == "" || before.LastRunID == "" || before.LastTurnID == "" || before.LastEventCursor != "e1" {
+		t.Fatalf("binding before resolver failure = %+v", before)
+	}
+
+	resolver.err = errors.New("resolve failed")
+	_, err = gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: session.SessionRef,
+		Input:      "second",
+	})
+	if err == nil {
+		t.Fatal("BeginTurn(second) error = nil, want resolver failure")
+	}
+	after, err := gw.LookupBinding(BindingStateRequest{BindingKey: "surface-1"})
+	if err != nil {
+		t.Fatalf("LookupBinding(after) error = %v", err)
+	}
+	if after.LastHandleID != before.LastHandleID ||
+		after.LastRunID != before.LastRunID ||
+		after.LastTurnID != before.LastTurnID ||
+		after.LastEventCursor != before.LastEventCursor {
+		t.Fatalf("binding changed after resolver failure: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestPromptParticipantUpdatesBindingReplayState(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	runner := &recordingRunner{
+		events: []*sdksession.Event{{ID: "participant-e1", Type: sdksession.EventTypeParticipant}},
+	}
+	rt := &controlPlaneRuntime{
+		session:    session,
+		attachResp: session,
+		promptResp: sdkruntime.RunResult{Session: session, Handle: runner},
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: session},
+		Runtime:  rt,
+		Resolver: staticResolver{},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := gw.PromptParticipant(context.Background(), PromptParticipantRequest{
+		SessionRef:    session.SessionRef,
+		BindingKey:    "surface-agent",
+		ParticipantID: "side-1",
+		Input:         "hello",
+	})
+	if err != nil {
+		t.Fatalf("PromptParticipant() error = %v", err)
+	}
+	_ = collectHandleEvents(t, result.Handle)
+
+	state, err := gw.LookupBinding(BindingStateRequest{BindingKey: "surface-agent"})
+	if err != nil {
+		t.Fatalf("LookupBinding() error = %v", err)
+	}
+	if state.LastEventCursor != "participant-e1" ||
+		state.LastHandleID == "" ||
+		state.LastRunID == "" ||
+		state.LastTurnID == "" {
+		t.Fatalf("participant binding replay state = %+v", state)
 	}
 }
 
@@ -1588,6 +1807,7 @@ type recordingSessionService struct {
 	listSessionsResult sdksession.SessionList
 	sessionResult      sdksession.Session
 	eventsResult       []*sdksession.Event
+	snapshotErr        error
 	startErr           error
 	loadErr            error
 	listErr            error
@@ -1652,6 +1872,9 @@ func (s *recordingSessionService) RemoveParticipant(context.Context, sdksession.
 }
 
 func (s *recordingSessionService) SnapshotState(context.Context, sdksession.SessionRef) (map[string]any, error) {
+	if s.snapshotErr != nil {
+		return nil, s.snapshotErr
+	}
 	return map[string]any{}, nil
 }
 
@@ -1665,19 +1888,29 @@ func (s *recordingSessionService) UpdateState(context.Context, sdksession.Sessio
 
 type staticResolver struct {
 	resolved ResolvedTurn
+	err      error
 }
 
 func (r staticResolver) ResolveTurn(context.Context, TurnIntent) (ResolvedTurn, error) {
+	if r.err != nil {
+		return ResolvedTurn{}, r.err
+	}
 	return r.resolved, nil
 }
 
 type recordingResolver struct {
 	resolved   ResolvedTurn
 	lastIntent TurnIntent
+	calls      int
+	err        error
 }
 
 func (r *recordingResolver) ResolveTurn(_ context.Context, intent TurnIntent) (ResolvedTurn, error) {
+	r.calls++
 	r.lastIntent = intent
+	if r.err != nil {
+		return ResolvedTurn{}, r.err
+	}
 	return r.resolved, nil
 }
 

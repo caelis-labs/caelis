@@ -126,10 +126,82 @@ func (s *appConfigStore) Save(doc AppConfig) error {
 	if err != nil {
 		return fmt.Errorf("gatewayapp: encode app config: %w", err)
 	}
-	if err := os.WriteFile(s.path, data, 0o600); err != nil {
+	if err := atomicWriteFile(s.path, data, 0o600, atomicWriteOps{}); err != nil {
 		return err
 	}
 	if err := os.Chmod(s.path, 0o600); err != nil {
+		return err
+	}
+	return nil
+}
+
+type atomicWriteOps struct {
+	createTemp func(string, string) (*os.File, error)
+	rename     func(string, string) error
+	chmod      func(string, os.FileMode) error
+	fsyncDir   func(string) error
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode, ops atomicWriteOps) error {
+	if ops.createTemp == nil {
+		ops.createTemp = os.CreateTemp
+	}
+	if ops.rename == nil {
+		ops.rename = os.Rename
+	}
+	if ops.chmod == nil {
+		ops.chmod = os.Chmod
+	}
+	if ops.fsyncDir == nil {
+		ops.fsyncDir = syncDir
+	}
+	dir := filepath.Dir(path)
+	tmp, err := ops.createTemp(dir, "."+filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := ops.chmod(tmpPath, perm); err != nil {
+		return err
+	}
+	if err := ops.rename(tmpPath, path); err != nil {
+		return err
+	}
+	committed = true
+	if err := ops.chmod(path, perm); err != nil {
+		return err
+	}
+	return ops.fsyncDir(dir)
+}
+
+func syncDir(dir string) error {
+	f, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if err := f.Sync(); err != nil {
 		return err
 	}
 	return nil

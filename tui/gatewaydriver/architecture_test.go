@@ -12,7 +12,8 @@ import (
 
 func TestGatewayDriverDoesNotImportTUIApp(t *testing.T) {
 	forbidden := map[string]string{
-		"github.com/OnslaughtSnail/caelis/tui/tuiapp": "Bubble Tea implementation",
+		"github.com/OnslaughtSnail/caelis/app/gatewayapp": "local app composition root",
+		"github.com/OnslaughtSnail/caelis/tui/tuiapp":     "Bubble Tea implementation",
 	}
 	entries, err := os.ReadDir(".")
 	if err != nil {

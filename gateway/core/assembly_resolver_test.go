@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"iter"
+	"sync"
 	"testing"
 
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
@@ -219,6 +220,54 @@ func TestCurrentSessionModeMigratesLegacySandboxState(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAssemblyResolverConcurrentSetModelLookupAndResolveTurn(t *testing.T) {
+	t.Parallel()
+
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions:          snapshotStateFunc(func(context.Context, sdksession.SessionRef) (map[string]any, error) { return map[string]any{}, nil }),
+		DefaultModelAlias: "mini",
+		ContextWindow:     1024,
+		ModelLookup:       namedModelLookup("mini"),
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				resolver.SetModelLookup(namedModelLookup("mini"), "mini")
+			}
+		}()
+	}
+	for i := 0; i < 4; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 200; j++ {
+				if _, err := resolver.ResolveTurn(context.Background(), TurnIntent{SessionRef: sdksession.SessionRef{SessionID: "s1"}}); err != nil {
+					t.Errorf("ResolveTurn() error = %v", err)
+					return
+				}
+				if _, err := resolver.ListModelAliases(context.Background(), sdksession.SessionRef{SessionID: "s1"}); err != nil {
+					t.Errorf("ListModelAliases() error = %v", err)
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func namedModelLookup(name string) ModelLookup {
+	return modelLookupFunc(func(context.Context, string, int) (ModelResolution, error) {
+		return ModelResolution{Model: fakeLLM{name: name}}, nil
+	})
 }
 
 type modelLookupFunc func(context.Context, string, int) (ModelResolution, error)

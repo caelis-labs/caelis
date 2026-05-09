@@ -24,6 +24,7 @@ type SetStatusMsg struct {
 	Model     string
 	Context   string
 	ModeLabel string
+	Status    StatusViewModel
 }
 
 type SetCommandsMsg struct {

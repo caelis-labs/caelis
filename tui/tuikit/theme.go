@@ -94,6 +94,46 @@ type Theme struct {
 	tokens *Tokens
 }
 
+type ThemeIssue struct {
+	Field   string
+	Message string
+}
+
+func ValidateTheme(theme Theme) []ThemeIssue {
+	if theme.NoColor {
+		return nil
+	}
+	bg := validationBackground(theme)
+	checks := []struct {
+		field     string
+		fg        color.Color
+		bg        color.Color
+		threshold float64
+	}{
+		{field: "TextPrimary", fg: theme.TextPrimary, bg: bg, threshold: 4.5},
+		{field: "TextSecondary", fg: firstColor(theme.TextSecondary, theme.SecondaryText), bg: bg, threshold: 3.0},
+		{field: "MutedText", fg: theme.MutedText, bg: bg, threshold: 3.0},
+		{field: "Warning", fg: theme.Warning, bg: bg, threshold: 3.0},
+		{field: "Error", fg: theme.Error, bg: bg, threshold: 3.0},
+		{field: "Success", fg: theme.Success, bg: bg, threshold: 3.0},
+		{field: "DiffAddFg", fg: theme.DiffAddFg, bg: firstColor(theme.DiffAddBg, bg), threshold: 3.0},
+		{field: "DiffRemoveFg", fg: theme.DiffRemoveFg, bg: firstColor(theme.DiffRemoveBg, bg), threshold: 3.0},
+	}
+	var issues []ThemeIssue
+	for _, check := range checks {
+		if check.fg == nil || check.bg == nil {
+			continue
+		}
+		if ratio := contrastRatio(check.fg, check.bg); ratio < check.threshold {
+			issues = append(issues, ThemeIssue{
+				Field:   check.field,
+				Message: "contrast below threshold",
+			})
+		}
+	}
+	return issues
+}
+
 // Tokens returns the resolved semantic design tokens for this theme.
 // The result is cached after the first call.
 func (t *Theme) Tokens() Tokens {
@@ -441,6 +481,50 @@ func rgb8(c color.Color) (uint8, uint8, uint8, bool) {
 	}
 	r, g, b, _ := c.RGBA()
 	return uint8(r >> 8), uint8(g >> 8), uint8(b >> 8), true
+}
+
+func validationBackground(theme Theme) color.Color {
+	if theme.AppBg != nil {
+		return theme.AppBg
+	}
+	if theme.IsDark {
+		return color.RGBA{A: 255}
+	}
+	return color.RGBA{R: 255, G: 255, B: 255, A: 255}
+}
+
+func firstColor(values ...color.Color) color.Color {
+	for _, value := range values {
+		if value != nil {
+			return value
+		}
+	}
+	return nil
+}
+
+func contrastRatio(fg color.Color, bg color.Color) float64 {
+	fgLum := relativeLuminance(fg)
+	bgLum := relativeLuminance(bg)
+	light := math.Max(fgLum, bgLum)
+	dark := math.Min(fgLum, bgLum)
+	return (light + 0.05) / (dark + 0.05)
+}
+
+func relativeLuminance(c color.Color) float64 {
+	r, g, b, ok := rgb8(c)
+	if !ok {
+		return 0
+	}
+	return (0.2126 * linearRGB(float64(r)/255)) +
+		(0.7152 * linearRGB(float64(g)/255)) +
+		(0.0722 * linearRGB(float64(b)/255))
+}
+
+func linearRGB(v float64) float64 {
+	if v <= 0.03928 {
+		return v / 12.92
+	}
+	return math.Pow((v+0.055)/1.055, 2.4)
 }
 
 func colorIsDark(c color.Color) bool {

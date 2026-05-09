@@ -59,6 +59,7 @@ type StatusSnapshot struct {
 	SessionCachedInputTokens int
 	SessionOutputTokens      int
 	SessionTotalTokens       int
+	ActiveJobs               int
 	Running                  bool
 }
 

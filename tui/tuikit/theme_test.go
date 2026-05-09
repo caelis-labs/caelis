@@ -163,6 +163,26 @@ func TestTokensIncludeToolAndMarkdownSemantics(t *testing.T) {
 	}
 }
 
+func TestValidateThemeAcceptsSupportedPalettes(t *testing.T) {
+	for _, name := range []string{"dark", "light", "nord", "solarized", "dracula"} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv("NO_COLOR", "")
+			t.Setenv("CAELIS_THEME", name)
+			theme := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+			if issues := ValidateTheme(theme); len(issues) != 0 {
+				t.Fatalf("ValidateTheme(%s) issues = %#v", name, issues)
+			}
+		})
+	}
+}
+
+func TestValidateThemeSkipsNoColorPalette(t *testing.T) {
+	theme := ResolveThemeFromOptions(true, colorprofile.NoTTY)
+	if issues := ValidateTheme(theme); len(issues) != 0 {
+		t.Fatalf("ValidateTheme(no-color) issues = %#v, want none", issues)
+	}
+}
+
 func TestResolveThemeWithBackgroundColorBlendsAdaptiveSurfaces(t *testing.T) {
 	dark := ResolveThemeWithBackgroundColor(color.RGBA{A: 255}, false, colorprofile.TrueColor)
 	if !dark.IsDark {

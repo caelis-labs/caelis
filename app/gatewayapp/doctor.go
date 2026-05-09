@@ -133,8 +133,8 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 		report.Warnings = append(report.Warnings, "config file permissions are not secure")
 	}
 
-	if s.Gateway != nil {
-		active := s.Gateway.ActiveTurns()
+	if gw := s.CurrentGateway(); gw != nil {
+		active := gw.ActiveTurns()
 		report.ActiveTurnCount = len(active)
 		report.HasActiveTurn = len(active) > 0
 		sessions := make([]string, 0, len(active))
@@ -212,9 +212,11 @@ func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) 
 			WorkspaceKey: s.Workspace.Key,
 		}
 	}
-	if strings.TrimSpace(req.BindingKey) != "" && s.Gateway != nil {
-		if ref, ok := s.Gateway.CurrentSession(req.BindingKey); ok {
-			return ref
+	if strings.TrimSpace(req.BindingKey) != "" {
+		if gw := s.CurrentGateway(); gw != nil {
+			if ref, ok := gw.CurrentSession(req.BindingKey); ok {
+				return ref
+			}
 		}
 	}
 	_ = ctx

@@ -1,14 +1,29 @@
-package gatewaydriver
+package local
 
 import (
 	"context"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	gatewaydriver "github.com/OnslaughtSnail/caelis/tui/gatewaydriver"
 )
 
+type GatewayDriver = gatewaydriver.GatewayDriver
+type DriverStack = gatewaydriver.DriverStack
+type GatewayService = gatewaydriver.GatewayService
+type ModelConfig = gatewaydriver.ModelConfig
+type ModelChoice = gatewaydriver.ModelChoice
+type SessionRuntimeState = gatewaydriver.SessionRuntimeState
+type SandboxStatus = gatewaydriver.SandboxStatus
+type DoctorRequest = gatewaydriver.DoctorRequest
+type DoctorReport = gatewaydriver.DoctorReport
+type RegisterBuiltinACPAgentOptions = gatewaydriver.RegisterBuiltinACPAgentOptions
+type ACPAgentInfo = gatewaydriver.ACPAgentInfo
+type ACPAgentAddOption = gatewaydriver.ACPAgentAddOption
+type CustomAgentConfig = gatewaydriver.CustomAgentConfig
+
 func NewLocalDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
-	return NewGatewayDriver(ctx, driverStack(stack), preferredSessionID, bindingKey, modelText)
+	return gatewaydriver.NewGatewayDriver(ctx, driverStack(stack), preferredSessionID, bindingKey, modelText)
 }
 
 func driverStack(stack *gatewayapp.Stack) *DriverStack {
@@ -19,7 +34,7 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 	agents := stack.Agents()
 	status := stack.Status()
 	return &DriverStack{
-		Gateway:   stack.Gateway,
+		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
 		Sessions:  stack.Sessions,
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,

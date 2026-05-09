@@ -411,6 +411,7 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	}
 	m.statusContext = strings.TrimSpace(msg.Context)
 	m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
+	m.statusView = msg.Status
 	if welcomeMayChange && m.syncWelcomeCardBlock() {
 		m.syncViewportContent()
 	}
@@ -471,6 +472,9 @@ func (m *Model) handleStatusTickMsg() (tea.Model, tea.Cmd) {
 			welcomeMayChange = true
 		}
 		m.statusContext = strings.TrimSpace(contextText)
+	}
+	if m.cfg.RefreshStatusView != nil {
+		m.statusView = m.cfg.RefreshStatusView()
 	}
 	m.refreshModeLabelFromConfig()
 	if welcomeMayChange && m.syncWelcomeCardBlock() {

@@ -44,6 +44,20 @@ func TestResolveTurnInputForceInteractiveDoesNotConsumePipe(t *testing.T) {
 	}
 }
 
+func TestReaderIsTTYUsesInjectedReader(t *testing.T) {
+	if readerIsTTY(strings.NewReader("prompt")) {
+		t.Fatal("readerIsTTY(strings.Reader) = true, want false for injected non-file stdin")
+	}
+	file, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatalf("CreateTemp() error = %v", err)
+	}
+	defer file.Close()
+	if readerIsTTY(file) {
+		t.Fatal("readerIsTTY(temp file) = true, want false for regular file")
+	}
+}
+
 func TestParseOutputFormat(t *testing.T) {
 	if got, err := parseOutputFormat("json"); err != nil || got != outputJSON {
 		t.Fatalf("parseOutputFormat() = %q, %v", got, err)

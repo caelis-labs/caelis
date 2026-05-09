@@ -133,7 +133,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
 	}
 
-	stdinTTY := isTTY(os.Stdin)
+	stdinTTY := readerIsTTY(stdin)
 	input, singleShot, err := resolveTurnInput(*prompt, stdin, stdinTTY, *forceInteractive)
 	if err != nil {
 		return err
@@ -358,6 +358,14 @@ func isTTY(file *os.File) bool {
 		return false
 	}
 	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func readerIsTTY(reader io.Reader) bool {
+	file, ok := reader.(*os.File)
+	if !ok {
+		return false
+	}
+	return isTTY(file)
 }
 
 func envOr(key string, fallback string) string {

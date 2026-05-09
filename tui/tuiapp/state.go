@@ -123,6 +123,7 @@ type Config struct {
 	ModeLabel            func() string
 	RefreshWorkspace     func() string
 	RefreshStatus        func() (string, string)
+	RefreshStatusView    func() StatusViewModel
 	MentionComplete      func(string, int) ([]CompletionCandidate, error)
 	FileComplete         func(string, int) ([]CompletionCandidate, error)
 	SkillComplete        func(string, int) ([]CompletionCandidate, error)
@@ -386,6 +387,7 @@ type Model struct {
 	statusModel        string
 	statusContext      string
 	statusModeLabel    string
+	statusView         StatusViewModel
 	approvalReviewHint string
 	hint               string
 	hintEntries        []hintEntry

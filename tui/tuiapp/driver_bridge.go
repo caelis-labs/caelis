@@ -156,6 +156,7 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 	}
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, driver, base.Commands)
 	var cachedModeLabel string
+	var cachedStatusView StatusViewModel
 
 	if base.ExecuteLine == nil {
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
@@ -168,10 +169,17 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 			status, err := driver.Status(ctx)
 			if err != nil {
 				cachedModeLabel = ""
+				cachedStatusView = StatusViewModel{}
 				return "not configured", ""
 			}
 			cachedModeLabel = strings.TrimSpace(status.ModeLabel)
+			cachedStatusView = statusViewModelFromSnapshot(status)
 			return statusModelDisplay(status.Model), formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens)
+		}
+	}
+	if base.RefreshStatusView == nil {
+		base.RefreshStatusView = func() StatusViewModel {
+			return cachedStatusView
 		}
 	}
 	if base.ModeLabel == nil {
@@ -1446,6 +1454,7 @@ func sendStatusUpdate(send func(tea.Msg), status tuidriver.StatusSnapshot) {
 			Model:     statusModelDisplay(status.Model),
 			Context:   formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens),
 			ModeLabel: strings.TrimSpace(status.ModeLabel),
+			Status:    statusViewModelFromSnapshot(status),
 		})
 	}
 }

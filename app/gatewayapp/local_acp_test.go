@@ -85,6 +85,70 @@ func TestLookupBuiltInACPAgentIncludesClaude(t *testing.T) {
 	}
 }
 
+func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
+	agent := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+		Config: Config{
+			AppName:      "caelis",
+			UserID:       "u",
+			StoreDir:     "/tmp/store",
+			WorkspaceKey: "ws",
+			WorkspaceCWD: "/tmp/ws",
+			Model: ModelConfig{
+				Provider: "deepseek",
+				API:      sdkproviders.APIDeepSeek,
+				Model:    "deepseek-reasoner",
+				Token:    "super-secret-token",
+			},
+		},
+		AppName:      "caelis",
+		UserID:       "u",
+		StoreDir:     "/tmp/store",
+		WorkspaceKey: "ws",
+		WorkspaceCWD: "/tmp/ws",
+	})
+	if strings.Contains(strings.Join(agent.Args, " "), "super-secret-token") {
+		t.Fatalf("self ACP args leaked token: %#v", agent.Args)
+	}
+	if slices.Contains(agent.Args, "-token") {
+		t.Fatalf("self ACP args contain raw -token flag: %#v", agent.Args)
+	}
+	if !slices.Contains(agent.Args, "-token-env") || !slices.Contains(agent.Args, "CAELIS_SELF_MODEL_TOKEN") {
+		t.Fatalf("self ACP args = %#v, want token-env indirection", agent.Args)
+	}
+	if got := agent.Env["CAELIS_SELF_MODEL_TOKEN"]; got != "super-secret-token" {
+		t.Fatalf("self ACP env token = %q, want literal token", got)
+	}
+}
+
+func TestDefaultSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
+	agent := defaultSelfACPAgent(defaultSelfACPAgentConfig{
+		Config: Config{
+			AppName:      "caelis",
+			UserID:       "u",
+			StoreDir:     "/tmp/store",
+			WorkspaceKey: "ws",
+			WorkspaceCWD: "/tmp/ws",
+			Model: ModelConfig{
+				Provider: "deepseek",
+				API:      sdkproviders.APIDeepSeek,
+				Model:    "deepseek-reasoner",
+				TokenEnv: "DEEPSEEK_API_KEY",
+			},
+		},
+		AppName:      "caelis",
+		UserID:       "u",
+		StoreDir:     "/tmp/store",
+		WorkspaceKey: "ws",
+		WorkspaceCWD: "/tmp/ws",
+	})
+	if !slices.Contains(agent.Args, "DEEPSEEK_API_KEY") {
+		t.Fatalf("self ACP args = %#v, want configured token env", agent.Args)
+	}
+	if len(agent.Env) != 0 {
+		t.Fatalf("self ACP env = %#v, want none for configured token env", agent.Env)
+	}
+}
+
 func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) {
 	binDir := t.TempDir()
 	writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")

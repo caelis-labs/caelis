@@ -3,6 +3,8 @@ package gatewayapp
 import (
 	"context"
 	"iter"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -148,6 +150,69 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	close(blocking.release)
 	for range handle.Handle.Events() {
 	}
+}
+
+func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
+	t.Parallel()
+
+	stack, _ := newLocalStateTestStack(t)
+	beforeDefault := stack.DefaultModelID()
+	stack.mu.RLock()
+	beforeRuntime := stack.runtime
+	stack.mu.RUnlock()
+	poisonConfigStorePath(t, stack)
+
+	_, err := stack.Connect(ModelConfig{
+		Provider: "ollama",
+		API:      sdkproviders.APIOllama,
+		Model:    "save-failed-model",
+	})
+	if err == nil {
+		t.Fatal("Connect() error = nil, want config save failure")
+	}
+	if stack.lookup.HasAlias("ollama/save-failed-model") {
+		t.Fatal("Connect() left failed model in lookup")
+	}
+	if got := stack.DefaultModelID(); got != beforeDefault {
+		t.Fatalf("DefaultModelID() = %q, want %q", got, beforeDefault)
+	}
+	stack.mu.RLock()
+	afterRuntime := stack.runtime
+	stack.mu.RUnlock()
+	if afterRuntime.Model.ID != beforeRuntime.Model.ID {
+		t.Fatalf("runtime model = %q, want %q", afterRuntime.Model.ID, beforeRuntime.Model.ID)
+	}
+}
+
+func TestStackSetSandboxBackendRollsBackOnConfigSaveFailure(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	stack, _ := newLocalStateTestStack(t)
+	before := stack.SandboxStatus()
+	beforeGateway := stack.CurrentGateway()
+	poisonConfigStorePath(t, stack)
+
+	_, err := stack.SetSandboxBackend(ctx, "auto")
+	if err == nil {
+		t.Fatal("SetSandboxBackend() error = nil, want config save failure")
+	}
+	after := stack.SandboxStatus()
+	if after.RequestedBackend != before.RequestedBackend || after.ResolvedBackend != before.ResolvedBackend {
+		t.Fatalf("SandboxStatus() = %+v, want rollback to %+v", after, before)
+	}
+	if afterGateway := stack.CurrentGateway(); afterGateway != beforeGateway {
+		t.Fatalf("CurrentGateway() changed on save failure: before=%p after=%p", beforeGateway, afterGateway)
+	}
+}
+
+func poisonConfigStorePath(t *testing.T, stack *Stack) {
+	t.Helper()
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, []byte("block"), 0o600); err != nil {
+		t.Fatalf("WriteFile(blocker) error = %v", err)
+	}
+	stack.store.path = filepath.Join(blocker, "config.json")
 }
 
 type blockingResolver struct{}

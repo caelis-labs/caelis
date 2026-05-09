@@ -3,6 +3,7 @@ package file
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -179,6 +180,65 @@ func TestStoreUpdateStateAndParticipantAnchor(t *testing.T) {
 	text := string(data)
 	if !strings.Contains(text, "\"session_id\": \"child-1\"") {
 		t.Fatal("persisted participant anchor must include child session id")
+	}
+}
+
+func TestServiceLoadSessionReadsOneDocumentSnapshot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	service := NewService(NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		EventIDGenerator:   func() string { return "evt-1" },
+		Clock:              func() time.Time { return at },
+	}))
+	ctx := context.Background()
+
+	session, err := service.StartSession(ctx, sdksession.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	if _, err := service.AppendEvent(ctx, sdksession.AppendEventRequest{
+		SessionRef: session.SessionRef,
+		Event: &sdksession.Event{
+			Message: ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")),
+			Text:    "hello",
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent() error = %v", err)
+	}
+	if err := service.UpdateState(ctx, session.SessionRef, func(state map[string]any) (map[string]any, error) {
+		state["mode"] = "manual"
+		return state, nil
+	}); err != nil {
+		t.Fatalf("UpdateState() error = %v", err)
+	}
+
+	loaded, err := service.LoadSession(ctx, sdksession.LoadSessionRequest{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	if got, want := loaded.Session.SessionID, session.SessionID; got != want {
+		t.Fatalf("loaded session id = %q, want %q", got, want)
+	}
+	if got, want := len(loaded.Events), 1; got != want {
+		t.Fatalf("len(loaded.Events) = %d, want %d", got, want)
+	}
+	if got := loaded.State["mode"]; got != "manual" {
+		t.Fatalf("loaded state mode = %v, want manual", got)
+	}
+	loaded.State["mode"] = "mutated"
+	state, err := service.SnapshotState(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	if got := state["mode"]; got != "manual" {
+		t.Fatalf("stored state mode = %v, want clone to remain manual", got)
 	}
 }
 
@@ -434,6 +494,50 @@ func TestStoreGetLoadsSessionWithoutWorkspaceKey(t *testing.T) {
 	}
 	if loaded.WorkspaceKey != session.WorkspaceKey {
 		t.Fatalf("loaded workspace key = %q, want %q", loaded.WorkspaceKey, session.WorkspaceKey)
+	}
+}
+
+func TestStoreRequiresWorkspaceKeyWhenSessionIDMatchesMultipleWorkspaces(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root})
+	ctx := context.Background()
+	for _, workspaceKey := range []string{"ws-a", "ws-b"} {
+		if _, err := store.GetOrCreate(ctx, sdksession.StartSessionRequest{
+			AppName:            "caelis",
+			UserID:             "user-1",
+			PreferredSessionID: "shared",
+			Workspace: sdksession.WorkspaceRef{
+				Key: workspaceKey,
+				CWD: "/tmp/" + workspaceKey,
+			},
+		}); err != nil {
+			t.Fatalf("GetOrCreate(%s) error = %v", workspaceKey, err)
+		}
+	}
+
+	reloaded := NewService(NewStore(Config{RootDir: root}))
+	_, err := reloaded.Session(ctx, sdksession.SessionRef{
+		AppName:   "caelis",
+		UserID:    "user-1",
+		SessionID: "shared",
+	})
+	if !errors.Is(err, sdksession.ErrAmbiguousSession) {
+		t.Fatalf("Session(without workspace) error = %v, want ErrAmbiguousSession", err)
+	}
+
+	loaded, err := reloaded.Session(ctx, sdksession.SessionRef{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		SessionID:    "shared",
+		WorkspaceKey: "ws-b",
+	})
+	if err != nil {
+		t.Fatalf("Session(ws-b) error = %v", err)
+	}
+	if got := loaded.WorkspaceKey; got != "ws-b" {
+		t.Fatalf("loaded workspace = %q, want ws-b", got)
 	}
 }
 

@@ -158,6 +158,7 @@ func renderToolEventViewModelSegments(vm ToolEventViewModel, width int, theme tu
 }
 
 func styleToolEventLine(theme tuikit.Theme, line string, style tuikit.LineStyle) string {
+	components := theme.ComponentStyles()
 	switch style {
 	case tuikit.LineStyleTool:
 		parts := strings.SplitN(strings.TrimSpace(line), " ", 3)
@@ -177,9 +178,9 @@ func styleToolEventLine(theme tuikit.Theme, line string, style tuikit.LineStyle)
 		}
 		return styled
 	case tuikit.LineStyleError:
-		return theme.ErrorStyle().Render(line)
+		return components.Tool.Error.Render(line)
 	default:
-		return theme.TextStyle().Render(line)
+		return components.Tool.Normal.Render(line)
 	}
 }
 

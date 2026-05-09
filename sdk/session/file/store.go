@@ -394,6 +394,24 @@ func (s *Store) UpdateState(
 	return s.writeDocument(doc)
 }
 
+func (s *Store) LoadDocument(
+	_ context.Context,
+	req sdksession.LoadSessionRequest,
+) (sdksession.LoadedSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	doc, err := s.readDocumentForRef(req.SessionRef)
+	if err != nil {
+		return sdksession.LoadedSession{}, err
+	}
+	return sdksession.LoadedSession{
+		Session: sdksession.CloneSession(doc.Session),
+		Events:  sdksession.FilterEvents(doc.Events, req.Limit, req.IncludeTransient),
+		State:   cloneState(doc.State),
+	}, nil
+}
+
 func (s *Service) StartSession(
 	ctx context.Context,
 	req sdksession.StartSessionRequest,
@@ -405,23 +423,7 @@ func (s *Service) LoadSession(
 	ctx context.Context,
 	req sdksession.LoadSessionRequest,
 ) (sdksession.LoadedSession, error) {
-	session, err := s.store.Get(ctx, req.SessionRef)
-	if err != nil {
-		return sdksession.LoadedSession{}, err
-	}
-	events, err := s.store.Events(ctx, sdksession.EventsRequest(req))
-	if err != nil {
-		return sdksession.LoadedSession{}, err
-	}
-	state, err := s.store.SnapshotState(ctx, req.SessionRef)
-	if err != nil {
-		return sdksession.LoadedSession{}, err
-	}
-	return sdksession.LoadedSession{
-		Session: session,
-		Events:  events,
-		State:   state,
-	}, nil
+	return s.store.LoadDocument(ctx, req)
 }
 
 func (s *Service) Session(
@@ -578,6 +580,10 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
@@ -585,6 +591,9 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 		return err
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	if err := syncDir(dir); err != nil {
 		return err
 	}
 	s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
@@ -606,6 +615,9 @@ func (s *Store) resolveWritePath(session sdksession.Session) (string, error) {
 }
 
 func (s *Store) resolveDocumentPath(sessionID string, workspaceKey string) (string, error) {
+	if strings.TrimSpace(workspaceKey) == "" {
+		return s.findDocumentPath(sessionID, workspaceKey)
+	}
 	key := pathCacheKey(sessionID, workspaceKey)
 	if path, ok := s.pathCache[key]; ok && strings.TrimSpace(path) != "" {
 		return path, nil
@@ -620,10 +632,12 @@ func (s *Store) resolveDocumentPath(sessionID string, workspaceKey string) (stri
 
 func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string, error) {
 	searchRoot := s.rootDir
+	requireUnique := true
 	if key := strings.TrimSpace(workspaceKey); key != "" {
 		searchRoot = filepath.Join(searchRoot, workspaceDirName(key))
+		requireUnique = false
 	}
-	var found string
+	found := make([]string, 0, 1)
 	walkErr := filepath.WalkDir(searchRoot, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
@@ -635,8 +649,10 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), "-"+sanitizeSessionID(sessionID)+".json") {
-			found = path
-			return fs.SkipAll
+			found = append(found, path)
+			if !requireUnique {
+				return fs.SkipAll
+			}
 		}
 		return nil
 	})
@@ -646,10 +662,27 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 		}
 		return "", walkErr
 	}
-	if strings.TrimSpace(found) == "" {
+	switch len(found) {
+	case 0:
 		return "", sdksession.ErrSessionNotFound
+	case 1:
+		return found[0], nil
+	default:
+		return "", fmt.Errorf(
+			"sdk/session/file: session %q matches multiple workspaces; workspace key is required: %w",
+			strings.TrimSpace(sessionID),
+			sdksession.ErrAmbiguousSession,
+		)
 	}
-	return found, nil
+}
+
+func syncDir(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
 }
 
 func (s *Store) listDocumentPaths() ([]string, error) {
@@ -766,10 +799,6 @@ func workspaceDirName(workspaceKey string) string {
 }
 
 func pathCacheKey(sessionID string, workspaceKey string) string {
-	workspaceKey = strings.TrimSpace(workspaceKey)
-	if workspaceKey == "" {
-		return "*:" + sanitizeSessionID(sessionID)
-	}
 	return workspaceDirName(workspaceKey) + ":" + sanitizeSessionID(sessionID)
 }
 

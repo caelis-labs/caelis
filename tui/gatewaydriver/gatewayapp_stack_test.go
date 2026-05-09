@@ -16,7 +16,7 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *DriverStack {
 		return nil
 	}
 	return &DriverStack{
-		Gateway:   stack.Gateway,
+		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
 		Sessions:  stack.Sessions,
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,

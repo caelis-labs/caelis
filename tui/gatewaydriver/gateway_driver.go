@@ -76,8 +76,16 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 	return driver, nil
 }
 
+func (d *GatewayDriver) gateway() (GatewayService, error) {
+	if d == nil || d.stack == nil {
+		return nil, fmt.Errorf("tui/gatewaydriver: stack is required")
+	}
+	return d.stack.gateway()
+}
+
 func (d *GatewayDriver) SubscribeStream(ctx context.Context, env gateway.EventEnvelope) (<-chan gateway.EventEnvelope, bool) {
-	if d == nil || d.stack == nil || d.stack.Gateway == nil {
+	gw, err := d.gateway()
+	if err != nil {
 		return nil, false
 	}
 	req, ok := gateway.StreamRequestFromEvent(env)
@@ -85,7 +93,7 @@ func (d *GatewayDriver) SubscribeStream(ctx context.Context, env gateway.EventEn
 		return nil, false
 	}
 	d.bindTerminalStreamRequest(&req)
-	streams := d.stack.Gateway.Streams()
+	streams := gw.Streams()
 	if streams == nil {
 		return nil, false
 	}
@@ -446,6 +454,11 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			status.Route = "host"
 		}
 	}
+	if gw, err := d.gateway(); err == nil && gw != nil {
+		active := gw.ActiveTurns()
+		status.ActiveJobs = len(active)
+		status.Running = len(active) > 0
+	}
 	return status, nil
 }
 
@@ -504,7 +517,11 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	if err != nil {
 		return nil, err
 	}
-	result, err := d.stack.Gateway.BeginTurn(ctx, gateway.BeginTurnRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	result, err := gw.BeginTurn(ctx, gateway.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      strings.TrimSpace(submission.Text),
 		Surface:    d.bindingKey,
@@ -538,7 +555,11 @@ func (d *GatewayDriver) Interrupt(ctx context.Context) error {
 		}
 		return fmt.Errorf("tui/gatewaydriver: no active session")
 	}
-	if err := d.stack.Gateway.Interrupt(ctx, gateway.InterruptRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return err
+	}
+	if err := gw.Interrupt(ctx, gateway.InterruptRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 		Reason:     "tui interrupt",
@@ -594,7 +615,11 @@ func (d *GatewayDriver) NewSession(ctx context.Context) (sdksession.Session, err
 }
 
 func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (sdksession.Session, error) {
-	result, err := d.stack.Gateway.ResumeSession(ctx, gateway.ResumeSessionRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return sdksession.Session{}, err
+	}
+	result, err := gw.ResumeSession(ctx, gateway.ResumeSessionRequest{
 		AppName:    d.stack.AppName,
 		UserID:     d.stack.UserID,
 		Workspace:  d.stack.Workspace,
@@ -620,7 +645,11 @@ func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCa
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
-	result, err := d.stack.Gateway.ListSessions(ctx, gateway.ListSessionsRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	result, err := gw.ListSessions(ctx, gateway.ListSessionsRequest{
 		AppName:      d.stack.AppName,
 		UserID:       d.stack.UserID,
 		WorkspaceKey: d.stack.Workspace.Key,
@@ -645,7 +674,11 @@ func (d *GatewayDriver) ReplayEvents(ctx context.Context) ([]gateway.EventEnvelo
 	if !ok {
 		return nil, fmt.Errorf("tui/gatewaydriver: no active session")
 	}
-	result, err := d.stack.Gateway.ReplayEvents(ctx, gateway.ReplayEventsRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	result, err := gw.ReplayEvents(ctx, gateway.ReplayEventsRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 	})
@@ -915,7 +948,11 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	if !ok {
 		return status, nil
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return AgentStatusSnapshot{}, err
+	}
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
 		SessionRef: session.SessionRef,
 	})
 	if err != nil {
@@ -1025,7 +1062,11 @@ func (d *GatewayDriver) HandoffAgent(ctx context.Context, target string) (AgentS
 		req.Agent = agent
 		req.Reason = "handoff to agent"
 	}
-	updated, err := d.stack.Gateway.HandoffController(ctx, req)
+	gw, err := d.gateway()
+	if err != nil {
+		return AgentStatusSnapshot{}, err
+	}
+	updated, err := gw.HandoffController(ctx, req)
 	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}
@@ -1047,7 +1088,11 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 		return nil, err
 	}
 	label := d.allocateSideAgentLabel(ctx, session.SessionRef, agent)
-	updated, err := d.stack.Gateway.AttachParticipant(ctx, gateway.AttachParticipantRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	updated, err := gw.AttachParticipant(ctx, gateway.AttachParticipantRequest{
 		SessionRef: session.SessionRef,
 		BindingKey: d.bindingKey,
 		Agent:      agent,
@@ -1069,7 +1114,7 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 		}
 		return nil, err
 	}
-	result, err := d.stack.Gateway.PromptParticipant(ctx, gateway.PromptParticipantRequest{
+	result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    updated.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1090,10 +1135,14 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 
 func (d *GatewayDriver) detachSideAgentAfterPromptFailure(ctx context.Context, ref sdksession.SessionRef, participantID string) error {
 	participantID = strings.TrimSpace(participantID)
-	if participantID == "" || d == nil || d.stack == nil || d.stack.Gateway == nil {
+	if participantID == "" || d == nil || d.stack == nil {
 		return nil
 	}
-	updated, err := d.stack.Gateway.DetachParticipant(context.WithoutCancel(ctx), gateway.DetachParticipantRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil
+	}
+	updated, err := gw.DetachParticipant(context.WithoutCancel(ctx), gateway.DetachParticipantRequest{
 		SessionRef:    ref,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1111,8 +1160,8 @@ func (d *GatewayDriver) detachSideAgentAfterPromptFailure(ctx context.Context, r
 
 func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref sdksession.SessionRef, agent string) string {
 	used := map[string]struct{}{}
-	if d != nil && d.stack != nil && d.stack.Gateway != nil {
-		if state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
+	if gw, err := d.gateway(); err == nil {
+		if state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
 				label := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(participant.Label), "@"))
 				if label != "" {
@@ -1201,7 +1250,11 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 	if err != nil {
 		return nil, err
 	}
-	result, err := d.stack.Gateway.PromptParticipant(ctx, gateway.PromptParticipantRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	result, err := gw.PromptParticipant(ctx, gateway.PromptParticipantRequest{
 		SessionRef:    session.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
@@ -1223,7 +1276,11 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	if !ok {
 		return []CompletionCandidate{}, nil
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: session.SessionRef})
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: session.SessionRef})
 	if err != nil {
 		return nil, err
 	}
@@ -1711,7 +1768,11 @@ func (d *GatewayDriver) completeAgentParticipants(ctx context.Context, query str
 	if !ok {
 		return nil, nil
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
+	gw, err := d.gateway()
+	if err != nil {
+		return nil, err
+	}
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{
 		SessionRef: session.SessionRef,
 	})
 	if err != nil {
@@ -1793,7 +1854,11 @@ func (d *GatewayDriver) resolveHandoffAgentName(ctx context.Context, ref sdksess
 	if err != nil {
 		return "", err
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
+	gw, err := d.gateway()
+	if err != nil {
+		return "", err
+	}
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}
@@ -1844,7 +1909,11 @@ func (d *GatewayDriver) resolveParticipantID(ctx context.Context, ref sdksession
 	if input == "" {
 		return "", fmt.Errorf("tui/gatewaydriver: participant id is required")
 	}
-	state, err := d.stack.Gateway.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
+	gw, err := d.gateway()
+	if err != nil {
+		return "", err
+	}
+	state, err := gw.ControlPlaneState(ctx, gateway.ControlPlaneStateRequest{SessionRef: ref})
 	if err != nil {
 		return "", err
 	}

@@ -91,6 +91,44 @@ func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp
 	return gatewayapp.NewLocalStack(cfg)
 }
 
+func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "driver-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   "driver-workspace",
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      sdkproviders.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "rebuild-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+	}
+	before := stack.CurrentGateway()
+	if got, err := driver.gateway(); err != nil || got != before {
+		t.Fatalf("driver.gateway() before rebuild = %p, %v; want %p", got, err, before)
+	}
+	if _, err := stack.SetSandboxBackend(ctx, "auto"); err != nil {
+		t.Fatalf("SetSandboxBackend(auto) error = %v", err)
+	}
+	after := stack.CurrentGateway()
+	if after == nil || after == before {
+		t.Fatalf("CurrentGateway() after rebuild = %p, before %p; want replacement", after, before)
+	}
+	if got, err := driver.gateway(); err != nil || got != after {
+		t.Fatalf("driver.gateway() after rebuild = %p, %v; want current %p", got, err, after)
+	}
+}
+
 func TestAllocateSideAgentHandleUsesAgentDerivedHandles(t *testing.T) {
 	used := map[string]struct{}{}
 

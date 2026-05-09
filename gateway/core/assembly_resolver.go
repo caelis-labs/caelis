@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
@@ -53,6 +54,8 @@ type AssemblyResolverConfig struct {
 }
 
 type AssemblyResolver struct {
+	mu sync.RWMutex
+
 	sessions interface {
 		SnapshotState(context.Context, sdksession.SessionRef) (map[string]any, error)
 	}
@@ -113,6 +116,8 @@ func (r *AssemblyResolver) SetModelLookup(lookup ModelLookup, defaultAlias strin
 	if r == nil || lookup == nil {
 		return
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.modelLookup = lookup
 	r.defaultModelAlias = strings.TrimSpace(defaultAlias)
 }
@@ -122,18 +127,22 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	alias := r.resolveModelAlias(state, intent.ModelHint)
-	model, err := r.modelLookup.ResolveModel(ctx, alias, r.contextWindow)
+	snap := r.snapshot()
+	if snap.modelLookup == nil {
+		return ResolvedTurn{}, fmt.Errorf("gateway: model lookup is required")
+	}
+	alias := resolveModelAliasWith(snap.modelLookup, snap.defaultModelAlias, state, intent.ModelHint)
+	model, err := snap.modelLookup.ResolveModel(ctx, alias, snap.contextWindow)
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	metadata, err := r.resolveMetadata(intent, state, model)
+	metadata, err := resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, model)
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	tools := append([]sdktool.Tool(nil), r.tools...)
-	if r.toolAugmenter != nil {
-		augmentation, err := r.toolAugmenter(ctx, ToolAugmentContext{
+	tools := append([]sdktool.Tool(nil), snap.tools...)
+	if snap.toolAugmenter != nil {
+		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
 			SessionRef: intent.SessionRef,
 			State:      cloneMap(state),
 		})
@@ -155,7 +164,7 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 			Input:        intent.Input,
 			ContentParts: append([]sdkmodel.ContentPart(nil), intent.ContentParts...),
 			AgentSpec: sdkruntime.AgentSpec{
-				Name:     r.agentName,
+				Name:     snap.agentName,
 				Model:    model.Model,
 				Tools:    tools,
 				Metadata: metadata,
@@ -167,14 +176,18 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 // ResolveApprovalModel resolves the model currently selected for one session so
 // automatic approval review uses the same model surface as the main session.
 func (r *AssemblyResolver) ResolveApprovalModel(ctx context.Context, ref sdksession.SessionRef) (sdkmodel.LLM, error) {
-	if r == nil || r.modelLookup == nil {
+	if r == nil {
 		return nil, fmt.Errorf("gateway: model lookup is required")
 	}
 	state, err := r.snapshotState(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
-	model, err := r.modelLookup.ResolveModel(ctx, r.resolveModelAlias(state, ""), r.contextWindow)
+	snap := r.snapshot()
+	if snap.modelLookup == nil {
+		return nil, fmt.Errorf("gateway: model lookup is required")
+	}
+	model, err := snap.modelLookup.ResolveModel(ctx, resolveModelAliasWith(snap.modelLookup, snap.defaultModelAlias, state, ""), snap.contextWindow)
 	if err != nil {
 		return nil, err
 	}
@@ -182,15 +195,23 @@ func (r *AssemblyResolver) ResolveApprovalModel(ctx context.Context, ref sdksess
 }
 
 func (r *AssemblyResolver) resolveModelAlias(state map[string]any, hint string) string {
+	if r == nil {
+		return strings.TrimSpace(hint)
+	}
+	snap := r.snapshot()
+	return resolveModelAliasWith(snap.modelLookup, snap.defaultModelAlias, state, hint)
+}
+
+func resolveModelAliasWith(lookup ModelLookup, defaultAlias string, state map[string]any, hint string) string {
 	alias := strings.TrimSpace(hint)
 	if alias == "" {
 		alias = CurrentModelAlias(state)
-		if validator, ok := r.modelLookup.(modelAliasValidator); ok && alias != "" && !validator.HasAlias(alias) {
+		if validator, ok := lookup.(modelAliasValidator); ok && alias != "" && !validator.HasAlias(alias) {
 			alias = ""
 		}
 	}
 	if alias == "" {
-		alias = r.defaultModelAlias
+		alias = defaultAlias
 	}
 	return alias
 }
@@ -203,19 +224,49 @@ func (r *AssemblyResolver) ListModelAliases(ctx context.Context, ref sdksession.
 	if err != nil {
 		return nil, err
 	}
+	snap := r.snapshot()
 	aliases := make([]string, 0, 4)
 	if alias := CurrentModelAlias(state); alias != "" {
-		if validator, ok := r.modelLookup.(modelAliasValidator); !ok || validator.HasAlias(alias) {
+		if validator, ok := snap.modelLookup.(modelAliasValidator); !ok || validator.HasAlias(alias) {
 			aliases = append(aliases, alias)
 		}
 	}
-	if lister, ok := r.modelLookup.(modelAliasLister); ok {
+	if lister, ok := snap.modelLookup.(modelAliasLister); ok {
 		aliases = append(aliases, lister.ListModelAliases()...)
 	}
-	if r.defaultModelAlias != "" {
-		aliases = append(aliases, r.defaultModelAlias)
+	if snap.defaultModelAlias != "" {
+		aliases = append(aliases, snap.defaultModelAlias)
 	}
 	return dedupeOrderedStrings(aliases), nil
+}
+
+type assemblyResolverSnapshot struct {
+	assembly          sdkplugin.ResolvedAssembly
+	defaultModelAlias string
+	contextWindow     int
+	modelLookup       ModelLookup
+	tools             []sdktool.Tool
+	agentName         string
+	baseMetadata      map[string]any
+	toolAugmenter     ToolAugmenter
+}
+
+func (r *AssemblyResolver) snapshot() assemblyResolverSnapshot {
+	if r == nil {
+		return assemblyResolverSnapshot{}
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return assemblyResolverSnapshot{
+		assembly:          sdkplugin.CloneResolvedAssembly(r.assembly),
+		defaultModelAlias: r.defaultModelAlias,
+		contextWindow:     r.contextWindow,
+		modelLookup:       r.modelLookup,
+		tools:             append([]sdktool.Tool(nil), r.tools...),
+		agentName:         r.agentName,
+		baseMetadata:      cloneMap(r.baseMetadata),
+		toolAugmenter:     r.toolAugmenter,
+	}
 }
 
 func (r *AssemblyResolver) snapshotState(ctx context.Context, ref sdksession.SessionRef) (map[string]any, error) {
@@ -230,11 +281,16 @@ func (r *AssemblyResolver) snapshotState(ctx context.Context, ref sdksession.Ses
 }
 
 func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]any, model ModelResolution) (map[string]any, error) {
-	metadata := cloneMap(r.baseMetadata)
+	snap := r.snapshot()
+	return resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, model)
+}
+
+func resolveMetadataWith(baseMetadata map[string]any, assembly sdkplugin.ResolvedAssembly, intent TurnIntent, state map[string]any, model ModelResolution) (map[string]any, error) {
+	metadata := cloneMap(baseMetadata)
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	if err := applyAssemblySelections(metadata, r.assembly, strings.TrimSpace(intent.ModeName), state); err != nil {
+	if err := applyAssemblySelections(metadata, assembly, strings.TrimSpace(intent.ModeName), state); err != nil {
 		return nil, err
 	}
 	if sessionMode := CurrentSessionMode(state); sessionMode != "" {

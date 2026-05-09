@@ -507,15 +507,11 @@ func (g *Gateway) LookupBinding(req BindingStateRequest) (BindingState, error) {
 }
 
 func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
-	resolved, err := g.resolver.ResolveTurn(ctx, req)
-	if err != nil {
-		return BeginTurnResult{}, err
-	}
-	resolved.RunRequest.Request = resolved.RunRequest.Request.WithDefaults(g.requestOptions(req))
 	session, err := g.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
 		return BeginTurnResult{}, wrapSessionError(err)
 	}
+	req.SessionRef = session.SessionRef
 	runCtx, cancel := context.WithCancel(ctx)
 	cancelFn := sync.OnceValue(func() bool {
 		cancel()
@@ -542,7 +538,20 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		},
 	})
 	g.active[session.SessionID] = handle
-	g.noteActiveHandleLocked(session.SessionID, handle)
+	g.mu.Unlock()
+
+	resolved, err := g.resolver.ResolveTurn(ctx, req)
+	if err != nil {
+		cancelFn()
+		handle.finish()
+		g.releaseActive(session.SessionID, handle)
+		return BeginTurnResult{}, err
+	}
+	resolved.RunRequest.Request = resolved.RunRequest.Request.WithDefaults(g.requestOptions(req))
+	g.mu.Lock()
+	if g.active[session.SessionID] == handle {
+		g.noteActiveHandleLocked(session.SessionID, handle)
+	}
 	g.mu.Unlock()
 
 	go g.runTurn(runCtx, session, req, resolved, handle)
@@ -906,6 +915,14 @@ func wrapSessionError(err error) error {
 			Message:     "gateway: session not found",
 			Cause:       err,
 		}
+	case errors.Is(err, sdksession.ErrAmbiguousSession):
+		return &Error{
+			Kind:        KindValidation,
+			Code:        CodeInvalidRequest,
+			UserVisible: true,
+			Message:     "gateway: session workspace is ambiguous",
+			Cause:       err,
+		}
 	case errors.Is(err, sdksession.ErrInvalidSession):
 		return &Error{
 			Kind:        KindValidation,
@@ -938,7 +955,10 @@ func (g *Gateway) resolveApprovalRequest(
 	if g == nil || handle == nil || req == nil {
 		return sdkruntime.ApprovalResponse{}, nil
 	}
-	mode := g.currentApprovalMode(turnCtx, req.SessionRef)
+	mode, modeErr := g.currentApprovalMode(turnCtx, req.SessionRef)
+	if modeErr != nil {
+		mode = ApprovalModeManual
+	}
 	if mode == ApprovalModeManual {
 		wait := handle.publishApproval(req)
 		select {
@@ -1086,15 +1106,15 @@ func (g *Gateway) approvalReviewModel(ctx context.Context, ref sdksession.Sessio
 	return resolver.ResolveApprovalModel(ctx, ref)
 }
 
-func (g *Gateway) currentApprovalMode(ctx context.Context, ref sdksession.SessionRef) ApprovalMode {
+func (g *Gateway) currentApprovalMode(ctx context.Context, ref sdksession.SessionRef) (ApprovalMode, error) {
 	if g == nil || g.sessions == nil {
-		return ApprovalModeAutoReview
+		return ApprovalModeManual, fmt.Errorf("gateway: sessions service unavailable")
 	}
 	state, err := g.sessions.SnapshotState(ctx, ref)
 	if err != nil {
-		return ApprovalModeAutoReview
+		return ApprovalModeManual, wrapSessionError(err)
 	}
-	return CurrentApprovalMode(state)
+	return CurrentApprovalMode(state), nil
 }
 
 func (g *Gateway) ActiveCounts() (int, int) {

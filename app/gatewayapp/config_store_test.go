@@ -1,6 +1,7 @@
 package gatewayapp
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -249,6 +250,36 @@ func TestAppConfigStoreLoadsLegacyUppercaseModelConfig(t *testing.T) {
 	cfg := doc.Models.Configs[0]
 	if cfg.Alias != "deepseek/deepseek-v4-flash" || cfg.Token != "legacy-token" || cfg.AuthType != sdkproviders.AuthAPIKey {
 		t.Fatalf("loaded legacy config = %#v", cfg)
+	}
+}
+
+func TestAtomicWriteFileKeepsOriginalOnRenameFailure(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "config.json")
+	original := []byte(`{"models":{"default_model_id":"old"}}`)
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(original) error = %v", err)
+	}
+	renameErr := errors.New("rename failed")
+	err := atomicWriteFile(path, []byte(`{"models":{"default_model_id":"new"}}`), 0o600, atomicWriteOps{
+		rename: func(string, string) error { return renameErr },
+	})
+	if !errors.Is(err, renameErr) {
+		t.Fatalf("atomicWriteFile() error = %v, want rename failure", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(config.json) error = %v", err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("config after failed rename = %s, want original %s", got, original)
+	}
+	matches, err := filepath.Glob(filepath.Join(root, ".config.json.*.tmp"))
+	if err != nil {
+		t.Fatalf("Glob(temp) error = %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("temporary files left after failed write: %#v", matches)
 	}
 }
 

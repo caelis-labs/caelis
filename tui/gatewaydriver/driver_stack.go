@@ -26,6 +26,7 @@ type GatewayService interface {
 	AttachParticipant(context.Context, gateway.AttachParticipantRequest) (sdksession.Session, error)
 	PromptParticipant(context.Context, gateway.PromptParticipantRequest) (gateway.BeginTurnResult, error)
 	DetachParticipant(context.Context, gateway.DetachParticipantRequest) (sdksession.Session, error)
+	ActiveTurns() []gateway.ActiveTurnState
 }
 
 type ModelConfig struct {
@@ -124,7 +125,7 @@ type ACPAgentAddOption struct {
 }
 
 type DriverStack struct {
-	Gateway   GatewayService
+	GatewayFn func() GatewayService
 	Sessions  sdksession.Service
 	AppName   string
 	UserID    string
@@ -156,6 +157,17 @@ type DriverStack struct {
 	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
 	ListACPAgentsFn                      func() []ACPAgentInfo
+}
+
+func (s *DriverStack) gateway() (GatewayService, error) {
+	if s == nil || s.GatewayFn == nil {
+		return nil, fmt.Errorf("tui/gatewaydriver: gateway dependency is unavailable")
+	}
+	gw := s.GatewayFn()
+	if gw == nil {
+		return nil, fmt.Errorf("tui/gatewaydriver: gateway is unavailable")
+	}
+	return gw, nil
 }
 
 func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (sdksession.Session, error) {

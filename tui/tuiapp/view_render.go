@@ -672,27 +672,39 @@ func (m *Model) renderHintRowStyledText() string {
 }
 
 func (m *Model) headerRowText() string {
-	left, right := fitHeaderRowParts(m.fixedRowContentWidth(), m.cfg.Workspace, m.statusModel)
+	left, right := fitHeaderRowParts(m.fixedRowContentWidth(), m.headerWorkspaceText(), m.headerModelText())
 	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
 }
 
 func (m *Model) renderHeaderRowStyledText() string {
 	tok := m.theme.Tokens()
-	leftPlain, rightPlain := fitHeaderRowParts(m.fixedRowContentWidth(), m.cfg.Workspace, m.statusModel)
+	leftPlain, rightPlain := fitHeaderRowParts(m.fixedRowContentWidth(), m.headerWorkspaceText(), m.headerModelText())
 	left := tok.TextPrimary.Render(leftPlain)
 	right := tok.TextPrimary.Render(rightPlain)
 	return composeStyledFooter(m.fixedRowContentWidth(), left, right)
 }
 
+func (m *Model) headerWorkspaceText() string {
+	if workspace := strings.TrimSpace(m.statusView.Workspace); workspace != "" {
+		return workspace
+	}
+	return strings.TrimSpace(m.cfg.Workspace)
+}
+
+func (m *Model) headerModelText() string {
+	return m.statusView.HeaderModelText(m.statusModel)
+}
+
 func (m *Model) renderStatusFooter() string {
-	style := m.theme.StatusStyle().Width(m.fixedRowWidth())
+	components := m.theme.ComponentStyles()
+	style := components.Status.Bar.Width(m.fixedRowWidth())
 	if m.fixedSelectionArea == fixedSelectionFooter {
 		return m.renderFixedRow(fixedSelectionFooter, m.footerRowText(), m.renderFooterRowStyledText(), style)
 	}
 	contentWidth := m.fixedRowContentWidth()
 	leftPlain, rightPlain := fitGenericFooterParts(contentWidth, m.footerLeftText(), m.footerContextText())
 	left := styleFooterLeft(m, leftPlain)
-	right := m.theme.TextStyle().Render(rightPlain)
+	right := components.Status.Text.Render(rightPlain)
 	return style.Render(composeStyledFooter(contentWidth, left, right))
 }
 
@@ -859,7 +871,7 @@ func (m *Model) footerRowText() string {
 }
 
 func (m *Model) footerLeftText() string {
-	mode := strings.TrimSpace(m.modeLabel())
+	mode := strings.TrimSpace(m.statusView.FooterModeText(m.modeLabel()))
 	helpText := m.footerHelpText()
 	switch {
 	case mode == "":
@@ -883,7 +895,7 @@ func (m *Model) footerHelpText() string {
 }
 
 func (m *Model) footerContextText() string {
-	text := formatStatusContextDisplay(strings.TrimSpace(m.statusContext))
+	text := formatStatusContextDisplay(strings.TrimSpace(m.statusView.FooterContextText(m.statusContext)))
 	if text == "0" {
 		return ""
 	}

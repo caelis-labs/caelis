@@ -295,6 +295,73 @@ func TestTurnHandlePublishDoesNotBlockWhenEventChannelIsFull(t *testing.T) {
 	}
 }
 
+func TestTurnHandleDoesNotStartLiveDispatcherWithoutSubscriber(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	for i := 0; i < 96; i++ {
+		handle.publishSessionEvent(&sdksession.Event{ID: fmt.Sprintf("e%d", i), Type: sdksession.EventTypeAssistant})
+	}
+	handle.finish()
+
+	handle.mu.Lock()
+	started := handle.eventsStarted
+	closed := handle.eventsClosed
+	handle.mu.Unlock()
+	if started || closed {
+		t.Fatalf("live dispatcher state = started:%t closed:%t, want unopened lazy stream", started, closed)
+	}
+	replayed, next, err := handle.EventsAfter("")
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(replayed) != 96 || next != "e95" {
+		t.Fatalf("replayed len/next = %d/%q, want 96/e95", len(replayed), next)
+	}
+}
+
+func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	for i := 0; i < 96; i++ {
+		handle.publishSessionEvent(&sdksession.Event{ID: fmt.Sprintf("e%d", i), Type: sdksession.EventTypeAssistant})
+	}
+	handle.publishApproval(&sdkruntime.ApprovalRequest{Tool: sdktool.Definition{Name: "bash"}})
+	handle.finish()
+
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case env, ok := <-handle.Events():
+			if !ok {
+				t.Fatal("live events closed before approval request was delivered")
+			}
+			if env.Event.Kind == EventKindApprovalRequested {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for approval request from slow-consumer live stream")
+		}
+	}
+}
+
 func TestTurnHandleSubmitRejectsUnsupportedWithoutRunner(t *testing.T) {
 	t.Parallel()
 

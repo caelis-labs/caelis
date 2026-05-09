@@ -500,6 +500,9 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.statusModel = normalizeStatusModel(modelText)
 			m.statusContext = strings.TrimSpace(contextText)
 		}
+		if m.cfg.RefreshStatusView != nil {
+			m.statusView = m.cfg.RefreshStatusView()
+		}
 		m.refreshModeLabelFromConfig()
 		return m, m.showHint(hint, hintOptions{
 			priority:       HintPriorityNormal,

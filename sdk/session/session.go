@@ -16,6 +16,10 @@ var (
 	// ErrSessionNotFound reports that one session ref cannot be resolved.
 	ErrSessionNotFound = errors.New("sdk/session: session not found")
 
+	// ErrAmbiguousSession reports that one session ref matches multiple
+	// durable session documents and needs a narrower workspace key.
+	ErrAmbiguousSession = errors.New("sdk/session: ambiguous session")
+
 	// ErrInvalidSession reports that one session request is incomplete.
 	ErrInvalidSession = errors.New("sdk/session: invalid session")
 

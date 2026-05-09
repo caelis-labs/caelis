@@ -31,6 +31,9 @@ type turnHandle struct {
 	mu                sync.Mutex
 	events            []EventEnvelope
 	eventsCh          chan EventEnvelope
+	eventsCond        *sync.Cond
+	liveQueue         []EventEnvelope
+	eventsStarted     bool
 	eventsClosed      bool
 	closed            bool
 	finished          bool
@@ -44,7 +47,7 @@ type turnHandle struct {
 }
 
 func newTurnHandle(cfg turnHandleConfig) *turnHandle {
-	return &turnHandle{
+	h := &turnHandle{
 		handleID:   cfg.handleID,
 		runID:      cfg.runID,
 		turnID:     cfg.turnID,
@@ -53,6 +56,8 @@ func newTurnHandle(cfg turnHandleConfig) *turnHandle {
 		cancelFn:   cfg.cancel,
 		eventsCh:   make(chan EventEnvelope, 32),
 	}
+	h.eventsCond = sync.NewCond(&h.mu)
+	return h
 }
 
 func (h *turnHandle) HandleID() string                  { return h.handleID }
@@ -60,7 +65,15 @@ func (h *turnHandle) RunID() string                     { return h.runID }
 func (h *turnHandle) TurnID() string                    { return h.turnID }
 func (h *turnHandle) SessionRef() sdksession.SessionRef { return h.sessionRef }
 func (h *turnHandle) CreatedAt() time.Time              { return h.createdAt }
-func (h *turnHandle) Events() <-chan EventEnvelope      { return h.eventsCh }
+func (h *turnHandle) Events() <-chan EventEnvelope {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if !h.eventsStarted && !h.eventsClosed {
+		h.eventsStarted = true
+		go h.dispatchLiveEvents()
+	}
+	return h.eventsCh
+}
 
 func (h *turnHandle) EventsAfter(cursor string) ([]EventEnvelope, string, error) {
 	h.mu.Lock()
@@ -254,11 +267,8 @@ func (h *turnHandle) publish(env EventEnvelope) {
 	if h.closed || h.finished {
 		return
 	}
-	ch := h.eventsCh
-	select {
-	case ch <- env:
-	default:
-	}
+	h.liveQueue = append(h.liveQueue, env)
+	h.eventsCond.Signal()
 }
 
 func (h *turnHandle) allocateCursor() string {
@@ -292,8 +302,32 @@ func (h *turnHandle) closeEventsLocked() {
 	if h.eventsClosed {
 		return
 	}
-	h.eventsClosed = true
-	close(h.eventsCh)
+	if !h.eventsStarted {
+		return
+	}
+	h.eventsCond.Signal()
+}
+
+func (h *turnHandle) dispatchLiveEvents() {
+	for {
+		h.mu.Lock()
+		for len(h.liveQueue) == 0 && !h.finished {
+			h.eventsCond.Wait()
+		}
+		if len(h.liveQueue) == 0 && h.finished {
+			if !h.eventsClosed {
+				h.eventsClosed = true
+				close(h.eventsCh)
+			}
+			h.mu.Unlock()
+			return
+		}
+		env := h.liveQueue[0]
+		copy(h.liveQueue, h.liveQueue[1:])
+		h.liveQueue = h.liveQueue[:len(h.liveQueue)-1]
+		h.mu.Unlock()
+		h.eventsCh <- env
+	}
 }
 
 func cloneMap(in map[string]any) map[string]any {
