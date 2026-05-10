@@ -409,7 +409,7 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 			}
 			drained = true
 			return []sdkruntime.Submission{{
-				Kind: "conversation",
+				Kind: sdkruntime.SubmissionKindConversation,
 				Text: "focus on the follow-up",
 			}}
 		},

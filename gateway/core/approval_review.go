@@ -40,7 +40,7 @@ func CurrentApprovalMode(state map[string]any) ApprovalMode {
 	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
 		return NormalizeApprovalMode(value)
 	}
-	return NormalizeApprovalMode(CurrentSandboxMode(state))
+	return ApprovalModeAutoReview
 }
 
 type ApprovalReviewRequest struct {

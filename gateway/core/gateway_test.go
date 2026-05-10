@@ -422,8 +422,8 @@ func TestPromptParticipantCancelCancelsRuntimeRunner(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("runtime runner events were not attached")
 	}
-	if !result.Handle.Cancel() {
-		t.Fatal("participant turn Cancel() = false, want true")
+	if !result.Handle.Cancel().Cancelled() {
+		t.Fatal("participant turn Cancel().Cancelled() = false, want true")
 	}
 	select {
 	case <-runner.cancelled:
@@ -2065,12 +2065,12 @@ func (r *recordingRunner) Submit(sub sdkruntime.Submission) error {
 	return nil
 }
 
-func (r *recordingRunner) Cancel() bool {
+func (r *recordingRunner) Cancel() sdkruntime.CancelResult {
 	if r.cancelled {
-		return false
+		return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusAlreadyCancelled}
 	}
 	r.cancelled = true
-	return true
+	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
 }
 
 func (r *recordingRunner) Close() error { return nil }
@@ -2088,8 +2088,10 @@ func (r blockingRunner) Events() iter.Seq2[*sdksession.Event, error] {
 }
 
 func (blockingRunner) Submit(sdkruntime.Submission) error { return nil }
-func (blockingRunner) Cancel() bool                       { return true }
-func (blockingRunner) Close() error                       { return nil }
+func (blockingRunner) Cancel() sdkruntime.CancelResult {
+	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
+}
+func (blockingRunner) Close() error { return nil }
 
 type submitRecordingBlockingRunner struct {
 	release     chan struct{}
@@ -2109,7 +2111,9 @@ func (r *submitRecordingBlockingRunner) Submit(sub sdkruntime.Submission) error 
 	return nil
 }
 
-func (r *submitRecordingBlockingRunner) Cancel() bool { return true }
+func (r *submitRecordingBlockingRunner) Cancel() sdkruntime.CancelResult {
+	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
+}
 func (r *submitRecordingBlockingRunner) Close() error { return nil }
 
 type blockingCancelRunner struct {
@@ -2129,13 +2133,13 @@ func (r *blockingCancelRunner) Events() iter.Seq2[*sdksession.Event, error] {
 
 func (r *blockingCancelRunner) Submit(sdkruntime.Submission) error { return nil }
 
-func (r *blockingCancelRunner) Cancel() bool {
+func (r *blockingCancelRunner) Cancel() sdkruntime.CancelResult {
 	select {
 	case <-r.cancelled:
-		return false
+		return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusAlreadyCancelled}
 	default:
 		close(r.cancelled)
-		return true
+		return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
 	}
 }
 

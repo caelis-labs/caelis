@@ -426,7 +426,7 @@ func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		ContextWindow:  12345,
 		Sandbox: SandboxConfig{
 			RequestedType: "host",
@@ -466,7 +466,7 @@ func newStackWithAssemblyForToolTest(t *testing.T, assembly sdkplugin.ResolvedAs
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       assembly,
 		// These tests rewrite PATH to exercise ACP adapter lookup. Keep the
 		// sandbox on host so auto-probing does not execute the test binary as a

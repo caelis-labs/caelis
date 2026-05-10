@@ -651,10 +651,14 @@ func buildRestrictedNetworkSeccompProgram() (unix.SockFprog, error) {
 	deny := uint32(unix.SECCOMP_RET_ERRNO | (unix.EPERM & unix.SECCOMP_RET_DATA))
 	allow := uint32(unix.SECCOMP_RET_ALLOW)
 	kill := uint32(unix.SECCOMP_RET_KILL_PROCESS)
+	auditArch, err := seccompAuditArch()
+	if err != nil {
+		return unix.SockFprog{}, err
+	}
 
 	filters := []unix.SockFilter{
 		bpfStmt(unix.BPF_LD|unix.BPF_W|unix.BPF_ABS, seccompDataOffsetArch),
-		bpfJump(unix.BPF_JMP|unix.BPF_JEQ|unix.BPF_K, seccompAuditArch(), 1, 0),
+		bpfJump(unix.BPF_JMP|unix.BPF_JEQ|unix.BPF_K, auditArch, 1, 0),
 		bpfStmt(unix.BPF_RET|unix.BPF_K, kill),
 		bpfStmt(unix.BPF_LD|unix.BPF_W|unix.BPF_ABS, seccompDataOffsetNR),
 	}
@@ -700,14 +704,14 @@ func buildRestrictedNetworkSeccompProgram() (unix.SockFprog, error) {
 	}, nil
 }
 
-func seccompAuditArch() uint32 {
+func seccompAuditArch() (uint32, error) {
 	switch stdruntime.GOARCH {
 	case "amd64":
-		return unix.AUDIT_ARCH_X86_64
+		return unix.AUDIT_ARCH_X86_64, nil
 	case "arm64":
-		return unix.AUDIT_ARCH_AARCH64
+		return unix.AUDIT_ARCH_AARCH64, nil
 	default:
-		panic(fmt.Sprintf("unsupported architecture for seccomp filter: %s", stdruntime.GOARCH))
+		return 0, fmt.Errorf("unsupported architecture for seccomp filter: %s", stdruntime.GOARCH)
 	}
 }
 

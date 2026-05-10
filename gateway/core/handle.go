@@ -102,6 +102,9 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if err := validateSubmitRequest(req); err != nil {
+		return err
+	}
 	if req.Kind == SubmissionKindApproval && req.Approval != nil {
 		h.mu.Lock()
 		wait := h.pendingApprovalCh
@@ -151,11 +154,11 @@ func (h *turnHandle) Submit(ctx context.Context, req SubmitRequest) error {
 	return runner.Submit(runnerSubmissionFromSubmitRequest(req))
 }
 
-func (h *turnHandle) Cancel() bool {
+func (h *turnHandle) Cancel() sdkruntime.CancelResult {
 	h.mu.Lock()
 	if h.cancelled {
 		h.mu.Unlock()
-		return false
+		return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusAlreadyCancelled}
 	}
 	h.cancelled = true
 	cancelFn := h.cancelFn
@@ -165,10 +168,13 @@ func (h *turnHandle) Cancel() bool {
 	if cancelFn != nil {
 		cancelFn()
 	}
+	result := sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
 	if runner != nil {
-		runner.Cancel()
+		if runnerResult := runner.Cancel(); runnerResult.Err != nil {
+			result.Err = runnerResult.Err
+		}
 	}
-	return true
+	return result
 }
 
 func (h *turnHandle) Close() error {
@@ -229,9 +235,36 @@ func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 
 func runnerSubmissionFromSubmitRequest(req SubmitRequest) sdkruntime.Submission {
 	return sdkruntime.Submission{
-		Kind:     string(req.Kind),
+		Kind:     req.Kind,
 		Text:     req.Text,
 		Metadata: cloneMap(req.Metadata),
+	}
+}
+
+func validateSubmitRequest(req SubmitRequest) error {
+	switch req.Kind {
+	case SubmissionKindConversation:
+		if req.Approval != nil {
+			return invalidSubmissionKind(req.Kind)
+		}
+		return nil
+	case SubmissionKindApproval:
+		if req.Approval == nil {
+			return invalidSubmissionKind(req.Kind)
+		}
+		return nil
+	default:
+		return invalidSubmissionKind(req.Kind)
+	}
+}
+
+func invalidSubmissionKind(kind SubmissionKind) error {
+	return &Error{
+		Kind:        KindValidation,
+		Code:        CodeInvalidRequest,
+		UserVisible: true,
+		Message:     "gateway: invalid submission kind",
+		Detail:      string(kind),
 	}
 }
 

@@ -509,12 +509,19 @@ type EventEnvelope struct {
 	Err    *Error `json:"err,omitempty"`
 }
 
-type SubmissionKind string
+type SubmissionKind = sdkruntime.SubmissionKind
 
 const (
-	SubmissionKindConversation SubmissionKind = "conversation"
-	SubmissionKindOverlay      SubmissionKind = "overlay"
+	SubmissionKindConversation                = sdkruntime.SubmissionKindConversation
 	SubmissionKindApproval     SubmissionKind = "approval"
+)
+
+type CancelStatus = sdkruntime.CancelStatus
+type CancelResult = sdkruntime.CancelResult
+
+const (
+	CancelStatusCancelled        = sdkruntime.CancelStatusCancelled
+	CancelStatusAlreadyCancelled = sdkruntime.CancelStatusAlreadyCancelled
 )
 
 type ApprovalDecision struct {
@@ -554,6 +561,6 @@ type TurnHandle interface {
 	Events() <-chan EventEnvelope
 	EventsAfter(string) ([]EventEnvelope, string, error)
 	Submit(context.Context, SubmitRequest) error
-	Cancel() bool
+	Cancel() sdkruntime.CancelResult
 	Close() error
 }

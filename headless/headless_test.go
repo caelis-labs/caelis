@@ -180,5 +180,7 @@ func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error 
 	h.submissions = append(h.submissions, req)
 	return nil
 }
-func (h *fakeHandle) Cancel() bool { return true }
+func (h *fakeHandle) Cancel() gateway.CancelResult {
+	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
+}
 func (h *fakeHandle) Close() error { return nil }

@@ -78,6 +78,25 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 	}
 }
 
+func TestPolicyModeDefaultsUnknownAndLegacyValues(t *testing.T) {
+	t.Parallel()
+
+	tests := map[string]string{
+		"":             "auto-review",
+		"default":      "auto-review",
+		"plan":         "auto-review",
+		"full_access":  "auto-review",
+		"full_control": "auto-review",
+		"manual":       "manual",
+		"unknown":      "auto-review",
+	}
+	for input, want := range tests {
+		if got := policyMode(input); got != want {
+			t.Fatalf("policyMode(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
 func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	t.Parallel()
 
@@ -143,7 +162,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -163,7 +182,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -224,7 +243,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -355,7 +374,7 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -432,7 +451,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -469,7 +488,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -523,7 +542,7 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -543,7 +562,7 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		ContextWindow:  64,
 		Assembly:       sdkplugin.ResolvedAssembly{},
 		Model: ModelConfig{
@@ -604,7 +623,7 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		ContextWindow:  4096,
 		SystemPrompt:   strings.Repeat("stable prompt prefix token. ", 600),
 		Assembly:       sdkplugin.ResolvedAssembly{},
@@ -646,7 +665,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		ContextWindow:  4096,
 		Assembly:       sdkplugin.ResolvedAssembly{},
 		Model: ModelConfig{
@@ -708,7 +727,7 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		SystemPrompt:   strings.Repeat("count this stable prefix instruction. ", 2000),
 		Model: ModelConfig{
 			Provider:            "ollama",
@@ -766,7 +785,7 @@ func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "codefree",
@@ -806,7 +825,7 @@ func newLocalStateTestStack(t *testing.T) (*Stack, sdksession.Session) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",

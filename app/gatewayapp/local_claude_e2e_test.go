@@ -36,7 +36,7 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Model: ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",

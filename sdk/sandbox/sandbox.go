@@ -241,8 +241,9 @@ type BackendFactory interface {
 }
 
 var (
-	backendFactoriesMu sync.RWMutex
-	backendFactories   = map[Backend]BackendFactory{}
+	backendFactoriesMu      sync.RWMutex
+	backendFactories        = map[Backend]BackendFactory{}
+	backendRegistrationErrs []error
 )
 
 // FuncRunner adapts one function into one Runner.

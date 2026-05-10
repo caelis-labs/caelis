@@ -3,6 +3,7 @@ package policy
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -48,6 +49,28 @@ type Decision struct {
 	Constraints sdksandbox.Constraints       `json:"constraints,omitempty"`
 	Metadata    map[string]any               `json:"metadata,omitempty"`
 	Approval    *sdksession.ProtocolApproval `json:"approval,omitempty"`
+}
+
+type ToolInputDecodeError struct {
+	Tool string
+	Err  error
+}
+
+func (e *ToolInputDecodeError) Error() string {
+	if e == nil {
+		return "<nil>"
+	}
+	if e.Tool != "" {
+		return fmt.Sprintf("decode tool call input for %s: %v", e.Tool, e.Err)
+	}
+	return fmt.Sprintf("decode tool call input: %v", e.Err)
+}
+
+func (e *ToolInputDecodeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 // Mode decides whether one tool call may run under one named permission model.
@@ -116,14 +139,18 @@ func CloneDecision(in Decision, err error) (Decision, error) {
 	return out, err
 }
 
-// CallArgs decodes one tool-call input object for policy inspection.
-func CallArgs(call sdktool.Call) map[string]any {
+// CallArgs decodes one tool-call input object for policy inspection. Malformed
+// tool input is a policy error because authorization must not continue from a
+// guessed empty argument set.
+func CallArgs(call sdktool.Call) (map[string]any, error) {
 	if len(call.Input) == 0 {
-		return nil
+		return nil, nil
 	}
 	var out map[string]any
-	_ = json.Unmarshal(call.Input, &out)
-	return out
+	if err := json.Unmarshal(call.Input, &out); err != nil {
+		return nil, &ToolInputDecodeError{Tool: strings.TrimSpace(call.Name), Err: err}
+	}
+	return out, nil
 }
 
 func cloneStringSlice(in []string) []string {

@@ -17,7 +17,5 @@ func New(cfg Config) (sdksandbox.Runtime, error) {
 }
 
 func init() {
-	if err := sdksandbox.RegisterBackendFactory(backendFactory{}); err != nil {
-		panic(err)
-	}
+	sdksandbox.RegisterBuiltInBackendFactory(backendFactory{})
 }

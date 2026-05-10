@@ -484,7 +484,7 @@ func (r *Runtime) resolveAgent(
 	}
 	spec := r.applyAssemblySpec(state, req.AgentSpec)
 	spec.Request = req.Request.WithDefaults(spec.Request)
-	modeName := r.policyMode(spec)
+	modeName, _ := r.policyForName(ctx, r.policyMode(spec))
 	grants := r.permissionGrantStoreForSession(ref)
 	if err := r.hydratePermissionGrantStore(ctx, ref, grants); err != nil {
 		return nil, err
@@ -972,17 +972,7 @@ func (r *Runtime) policyMode(spec sdkruntime.AgentSpec) string {
 }
 
 func normalizePolicyMode(mode string) string {
-	mode = strings.TrimSpace(mode)
-	switch strings.ToLower(mode) {
-	case "":
-		return policypresets.ModeAutoReview
-	case "manual":
-		return policypresets.ModeManual
-	case "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
-		return policypresets.ModeAutoReview
-	default:
-		return mode
-	}
+	return policypresets.NormalizeModeName(mode)
 }
 
 func modeOptionsFromSession(session sdksession.Session, spec sdkruntime.AgentSpec) sdkpolicy.ModeOptions {
@@ -1042,7 +1032,7 @@ type runner struct {
 	cancelled   bool
 	closed      bool
 	submissions []sdkruntime.Submission
-	cancelHook  func() bool
+	cancelHook  func() error
 }
 
 type runnerEvent struct {
@@ -1071,6 +1061,9 @@ func (r *runner) Events() iter.Seq2[*sdksession.Event, error] {
 }
 
 func (r *runner) Submit(sub sdkruntime.Submission) error {
+	if sub.Kind != sdkruntime.SubmissionKindConversation {
+		return fmt.Errorf("sdk/runtime/local: unsupported submission kind %q", sub.Kind)
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.closed {
@@ -1100,11 +1093,11 @@ func (r *runner) markClosed() {
 	r.mu.Unlock()
 }
 
-func (r *runner) Cancel() bool {
+func (r *runner) Cancel() sdkruntime.CancelResult {
 	r.mu.Lock()
 	if r.cancelled {
 		r.mu.Unlock()
-		return false
+		return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusAlreadyCancelled}
 	}
 	r.cancelled = true
 	cancelFn := r.cancelFn
@@ -1114,19 +1107,22 @@ func (r *runner) Cancel() bool {
 	if cancelFn != nil {
 		cancelFn()
 	}
+	result := sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
 	if cancelHook != nil {
-		cancelHook()
+		if err := cancelHook(); err != nil {
+			result.Err = err
+		}
 	}
-	return true
+	return result
 }
 
-func (r *runner) setCancelHook(fn func() bool) {
+func (r *runner) setCancelHook(fn func() error) {
 	r.mu.Lock()
 	cancelled := r.cancelled
 	r.cancelHook = fn
 	r.mu.Unlock()
 	if cancelled && fn != nil {
-		fn()
+		_ = fn()
 	}
 }
 

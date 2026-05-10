@@ -164,6 +164,33 @@ func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 	}
 }
 
+func TestTurnHandleSubmitRejectsUnknownSubmissionKind(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	handle.setRunner(&recordingRunner{})
+
+	err := handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKind("debug"),
+		Text: "follow up",
+	})
+	if err == nil {
+		t.Fatal("Submit() error = nil, want invalid request")
+	}
+	var gwErr *Error
+	if !As(err, &gwErr) || gwErr.Code != CodeInvalidRequest {
+		t.Fatalf("Submit() error = %v, want invalid_request", err)
+	}
+}
+
 func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
 	t.Parallel()
 
@@ -184,8 +211,9 @@ func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
 	runner := &recordingRunner{}
 	handle.setRunner(runner)
 
-	if !handle.Cancel() {
-		t.Fatal("Cancel() = false, want true")
+	result := handle.Cancel()
+	if result.Status != sdkruntime.CancelStatusCancelled {
+		t.Fatalf("Cancel().Status = %q, want %q", result.Status, sdkruntime.CancelStatusCancelled)
 	}
 	if !contextCancelled {
 		t.Fatal("gateway context was not cancelled")
@@ -193,8 +221,9 @@ func TestTurnHandleCancelCancelsContextAndRunner(t *testing.T) {
 	if !runner.cancelled {
 		t.Fatal("runner was not cancelled")
 	}
-	if handle.Cancel() {
-		t.Fatal("Cancel(second) = true, want false")
+	result = handle.Cancel()
+	if result.Status != sdkruntime.CancelStatusAlreadyCancelled {
+		t.Fatalf("Cancel(second).Status = %q, want %q", result.Status, sdkruntime.CancelStatusAlreadyCancelled)
 	}
 }
 
@@ -210,8 +239,9 @@ func TestTurnHandleSetRunnerAfterCancelCancelsRunner(t *testing.T) {
 		},
 		createdAt: time.Unix(100, 0),
 	})
-	if !handle.Cancel() {
-		t.Fatal("Cancel() = false, want true")
+	result := handle.Cancel()
+	if result.Status != sdkruntime.CancelStatusCancelled {
+		t.Fatalf("Cancel().Status = %q, want %q", result.Status, sdkruntime.CancelStatusCancelled)
 	}
 	runner := &recordingRunner{}
 	handle.setRunner(runner)

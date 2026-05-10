@@ -7,6 +7,7 @@ import (
 
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy"
+	policypresets "github.com/OnslaughtSnail/caelis/sdk/policy/presets"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksandbox "github.com/OnslaughtSnail/caelis/sdk/sandbox"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
@@ -47,14 +48,10 @@ func (r *Runtime) wrapToolsForPolicy(
 	spec sdkruntime.AgentSpec,
 	approval approvalContext,
 ) []sdktool.Tool {
-	if len(spec.Tools) == 0 || r.policies == nil {
+	if len(spec.Tools) == 0 {
 		return spec.Tools
 	}
-	modeName := r.policyMode(spec)
-	mode, ok, err := r.policies.Lookup(approval.ctx, modeName)
-	if err != nil || !ok || mode == nil {
-		return spec.Tools
-	}
+	modeName, mode := r.policyForName(approval.ctx, r.policyMode(spec))
 	options := modeOptionsFromSession(session, spec)
 	out := make([]sdktool.Tool, 0, len(spec.Tools))
 	for _, one := range spec.Tools {
@@ -74,6 +71,16 @@ func (r *Runtime) wrapToolsForPolicy(
 		})
 	}
 	return out
+}
+
+func (r *Runtime) policyForName(ctx context.Context, modeName string) (string, sdkpolicy.Mode) {
+	normalized := normalizePolicyMode(modeName)
+	if r != nil && r.policies != nil {
+		if mode, ok, err := r.policies.Lookup(ctx, normalized); err == nil && ok && mode != nil {
+			return normalized, mode
+		}
+	}
+	return policypresets.ModeDefault, policypresets.AutoReviewMode()
 }
 
 func (t policyWrappedTool) Definition() sdktool.Definition {

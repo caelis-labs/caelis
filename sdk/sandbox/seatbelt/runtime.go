@@ -461,7 +461,5 @@ func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
 }
 
 func init() {
-	if err := sdksandbox.RegisterBackendFactory(backendFactory{}); err != nil {
-		panic(err)
-	}
+	sdksandbox.RegisterBuiltInBackendFactory(backendFactory{})
 }

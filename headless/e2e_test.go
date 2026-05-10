@@ -43,7 +43,7 @@ func TestHeadlessGatewayProviderE2E(t *testing.T) {
 	rt, err := localruntime.New(localruntime.Config{
 		Sessions:          sessions,
 		AgentFactory:      chat.Factory{SystemPrompt: "Answer tersely."},
-		DefaultPolicyMode: sdkpolicy.ModeDefault,
+		DefaultPolicyMode: sdkpolicy.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("local.New() error = %v", err)

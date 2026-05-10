@@ -258,7 +258,7 @@ func (g *Gateway) Interrupt(ctx context.Context, req InterruptRequest) error {
 			Message:     "gateway: session has no active run",
 		}
 	}
-	if !handle.Cancel() {
+	if !handle.Cancel().Cancelled() {
 		return &Error{
 			Kind:        KindConflict,
 			Code:        CodeNoActiveRun,

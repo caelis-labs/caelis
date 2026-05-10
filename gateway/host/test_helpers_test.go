@@ -171,12 +171,12 @@ func (r *recordingRunner) Submit(sub sdkruntime.Submission) error {
 	return nil
 }
 
-func (r *recordingRunner) Cancel() bool {
+func (r *recordingRunner) Cancel() sdkruntime.CancelResult {
 	if r.cancelled {
-		return false
+		return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusAlreadyCancelled}
 	}
 	r.cancelled = true
-	return true
+	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
 }
 
 func (r *recordingRunner) Close() error { return nil }

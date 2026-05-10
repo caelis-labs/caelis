@@ -175,8 +175,8 @@ func (a *Agent) drainPendingSubmissions(ctx sdkruntime.Context, messages *[]sdkm
 }
 
 func isConversationSubmission(sub sdkruntime.Submission) bool {
-	switch strings.TrimSpace(sub.Kind) {
-	case "", "conversation":
+	switch sub.Kind {
+	case sdkruntime.SubmissionKindConversation:
 		return true
 	default:
 		return false

@@ -361,7 +361,7 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	}
 
 	if err := result.Handle.Submit(sdkruntime.Submission{
-		Kind: "conversation",
+		Kind: sdkruntime.SubmissionKindConversation,
 		Text: "steer next step",
 	}); err != nil {
 		t.Fatalf("Submit() while running error = %v", err)
@@ -406,7 +406,7 @@ func TestRuntimeSubmitQueuesGuidanceForNextModelStep(t *testing.T) {
 	if !reflect.DeepEqual(gotPersisted, wantTexts) {
 		t.Fatalf("persisted user/assistant texts = %#v, want %#v", gotPersisted, wantTexts)
 	}
-	if err := result.Handle.Submit(sdkruntime.Submission{Kind: "conversation", Text: "too late"}); err == nil {
+	if err := result.Handle.Submit(sdkruntime.Submission{Kind: sdkruntime.SubmissionKindConversation, Text: "too late"}); err == nil {
 		t.Fatal("Submit() after runner completion error = nil, want closed-runner error")
 	}
 }
@@ -978,8 +978,8 @@ func TestRuntimePromptACPParticipantCancelCancelsControllerTurn(t *testing.T) {
 	if result.Handle == nil {
 		t.Fatal("PromptACPParticipant() handle = nil")
 	}
-	if !result.Handle.Cancel() {
-		t.Fatal("participant handle Cancel() = false, want true")
+	if !result.Handle.Cancel().Cancelled() {
+		t.Fatal("participant handle Cancel().Cancelled() = false, want true")
 	}
 	select {
 	case <-controllerCancelled:
@@ -1457,17 +1457,17 @@ func (h *testControllerTurnHandle) Events() iter.Seq2[*sdksession.Event, error] 
 	}
 }
 
-func (h *testControllerTurnHandle) Cancel() bool {
+func (h *testControllerTurnHandle) Cancel() sdkcontroller.CancelResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cancelled {
-		return false
+		return sdkcontroller.CancelResult{Status: sdkcontroller.CancelStatusAlreadyCancelled}
 	}
 	h.cancelled = true
 	if h.cancelFn != nil {
 		h.cancelFn()
 	}
-	return true
+	return sdkcontroller.CancelResult{Status: sdkcontroller.CancelStatusCancelled}
 }
 
 func (h *testControllerTurnHandle) Close() error { return nil }
@@ -2975,7 +2975,7 @@ func TestRuntimePolicyDefaultDeniesWriteOutsideAllowedRoots(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: policypresets.ModeDefault,
+		DefaultPolicyMode: policypresets.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3069,18 +3069,69 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 	}
 }
 
-func TestNormalizePolicyModeCollapsesLegacyAliasesButPreservesCustomNames(t *testing.T) {
+func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
+	t.Parallel()
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws"},
+		CWD:        "/workspace",
+	}
+	registry, err := policypresets.NewRegistry()
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	runtime := &Runtime{
+		policies:          registry,
+		defaultPolicyMode: policypresets.ModeAutoReview,
+	}
+	tool := sdktool.NamedTool{
+		Def: sdktool.Definition{Name: "WRITE"},
+		Invoke: func(context.Context, sdktool.Call) (sdktool.Result, error) {
+			t.Fatal("default policy should deny before invoking the tool")
+			return sdktool.Result{}, nil
+		},
+	}
+	wrapped := runtime.wrapToolsForPolicy(session, session.SessionRef, nil, sdkruntime.AgentSpec{
+		Metadata: map[string]any{"policy_mode": "unknown-policy"},
+		Tools:    []sdktool.Tool{tool},
+	}, approvalContext{
+		ctx:        context.Background(),
+		session:    session,
+		sessionRef: session.SessionRef,
+	})
+	if got := len(wrapped); got != 1 {
+		t.Fatalf("len(wrapped) = %d, want 1", got)
+	}
+	result, err := wrapped[0].Call(context.Background(), sdktool.Call{
+		ID:    "call-1",
+		Name:  "WRITE",
+		Input: []byte(`{"path":"/etc/passwd"}`),
+	})
+	if err != nil {
+		t.Fatalf("wrapped tool Call() error = %v", err)
+	}
+	if !result.IsError {
+		t.Fatalf("result.IsError = false, want policy denial")
+	}
+	if got := result.Meta["policy_mode"]; got != policypresets.ModeAutoReview {
+		t.Fatalf("result policy_mode = %v, want %s", got, policypresets.ModeAutoReview)
+	}
+}
+
+func TestNormalizePolicyModeHandlesDefaultAliasesAndPreservesCustomNames(t *testing.T) {
 	t.Parallel()
 
 	tests := map[string]string{
-		"":            "auto-review",
-		"default":     "auto-review",
-		"plan":        "auto-review",
-		"full_access": "auto-review",
-		"auto_review": "auto-review",
-		"manual":      "manual",
-		"locked-down": "locked-down",
-		"TeamStrict":  "TeamStrict",
+		"":             "auto-review",
+		"auto":         "auto-review",
+		"auto_review":  "auto-review",
+		"manual":       "manual",
+		"default":      "auto-review",
+		"plan":         "auto-review",
+		"full_access":  "auto-review",
+		"full_control": "auto-review",
+		"locked-down":  "locked-down",
+		"TeamStrict":   "TeamStrict",
 	}
 	for input, want := range tests {
 		if got := normalizePolicyMode(input); got != want {
@@ -3187,7 +3238,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousBash(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: policypresets.ModeFullAccess,
+		DefaultPolicyMode: policypresets.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3235,7 +3286,7 @@ func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: policypresets.ModeDefault,
+		DefaultPolicyMode: policypresets.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3358,7 +3409,7 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: policypresets.ModeFullAccess,
+		DefaultPolicyMode: policypresets.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -3534,7 +3585,7 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: policypresets.ModeFullAccess,
+		DefaultPolicyMode: policypresets.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -5480,7 +5531,7 @@ func newRuntimeBashToolTestHarness(t *testing.T) (sdksession.Service, sdksession
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: policypresets.ModeFullAccess,
+		DefaultPolicyMode: policypresets.ModeAutoReview,
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)

@@ -686,7 +686,5 @@ func readFirstLineInt(readFileFn func(string) ([]byte, error), path string) (int
 }
 
 func init() {
-	if err := sdksandbox.RegisterBackendFactory(backendFactory{}); err != nil {
-		panic(err)
-	}
+	sdksandbox.RegisterBuiltInBackendFactory(backendFactory{})
 }

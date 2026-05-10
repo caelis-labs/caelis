@@ -250,5 +250,7 @@ func (r blockingRunner) Events() iter.Seq2[*sdksession.Event, error] {
 }
 
 func (blockingRunner) Submit(sdkruntime.Submission) error { return nil }
-func (blockingRunner) Cancel() bool                       { return true }
-func (blockingRunner) Close() error                       { return nil }
+func (blockingRunner) Cancel() sdkruntime.CancelResult {
+	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
+}
+func (blockingRunner) Close() error { return nil }

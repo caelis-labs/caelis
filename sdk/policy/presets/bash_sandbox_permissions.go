@@ -26,7 +26,10 @@ type bashSandboxRequest struct {
 }
 
 func parseBashSandboxRequest(input sdkpolicy.ToolContext) (bashSandboxRequest, error) {
-	args := sdkpolicy.CallArgs(input.Call)
+	args, err := sdkpolicy.CallArgs(input.Call)
+	if err != nil {
+		return bashSandboxRequest{}, err
+	}
 	req := bashSandboxRequest{SandboxPermissions: bashSandboxPermissionUseDefault}
 
 	if raw, ok := args["sandbox_permissions"]; ok && raw != nil {
@@ -51,7 +54,7 @@ func parseBashSandboxRequest(input sdkpolicy.ToolContext) (bashSandboxRequest, e
 	}
 
 	if raw, ok := args["additional_permissions"]; ok && raw != nil {
-		additional, err := parseBashAdditionalPermissions(raw, input)
+		additional, err := parseBashAdditionalPermissions(raw, input, args)
 		if err != nil {
 			return req, err
 		}
@@ -182,7 +185,7 @@ type parsedBashAdditionalPermissions struct {
 	PathRules []sdksandbox.PathRule
 }
 
-func parseBashAdditionalPermissions(raw any, input sdkpolicy.ToolContext) (parsedBashAdditionalPermissions, error) {
+func parseBashAdditionalPermissions(raw any, input sdkpolicy.ToolContext, args map[string]any) (parsedBashAdditionalPermissions, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
 		return parsedBashAdditionalPermissions{}, fmt.Errorf("additional_permissions must be an object")
@@ -203,7 +206,7 @@ func parseBashAdditionalPermissions(raw any, input sdkpolicy.ToolContext) (parse
 		out.Network = network
 	}
 	if rawFileSystem, ok := obj["file_system"]; ok && rawFileSystem != nil {
-		pathRules, err := parseBashAdditionalFileSystem(rawFileSystem, input)
+		pathRules, err := parseBashAdditionalFileSystem(rawFileSystem, input, args)
 		if err != nil {
 			return out, err
 		}
@@ -236,7 +239,7 @@ func parseBashAdditionalNetwork(raw any) (sdksandbox.Network, error) {
 	return "", nil
 }
 
-func parseBashAdditionalFileSystem(raw any, input sdkpolicy.ToolContext) ([]sdksandbox.PathRule, error) {
+func parseBashAdditionalFileSystem(raw any, input sdkpolicy.ToolContext, args map[string]any) ([]sdksandbox.PathRule, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("additional_permissions.file_system must be an object")
@@ -255,7 +258,7 @@ func parseBashAdditionalFileSystem(raw any, input sdkpolicy.ToolContext) ([]sdks
 			return err
 		}
 		for _, value := range values {
-			resolved := resolveAdditionalPermissionPath(value, input)
+			resolved := resolveAdditionalPermissionPath(value, input, args)
 			if resolved == "" {
 				return fmt.Errorf("%s contains an empty path", label)
 			}
@@ -279,7 +282,7 @@ func parseBashAdditionalFileSystem(raw any, input sdkpolicy.ToolContext) ([]sdks
 	return rules, nil
 }
 
-func resolveAdditionalPermissionPath(value string, input sdkpolicy.ToolContext) string {
+func resolveAdditionalPermissionPath(value string, input sdkpolicy.ToolContext, args map[string]any) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""
@@ -287,12 +290,11 @@ func resolveAdditionalPermissionPath(value string, input sdkpolicy.ToolContext) 
 	if filepath.IsAbs(value) {
 		return filepath.Clean(value)
 	}
-	base := additionalPermissionBasePath(input)
+	base := additionalPermissionBasePath(input, args)
 	return filepath.Clean(filepath.Join(base, value))
 }
 
-func additionalPermissionBasePath(input sdkpolicy.ToolContext) string {
-	args := sdkpolicy.CallArgs(input.Call)
+func additionalPermissionBasePath(input sdkpolicy.ToolContext, args map[string]any) string {
 	if raw, ok := args["workdir"]; ok && raw != nil {
 		if workdir, ok := raw.(string); ok {
 			workdir = strings.TrimSpace(workdir)

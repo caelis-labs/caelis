@@ -155,7 +155,7 @@ type Turn interface {
 	SessionRef() sdksession.SessionRef
 	Events() <-chan gateway.EventEnvelope
 	Submit(context.Context, gateway.SubmitRequest) error
-	Cancel() bool
+	Cancel() gateway.CancelResult
 	Close() error
 }
 
@@ -178,7 +178,7 @@ type Driver interface {
 	DeleteModel(context.Context, string) error
 	CycleSessionMode(context.Context) (StatusSnapshot, error)
 	SetSandboxBackend(context.Context, string) (StatusSnapshot, error)
-	SetSandboxMode(context.Context, string) (StatusSnapshot, error)
+	SetSessionMode(context.Context, string) (StatusSnapshot, error)
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
 	AddAgent(context.Context, string) (AgentStatusSnapshot, error)

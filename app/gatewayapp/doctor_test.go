@@ -21,7 +21,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {
@@ -53,7 +53,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly:       sdkplugin.ResolvedAssembly{},
 	})
 	if err != nil {

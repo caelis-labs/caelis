@@ -26,7 +26,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		StoreDir:       root,
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
+		PermissionMode: "auto-review",
 		Assembly: sdkplugin.ResolvedAssembly{
 			Agents: []sdkplugin.AgentConfig{{
 				Name:        "codex",

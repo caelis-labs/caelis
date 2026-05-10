@@ -340,9 +340,7 @@ func CurrentSandboxMode(state map[string]any) string {
 	return strings.TrimSpace(value)
 }
 
-// CurrentSessionMode returns the normalized per-session execution mode. It
-// reads the new dedicated session-mode key first and falls back to the legacy
-// sandbox-mode key for migration compatibility.
+// CurrentSessionMode returns the normalized per-session execution mode.
 func CurrentSessionMode(state map[string]any) string {
 	if state == nil {
 		return string(ApprovalModeAutoReview)
@@ -350,7 +348,7 @@ func CurrentSessionMode(state map[string]any) string {
 	if value, _ := state[StateCurrentSessionMode].(string); strings.TrimSpace(value) != "" {
 		return normalizeSessionMode(value)
 	}
-	return normalizeSessionMode(CurrentSandboxMode(state))
+	return string(ApprovalModeAutoReview)
 }
 
 func normalizeSessionMode(mode string) string {

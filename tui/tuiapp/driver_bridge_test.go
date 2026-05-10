@@ -1462,7 +1462,9 @@ func (t *bridgeTestTurn) Events() <-chan appgateway.EventEnvelope { return t.eve
 func (t *bridgeTestTurn) Submit(context.Context, appgateway.SubmitRequest) error {
 	return nil
 }
-func (t *bridgeTestTurn) Cancel() bool { return false }
+func (t *bridgeTestTurn) Cancel() appgateway.CancelResult {
+	return appgateway.CancelResult{Status: appgateway.CancelStatusAlreadyCancelled}
+}
 func (t *bridgeTestTurn) Close() error { return nil }
 
 func bridgeTurnWithEvents(envs ...appgateway.EventEnvelope) tuidriver.Turn {
@@ -1544,7 +1546,7 @@ func (d *bridgeSubmitDriver) CycleSessionMode(context.Context) (tuidriver.Status
 func (d *bridgeSubmitDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return tuidriver.StatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) SetSandboxMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeSubmitDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return tuidriver.StatusSnapshot{}, nil
 }
 func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
@@ -1646,7 +1648,7 @@ func (d *bridgeTestDriver) CycleSessionMode(context.Context) (tuidriver.StatusSn
 func (d *bridgeTestDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return d.status, nil
 }
-func (d *bridgeTestDriver) SetSandboxMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
+func (d *bridgeTestDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return d.status, nil
 }
 func (d *bridgeTestDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {

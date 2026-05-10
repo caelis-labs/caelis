@@ -66,7 +66,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		workspaceKey     = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
 		workspaceCWD     = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
 		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
-		permissionMode   = fs.String("permission-mode", envOr("CAELIS_PERMISSION_MODE", "default"), "Permission mode: default|full_control")
+		permissionMode   = fs.String("permission-mode", envOr("CAELIS_PERMISSION_MODE", "auto-review"), "Permission mode: auto-review|manual")
 		modelAlias       = fs.String("model-alias", envOr("CAELIS_MODEL_ALIAS", ""), "Model alias")
 		modelProvider    = fs.String("provider", envOr("CAELIS_MODEL_PROVIDER", ""), "Model provider name")
 		modelAPI         = fs.String("api", envOr("CAELIS_MODEL_API", ""), "Model API type")

@@ -58,6 +58,8 @@ type Event = gatewaycore.Event
 type EventEnvelope = gatewaycore.EventEnvelope
 type StreamRequest = gatewaycore.StreamRequest
 type SubmissionKind = gatewaycore.SubmissionKind
+type CancelStatus = gatewaycore.CancelStatus
+type CancelResult = gatewaycore.CancelResult
 type ApprovalDecision = gatewaycore.ApprovalDecision
 type SubmitRequest = gatewaycore.SubmitRequest
 type SubmitActiveTurnRequest = gatewaycore.SubmitActiveTurnRequest
@@ -162,11 +164,15 @@ const (
 
 const (
 	SubmissionKindConversation = gatewaycore.SubmissionKindConversation
-	SubmissionKindOverlay      = gatewaycore.SubmissionKindOverlay
 	SubmissionKindApproval     = gatewaycore.SubmissionKindApproval
 
 	ActiveTurnKindKernel      = gatewaycore.ActiveTurnKindKernel
 	ActiveTurnKindParticipant = gatewaycore.ActiveTurnKindParticipant
+)
+
+const (
+	CancelStatusCancelled        = gatewaycore.CancelStatusCancelled
+	CancelStatusAlreadyCancelled = gatewaycore.CancelStatusAlreadyCancelled
 )
 
 const (

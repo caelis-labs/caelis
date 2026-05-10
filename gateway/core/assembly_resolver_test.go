@@ -198,7 +198,7 @@ func TestAssemblyResolverRejectsUnknownMode(t *testing.T) {
 	}
 }
 
-func TestCurrentSessionModeMigratesLegacySandboxState(t *testing.T) {
+func TestCurrentSessionModeUsesSessionModeKey(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -207,9 +207,8 @@ func TestCurrentSessionModeMigratesLegacySandboxState(t *testing.T) {
 		want  string
 	}{
 		{name: "empty defaults to auto-review", state: map[string]any{}, want: "auto-review"},
-		{name: "legacy auto becomes auto-review", state: map[string]any{StateCurrentSandboxMode: "auto"}, want: "auto-review"},
-		{name: "legacy full control becomes auto-review", state: map[string]any{StateCurrentSandboxMode: "full_control"}, want: "auto-review"},
-		{name: "new manual key wins", state: map[string]any{StateCurrentSandboxMode: "full_control", StateCurrentSessionMode: "manual"}, want: "manual"},
+		{name: "sandbox mode key ignored", state: map[string]any{StateCurrentSandboxMode: "manual"}, want: "auto-review"},
+		{name: "session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: "manual"},
 	}
 
 	for _, tt := range tests {
@@ -217,6 +216,30 @@ func TestCurrentSessionModeMigratesLegacySandboxState(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := CurrentSessionMode(tt.state); got != tt.want {
 				t.Fatalf("CurrentSessionMode(%#v) = %q, want %q", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCurrentApprovalModeIgnoresLegacySandboxState(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		state map[string]any
+		want  ApprovalMode
+	}{
+		{name: "empty defaults to auto-review", state: map[string]any{}, want: ApprovalModeAutoReview},
+		{name: "legacy sandbox mode key ignored", state: map[string]any{StateCurrentSandboxMode: "manual"}, want: ApprovalModeAutoReview},
+		{name: "unknown session mode defaults to auto-review", state: map[string]any{StateCurrentSessionMode: "unknown"}, want: ApprovalModeAutoReview},
+		{name: "session mode key wins", state: map[string]any{StateCurrentSandboxMode: "manual", StateCurrentSessionMode: "manual"}, want: ApprovalModeManual},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			if got := CurrentApprovalMode(tt.state); got != tt.want {
+				t.Fatalf("CurrentApprovalMode(%#v) = %q, want %q", tt.state, got, tt.want)
 			}
 		})
 	}

@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -8,6 +9,7 @@ import (
 	sdkacpclient "github.com/OnslaughtSnail/caelis/acp/client"
 	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdksubagentacp "github.com/OnslaughtSnail/caelis/sdk/subagent/acp"
 )
 
 func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
@@ -392,6 +394,127 @@ func TestControllerRunStatusPreservesConfigChoicesAfterPartialUpdate(t *testing.
 	}
 	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-5.5", "gpt-5.4"}) {
 		t.Fatalf("model options = %#v, want preserved full choices", got)
+	}
+}
+
+func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
+	registry, err := sdksubagentacp.NewRegistry([]sdksubagentacp.AgentConfig{{
+		Name:    "helper",
+		Command: "helper-acp",
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	starts := 0
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		cfg sdksubagentacp.AgentConfig,
+		resumeRemoteSessionID string,
+		onUpdate func(sdkacpclient.UpdateEnvelope),
+		_ func(context.Context, sdkacpclient.RequestPermissionRequest) (sdkacpclient.RequestPermissionResponse, error),
+	) (*sdkacpclient.Client, string, controllerClientState, error) {
+		starts++
+		remoteID := "remote-session"
+		if resumeRemoteSessionID != "" {
+			remoteID = resumeRemoteSessionID
+		}
+		onUpdate(sdkacpclient.UpdateEnvelope{Update: sdkacpclient.AvailableCommandsUpdate{
+			SessionUpdate: sdkacpclient.UpdateAvailableCmds,
+			AvailableCommands: []map[string]any{{
+				"name":        "/search",
+				"description": "remote search",
+			}},
+		}})
+		return nil, remoteID, controllerClientState{
+			agentLabel: "Helper ACP",
+			configOptions: []sdkcontroller.ControllerConfigOption{{
+				ID:           "model",
+				Name:         "Model",
+				CurrentValue: "gpt-test",
+			}},
+			mode: "default",
+			modeOptions: []sdkcontroller.ControllerMode{{
+				ID:   "default",
+				Name: "Default",
+			}},
+		}, nil
+	}
+
+	session := sdksession.Session{
+		SessionRef: sdksession.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: "/workspace",
+	}
+	binding, err := manager.Activate(context.Background(), sdkcontroller.HandoffRequest{
+		Session: session,
+		Agent:   "helper",
+		Source:  "test",
+	})
+	if err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	if binding.Kind != sdksession.ControllerKindACP || binding.RemoteSessionID != "remote-session" || binding.Label != "Helper ACP" {
+		t.Fatalf("binding = %#v, want ACP helper binding", binding)
+	}
+	status, ok, err := manager.ControllerStatus(context.Background(), session.SessionRef)
+	if err != nil || !ok {
+		t.Fatalf("ControllerStatus() = %#v, %v, %v; want active status", status, ok, err)
+	}
+	if status.Model != "gpt-test" || status.Mode != "default" || len(status.Commands) != 1 || status.Commands[0].Name != "search" {
+		t.Fatalf("status = %#v, want startup model/mode and live commands", status)
+	}
+	turn, err := manager.RunTurn(context.Background(), sdkcontroller.TurnRequest{
+		SessionRef: session.SessionRef,
+		Session:    session,
+		TurnID:     "turn-empty",
+		Input:      " ",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn(empty) error = %v", err)
+	}
+	if turn.Handle == nil {
+		t.Fatal("RunTurn(empty) handle = nil")
+	}
+	for range turn.Handle.Events() {
+	}
+	if err := manager.Deactivate(context.Background(), session.SessionRef); err != nil {
+		t.Fatalf("Deactivate() error = %v", err)
+	}
+	if _, ok, err := manager.ControllerStatus(context.Background(), session.SessionRef); err != nil || ok {
+		t.Fatalf("ControllerStatus(after deactivate) ok/err = %v/%v, want false/nil", ok, err)
+	}
+
+	participant, err := manager.Attach(context.Background(), sdkcontroller.AttachRequest{
+		Session: session,
+		Agent:   "helper",
+		Label:   "helper",
+	})
+	if err != nil {
+		t.Fatalf("Attach() error = %v", err)
+	}
+	if participant.ID == "" || participant.SessionID != "remote-session" {
+		t.Fatalf("participant binding = %#v, want remote session binding", participant)
+	}
+	if err := manager.Detach(context.Background(), sdkcontroller.DetachRequest{ParticipantID: participant.ID}); err != nil {
+		t.Fatalf("Detach() error = %v", err)
+	}
+	manager.mu.RLock()
+	_, stillAttached := manager.participants[participant.ID]
+	manager.mu.RUnlock()
+	if stillAttached {
+		t.Fatal("participant still attached after Detach")
+	}
+	if starts != 2 {
+		t.Fatalf("client starts = %d, want 2 (controller + participant)", starts)
 	}
 }
 

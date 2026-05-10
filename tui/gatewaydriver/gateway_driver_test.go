@@ -1645,7 +1645,7 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	}
 }
 
-func TestGatewayDriverSetSandboxModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
+func TestGatewayDriverSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
 		AppName:        "caelis",
@@ -1687,9 +1687,9 @@ func TestGatewayDriverSetSandboxModeUpdatesLocalApprovalModeUnderACPController(t
 		streamSubscriptions: map[string]struct{}{},
 	}
 
-	status, err := driver.SetSandboxMode(ctx, "manual")
+	status, err := driver.SetSessionMode(ctx, "manual")
 	if err != nil {
-		t.Fatalf("SetSandboxMode(manual) error = %v", err)
+		t.Fatalf("SetSessionMode(manual) error = %v", err)
 	}
 	if status.SessionMode != "manual" {
 		t.Fatalf("status.SessionMode = %q, want manual", status.SessionMode)
@@ -2864,8 +2864,8 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if _, err := driver.SetSandboxMode(ctx, "manual"); err != nil {
-		t.Fatalf("SetSandboxMode() error = %v", err)
+	if _, err := driver.SetSessionMode(ctx, "manual"); err != nil {
+		t.Fatalf("SetSessionMode() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {

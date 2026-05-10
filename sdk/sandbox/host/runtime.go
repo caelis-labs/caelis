@@ -491,9 +491,7 @@ func (factory) Build(cfg sdksandbox.Config) (sdksandbox.Runtime, error) {
 }
 
 func init() {
-	if err := sdksandbox.RegisterBackendFactory(factory{}); err != nil {
-		panic(err)
-	}
+	sdksandbox.RegisterBuiltInBackendFactory(factory{})
 }
 
 func firstNonEmptyRoute(values ...sdksandbox.Route) sdksandbox.Route {

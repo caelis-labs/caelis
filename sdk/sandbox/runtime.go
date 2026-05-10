@@ -1,6 +1,7 @@
 package sandbox
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,6 +24,21 @@ func RegisterBackendFactory(factory BackendFactory) error {
 	}
 	backendFactories[backend] = factory
 	return nil
+}
+
+func RegisterBuiltInBackendFactory(factory BackendFactory) {
+	if err := RegisterBackendFactory(factory); err != nil {
+		backendFactoriesMu.Lock()
+		backendRegistrationErrs = append(backendRegistrationErrs, err)
+		backendFactoriesMu.Unlock()
+	}
+}
+
+func backendRegistrationError() error {
+	backendFactoriesMu.RLock()
+	errs := append([]error(nil), backendRegistrationErrs...)
+	backendFactoriesMu.RUnlock()
+	return errors.Join(errs...)
 }
 
 func New(cfg Config) (Runtime, error) {
@@ -117,6 +133,9 @@ func buildRegisteredRuntime(backend Backend, cfg Config) (Runtime, error) {
 	factory, ok := backendFactories[backend]
 	backendFactoriesMu.RUnlock()
 	if !ok {
+		if err := backendRegistrationError(); err != nil {
+			return nil, fmt.Errorf("sdk/sandbox: backend %q is not registered: %w", backend, err)
+		}
 		return nil, fmt.Errorf("sdk/sandbox: backend %q is not registered", backend)
 	}
 	runtime, err := factory.Build(cfg)

@@ -26,11 +26,37 @@ type ReadonlyState interface {
 	Snapshot() map[string]any
 }
 
-// Submission is one runtime continuation or approval submission.
+// SubmissionKind identifies one runtime submission path.
+type SubmissionKind string
+
+const (
+	SubmissionKindConversation SubmissionKind = "conversation"
+)
+
+// Submission is one runtime continuation submission.
 type Submission struct {
-	Kind     string         `json:"kind,omitempty"`
+	Kind     SubmissionKind `json:"kind,omitempty"`
 	Text     string         `json:"text,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
+}
+
+// CancelStatus identifies the outcome of one cancellation request.
+type CancelStatus string
+
+const (
+	CancelStatusCancelled        CancelStatus = "cancelled"
+	CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
+)
+
+// CancelResult preserves the useful cancellation outcome without forcing
+// callers to infer it from a lossy boolean.
+type CancelResult struct {
+	Status CancelStatus `json:"status,omitempty"`
+	Err    error        `json:"-"`
+}
+
+func (r CancelResult) Cancelled() bool {
+	return r.Status == CancelStatusCancelled
 }
 
 // RunLifecycleStatus identifies one runtime run lifecycle state.
@@ -64,7 +90,7 @@ type Runner interface {
 	RunID() string
 	Events() iter.Seq2[*sdksession.Event, error]
 	Submit(Submission) error
-	Cancel() bool
+	Cancel() CancelResult
 	Close() error
 }
 

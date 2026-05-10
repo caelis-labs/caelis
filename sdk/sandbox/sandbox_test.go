@@ -218,6 +218,39 @@ func TestNormalizeConfigTreatsAutoBackendAsUnset(t *testing.T) {
 	}
 }
 
+func TestRegisterBuiltInBackendFactoryRecordsDuplicateWithoutPanic(t *testing.T) {
+	backend := Backend("test-duplicate-backend")
+	backendFactoriesMu.Lock()
+	oldFactory, hadFactory := backendFactories[backend]
+	oldErrs := append([]error(nil), backendRegistrationErrs...)
+	delete(backendFactories, backend)
+	backendRegistrationErrs = nil
+	backendFactoriesMu.Unlock()
+	t.Cleanup(func() {
+		backendFactoriesMu.Lock()
+		if hadFactory {
+			backendFactories[backend] = oldFactory
+		} else {
+			delete(backendFactories, backend)
+		}
+		backendRegistrationErrs = oldErrs
+		backendFactoriesMu.Unlock()
+	})
+
+	if err := RegisterBackendFactory(fakeBackendFactory{backend: backend}); err != nil {
+		t.Fatalf("RegisterBackendFactory() error = %v", err)
+	}
+	RegisterBuiltInBackendFactory(fakeBackendFactory{backend: backend})
+
+	err := backendRegistrationError()
+	if err == nil {
+		t.Fatal("backendRegistrationError() = nil, want duplicate registration error")
+	}
+	if !strings.Contains(err.Error(), "duplicated backend factory") {
+		t.Fatalf("backendRegistrationError() = %v, want duplicate backend factory", err)
+	}
+}
+
 func TestNewAutoBackendPrefersSandboxCandidate(t *testing.T) {
 	wantCandidates, err := candidateBackends("")
 	if err != nil {

@@ -454,8 +454,10 @@ func (r terminalBridgeRun) Events() iter.Seq2[*sdksession.Event, error] {
 }
 
 func (terminalBridgeRun) Submit(sdkruntime.Submission) error { return nil }
-func (terminalBridgeRun) Cancel() bool                       { return true }
-func (terminalBridgeRun) Close() error                       { return nil }
+func (terminalBridgeRun) Cancel() sdkruntime.CancelResult {
+	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
+}
+func (terminalBridgeRun) Close() error { return nil }
 
 type terminalBridgeStream struct{}
 

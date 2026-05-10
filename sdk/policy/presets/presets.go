@@ -2,6 +2,7 @@ package presets
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,30 +18,30 @@ const (
 	ModeAutoReview = "auto-review"
 	ModeManual     = "manual"
 
-	// Deprecated compatibility aliases. Legacy sessions and configs collapse
-	// to auto-review instead of preserving the old sandbox/approval modes.
-	ModePlan       = ModeAutoReview
-	ModeDefault    = ModeAutoReview
-	ModeFullAccess = ModeAutoReview
+	// ModeDefault is the built-in fallback policy for omitted, legacy, or
+	// otherwise unresolved local policy configuration.
+	ModeDefault = ModeAutoReview
 )
+
+func NormalizeModeName(mode string) string {
+	trimmed := strings.TrimSpace(mode)
+	switch strings.ToLower(trimmed) {
+	case "":
+		return ModeDefault
+	case "manual":
+		return ModeManual
+	case "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
+		return ModeDefault
+	default:
+		return trimmed
+	}
+}
 
 func NewRegistry() (*sdkpolicy.MemoryRegistry, error) {
 	return sdkpolicy.NewMemory(
 		AutoReviewMode(),
 		ManualMode(),
 	)
-}
-
-func PlanMode() sdkpolicy.Mode {
-	return AutoReviewMode()
-}
-
-func DefaultMode() sdkpolicy.Mode {
-	return AutoReviewMode()
-}
-
-func FullAccessMode() sdkpolicy.Mode {
-	return AutoReviewMode()
 }
 
 func AutoReviewMode() sdkpolicy.Mode {
@@ -53,18 +54,22 @@ func AutoReviewMode() sdkpolicy.Mode {
 				return allow(def), nil
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
-					return deny(err.Error()), nil
+					return policyErrorOrDeny(err)
 				}
 				return allow(readStrictConstraints(input.Options)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
-					return deny(err.Error()), nil
+					return policyErrorOrDeny(err)
 				}
 				return allow(def), nil
 			case "TASK":
 				return allow(def), nil
 			case "BASH":
-				if commandLooksDangerous(commandArg(input)) {
+				command, err := commandArg(input)
+				if err != nil {
+					return sdkpolicy.Decision{}, err
+				}
+				if commandLooksDangerous(command) {
 					return deny("dangerous command is blocked even in auto-review mode"), nil
 				}
 				req, err := parseBashSandboxRequest(input)
@@ -73,10 +78,13 @@ func AutoReviewMode() sdkpolicy.Mode {
 				}
 				switch req.SandboxPermissions {
 				case bashSandboxPermissionRequireEscalated:
-					return askEscalationApproval(input, req), nil
+					return askEscalationApproval(input, req)
 				case bashSandboxPermissionWithAdditionalPermissions:
 					reason := "additional sandbox permissions require user approval"
-					decision := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+					decision, err := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+					if err != nil {
+						return sdkpolicy.Decision{}, err
+					}
 					decision.Metadata = req.approvalMetadata(reason)
 					return decision, nil
 				}
@@ -98,18 +106,22 @@ func ManualMode() sdkpolicy.Mode {
 				return allow(def), nil
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
-					return deny(err.Error()), nil
+					return policyErrorOrDeny(err)
 				}
 				return allow(readStrictConstraints(input.Options)), nil
 			case "WRITE", "PATCH":
 				if err := ensureWritePathsWithinRoots(input); err != nil {
-					return deny(err.Error()), nil
+					return policyErrorOrDeny(err)
 				}
 				return allow(def), nil
 			case "TASK":
 				return allow(def), nil
 			case "BASH":
-				if commandLooksDangerous(commandArg(input)) {
+				command, err := commandArg(input)
+				if err != nil {
+					return sdkpolicy.Decision{}, err
+				}
+				if commandLooksDangerous(command) {
 					return deny("dangerous command is blocked even in manual mode"), nil
 				}
 				req, err := parseBashSandboxRequest(input)
@@ -118,10 +130,13 @@ func ManualMode() sdkpolicy.Mode {
 				}
 				switch req.SandboxPermissions {
 				case bashSandboxPermissionRequireEscalated:
-					return askEscalationApproval(input, req), nil
+					return askEscalationApproval(input, req)
 				case bashSandboxPermissionWithAdditionalPermissions:
 					reason := "additional sandbox permissions require user approval"
-					decision := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+					decision, err := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+					if err != nil {
+						return sdkpolicy.Decision{}, err
+					}
 					decision.Metadata = req.approvalMetadata(reason)
 					return decision, nil
 				}
@@ -147,9 +162,20 @@ func deny(reason string) sdkpolicy.Decision {
 	}
 }
 
-func askApproval(reason string, constraints sdksandbox.Constraints, input sdkpolicy.ToolContext) sdkpolicy.Decision {
+func policyErrorOrDeny(err error) (sdkpolicy.Decision, error) {
+	var decodeErr *sdkpolicy.ToolInputDecodeError
+	if errors.As(err, &decodeErr) {
+		return sdkpolicy.Decision{}, err
+	}
+	return deny(err.Error()), nil
+}
+
+func askApproval(reason string, constraints sdksandbox.Constraints, input sdkpolicy.ToolContext) (sdkpolicy.Decision, error) {
 	name := strings.TrimSpace(strings.ToUpper(input.Tool.Name))
-	call := sdkpolicy.CallArgs(input.Call)
+	call, err := sdkpolicy.CallArgs(input.Call)
+	if err != nil {
+		return sdkpolicy.Decision{}, err
+	}
 	return sdkpolicy.Decision{
 		Action:      sdkpolicy.ActionAskApproval,
 		Reason:      strings.TrimSpace(reason),
@@ -168,20 +194,23 @@ func askApproval(reason string, constraints sdksandbox.Constraints, input sdkpol
 				{ID: "reject_once", Name: "Reject once", Kind: "reject_once"},
 			},
 		},
-	}
+	}, nil
 }
 
-func askEscalationApproval(input sdkpolicy.ToolContext, req bashSandboxRequest) sdkpolicy.Decision {
+func askEscalationApproval(input sdkpolicy.ToolContext, req bashSandboxRequest) (sdkpolicy.Decision, error) {
 	reason := "host execution requires user approval"
-	decision := askApproval(reason, sdksandbox.Constraints{
+	decision, err := askApproval(reason, sdksandbox.Constraints{
 		Route:      sdksandbox.RouteHost,
 		Backend:    sdksandbox.BackendHost,
 		Permission: sdksandbox.PermissionFullAccess,
 		Isolation:  sdksandbox.IsolationHost,
 		Network:    sdksandbox.NetworkInherit,
 	}, input)
+	if err != nil {
+		return sdkpolicy.Decision{}, err
+	}
 	decision.Metadata = req.approvalMetadata(reason)
-	return decision
+	return decision, nil
 }
 
 func toolKind(name string) string {
@@ -270,30 +299,26 @@ func toolName(input sdkpolicy.ToolContext) string {
 	return strings.ToUpper(strings.TrimSpace(input.Tool.Name))
 }
 
-func ensureMarkdownOnly(input sdkpolicy.ToolContext) error {
-	for _, one := range candidatePaths(input) {
-		switch strings.ToLower(filepath.Ext(one)) {
-		case ".md", ".mdx", ".markdown":
-			continue
-		default:
-			return fmt.Errorf("plan mode only allows markdown writes, got %q", one)
-		}
-	}
-	return nil
-}
-
 func ensureReadPathsWithinRoots(input sdkpolicy.ToolContext) error {
-	if err := ensurePathsOutsideDefaultHiddenRoots(candidatePaths(input), approvedOverrideRoots(input.Options), "read"); err != nil {
+	paths, err := candidatePaths(input)
+	if err != nil {
 		return err
 	}
-	return ensurePathsWithinRoots(candidatePaths(input), readableRoots(input.Options), "read")
+	if err := ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "read"); err != nil {
+		return err
+	}
+	return ensurePathsWithinRoots(paths, readableRoots(input.Options), "read")
 }
 
 func ensureWritePathsWithinRoots(input sdkpolicy.ToolContext) error {
-	if err := ensurePathsOutsideDefaultHiddenRoots(candidatePaths(input), approvedOverrideRoots(input.Options), "write"); err != nil {
+	paths, err := candidatePaths(input)
+	if err != nil {
 		return err
 	}
-	return ensurePathsWithinRoots(candidatePaths(input), writableRoots(input.Options), "write")
+	if err := ensurePathsOutsideDefaultHiddenRoots(paths, approvedOverrideRoots(input.Options), "write"); err != nil {
+		return err
+	}
+	return ensurePathsWithinRoots(paths, writableRoots(input.Options), "write")
 }
 
 func ensurePathsWithinRoots(paths []string, roots []string, action string) error {
@@ -442,16 +467,19 @@ func normalizeTarget(value string) string {
 	return filepath.Clean(value)
 }
 
-func candidatePaths(input sdkpolicy.ToolContext) []string {
-	args := sdkpolicy.CallArgs(input.Call)
+func candidatePaths(input sdkpolicy.ToolContext) ([]string, error) {
+	args, err := sdkpolicy.CallArgs(input.Call)
+	if err != nil {
+		return nil, err
+	}
 	name := toolName(input)
 	switch name {
 	case "READ", "WRITE", "PATCH", "LIST", "SEARCH":
-		return resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot)
+		return resolvePathsAgainstWorkspace(stringValues(args["path"]), input.Options.WorkspaceRoot), nil
 	case "GLOB":
-		return globRoots(stringValues(args["pattern"]), input.Options.WorkspaceRoot)
+		return globRoots(stringValues(args["pattern"]), input.Options.WorkspaceRoot), nil
 	default:
-		return nil
+		return nil, nil
 	}
 }
 
@@ -534,10 +562,13 @@ func stringValues(value any) []string {
 	return nil
 }
 
-func commandArg(input sdkpolicy.ToolContext) string {
-	args := sdkpolicy.CallArgs(input.Call)
+func commandArg(input sdkpolicy.ToolContext) (string, error) {
+	args, err := sdkpolicy.CallArgs(input.Call)
+	if err != nil {
+		return "", err
+	}
 	command, _ := args["command"].(string)
-	return strings.TrimSpace(command)
+	return strings.TrimSpace(command), nil
 }
 
 func commandLooksDangerous(command string) bool {

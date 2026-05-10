@@ -195,7 +195,9 @@ func (r *Runtime) executeACPControllerTurn(
 		return
 	}
 	if turnResult.Handle != nil {
-		handle.setCancelHook(turnResult.Handle.Cancel)
+		handle.setCancelHook(func() error {
+			return turnResult.Handle.Cancel().Err
+		})
 		defer turnResult.Handle.Close()
 		accumulator := acpNarrativeAccumulator{}
 		for event, seqErr := range turnResult.Handle.Events() {
@@ -674,7 +676,9 @@ func (r *Runtime) executeACPParticipantTurn(
 	if turnResult.Handle == nil {
 		return
 	}
-	handle.setCancelHook(turnResult.Handle.Cancel)
+	handle.setCancelHook(func() error {
+		return turnResult.Handle.Cancel().Err
+	})
 	defer turnResult.Handle.Close()
 	accumulator := acpNarrativeAccumulator{}
 	for event, seqErr := range turnResult.Handle.Events() {

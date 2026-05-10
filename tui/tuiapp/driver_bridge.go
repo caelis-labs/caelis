@@ -1428,7 +1428,7 @@ func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send
 		sendNotice(send, "usage: /approval [auto-review|manual]")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	status, err := driver.SetSandboxMode(ctx, mode)
+	status, err := driver.SetSessionMode(ctx, mode)
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("approval", err)}
 	}
@@ -2055,12 +2055,9 @@ func modeToggleHint(status tuidriver.StatusSnapshot) string {
 	switch strings.ToLower(strings.TrimSpace(status.SessionMode)) {
 	case "manual":
 		return "manual approval mode enabled"
-	case "auto-review", "default", "plan", "full_access":
+	case "auto-review":
 		return "auto-review approval mode enabled"
 	default:
-		if strings.EqualFold(label, "default") || strings.EqualFold(label, "plan") || strings.EqualFold(label, "full_access") {
-			return "auto-review approval mode enabled"
-		}
 		return label + " mode enabled"
 	}
 }

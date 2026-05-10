@@ -110,9 +110,25 @@ type ParticipantPromptRequest struct {
 	ApprovalRequester ApprovalRequester      `json:"-"`
 }
 
+type CancelStatus string
+
+const (
+	CancelStatusCancelled        CancelStatus = "cancelled"
+	CancelStatusAlreadyCancelled CancelStatus = "already_cancelled"
+)
+
+type CancelResult struct {
+	Status CancelStatus `json:"status,omitempty"`
+	Err    error        `json:"-"`
+}
+
+func (r CancelResult) Cancelled() bool {
+	return r.Status == CancelStatusCancelled
+}
+
 type TurnHandle interface {
 	Events() iter.Seq2[*sdksession.Event, error]
-	Cancel() bool
+	Cancel() CancelResult
 	Close() error
 }
 

@@ -969,7 +969,7 @@ func (d *GatewayDriver) SetSandboxBackend(ctx context.Context, backend string) (
 	return d.Status(ctx)
 }
 
-func (d *GatewayDriver) SetSandboxMode(ctx context.Context, mode string) (StatusSnapshot, error) {
+func (d *GatewayDriver) SetSessionMode(ctx context.Context, mode string) (StatusSnapshot, error) {
 	session, err := d.ensureSession(ctx)
 	if err != nil {
 		return StatusSnapshot{}, err
@@ -2198,8 +2198,8 @@ func (t gatewayTurn) Events() <-chan gateway.EventEnvelope {
 func (t gatewayTurn) Submit(ctx context.Context, req gateway.SubmitRequest) error {
 	return t.handle.Submit(ctx, req)
 }
-func (t gatewayTurn) Cancel() bool { return t.handle.Cancel() }
-func (t gatewayTurn) Close() error { return t.handle.Close() }
+func (t gatewayTurn) Cancel() gateway.CancelResult { return t.handle.Cancel() }
+func (t gatewayTurn) Close() error                 { return t.handle.Close() }
 
 func defaultSlashArgCandidates(command string) []SlashArgCandidate {
 	switch command {

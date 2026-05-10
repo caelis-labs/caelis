@@ -26,9 +26,10 @@ type Config struct {
 }
 
 type Manager struct {
-	registry   *sdksubagentacp.Registry
-	clientInfo *sdkacpclient.Implementation
-	clock      func() time.Time
+	registry    *sdksubagentacp.Registry
+	clientInfo  *sdkacpclient.Implementation
+	clock       func() time.Time
+	startClient clientStarter
 
 	counter atomic.Uint64
 
@@ -36,6 +37,15 @@ type Manager struct {
 	controllers  map[string]*controllerRun
 	participants map[string]*participantRun
 }
+
+type clientStarter func(
+	ctx context.Context,
+	cwd string,
+	cfg sdksubagentacp.AgentConfig,
+	resumeRemoteSessionID string,
+	onUpdate func(sdkacpclient.UpdateEnvelope),
+	onPermission func(context.Context, sdkacpclient.RequestPermissionRequest) (sdkacpclient.RequestPermissionResponse, error),
+) (*sdkacpclient.Client, string, controllerClientState, error)
 
 type controllerRun struct {
 	parentSessionID       string
@@ -101,13 +111,15 @@ func NewManager(cfg Config) (*Manager, error) {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &Manager{
+	manager := &Manager{
 		registry:     cfg.Registry,
 		clientInfo:   cfg.ClientInfo,
 		clock:        clock,
 		controllers:  map[string]*controllerRun{},
 		participants: map[string]*participantRun{},
-	}, nil
+	}
+	manager.startClient = manager.startACPClient
+	return manager, nil
 }
 
 func (m *Manager) Activate(ctx context.Context, req sdkcontroller.HandoffRequest) (sdksession.ControllerBinding, error) {
@@ -413,7 +425,7 @@ func (m *Manager) startParticipant(
 	return run, nil
 }
 
-func (m *Manager) startClient(
+func (m *Manager) startACPClient(
 	ctx context.Context,
 	cwd string,
 	cfg sdksubagentacp.AgentConfig,
@@ -1017,17 +1029,17 @@ func (h *turnHandle) Events() iter.Seq2[*sdksession.Event, error] {
 	}
 }
 
-func (h *turnHandle) Cancel() bool {
+func (h *turnHandle) Cancel() sdkcontroller.CancelResult {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.cancelled {
-		return false
+		return sdkcontroller.CancelResult{Status: sdkcontroller.CancelStatusAlreadyCancelled}
 	}
 	h.cancelled = true
 	if h.cancelFn != nil {
 		h.cancelFn()
 	}
-	return true
+	return sdkcontroller.CancelResult{Status: sdkcontroller.CancelStatusCancelled}
 }
 
 func (h *turnHandle) Close() error { return nil }

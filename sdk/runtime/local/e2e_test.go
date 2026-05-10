@@ -1357,7 +1357,7 @@ func TestRuntimeAsyncBashFileE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: "full_access",
+		DefaultPolicyMode: "auto-review",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1471,7 +1471,7 @@ func TestRuntimeSpawnACPSubagentFileE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: "full_access",
+		DefaultPolicyMode: "auto-review",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1677,7 +1677,7 @@ func TestRuntimeSpawnACPSubagentFullAccessAutoApprovesE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: "full_access",
+		DefaultPolicyMode: "auto-review",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -1753,7 +1753,7 @@ func TestRuntimeSpawnSelfDisablesNestedSpawnE2E(t *testing.T) {
 		AgentFactory: chat.Factory{
 			SystemPrompt: "Use tools when necessary.",
 		},
-		DefaultPolicyMode: "full_access",
+		DefaultPolicyMode: "auto-review",
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
