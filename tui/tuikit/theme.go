@@ -1132,7 +1132,7 @@ func (t Theme) ToolOutputStyle() lipgloss.Style {
 
 // UserStyle renders user messages in a subtle chat bubble-like background.
 func (t Theme) UserStyle() lipgloss.Style {
-	return fgStyle(t.UserFg).Bold(true)
+	return withBg(fgStyle(t.UserFg).Bold(true), t.UserBg)
 }
 
 // UserPrefixStyle renders the leading "> " marker for user messages.

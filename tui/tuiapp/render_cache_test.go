@@ -36,11 +36,11 @@ func TestViewportRhythmAddsDisplayOnlyGapsWithoutSplittingToolRuns(t *testing.T)
 	}
 	assertViewportCacheLengthsMatch(t, m)
 
-	userIdx := indexPlainLineContaining(m.viewportPlainLines, "> review this rendering")
-	answerIdx := indexPlainLineContaining(m.viewportPlainLines, "* I will inspect")
+	userIdx := indexPlainLineContaining(m.viewportPlainLines, "▌ review this rendering")
+	answerIdx := indexPlainLineContaining(m.viewportPlainLines, "· I will inspect")
 	readStartIdx := indexPlainLineContaining(m.viewportPlainLines, "▸ READ")
 	readDoneIdx := indexPlainLineContaining(m.viewportPlainLines, "✓ READ")
-	followupIdx := indexPlainLineContaining(m.viewportPlainLines, "* The tool output")
+	followupIdx := indexPlainLineContaining(m.viewportPlainLines, "· The tool output")
 	for label, idx := range map[string]int{
 		"user":       userIdx,
 		"answer":     answerIdx,

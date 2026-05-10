@@ -12,9 +12,9 @@ type LineStyle int
 
 const (
 	LineStyleDefault    LineStyle = iota
-	LineStyleAssistant            // "* " prefix
-	LineStyleReasoning            // "│ " prefix
-	LineStyleUser                 // "> " prefix
+	LineStyleAssistant            // "· " prefix
+	LineStyleReasoning            // "› " prefix
+	LineStyleUser                 // "▌ " prefix
 	LineStyleTool                 // "▸" / "✓" / "? " prefix
 	LineStyleWarn                 // "warn:" prefix
 	LineStyleError                // "error:" prefix
@@ -52,10 +52,16 @@ func DetectLineStyleWithContext(line string, prevStyle LineStyle) LineStyle {
 		return LineStyleWarn
 	case strings.HasPrefix(trimmed, "note:"):
 		return LineStyleNote
+	case strings.HasPrefix(trimmed, "· "):
+		return LineStyleAssistant
 	case strings.HasPrefix(trimmed, "* "):
 		return LineStyleAssistant
+	case strings.HasPrefix(trimmed, "› "):
+		return LineStyleReasoning
 	case strings.HasPrefix(trimmed, "│ ") || strings.HasPrefix(trimmed, "│"):
 		return LineStyleReasoning
+	case strings.HasPrefix(trimmed, "▌ "):
+		return LineStyleUser
 	case strings.HasPrefix(trimmed, "> "):
 		return LineStyleUser
 	case strings.HasPrefix(trimmed, "▸"):
@@ -127,7 +133,7 @@ func ColorizeLogLine(line string, style LineStyle, theme Theme) string {
 	case LineStyleAssistant:
 		return colorizeAssistantLine(line, theme)
 	case LineStyleReasoning:
-		return theme.ReasoningStyle().Render(LinkifyText(line, theme.LinkStyle()))
+		return colorizeReasoningLine(line, theme)
 	case LineStyleUser:
 		return colorizeUserLine(line, theme)
 	case LineStyleTool:
@@ -159,6 +165,10 @@ func ColorizeLogLine(line string, style LineStyle, theme Theme) string {
 }
 
 func colorizeAssistantLine(line string, theme Theme) string {
+	if strings.HasPrefix(line, "· ") {
+		prefix := theme.AssistantStyle().Render("· ")
+		return prefix + theme.TextStyle().Render(LinkifyText(line[len("· "):], theme.LinkStyle()))
+	}
 	if strings.HasPrefix(line, "* ") {
 		prefix := theme.AssistantStyle().Render("* ")
 		return prefix + theme.TextStyle().Render(LinkifyText(line[len("* "):], theme.LinkStyle()))
@@ -166,13 +176,27 @@ func colorizeAssistantLine(line string, theme Theme) string {
 	return theme.TextStyle().Render(LinkifyText(line, theme.LinkStyle()))
 }
 
+func colorizeReasoningLine(line string, theme Theme) string {
+	if strings.HasPrefix(line, "› ") {
+		return theme.ReasoningStyle().Render("› ") + strings.TrimPrefix(line, "› ")
+	}
+	if strings.HasPrefix(line, "│ ") {
+		return theme.ReasoningStyle().Render("│ ") + strings.TrimPrefix(line, "│ ")
+	}
+	return line
+}
+
 func colorizeUserLine(line string, theme Theme) string {
-	content := strings.TrimPrefix(line, "> ")
+	prefix := "> "
+	if strings.HasPrefix(line, "▌ ") {
+		prefix = "▌ "
+	}
+	content := strings.TrimPrefix(line, prefix)
 	if content == "" {
-		return theme.UserPrefixStyle().Render("> ")
+		return theme.UserPrefixStyle().Render(prefix)
 	}
 	styledBody := styleUserMentions(LinkifyText(content, theme.LinkStyle()), theme)
-	return theme.UserPrefixStyle().Render("> ") + styledBody
+	return theme.UserPrefixStyle().Render(prefix) + styledBody
 }
 
 func colorizeWarnLine(line string, theme Theme) string {

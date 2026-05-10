@@ -88,6 +88,9 @@ func (b *activeNarrativeBuffer) RenderRows(blockID, rolePrefix string, roleStyle
 
 func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
 	raw := b.Text()
+	if roleStyle == tuikit.LineStyleReasoning {
+		return renderPlainReasoningRows(blockID, raw, rolePrefix, width, theme)
+	}
 	if strings.TrimSpace(b.stablePrefixRaw) == "" {
 		return renderActiveNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, width, theme)
 	}

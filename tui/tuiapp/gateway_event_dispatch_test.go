@@ -487,7 +487,7 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 		t.Fatalf("rendered rows = %q, want exploration reasoning hidden while collapsed", joined)
 	}
 	exploreTailIdx := indexOfRowContaining(plain, "List tuiapp")
-	patchReasonIdx := indexOfRowContaining(plain, "> Let me patch the hook implementation next.")
+	patchReasonIdx := indexOfRowContaining(plain, "› Let me patch the hook implementation next.")
 	patchIdx := indexOfRowContaining(plain, "• Patched hooks.go")
 	if exploreTailIdx < 0 || patchReasonIdx < 0 || patchIdx < 0 {
 		t.Fatalf("rendered rows = %#v, want exploration summary, patch reasoning, and patch tool", plain)
@@ -1291,7 +1291,7 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "· 两个子任务已启动") ||
+	if !strings.Contains(joined, "› 两个子任务已启动") ||
 		!strings.Contains(joined, "• Tasks") ||
 		!strings.Contains(joined, `  └ Write "Alice"`) ||
 		!strings.Contains(joined, `    Wait ella 5s`) ||
@@ -1309,7 +1309,7 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	if strings.Contains(joined, `  └ 两个子任务已启动`) {
 		t.Fatalf("expanded live rows = %q, should keep live reasoning outside the TASK group", joined)
 	}
-	if !strings.Contains(joined, `· 两个子任务已启动`) ||
+	if !strings.Contains(joined, `› 两个子任务已启动`) ||
 		!strings.Contains(joined, `  └ Write "Alice"`) ||
 		!strings.Contains(joined, `    Wait ella 5s`) {
 		t.Fatalf("expanded live rows = %q, want visible reasoning and expanded controls", joined)
@@ -1320,7 +1320,7 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	if !strings.Contains(joined, `  └ 两个子任务已启动`) ||
 		!strings.Contains(joined, `    Write "Alice"`) ||
 		!strings.Contains(joined, `    Wait ella 5s`) ||
-		!strings.Contains(joined, `· 继续处理`) {
+		!strings.Contains(joined, `› 继续处理`) {
 		t.Fatalf("settled rows = %q, want previous TASK step settled before new reasoning", joined)
 	}
 }
@@ -1498,14 +1498,17 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	if !strings.Contains(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside") {
 		t.Fatalf("rendered rows = %q, want request_permissions standard header", plain)
 	}
-	if !strings.Contains(plain, reviewText) {
-		t.Fatalf("rendered rows = %q, want approval review result at transcript location", plain)
+	if !strings.Contains(plain, "• Automatic approval review approved (risk: low, authorization: high)") {
+		t.Fatalf("rendered rows = %q, want compact approval review header", plain)
+	}
+	if !strings.Contains(plain, "  └ user requested it.") {
+		t.Fatalf("rendered rows = %q, want compact approval review rationale", plain)
 	}
 	if strings.Contains(plain, "⚠") {
 		t.Fatalf("rendered rows = %q, should not use warning prefix for approval review", plain)
 	}
 	toolIdx := strings.Index(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside")
-	reviewIdx := strings.Index(plain, reviewText)
+	reviewIdx := strings.Index(plain, "• Automatic approval review approved")
 	assistantIdx := strings.Index(plain, "approval-dependent work finished")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
 		t.Fatalf("rendered rows = %q, want approval review next to tool before later assistant text", plain)
@@ -1591,15 +1594,17 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 	}
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	plain := strings.Join(renderedPlainRows(rows), "\n")
-	reviewText := "Automatic approval review denied (risk: high, authorization: low): not narrow enough"
-	if !strings.Contains(plain, reviewText) {
-		t.Fatalf("rendered rows = %q, want denied approval review", plain)
+	if !strings.Contains(plain, "• Automatic approval review denied (risk: high, authorization: low)") {
+		t.Fatalf("rendered rows = %q, want compact denied approval review header", plain)
+	}
+	if !strings.Contains(plain, "  └ not narrow enough") {
+		t.Fatalf("rendered rows = %q, want compact denied approval rationale", plain)
 	}
 	if strings.Contains(plain, "⚠") {
 		t.Fatalf("rendered rows = %q, should not use warning prefix for denied review", plain)
 	}
 	toolIdx := strings.Index(plain, "request_permissions write /tmp/outside")
-	reviewIdx := strings.Index(plain, reviewText)
+	reviewIdx := strings.Index(plain, "• Automatic approval review denied")
 	assistantIdx := strings.Index(plain, "trying a safer path")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
 		t.Fatalf("rendered rows = %q, want denied review between tool and later assistant text", plain)
@@ -2424,7 +2429,7 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	for _, want := range []string{"• Updated Plan", "  └ ✔ Inspect files", "    ▸ Run validation"} {
+	for _, want := range []string{"• Updated Plan", "  └ ✔ Inspect files", "    □ Run validation"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
 		}
@@ -2734,10 +2739,10 @@ func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "> thinking through the plan") {
+	if !strings.Contains(joined, "› thinking through the plan") {
 		t.Fatalf("rendered rows = %q, want folded reasoning preview", joined)
 	}
-	if strings.Contains(joined, "· thinking through the plan") {
+	if strings.Contains(joined, "  thinking through the plan") {
 		t.Fatalf("rendered rows = %q, should collapse reasoning body by default", joined)
 	}
 	if !strings.Contains(joined, "final answer") {
@@ -2748,7 +2753,7 @@ func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 	}
 	rows = block.Render(BlockRenderContext{Width: 80, TermWidth: 80, Theme: m.theme})
 	joined = strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "∨ thinking through the plan") {
+	if !strings.Contains(joined, "› thinking through the plan") {
 		t.Fatalf("expanded rows = %q, want expanded reasoning preview", joined)
 	}
 }
@@ -2814,13 +2819,13 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 	rows := block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "> thinking through the command choice") {
+	if !strings.Contains(joined, "› thinking through the command choice") {
 		t.Fatalf("rendered rows = %q, want folded reasoning preview", joined)
 	}
 	if strings.Contains(joined, "Thought a few seconds") {
 		t.Fatalf("rendered rows = %q, should not show reasoning duration", joined)
 	}
-	reasonIdx := indexOfRowContaining(plain, "> thinking through the command choice")
+	reasonIdx := indexOfRowContaining(plain, "› thinking through the command choice")
 	bashIdx := indexOfRowContaining(plain, "• Ran go test ./tui/...")
 	if reasonIdx < 0 || bashIdx < 0 {
 		t.Fatalf("rendered rows = %#v, want folded reasoning and attention tool", plain)
@@ -2834,7 +2839,7 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 	}
 	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	joined = strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "∨ thinking through the command choice") {
+	if !strings.Contains(joined, "› thinking through the command choice") {
 		t.Fatalf("expanded rows = %q, want expanded reasoning preview", joined)
 	}
 	if strings.Count(joined, "thinking through the command choice") != 1 {
@@ -2896,7 +2901,7 @@ func TestGatewayExpandedReasoningReplacesFoldedPreviewInPlace(t *testing.T) {
 	}
 	rows := block.Render(BlockRenderContext{Width: 90, TermWidth: 90, Theme: model.theme})
 	plain := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(plain, "∨ Now let me verify the DDL matches every field in the entity.") {
+	if !strings.Contains(plain, "› Now let me verify the DDL matches every field in the entity.") {
 		t.Fatalf("expanded rows = %q, want first reasoning row to replace folded preview", plain)
 	}
 	if strings.Contains(plain, "\n· Now let me verify the DDL matches every field in the entity.") {
@@ -2919,13 +2924,13 @@ func TestConsecutiveReasoningEventsFoldAsOnePreviewBeforeAttentionTool(t *testin
 	rows := block.Render(BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme})
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, "> First I need to inspect the repository. Then I will patch the failing field references.") {
+	if !strings.Contains(joined, "› First I need to inspect the repository. Then I will patch the failing field references.") {
 		t.Fatalf("rendered rows = %q, want consecutive reasoning folded into one preview", joined)
 	}
-	if strings.Contains(joined, "· First I need") || strings.Contains(joined, "· Then I will") {
+	if strings.Contains(joined, "\n› First I need") || strings.Contains(joined, "\n› Then I will") {
 		t.Fatalf("rendered rows = %q, consecutive reasoning should not remain expanded before PATCH", joined)
 	}
-	if hasBlankRowBetween(plain, indexOfRowContaining(plain, "> First I need"), indexOfRowContaining(plain, "• Patched gm_license.go")) {
+	if hasBlankRowBetween(plain, indexOfRowContaining(plain, "› First I need"), indexOfRowContaining(plain, "• Patched gm_license.go")) {
 		t.Fatalf("rendered rows = %#v, folded reasoning should attach to PATCH", plain)
 	}
 }
@@ -3005,7 +3010,7 @@ func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 	}
 	rows := block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "> first last") {
+	if !strings.Contains(joined, "› first last") {
 		t.Fatalf("rendered rows = %q, want folded reasoning preview", joined)
 	}
 	if strings.Contains(joined, "Thought") || strings.Contains(joined, "1.5s") {

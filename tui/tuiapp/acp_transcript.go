@@ -341,15 +341,12 @@ func collectConsecutiveReasoning(events []SubagentEvent, idx int) (string, int) 
 }
 
 func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, width int, ctx BlockRenderContext, expanded bool) RenderedRow {
-	arrow := ">"
-	if expanded {
-		arrow = "∨"
-	}
+	marker := "›"
 	preview := reasoningPreviewText(ev.Text, width)
-	plain := strings.TrimSpace(arrow + " " + preview)
-	styled := ctx.Theme.ToolNameStyle().Bold(true).Render(arrow)
+	plain := strings.TrimSpace(marker + " " + preview)
+	styled := ctx.Theme.ReasoningStyle().Render(marker)
 	if preview != "" {
-		styled += ctx.Theme.ReasoningStyle().Render(" " + preview)
+		styled += " " + preview
 	}
 	return StyledPlainClickableRow(blockID, plain, styled, acpReasoningClickToken(reasoningFoldKey(idx)))
 }
@@ -359,7 +356,7 @@ func reasoningPreviewText(text string, width int) string {
 	if text == "" {
 		return ""
 	}
-	budget := maxInt(12, width-displayColumns("> "))
+	budget := maxInt(12, width-displayColumns("› "))
 	return strings.TrimSpace(truncateReasoningPreviewMiddle(text, budget))
 }
 
@@ -377,12 +374,12 @@ func renderACPReasoningExpandedRows(blockID string, text string, idx int, width 
 	if len(rows) == 0 {
 		return rows
 	}
-	firstPlain := strings.TrimPrefix(rows[0].Plain, "· ")
+	firstPlain := strings.TrimPrefix(rows[0].Plain, "› ")
 	firstPlain = strings.TrimPrefix(firstPlain, "  ")
-	plain := strings.TrimSpace("∨ " + firstPlain)
-	styled := ctx.Theme.ToolNameStyle().Bold(true).Render("∨")
+	plain := strings.TrimSpace("› " + firstPlain)
+	styled := ctx.Theme.ReasoningStyle().Render("›")
 	if firstPlain != "" {
-		styled += ctx.Theme.ReasoningStyle().Render(" " + firstPlain)
+		styled += " " + firstPlain
 	}
 	rows[0] = StyledPlainClickableRow(blockID, plain, styled, acpReasoningClickToken(reasoningFoldKey(idx)))
 	return rows
@@ -1308,7 +1305,6 @@ func renderACPPlanRows(blockID string, ev SubagentEvent, width int, ctx BlockRen
 			iconStyle = ctx.Theme.NoteStyle()
 			textStyle = ctx.Theme.NoteStyle()
 		case "in_progress", "running":
-			icon = "▸"
 			iconStyle = lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true)
 			textStyle = lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true)
 		case "failed":
@@ -2433,13 +2429,7 @@ func isDiffPanelText(text string) bool {
 }
 
 func renderACPDiffPanelRows(blockID string, text string, width int, ctx BlockRenderContext) []RenderedRow {
-	bodyWidth := maxInt(1, width-2)
-	lines := renderACPToolPanelBody(text, bodyWidth, ctx, false)
-	rows := make([]RenderedRow, 0, len(lines))
-	for _, line := range lines {
-		rows = append(rows, StyledPlainRow(blockID, ansi.Strip(line), line))
-	}
-	return rows
+	return renderNumberedACPDiffPanelRows(blockID, text, width, ctx)
 }
 
 func renderACPToolHeaderRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext, expanded bool) []RenderedRow {
@@ -2696,25 +2686,23 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	if display.Rationale == "" {
 		return []RenderedRow{StyledPlainRow(blockID, prefixPlain, prefixStyled)}
 	}
-	separatorPlain := ": "
-	separatorStyled := ctx.Theme.TranscriptMetaStyle().Render(separatorPlain)
-	bodyWidth := maxInt(1, width-displayColumns(prefixPlain+separatorPlain))
+	bodyPrefix := "  └ "
+	bodyContinuation := "    "
+	bodyWidth := maxInt(1, width-displayColumns(bodyPrefix))
 	segments := wrapToolOutputText(display.Rationale, bodyWidth)
 	if len(segments) == 0 {
 		segments = []string{display.Rationale}
 	}
 	bodyStyle := ctx.Theme.TranscriptMetaStyle()
-	rows := make([]RenderedRow, 0, len(segments))
+	rows := make([]RenderedRow, 0, len(segments)+1)
+	rows = append(rows, StyledPlainRow(blockID, prefixPlain, prefixStyled))
 	for i, segment := range segments {
+		linePrefix := bodyContinuation
 		if i == 0 {
-			plain := prefixPlain + separatorPlain + segment
-			styled := prefixStyled + separatorStyled + bodyStyle.Render(segment)
-			rows = append(rows, StyledPlainRow(blockID, plain, styled))
-			continue
+			linePrefix = bodyPrefix
 		}
-		prefix := strings.Repeat(" ", displayColumns(prefixPlain+separatorPlain))
-		plain := prefix + segment
-		styled := ctx.Theme.TranscriptMetaStyle().Render(prefix) + bodyStyle.Render(segment)
+		plain := linePrefix + segment
+		styled := ctx.Theme.TranscriptMetaStyle().Render(linePrefix) + bodyStyle.Render(segment)
 		rows = append(rows, StyledPlainRow(blockID, plain, styled))
 	}
 	return rows
@@ -2740,8 +2728,8 @@ func approvalReviewDisplayParts(ev SubagentEvent) approvalReviewDisplay {
 
 func approvalReviewPrefix(display approvalReviewDisplay, ctx BlockRenderContext) (string, string) {
 	status := strings.TrimSpace(display.Status)
-	plain := "Automatic approval review"
-	styled := ctx.Theme.TranscriptMetaStyle().Render(plain)
+	plain := "• Automatic approval review"
+	styled := ctx.Theme.ToolStyle().Render("•") + " " + ctx.Theme.TranscriptMetaStyle().Render("Automatic approval review")
 	if status != "" {
 		plain += " " + status
 		styled += " " + approvalReviewStatusStyle(ctx, status).Render(status)

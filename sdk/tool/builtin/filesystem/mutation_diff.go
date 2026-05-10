@@ -258,40 +258,92 @@ func buildLargeMutationDiffHunk(oldLines, newLines []string, prefix, suffix, con
 	if lineBudget <= 0 {
 		return nil, true
 	}
-	truncated := false
-	addLine := func(line string) bool {
-		if len(hunk.Lines) >= lineBudget {
-			truncated = true
-			return false
-		}
-		hunk.Lines = append(hunk.Lines, line)
-		return true
-	}
-
-	for idx := oldStart; idx < prefix; idx++ {
-		if !addLine(" " + oldLines[idx]) {
-			return []MutationDiffHunk{hunk}, true
-		}
-	}
-	for idx := prefix; idx < oldCoreEnd; idx++ {
-		if !addLine("-" + oldLines[idx]) {
-			return []MutationDiffHunk{hunk}, true
-		}
-	}
-	for idx := prefix; idx < newCoreEnd; idx++ {
-		if !addLine("+" + newLines[idx]) {
-			return []MutationDiffHunk{hunk}, true
-		}
-	}
-	for oldIdx, newIdx := oldCoreEnd, newCoreEnd; oldIdx < oldEnd && newIdx < newEnd; oldIdx, newIdx = oldIdx+1, newIdx+1 {
-		if !addLine(" " + oldLines[oldIdx]) {
-			return []MutationDiffHunk{hunk}, true
-		}
-	}
+	truncated := appendLargeMutationDiffLines(&hunk, oldLines, newLines, oldStart, prefix, oldCoreEnd, newCoreEnd, oldEnd, newEnd, lineBudget)
 	if len(hunk.Lines) == 0 {
 		return nil, true
 	}
 	return []MutationDiffHunk{hunk}, truncated
+}
+
+func appendLargeMutationDiffLines(hunk *MutationDiffHunk, oldLines, newLines []string, oldStart, prefix, oldCoreEnd, newCoreEnd, oldEnd, newEnd, lineBudget int) bool {
+	prefixContext := maxInt(0, prefix-oldStart)
+	suffixContext := maxInt(0, minInt(oldEnd-oldCoreEnd, newEnd-newCoreEnd))
+	removed := maxInt(0, oldCoreEnd-prefix)
+	added := maxInt(0, newCoreEnd-prefix)
+	total := prefixContext + removed + added + suffixContext
+	if total <= lineBudget {
+		appendDiffContextLines(hunk, oldLines, oldStart, prefix)
+		appendDiffChangedLines(hunk, "-", oldLines, prefix, oldCoreEnd)
+		appendDiffChangedLines(hunk, "+", newLines, prefix, newCoreEnd)
+		appendDiffContextLines(hunk, oldLines, oldCoreEnd, oldEnd)
+		return false
+	}
+
+	truncated := true
+	prefixBudget := minInt(prefixContext, lineBudget)
+	suffixBudget := 0
+	if remaining := lineBudget - prefixBudget; remaining > 0 {
+		suffixBudget = minInt(suffixContext, remaining)
+	}
+	changedBudget := lineBudget - prefixBudget - suffixBudget
+	if changedBudget <= 0 && removed+added > 0 {
+		shift := minInt(prefixBudget+suffixBudget, removed+added)
+		changedBudget += shift
+		if suffixBudget >= shift {
+			suffixBudget -= shift
+		} else {
+			shift -= suffixBudget
+			suffixBudget = 0
+			prefixBudget = maxInt(0, prefixBudget-shift)
+		}
+	}
+	removedBudget, addedBudget := splitChangedDiffBudget(removed, added, changedBudget)
+
+	appendDiffContextLines(hunk, oldLines, oldStart, oldStart+prefixBudget)
+	appendDiffChangedLines(hunk, "-", oldLines, prefix, prefix+removedBudget)
+	appendDiffChangedLines(hunk, "+", newLines, prefix, prefix+addedBudget)
+	appendDiffContextLines(hunk, oldLines, oldCoreEnd, oldCoreEnd+suffixBudget)
+	return truncated
+}
+
+func splitChangedDiffBudget(removed, added, budget int) (int, int) {
+	if budget <= 0 {
+		return 0, 0
+	}
+	if removed <= 0 {
+		return 0, minInt(added, budget)
+	}
+	if added <= 0 {
+		return minInt(removed, budget), 0
+	}
+	if budget == 1 {
+		return 1, 0
+	}
+	removedBudget := minInt(removed, maxInt(1, budget/2))
+	addedBudget := minInt(added, maxInt(1, budget-removedBudget))
+	if unused := budget - removedBudget - addedBudget; unused > 0 {
+		if removedBudget < removed {
+			extra := minInt(unused, removed-removedBudget)
+			removedBudget += extra
+			unused -= extra
+		}
+		if unused > 0 && addedBudget < added {
+			addedBudget += minInt(unused, added-addedBudget)
+		}
+	}
+	return removedBudget, addedBudget
+}
+
+func appendDiffContextLines(hunk *MutationDiffHunk, lines []string, start, end int) {
+	for idx := start; idx < end && idx < len(lines); idx++ {
+		hunk.Lines = append(hunk.Lines, " "+lines[idx])
+	}
+}
+
+func appendDiffChangedLines(hunk *MutationDiffHunk, prefix string, lines []string, start, end int) {
+	for idx := start; idx < end && idx < len(lines); idx++ {
+		hunk.Lines = append(hunk.Lines, prefix+lines[idx])
+	}
 }
 
 func hunkStartLine(startIndex, lineCount int) int {

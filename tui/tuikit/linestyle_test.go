@@ -10,8 +10,11 @@ func TestDetectLineStyle(t *testing.T) {
 		line string
 		want LineStyle
 	}{
+		{"· Hello world", LineStyleAssistant},
 		{"* Hello world", LineStyleAssistant},
+		{"› thinking about it", LineStyleReasoning},
 		{"│ thinking about it", LineStyleReasoning},
+		{"▌ user input", LineStyleUser},
 		{"> user input", LineStyleUser},
 		{"▸ tool_call {}", LineStyleTool},
 		{"▾ tool_call {expanded}", LineStyleTool},
@@ -55,13 +58,13 @@ func TestColorizeLogLine(t *testing.T) {
 
 func TestColorizeAssistantPrefix(t *testing.T) {
 	theme := DefaultTheme()
-	result := ColorizeLogLine("* hello", LineStyleAssistant, theme)
+	result := ColorizeLogLine("· hello", LineStyleAssistant, theme)
 	// In non-TTY (CI) environments lipgloss may strip colors; just ensure
 	// the textual content is preserved.
 	if result == "" {
 		t.Error("expected non-empty output")
 	}
-	if len(result) < len("* hello") {
+	if len(result) < len("· hello") {
 		t.Errorf("expected at least original length, got %d", len(result))
 	}
 }
@@ -95,7 +98,7 @@ func TestColorizeToolFailure(t *testing.T) {
 
 func TestColorizeUserLine_PreservesMentionToken(t *testing.T) {
 	theme := DefaultTheme()
-	result := ColorizeLogLine("> please check @deploy/build.sh, now", LineStyleUser, theme)
+	result := ColorizeLogLine("▌ please check @deploy/build.sh, now", LineStyleUser, theme)
 	if result == "" {
 		t.Fatal("expected non-empty user line")
 	}
@@ -145,7 +148,7 @@ func TestCountLeadingSpaces(t *testing.T) {
 
 func TestBlockContinuationFromReasoning(t *testing.T) {
 	// First line detected as reasoning.
-	first := DetectLineStyleWithContext("│ thinking about it", LineStyleDefault)
+	first := DetectLineStyleWithContext("› thinking about it", LineStyleDefault)
 	if first != LineStyleReasoning {
 		t.Fatalf("expected reasoning, got %d", first)
 	}
@@ -157,7 +160,7 @@ func TestBlockContinuationFromReasoning(t *testing.T) {
 }
 
 func TestBlockContinuationFromAssistant(t *testing.T) {
-	first := DetectLineStyleWithContext("* hello world", LineStyleDefault)
+	first := DetectLineStyleWithContext("· hello world", LineStyleDefault)
 	if first != LineStyleAssistant {
 		t.Fatalf("expected assistant, got %d", first)
 	}

@@ -366,9 +366,6 @@ func buildNarrativeRows(raw string) ([]NarrativeLine, []string) {
 // ---------------------------------------------------------------------------
 
 func narrativeBodyStyle(roleStyle tuikit.LineStyle, theme tuikit.Theme) lipgloss.Style {
-	if roleStyle == tuikit.LineStyleReasoning {
-		return theme.ReasoningStyle()
-	}
 	return theme.TextStyle()
 }
 

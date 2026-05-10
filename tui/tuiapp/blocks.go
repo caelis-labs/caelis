@@ -65,7 +65,8 @@ func NewUserNarrativeBlock(text string) *UserNarrativeBlock {
 func (b *UserNarrativeBlock) BlockID() string { return b.id }
 func (b *UserNarrativeBlock) Kind() BlockKind { return BlockTranscript }
 func (b *UserNarrativeBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	return b.renderCache.renderNarrativeRows(b.id, b.Raw, "> ", tuikit.LineStyleUser, ctx, false)
+	rows := b.renderCache.renderNarrativeRows(b.id, b.Raw, "▌ ", tuikit.LineStyleUser, ctx, false)
+	return applyUserNarrativeSurface(rows, ctx)
 }
 
 type narrativeBlockRenderCache struct {
@@ -131,7 +132,7 @@ func NewAssistantBlock(actor ...string) *AssistantBlock {
 func (b *AssistantBlock) BlockID() string { return b.id }
 func (b *AssistantBlock) Kind() BlockKind { return BlockAssistant }
 func (b *AssistantBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	rolePrefix := "* " + assistantActorPrefix(b.Actor)
+	rolePrefix := "· " + assistantActorPrefix(b.Actor)
 	if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
 		return b.activeBuffer.RenderRows(b.id, rolePrefix, tuikit.LineStyleAssistant, ctx)
 	}
@@ -176,7 +177,7 @@ func NewReasoningBlock(actor ...string) *ReasoningBlock {
 func (b *ReasoningBlock) BlockID() string { return b.id }
 func (b *ReasoningBlock) Kind() BlockKind { return BlockReasoning }
 func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	prefix := "· "
+	prefix := "› "
 	if actor := strings.TrimSpace(b.Actor); actor != "" && !strings.EqualFold(actor, "assistant") {
 		prefix += actor + ": "
 	}
@@ -211,6 +212,9 @@ func renderNarrativeFallbackRows(blockID, raw, rolePrefix, continuationPrefix st
 }
 
 func renderNarrativeRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, width int, theme tuikit.Theme, streaming bool) []RenderedRow {
+	if lineStyle == tuikit.LineStyleReasoning {
+		return renderPlainReasoningRows(blockID, raw, rolePrefix, width, theme)
+	}
 	if rows := renderNarrativeGlamourRows(blockID, raw, rolePrefix, lineStyle, width, theme, streaming); len(rows) > 0 {
 		return rows
 	}
@@ -1650,9 +1654,9 @@ func renderParticipantActorLabel(theme tuikit.Theme, actor string) string {
 func narrativeLinePrefixes(lineStyle tuikit.LineStyle) (string, string) {
 	switch lineStyle {
 	case tuikit.LineStyleAssistant:
-		return "* ", "  "
-	case tuikit.LineStyleReasoning:
 		return "· ", "  "
+	case tuikit.LineStyleReasoning:
+		return "› ", "  "
 	default:
 		return "", ""
 	}

@@ -239,7 +239,7 @@ func (m *Model) renderBTWDrawer() string {
 }
 
 func renderPlanLine(m *Model, item planEntryState) string {
-	icon := "☐"
+	icon := "□"
 	iconStyle := m.theme.HelpHintTextStyle()
 	textStyle := m.theme.HelpHintTextStyle()
 	switch strings.TrimSpace(item.Status) {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -61,6 +62,30 @@ func TestBuildMutationDiffHunksTruncatesBeforeCollectingAllLines(t *testing.T) {
 	}
 	if hunks[0].OldLines != 600 || hunks[0].NewLines != 600 {
 		t.Fatalf("hunk counts = -%d +%d, want full changed range counts", hunks[0].OldLines, hunks[0].NewLines)
+	}
+}
+
+func TestBuildMutationDiffHunksLargeRewriteShowsBothSidesWhenTruncated(t *testing.T) {
+	beforeLines := make([]string, 600)
+	afterLines := make([]string, 600)
+	for i := range beforeLines {
+		beforeLines[i] = "old-" + strconv.Itoa(i+1)
+		afterLines[i] = "new-" + strconv.Itoa(i+1)
+	}
+
+	hunks, truncated := BuildMutationDiffHunks(strings.Join(beforeLines, "\n"), strings.Join(afterLines, "\n"), 0, 10, 9)
+	if !truncated {
+		t.Fatal("BuildMutationDiffHunks() truncated = false, want true")
+	}
+	if len(hunks) != 1 {
+		t.Fatalf("len(hunks) = %d, want 1", len(hunks))
+	}
+	joined := strings.Join(hunks[0].Lines, "\n")
+	if !strings.Contains(joined, "-old-1") {
+		t.Fatalf("truncated rewrite missing removed side: %#v", hunks[0].Lines)
+	}
+	if !strings.Contains(joined, "+new-1") {
+		t.Fatalf("truncated rewrite missing added side: %#v", hunks[0].Lines)
 	}
 }
 

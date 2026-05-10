@@ -461,7 +461,10 @@ func (m *Model) renderStreamViewportLines(ctx BlockRenderContext) ([]string, []s
 		var wrappedStyled string
 		var plainParts []string
 		switch style {
-		case tuikit.LineStyleAssistant, tuikit.LineStyleReasoning:
+		case tuikit.LineStyleReasoning:
+			wrappedStyled = hardWrapDisplayLine(tuikit.ColorizeLogLine(sl, style, m.theme), wrapWidth)
+			plainParts = normalizeWrappedPlainSegments(graphemeHardWrap(sl, wrapWidth))
+		case tuikit.LineStyleAssistant:
 			segments := graphemeWordWrap(sl, wrapWidth)
 			if len(segments) == 0 {
 				wrappedStyled = ""

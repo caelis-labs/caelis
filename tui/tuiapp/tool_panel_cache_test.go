@@ -65,6 +65,49 @@ func TestParticipantToolPanelRenderCachePreservesHeaderToken(t *testing.T) {
 	}
 }
 
+func TestDiffToolPanelRowsAreNumberedAndPreWrapped(t *testing.T) {
+	m := newPerfTestModel()
+	ctx := BlockRenderContext{Width: 72, TermWidth: 72, Theme: m.theme}
+	block := NewMainACPTurnBlock("session-1")
+	output := strings.Join([]string{
+		"demo.go +1 -1",
+		"diff / hunk",
+		"@@ -10,2 +10,2 @@",
+		" context",
+		"-old line",
+		"+new line",
+	}, "\n")
+
+	block.UpdateTool("patch-1", "PATCH", "demo.go +1 -1", output, true, false)
+	block.setToolPanelExpanded("patch-1", true)
+	rows := block.Render(ctx)
+
+	removeRow, ok := renderedRowContaining(rows, "-old line")
+	if !ok {
+		t.Fatalf("rendered rows missing removed line: %#v", renderedPlainRows(rows))
+	}
+	if !removeRow.PreWrapped {
+		t.Fatalf("removed diff row was not prewrapped: %#v", removeRow)
+	}
+	if !strings.Contains(removeRow.Plain, "11") {
+		t.Fatalf("removed diff row missing old line number: %q", removeRow.Plain)
+	}
+
+	addRow, ok := renderedRowContaining(rows, "+new line")
+	if !ok {
+		t.Fatalf("rendered rows missing added line: %#v", renderedPlainRows(rows))
+	}
+	if !addRow.PreWrapped {
+		t.Fatalf("added diff row was not prewrapped: %#v", addRow)
+	}
+	if !strings.Contains(addRow.Plain, "11") {
+		t.Fatalf("added diff row missing new line number: %q", addRow.Plain)
+	}
+	if addRow.Styled == addRow.Plain || !strings.Contains(addRow.Styled, "\x1b[") {
+		t.Fatalf("added diff row is not styled: plain=%q styled=%q", addRow.Plain, addRow.Styled)
+	}
+}
+
 func rowsContainClickToken(rows []RenderedRow, token string) bool {
 	for _, row := range rows {
 		if row.ClickToken == token {
@@ -72,6 +115,15 @@ func rowsContainClickToken(rows []RenderedRow, token string) bool {
 		}
 	}
 	return false
+}
+
+func renderedRowContaining(rows []RenderedRow, needle string) (RenderedRow, bool) {
+	for _, row := range rows {
+		if strings.Contains(row.Plain, needle) {
+			return row, true
+		}
+	}
+	return RenderedRow{}, false
 }
 
 func numberedToolLines(n int) []string {
