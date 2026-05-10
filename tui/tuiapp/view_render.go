@@ -532,7 +532,7 @@ func (m *Model) renderInputBar() string {
 	if start, end, ok := normalizedSelectionRange(m.inputSelectionStart, m.inputSelectionEnd, len(m.inputPlainLines())); ok &&
 		(start.line != end.line || start.col != end.col) {
 		lines := m.inputPlainLines()
-		return insetRenderedBlock(strings.Join(renderSelectionOnLines(lines, start, end), "\n"), inputHorizontalInset)
+		return insetRenderedBlock(strings.Join(renderSelectionOnLines(lines, start, end, m.theme.SelectionStyle()), "\n"), inputHorizontalInset)
 	}
 
 	prompt := m.theme.PromptStyle().Render("> ")
@@ -868,7 +868,7 @@ func (m *Model) renderViewportLinesView(applySelection bool) string {
 			if finish.line >= end {
 				localFinish.col = displayColumns(plain[len(plain)-1])
 			}
-			styled = renderSelectionOnStyledLines(styled, plain, localStart, localFinish)
+			styled = renderSelectionOnStyledLines(styled, plain, localStart, localFinish, m.theme.SelectionStyle())
 		}
 	}
 	vp := m.viewport

@@ -3,6 +3,10 @@ package tuiapp
 import (
 	"testing"
 	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/OnslaughtSnail/caelis/tui/tuikit"
 )
 
 func TestCopySelectionToClipboardRunsAsCommand(t *testing.T) {
@@ -50,5 +54,29 @@ func TestCopySelectionToClipboardRunsAsCommand(t *testing.T) {
 		}
 	case <-time.After(250 * time.Millisecond):
 		t.Fatal("clipboard command did not finish")
+	}
+}
+
+func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(10)
+	m.viewportStyledLines = []string{"hello world"}
+	m.viewportPlainLines = []string{"hello world"}
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 0, col: 0}
+	m.selectionEnd = textSelectionPoint{line: 0, col: 5}
+	version := m.viewportSelectionVersion
+
+	_ = m.handleViewportMouseMotion(tea.Mouse{X: m.mainColumnX() + tuikit.GutterNarrative + 5, Y: 0})
+	if got := m.viewportSelectionVersion; got != version {
+		t.Fatalf("selection version after duplicate endpoint = %d, want %d", got, version)
+	}
+
+	_ = m.handleViewportMouseMotion(tea.Mouse{X: m.mainColumnX() + tuikit.GutterNarrative + 6, Y: 0})
+	if got := m.viewportSelectionVersion; got != version+1 {
+		t.Fatalf("selection version after changed endpoint = %d, want %d", got, version+1)
 	}
 }

@@ -158,12 +158,12 @@ func TestShiftPageKeysHalfPageViewport(t *testing.T) {
 	}
 }
 
-func TestModelViewRequestsAllMotionForViewportHover(t *testing.T) {
+func TestModelViewUsesCellMotionByDefault(t *testing.T) {
 	m := NewModel(Config{})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
 
-	if got := updated.View().MouseMode; got != tea.MouseModeAllMotion {
-		t.Fatalf("View().MouseMode = %v, want all-motion hover support", got)
+	if got := updated.View().MouseMode; got != tea.MouseModeCellMotion {
+		t.Fatalf("View().MouseMode = %v, want cell-motion mouse support", got)
 	}
 }
 

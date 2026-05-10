@@ -99,15 +99,21 @@ func glamourNarrativeRowsWithWrapWidth(blockID, raw, rolePrefix string, roleStyl
 }
 
 // ---------------------------------------------------------------------------
-// Glamour renderer cache (width-keyed singleton)
+// Glamour renderer cache (small width/theme/role LRU)
 // ---------------------------------------------------------------------------
 
-var glamourCache struct {
-	sync.Mutex
-	renderer *glamour.TermRenderer
+const glamourRendererCacheMaxEntries = 8
+
+type glamourRendererKey struct {
 	width    int
 	themeKey string
 	role     tuikit.LineStyle
+}
+
+var glamourCache struct {
+	sync.Mutex
+	entries map[glamourRendererKey]*glamour.TermRenderer
+	order   []glamourRendererKey
 }
 
 type streamingNarrativeCacheEntry struct {
@@ -130,8 +136,8 @@ var glamourStreamingCache struct {
 // color profile changes (e.g. from applyTheme).
 func clearGlamourCache() {
 	glamourCache.Lock()
-	glamourCache.renderer = nil
-	glamourCache.themeKey = ""
+	glamourCache.entries = nil
+	glamourCache.order = nil
 	glamourCache.Unlock()
 	glamourStreamingCache.Lock()
 	glamourStreamingCache.entries = nil
@@ -143,8 +149,10 @@ func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyl
 	defer glamourCache.Unlock()
 
 	themeKey := themeRenderCacheKey(theme)
-	if glamourCache.renderer != nil && glamourCache.width == width && glamourCache.themeKey == themeKey && glamourCache.role == roleStyle {
-		return glamourCache.renderer
+	key := glamourRendererKey{width: width, themeKey: themeKey, role: roleStyle}
+	if renderer := glamourCache.entries[key]; renderer != nil {
+		touchGlamourRendererCacheKey(key)
+		return renderer
 	}
 
 	renderer, err := glamour.NewTermRenderer(
@@ -157,11 +165,38 @@ func getGlamourRenderer(width int, theme tuikit.Theme, roleStyle tuikit.LineStyl
 		return nil
 	}
 
-	glamourCache.renderer = renderer
-	glamourCache.width = width
-	glamourCache.themeKey = themeKey
-	glamourCache.role = roleStyle
+	storeGlamourRenderer(key, renderer)
 	return renderer
+}
+
+func touchGlamourRendererCacheKey(key glamourRendererKey) {
+	for i, item := range glamourCache.order {
+		if item == key {
+			copy(glamourCache.order[i:], glamourCache.order[i+1:])
+			glamourCache.order[len(glamourCache.order)-1] = key
+			return
+		}
+	}
+	glamourCache.order = append(glamourCache.order, key)
+}
+
+func storeGlamourRenderer(key glamourRendererKey, renderer *glamour.TermRenderer) {
+	if glamourCache.entries == nil {
+		glamourCache.entries = make(map[glamourRendererKey]*glamour.TermRenderer, glamourRendererCacheMaxEntries)
+	}
+	if old := glamourCache.entries[key]; old != nil {
+		glamourCache.entries[key] = renderer
+		touchGlamourRendererCacheKey(key)
+		return
+	}
+	if len(glamourCache.order) >= glamourRendererCacheMaxEntries {
+		evict := glamourCache.order[0]
+		copy(glamourCache.order, glamourCache.order[1:])
+		glamourCache.order = glamourCache.order[:len(glamourCache.order)-1]
+		delete(glamourCache.entries, evict)
+	}
+	glamourCache.entries[key] = renderer
+	glamourCache.order = append(glamourCache.order, key)
 }
 
 // ---------------------------------------------------------------------------

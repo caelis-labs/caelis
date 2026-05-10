@@ -36,6 +36,8 @@ type Theme struct {
 	CommandActive  color.Color
 	CommandText    color.Color
 	CommandSubText color.Color
+	SelectionFg    color.Color
+	SelectionBg    color.Color
 
 	// Line-level semantic colors (conversation / tool / diff).
 	AssistantFg        color.Color
@@ -118,6 +120,7 @@ func ValidateTheme(theme Theme) []ThemeIssue {
 		{field: "Success", fg: theme.Success, bg: bg, threshold: 3.0},
 		{field: "DiffAddFg", fg: theme.DiffAddFg, bg: firstColor(theme.DiffAddBg, bg), threshold: 3.0},
 		{field: "DiffRemoveFg", fg: theme.DiffRemoveFg, bg: firstColor(theme.DiffRemoveBg, bg), threshold: 3.0},
+		{field: "SelectionFg", fg: theme.SelectionFg, bg: theme.SelectionBg, threshold: 4.5},
 	}
 	var issues []ThemeIssue
 	for _, check := range checks {
@@ -303,6 +306,8 @@ func stripThemeColors(theme Theme) Theme {
 	theme.CommandActive = nil
 	theme.CommandText = nil
 	theme.CommandSubText = nil
+	theme.SelectionFg = nil
+	theme.SelectionBg = nil
 	theme.AssistantFg = nil
 	theme.ReasoningFg = nil
 	theme.UserFg = nil
@@ -545,6 +550,7 @@ func stripThemeBackgroundsForANSI(theme Theme, profile colorprofile.Profile) The
 	theme.StatusBg = nil
 	theme.CommandBg = nil
 	theme.CommandActive = nil
+	theme.SelectionBg = nil
 	theme.UserBg = nil
 	theme.DiffAddBg = nil
 	theme.DiffAddStrongBg = nil
@@ -571,7 +577,7 @@ func defaultAdaptiveThemeVariant(profile colorprofile.Profile, dark bool, backgr
 func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Color) Theme {
 	surface1 := adaptiveBackgroundColor(profile, background, true, 0.08, 0, "#141820", "", "234", "")
 	surface2 := adaptiveBackgroundColor(profile, background, true, 0.12, 0, "#1d2430", "", "236", "")
-	selection := adaptiveTintColor(profile, background, true, [3]uint8{34, 211, 238}, [3]uint8{}, 0.18, 0, "#18313a", "", "23", "")
+	selection := adaptiveTintColor(profile, background, true, [3]uint8{148, 163, 184}, [3]uint8{}, 0.28, 0, "#334155", "", "240", "")
 	addBg := adaptiveTintColor(profile, background, true, [3]uint8{46, 204, 113}, [3]uint8{}, 0.18, 0, "#213a2b", "", "22", "")
 	addStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{46, 204, 113}, [3]uint8{}, 0.28, 0, "#285139", "", "29", "")
 	delBg := adaptiveTintColor(profile, background, true, [3]uint8{255, 92, 87}, [3]uint8{}, 0.20, 0, "#4a221d", "", "52", "")
@@ -581,81 +587,83 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 		Name:           "dark",
 		IsDark:         true,
 		AppBg:          nil,
-		PanelBorder:    profileColor(profile, "#3b4352", "240", "8"),
-		PanelTitle:     nil,
-		TextPrimary:    nil,
-		TextSecondary:  nil,
-		SecondaryText:  nil,
-		MutedText:      nil,
-		Info:           profileColor(profile, "#22d3ee", "44", "6"),
-		Success:        profileColor(profile, "#2ecc71", "35", "2"),
-		Warning:        profileColor(profile, "#d99a1e", "178", "3"),
-		Error:          profileColor(profile, "#ff5c57", "203", "1"),
-		Accent:         profileColor(profile, "#d78bff", "177", "5"),
-		Focus:          profileColor(profile, "#22d3ee", "44", "6"),
+		PanelBorder:    profileColor(profile, "#263244", "238", "8"),
+		PanelTitle:     profileColor(profile, "#f8fafc", "255", "7"),
+		TextPrimary:    profileColor(profile, "#e5e7eb", "254", "7"),
+		TextSecondary:  profileColor(profile, "#a7b0c0", "250", "7"),
+		SecondaryText:  profileColor(profile, "#a7b0c0", "250", "7"),
+		MutedText:      profileColor(profile, "#6b7280", "242", "8"),
+		Info:           profileColor(profile, "#38bdf8", "39", "6"),
+		Success:        profileColor(profile, "#22c55e", "35", "2"),
+		Warning:        profileColor(profile, "#f59e0b", "214", "3"),
+		Error:          profileColor(profile, "#ef4444", "203", "1"),
+		Accent:         profileColor(profile, "#8b5cf6", "99", "5"),
+		Focus:          profileColor(profile, "#38bdf8", "39", "6"),
 		ModalBg:        surface1,
 		StatusBg:       surface1,
-		StatusText:     nil,
+		StatusText:     profileColor(profile, "#a7b0c0", "250", "7"),
 		CommandBg:      nil,
 		CommandActive:  selection,
-		CommandText:    nil,
-		CommandSubText: nil,
+		CommandText:    profileColor(profile, "#e5e7eb", "254", "7"),
+		CommandSubText: profileColor(profile, "#6b7280", "242", "8"),
+		SelectionFg:    profileColor(profile, "#f8fafc", "255", "7"),
+		SelectionBg:    selection,
 
-		AssistantFg:        nil,
-		ReasoningFg:        profileColor(profile, "#7f8ba3", "245", "8"),
-		UserFg:             nil,
+		AssistantFg:        profileColor(profile, "#e5e7eb", "254", "7"),
+		ReasoningFg:        profileColor(profile, "#94a3b8", "246", "8"),
+		UserFg:             profileColor(profile, "#f8fafc", "255", "7"),
 		UserBg:             surface2,
-		UserPrefixFg:       profileColor(profile, "#22d3ee", "44", "6"),
-		UserMentionFg:      profileColor(profile, "#22d3ee", "44", "6"),
-		ToolFg:             profileColor(profile, "#22d3ee", "44", "6"),
-		DiffAddFg:          profileColor(profile, "#2ecc71", "35", "2"),
-		DiffRemoveFg:       profileColor(profile, "#ff5c57", "203", "1"),
-		DiffHeaderFg:       nil,
-		DiffHunkFg:         profileColor(profile, "#d78bff", "177", "5"),
+		UserPrefixFg:       profileColor(profile, "#38bdf8", "39", "6"),
+		UserMentionFg:      profileColor(profile, "#a78bfa", "141", "5"),
+		ToolFg:             profileColor(profile, "#38bdf8", "39", "6"),
+		DiffAddFg:          profileColor(profile, "#22c55e", "35", "2"),
+		DiffRemoveFg:       profileColor(profile, "#ef4444", "203", "1"),
+		DiffHeaderFg:       profileColor(profile, "#a7b0c0", "250", "7"),
+		DiffHunkFg:         profileColor(profile, "#a78bfa", "141", "5"),
 		DiffAddBg:          addBg,
 		DiffAddStrongBg:    addStrongBg,
 		DiffRemoveBg:       delBg,
 		DiffRemoveStrongBg: delStrongBg,
-		DiffLineNoFg:       nil,
-		DiffGutterFg:       nil,
-		DiffPanelBorder:    profileColor(profile, "#3b4352", "240", "8"),
-		SectionFg:          nil,
-		KeyLabelFg:         nil,
-		NoteFg:             nil,
-		PromptFg:           profileColor(profile, "#22d3ee", "44", "6"),
-		CursorFg:           nil,
-		ScrollHintFg:       profileColor(profile, "#d99a1e", "178", "3"),
+		DiffLineNoFg:       profileColor(profile, "#6b7280", "242", "8"),
+		DiffGutterFg:       profileColor(profile, "#94a3b8", "246", "8"),
+		DiffPanelBorder:    profileColor(profile, "#263244", "238", "8"),
+		SectionFg:          profileColor(profile, "#f8fafc", "255", "7"),
+		KeyLabelFg:         profileColor(profile, "#a7b0c0", "250", "7"),
+		NoteFg:             profileColor(profile, "#94a3b8", "246", "8"),
+		PromptFg:           profileColor(profile, "#38bdf8", "39", "6"),
+		CursorFg:           profileColor(profile, "#f8fafc", "255", "7"),
+		ScrollHintFg:       profileColor(profile, "#f59e0b", "214", "3"),
 
 		InputBarBg:          nil,
-		InputBarFg:          nil,
+		InputBarFg:          profileColor(profile, "#e5e7eb", "254", "7"),
 		ToolOutputBg:        nil,
-		HelpHintFg:          nil,
-		SpinnerFg:           profileColor(profile, "#22d3ee", "44", "6"),
-		SeparatorFg:         profileColor(profile, "#3b4352", "240", "8"),
-		RoleBorderFg:        profileColor(profile, "#3b4352", "240", "8"),
+		HelpHintFg:          profileColor(profile, "#6b7280", "242", "8"),
+		SpinnerFg:           profileColor(profile, "#38bdf8", "39", "6"),
+		SeparatorFg:         profileColor(profile, "#263244", "238", "8"),
+		RoleBorderFg:        profileColor(profile, "#263244", "238", "8"),
 		NewMsgBg:            selection,
-		ComposerBorder:      profileColor(profile, "#3b4352", "240", "8"),
-		ComposerBorderFocus: profileColor(profile, "#22d3ee", "44", "6"),
-		ScrollbarTrack:      profileColor(profile, "#303846", "238", "8"),
-		ScrollbarThumb:      profileColor(profile, "#7b8798", "245", "7"),
-		LinkFg:              profileColor(profile, "#22d3ee", "44", "6"),
-		CodeFg:              profileColor(profile, "#d99a1e", "178", "3"),
+		ComposerBorder:      profileColor(profile, "#263244", "238", "8"),
+		ComposerBorderFocus: profileColor(profile, "#38bdf8", "39", "6"),
+		ScrollbarTrack:      profileColor(profile, "#1e293b", "236", "8"),
+		ScrollbarThumb:      profileColor(profile, "#64748b", "244", "7"),
+		LinkFg:              profileColor(profile, "#38bdf8", "39", "6"),
+		CodeFg:              profileColor(profile, "#c4b5fd", "183", "5"),
 		CodeBg:              surface2,
-		CodeBlockFg:         nil,
+		CodeBlockFg:         profileColor(profile, "#e5e7eb", "254", "7"),
 		CodeBlockBg:         surface1,
-		TranscriptRail:      profileColor(profile, "#3b4352", "240", "8"),
-		TranscriptShell:     profileColor(profile, "#303846", "238", "8"),
+		TranscriptRail:      profileColor(profile, "#263244", "238", "8"),
+		TranscriptShell:     profileColor(profile, "#334155", "240", "8"),
 		TranscriptPillBg:    nil,
 		CodeSurface:         surface1,
 		TableHeaderBg:       surface1,
-		TableBorder:         profileColor(profile, "#596579", "242", "8"),
+		TableBorder:         profileColor(profile, "#475569", "242", "8"),
 	}
 }
 
 func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Color) Theme {
 	surface1 := adaptiveBackgroundColor(profile, background, false, 0, 0.035, "", "#f6f7f9", "", "255")
 	surface2 := adaptiveBackgroundColor(profile, background, false, 0, 0.055, "", "#eef2f7", "", "255")
-	selection := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{0, 119, 170}, 0, 0.10, "", "#e8f6fb", "", "195")
+	selection := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{59, 130, 246}, 0, 0.14, "", "#dbeafe", "", "153")
 	addBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{46, 204, 113}, 0, 0.16, "", "#dafbe1", "", "194")
 	addStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{46, 204, 113}, 0, 0.28, "", "#aceebb", "", "157")
 	delBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{255, 92, 87}, 0, 0.12, "", "#ffebe9", "", "224")
@@ -665,74 +673,76 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		Name:           "light",
 		IsDark:         false,
 		AppBg:          nil,
-		PanelBorder:    profileColor(profile, "#c9d1dc", "252", "8"),
-		PanelTitle:     nil,
-		TextPrimary:    nil,
-		TextSecondary:  nil,
-		SecondaryText:  nil,
-		MutedText:      nil,
-		Info:           profileColor(profile, "#0077aa", "32", "6"),
-		Success:        profileColor(profile, "#188a42", "28", "2"),
-		Warning:        profileColor(profile, "#a15c00", "130", "3"),
-		Error:          profileColor(profile, "#c2410c", "166", "1"),
-		Accent:         profileColor(profile, "#8a3ffc", "99", "5"),
-		Focus:          profileColor(profile, "#0077aa", "32", "6"),
+		PanelBorder:    profileColor(profile, "#cbd5e1", "252", "8"),
+		PanelTitle:     profileColor(profile, "#0f172a", "235", "0"),
+		TextPrimary:    profileColor(profile, "#0f172a", "235", "0"),
+		TextSecondary:  profileColor(profile, "#475569", "240", "0"),
+		SecondaryText:  profileColor(profile, "#475569", "240", "0"),
+		MutedText:      profileColor(profile, "#64748b", "243", "8"),
+		Info:           profileColor(profile, "#0284c7", "32", "6"),
+		Success:        profileColor(profile, "#16a34a", "28", "2"),
+		Warning:        profileColor(profile, "#d97706", "172", "3"),
+		Error:          profileColor(profile, "#dc2626", "160", "1"),
+		Accent:         profileColor(profile, "#6d28d9", "93", "5"),
+		Focus:          profileColor(profile, "#0284c7", "32", "6"),
 		ModalBg:        surface1,
 		StatusBg:       surface1,
-		StatusText:     nil,
+		StatusText:     profileColor(profile, "#475569", "240", "0"),
 		CommandBg:      nil,
 		CommandActive:  selection,
-		CommandText:    nil,
-		CommandSubText: nil,
+		CommandText:    profileColor(profile, "#0f172a", "235", "0"),
+		CommandSubText: profileColor(profile, "#64748b", "243", "8"),
+		SelectionFg:    profileColor(profile, "#0f172a", "235", "0"),
+		SelectionBg:    selection,
 
-		AssistantFg:        nil,
-		ReasoningFg:        profileColor(profile, "#6b7280", "242", "8"),
-		UserFg:             nil,
+		AssistantFg:        profileColor(profile, "#0f172a", "235", "0"),
+		ReasoningFg:        profileColor(profile, "#64748b", "243", "8"),
+		UserFg:             profileColor(profile, "#0f172a", "235", "0"),
 		UserBg:             surface1,
-		UserPrefixFg:       profileColor(profile, "#0077aa", "32", "6"),
-		UserMentionFg:      profileColor(profile, "#0077aa", "32", "6"),
-		ToolFg:             profileColor(profile, "#0077aa", "32", "6"),
-		DiffAddFg:          profileColor(profile, "#188a42", "28", "2"),
-		DiffRemoveFg:       profileColor(profile, "#c2410c", "166", "1"),
-		DiffHeaderFg:       nil,
-		DiffHunkFg:         profileColor(profile, "#8a3ffc", "99", "5"),
+		UserPrefixFg:       profileColor(profile, "#0284c7", "32", "6"),
+		UserMentionFg:      profileColor(profile, "#6d28d9", "93", "5"),
+		ToolFg:             profileColor(profile, "#0284c7", "32", "6"),
+		DiffAddFg:          profileColor(profile, "#15803d", "28", "2"),
+		DiffRemoveFg:       profileColor(profile, "#dc2626", "160", "1"),
+		DiffHeaderFg:       profileColor(profile, "#475569", "240", "0"),
+		DiffHunkFg:         profileColor(profile, "#6d28d9", "93", "5"),
 		DiffAddBg:          addBg,
 		DiffAddStrongBg:    addStrongBg,
 		DiffRemoveBg:       delBg,
 		DiffRemoveStrongBg: delStrongBg,
-		DiffLineNoFg:       nil,
-		DiffGutterFg:       nil,
-		DiffPanelBorder:    profileColor(profile, "#c9d1dc", "252", "8"),
-		SectionFg:          nil,
-		KeyLabelFg:         nil,
-		NoteFg:             nil,
-		PromptFg:           profileColor(profile, "#0077aa", "32", "6"),
-		CursorFg:           nil,
-		ScrollHintFg:       profileColor(profile, "#a15c00", "130", "3"),
+		DiffLineNoFg:       profileColor(profile, "#64748b", "243", "8"),
+		DiffGutterFg:       profileColor(profile, "#64748b", "243", "8"),
+		DiffPanelBorder:    profileColor(profile, "#cbd5e1", "252", "8"),
+		SectionFg:          profileColor(profile, "#0f172a", "235", "0"),
+		KeyLabelFg:         profileColor(profile, "#475569", "240", "0"),
+		NoteFg:             profileColor(profile, "#64748b", "243", "8"),
+		PromptFg:           profileColor(profile, "#0284c7", "32", "6"),
+		CursorFg:           profileColor(profile, "#0f172a", "235", "0"),
+		ScrollHintFg:       profileColor(profile, "#d97706", "172", "3"),
 
 		InputBarBg:          nil,
-		InputBarFg:          nil,
+		InputBarFg:          profileColor(profile, "#0f172a", "235", "0"),
 		ToolOutputBg:        nil,
-		HelpHintFg:          nil,
-		SpinnerFg:           profileColor(profile, "#0077aa", "32", "6"),
-		SeparatorFg:         profileColor(profile, "#c9d1dc", "252", "8"),
-		RoleBorderFg:        profileColor(profile, "#c9d1dc", "252", "8"),
+		HelpHintFg:          profileColor(profile, "#64748b", "243", "8"),
+		SpinnerFg:           profileColor(profile, "#0284c7", "32", "6"),
+		SeparatorFg:         profileColor(profile, "#cbd5e1", "252", "8"),
+		RoleBorderFg:        profileColor(profile, "#cbd5e1", "252", "8"),
 		NewMsgBg:            selection,
-		ComposerBorder:      profileColor(profile, "#c9d1dc", "252", "8"),
-		ComposerBorderFocus: profileColor(profile, "#0077aa", "32", "6"),
-		ScrollbarTrack:      profileColor(profile, "#d8e0ea", "254", "8"),
-		ScrollbarThumb:      profileColor(profile, "#7f8b9a", "245", "7"),
-		LinkFg:              profileColor(profile, "#0077aa", "32", "6"),
-		CodeFg:              profileColor(profile, "#a15c00", "130", "3"),
+		ComposerBorder:      profileColor(profile, "#cbd5e1", "252", "8"),
+		ComposerBorderFocus: profileColor(profile, "#0284c7", "32", "6"),
+		ScrollbarTrack:      profileColor(profile, "#e2e8f0", "254", "8"),
+		ScrollbarThumb:      profileColor(profile, "#94a3b8", "247", "7"),
+		LinkFg:              profileColor(profile, "#0284c7", "32", "6"),
+		CodeFg:              profileColor(profile, "#5b21b6", "93", "5"),
 		CodeBg:              surface2,
-		CodeBlockFg:         nil,
+		CodeBlockFg:         profileColor(profile, "#0f172a", "235", "0"),
 		CodeBlockBg:         surface1,
-		TranscriptRail:      profileColor(profile, "#c9d1dc", "252", "8"),
-		TranscriptShell:     profileColor(profile, "#d8e0ea", "254", "8"),
+		TranscriptRail:      profileColor(profile, "#cbd5e1", "252", "8"),
+		TranscriptShell:     profileColor(profile, "#94a3b8", "247", "8"),
 		TranscriptPillBg:    nil,
 		CodeSurface:         surface1,
 		TableHeaderBg:       surface1,
-		TableBorder:         profileColor(profile, "#9aa7b8", "248", "8"),
+		TableBorder:         profileColor(profile, "#94a3b8", "247", "8"),
 	}
 }
 
@@ -760,6 +770,8 @@ func defaultThemeVariant(trueColor bool) Theme {
 		CommandActive:  themeColor(trueColor, "#20283a", "236"),
 		CommandText:    themeColor(trueColor, "#f4f7fb", "255"),
 		CommandSubText: themeColor(trueColor, "#9aa6ba", "247"),
+		SelectionFg:    themeColor(trueColor, "#f8fafc", "255"),
+		SelectionBg:    themeColor(trueColor, "#334155", "240"),
 
 		AssistantFg:        themeColor(trueColor, "#9ece6a", "114"),
 		ReasoningFg:        themeColor(trueColor, "#7f8ba3", "245"),
@@ -836,6 +848,8 @@ func defaultLightThemeVariant(trueColor bool) Theme {
 		CommandActive:  themeColor(trueColor, "#e7f0ff", "195"),
 		CommandText:    themeColor(trueColor, "#111827", "235"),
 		CommandSubText: themeColor(trueColor, "#526071", "240"),
+		SelectionFg:    themeColor(trueColor, "#0f172a", "235"),
+		SelectionBg:    themeColor(trueColor, "#dbeafe", "153"),
 
 		AssistantFg:        themeColor(trueColor, "#188a42", "28"),
 		ReasoningFg:        themeColor(trueColor, "#6b7280", "242"),
@@ -1065,6 +1079,15 @@ func (t Theme) CommandActiveStyle() lipgloss.Style {
 
 func (t Theme) CommandStyle() lipgloss.Style {
 	return fgStyle(t.CommandText).Padding(0, 1)
+}
+
+func (t Theme) SelectionStyle() lipgloss.Style {
+	if t.SelectionFg == nil || t.SelectionBg == nil {
+		return lipgloss.NewStyle().Reverse(true)
+	}
+	return lipgloss.NewStyle().
+		Foreground(t.SelectionFg).
+		Background(t.SelectionBg)
 }
 
 // ---------------------------------------------------------------------------

@@ -729,11 +729,10 @@ func selectionTextFromLines(lines []string, start textSelectionPoint, end textSe
 	return strings.Join(out, "\n")
 }
 
-func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSelectionPoint) []string {
+func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
 	if len(lines) == 0 {
 		return nil
 	}
-	highlight := lipgloss.NewStyle().Reverse(true)
 	out := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); i++ {
 		if i < start.line || i > end.line {
@@ -773,13 +772,12 @@ func renderSelectionOnLines(lines []string, start textSelectionPoint, end textSe
 
 // renderSelectionOnStyledLines renders selection highlight while preserving
 // styled (ANSI-colored) output for non-selected lines. Selected lines show
-// plain text with reverse highlight so the selection boundary is visually
-// unambiguous.
-func renderSelectionOnStyledLines(styledLines, plainLines []string, start textSelectionPoint, end textSelectionPoint) []string {
+// plain text with the configured selection style so the selection boundary is
+// visually unambiguous.
+func renderSelectionOnStyledLines(styledLines, plainLines []string, start textSelectionPoint, end textSelectionPoint, highlight lipgloss.Style) []string {
 	if len(styledLines) == 0 {
 		return nil
 	}
-	highlight := lipgloss.NewStyle().Reverse(true)
 	out := make([]string, 0, len(styledLines))
 	for i := 0; i < len(styledLines); i++ {
 		if i < start.line || i > end.line {

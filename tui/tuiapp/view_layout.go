@@ -636,7 +636,7 @@ func (m *Model) renderSelectionLines() []string {
 	}
 	// Rendered-text-first selection: non-selected lines keep styled output,
 	// selected lines show plain text with reverse highlight.
-	return renderSelectionOnStyledLines(m.viewportStyledLines, m.viewportPlainLines, start, end)
+	return renderSelectionOnStyledLines(m.viewportStyledLines, m.viewportPlainLines, start, end, m.theme.SelectionStyle())
 }
 
 type fixedTextRegion struct {
@@ -752,7 +752,7 @@ func (m *Model) renderFixedRow(area fixedSelectionArea, plain string, rendered s
 	if m.fixedSelectionArea == area {
 		start, end, ok := normalizedSelectionRange(m.fixedSelectionStart, m.fixedSelectionEnd, 1)
 		if ok && (start.line != end.line || start.col != end.col) {
-			line = renderSelectionOnLines([]string{plain}, start, end)[0]
+			line = renderSelectionOnLines([]string{plain}, start, end, m.theme.SelectionStyle())[0]
 			return style.Render(line)
 		}
 	}

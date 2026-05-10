@@ -114,7 +114,7 @@ func (m *Model) View() tea.View {
 	m.observeRender(duration, len(view), "fullscreen")
 	frame := tea.NewView(view)
 	frame.AltScreen = true
-	frame.MouseMode = tea.MouseModeAllMotion
+	frame.MouseMode = m.desiredMouseMode()
 	frame.ReportFocus = true
 	frame.KeyboardEnhancements.ReportEventTypes = true
 	frame.WindowTitle = m.windowTitle()
@@ -131,4 +131,8 @@ func (m *Model) View() tea.View {
 		frame.Cursor = cursor
 	}
 	return frame
+}
+
+func (m *Model) desiredMouseMode() tea.MouseMode {
+	return tea.MouseModeCellMotion
 }

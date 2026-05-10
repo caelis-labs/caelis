@@ -46,6 +46,25 @@ func TestGlamourNarrativeRendererCacheUsesFullThemeKey(t *testing.T) {
 	}
 }
 
+func TestGlamourNarrativeRendererCacheKeepsRecentKeys(t *testing.T) {
+	clearGlamourCache()
+	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+
+	first := getGlamourRenderer(80, theme, tuikit.LineStyleAssistant)
+	second := getGlamourRenderer(96, theme, tuikit.LineStyleReasoning)
+	again := getGlamourRenderer(80, theme, tuikit.LineStyleAssistant)
+
+	if first == nil || second == nil || again == nil {
+		t.Fatal("expected cached glamour renderers")
+	}
+	if first != again {
+		t.Fatal("expected LRU cache to retain the first renderer across another key")
+	}
+	if first == second {
+		t.Fatal("expected different width/role keys to use distinct renderers")
+	}
+}
+
 func TestGlamourNarrativeRendersNormalizedMarkdownTable(t *testing.T) {
 	raw := "工具调用演示总结：| 工具 | 用途 | 演示内容 | |------|------|----------| | Bash | 执行 shell 命令 | ls 列出文件 | | Glob | 文件名模式匹配 | 搜索 *.py 文件 |"
 

@@ -196,6 +196,9 @@ func (m *Model) handleViewportMouseMotion(mouse tea.Mouse) tea.Cmd {
 	if !ok {
 		return nil
 	}
+	if m.selectionEnd == point {
+		return nil
+	}
 	m.selectionEnd = point
 	m.bumpViewportSelectionVersion()
 	return nil
@@ -296,6 +299,9 @@ func (m *Model) handleInputAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, t
 		if !m.inputSelecting || !ok {
 			return false, nil
 		}
+		if m.inputSelectionEnd == point {
+			return true, nil
+		}
 		m.inputSelectionEnd = point
 		return true, nil
 	case mousePhaseRelease:
@@ -353,6 +359,9 @@ func (m *Model) handleFixedAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, t
 		point, ok := m.fixedRowPoint(region, mouse.X, true)
 		if !ok {
 			return false, nil
+		}
+		if m.fixedSelectionEnd == point {
+			return true, nil
 		}
 		m.fixedSelectionEnd = point
 		return true, nil
