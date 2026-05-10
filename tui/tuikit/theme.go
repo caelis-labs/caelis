@@ -1099,9 +1099,9 @@ func (t Theme) AssistantStyle() lipgloss.Style {
 	return fgStyle(t.AssistantFg)
 }
 
-// ReasoningStyle renders reasoning/thinking text (dimmed + italic).
+// ReasoningStyle renders reasoning/thinking text in muted contrast.
 func (t Theme) ReasoningStyle() lipgloss.Style {
-	return quietStyle(t, t.ReasoningFg).Italic(true)
+	return quietStyle(t, t.ReasoningFg)
 }
 
 // ToolStyle renders tool call/result prefixes.

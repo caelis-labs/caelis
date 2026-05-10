@@ -169,6 +169,9 @@ func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRender
 	if width <= 0 {
 		width = 1
 	}
+	if isApprovalReviewHeaderPlain(plain) {
+		return nil, nil, false
+	}
 	prefix, detail, ok := splitACPTranscriptHeaderPrefix(plain)
 	if !ok || strings.TrimSpace(detail) == "" {
 		return nil, nil, false
@@ -212,6 +215,10 @@ func wrapACPTranscriptHeaderForViewport(plain string, width int, ctx BlockRender
 		styledLines = append(styledLines, styleACPTranscriptHeaderContinuation(ctx, verb, continuationPrefix, line))
 	}
 	return plainLines, styledLines, true
+}
+
+func isApprovalReviewHeaderPlain(plain string) bool {
+	return strings.HasPrefix(strings.TrimSpace(plain), "• Automatic approval review ")
 }
 
 func acpTranscriptHeaderUsesRailContinuation(verb string) bool {

@@ -178,25 +178,16 @@ func colorizeAssistantLine(line string, theme Theme) string {
 
 func colorizeReasoningLine(line string, theme Theme) string {
 	if strings.HasPrefix(line, "› ") {
-		return theme.ReasoningStyle().Render("› ") + strings.TrimPrefix(line, "› ")
+		return theme.ReasoningStyle().Render("› ") + theme.ReasoningStyle().Render(strings.TrimPrefix(line, "› "))
 	}
 	if strings.HasPrefix(line, "│ ") {
-		return theme.ReasoningStyle().Render("│ ") + strings.TrimPrefix(line, "│ ")
+		return theme.ReasoningStyle().Render("│ ") + theme.ReasoningStyle().Render(strings.TrimPrefix(line, "│ "))
 	}
-	return line
+	return theme.ReasoningStyle().Render(line)
 }
 
 func colorizeUserLine(line string, theme Theme) string {
-	prefix := "> "
-	if strings.HasPrefix(line, "▌ ") {
-		prefix = "▌ "
-	}
-	content := strings.TrimPrefix(line, prefix)
-	if content == "" {
-		return theme.UserPrefixStyle().Render(prefix)
-	}
-	styledBody := styleUserMentions(LinkifyText(content, theme.LinkStyle()), theme)
-	return theme.UserPrefixStyle().Render(prefix) + styledBody
+	return theme.UserStyle().Render(line)
 }
 
 func colorizeWarnLine(line string, theme Theme) string {

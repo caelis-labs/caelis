@@ -346,7 +346,7 @@ func renderACPReasoningSummaryRow(blockID string, ev SubagentEvent, idx int, wid
 	plain := strings.TrimSpace(marker + " " + preview)
 	styled := ctx.Theme.ReasoningStyle().Render(marker)
 	if preview != "" {
-		styled += " " + preview
+		styled += ctx.Theme.ReasoningStyle().Render(" " + preview)
 	}
 	return StyledPlainClickableRow(blockID, plain, styled, acpReasoningClickToken(reasoningFoldKey(idx)))
 }
@@ -379,7 +379,7 @@ func renderACPReasoningExpandedRows(blockID string, text string, idx int, width 
 	plain := strings.TrimSpace("› " + firstPlain)
 	styled := ctx.Theme.ReasoningStyle().Render("›")
 	if firstPlain != "" {
-		styled += " " + firstPlain
+		styled += ctx.Theme.ReasoningStyle().Render(" " + firstPlain)
 	}
 	rows[0] = StyledPlainClickableRow(blockID, plain, styled, acpReasoningClickToken(reasoningFoldKey(idx)))
 	return rows
@@ -2695,7 +2695,7 @@ func renderACPApprovalReviewRows(blockID string, ev SubagentEvent, width int, ct
 	}
 	bodyStyle := ctx.Theme.TranscriptMetaStyle()
 	rows := make([]RenderedRow, 0, len(segments)+1)
-	rows = append(rows, StyledPlainRow(blockID, prefixPlain, prefixStyled))
+	rows = append(rows, RenderedRow{Styled: prefixStyled, Plain: prefixPlain, BlockID: blockID, PreWrapped: true})
 	for i, segment := range segments {
 		linePrefix := bodyContinuation
 		if i == 0 {
@@ -2765,7 +2765,7 @@ func approvalReviewStatusStyle(ctx BlockRenderContext, status string) lipgloss.S
 		return lipgloss.NewStyle().Foreground(ctx.Theme.Success).Bold(true)
 	case "denied", "failed":
 		return ctx.Theme.ErrorStyle().Bold(true)
-	case "timed_out":
+	case "timed_out", "timed out", "needs_user", "needs user", "needs-user":
 		return ctx.Theme.WarnStyle().Bold(true)
 	default:
 		return ctx.Theme.TranscriptLabelStyle()

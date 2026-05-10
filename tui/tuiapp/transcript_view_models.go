@@ -161,6 +161,9 @@ func styleToolEventLine(theme tuikit.Theme, line string, style tuikit.LineStyle)
 	components := theme.ComponentStyles()
 	switch style {
 	case tuikit.LineStyleTool:
+		if styled, ok := styleRequestPermissionsToolLine(theme, line); ok {
+			return styled
+		}
 		parts := strings.SplitN(strings.TrimSpace(line), " ", 3)
 		model := tuikit.ToolLineModel{Style: tuikit.LineStyleTool}
 		if len(parts) > 0 {
@@ -184,8 +187,51 @@ func styleToolEventLine(theme tuikit.Theme, line string, style tuikit.LineStyle)
 	}
 }
 
+func styleRequestPermissionsToolLine(theme tuikit.Theme, line string) (string, bool) {
+	trimmed := strings.TrimSpace(line)
+	prefix, rest, ok := splitToolLifecycleHeader(trimmed)
+	if !ok {
+		return "", false
+	}
+	const name = "Request permissions"
+	if !strings.HasPrefix(rest, name) {
+		return "", false
+	}
+	suffix := strings.TrimSpace(strings.TrimPrefix(rest, name))
+	prefixStyle := theme.ToolStyle()
+	nameStyle := theme.ToolNameStyle()
+	suffixStyle := theme.ToolArgsStyle()
+	switch prefix {
+	case "✓":
+		prefixStyle = theme.AssistantStyle()
+		suffixStyle = theme.ToolResultStyle()
+	case "✗":
+		prefixStyle = theme.ToolErrorStyle()
+		nameStyle = theme.ToolErrorStyle()
+		suffixStyle = theme.ToolErrorStyle()
+	}
+	styled := prefixStyle.Render(prefix+" ") + nameStyle.Render(name)
+	if suffix != "" {
+		styled += " " + suffixStyle.Render(tuikit.LinkifyText(suffix, theme.LinkStyle()))
+	}
+	if strings.HasPrefix(line, "  ") {
+		styled = "  " + styled
+	}
+	return styled, true
+}
+
+func splitToolLifecycleHeader(line string) (prefix string, rest string, ok bool) {
+	line = strings.TrimSpace(line)
+	for _, candidate := range []string{"▸", "▾", "✓", "✗"} {
+		if strings.HasPrefix(line, candidate+" ") {
+			return candidate, strings.TrimSpace(strings.TrimPrefix(line, candidate+" ")), true
+		}
+	}
+	return "", "", false
+}
+
 func renderToolEventViewModelPlain(vm ToolEventViewModel) (string, tuikit.LineStyle) {
-	name := cmp.Or(strings.TrimSpace(vm.Name), "TOOL")
+	name := toolEventDisplayName(vm.Name)
 	if !vm.Done {
 		prefix := "▸"
 		if vm.Expandable && vm.Expanded {
@@ -211,4 +257,17 @@ func renderToolEventViewModelPlain(vm ToolEventViewModel) (string, tuikit.LineSt
 		line += " completed"
 	}
 	return line, tuikit.LineStyleTool
+}
+
+func toolEventDisplayName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "TOOL"
+	}
+	switch strings.ToUpper(strings.ReplaceAll(name, " ", "_")) {
+	case "REQUEST_PERMISSIONS":
+		return "Request permissions"
+	default:
+		return cmp.Or(strings.TrimSpace(name), "TOOL")
+	}
 }

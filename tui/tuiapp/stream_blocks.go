@@ -224,7 +224,7 @@ func (m *Model) handleAnswerStream(actor string, text string, final bool) (tea.M
 		m.activeAssistantActor = actor
 		m.hasCommittedLine = true
 		m.lastCommittedStyle = tuikit.LineStyleAssistant
-		m.lastCommittedRaw = "* "
+		m.lastCommittedRaw = "· "
 		if final {
 			m.activeAssistantID = ""
 			m.activeAssistantActor = ""
@@ -253,7 +253,7 @@ func (m *Model) handleAnswerStream(actor string, text string, final bool) (tea.M
 		m.activeAssistantActor = ""
 	}
 	m.lastCommittedStyle = tuikit.LineStyleAssistant
-	m.lastCommittedRaw = "* "
+	m.lastCommittedRaw = "· "
 	m.markViewportBlockDirty(ab.BlockID())
 	return m, m.requestStreamViewportSync()
 }
@@ -306,7 +306,7 @@ func (m *Model) handleReasoningStream(actor string, text string, final bool) (te
 			m.doc.Append(block)
 			m.hasCommittedLine = true
 			m.lastCommittedStyle = tuikit.LineStyleReasoning
-			m.lastCommittedRaw = "│ "
+			m.lastCommittedRaw = "› "
 			m.markViewportStructureDirty()
 			return m, m.requestStreamViewportSync()
 		}
@@ -323,7 +323,7 @@ func (m *Model) handleReasoningStream(actor string, text string, final bool) (te
 		m.activeReasoningID = ""
 		m.activeReasoningActor = ""
 		m.lastCommittedStyle = tuikit.LineStyleReasoning
-		m.lastCommittedRaw = "│ "
+		m.lastCommittedRaw = "› "
 		m.markViewportBlockDirty(rb.BlockID())
 		return m, m.requestStreamViewportSync()
 	}
@@ -336,7 +336,7 @@ func (m *Model) handleReasoningStream(actor string, text string, final bool) (te
 		m.activeReasoningActor = actor
 		m.hasCommittedLine = true
 		m.lastCommittedStyle = tuikit.LineStyleReasoning
-		m.lastCommittedRaw = "│ "
+		m.lastCommittedRaw = "› "
 		m.markViewportStructureDirty()
 		return m, m.requestStreamViewportSync()
 	}
@@ -351,7 +351,7 @@ func (m *Model) handleReasoningStream(actor string, text string, final bool) (te
 	rb.Actor = actor
 	rb.appendActiveDelta(text)
 	m.lastCommittedStyle = tuikit.LineStyleReasoning
-	m.lastCommittedRaw = "│ "
+	m.lastCommittedRaw = "› "
 	m.markViewportBlockDirty(rb.BlockID())
 	return m, m.requestStreamViewportSync()
 }
@@ -962,9 +962,9 @@ func stableRenderedNarrativeRow(row string, streamKind string, actor string, all
 
 func stripStreamRolePrefix(row string, streamKind string, actor string) string {
 	row = strings.TrimLeft(row, " ")
-	base := "* "
+	base := "· "
 	if streamKind == "reasoning" {
-		base = "· "
+		base = "› "
 	}
 	if actor = strings.TrimSpace(actor); actor != "" {
 		prefix := base + actor + ": "
@@ -1048,12 +1048,12 @@ func renderAssistantPlainRows(raw string, actor string) []string {
 		actorPrefix = actor + ": "
 	}
 	if len(plainRows) == 0 {
-		return []string{"* " + actorPrefix}
+		return []string{"· " + actorPrefix}
 	}
 	rows := make([]string, 0, len(plainRows))
 	for i, pr := range plainRows {
 		if i == 0 {
-			rows = append(rows, "* "+actorPrefix+pr)
+			rows = append(rows, "· "+actorPrefix+pr)
 			continue
 		}
 		rows = append(rows, pr)
@@ -1068,13 +1068,13 @@ func renderReasoningPlainRows(raw string, actor string) []string {
 		actorPrefix = actor + ": "
 	}
 	if len(plainRows) == 0 {
-		return []string{"· " + actorPrefix}
+		return []string{"› " + actorPrefix}
 	}
 	rows := make([]string, 0, len(plainRows))
 	for i, pr := range plainRows {
 		prefix := "  "
 		if i == 0 {
-			prefix = "· " + actorPrefix
+			prefix = "› " + actorPrefix
 		}
 		rows = append(rows, prefix+pr)
 	}
@@ -1347,6 +1347,17 @@ func (m *Model) refreshHistoryTailState() {
 	m.hasCommittedLine = false
 	blocks := m.doc.Blocks()
 	for i := len(blocks) - 1; i >= 0; i-- {
+		if ub, ok := blocks[i].(*UserNarrativeBlock); ok {
+			raw := "▌ " + strings.TrimSpace(ub.Raw)
+			if strings.TrimSpace(raw) == "▌" {
+				continue
+			}
+			m.lastCommittedRaw = raw
+			m.lastCommittedStyle = tuikit.LineStyleUser
+			m.lastUserDisplayLine = strings.TrimSpace(ub.Raw)
+			m.hasCommittedLine = true
+			return
+		}
 		tb, ok := blocks[i].(*TranscriptBlock)
 		if !ok {
 			// Non-transcript blocks (assistant, diff, etc.) count as committed content.
@@ -1360,7 +1371,7 @@ func (m *Model) refreshHistoryTailState() {
 		m.lastCommittedRaw = raw
 		m.lastCommittedStyle = tuikit.DetectLineStyle(raw)
 		if m.lastCommittedStyle == tuikit.LineStyleUser {
-			m.lastUserDisplayLine = strings.TrimPrefix(strings.TrimSpace(raw), ">")
+			m.lastUserDisplayLine = strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(strings.TrimSpace(raw), ">"), "▌"))
 		}
 		m.hasCommittedLine = true
 		return

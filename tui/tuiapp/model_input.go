@@ -1188,11 +1188,11 @@ func (m *Model) commitUserDisplayLine(displayLine string) {
 	if m.userDisplayDedupOK && normalized != "" && normalizeUserDisplayLine(m.lastUserDisplayLine) == normalized {
 		return
 	}
-	userLine := "> " + displayLine
+	userLine := "▌ " + displayLine
 	if m.hasCommittedLine {
 		m.insertSpacing(tuikit.LineStyleUser, userLine)
 	}
-	block := NewTranscriptBlock(userLine, tuikit.LineStyleUser)
+	block := NewUserNarrativeBlock(displayLine)
 	m.doc.Append(block)
 	m.lastCommittedStyle = tuikit.LineStyleUser
 	m.lastCommittedRaw = userLine

@@ -49,7 +49,7 @@ func NewSpacerBlock() *TranscriptBlock {
 }
 
 // ---------------------------------------------------------------------------
-// UserNarrativeBlock — finalized user message rendered through glamour.
+// UserNarrativeBlock — finalized user message rendered as plain text.
 // ---------------------------------------------------------------------------
 
 type UserNarrativeBlock struct {
@@ -65,8 +65,7 @@ func NewUserNarrativeBlock(text string) *UserNarrativeBlock {
 func (b *UserNarrativeBlock) BlockID() string { return b.id }
 func (b *UserNarrativeBlock) Kind() BlockKind { return BlockTranscript }
 func (b *UserNarrativeBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	rows := b.renderCache.renderNarrativeRows(b.id, b.Raw, "▌ ", tuikit.LineStyleUser, ctx, false)
-	return applyUserNarrativeSurface(rows, ctx)
+	return renderPlainUserRows(b.id, b.Raw, "▌ ", ctx.Width, ctx.Theme)
 }
 
 type narrativeBlockRenderCache struct {

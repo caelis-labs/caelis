@@ -1438,7 +1438,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 		t.Fatalf("approval hint = %q, want pending review hint", got)
 	}
 
-	reviewText := "Automatic approval review approved (risk: low, authorization: high): user requested it."
+	reviewText := "Automatic approval review approved (risk: medium, authorization: high): user requested it."
 	updated, _ = model.Update(appgateway.EventEnvelope{
 		Event: appgateway.Event{
 			Kind:       appgateway.EventKindToolResult,
@@ -1479,7 +1479,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				ReviewStatus:   appgateway.ApprovalReviewStatusApproved,
 				DecisionSource: "auto-review",
 				ReviewText:     reviewText,
-				Risk:           "low",
+				Risk:           "medium",
 				Authorization:  "high",
 			},
 		},
@@ -1495,10 +1495,10 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	}
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	plain := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside") {
+	if !strings.Contains(plain, "▸ Request permissions write /tmp/outside; read /tmp/outside") {
 		t.Fatalf("rendered rows = %q, want request_permissions standard header", plain)
 	}
-	if !strings.Contains(plain, "• Automatic approval review approved (risk: low, authorization: high)") {
+	if !strings.Contains(plain, "• Automatic approval review approved (risk: medium, authorization: high)") {
 		t.Fatalf("rendered rows = %q, want compact approval review header", plain)
 	}
 	if !strings.Contains(plain, "  └ user requested it.") {
@@ -1507,7 +1507,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	if strings.Contains(plain, "⚠") {
 		t.Fatalf("rendered rows = %q, should not use warning prefix for approval review", plain)
 	}
-	toolIdx := strings.Index(plain, "▸ request_permissions write /tmp/outside; read /tmp/outside")
+	toolIdx := strings.Index(plain, "▸ Request permissions write /tmp/outside; read /tmp/outside")
 	reviewIdx := strings.Index(plain, "• Automatic approval review approved")
 	assistantIdx := strings.Index(plain, "approval-dependent work finished")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
@@ -1516,8 +1516,29 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	if len(block.Events) < 3 || block.Events[0].Kind != SEToolCall || block.Events[0].CallID != "perm-1" || block.Events[1].Kind != SEApproval || block.Events[1].CallID != "perm-1" || block.Events[2].Kind != SEAssistant {
 		t.Fatalf("events = %#v, want tool then matching approval then later assistant", block.Events)
 	}
-	if block.Events[1].ApprovalRisk != "low" || block.Events[1].ApprovalAuth != "high" {
-		t.Fatalf("approval event metadata = (%q, %q), want low/high", block.Events[1].ApprovalRisk, block.Events[1].ApprovalAuth)
+	if block.Events[1].ApprovalRisk != "medium" || block.Events[1].ApprovalAuth != "high" {
+		t.Fatalf("approval event metadata = (%q, %q), want medium/high", block.Events[1].ApprovalRisk, block.Events[1].ApprovalAuth)
+	}
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+	styledLines, plainLines, _ := model.wrapRenderedRowsForViewport(block, rows, ctx.Width, ctx)
+	reviewLine := ""
+	for i, line := range plainLines {
+		if strings.Contains(line, "• Automatic approval review approved") {
+			reviewLine = styledLines[i]
+			break
+		}
+	}
+	if reviewLine == "" {
+		t.Fatalf("viewport rows = %#v, want approval review line", plainLines)
+	}
+	for label, want := range map[string]string{
+		"approved": approvalReviewStatusStyle(ctx, "approved").Render("approved"),
+		"medium":   approvalReviewValueStyle(ctx, "medium").Render("medium"),
+		"high":     approvalReviewValueStyle(ctx, "high").Render("high"),
+	} {
+		if !strings.Contains(reviewLine, want) {
+			t.Fatalf("approval review viewport styling missing %s token:\n line: %q\n want token: %q", label, reviewLine, want)
+		}
 	}
 	for _, forbidden := range []string{`"approved":true`, `"granted"`, "Automatic approval review pending"} {
 		if strings.Contains(plain, forbidden) {
@@ -1603,7 +1624,7 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 	if strings.Contains(plain, "⚠") {
 		t.Fatalf("rendered rows = %q, should not use warning prefix for denied review", plain)
 	}
-	toolIdx := strings.Index(plain, "request_permissions write /tmp/outside")
+	toolIdx := strings.Index(plain, "Request permissions write /tmp/outside")
 	reviewIdx := strings.Index(plain, "• Automatic approval review denied")
 	assistantIdx := strings.Index(plain, "trying a safer path")
 	if toolIdx < 0 || reviewIdx < 0 || assistantIdx < 0 || toolIdx >= reviewIdx || reviewIdx >= assistantIdx {
@@ -3243,6 +3264,9 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 	var secondUserIndex = -1
 	var secondTurnIndex = -1
 	for i, block := range blocks {
+		if user, ok := block.(*UserNarrativeBlock); ok && strings.Contains(user.Raw, "@kate 帮我清理") {
+			secondUserIndex = i
+		}
 		if transcript, ok := block.(*TranscriptBlock); ok && strings.Contains(transcript.Raw, "@kate 帮我清理") {
 			secondUserIndex = i
 		}
@@ -3301,6 +3325,10 @@ func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing
 
 	var userLines []string
 	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok {
+			userLines = append(userLines, "▌ "+user.Raw)
+			continue
+		}
 		if transcript, ok := block.(*TranscriptBlock); ok && strings.HasPrefix(strings.TrimSpace(transcript.Raw), ">") {
 			userLines = append(userLines, transcript.Raw)
 		}
@@ -3308,7 +3336,7 @@ func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing
 	if len(userLines) != 1 || !strings.Contains(userLines[0], "/claude 总结一下工作") {
 		t.Fatalf("user lines = %#v, want only displayed slash prompt", userLines)
 	}
-	if strings.Contains(strings.Join(userLines, "\n"), "> 总结一下工作") {
+	if strings.Contains(strings.Join(userLines, "\n"), "▌ 总结一下工作") || strings.Contains(strings.Join(userLines, "\n"), "> 总结一下工作") {
 		t.Fatalf("user lines = %#v, should not render participant prompt echo", userLines)
 	}
 }
