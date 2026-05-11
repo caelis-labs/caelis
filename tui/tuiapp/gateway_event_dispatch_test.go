@@ -598,7 +598,10 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 		t.Fatalf("live rows = %q, want current reasoning to remain visible", liveJoined)
 	}
 	if strings.Contains(liveJoined, "• Explored") {
-		t.Fatalf("live rows = %q, should not compact the current exploration step before next assistant output", liveJoined)
+		t.Fatalf("live rows = %q, should not compact current exploration step before next assistant output", liveJoined)
+	}
+	if strings.Contains(liveJoined, "config contents") || strings.Contains(liveJoined, "╭") {
+		t.Fatalf("live rows = %q, current exploration tool should not expose raw output panel", liveJoined)
 	}
 
 	sendReasoning("Now I can patch the rendering behavior.")
@@ -673,6 +676,45 @@ func TestGatewayLiveExplorationCompactsAtTurnCompletion(t *testing.T) {
 	}
 	if strings.Contains(settled, "Inspect before finishing.") {
 		t.Fatalf("completed rows = %q, collapsed completed rows should hide exploration reasoning", settled)
+	}
+}
+
+func TestGatewaySettledExplorationStepsStayInSingleExploredGroup(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEReasoning, Text: `Let me inspect the dispatch repository first.`},
+		SubagentEvent{Kind: SEToolCall, CallID: "search-ready", Name: "SEARCH", Args: `"GetReadyDispatchesByRegion"`, Output: "3 hits in 2 files", Done: true},
+		SubagentEvent{Kind: SEReasoning, Text: `Now I will check the busy and trigger paths.`},
+		SubagentEvent{Kind: SEToolCall, CallID: "search-busy", Name: "SEARCH", Args: `"GetBusyEbsIDsByRegion"`, Output: "3 hits in 2 files", Done: true},
+		SubagentEvent{Kind: SEReasoning, Text: `Now I will inspect trigger flow before patching.`},
+		SubagentEvent{Kind: SEToolCall, CallID: "search-trigger", Name: "SEARCH", Args: `"TriggerEbsBackupDispatch"`},
+	)
+
+	rows := block.Render(BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if strings.Count(joined, "• Explored") != 1 {
+		t.Fatalf("rendered rows = %q, want one live Explored group", joined)
+	}
+	for _, want := range []string{
+		`Search "GetReadyDispatchesByRegion"`,
+		`"GetBusyEbsIDsByRegion"`,
+		"Now I will inspect trigger flow before patching.",
+		`SEARCH "TriggerEbsBackupDispatch"`,
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want %q", joined, want)
+		}
+	}
+	for _, hidden := range []string{"Let me inspect the dispatch repository first.", "Now I will check the busy and trigger paths."} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("rendered rows = %q, settled exploration reasoning should be hidden in collapsed group", joined)
+		}
+	}
+	for _, forbidden := range []string{"✓ SEARCH", "▾ SEARCH", "3 hits in 2 files", "╭"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, should not expose raw exploration tool panel %q", joined, forbidden)
+		}
 	}
 }
 
@@ -782,6 +824,7 @@ func TestGatewayCompletedExplorationSummaryWrapsAndAlignsDetails(t *testing.T) {
 		block.UpdateTool(callID, "READ", name, "ok", false, false)
 		block.UpdateTool(callID, "READ", name, "ok", true, false)
 	}
+	block.SetStatus("completed", "", "", time.Now())
 
 	rows := block.Render(BlockRenderContext{Width: 58, TermWidth: 58, Theme: model.theme})
 	plain := renderedPlainRows(rows)
@@ -802,7 +845,7 @@ func TestGatewayCompletedExplorationSummaryWrapsAndAlignsDetails(t *testing.T) {
 	}
 }
 
-func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
+func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendACPTool := func(id string, name string, args string, output string) {
 		rawInput := map[string]any{"path": args}
@@ -844,6 +887,17 @@ func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 
 	sendACPTool("read-1", "READ", "gateway/core/types.go", "type Event struct{}")
 	sendACPTool("search-1", "SEARCH", "EventKind", "42 matches")
+	updated, _ := model.Update(appgateway.EventEnvelope{Event: appgateway.Event{
+		Kind:       appgateway.EventKindAssistantMessage,
+		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+		Narrative: &appgateway.NarrativePayload{
+			Role:          appgateway.NarrativeRoleAssistant,
+			ReasoningText: "Now I can continue.",
+			Final:         true,
+			Scope:         appgateway.EventScopeMain,
+		},
+	}})
+	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
@@ -855,14 +909,14 @@ func TestGatewayACPExplorationNamedToolsDoNotRenderExploredGroup(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	if strings.Contains(joined, "• Explored") {
-		t.Fatalf("rendered rows = %q, want ACP tools to stay out of compact exploration grouping", joined)
+	if !strings.Contains(joined, "• Explored") ||
+		!strings.Contains(joined, "  └ Read types.go") ||
+		!strings.Contains(joined, `    Search "EventKind"`) ||
+		!strings.Contains(joined, "Now I can continue.") {
+		t.Fatalf("rendered rows = %q, want ACP read/search tools to fold into exploration group", joined)
 	}
-	if !strings.Contains(joined, "Read types.go") || !strings.Contains(joined, `Search "EventKind"`) {
-		t.Fatalf("rendered rows = %q, want standard tool rows", joined)
-	}
-	if !block.toolPanelExpanded("read-1") || !block.toolPanelExpanded("search-1") {
-		t.Fatalf("ACP tool panels should not default collapse; expanded map = %#v", block.ExpandedTools)
+	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
+		t.Fatalf("rendered rows = %q, collapsed ACP exploration group should hide raw outputs", joined)
 	}
 }
 
@@ -897,7 +951,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"content":    "1: package main",
 				},
 			},
-			want:      []string{"READ demo.py 1~100"},
+			want:      []string{"• Read demo.py 1~100"},
 			forbidden: []string{"│   /tmp/workspace/demo.py"},
 		},
 		{
@@ -921,7 +975,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"matches": []any{"a.py", "b.py", "c.py", "d.py", "e.py"},
 				},
 			},
-			want: []string{"GLOB **/*.py 5 matches"},
+			want: []string{"• Glob **/*.py 5 matches"},
 		},
 		{
 			name: "bash terminal panel",

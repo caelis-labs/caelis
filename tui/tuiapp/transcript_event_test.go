@@ -201,30 +201,6 @@ func TestProjectGatewayEventToTranscriptEvents_KeepsMainUserMessage(t *testing.T
 	}
 }
 
-func TestProjectGatewayEventToTranscriptEvents_ACPToolDisablesExplorationGrouping(t *testing.T) {
-	t.Parallel()
-
-	events := ProjectGatewayEventToTranscriptEvents(appgateway.Event{
-		Kind:       appgateway.EventKindToolResult,
-		SessionRef: sdksession.SessionRef{SessionID: "root-session"},
-		Origin:     &appgateway.EventOrigin{Scope: appgateway.EventScopeMain, ScopeID: "root-session", Source: "acp"},
-		ToolResult: &appgateway.ToolResultPayload{
-			CallID:    "read-1",
-			ToolName:  "READ",
-			RawOutput: map[string]any{"text": "type Event struct{}"},
-			Status:    appgateway.ToolStatusCompleted,
-			Scope:     appgateway.EventScopeMain,
-		},
-	})
-
-	if got := len(events); got != 1 {
-		t.Fatalf("len(events) = %d, want 1", got)
-	}
-	if !events[0].DisableToolGrouping {
-		t.Fatalf("event = %#v, want ACP tool grouping disabled", events[0])
-	}
-}
-
 func TestTranscriptSnapshots(t *testing.T) {
 	t.Parallel()
 
@@ -570,9 +546,6 @@ func TestProjectGatewayEventACPFetchToolUsesReadableQueryArgs(t *testing.T) {
 	}
 	if got.ToolArgs != `"weather: Shanghai, China"` {
 		t.Fatalf("tool args = %q, want readable query", got.ToolArgs)
-	}
-	if !got.DisableToolGrouping {
-		t.Fatal("DisableToolGrouping = false, want ACP tool to bypass exploration grouping")
 	}
 }
 

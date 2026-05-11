@@ -42,21 +42,20 @@ type TranscriptEvent struct {
 	Text          string
 	Final         bool
 
-	ToolCallID          string
-	ToolName            string
-	ToolKind            string
-	ToolTitle           string
-	ToolArgs            string
-	ToolFullArgs        string
-	ToolOutput          string
-	ToolStream          string
-	ToolStatus          string
-	ToolError           bool
-	ToolTaskID          string
-	ToolTaskAction      string
-	ToolTaskInput       string
-	ToolTaskTargetKind  string
-	DisableToolGrouping bool
+	ToolCallID         string
+	ToolName           string
+	ToolKind           string
+	ToolTitle          string
+	ToolArgs           string
+	ToolFullArgs       string
+	ToolOutput         string
+	ToolStream         string
+	ToolStatus         string
+	ToolError          bool
+	ToolTaskID         string
+	ToolTaskAction     string
+	ToolTaskInput      string
+	ToolTaskTargetKind string
 
 	PlanEntries []PlanEntry
 
@@ -79,7 +78,6 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 	scope := gatewayEventScope(ev)
 	scopeID := gatewayEventScopeID(ev)
 	occurredAt := ev.OccurredAt
-	disableToolGrouping := gatewayEventFromACP(ev)
 	anchorToolCallID := appgateway.EventMetaString(ev.Meta, "caelis", "runtime", "stream", "parent_call_id")
 	anchorToolName := appgateway.EventMetaString(ev.Meta, "caelis", "runtime", "stream", "parent_tool")
 	out := make([]TranscriptEvent, 0, 4)
@@ -200,23 +198,22 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
 			out = append(out, TranscriptEvent{
-				Kind:                TranscriptEventTool,
-				Scope:               scope,
-				ScopeID:             scopeID,
-				Actor:               gatewayDisplayActor(ev, payload.Actor),
-				OccurredAt:          occurredAt,
-				ToolCallID:          strings.TrimSpace(payload.CallID),
-				ToolName:            toolName,
-				ToolKind:            strings.TrimSpace(payload.ToolKind),
-				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:            toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput)),
-				ToolFullArgs:        toolDisplayFullArgs(semanticName, rawInput),
-				ToolStatus:          status,
-				ToolTaskID:          toolDisplayTaskID(rawInput, nil, ev.Meta),
-				ToolTaskAction:      toolDisplayTaskAction(rawInput, nil, ev.Meta),
-				ToolTaskInput:       toolDisplayTaskInput(rawInput, nil, ev.Meta),
-				ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
-				DisableToolGrouping: disableToolGrouping,
+				Kind:               TranscriptEventTool,
+				Scope:              scope,
+				ScopeID:            scopeID,
+				Actor:              gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt:         occurredAt,
+				ToolCallID:         strings.TrimSpace(payload.CallID),
+				ToolName:           toolName,
+				ToolKind:           strings.TrimSpace(payload.ToolKind),
+				ToolTitle:          strings.TrimSpace(payload.ToolTitle),
+				ToolArgs:           toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput)),
+				ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
+				ToolStatus:         status,
+				ToolTaskID:         toolDisplayTaskID(rawInput, nil, ev.Meta),
+				ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, ev.Meta),
+				ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, ev.Meta),
+				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
 			})
 		}
 	case appgateway.EventKindToolResult:
@@ -250,27 +247,26 @@ func ProjectGatewayEventToTranscriptEvents(ev appgateway.Event) []TranscriptEven
 			}
 			toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
 			out = append(out, TranscriptEvent{
-				Kind:                TranscriptEventTool,
-				Scope:               scope,
-				ScopeID:             scopeID,
-				Actor:               gatewayDisplayActor(ev, payload.Actor),
-				OccurredAt:          occurredAt,
-				ToolCallID:          strings.TrimSpace(payload.CallID),
-				ToolName:            toolName,
-				ToolKind:            strings.TrimSpace(payload.ToolKind),
-				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:            toolArgs,
-				ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
-				ToolOutput:          toolOutput,
-				ToolStream:          transcriptToolStream(status, toolErr),
-				ToolStatus:          status,
-				ToolError:           toolErr,
-				ToolTaskID:          toolDisplayTaskID(rawInput, rawOutput, ev.Meta),
-				ToolTaskAction:      toolDisplayTaskAction(rawInput, rawOutput, ev.Meta),
-				ToolTaskInput:       toolDisplayTaskInput(rawInput, rawOutput, ev.Meta),
-				ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, rawOutput, ev.Meta),
-				DisableToolGrouping: disableToolGrouping,
-				Final:               transcriptToolStatusFinal(status, toolErr),
+				Kind:               TranscriptEventTool,
+				Scope:              scope,
+				ScopeID:            scopeID,
+				Actor:              gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt:         occurredAt,
+				ToolCallID:         strings.TrimSpace(payload.CallID),
+				ToolName:           toolName,
+				ToolKind:           strings.TrimSpace(payload.ToolKind),
+				ToolTitle:          strings.TrimSpace(payload.ToolTitle),
+				ToolArgs:           toolArgs,
+				ToolFullArgs:       toolDisplayFullArgs(semanticName, displayInput),
+				ToolOutput:         toolOutput,
+				ToolStream:         transcriptToolStream(status, toolErr),
+				ToolStatus:         status,
+				ToolError:          toolErr,
+				ToolTaskID:         toolDisplayTaskID(rawInput, rawOutput, ev.Meta),
+				ToolTaskAction:     toolDisplayTaskAction(rawInput, rawOutput, ev.Meta),
+				ToolTaskInput:      toolDisplayTaskInput(rawInput, rawOutput, ev.Meta),
+				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, rawOutput, ev.Meta),
+				Final:              transcriptToolStatusFinal(status, toolErr),
 			})
 		}
 	case appgateway.EventKindPlanUpdate:

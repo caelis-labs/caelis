@@ -111,8 +111,7 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	}, "\n")
 
 	block.UpdateToolWithMeta("ws-1", "fetch", `"weather: Shanghai, China"`, output, true, false, ToolUpdateMeta{
-		ToolKind:        "fetch",
-		DisableGrouping: true,
+		ToolKind: "fetch",
 	})
 
 	rows := block.Render(ctx)
@@ -124,6 +123,18 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	if strings.Contains(joined, "▾ Searching the Web") || strings.Contains(joined, "{") {
 		t.Fatalf("generic ACP tool leaked old expandable/raw-json header, got\n%s", joined)
 	}
+	for _, hidden := range []string{"result 01", "result 06", "╭", "│"} {
+		if strings.Contains(joined, hidden) {
+			t.Fatalf("collapsed generic ACP tool should not show old/raw output %q\n%s", hidden, joined)
+		}
+	}
+
+	if !block.toggleToolPanelClick("ws-1") {
+		t.Fatal("expected generic ACP summary click to expand summarized output")
+	}
+	rows = block.Render(ctx)
+	plain = renderedPlainRows(rows)
+	joined = strings.Join(plain, "\n")
 	for _, want := range []string{"result 01", "result 02", "... +2 lines", "result 05", "result 06"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("generic ACP tool output missing %q\n%s", want, joined)
@@ -131,6 +142,9 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	}
 	if strings.Contains(joined, "result 03") || strings.Contains(joined, "result 04") {
 		t.Fatalf("generic ACP tool final output should be summarized, got\n%s", joined)
+	}
+	if strings.Contains(joined, "╭") || strings.Contains(joined, "│") {
+		t.Fatalf("generic ACP tool should use unified detail rows, got\n%s", joined)
 	}
 
 	if !block.toggleToolPanelClick("ws-1") {
@@ -141,6 +155,33 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	joined = strings.Join(plain, "\n")
 	if strings.Contains(joined, "... +") || !strings.Contains(joined, "result 03") || !strings.Contains(joined, "result 04") {
 		t.Fatalf("expanded generic ACP tool output should show hidden lines, got\n%s", joined)
+	}
+}
+
+func TestStandardCustomToolCollapseHidesOutputRows(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
+	block := NewParticipantTurnBlock("codex-001", "codex-001")
+	block.UpdateToolWithMeta("custom-1", "lookup_weather", `"Shanghai"`, "sunny\n24C", true, false, ToolUpdateMeta{
+		ToolKind: "other",
+	})
+
+	joined := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(joined, `• lookup_weather "Shanghai"`) ||
+		!strings.Contains(joined, "sunny") ||
+		!strings.Contains(joined, "24C") {
+		t.Fatalf("expanded custom tool should show standard header and output, got\n%s", joined)
+	}
+
+	if !block.toggleToolPanelClick("custom-1") {
+		t.Fatal("expected custom tool click to collapse panel")
+	}
+	joined = strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(joined, `• lookup_weather "Shanghai"`) {
+		t.Fatalf("collapsed custom tool should keep header, got\n%s", joined)
+	}
+	if strings.Contains(joined, "sunny") || strings.Contains(joined, "24C") || strings.Contains(joined, "╭") || strings.Contains(joined, "│") {
+		t.Fatalf("collapsed custom tool should hide output and old panel UI, got\n%s", joined)
 	}
 }
 

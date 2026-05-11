@@ -249,13 +249,12 @@ type MainACPTurnBlock struct {
 }
 
 type ToolUpdateMeta struct {
-	TaskID          string
-	TaskAction      string
-	TaskInput       string
-	TaskTargetKind  string
-	ToolKind        string
-	FullArgs        string
-	DisableGrouping bool
+	TaskID         string
+	TaskAction     string
+	TaskInput      string
+	TaskTargetKind string
+	ToolKind       string
+	FullArgs       string
 }
 
 type toolEventUpdate struct {
@@ -280,7 +279,6 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
-	disableGrouping := update.Meta.DisableGrouping
 	semanticName := toolSemanticName(name, toolKind)
 	output := update.Output
 	defer func() {
@@ -304,41 +302,39 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 			if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != callID || ev.Done || (update.SkipErroredOpen && ev.Err) {
 				continue
 			}
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, disableGrouping, semanticName)
+			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, semanticName)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
-			Kind:            SEToolCall,
-			CallID:          callID,
-			Name:            name,
-			ToolKind:        toolKind,
-			Args:            args,
-			FullArgs:        fullArgs,
-			Output:          output,
-			TaskID:          taskID,
-			TaskAction:      taskAction,
-			TaskInput:       taskInput,
-			TaskTargetKind:  taskTargetKind,
-			DisableGrouping: disableGrouping,
+			Kind:           SEToolCall,
+			CallID:         callID,
+			Name:           name,
+			ToolKind:       toolKind,
+			Args:           args,
+			FullArgs:       fullArgs,
+			Output:         output,
+			TaskID:         taskID,
+			TaskAction:     taskAction,
+			TaskInput:      taskInput,
+			TaskTargetKind: taskTargetKind,
 		})
 		return out, true, false
 	}
 
 	finalEvent := SubagentEvent{
-		Kind:            SEToolCall,
-		CallID:          callID,
-		Name:            name,
-		ToolKind:        toolKind,
-		Args:            args,
-		FullArgs:        fullArgs,
-		Output:          output,
-		Done:            true,
-		Err:             update.Err,
-		TaskID:          taskID,
-		TaskAction:      taskAction,
-		TaskInput:       taskInput,
-		TaskTargetKind:  taskTargetKind,
-		DisableGrouping: disableGrouping,
+		Kind:           SEToolCall,
+		CallID:         callID,
+		Name:           name,
+		ToolKind:       toolKind,
+		Args:           args,
+		FullArgs:       fullArgs,
+		Output:         output,
+		Done:           true,
+		Err:            update.Err,
+		TaskID:         taskID,
+		TaskAction:     taskAction,
+		TaskInput:      taskInput,
+		TaskTargetKind: taskTargetKind,
 	}
 	for i := len(out) - 1; i >= 0; i-- {
 		ev := &out[i]
@@ -369,7 +365,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 	return out, true, collapse
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind string, disableGrouping bool, semanticName string) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind string, semanticName string) {
 	if ev == nil {
 		return
 	}
@@ -400,9 +396,6 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	}
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = taskTargetKind
-	}
-	if disableGrouping {
-		ev.DisableGrouping = true
 	}
 	if output != "" {
 		ev.Output = mergeSubagentStreamChunk(ev.Output, output)
@@ -469,10 +462,6 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = finalEvent.TaskTargetKind
 	}
-	if ev.DisableGrouping {
-		finalEvent.DisableGrouping = true
-	}
-	ev.DisableGrouping = finalEvent.DisableGrouping
 }
 
 func mergeOpenFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
@@ -1016,7 +1005,7 @@ func toggleToolPanelExpanded(state *map[string]bool, callID string) bool {
 	}
 	next := !toolPanelExpanded(*state, callID)
 	(*state)[callID] = next
-	return next
+	return true
 }
 
 func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[string]bool, events []SubagentEvent, callID string) bool {
@@ -1346,27 +1335,21 @@ func collapseToolPanelsForEvents(state map[string]bool, events []SubagentEvent) 
 }
 
 func shouldDefaultCollapseCallID(events []SubagentEvent, callID string) bool {
-	var name string
+	var candidate SubagentEvent
 	for _, ev := range events {
 		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != strings.TrimSpace(callID) {
 			continue
 		}
-		if ev.DisableGrouping {
-			return false
-		}
-		if name == "" {
-			name = strings.TrimSpace(ev.Name)
+		if strings.TrimSpace(candidate.Name) == "" {
+			candidate = ev
 		}
 	}
-	return shouldDefaultCollapseToolPanel(name)
+	return shouldDefaultCollapseToolEvent(candidate)
 }
 
 func toolPanelHasHiddenSummary(events []SubagentEvent, callID string) bool {
 	final, ok := finalToolEventForCallID(events, callID)
 	if !ok {
-		return false
-	}
-	if !final.DisableGrouping && !isTerminalPanelToolEvent(final) {
 		return false
 	}
 	return len(nonEmptyToolOutputLines(final.Output)) > acpTerminalPanelMaxLines
@@ -1449,10 +1432,7 @@ func shouldDefaultCollapseToolPanel(name string) bool {
 }
 
 func shouldDefaultCollapseToolEvent(ev SubagentEvent) bool {
-	if ev.DisableGrouping {
-		return false
-	}
-	return shouldDefaultCollapseToolPanel(ev.Name)
+	return shouldDefaultCollapseToolPanel(toolSemanticName(ev.Name, ev.ToolKind))
 }
 
 func participantTurnStatusLabel(state string) string {
@@ -2074,20 +2054,18 @@ type SubagentEvent struct {
 	EndedAt   time.Time
 
 	// ToolCall fields.
-	CallID          string
-	Name            string
-	ToolKind        string
-	Args            string
-	FullArgs        string
-	Output          string
-	TaskID          string
-	TaskAction      string
-	TaskInput       string
-	TaskTargetKind  string
-	Done            bool
-	Err             bool
-	DisableGrouping bool
-
+	CallID         string
+	Name           string
+	ToolKind       string
+	Args           string
+	FullArgs       string
+	Output         string
+	TaskID         string
+	TaskAction     string
+	TaskInput      string
+	TaskTargetKind string
+	Done           bool
+	Err            bool
 	// Plan fields.
 	PlanEntries []planEntryState
 
