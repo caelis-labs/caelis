@@ -3137,7 +3137,7 @@ func TestGatewayParticipantStreamingChunksAppendInsteadOfReplace(t *testing.T) {
 	}
 }
 
-func TestGatewayParticipantFinalCumulativeMessageReplacesCoveredLiveSegments(t *testing.T) {
+func TestGatewayParticipantFinalCumulativeMessagePreservesInterleavedTimeline(t *testing.T) {
 	model := newGatewayEventTestModel()
 
 	sendAssistant := func(text string, final bool) {
@@ -3202,24 +3202,64 @@ func TestGatewayParticipantFinalCumulativeMessageReplacesCoveredLiveSegments(t *
 	if !ok {
 		t.Fatalf("first block = %#v, want ParticipantTurnBlock", model.doc.Blocks()[0])
 	}
-	var assistantTexts []string
-	var toolEvents int
-	for _, event := range block.Events {
-		switch event.Kind {
-		case SEAssistant:
-			assistantTexts = append(assistantTexts, event.Text)
-		case SEToolCall:
-			toolEvents++
+	wantKinds := []SubagentEventKind{SEAssistant, SEToolCall, SEAssistant}
+	if len(block.Events) != len(wantKinds) {
+		t.Fatalf("participant events = %#v, want assistant/tool/assistant timeline", block.Events)
+	}
+	for i, kind := range wantKinds {
+		if block.Events[i].Kind != kind {
+			t.Fatalf("participant events[%d] = %#v, want kind %v", i, block.Events[i], kind)
 		}
 	}
-	if len(assistantTexts) != 1 {
-		t.Fatalf("assistant events = %#v, want only cumulative final assistant event", assistantTexts)
+	if block.Events[0].Text != "I will inspect first." {
+		t.Fatalf("first assistant text = %q, want original first segment", block.Events[0].Text)
 	}
-	if assistantTexts[0] != "I will inspect first.\n\nThe final answer is ready." {
-		t.Fatalf("assistant final = %q, want cumulative final", assistantTexts[0])
+	if !block.Events[1].Done {
+		t.Fatalf("tool event = %#v, want completed tool preserved in place", block.Events[1])
 	}
-	if toolEvents == 0 {
-		t.Fatalf("participant events = %#v, want tool event preserved", block.Events)
+	if block.Events[2].Text != "The final answer is ready." {
+		t.Fatalf("second assistant text = %q, want original second segment", block.Events[2].Text)
+	}
+}
+
+func TestGatewayParticipantFinalMarkdownWhitespaceReplacesSingleLiveSegment(t *testing.T) {
+	model := newGatewayEventTestModel()
+
+	sendAssistant := func(text string, final bool) {
+		updated, _ := model.Update(appgateway.EventEnvelope{
+			Event: appgateway.Event{
+				Kind:       appgateway.EventKindAssistantMessage,
+				SessionRef: sdksession.SessionRef{SessionID: "root-session"},
+				Origin: &appgateway.EventOrigin{
+					Scope:         appgateway.EventScopeParticipant,
+					ScopeID:       "codex-turn-1",
+					Actor:         "@codex",
+					ParticipantID: "codex-001",
+				},
+				Narrative: &appgateway.NarrativePayload{
+					Role:  appgateway.NarrativeRoleAssistant,
+					Actor: "@codex",
+					Text:  text,
+					Final: final,
+					Scope: appgateway.EventScopeParticipant,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+
+	sendAssistant("- a - b", false)
+	sendAssistant("- a\n- b", true)
+
+	block, ok := model.doc.Blocks()[0].(*ParticipantTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want ParticipantTurnBlock", model.doc.Blocks()[0])
+	}
+	if len(block.Events) != 1 || block.Events[0].Kind != SEAssistant {
+		t.Fatalf("participant events = %#v, want one assistant event", block.Events)
+	}
+	if block.Events[0].Text != "- a\n- b" {
+		t.Fatalf("assistant final text = %q, want canonical Markdown line break", block.Events[0].Text)
 	}
 }
 

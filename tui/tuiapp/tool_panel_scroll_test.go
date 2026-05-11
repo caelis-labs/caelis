@@ -193,6 +193,27 @@ func TestSubagentPanelShowsLiveTailAndCompletedFinalAnswer(t *testing.T) {
 	}
 }
 
+func TestCompletedSubagentPanelShowsFinalMessageOnly(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
+	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
+	panel.AppendStreamChunk(SEAssistant, "I will run tests.")
+	panel.UpdateToolCall("bash-1", "BASH", "go test ./...", "stdout", "ok\n", true)
+	panel.AppendStreamChunk(SEAssistant, "Tests passed.")
+	panel.ReplaceFinalStreamChunk(SEAssistant, "I will run tests.\n\nTests passed.")
+	panel.Status = "completed"
+
+	rows := panel.Render(ctx)
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if !strings.Contains(joined, "I will run tests.") || !strings.Contains(joined, "Tests passed.") {
+		t.Fatalf("completed subagent panel rows = %#v, want final message", plain)
+	}
+	if strings.Contains(joined, "BASH go test ./...") || strings.Contains(joined, "ok") {
+		t.Fatalf("completed subagent panel rows = %#v, should hide tool trace", plain)
+	}
+}
+
 func TestCompletedSubagentPanelPreservesToolOnlyOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
