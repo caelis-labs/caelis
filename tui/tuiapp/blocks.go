@@ -717,9 +717,9 @@ func compactHeightBudgetContextKey(ctx BlockRenderContext) string {
 
 func compactHeightBudgetMaxRows(ctx BlockRenderContext) int {
 	if ctx.Height > 0 {
-		return maxInt(1, ctx.Height)
+		return maxInt(1, ctx.Height/2)
 	}
-	return 8
+	return 4
 }
 
 func appendCompactHeightBudgetSpacerRows(rows []RenderedRow, blockID string, count int) []RenderedRow {

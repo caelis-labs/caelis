@@ -38,6 +38,24 @@ func hasBlankRowBetween(lines []string, start int, end int) bool {
 	return false
 }
 
+func countTrailingBlankRows(lines []string) int {
+	count := 0
+	for i := len(lines) - 1; i >= 0; i-- {
+		if strings.TrimSpace(lines[i]) != "" {
+			break
+		}
+		count++
+	}
+	return count
+}
+
+func tailPlainRows(lines []string, height int) []string {
+	if height <= 0 || len(lines) <= height {
+		return lines
+	}
+	return lines[len(lines)-height:]
+}
+
 func TestRanHeaderStylesShellCommandTokens(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	plain := "• Ran GOMODCACHE=/tmp/cache git status --short --branch"
@@ -594,8 +612,45 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 	if strings.Contains(settledJoined, "· I need to inspect the config before changing behavior.") {
 		t.Fatalf("settled rows = %q, previous reasoning should be hidden in collapsed Explored", settledJoined)
 	}
-	if len(settledRows) < len(liveRows) {
-		t.Fatalf("settled row count = %d, live row count = %d; height budget should prevent immediate shrink", len(settledRows), len(liveRows))
+	maxBudget := maxInt(1, ctx.Height/2)
+	if trailing := countTrailingBlankRows(renderedPlainRows(settledRows)); trailing > maxBudget {
+		t.Fatalf("settled trailing budget rows = %d, want <= %d; live rows = %d settled rows = %d", trailing, maxBudget, len(liveRows), len(settledRows))
+	}
+}
+
+func TestGatewayLongExplorationHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{
+			Kind: SEReasoning,
+			Text: strings.Repeat("I need to inspect enough context before patching.\n", 30),
+		},
+		SubagentEvent{
+			Kind:   SEToolCall,
+			CallID: "read-long",
+			Name:   "READ",
+			Args:   "long_config.go",
+			Output: "done",
+			Done:   true,
+		},
+	)
+	ctx := BlockRenderContext{Width: 96, Height: 12, TermWidth: 96, Theme: model.theme}
+	live := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if strings.Contains(live, "• Explored") {
+		t.Fatalf("live rows = %q, should not compact before next assistant output", live)
+	}
+
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "Now continue with the patch."})
+	settledPlain := renderedPlainRows(block.Render(ctx))
+	maxBudget := maxInt(1, ctx.Height/2)
+	trailing := countTrailingBlankRows(settledPlain)
+	if trailing == 0 || trailing > maxBudget {
+		t.Fatalf("settled trailing budget rows = %d, want 1..%d; rows = %#v", trailing, maxBudget, settledPlain)
+	}
+	tail := strings.Join(tailPlainRows(settledPlain, ctx.Height), "\n")
+	if !strings.Contains(tail, "• Explored") || !strings.Contains(tail, "Now continue with the patch.") {
+		t.Fatalf("visible tail = %q, want compact summary and new stream visible", tail)
 	}
 }
 
@@ -1322,6 +1377,36 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 		!strings.Contains(joined, `    Wait ella 5s`) ||
 		!strings.Contains(joined, `› 继续处理`) {
 		t.Fatalf("settled rows = %q, want previous TASK step settled before new reasoning", joined)
+	}
+}
+
+func TestGatewayTaskHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{
+			Kind: SEReasoning,
+			Text: strings.Repeat("I am coordinating child work before continuing.\n", 30),
+		},
+		SubagentEvent{Kind: SEToolCall, CallID: "task-0", Name: "TASK", Args: "write Alice"},
+		SubagentEvent{Kind: SEToolCall, CallID: "task-1", Name: "TASK", Args: "wait ella 5s"},
+	)
+	ctx := BlockRenderContext{Width: 110, Height: 12, TermWidth: 110, Theme: model.theme}
+	live := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(live, "I am coordinating child work before continuing.") || !strings.Contains(live, "• Tasks") {
+		t.Fatalf("live rows = %q, want live reasoning followed by task controls", live)
+	}
+
+	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "继续处理"})
+	settledPlain := renderedPlainRows(block.Render(ctx))
+	maxBudget := maxInt(1, ctx.Height/2)
+	trailing := countTrailingBlankRows(settledPlain)
+	if trailing == 0 || trailing > maxBudget {
+		t.Fatalf("settled trailing budget rows = %d, want 1..%d; rows = %#v", trailing, maxBudget, settledPlain)
+	}
+	tail := strings.Join(tailPlainRows(settledPlain, ctx.Height), "\n")
+	if !strings.Contains(tail, "• Tasks") || !strings.Contains(tail, "继续处理") {
+		t.Fatalf("visible tail = %q, want task summary and new stream visible", tail)
 	}
 }
 
