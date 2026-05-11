@@ -27,6 +27,9 @@ const (
 	// StateCurrentReasoningEffort is the durable session-state key for a
 	// per-session reasoning effort override selected by the TUI.
 	StateCurrentReasoningEffort = "gateway.current_reasoning_effort"
+	// StateUsageAccounting is the durable non-invocation session-state key for
+	// token usage bookkeeping that must not enter canonical prompt history.
+	StateUsageAccounting = "gateway.usage.v1"
 )
 
 type ModelResolution struct {

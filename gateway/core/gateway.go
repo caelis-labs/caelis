@@ -1054,7 +1054,8 @@ func (g *Gateway) resolveApprovalRequest(
 	terminal.Risk = strings.TrimSpace(result.Risk)
 	terminal.Authorization = strings.TrimSpace(result.Authorization)
 	terminal.DecisionSource = strings.TrimSpace(result.DecisionSource)
-	handle.publishApprovalReviewPayload(req, terminal)
+	handle.publishApprovalReviewPayloadWithUsage(req, terminal, result.Usage)
+	_ = g.persistApprovalReviewUsage(context.WithoutCancel(turnCtx), req, result.Usage, terminal.DecisionSource)
 
 	if handle.recordApprovalReviewDecision(result.Approved) {
 		return sdkruntime.ApprovalResponse{}, fmt.Errorf("automatic approval review rejected too many approval requests for this turn")
@@ -1066,6 +1067,62 @@ func (g *Gateway) resolveApprovalRequest(
 		Reason:     strings.TrimSpace(result.Rationale),
 		ReviewText: strings.TrimSpace(result.DisplayText),
 	}, nil
+}
+
+func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *sdkruntime.ApprovalRequest, usage *UsageSnapshot, source string) error {
+	if g == nil || g.sessions == nil || req == nil || usage == nil || usageSnapshotEmpty(*usage) {
+		return nil
+	}
+	source = firstNonEmpty(strings.TrimSpace(source), string(ApprovalModeAutoReview))
+	usageCopy := *usage
+	return g.sessions.UpdateState(ctx, req.SessionRef, func(state map[string]any) (map[string]any, error) {
+		next := sdksession.CloneState(state)
+		if next == nil {
+			next = map[string]any{}
+		}
+		accounting := anyMapValue(next[StateUsageAccounting])
+		if accounting == nil {
+			accounting = map[string]any{}
+		}
+		total := UsageSnapshot{}
+		if existing := UsageSnapshotFromMap(anyMapValue(accounting["auto_review"])); existing != nil {
+			total = *existing
+		}
+		addUsageSnapshot(&total, usageCopy)
+		accounting["auto_review"] = usageSnapshotMeta(total)
+		accounting["auto_review_source"] = source
+		next[StateUsageAccounting] = accounting
+		return next, nil
+	})
+}
+
+func usageSnapshotMeta(usage UsageSnapshot) map[string]any {
+	return map[string]any{
+		"prompt_tokens":       usage.PromptTokens,
+		"cached_input_tokens": usage.CachedInputTokens,
+		"completion_tokens":   usage.CompletionTokens,
+		"reasoning_tokens":    usage.ReasoningTokens,
+		"total_tokens":        usage.TotalTokens,
+	}
+}
+
+func usageSnapshotEmpty(usage UsageSnapshot) bool {
+	return usage.PromptTokens == 0 &&
+		usage.CachedInputTokens == 0 &&
+		usage.CompletionTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.TotalTokens == 0
+}
+
+func addUsageSnapshot(total *UsageSnapshot, usage UsageSnapshot) {
+	if total == nil {
+		return
+	}
+	total.PromptTokens += usage.PromptTokens
+	total.CachedInputTokens += usage.CachedInputTokens
+	total.CompletionTokens += usage.CompletionTokens
+	total.ReasoningTokens += usage.ReasoningTokens
+	total.TotalTokens += usage.TotalTokens
 }
 
 func approvalOptionIDForDecision(options []ApprovalOption, approved bool) string {

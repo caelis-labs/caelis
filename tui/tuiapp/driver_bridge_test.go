@@ -1002,9 +1002,14 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		MissingAPIKey:            true,
 		HostExecution:            true,
 		FullAccessMode:           true,
+		SessionUsageTotal:        appgateway.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
+		SessionUsageMain:         appgateway.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
+		SessionUsageSubagents:    appgateway.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+		SessionUsageAutoReview:   appgateway.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
 		SessionInputTokens:       12600,
 		SessionCachedInputTokens: 9000,
 		SessionOutputTokens:      200,
+		SessionReasoningTokens:   50,
 		SessionTotalTokens:       12800,
 		PermissionGrantCount:     2,
 		PermissionGrantNetwork:   true,
@@ -1016,9 +1021,24 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"Session", "  Model", "  Mode", "Tokens     input 12600, cached 9000, output 200, total 12800", "Grants     2 approved, read roots 3, write roots 1, network yes", "warn: API key is missing", "/tmp/store"} {
+	for _, want := range []string{"Session", "  Model", "  Mode", "Token usage: total=12,800 input=12,600 (+ 9,000 cached) output=200 (reasoning 50)", "main usage: total=10,150 input=10,000 (+ 7,000 cached) output=150 (reasoning 30)", "sub-agent usage: total=2,040 input=2,000 (+ 1,800 cached) output=40 (reasoning 15)", "auto-review usage: total=610 input=600 (+ 200 cached) output=10 (reasoning 5)", "Grants     2 approved, read roots 3, write roots 1, network yes", "warn: API key is missing", "/tmp/store"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
+	got := formatSessionTokenUsageStatus(tuidriver.StatusSnapshot{
+		SessionUsageTotal: appgateway.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+		SessionUsageMain:  appgateway.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+	})
+	if !strings.Contains(got, "main usage: total=110 input=100 (+ 20 cached) output=10 (reasoning 0)") {
+		t.Fatalf("formatSessionTokenUsageStatus() = %q, want main usage", got)
+	}
+	for _, forbidden := range []string{"sub-agent usage:", "auto-review usage:"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("formatSessionTokenUsageStatus() = %q, should omit %q", got, forbidden)
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkinmemory "github.com/OnslaughtSnail/caelis/sdk/session/inmemory"
 	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
@@ -1179,6 +1180,7 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 				Risk:          "medium",
 				Authorization: "medium",
 				Rationale:     "not narrow enough",
+				Usage:         &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9},
 			},
 		},
 	})
@@ -1211,8 +1213,55 @@ func TestBeginTurnAutoReviewDenialDoesNotInterruptTurn(t *testing.T) {
 	if text := events[1].Event.ApprovalPayload.ReviewText; !strings.Contains(text, "not narrow enough") {
 		t.Fatalf("review text = %q, want reviewer rationale", text)
 	}
+	if usage := events[1].Event.Usage; usage == nil || usage.PromptTokens != 7 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.ReasoningTokens != 1 || usage.TotalTokens != 9 {
+		t.Fatalf("terminal review usage = %+v, want reviewer usage", usage)
+	}
 	if events[len(events)-1].Err != nil {
 		t.Fatalf("last event error = %v, want normal turn continuation", events[len(events)-1].Err)
+	}
+}
+
+func TestPersistApprovalReviewUsageUsesSessionStateNotHistory(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	sessions := sdkinmemory.NewService(sdkinmemory.NewStore(sdkinmemory.Config{}))
+	session, err := sessions.StartSession(ctx, sdksession.StartSessionRequest{
+		AppName:            "caelis",
+		UserID:             "u",
+		Workspace:          sdksession.WorkspaceRef{Key: "ws"},
+		PreferredSessionID: "s1",
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+	gw := &Gateway{
+		sessions: sessions,
+		clock:    time.Now,
+	}
+	req := &sdkruntime.ApprovalRequest{
+		SessionRef: session.SessionRef,
+		TurnID:     "turn-1",
+	}
+	usage := &UsageSnapshot{PromptTokens: 7, CachedInputTokens: 3, CompletionTokens: 2, ReasoningTokens: 1, TotalTokens: 9}
+	if err := gw.persistApprovalReviewUsage(ctx, req, usage, string(ApprovalModeAutoReview)); err != nil {
+		t.Fatalf("persistApprovalReviewUsage() error = %v", err)
+	}
+	events, err := sessions.Events(ctx, sdksession.EventsRequest{SessionRef: session.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("Events() count = %d, want no canonical accounting event", len(events))
+	}
+	state, err := sessions.SnapshotState(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("SnapshotState() error = %v", err)
+	}
+	accounting, _ := state[StateUsageAccounting].(map[string]any)
+	got := UsageSnapshotFromMap(anyMapValue(accounting["auto_review"]))
+	if got == nil || *got != *usage {
+		t.Fatalf("auto-review usage state = %+v, want %+v", got, usage)
 	}
 }
 

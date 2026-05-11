@@ -107,7 +107,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req appga
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	_, _, _, text, err := r.runGuardianReview(ctx, req)
+	_, _, assistantEvent, text, err := r.runGuardianReview(ctx, req)
 	if err != nil {
 		return appgateway.ApprovalReviewResult{}, err
 	}
@@ -127,6 +127,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req appga
 		Rationale:      rationale,
 		DisplayText:    appgateway.FormatApprovalReviewText(approved, risk, authorization, rationale),
 		DecisionSource: "auto-review",
+		Usage:          appgateway.UsageSnapshotFromSessionEvent(assistantEvent),
 	}, nil
 }
 

@@ -1863,7 +1863,13 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		lines = append(lines, fmt.Sprintf("  Context    %s", usage))
 	}
 	if usage := formatSessionTokenUsageStatus(status); usage != "" {
-		lines = append(lines, fmt.Sprintf("  Tokens     %s", usage))
+		for i, line := range strings.Split(usage, "\n") {
+			if i == 0 {
+				lines = append(lines, fmt.Sprintf("  Token usage: %s", line))
+				continue
+			}
+			lines = append(lines, fmt.Sprintf("              %s", line))
+		}
 	}
 	if status.PermissionGrantCount > 0 {
 		network := "no"
@@ -1891,23 +1897,96 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 }
 
 func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
-	inputTokens := max(status.SessionInputTokens, 0)
-	cachedTokens := max(status.SessionCachedInputTokens, 0)
-	outputTokens := max(status.SessionOutputTokens, 0)
-	totalTokens := max(status.SessionTotalTokens, 0)
-	if totalTokens == 0 && (inputTokens != 0 || outputTokens != 0) {
-		totalTokens = inputTokens + outputTokens
+	total := normalizedUsageSnapshot(status.SessionUsageTotal)
+	if usageSnapshotZero(total) {
+		total = normalizedUsageSnapshot(appgateway.UsageSnapshot{
+			PromptTokens:      status.SessionInputTokens,
+			CachedInputTokens: status.SessionCachedInputTokens,
+			CompletionTokens:  status.SessionOutputTokens,
+			ReasoningTokens:   status.SessionReasoningTokens,
+			TotalTokens:       status.SessionTotalTokens,
+		})
 	}
-	if inputTokens == 0 && cachedTokens == 0 && outputTokens == 0 && totalTokens == 0 {
+	if usageSnapshotZero(total) {
 		return ""
 	}
+	lines := []string{formatTokenUsageSnapshot(total)}
+	main := normalizedUsageSnapshot(status.SessionUsageMain)
+	subagents := normalizedUsageSnapshot(status.SessionUsageSubagents)
+	autoReview := normalizedUsageSnapshot(status.SessionUsageAutoReview)
+	if !usageSnapshotZero(main) {
+		lines = append(lines, "main usage: "+formatTokenUsageSnapshot(main))
+	}
+	if !usageSnapshotZero(subagents) {
+		lines = append(lines, "sub-agent usage: "+formatTokenUsageSnapshot(subagents))
+	}
+	if !usageSnapshotZero(autoReview) {
+		lines = append(lines, "auto-review usage: "+formatTokenUsageSnapshot(autoReview))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatTokenUsageSnapshot(usage appgateway.UsageSnapshot) string {
+	usage = normalizedUsageSnapshot(usage)
 	return fmt.Sprintf(
-		"input %d, cached %d, output %d, total %d",
-		inputTokens,
-		cachedTokens,
-		outputTokens,
-		totalTokens,
+		"total=%s input=%s (+ %s cached) output=%s (reasoning %s)",
+		formatTokenUsageNumber(usage.TotalTokens),
+		formatTokenUsageNumber(usage.PromptTokens),
+		formatTokenUsageNumber(usage.CachedInputTokens),
+		formatTokenUsageNumber(usage.CompletionTokens),
+		formatTokenUsageNumber(usage.ReasoningTokens),
 	)
+}
+
+func normalizedUsageSnapshot(usage appgateway.UsageSnapshot) appgateway.UsageSnapshot {
+	if usage.PromptTokens < 0 {
+		usage.PromptTokens = 0
+	}
+	if usage.CachedInputTokens < 0 {
+		usage.CachedInputTokens = 0
+	}
+	if usage.CompletionTokens < 0 {
+		usage.CompletionTokens = 0
+	}
+	if usage.ReasoningTokens < 0 {
+		usage.ReasoningTokens = 0
+	}
+	if usage.TotalTokens < 0 {
+		usage.TotalTokens = 0
+	}
+	if usage.TotalTokens == 0 && (usage.PromptTokens != 0 || usage.CompletionTokens != 0) {
+		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
+	}
+	return usage
+}
+
+func usageSnapshotZero(usage appgateway.UsageSnapshot) bool {
+	return usage.PromptTokens == 0 &&
+		usage.CachedInputTokens == 0 &&
+		usage.CompletionTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.TotalTokens == 0
+}
+
+func formatTokenUsageNumber(tokens int) string {
+	if tokens < 0 {
+		tokens = 0
+	}
+	text := strconv.Itoa(tokens)
+	if len(text) <= 3 {
+		return text
+	}
+	var b strings.Builder
+	prefix := len(text) % 3
+	if prefix == 0 {
+		prefix = 3
+	}
+	b.WriteString(text[:prefix])
+	for i := prefix; i < len(text); i += 3 {
+		b.WriteByte(',')
+		b.WriteString(text[i : i+3])
+	}
+	return b.String()
 }
 
 func agentHelpText() string {

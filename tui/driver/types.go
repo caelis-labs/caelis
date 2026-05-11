@@ -55,9 +55,14 @@ type StatusSnapshot struct {
 	CompletionTokens         int
 	TotalTokens              int
 	ContextWindowTokens      int
+	SessionUsageTotal        gateway.UsageSnapshot
+	SessionUsageMain         gateway.UsageSnapshot
+	SessionUsageSubagents    gateway.UsageSnapshot
+	SessionUsageAutoReview   gateway.UsageSnapshot
 	SessionInputTokens       int
 	SessionCachedInputTokens int
 	SessionOutputTokens      int
+	SessionReasoningTokens   int
 	SessionTotalTokens       int
 	ActiveJobs               int
 	ActiveTurnKind           string

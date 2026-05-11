@@ -294,6 +294,7 @@ type UsageSnapshot struct {
 	PromptTokens      int `json:"prompt_tokens,omitempty"`
 	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
 	CompletionTokens  int `json:"completion_tokens,omitempty"`
+	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
 	TotalTokens       int `json:"total_tokens,omitempty"`
 }
 

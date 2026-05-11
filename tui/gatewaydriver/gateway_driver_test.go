@@ -43,7 +43,11 @@ func ptrRuntimeMessage(message sdkmodel.Message) *sdkmodel.Message {
 	return &message
 }
 
-func modelUsageMetaForRuntimeTest(prompt int, cached int, completion int, total int) map[string]any {
+func modelUsageMetaForRuntimeTest(prompt int, cached int, completion int, total int, reasoning ...int) map[string]any {
+	reasoningTokens := 0
+	if len(reasoning) > 0 {
+		reasoningTokens = reasoning[0]
+	}
 	return map[string]any{
 		"caelis": map[string]any{
 			"version": 1,
@@ -52,6 +56,7 @@ func modelUsageMetaForRuntimeTest(prompt int, cached int, completion int, total 
 					"prompt_tokens":       prompt,
 					"cached_input_tokens": cached,
 					"completion_tokens":   completion,
+					"reasoning_tokens":    reasoningTokens,
 					"total_tokens":        total,
 				},
 			},
@@ -1024,6 +1029,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 				"prompt_tokens":       12600,
 				"cached_input_tokens": 9000,
 				"completion_tokens":   200,
+				"reasoning_tokens":    50,
 				"total_tokens":        12800,
 			},
 		},
@@ -1041,8 +1047,11 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if status.ContextWindowTokens != 88000 {
 		t.Fatalf("status.ContextWindowTokens = %d, want 88000", status.ContextWindowTokens)
 	}
-	if status.SessionInputTokens != 12600 || status.SessionCachedInputTokens != 9000 || status.SessionOutputTokens != 200 || status.SessionTotalTokens != 12800 {
-		t.Fatalf("session token usage = input %d cached %d output %d total %d", status.SessionInputTokens, status.SessionCachedInputTokens, status.SessionOutputTokens, status.SessionTotalTokens)
+	if status.SessionInputTokens != 12600 || status.SessionCachedInputTokens != 9000 || status.SessionOutputTokens != 200 || status.SessionReasoningTokens != 50 || status.SessionTotalTokens != 12800 {
+		t.Fatalf("session token usage = input %d cached %d output %d reasoning %d total %d", status.SessionInputTokens, status.SessionCachedInputTokens, status.SessionOutputTokens, status.SessionReasoningTokens, status.SessionTotalTokens)
+	}
+	if status.SessionUsageMain.PromptTokens != 12600 || status.SessionUsageMain.ReasoningTokens != 50 {
+		t.Fatalf("main usage = %+v, want assistant usage", status.SessionUsageMain)
 	}
 }
 
@@ -1099,6 +1108,112 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 	}
 	if usage.PromptTokens != 10 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.TotalTokens != 12 {
 		t.Fatalf("usage = %+v, want one model response counted once", usage)
+	}
+}
+
+func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *testing.T) {
+	ctx := context.Background()
+	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "status-usage-breakdown-test",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   t.TempDir(),
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "default",
+		Assembly:       sdkplugin.ResolvedAssembly{},
+		Model: gatewayapp.ModelConfig{
+			Provider: "ollama",
+			API:      sdkproviders.APIOllama,
+			Model:    "llama3",
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "status-usage-breakdown-session", "surface", "ollama/llama3")
+	if err != nil {
+		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+	}
+	session, ok := driver.currentSession()
+	if !ok {
+		t.Fatal("expected active session")
+	}
+	if _, err := stack.Sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		SessionRef: session.SessionRef,
+		Event: &sdksession.Event{
+			Type: sdksession.EventTypeAssistant,
+			Text: "main answer",
+			Meta: modelUsageMetaForRuntimeTest(10, 3, 2, 12, 1),
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(main) error = %v", err)
+	}
+	if err := stack.Sessions.UpdateState(ctx, session.SessionRef, func(state map[string]any) (map[string]any, error) {
+		next := sdksession.CloneState(state)
+		if next == nil {
+			next = map[string]any{}
+		}
+		next[gateway.StateUsageAccounting] = map[string]any{
+			"auto_review": map[string]any{
+				"prompt_tokens":       7,
+				"cached_input_tokens": 1,
+				"completion_tokens":   2,
+				"reasoning_tokens":    2,
+				"total_tokens":        9,
+			},
+		}
+		return next, nil
+	}); err != nil {
+		t.Fatalf("UpdateState(auto-review usage) error = %v", err)
+	}
+	child, err := stack.Sessions.StartSession(ctx, sdksession.StartSessionRequest{
+		AppName:            session.AppName,
+		UserID:             session.UserID,
+		Workspace:          sdksession.WorkspaceRef{Key: session.WorkspaceKey, CWD: session.CWD},
+		PreferredSessionID: "child-self-usage",
+	})
+	if err != nil {
+		t.Fatalf("StartSession(child) error = %v", err)
+	}
+	if _, err := stack.Sessions.PutParticipant(ctx, sdksession.PutParticipantRequest{
+		SessionRef: session.SessionRef,
+		Binding: sdksession.ParticipantBinding{
+			ID:           "self-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleDelegated,
+			AgentName:    "self",
+			SessionID:    child.SessionID,
+			DelegationID: "task-1",
+		},
+	}); err != nil {
+		t.Fatalf("PutParticipant(self) error = %v", err)
+	}
+	if _, err := stack.Sessions.AppendEvent(ctx, sdksession.AppendEventRequest{
+		SessionRef: child.SessionRef,
+		Event: &sdksession.Event{
+			Type: sdksession.EventTypeAssistant,
+			Text: "child answer",
+			Meta: modelUsageMetaForRuntimeTest(20, 4, 6, 26, 5),
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(child) error = %v", err)
+	}
+
+	usage, err := driver.sessionTokenUsageBreakdown(ctx, session.SessionRef)
+	if err != nil {
+		t.Fatalf("sessionTokenUsageBreakdown() error = %v", err)
+	}
+	if usage.Main.PromptTokens != 10 || usage.Main.ReasoningTokens != 1 || usage.Main.TotalTokens != 12 {
+		t.Fatalf("main usage = %+v, want parent model usage", usage.Main)
+	}
+	if usage.Subagents.PromptTokens != 20 || usage.Subagents.ReasoningTokens != 5 || usage.Subagents.TotalTokens != 26 {
+		t.Fatalf("subagent usage = %+v, want self child usage", usage.Subagents)
+	}
+	if usage.AutoReview.PromptTokens != 7 || usage.AutoReview.ReasoningTokens != 2 || usage.AutoReview.TotalTokens != 9 {
+		t.Fatalf("auto-review usage = %+v, want review usage", usage.AutoReview)
+	}
+	if usage.Total.PromptTokens != 37 || usage.Total.CachedInputTokens != 8 || usage.Total.CompletionTokens != 10 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 47 {
+		t.Fatalf("total usage = %+v, want all buckets", usage.Total)
 	}
 }
 

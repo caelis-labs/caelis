@@ -87,6 +87,7 @@ const (
 	StateCurrentSandboxMode     = gatewaycore.StateCurrentSandboxMode
 	StateCurrentSessionMode     = gatewaycore.StateCurrentSessionMode
 	StateCurrentReasoningEffort = gatewaycore.StateCurrentReasoningEffort
+	StateUsageAccounting        = gatewaycore.StateUsageAccounting
 )
 
 const (

@@ -63,6 +63,7 @@ type ApprovalReviewResult struct {
 	Rationale      string
 	DisplayText    string
 	DecisionSource string
+	Usage          *UsageSnapshot
 }
 
 type ApprovalReviewer interface {

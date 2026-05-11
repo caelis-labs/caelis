@@ -577,6 +577,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 						"prompt_tokens":       12,
 						"cached_input_tokens": 7,
 						"completion_tokens":   5,
+						"reasoning_tokens":    3,
 						"total_tokens":        17,
 					},
 				},
@@ -586,7 +587,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				if env.Event.Usage == nil {
 					t.Fatal("event.Usage = nil, want payload")
 				}
-				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CachedInputTokens != 7 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.TotalTokens != 17 {
+				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CachedInputTokens != 7 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.ReasoningTokens != 3 || env.Event.Usage.TotalTokens != 17 {
 					t.Fatalf("event.Usage = %+v", env.Event.Usage)
 				}
 			},
@@ -601,7 +602,10 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 					"prompt_tokens":       12,
 					"cached_input_tokens": 7,
 					"completion_tokens":   5,
-					"total_tokens":        17,
+					"completion_tokens_details": map[string]any{
+						"reasoning_tokens": 3,
+					},
+					"total_tokens": 17,
 				},
 			},
 			want: func(t *testing.T, env EventEnvelope) {
@@ -609,7 +613,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				if env.Event.Usage == nil {
 					t.Fatal("event.Usage = nil, want payload")
 				}
-				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CachedInputTokens != 7 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.TotalTokens != 17 {
+				if env.Event.Usage.PromptTokens != 12 || env.Event.Usage.CachedInputTokens != 7 || env.Event.Usage.CompletionTokens != 5 || env.Event.Usage.ReasoningTokens != 3 || env.Event.Usage.TotalTokens != 17 {
 					t.Fatalf("event.Usage = %+v", env.Event.Usage)
 				}
 			},

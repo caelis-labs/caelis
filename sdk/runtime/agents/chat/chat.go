@@ -647,6 +647,7 @@ func responseMeta(resp *sdkmodel.Response) map[string]any {
 		"prompt_tokens":       resp.Usage.PromptTokens,
 		"cached_input_tokens": resp.Usage.CachedInputTokens,
 		"completion_tokens":   resp.Usage.CompletionTokens,
+		"reasoning_tokens":    resp.Usage.ReasoningTokens,
 		"total_tokens":        resp.Usage.TotalTokens,
 	}
 	return map[string]any{

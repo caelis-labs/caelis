@@ -19,3 +19,7 @@ func NewAssemblyResolver(cfg AssemblyResolverConfig) (*AssemblyResolver, error) 
 func UsageSnapshotFromSessionEvent(event *sdksession.Event) *UsageSnapshot {
 	return gatewaycore.UsageSnapshotFromSessionEvent(event)
 }
+
+func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot {
+	return gatewaycore.UsageSnapshotFromMap(payload)
+}

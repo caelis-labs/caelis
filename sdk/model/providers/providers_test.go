@@ -1175,7 +1175,7 @@ func TestOpenAICompatStream_IncludesUsageRequestOptionAndPropagatesUsage(t *test
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = fmt.Fprint(w, "data: {\"model\":\"test-model\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n")
-		_, _ = fmt.Fprint(w, "data: {\"model\":\"test-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":9}}}\n\n")
+		_, _ = fmt.Fprint(w, "data: {\"model\":\"test-model\",\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":7,\"total_tokens\":18,\"prompt_tokens_details\":{\"cached_tokens\":9},\"completion_tokens_details\":{\"reasoning_tokens\":4}}}\n\n")
 		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
 	}))
 	defer server.Close()
@@ -1210,7 +1210,7 @@ func TestOpenAICompatStream_IncludesUsageRequestOptionAndPropagatesUsage(t *test
 	if !includeUsage {
 		t.Fatal("expected stream_options.include_usage=true in request payload")
 	}
-	if usage.PromptTokens != 11 || usage.CachedInputTokens != 9 || usage.CompletionTokens != 7 || usage.TotalTokens != 18 {
+	if usage.PromptTokens != 11 || usage.CachedInputTokens != 9 || usage.CompletionTokens != 7 || usage.ReasoningTokens != 4 || usage.TotalTokens != 18 {
 		t.Fatalf("unexpected usage: %+v", usage)
 	}
 }
@@ -1854,7 +1854,7 @@ func TestGeminiRequest_IncludesMaxOutputTokens(t *testing.T) {
 			}
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2}}`)
+		_, _ = fmt.Fprint(w, `{"candidates":[{"content":{"role":"model","parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"thoughtsTokenCount":7,"totalTokenCount":2}}`)
 	}))
 	defer server.Close()
 
@@ -1868,7 +1868,8 @@ func TestGeminiRequest_IncludesMaxOutputTokens(t *testing.T) {
 	}, "token")
 
 	var gotErr error
-	for _, err := range llm.Generate(context.Background(), &model.Request{
+	var usage model.Usage
+	for event, err := range llm.Generate(context.Background(), &model.Request{
 		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hi")},
 		Stream:   false,
 		Reasoning: model.ReasoningConfig{
@@ -1877,6 +1878,10 @@ func TestGeminiRequest_IncludesMaxOutputTokens(t *testing.T) {
 	}) {
 		if err != nil {
 			gotErr = err
+			continue
+		}
+		if event != nil && event.Response != nil {
+			usage = event.Usage
 		}
 	}
 	if gotErr != nil {
@@ -1893,6 +1898,9 @@ func TestGeminiRequest_IncludesMaxOutputTokens(t *testing.T) {
 	}
 	if gotThinkingBudget != nil {
 		t.Fatalf("expected thinkingBudget omitted, got %v", gotThinkingBudget)
+	}
+	if usage.ReasoningTokens != 7 {
+		t.Fatalf("usage.ReasoningTokens = %d, want Gemini thoughtsTokenCount", usage.ReasoningTokens)
 	}
 }
 

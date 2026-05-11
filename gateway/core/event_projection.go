@@ -191,6 +191,12 @@ func UsageSnapshotFromSessionEvent(event *sdksession.Event) *UsageSnapshot {
 	return usageSnapshotFromSessionEvent(event)
 }
 
+// UsageSnapshotFromMap projects one provider-style usage payload into the
+// canonical gateway usage contract.
+func UsageSnapshotFromMap(payload map[string]any) *UsageSnapshot {
+	return usageSnapshotFromPayload(payload)
+}
+
 func usageSnapshotFromPayload(payload map[string]any) *UsageSnapshot {
 	if payload == nil {
 		return nil
@@ -205,9 +211,10 @@ func usageSnapshotFromPayload(payload map[string]any) *UsageSnapshot {
 		PromptTokens:      promptTokens,
 		CachedInputTokens: cachedInputTokensFromPayload(payload),
 		CompletionTokens:  completionTokens,
+		ReasoningTokens:   reasoningTokensFromPayload(payload),
 		TotalTokens:       totalTokens,
 	}
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return nil
 	}
 	return usage
@@ -222,6 +229,21 @@ func cachedInputTokensFromPayload(payload map[string]any) int {
 		intValue(payload["cache_read_input_tokens"]),
 		intValue(nestedAny(payload, "input_tokens_details", "cached_tokens")),
 		intValue(nestedAny(payload, "prompt_tokens_details", "cached_tokens")),
+	)
+}
+
+func reasoningTokensFromPayload(payload map[string]any) int {
+	return firstNonZeroInt(
+		intValue(payload["reasoning_tokens"]),
+		intValue(payload["reasoning_output_tokens"]),
+		intValue(payload["thinking_tokens"]),
+		intValue(payload["thinking_output_tokens"]),
+		intValue(payload["thoughts_token_count"]),
+		intValue(payload["thoughtsTokenCount"]),
+		intValue(nestedAny(payload, "completion_tokens_details", "reasoning_tokens")),
+		intValue(nestedAny(payload, "output_tokens_details", "reasoning_tokens")),
+		intValue(nestedAny(payload, "usage_metadata", "thoughts_token_count")),
+		intValue(nestedAny(payload, "usageMetadata", "thoughtsTokenCount")),
 	)
 }
 

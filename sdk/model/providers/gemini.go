@@ -481,6 +481,7 @@ func geminiUsageFromResponse(out *genai.GenerateContentResponse) model.Usage {
 		PromptTokens:      int(out.UsageMetadata.PromptTokenCount),
 		CachedInputTokens: int(out.UsageMetadata.CachedContentTokenCount),
 		CompletionTokens:  int(out.UsageMetadata.CandidatesTokenCount),
+		ReasoningTokens:   int(out.UsageMetadata.ThoughtsTokenCount),
 		TotalTokens:       int(out.UsageMetadata.TotalTokenCount),
 	}
 }

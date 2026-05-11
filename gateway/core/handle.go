@@ -317,7 +317,16 @@ func (h *turnHandle) publishApprovalReviewPayload(req *sdkruntime.ApprovalReques
 	h.publishApprovalEvent(req, payload, EventKindApprovalReview)
 }
 
-func (h *turnHandle) publishApprovalEvent(req *sdkruntime.ApprovalRequest, payload *ApprovalPayload, kind EventKind) {
+func (h *turnHandle) publishApprovalReviewPayloadWithUsage(req *sdkruntime.ApprovalRequest, payload *ApprovalPayload, usage *UsageSnapshot) {
+	h.publishApprovalEvent(req, payload, EventKindApprovalReview, usage)
+}
+
+func (h *turnHandle) publishApprovalEvent(req *sdkruntime.ApprovalRequest, payload *ApprovalPayload, kind EventKind, usage ...*UsageSnapshot) {
+	var eventUsage *UsageSnapshot
+	if len(usage) > 0 && usage[0] != nil {
+		copy := *usage[0]
+		eventUsage = &copy
+	}
 	h.publish(EventEnvelope{
 		Cursor: h.allocateCursor(),
 		Event: Event{
@@ -327,6 +336,7 @@ func (h *turnHandle) publishApprovalEvent(req *sdkruntime.ApprovalRequest, paylo
 			TurnID:          h.turnID,
 			SessionRef:      h.sessionRef,
 			Origin:          canonicalOriginFromApproval(req, h.sessionRef, h.turnID),
+			Usage:           eventUsage,
 			ApprovalPayload: cloneApprovalPayload(payload),
 		},
 	})

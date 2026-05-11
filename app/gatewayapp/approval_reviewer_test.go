@@ -463,7 +463,7 @@ func (m *approvalReviewerProviderRecorder) recordRequest(req *sdkmodel.Request) 
 }
 
 func (m *approvalReviewerProviderRecorder) recordUsage(usage sdkmodel.Usage) {
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return
 	}
 	m.mu.Lock()

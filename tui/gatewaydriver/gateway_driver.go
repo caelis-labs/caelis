@@ -417,11 +417,16 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			}
 		}
 		if ok {
-			if usage, err := d.sessionTokenUsage(context.Background(), session.SessionRef); err == nil {
-				status.SessionInputTokens = usage.PromptTokens
-				status.SessionCachedInputTokens = usage.CachedInputTokens
-				status.SessionOutputTokens = usage.CompletionTokens
-				status.SessionTotalTokens = usage.TotalTokens
+			if usage, err := d.sessionTokenUsageBreakdown(context.Background(), session.SessionRef); err == nil {
+				status.SessionUsageTotal = usage.Total
+				status.SessionUsageMain = usage.Main
+				status.SessionUsageSubagents = usage.Subagents
+				status.SessionUsageAutoReview = usage.AutoReview
+				status.SessionInputTokens = usage.Total.PromptTokens
+				status.SessionCachedInputTokens = usage.Total.CachedInputTokens
+				status.SessionOutputTokens = usage.Total.CompletionTokens
+				status.SessionReasoningTokens = usage.Total.ReasoningTokens
+				status.SessionTotalTokens = usage.Total.TotalTokens
 			}
 		}
 	}
@@ -466,17 +471,57 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 }
 
 func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.SessionRef) (gateway.UsageSnapshot, error) {
-	if d == nil || d.stack == nil || d.stack.Sessions == nil {
-		return gateway.UsageSnapshot{}, nil
-	}
-	if strings.TrimSpace(ref.SessionID) == "" {
-		return gateway.UsageSnapshot{}, nil
-	}
-	events, err := d.stack.Sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
+	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
 	if err != nil {
 		return gateway.UsageSnapshot{}, err
 	}
-	var usage gateway.UsageSnapshot
+	return breakdown.Total, nil
+}
+
+type sessionTokenUsageBreakdown struct {
+	Total      gateway.UsageSnapshot
+	Main       gateway.UsageSnapshot
+	Subagents  gateway.UsageSnapshot
+	AutoReview gateway.UsageSnapshot
+}
+
+const (
+	tokenUsageCategoryMain       = "main"
+	tokenUsageCategorySubagent   = "subagent"
+	tokenUsageCategoryAutoReview = "auto_review"
+)
+
+func (d *GatewayDriver) sessionTokenUsageBreakdown(ctx context.Context, ref sdksession.SessionRef) (sessionTokenUsageBreakdown, error) {
+	if d == nil || d.stack == nil || d.stack.Sessions == nil {
+		return sessionTokenUsageBreakdown{}, nil
+	}
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return sessionTokenUsageBreakdown{}, nil
+	}
+	events, err := d.stack.Sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
+	if err != nil {
+		return sessionTokenUsageBreakdown{}, err
+	}
+	breakdown := sessionTokenUsageBreakdownFromEvents(events, tokenUsageCategoryMain)
+	if state, err := d.stack.Sessions.SnapshotState(ctx, ref); err == nil {
+		breakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
+	}
+	for _, childRef := range d.selfSubagentSessionRefs(ctx, ref) {
+		childEvents, err := d.stack.Sessions.Events(ctx, sdksession.EventsRequest{SessionRef: childRef})
+		if err != nil {
+			continue
+		}
+		childBreakdown := sessionTokenUsageBreakdownFromEvents(childEvents, tokenUsageCategorySubagent)
+		if state, err := d.stack.Sessions.SnapshotState(ctx, childRef); err == nil {
+			childBreakdown.addBreakdown(sessionTokenUsageBreakdownFromState(state))
+		}
+		breakdown.addBreakdown(childBreakdown)
+	}
+	return breakdown, nil
+}
+
+func sessionTokenUsageBreakdownFromEvents(events []*sdksession.Event, fallbackCategory string) sessionTokenUsageBreakdown {
+	var breakdown sessionTokenUsageBreakdown
 	lastToolCallUsageKey := ""
 	lastUsageWasToolCall := false
 	for _, event := range events {
@@ -493,10 +538,7 @@ func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.Se
 		if isToolCall && lastUsageWasToolCall && usageKey != "" && usageKey == lastToolCallUsageKey {
 			continue
 		}
-		usage.PromptTokens += one.PromptTokens
-		usage.CachedInputTokens += one.CachedInputTokens
-		usage.CompletionTokens += one.CompletionTokens
-		usage.TotalTokens += one.TotalTokens
+		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), *one)
 		if isToolCall {
 			lastToolCallUsageKey = usageKey
 			lastUsageWasToolCall = true
@@ -505,14 +547,161 @@ func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref sdksession.Se
 			lastUsageWasToolCall = false
 		}
 	}
-	return usage, nil
+	return breakdown
+}
+
+func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsageBreakdown {
+	var breakdown sessionTokenUsageBreakdown
+	accounting := mapAnyValue(state[gateway.StateUsageAccounting])
+	if usage := gateway.UsageSnapshotFromMap(mapAnyValue(accounting[tokenUsageCategoryAutoReview])); usage != nil {
+		breakdown.add(tokenUsageCategoryAutoReview, *usage)
+	}
+	return breakdown
+}
+
+func (u *sessionTokenUsageBreakdown) add(category string, usage gateway.UsageSnapshot) {
+	if u == nil {
+		return
+	}
+	addUsageSnapshot(&u.Total, usage)
+	switch strings.TrimSpace(category) {
+	case tokenUsageCategoryAutoReview:
+		addUsageSnapshot(&u.AutoReview, usage)
+	case tokenUsageCategorySubagent:
+		addUsageSnapshot(&u.Subagents, usage)
+	default:
+		addUsageSnapshot(&u.Main, usage)
+	}
+}
+
+func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdown) {
+	if u == nil {
+		return
+	}
+	addUsageSnapshot(&u.Total, other.Total)
+	addUsageSnapshot(&u.Main, other.Main)
+	addUsageSnapshot(&u.Subagents, other.Subagents)
+	addUsageSnapshot(&u.AutoReview, other.AutoReview)
+}
+
+func addUsageSnapshot(total *gateway.UsageSnapshot, usage gateway.UsageSnapshot) {
+	if total == nil {
+		return
+	}
+	total.PromptTokens += usage.PromptTokens
+	total.CachedInputTokens += usage.CachedInputTokens
+	total.CompletionTokens += usage.CompletionTokens
+	total.ReasoningTokens += usage.ReasoningTokens
+	total.TotalTokens += usage.TotalTokens
+}
+
+func usageCategoryFromSessionEvent(event *sdksession.Event, fallback string) string {
+	if event == nil {
+		return firstNonEmpty(fallback, tokenUsageCategoryMain)
+	}
+	if category := usageCategoryFromMeta(event.Meta); category != "" {
+		return category
+	}
+	if event.Scope != nil && event.Scope.Participant.Kind == sdksession.ParticipantKindSubagent {
+		return tokenUsageCategorySubagent
+	}
+	return firstNonEmpty(fallback, tokenUsageCategoryMain)
+}
+
+func usageCategoryFromMeta(meta map[string]any) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	for _, key := range []string{"usage_category", "usageCategory", "category"} {
+		if category := normalizeUsageCategory(anyString(meta[key])); category != "" {
+			return category
+		}
+	}
+	if category := normalizeUsageCategory(anyString(nestedMapAny(meta, "caelis", "usage", "category"))); category != "" {
+		return category
+	}
+	if category := normalizeUsageCategory(anyString(nestedMapAny(meta, "caelis", "sdk", "usage_category"))); category != "" {
+		return category
+	}
+	if strings.EqualFold(anyString(meta["decision_source"]), "auto-review") ||
+		strings.EqualFold(anyString(meta["source"]), "auto_review") {
+		return tokenUsageCategoryAutoReview
+	}
+	return ""
+}
+
+func nestedMapAny(values map[string]any, path ...string) any {
+	if len(values) == 0 {
+		return nil
+	}
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return nil
+		}
+		current = mapped[key]
+	}
+	return current
+}
+
+func mapAnyValue(value any) map[string]any {
+	if typed, ok := value.(map[string]any); ok {
+		return maps.Clone(typed)
+	}
+	return nil
+}
+
+func normalizeUsageCategory(category string) string {
+	switch strings.ToLower(strings.TrimSpace(strings.ReplaceAll(category, "-", "_"))) {
+	case "auto_review", "autoreview", "review":
+		return tokenUsageCategoryAutoReview
+	case "subagent", "sub_agent", "child", "child_agent":
+		return tokenUsageCategorySubagent
+	case "main", "controller":
+		return tokenUsageCategoryMain
+	default:
+		return ""
+	}
+}
+
+func (d *GatewayDriver) selfSubagentSessionRefs(ctx context.Context, ref sdksession.SessionRef) []sdksession.SessionRef {
+	if d == nil || d.stack == nil || d.stack.Sessions == nil {
+		return nil
+	}
+	session, err := d.stack.Sessions.Session(ctx, ref)
+	if err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]sdksession.SessionRef, 0, len(session.Participants))
+	for _, participant := range session.Participants {
+		if participant.Kind != sdksession.ParticipantKindSubagent {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(participant.AgentName), "self") {
+			continue
+		}
+		sessionID := strings.TrimSpace(participant.SessionID)
+		if sessionID == "" {
+			continue
+		}
+		if _, ok := seen[sessionID]; ok {
+			continue
+		}
+		seen[sessionID] = struct{}{}
+		childRef := ref
+		childRef.SessionID = sessionID
+		out = append(out, sdksession.NormalizeSessionRef(childRef))
+	}
+	return out
 }
 
 func usageSnapshotDedupeKey(usage gateway.UsageSnapshot) string {
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
+	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.TotalTokens)
+	return fmt.Sprintf("%d/%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.ReasoningTokens, usage.TotalTokens)
 }
 
 func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn, error) {
