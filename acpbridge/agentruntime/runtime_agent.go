@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 
@@ -13,6 +14,7 @@ import (
 	bridgeprojector "github.com/OnslaughtSnail/caelis/acpbridge/projector"
 	bridgeterminal "github.com/OnslaughtSnail/caelis/acpbridge/terminal"
 	"github.com/OnslaughtSnail/caelis/internal/version"
+	sdkapproval "github.com/OnslaughtSnail/caelis/sdk/approval"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
@@ -23,39 +25,46 @@ import (
 // prompt.
 type BuildAgentSpecFunc func(context.Context, sdksession.Session, acp.PromptRequest) (sdkruntime.AgentSpec, error)
 
+// ApprovalModelResolver resolves the model used by automatic approval review.
+type ApprovalModelResolver = sdkapproval.ModelResolver
+
 // Config configures one runtime-backed ACP agent adapter.
 type Config struct {
-	Runtime        sdkruntime.Runtime
-	Sessions       sdksession.Service
-	BuildAgentSpec BuildAgentSpecFunc
-	Projector      bridgeprojector.Projector
-	Loader         acp.SessionLoader
-	Modes          acp.ModeProvider
-	Config         acp.ConfigProvider
-	Models         acp.ModelProvider
-	Commands       acp.CommandProvider
-	PromptCaps     acp.PromptCapabilitiesProvider
-	AppName        string
-	UserID         string
-	AgentInfo      *acp.Implementation
+	Runtime               sdkruntime.Runtime
+	Sessions              sdksession.Service
+	BuildAgentSpec        BuildAgentSpecFunc
+	Projector             bridgeprojector.Projector
+	Loader                acp.SessionLoader
+	Modes                 acp.ModeProvider
+	Config                acp.ConfigProvider
+	Models                acp.ModelProvider
+	Commands              acp.CommandProvider
+	PromptCaps            acp.PromptCapabilitiesProvider
+	ApprovalReviewer      sdkapproval.Reviewer
+	ApprovalModelResolver ApprovalModelResolver
+	AppName               string
+	UserID                string
+	AgentInfo             *acp.Implementation
 }
 
 // RuntimeAgent adapts sdk/runtime + sdk/session into the standard ACP
 // agent-side methods.
 type RuntimeAgent struct {
-	runtime        sdkruntime.Runtime
-	sessions       sdksession.Service
-	buildAgentSpec BuildAgentSpecFunc
-	projector      bridgeprojector.Projector
-	loader         acp.SessionLoader
-	modes          acp.ModeProvider
-	config         acp.ConfigProvider
-	models         acp.ModelProvider
-	commands       acp.CommandProvider
-	promptCaps     acp.PromptCapabilitiesProvider
-	appName        string
-	userID         string
-	agentInfo      *acp.Implementation
+	runtime               sdkruntime.Runtime
+	sessions              sdksession.Service
+	buildAgentSpec        BuildAgentSpecFunc
+	projector             bridgeprojector.Projector
+	loader                acp.SessionLoader
+	modes                 acp.ModeProvider
+	config                acp.ConfigProvider
+	models                acp.ModelProvider
+	commands              acp.CommandProvider
+	promptCaps            acp.PromptCapabilitiesProvider
+	approvalReviewer      sdkapproval.Reviewer
+	approvalModelResolver ApprovalModelResolver
+	appName               string
+	userID                string
+	agentInfo             *acp.Implementation
 
 	mu      sync.Mutex
 	cancels map[string]context.CancelFunc
@@ -96,20 +105,22 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		})}
 	}
 	return &RuntimeAgent{
-		runtime:        cfg.Runtime,
-		sessions:       cfg.Sessions,
-		buildAgentSpec: cfg.BuildAgentSpec,
-		projector:      projector,
-		loader:         loader,
-		modes:          cfg.Modes,
-		config:         cfg.Config,
-		models:         cfg.Models,
-		commands:       cfg.Commands,
-		promptCaps:     cfg.PromptCaps,
-		appName:        appName,
-		userID:         userID,
-		agentInfo:      normalizeAgentInfo(cfg.AgentInfo, appName),
-		cancels:        map[string]context.CancelFunc{},
+		runtime:               cfg.Runtime,
+		sessions:              cfg.Sessions,
+		buildAgentSpec:        cfg.BuildAgentSpec,
+		projector:             projector,
+		loader:                loader,
+		modes:                 cfg.Modes,
+		config:                cfg.Config,
+		models:                cfg.Models,
+		commands:              cfg.Commands,
+		promptCaps:            cfg.PromptCaps,
+		approvalReviewer:      cfg.ApprovalReviewer,
+		approvalModelResolver: cfg.ApprovalModelResolver,
+		appName:               appName,
+		userID:                userID,
+		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
+		cancels:               map[string]context.CancelFunc{},
 	}, nil
 }
 
@@ -359,12 +370,16 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 	defer cancel()
 
 	result, err := a.runtime.Run(runCtx, sdkruntime.RunRequest{
-		SessionRef:        ref,
-		Input:             input,
-		ContentParts:      contentParts,
-		Request:           sdkruntime.ModelRequestOptions{Stream: boolPtr(true)},
-		ApprovalRequester: approvalRequester{callbacks: cb},
-		AgentSpec:         spec,
+		SessionRef:   ref,
+		Input:        input,
+		ContentParts: contentParts,
+		Request:      sdkruntime.ModelRequestOptions{Stream: boolPtr(true)},
+		ApprovalRequester: approvalRequester{
+			callbacks:     cb,
+			reviewer:      a.approvalReviewer,
+			modelResolver: a.approvalModelResolver,
+		},
+		AgentSpec: spec,
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -722,10 +737,56 @@ func splitDataURL(mimeType string, data string) (string, string) {
 }
 
 type approvalRequester struct {
-	callbacks acp.PromptCallbacks
+	callbacks     acp.PromptCallbacks
+	reviewer      sdkapproval.Reviewer
+	modelResolver ApprovalModelResolver
 }
 
 func (r approvalRequester) RequestApproval(
+	ctx context.Context,
+	req sdkruntime.ApprovalRequest,
+) (sdkruntime.ApprovalResponse, error) {
+	if r.reviewer != nil && sdkapproval.NormalizeMode(req.Mode) != sdkapproval.ModeManual {
+		return r.reviewApproval(ctx, req)
+	}
+	return r.requestClientPermission(ctx, req)
+}
+
+func (r approvalRequester) reviewApproval(ctx context.Context, req sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+	payload := sdkapproval.PayloadFromRuntimeRequest(req)
+	var reviewModel sdkmodel.LLM
+	if r.modelResolver != nil {
+		reviewModel, _ = r.modelResolver.ResolveApprovalModel(ctx, req.SessionRef)
+	}
+	result, err := r.reviewer.ReviewApproval(ctx, sdkapproval.ReviewRequest{
+		SessionRef:     req.SessionRef,
+		RunID:          strings.TrimSpace(req.RunID),
+		TurnID:         strings.TrimSpace(req.TurnID),
+		Mode:           sdkapproval.NormalizeMode(req.Mode),
+		ReviewID:       sdkapproval.ReviewID("acp-approval-review", payload),
+		Model:          reviewModel,
+		Approval:       sdkapproval.ClonePayload(payload),
+		RuntimeRequest: req,
+	})
+	if err != nil {
+		rationale := "automatic approval review failed: " + err.Error()
+		result = sdkapproval.ReviewResult{
+			Approved:       false,
+			Outcome:        string(sdkapproval.StatusRejected),
+			Risk:           "unknown",
+			Authorization:  "unknown",
+			Rationale:      rationale,
+			DisplayText:    sdkapproval.FormatReviewText(false, "unknown", "unknown", rationale),
+			DecisionSource: string(sdkapproval.ModeAutoReview),
+		}
+	}
+	if strings.TrimSpace(result.DisplayText) == "" {
+		result.DisplayText = sdkapproval.FormatReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
+	}
+	return sdkapproval.RuntimeResponseFromReview(payload, result), nil
+}
+
+func (r approvalRequester) requestClientPermission(
 	ctx context.Context,
 	req sdkruntime.ApprovalRequest,
 ) (sdkruntime.ApprovalResponse, error) {
@@ -774,6 +835,7 @@ func cloneProtocolApproval(in *sdksession.ProtocolApproval) *sdksession.Protocol
 		return nil
 	}
 	out := *in
+	out.ToolCall.RawInput = maps.Clone(in.ToolCall.RawInput)
 	if len(in.Options) > 0 {
 		out.Options = append([]sdksession.ProtocolApprovalOption(nil), in.Options...)
 	}

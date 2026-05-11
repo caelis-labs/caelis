@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	sdkapproval "github.com/OnslaughtSnail/caelis/sdk/approval"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
@@ -112,6 +113,15 @@ func (g *Gateway) Resolver() *AssemblyResolver {
 	}
 	r, _ := g.resolver.(*AssemblyResolver)
 	return r
+}
+
+// ApprovalReviewer returns the reviewer configured for automatic approval
+// decisions so non-gateway surfaces can reuse the same policy bridge.
+func (g *Gateway) ApprovalReviewer() ApprovalReviewer {
+	if g == nil {
+		return nil
+	}
+	return g.approvalReviewer
 }
 
 func (g *Gateway) StartSession(ctx context.Context, req StartSessionRequest) (sdksession.Session, error) {
@@ -1025,18 +1035,9 @@ func (g *Gateway) resolveApprovalRequest(
 			DecisionSource: string(ApprovalModeAutoReview),
 		}
 	}
-	if strings.TrimSpace(result.OptionID) == "" {
-		result.OptionID = approvalOptionIDForDecision(payload.Options, result.Approved)
-	}
-	if strings.TrimSpace(result.OptionID) != "" {
-		result.Outcome = string(ApprovalStatusSelected)
-	} else if strings.TrimSpace(result.Outcome) == "" {
-		if result.Approved {
-			result.Outcome = string(ApprovalStatusApproved)
-		} else {
-			result.Outcome = string(ApprovalStatusRejected)
-		}
-	}
+	response := sdkapproval.RuntimeResponseFromReview(payload, result)
+	result.OptionID = response.OptionID
+	result.Outcome = response.Outcome
 	if strings.TrimSpace(result.DisplayText) == "" {
 		result.DisplayText = FormatApprovalReviewText(result.Approved, result.Risk, result.Authorization, result.Rationale)
 	}
@@ -1060,13 +1061,8 @@ func (g *Gateway) resolveApprovalRequest(
 	if handle.recordApprovalReviewDecision(result.Approved) {
 		return sdkruntime.ApprovalResponse{}, fmt.Errorf("automatic approval review rejected too many approval requests for this turn")
 	}
-	return sdkruntime.ApprovalResponse{
-		Outcome:    result.Outcome,
-		OptionID:   result.OptionID,
-		Approved:   result.Approved,
-		Reason:     strings.TrimSpace(result.Rationale),
-		ReviewText: strings.TrimSpace(result.DisplayText),
-	}, nil
+	response.ReviewText = strings.TrimSpace(result.DisplayText)
+	return response, nil
 }
 
 func (g *Gateway) persistApprovalReviewUsage(ctx context.Context, req *sdkruntime.ApprovalRequest, usage *UsageSnapshot, source string) error {
@@ -1154,9 +1150,7 @@ func approvalOptionIDForDecision(options []ApprovalOption, approved bool) string
 	return ""
 }
 
-type approvalModelResolver interface {
-	ResolveApprovalModel(context.Context, sdksession.SessionRef) (sdkmodel.LLM, error)
-}
+type approvalModelResolver = sdkapproval.ModelResolver
 
 func (g *Gateway) approvalReviewModel(ctx context.Context, ref sdksession.SessionRef) (sdkmodel.LLM, error) {
 	if g == nil || g.resolver == nil {

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	sdkapproval "github.com/OnslaughtSnail/caelis/sdk/approval"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
@@ -290,13 +291,7 @@ const (
 	EventKindLifecycle         EventKind = "lifecycle"
 )
 
-type UsageSnapshot struct {
-	PromptTokens      int `json:"prompt_tokens,omitempty"`
-	CachedInputTokens int `json:"cached_input_tokens,omitempty"`
-	CompletionTokens  int `json:"completion_tokens,omitempty"`
-	ReasoningTokens   int `json:"reasoning_tokens,omitempty"`
-	TotalTokens       int `json:"total_tokens,omitempty"`
-}
+type UsageSnapshot = sdkapproval.UsageSnapshot
 
 type NarrativeRole string
 
@@ -376,48 +371,27 @@ type PlanPayload struct {
 	Entries []PlanEntryPayload `json:"entries,omitempty"`
 }
 
-type ApprovalOption struct {
-	ID   string `json:"id,omitempty"`
-	Name string `json:"name,omitempty"`
-	Kind string `json:"kind,omitempty"`
-}
-
-type ApprovalStatus string
+type ApprovalOption = sdkapproval.Option
+type ApprovalStatus = sdkapproval.Status
 
 const (
-	ApprovalStatusPending  ApprovalStatus = "pending"
-	ApprovalStatusApproved ApprovalStatus = "approved"
-	ApprovalStatusRejected ApprovalStatus = "rejected"
-	ApprovalStatusSelected ApprovalStatus = "selected"
+	ApprovalStatusPending  = sdkapproval.StatusPending
+	ApprovalStatusApproved = sdkapproval.StatusApproved
+	ApprovalStatusRejected = sdkapproval.StatusRejected
+	ApprovalStatusSelected = sdkapproval.StatusSelected
 )
 
-type ApprovalReviewStatus string
+type ApprovalReviewStatus = sdkapproval.ReviewStatus
 
 const (
-	ApprovalReviewStatusInProgress ApprovalReviewStatus = "in_progress"
-	ApprovalReviewStatusApproved   ApprovalReviewStatus = "approved"
-	ApprovalReviewStatusDenied     ApprovalReviewStatus = "denied"
-	ApprovalReviewStatusTimedOut   ApprovalReviewStatus = "timed_out"
-	ApprovalReviewStatusFailed     ApprovalReviewStatus = "failed"
+	ApprovalReviewStatusInProgress = sdkapproval.ReviewStatusInProgress
+	ApprovalReviewStatusApproved   = sdkapproval.ReviewStatusApproved
+	ApprovalReviewStatusDenied     = sdkapproval.ReviewStatusDenied
+	ApprovalReviewStatusTimedOut   = sdkapproval.ReviewStatusTimedOut
+	ApprovalReviewStatusFailed     = sdkapproval.ReviewStatusFailed
 )
 
-type ApprovalPayload struct {
-	ToolCallID            string               `json:"tool_call_id,omitempty"`
-	ToolName              string               `json:"tool_name,omitempty"`
-	RawInput              map[string]any       `json:"raw_input,omitempty"`
-	Reason                string               `json:"reason,omitempty"`
-	Justification         string               `json:"justification,omitempty"`
-	SandboxPermissions    string               `json:"sandbox_permissions,omitempty"`
-	AdditionalPermissions map[string]any       `json:"additional_permissions,omitempty"`
-	Status                ApprovalStatus       `json:"status,omitempty"`
-	Options               []ApprovalOption     `json:"options,omitempty"`
-	ReviewID              string               `json:"review_id,omitempty"`
-	ReviewStatus          ApprovalReviewStatus `json:"review_status,omitempty"`
-	ReviewText            string               `json:"review_text,omitempty"`
-	Risk                  string               `json:"risk,omitempty"`
-	Authorization         string               `json:"authorization,omitempty"`
-	DecisionSource        string               `json:"decision_source,omitempty"`
-}
+type ApprovalPayload = sdkapproval.Payload
 
 type ParticipantAction string
 

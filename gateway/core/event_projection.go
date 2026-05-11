@@ -5,6 +5,7 @@ import (
 	"maps"
 	"strings"
 
+	sdkapproval "github.com/OnslaughtSnail/caelis/sdk/approval"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 )
@@ -584,57 +585,11 @@ func canonicalApprovalPayload(req *sdkruntime.ApprovalRequest) *ApprovalPayload 
 	if req == nil {
 		return nil
 	}
-	payload := &ApprovalPayload{
-		ToolCallID: strings.TrimSpace(req.Call.ID),
-		ToolName:   strings.TrimSpace(req.Tool.Name),
-		Status:     ApprovalStatusPending,
-	}
-	if payload.ToolName == "" {
-		payload.ToolName = strings.TrimSpace(req.Call.Name)
-	}
-	if req.Approval != nil {
-		if callID := strings.TrimSpace(req.Approval.ToolCall.ID); callID != "" {
-			payload.ToolCallID = callID
-		}
-		if toolName := strings.TrimSpace(req.Approval.ToolCall.Name); toolName != "" {
-			payload.ToolName = toolName
-		}
-		payload.RawInput = maps.Clone(req.Approval.ToolCall.RawInput)
-		if len(req.Approval.Options) > 0 {
-			payload.Options = make([]ApprovalOption, 0, len(req.Approval.Options))
-			for _, option := range req.Approval.Options {
-				payload.Options = append(payload.Options, ApprovalOption{
-					ID:   strings.TrimSpace(option.ID),
-					Name: strings.TrimSpace(option.Name),
-					Kind: strings.TrimSpace(option.Kind),
-				})
-			}
-		}
-	}
-	if len(payload.RawInput) == 0 {
-		payload.RawInput = rawInputFromJSONString(string(req.Call.Input))
-	}
-	payload.Reason = firstNonEmpty(metadataString(req.Metadata, "approval_reason"), approvalRawString(payload.RawInput, "approval_reason"))
-	payload.Justification = firstNonEmpty(metadataString(req.Metadata, "justification"), approvalRawString(payload.RawInput, "justification"))
-	payload.SandboxPermissions = firstNonEmpty(metadataString(req.Metadata, "sandbox_permissions"), approvalRawString(payload.RawInput, "sandbox_permissions"))
-	payload.AdditionalPermissions = firstNonEmptyMap(metadataAnyMap(req.Metadata, "additional_permissions"), approvalRawMap(payload.RawInput, "additional_permissions"))
-	if payload.ToolName == "" && len(payload.RawInput) == 0 && len(payload.Options) == 0 && payload.Reason == "" {
-		return nil
-	}
-	return payload
+	return sdkapproval.PayloadFromRuntimeRequest(*req)
 }
 
 func cloneApprovalPayload(in *ApprovalPayload) *ApprovalPayload {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.RawInput = maps.Clone(in.RawInput)
-	out.AdditionalPermissions = maps.Clone(in.AdditionalPermissions)
-	if len(in.Options) > 0 {
-		out.Options = append([]ApprovalOption(nil), in.Options...)
-	}
-	return &out
+	return sdkapproval.ClonePayload(in)
 }
 
 func approvalRawString(raw map[string]any, key string) string {

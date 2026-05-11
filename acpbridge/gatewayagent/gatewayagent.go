@@ -43,13 +43,15 @@ func New(stack *gatewayapp.Stack) (*agentruntime.RuntimeAgent, error) {
 			}
 			return resolved.RunRequest.AgentSpec, nil
 		},
-		Modes:      surface,
-		Config:     surface,
-		Models:     surface,
-		Commands:   surface,
-		PromptCaps: surface,
-		AppName:    deps.AppName,
-		UserID:     deps.UserID,
-		AgentInfo:  &acp.Implementation{Name: deps.AppName, Version: version.String()},
+		Modes:                 surface,
+		Config:                surface,
+		Models:                surface,
+		Commands:              surface,
+		PromptCaps:            surface,
+		ApprovalReviewer:      deps.Gateway.ApprovalReviewer(),
+		ApprovalModelResolver: deps.Gateway.Resolver(),
+		AppName:               deps.AppName,
+		UserID:                deps.UserID,
+		AgentInfo:             &acp.Implementation{Name: deps.AppName, Version: version.String()},
 	})
 }

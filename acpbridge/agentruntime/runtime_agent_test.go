@@ -2,8 +2,10 @@ package agentruntime_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"iter"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/acp"
 	agentruntime "github.com/OnslaughtSnail/caelis/acpbridge/agentruntime"
 	bridgeassembly "github.com/OnslaughtSnail/caelis/acpbridge/assembly"
+	sdkapproval "github.com/OnslaughtSnail/caelis/sdk/approval"
 	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
 	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
 	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
@@ -19,6 +22,7 @@ import (
 	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
 	"github.com/OnslaughtSnail/caelis/sdk/session/inmemory"
 	sdkstream "github.com/OnslaughtSnail/caelis/sdk/stream"
+	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
 )
 
 func TestRuntimeAgentInitializeCapabilitiesDefault(t *testing.T) {
@@ -274,6 +278,95 @@ func TestRuntimeAgentOptionalMethodsUnsupportedByDefault(t *testing.T) {
 	}
 }
 
+func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &approvalReviewRuntime{}
+	reviewer := &recordingApprovalReviewer{}
+	agent, err := agentruntime.New(agentruntime.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, sdksession.Session, acp.PromptRequest) (sdkruntime.AgentSpec, error) {
+			return sdkruntime.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "auto-review"}}, nil
+		},
+		AppName:               "caelis",
+		UserID:                "user-1",
+		ApprovalReviewer:      reviewer,
+		ApprovalModelResolver: staticApprovalModelResolver{model: runtimeAgentTestModel{text: "review"}},
+	})
+	if err != nil {
+		t.Fatalf("agentruntime.New() error = %v", err)
+	}
+	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &permissionCountingCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: sessionResp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
+	}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if cb.permissions != 0 {
+		t.Fatalf("client permission requests = %d, want 0 under auto-review", cb.permissions)
+	}
+	if reviewer.calls != 1 {
+		t.Fatalf("reviewer calls = %d, want 1", reviewer.calls)
+	}
+	if !runtime.response.Approved || runtime.response.OptionID != acp.PermAllowOnce {
+		t.Fatalf("approval response = %#v, want approved allow_once", runtime.response)
+	}
+	if reviewer.last.Model == nil {
+		t.Fatal("reviewer request model = nil, want resolved session model")
+	}
+	if reviewer.last.Approval == nil || reviewer.last.Approval.ToolName != "BASH" {
+		t.Fatalf("reviewer approval payload = %#v, want BASH payload", reviewer.last.Approval)
+	}
+	if got := reviewer.last.Approval.RawInput["command"]; got != "git restore hello.py" {
+		t.Fatalf("reviewer approval raw command = %#v, want git restore hello.py", got)
+	}
+}
+
+func TestRuntimeAgentPromptManualModeUsesClientPermission(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := &approvalReviewRuntime{mode: "manual"}
+	reviewer := &recordingApprovalReviewer{}
+	agent, err := agentruntime.New(agentruntime.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, sdksession.Session, acp.PromptRequest) (sdkruntime.AgentSpec, error) {
+			return sdkruntime.AgentSpec{Name: "chat", Metadata: map[string]any{"policy_mode": "manual"}}, nil
+		},
+		AppName:               "caelis",
+		UserID:                "user-1",
+		ApprovalReviewer:      reviewer,
+		ApprovalModelResolver: staticApprovalModelResolver{model: runtimeAgentTestModel{text: "review"}},
+	})
+	if err != nil {
+		t.Fatalf("agentruntime.New() error = %v", err)
+	}
+	sessionResp, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &permissionCountingCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionID: sessionResp.SessionID,
+		Prompt:    []json.RawMessage{json.RawMessage(`{"type":"text","text":"clean workspace"}`)},
+	}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+	if cb.permissions != 1 {
+		t.Fatalf("client permission requests = %d, want 1 under manual mode", cb.permissions)
+	}
+	if reviewer.calls != 0 {
+		t.Fatalf("reviewer calls = %d, want 0 under manual mode", reviewer.calls)
+	}
+	if !runtime.response.Approved || runtime.response.OptionID != acp.PermAllowOnce {
+		t.Fatalf("approval response = %#v, want approved allow_once", runtime.response)
+	}
+}
+
 func newRuntimeAgentWithConfig(t *testing.T, override agentruntime.Config) (*agentruntime.RuntimeAgent, sdksession.Service) {
 	t.Helper()
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
@@ -383,6 +476,90 @@ func (c *recordingPromptCallbacks) RequestPermission(context.Context, acp.Reques
 	return acp.RequestPermissionResponse{
 		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
 	}, nil
+}
+
+type permissionCountingCallbacks struct {
+	recordingPromptCallbacks
+	permissions int
+}
+
+func (c *permissionCountingCallbacks) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	c.permissions++
+	return acp.RequestPermissionResponse{
+		Outcome: acp.PermissionOutcome{Outcome: "selected", OptionID: acp.PermAllowOnce},
+	}, nil
+}
+
+type approvalReviewRuntime struct {
+	response sdkruntime.ApprovalResponse
+	mode     string
+}
+
+func (r *approvalReviewRuntime) Run(ctx context.Context, req sdkruntime.RunRequest) (sdkruntime.RunResult, error) {
+	session := sdksession.Session{
+		SessionRef: req.SessionRef,
+	}
+	mode := strings.TrimSpace(r.mode)
+	if mode == "" {
+		mode = "auto-review"
+	}
+	if req.ApprovalRequester != nil {
+		resp, err := req.ApprovalRequester.RequestApproval(ctx, sdkruntime.ApprovalRequest{
+			SessionRef: req.SessionRef,
+			Session:    session,
+			RunID:      "run-1",
+			TurnID:     "turn-1",
+			Mode:       mode,
+			Tool:       sdktool.Definition{Name: "BASH"},
+			Call:       sdktool.Call{ID: "call-1", Name: "BASH"},
+			Approval: &sdksession.ProtocolApproval{
+				ToolCall: sdksession.ProtocolToolCall{
+					ID:   "call-1",
+					Name: "BASH",
+					RawInput: map[string]any{
+						"command": "git restore hello.py",
+					},
+				},
+				Options: []sdksession.ProtocolApprovalOption{
+					{ID: acp.PermAllowOnce, Name: "Allow once", Kind: "allow_once"},
+					{ID: acp.PermRejectOnce, Name: "Reject once", Kind: "reject_once"},
+				},
+			},
+		})
+		if err != nil {
+			return sdkruntime.RunResult{}, err
+		}
+		r.response = resp
+	}
+	return sdkruntime.RunResult{Session: session, Handle: terminalBridgeRun{}}, nil
+}
+
+func (*approvalReviewRuntime) RunState(context.Context, sdksession.SessionRef) (sdkruntime.RunState, error) {
+	return sdkruntime.RunState{}, nil
+}
+
+type recordingApprovalReviewer struct {
+	calls int
+	last  sdkapproval.ReviewRequest
+}
+
+func (r *recordingApprovalReviewer) ReviewApproval(_ context.Context, req sdkapproval.ReviewRequest) (sdkapproval.ReviewResult, error) {
+	r.calls++
+	r.last = req
+	return sdkapproval.ReviewResult{
+		Approved:      true,
+		Risk:          "low",
+		Authorization: "explicit",
+		Rationale:     "command matches the user request",
+	}, nil
+}
+
+type staticApprovalModelResolver struct {
+	model sdkmodel.LLM
+}
+
+func (r staticApprovalModelResolver) ResolveApprovalModel(context.Context, sdksession.SessionRef) (sdkmodel.LLM, error) {
+	return r.model, nil
 }
 
 type terminalBridgeRuntime struct{}

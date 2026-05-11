@@ -5,16 +5,14 @@ import (
 	"fmt"
 	"strings"
 
-	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	sdkapproval "github.com/OnslaughtSnail/caelis/sdk/approval"
 )
 
-type ApprovalMode string
+type ApprovalMode = sdkapproval.Mode
 
 const (
-	ApprovalModeAutoReview ApprovalMode = "auto-review"
-	ApprovalModeManual     ApprovalMode = "manual"
+	ApprovalModeAutoReview = sdkapproval.ModeAutoReview
+	ApprovalModeManual     = sdkapproval.ModeManual
 )
 
 const (
@@ -23,14 +21,7 @@ const (
 )
 
 func NormalizeApprovalMode(mode string) ApprovalMode {
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "manual":
-		return ApprovalModeManual
-	case "auto-review", "auto_review", "autoreview":
-		return ApprovalModeAutoReview
-	default:
-		return ApprovalModeAutoReview
-	}
+	return sdkapproval.NormalizeMode(mode)
 }
 
 func CurrentApprovalMode(state map[string]any) ApprovalMode {
@@ -43,32 +34,9 @@ func CurrentApprovalMode(state map[string]any) ApprovalMode {
 	return ApprovalModeAutoReview
 }
 
-type ApprovalReviewRequest struct {
-	SessionRef     sdksession.SessionRef
-	RunID          string
-	TurnID         string
-	Mode           ApprovalMode
-	ReviewID       string
-	Model          sdkmodel.LLM
-	Approval       *ApprovalPayload
-	RuntimeRequest sdkruntime.ApprovalRequest
-}
-
-type ApprovalReviewResult struct {
-	Approved       bool
-	Outcome        string
-	OptionID       string
-	Risk           string
-	Authorization  string
-	Rationale      string
-	DisplayText    string
-	DecisionSource string
-	Usage          *UsageSnapshot
-}
-
-type ApprovalReviewer interface {
-	ReviewApproval(context.Context, ApprovalReviewRequest) (ApprovalReviewResult, error)
-}
+type ApprovalReviewRequest = sdkapproval.ReviewRequest
+type ApprovalReviewResult = sdkapproval.ReviewResult
+type ApprovalReviewer = sdkapproval.Reviewer
 
 type denyingApprovalReviewer struct{}
 
@@ -90,20 +58,8 @@ func (denyingApprovalReviewer) ReviewApproval(_ context.Context, req ApprovalRev
 	}, nil
 }
 
-func FormatApprovalReviewText(approved bool, risk string, authorization string, rationale string) string {
-	verdict := "denied"
-	if approved {
-		verdict = "approved"
-	}
-	risk = firstNonEmpty(strings.TrimSpace(risk), "unknown")
-	authorization = firstNonEmpty(strings.TrimSpace(authorization), "unknown")
-	rationale = firstNonEmpty(strings.TrimSpace(rationale), "no rationale provided")
-	return fmt.Sprintf("Automatic approval review %s (risk: %s, authorization: %s): %s", verdict, risk, authorization, rationale)
-}
+var FormatApprovalReviewText = sdkapproval.FormatReviewText
 
 func approvalReviewTerminalStatus(result ApprovalReviewResult) ApprovalReviewStatus {
-	if result.Approved {
-		return ApprovalReviewStatusApproved
-	}
-	return ApprovalReviewStatusDenied
+	return sdkapproval.ReviewTerminalStatus(result)
 }
