@@ -670,6 +670,77 @@ func TestMessagesFromContextUsesEventLocalParticipantLabel(t *testing.T) {
 	}
 }
 
+func TestMessagesFromContextSkipsDelegatedACPToolRawOutput(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("permission denied\n", sdktool.DefaultTruncationPolicy().ByteBudget()/2)
+	delegatedScope := &sdksession.EventScope{
+		Source: "acp_subagent",
+		Participant: sdksession.ParticipantRef{
+			ID:           "agent-1",
+			Kind:         sdksession.ParticipantKindSubagent,
+			Role:         sdksession.ParticipantRoleDelegated,
+			DelegationID: "task-1",
+		},
+	}
+	resultEvent := &sdksession.Event{
+		Type:       sdksession.EventTypeToolResult,
+		Visibility: sdksession.VisibilityCanonical,
+		Scope:      delegatedScope,
+		Protocol: &sdksession.EventProtocol{
+			ToolCall: &sdksession.ProtocolToolCall{
+				ID:        "call-1",
+				Name:      "execute",
+				Status:    "failed",
+				RawOutput: map[string]any{"stderr": large, "exit_code": 1},
+			},
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: "tool_call_update",
+				ToolCallID:    "call-1",
+				Kind:          "execute",
+				Status:        "failed",
+				RawOutput:     map[string]any{"stderr": large, "exit_code": 1},
+			},
+		},
+	}
+
+	ctx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+		Context: context.Background(),
+		Session: sdksession.Session{SessionRef: sdksession.SessionRef{SessionID: "sess-delegated-acp"}},
+		Events: []*sdksession.Event{
+			{
+				Type:       sdksession.EventTypeUser,
+				Visibility: sdksession.VisibilityCanonical,
+				Message:    ptrMessage(sdkmodel.NewTextMessage(sdkmodel.RoleUser, "continue")),
+				Text:       "continue",
+			},
+			{
+				Type:       sdksession.EventTypeToolCall,
+				Visibility: sdksession.VisibilityCanonical,
+				Scope:      delegatedScope,
+				Protocol: &sdksession.EventProtocol{Update: &sdksession.ProtocolUpdate{
+					SessionUpdate: "tool_call",
+					ToolCallID:    "call-1",
+					Kind:          "execute",
+					RawInput:      map[string]any{"command": "find /tmp"},
+				}},
+			},
+			resultEvent,
+		},
+	})
+
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 1; got != want {
+		t.Fatalf("len(messages) = %d, want %d (%#v)", got, want, messages)
+	}
+	if got := messages[0].TextContent(); got != "continue" {
+		t.Fatalf("message text = %q, want continue", got)
+	}
+	if got, _ := resultEvent.Protocol.Update.RawOutput["stderr"].(string); got != large {
+		t.Fatalf("delegated ACP raw output was mutated before display projection")
+	}
+}
+
 func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T) {
 	t.Parallel()
 
@@ -702,6 +773,214 @@ func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T)
 	}
 	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, deniedPath) {
 		t.Fatalf("stdout = %q, want original denied path", stdout)
+	}
+}
+
+func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(sdkmodel.ToolCall{
+		ID:   "call-1",
+		Name: "BASH",
+		Args: `{"command":"echo hello"}`,
+	}, sdktool.Result{
+		ID:      "call-1",
+		Name:    "BASH",
+		IsError: true,
+		Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"error":"terminal session failed"}`))},
+	}, nil)
+
+	if event.Protocol == nil || event.Protocol.Update == nil {
+		t.Fatalf("event.Protocol = %#v, want tool result protocol", event.Protocol)
+	}
+	if got, _ := event.Protocol.Update.RawOutput["error"].(string); got != "terminal session failed" {
+		t.Fatalf("raw output error = %q, want terminal session failed", got)
+	}
+	if got := event.Protocol.Update.Status; got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+}
+
+func TestToolResultEventKeepsRawOutputForDisplayButMessageIsTruncated(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("permission denied\n", sdktool.DefaultTruncationPolicy().ByteBudget()/2)
+	message, truncationMeta := toolResultMessageWithMeta(sdkmodel.ToolCall{
+		ID:   "call-1",
+		Name: "BASH",
+	}, sdktool.Result{
+		ID:   "call-1",
+		Name: "BASH",
+		Content: []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(map[string]any{
+			"stderr":    large,
+			"exit_code": 1,
+		}))},
+	})
+	event := toolResultEvent(sdkmodel.ToolCall{
+		ID:   "call-1",
+		Name: "BASH",
+		Args: `{"command":"find /tmp -delete"}`,
+	}, sdktool.Result{
+		ID:   "call-1",
+		Name: "BASH",
+		Content: []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(map[string]any{
+			"stderr":    large,
+			"exit_code": 1,
+		}))},
+	}, &message, truncationMeta)
+
+	rawOutput := event.Protocol.Update.RawOutput
+	stderr, _ := rawOutput["stderr"].(string)
+	if stderr != large {
+		t.Fatalf("raw stderr len = %d, want original len %d for display rawOutput", len(stderr), len(large))
+	}
+	if rawOutput["_tool_truncation"] != nil {
+		t.Fatalf("raw output = %#v, should not carry model truncation metadata", rawOutput)
+	}
+	if meta := nestedMap(event.Meta, "caelis", "runtime", "tool", "truncation"); meta == nil || meta["truncated"] != true {
+		t.Fatalf("event.Meta = %#v, want truncation metadata under caelis.runtime.tool.truncation", event.Meta)
+	}
+	results := event.Message.ToolResults()
+	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
+		t.Fatalf("event message = %#v, want one tool result", event.Message)
+	}
+	if encoded := results[0].Content[0].JSON.Value; len(encoded) > sdktool.DefaultTruncationPolicy().ByteBudget()+4096 {
+		t.Fatalf("model-visible message len = %d, want bounded", len(encoded))
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
+	}
+	modelStderr, _ := payload["stderr"].(string)
+	if !strings.Contains(modelStderr, "tokens truncated") {
+		t.Fatalf("model stderr = %q, want truncation marker", modelStderr)
+	}
+	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
+		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
+	}
+}
+
+func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("permission denied\n", sdktool.DefaultTruncationPolicy().ByteBudget()/2)
+	message := toolResultMessage(sdkmodel.ToolCall{
+		ID:   "call-1",
+		Name: "BASH",
+	}, sdktool.Result{
+		ID:   "call-1",
+		Name: "BASH",
+		Content: []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(map[string]any{
+			"stderr": large,
+		}))},
+	})
+
+	results := message.ToolResults()
+	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
+		t.Fatalf("ToolResults() = %#v, want one JSON tool result", results)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
+	}
+	limit := sdktool.DefaultTruncationPolicy().ByteBudget() + 4096
+	if encoded := results[0].Content[0].JSON.Value; len(encoded) > limit {
+		t.Fatalf("encoded payload len = %d, want <= %d", len(encoded), limit)
+	}
+	stderr, _ := payload["stderr"].(string)
+	if !strings.Contains(stderr, "tokens truncated") {
+		t.Fatalf("stderr = %q, want truncation marker", stderr)
+	}
+	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
+		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
+	}
+}
+
+func TestProtocolToolResultContextCompactsRawOutput(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("x", sdktool.DefaultTruncationPolicy().ByteBudget()*2)
+	message, ok := messageFromProtocolEvent(&sdksession.Event{
+		Type: sdksession.EventTypeToolResult,
+		Protocol: &sdksession.EventProtocol{
+			ToolCall: &sdksession.ProtocolToolCall{ID: "call-1", Name: "BASH"},
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "call-1",
+				Title:         "BASH echo",
+				Status:        "completed",
+				RawOutput:     map[string]any{"stdout": large},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("messageFromProtocolEvent() ok = false, want true")
+	}
+	results := message.ToolResults()
+	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
+		t.Fatalf("ToolResults() = %#v, want one JSON tool result", results)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
+	}
+	stdout, _ := payload["stdout"].(string)
+	if !strings.Contains(stdout, "tokens truncated") {
+		t.Fatalf("stdout = %q, want truncation marker", stdout)
+	}
+	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
+		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
+	}
+}
+
+func TestProtocolToolResultContextTruncatesPersistedBashFailureShape(t *testing.T) {
+	t.Parallel()
+
+	large := strings.Repeat("find: cannot delete /tmp/gomod/pkg: permission denied\n", sdktool.DefaultTruncationPolicy().ByteBudget()/4)
+	message, ok := messageFromProtocolEvent(&sdksession.Event{
+		Type: sdksession.EventTypeToolResult,
+		Protocol: &sdksession.EventProtocol{
+			ToolCall: &sdksession.ProtocolToolCall{ID: "call-1", Name: "BASH"},
+			Update: &sdksession.ProtocolUpdate{
+				SessionUpdate: string(sdksession.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "call-1",
+				Title:         "BASH find /tmp/gomod -delete",
+				Status:        "failed",
+				RawOutput: map[string]any{
+					"stderr":        large,
+					"result":        "stderr:\n" + large,
+					"stderr_cursor": 1119342,
+					"exit_code":     1,
+					"task_id":       "task-11",
+					"state":         "failed",
+				},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("messageFromProtocolEvent() ok = false, want true")
+	}
+	results := message.ToolResults()
+	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
+		t.Fatalf("ToolResults() = %#v, want one JSON tool result", results)
+	}
+	raw := results[0].Content[0].JSON.Value
+	if limit := sdktool.DefaultTruncationPolicy().ByteBudget() + 4096; len(raw) > limit {
+		t.Fatalf("replayed tool result len = %d, want <= %d", len(raw), limit)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
+	}
+	if payload["task_id"] != "task-11" || payload["exit_code"] != float64(1) {
+		t.Fatalf("payload lost task identity or exit code: %#v", payload)
+	}
+	stderr, _ := payload["stderr"].(string)
+	if !strings.Contains(stderr, "tokens truncated") {
+		t.Fatalf("stderr = %q, want truncation marker", stderr)
+	}
+	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
+		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
 	}
 }
 

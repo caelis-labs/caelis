@@ -355,6 +355,64 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 	if decision.Action != sdkpolicy.ActionDeny {
 		t.Fatalf("Action = %q, want deny", decision.Action)
 	}
+
+	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("rm -rf $HOME", false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionDeny {
+		t.Fatalf("Action = %q, want deny for home target", decision.Action)
+	}
+
+	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("rm $HOME -rf", false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != sdkpolicy.ActionDeny {
+		t.Fatalf("Action = %q, want deny for trailing flags on home target", decision.Action)
+	}
+}
+
+func TestScopedRecursiveDeleteRequiresApproval(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []struct {
+		name string
+		mode sdkpolicy.Mode
+	}{
+		{name: "auto-review", mode: AutoReviewMode()},
+		{name: "manual", mode: ManualMode()},
+	} {
+		mode := mode
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := mode.mode.DecideTool(context.Background(), bashCtx("rm -rf /tmp/caelis-gocache", false))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != sdkpolicy.ActionAskApproval {
+				t.Fatalf("Action = %q, want ask_approval", decision.Action)
+			}
+			if decision.Approval == nil {
+				t.Fatal("Approval = nil, want protocol approval payload")
+			}
+			if !strings.Contains(decision.Reason, "destructive") {
+				t.Fatalf("Reason = %q, want destructive approval reason", decision.Reason)
+			}
+			if got, _ := decision.Metadata["destructive_command"].(bool); !got {
+				t.Fatalf("Metadata[destructive_command] = %#v, want true", decision.Metadata["destructive_command"])
+			}
+
+			decision, err = mode.mode.DecideTool(context.Background(), bashCtx("rm /tmp/caelis-gocache -rf", false))
+			if err != nil {
+				t.Fatalf("DecideTool() trailing flags error = %v", err)
+			}
+			if decision.Action != sdkpolicy.ActionAskApproval {
+				t.Fatalf("Trailing flags action = %q, want ask_approval", decision.Action)
+			}
+		})
+	}
 }
 
 func writeCtx(path string) sdkpolicy.ToolContext {

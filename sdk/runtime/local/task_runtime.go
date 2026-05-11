@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -563,7 +564,11 @@ func (tm *taskRuntime) StartBash(
 		task.mu.Unlock()
 		req.Observer.ObserveTaskSnapshot(snapshot)
 	}
-	return tm.waitBash(ctx, task, req.Yield)
+	snapshot, err := tm.waitBash(ctx, task, req.Yield)
+	if err != nil {
+		return tm.failBashTaskIfStopped(ctx, task, err)
+	}
+	return snapshot, nil
 }
 
 type taskToolObserver struct {
@@ -661,7 +666,11 @@ func (tm *taskRuntime) StartSubagent(
 
 func (tm *taskRuntime) Wait(ctx context.Context, ref sdksession.SessionRef, req sdktask.ControlRequest) (sdktask.Snapshot, error) {
 	if task, err := tm.lookupBash(ctx, ref, req.TaskID); err == nil {
-		return tm.waitBash(ctx, task, req.Yield)
+		snapshot, err := tm.waitBash(ctx, task, req.Yield)
+		if err != nil {
+			return sdktask.Snapshot{}, err
+		}
+		return snapshot, nil
 	}
 	task, err := tm.lookupSubagent(ctx, ref, req.TaskID)
 	if err != nil {
@@ -679,7 +688,11 @@ func (tm *taskRuntime) Write(ctx context.Context, ref sdksession.SessionRef, req
 		if err := task.session.WriteInput(ctx, []byte(input)); err != nil {
 			return sdktask.Snapshot{}, err
 		}
-		return tm.waitBash(ctx, task, req.Yield)
+		snapshot, err := tm.waitBash(ctx, task, req.Yield)
+		if err != nil {
+			return sdktask.Snapshot{}, err
+		}
+		return snapshot, nil
 	}
 
 	task, err := tm.lookupSubagent(ctx, ref, req.TaskID)
@@ -929,7 +942,11 @@ func (tm *taskRuntime) Cancel(ctx context.Context, ref sdksession.SessionRef, re
 		if err := task.session.Terminate(ctx); err != nil {
 			return sdktask.Snapshot{}, err
 		}
-		return tm.waitBash(ctx, task, 10*time.Millisecond)
+		snapshot, err := tm.waitBash(ctx, task, 10*time.Millisecond)
+		if err != nil {
+			return sdktask.Snapshot{}, err
+		}
+		return snapshot, nil
 	}
 	task, err := tm.lookupSubagent(ctx, ref, req.TaskID)
 	if err != nil {
@@ -1021,6 +1038,86 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	tm.mu.Lock()
 	delete(tm.tasks, task.ref.TaskID)
 	tm.mu.Unlock()
+	return snapshot, nil
+}
+
+func (tm *taskRuntime) failBashTaskIfStopped(ctx context.Context, task *bashTask, cause error) (sdktask.Snapshot, error) {
+	if task == nil || task.session == nil {
+		return tm.failBashTask(ctx, task, cause)
+	}
+	if err := ctx.Err(); err != nil {
+		return sdktask.Snapshot{}, cause
+	}
+	status, statusErr := task.session.Status(context.WithoutCancel(ctx))
+	if statusErr == nil && status.Running {
+		return sdktask.Snapshot{}, cause
+	}
+	return tm.failBashTask(ctx, task, cause)
+}
+
+func (tm *taskRuntime) failBashTask(ctx context.Context, task *bashTask, cause error) (sdktask.Snapshot, error) {
+	if task == nil {
+		return sdktask.Snapshot{}, fmt.Errorf("sdk/runtime/local: task is required")
+	}
+	reason := strings.TrimSpace(fmt.Sprint(cause))
+	if reason == "" {
+		reason = "bash task failed"
+	}
+	state := sdktask.StateFailed
+	if errors.Is(cause, context.Canceled) {
+		state = sdktask.StateInterrupted
+	}
+	persistCtx := context.WithoutCancel(ctx)
+	if task.session != nil {
+		_ = task.session.Terminate(persistCtx)
+	}
+	now := tm.runtime.now()
+	status := sdksandbox.SessionStatus{
+		Running:   false,
+		ExitCode:  -1,
+		UpdatedAt: now,
+	}
+	if task.session != nil {
+		status.SessionRef = task.session.Ref()
+		status.Terminal = task.session.Terminal()
+	} else {
+		status.SessionRef = sdksandbox.SessionRef{SessionID: task.ref.SessionID}
+		status.Terminal = sdksandbox.TerminalRef{
+			SessionID:  task.ref.SessionID,
+			TerminalID: task.ref.TerminalID,
+		}
+	}
+
+	task.mu.Lock()
+	task.state = state
+	task.running = false
+	task.metadata = map[string]any{
+		"task_id":     task.ref.TaskID,
+		"task_kind":   string(sdktask.KindBash),
+		"state":       string(state),
+		"running":     false,
+		"session_id":  task.ref.SessionID,
+		"terminal_id": task.ref.TerminalID,
+	}
+	if status.Terminal.TerminalID != "" {
+		task.metadata["terminal_id"] = status.Terminal.TerminalID
+	}
+	task.result = map[string]any{
+		"state":     string(state),
+		"error":     reason,
+		"result":    reason,
+		"exit_code": -1,
+	}
+	snapshot := task.snapshotLocked(status)
+	entry := task.entrySnapshot(now)
+	task.mu.Unlock()
+	persistErr := tm.persistTaskEntry(persistCtx, entry)
+	tm.mu.Lock()
+	delete(tm.tasks, task.ref.TaskID)
+	tm.mu.Unlock()
+	if persistErr != nil {
+		return snapshot, persistErr
+	}
 	return snapshot, nil
 }
 

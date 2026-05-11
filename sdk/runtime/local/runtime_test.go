@@ -3707,6 +3707,104 @@ func TestRuntimeBashToolPassesExplicitYieldThrough(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
+func TestStartBashMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
+	t.Parallel()
+
+	_, session, runtime := newRuntimeBashToolTestHarness(t)
+	waitErr := errors.New("terminal session failed")
+	fake := &yieldProbeSandboxRuntime{session: &yieldProbeSandboxSession{waitErr: waitErr, statusRunning: boolPtr(false)}}
+	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	runtime.tasks.store = taskStore
+
+	snapshot, err := runtime.tasks.StartBash(context.Background(), session, session.SessionRef, fake, sdktask.BashStartRequest{
+		Command: "echo hello",
+		Workdir: session.CWD,
+		Yield:   0,
+	})
+	if err != nil {
+		t.Fatalf("StartBash() error = %v", err)
+	}
+	if snapshot.Running {
+		t.Fatalf("snapshot.Running = true, want false")
+	}
+	if snapshot.State != sdktask.StateFailed {
+		t.Fatalf("snapshot.State = %q, want failed", snapshot.State)
+	}
+	if got, _ := snapshot.Result["error"].(string); got != waitErr.Error() {
+		t.Fatalf("snapshot.Result[error] = %q, want %q", got, waitErr.Error())
+	}
+	if !fake.session.terminated {
+		t.Fatal("session.terminated = false, want true")
+	}
+	runtime.tasks.mu.RLock()
+	_, active := runtime.tasks.tasks[snapshot.Ref.TaskID]
+	runtime.tasks.mu.RUnlock()
+	if active {
+		t.Fatalf("task %q still active after wait failure", snapshot.Ref.TaskID)
+	}
+	entry, err := taskStore.Get(context.Background(), snapshot.Ref.TaskID)
+	if err != nil {
+		t.Fatalf("task store Get() error = %v", err)
+	}
+	if entry == nil || entry.Running || entry.State != sdktask.StateFailed {
+		t.Fatalf("persisted entry = %#v, want failed non-running task", entry)
+	}
+}
+
+func TestRuntimeTaskWaitErrorDoesNotTerminateRunningBash(t *testing.T) {
+	t.Parallel()
+
+	_, session, runtime := newRuntimeBashToolTestHarness(t)
+	fakeSession := newYieldProbeSandboxSession()
+	fake := &yieldProbeSandboxRuntime{session: fakeSession}
+	bashTool := runtimeBashTool{
+		base:       mustRuntimeBashTool(t, fake),
+		session:    sdksession.CloneSession(session),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+		"command":       "sleep 60",
+		"workdir":       session.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := bashResult.Meta["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+	}
+
+	waitErr := errors.New("transient wait failure")
+	fakeSession.waitErr = waitErr
+	raw, err := json.Marshal(map[string]any{
+		"action":  "wait",
+		"task_id": taskID,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	_, err = (runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: session.SessionRef,
+		tasks:      runtime.tasks,
+	}).Call(context.Background(), sdktool.Call{
+		ID:    "task-control-test",
+		Name:  tasktool.ToolName,
+		Input: raw,
+	})
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("TASK wait error = %v, want %v", err, waitErr)
+	}
+	if fakeSession.terminated {
+		t.Fatal("session.terminated = true, want running task left alone")
+	}
+	runtime.tasks.mu.RLock()
+	_, active := runtime.tasks.tasks[taskID]
+	runtime.tasks.mu.RUnlock()
+	if !active {
+		t.Fatalf("task %q not active after wait-side error", taskID)
+	}
+}
+
 func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 	t.Parallel()
 
@@ -3855,6 +3953,64 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	}
 	if got, _ := result.Meta["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("meta error = %q, want concise sandbox permission hint", got)
+	}
+}
+
+func TestTaskSnapshotToolResultKeepsRawTerminalStreamsForDisplay(t *testing.T) {
+	t.Parallel()
+
+	hugeStderr := strings.Repeat("permission denied\n", sdktool.DefaultTruncationPolicy().ByteBudget()/2)
+	result := taskSnapshotToolResult(
+		sdktool.Call{ID: "call-1", Name: shell.BashToolName},
+		sdktool.Definition{Name: shell.BashToolName},
+		sdktask.Snapshot{
+			Ref:     sdktask.Ref{TaskID: "task-1", SessionID: "session-1"},
+			State:   sdktask.StateFailed,
+			Running: false,
+			Result: map[string]any{
+				"stderr":    hugeStderr,
+				"result":    hugeStderr,
+				"exit_code": 1,
+			},
+		},
+	)
+
+	var payload map[string]any
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
+	}
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	if got, _ := payload["stderr"].(string); got != hugeStderr {
+		t.Fatalf("payload stderr len = %d, want original len %d", len(got), len(hugeStderr))
+	}
+	if got, _ := result.Meta["stderr"].(string); got != hugeStderr {
+		t.Fatalf("meta stderr len = %d, want original len %d", len(got), len(hugeStderr))
+	}
+	if got, _ := result.Meta["result"].(string); got != hugeStderr {
+		t.Fatalf("meta result len = %d, want original len %d", len(got), len(hugeStderr))
+	}
+	truncated, info := sdktool.TruncateResultWithInfo(result, sdktool.DefaultTruncationPolicy())
+	if len(truncated.Content) != 1 || truncated.Content[0].JSON == nil {
+		t.Fatalf("truncated content = %#v, want one JSON result", truncated.Content)
+	}
+	if meta := sdktool.TruncationMetadata(info); meta == nil || meta["truncated"] != true {
+		t.Fatalf("TruncationMetadata(%#v) = %#v, want metadata", info, meta)
+	}
+	var modelPayload map[string]any
+	if err := json.Unmarshal(truncated.Content[0].JSON.Value, &modelPayload); err != nil {
+		t.Fatalf("unmarshal model payload: %v", err)
+	}
+	modelStderr := taskStringValue(modelPayload["stderr"])
+	if len(modelStderr) > sdktool.DefaultTruncationPolicy().ByteBudget()+1024 {
+		t.Fatalf("model stderr len = %d, want bounded", len(modelStderr))
+	}
+	if !strings.Contains(modelStderr, "tokens truncated") {
+		t.Fatalf("model stderr = %q, want truncation marker", modelStderr)
+	}
+	if modelPayload["_tool_truncation"] != nil || modelPayload["output_meta"] != nil {
+		t.Fatalf("model payload = %#v, should not expose truncation metadata", modelPayload)
 	}
 }
 
@@ -5371,9 +5527,12 @@ func (r *yieldProbeSandboxRuntime) Status() sdksandbox.Status {
 func (r *yieldProbeSandboxRuntime) Close() error { return nil }
 
 type yieldProbeSandboxSession struct {
-	command  string
-	workdir  string
-	lastWait time.Duration
+	command       string
+	workdir       string
+	lastWait      time.Duration
+	waitErr       error
+	statusRunning *bool
+	terminated    bool
 }
 
 func newYieldProbeSandboxSession() *yieldProbeSandboxSession {
@@ -5399,10 +5558,14 @@ func (s *yieldProbeSandboxSession) ReadOutput(context.Context, int64, int64) ([]
 }
 
 func (s *yieldProbeSandboxSession) Status(context.Context) (sdksandbox.SessionStatus, error) {
+	running := true
+	if s.statusRunning != nil {
+		running = *s.statusRunning
+	}
 	return sdksandbox.SessionStatus{
 		SessionRef:    s.Ref(),
 		Terminal:      s.Terminal(),
-		Running:       true,
+		Running:       running,
 		SupportsInput: true,
 		UpdatedAt:     time.Now(),
 	}, nil
@@ -5410,6 +5573,9 @@ func (s *yieldProbeSandboxSession) Status(context.Context) (sdksandbox.SessionSt
 
 func (s *yieldProbeSandboxSession) Wait(_ context.Context, timeout time.Duration) (sdksandbox.SessionStatus, error) {
 	s.lastWait = timeout
+	if s.waitErr != nil {
+		return sdksandbox.SessionStatus{}, s.waitErr
+	}
 	return s.Status(context.Background())
 }
 
@@ -5417,7 +5583,10 @@ func (s *yieldProbeSandboxSession) Result(context.Context) (sdksandbox.CommandRe
 	return sdksandbox.CommandResult{}, nil
 }
 
-func (s *yieldProbeSandboxSession) Terminate(context.Context) error { return nil }
+func (s *yieldProbeSandboxSession) Terminate(context.Context) error {
+	s.terminated = true
+	return nil
+}
 
 type runningOnlyProbeSandboxSession struct {
 	lastWait time.Duration

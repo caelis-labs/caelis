@@ -65,30 +65,7 @@ func AutoReviewMode() sdkpolicy.Mode {
 			case "TASK":
 				return allow(def), nil
 			case "BASH":
-				command, err := commandArg(input)
-				if err != nil {
-					return sdkpolicy.Decision{}, err
-				}
-				if commandLooksDangerous(command) {
-					return deny("dangerous command is blocked even in auto-review mode"), nil
-				}
-				req, err := parseBashSandboxRequest(input)
-				if err != nil {
-					return deny(err.Error()), nil
-				}
-				switch req.SandboxPermissions {
-				case bashSandboxPermissionRequireEscalated:
-					return askEscalationApproval(input, req)
-				case bashSandboxPermissionWithAdditionalPermissions:
-					reason := "additional sandbox permissions require user approval"
-					decision, err := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
-					if err != nil {
-						return sdkpolicy.Decision{}, err
-					}
-					decision.Metadata = req.approvalMetadata(reason)
-					return decision, nil
-				}
-				return allow(def), nil
+				return decideBashCommand(input, def, "auto-review mode")
 			default:
 				return deny(fmt.Sprintf("tool %q is not allowed in auto-review mode", input.Tool.Name)), nil
 			}
@@ -117,35 +94,42 @@ func ManualMode() sdkpolicy.Mode {
 			case "TASK":
 				return allow(def), nil
 			case "BASH":
-				command, err := commandArg(input)
-				if err != nil {
-					return sdkpolicy.Decision{}, err
-				}
-				if commandLooksDangerous(command) {
-					return deny("dangerous command is blocked even in manual mode"), nil
-				}
-				req, err := parseBashSandboxRequest(input)
-				if err != nil {
-					return deny(err.Error()), nil
-				}
-				switch req.SandboxPermissions {
-				case bashSandboxPermissionRequireEscalated:
-					return askEscalationApproval(input, req)
-				case bashSandboxPermissionWithAdditionalPermissions:
-					reason := "additional sandbox permissions require user approval"
-					decision, err := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
-					if err != nil {
-						return sdkpolicy.Decision{}, err
-					}
-					decision.Metadata = req.approvalMetadata(reason)
-					return decision, nil
-				}
-				return allow(def), nil
+				return decideBashCommand(input, def, "manual mode")
 			default:
 				return deny(fmt.Sprintf("tool %q is not allowed in manual mode", input.Tool.Name)), nil
 			}
 		},
 	}
+}
+
+func decideBashCommand(input sdkpolicy.ToolContext, def sdksandbox.Constraints, modeName string) (sdkpolicy.Decision, error) {
+	command, err := commandArg(input)
+	if err != nil {
+		return sdkpolicy.Decision{}, err
+	}
+	if commandLooksDangerous(command) {
+		return deny("dangerous command is blocked even in " + strings.TrimSpace(modeName)), nil
+	}
+	req, err := parseBashSandboxRequest(input)
+	if err != nil {
+		return deny(err.Error()), nil
+	}
+	if commandRequiresDestructiveApproval(command) {
+		return askDestructiveCommandApproval(input, def, req)
+	}
+	switch req.SandboxPermissions {
+	case bashSandboxPermissionRequireEscalated:
+		return askEscalationApproval(input, req)
+	case bashSandboxPermissionWithAdditionalPermissions:
+		reason := "additional sandbox permissions require user approval"
+		decision, err := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+		if err != nil {
+			return sdkpolicy.Decision{}, err
+		}
+		decision.Metadata = req.approvalMetadata(reason)
+		return decision, nil
+	}
+	return allow(def), nil
 }
 
 func allow(constraints sdksandbox.Constraints) sdkpolicy.Decision {
@@ -199,18 +183,46 @@ func askApproval(reason string, constraints sdksandbox.Constraints, input sdkpol
 
 func askEscalationApproval(input sdkpolicy.ToolContext, req bashSandboxRequest) (sdkpolicy.Decision, error) {
 	reason := "host execution requires user approval"
-	decision, err := askApproval(reason, sdksandbox.Constraints{
-		Route:      sdksandbox.RouteHost,
-		Backend:    sdksandbox.BackendHost,
-		Permission: sdksandbox.PermissionFullAccess,
-		Isolation:  sdksandbox.IsolationHost,
-		Network:    sdksandbox.NetworkInherit,
-	}, input)
+	decision, err := askApproval(reason, hostExecutionConstraints(), input)
 	if err != nil {
 		return sdkpolicy.Decision{}, err
 	}
 	decision.Metadata = req.approvalMetadata(reason)
 	return decision, nil
+}
+
+func askDestructiveCommandApproval(input sdkpolicy.ToolContext, def sdksandbox.Constraints, req bashSandboxRequest) (sdkpolicy.Decision, error) {
+	reason := "destructive filesystem command requires user approval"
+	constraints := def
+	metadata := req.approvalMetadata(reason)
+	metadata["destructive_command"] = true
+	switch req.SandboxPermissions {
+	case bashSandboxPermissionRequireEscalated:
+		reason = "destructive host command requires user approval"
+		constraints = hostExecutionConstraints()
+		metadata = req.approvalMetadata(reason)
+		metadata["destructive_command"] = true
+	case bashSandboxPermissionWithAdditionalPermissions:
+		constraints = applyBashAdditionalPermissions(def, req)
+		metadata = req.approvalMetadata(reason)
+		metadata["destructive_command"] = true
+	}
+	decision, err := askApproval(reason, constraints, input)
+	if err != nil {
+		return sdkpolicy.Decision{}, err
+	}
+	decision.Metadata = metadata
+	return decision, nil
+}
+
+func hostExecutionConstraints() sdksandbox.Constraints {
+	return sdksandbox.Constraints{
+		Route:      sdksandbox.RouteHost,
+		Backend:    sdksandbox.BackendHost,
+		Permission: sdksandbox.PermissionFullAccess,
+		Isolation:  sdksandbox.IsolationHost,
+		Network:    sdksandbox.NetworkInherit,
+	}
 }
 
 func toolKind(name string) string {
@@ -587,7 +599,7 @@ func commandLooksDangerous(command string) bool {
 		return true
 	case strings.Contains(compact, "wget") && (strings.Contains(compact, "|bash") || strings.Contains(compact, "|sh")):
 		return true
-	case strings.Contains(compact, "rm-rf/") || strings.Contains(compact, "rm-rf~") || strings.Contains(compact, "rm-rf$home"):
+	case commandRemovesProtectedTarget(command):
 		return true
 	case strings.Contains(compact, "gitreset--hard"):
 		return true
@@ -595,4 +607,109 @@ func commandLooksDangerous(command string) bool {
 		return true
 	}
 	return false
+}
+
+func commandRequiresDestructiveApproval(command string) bool {
+	return len(recursiveForceRemoveTargets(command)) > 0
+}
+
+func commandRemovesProtectedTarget(command string) bool {
+	for _, target := range recursiveForceRemoveTargets(command) {
+		if destructiveTargetIsProtected(target) {
+			return true
+		}
+	}
+	return false
+}
+
+func recursiveForceRemoveTargets(command string) []string {
+	fields := shellishFields(command)
+	targets := []string{}
+	for i := 0; i < len(fields); i++ {
+		if !isRmCommand(fields[i]) {
+			continue
+		}
+		recursive := false
+		force := false
+		operands := []string{}
+		afterDoubleDash := false
+		for j := i + 1; j < len(fields); j++ {
+			token := trimShellToken(fields[j])
+			if token == "" || isShellCommandSeparator(token) {
+				break
+			}
+			if !afterDoubleDash && token == "--" {
+				afterDoubleDash = true
+				continue
+			}
+			if !afterDoubleDash && strings.HasPrefix(token, "-") && token != "-" {
+				if strings.ContainsAny(token, "rR") || strings.Contains(token, "recursive") {
+					recursive = true
+				}
+				if strings.Contains(token, "f") || strings.Contains(token, "force") {
+					force = true
+				}
+				continue
+			}
+			operands = append(operands, token)
+		}
+		if recursive && force {
+			targets = append(targets, operands...)
+		}
+	}
+	return targets
+}
+
+func shellishFields(command string) []string {
+	command = strings.NewReplacer(
+		"&&", " && ",
+		"||", " || ",
+		";", " ; ",
+		"|", " | ",
+	).Replace(command)
+	out := []string{}
+	for _, field := range strings.Fields(command) {
+		field = trimShellToken(field)
+		if field != "" {
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
+func trimShellToken(token string) string {
+	return strings.Trim(strings.TrimSpace(token), `"'`)
+}
+
+func isShellCommandSeparator(token string) bool {
+	switch token {
+	case ";", "&&", "||", "|":
+		return true
+	default:
+		return false
+	}
+}
+
+func isRmCommand(token string) bool {
+	token = trimShellToken(token)
+	if token == "" {
+		return false
+	}
+	return token == "rm" || filepath.Base(token) == "rm"
+}
+
+func destructiveTargetIsProtected(target string) bool {
+	target = trimShellToken(target)
+	if target == "" {
+		return false
+	}
+	lower := strings.ToLower(strings.TrimRight(target, "/"))
+	switch lower {
+	case "", "/", "/.", "/..", "/*", "~", "$home", "${home}":
+		return true
+	}
+	if strings.HasPrefix(lower, "~/") || strings.HasPrefix(lower, "$home/") || strings.HasPrefix(lower, "${home}/") {
+		return true
+	}
+	return filepath.Clean(target) == string(filepath.Separator)
 }

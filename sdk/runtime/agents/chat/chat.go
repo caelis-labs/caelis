@@ -398,7 +398,7 @@ func (a *Agent) executeToolCall(ctx context.Context, call sdkmodel.ToolCall, obs
 	tool, ok := a.lookupTool(call.Name)
 	if !ok {
 		rawOutput := map[string]any{"error": fmt.Sprintf("tool %q not found", call.Name)}
-		message := toolResultMessage(call, sdktool.Result{
+		message, truncationMeta := toolResultMessageWithMeta(call, sdktool.Result{
 			ID:      call.ID,
 			Name:    call.Name,
 			IsError: true,
@@ -409,7 +409,7 @@ func (a *Agent) executeToolCall(ctx context.Context, call sdkmodel.ToolCall, obs
 			Message:  &message,
 			Text:     message.TextContent(),
 			Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolUpdate, "failed", rawInput, rawOutput),
-			Meta:     mergeEventMeta(toolMeta(call.Name)),
+			Meta:     mergeEventMeta(toolMeta(call.Name), truncationMeta),
 		}, nil
 	}
 
@@ -427,24 +427,54 @@ func (a *Agent) executeToolCall(ctx context.Context, call sdkmodel.ToolCall, obs
 			Content: []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(map[string]any{"error": err.Error()}))},
 		}
 	}
-	message := toolResultMessage(call, result)
-	event := toolResultEvent(call, result, &message)
+	message, truncationMeta := toolResultMessageWithMeta(call, result)
+	event := toolResultEvent(call, result, &message, truncationMeta)
 	return message, event, nil
 }
 
-func toolResultEvent(call sdkmodel.ToolCall, result sdktool.Result, message *sdkmodel.Message) *sdksession.Event {
+func toolResultEvent(call sdkmodel.ToolCall, result sdktool.Result, message *sdkmodel.Message, extraMeta ...map[string]any) *sdksession.Event {
 	rawInput := mustObject(call.Args)
-	rawOutput := maps.Clone(result.Meta)
+	rawOutput := toolResultRawOutput(result)
+	metaParts := []map[string]any{toolMeta(call.Name), result.Metadata}
+	metaParts = append(metaParts, extraMeta...)
 	event := &sdksession.Event{
 		Type:     sdksession.EventTypeToolResult,
 		Protocol: toolCallProtocol(call, sdksession.ProtocolUpdateTypeToolUpdate, toolCallStatus(result), rawInput, rawOutput),
-		Meta:     mergeEventMeta(toolMeta(call.Name), result.Metadata),
+		Meta:     mergeEventMeta(metaParts...),
 	}
 	if message != nil {
 		event.Message = message
 		event.Text = message.TextContent()
 	}
 	return event
+}
+
+func toolResultRawOutput(result sdktool.Result) map[string]any {
+	if len(result.Meta) > 0 {
+		return maps.Clone(result.Meta)
+	}
+	for _, part := range result.Content {
+		if part.JSON == nil || len(part.JSON.Value) == 0 {
+			continue
+		}
+		var decoded any
+		if err := json.Unmarshal(part.JSON.Value, &decoded); err != nil {
+			return map[string]any{"result": string(part.JSON.Value)}
+		}
+		if payload, ok := decoded.(map[string]any); ok {
+			return maps.Clone(payload)
+		}
+		return map[string]any{"result": decoded}
+	}
+	for _, part := range result.Content {
+		if part.Text != nil {
+			return map[string]any{"result": part.Text.Text}
+		}
+	}
+	if result.IsError {
+		return map[string]any{"error": "tool call failed"}
+	}
+	return map[string]any{}
 }
 
 func (a *Agent) lookupTool(name string) (sdktool.Tool, bool) {
@@ -461,14 +491,18 @@ func (a *Agent) lookupTool(name string) (sdktool.Tool, bool) {
 }
 
 func toolResultMessage(call sdkmodel.ToolCall, result sdktool.Result) sdkmodel.Message {
-	if len(result.Content) == 0 {
-		result.Content = []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(result.Meta))}
-	}
+	message, _ := toolResultMessageWithMeta(call, result)
+	return message
+}
+
+func toolResultMessageWithMeta(call sdkmodel.ToolCall, result sdktool.Result) (sdkmodel.Message, map[string]any) {
+	var info sdktool.TruncationInfo
+	result, info = sdktool.TruncateResultWithInfo(result, sdktool.DefaultTruncationPolicy())
 	parts := sdkmodel.CloneParts(result.Content)
 	if len(parts) == 0 {
 		parts = []sdkmodel.Part{sdkmodel.NewJSONPart(mustJSON(map[string]any{}))}
 	}
-	return sdkmodel.Message{
+	message := sdkmodel.Message{
 		Role: sdkmodel.RoleTool,
 		Parts: []sdkmodel.Part{{
 			Kind: sdkmodel.PartKindToolResult,
@@ -480,6 +514,7 @@ func toolResultMessage(call sdkmodel.ToolCall, result sdktool.Result) sdkmodel.M
 			},
 		}},
 	}
+	return message, toolTruncationEventMeta(info)
 }
 
 func firstNonEmpty(values ...string) string {
@@ -674,6 +709,23 @@ func toolMeta(name string) map[string]any {
 			"runtime": map[string]any{
 				"tool": map[string]any{
 					"name": name,
+				},
+			},
+		},
+	}
+}
+
+func toolTruncationEventMeta(info sdktool.TruncationInfo) map[string]any {
+	truncation := sdktool.TruncationMetadata(info)
+	if len(truncation) == 0 {
+		return nil
+	}
+	return map[string]any{
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				"tool": map[string]any{
+					"truncation": truncation,
 				},
 			},
 		},
@@ -1015,13 +1067,18 @@ func messageFromProtocolEvent(event *sdksession.Event) (sdkmodel.Message, bool) 
 			Parts: []sdkmodel.Part{sdkmodel.NewToolResultJSONPart(
 				strings.TrimSpace(update.ToolCallID),
 				name,
-				maps.Clone(update.RawOutput),
+				truncatedToolOutputMap(update.RawOutput),
 				strings.EqualFold(strings.TrimSpace(update.Status), "failed"),
 			)},
 		}
 		return message, true
 	}
 	return sdkmodel.Message{}, false
+}
+
+func truncatedToolOutputMap(values map[string]any) map[string]any {
+	out, _ := sdktool.TruncateMap(values, sdktool.DefaultTruncationPolicy())
+	return out
 }
 
 func toolNameFromEvent(event *sdksession.Event) string {
