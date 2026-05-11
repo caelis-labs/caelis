@@ -54,6 +54,50 @@ func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
 	}
 }
 
+func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.AppendStreamChunk(SEAssistant, "Before tool.")
+	block.UpdateToolWithMeta("bash-1", "BASH", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.AppendStreamChunk(SEAssistant, "After")
+
+	block.ReplaceFinalStreamChunk(SEAssistant, "Before tool.\n\nAfter tool done.")
+
+	if len(block.Events) != 3 {
+		t.Fatalf("events = %#v, want pre-tool assistant, tool, post-tool assistant", block.Events)
+	}
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool." {
+		t.Fatalf("pre-tool event = %#v, want original assistant text", block.Events[0])
+	}
+	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "BASH" {
+		t.Fatalf("tool event = %#v, want BASH between assistant chunks", block.Events[1])
+	}
+	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool done." {
+		t.Fatalf("post-tool event = %#v, want only final suffix after prior text", block.Events[2])
+	}
+}
+
+func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
+	block := NewParticipantTurnBlock("session-1", "@self")
+	block.AppendStreamChunk(SEAssistant, "Before tool.")
+	block.UpdateToolWithMeta("bash-1", "BASH", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.AppendStreamChunk(SEAssistant, "After")
+
+	block.ReplaceFinalStreamChunk(SEAssistant, "Before tool.\n\nAfter tool done.")
+
+	if len(block.Events) != 3 {
+		t.Fatalf("events = %#v, want pre-tool assistant, tool, post-tool assistant", block.Events)
+	}
+	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool." {
+		t.Fatalf("pre-tool event = %#v, want original assistant text", block.Events[0])
+	}
+	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "BASH" {
+		t.Fatalf("tool event = %#v, want BASH between assistant chunks", block.Events[1])
+	}
+	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool done." {
+		t.Fatalf("post-tool event = %#v, want only final suffix after prior text", block.Events[2])
+	}
+}
+
 func TestTaskWaitResultDoesNotCompleteLinkedSpawnTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.UpdateToolWithMeta("spawn-1", "SPAWN", "inspect files", "", false, false, ToolUpdateMeta{TaskID: "jack"})

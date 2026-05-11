@@ -523,9 +523,17 @@ func (b *MainACPTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, chunk
 		return
 	}
 	if idx := latestNarrativeFinalTargetIndex(b.Events, kind); idx >= 0 {
+		chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, idx)
+		if strings.TrimSpace(chunk) == "" {
+			return
+		}
 		b.Events[idx].Text = chunk
 		markNarrativeTiming(&b.Events[idx], at)
 		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
+		return
+	}
+	chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, len(b.Events))
+	if strings.TrimSpace(chunk) == "" {
 		return
 	}
 	ev := SubagentEvent{Kind: kind, Text: chunk}
@@ -809,9 +817,17 @@ func (b *ParticipantTurnBlock) ReplaceFinalStreamChunk(kind SubagentEventKind, c
 		return
 	}
 	if idx := latestNarrativeFinalTargetIndex(b.Events, kind); idx >= 0 {
+		chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, idx)
+		if strings.TrimSpace(chunk) == "" {
+			return
+		}
 		b.Events[idx].Text = chunk
 		markNarrativeTiming(&b.Events[idx], at)
 		b.Events = pruneNarrativeEventsCoveredByFinal(b.Events, idx, kind)
+		return
+	}
+	chunk = cumulativeFinalNarrativeTimelineText(b.Events, kind, chunk, len(b.Events))
+	if strings.TrimSpace(chunk) == "" {
 		return
 	}
 	ev := SubagentEvent{Kind: kind, Text: chunk}
@@ -1602,6 +1618,40 @@ func cumulativeFinalNarrativeAlreadyRendered(events []SubagentEvent, kind Subage
 		return false
 	}
 	return strings.TrimSpace(finalText[cursor:]) == ""
+}
+
+func cumulativeFinalNarrativeTimelineText(events []SubagentEvent, kind SubagentEventKind, finalText string, targetIdx int) string {
+	if strings.TrimSpace(finalText) == "" || targetIdx <= 0 {
+		return finalText
+	}
+	if targetIdx > len(events) {
+		targetIdx = len(events)
+	}
+	cursor := 0
+	matched := false
+	for i := 0; i < targetIdx; i++ {
+		ev := events[i]
+		if ev.Kind != kind {
+			continue
+		}
+		text := ev.Text
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		pos := strings.Index(finalText[cursor:], text)
+		if pos < 0 {
+			return finalText
+		}
+		if strings.TrimSpace(finalText[cursor:cursor+pos]) != "" {
+			return finalText
+		}
+		cursor += pos + len(text)
+		matched = true
+	}
+	if !matched {
+		return finalText
+	}
+	return strings.TrimLeft(finalText[cursor:], " \t\r\n")
 }
 
 func narrativeCoverageText(text string) string {
