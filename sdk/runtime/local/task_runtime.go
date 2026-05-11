@@ -1007,12 +1007,10 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 		"exit_code": result.ExitCode,
 		"state":     string(state),
 	}
-	if resultErr != nil {
-		task.result["error"] = strings.TrimSpace(resultErr.Error())
-	}
 	if detail, ok := sdksandbox.SandboxPermissionDetail(result, resultErr); ok {
-		task.result["sandbox_permission_denied"] = true
 		task.result["error"] = detail
+	} else if resultErr != nil && strings.TrimSpace(stdoutText) == "" && strings.TrimSpace(stderrText) == "" {
+		task.result["error"] = strings.TrimSpace(resultErr.Error())
 	}
 	snapshot := task.snapshotLocked(status)
 	entry := task.entrySnapshot(tm.runtime.now())
@@ -1410,10 +1408,8 @@ func bashTaskToolPayload(snapshot sdktask.Snapshot) map[string]any {
 	stderr, _ := snapshot.Result["stderr"].(string)
 	payload["stdout"] = stdout
 	payload["stderr"] = stderr
-	if strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
-		if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
-			payload["stderr"] = strings.TrimSpace(errText)
-		}
+	if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
+		payload["error"] = strings.TrimSpace(errText)
 	}
 	if exitCode, ok := snapshot.Result["exit_code"]; ok {
 		payload["exit_code"] = exitCode

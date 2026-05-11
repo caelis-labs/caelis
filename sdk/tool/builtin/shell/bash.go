@@ -168,10 +168,10 @@ func (t *BashTool) Call(ctx context.Context, call sdktool.Call) (sdktool.Result,
 		out.Meta["backend"] = result.Backend
 	}
 	if err != nil {
-		out.Meta["error"] = strings.TrimSpace(err.Error())
 		if detail, ok := sdksandbox.SandboxPermissionDetail(result, err); ok {
-			out.Meta["sandbox_permission_denied"] = true
-			out.Meta["sandbox_permission_detail"] = detail
+			out.Meta["error"] = detail
+		} else {
+			out.Meta["error"] = strings.TrimSpace(err.Error())
 		}
 	}
 	return out, resultErr
@@ -187,18 +187,21 @@ func bashCommandPayload(result sdksandbox.CommandResult, err error) map[string]a
 	exitCode := result.ExitCode
 	if err != nil && strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
 		stderr = strings.TrimSpace(err.Error())
-		if detail, ok := sdksandbox.SandboxPermissionDetail(result, err); ok {
-			stderr = detail
-		}
 		if exitCode == 0 {
 			exitCode = -1
 		}
 	}
-	return map[string]any{
+	payload := map[string]any{
 		"stdout":    stdout,
 		"stderr":    stderr,
 		"exit_code": exitCode,
 	}
+	if err != nil {
+		if detail, ok := sdksandbox.SandboxPermissionDetail(result, err); ok {
+			payload["error"] = detail
+		}
+	}
+	return payload
 }
 
 func runtimeOrDefault(runtime sdksandbox.Runtime) (sdksandbox.Runtime, error) {

@@ -3819,7 +3819,7 @@ func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
 	}
 }
 
-func TestTaskSnapshotToolResultKeepsSandboxDetailOutOfModelPayload(t *testing.T) {
+func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
@@ -3830,11 +3830,10 @@ func TestTaskSnapshotToolResultKeepsSandboxDetailOutOfModelPayload(t *testing.T)
 			State:   sdktask.StateFailed,
 			Running: false,
 			Result: map[string]any{
-				"stdout":                    "go: writing stat cache: open /home/test/go/pkg/mod/cache: read-only file system",
-				"result":                    "touch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system",
-				"exit_code":                 1,
-				"error":                     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.\ntouch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system",
-				"sandbox_permission_denied": true,
+				"stdout":    "go: writing stat cache: open /home/test/go/pkg/mod/cache: read-only file system",
+				"result":    "touch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system",
+				"exit_code": 1,
+				"error":     sdksandbox.SandboxPermissionDeniedMessage,
 			},
 		},
 	)
@@ -3848,17 +3847,14 @@ func TestTaskSnapshotToolResultKeepsSandboxDetailOutOfModelPayload(t *testing.T)
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if _, ok := payload["sandbox_permission_denied"]; ok {
-		t.Fatalf("payload contains sandbox_permission_denied = %#v, want raw streams only", payload["sandbox_permission_denied"])
-	}
 	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, "/home/test/go/pkg/mod/cache") {
 		t.Fatalf("payload[stdout] = %q, want original stdout denied path", stdout)
 	}
-	if _, ok := payload["error"]; ok {
-		t.Fatalf("payload contains error = %#v, want raw streams only", payload["error"])
+	if got, _ := payload["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
+		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
 	}
-	if denied, _ := result.Meta["sandbox_permission_denied"].(bool); !denied {
-		t.Fatalf("meta[sandbox_permission_denied] = %#v, want true", result.Meta["sandbox_permission_denied"])
+	if got, _ := result.Meta["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
+		t.Fatalf("meta error = %q, want concise sandbox permission hint", got)
 	}
 }
 

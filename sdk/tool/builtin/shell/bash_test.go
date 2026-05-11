@@ -123,12 +123,9 @@ func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	if _, ok := payload["error"]; ok {
 		t.Fatalf("payload contains error = %#v, want terminal-like stdout/stderr/exit_code only", payload["error"])
 	}
-	if denied, _ := payload["sandbox_permission_denied"].(bool); denied {
-		t.Fatal("sandbox_permission_denied = true for non-permission command failure")
-	}
 }
 
-func TestBashCallPreservesSandboxPermissionStderrWithoutModelFlags(t *testing.T) {
+func TestBashCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
 	t.Parallel()
 
 	rt := sandboxPermissionRuntime{result: sdksandbox.CommandResult{
@@ -158,18 +155,15 @@ func TestBashCallPreservesSandboxPermissionStderrWithoutModelFlags(t *testing.T)
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if _, ok := payload["sandbox_permission_denied"]; ok {
-		t.Fatalf("payload contains sandbox_permission_denied = %#v, want raw streams only", payload["sandbox_permission_denied"])
-	}
 	stderr, _ := payload["stderr"].(string)
 	if !strings.Contains(stderr, "/home/test/go/pkg/mod/cache") {
 		t.Fatalf("stderr = %q, want original denied path", stderr)
 	}
-	if _, ok := payload["error"]; ok {
-		t.Fatalf("payload contains error = %#v, want raw streams only", payload["error"])
+	if got, _ := payload["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
+		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
 	}
-	if denied, _ := result.Meta["sandbox_permission_denied"].(bool); !denied {
-		t.Fatalf("meta sandbox_permission_denied = %#v, want true for UI/debug metadata", result.Meta["sandbox_permission_denied"])
+	if got, _ := result.Meta["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
+		t.Fatalf("meta error = %q, want concise sandbox permission hint", got)
 	}
 }
 
@@ -204,18 +198,15 @@ func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if _, ok := payload["sandbox_permission_denied"]; ok {
-		t.Fatalf("payload contains sandbox_permission_denied = %#v, want raw streams only", payload["sandbox_permission_denied"])
-	}
 	stdout, _ := payload["stdout"].(string)
 	if !strings.Contains(stdout, deniedPath) {
 		t.Fatalf("stdout = %q, want original denied path", stdout)
 	}
-	if _, ok := payload["error"]; ok {
-		t.Fatalf("payload contains error = %#v, want raw streams only", payload["error"])
+	if got, _ := payload["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
+		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
 	}
-	if denied, _ := result.Meta["sandbox_permission_denied"].(bool); !denied {
-		t.Fatalf("meta sandbox_permission_denied = %#v, want true for UI/debug metadata", result.Meta["sandbox_permission_denied"])
+	if got, _ := result.Meta["error"].(string); got != sdksandbox.SandboxPermissionDeniedMessage {
+		t.Fatalf("meta error = %q, want concise sandbox permission hint", got)
 	}
 }
 
@@ -245,9 +236,6 @@ func TestBashCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
 	var payload map[string]any
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
-	}
-	if _, ok := payload["sandbox_permission_denied"]; ok {
-		t.Fatalf("payload contains sandbox_permission_denied for host failure: %#v", payload)
 	}
 	if _, ok := payload["error"]; ok {
 		t.Fatalf("payload contains error = %#v, want terminal-like stdout/stderr/exit_code only", payload["error"])

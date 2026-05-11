@@ -417,11 +417,17 @@ func parsePermissionGrantRequest(args map[string]any, cwd string) (permissionGra
 	if fsPerm, ok := mapValue(permissions["file_system"]); ok {
 		for _, path := range stringListValue(fsPerm["read"]) {
 			if resolved := resolvePermissionPath(path, cwd); resolved != "" {
+				if err := validatePermissionPathExists("read", resolved); err != nil {
+					return req, err
+				}
 				req.ReadRoots = append(req.ReadRoots, resolved)
 			}
 		}
 		for _, path := range stringListValue(fsPerm["write"]) {
 			if resolved := resolvePermissionPath(path, cwd); resolved != "" {
+				if err := validatePermissionPathExists("write", resolved); err != nil {
+					return req, err
+				}
 				req.WriteRoots = append(req.WriteRoots, resolved)
 				if shellRoot := shellWriteRootForPath(resolved); shellRoot != "" {
 					req.ShellWriteRoots = append(req.ShellWriteRoots, shellRoot)
@@ -478,6 +484,25 @@ func resolvePermissionPath(path string, cwd string) string {
 		}
 	}
 	return filepath.Clean(path)
+}
+
+func validatePermissionPathExists(access string, path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if _, err := os.Stat(path); err != nil {
+		if os.IsNotExist(err) {
+			switch access {
+			case "write":
+				return fmt.Errorf("request_permissions write path %q does not exist; request an existing parent directory", path)
+			default:
+				return fmt.Errorf("request_permissions read path %q does not exist", path)
+			}
+		}
+		return fmt.Errorf("request_permissions cannot inspect %s path %q: %w", access, path, err)
+	}
+	return nil
 }
 
 func shellWriteRootForPath(path string) string {

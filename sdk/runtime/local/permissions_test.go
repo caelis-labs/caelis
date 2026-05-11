@@ -3,6 +3,8 @@ package local
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -67,8 +69,14 @@ func TestPermissionGrantStoreAppliesPathRulesAndNetwork(t *testing.T) {
 func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	store := newPermissionGrantStore()
 	now := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)
+	workspace := t.TempDir()
+	for _, dir := range []string{"docs", "build"} {
+		if err := os.MkdirAll(filepath.Join(workspace, dir), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", dir, err)
+		}
+	}
 	tool := requestPermissionsTool{
-		session:    sdksession.Session{CWD: "/workspace"},
+		session:    sdksession.Session{CWD: workspace},
 		sessionRef: sdksession.SessionRef{SessionID: "sess-1"},
 		mode:       "manual",
 		runID:      "run-1",
@@ -113,22 +121,78 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	}
 }
 
+func TestRequestPermissionsToolRejectsMissingFilesystemPath(t *testing.T) {
+	workspace := t.TempDir()
+	tool := requestPermissionsTool{
+		session:    sdksession.Session{CWD: workspace},
+		sessionRef: sdksession.SessionRef{SessionID: "sess-1"},
+		approval: approvalRequesterFunc(func(context.Context, sdkruntime.ApprovalRequest) (sdkruntime.ApprovalResponse, error) {
+			t.Fatal("approval requester should not be called for missing filesystem paths")
+			return sdkruntime.ApprovalResponse{}, nil
+		}),
+		grants: newPermissionGrantStore(),
+	}
+
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "read",
+			input: `{"reason":"need read","permissions":{"file_system":{"read":["missing-read"]}}}`,
+			want:  "request_permissions read path",
+		},
+		{
+			name:  "write",
+			input: `{"reason":"need write","permissions":{"file_system":{"write":["missing-write"]}}}`,
+			want:  "request an existing parent directory",
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := tool.Call(context.Background(), sdktool.Call{
+				ID:    "perm-1",
+				Name:  requestPermissionsToolName,
+				Input: []byte(tt.input),
+			})
+			if err == nil {
+				t.Fatal("Call() error = nil, want missing path error")
+			}
+			if !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("Call() error = %v, want substring %q", err, tt.want)
+			}
+			if result.ID != "" || result.Name != "" || len(result.Content) != 0 || len(result.Meta) != 0 || result.IsError {
+				t.Fatalf("result = %#v, want zero result on parse error", result)
+			}
+		})
+	}
+}
+
 func TestRequestPermissionsToolPersistsGrantInSessionState(t *testing.T) {
 	ctx := context.Background()
+	workspace := t.TempDir()
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	session, err := sessions.StartSession(ctx, sdksession.StartSessionRequest{
 		AppName: "caelis-test",
 		UserID:  "user",
 		Workspace: sdksession.WorkspaceRef{
 			Key: "workspace",
-			CWD: "/workspace",
+			CWD: workspace,
 		},
 		PreferredSessionID: "sess-grants",
 	})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	target := "/home/test/.config/ghostty/config"
+	target := filepath.Join(workspace, ".config", "ghostty", "config")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(target), err)
+	}
+	if err := os.WriteFile(target, []byte("theme=dark\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(%q) error = %v", target, err)
+	}
 	store := newPermissionGrantStore()
 	tool := requestPermissionsTool{
 		session:    session,
@@ -166,14 +230,14 @@ func TestRequestPermissionsToolPersistsGrantInSessionState(t *testing.T) {
 	if records[0].WriteRoots[0] != target {
 		t.Fatalf("WriteRoots = %#v, want %q", records[0].WriteRoots, target)
 	}
-	if want := "/home/test/.config/ghostty"; records[0].ShellWriteRoots[0] != want {
+	if want := filepath.Dir(target); records[0].ShellWriteRoots[0] != want {
 		t.Fatalf("ShellWriteRoots = %#v, want %q", records[0].ShellWriteRoots, want)
 	}
 
 	hydrated := newPermissionGrantStore()
 	hydrated.hydrate(records)
 	constraints := hydrated.applyToConstraints(sdksandbox.Constraints{})
-	if !hasSandboxPathRule(constraints.PathRules, "/home/test/.config/ghostty", sdksandbox.PathAccessReadWrite) {
+	if !hasSandboxPathRule(constraints.PathRules, filepath.Dir(target), sdksandbox.PathAccessReadWrite) {
 		t.Fatalf("PathRules = %#v, want parent dir shell write root", constraints.PathRules)
 	}
 }

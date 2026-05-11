@@ -680,7 +680,7 @@ func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T)
 	}, sdktool.Result{
 		ID:      "call-1",
 		Name:    "BASH",
-		Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"stdout":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp: read-only file system\n","stderr":"","exit_code":1}`))},
+		Content: []sdkmodel.Part{sdkmodel.NewJSONPart([]byte(`{"stdout":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp: read-only file system\n","stderr":"","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
 	})
 
 	results := message.ToolResults()
@@ -697,11 +697,8 @@ func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T)
 	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
 	}
-	if _, ok := payload["sandbox_permission_denied"]; ok {
-		t.Fatalf("sandbox_permission_denied present = %#v, want omitted from model payload", payload["sandbox_permission_denied"])
-	}
-	if _, ok := payload["error"]; ok {
-		t.Fatalf("error present = %#v, want omitted from model payload", payload["error"])
+	if got, _ := payload["error"].(string); got == "" {
+		t.Fatalf("error = %q, want concise sandbox permission hint", got)
 	}
 	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, deniedPath) {
 		t.Fatalf("stdout = %q, want original denied path", stdout)

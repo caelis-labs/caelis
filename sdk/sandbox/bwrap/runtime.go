@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	stdruntime "runtime"
 	"sort"
 	"strconv"
@@ -198,6 +199,9 @@ func (b *bwrapRunner) Run(ctx context.Context, req runnerruntime.Request) (sdksa
 		}
 		return result, fmt.Errorf("tool: bwrap sandbox command produced no output for %s and was terminated; %s", label, commandOutputSummary(result))
 	}
+	if detail := bwrapMissingMountDiagnostic(result, effectivePolicy, workDir); detail != "" {
+		result.Error = detail
+	}
 	return result, fmt.Errorf("tool: bwrap sandbox command failed: %w; %s", waitErr, commandOutputSummary(result))
 }
 
@@ -343,7 +347,7 @@ func buildBwrapArgs(p policy.Policy, workDir string) []string {
 }
 
 func buildScopedBwrapRootArgs(p policy.Policy, workDir string) []string {
-	readableRoots := policy.ShellReadableRoots(p, workDir)
+	readableRoots := bwrapRegularReadableRoots(policy.ShellReadableRoots(p, workDir))
 	writableRoots := bwrapWritableRoots(p, workDir)
 	readOnlySubpaths := bwrapReadOnlySubpaths(p, workDir)
 	destParents := bwrapMountParentDirs(readableRoots, writableRoots, readOnlySubpaths)
@@ -356,6 +360,110 @@ func buildScopedBwrapRootArgs(p policy.Policy, workDir string) []string {
 		args = append(args, "--ro-bind", root, root)
 	}
 	return args
+}
+
+var quotedAbsolutePathPattern = regexp.MustCompile(`['"](/[^'"\n]+)['"]`)
+var bwrapStat = os.Stat
+
+func bwrapMissingMountDiagnostic(result sdksandbox.CommandResult, p policy.Policy, workDir string) string {
+	if !policy.HasExplicitReadableRoots(p) {
+		return ""
+	}
+	mountedRoots := bwrapMountedRoots(p, workDir)
+	if detail := bwrapMissingMountStreamDiagnostic(result.Stderr, mountedRoots); detail != "" {
+		return detail
+	}
+	return bwrapMissingMountStreamDiagnostic(result.Stdout, mountedRoots)
+}
+
+func bwrapMissingMountStreamDiagnostic(text string, mountedRoots []string) string {
+	path := bwrapHostExistingUnmountedPath(text, mountedRoots)
+	if path == "" {
+		return ""
+	}
+	return sdksandbox.SandboxPermissionDeniedMessage + " Host path exists but is not mounted in the sandbox: " + path
+}
+
+func bwrapHostExistingUnmountedPath(text string, mountedRoots []string) string {
+	for _, line := range strings.Split(text, "\n") {
+		if !bwrapLineLooksLikeMissingPath(line) {
+			continue
+		}
+		for _, match := range quotedAbsolutePathPattern.FindAllStringSubmatch(line, -1) {
+			if len(match) < 2 {
+				continue
+			}
+			path := filepath.Clean(strings.TrimSpace(match[1]))
+			if path == "." || path == string(filepath.Separator) {
+				continue
+			}
+			if _, err := bwrapStat(path); err != nil {
+				continue
+			}
+			if bwrapPathWithinAnyRoot(path, mountedRoots) {
+				continue
+			}
+			return path
+		}
+	}
+	return ""
+}
+
+func bwrapLineLooksLikeMissingPath(line string) bool {
+	lower := strings.ToLower(strings.TrimSpace(line))
+	if lower == "" {
+		return false
+	}
+	return strings.Contains(lower, "no such file or directory") ||
+		strings.Contains(line, "没有那个文件或目录")
+}
+
+func bwrapMountedRoots(p policy.Policy, workDir string) []string {
+	roots := make([]string, 0, len(p.ReadableRoots)+len(p.WritableRoots)+len(p.ReadOnlySubpaths)+16)
+	if policy.HasExplicitReadableRoots(p) {
+		roots = append(roots, bwrapRegularReadableRoots(policy.ShellReadableRoots(p, workDir))...)
+	}
+	roots = append(roots, bwrapWritableRoots(p, workDir)...)
+	roots = append(roots, bwrapReadOnlySubpaths(p, workDir)...)
+	return normalizeStringList(roots)
+}
+
+func bwrapPathWithinAnyRoot(path string, roots []string) bool {
+	targets := []string{filepath.Clean(strings.TrimSpace(path))}
+	if resolved, err := filepath.EvalSymlinks(targets[0]); err == nil && strings.TrimSpace(resolved) != "" {
+		targets = append(targets, filepath.Clean(resolved))
+	}
+	for _, target := range normalizeStringList(targets) {
+		for _, root := range roots {
+			root = filepath.Clean(strings.TrimSpace(root))
+			if root == "" || root == "." {
+				continue
+			}
+			if target == root || strings.HasPrefix(target, root+string(filepath.Separator)) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func bwrapRegularReadableRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if bwrapManagedMountPath(root) {
+			continue
+		}
+		out = append(out, root)
+	}
+	return out
+}
+
+func bwrapManagedMountPath(path string) bool {
+	cleaned := filepath.Clean(strings.TrimSpace(path))
+	return cleaned == "/dev" ||
+		strings.HasPrefix(cleaned, "/dev/") ||
+		cleaned == "/proc" ||
+		strings.HasPrefix(cleaned, "/proc/")
 }
 
 func bwrapWritableRoots(p policy.Policy, workDir string) []string {

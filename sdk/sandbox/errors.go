@@ -29,14 +29,14 @@ func SandboxPermissionDetail(result CommandResult, err error) (string, bool) {
 	if !isSandboxExecutionResult(result) {
 		return "", false
 	}
+	if detail := strings.TrimSpace(result.Error); detail != "" {
+		return detail, true
+	}
 	raw := sandboxPermissionRawDetail(result, err)
 	if !IsSandboxPermissionDeniedText(raw) {
 		return "", false
 	}
-	if raw == "" {
-		return SandboxPermissionDeniedMessage, true
-	}
-	return SandboxPermissionDeniedMessage + "\n" + raw, true
+	return SandboxPermissionDeniedMessage, true
 }
 
 func isSandboxExecutionResult(result CommandResult) bool {

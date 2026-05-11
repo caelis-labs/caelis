@@ -2,11 +2,10 @@ package sandbox
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
-func TestSandboxPermissionDetailIncludesStdoutRedirectedDiagnostics(t *testing.T) {
+func TestSandboxPermissionDetailDetectsStdoutRedirectedDiagnostics(t *testing.T) {
 	t.Parallel()
 
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
@@ -18,8 +17,7 @@ func TestSandboxPermissionDetailIncludesStdoutRedirectedDiagnostics(t *testing.T
 	if !ok {
 		t.Fatal("SandboxPermissionDetail() ok = false, want true")
 	}
-	if !strings.Contains(detail, SandboxPermissionDeniedMessage) ||
-		!strings.Contains(detail, deniedPath) {
-		t.Fatalf("detail = %q, want sandbox prefix plus stdout denied path", detail)
+	if detail != SandboxPermissionDeniedMessage {
+		t.Fatalf("detail = %q, want concise sandbox prefix without raw output from %q", detail, deniedPath)
 	}
 }

@@ -2637,6 +2637,7 @@ func TestOpenAICompatMessageTransformPreservesTerminalLikeBashPayload(t *testing
 			Parts: []model.Part{model.NewToolResultJSONPart("call_1", "BASH", map[string]any{
 				"stdout":    "go: writing stat cache: open " + deniedPath + ": read-only file system\n",
 				"stderr":    "",
+				"error":     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
 				"exit_code": 1,
 			}, false)},
 		},
@@ -2648,13 +2649,12 @@ func TestOpenAICompatMessageTransformPreservesTerminalLikeBashPayload(t *testing
 		t.Fatalf("unexpected tool message: %+v", messages[1])
 	}
 	content, _ := messages[1].Content.(string)
-	if strings.Contains(content, "sandbox_permission_denied") || strings.Contains(content, "Sandbox permission denied") {
-		t.Fatalf("tool content = %q, want terminal-like payload without sandbox flags", content)
-	}
 	if !strings.Contains(content, "stdout") ||
+		!strings.Contains(content, "error") ||
+		!strings.Contains(content, "Sandbox permission denied") ||
 		!strings.Contains(content, "exit_code") ||
 		!strings.Contains(content, deniedPath) {
-		t.Fatalf("tool content = %q, want terminal-like payload with denied path", content)
+		t.Fatalf("tool content = %q, want raw terminal payload plus concise sandbox error", content)
 	}
 }
 
