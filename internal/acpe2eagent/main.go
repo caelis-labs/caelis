@@ -17,7 +17,6 @@ import (
 	bridgeassembly "github.com/OnslaughtSnail/caelis/impl/agent/acp/assembly"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers/e2etest"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
@@ -113,16 +112,7 @@ func resolveLLM() (model.LLM, error) {
 		}
 		return staticLLM{text: reply, delay: delay}, nil
 	}
-	spec, err := e2etest.ResolveLLM(e2etest.Config{
-		DefaultProvider: "codefree",
-		DefaultModel:    "GLM-5.1",
-		Timeout:         90 * time.Second,
-		MaxTokens:       1024,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return spec.LLM, nil
+	return nil, fmt.Errorf("set SDK_ACP_SCRIPTED_MODE or SDK_ACP_STUB_REPLY for acpe2eagent")
 }
 
 func sessionRootDir() string {

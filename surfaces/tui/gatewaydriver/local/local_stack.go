@@ -12,6 +12,7 @@ type GatewayDriver = gatewaydriver.GatewayDriver
 type DriverStack = gatewaydriver.DriverStack
 type GatewayService = gatewaydriver.GatewayService
 type ModelConfig = gatewaydriver.ModelConfig
+type ModelCapabilityInfo = gatewaydriver.ModelCapabilityInfo
 type ModelChoice = gatewaydriver.ModelChoice
 type SessionRuntimeState = gatewaydriver.SessionRuntimeState
 type SandboxStatus = gatewaydriver.SandboxStatus
@@ -20,6 +21,7 @@ type DoctorReport = gatewaydriver.DoctorReport
 type RegisterBuiltinACPAgentOptions = gatewaydriver.RegisterBuiltinACPAgentOptions
 type ACPAgentInfo = gatewaydriver.ACPAgentInfo
 type ACPAgentAddOption = gatewaydriver.ACPAgentAddOption
+type CodeFreeAuthRequest = gatewaydriver.CodeFreeAuthRequest
 type CustomAgentConfig = gatewaydriver.CustomAgentConfig
 
 func NewLocalDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
@@ -32,6 +34,7 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 	}
 	models := stack.Models()
 	agents := stack.Agents()
+	skills := stack.Skills()
 	status := stack.Status()
 	return &DriverStack{
 		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
@@ -87,7 +90,28 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 			return toRuntimeModelChoices(models.ListChoices(ctx, ref))
 		},
-		ListProviderModelsFn: models.ListProviderModels,
+		ListProviderModelsFn:       models.ListProviderModels,
+		ListCatalogModelsFn:        models.ListCatalogModels,
+		DefaultModelCapabilitiesFn: func() ModelCapabilityInfo { return toRuntimeModelCapabilities(models.DefaultCapabilities()) },
+		LookupModelCapabilitiesFn: func(provider string, modelName string) (ModelCapabilityInfo, bool) {
+			return toRuntimeModelCapabilitiesWithOK(models.LookupCapabilities(provider, modelName))
+		},
+		ReasoningLevelsForModelFn: models.ReasoningLevels,
+		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
+			return models.EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
+				BaseURL:         req.BaseURL,
+				OpenBrowser:     req.OpenBrowser,
+				CallbackTimeout: req.CallbackTimeout,
+			})
+		},
+		EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
+			return models.EnsureCodeFreeModelSelectionAuth(ctx, gatewayapp.CodeFreeAuthRequest{
+				BaseURL:         req.BaseURL,
+				OpenBrowser:     req.OpenBrowser,
+				CallbackTimeout: req.CallbackTimeout,
+			})
+		},
+		DiscoverSkillsFn: skills.Discover,
 		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
 			return toRuntimeACPAgentAddOptions(agents.BuiltinAddOptions())
 		},
@@ -154,6 +178,24 @@ func toGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 		ReasoningMode:          cfg.ReasoningMode,
 		MaxOutputTok:           cfg.MaxOutputTok,
 		Timeout:                cfg.Timeout,
+	}
+}
+
+func toRuntimeModelCapabilitiesWithOK(caps gatewayapp.ModelCapabilityInfo, ok bool) (ModelCapabilityInfo, bool) {
+	return toRuntimeModelCapabilities(caps), ok
+}
+
+func toRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo {
+	return ModelCapabilityInfo{
+		ContextWindowTokens:    caps.ContextWindowTokens,
+		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
+		MaxOutputTokens:        caps.MaxOutputTokens,
+		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
+		DefaultReasoningEffort: caps.DefaultReasoningEffort,
+		SupportsReasoning:      caps.SupportsReasoning,
+		SupportsToolCalls:      caps.SupportsToolCalls,
+		SupportsImages:         caps.SupportsImages,
+		SupportsJSON:           caps.SupportsJSON,
 	}
 }
 

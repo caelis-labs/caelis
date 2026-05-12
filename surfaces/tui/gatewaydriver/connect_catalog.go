@@ -9,8 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
 const (
@@ -24,7 +23,7 @@ const (
 
 type providerTemplate struct {
 	label               string
-	api                 providers.APIType
+	api                 model.APIType
 	provider            string
 	description         string
 	defaultEndpointID   string
@@ -41,20 +40,20 @@ type connectEndpointTemplate struct {
 	baseURL  string
 	display  string
 	detail   string
-	api      providers.APIType
+	api      model.APIType
 	tokenEnv string
 }
 
 var xiaomiMimoCommonModels = []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}
 
 var connectXiaomiEndpoints = []connectEndpointTemplate{
-	{id: "api-cn", baseURL: connectXiaomiAPIBaseURL, display: "api cn", detail: "Xiaomi MiMo API CN · OpenAI-compatible", api: providers.APIMimo, tokenEnv: "XIAOMI_API_KEY"},
-	{id: "token-plan-cn", baseURL: connectXiaomiTokenPlanCNBaseURL, display: "token plan cn", detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", api: providers.APIMimo, tokenEnv: "MIMO_TOKEN_PLAN_API_KEY"},
+	{id: "api-cn", baseURL: connectXiaomiAPIBaseURL, display: "api cn", detail: "Xiaomi MiMo API CN · OpenAI-compatible", api: model.APIMimo, tokenEnv: "XIAOMI_API_KEY"},
+	{id: "token-plan-cn", baseURL: connectXiaomiTokenPlanCNBaseURL, display: "token plan cn", detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", api: model.APIMimo, tokenEnv: "MIMO_TOKEN_PLAN_API_KEY"},
 }
 
 var connectVolcengineEndpoints = []connectEndpointTemplate{
-	{id: connectVolcengineStandardValue, baseURL: "https://ark.cn-beijing.volces.com/api/v3", display: "standard api", detail: "regular Ark endpoint", api: providers.APIVolcengine, tokenEnv: "VOLCENGINE_API_KEY"},
-	{id: connectVolcengineCodingValue, baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", display: "coding plan", detail: "Ark coding-plan endpoint", api: providers.APIVolcengineCoding, tokenEnv: "VOLCENGINE_API_KEY"},
+	{id: connectVolcengineStandardValue, baseURL: "https://ark.cn-beijing.volces.com/api/v3", display: "standard api", detail: "regular Ark endpoint", api: model.APIVolcengine, tokenEnv: "VOLCENGINE_API_KEY"},
+	{id: connectVolcengineCodingValue, baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", display: "coding plan", detail: "Ark coding-plan endpoint", api: model.APIVolcengineCoding, tokenEnv: "VOLCENGINE_API_KEY"},
 }
 
 type connectModelChoice struct {
@@ -79,18 +78,18 @@ type connectWizardPayload struct {
 }
 
 var providerTemplates = []providerTemplate{
-	{label: "openai", api: providers.APIOpenAI, provider: "openai", description: "OpenAI-hosted models", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
-	{label: "openai-compatible", api: providers.APIOpenAICompatible, provider: "openai-compatible", description: "OpenAI-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
-	{label: "codefree", api: providers.APICodeFree, provider: "codefree", description: "China Telecom SRD CodeFree models via browser OAuth", defaultBaseURL: "https://www.srdcloud.cn", defaultContextToken: 88000, defaultMaxOutputTok: 8000, noAuthRequired: true, commonModels: []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1"}},
-	{label: "openrouter", api: providers.APIOpenRouter, provider: "openrouter", description: "OpenRouter multi-provider routing", defaultBaseURL: "https://openrouter.ai/api/v1", defaultContextToken: 262144, commonModels: []string{"openai/gpt-4o-mini", "anthropic/claude-sonnet-4", "google/gemini-2.5-flash"}},
-	{label: "gemini", api: providers.APIGemini, provider: "gemini", description: "Google Gemini API", defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", defaultContextToken: 128000, commonModels: []string{"gemini-2.5-flash", "gemini-2.5-pro"}},
-	{label: "anthropic", api: providers.APIAnthropic, provider: "anthropic", description: "Anthropic Claude API", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024, commonModels: []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514"}},
-	{label: "anthropic-compatible", api: providers.APIAnthropicCompatible, provider: "anthropic-compatible", description: "Anthropic-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024},
-	{label: "deepseek", api: providers.APIDeepSeek, provider: "deepseek", description: "DeepSeek V4 models", defaultBaseURL: "https://api.deepseek.com/v1", defaultContextToken: 1048576, commonModels: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
-	{label: "xiaomi", api: providers.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultEndpointID: "api-cn", defaultBaseURL: connectXiaomiAPIBaseURL, defaultContextToken: 262144, commonModels: xiaomiMimoCommonModels, endpoints: connectXiaomiEndpoints},
-	{label: "minimax", api: providers.APIMiniMax, provider: "minimax", description: "MiniMax models over an Anthropic-compatible API", defaultBaseURL: "https://api.minimaxi.com/anthropic", defaultContextToken: 204800, defaultMaxOutputTok: 8192, commonModels: []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"}},
-	{label: "volcengine", api: providers.APIVolcengine, provider: "volcengine", description: "Volcengine Ark standard or coding-plan endpoints", defaultEndpointID: connectVolcengineStandardValue, defaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", defaultContextToken: 128000, endpoints: connectVolcengineEndpoints},
-	{label: "ollama", api: providers.APIOllama, provider: "ollama", description: "Local Ollama runtime", defaultBaseURL: "http://localhost:11434", defaultContextToken: 128000, noAuthRequired: true, commonModels: []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"}},
+	{label: "openai", api: model.APIOpenAI, provider: "openai", description: "OpenAI-hosted models", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
+	{label: "openai-compatible", api: model.APIOpenAICompatible, provider: "openai-compatible", description: "OpenAI-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
+	{label: "codefree", api: model.APICodeFree, provider: "codefree", description: "China Telecom SRD CodeFree models via browser OAuth", defaultBaseURL: "https://www.srdcloud.cn", defaultContextToken: 88000, defaultMaxOutputTok: 8000, noAuthRequired: true, commonModels: []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1"}},
+	{label: "openrouter", api: model.APIOpenRouter, provider: "openrouter", description: "OpenRouter multi-provider routing", defaultBaseURL: "https://openrouter.ai/api/v1", defaultContextToken: 262144, commonModels: []string{"openai/gpt-4o-mini", "anthropic/claude-sonnet-4", "google/gemini-2.5-flash"}},
+	{label: "gemini", api: model.APIGemini, provider: "gemini", description: "Google Gemini API", defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", defaultContextToken: 128000, commonModels: []string{"gemini-2.5-flash", "gemini-2.5-pro"}},
+	{label: "anthropic", api: model.APIAnthropic, provider: "anthropic", description: "Anthropic Claude API", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024, commonModels: []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514"}},
+	{label: "anthropic-compatible", api: model.APIAnthropicCompatible, provider: "anthropic-compatible", description: "Anthropic-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024},
+	{label: "deepseek", api: model.APIDeepSeek, provider: "deepseek", description: "DeepSeek V4 models", defaultBaseURL: "https://api.deepseek.com/v1", defaultContextToken: 1048576, commonModels: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
+	{label: "xiaomi", api: model.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultEndpointID: "api-cn", defaultBaseURL: connectXiaomiAPIBaseURL, defaultContextToken: 262144, commonModels: xiaomiMimoCommonModels, endpoints: connectXiaomiEndpoints},
+	{label: "minimax", api: model.APIMiniMax, provider: "minimax", description: "MiniMax models over an Anthropic-compatible API", defaultBaseURL: "https://api.minimaxi.com/anthropic", defaultContextToken: 204800, defaultMaxOutputTok: 8192, commonModels: []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"}},
+	{label: "volcengine", api: model.APIVolcengine, provider: "volcengine", description: "Volcengine Ark standard or coding-plan endpoints", defaultEndpointID: connectVolcengineStandardValue, defaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", defaultContextToken: 128000, endpoints: connectVolcengineEndpoints},
+	{label: "ollama", api: model.APIOllama, provider: "ollama", description: "Local Ollama runtime", defaultBaseURL: "http://localhost:11434", defaultContextToken: 128000, noAuthRequired: true, commonModels: []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"}},
 }
 
 func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command string, query string, limit int) ([]SlashArgCandidate, error) {
@@ -106,11 +105,11 @@ func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command str
 	case strings.HasPrefix(command, "connect-model:"):
 		return completeConnectModels(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
 	case strings.HasPrefix(command, "connect-context:"):
-		return completeConnectContext(ctx, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
+		return completeConnectContext(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
 	case strings.HasPrefix(command, "connect-maxout:"):
-		return completeConnectMaxOutput(ctx, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
+		return completeConnectMaxOutput(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
 	case strings.HasPrefix(command, "connect-reasoning-levels:"):
-		return completeConnectReasoningLevels(ctx, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
+		return completeConnectReasoningLevels(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
 	default:
 		return nil, nil
 	}
@@ -200,7 +199,10 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 		if baseURL == "" {
 			baseURL = tpl.defaultBaseURL
 		}
-		if _, err := providers.CodeFreeEnsureModelSelectionAuth(ctx, providers.CodeFreeEnsureAuthOptions{
+		if driver == nil || driver.stack == nil {
+			return nil, fmt.Errorf("surfaces/tui/gatewaydriver: codefree model auth dependency is unavailable")
+		}
+		if err := driver.stack.EnsureCodeFreeModelSelectionAuth(ctx, CodeFreeAuthRequest{
 			BaseURL:         baseURL,
 			OpenBrowser:     true,
 			CallbackTimeout: 5 * time.Minute,
@@ -208,11 +210,11 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 			return nil, err
 		}
 	}
-	fallbackModels := fallbackConnectModels(tpl)
+	fallbackModels := fallbackConnectModels(stackForDriver(driver), tpl)
 	if driver != nil && driver.stack != nil {
 		fallbackModels = append(fallbackModels, driver.stack.ListProviderModels(tpl.provider)...)
 	}
-	choices := buildConnectModelChoices(tpl.provider, fallbackModels)
+	choices := buildConnectModelChoices(stackForDriver(driver), tpl.provider, fallbackModels)
 	out := make([]SlashArgCandidate, 0, len(choices))
 	for _, choice := range choices {
 		if query != "" && !strings.Contains(strings.ToLower(choice.Name+" "+choice.Display+" "+choice.Detail), strings.ToLower(strings.TrimSpace(query))) {
@@ -231,6 +233,10 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 }
 
 func connectDefaultsForConfig(ctx context.Context, cfg ConnectConfig) (connectModelDefaults, error) {
+	return connectDefaultsForConfigWithStack(ctx, nil, cfg)
+}
+
+func connectDefaultsForConfigWithStack(ctx context.Context, stack *DriverStack, cfg ConnectConfig) (connectModelDefaults, error) {
 	tpl, ok := findProviderTemplate(strings.ToLower(strings.TrimSpace(cfg.Provider)))
 	if !ok {
 		return connectModelDefaults{}, nil
@@ -248,27 +254,27 @@ func connectDefaultsForConfig(ctx context.Context, cfg ConnectConfig) (connectMo
 	if strings.TrimSpace(payload.Timeout) == "" || strings.TrimSpace(payload.Timeout) == "0" {
 		payload.Timeout = "60"
 	}
-	return connectDefaultsForPayload(ctx, payload)
+	return connectDefaultsForPayload(ctx, stack, payload)
 }
 
-func completeConnectContext(ctx context.Context, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
-	defaults, err := connectDefaultsForPayload(ctx, payload)
+func completeConnectContext(ctx context.Context, driver *GatewayDriver, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+	defaults, err := connectDefaultsForPayload(ctx, stackForDriver(driver), payload)
 	if err != nil {
 		return nil, err
 	}
 	return filterSlashArgCandidates([]SlashArgCandidate{{Value: strconv.Itoa(defaults.ContextWindow), Display: strconv.Itoa(defaults.ContextWindow), Detail: "context window tokens"}}, query, limit), nil
 }
 
-func completeConnectMaxOutput(ctx context.Context, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
-	defaults, err := connectDefaultsForPayload(ctx, payload)
+func completeConnectMaxOutput(ctx context.Context, driver *GatewayDriver, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+	defaults, err := connectDefaultsForPayload(ctx, stackForDriver(driver), payload)
 	if err != nil {
 		return nil, err
 	}
 	return filterSlashArgCandidates([]SlashArgCandidate{{Value: strconv.Itoa(defaults.MaxOutput), Display: strconv.Itoa(defaults.MaxOutput), Detail: "max output tokens"}}, query, limit), nil
 }
 
-func completeConnectReasoningLevels(ctx context.Context, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
-	defaults, err := connectDefaultsForPayload(ctx, payload)
+func completeConnectReasoningLevels(ctx context.Context, driver *GatewayDriver, payload connectWizardPayload, query string, limit int) ([]SlashArgCandidate, error) {
+	defaults, err := connectDefaultsForPayload(ctx, stackForDriver(driver), payload)
 	if err != nil {
 		return nil, err
 	}
@@ -281,15 +287,15 @@ func completeConnectReasoningLevels(ctx context.Context, payload connectWizardPa
 	return filterSlashArgCandidates([]SlashArgCandidate{{Value: value, Display: value, Detail: detail}}, query, limit), nil
 }
 
-func connectDefaultsForPayload(ctx context.Context, payload connectWizardPayload) (connectModelDefaults, error) {
+func connectDefaultsForPayload(ctx context.Context, stack *DriverStack, payload connectWizardPayload) (connectModelDefaults, error) {
 	tpl, ok := findProviderTemplate(payload.Provider)
 	if !ok {
 		return connectModelDefaults{}, nil
 	}
 	_ = ctx
-	baseCaps, baseKnown := modelcatalog.LookupModelCapabilities(tpl.provider, payload.Model)
+	baseCaps, baseKnown := lookupConnectModelCapabilities(stack, tpl.provider, payload.Model)
 	if !baseKnown {
-		baseCaps = modelcatalog.DefaultModelCapabilities()
+		baseCaps = defaultConnectCapabilities(stack)
 	}
 	if baseCaps.ContextWindowTokens <= 0 {
 		baseCaps.ContextWindowTokens = defaultContextWindowForTemplate(tpl)
@@ -300,7 +306,7 @@ func connectDefaultsForPayload(ctx context.Context, payload connectWizardPayload
 	if baseCaps.MaxOutputTokens <= 0 {
 		baseCaps.MaxOutputTokens = baseCaps.DefaultMaxOutputTokens
 	}
-	reasoningLevels := normalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(tpl.provider, payload.Model))
+	reasoningLevels := normalizeReasoningLevels(reasoningLevelsForModel(stack, tpl.provider, payload.Model))
 	if len(reasoningLevels) == 0 {
 		reasoningLevels = normalizeReasoningLevels(baseCaps.ReasoningEfforts)
 	}
@@ -388,7 +394,7 @@ func findProviderTemplate(value string) (providerTemplate, bool) {
 	case connectXiaomiTokenPlanCNAlias:
 		return providerTemplate{
 			label:               connectXiaomiTokenPlanCNAlias,
-			api:                 providers.APIMimo,
+			api:                 model.APIMimo,
 			provider:            "xiaomi",
 			description:         "Xiaomi Mimo Token Plan CN over an OpenAI-compatible API",
 			defaultEndpointID:   "token-plan-cn",
@@ -422,7 +428,7 @@ func connectEndpointForBaseURL(tpl providerTemplate, baseURL string) (connectEnd
 	return connectEndpointTemplate{}, false
 }
 
-func buildConnectModelChoices(provider string, fallbackModels []string) []connectModelChoice {
+func buildConnectModelChoices(stack *DriverStack, provider string, fallbackModels []string) []connectModelChoice {
 	seen := map[string]struct{}{}
 	out := make([]connectModelChoice, 0, len(fallbackModels))
 	add := func(name string, detail string) {
@@ -436,7 +442,7 @@ func buildConnectModelChoices(provider string, fallbackModels []string) []connec
 		}
 		seen[key] = struct{}{}
 		if strings.TrimSpace(detail) == "" {
-			detail = describeConnectModel(provider, name)
+			detail = describeConnectModel(stack, provider, name)
 		}
 		out = append(out, connectModelChoice{
 			Name:    name,
@@ -453,9 +459,11 @@ func buildConnectModelChoices(provider string, fallbackModels []string) []connec
 	return out
 }
 
-func fallbackConnectModels(tpl providerTemplate) []string {
-	if models := modelcatalog.ListCatalogModels(tpl.provider); len(models) > 0 {
-		return models
+func fallbackConnectModels(stack *DriverStack, tpl providerTemplate) []string {
+	if stack != nil {
+		if models := stack.ListCatalogModels(tpl.provider); len(models) > 0 {
+			return models
+		}
 	}
 	if len(tpl.commonModels) > 0 {
 		return append([]string(nil), tpl.commonModels...)
@@ -502,8 +510,8 @@ func commonModelsForProvider(provider string) []string {
 	return nil
 }
 
-func describeConnectModel(provider, modelName string) string {
-	caps, ok := modelcatalog.LookupModelCapabilities(provider, modelName)
+func describeConnectModel(stack *DriverStack, provider string, modelName string) string {
+	caps, ok := lookupConnectModelCapabilities(stack, provider, modelName)
 	if !ok {
 		return "suggested model"
 	}
@@ -520,6 +528,38 @@ func describeConnectModel(provider, modelName string) string {
 	return strings.Join(parts, " · ")
 }
 
+func stackForDriver(driver *GatewayDriver) *DriverStack {
+	if driver == nil {
+		return nil
+	}
+	return driver.stack
+}
+
+func defaultConnectCapabilities(stack *DriverStack) ModelCapabilityInfo {
+	if stack == nil {
+		return ModelCapabilityInfo{
+			ContextWindowTokens:    128000,
+			DefaultMaxOutputTokens: 4096,
+			MaxOutputTokens:        4096,
+		}
+	}
+	return stack.DefaultModelCapabilities()
+}
+
+func lookupConnectModelCapabilities(stack *DriverStack, provider string, modelName string) (ModelCapabilityInfo, bool) {
+	if stack == nil {
+		return ModelCapabilityInfo{}, false
+	}
+	return stack.LookupModelCapabilities(provider, modelName)
+}
+
+func reasoningLevelsForModel(stack *DriverStack, provider string, modelName string) []string {
+	if stack == nil {
+		return nil
+	}
+	return stack.ReasoningLevelsForModel(provider, modelName)
+}
+
 func compactNonEmpty(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -530,29 +570,6 @@ func compactNonEmpty(values []string) []string {
 		out = append(out, trimmed)
 	}
 	return out
-}
-
-func connectRemoteCapabilities(remote *providers.RemoteModel) (supportsToolCalls bool, supportsReasoning bool, supportsImages bool, supportsJSON bool, known bool) {
-	if remote == nil {
-		return false, false, false, false, false
-	}
-	for _, cap := range remote.Capabilities {
-		switch strings.ToLower(strings.TrimSpace(cap)) {
-		case "tools", "tool_call", "tool_calls", "function_calling", "function-calling":
-			supportsToolCalls = true
-			known = true
-		case "reasoning", "thinking":
-			supportsReasoning = true
-			known = true
-		case "image", "images", "vision":
-			supportsImages = true
-			known = true
-		case "json", "structured_output", "structured-output":
-			supportsJSON = true
-			known = true
-		}
-	}
-	return
 }
 
 func normalizeReasoningLevels(levels []string) []string {

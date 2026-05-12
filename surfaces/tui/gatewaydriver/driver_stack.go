@@ -6,11 +6,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
@@ -36,14 +37,14 @@ type ModelConfig struct {
 	Provider               string
 	ProfileID              string
 	EndpointID             string
-	API                    providers.APIType
+	API                    model.APIType
 	Model                  string
 	BaseURL                string
 	HTTPClient             *http.Client
 	Token                  string
 	TokenEnv               string
 	PersistToken           bool
-	AuthType               providers.AuthType
+	AuthType               model.AuthType
 	HeaderKey              string
 	ContextWindowTokens    int
 	ReasoningEffort        string
@@ -52,6 +53,18 @@ type ModelConfig struct {
 	ReasoningMode          string
 	MaxOutputTok           int
 	Timeout                time.Duration
+}
+
+type ModelCapabilityInfo struct {
+	ContextWindowTokens    int
+	DefaultMaxOutputTokens int
+	MaxOutputTokens        int
+	ReasoningEfforts       []string
+	DefaultReasoningEffort string
+	SupportsReasoning      bool
+	SupportsToolCalls      bool
+	SupportsImages         bool
+	SupportsJSON           bool
 }
 
 type ModelChoice struct {
@@ -125,6 +138,12 @@ type ACPAgentAddOption struct {
 	Detail  string
 }
 
+type CodeFreeAuthRequest struct {
+	BaseURL         string
+	OpenBrowser     bool
+	CallbackTimeout time.Duration
+}
+
 type DriverStack struct {
 	GatewayFn func() GatewayService
 	Sessions  session.Service
@@ -155,6 +174,13 @@ type DriverStack struct {
 	ListModelAliasesFn                   func(context.Context, session.SessionRef) ([]string, error)
 	ListModelChoicesFn                   func(context.Context, session.SessionRef) ([]ModelChoice, error)
 	ListProviderModelsFn                 func(string) []string
+	ListCatalogModelsFn                  func(string) []string
+	DefaultModelCapabilitiesFn           func() ModelCapabilityInfo
+	LookupModelCapabilitiesFn            func(string, string) (ModelCapabilityInfo, bool)
+	ReasoningLevelsForModelFn            func(string, string) []string
+	EnsureCodeFreeAuthFn                 func(context.Context, CodeFreeAuthRequest) error
+	EnsureCodeFreeModelSelectionAuthFn   func(context.Context, CodeFreeAuthRequest) error
+	DiscoverSkillsFn                     func(context.Context, string) ([]skill.Meta, error)
 	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
 	ListACPAgentsFn                      func() []ACPAgentInfo
@@ -338,6 +364,59 @@ func (s *DriverStack) ListProviderModels(provider string) []string {
 		return nil
 	}
 	return s.ListProviderModelsFn(provider)
+}
+
+func (s *DriverStack) ListCatalogModels(provider string) []string {
+	if s == nil || s.ListCatalogModelsFn == nil {
+		return nil
+	}
+	return s.ListCatalogModelsFn(provider)
+}
+
+func (s *DriverStack) DefaultModelCapabilities() ModelCapabilityInfo {
+	if s == nil || s.DefaultModelCapabilitiesFn == nil {
+		return ModelCapabilityInfo{
+			ContextWindowTokens:    128000,
+			DefaultMaxOutputTokens: 4096,
+			MaxOutputTokens:        4096,
+		}
+	}
+	return s.DefaultModelCapabilitiesFn()
+}
+
+func (s *DriverStack) LookupModelCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
+	if s == nil || s.LookupModelCapabilitiesFn == nil {
+		return ModelCapabilityInfo{}, false
+	}
+	return s.LookupModelCapabilitiesFn(provider, modelName)
+}
+
+func (s *DriverStack) ReasoningLevelsForModel(provider string, modelName string) []string {
+	if s == nil || s.ReasoningLevelsForModelFn == nil {
+		return nil
+	}
+	return s.ReasoningLevelsForModelFn(provider, modelName)
+}
+
+func (s *DriverStack) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) error {
+	if s == nil || s.EnsureCodeFreeAuthFn == nil {
+		return fmt.Errorf("surfaces/tui/gatewaydriver: codefree auth dependency is unavailable")
+	}
+	return s.EnsureCodeFreeAuthFn(ctx, req)
+}
+
+func (s *DriverStack) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req CodeFreeAuthRequest) error {
+	if s == nil || s.EnsureCodeFreeModelSelectionAuthFn == nil {
+		return fmt.Errorf("surfaces/tui/gatewaydriver: codefree model auth dependency is unavailable")
+	}
+	return s.EnsureCodeFreeModelSelectionAuthFn(ctx, req)
+}
+
+func (s *DriverStack) DiscoverSkills(ctx context.Context, workspaceDir string) ([]skill.Meta, error) {
+	if s == nil || s.DiscoverSkillsFn == nil {
+		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: skill discovery dependency is unavailable")
+	}
+	return s.DiscoverSkillsFn(ctx, workspaceDir)
 }
 
 func (s *DriverStack) ListBuiltinACPAgentAddOptions() []ACPAgentAddOption {

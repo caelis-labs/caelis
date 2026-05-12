@@ -2,7 +2,10 @@ package gatewayapp
 
 import (
 	"context"
+	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
@@ -18,11 +21,31 @@ type AgentService struct {
 	stack *Stack
 }
 
+type SkillService struct{}
+
 type StatusService struct {
 	stack *Stack
 }
 
 type ACPSurfaceService = gatewayACPSurface
+
+type ModelCapabilityInfo struct {
+	ContextWindowTokens    int
+	DefaultMaxOutputTokens int
+	MaxOutputTokens        int
+	ReasoningEfforts       []string
+	DefaultReasoningEffort string
+	SupportsReasoning      bool
+	SupportsToolCalls      bool
+	SupportsImages         bool
+	SupportsJSON           bool
+}
+
+type CodeFreeAuthRequest struct {
+	BaseURL         string
+	OpenBrowser     bool
+	CallbackTimeout time.Duration
+}
 
 func (s *Stack) Models() ModelService {
 	return ModelService{stack: s}
@@ -30,6 +53,10 @@ func (s *Stack) Models() ModelService {
 
 func (s *Stack) Agents() AgentService {
 	return AgentService{stack: s}
+}
+
+func (s *Stack) Skills() SkillService {
+	return SkillService{}
 }
 
 func (s *Stack) Status() StatusService {
@@ -91,6 +118,41 @@ func (s ModelService) ListProviderModels(provider string) []string {
 	return s.stack.ListProviderModels(provider)
 }
 
+func (s ModelService) ListCatalogModels(provider string) []string {
+	return modelcatalog.ListCatalogModels(provider)
+}
+
+func (s ModelService) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
+	caps, ok := modelcatalog.LookupModelCapabilities(provider, modelName)
+	return toModelCapabilityInfo(caps), ok
+}
+
+func (s ModelService) DefaultCapabilities() ModelCapabilityInfo {
+	return toModelCapabilityInfo(modelcatalog.DefaultModelCapabilities())
+}
+
+func (s ModelService) ReasoningLevels(provider string, modelName string) []string {
+	return modelcatalog.ReasoningLevelsForModel(provider, modelName)
+}
+
+func (s ModelService) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) error {
+	_, err := providers.CodeFreeEnsureAuth(ctx, providers.CodeFreeEnsureAuthOptions{
+		BaseURL:         req.BaseURL,
+		OpenBrowser:     req.OpenBrowser,
+		CallbackTimeout: req.CallbackTimeout,
+	})
+	return err
+}
+
+func (s ModelService) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req CodeFreeAuthRequest) error {
+	_, err := providers.CodeFreeEnsureModelSelectionAuth(ctx, providers.CodeFreeEnsureAuthOptions{
+		BaseURL:         req.BaseURL,
+		OpenBrowser:     req.OpenBrowser,
+		CallbackTimeout: req.CallbackTimeout,
+	})
+	return err
+}
+
 func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
 	return s.stack.SessionUsageSnapshot(ctx, ref, modelAlias)
 }
@@ -131,6 +193,15 @@ func (s AgentService) InstallableOptions() []ACPAgentAddOption {
 	return s.stack.ListInstallableACPAgentOptions()
 }
 
+func (SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillMeta, error) {
+	if ctx != nil {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+	}
+	return DiscoverSkillMeta(nil, workspaceDir)
+}
+
 func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
 	return s.stack.Doctor(ctx, req)
 }
@@ -153,4 +224,18 @@ func (s StatusService) SetSessionMode(ctx context.Context, ref session.SessionRe
 
 func (s StatusService) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
 	return s.stack.CycleSessionMode(ctx, ref)
+}
+
+func toModelCapabilityInfo(caps modelcatalog.ModelCapabilities) ModelCapabilityInfo {
+	return ModelCapabilityInfo{
+		ContextWindowTokens:    caps.ContextWindowTokens,
+		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
+		MaxOutputTokens:        caps.MaxOutputTokens,
+		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
+		DefaultReasoningEffort: caps.DefaultReasoningEffort,
+		SupportsReasoning:      caps.SupportsReasoning,
+		SupportsToolCalls:      caps.SupportsToolCalls,
+		SupportsImages:         caps.SupportsImages,
+		SupportsJSON:           caps.SupportsJSONOutput,
+	}
 }

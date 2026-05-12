@@ -1,12 +1,11 @@
 //go:build e2e
 
-package client_test
+package eval
 
 import (
 	"context"
 	"encoding/json"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -27,7 +26,7 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 		mu      sync.Mutex
 		updates []client.UpdateEnvelope
 	)
-	client := startE2EClient(ctx, t, e2eClientConfig{
+	acpClient := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
 		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
@@ -39,16 +38,16 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 			updates = append(updates, update)
 		},
 	})
-	defer client.Close(ctx)
+	defer acpClient.Close(ctx)
 
-	if _, err := client.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize() error = %v; stderr=%q", err, client.StderrTail(4096))
+	if _, err := acpClient.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize() error = %v; stderr=%q", err, acpClient.StderrTail(4096))
 	}
-	session, err := client.NewSession(ctx, cwd, nil)
+	session, err := acpClient.NewSession(ctx, cwd, nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	resp, err := client.Prompt(ctx, session.SessionID, "Reply with exactly: client lifecycle ok", nil)
+	resp, err := acpClient.Prompt(ctx, session.SessionID, "Reply with exactly: client lifecycle ok", nil)
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
@@ -58,7 +57,7 @@ func TestPublicClientLifecycleAndLoadE2E(t *testing.T) {
 	if got := collectedUpdateKinds(updates); !containsAll(got, client.UpdateUserMessage, client.UpdateAgentMessage) {
 		t.Fatalf("prompt update kinds = %v, want user+assistant", got)
 	}
-	_ = client.Close(ctx)
+	_ = acpClient.Close(ctx)
 
 	var replay []client.UpdateEnvelope
 	reload := startE2EClient(ctx, t, e2eClientConfig{
@@ -99,7 +98,7 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		displayTerminalExit   bool
 		displayTerminalDone   bool
 	)
-	client := startE2EClient(ctx, t, e2eClientConfig{
+	acpClient := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
 		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
@@ -147,16 +146,16 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 			}
 		},
 	})
-	defer client.Close(ctx)
+	defer acpClient.Close(ctx)
 
-	if _, err := client.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize() error = %v; stderr=%q", err, client.StderrTail(4096))
+	if _, err := acpClient.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize() error = %v; stderr=%q", err, acpClient.StderrTail(4096))
 	}
-	session, err := client.NewSession(ctx, t.TempDir(), nil)
+	session, err := acpClient.NewSession(ctx, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := client.Prompt(ctx, session.SessionID, "Run the scripted approval bash flow.", nil); err != nil {
+	if _, err := acpClient.Prompt(ctx, session.SessionID, "Run the scripted approval bash flow.", nil); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 
@@ -171,21 +170,21 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		t.Fatal("missing terminal id from tool_call_update content")
 	}
 
-	output, err := client.TerminalOutput(ctx, session.SessionID, gotTerminalID)
+	output, err := acpClient.TerminalOutput(ctx, session.SessionID, gotTerminalID)
 	if err != nil {
 		t.Fatalf("TerminalOutput() error = %v", err)
 	}
 	if !strings.Contains(output.Output, "child approval ok") {
 		t.Fatalf("terminal output = %q, want child approval text", output.Output)
 	}
-	wait, err := client.TerminalWaitForExit(ctx, session.SessionID, gotTerminalID)
+	wait, err := acpClient.TerminalWaitForExit(ctx, session.SessionID, gotTerminalID)
 	if err != nil {
 		t.Fatalf("TerminalWaitForExit() error = %v", err)
 	}
 	if wait.ExitCode == nil || *wait.ExitCode != 0 {
 		t.Fatalf("terminal exit = %#v, want exit code 0", wait)
 	}
-	if err := client.TerminalRelease(ctx, session.SessionID, gotTerminalID); err != nil {
+	if err := acpClient.TerminalRelease(ctx, session.SessionID, gotTerminalID); err != nil {
 		t.Fatalf("TerminalRelease() error = %v", err)
 	}
 	deadline := time.After(2 * time.Second)
@@ -215,7 +214,7 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 	defer cancel()
 
 	var updates []client.UpdateEnvelope
-	client := startE2EClient(ctx, t, e2eClientConfig{
+	acpClient := startE2EClient(ctx, t, e2eClientConfig{
 		SessionRoot: filepath.Join(root, "sessions"),
 		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
@@ -226,12 +225,12 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 			updates = append(updates, update)
 		},
 	})
-	defer client.Close(ctx)
+	defer acpClient.Close(ctx)
 
-	if _, err := client.Initialize(ctx); err != nil {
-		t.Fatalf("Initialize() error = %v; stderr=%q", err, client.StderrTail(4096))
+	if _, err := acpClient.Initialize(ctx); err != nil {
+		t.Fatalf("Initialize() error = %v; stderr=%q", err, acpClient.StderrTail(4096))
 	}
-	session, err := client.NewSession(ctx, t.TempDir(), nil)
+	session, err := acpClient.NewSession(ctx, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
@@ -245,10 +244,10 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 		t.Fatalf("session.ConfigOptions[0].CurrentValue = %#v, want balanced", got)
 	}
 
-	if err := client.SetMode(ctx, session.SessionID, "plan"); err != nil {
+	if err := acpClient.SetMode(ctx, session.SessionID, "plan"); err != nil {
 		t.Fatalf("SetMode() error = %v", err)
 	}
-	configResp, err := client.SetConfigOption(ctx, session.SessionID, "reasoning", "deep")
+	configResp, err := acpClient.SetConfigOption(ctx, session.SessionID, "reasoning", "deep")
 	if err != nil {
 		t.Fatalf("SetConfigOption() error = %v", err)
 	}
@@ -256,7 +255,7 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 		t.Fatalf("configResp.ConfigOptions[0].CurrentValue = %#v, want deep", got)
 	}
 
-	loadResp, err := client.LoadSession(ctx, session.SessionID, t.TempDir(), nil)
+	loadResp, err := acpClient.LoadSession(ctx, session.SessionID, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -271,7 +270,7 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 	}
 
 	updates = nil
-	resp, err := client.Prompt(ctx, session.SessionID, "Report current mode and reasoning effort.", nil)
+	resp, err := acpClient.Prompt(ctx, session.SessionID, "Report current mode and reasoning effort.", nil)
 	if err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
@@ -300,7 +299,7 @@ func startE2EClient(ctx context.Context, t *testing.T, cfg e2eClientConfig) *cli
 	for k, v := range cfg.Env {
 		env[k] = v
 	}
-	client, err := client.Start(ctx, client.Config{
+	acpClient, err := client.Start(ctx, client.Config{
 		Command:             "go",
 		Args:                []string{"run", "./internal/acpe2eagent"},
 		WorkDir:             repoRoot(t),
@@ -315,16 +314,12 @@ func startE2EClient(ctx context.Context, t *testing.T, cfg e2eClientConfig) *cli
 	if err != nil {
 		t.Fatalf("client.Start() error = %v", err)
 	}
-	return client
+	return acpClient
 }
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
-	_, file, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("runtime.Caller() failed")
-	}
-	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	return repoRootForEval(t)
 }
 
 func collectedUpdateKinds(updates []client.UpdateEnvelope) []string {

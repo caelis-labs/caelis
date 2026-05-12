@@ -37,8 +37,9 @@ TUI, ACP stdio, and the headless one-shot runner.
   and interactive TUI modes through the local app stack.
 - `kernel/`: public product contract for sessions, turns, replay, active runs,
   and control-plane operations.
-- `ports/`: public extension ports for approval, session storage, model, sandbox,
-  tool, skill, prompt, agent, task, stream, config, and assembly contracts.
+- `ports/`: public extension ports for agent orchestration, approval, assembly,
+  compaction, config, controller, delegation, model, policy, prompt, sandbox,
+  session storage, skill, stream, subagent, task, and tool contracts.
 - `impl/`: concrete implementations such as local agents, ACP-backed agents,
   session stores, model providers, sandbox backends, policy presets, tools,
   prompt/config/stream adapters, and approval strategies.
@@ -53,6 +54,8 @@ TUI, ACP stdio, and the headless one-shot runner.
 - `protocol/acp`: ACP schema, JSON-RPC, client, server, transport, terminal, and
   projector packages.
 - `surfaces/acpserver`: exposes the local stack as an ACP stdio agent.
+- `eval/`: build-tagged cross-stack and live evaluation tests for kernel, app,
+  ACP, CLI, local-config model, and TUI gateway-driver flows.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 
 Documentation map: [docs/README.md](docs/README.md)

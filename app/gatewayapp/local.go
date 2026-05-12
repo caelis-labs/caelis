@@ -16,7 +16,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/sandboxpolicy"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/toolset"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
@@ -26,6 +25,7 @@ import (
 	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/seatbelt"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -35,6 +35,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 var errAmbiguousModelAlias = errors.New("ambiguous model alias")
@@ -1612,8 +1613,15 @@ func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.Ses
 	if delta := estimatePromptTextTokens(withDelegation) - estimatePromptTextTokens(baseSystemPrompt); delta > 0 {
 		extra += delta
 	}
-	extra += estimateToolPromptTokens(toolset.SpawnTools(agents))
+	extra += estimateToolPromptTokens(spawnTools(agents))
 	return base + extra
+}
+
+func spawnTools(agents []delegation.Agent) []tool.Tool {
+	if len(agents) == 0 {
+		return nil
+	}
+	return []tool.Tool{spawn.New(agents)}
 }
 
 func (s *Stack) currentContextWindowTokensForAlias(alias string) int {

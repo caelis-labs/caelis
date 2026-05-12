@@ -1,6 +1,6 @@
 //go:build e2e
 
-package gatewayapp
+package eval
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -20,7 +21,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	root := t.TempDir()
 	workdir := t.TempDir()
 
-	stack, err := NewLocalStack(Config{
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "user-1",
 		StoreDir:       root,
@@ -42,22 +43,22 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 				},
 			}},
 		},
-		Model: ModelConfig{
+		Model: gatewayapp.ModelConfig{
 			Provider: "minimax",
 			Model:    "MiniMax-M2",
 		},
 	})
 	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
+		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
 
-	session, err := stack.StartSession(context.Background(), "gateway-acp-main", "surface-acp-main")
+	activeSession, err := stack.StartSession(context.Background(), "gateway-acp-main", "surface-acp-main")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
 	updated, err := stack.Gateway.HandoffController(context.Background(), kernel.HandoffControllerRequest{
-		SessionRef: session.SessionRef,
+		SessionRef: activeSession.SessionRef,
 		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
 		Source:     "test",
@@ -71,7 +72,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	}
 
 	state, err := stack.Gateway.ControlPlaneState(context.Background(), kernel.ControlPlaneStateRequest{
-		SessionRef: session.SessionRef,
+		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
 		t.Fatalf("ControlPlaneState() error = %v", err)
@@ -79,7 +80,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if state.Controller.Kind != session.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("control state = %+v", state)
 	}
-	controllerStatus, found, err := stack.ACPControllerStatus(context.Background(), session.SessionRef)
+	controllerStatus, found, err := stack.ACPControllerStatus(context.Background(), activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ACPControllerStatus() error = %v", err)
 	}
@@ -92,7 +93,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if got := len(controllerStatus.ModeOptions); got != 2 {
 		t.Fatalf("len(ACPControllerStatus().ModeOptions) = %d, want 2", got)
 	}
-	updatedStatus, err := stack.SetACPControllerMode(context.Background(), session.SessionRef, "plan")
+	updatedStatus, err := stack.SetACPControllerMode(context.Background(), activeSession.SessionRef, "plan")
 	if err != nil {
 		t.Fatalf("SetACPControllerMode(plan) error = %v", err)
 	}
@@ -104,7 +105,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	defer cancel()
 
 	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
-		SessionRef: session.SessionRef,
+		SessionRef: activeSession.SessionRef,
 		Input:      "run through acp controller",
 		Surface:    "headless-acp-main-e2e",
 	}, headless.Options{})
@@ -116,7 +117,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	}
 
 	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{
-		SessionRef: session.SessionRef,
+		SessionRef: activeSession.SessionRef,
 	})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)

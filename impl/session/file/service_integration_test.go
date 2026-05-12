@@ -8,7 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func TestSessionServiceE2E(t *testing.T) {
+func TestSessionServiceIntegration(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()

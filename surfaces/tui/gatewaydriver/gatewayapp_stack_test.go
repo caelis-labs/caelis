@@ -53,7 +53,28 @@ func gatewayAppStackForRuntimeTest(stack *gatewayapp.Stack) *DriverStack {
 		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 			return testRuntimeModelChoices(stack.ListModelChoices(ctx, ref))
 		},
-		ListProviderModelsFn: stack.ListProviderModels,
+		ListProviderModelsFn:       stack.ListProviderModels,
+		ListCatalogModelsFn:        stack.Models().ListCatalogModels,
+		DefaultModelCapabilitiesFn: func() ModelCapabilityInfo { return testRuntimeModelCapabilities(stack.Models().DefaultCapabilities()) },
+		LookupModelCapabilitiesFn: func(provider string, modelName string) (ModelCapabilityInfo, bool) {
+			return testRuntimeModelCapabilitiesWithOK(stack.Models().LookupCapabilities(provider, modelName))
+		},
+		ReasoningLevelsForModelFn: stack.Models().ReasoningLevels,
+		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
+			return stack.Models().EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
+				BaseURL:         req.BaseURL,
+				OpenBrowser:     req.OpenBrowser,
+				CallbackTimeout: req.CallbackTimeout,
+			})
+		},
+		EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
+			return stack.Models().EnsureCodeFreeModelSelectionAuth(ctx, gatewayapp.CodeFreeAuthRequest{
+				BaseURL:         req.BaseURL,
+				OpenBrowser:     req.OpenBrowser,
+				CallbackTimeout: req.CallbackTimeout,
+			})
+		},
+		DiscoverSkillsFn: stack.Skills().Discover,
 		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
 			return testRuntimeACPAgentAddOptions(stack.ListBuiltinACPAgentAddOptions())
 		},
@@ -120,6 +141,24 @@ func testGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 		ReasoningMode:          cfg.ReasoningMode,
 		MaxOutputTok:           cfg.MaxOutputTok,
 		Timeout:                cfg.Timeout,
+	}
+}
+
+func testRuntimeModelCapabilitiesWithOK(caps gatewayapp.ModelCapabilityInfo, ok bool) (ModelCapabilityInfo, bool) {
+	return testRuntimeModelCapabilities(caps), ok
+}
+
+func testRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo {
+	return ModelCapabilityInfo{
+		ContextWindowTokens:    caps.ContextWindowTokens,
+		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
+		MaxOutputTokens:        caps.MaxOutputTokens,
+		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
+		DefaultReasoningEffort: caps.DefaultReasoningEffort,
+		SupportsReasoning:      caps.SupportsReasoning,
+		SupportsToolCalls:      caps.SupportsToolCalls,
+		SupportsImages:         caps.SupportsImages,
+		SupportsJSON:           caps.SupportsJSON,
 	}
 }
 

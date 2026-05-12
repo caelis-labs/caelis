@@ -11,11 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/impl/skill/fs"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -966,7 +964,7 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 			return StatusSnapshot{}, err
 		}
 	}
-	if defaults, err := connectDefaultsForConfig(ctx, cfg); err == nil {
+	if defaults, err := connectDefaultsForConfigWithStack(ctx, d.stack, cfg); err == nil {
 		if cfg.ContextWindowTokens <= 0 {
 			cfg.ContextWindowTokens = defaults.ContextWindow
 		}
@@ -986,7 +984,7 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		api = endpoint.api
 	}
 	if tpl.provider == "codefree" {
-		if _, err := providers.CodeFreeEnsureAuth(ctx, providers.CodeFreeEnsureAuthOptions{
+		if err := d.stack.EnsureCodeFreeAuth(ctx, CodeFreeAuthRequest{
 			BaseURL:         baseURL,
 			OpenBrowser:     true,
 			CallbackTimeout: 5 * time.Minute,
@@ -1003,7 +1001,7 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		authType = authTypeFromString(strings.TrimSpace(cfg.AuthType))
 	}
 	if tpl.noAuthRequired {
-		authType = providers.AuthNone
+		authType = model.AuthNone
 	}
 	persistToken := strings.TrimSpace(cfg.APIKey) != "" && strings.TrimSpace(cfg.TokenEnv) == ""
 	reasoningLevels := normalizeReasoningLevels(cfg.ReasoningLevels)
@@ -1575,7 +1573,7 @@ func (d *GatewayDriver) CompleteFile(ctx context.Context, query string, limit in
 func (d *GatewayDriver) CompleteSkill(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 
-	skills, err := fs.DiscoverMeta(nil, d.WorkspaceDir())
+	skills, err := d.stack.DiscoverSkills(ctx, d.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -1706,7 +1704,7 @@ func (d *GatewayDriver) completeModelReasoningLevels(ctx context.Context, aliasQ
 	if !ok {
 		return nil, nil
 	}
-	levels := configuredModelReasoningLevels(cfg)
+	levels := d.configuredModelReasoningLevels(cfg)
 	out := make([]SlashArgCandidate, 0, min(limit, len(levels)))
 	for _, level := range levels {
 		if query != "" && !hasSlashArgPrefix(query, level) {
@@ -1729,7 +1727,7 @@ func (d *GatewayDriver) modelAliasSupportsReasoningLevel(alias string, level str
 	if !ok {
 		return false
 	}
-	for _, one := range configuredModelReasoningLevels(cfg) {
+	for _, one := range d.configuredModelReasoningLevels(cfg) {
 		if strings.EqualFold(strings.TrimSpace(one), strings.TrimSpace(level)) {
 			return true
 		}
@@ -1737,9 +1735,9 @@ func (d *GatewayDriver) modelAliasSupportsReasoningLevel(alias string, level str
 	return false
 }
 
-func configuredModelReasoningLevels(cfg ModelConfig) []string {
+func (d *GatewayDriver) configuredModelReasoningLevels(cfg ModelConfig) []string {
 	levels := normalizeReasoningLevels(cfg.ReasoningLevels)
-	for _, level := range normalizeReasoningLevels(modelcatalog.ReasoningLevelsForModel(cfg.Provider, cfg.Model)) {
+	for _, level := range normalizeReasoningLevels(reasoningLevelsForModel(stackForDriver(d), cfg.Provider, cfg.Model)) {
 		seen := false
 		for _, existing := range levels {
 			if strings.EqualFold(existing, level) {
@@ -2346,12 +2344,12 @@ func defaultTokenEnvNameForConnect(provider string, baseURL string) string {
 	return defaultTokenEnvName(provider)
 }
 
-func defaultConnectAuthType(provider string) providers.AuthType {
+func defaultConnectAuthType(provider string) model.AuthType {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "minimax":
-		return providers.AuthBearerToken
+		return model.AuthBearerToken
 	default:
-		return providers.AuthAPIKey
+		return model.AuthAPIKey
 	}
 }
 
@@ -2526,17 +2524,17 @@ func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession
 	d.mu.Unlock()
 }
 
-func authTypeFromString(s string) providers.AuthType {
+func authTypeFromString(s string) model.AuthType {
 	switch strings.ToLower(strings.TrimSpace(s)) {
 	case "api_key", "apikey":
-		return providers.AuthAPIKey
+		return model.AuthAPIKey
 	case "bearer_token", "bearer":
-		return providers.AuthBearerToken
+		return model.AuthBearerToken
 	case "oauth_token", "oauth":
-		return providers.AuthOAuthToken
+		return model.AuthOAuthToken
 	case "none":
-		return providers.AuthNone
+		return model.AuthNone
 	default:
-		return providers.AuthAPIKey
+		return model.AuthAPIKey
 	}
 }

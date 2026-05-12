@@ -8,32 +8,32 @@ import (
 )
 
 // APIType defines protocol dialect used by a model provider.
-type APIType string
+type APIType = model.APIType
 
 const (
-	APIOpenAI              APIType = "openai"
-	APIOpenAICompatible    APIType = "openai_compatible"
-	APIOpenRouter          APIType = "openrouter"
-	APICodeFree            APIType = "codefree"
-	APIGemini              APIType = "gemini"
-	APIAnthropic           APIType = "anthropic"
-	APIAnthropicCompatible APIType = "anthropic_compatible"
-	APIDeepSeek            APIType = "deepseek"
-	APIMiniMax             APIType = "minimax"
-	APIVolcengine          APIType = "volcengine"
-	APIMimo                APIType = "mimo"
-	APIVolcengineCoding    APIType = "volcengine_coding_plan"
-	APIOllama              APIType = "ollama"
+	APIOpenAI              = model.APIOpenAI
+	APIOpenAICompatible    = model.APIOpenAICompatible
+	APIOpenRouter          = model.APIOpenRouter
+	APICodeFree            = model.APICodeFree
+	APIGemini              = model.APIGemini
+	APIAnthropic           = model.APIAnthropic
+	APIAnthropicCompatible = model.APIAnthropicCompatible
+	APIDeepSeek            = model.APIDeepSeek
+	APIMiniMax             = model.APIMiniMax
+	APIVolcengine          = model.APIVolcengine
+	APIMimo                = model.APIMimo
+	APIVolcengineCoding    = model.APIVolcengineCoding
+	APIOllama              = model.APIOllama
 )
 
 // AuthType defines model provider authentication strategy.
-type AuthType string
+type AuthType = model.AuthType
 
 const (
-	AuthAPIKey      AuthType = "api_key"
-	AuthBearerToken AuthType = "bearer_token"
-	AuthOAuthToken  AuthType = "oauth_token"
-	AuthNone        AuthType = "none"
+	AuthAPIKey      = model.AuthAPIKey
+	AuthBearerToken = model.AuthBearerToken
+	AuthOAuthToken  = model.AuthOAuthToken
+	AuthNone        = model.AuthNone
 )
 
 // AuthConfig is provider-agnostic auth configuration.

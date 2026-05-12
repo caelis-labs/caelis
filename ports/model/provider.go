@@ -2,6 +2,36 @@ package model
 
 import "context"
 
+// APIType identifies the model-provider protocol dialect for one configured
+// endpoint.
+type APIType string
+
+const (
+	APIOpenAI              APIType = "openai"
+	APIOpenAICompatible    APIType = "openai_compatible"
+	APIOpenRouter          APIType = "openrouter"
+	APICodeFree            APIType = "codefree"
+	APIGemini              APIType = "gemini"
+	APIAnthropic           APIType = "anthropic"
+	APIAnthropicCompatible APIType = "anthropic_compatible"
+	APIDeepSeek            APIType = "deepseek"
+	APIMiniMax             APIType = "minimax"
+	APIVolcengine          APIType = "volcengine"
+	APIMimo                APIType = "mimo"
+	APIVolcengineCoding    APIType = "volcengine_coding_plan"
+	APIOllama              APIType = "ollama"
+)
+
+// AuthType identifies how a model-provider endpoint authenticates.
+type AuthType string
+
+const (
+	AuthAPIKey      AuthType = "api_key"
+	AuthBearerToken AuthType = "bearer_token"
+	AuthOAuthToken  AuthType = "oauth_token"
+	AuthNone        AuthType = "none"
+)
+
 type Client = LLM
 
 type ProviderConfig struct {

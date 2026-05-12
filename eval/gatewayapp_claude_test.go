@@ -1,6 +1,6 @@
 //go:build e2e
 
-package gatewayapp
+package eval
 
 import (
 	"context"
@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 )
 
 func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
@@ -30,36 +32,36 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Minute)
 	defer cancel()
 	workdir := t.TempDir()
-	stack, err := NewLocalStack(Config{
+	stack, err := gatewayapp.NewLocalStack(gatewayapp.Config{
 		AppName:        "caelis",
 		UserID:         "claude-e2e-test",
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Model: ModelConfig{
+		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
 			Model:    "llama3",
 		},
 	})
 	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
+		t.Fatalf("gatewayapp.NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "", "claude-e2e")
+	activeSession, err := stack.StartSession(ctx, "", "claude-e2e")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	if err := stack.RegisterBuiltinACPAgentWithOptions(ctx, "claude", RegisterBuiltinACPAgentOptions{Install: true}); err != nil {
+	if err := stack.RegisterBuiltinACPAgentWithOptions(ctx, "claude", gatewayapp.RegisterBuiltinACPAgentOptions{Install: true}); err != nil {
 		t.Fatalf("RegisterBuiltinACPAgentWithOptions(claude, install) error = %v", err)
 	}
 
 	const want = "caelis claude acp e2e ok"
-	snapshot, err := stack.StartSubagent(ctx, session.SessionRef, "claude", "Reply with exactly: "+want, "claude_e2e")
+	snapshot, err := stack.StartSubagent(ctx, activeSession.SessionRef, "claude", "Reply with exactly: "+want, "claude_e2e")
 	if err != nil {
 		t.Fatalf("StartSubagent(claude) error = %v", err)
 	}
 	for snapshot.Running {
-		snapshot, err = stack.WaitSubagentTask(ctx, session.SessionRef, snapshot.Ref.TaskID, 5*time.Second)
+		snapshot, err = stack.WaitSubagentTask(ctx, activeSession.SessionRef, snapshot.Ref.TaskID, 5*time.Second)
 		if err != nil {
 			t.Fatalf("WaitSubagentTask(claude) error = %v", err)
 		}

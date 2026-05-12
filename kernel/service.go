@@ -3,7 +3,7 @@ package kernel
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/internal/kernel"
+	kernelimpl "github.com/OnslaughtSnail/caelis/internal/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -39,82 +39,82 @@ type ControlPlaneService interface {
 	DetachParticipant(context.Context, DetachParticipantRequest) (Session, error)
 }
 
-type Config = kernel.Config
-type Gateway = kernel.Gateway
-type AssemblyResolverConfig = kernel.AssemblyResolverConfig
-type AssemblyResolver = kernel.AssemblyResolver
-type BeginTurnRequest = kernel.BeginTurnRequest
-type TurnIntent = kernel.TurnIntent
-type StartSessionRequest = kernel.StartSessionRequest
-type LoadSessionRequest = kernel.LoadSessionRequest
-type ForkSessionRequest = kernel.ForkSessionRequest
-type ResumeSessionRequest = kernel.ResumeSessionRequest
-type ListSessionsRequest = kernel.ListSessionsRequest
-type InterruptRequest = kernel.InterruptRequest
-type BindingDescriptor = kernel.BindingDescriptor
-type BindSessionRequest = kernel.BindSessionRequest
-type ReplayEventsRequest = kernel.ReplayEventsRequest
-type HandoffControllerRequest = kernel.HandoffControllerRequest
-type AttachParticipantRequest = kernel.AttachParticipantRequest
-type PromptParticipantRequest = kernel.PromptParticipantRequest
-type DetachParticipantRequest = kernel.DetachParticipantRequest
-type ControlPlaneStateRequest = kernel.ControlPlaneStateRequest
-type BindingStateRequest = kernel.BindingStateRequest
-type ActiveTurnState = kernel.ActiveTurnState
-type ActiveTurnKind = kernel.ActiveTurnKind
-type ControllerState = kernel.ControllerState
-type ParticipantState = kernel.ParticipantState
-type ACPProjectionState = kernel.ACPProjectionState
-type ContinuityState = kernel.ContinuityState
-type ControlPlaneState = kernel.ControlPlaneState
-type BindingState = kernel.BindingState
-type ReplayEventsResult = kernel.ReplayEventsResult
-type ResolvedTurn = kernel.ResolvedTurn
-type TurnResolver = kernel.TurnResolver
-type RequestPolicy = kernel.RequestPolicy
-type SurfaceClass = kernel.SurfaceClass
-type EventKind = kernel.EventKind
-type UsageSnapshot = kernel.UsageSnapshot
-type NarrativeRole = kernel.NarrativeRole
-type EventScope = kernel.EventScope
-type NarrativePayload = kernel.NarrativePayload
-type ToolStatus = kernel.ToolStatus
-type ToolCallPayload = kernel.ToolCallPayload
-type ToolResultPayload = kernel.ToolResultPayload
-type PlanEntryPayload = kernel.PlanEntryPayload
-type PlanPayload = kernel.PlanPayload
-type ApprovalStatus = kernel.ApprovalStatus
-type ApprovalReviewStatus = kernel.ApprovalReviewStatus
-type ApprovalOption = kernel.ApprovalOption
-type ApprovalPayload = kernel.ApprovalPayload
-type ApprovalMode = kernel.ApprovalMode
-type ApprovalReviewRequest = kernel.ApprovalReviewRequest
-type ApprovalReviewResult = kernel.ApprovalReviewResult
-type ApprovalReviewer = kernel.ApprovalReviewer
-type ApprovalApprover = kernel.ApprovalApprover
-type ParticipantAction = kernel.ParticipantAction
-type ParticipantPayload = kernel.ParticipantPayload
-type LifecycleStatus = kernel.LifecycleStatus
-type LifecyclePayload = kernel.LifecyclePayload
-type EventOrigin = kernel.EventOrigin
-type Event = kernel.Event
-type EventEnvelope = kernel.EventEnvelope
-type StreamRequest = kernel.StreamRequest
-type SubmissionKind = kernel.SubmissionKind
-type CancelStatus = kernel.CancelStatus
-type CancelResult = kernel.CancelResult
-type ApprovalDecision = kernel.ApprovalDecision
-type SubmitRequest = kernel.SubmitRequest
-type SubmitActiveTurnRequest = kernel.SubmitActiveTurnRequest
-type BeginTurnResult = kernel.BeginTurnResult
-type TurnHandle = kernel.TurnHandle
-type ErrorKind = kernel.ErrorKind
-type Error = kernel.Error
-type ModelLookup = kernel.ModelLookup
-type ModelResolution = kernel.ModelResolution
-type ToolAugmenter = kernel.ToolAugmenter
-type ToolAugmentContext = kernel.ToolAugmentContext
-type ToolAugmentation = kernel.ToolAugmentation
+type Config = kernelimpl.Config
+type Gateway = kernelimpl.Gateway
+type AssemblyResolverConfig = kernelimpl.AssemblyResolverConfig
+type AssemblyResolver = kernelimpl.AssemblyResolver
+type BeginTurnRequest = kernelimpl.BeginTurnRequest
+type TurnIntent = kernelimpl.TurnIntent
+type StartSessionRequest = kernelimpl.StartSessionRequest
+type LoadSessionRequest = kernelimpl.LoadSessionRequest
+type ForkSessionRequest = kernelimpl.ForkSessionRequest
+type ResumeSessionRequest = kernelimpl.ResumeSessionRequest
+type ListSessionsRequest = kernelimpl.ListSessionsRequest
+type InterruptRequest = kernelimpl.InterruptRequest
+type BindingDescriptor = kernelimpl.BindingDescriptor
+type BindSessionRequest = kernelimpl.BindSessionRequest
+type ReplayEventsRequest = kernelimpl.ReplayEventsRequest
+type HandoffControllerRequest = kernelimpl.HandoffControllerRequest
+type AttachParticipantRequest = kernelimpl.AttachParticipantRequest
+type PromptParticipantRequest = kernelimpl.PromptParticipantRequest
+type DetachParticipantRequest = kernelimpl.DetachParticipantRequest
+type ControlPlaneStateRequest = kernelimpl.ControlPlaneStateRequest
+type BindingStateRequest = kernelimpl.BindingStateRequest
+type ActiveTurnState = kernelimpl.ActiveTurnState
+type ActiveTurnKind = kernelimpl.ActiveTurnKind
+type ControllerState = kernelimpl.ControllerState
+type ParticipantState = kernelimpl.ParticipantState
+type ACPProjectionState = kernelimpl.ACPProjectionState
+type ContinuityState = kernelimpl.ContinuityState
+type ControlPlaneState = kernelimpl.ControlPlaneState
+type BindingState = kernelimpl.BindingState
+type ReplayEventsResult = kernelimpl.ReplayEventsResult
+type ResolvedTurn = kernelimpl.ResolvedTurn
+type TurnResolver = kernelimpl.TurnResolver
+type RequestPolicy = kernelimpl.RequestPolicy
+type SurfaceClass = kernelimpl.SurfaceClass
+type EventKind = kernelimpl.EventKind
+type UsageSnapshot = kernelimpl.UsageSnapshot
+type NarrativeRole = kernelimpl.NarrativeRole
+type EventScope = kernelimpl.EventScope
+type NarrativePayload = kernelimpl.NarrativePayload
+type ToolStatus = kernelimpl.ToolStatus
+type ToolCallPayload = kernelimpl.ToolCallPayload
+type ToolResultPayload = kernelimpl.ToolResultPayload
+type PlanEntryPayload = kernelimpl.PlanEntryPayload
+type PlanPayload = kernelimpl.PlanPayload
+type ApprovalStatus = kernelimpl.ApprovalStatus
+type ApprovalReviewStatus = kernelimpl.ApprovalReviewStatus
+type ApprovalOption = kernelimpl.ApprovalOption
+type ApprovalPayload = kernelimpl.ApprovalPayload
+type ApprovalMode = kernelimpl.ApprovalMode
+type ApprovalReviewRequest = kernelimpl.ApprovalReviewRequest
+type ApprovalReviewResult = kernelimpl.ApprovalReviewResult
+type ApprovalReviewer = kernelimpl.ApprovalReviewer
+type ApprovalApprover = kernelimpl.ApprovalApprover
+type ParticipantAction = kernelimpl.ParticipantAction
+type ParticipantPayload = kernelimpl.ParticipantPayload
+type LifecycleStatus = kernelimpl.LifecycleStatus
+type LifecyclePayload = kernelimpl.LifecyclePayload
+type EventOrigin = kernelimpl.EventOrigin
+type Event = kernelimpl.Event
+type EventEnvelope = kernelimpl.EventEnvelope
+type StreamRequest = kernelimpl.StreamRequest
+type SubmissionKind = kernelimpl.SubmissionKind
+type CancelStatus = kernelimpl.CancelStatus
+type CancelResult = kernelimpl.CancelResult
+type ApprovalDecision = kernelimpl.ApprovalDecision
+type SubmitRequest = kernelimpl.SubmitRequest
+type SubmitActiveTurnRequest = kernelimpl.SubmitActiveTurnRequest
+type BeginTurnResult = kernelimpl.BeginTurnResult
+type TurnHandle = kernelimpl.TurnHandle
+type ErrorKind = kernelimpl.ErrorKind
+type Error = kernelimpl.Error
+type ModelLookup = kernelimpl.ModelLookup
+type ModelResolution = kernelimpl.ModelResolution
+type ToolAugmenter = kernelimpl.ToolAugmenter
+type ToolAugmentContext = kernelimpl.ToolAugmentContext
+type ToolAugmentation = kernelimpl.ToolAugmentation
 type SessionRef = session.SessionRef
 type WorkspaceRef = session.WorkspaceRef
 type Session = session.Session
@@ -124,171 +124,171 @@ type ControllerBinding = session.ControllerBinding
 type ParticipantBinding = session.ParticipantBinding
 
 const (
-	KindValidation  = kernel.KindValidation
-	KindConflict    = kernel.KindConflict
-	KindNotFound    = kernel.KindNotFound
-	KindInternal    = kernel.KindInternal
-	KindApproval    = kernel.KindApproval
-	KindUnsupported = kernel.KindUnsupported
+	KindValidation  = kernelimpl.KindValidation
+	KindConflict    = kernelimpl.KindConflict
+	KindNotFound    = kernelimpl.KindNotFound
+	KindInternal    = kernelimpl.KindInternal
+	KindApproval    = kernelimpl.KindApproval
+	KindUnsupported = kernelimpl.KindUnsupported
 )
 
 const (
-	CodeNotImplemented          = kernel.CodeNotImplemented
-	CodeInternal                = kernel.CodeInternal
-	CodeActiveRunConflict       = kernel.CodeActiveRunConflict
-	CodeInvalidRequest          = kernel.CodeInvalidRequest
-	CodeCursorNotFound          = kernel.CodeCursorNotFound
-	CodeSubmissionUnsupported   = kernel.CodeSubmissionUnsupported
-	CodeApprovalNotPending      = kernel.CodeApprovalNotPending
-	CodeSessionNotFound         = kernel.CodeSessionNotFound
-	CodeSessionAmbiguous        = kernel.CodeSessionAmbiguous
-	CodeBindingNotFound         = kernel.CodeBindingNotFound
-	CodeNoResumableSession      = kernel.CodeNoResumableSession
-	CodeNoActiveRun             = kernel.CodeNoActiveRun
-	CodeModeNotFound            = kernel.CodeModeNotFound
-	CodeControlPlaneUnsupported = kernel.CodeControlPlaneUnsupported
+	CodeNotImplemented          = kernelimpl.CodeNotImplemented
+	CodeInternal                = kernelimpl.CodeInternal
+	CodeActiveRunConflict       = kernelimpl.CodeActiveRunConflict
+	CodeInvalidRequest          = kernelimpl.CodeInvalidRequest
+	CodeCursorNotFound          = kernelimpl.CodeCursorNotFound
+	CodeSubmissionUnsupported   = kernelimpl.CodeSubmissionUnsupported
+	CodeApprovalNotPending      = kernelimpl.CodeApprovalNotPending
+	CodeSessionNotFound         = kernelimpl.CodeSessionNotFound
+	CodeSessionAmbiguous        = kernelimpl.CodeSessionAmbiguous
+	CodeBindingNotFound         = kernelimpl.CodeBindingNotFound
+	CodeNoResumableSession      = kernelimpl.CodeNoResumableSession
+	CodeNoActiveRun             = kernelimpl.CodeNoActiveRun
+	CodeModeNotFound            = kernelimpl.CodeModeNotFound
+	CodeControlPlaneUnsupported = kernelimpl.CodeControlPlaneUnsupported
 )
 
 const (
-	StateCurrentModelAlias      = kernel.StateCurrentModelAlias
-	StateCurrentSandboxMode     = kernel.StateCurrentSandboxMode
-	StateCurrentSessionMode     = kernel.StateCurrentSessionMode
-	StateCurrentReasoningEffort = kernel.StateCurrentReasoningEffort
-	StateUsageAccounting        = kernel.StateUsageAccounting
+	StateCurrentModelAlias      = kernelimpl.StateCurrentModelAlias
+	StateCurrentSandboxMode     = kernelimpl.StateCurrentSandboxMode
+	StateCurrentSessionMode     = kernelimpl.StateCurrentSessionMode
+	StateCurrentReasoningEffort = kernelimpl.StateCurrentReasoningEffort
+	StateUsageAccounting        = kernelimpl.StateUsageAccounting
 )
 
 const (
-	EventMetaRoot                      = kernel.EventMetaRoot
-	EventMetaVersion                   = kernel.EventMetaVersion
-	EventMetaTransient                 = kernel.EventMetaTransient
-	EventMetaRuntime                   = kernel.EventMetaRuntime
-	EventMetaRuntimeTool               = kernel.EventMetaRuntimeTool
-	EventMetaRuntimeToolName           = kernel.EventMetaRuntimeToolName
-	EventMetaRuntimeToolAction         = kernel.EventMetaRuntimeToolAction
-	EventMetaRuntimeToolInput          = kernel.EventMetaRuntimeToolInput
-	EventMetaRuntimeTargetKind         = kernel.EventMetaRuntimeTargetKind
-	EventMetaRuntimeTargetID           = kernel.EventMetaRuntimeTargetID
-	EventMetaRuntimeStream             = kernel.EventMetaRuntimeStream
-	EventMetaRuntimeStreamMode         = kernel.EventMetaRuntimeStreamMode
-	EventMetaRuntimeStreamParentCallID = kernel.EventMetaRuntimeStreamParentCallID
-	EventMetaRuntimeStreamParentTool   = kernel.EventMetaRuntimeStreamParentTool
-	EventMetaRuntimeStreamParentTaskID = kernel.EventMetaRuntimeStreamParentTaskID
+	EventMetaRoot                      = kernelimpl.EventMetaRoot
+	EventMetaVersion                   = kernelimpl.EventMetaVersion
+	EventMetaTransient                 = kernelimpl.EventMetaTransient
+	EventMetaRuntime                   = kernelimpl.EventMetaRuntime
+	EventMetaRuntimeTool               = kernelimpl.EventMetaRuntimeTool
+	EventMetaRuntimeToolName           = kernelimpl.EventMetaRuntimeToolName
+	EventMetaRuntimeToolAction         = kernelimpl.EventMetaRuntimeToolAction
+	EventMetaRuntimeToolInput          = kernelimpl.EventMetaRuntimeToolInput
+	EventMetaRuntimeTargetKind         = kernelimpl.EventMetaRuntimeTargetKind
+	EventMetaRuntimeTargetID           = kernelimpl.EventMetaRuntimeTargetID
+	EventMetaRuntimeStream             = kernelimpl.EventMetaRuntimeStream
+	EventMetaRuntimeStreamMode         = kernelimpl.EventMetaRuntimeStreamMode
+	EventMetaRuntimeStreamParentCallID = kernelimpl.EventMetaRuntimeStreamParentCallID
+	EventMetaRuntimeStreamParentTool   = kernelimpl.EventMetaRuntimeStreamParentTool
+	EventMetaRuntimeStreamParentTaskID = kernelimpl.EventMetaRuntimeStreamParentTaskID
 )
 
 const (
-	ApprovalModeAutoReview = kernel.ApprovalModeAutoReview
-	ApprovalModeManual     = kernel.ApprovalModeManual
+	ApprovalModeAutoReview = kernelimpl.ApprovalModeAutoReview
+	ApprovalModeManual     = kernelimpl.ApprovalModeManual
 )
 
 const (
-	SurfaceClassInteractive = kernel.SurfaceClassInteractive
-	SurfaceClassBatch       = kernel.SurfaceClassBatch
+	SurfaceClassInteractive = kernelimpl.SurfaceClassInteractive
+	SurfaceClassBatch       = kernelimpl.SurfaceClassBatch
 )
 
 const (
-	EventKindUserMessage       = kernel.EventKindUserMessage
-	EventKindAssistantMessage  = kernel.EventKindAssistantMessage
-	EventKindPlanUpdate        = kernel.EventKindPlanUpdate
-	EventKindToolCall          = kernel.EventKindToolCall
-	EventKindToolResult        = kernel.EventKindToolResult
-	EventKindParticipant       = kernel.EventKindParticipant
-	EventKindHandoff           = kernel.EventKindHandoff
-	EventKindCompact           = kernel.EventKindCompact
-	EventKindNotice            = kernel.EventKindNotice
-	EventKindSystemMessage     = kernel.EventKindSystemMessage
-	EventKindApprovalRequested = kernel.EventKindApprovalRequested
-	EventKindApprovalReview    = kernel.EventKindApprovalReview
-	EventKindLifecycle         = kernel.EventKindLifecycle
+	EventKindUserMessage       = kernelimpl.EventKindUserMessage
+	EventKindAssistantMessage  = kernelimpl.EventKindAssistantMessage
+	EventKindPlanUpdate        = kernelimpl.EventKindPlanUpdate
+	EventKindToolCall          = kernelimpl.EventKindToolCall
+	EventKindToolResult        = kernelimpl.EventKindToolResult
+	EventKindParticipant       = kernelimpl.EventKindParticipant
+	EventKindHandoff           = kernelimpl.EventKindHandoff
+	EventKindCompact           = kernelimpl.EventKindCompact
+	EventKindNotice            = kernelimpl.EventKindNotice
+	EventKindSystemMessage     = kernelimpl.EventKindSystemMessage
+	EventKindApprovalRequested = kernelimpl.EventKindApprovalRequested
+	EventKindApprovalReview    = kernelimpl.EventKindApprovalReview
+	EventKindLifecycle         = kernelimpl.EventKindLifecycle
 )
 
 const (
-	NarrativeRoleUser      = kernel.NarrativeRoleUser
-	NarrativeRoleAssistant = kernel.NarrativeRoleAssistant
-	NarrativeRoleReasoning = kernel.NarrativeRoleReasoning
-	NarrativeRoleSystem    = kernel.NarrativeRoleSystem
-	NarrativeRoleNotice    = kernel.NarrativeRoleNotice
+	NarrativeRoleUser      = kernelimpl.NarrativeRoleUser
+	NarrativeRoleAssistant = kernelimpl.NarrativeRoleAssistant
+	NarrativeRoleReasoning = kernelimpl.NarrativeRoleReasoning
+	NarrativeRoleSystem    = kernelimpl.NarrativeRoleSystem
+	NarrativeRoleNotice    = kernelimpl.NarrativeRoleNotice
 )
 
 const (
-	EventScopeMain        = kernel.EventScopeMain
-	EventScopeParticipant = kernel.EventScopeParticipant
-	EventScopeSubagent    = kernel.EventScopeSubagent
+	EventScopeMain        = kernelimpl.EventScopeMain
+	EventScopeParticipant = kernelimpl.EventScopeParticipant
+	EventScopeSubagent    = kernelimpl.EventScopeSubagent
 )
 
 const (
-	ToolStatusStarted         = kernel.ToolStatusStarted
-	ToolStatusRunning         = kernel.ToolStatusRunning
-	ToolStatusWaitingApproval = kernel.ToolStatusWaitingApproval
-	ToolStatusCompleted       = kernel.ToolStatusCompleted
-	ToolStatusFailed          = kernel.ToolStatusFailed
-	ToolStatusInterrupted     = kernel.ToolStatusInterrupted
-	ToolStatusCancelled       = kernel.ToolStatusCancelled
+	ToolStatusStarted         = kernelimpl.ToolStatusStarted
+	ToolStatusRunning         = kernelimpl.ToolStatusRunning
+	ToolStatusWaitingApproval = kernelimpl.ToolStatusWaitingApproval
+	ToolStatusCompleted       = kernelimpl.ToolStatusCompleted
+	ToolStatusFailed          = kernelimpl.ToolStatusFailed
+	ToolStatusInterrupted     = kernelimpl.ToolStatusInterrupted
+	ToolStatusCancelled       = kernelimpl.ToolStatusCancelled
 )
 
 const (
-	ApprovalStatusPending  = kernel.ApprovalStatusPending
-	ApprovalStatusApproved = kernel.ApprovalStatusApproved
-	ApprovalStatusRejected = kernel.ApprovalStatusRejected
-	ApprovalStatusSelected = kernel.ApprovalStatusSelected
+	ApprovalStatusPending  = kernelimpl.ApprovalStatusPending
+	ApprovalStatusApproved = kernelimpl.ApprovalStatusApproved
+	ApprovalStatusRejected = kernelimpl.ApprovalStatusRejected
+	ApprovalStatusSelected = kernelimpl.ApprovalStatusSelected
 )
 
 const (
-	ApprovalReviewStatusInProgress = kernel.ApprovalReviewStatusInProgress
-	ApprovalReviewStatusApproved   = kernel.ApprovalReviewStatusApproved
-	ApprovalReviewStatusDenied     = kernel.ApprovalReviewStatusDenied
-	ApprovalReviewStatusTimedOut   = kernel.ApprovalReviewStatusTimedOut
-	ApprovalReviewStatusFailed     = kernel.ApprovalReviewStatusFailed
+	ApprovalReviewStatusInProgress = kernelimpl.ApprovalReviewStatusInProgress
+	ApprovalReviewStatusApproved   = kernelimpl.ApprovalReviewStatusApproved
+	ApprovalReviewStatusDenied     = kernelimpl.ApprovalReviewStatusDenied
+	ApprovalReviewStatusTimedOut   = kernelimpl.ApprovalReviewStatusTimedOut
+	ApprovalReviewStatusFailed     = kernelimpl.ApprovalReviewStatusFailed
 )
 
 const (
-	ParticipantActionAttached = kernel.ParticipantActionAttached
-	ParticipantActionDetached = kernel.ParticipantActionDetached
+	ParticipantActionAttached = kernelimpl.ParticipantActionAttached
+	ParticipantActionDetached = kernelimpl.ParticipantActionDetached
 )
 
 const (
-	LifecycleStatusRunning         = kernel.LifecycleStatusRunning
-	LifecycleStatusWaitingApproval = kernel.LifecycleStatusWaitingApproval
-	LifecycleStatusInterrupted     = kernel.LifecycleStatusInterrupted
-	LifecycleStatusFailed          = kernel.LifecycleStatusFailed
-	LifecycleStatusCompleted       = kernel.LifecycleStatusCompleted
+	LifecycleStatusRunning         = kernelimpl.LifecycleStatusRunning
+	LifecycleStatusWaitingApproval = kernelimpl.LifecycleStatusWaitingApproval
+	LifecycleStatusInterrupted     = kernelimpl.LifecycleStatusInterrupted
+	LifecycleStatusFailed          = kernelimpl.LifecycleStatusFailed
+	LifecycleStatusCompleted       = kernelimpl.LifecycleStatusCompleted
 )
 
 const (
-	SubmissionKindConversation = kernel.SubmissionKindConversation
-	SubmissionKindApproval     = kernel.SubmissionKindApproval
+	SubmissionKindConversation = kernelimpl.SubmissionKindConversation
+	SubmissionKindApproval     = kernelimpl.SubmissionKindApproval
 )
 
 const (
-	CancelStatusCancelled        = kernel.CancelStatusCancelled
-	CancelStatusAlreadyCancelled = kernel.CancelStatusAlreadyCancelled
+	CancelStatusCancelled        = kernelimpl.CancelStatusCancelled
+	CancelStatusAlreadyCancelled = kernelimpl.CancelStatusAlreadyCancelled
 )
 
-var New = kernel.New
-var NewAssemblyResolver = kernel.NewAssemblyResolver
-var NormalizeApprovalMode = kernel.NormalizeApprovalMode
-var CurrentApprovalMode = kernel.CurrentApprovalMode
-var CurrentModelAlias = kernel.CurrentModelAlias
-var CurrentReasoningEffort = kernel.CurrentReasoningEffort
-var CurrentSandboxMode = kernel.CurrentSandboxMode
-var CurrentSessionMode = kernel.CurrentSessionMode
-var ClassifySurface = kernel.ClassifySurface
-var EventError = kernel.EventError
-var As = kernel.As
-var StreamRequestFromEvent = kernel.StreamRequestFromEvent
-var StreamFrameEvent = kernel.StreamFrameEvent
-var StreamFrameEvents = kernel.StreamFrameEvents
-var CleanSubagentFinalOutput = kernel.CleanSubagentFinalOutput
-var ProjectSessionEvent = kernel.ProjectSessionEvent
-var EventMetaString = kernel.EventMetaString
-var EventMetaBool = kernel.EventMetaBool
-var FormatApprovalReviewText = kernel.FormatApprovalReviewText
-var UsageSnapshotFromSessionEvent = kernel.UsageSnapshotFromSessionEvent
-var UsageSnapshotFromMap = kernel.UsageSnapshotFromMap
-var AssistantText = kernel.AssistantText
-var PromptTokens = kernel.PromptTokens
-var CachedInputTokens = kernel.CachedInputTokens
+var New = kernelimpl.New
+var NewAssemblyResolver = kernelimpl.NewAssemblyResolver
+var NormalizeApprovalMode = kernelimpl.NormalizeApprovalMode
+var CurrentApprovalMode = kernelimpl.CurrentApprovalMode
+var CurrentModelAlias = kernelimpl.CurrentModelAlias
+var CurrentReasoningEffort = kernelimpl.CurrentReasoningEffort
+var CurrentSandboxMode = kernelimpl.CurrentSandboxMode
+var CurrentSessionMode = kernelimpl.CurrentSessionMode
+var ClassifySurface = kernelimpl.ClassifySurface
+var EventError = kernelimpl.EventError
+var As = kernelimpl.As
+var StreamRequestFromEvent = kernelimpl.StreamRequestFromEvent
+var StreamFrameEvent = kernelimpl.StreamFrameEvent
+var StreamFrameEvents = kernelimpl.StreamFrameEvents
+var CleanSubagentFinalOutput = kernelimpl.CleanSubagentFinalOutput
+var ProjectSessionEvent = kernelimpl.ProjectSessionEvent
+var EventMetaString = kernelimpl.EventMetaString
+var EventMetaBool = kernelimpl.EventMetaBool
+var FormatApprovalReviewText = kernelimpl.FormatApprovalReviewText
+var UsageSnapshotFromSessionEvent = kernelimpl.UsageSnapshotFromSessionEvent
+var UsageSnapshotFromMap = kernelimpl.UsageSnapshotFromMap
+var AssistantText = kernelimpl.AssistantText
+var PromptTokens = kernelimpl.PromptTokens
+var CachedInputTokens = kernelimpl.CachedInputTokens
 
 const (
-	ActiveTurnKindKernel      = kernel.ActiveTurnKindKernel
-	ActiveTurnKindParticipant = kernel.ActiveTurnKindParticipant
+	ActiveTurnKindKernel      = kernelimpl.ActiveTurnKindKernel
+	ActiveTurnKindParticipant = kernelimpl.ActiveTurnKindParticipant
 )

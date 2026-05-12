@@ -1,6 +1,6 @@
 //go:build e2e
 
-package gatewaydriver
+package eval
 
 import (
 	"context"
@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
 func TestGatewayDriverCodexACPModelEffortE2E(t *testing.T) {
@@ -137,7 +138,7 @@ func TestGatewayDriverCodexACPModelEffortE2E(t *testing.T) {
 	}
 }
 
-func preferredEffortCandidate(candidates []SlashArgCandidate) string {
+func preferredEffortCandidate(candidates []gatewaydriver.SlashArgCandidate) string {
 	for _, preferred := range []string{"xhigh", "high", "medium", "low"} {
 		for _, candidate := range candidates {
 			if strings.EqualFold(strings.TrimSpace(candidate.Value), preferred) {

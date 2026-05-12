@@ -1,6 +1,6 @@
 //go:build e2e
 
-package acp
+package eval
 
 import (
 	"context"
@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/agent/acp/subagent"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/subagent"
 )
@@ -24,7 +25,7 @@ func TestRunnerCodexACPWebSearchLiveE2E(t *testing.T) {
 	}
 
 	repo := repoRootForRunnerTest(t)
-	registry, err := NewRegistry([]AgentConfig{{
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
 		Name:        "codex",
 		Description: "local Codex ACP",
 		Command:     "npx",
@@ -35,12 +36,12 @@ func TestRunnerCodexACPWebSearchLiveE2E(t *testing.T) {
 		},
 	}})
 	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
+		t.Fatalf("acpsubagent.NewRegistry() error = %v", err)
 	}
 	sink := &recordingStreams{}
-	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	runner, err := acp.NewRunner(acp.RunnerConfig{Registry: registry})
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("acpsubagent.NewRunner() error = %v", err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 180*time.Second)
 	defer cancel()
@@ -107,7 +108,7 @@ func TestRunnerSpawnChildSurvivesCallerContextCancelAfterYield(t *testing.T) {
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build e2eagent: %v\n%s", err, string(output))
 	}
-	registry, err := NewRegistry([]AgentConfig{{
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
 		Name:        "self",
 		Description: "self child",
 		Command:     childBin,
@@ -120,11 +121,11 @@ func TestRunnerSpawnChildSurvivesCallerContextCancelAfterYield(t *testing.T) {
 		},
 	}})
 	if err != nil {
-		t.Fatalf("NewRegistry() error = %v", err)
+		t.Fatalf("acpsubagent.NewRegistry() error = %v", err)
 	}
-	runner, err := NewRunner(RunnerConfig{Registry: registry})
+	runner, err := acp.NewRunner(acp.RunnerConfig{Registry: registry})
 	if err != nil {
-		t.Fatalf("NewRunner() error = %v", err)
+		t.Fatalf("acpsubagent.NewRunner() error = %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	anchor, result, err := runner.Spawn(ctx, subagent.SpawnContext{

@@ -1,6 +1,6 @@
 //go:build e2e
 
-package cli
+package eval
 
 import (
 	"context"

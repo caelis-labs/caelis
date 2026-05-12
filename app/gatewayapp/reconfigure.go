@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/approvalstrategy"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/toolset"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
+	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -59,9 +60,9 @@ func (s *Stack) rebuildGateway() error {
 	if err := rejectReconfigureWithActiveTurns(oldGateway, "rebuild gateway"); err != nil {
 		return err
 	}
-	sandboxRuntime, err := toolset.NewSandboxRuntime(toolset.SandboxConfig{
+	sandboxRuntime, err := sandbox.New(sandbox.Config{
 		CWD:              s.Workspace.CWD,
-		RequestedBackend: sandboxCfg.RequestedType,
+		RequestedBackend: sandbox.Backend(sandboxCfg.RequestedType),
 		HelperPath:       sandboxCfg.HelperPath,
 		ReadableRoots:    append([]string(nil), sandboxCfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), sandboxCfg.WritableRoots...),
@@ -70,7 +71,7 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
-	tools, err := toolset.BuildCoreTools(sandboxRuntime)
+	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandboxRuntime})
 	if err != nil {
 		_ = sandboxRuntime.Close()
 		return err
@@ -119,7 +120,7 @@ func (s *Stack) rebuildGateway() error {
 				metadata["system_prompt"] = systemPromptWithDelegationGuidance(systemPrompt)
 			}
 			return kernel.ToolAugmentation{
-				Tools:    toolset.SpawnTools(agents),
+				Tools:    spawnTools(agents),
 				Metadata: metadata,
 			}, nil
 		},
@@ -132,7 +133,7 @@ func (s *Stack) rebuildGateway() error {
 		Sessions:         s.Sessions,
 		Runtime:          rt,
 		Resolver:         resolver,
-		ApprovalApprover: approvalstrategy.AgentReviewApprover(newModelApprovalReviewer(s.Sessions)),
+		ApprovalApprover: agentreview.Approver{Reviewer: newModelApprovalReviewer(s.Sessions)},
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()
