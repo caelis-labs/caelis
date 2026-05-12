@@ -1978,10 +1978,10 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 				b.WriteString("  ")
 			}
 			if colIndex == 0 {
-				b.WriteString(fmt.Sprintf("%-*s", widths[colIndex], col))
+				fmt.Fprintf(&b, "%-*s", widths[colIndex], col)
 				continue
 			}
-			b.WriteString(fmt.Sprintf("%*s", widths[colIndex], col))
+			fmt.Fprintf(&b, "%*s", widths[colIndex], col)
 		}
 	}
 	return b.String()

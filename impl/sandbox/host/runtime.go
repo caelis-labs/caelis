@@ -102,7 +102,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "/bin/sh", "-lc", req.Command)
+	cmd := exec.CommandContext(runCtx, "/bin/sh", "-c", req.Command)
 	cmd.Dir = dir
 	cmd.Env = mergeEnv(req.Env)
 	if len(req.Stdin) > 0 {
@@ -156,7 +156,7 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if req.Timeout > 0 {
 		cmdCtx, cancel = context.WithTimeout(cmdCtx, req.Timeout)
 	}
-	cmd := exec.CommandContext(cmdCtx, "/bin/sh", "-lc", req.Command)
+	cmd := exec.CommandContext(cmdCtx, "/bin/sh", "-c", req.Command)
 	cmd.Dir = dir
 	cmd.Env = mergeEnv(req.Env)
 	setProcessGroup(cmd)
