@@ -10,11 +10,6 @@ the source of truth for completed implementation details.
 
 - [architecture.md](architecture.md): current repository layout, entry flow, and
   ownership boundaries.
-- [current_sdk_foundation_scope.md](current_sdk_foundation_scope.md): SDK,
-  gateway, app assembly, and adapter boundary rules that should remain true
-  during refactors.
-- [unified_gateway_foundation_spec.md](unified_gateway_foundation_spec.md):
-  active gateway contract, canonical event model, and deferred surface scope.
 
 ## Documentation Rules
 

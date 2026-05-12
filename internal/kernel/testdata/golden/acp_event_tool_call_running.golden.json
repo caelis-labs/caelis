@@ -1,0 +1,51 @@
+{
+  "cursor": "tool-call-event-1",
+  "event": {
+    "kind": "tool_call",
+    "occurred_at": "0001-01-01T00:00:00Z",
+    "session_ref": {
+      "app_name": "caelis",
+      "user_id": "user-1",
+      "session_id": "session-1",
+      "workspace_key": "workspace-1"
+    },
+    "origin": {
+      "scope": "main",
+      "scope_id": "session-1"
+    },
+    "_meta": {
+      "caelis": {
+        "runtime": {
+          "tool": {
+            "name": "BASH"
+          }
+        },
+        "version": 1
+      }
+    },
+    "protocol": {
+      "method": "session/update",
+      "update": {
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call-bash-1",
+        "title": "BASH",
+        "kind": "execute",
+        "status": "running",
+        "rawInput": {
+          "command": "echo hi"
+        }
+      }
+    },
+    "tool_call": {
+      "call_id": "call-bash-1",
+      "tool_name": "BASH",
+      "tool_kind": "execute",
+      "tool_title": "BASH",
+      "raw_input": {
+        "command": "echo hi"
+      },
+      "status": "running",
+      "scope": "main"
+    }
+  }
+}

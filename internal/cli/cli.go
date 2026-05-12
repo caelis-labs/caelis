@@ -10,13 +10,12 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/acp"
-	"github.com/OnslaughtSnail/caelis/acpbridge/gatewayagent"
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/gateway"
-	"github.com/OnslaughtSnail/caelis/headless"
-	"github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/surfaces/acpserver"
+	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
 
 type outputFormat string
@@ -119,11 +118,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	if acpSubcommand {
-		agent, err := gatewayagent.New(stack)
-		if err != nil {
-			return err
-		}
-		return acp.ServeStdio(ctx, agent, stdin, stdout)
+		return acpserver.ServeStdio(ctx, stack, stdin, stdout)
 	}
 	if doctorSubcommand || *doctor {
 		outFmt, err := parseOutputFormat(*format)
@@ -148,17 +143,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
 }
 
-func assemblyFromEnv() sdkplugin.ResolvedAssembly {
+func assemblyFromEnv() assembly.ResolvedAssembly {
 	cmd := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_CMD", ""))
 	if cmd == "" {
-		return sdkplugin.ResolvedAssembly{}
+		return assembly.ResolvedAssembly{}
 	}
 	name := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_NAME", "self"))
 	if name == "" {
 		name = "self"
 	}
-	return sdkplugin.ResolvedAssembly{
-		Agents: []sdkplugin.AgentConfig{{
+	return assembly.ResolvedAssembly{
+		Agents: []assembly.AgentConfig{{
 			Name:        name,
 			Description: strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_DESC", "")),
 			Command:     "bash",
@@ -188,7 +183,7 @@ func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string,
 	if err != nil {
 		return err
 	}
-	result, err := headless.RunOnce(ctx, stack.Gateway, gateway.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      input,
 		Surface:    "headless",
@@ -249,7 +244,7 @@ func renderConfiguredModelText(alias string, provider string, model string) stri
 	return provider + "/" + model
 }
 
-func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writer, stderr io.Writer) error {
+func streamHandle(ctx context.Context, handle kernel.TurnHandle, stdout io.Writer, stderr io.Writer) error {
 	if handle == nil {
 		return nil
 	}
@@ -259,16 +254,16 @@ func streamHandle(ctx context.Context, handle gateway.TurnHandle, stdout io.Writ
 		if env.Err != nil {
 			return env.Err
 		}
-		if env.Event.Kind == gateway.EventKindApprovalRequested {
+		if env.Event.Kind == kernel.EventKindApprovalRequested {
 			fmt.Fprintln(stderr, "[approval] denied by default")
-			if err := handle.Submit(ctx, gateway.SubmitRequest{
-				Kind:     gateway.SubmissionKindApproval,
-				Approval: &gateway.ApprovalDecision{Approved: false, Outcome: string(gateway.ApprovalStatusRejected)},
+			if err := handle.Submit(ctx, kernel.SubmitRequest{
+				Kind:     kernel.SubmissionKindApproval,
+				Approval: &kernel.ApprovalDecision{Approved: false, Outcome: string(kernel.ApprovalStatusRejected)},
 			}); err != nil {
 				return err
 			}
 		}
-		if text := gateway.AssistantText(env.Event); text != "" {
+		if text := kernel.AssistantText(env.Event); text != "" {
 			fmt.Fprintln(stdout, text)
 		}
 	}

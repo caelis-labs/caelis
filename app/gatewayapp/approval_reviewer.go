@@ -10,16 +10,17 @@ import (
 	"sync"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	"github.com/OnslaughtSnail/caelis/sdk/runtime/agents/chat"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 const (
 	defaultApprovalReviewTimeout = 90 * time.Second
 
+	guardianAssessmentMaxAttempts      = 3
 	guardianMaxMessageTranscriptTokens = 10_000
 	guardianMaxToolTranscriptTokens    = 10_000
 	guardianMaxMessageEntryTokens      = 2_000
@@ -29,8 +30,8 @@ const (
 )
 
 type guardianApprovalReviewer struct {
-	sessions sdksession.Service
-	factory  sdkruntime.AgentFactory
+	sessions session.Service
+	factory  agent.AgentFactory
 	timeout  time.Duration
 
 	mu               sync.Mutex
@@ -40,7 +41,7 @@ type guardianApprovalReviewer struct {
 type guardianReviewSession struct {
 	mu       sync.Mutex
 	reuseKey string
-	events   []*sdksession.Event
+	events   []*session.Event
 	cursor   guardianTranscriptCursor
 	version  uint64
 }
@@ -76,15 +77,15 @@ type guardianTranscriptEntry struct {
 // newModelApprovalReviewer keeps the historical constructor name used by local
 // stack setup and tests while the concrete implementation is now a no-tool
 // guardian agent.
-func newModelApprovalReviewer(sessions ...sdksession.Service) appgateway.ApprovalReviewer {
-	var service sdksession.Service
+func newModelApprovalReviewer(sessions ...session.Service) kernel.ApprovalReviewer {
+	var service session.Service
 	if len(sessions) > 0 {
 		service = sessions[0]
 	}
 	return newGuardianApprovalReviewer(service)
 }
 
-func newGuardianApprovalReviewer(service sdksession.Service) appgateway.ApprovalReviewer {
+func newGuardianApprovalReviewer(service session.Service) kernel.ApprovalReviewer {
 	return &guardianApprovalReviewer{
 		sessions:         service,
 		factory:          chat.Factory{},
@@ -93,12 +94,12 @@ func newGuardianApprovalReviewer(service sdksession.Service) appgateway.Approval
 	}
 }
 
-func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req appgateway.ApprovalReviewRequest) (appgateway.ApprovalReviewResult, error) {
+func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kernel.ApprovalReviewRequest) (kernel.ApprovalReviewResult, error) {
 	if req.Model == nil {
-		return appgateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires the current session model")
 	}
 	if r == nil || r.sessions == nil {
-		return appgateway.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
+		return kernel.ApprovalReviewResult{}, fmt.Errorf("approval reviewer requires session history")
 	}
 	timeout := r.timeout
 	if timeout <= 0 {
@@ -107,59 +108,68 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req appga
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	_, _, assistantEvent, text, err := r.runGuardianReview(ctx, req)
+	_, _, assistantEvent, parsed, err := r.runGuardianReview(ctx, req)
 	if err != nil {
-		return appgateway.ApprovalReviewResult{}, err
-	}
-	parsed, err := parseGuardianAssessment(text)
-	if err != nil {
-		return appgateway.ApprovalReviewResult{}, err
+		return kernel.ApprovalReviewResult{}, err
 	}
 	approved := strings.EqualFold(strings.TrimSpace(parsed.Outcome), "allow")
 	risk := normalizeReviewLabel(parsed.RiskLevel, "unknown")
 	authorization := normalizeAuthorizationLabel(parsed.UserAuthorization, "unknown")
 	rationale := firstNonEmpty(parsed.Rationale, "approval reviewer returned no rationale")
-	return appgateway.ApprovalReviewResult{
+	return kernel.ApprovalReviewResult{
 		Approved:       approved,
 		Outcome:        approvalOutcome(approved),
 		Risk:           risk,
 		Authorization:  authorization,
 		Rationale:      rationale,
-		DisplayText:    appgateway.FormatApprovalReviewText(approved, risk, authorization, rationale),
+		DisplayText:    kernel.FormatApprovalReviewText(approved, risk, authorization, rationale),
 		DecisionSource: "auto-review",
-		Usage:          appgateway.UsageSnapshotFromSessionEvent(assistantEvent),
+		Usage:          kernel.UsageSnapshotFromSessionEvent(assistantEvent),
 	}, nil
 }
 
 func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
-	req appgateway.ApprovalReviewRequest,
-) (guardianPromptItems, *sdksession.Event, *sdksession.Event, string, error) {
-	session, err := r.sessions.Session(ctx, req.SessionRef)
+	req kernel.ApprovalReviewRequest,
+) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, error) {
+	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, "", err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
-	reviewSession := r.reviewSessionFor(req, session)
+	reviewSession := r.reviewSessionFor(req, activeSession)
 	trunkEvents, promptMode, baseVersion := reviewSession.snapshot()
-	parentEvents, err := r.sessions.Events(ctx, sdksession.EventsRequest{SessionRef: req.SessionRef})
+	parentEvents, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: req.SessionRef})
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, "", err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
 	promptItems, err := buildGuardianPromptItems(parentEvents, promptMode, req)
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, "", err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
-	promptEvent := guardianUserEvent(session, promptItems.Text)
-	events := append(sdksession.CloneEvents(trunkEvents), promptEvent)
-	assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, session, events, guardianOutputSpec())
-	if err != nil {
-		return promptItems, promptEvent, assistantEvent, "", err
+	promptEvent := guardianUserEvent(activeSession, promptItems.Text)
+	events := append(session.CloneEvents(trunkEvents), promptEvent)
+	var lastAssistantEvent *session.Event
+	var lastParseErr error
+	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
+		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, activeSession, events, guardianOutputSpec())
+		if err != nil {
+			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, err
+		}
+		lastAssistantEvent = assistantEvent
+		parsed, err := parseGuardianAssessment(text)
+		if err != nil {
+			lastParseErr = err
+			continue
+		}
+		// Commit only validated assessments; malformed attempts must not poison
+		// the reusable reviewer prefix for later approval requests.
+		reviewSession.commit(baseVersion, promptItems.TranscriptCursor, promptEvent, assistantEvent)
+		return promptItems, promptEvent, assistantEvent, parsed, nil
 	}
-	reviewSession.commit(baseVersion, promptItems.TranscriptCursor, promptEvent, assistantEvent)
-	return promptItems, promptEvent, assistantEvent, text, nil
+	return promptItems, promptEvent, lastAssistantEvent, guardianReviewModelOutput{}, fmt.Errorf("approval reviewer failed to return a valid JSON assessment after %d attempts: %w", guardianAssessmentMaxAttempts, lastParseErr)
 }
 
-func (r *guardianApprovalReviewer) reviewSessionFor(req appgateway.ApprovalReviewRequest, session sdksession.Session) *guardianReviewSession {
+func (r *guardianApprovalReviewer) reviewSessionFor(req kernel.ApprovalReviewRequest, session session.Session) *guardianReviewSession {
 	key := strings.TrimSpace(req.SessionRef.SessionID)
 	if key == "" {
 		key = strings.TrimSpace(session.SessionID)
@@ -181,21 +191,21 @@ func (r *guardianApprovalReviewer) reviewSessionFor(req appgateway.ApprovalRevie
 
 func (r *guardianApprovalReviewer) runGuardianAgent(
 	ctx context.Context,
-	model sdkmodel.LLM,
-	session sdksession.Session,
-	events []*sdksession.Event,
-	output *sdkmodel.OutputSpec,
-) (*sdksession.Event, string, error) {
+	model model.LLM,
+	parentSession session.Session,
+	events []*session.Event,
+	output *model.OutputSpec,
+) (*session.Event, string, error) {
 	metadata := chat.Metadata(guardianPolicyPrompt())
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
 	metadata["reasoning_effort"] = "none"
-	agent, err := r.factory.NewAgent(ctx, sdkruntime.AgentSpec{
+	guardianAgent, err := r.factory.NewAgent(ctx, agent.AgentSpec{
 		Name:  "guardian",
 		Model: model,
 		Tools: nil,
-		Request: sdkruntime.ModelRequestOptions{
+		Request: agent.ModelRequestOptions{
 			Stream: boolPtr(false),
 			Output: output,
 		},
@@ -204,53 +214,53 @@ func (r *guardianApprovalReviewer) runGuardianAgent(
 	if err != nil {
 		return nil, "", err
 	}
-	reviewCtx := sdkruntime.NewContext(sdkruntime.ContextSpec{
+	reviewCtx := agent.NewContext(agent.ContextSpec{
 		Context: ctx,
-		Session: guardianSessionForParent(session),
+		Session: guardianSessionForParent(parentSession),
 		Events:  events,
 	})
-	var assistantEvent *sdksession.Event
-	for event, runErr := range agent.Run(reviewCtx) {
+	var assistantEvent *session.Event
+	for event, runErr := range guardianAgent.Run(reviewCtx) {
 		if runErr != nil {
 			return assistantEvent, "", runErr
 		}
 		if event == nil {
 			continue
 		}
-		if sdksession.EventTypeOf(event) == sdksession.EventTypeAssistant {
-			assistantEvent = sdksession.CloneEvent(event)
+		if session.EventTypeOf(event) == session.EventTypeAssistant {
+			assistantEvent = session.CloneEvent(event)
 		}
 	}
-	if assistantEvent == nil || strings.TrimSpace(sdksession.EventText(assistantEvent)) == "" {
+	if assistantEvent == nil || strings.TrimSpace(session.EventText(assistantEvent)) == "" {
 		return assistantEvent, "", fmt.Errorf("approval reviewer returned no final assessment")
 	}
-	return assistantEvent, sdksession.EventText(assistantEvent), nil
+	return assistantEvent, session.EventText(assistantEvent), nil
 }
 
-func (s *guardianReviewSession) snapshot() ([]*sdksession.Event, guardianPromptMode, uint64) {
+func (s *guardianReviewSession) snapshot() ([]*session.Event, guardianPromptMode, uint64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	mode := guardianPromptMode{}
 	if len(s.events) > 0 && s.cursor.EventCount > 0 {
 		mode = guardianPromptMode{Delta: true, Cursor: s.cursor}
 	}
-	return sdksession.CloneEvents(s.events), mode, s.version
+	return session.CloneEvents(s.events), mode, s.version
 }
 
-func (s *guardianReviewSession) commit(version uint64, cursor guardianTranscriptCursor, promptEvent *sdksession.Event, assistantEvent *sdksession.Event) bool {
+func (s *guardianReviewSession) commit(version uint64, cursor guardianTranscriptCursor, promptEvent *session.Event, assistantEvent *session.Event) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.version != version {
 		return false
 	}
-	s.events = append(s.events, sdksession.CloneEvent(promptEvent), sdksession.CloneEvent(assistantEvent))
+	s.events = append(s.events, session.CloneEvent(promptEvent), session.CloneEvent(assistantEvent))
 	s.cursor = cursor
 	s.version++
 	return true
 }
 
-func guardianSessionForParent(parent sdksession.Session) sdksession.Session {
-	out := sdksession.CloneSession(parent)
+func guardianSessionForParent(parent session.Session) session.Session {
+	out := session.CloneSession(parent)
 	out.SessionID = firstNonEmpty(strings.TrimSpace(parent.SessionID)+"-approval-review", "approval-review")
 	out.Metadata = map[string]any{
 		"guardian": true,
@@ -261,9 +271,9 @@ func guardianSessionForParent(parent sdksession.Session) sdksession.Session {
 }
 
 func buildGuardianPromptItems(
-	parentEvents []*sdksession.Event,
+	parentEvents []*session.Event,
 	mode guardianPromptMode,
-	req appgateway.ApprovalReviewRequest,
+	req kernel.ApprovalReviewRequest,
 ) (guardianPromptItems, error) {
 	entries, cursor := collectGuardianTranscriptEntries(parentEvents)
 	var selected []guardianTranscriptEntry
@@ -326,11 +336,11 @@ type guardianPromptHeadings struct {
 	ActionIntro     string
 }
 
-func collectGuardianTranscriptEntries(events []*sdksession.Event) ([]guardianTranscriptEntry, guardianTranscriptCursor) {
+func collectGuardianTranscriptEntries(events []*session.Event) ([]guardianTranscriptEntry, guardianTranscriptCursor) {
 	entries := make([]guardianTranscriptEntry, 0, len(events))
 	cursor := guardianTranscriptCursor{}
 	for _, event := range events {
-		if event == nil || !sdksession.IsCanonicalHistoryEvent(event) {
+		if event == nil || !session.IsCanonicalHistoryEvent(event) {
 			continue
 		}
 		cursor.LastEventID = strings.TrimSpace(event.ID)
@@ -343,22 +353,22 @@ func collectGuardianTranscriptEntries(events []*sdksession.Event) ([]guardianTra
 	return entries, cursor
 }
 
-func guardianTranscriptEntryFromEvent(event *sdksession.Event) (guardianTranscriptEntry, bool) {
-	text := strings.TrimSpace(sdksession.EventText(event))
+func guardianTranscriptEntryFromEvent(event *session.Event) (guardianTranscriptEntry, bool) {
+	text := strings.TrimSpace(session.EventText(event))
 	kind := ""
-	switch sdksession.EventTypeOf(event) {
-	case sdksession.EventTypeUser:
+	switch session.EventTypeOf(event) {
+	case session.EventTypeUser:
 		kind = "user"
-	case sdksession.EventTypeAssistant:
+	case session.EventTypeAssistant:
 		kind = "assistant"
-	case sdksession.EventTypeToolCall:
+	case session.EventTypeToolCall:
 		kind = "tool " + firstNonEmpty(toolNameFromSessionEvent(event), "call") + " call"
-		if update := sdksession.ProtocolUpdateOf(event); update != nil && len(update.RawInput) > 0 {
+		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawInput) > 0 {
 			text = mustPrettyJSON(map[string]any{"tool": toolNameFromSessionEvent(event), "input": update.RawInput})
 		}
-	case sdksession.EventTypeToolResult:
+	case session.EventTypeToolResult:
 		kind = "tool " + firstNonEmpty(toolNameFromSessionEvent(event), "result") + " result"
-		if update := sdksession.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
+		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
 			text = mustPrettyJSON(map[string]any{"tool": toolNameFromSessionEvent(event), "output": update.RawOutput})
 		}
 	default:
@@ -465,7 +475,7 @@ func isGuardianToolEntry(entry guardianTranscriptEntry) bool {
 	return strings.HasPrefix(strings.TrimSpace(entry.Kind), "tool ")
 }
 
-func guardianPlannedActionJSON(req appgateway.ApprovalReviewRequest) (string, bool, error) {
+func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, error) {
 	action := map[string]any{}
 	toolName := ""
 	if req.Approval != nil {
@@ -595,9 +605,9 @@ func approxTokenCount(text string) int {
 	return len([]rune(text))/4 + 1
 }
 
-func guardianOutputSpec() *sdkmodel.OutputSpec {
-	return &sdkmodel.OutputSpec{
-		Mode: sdkmodel.OutputModeSchema,
+func guardianOutputSpec() *model.OutputSpec {
+	return &model.OutputSpec{
+		Mode: model.OutputModeSchema,
 		JSONSchema: map[string]any{
 			"type":                 "object",
 			"additionalProperties": false,
@@ -686,9 +696,9 @@ func parseGuardianAssessment(text string) (guardianReviewModelOutput, error) {
 
 func approvalOutcome(approved bool) string {
 	if approved {
-		return string(appgateway.ApprovalStatusApproved)
+		return string(kernel.ApprovalStatusApproved)
 	}
-	return string(appgateway.ApprovalStatusRejected)
+	return string(kernel.ApprovalStatusRejected)
 }
 
 func normalizeReviewLabel(value string, fallback string) string {
@@ -787,7 +797,7 @@ func scanGuardianJSONObject(text string, start int) (string, bool) {
 	return "", false
 }
 
-func guardianReuseKey(model sdkmodel.LLM, policy string) string {
+func guardianReuseKey(model model.LLM, policy string) string {
 	hash := sha256.New()
 	if model != nil {
 		hash.Write([]byte(model.Name()))
@@ -797,13 +807,13 @@ func guardianReuseKey(model sdkmodel.LLM, policy string) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
-func guardianUserEvent(session sdksession.Session, text string) *sdksession.Event {
-	message := sdkmodel.NewTextMessage(sdkmodel.RoleUser, strings.TrimSpace(text))
-	return &sdksession.Event{
-		Type:       sdksession.EventTypeUser,
-		Visibility: sdksession.VisibilityCanonical,
-		Actor:      sdksession.ActorRef{Kind: sdksession.ActorKindUser, Name: "guardian_input"},
-		Scope: &sdksession.EventScope{
+func guardianUserEvent(_ session.Session, text string) *session.Event {
+	message := model.NewTextMessage(model.RoleUser, strings.TrimSpace(text))
+	return &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "guardian_input"},
+		Scope: &session.EventScope{
 			TurnID: "guardian-review",
 			Source: "auto-review",
 		},
@@ -812,7 +822,7 @@ func guardianUserEvent(session sdksession.Session, text string) *sdksession.Even
 	}
 }
 
-func toolNameFromSessionEvent(event *sdksession.Event) string {
+func toolNameFromSessionEvent(event *session.Event) string {
 	if event == nil {
 		return ""
 	}
@@ -821,7 +831,7 @@ func toolNameFromSessionEvent(event *sdksession.Event) string {
 			return name
 		}
 	}
-	if update := sdksession.ProtocolUpdateOf(event); update != nil {
+	if update := session.ProtocolUpdateOf(event); update != nil {
 		if title := strings.TrimSpace(update.Title); title != "" {
 			return strings.Fields(title)[0]
 		}
@@ -850,5 +860,5 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-var _ appgateway.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
-var _ sdkruntime.AgentFactory = chat.Factory{}
+var _ kernel.ApprovalReviewer = (*guardianApprovalReviewer)(nil)
+var _ agent.AgentFactory = chat.Factory{}

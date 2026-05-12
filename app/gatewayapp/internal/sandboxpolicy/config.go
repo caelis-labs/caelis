@@ -1,0 +1,124 @@
+package sandboxpolicy
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
+)
+
+func NormalizeBackend(backend string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "", "auto":
+		return "auto", nil
+	case "seatbelt":
+		return "seatbelt", nil
+	case "bwrap":
+		return "bwrap", nil
+	case "landlock":
+		return "landlock", nil
+	default:
+		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
+	}
+}
+
+func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxConfig) configstore.SandboxConfig {
+	stored = configstore.NormalizeSandboxConfig(stored)
+	override = configstore.NormalizeSandboxConfig(override)
+	if override.RequestedType != "" {
+		stored.RequestedType = override.RequestedType
+	}
+	if override.HelperPath != "" {
+		stored.HelperPath = override.HelperPath
+	}
+	if len(override.ReadableRoots) > 0 {
+		stored.ReadableRoots = append([]string(nil), override.ReadableRoots...)
+	}
+	if len(override.WritableRoots) > 0 {
+		stored.WritableRoots = append([]string(nil), override.WritableRoots...)
+	}
+	if len(override.ReadOnlySubpaths) > 0 {
+		stored.ReadOnlySubpaths = append([]string(nil), override.ReadOnlySubpaths...)
+	}
+	if stored.RequestedType == "" {
+		stored.RequestedType = "auto"
+	}
+	return stored
+}
+
+func EffectiveConfig(cfg configstore.SandboxConfig, workspaceDir string) configstore.SandboxConfig {
+	cfg = configstore.NormalizeSandboxConfig(cfg)
+	cfg.WritableRoots = configstore.DedupeStrings(append(cfg.WritableRoots, DefaultSkillRoots(workspaceDir)...))
+	return cfg
+}
+
+func WithPolicyRootMetadata(metadata map[string]any, cfg configstore.SandboxConfig, workspaceDir string) map[string]any {
+	out := cloneMap(metadata)
+	if out == nil {
+		out = map[string]any{}
+	}
+	effective := EffectiveConfig(cfg, workspaceDir)
+	if len(effective.ReadableRoots) > 0 {
+		out["policy_extra_read_roots"] = mergePolicyRootMetadata(out["policy_extra_read_roots"], effective.ReadableRoots)
+	}
+	if len(effective.WritableRoots) > 0 {
+		out["policy_extra_write_roots"] = mergePolicyRootMetadata(out["policy_extra_write_roots"], effective.WritableRoots)
+	}
+	return out
+}
+
+func DefaultSkillRoots(workspaceDir string) []string {
+	dirs := promptassembly.DefaultSkillDiscoveryDirs(workspaceDir)
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		resolved, err := promptassembly.ResolvePromptPath(dir)
+		if err != nil {
+			continue
+		}
+		out = append(out, resolved)
+	}
+	return configstore.DedupeStrings(out)
+}
+
+func mergePolicyRootMetadata(existing any, values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	appendOne := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	switch typed := existing.(type) {
+	case []string:
+		for _, one := range typed {
+			appendOne(one)
+		}
+	case []any:
+		for _, one := range typed {
+			text, _ := one.(string)
+			appendOne(text)
+		}
+	}
+	for _, one := range values {
+		appendOne(one)
+	}
+	return out
+}
+
+func cloneMap(values map[string]any) map[string]any {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(values))
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
+}

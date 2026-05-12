@@ -1,0 +1,477 @@
+package inmemory
+
+import (
+	"context"
+	"fmt"
+	"maps"
+	"sort"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/OnslaughtSnail/caelis/ports/session"
+)
+
+// Config defines one in-memory session store and service instance.
+type Config struct {
+	SessionIDGenerator func() string
+	EventIDGenerator   func() string
+	Clock              func() time.Time
+}
+
+// Store is the in-memory implementation of session.Store.
+type Store struct {
+	mu                 sync.RWMutex
+	sessionIDGenerator func() string
+	eventIDGenerator   func() string
+	clock              func() time.Time
+	idCounter          atomic.Uint64
+	sessions           map[string]*record
+}
+
+// Service is the in-memory implementation of session.Service.
+type Service struct {
+	store *Store
+}
+
+// NewStore constructs one new in-memory session store.
+func NewStore(cfg Config) *Store {
+	store := &Store{
+		sessionIDGenerator: cfg.SessionIDGenerator,
+		eventIDGenerator:   cfg.EventIDGenerator,
+		clock:              cfg.Clock,
+		sessions:           map[string]*record{},
+	}
+	if store.clock == nil {
+		store.clock = time.Now
+	}
+	return store
+}
+
+// NewService constructs one session service backed by one in-memory store.
+func NewService(store *Store) *Service {
+	if store == nil {
+		store = NewStore(Config{})
+	}
+	return &Service{store: store}
+}
+
+func (s *Store) GetOrCreate(
+	_ context.Context,
+	req session.StartSessionRequest,
+) (session.Session, error) {
+	ref := session.NormalizeSessionRef(session.SessionRef{
+		AppName:      req.AppName,
+		UserID:       req.UserID,
+		SessionID:    req.PreferredSessionID,
+		WorkspaceKey: req.Workspace.Key,
+	})
+	if ref.AppName == "" || ref.UserID == "" {
+		return session.Session{}, session.ErrInvalidSession
+	}
+	if ref.SessionID == "" {
+		ref.SessionID = s.nextID("session", s.sessionIDGenerator)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if existing, ok := s.sessions[ref.SessionID]; ok {
+		return existing.cloneSession(), nil
+	}
+
+	now := s.now()
+	createdSession := session.Session{
+		SessionRef:   ref,
+		CWD:          strings.TrimSpace(req.Workspace.CWD),
+		Title:        strings.TrimSpace(req.Title),
+		Metadata:     maps.Clone(req.Metadata),
+		Participants: nil,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+	s.sessions[ref.SessionID] = &record{
+		session: createdSession,
+		state:   map[string]any{},
+	}
+	return session.CloneSession(createdSession), nil
+}
+
+func (s *Store) Get(
+	_ context.Context,
+	ref session.SessionRef,
+) (session.Session, error) {
+	record, ok := s.lookup(ref)
+	if !ok {
+		return session.Session{}, session.ErrSessionNotFound
+	}
+	return record.cloneSession(), nil
+}
+
+func (s *Store) List(
+	_ context.Context,
+	req session.ListSessionsRequest,
+) (session.SessionList, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rows := make([]session.SessionSummary, 0, len(s.sessions))
+	for _, record := range s.sessions {
+		if req.AppName != "" && record.session.AppName != strings.TrimSpace(req.AppName) {
+			continue
+		}
+		if req.UserID != "" && record.session.UserID != strings.TrimSpace(req.UserID) {
+			continue
+		}
+		if req.WorkspaceKey != "" && record.session.WorkspaceKey != strings.TrimSpace(req.WorkspaceKey) {
+			continue
+		}
+		rows = append(rows, session.SessionSummary{
+			SessionRef: record.session.SessionRef,
+			CWD:        record.session.CWD,
+			Title:      record.session.Title,
+			UpdatedAt:  record.session.UpdatedAt,
+		})
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].UpdatedAt.After(rows[j].UpdatedAt)
+	})
+	if req.Limit > 0 && len(rows) > req.Limit {
+		rows = rows[:req.Limit]
+	}
+	return session.SessionList{
+		Sessions: session.CloneSessionSummaries(rows),
+	}, nil
+}
+
+func (s *Store) AppendEvent(
+	_ context.Context,
+	ref session.SessionRef,
+	event *session.Event,
+) (*session.Event, error) {
+	if event == nil {
+		return nil, session.ErrInvalidEvent
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return nil, session.ErrSessionNotFound
+	}
+
+	normalized := session.CanonicalizeEvent(event)
+	if normalized.ID == "" {
+		normalized.ID = s.nextID("event", s.eventIDGenerator)
+	}
+	normalized.SessionID = record.session.SessionID
+	if normalized.Time.IsZero() {
+		normalized.Time = s.now()
+	}
+	if normalized.Type == "" {
+		normalized.Type = session.EventTypeOf(normalized)
+	}
+	if normalized.Visibility == "" {
+		normalized.Visibility = session.VisibilityCanonical
+	}
+	record.events = append(record.events, normalized)
+	record.session.UpdatedAt = normalized.Time
+	if record.session.Title == "" && normalized.Text != "" {
+		record.session.Title = truncateTitle(normalized.Text)
+	}
+	return session.CloneEvent(normalized), nil
+}
+
+func (s *Store) Events(
+	_ context.Context,
+	req session.EventsRequest,
+) ([]*session.Event, error) {
+	record, ok := s.lookup(req.SessionRef)
+	if !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	return session.FilterEvents(record.events, req.Limit, req.IncludeTransient), nil
+}
+
+func (s *Store) BindController(
+	_ context.Context,
+	ref session.SessionRef,
+	binding session.ControllerBinding,
+) (session.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.Session{}, session.ErrSessionNotFound
+	}
+	record.session.Controller = session.CloneControllerBinding(binding)
+	record.session.UpdatedAt = s.now()
+	return record.cloneSession(), nil
+}
+
+func (s *Store) PutParticipant(
+	_ context.Context,
+	ref session.SessionRef,
+	binding session.ParticipantBinding,
+) (session.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.Session{}, session.ErrSessionNotFound
+	}
+	normalized := session.CloneParticipantBinding(binding)
+	for i := range record.session.Participants {
+		if record.session.Participants[i].ID == normalized.ID && normalized.ID != "" {
+			record.session.Participants[i] = normalized
+			record.session.UpdatedAt = s.now()
+			return record.cloneSession(), nil
+		}
+	}
+	record.session.Participants = append(record.session.Participants, normalized)
+	record.session.UpdatedAt = s.now()
+	return record.cloneSession(), nil
+}
+
+func (s *Store) RemoveParticipant(
+	_ context.Context,
+	ref session.SessionRef,
+	participantID string,
+) (session.Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.Session{}, session.ErrSessionNotFound
+	}
+	participantID = strings.TrimSpace(participantID)
+	if participantID == "" {
+		return record.cloneSession(), nil
+	}
+	filtered := record.session.Participants[:0]
+	for _, item := range record.session.Participants {
+		if strings.TrimSpace(item.ID) == participantID {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	record.session.Participants = append([]session.ParticipantBinding(nil), filtered...)
+	record.session.UpdatedAt = s.now()
+	return record.cloneSession(), nil
+}
+
+func (s *Store) SnapshotState(
+	_ context.Context,
+	ref session.SessionRef,
+) (map[string]any, error) {
+	record, ok := s.lookup(ref)
+	if !ok {
+		return nil, session.ErrSessionNotFound
+	}
+	return session.CloneState(record.state), nil
+}
+
+func (s *Store) ReplaceState(
+	_ context.Context,
+	ref session.SessionRef,
+	state map[string]any,
+) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	record.state = session.CloneState(state)
+	record.session.UpdatedAt = s.now()
+	return nil
+}
+
+func (s *Store) UpdateState(
+	_ context.Context,
+	ref session.SessionRef,
+	update func(map[string]any) (map[string]any, error),
+) error {
+	if update == nil {
+		return nil
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	record, ok := s.lookupLocked(ref)
+	if !ok {
+		return session.ErrSessionNotFound
+	}
+	next, err := update(session.CloneState(record.state))
+	if err != nil {
+		return err
+	}
+	record.state = session.CloneState(next)
+	record.session.UpdatedAt = s.now()
+	return nil
+}
+
+func (s *Service) StartSession(
+	ctx context.Context,
+	req session.StartSessionRequest,
+) (session.Session, error) {
+	return s.store.GetOrCreate(ctx, req)
+}
+
+func (s *Service) LoadSession(
+	ctx context.Context,
+	req session.LoadSessionRequest,
+) (session.LoadedSession, error) {
+	loadedSession, err := s.store.Get(ctx, req.SessionRef)
+	if err != nil {
+		return session.LoadedSession{}, err
+	}
+	events, err := s.store.Events(ctx, session.EventsRequest(req))
+	if err != nil {
+		return session.LoadedSession{}, err
+	}
+	state, err := s.store.SnapshotState(ctx, req.SessionRef)
+	if err != nil {
+		return session.LoadedSession{}, err
+	}
+	return session.LoadedSession{
+		Session: loadedSession,
+		Events:  events,
+		State:   state,
+	}, nil
+}
+
+func (s *Service) Session(
+	ctx context.Context,
+	ref session.SessionRef,
+) (session.Session, error) {
+	return s.store.Get(ctx, ref)
+}
+
+func (s *Service) AppendEvent(
+	ctx context.Context,
+	req session.AppendEventRequest,
+) (*session.Event, error) {
+	return s.store.AppendEvent(ctx, req.SessionRef, req.Event)
+}
+
+func (s *Service) Events(
+	ctx context.Context,
+	req session.EventsRequest,
+) ([]*session.Event, error) {
+	return s.store.Events(ctx, req)
+}
+
+func (s *Service) ListSessions(
+	ctx context.Context,
+	req session.ListSessionsRequest,
+) (session.SessionList, error) {
+	return s.store.List(ctx, req)
+}
+
+func (s *Service) BindController(
+	ctx context.Context,
+	req session.BindControllerRequest,
+) (session.Session, error) {
+	return s.store.BindController(ctx, req.SessionRef, req.Binding)
+}
+
+func (s *Service) PutParticipant(
+	ctx context.Context,
+	req session.PutParticipantRequest,
+) (session.Session, error) {
+	return s.store.PutParticipant(ctx, req.SessionRef, req.Binding)
+}
+
+func (s *Service) RemoveParticipant(
+	ctx context.Context,
+	req session.RemoveParticipantRequest,
+) (session.Session, error) {
+	return s.store.RemoveParticipant(ctx, req.SessionRef, req.ParticipantID)
+}
+
+func (s *Service) SnapshotState(
+	ctx context.Context,
+	ref session.SessionRef,
+) (map[string]any, error) {
+	return s.store.SnapshotState(ctx, ref)
+}
+
+func (s *Service) ReplaceState(
+	ctx context.Context,
+	ref session.SessionRef,
+	state map[string]any,
+) error {
+	return s.store.ReplaceState(ctx, ref, state)
+}
+
+func (s *Service) UpdateState(
+	ctx context.Context,
+	ref session.SessionRef,
+	update func(map[string]any) (map[string]any, error),
+) error {
+	return s.store.UpdateState(ctx, ref, update)
+}
+
+type record struct {
+	session session.Session
+	events  []*session.Event
+	state   map[string]any
+}
+
+func (r *record) cloneSession() session.Session {
+	return session.CloneSession(r.session)
+}
+
+func (s *Store) lookup(ref session.SessionRef) (*record, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lookupLocked(ref)
+}
+
+func (s *Store) lookupLocked(ref session.SessionRef) (*record, bool) {
+	normalized := session.NormalizeSessionRef(ref)
+	record, ok := s.sessions[normalized.SessionID]
+	if !ok {
+		return nil, false
+	}
+	if normalized.AppName != "" && record.session.AppName != normalized.AppName {
+		return nil, false
+	}
+	if normalized.UserID != "" && record.session.UserID != normalized.UserID {
+		return nil, false
+	}
+	if normalized.WorkspaceKey != "" && record.session.WorkspaceKey != normalized.WorkspaceKey {
+		return nil, false
+	}
+	return record, true
+}
+
+func (s *Store) nextID(prefix string, custom func() string) string {
+	if custom != nil {
+		if id := strings.TrimSpace(custom()); id != "" {
+			return id
+		}
+	}
+	n := s.idCounter.Add(1)
+	return fmt.Sprintf("%s-%d", prefix, n)
+}
+
+func (s *Store) now() time.Time {
+	return s.clock()
+}
+
+func truncateTitle(text string) string {
+	text = strings.TrimSpace(text)
+	if len(text) > 80 {
+		return text[:80]
+	}
+	return text
+}

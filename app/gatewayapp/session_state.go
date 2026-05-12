@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 // SetSessionMode persists one per-session execution mode override for
 // subsequent turns and returns the normalized display label.
-func (s *Stack) SetSessionMode(ctx context.Context, ref sdksession.SessionRef, mode string) (string, error) {
+func (s *Stack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode string) (string, error) {
 	if s == nil || s.Sessions == nil {
 		return "", fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
@@ -23,12 +23,12 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref sdksession.SessionRef, m
 		return "", err
 	}
 	err = s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
-		next := sdksession.CloneState(state)
+		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[appgateway.StateCurrentSessionMode] = normalized
-		delete(next, appgateway.StateCurrentSandboxMode)
+		next[kernel.StateCurrentSessionMode] = normalized
+		delete(next, kernel.StateCurrentSandboxMode)
 		return next, nil
 	})
 	if err != nil {
@@ -37,7 +37,7 @@ func (s *Stack) SetSessionMode(ctx context.Context, ref sdksession.SessionRef, m
 	return normalized, nil
 }
 
-func (s *Stack) CycleSessionMode(ctx context.Context, ref sdksession.SessionRef) (string, error) {
+func (s *Stack) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
 	state, err := s.SessionRuntimeState(ctx, ref)
 	if err != nil {
 		return "", err
@@ -48,7 +48,7 @@ func (s *Stack) CycleSessionMode(ctx context.Context, ref sdksession.SessionRef)
 
 // SessionRuntimeState returns the current per-session runtime overrides backed
 // by session state.
-func (s *Stack) SessionRuntimeState(ctx context.Context, ref sdksession.SessionRef) (SessionRuntimeState, error) {
+func (s *Stack) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 	if s == nil || s.Sessions == nil {
 		return SessionRuntimeState{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
@@ -56,7 +56,7 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref sdksession.SessionR
 	if err != nil {
 		return SessionRuntimeState{}, err
 	}
-	modelRef := appgateway.CurrentModelAlias(state)
+	modelRef := kernel.CurrentModelAlias(state)
 	modelID := ""
 	modelAlias := ""
 	if s.lookup != nil && modelRef != "" {
@@ -68,9 +68,9 @@ func (s *Stack) SessionRuntimeState(ctx context.Context, ref sdksession.SessionR
 	return SessionRuntimeState{
 		ModelID:         modelID,
 		ModelAlias:      modelAlias,
-		ReasoningEffort: appgateway.CurrentReasoningEffort(state),
-		SessionMode:     appgateway.CurrentSessionMode(state),
-		SandboxMode:     appgateway.CurrentSandboxMode(state),
+		ReasoningEffort: kernel.CurrentReasoningEffort(state),
+		SessionMode:     kernel.CurrentSessionMode(state),
+		SandboxMode:     kernel.CurrentSandboxMode(state),
 	}, nil
 }
 

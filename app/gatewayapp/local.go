@@ -2,12 +2,8 @@ package gatewayapp
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,26 +13,29 @@ import (
 	"sync"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
-	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
-	sdkdelegation "github.com/OnslaughtSnail/caelis/sdk/delegation"
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
-	sdkpolicy "github.com/OnslaughtSnail/caelis/sdk/policy/presets"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	localruntime "github.com/OnslaughtSnail/caelis/sdk/runtime/local"
-	sdksandbox "github.com/OnslaughtSnail/caelis/sdk/sandbox"
-	_ "github.com/OnslaughtSnail/caelis/sdk/sandbox/bwrap"
-	_ "github.com/OnslaughtSnail/caelis/sdk/sandbox/host"
-	_ "github.com/OnslaughtSnail/caelis/sdk/sandbox/landlock"
-	_ "github.com/OnslaughtSnail/caelis/sdk/sandbox/seatbelt"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	sessionfile "github.com/OnslaughtSnail/caelis/sdk/session/file"
-	sdktask "github.com/OnslaughtSnail/caelis/sdk/task"
-	taskfile "github.com/OnslaughtSnail/caelis/sdk/task/file"
-	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
-	spawntool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/spawn"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/agentregistry"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/sandboxpolicy"
+	"github.com/OnslaughtSnail/caelis/impl/agent/local"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
+	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/bwrap"
+	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/host"
+	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/landlock"
+	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/seatbelt"
+	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
+	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/compact"
+	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/task"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 var errAmbiguousModelAlias = errors.New("ambiguous model alias")
@@ -50,73 +49,21 @@ type Config struct {
 	PermissionMode string
 	ContextWindow  int
 	SystemPrompt   string
-	Assembly       sdkplugin.ResolvedAssembly
+	Assembly       assembly.ResolvedAssembly
 	Model          ModelConfig
 	Sandbox        SandboxConfig
 }
 
-type ModelConfig struct {
-	ID         string               `json:"id,omitempty"`
-	Alias      string               `json:"alias,omitempty"`
-	Provider   string               `json:"provider,omitempty"`
-	ProfileID  string               `json:"profile_id,omitempty"`
-	EndpointID string               `json:"endpoint_id,omitempty"`
-	API        sdkproviders.APIType `json:"api,omitempty"`
-	Model      string               `json:"model,omitempty"`
-	BaseURL    string               `json:"base_url,omitempty"`
-	// HTTPClient is an in-memory transport override for this process. It is
-	// intentionally never persisted.
-	HTTPClient *http.Client `json:"-"`
-	// Token is an in-memory secret used for the current process. It is not
-	// persisted unless PersistToken is explicitly enabled.
-	Token    string `json:"token,omitempty"`
-	TokenEnv string `json:"token_env,omitempty"`
-	// PersistToken explicitly opts into persisting Token in plaintext config.
-	// Prefer TokenEnv instead.
-	PersistToken           bool                  `json:"persist_token,omitempty"`
-	AuthType               sdkproviders.AuthType `json:"auth_type,omitempty"`
-	HeaderKey              string                `json:"header_key,omitempty"`
-	ContextWindowTokens    int                   `json:"context_window_tokens,omitempty"`
-	ReasoningEffort        string                `json:"reasoning_effort,omitempty"`
-	DefaultReasoningEffort string                `json:"default_reasoning_effort,omitempty"`
-	ReasoningLevels        []string              `json:"reasoning_levels,omitempty"`
-	ReasoningMode          string                `json:"reasoning_mode,omitempty"`
-	MaxOutputTok           int                   `json:"max_output_tokens,omitempty"`
-	Timeout                time.Duration         `json:"timeout,omitempty"`
-}
-
-type ModelProfileConfig struct {
-	ID           string                `json:"id,omitempty"`
-	Provider     string                `json:"provider,omitempty"`
-	EndpointID   string                `json:"endpoint_id,omitempty"`
-	API          sdkproviders.APIType  `json:"api,omitempty"`
-	BaseURL      string                `json:"base_url,omitempty"`
-	HTTPClient   *http.Client          `json:"-"`
-	Token        string                `json:"token,omitempty"`
-	TokenEnv     string                `json:"token_env,omitempty"`
-	PersistToken bool                  `json:"persist_token,omitempty"`
-	AuthType     sdkproviders.AuthType `json:"auth_type,omitempty"`
-	HeaderKey    string                `json:"header_key,omitempty"`
-	Timeout      time.Duration         `json:"timeout,omitempty"`
-}
-
-type ModelChoice struct {
-	ID         string
-	Alias      string
-	Provider   string
-	Model      string
-	ProfileID  string
-	EndpointID string
-	BaseURL    string
-	Detail     string
-}
+type ModelConfig = modelregistry.Config
+type ModelProfileConfig = modelregistry.ProfileConfig
+type ModelChoice = modelregistry.Choice
 
 type Stack struct {
-	Gateway       *appgateway.Gateway
-	Sessions      sdksession.Service
+	Gateway       *kernel.Gateway
+	Sessions      session.Service
 	AppName       string
 	UserID        string
-	Workspace     sdksession.WorkspaceRef
+	Workspace     session.WorkspaceRef
 	lookup        *modelLookup
 	store         *appConfigStore
 	storeDir      string
@@ -124,12 +71,12 @@ type Stack struct {
 	reconfigureMu sync.Mutex
 	runtime       stackRuntimeConfig
 	sandbox       SandboxConfig
-	exec          sdksandbox.Runtime
-	engine        *localruntime.Runtime
+	exec          sandbox.Runtime
+	engine        *local.Runtime
 	taskStore     *taskfile.Store
 }
 
-func (s *Stack) CurrentGateway() *appgateway.Gateway {
+func (s *Stack) CurrentGateway() *kernel.Gateway {
 	if s == nil {
 		return nil
 	}
@@ -147,11 +94,13 @@ type SessionRuntimeState struct {
 }
 
 type SandboxStatus struct {
-	RequestedBackend string
-	ResolvedBackend  string
-	Route            string
-	FallbackReason   string
-	SecuritySummary  string
+	RequestedBackend   string
+	ResolvedBackend    string
+	Route              string
+	FallbackReason     string
+	InstallHint        string
+	SecuritySummary    string
+	AutoReviewDisabled bool
 }
 
 type ACPAgentInfo struct {
@@ -165,10 +114,10 @@ type ACPAgentAddOption struct {
 	Detail  string
 }
 
-type ACPControllerStatus = sdkcontroller.ControllerStatus
-type ACPControllerCommand = sdkcontroller.ControllerCommand
-type ACPControllerConfigChoice = sdkcontroller.ControllerConfigChoice
-type ACPControllerMode = sdkcontroller.ControllerMode
+type ACPControllerStatus = controller.ControllerStatus
+type ACPControllerCommand = controller.ControllerCommand
+type ACPControllerConfigChoice = controller.ControllerConfigChoice
+type ACPControllerMode = controller.ControllerMode
 
 type RegisterBuiltinACPAgentOptions struct {
 	Install bool
@@ -215,15 +164,15 @@ func (e *ACPAgentInstallError) CommandString() string {
 }
 
 type StartSubagentOptions struct {
-	ApprovalRequester sdkruntime.ApprovalRequester
+	ApprovalRequester agent.ApprovalRequester
 }
 
 type stackRuntimeConfig struct {
 	PermissionMode              string
 	ContextWindow               int
 	Model                       ModelConfig
-	BaseAssembly                sdkplugin.ResolvedAssembly
-	Assembly                    sdkplugin.ResolvedAssembly
+	BaseAssembly                assembly.ResolvedAssembly
+	Assembly                    assembly.ResolvedAssembly
 	BaseMetadata                map[string]any
 	EstimatedPromptPrefixTokens int
 }
@@ -242,7 +191,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	baseAssembly := sdkplugin.CloneResolvedAssembly(cfg.Assembly)
+	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
 	cfg.Assembly = withConfiguredACPAgents(cfg.Assembly, doc.Agents, defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config:       cfg,
 		AppName:      appName,
@@ -280,7 +229,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 		Sessions: sessions,
 		AppName:  appName,
 		UserID:   userID,
-		Workspace: sdksession.WorkspaceRef{
+		Workspace: session.WorkspaceRef{
 			Key: workspaceKey,
 			CWD: workspaceCWD,
 		},
@@ -293,7 +242,7 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 			ContextWindow:  cfg.ContextWindow,
 			Model:          cfg.Model,
 			BaseAssembly:   baseAssembly,
-			Assembly:       sdkplugin.CloneResolvedAssembly(cfg.Assembly),
+			Assembly:       assembly.CloneResolvedAssembly(cfg.Assembly),
 			BaseMetadata:   cloneMap(baseMetadata),
 		},
 		sandbox: sandboxCfg,
@@ -304,10 +253,10 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	return stack, nil
 }
 
-func delegationAgentsFromAssembly(assembly sdkplugin.ResolvedAssembly) []sdkdelegation.Agent {
-	out := make([]sdkdelegation.Agent, 0, len(assembly.Agents))
+func delegationAgentsFromAssembly(assembly assembly.ResolvedAssembly) []delegation.Agent {
+	out := make([]delegation.Agent, 0, len(assembly.Agents))
 	for _, one := range assembly.Agents {
-		agent := sdkdelegation.NormalizeAgent(sdkdelegation.Agent{
+		agent := delegation.NormalizeAgent(delegation.Agent{
 			Name:        one.Name,
 			Description: one.Description,
 		})
@@ -319,7 +268,7 @@ func delegationAgentsFromAssembly(assembly sdkplugin.ResolvedAssembly) []sdkdele
 	return out
 }
 
-func delegationAgentsForSpawn(assembly sdkplugin.ResolvedAssembly, _ []sdksession.ParticipantBinding) []sdkdelegation.Agent {
+func delegationAgentsForSpawn(assembly assembly.ResolvedAssembly, _ []session.ParticipantBinding) []delegation.Agent {
 	if len(assembly.Agents) == 0 {
 		return nil
 	}
@@ -338,56 +287,16 @@ func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	return systemPrompt + "\n" + guidance
 }
 
-func withConfiguredACPAgents(assembly sdkplugin.ResolvedAssembly, configured []AgentConfig, self sdkplugin.AgentConfig) sdkplugin.ResolvedAssembly {
-	out := sdkplugin.CloneResolvedAssembly(assembly)
-	seen := map[string]struct{}{}
-	for _, agent := range out.Agents {
-		name := strings.ToLower(strings.TrimSpace(agent.Name))
-		if name != "" {
-			seen[name] = struct{}{}
-		}
-	}
-	if name := strings.ToLower(strings.TrimSpace(self.Name)); name != "" {
-		if _, exists := seen[name]; !exists {
-			out.Agents = append(out.Agents, self)
-			seen[name] = struct{}{}
-		}
-	}
-	for _, agent := range configured {
-		cfg := agentConfigToPlugin(agent)
-		name := strings.ToLower(strings.TrimSpace(cfg.Name))
-		if name != "" {
-			if _, exists := seen[name]; !exists {
-				out.Agents = append(out.Agents, cfg)
-				seen[name] = struct{}{}
-			}
-		}
-	}
-	return out
+func withConfiguredACPAgents(assembly assembly.ResolvedAssembly, configured []AgentConfig, self assembly.AgentConfig) assembly.ResolvedAssembly {
+	return agentregistry.WithConfiguredAgents(assembly, configured, self)
 }
 
-func agentConfigToPlugin(in AgentConfig) sdkplugin.AgentConfig {
-	in = normalizeAgentConfig(in)
-	return sdkplugin.AgentConfig{
-		Name:        in.Name,
-		Description: in.Description,
-		Command:     in.Command,
-		Args:        append([]string(nil), in.Args...),
-		Env:         cloneStringMap(in.Env),
-		WorkDir:     in.WorkDir,
-	}
+func agentConfigToPlugin(in AgentConfig) assembly.AgentConfig {
+	return agentregistry.AgentConfigToPlugin(in)
 }
 
-func pluginAgentToConfig(in sdkplugin.AgentConfig, builtin bool) AgentConfig {
-	return normalizeAgentConfig(AgentConfig{
-		Name:        in.Name,
-		Description: in.Description,
-		Command:     in.Command,
-		Args:        append([]string(nil), in.Args...),
-		Env:         cloneStringMap(in.Env),
-		WorkDir:     in.WorkDir,
-		Builtin:     builtin,
-	})
+func pluginAgentToConfig(in assembly.AgentConfig, builtin bool) AgentConfig {
+	return agentregistry.PluginAgentToConfig(in, builtin)
 }
 
 type defaultSelfACPAgentConfig struct {
@@ -399,123 +308,46 @@ type defaultSelfACPAgentConfig struct {
 	WorkspaceCWD string
 }
 
-func defaultSelfACPAgent(cfg defaultSelfACPAgentConfig) sdkplugin.AgentConfig {
-	if cmd := strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_CMD")); cmd != "" {
-		name := strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_NAME"))
-		if name == "" {
-			name = "self"
-		}
-		return sdkplugin.AgentConfig{
-			Name:        name,
-			Description: firstNonEmpty(strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_DESC")), "Caelis self ACP agent"),
-			Command:     "bash",
-			Args:        []string{"-lc", cmd},
-			WorkDir:     strings.TrimSpace(os.Getenv("CAELIS_ACP_SELF_AGENT_WORKDIR")),
-		}
-	}
-	executable, err := os.Executable()
-	if err != nil || strings.TrimSpace(executable) == "" {
-		executable = os.Args[0]
-	}
-	args, env := selfRuntimeInvocation(cfg.Config)
-	return sdkplugin.AgentConfig{
-		Name:        "self",
-		Description: "Caelis self ACP agent",
-		Command:     executable,
-		Args: append([]string{
-			"acp",
-			"-app", strings.TrimSpace(cfg.AppName),
-			"-user", strings.TrimSpace(cfg.UserID),
-			"-store-dir", strings.TrimSpace(cfg.StoreDir),
-			"-workspace-key", strings.TrimSpace(cfg.WorkspaceKey),
-			"-workspace-cwd", strings.TrimSpace(cfg.WorkspaceCWD),
-			"-permission-mode", strings.TrimSpace(cfg.Config.PermissionMode),
-		}, args...),
-		Env: env,
-	}
+func defaultSelfACPAgent(cfg defaultSelfACPAgentConfig) assembly.AgentConfig {
+	return agentregistry.DefaultSelfAgent(agentregistry.DefaultSelfConfig{
+		Config:       agentRuntimeConfig(cfg.Config),
+		AppName:      cfg.AppName,
+		UserID:       cfg.UserID,
+		StoreDir:     cfg.StoreDir,
+		WorkspaceKey: cfg.WorkspaceKey,
+		WorkspaceCWD: cfg.WorkspaceCWD,
+	})
 }
 
 func selfRuntimeArgs(cfg Config) []string {
-	args, _ := selfRuntimeInvocation(cfg)
-	return args
+	return agentregistry.SelfRuntimeArgs(agentRuntimeConfig(cfg))
 }
 
 func selfRuntimeInvocation(cfg Config) ([]string, map[string]string) {
-	args := []string{}
-	env := map[string]string{}
-	appendFlag := func(name string, value string) {
-		if strings.TrimSpace(value) != "" {
-			args = append(args, name, strings.TrimSpace(value))
-		}
-	}
-	model := cfg.Model
-	appendFlag("-model-alias", model.Alias)
-	appendFlag("-provider", model.Provider)
-	appendFlag("-api", string(model.API))
-	appendFlag("-model", model.Model)
-	appendFlag("-base-url", model.BaseURL)
-	if strings.TrimSpace(model.Token) != "" {
-		env["CAELIS_SELF_MODEL_TOKEN"] = model.Token
-		appendFlag("-token-env", "CAELIS_SELF_MODEL_TOKEN")
-	} else {
-		appendFlag("-token-env", model.TokenEnv)
-	}
-	appendFlag("-auth-type", string(model.AuthType))
-	appendFlag("-header-key", model.HeaderKey)
-	if cfg.ContextWindow > 0 {
-		args = append(args, "-context-window", fmt.Sprintf("%d", cfg.ContextWindow))
-	}
-	if model.MaxOutputTok > 0 {
-		args = append(args, "-max-output-tokens", fmt.Sprintf("%d", model.MaxOutputTok))
-	}
-	if len(env) == 0 {
-		env = nil
-	}
-	return args, env
+	return agentregistry.SelfRuntimeInvocation(agentRuntimeConfig(cfg))
 }
 
-func builtInACPAgents() []sdkplugin.AgentConfig {
-	return []sdkplugin.AgentConfig{
-		npxACPAgentConfig("codex", "OpenAI Codex ACP agent", "@zed-industries/codex-acp"),
-		npxACPAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp"),
-		{
-			Name:        "copilot",
-			Description: "GitHub Copilot ACP agent",
-			Command:     "copilot",
-			Args:        []string{"--acp", "--stdio"},
-		},
-		{
-			Name:        "gemini",
-			Description: "Gemini ACP agent",
-			Command:     "gemini",
-			Args:        []string{"--acp"},
-		},
+func agentRuntimeConfig(cfg Config) agentregistry.RuntimeConfig {
+	return agentregistry.RuntimeConfig{
+		AppName:        cfg.AppName,
+		UserID:         cfg.UserID,
+		StoreDir:       cfg.StoreDir,
+		WorkspaceKey:   cfg.WorkspaceKey,
+		WorkspaceCWD:   cfg.WorkspaceCWD,
+		PermissionMode: cfg.PermissionMode,
+		ContextWindow:  cfg.ContextWindow,
+		Model:          cfg.Model,
 	}
 }
 
-type builtinACPAdapterPackage struct {
-	Package string
-	Bin     string
+func builtInACPAgents() []assembly.AgentConfig {
+	return agentregistry.BuiltInAgents()
 }
 
-func npxACPAgentConfig(name string, description string, pkg string) sdkplugin.AgentConfig {
-	return sdkplugin.AgentConfig{
-		Name:        strings.TrimSpace(name),
-		Description: strings.TrimSpace(description),
-		Command:     "npx",
-		Args:        []string{"-y", strings.TrimSpace(pkg)},
-	}
-}
+type builtinACPAdapterPackage = agentregistry.BuiltinAdapterPackage
 
 func builtinACPAdapterPackageFor(name string) (builtinACPAdapterPackage, bool) {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "codex":
-		return builtinACPAdapterPackage{Package: "@zed-industries/codex-acp", Bin: "codex-acp"}, true
-	case "claude":
-		return builtinACPAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Bin: "claude-agent-acp"}, true
-	default:
-		return builtinACPAdapterPackage{}, false
-	}
+	return agentregistry.BuiltinAdapterPackageFor(name)
 }
 
 func (s *Stack) RegisterBuiltinACPAgent(name string) error {
@@ -611,7 +443,7 @@ func (s *Stack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, name str
 	return s.setConfiguredAgents(doc.Agents)
 }
 
-func (s *Stack) lookupRegisterableACPAgent(name string) (sdkplugin.AgentConfig, bool) {
+func (s *Stack) lookupRegisterableACPAgent(name string) (assembly.AgentConfig, bool) {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if preset, ok := lookupBuiltInACPAgent(name); ok {
 		return preset, true
@@ -619,38 +451,38 @@ func (s *Stack) lookupRegisterableACPAgent(name string) (sdkplugin.AgentConfig, 
 	return s.lookupRuntimeACPAgent(name)
 }
 
-func (s *Stack) lookupRuntimeACPAgent(name string) (sdkplugin.AgentConfig, bool) {
+func (s *Stack) lookupRuntimeACPAgent(name string) (assembly.AgentConfig, bool) {
 	if s == nil {
-		return sdkplugin.AgentConfig{}, false
+		return assembly.AgentConfig{}, false
 	}
 	name = strings.ToLower(strings.TrimSpace(name))
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, agent := range s.runtime.Assembly.Agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Name), name) {
-			return sdkplugin.CloneAgentConfig(agent), true
+			return assembly.CloneAgentConfig(agent), true
 		}
 	}
-	return sdkplugin.AgentConfig{}, false
+	return assembly.AgentConfig{}, false
 }
 
-func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base sdkplugin.AgentConfig) (sdkplugin.AgentConfig, error) {
+func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base assembly.AgentConfig) (assembly.AgentConfig, error) {
 	pkg, ok := builtinACPAdapterPackageFor(name)
 	if !ok {
-		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: ACP agent %q does not support local npm install", strings.TrimSpace(name))
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: ACP agent %q does not support local npm install", strings.TrimSpace(name))
 	}
 	root := s.managedACPAgentRoot()
 	installCommand := []string{"npm", "install", "--prefix", root, pkg.Package + "@latest"}
 	npm, err := exec.LookPath("npm")
 	if err != nil || strings.TrimSpace(npm) == "" {
-		return sdkplugin.AgentConfig{}, &ACPAgentInstallError{
+		return assembly.AgentConfig{}, &ACPAgentInstallError{
 			Agent:   strings.TrimSpace(name),
 			Command: installCommand,
 			Err:     fmt.Errorf("npm is required"),
 		}
 	}
 	if err := os.MkdirAll(root, 0o700); err != nil {
-		return sdkplugin.AgentConfig{}, err
+		return assembly.AgentConfig{}, err
 	}
 	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, pkg.Package+"@latest")
 	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
@@ -659,7 +491,7 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base sd
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			err = ctxErr
 		}
-		return sdkplugin.AgentConfig{}, &ACPAgentInstallError{
+		return assembly.AgentConfig{}, &ACPAgentInstallError{
 			Agent:   strings.TrimSpace(name),
 			Command: installCommand,
 			Output:  strings.TrimSpace(string(output)),
@@ -671,7 +503,7 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base sd
 		if err == nil {
 			err = fmt.Errorf("installed path is a directory")
 		}
-		return sdkplugin.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q did not produce %s: %w", strings.TrimSpace(name), bin, err)
+		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: install ACP agent %q did not produce %s: %w", strings.TrimSpace(name), bin, err)
 	}
 	base.Command = bin
 	base.Args = nil
@@ -718,7 +550,7 @@ func (s *Stack) UnregisterACPAgent(name string) error {
 	}
 	s.mu.Lock()
 	runtimeCfg := s.runtime
-	baseAgents := make([]sdkplugin.AgentConfig, 0, len(runtimeCfg.BaseAssembly.Agents))
+	baseAgents := make([]assembly.AgentConfig, 0, len(runtimeCfg.BaseAssembly.Agents))
 	for _, agent := range runtimeCfg.BaseAssembly.Agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Name), name) {
 			removed = true
@@ -743,12 +575,12 @@ func (s *Stack) setConfiguredAgents(configured []AgentConfig) error {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
-	base := sdkplugin.CloneResolvedAssembly(s.runtime.BaseAssembly)
+	base := assembly.CloneResolvedAssembly(s.runtime.BaseAssembly)
 	s.mu.RUnlock()
 	return s.setConfiguredAgentsWithBase(base, configured)
 }
 
-func (s *Stack) setConfiguredAgentsWithBase(base sdkplugin.ResolvedAssembly, configured []AgentConfig) error {
+func (s *Stack) setConfiguredAgentsWithBase(base assembly.ResolvedAssembly, configured []AgentConfig) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -756,7 +588,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base sdkplugin.ResolvedAssembly, con
 	runtimeCfg := s.runtime
 	engine := s.engine
 	s.mu.RUnlock()
-	runtimeCfg.BaseAssembly = sdkplugin.CloneResolvedAssembly(base)
+	runtimeCfg.BaseAssembly = assembly.CloneResolvedAssembly(base)
 	runtimeCfg.Assembly = s.configuredAssembly(runtimeCfg.BaseAssembly, configured, runtimeCfg)
 	if engine == nil {
 		return fmt.Errorf("gatewayapp: runtime is unavailable")
@@ -773,7 +605,7 @@ func (s *Stack) setConfiguredAgentsWithBase(base sdkplugin.ResolvedAssembly, con
 	return nil
 }
 
-func (s *Stack) configuredAssembly(base sdkplugin.ResolvedAssembly, configured []AgentConfig, runtimeCfg stackRuntimeConfig) sdkplugin.ResolvedAssembly {
+func (s *Stack) configuredAssembly(base assembly.ResolvedAssembly, configured []AgentConfig, runtimeCfg stackRuntimeConfig) assembly.ResolvedAssembly {
 	return withConfiguredACPAgents(base, configured, defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config: Config{
 			AppName:        s.AppName,
@@ -857,34 +689,12 @@ func (s *Stack) builtinACPAgentInstallCommand(pkg builtinACPAdapterPackage) stri
 	return strings.Join([]string{"npm", "install", "--prefix", s.managedACPAgentRoot(), pkg.Package + "@latest"}, " ")
 }
 
-func lookupBuiltInACPAgent(name string) (sdkplugin.AgentConfig, bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	for _, agent := range builtInACPAgents() {
-		if strings.EqualFold(strings.TrimSpace(agent.Name), name) {
-			return agent, true
-		}
-	}
-	return sdkplugin.AgentConfig{}, false
+func lookupBuiltInACPAgent(name string) (assembly.AgentConfig, bool) {
+	return agentregistry.LookupBuiltInAgent(name)
 }
 
 func reservedSlashCommandName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "help", "agent", "connect", "model", "sandbox", "status", "new", "resume", "compact", "exit", "quit":
-		return true
-	default:
-		return false
-	}
-}
-
-func cloneStringMap(in map[string]string) map[string]string {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(in))
-	for key, value := range in {
-		out[key] = value
-	}
-	return out
+	return agentregistry.ReservedSlashCommandName(name)
 }
 
 func defaultStoreDir() string {
@@ -896,57 +706,57 @@ func defaultStoreDir() string {
 	return filepath.Join(cwd, ".caelis")
 }
 
-func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (sdksession.Session, error) {
+func (s *Stack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (session.Session, error) {
 	if s == nil {
-		return sdksession.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
+		return session.Session{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	gw := s.CurrentGateway()
 	if gw == nil {
-		return sdksession.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
+		return session.Session{}, fmt.Errorf("gatewayapp: gateway is unavailable")
 	}
-	return gw.StartSession(ctx, appgateway.StartSessionRequest{
+	return gw.StartSession(ctx, kernel.StartSessionRequest{
 		AppName:            s.AppName,
 		UserID:             s.UserID,
 		Workspace:          s.Workspace,
 		PreferredSessionID: strings.TrimSpace(preferredSessionID),
 		BindingKey:         strings.TrimSpace(bindingKey),
-		Binding: appgateway.BindingDescriptor{
+		Binding: kernel.BindingDescriptor{
 			Surface: strings.TrimSpace(bindingKey),
 			Owner:   s.AppName,
 		},
 	})
 }
 
-func (s *Stack) ACPControllerStatus(ctx context.Context, ref sdksession.SessionRef) (sdkcontroller.ControllerStatus, bool, error) {
+func (s *Stack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
 	if s == nil || s.engine == nil {
-		return sdkcontroller.ControllerStatus{}, false, nil
+		return controller.ControllerStatus{}, false, nil
 	}
-	return s.engine.ACPControllerStatus(ctx, sdksession.NormalizeSessionRef(ref))
+	return s.engine.ACPControllerStatus(ctx, session.NormalizeSessionRef(ref))
 }
 
-func (s *Stack) SetACPControllerModel(ctx context.Context, ref sdksession.SessionRef, model string, reasoningEffort string) (sdkcontroller.ControllerStatus, error) {
+func (s *Stack) SetACPControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoningEffort string) (controller.ControllerStatus, error) {
 	if s == nil || s.engine == nil {
-		return sdkcontroller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
+		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
 	}
 	if err := s.rejectReconfigureWhileActive("switch ACP model"); err != nil {
-		return sdkcontroller.ControllerStatus{}, err
+		return controller.ControllerStatus{}, err
 	}
-	return s.engine.SetACPControllerModel(ctx, sdkcontroller.SetControllerModelRequest{
-		SessionRef:      sdksession.NormalizeSessionRef(ref),
+	return s.engine.SetACPControllerModel(ctx, controller.SetControllerModelRequest{
+		SessionRef:      session.NormalizeSessionRef(ref),
 		Model:           strings.TrimSpace(model),
 		ReasoningEffort: strings.TrimSpace(reasoningEffort),
 	})
 }
 
-func (s *Stack) SetACPControllerMode(ctx context.Context, ref sdksession.SessionRef, mode string) (sdkcontroller.ControllerStatus, error) {
+func (s *Stack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
 	if s == nil || s.engine == nil {
-		return sdkcontroller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
+		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
 	}
 	if err := s.rejectReconfigureWhileActive("switch ACP mode"); err != nil {
-		return sdkcontroller.ControllerStatus{}, err
+		return controller.ControllerStatus{}, err
 	}
-	return s.engine.SetACPControllerMode(ctx, sdkcontroller.SetControllerModeRequest{
-		SessionRef: sdksession.NormalizeSessionRef(ref),
+	return s.engine.SetACPControllerMode(ctx, controller.SetControllerModeRequest{
+		SessionRef: session.NormalizeSessionRef(ref),
 		Mode:       strings.TrimSpace(mode),
 	})
 }
@@ -1003,7 +813,7 @@ func (s *Stack) Connect(cfg ModelConfig) (string, error) {
 }
 
 // UseModel persists one per-session model alias override for subsequent turns.
-func (s *Stack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias string, reasoningEffort ...string) error {
+func (s *Stack) UseModel(ctx context.Context, ref session.SessionRef, alias string, reasoningEffort ...string) error {
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
@@ -1065,15 +875,15 @@ func (s *Stack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias s
 		}
 	}
 	return s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
-		next := sdksession.CloneState(state)
+		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
-		next[appgateway.StateCurrentModelAlias] = cfg.ID
+		next[kernel.StateCurrentModelAlias] = cfg.ID
 		if reasoning != "" {
-			next[appgateway.StateCurrentReasoningEffort] = reasoning
+			next[kernel.StateCurrentReasoningEffort] = reasoning
 		} else {
-			delete(next, appgateway.StateCurrentReasoningEffort)
+			delete(next, kernel.StateCurrentReasoningEffort)
 		}
 		return next, nil
 	})
@@ -1081,7 +891,7 @@ func (s *Stack) UseModel(ctx context.Context, ref sdksession.SessionRef, alias s
 
 // DeleteModel clears one per-session model alias override when it matches the
 // supplied alias. This reverts the session back to the resolver default.
-func (s *Stack) DeleteModel(ctx context.Context, ref sdksession.SessionRef, alias string) error {
+func (s *Stack) DeleteModel(ctx context.Context, ref session.SessionRef, alias string) error {
 	if s == nil || s.Sessions == nil {
 		return fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
@@ -1125,14 +935,14 @@ func (s *Stack) DeleteModel(ctx context.Context, ref sdksession.SessionRef, alia
 		return err
 	}
 	return s.Sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
-		next := sdksession.CloneState(state)
+		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
-		current, _ := next[appgateway.StateCurrentModelAlias].(string)
+		current, _ := next[kernel.StateCurrentModelAlias].(string)
 		if alias == "" || strings.EqualFold(strings.TrimSpace(current), cfg.ID) || strings.EqualFold(strings.TrimSpace(current), cfg.Alias) || !hasDefault {
-			delete(next, appgateway.StateCurrentModelAlias)
-			delete(next, appgateway.StateCurrentReasoningEffort)
+			delete(next, kernel.StateCurrentModelAlias)
+			delete(next, kernel.StateCurrentReasoningEffort)
 		}
 		return next, nil
 	})
@@ -1184,7 +994,7 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 	s.mu.RUnlock()
 	status := SandboxStatus{
 		RequestedBackend: cfg.RequestedType,
-		Route:            string(sdksandbox.RouteSandbox),
+		Route:            string(sandbox.RouteSandbox),
 		SecuritySummary:  "sandbox",
 	}
 	if status.RequestedBackend == "" {
@@ -1202,11 +1012,13 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 		status.ResolvedBackend = string(rtStatus.ResolvedBackend)
 	}
 	status.FallbackReason = strings.TrimSpace(rtStatus.FallbackReason)
+	status.InstallHint = strings.TrimSpace(rtStatus.FallbackInstallHint)
 	if rtStatus.FallbackToHost {
-		status.Route = string(sdksandbox.RouteHost)
+		status.Route = string(sandbox.RouteHost)
 		status.SecuritySummary = "host fallback"
+		status.AutoReviewDisabled = true
 		if status.ResolvedBackend == "" {
-			status.ResolvedBackend = string(sdksandbox.BackendHost)
+			status.ResolvedBackend = string(sandbox.BackendHost)
 		}
 	} else if status.ResolvedBackend != "" {
 		status.SecuritySummary = status.ResolvedBackend
@@ -1219,7 +1031,7 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 
 // ListModelAliases returns the current session override plus resolver-known
 // model aliases for picker surfaces such as the TUI `/model` command.
-func (s *Stack) ListModelAliases(ctx context.Context, ref sdksession.SessionRef) ([]string, error) {
+func (s *Stack) ListModelAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
 	choices, err := s.ListModelChoices(ctx, ref)
 	if err != nil {
 		return nil, err
@@ -1231,7 +1043,7 @@ func (s *Stack) ListModelAliases(ctx context.Context, ref sdksession.SessionRef)
 	return dedupeNonEmptyStrings(aliases), nil
 }
 
-func (s *Stack) ListModelChoices(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {
+func (s *Stack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 	if s == nil || s.Sessions == nil {
 		return nil, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
@@ -1244,7 +1056,7 @@ func (s *Stack) ListModelChoices(ctx context.Context, ref sdksession.SessionRef)
 		if err != nil {
 			return nil, err
 		}
-		if modelRef := appgateway.CurrentModelAlias(state); modelRef != "" {
+		if modelRef := kernel.CurrentModelAlias(state); modelRef != "" {
 			if cfg, ok := s.lookup.Config(modelRef); ok {
 				choices = append(choices, modelChoiceFromConfig(cfg))
 			}
@@ -1295,7 +1107,7 @@ func (s *Stack) ListACPAgents() []ACPAgentInfo {
 		return nil
 	}
 	s.mu.RLock()
-	agents := append([]sdkplugin.AgentConfig(nil), s.runtime.Assembly.Agents...)
+	agents := append([]assembly.AgentConfig(nil), s.runtime.Assembly.Agents...)
 	s.mu.RUnlock()
 	if len(agents) == 0 {
 		return nil
@@ -1322,94 +1134,94 @@ func (s *Stack) ListACPAgents() []ACPAgentInfo {
 
 func (s *Stack) StartSubagent(
 	ctx context.Context,
-	ref sdksession.SessionRef,
+	ref session.SessionRef,
 	agent string,
 	prompt string,
 	source string,
-) (sdktask.Snapshot, error) {
+) (task.Snapshot, error) {
 	return s.StartSubagentWithOptions(ctx, ref, agent, prompt, source, StartSubagentOptions{})
 }
 
 func (s *Stack) StartSubagentWithOptions(
 	ctx context.Context,
-	ref sdksession.SessionRef,
+	ref session.SessionRef,
 	agent string,
 	prompt string,
 	source string,
 	opts StartSubagentOptions,
-) (sdktask.Snapshot, error) {
+) (task.Snapshot, error) {
 	if s == nil {
-		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
 	engine := s.engine
 	s.mu.RUnlock()
 	if engine == nil {
-		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
-	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, localruntime.StartSubagentOptions{
+	return engine.StartSubagentWithOptions(ctx, ref, agent, prompt, source, local.StartSubagentOptions{
 		ApprovalRequester: opts.ApprovalRequester,
 	})
 }
 
 func (s *Stack) ContinueSubagentByHandle(
 	ctx context.Context,
-	ref sdksession.SessionRef,
+	ref session.SessionRef,
 	handle string,
 	prompt string,
 	yield time.Duration,
-) (sdktask.Snapshot, error) {
+) (task.Snapshot, error) {
 	if s == nil {
-		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
 	engine := s.engine
 	s.mu.RUnlock()
 	if engine == nil {
-		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
 	return engine.ContinueSubagentByHandle(ctx, ref, handle, prompt, yield)
 }
 
 func (s *Stack) WaitSubagentTask(
 	ctx context.Context,
-	ref sdksession.SessionRef,
+	ref session.SessionRef,
 	taskID string,
 	yield time.Duration,
-) (sdktask.Snapshot, error) {
+) (task.Snapshot, error) {
 	if s == nil {
-		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
 	engine := s.engine
 	s.mu.RUnlock()
 	if engine == nil {
-		return sdktask.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
+		return task.Snapshot{}, fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
 	return engine.WaitSubagentTask(ctx, ref, taskID, yield)
 }
 
 // CompactSession forces a model-backed checkpoint compaction for the given
 // session.
-func (s *Stack) CompactSession(ctx context.Context, ref sdksession.SessionRef) error {
+func (s *Stack) CompactSession(ctx context.Context, ref session.SessionRef) error {
 	if s == nil {
 		return fmt.Errorf("gatewayapp: stack is unavailable")
 	}
 	s.mu.RLock()
 	engine := s.engine
-	gateway := s.Gateway
+	gw := s.Gateway
 	s.mu.RUnlock()
 	if engine == nil {
 		return fmt.Errorf("gatewayapp: runtime is unavailable")
 	}
-	if gateway == nil || gateway.Resolver() == nil {
+	if gw == nil || gw.Resolver() == nil {
 		return fmt.Errorf("gatewayapp: resolver is unavailable")
 	}
-	resolved, err := gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: ref})
+	resolved, err := gw.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: ref})
 	if err != nil {
 		return err
 	}
-	_, err = engine.Compact(ctx, localruntime.CompactRequest{
+	_, err = engine.Compact(ctx, local.CompactRequest{
 		SessionRef: ref,
 		Model:      resolved.RunRequest.AgentSpec.Model,
 		Trigger:    "manual",
@@ -1417,8 +1229,8 @@ func (s *Stack) CompactSession(ctx context.Context, ref sdksession.SessionRef) e
 	return err
 }
 
-func defaultCompactionConfig(contextWindow int) localruntime.CompactionConfig {
-	return localruntime.CompactionConfig{
+func defaultCompactionConfig(contextWindow int) local.CompactionConfig {
+	return local.CompactionConfig{
 		Enabled:                    true,
 		DefaultContextWindowTokens: contextWindow,
 	}
@@ -1570,24 +1382,24 @@ func (l *modelLookup) ListProviderModels(provider string) []string {
 	return dedupeNonEmptyStrings(models)
 }
 
-func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWindow int) (appgateway.ModelResolution, error) {
+func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWindow int) (kernel.ModelResolution, error) {
 	if l == nil {
-		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: model lookup is nil")
+		return kernel.ModelResolution{}, fmt.Errorf("gatewayapp: model lookup is nil")
 	}
 	l.mu.RLock()
 	ref := firstNonEmpty(strings.TrimSpace(alias), l.defaultID)
 	if ref == "" || len(l.configs) == 0 {
 		l.mu.RUnlock()
-		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: no model configured; use /connect")
+		return kernel.ModelResolution{}, fmt.Errorf("gatewayapp: no model configured; use /connect")
 	}
 	cfg, ok, resolveErr := l.resolveConfigLocked(ref)
 	fallbackContextWindow := l.contextWindow
 	l.mu.RUnlock()
 	if resolveErr != nil {
-		return appgateway.ModelResolution{}, resolveErr
+		return kernel.ModelResolution{}, resolveErr
 	}
 	if !ok {
-		return appgateway.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
+		return kernel.ModelResolution{}, fmt.Errorf("gatewayapp: unknown model alias %q", alias)
 	}
 	effectiveContextWindow := fallbackContextWindow
 	if cfg.ContextWindowTokens > 0 {
@@ -1596,8 +1408,8 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 	if contextWindow > 0 {
 		effectiveContextWindow = contextWindow
 	}
-	factory := sdkproviders.NewFactory()
-	record := sdkproviders.Config{
+	factory := providers.NewFactory()
+	record := providers.Config{
 		Alias:                     cfg.ID,
 		Provider:                  cfg.Provider,
 		API:                       cfg.API,
@@ -1612,7 +1424,7 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 		DefaultReasoningEffort:    cfg.DefaultReasoningEffort,
 		ReasoningEffort:           cfg.ReasoningEffort,
 		SupportedReasoningEfforts: append([]string(nil), cfg.ReasoningLevels...),
-		Auth: sdkproviders.AuthConfig{
+		Auth: providers.AuthConfig{
 			Type:      cfg.AuthType,
 			Token:     cfg.Token,
 			TokenEnv:  cfg.TokenEnv,
@@ -1620,13 +1432,13 @@ func (l *modelLookup) ResolveModel(ctx context.Context, alias string, contextWin
 		},
 	}
 	if err := factory.Register(record); err != nil {
-		return appgateway.ModelResolution{}, err
+		return kernel.ModelResolution{}, err
 	}
 	llm, err := factory.NewByAlias(cfg.ID)
 	if err != nil {
-		return appgateway.ModelResolution{}, err
+		return kernel.ModelResolution{}, err
 	}
-	return appgateway.ModelResolution{
+	return kernel.ModelResolution{
 		Model:                  llm,
 		ReasoningEffort:        cfg.ReasoningEffort,
 		DefaultReasoningEffort: cfg.DefaultReasoningEffort,
@@ -1753,16 +1565,16 @@ func (l *modelLookup) SetDefault(alias string) {
 	}
 }
 
-func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref sdksession.SessionRef, modelAlias string) (sdkcompact.UsageSnapshot, error) {
+func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
 	if s == nil || s.Sessions == nil {
-		return sdkcompact.UsageSnapshot{}, fmt.Errorf("gatewayapp: sessions service unavailable")
+		return compact.UsageSnapshot{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
 	if strings.TrimSpace(ref.SessionID) == "" {
-		return sdkcompact.UsageSnapshot{}, nil
+		return compact.UsageSnapshot{}, nil
 	}
-	events, err := s.Sessions.Events(ctx, sdksession.EventsRequest{SessionRef: ref})
+	events, err := s.Sessions.Events(ctx, session.EventsRequest{SessionRef: ref})
 	if err != nil {
-		return sdkcompact.UsageSnapshot{}, err
+		return compact.UsageSnapshot{}, err
 	}
 	alias := strings.TrimSpace(modelAlias)
 	if alias == "" && s.lookup != nil {
@@ -1771,16 +1583,16 @@ func (s *Stack) SessionUsageSnapshot(ctx context.Context, ref sdksession.Session
 	contextWindow := s.currentContextWindowTokensForAlias(alias)
 	cfg := defaultCompactionConfig(contextWindow)
 	cfg.EstimatedPromptPrefixTokens = s.estimatedPromptPrefixTokens(ctx, ref)
-	return localruntime.ComputeUsageSnapshot(events, nil, contextWindow, cfg), nil
+	return local.ComputeUsageSnapshot(events, nil, contextWindow, cfg), nil
 }
 
-func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref sdksession.SessionRef) int {
+func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref session.SessionRef) int {
 	if s == nil {
 		return 0
 	}
 	s.mu.RLock()
 	runtimeCfg := s.runtime
-	runtimeCfg.Assembly = sdkplugin.CloneResolvedAssembly(runtimeCfg.Assembly)
+	runtimeCfg.Assembly = assembly.CloneResolvedAssembly(runtimeCfg.Assembly)
 	runtimeCfg.BaseMetadata = cloneMap(runtimeCfg.BaseMetadata)
 	base := runtimeCfg.EstimatedPromptPrefixTokens
 	s.mu.RUnlock()
@@ -1788,7 +1600,7 @@ func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref sdksession.
 		base = 0
 	}
 
-	var participants []sdksession.ParticipantBinding
+	var participants []session.ParticipantBinding
 	if s.Sessions != nil && strings.TrimSpace(ref.SessionID) != "" {
 		if session, err := s.Sessions.Session(ctx, ref); err == nil {
 			participants = session.Participants
@@ -1805,45 +1617,15 @@ func (s *Stack) estimatedPromptPrefixTokens(ctx context.Context, ref sdksession.
 	if delta := estimatePromptTextTokens(withDelegation) - estimatePromptTextTokens(baseSystemPrompt); delta > 0 {
 		extra += delta
 	}
-	extra += estimateToolPromptTokens([]sdktool.Tool{spawntool.New(agents)})
+	extra += estimateToolPromptTokens(spawnTools(agents))
 	return base + extra
 }
 
-func estimateModelPromptPrefixTokens(metadata map[string]any, tools []sdktool.Tool) int {
-	total := estimatePromptTextTokens(stringFromMap(metadata, "system_prompt"))
-	total += estimateToolPromptTokens(tools)
-	if total > 0 {
-		total += 96
+func spawnTools(agents []delegation.Agent) []tool.Tool {
+	if len(agents) == 0 {
+		return nil
 	}
-	return total
-}
-
-func estimateToolPromptTokens(tools []sdktool.Tool) int {
-	specs := sdktool.ModelSpecs(tools)
-	if len(specs) == 0 {
-		return 0
-	}
-	raw, err := json.Marshal(specs)
-	if err != nil {
-		return len(specs) * 64
-	}
-	return estimatePromptTextTokens(string(raw)) + len(specs)*24
-}
-
-func estimatePromptTextTokens(text string) int {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return 0
-	}
-	runes := len([]rune(text))
-	tokens := runes / 4
-	if runes%4 != 0 {
-		tokens++
-	}
-	if tokens < 1 {
-		return 1
-	}
-	return tokens
+	return []tool.Tool{spawn.New(agents)}
 }
 
 func (s *Stack) currentContextWindowTokensForAlias(alias string) int {
@@ -2015,299 +1797,59 @@ func (l *modelLookup) hydrateModelConfigLocked(cfg ModelConfig) ModelConfig {
 }
 
 func modelChoiceDetail(cfg ModelConfig) string {
-	parts := []string{}
-	if profileID := strings.TrimSpace(cfg.ProfileID); profileID != "" {
-		parts = append(parts, "profile:"+profileID)
-	}
-	if endpoint := strings.TrimSpace(cfg.EndpointID); endpoint != "" && endpoint != "default" {
-		parts = append(parts, endpoint)
-	}
-	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
-		parts = append(parts, baseURL)
-	}
-	if tokenEnv := strings.TrimSpace(cfg.TokenEnv); tokenEnv != "" {
-		parts = append(parts, "env:"+tokenEnv)
-	}
-	if len(parts) == 0 {
-		return "configured model"
-	}
-	return strings.Join(parts, " · ")
+	return modelregistry.ChoiceDetail(cfg)
 }
 
 func modelChoiceFromConfig(cfg ModelConfig) ModelChoice {
-	cfg = normalizeModelConfig(cfg)
-	return ModelChoice{
-		ID:         cfg.ID,
-		Alias:      cfg.Alias,
-		Provider:   cfg.Provider,
-		Model:      cfg.Model,
-		ProfileID:  cfg.ProfileID,
-		EndpointID: cfg.EndpointID,
-		BaseURL:    cfg.BaseURL,
-		Detail:     modelChoiceDetail(cfg),
-	}
+	return modelregistry.ChoiceFromConfig(cfg)
 }
 
 func dedupeModelChoices(choices []ModelChoice) []ModelChoice {
-	if len(choices) == 0 {
-		return nil
-	}
-	out := make([]ModelChoice, 0, len(choices))
-	seen := map[string]struct{}{}
-	for _, choice := range choices {
-		id := strings.ToLower(strings.TrimSpace(choice.ID))
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		out = append(out, choice)
-	}
-	return out
+	return modelregistry.DedupeChoices(choices)
 }
 
 func normalizeModelConfig(cfg ModelConfig) ModelConfig {
-	cfg.ID = strings.ToLower(strings.TrimSpace(cfg.ID))
-	cfg.Provider = strings.ToLower(strings.TrimSpace(cfg.Provider))
-	cfg.Model = strings.TrimSpace(cfg.Model)
-	if cfg.Provider == "minimax" && cfg.API == sdkproviders.APIAnthropicCompatible {
-		cfg.API = sdkproviders.APIMiniMax
-	}
-	cfg.EndpointID = normalizeEndpointID(cfg.Provider, cfg.EndpointID, cfg.BaseURL, cfg.API)
-	cfg.ProfileID = strings.ToLower(strings.TrimSpace(cfg.ProfileID))
-	if cfg.ProfileID == "" {
-		cfg.ProfileID = buildProfileID(cfg.Provider, cfg.EndpointID, cfg.BaseURL)
-	}
-	cfg.Alias = strings.ToLower(strings.TrimSpace(cfg.Alias))
-	if cfg.Alias == "" {
-		cfg.Alias = buildAlias(cfg.Provider, cfg.Model)
-	}
-	if id := buildModelID(cfg.ProfileID, cfg.Alias); id != "" {
-		cfg.ID = id
-	}
-	if cfg.API == "" {
-		cfg.API = defaultModelAPIForProvider(cfg.Provider)
-	}
-	if cfg.AuthType == "" {
-		cfg.AuthType = defaultAuthTypeForProvider(cfg.Provider)
-	}
-	if cfg.DefaultReasoningEffort == "" && cfg.ReasoningEffort != "" {
-		cfg.DefaultReasoningEffort = cfg.ReasoningEffort
-	}
-	if cfg.MaxOutputTok <= 0 {
-		cfg.MaxOutputTok = 4096
-	}
-	if cfg.ContextWindowTokens < 0 {
-		cfg.ContextWindowTokens = 0
-	}
-	cfg.ReasoningLevels = dedupeNonEmptyStrings(cfg.ReasoningLevels)
-	if cfg.Token == "" && strings.TrimSpace(cfg.TokenEnv) != "" {
-		cfg.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(cfg.TokenEnv)))
-	}
-	return cfg
+	return modelregistry.NormalizeConfig(cfg)
 }
 
 func normalizeModelProfileConfig(profile ModelProfileConfig) ModelProfileConfig {
-	profile.ID = strings.ToLower(strings.TrimSpace(profile.ID))
-	profile.Provider = strings.ToLower(strings.TrimSpace(profile.Provider))
-	if profile.Provider == "minimax" && profile.API == sdkproviders.APIAnthropicCompatible {
-		profile.API = sdkproviders.APIMiniMax
-	}
-	profile.EndpointID = normalizeEndpointID(profile.Provider, profile.EndpointID, profile.BaseURL, profile.API)
-	if profile.ID == "" {
-		profile.ID = buildProfileID(profile.Provider, profile.EndpointID, profile.BaseURL)
-	}
-	if profile.API == "" {
-		profile.API = defaultModelAPIForProvider(profile.Provider)
-	}
-	if profile.AuthType == "" {
-		profile.AuthType = defaultAuthTypeForProvider(profile.Provider)
-	}
-	if profile.Token == "" && strings.TrimSpace(profile.TokenEnv) != "" {
-		profile.Token = strings.TrimSpace(os.Getenv(strings.TrimSpace(profile.TokenEnv)))
-	}
-	return profile
+	return modelregistry.NormalizeProfileConfig(profile)
 }
 
 func modelProfileFromModelConfig(cfg ModelConfig) ModelProfileConfig {
-	cfg = normalizeModelConfig(cfg)
-	return normalizeModelProfileConfig(ModelProfileConfig{
-		ID:           cfg.ProfileID,
-		Provider:     cfg.Provider,
-		EndpointID:   cfg.EndpointID,
-		API:          cfg.API,
-		BaseURL:      cfg.BaseURL,
-		HTTPClient:   cfg.HTTPClient,
-		Token:        cfg.Token,
-		TokenEnv:     cfg.TokenEnv,
-		PersistToken: cfg.PersistToken,
-		AuthType:     cfg.AuthType,
-		HeaderKey:    cfg.HeaderKey,
-		Timeout:      cfg.Timeout,
-	})
+	return modelregistry.ProfileFromConfig(cfg)
 }
 
 func modelConfigCarriesProfileFields(cfg ModelConfig) bool {
-	return strings.TrimSpace(cfg.Provider) != "" ||
-		strings.TrimSpace(cfg.EndpointID) != "" ||
-		strings.TrimSpace(cfg.BaseURL) != "" ||
-		strings.TrimSpace(cfg.Token) != "" ||
-		strings.TrimSpace(cfg.TokenEnv) != "" ||
-		strings.TrimSpace(cfg.HeaderKey) != "" ||
-		cfg.HTTPClient != nil ||
-		cfg.API != "" ||
-		cfg.AuthType != "" ||
-		cfg.Timeout > 0
+	return modelregistry.ConfigCarriesProfileFields(cfg)
 }
 
 func modelConfigCarriesProfileAuth(cfg ModelConfig) bool {
-	return strings.TrimSpace(cfg.Token) != "" ||
-		strings.TrimSpace(cfg.TokenEnv) != "" ||
-		strings.TrimSpace(cfg.HeaderKey) != "" ||
-		cfg.PersistToken ||
-		cfg.HTTPClient != nil
+	return modelregistry.ConfigCarriesProfileAuth(cfg)
 }
 
 func mergeModelConfigProfile(cfg ModelConfig, profile ModelProfileConfig) ModelConfig {
-	cfg = normalizeModelConfig(cfg)
-	profile = normalizeModelProfileConfig(profile)
-	cfg.ProfileID = profile.ID
-	cfg.Provider = firstNonEmpty(profile.Provider, cfg.Provider)
-	cfg.EndpointID = profile.EndpointID
-	cfg.API = firstNonEmptyAPI(profile.API, cfg.API)
-	cfg.BaseURL = firstNonEmpty(profile.BaseURL, cfg.BaseURL)
-	cfg.HTTPClient = firstNonNilHTTPClient(profile.HTTPClient, cfg.HTTPClient)
-	cfg.Token = firstNonEmpty(profile.Token, cfg.Token)
-	cfg.TokenEnv = firstNonEmpty(profile.TokenEnv, cfg.TokenEnv)
-	cfg.PersistToken = profile.PersistToken || cfg.PersistToken
-	cfg.AuthType = firstNonEmptyAuthType(profile.AuthType, cfg.AuthType)
-	cfg.HeaderKey = firstNonEmpty(profile.HeaderKey, cfg.HeaderKey)
-	if profile.Timeout > 0 {
-		cfg.Timeout = profile.Timeout
-	}
-	return normalizeModelConfig(cfg)
+	return modelregistry.MergeConfigProfile(cfg, profile)
 }
 
 func modelConfigSupportsReasoningEffort(cfg ModelConfig, effort string) bool {
-	effort = strings.ToLower(strings.TrimSpace(effort))
-	if effort == "" {
-		return true
-	}
-	for _, level := range cfg.ReasoningLevels {
-		if strings.EqualFold(strings.TrimSpace(level), effort) {
-			return true
-		}
-	}
-	mode := strings.ToLower(strings.TrimSpace(cfg.ReasoningMode))
-	switch mode {
-	case "toggle":
-		return effort == "none" || effort == "high" || effort == "max" || effort == "enabled"
-	case "fixed":
-		return effort == "low" || effort == "medium" || effort == "high"
-	case "":
-		return true
-	default:
-		return false
-	}
+	return modelregistry.SupportsReasoningEffort(cfg, effort)
 }
 
-func defaultModelAPIForProvider(provider string) sdkproviders.APIType {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "openai":
-		return sdkproviders.APIOpenAI
-	case "openai-compatible":
-		return sdkproviders.APIOpenAICompatible
-	case "openrouter":
-		return sdkproviders.APIOpenRouter
-	case "codefree":
-		return sdkproviders.APICodeFree
-	case "gemini":
-		return sdkproviders.APIGemini
-	case "anthropic":
-		return sdkproviders.APIAnthropic
-	case "anthropic-compatible":
-		return sdkproviders.APIAnthropicCompatible
-	case "minimax":
-		return sdkproviders.APIMiniMax
-	case "deepseek":
-		return sdkproviders.APIDeepSeek
-	case "xiaomi":
-		return sdkproviders.APIMimo
-	case "volcengine":
-		return sdkproviders.APIVolcengine
-	case "volcengine-coding-plan", "volcengine_coding_plan":
-		return sdkproviders.APIVolcengineCoding
-	case "ollama":
-		return sdkproviders.APIOllama
-	default:
-		return ""
-	}
+func defaultModelAPIForProvider(provider string) providers.APIType {
+	return modelregistry.DefaultAPIForProvider(provider)
 }
 
 func sanitizePersistedModelConfig(cfg ModelConfig) ModelConfig {
-	cfg = normalizeModelConfig(cfg)
-	if cfg.ProfileID != "" {
-		cfg.Provider = ""
-		cfg.EndpointID = ""
-		cfg.API = ""
-		cfg.BaseURL = ""
-		cfg.HTTPClient = nil
-		cfg.Token = ""
-		cfg.TokenEnv = ""
-		cfg.PersistToken = false
-		cfg.AuthType = ""
-		cfg.HeaderKey = ""
-		cfg.Timeout = 0
-	}
-	if !cfg.PersistToken {
-		cfg.Token = ""
-	}
-	if cfg.API == defaultModelAPIForProvider(cfg.Provider) {
-		cfg.API = ""
-	}
-	if cfg.AuthType == defaultAuthTypeForProvider(cfg.Provider) {
-		cfg.AuthType = ""
-	}
-	if cfg.DefaultReasoningEffort == cfg.ReasoningEffort {
-		cfg.DefaultReasoningEffort = ""
-	}
-	if cfg.MaxOutputTok == 4096 {
-		cfg.MaxOutputTok = 0
-	}
-	cfg.PersistToken = false
-	cfg.HTTPClient = nil
-	cfg.Timeout = 0
-	return cfg
+	return modelregistry.SanitizePersistedConfig(cfg)
 }
 
 func sanitizePersistedModelProfile(profile ModelProfileConfig) ModelProfileConfig {
-	profile = normalizeModelProfileConfig(profile)
-	if !profile.PersistToken {
-		profile.Token = ""
-	}
-	if profile.API == defaultModelAPIForProvider(profile.Provider) {
-		profile.API = ""
-	}
-	if profile.AuthType == defaultAuthTypeForProvider(profile.Provider) {
-		profile.AuthType = ""
-	}
-	profile.PersistToken = false
-	profile.HTTPClient = nil
-	profile.Timeout = 0
-	return profile
+	return modelregistry.SanitizePersistedProfile(profile)
 }
 
-func defaultAuthTypeForProvider(provider string) sdkproviders.AuthType {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "minimax":
-		return sdkproviders.AuthBearerToken
-	case "ollama", "codefree":
-		return sdkproviders.AuthNone
-	default:
-		return sdkproviders.AuthAPIKey
-	}
+func defaultAuthTypeForProvider(provider string) providers.AuthType {
+	return modelregistry.DefaultAuthTypeForProvider(provider)
 }
 
 func (s *Stack) rejectReconfigureWhileActive(action string) error {
@@ -2317,7 +1859,7 @@ func (s *Stack) rejectReconfigureWhileActive(action string) error {
 	return rejectReconfigureWithActiveTurns(s.CurrentGateway(), action)
 }
 
-func rejectReconfigureWithActiveTurns(gw *appgateway.Gateway, action string) error {
+func rejectReconfigureWithActiveTurns(gw *kernel.Gateway, action string) error {
 	if gw == nil {
 		return nil
 	}
@@ -2351,287 +1893,47 @@ func rejectReconfigureWithActiveTurns(gw *appgateway.Gateway, action string) err
 }
 
 func buildAlias(provider string, modelName string) string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	modelName = strings.TrimSpace(modelName)
-	if provider == "" {
-		return strings.ToLower(modelName)
-	}
-	if modelName == "" {
-		return provider
-	}
-	return strings.ToLower(provider + "/" + modelName)
+	return modelregistry.BuildAlias(provider, modelName)
 }
 
 func buildProfileID(provider string, endpointID string, baseURL string) string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	endpointID = sanitizeConfigIDPart(firstNonEmpty(strings.TrimSpace(endpointID), "default"))
-	if endpointID == "custom" || strings.HasPrefix(endpointID, "custom-") {
-		endpointID = "custom-" + shortConfigHash(normalizedConfigBaseURL(baseURL))
-	}
-	if provider == "" {
-		return endpointID
-	}
-	return provider + "@" + endpointID
+	return modelregistry.BuildProfileID(provider, endpointID, baseURL)
 }
 
 func buildModelID(profileID string, alias string) string {
-	profileID = strings.ToLower(strings.TrimSpace(profileID))
-	alias = strings.ToLower(strings.TrimSpace(alias))
-	if profileID == "" {
-		return alias
-	}
-	if alias == "" {
-		return profileID
-	}
-	return profileID + "/" + alias
+	return modelregistry.BuildModelID(profileID, alias)
 }
 
-func normalizeEndpointID(provider string, endpointID string, baseURL string, api sdkproviders.APIType) string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	endpointID = sanitizeConfigIDPart(endpointID)
-	if endpointID != "" {
-		return endpointID
-	}
-	normalizedBaseURL := normalizedConfigBaseURL(baseURL)
-	switch provider {
-	case "openai":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.openai.com/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "openai-compatible":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.openai.com/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "openrouter":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://openrouter.ai/api/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "gemini":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://generativelanguage.googleapis.com/v1beta" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "anthropic":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "anthropic-compatible":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "deepseek":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.deepseek.com/v1" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "minimax":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.minimaxi.com/anthropic" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "codefree":
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://www.srdcloud.cn" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "ollama":
-		if normalizedBaseURL == "" || normalizedBaseURL == "http://localhost:11434" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	case "xiaomi":
-		switch normalizedBaseURL {
-		case "https://api.xiaomimimo.com/v1", "":
-			return "api-cn"
-		case "https://token-plan-cn.xiaomimimo.com/v1":
-			return "token-plan-cn"
-		default:
-			return "custom-" + shortConfigHash(normalizedBaseURL)
-		}
-	case "volcengine":
-		if api == sdkproviders.APIVolcengineCoding || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/coding/v3" {
-			return "coding-plan"
-		}
-		if normalizedBaseURL == "" || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/v3" {
-			return "standard"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	default:
-		if normalizedBaseURL == "" {
-			return "default"
-		}
-		return "custom-" + shortConfigHash(normalizedBaseURL)
-	}
+func normalizeEndpointID(provider string, endpointID string, baseURL string, api providers.APIType) string {
+	return modelregistry.NormalizeEndpointID(provider, endpointID, baseURL, api)
 }
 
-func normalizedConfigBaseURL(baseURL string) string {
-	return strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+func firstNonEmptyAPI(values ...providers.APIType) providers.APIType {
+	return modelregistry.FirstNonEmptyAPI(values...)
 }
 
-func sanitizeConfigIDPart(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if value == "" {
-		return ""
-	}
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		ok := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '.' || r == '_' || r == '-'
-		if ok {
-			b.WriteRune(r)
-			lastDash = false
-			continue
-		}
-		if !lastDash {
-			b.WriteByte('-')
-			lastDash = true
-		}
-	}
-	return strings.Trim(b.String(), "-")
-}
-
-func shortConfigHash(value string) string {
-	if strings.TrimSpace(value) == "" {
-		return "default"
-	}
-	sum := sha256.Sum256([]byte(value))
-	return hex.EncodeToString(sum[:])[:10]
-}
-
-func firstNonEmptyAPI(values ...sdkproviders.APIType) sdkproviders.APIType {
-	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func firstNonEmptyAuthType(values ...sdkproviders.AuthType) sdkproviders.AuthType {
-	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func firstNonNilHTTPClient(values ...*http.Client) *http.Client {
-	for _, value := range values {
-		if value != nil {
-			return value
-		}
-	}
-	return nil
+func firstNonEmptyAuthType(values ...providers.AuthType) providers.AuthType {
+	return modelregistry.FirstNonEmptyAuthType(values...)
 }
 
 func normalizeSandboxBackend(backend string) (string, error) {
-	switch strings.ToLower(strings.TrimSpace(backend)) {
-	case "", "auto":
-		return "auto", nil
-	case "seatbelt":
-		return "seatbelt", nil
-	case "bwrap":
-		return "bwrap", nil
-	case "landlock":
-		return "landlock", nil
-	default:
-		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
-	}
+	return sandboxpolicy.NormalizeBackend(backend)
 }
 
 func mergeSandboxConfig(stored SandboxConfig, override SandboxConfig) SandboxConfig {
-	stored = normalizeSandboxConfig(stored)
-	override = normalizeSandboxConfig(override)
-	if override.RequestedType != "" {
-		stored.RequestedType = override.RequestedType
-	}
-	if override.HelperPath != "" {
-		stored.HelperPath = override.HelperPath
-	}
-	if len(override.ReadableRoots) > 0 {
-		stored.ReadableRoots = append([]string(nil), override.ReadableRoots...)
-	}
-	if len(override.WritableRoots) > 0 {
-		stored.WritableRoots = append([]string(nil), override.WritableRoots...)
-	}
-	if len(override.ReadOnlySubpaths) > 0 {
-		stored.ReadOnlySubpaths = append([]string(nil), override.ReadOnlySubpaths...)
-	}
-	if stored.RequestedType == "" {
-		stored.RequestedType = "auto"
-	}
-	return stored
+	return sandboxpolicy.MergeConfig(stored, override)
 }
 
 func effectiveSandboxConfig(cfg SandboxConfig, workspaceDir string) SandboxConfig {
-	cfg = normalizeSandboxConfig(cfg)
-	cfg.WritableRoots = dedupeStrings(append(cfg.WritableRoots, defaultSkillSandboxRoots(workspaceDir)...))
-	return cfg
+	return sandboxpolicy.EffectiveConfig(cfg, workspaceDir)
 }
 
 func withSandboxPolicyRootMetadata(metadata map[string]any, cfg SandboxConfig, workspaceDir string) map[string]any {
-	out := cloneMap(metadata)
-	if out == nil {
-		out = map[string]any{}
-	}
-	effective := effectiveSandboxConfig(cfg, workspaceDir)
-	if len(effective.ReadableRoots) > 0 {
-		out["policy_extra_read_roots"] = mergePolicyRootMetadata(out["policy_extra_read_roots"], effective.ReadableRoots)
-	}
-	if len(effective.WritableRoots) > 0 {
-		out["policy_extra_write_roots"] = mergePolicyRootMetadata(out["policy_extra_write_roots"], effective.WritableRoots)
-	}
-	return out
-}
-
-func mergePolicyRootMetadata(existing any, values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := map[string]struct{}{}
-	appendOne := func(value string) {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		out = append(out, value)
-	}
-	switch typed := existing.(type) {
-	case []string:
-		for _, one := range typed {
-			appendOne(one)
-		}
-	case []any:
-		for _, one := range typed {
-			text, _ := one.(string)
-			appendOne(text)
-		}
-	}
-	for _, one := range values {
-		appendOne(one)
-	}
-	return out
+	return sandboxpolicy.WithPolicyRootMetadata(metadata, cfg, workspaceDir)
 }
 
 func defaultSkillSandboxRoots(workspaceDir string) []string {
-	dirs := DefaultSkillDiscoveryDirs(workspaceDir)
-	out := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		resolved, err := resolvePromptPath(dir)
-		if err != nil {
-			continue
-		}
-		out = append(out, resolved)
-	}
-	return dedupeStrings(out)
+	return sandboxpolicy.DefaultSkillRoots(workspaceDir)
 }
 
 func dedupeNonEmptyStrings(values []string) []string {
@@ -2658,11 +1960,11 @@ func dedupeNonEmptyStrings(values []string) []string {
 func policyMode(raw string) string {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
 	case "manual":
-		return sdkpolicy.ModeManual
+		return presets.ModeManual
 	case "", "auto", "auto-review", "auto_review", "autoreview", "default", "plan", "full_control", "full_access":
-		return sdkpolicy.ModeAutoReview
+		return presets.ModeAutoReview
 	default:
-		return sdkpolicy.ModeDefault
+		return presets.ModeDefault
 	}
 }
 

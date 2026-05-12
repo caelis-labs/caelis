@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 )
 
 func TestAppConfigStoreSaveUsesSecurePermissionsAndRedactsTokenByDefault(t *testing.T) {
@@ -22,7 +22,7 @@ func TestAppConfigStoreSaveUsesSecurePermissionsAndRedactsTokenByDefault(t *test
 			Configs: []ModelConfig{{
 				Alias:    "minimax/minimax-m1",
 				Provider: "minimax",
-				API:      sdkproviders.APIAnthropicCompatible,
+				API:      providers.APIAnthropicCompatible,
 				Model:    "MiniMax-M1",
 				Token:    "super-secret",
 				TokenEnv: "MINIMAX_API_KEY",
@@ -89,7 +89,7 @@ func TestAppConfigStoreCanPersistTokenOnlyWhenExplicitlyEnabled(t *testing.T) {
 			Configs: []ModelConfig{{
 				Alias:        "deepseek/reasoner",
 				Provider:     "deepseek",
-				API:          sdkproviders.APIDeepSeek,
+				API:          providers.APIDeepSeek,
 				Model:        "deepseek-v4-pro",
 				Token:        "persist-me",
 				PersistToken: true,
@@ -248,7 +248,7 @@ func TestAppConfigStoreLoadsLegacyUppercaseModelConfig(t *testing.T) {
 		t.Fatalf("len(configs) = %d, want 1", len(doc.Models.Configs))
 	}
 	cfg := doc.Models.Configs[0]
-	if cfg.Alias != "deepseek/deepseek-v4-flash" || cfg.Token != "legacy-token" || cfg.AuthType != sdkproviders.AuthAPIKey {
+	if cfg.Alias != "deepseek/deepseek-v4-flash" || cfg.Token != "legacy-token" || cfg.AuthType != providers.AuthAPIKey {
 		t.Fatalf("loaded legacy config = %#v", cfg)
 	}
 }

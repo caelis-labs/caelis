@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
@@ -21,7 +21,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	stack, session := newLocalStateTestStack(t)
 	altAlias, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
-		API:      sdkproviders.APIOllama,
+		API:      providers.APIOllama,
 		Model:    "alt-model",
 	})
 	if err != nil {
@@ -29,17 +29,17 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 	}
 
 	blocking := &blockingRuntime{session: session, release: make(chan struct{})}
-	gw, err := appgateway.New(appgateway.Config{
+	gw, err := kernel.New(kernel.Config{
 		Sessions: stack.Sessions,
 		Runtime:  blocking,
 		Resolver: blockingResolver{},
 	})
 	if err != nil {
-		t.Fatalf("gateway.New() error = %v", err)
+		t.Fatalf("kernel.New() error = %v", err)
 	}
 	stack.Gateway = gw
 
-	handle, err := stack.Gateway.BeginTurn(ctx, appgateway.BeginTurnRequest{
+	handle, err := stack.Gateway.BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "hold active",
 	})
@@ -61,7 +61,7 @@ func TestStackRejectsReconfigureWhileActiveTurn(t *testing.T) {
 			run: func() error {
 				_, err := stack.Connect(ModelConfig{
 					Provider: "ollama",
-					API:      sdkproviders.APIOllama,
+					API:      providers.APIOllama,
 					Model:    "blocked-model",
 				})
 				return err
@@ -164,7 +164,7 @@ func TestStackConnectRollsBackOnConfigSaveFailure(t *testing.T) {
 
 	_, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
-		API:      sdkproviders.APIOllama,
+		API:      providers.APIOllama,
 		Model:    "save-failed-model",
 	})
 	if err == nil {
@@ -217,24 +217,24 @@ func poisonConfigStorePath(t *testing.T, stack *Stack) {
 
 type blockingResolver struct{}
 
-func (blockingResolver) ResolveTurn(context.Context, appgateway.TurnIntent) (appgateway.ResolvedTurn, error) {
-	return appgateway.ResolvedTurn{RunRequest: sdkruntime.RunRequest{}}, nil
+func (blockingResolver) ResolveTurn(context.Context, kernel.TurnIntent) (kernel.ResolvedTurn, error) {
+	return kernel.ResolvedTurn{RunRequest: agent.RunRequest{}}, nil
 }
 
 type blockingRuntime struct {
-	session sdksession.Session
+	session session.Session
 	release chan struct{}
 }
 
-func (r *blockingRuntime) Run(context.Context, sdkruntime.RunRequest) (sdkruntime.RunResult, error) {
-	return sdkruntime.RunResult{
+func (r *blockingRuntime) Run(context.Context, agent.RunRequest) (agent.RunResult, error) {
+	return agent.RunResult{
 		Session: r.session,
 		Handle:  blockingRunner{release: r.release},
 	}, nil
 }
 
-func (r *blockingRuntime) RunState(context.Context, sdksession.SessionRef) (sdkruntime.RunState, error) {
-	return sdkruntime.RunState{Status: sdkruntime.RunLifecycleStatusRunning}, nil
+func (r *blockingRuntime) RunState(context.Context, session.SessionRef) (agent.RunState, error) {
+	return agent.RunState{Status: agent.RunLifecycleStatusRunning}, nil
 }
 
 type blockingRunner struct {
@@ -243,14 +243,14 @@ type blockingRunner struct {
 
 func (blockingRunner) RunID() string { return "run-blocking" }
 
-func (r blockingRunner) Events() iter.Seq2[*sdksession.Event, error] {
-	return func(yield func(*sdksession.Event, error) bool) {
+func (r blockingRunner) Events() iter.Seq2[*session.Event, error] {
+	return func(yield func(*session.Event, error) bool) {
 		<-r.release
 	}
 }
 
-func (blockingRunner) Submit(sdkruntime.Submission) error { return nil }
-func (blockingRunner) Cancel() sdkruntime.CancelResult {
-	return sdkruntime.CancelResult{Status: sdkruntime.CancelStatusCancelled}
+func (blockingRunner) Submit(agent.Submission) error { return nil }
+func (blockingRunner) Cancel() agent.CancelResult {
+	return agent.CancelResult{Status: agent.CancelStatusCancelled}
 }
 func (blockingRunner) Close() error { return nil }
