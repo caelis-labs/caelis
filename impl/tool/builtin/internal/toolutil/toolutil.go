@@ -1,0 +1,52 @@
+package toolutil
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"maps"
+	"strings"
+
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
+)
+
+func DecodeArgs(call tool.Call) (map[string]any, error) {
+	call = tool.CloneCall(call)
+	if len(call.Input) == 0 {
+		return map[string]any{}, nil
+	}
+	var args map[string]any
+	if err := json.Unmarshal(call.Input, &args); err != nil {
+		return nil, fmt.Errorf("tool: invalid json input: %w", err)
+	}
+	return args, nil
+}
+
+func JSONResult(name string, payload map[string]any) (tool.Result, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	name = strings.TrimSpace(name)
+	return tool.Result{
+		Name:    name,
+		Content: []model.Part{model.NewJSONPart(raw)},
+		Meta:    maps.Clone(payload),
+	}, nil
+}
+
+func JSONErrorResult(name string, payload map[string]any) (tool.Result, error) {
+	out, err := JSONResult(name, payload)
+	out.IsError = true
+	return out, err
+}
+
+func WithContextCancel(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+		return nil
+	}
+}

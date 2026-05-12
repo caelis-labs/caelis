@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
-	"github.com/OnslaughtSnail/caelis/sdk/model/providers/e2etest"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers/e2etest"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestApprovalReviewerMultiTurnReviewAgentE2E(t *testing.T) {
@@ -28,7 +28,7 @@ func TestApprovalReviewerMultiTurnReviewAgentE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	service, session := newApprovalReviewerTestSession(t, ctx)
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeUser, sdkmodel.RoleUser, strings.Repeat("The user explicitly asked the agent to inspect the repository, commit the focused fix, and push the current branch after tests pass. ", 40))
+	appendApprovalReviewerTextEvent(t, ctx, service, session, session.EventTypeUser, model.RoleUser, strings.Repeat("The user explicitly asked the agent to inspect the repository, commit the focused fix, and push the current branch after tests pass. ", 40))
 	reviewer := newModelApprovalReviewer(service)
 
 	first, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git commit the focused fix", map[string]any{
@@ -43,7 +43,7 @@ func TestApprovalReviewerMultiTurnReviewAgentE2E(t *testing.T) {
 	if strings.TrimSpace(first.Rationale) == "" || first.Risk == "" || first.Authorization == "" {
 		t.Fatalf("first result incomplete: %#v", first)
 	}
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeAssistant, sdkmodel.RoleAssistant, "Tests passed. The next action is the user-requested push of the same branch.")
+	appendApprovalReviewerTextEvent(t, ctx, service, session, session.EventTypeAssistant, model.RoleAssistant, "Tests passed. The next action is the user-requested push of the same branch.")
 	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git push the current branch", map[string]any{
 		"cmd": "git push origin dev",
 	}))
@@ -65,7 +65,7 @@ func TestApprovalReviewerMultiTurnReviewAgentE2E(t *testing.T) {
 		if got := len(req.Tools); got != 0 {
 			t.Fatalf("request %d len(Tools) = %d, want 0", i, got)
 		}
-		if req.Output == nil || req.Output.Mode != sdkmodel.OutputModeSchema {
+		if req.Output == nil || req.Output.Mode != model.OutputModeSchema {
 			t.Fatalf("request %d Output = %#v, want schema", i, req.Output)
 		}
 	}
@@ -81,7 +81,7 @@ func TestApprovalReviewerMultiTurnReviewAgentE2E(t *testing.T) {
 		t.Logf("provider did not report a cache hit; stable prefix was verified locally, usages=%+v", usages)
 	}
 
-	events, err := service.Events(ctx, sdksession.EventsRequest{SessionRef: session.SessionRef})
+	events, err := service.Events(ctx, session.EventsRequest{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
@@ -91,17 +91,17 @@ func TestApprovalReviewerMultiTurnReviewAgentE2E(t *testing.T) {
 }
 
 type approvalReviewerRecordingLLM struct {
-	base sdkmodel.LLM
+	base model.LLM
 	mu   sync.Mutex
-	reqs []sdkmodel.Request
-	uses []sdkmodel.Usage
+	reqs []model.Request
+	uses []model.Usage
 }
 
 func (m *approvalReviewerRecordingLLM) Name() string { return m.base.Name() }
 
-func (m *approvalReviewerRecordingLLM) Generate(ctx context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+func (m *approvalReviewerRecordingLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.recordRequest(req)
-	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+	return func(yield func(*model.StreamEvent, error) bool) {
 		for event, err := range m.base.Generate(ctx, req) {
 			if event != nil && event.Response != nil {
 				m.recordUsage(event.Usage)
@@ -113,22 +113,22 @@ func (m *approvalReviewerRecordingLLM) Generate(ctx context.Context, req *sdkmod
 	}
 }
 
-func (m *approvalReviewerRecordingLLM) recordRequest(req *sdkmodel.Request) {
+func (m *approvalReviewerRecordingLLM) recordRequest(req *model.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if req == nil {
-		m.reqs = append(m.reqs, sdkmodel.Request{})
+		m.reqs = append(m.reqs, model.Request{})
 		return
 	}
 	cp := *req
-	cp.Messages = sdkmodel.CloneMessages(req.Messages)
-	cp.Instructions = sdkmodel.CloneParts(req.Instructions)
-	cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
-	cp.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
+	cp.Messages = model.CloneMessages(req.Messages)
+	cp.Instructions = model.CloneParts(req.Instructions)
+	cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+	cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 	m.reqs = append(m.reqs, cp)
 }
 
-func (m *approvalReviewerRecordingLLM) recordUsage(usage sdkmodel.Usage) {
+func (m *approvalReviewerRecordingLLM) recordUsage(usage model.Usage) {
 	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.TotalTokens == 0 {
 		return
 	}
@@ -137,17 +137,17 @@ func (m *approvalReviewerRecordingLLM) recordUsage(usage sdkmodel.Usage) {
 	m.uses = append(m.uses, usage)
 }
 
-func (m *approvalReviewerRecordingLLM) Snapshot() ([]sdkmodel.Request, []sdkmodel.Usage) {
+func (m *approvalReviewerRecordingLLM) Snapshot() ([]model.Request, []model.Usage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	reqs := make([]sdkmodel.Request, 0, len(m.reqs))
+	reqs := make([]model.Request, 0, len(m.reqs))
 	for _, req := range m.reqs {
 		cp := req
-		cp.Messages = sdkmodel.CloneMessages(req.Messages)
-		cp.Instructions = sdkmodel.CloneParts(req.Instructions)
-		cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
-		cp.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
+		cp.Messages = model.CloneMessages(req.Messages)
+		cp.Instructions = model.CloneParts(req.Instructions)
+		cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+		cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 		reqs = append(reqs, cp)
 	}
-	return reqs, append([]sdkmodel.Usage(nil), m.uses...)
+	return reqs, append([]model.Usage(nil), m.uses...)
 }

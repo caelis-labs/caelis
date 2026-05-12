@@ -8,48 +8,48 @@ import (
 	"strings"
 	"testing"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
-	spawntool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/spawn"
-	tasktool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
+	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestLocalStackInjectsSpawnForSelfAndRegisteredACPAgents(t *testing.T) {
 	ctx := context.Background()
-	withAgents, session := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{
-		Agents: []sdkplugin.AgentConfig{{
+	withAgents, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{
+		Agents: []assembly.AgentConfig{{
 			Name:        "helper",
 			Description: "bounded ACP helper",
 			Command:     "go",
-			Args:        []string{"run", "./acpbridge/cmd/e2eagent"},
+			Args:        []string{"run", "./internal/acpe2eagent"},
 			WorkDir:     repoRootForGatewayAppTest(t),
 		}},
 	})
-	resolved, err := withAgents.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err := withAgents.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(with agents) error = %v", err)
 	}
-	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawntool.ToolName) {
-		t.Fatalf("tools missing %s when assembly agents exist", spawntool.ToolName)
+	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) {
+		t.Fatalf("tools missing %s when assembly agents exist", spawn.ToolName)
 	}
-	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, tasktool.ToolName) {
-		t.Fatalf("tools missing %s", tasktool.ToolName)
+	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, task.ToolName) {
+		t.Fatalf("tools missing %s", task.ToolName)
 	}
 	systemPrompt, _ := resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
 		t.Fatalf("system prompt missing delegation guidance: %q", systemPrompt)
 	}
 
-	withoutAgents, session := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
-	resolved, err = withoutAgents.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	withoutAgents, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
+	resolved, err = withoutAgents.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(without agents) error = %v", err)
 	}
-	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawntool.ToolName) {
-		t.Fatalf("tools missing %s for default self spawn", spawntool.ToolName)
+	if !toolSetHas(resolved.RunRequest.AgentSpec.Tools, spawn.ToolName) {
+		t.Fatalf("tools missing %s for default self spawn", spawn.ToolName)
 	}
 	systemPrompt, _ = resolved.RunRequest.AgentSpec.Metadata["system_prompt"].(string)
 	if !strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
@@ -95,7 +95,7 @@ func TestDefaultSelfACPAgentPassesLiteralTokenViaEnv(t *testing.T) {
 			WorkspaceCWD: "/tmp/ws",
 			Model: ModelConfig{
 				Provider: "deepseek",
-				API:      sdkproviders.APIDeepSeek,
+				API:      providers.APIDeepSeek,
 				Model:    "deepseek-reasoner",
 				Token:    "super-secret-token",
 			},
@@ -130,7 +130,7 @@ func TestDefaultSelfACPAgentPreservesConfiguredTokenEnv(t *testing.T) {
 			WorkspaceCWD: "/tmp/ws",
 			Model: ModelConfig{
 				Provider: "deepseek",
-				API:      sdkproviders.APIDeepSeek,
+				API:      providers.APIDeepSeek,
 				Model:    "deepseek-reasoner",
 				TokenEnv: "DEEPSEEK_API_KEY",
 			},
@@ -154,7 +154,7 @@ func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) 
 	writeExecutableForGatewayAppTest(t, binDir, "claude-agent-acp", "#!/bin/sh\nexit 0\n")
 	t.Setenv("PATH", binDir)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgent("claude"); err != nil {
 		t.Fatalf("RegisterBuiltinACPAgent(claude) error = %v", err)
 	}
@@ -182,7 +182,7 @@ func TestRegisterBuiltinACPAgentInstallRunsNPMEvenWhenPATHAdapterExists(t *testi
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CAELIS_FAKE_NPM_LOG", logPath)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
 		Install: true,
 	}); err != nil {
@@ -220,7 +220,7 @@ func TestRegisterBuiltinACPAgentInstallUpdatesManagedAdapterOnRepeatedRuns(t *te
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("CAELIS_FAKE_NPM_LOG", logPath)
 
-	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	for i := 0; i < 2; i++ {
 		if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "codex", RegisterBuiltinACPAgentOptions{
 			Install: true,
@@ -253,7 +253,7 @@ func TestRegisterBuiltinACPAgentInstallUsesManagedAdapter(t *testing.T) {
 	writeFakeNPMInstallerForGatewayAppTest(t, binDir)
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	if err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
 		Install: true,
 	}); err != nil {
@@ -285,7 +285,7 @@ func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) 
 	writeExecutableForGatewayAppTest(t, binDir, "npm", "#!/bin/sh\necho install failed >&2\nexit 7\n")
 	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	stack, _ := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, _ := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	err := stack.RegisterBuiltinACPAgentWithOptions(context.Background(), "claude", RegisterBuiltinACPAgentOptions{
 		Install: true,
 	})
@@ -303,7 +303,7 @@ func TestRegisterBuiltinACPAgentInstallFailureDoesNotUpdateConfig(t *testing.T) 
 
 func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	oldGateway := stack.Gateway
 	oldEngine := stack.engine
 
@@ -316,7 +316,7 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	if stack.engine != oldEngine {
 		t.Fatal("RegisterBuiltinACPAgent rebuilt runtime engine")
 	}
-	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after register) error = %v", err)
 	}
@@ -333,7 +333,7 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 	if stack.engine != oldEngine {
 		t.Fatal("UnregisterACPAgent rebuilt runtime engine")
 	}
-	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after unregister) error = %v", err)
 	}
@@ -344,7 +344,7 @@ func TestLocalStackAgentRegistryUpdatesWithoutRuntimeRebuild(t *testing.T) {
 
 func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newStackWithAssemblyForToolTest(t, sdkplugin.ResolvedAssembly{})
+	stack, session := newStackWithAssemblyForToolTest(t, assembly.ResolvedAssembly{})
 	oldGateway := stack.Gateway
 	oldEngine := stack.engine
 
@@ -383,7 +383,7 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	if got, want := agent.Env["HELPER_MODE"], "test"; got != want {
 		t.Fatalf("stored env HELPER_MODE = %q, want %q", got, want)
 	}
-	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err := stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after custom register) error = %v", err)
 	}
@@ -409,7 +409,7 @@ func TestRegisterCustomACPAgentUpdatesConfigAndRuntimeRegistry(t *testing.T) {
 	if err := stack.UnregisterACPAgent("helper"); err != nil {
 		t.Fatalf("UnregisterACPAgent(helper) error = %v", err)
 	}
-	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, appgateway.TurnIntent{SessionRef: session.SessionRef})
+	resolved, err = stack.Gateway.Resolver().ResolveTurn(ctx, kernel.TurnIntent{SessionRef: session.SessionRef})
 	if err != nil {
 		t.Fatalf("ResolveTurn(after custom unregister) error = %v", err)
 	}
@@ -433,11 +433,11 @@ func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 		},
 		Model: ModelConfig{
 			Provider:     "deepseek",
-			API:          sdkproviders.APIDeepSeek,
+			API:          providers.APIDeepSeek,
 			Model:        "deepseek-reasoner",
 			BaseURL:      "https://api.deepseek.example/v1",
 			TokenEnv:     "DEEPSEEK_TEST_TOKEN",
-			AuthType:     sdkproviders.AuthAPIKey,
+			AuthType:     providers.AuthAPIKey,
 			HeaderKey:    "Authorization",
 			MaxOutputTok: 8192,
 		},
@@ -457,7 +457,7 @@ func TestLocalStackAgentRegistryUpdatesPreserveSelfModelArgs(t *testing.T) {
 	assertSelfAgentArgsForModel(t, stack.runtime.Assembly.Agents)
 }
 
-func newStackWithAssemblyForToolTest(t *testing.T, assembly sdkplugin.ResolvedAssembly) (*Stack, sdksession.Session) {
+func newStackWithAssemblyForToolTest(t *testing.T, assembly assembly.ResolvedAssembly) (*Stack, session.Session) {
 	t.Helper()
 	workdir := t.TempDir()
 	stack, err := NewLocalStack(Config{
@@ -489,7 +489,7 @@ func newStackWithAssemblyForToolTest(t *testing.T, assembly sdkplugin.ResolvedAs
 	return stack, session
 }
 
-func toolSetHas(tools []sdktool.Tool, name string) bool {
+func toolSetHas(tools []tool.Tool, name string) bool {
 	for _, tool := range tools {
 		if tool == nil {
 			continue
@@ -501,9 +501,9 @@ func toolSetHas(tools []sdktool.Tool, name string) bool {
 	return false
 }
 
-func spawnToolHasAgent(tools []sdktool.Tool, name string) bool {
+func spawnToolHasAgent(tools []tool.Tool, name string) bool {
 	for _, tool := range tools {
-		if tool == nil || !strings.EqualFold(strings.TrimSpace(tool.Definition().Name), spawntool.ToolName) {
+		if tool == nil || !strings.EqualFold(strings.TrimSpace(tool.Definition().Name), spawn.ToolName) {
 			continue
 		}
 		schema := tool.Definition().InputSchema
@@ -519,14 +519,14 @@ func spawnToolHasAgent(tools []sdktool.Tool, name string) bool {
 	return false
 }
 
-func attachAgentForToolTest(t *testing.T, stack *Stack, ref sdksession.SessionRef, agent string) {
+func attachAgentForToolTest(t *testing.T, stack *Stack, ref session.SessionRef, agent string) {
 	t.Helper()
-	_, err := stack.Sessions.PutParticipant(context.Background(), sdksession.PutParticipantRequest{
+	_, err := stack.Sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
 		SessionRef: ref,
-		Binding: sdksession.ParticipantBinding{
+		Binding: session.ParticipantBinding{
 			ID:        "sidecar-" + strings.ToLower(strings.TrimSpace(agent)),
-			Kind:      sdksession.ParticipantKindACP,
-			Role:      sdksession.ParticipantRoleSidecar,
+			Kind:      session.ParticipantKindACP,
+			Role:      session.ParticipantRoleSidecar,
 			Label:     strings.TrimSpace(agent),
 			SessionID: "remote-" + strings.ToLower(strings.TrimSpace(agent)),
 			Source:    "test_attach",
@@ -537,21 +537,21 @@ func attachAgentForToolTest(t *testing.T, stack *Stack, ref sdksession.SessionRe
 	}
 }
 
-func agentConfigSetHas(agents []sdkplugin.AgentConfig, name string) bool {
+func agentConfigSetHas(agents []assembly.AgentConfig, name string) bool {
 	_, ok := agentConfigForToolTest(agents, name)
 	return ok
 }
 
-func agentConfigForToolTest(agents []sdkplugin.AgentConfig, name string) (sdkplugin.AgentConfig, bool) {
+func agentConfigForToolTest(agents []assembly.AgentConfig, name string) (assembly.AgentConfig, bool) {
 	for _, agent := range agents {
 		if strings.EqualFold(strings.TrimSpace(agent.Name), strings.TrimSpace(name)) {
 			return agent, true
 		}
 	}
-	return sdkplugin.AgentConfig{}, false
+	return assembly.AgentConfig{}, false
 }
 
-func assertSelfAgentArgsForModel(t *testing.T, agents []sdkplugin.AgentConfig) {
+func assertSelfAgentArgsForModel(t *testing.T, agents []assembly.AgentConfig) {
 	t.Helper()
 	self, ok := agentConfigForToolTest(agents, "self")
 	if !ok {
@@ -559,11 +559,11 @@ func assertSelfAgentArgsForModel(t *testing.T, agents []sdkplugin.AgentConfig) {
 	}
 	for _, want := range []string{
 		"-provider", "deepseek",
-		"-api", string(sdkproviders.APIDeepSeek),
+		"-api", string(providers.APIDeepSeek),
 		"-model", "deepseek-reasoner",
 		"-base-url", "https://api.deepseek.example/v1",
 		"-token-env", "DEEPSEEK_TEST_TOKEN",
-		"-auth-type", string(sdkproviders.AuthAPIKey),
+		"-auth-type", string(providers.AuthAPIKey),
 		"-header-key", "Authorization",
 		"-context-window", "12345",
 		"-max-output-tokens", "8192",

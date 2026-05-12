@@ -20,22 +20,22 @@
 - Prefer small public extension ports over hard-wired implementations. Approval
   review, session storage, model providers, sandbox policy, tools, skills, and
   prompt assembly should be replaceable through narrow interfaces.
-- Put reusable extension contracts in `sdk/*` when they are intended for
+- Put reusable extension contracts in `ports/*` when they are intended for
   outside implementations. Use `internal/*` only for private glue that should
   not become a public integration point.
-- Keep `sdk/runtime` focused on runtime orchestration and abstract callbacks. It
+- Keep `ports/agent` focused on runtime orchestration and abstract callbacks. It
   should depend on generic ports such as approval requesters, not know whether a
   decision came from a human, a guardian agent, or a future policy engine.
 - Model approval as a pluggable port: human/manual approval and agent
   Auto-Review are implementations of the same approval contract. Shared
   approval payload normalization and response conversion belong with that
   contract, not in surface adapters.
-- Keep generic ACP adapters independent from `gateway/core`. They may depend on
-  `sdk/*` ports and ACP protocol packages. Composition packages may wire gateway
-  defaults into ACP adapters, but generic adapters should not import gateway
+- Keep generic ACP adapters independent from `internal/kernel`. They may depend on
+  `ports/*` contracts and ACP protocol packages. Composition packages may wire
+  kernel defaults into ACP adapters, but generic adapters should not import kernel
   orchestration types unless the dependency is explicitly part of a migration
   step.
-- Keep `gateway/core` responsible for local turn/session orchestration,
+- Keep `internal/kernel` responsible for local turn/session orchestration,
   canonical event projection, and lifecycle coordination. It should not import
   TUI packages or generic ACP surface adapters.
 - Keep `app/gatewayapp` as the default local composition layer. It wires default

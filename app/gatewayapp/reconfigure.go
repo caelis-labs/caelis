@@ -5,14 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	"github.com/OnslaughtSnail/caelis/sdk/runtime/agents/chat"
-	localruntime "github.com/OnslaughtSnail/caelis/sdk/runtime/local"
-	sdksandbox "github.com/OnslaughtSnail/caelis/sdk/sandbox"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
-	sdkbuiltin "github.com/OnslaughtSnail/caelis/sdk/tool/builtin"
-	spawntool "github.com/OnslaughtSnail/caelis/sdk/tool/builtin/spawn"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/approvalstrategy"
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/toolset"
+	"github.com/OnslaughtSnail/caelis/impl/agent/local"
+	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func (s *Stack) saveModelConfigs() error {
@@ -61,9 +59,9 @@ func (s *Stack) rebuildGateway() error {
 	if err := rejectReconfigureWithActiveTurns(oldGateway, "rebuild gateway"); err != nil {
 		return err
 	}
-	sandboxRuntime, err := sdksandbox.New(sdksandbox.Config{
+	sandboxRuntime, err := toolset.NewSandboxRuntime(toolset.SandboxConfig{
 		CWD:              s.Workspace.CWD,
-		RequestedBackend: sdksandbox.Backend(sandboxCfg.RequestedType),
+		RequestedBackend: sandboxCfg.RequestedType,
 		HelperPath:       sandboxCfg.HelperPath,
 		ReadableRoots:    append([]string(nil), sandboxCfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), sandboxCfg.WritableRoots...),
@@ -72,7 +70,7 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
-	tools, err := sdkbuiltin.BuildCoreTools(sdkbuiltin.CoreToolsConfig{Runtime: sandboxRuntime})
+	tools, err := toolset.BuildCoreTools(sandboxRuntime)
 	if err != nil {
 		_ = sandboxRuntime.Close()
 		return err
@@ -80,7 +78,7 @@ func (s *Stack) rebuildGateway() error {
 	estimatedPrefixTokens := estimateModelPromptPrefixTokens(runtimeCfg.BaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
-	rt, err := localruntime.New(localruntime.Config{
+	rt, err := local.New(local.Config{
 		Sessions:          s.Sessions,
 		AgentFactory:      chat.Factory{},
 		DefaultPolicyMode: policyMode(runtimeCfg.PermissionMode),
@@ -92,7 +90,7 @@ func (s *Stack) rebuildGateway() error {
 		_ = sandboxRuntime.Close()
 		return err
 	}
-	resolver, err := appgateway.NewAssemblyResolver(appgateway.AssemblyResolverConfig{
+	resolver, err := kernel.NewAssemblyResolver(kernel.AssemblyResolverConfig{
 		Sessions:          s.Sessions,
 		Assembly:          runtimeCfg.Assembly,
 		DefaultModelAlias: s.lookup.DefaultID(),
@@ -100,28 +98,28 @@ func (s *Stack) rebuildGateway() error {
 		ModelLookup:       s.lookup,
 		Tools:             tools,
 		BaseMetadata:      cloneMap(runtimeCfg.BaseMetadata),
-		ToolAugmenter: func(ctx context.Context, req appgateway.ToolAugmentContext) (appgateway.ToolAugmentation, error) {
+		ToolAugmenter: func(ctx context.Context, req kernel.ToolAugmentContext) (kernel.ToolAugmentation, error) {
 			s.mu.RLock()
 			runtimeCfg := s.runtime
 			s.mu.RUnlock()
-			var participants []sdksession.ParticipantBinding
+			var participants []session.ParticipantBinding
 			if strings.TrimSpace(req.SessionRef.SessionID) != "" {
 				session, err := s.Sessions.Session(ctx, req.SessionRef)
 				if err != nil {
-					return appgateway.ToolAugmentation{}, err
+					return kernel.ToolAugmentation{}, err
 				}
 				participants = session.Participants
 			}
 			agents := delegationAgentsForSpawn(runtimeCfg.Assembly, participants)
 			if len(agents) == 0 {
-				return appgateway.ToolAugmentation{}, nil
+				return kernel.ToolAugmentation{}, nil
 			}
 			metadata := map[string]any{}
 			if systemPrompt := stringFromMap(runtimeCfg.BaseMetadata, "system_prompt"); systemPrompt != "" {
 				metadata["system_prompt"] = systemPromptWithDelegationGuidance(systemPrompt)
 			}
-			return appgateway.ToolAugmentation{
-				Tools:    []sdktool.Tool{spawntool.New(agents)},
+			return kernel.ToolAugmentation{
+				Tools:    toolset.SpawnTools(agents),
 				Metadata: metadata,
 			}, nil
 		},
@@ -130,11 +128,11 @@ func (s *Stack) rebuildGateway() error {
 		_ = sandboxRuntime.Close()
 		return err
 	}
-	gw, err := appgateway.New(appgateway.Config{
+	gw, err := kernel.New(kernel.Config{
 		Sessions:         s.Sessions,
 		Runtime:          rt,
 		Resolver:         resolver,
-		ApprovalReviewer: newModelApprovalReviewer(s.Sessions),
+		ApprovalApprover: approvalstrategy.AgentReviewApprover(newModelApprovalReviewer(s.Sessions)),
 	})
 	if err != nil {
 		_ = sandboxRuntime.Close()

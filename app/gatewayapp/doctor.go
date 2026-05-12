@@ -10,12 +10,12 @@ import (
 	"sort"
 	"strings"
 
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type DoctorRequest struct {
-	SessionRef sdksession.SessionRef
+	SessionRef session.SessionRef
 	SessionID  string
 	BindingKey string
 }
@@ -197,15 +197,15 @@ func (r DoctorReport) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
-func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) sdksession.SessionRef {
+func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) session.SessionRef {
 	if s == nil {
-		return sdksession.SessionRef{}
+		return session.SessionRef{}
 	}
 	if strings.TrimSpace(req.SessionRef.SessionID) != "" {
 		return req.SessionRef
 	}
 	if strings.TrimSpace(req.SessionID) != "" {
-		return sdksession.SessionRef{
+		return session.SessionRef{
 			AppName:      s.AppName,
 			UserID:       s.UserID,
 			SessionID:    strings.TrimSpace(req.SessionID),
@@ -220,7 +220,7 @@ func (s *Stack) resolveDoctorSessionRef(ctx context.Context, req DoctorRequest) 
 		}
 	}
 	_ = ctx
-	return sdksession.SessionRef{}
+	return session.SessionRef{}
 }
 
 func (s *Stack) modelConfigForAlias(alias string) (ModelConfig, bool) {
@@ -235,7 +235,7 @@ func modelConfigMissingAPIKey(cfg ModelConfig) bool {
 	if cfg.Provider == "" || cfg.Model == "" {
 		return false
 	}
-	if cfg.AuthType == "" || cfg.AuthType == sdkproviders.AuthNone {
+	if cfg.AuthType == "" || cfg.AuthType == providers.AuthNone {
 		return false
 	}
 	if strings.TrimSpace(cfg.Token) != "" {

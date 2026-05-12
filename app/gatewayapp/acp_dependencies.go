@@ -3,17 +3,18 @@ package gatewayapp
 import (
 	"fmt"
 
-	"github.com/OnslaughtSnail/caelis/gateway"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/agent/acp"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type ACPAgentDependencies struct {
-	Runtime  sdkruntime.Runtime
-	Sessions sdksession.Service
-	Gateway  *gateway.Gateway
-	Assembly sdkplugin.ResolvedAssembly
+	Runtime  agent.Runtime
+	Sessions session.Service
+	Gateway  *kernel.Gateway
+	Assembly assembly.ResolvedAssembly
 	AppName  string
 	UserID   string
 }
@@ -39,4 +40,22 @@ func (s *Stack) ACPAgentDependencies() (ACPAgentDependencies, error) {
 		return ACPAgentDependencies{}, fmt.Errorf("gatewayapp: gateway is unavailable")
 	}
 	return deps, nil
+}
+
+func (s *Stack) ACPAgent() (*acp.RuntimeAgent, error) {
+	deps, err := s.ACPAgentDependencies()
+	if err != nil {
+		return nil, err
+	}
+	return acp.NewGatewayAgent(acp.GatewayAgentConfig{
+		Runtime:  deps.Runtime,
+		Sessions: deps.Sessions,
+		Gateway:  deps.Gateway,
+		Assembly: deps.Assembly,
+		AppName:  deps.AppName,
+		UserID:   deps.UserID,
+		SurfaceBuilder: func(req acp.SurfaceRequest) acp.Surface {
+			return s.ACPSurface(req.Modes, req.UseFallbackModes, req.Config)
+		},
+	})
 }

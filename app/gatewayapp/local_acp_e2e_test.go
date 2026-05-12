@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	headlessadapter "github.com/OnslaughtSnail/caelis/headless"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
 
 func TestLocalStackGatewayACPMainE2E(t *testing.T) {
@@ -27,12 +27,12 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly: sdkplugin.ResolvedAssembly{
-			Agents: []sdkplugin.AgentConfig{{
+		Assembly: assembly.ResolvedAssembly{
+			Agents: []assembly.AgentConfig{{
 				Name:        "codex",
 				Description: "ACP main controller.",
 				Command:     "go",
-				Args:        []string{"run", "./acpbridge/cmd/e2eagent"},
+				Args:        []string{"run", "./internal/acpe2eagent"},
 				WorkDir:     repo,
 				Env: map[string]string{
 					"SDK_ACP_STUB_REPLY":         "gateway acp main ok",
@@ -56,9 +56,9 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 
-	updated, err := stack.Gateway.HandoffController(context.Background(), appgateway.HandoffControllerRequest{
+	updated, err := stack.Gateway.HandoffController(context.Background(), kernel.HandoffControllerRequest{
 		SessionRef: session.SessionRef,
-		Kind:       sdksession.ControllerKindACP,
+		Kind:       session.ControllerKindACP,
 		Agent:      "codex",
 		Source:     "test",
 		Reason:     "delegate main control",
@@ -66,17 +66,17 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("HandoffController() error = %v", err)
 	}
-	if updated.Controller.Kind != sdksession.ControllerKindACP {
-		t.Fatalf("controller kind = %q, want %q", updated.Controller.Kind, sdksession.ControllerKindACP)
+	if updated.Controller.Kind != session.ControllerKindACP {
+		t.Fatalf("controller kind = %q, want %q", updated.Controller.Kind, session.ControllerKindACP)
 	}
 
-	state, err := stack.Gateway.ControlPlaneState(context.Background(), appgateway.ControlPlaneStateRequest{
+	state, err := stack.Gateway.ControlPlaneState(context.Background(), kernel.ControlPlaneStateRequest{
 		SessionRef: session.SessionRef,
 	})
 	if err != nil {
 		t.Fatalf("ControlPlaneState() error = %v", err)
 	}
-	if state.Controller.Kind != sdksession.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
+	if state.Controller.Kind != session.ControllerKindACP || strings.TrimSpace(state.Controller.EpochID) == "" {
 		t.Fatalf("control state = %+v", state)
 	}
 	controllerStatus, found, err := stack.ACPControllerStatus(context.Background(), session.SessionRef)
@@ -103,11 +103,11 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	result, err := headlessadapter.RunOnce(ctx, stack.Gateway, appgateway.BeginTurnRequest{
+	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
 		SessionRef: session.SessionRef,
 		Input:      "run through acp controller",
 		Surface:    "headless-acp-main-e2e",
-	}, headlessadapter.Options{})
+	}, headless.Options{})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
@@ -115,7 +115,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		t.Fatalf("RunOnce() output = %q, want %q", got, "gateway acp main ok")
 	}
 
-	loaded, err := stack.Sessions.LoadSession(ctx, sdksession.LoadSessionRequest{
+	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{
 		SessionRef: session.SessionRef,
 	})
 	if err != nil {
@@ -123,10 +123,10 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	}
 	var sawACPAssistant bool
 	for _, event := range loaded.Events {
-		if event == nil || sdksession.EventTypeOf(event) != sdksession.EventTypeAssistant || event.Scope == nil {
+		if event == nil || session.EventTypeOf(event) != session.EventTypeAssistant || event.Scope == nil {
 			continue
 		}
-		if event.Scope.Controller.Kind == sdksession.ControllerKindACP && strings.TrimSpace(event.Text) == "gateway acp main ok" {
+		if event.Scope.Controller.Kind == session.ControllerKindACP && strings.TrimSpace(event.Text) == "gateway acp main ok" {
 			sawACPAssistant = true
 			break
 		}

@@ -13,25 +13,25 @@ import (
 	"testing"
 	"time"
 
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
-	modelproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkruntime "github.com/OnslaughtSnail/caelis/sdk/runtime"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
-	"github.com/OnslaughtSnail/caelis/sdk/session/inmemory"
-	sdktool "github.com/OnslaughtSnail/caelis/sdk/tool"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/impl/session/memory"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	ctx := context.Background()
-	service, session := newApprovalReviewerTestSession(t, ctx)
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeUser, sdkmodel.RoleUser, "Please push the current changes after the focused tests pass.")
-	model := &approvalReviewerFakeModel{
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please push the current changes after the focused tests pass.")
+	testModel := &approvalReviewerFakeModel{
 		responses: []string{`{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"narrow request"}`},
 	}
 	reviewer := newModelApprovalReviewer(service)
 
-	result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git push origin dev", map[string]any{
+	result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{
 		"cmd":        "git push origin dev",
 		"call_id":    "call-123",
 		"session_id": "session-123",
@@ -47,7 +47,7 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 		t.Fatalf("DisplayText = %q, want rationale", result.DisplayText)
 	}
 
-	requests := model.Requests()
+	requests := testModel.Requests()
 	if got, want := len(requests), 1; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
@@ -58,7 +58,7 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	if got := len(req.Tools); got != 0 {
 		t.Fatalf("len(Tools) = %d, want no reviewer tools", got)
 	}
-	if req.Output == nil || req.Output.Mode != sdkmodel.OutputModeSchema {
+	if req.Output == nil || req.Output.Mode != model.OutputModeSchema {
 		t.Fatalf("Output = %#v, want schema output", req.Output)
 	}
 	if got := len(req.Instructions); got != 1 {
@@ -84,7 +84,7 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 		}
 	}
 
-	events, err := service.Events(ctx, sdksession.EventsRequest{SessionRef: session.SessionRef})
+	events, err := service.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
@@ -95,23 +95,23 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 
 func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T) {
 	ctx := context.Background()
-	service, session := newApprovalReviewerTestSession(t, ctx)
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeUser, sdkmodel.RoleUser, "Please commit and push the prepared fix.")
-	model := &approvalReviewerFakeModel{responses: []string{
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please commit and push the prepared fix.")
+	testModel := &approvalReviewerFakeModel{responses: []string{
 		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"commit is user requested"}`,
 		`{"outcome":"allow","risk_level":"medium","user_authorization":"high","rationale":"push is user requested"}`,
 	}}
 	reviewer := newModelApprovalReviewer(service)
 
-	first, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
+	first, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
 	if err != nil {
 		t.Fatalf("first ReviewApproval() error = %v", err)
 	}
 	if !first.Approved {
 		t.Fatalf("first Approved = false, want true: %#v", first)
 	}
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeAssistant, sdkmodel.RoleAssistant, "Focused tests passed; next I will push the branch.")
-	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeAssistant, model.RoleAssistant, "Focused tests passed; next I will push the branch.")
+	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
 	if err != nil {
 		t.Fatalf("second ReviewApproval() error = %v", err)
 	}
@@ -119,7 +119,7 @@ func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T)
 		t.Fatalf("second Approved = false, want true: %#v", second)
 	}
 
-	requests := model.Requests()
+	requests := testModel.Requests()
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("model calls = %d, want %d", got, want)
 	}
@@ -131,7 +131,7 @@ func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T)
 	if !reflect.DeepEqual(secondReq.Messages[0], firstReq.Messages[0]) {
 		t.Fatal("second review did not reuse the exact first prompt as stable prefix")
 	}
-	if got, want := secondReq.Messages[1].TextContent(), model.responses[0]; got != want {
+	if got, want := secondReq.Messages[1].TextContent(), testModel.responses[0]; got != want {
 		t.Fatalf("second prefix assistant text = %q, want first assessment %q", got, want)
 	}
 	prompt := secondReq.Messages[len(secondReq.Messages)-1].TextContent()
@@ -148,8 +148,8 @@ func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T)
 
 func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 	ctx := context.Background()
-	service, session := newApprovalReviewerTestSession(t, ctx)
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeUser, sdkmodel.RoleUser, "Please commit and push the prepared fix.")
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please commit and push the prepared fix.")
 
 	var (
 		serverMu sync.Mutex
@@ -190,15 +190,15 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 	}))
 	defer server.Close()
 
-	factory := modelproviders.NewFactory()
-	if err := factory.Register(modelproviders.Config{
+	factory := providers.NewFactory()
+	if err := factory.Register(providers.Config{
 		Alias:    "cache-provider",
 		Provider: "openai-compatible",
-		API:      modelproviders.APIOpenAICompatible,
+		API:      providers.APIOpenAICompatible,
 		Model:    "cache-provider",
 		BaseURL:  server.URL,
 		Timeout:  2 * time.Second,
-		Auth:     modelproviders.AuthConfig{Type: modelproviders.AuthNone},
+		Auth:     providers.AuthConfig{Type: providers.AuthNone},
 	}); err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
@@ -206,18 +206,18 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewByAlias() error = %v", err)
 	}
-	model := &approvalReviewerProviderRecorder{base: llm}
+	testModel := &approvalReviewerProviderRecorder{base: llm}
 	reviewer := newModelApprovalReviewer(service)
 
-	first, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
+	first, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git commit -m fix", map[string]any{"cmd": "git commit -m fix"}))
 	if err != nil {
 		t.Fatalf("first ReviewApproval() error = %v", err)
 	}
 	if !first.Approved || first.Authorization != "high" {
 		t.Fatalf("first result = %#v, want approved high authorization", first)
 	}
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeAssistant, sdkmodel.RoleAssistant, "Focused tests passed; next I will push the branch.")
-	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeAssistant, model.RoleAssistant, "Focused tests passed; next I will push the branch.")
+	second, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "git push origin dev", map[string]any{"cmd": "git push origin dev"}))
 	if err != nil {
 		t.Fatalf("second ReviewApproval() error = %v", err)
 	}
@@ -225,7 +225,7 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 		t.Fatalf("second result = %#v, want approved high authorization", second)
 	}
 
-	requests, usages := model.Snapshot()
+	requests, usages := testModel.Snapshot()
 	if got, want := len(requests), 2; got != want {
 		t.Fatalf("model requests = %d, want %d", got, want)
 	}
@@ -241,7 +241,7 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 	if !strings.Contains(requests[1].Messages[len(requests[1].Messages)-1].TextContent(), ">>> TRANSCRIPT DELTA START") {
 		t.Fatalf("second provider-backed prompt missing transcript delta:\n%s", requests[1].Messages[len(requests[1].Messages)-1].TextContent())
 	}
-	events, err := service.Events(ctx, sdksession.EventsRequest{SessionRef: session.SessionRef})
+	events, err := service.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
@@ -269,10 +269,10 @@ func TestParseGuardianAssessmentAcceptsJSONEmbeddedInText(t *testing.T) {
 
 func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T) {
 	ctx := context.Background()
-	service, session := newApprovalReviewerTestSession(t, ctx)
-	appendApprovalReviewerTextEvent(t, ctx, service, session, sdksession.EventTypeUser, sdkmodel.RoleUser, "Please inspect this directory and request the minimum permission needed.")
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect this directory and request the minimum permission needed.")
 	release := make(chan struct{})
-	model := &approvalReviewerFakeModel{
+	testModel := &approvalReviewerFakeModel{
 		responses: []string{
 			`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"read-only path is bounded"}`,
 			`{"outcome":"allow","risk_level":"low","user_authorization":"medium","rationale":"read-only path is bounded"}`,
@@ -287,7 +287,7 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 	errs := make(chan error, 2)
 	for i := 0; i < 2; i++ {
 		go func() {
-			result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(session, model, "read temp dir", map[string]any{
+			result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "read temp dir", map[string]any{
 				"path": readPath,
 			}))
 			if err == nil && !result.Approved {
@@ -296,17 +296,17 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 			errs <- err
 		}()
 	}
-	waitForApprovalReviewerCalls(t, model.started, 2)
+	waitForApprovalReviewerCalls(t, testModel.started, 2)
 	close(release)
 	for i := 0; i < 2; i++ {
 		if err := <-errs; err != nil {
 			t.Fatalf("ReviewApproval() error = %v", err)
 		}
 	}
-	if got := len(model.Requests()); got != 2 {
+	if got := len(testModel.Requests()); got != 2 {
 		t.Fatalf("model calls = %d, want 2", got)
 	}
-	events, err := service.Events(ctx, sdksession.EventsRequest{SessionRef: session.SessionRef})
+	events, err := service.Events(ctx, session.EventsRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("Events() error = %v", err)
 	}
@@ -314,7 +314,7 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 		t.Fatalf("parent session event count = %d, want %d", got, want)
 	}
 	guardian.mu.Lock()
-	reviewSession := guardian.sessionsByParent[session.SessionID]
+	reviewSession := guardian.sessionsByParent[activeSession.SessionID]
 	guardian.mu.Unlock()
 	if reviewSession == nil {
 		t.Fatal("review session not recorded")
@@ -328,16 +328,16 @@ func TestApprovalReviewerConcurrentReviewsDoNotMutateParentSession(t *testing.T)
 }
 
 func TestApprovalReviewerRejectsMissingRequestModel(t *testing.T) {
-	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), appgateway.ApprovalReviewRequest{})
+	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), kernel.ApprovalReviewRequest{})
 	if err == nil || !strings.Contains(err.Error(), "current session model") {
 		t.Fatalf("ReviewApproval() error = %v, want current session model error", err)
 	}
 }
 
 func TestApprovalReviewerRejectsMissingSessionHistory(t *testing.T) {
-	model := &approvalReviewerFakeModel{responses: []string{`{"outcome":"allow"}`}}
-	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), appgateway.ApprovalReviewRequest{
-		Model: model,
+	testModel := &approvalReviewerFakeModel{responses: []string{`{"outcome":"allow"}`}}
+	_, err := newModelApprovalReviewer(nil).ReviewApproval(context.Background(), kernel.ApprovalReviewRequest{
+		Model: testModel,
 	})
 	if err == nil || !strings.Contains(err.Error(), "session history") {
 		t.Fatalf("ReviewApproval() error = %v, want session history error", err)
@@ -353,16 +353,16 @@ func (e approvalReviewerError) Error() string { return string(e) }
 type approvalReviewerFakeModel struct {
 	mu        sync.Mutex
 	responses []string
-	requests  []sdkmodel.Request
+	requests  []model.Request
 	release   <-chan struct{}
 	started   chan struct{}
 }
 
 func (m *approvalReviewerFakeModel) Name() string { return "approval-reviewer-fake" }
 
-func (m *approvalReviewerFakeModel) Generate(ctx context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+func (m *approvalReviewerFakeModel) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	index := m.recordRequest(req)
-	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+	return func(yield func(*model.StreamEvent, error) bool) {
 		if m.started != nil {
 			m.started <- struct{}{}
 		}
@@ -380,62 +380,62 @@ func (m *approvalReviewerFakeModel) Generate(ctx context.Context, req *sdkmodel.
 			response = m.responses[index]
 		}
 		m.mu.Unlock()
-		yield(&sdkmodel.StreamEvent{
-			Type: sdkmodel.StreamEventTurnDone,
-			Response: &sdkmodel.Response{
-				Status:       sdkmodel.ResponseStatusCompleted,
+		yield(&model.StreamEvent{
+			Type: model.StreamEventTurnDone,
+			Response: &model.Response{
+				Status:       model.ResponseStatusCompleted,
 				TurnComplete: true,
 				StepComplete: true,
-				Message:      sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, response),
+				Message:      model.NewTextMessage(model.RoleAssistant, response),
 			},
 		}, nil)
 	}
 }
 
-func (m *approvalReviewerFakeModel) recordRequest(req *sdkmodel.Request) int {
+func (m *approvalReviewerFakeModel) recordRequest(req *model.Request) int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	index := len(m.requests)
 	if req == nil {
-		m.requests = append(m.requests, sdkmodel.Request{})
+		m.requests = append(m.requests, model.Request{})
 		return index
 	}
 	cp := *req
-	cp.Messages = sdkmodel.CloneMessages(req.Messages)
-	cp.Instructions = sdkmodel.CloneParts(req.Instructions)
-	cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
-	cp.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
+	cp.Messages = model.CloneMessages(req.Messages)
+	cp.Instructions = model.CloneParts(req.Instructions)
+	cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+	cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 	m.requests = append(m.requests, cp)
 	return index
 }
 
-func (m *approvalReviewerFakeModel) Requests() []sdkmodel.Request {
+func (m *approvalReviewerFakeModel) Requests() []model.Request {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := make([]sdkmodel.Request, 0, len(m.requests))
+	out := make([]model.Request, 0, len(m.requests))
 	for _, req := range m.requests {
 		cp := req
-		cp.Messages = sdkmodel.CloneMessages(req.Messages)
-		cp.Instructions = sdkmodel.CloneParts(req.Instructions)
-		cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
-		cp.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
+		cp.Messages = model.CloneMessages(req.Messages)
+		cp.Instructions = model.CloneParts(req.Instructions)
+		cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+		cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 		out = append(out, cp)
 	}
 	return out
 }
 
 type approvalReviewerProviderRecorder struct {
-	base sdkmodel.LLM
+	base model.LLM
 	mu   sync.Mutex
-	reqs []sdkmodel.Request
-	uses []sdkmodel.Usage
+	reqs []model.Request
+	uses []model.Usage
 }
 
 func (m *approvalReviewerProviderRecorder) Name() string { return m.base.Name() }
 
-func (m *approvalReviewerProviderRecorder) Generate(ctx context.Context, req *sdkmodel.Request) iter.Seq2[*sdkmodel.StreamEvent, error] {
+func (m *approvalReviewerProviderRecorder) Generate(ctx context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.recordRequest(req)
-	return func(yield func(*sdkmodel.StreamEvent, error) bool) {
+	return func(yield func(*model.StreamEvent, error) bool) {
 		for event, err := range m.base.Generate(ctx, req) {
 			if event != nil && event.Response != nil {
 				m.recordUsage(event.Usage)
@@ -447,22 +447,22 @@ func (m *approvalReviewerProviderRecorder) Generate(ctx context.Context, req *sd
 	}
 }
 
-func (m *approvalReviewerProviderRecorder) recordRequest(req *sdkmodel.Request) {
+func (m *approvalReviewerProviderRecorder) recordRequest(req *model.Request) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if req == nil {
-		m.reqs = append(m.reqs, sdkmodel.Request{})
+		m.reqs = append(m.reqs, model.Request{})
 		return
 	}
 	cp := *req
-	cp.Messages = sdkmodel.CloneMessages(req.Messages)
-	cp.Instructions = sdkmodel.CloneParts(req.Instructions)
-	cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
-	cp.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
+	cp.Messages = model.CloneMessages(req.Messages)
+	cp.Instructions = model.CloneParts(req.Instructions)
+	cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+	cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 	m.reqs = append(m.reqs, cp)
 }
 
-func (m *approvalReviewerProviderRecorder) recordUsage(usage sdkmodel.Usage) {
+func (m *approvalReviewerProviderRecorder) recordUsage(usage model.Usage) {
 	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
 		return
 	}
@@ -471,52 +471,52 @@ func (m *approvalReviewerProviderRecorder) recordUsage(usage sdkmodel.Usage) {
 	m.uses = append(m.uses, usage)
 }
 
-func (m *approvalReviewerProviderRecorder) Snapshot() ([]sdkmodel.Request, []sdkmodel.Usage) {
+func (m *approvalReviewerProviderRecorder) Snapshot() ([]model.Request, []model.Usage) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	reqs := make([]sdkmodel.Request, 0, len(m.reqs))
+	reqs := make([]model.Request, 0, len(m.reqs))
 	for _, req := range m.reqs {
 		cp := req
-		cp.Messages = sdkmodel.CloneMessages(req.Messages)
-		cp.Instructions = sdkmodel.CloneParts(req.Instructions)
-		cp.Tools = append([]sdkmodel.ToolSpec(nil), req.Tools...)
-		cp.Output = sdkruntime.ModelRequestOptions{Output: req.Output}.OutputSpec()
+		cp.Messages = model.CloneMessages(req.Messages)
+		cp.Instructions = model.CloneParts(req.Instructions)
+		cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+		cp.Output = agent.ModelRequestOptions{Output: req.Output}.OutputSpec()
 		reqs = append(reqs, cp)
 	}
-	return reqs, append([]sdkmodel.Usage(nil), m.uses...)
+	return reqs, append([]model.Usage(nil), m.uses...)
 }
 
-func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (sdksession.Service, sdksession.Session) {
+func newApprovalReviewerTestSession(t *testing.T, ctx context.Context) (session.Service, session.Session) {
 	t.Helper()
 	service := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
-	session, err := service.StartSession(ctx, sdksession.StartSessionRequest{
+	activeSession, err := service.StartSession(ctx, session.StartSessionRequest{
 		AppName:            "caelis",
 		UserID:             "user-1",
 		PreferredSessionID: "approval-reviewer-test",
-		Workspace:          sdksession.WorkspaceRef{Key: "workspace-1", CWD: t.TempDir()},
+		Workspace:          session.WorkspaceRef{Key: "workspace-1", CWD: t.TempDir()},
 	})
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	return service, session
+	return service, activeSession
 }
 
 func appendApprovalReviewerTextEvent(
 	t *testing.T,
 	ctx context.Context,
-	service sdksession.Service,
-	session sdksession.Session,
-	eventType sdksession.EventType,
-	role sdkmodel.Role,
+	service session.Service,
+	activeSession session.Session,
+	eventType session.EventType,
+	role model.Role,
 	text string,
 ) {
 	t.Helper()
-	message := sdkmodel.NewTextMessage(role, text)
-	if _, err := service.AppendEvent(ctx, sdksession.AppendEventRequest{
-		SessionRef: session.SessionRef,
-		Event: &sdksession.Event{
+	message := model.NewTextMessage(role, text)
+	if _, err := service.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event: &session.Event{
 			Type:       eventType,
-			Visibility: sdksession.VisibilityCanonical,
+			Visibility: session.VisibilityCanonical,
 			Message:    &message,
 			Text:       text,
 		},
@@ -525,26 +525,26 @@ func appendApprovalReviewerTextEvent(
 	}
 }
 
-func approvalReviewerTestRequest(session sdksession.Session, model sdkmodel.LLM, reason string, input map[string]any) appgateway.ApprovalReviewRequest {
+func approvalReviewerTestRequest(activeSession session.Session, llm model.LLM, reason string, input map[string]any) kernel.ApprovalReviewRequest {
 	raw, _ := json.Marshal(input)
-	return appgateway.ApprovalReviewRequest{
-		SessionRef: session.SessionRef,
-		Mode:       appgateway.ApprovalModeAutoReview,
+	return kernel.ApprovalReviewRequest{
+		SessionRef: activeSession.SessionRef,
+		Mode:       kernel.ApprovalModeAutoReview,
 		ReviewID:   "review-test",
 		RunID:      "run-test",
 		TurnID:     "turn-test",
-		Model:      model,
-		Approval: &appgateway.ApprovalPayload{
+		Model:      llm,
+		Approval: &kernel.ApprovalPayload{
 			ToolName:           "request_permissions",
 			RawInput:           input,
 			Reason:             reason,
 			SandboxPermissions: "with_additional_permissions",
-			Status:             appgateway.ApprovalStatusPending,
+			Status:             kernel.ApprovalStatusPending,
 		},
-		RuntimeRequest: sdkruntime.ApprovalRequest{
+		RuntimeRequest: agent.ApprovalRequest{
 			Mode: "auto-review",
-			Tool: sdktool.Definition{Name: "request_permissions"},
-			Call: sdktool.Call{Name: "request_permissions", Input: raw},
+			Tool: tool.Definition{Name: "request_permissions"},
+			Call: tool.Call{Name: "request_permissions", Input: raw},
 		},
 	}
 }

@@ -12,38 +12,38 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/acp"
-	appgateway "github.com/OnslaughtSnail/caelis/gateway"
-	headlessadapter "github.com/OnslaughtSnail/caelis/headless"
-	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
-	sdkmodel "github.com/OnslaughtSnail/caelis/sdk/model"
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/compact"
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp"
+	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
 
 func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newLocalStateTestStack(t)
+	stack, activeSession := newLocalStateTestStack(t)
 
 	alias, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
-		API:      sdkproviders.APIOllama,
+		API:      providers.APIOllama,
 		Model:    "alt-model",
 	})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if err := stack.UseModel(ctx, session.SessionRef, alias); err != nil {
+	if err := stack.UseModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if mode, err := stack.SetSessionMode(ctx, session.SessionRef, "manual"); err != nil {
+	if mode, err := stack.SetSessionMode(ctx, activeSession.SessionRef, "manual"); err != nil {
 		t.Fatalf("SetSessionMode(manual) error = %v", err)
 	} else if mode != "manual" {
 		t.Fatalf("SetSessionMode() = %q, want manual", mode)
 	}
 
-	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -57,16 +57,16 @@ func TestStackSessionRuntimeStateTracksModelAndSessionModeOverrides(t *testing.T
 		t.Fatalf("session mode = %q, want manual", state.SessionMode)
 	}
 
-	if err := stack.DeleteModel(ctx, session.SessionRef, alias); err != nil {
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
-	if mode, err := stack.SetSessionMode(ctx, session.SessionRef, "auto-review"); err != nil {
+	if mode, err := stack.SetSessionMode(ctx, activeSession.SessionRef, "auto-review"); err != nil {
 		t.Fatalf("SetSessionMode(auto-review) error = %v", err)
 	} else if mode != "auto-review" {
 		t.Fatalf("SetSessionMode(auto-review) = %q, want auto-review", mode)
 	}
 
-	state, err = stack.SessionRuntimeState(ctx, session.SessionRef)
+	state, err = stack.SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() after reset error = %v", err)
 	}
@@ -125,11 +125,11 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 	if !ok {
 		t.Fatal("expected minimax config")
 	}
-	if cfg.API != sdkproviders.APIMiniMax {
-		t.Fatalf("cfg.API = %q, want %q", cfg.API, sdkproviders.APIMiniMax)
+	if cfg.API != providers.APIMiniMax {
+		t.Fatalf("cfg.API = %q, want %q", cfg.API, providers.APIMiniMax)
 	}
-	if cfg.AuthType != sdkproviders.AuthBearerToken {
-		t.Fatalf("cfg.AuthType = %q, want %q", cfg.AuthType, sdkproviders.AuthBearerToken)
+	if cfg.AuthType != providers.AuthBearerToken {
+		t.Fatalf("cfg.AuthType = %q, want %q", cfg.AuthType, providers.AuthBearerToken)
 	}
 
 	resolved, err := lookup.ResolveModel(context.Background(), "minimax/minimax-m2", 0)
@@ -137,8 +137,8 @@ func TestModelLookupResolvesMiniMaxThroughProviderFactory(t *testing.T) {
 		t.Fatalf("ResolveModel() error = %v", err)
 	}
 	var finalText string
-	for event, err := range resolved.Model.Generate(context.Background(), &sdkmodel.Request{
-		Messages: []sdkmodel.Message{sdkmodel.NewTextMessage(sdkmodel.RoleUser, "hello")},
+	for event, err := range resolved.Model.Generate(context.Background(), &model.Request{
+		Messages: []model.Message{model.NewTextMessage(model.RoleUser, "hello")},
 	}) {
 		if err != nil {
 			t.Fatalf("Generate() error = %v", err)
@@ -163,7 +163,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -183,7 +183,7 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -202,24 +202,24 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 
 func TestStackDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newLocalStateTestStack(t)
+	stack, activeSession := newLocalStateTestStack(t)
 
 	alias, err := stack.Connect(ModelConfig{
 		Provider: "ollama",
-		API:      sdkproviders.APIOllama,
+		API:      providers.APIOllama,
 		Model:    "alt-model",
 	})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if err := stack.UseModel(ctx, session.SessionRef, alias); err != nil {
+	if err := stack.UseModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if err := stack.DeleteModel(ctx, session.SessionRef, alias); err != nil {
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
 
-	aliases, err := stack.ListModelAliases(ctx, session.SessionRef)
+	aliases, err := stack.ListModelAliases(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ListModelAliases() error = %v", err)
 	}
@@ -244,18 +244,18 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "delete-profile-session", "surface")
+	activeSession, err := stack.StartSession(ctx, "delete-profile-session", "surface")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	firstID, err := stack.Connect(ModelConfig{
 		Provider:     "deepseek",
-		API:          sdkproviders.APIDeepSeek,
+		API:          providers.APIDeepSeek,
 		Model:        "deepseek-v4-flash",
 		Token:        "secret",
 		PersistToken: true,
@@ -265,13 +265,13 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	}
 	secondID, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
-		API:      sdkproviders.APIDeepSeek,
+		API:      providers.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 	})
 	if err != nil {
 		t.Fatalf("Connect(second) error = %v", err)
 	}
-	if err := stack.DeleteModel(ctx, session.SessionRef, firstID); err != nil {
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, firstID); err != nil {
 		t.Fatalf("DeleteModel(first) error = %v", err)
 	}
 	doc, err := LoadAppConfig(root)
@@ -281,7 +281,7 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 	if len(doc.Models.Profiles) != 1 {
 		t.Fatalf("profiles after deleting one model = %#v, want shared profile retained", doc.Models.Profiles)
 	}
-	if err := stack.DeleteModel(ctx, session.SessionRef, secondID); err != nil {
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, secondID); err != nil {
 		t.Fatalf("DeleteModel(second) error = %v", err)
 	}
 	doc, err = LoadAppConfig(root)
@@ -295,11 +295,11 @@ func TestStackDeleteModelDropsUnreferencedProfile(t *testing.T) {
 
 func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newLocalStateTestStack(t)
+	stack, activeSession := newLocalStateTestStack(t)
 
 	for _, cfg := range []ModelConfig{
-		{Provider: "xiaomi", API: sdkproviders.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://api.xiaomimimo.com/v1"},
-		{Provider: "xiaomi", API: sdkproviders.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
+		{Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://api.xiaomimimo.com/v1"},
+		{Provider: "xiaomi", API: providers.APIMimo, Model: "mimo-v2.5-pro", BaseURL: "https://token-plan-cn.xiaomimimo.com/v1"},
 	} {
 		if _, err := stack.Connect(cfg); err != nil {
 			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
@@ -308,7 +308,7 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 	if !stack.lookup.HasAlias("xiaomi/mimo-v2.5-pro") {
 		t.Fatal("HasAlias(duplicate visible alias) = false, want true")
 	}
-	err := stack.UseModel(ctx, session.SessionRef, "xiaomi/mimo-v2.5-pro")
+	err := stack.UseModel(ctx, activeSession.SessionRef, "xiaomi/mimo-v2.5-pro")
 	if err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
 		t.Fatalf("UseModel(duplicate visible alias) error = %v, want ambiguity", err)
 	}
@@ -316,10 +316,10 @@ func TestStackUseModelReportsAmbiguousVisibleAlias(t *testing.T) {
 
 func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newLocalStateTestStack(t)
+	stack, activeSession := newLocalStateTestStack(t)
 	apiID, err := stack.Connect(ModelConfig{
 		Provider: "xiaomi",
-		API:      sdkproviders.APIMimo,
+		API:      providers.APIMimo,
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  "https://api.xiaomimimo.com/v1",
 	})
@@ -328,7 +328,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	}
 	tokenPlanID, err := stack.Connect(ModelConfig{
 		Provider: "xiaomi",
-		API:      sdkproviders.APIMimo,
+		API:      providers.APIMimo,
 		Model:    "mimo-v2.5-pro",
 		BaseURL:  "https://token-plan-cn.xiaomimimo.com/v1",
 	})
@@ -336,7 +336,7 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 		t.Fatalf("Connect(token plan) error = %v", err)
 	}
 	surface := stack.ACPSurface(nil, false, nil)
-	models, err := surface.SessionModels(ctx, session)
+	models, err := surface.SessionModels(ctx, activeSession)
 	if err != nil {
 		t.Fatalf("SessionModels() error = %v", err)
 	}
@@ -353,10 +353,10 @@ func TestACPSurfaceUsesStableModelIDsForDuplicateAliases(t *testing.T) {
 	if seen[apiID] != "xiaomi/mimo-v2.5-pro" || seen[tokenPlanID] != "xiaomi/mimo-v2.5-pro" {
 		t.Fatalf("available models = %#v, want stable ids with visible alias names", models.AvailableModels)
 	}
-	if _, err := surface.SetSessionModel(ctx, acp.SetSessionModelRequest{SessionID: session.SessionID, ModelID: apiID}); err != nil {
+	if _, err := surface.SetSessionModel(ctx, acp.SetSessionModelRequest{SessionID: activeSession.SessionID, ModelID: apiID}); err != nil {
 		t.Fatalf("SetSessionModel(stable id) error = %v", err)
 	}
-	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -375,41 +375,41 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "delete-only-model-session", "surface")
+	activeSession, err := stack.StartSession(ctx, "delete-only-model-session", "surface")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
 	alias, err := stack.Connect(ModelConfig{
 		Provider:        "deepseek",
-		API:             sdkproviders.APIDeepSeek,
+		API:             providers.APIDeepSeek,
 		Model:           "deepseek-v4-pro",
 		ReasoningLevels: []string{"none", "high", "max"},
 	})
 	if err != nil {
 		t.Fatalf("Connect() error = %v", err)
 	}
-	if err := stack.UseModel(ctx, session.SessionRef, alias, "high"); err != nil {
+	if err := stack.UseModel(ctx, activeSession.SessionRef, alias, "high"); err != nil {
 		t.Fatalf("UseModel() error = %v", err)
 	}
-	if err := stack.DeleteModel(ctx, session.SessionRef, alias); err != nil {
+	if err := stack.DeleteModel(ctx, activeSession.SessionRef, alias); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
 	if got := stack.DefaultModelAlias(); got != "" {
 		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
 	}
-	aliases, err := stack.ListModelAliases(ctx, session.SessionRef)
+	aliases, err := stack.ListModelAliases(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("ListModelAliases() error = %v", err)
 	}
 	if len(aliases) != 0 {
 		t.Fatalf("ListModelAliases() = %#v, want empty", aliases)
 	}
-	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -420,18 +420,18 @@ func TestStackDeleteOnlyModelClearsRuntimeModelState(t *testing.T) {
 
 func TestSessionRuntimeStateIgnoresStaleModelAliasOutsideConfig(t *testing.T) {
 	ctx := context.Background()
-	stack, session := newLocalStateTestStack(t)
-	if err := stack.Sessions.UpdateState(ctx, session.SessionRef, func(state map[string]any) (map[string]any, error) {
-		next := sdksession.CloneState(state)
+	stack, activeSession := newLocalStateTestStack(t)
+	if err := stack.Sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}
 		}
-		next["gateway.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
+		next["kernel.current_model_alias"] = "minimax/minimax-m2.7-highspeed"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState() error = %v", err)
 	}
-	state, err := stack.SessionRuntimeState(ctx, session.SessionRef)
+	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
 	if err != nil {
 		t.Fatalf("SessionRuntimeState() error = %v", err)
 	}
@@ -452,12 +452,12 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "persist-session", "surface-persist")
+	activeSession, err := stack.StartSession(ctx, "persist-session", "surface-persist")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
@@ -472,13 +472,13 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 	}
 	if _, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
-		API:      sdkproviders.APIDeepSeek,
+		API:      providers.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "deepseek-secret",
 	}); err != nil {
 		t.Fatalf("Connect(deepseek) error = %v", err)
 	}
-	if err := stack.UseModel(ctx, session.SessionRef, minimaxAlias); err != nil {
+	if err := stack.UseModel(ctx, activeSession.SessionRef, minimaxAlias); err != nil {
 		t.Fatalf("UseModel(minimax) error = %v", err)
 	}
 
@@ -489,7 +489,7 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -543,7 +543,7 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -564,10 +564,10 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "auto-review",
 		ContextWindow:  64,
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
-			API:        sdkproviders.APIOllama,
+			API:        providers.APIOllama,
 			Model:      "compact-test",
 			BaseURL:    server.URL,
 			HTTPClient: server.Client(),
@@ -576,27 +576,27 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "auto compact session", "surface-auto-compact")
+	activeSession, err := stack.StartSession(ctx, "auto compact session", "surface-auto-compact")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Project objective: app default auto compact should be enabled in the upper app assembly."))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppAssistantEvent("ack"))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Current blocker: app assembly previously left compaction disabled unless tests opted in explicitly."))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppAssistantEvent("ack"))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Project objective: app default auto compact should be enabled in the upper app assembly."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Current blocker: app assembly previously left compaction disabled unless tests opted in explicitly."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: verify the default app runtime invokes model-backed compact before the turn."))
 
-	if _, err := headlessadapter.RunOnce(ctx, stack.Gateway, appgateway.BeginTurnRequest{
-		SessionRef: session.SessionRef,
+	if _, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
 		Input:      "continue after app auto compact",
 		Surface:    "headless-auto-compact-test",
-	}, headlessadapter.Options{}); err != nil {
+	}, headless.Options{}); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got == 0 {
 		t.Fatal("expected app default runtime to invoke compaction")
 	}
-	loaded, err := stack.Sessions.LoadSession(ctx, sdksession.LoadSessionRequest{SessionRef: session.SessionRef})
+	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -604,12 +604,12 @@ func TestLocalStackDefaultRuntimeAutoCompactionEnabled(t *testing.T) {
 	if !ok {
 		t.Fatal("missing compact event after auto compact")
 	}
-	data, ok := sdkcompact.CompactEventDataFromEvent(compactEvent)
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
 	if !ok || data.SourceEventCount == 0 {
 		t.Fatalf("auto compact event missing compact metadata: meta=%+v", compactEvent.Meta)
 	}
-	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
-	if len(promptEvents) == 0 || strings.TrimSpace(sdksession.EventText(promptEvents[0])) == "" {
+	promptEvents := compact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || strings.TrimSpace(session.EventText(promptEvents[0])) == "" {
 		t.Fatalf("auto compact prompt overlay missing checkpoint text: %+v", promptEvents)
 	}
 }
@@ -626,10 +626,10 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 		PermissionMode: "auto-review",
 		ContextWindow:  4096,
 		SystemPrompt:   strings.Repeat("stable prompt prefix token. ", 600),
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
-			API:        sdkproviders.APIOllama,
+			API:        providers.APIOllama,
 			Model:      "compact-test",
 			BaseURL:    server.URL,
 			HTTPClient: server.Client(),
@@ -638,17 +638,17 @@ func TestLocalStackAutoCompactCountsPromptPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "auto compact prefix session", "surface-auto-compact-prefix")
+	activeSession, err := stack.StartSession(ctx, "auto compact prefix session", "surface-auto-compact-prefix")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Short durable event."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Short durable event."))
 
-	if _, err := headlessadapter.RunOnce(ctx, stack.Gateway, appgateway.BeginTurnRequest{
-		SessionRef: session.SessionRef,
+	if _, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
 		Input:      "continue after prefix pressure",
 		Surface:    "headless-auto-compact-prefix-test",
-	}, headlessadapter.Options{}); err != nil {
+	}, headless.Options{}); err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got == 0 {
@@ -667,10 +667,10 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "auto-review",
 		ContextWindow:  4096,
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider:   "ollama",
-			API:        sdkproviders.APIOllama,
+			API:        providers.APIOllama,
 			Model:      "compact-test",
 			BaseURL:    server.URL,
 			HTTPClient: server.Client(),
@@ -679,23 +679,23 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "manual compact session", "surface-manual-compact")
+	activeSession, err := stack.StartSession(ctx, "manual compact session", "surface-manual-compact")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Project objective: manual compact must preserve context with checkpoint overlay."))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppAssistantEvent("ack"))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Current blocker: a bare manual compact event truncates all prior prompt-visible history."))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppAssistantEvent("ack"))
-	appendGatewayAppEvent(t, stack, session.SessionRef, gatewayAppUserEvent("Next action: force the runtime compactor with trigger manual."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Project objective: manual compact must preserve context with checkpoint overlay."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Current blocker: a bare manual compact event truncates all prior prompt-visible history."))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppAssistantEvent("ack"))
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, gatewayAppUserEvent("Next action: force the runtime compactor with trigger manual."))
 
-	if err := stack.CompactSession(ctx, session.SessionRef); err != nil {
+	if err := stack.CompactSession(ctx, activeSession.SessionRef); err != nil {
 		t.Fatalf("CompactSession() error = %v", err)
 	}
 	if got := server.compactionCalls.Load(); got != 1 {
 		t.Fatalf("compactionCalls = %d, want 1", got)
 	}
-	loaded, err := stack.Sessions.LoadSession(ctx, sdksession.LoadSessionRequest{SessionRef: session.SessionRef})
+	loaded, err := stack.Sessions.LoadSession(ctx, session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
@@ -703,7 +703,7 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if !ok {
 		t.Fatal("missing compact event after manual compact")
 	}
-	data, ok := sdkcompact.CompactEventDataFromEvent(compactEvent)
+	data, ok := compact.CompactEventDataFromEvent(compactEvent)
 	if !ok {
 		t.Fatalf("manual compact event missing structured metadata: meta=%+v", compactEvent.Meta)
 	}
@@ -713,8 +713,8 @@ func TestLocalStackManualCompactUsesStructuredRuntimeCompaction(t *testing.T) {
 	if data.SourceEventCount == 0 {
 		t.Fatalf("manual compact source event count = %d, want > 0", data.SourceEventCount)
 	}
-	promptEvents := sdkcompact.PromptEventsFromLatestCompact(loaded.Events)
-	if len(promptEvents) == 0 || strings.TrimSpace(sdksession.EventText(promptEvents[0])) == "" {
+	promptEvents := compact.PromptEventsFromLatestCompact(loaded.Events)
+	if len(promptEvents) == 0 || strings.TrimSpace(session.EventText(promptEvents[0])) == "" {
 		t.Fatalf("manual compact prompt overlay missing checkpoint text: %+v", promptEvents)
 	}
 }
@@ -731,7 +731,7 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 		SystemPrompt:   strings.Repeat("count this stable prefix instruction. ", 2000),
 		Model: ModelConfig{
 			Provider:            "ollama",
-			API:                 sdkproviders.APIOllama,
+			API:                 providers.APIOllama,
 			Model:               "llama3",
 			ContextWindowTokens: 1000000,
 		},
@@ -739,35 +739,35 @@ func TestSessionUsageSnapshotKeepsPromptPrefixVisibleAfterCompact(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(ctx, "compact usage prefix session", "surface-compact-usage-prefix")
+	activeSession, err := stack.StartSession(ctx, "compact usage prefix session", "surface-compact-usage-prefix")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	compactMessage := sdkmodel.NewTextMessage(sdkmodel.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
-	appendGatewayAppEvent(t, stack, session.SessionRef, &sdksession.Event{
-		Type:       sdksession.EventTypeCompact,
-		Visibility: sdksession.VisibilityCanonical,
+	compactMessage := model.NewTextMessage(model.RoleUser, "CONTEXT CHECKPOINT\nObjective: compacted baseline")
+	appendGatewayAppEvent(t, stack, activeSession.SessionRef, &session.Event{
+		Type:       session.EventTypeCompact,
+		Visibility: session.VisibilityCanonical,
 		Message:    &compactMessage,
 		Text:       compactMessage.TextContent(),
-		Protocol: &sdksession.EventProtocol{
-			Method: sdksession.ProtocolMethodContextCheckpoint,
-			Update: &sdksession.ProtocolUpdate{
+		Protocol: &session.EventProtocol{
+			Method: session.ProtocolMethodContextCheckpoint,
+			Update: &session.ProtocolUpdate{
 				SessionUpdate: "compact",
-				Content:       sdksession.ProtocolTextContent(compactMessage.TextContent()),
+				Content:       session.ProtocolTextContent(compactMessage.TextContent()),
 			},
 		},
 		Meta: map[string]any{
-			sdkcompact.MetaKeyCompact: sdkcompact.CompactEventDataValue(sdkcompact.CompactEventData{
-				ContractVersion: sdkcompact.CompactContractVersion,
+			compact.MetaKeyCompact: compact.CompactEventDataValue(compact.CompactEventData{
+				ContractVersion: compact.CompactContractVersion,
 			}),
 		},
 	})
 
-	usage, err := stack.SessionUsageSnapshot(ctx, session.SessionRef, "ollama/llama3")
+	usage, err := stack.SessionUsageSnapshot(ctx, activeSession.SessionRef, "ollama/llama3")
 	if err != nil {
 		t.Fatalf("SessionUsageSnapshot() error = %v", err)
 	}
-	if usage.Source != sdkcompact.UsageSourceEstimated {
+	if usage.Source != compact.UsageSourceEstimated {
 		t.Fatalf("usage source = %q, want estimated after compact without provider baseline", usage.Source)
 	}
 	if usage.EstimatedPrefixTokens < 5000 {
@@ -786,7 +786,7 @@ func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "codefree",
 			Model:    "GLM-5.1",
@@ -799,8 +799,8 @@ func TestNewLocalStackInfersCodeFreeAPIFromProvider(t *testing.T) {
 	if !ok {
 		t.Fatal("missing codefree model config")
 	}
-	if cfg.API != sdkproviders.APICodeFree {
-		t.Fatalf("codefree API = %q, want %q", cfg.API, sdkproviders.APICodeFree)
+	if cfg.API != providers.APICodeFree {
+		t.Fatalf("codefree API = %q, want %q", cfg.API, providers.APICodeFree)
 	}
 }
 
@@ -815,7 +815,7 @@ func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 	}
 }
 
-func newLocalStateTestStack(t *testing.T) (*Stack, sdksession.Session) {
+func newLocalStateTestStack(t *testing.T) (*Stack, session.Session) {
 	t.Helper()
 	root := t.TempDir()
 	workdir := t.TempDir()
@@ -826,21 +826,21 @@ func newLocalStateTestStack(t *testing.T) (*Stack, sdksession.Session) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 		Model: ModelConfig{
 			Provider: "ollama",
-			API:      sdkproviders.APIOllama,
+			API:      providers.APIOllama,
 			Model:    "llama3",
 		},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	session, err := stack.StartSession(context.Background(), "state-test-session", "surface-state-test")
+	activeSession, err := stack.StartSession(context.Background(), "state-test-session", "surface-state-test")
 	if err != nil {
 		t.Fatalf("StartSession() error = %v", err)
 	}
-	return stack, session
+	return stack, activeSession
 }
 
 type gatewayAppCompactionOllamaServer struct {
@@ -919,9 +919,9 @@ func gatewayAppOllamaMessages(messages []struct {
 	return strings.Join(parts, "\n")
 }
 
-func appendGatewayAppEvent(t *testing.T, stack *Stack, ref sdksession.SessionRef, event *sdksession.Event) {
+func appendGatewayAppEvent(t *testing.T, stack *Stack, ref session.SessionRef, event *session.Event) {
 	t.Helper()
-	if _, err := stack.Sessions.AppendEvent(context.Background(), sdksession.AppendEventRequest{
+	if _, err := stack.Sessions.AppendEvent(context.Background(), session.AppendEventRequest{
 		SessionRef: ref,
 		Event:      event,
 	}); err != nil {
@@ -929,29 +929,29 @@ func appendGatewayAppEvent(t *testing.T, stack *Stack, ref sdksession.SessionRef
 	}
 }
 
-func gatewayAppUserEvent(text string) *sdksession.Event {
-	message := sdkmodel.NewTextMessage(sdkmodel.RoleUser, text)
-	return &sdksession.Event{
-		Type:       sdksession.EventTypeUser,
-		Visibility: sdksession.VisibilityCanonical,
+func gatewayAppUserEvent(text string) *session.Event {
+	message := model.NewTextMessage(model.RoleUser, text)
+	return &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
 		Message:    &message,
 		Text:       strings.TrimSpace(text),
 	}
 }
 
-func gatewayAppAssistantEvent(text string) *sdksession.Event {
-	message := sdkmodel.NewTextMessage(sdkmodel.RoleAssistant, text)
-	return &sdksession.Event{
-		Type:       sdksession.EventTypeAssistant,
-		Visibility: sdksession.VisibilityCanonical,
+func gatewayAppAssistantEvent(text string) *session.Event {
+	message := model.NewTextMessage(model.RoleAssistant, text)
+	return &session.Event{
+		Type:       session.EventTypeAssistant,
+		Visibility: session.VisibilityCanonical,
 		Message:    &message,
 		Text:       strings.TrimSpace(text),
 	}
 }
 
-func latestGatewayAppCompactEvent(events []*sdksession.Event) (*sdksession.Event, bool) {
+func latestGatewayAppCompactEvent(events []*session.Event) (*session.Event, bool) {
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i] != nil && events[i].Type == sdksession.EventTypeCompact {
+		if events[i] != nil && events[i].Type == session.EventTypeCompact {
 			return events[i], true
 		}
 	}

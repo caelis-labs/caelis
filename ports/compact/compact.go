@@ -1,0 +1,309 @@
+package compact
+
+import (
+	"context"
+	"encoding/json"
+	"strings"
+
+	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+)
+
+const (
+	MetaKeyCompact         = "compact"
+	CompactContractVersion = 1
+)
+
+type UsageSource string
+
+const (
+	UsageSourceProvider  UsageSource = "provider"
+	UsageSourceEstimated UsageSource = "estimated"
+)
+
+// UsageSnapshot captures the best-known prompt-budget view before one turn.
+type UsageSnapshot struct {
+	TotalTokens           int         `json:"total_tokens,omitempty"`
+	ContextWindowTokens   int         `json:"context_window_tokens,omitempty"`
+	EffectiveInputBudget  int         `json:"effective_input_budget,omitempty"`
+	EstimatedDeltaTokens  int         `json:"estimated_delta_tokens,omitempty"`
+	EstimatedPrefixTokens int         `json:"estimated_prefix_tokens,omitempty"`
+	Source                UsageSource `json:"source,omitempty"`
+	AsOfEventID           string      `json:"as_of_event_id,omitempty"`
+}
+
+type Request struct {
+	Session       session.Session
+	SessionRef    session.SessionRef
+	Events        []*session.Event
+	PendingEvents []*session.Event
+	Model         model.LLM
+}
+
+type Result struct {
+	Compacted    bool
+	CompactText  string
+	CompactEvent *session.Event
+	PromptEvents []*session.Event
+	Usage        UsageSnapshot
+}
+
+type TriggerDecision struct {
+	ShouldCompact bool
+	Reason        string
+}
+
+type Engine interface {
+	Prepare(context.Context, Request) (Result, error)
+	CompactOnOverflow(context.Context, Request, error) (Result, error)
+}
+
+type ForceEngine interface {
+	Force(context.Context, Request, string) (Result, error)
+}
+
+type CompactEventData struct {
+	Revision            int    `json:"revision,omitempty"`
+	ContractVersion     int    `json:"contract_version,omitempty"`
+	SummarizedThroughID string `json:"summarized_through_id,omitempty"`
+	Generator           string `json:"generator,omitempty"`
+	Trigger             string `json:"trigger,omitempty"`
+	SourceEventCount    int    `json:"source_event_count,omitempty"`
+	TotalTokens         int    `json:"total_tokens,omitempty"`
+	ContextWindowTokens int    `json:"context_window_tokens,omitempty"`
+}
+
+type ContextWindowProvider interface {
+	ContextWindowTokens() int
+}
+
+func IsCompactEvent(event *session.Event) bool {
+	if event == nil {
+		return false
+	}
+	if event.Type == session.EventTypeCompact {
+		return true
+	}
+	if event.Meta == nil {
+		return false
+	}
+	_, ok := event.Meta[MetaKeyCompact]
+	return ok
+}
+
+func CompactEventDataFromEvent(event *session.Event) (CompactEventData, bool) {
+	if event == nil || event.Meta == nil {
+		return CompactEventData{}, false
+	}
+	raw, ok := event.Meta[MetaKeyCompact]
+	if !ok {
+		return CompactEventData{}, false
+	}
+	switch typed := raw.(type) {
+	case CompactEventData:
+		return normalizeCompactEventData(typed), true
+	case map[string]any:
+		var out CompactEventData
+		buf, _ := json.Marshal(typed)
+		_ = json.Unmarshal(buf, &out)
+		return normalizeCompactEventData(out), true
+	default:
+		return CompactEventData{}, false
+	}
+}
+
+func CompactEventDataValue(in CompactEventData) map[string]any {
+	in = normalizeCompactEventData(in)
+	buf, _ := json.Marshal(in)
+	out := map[string]any{}
+	_ = json.Unmarshal(buf, &out)
+	if len(out) == 0 {
+		return map[string]any{}
+	}
+	return out
+}
+
+func normalizeCompactEventData(in CompactEventData) CompactEventData {
+	in.SummarizedThroughID = strings.TrimSpace(in.SummarizedThroughID)
+	in.Generator = strings.TrimSpace(in.Generator)
+	in.Trigger = strings.TrimSpace(in.Trigger)
+	if in.ContractVersion < 0 {
+		in.ContractVersion = 0
+	}
+	if in.SourceEventCount < 0 {
+		in.SourceEventCount = 0
+	}
+	return in
+}
+
+func PromptEventsFromLatestCompact(events []*session.Event) []*session.Event {
+	visible := filterPromptVisibleEvents(events)
+	if len(visible) == 0 {
+		return nil
+	}
+	index := lastCompactIndex(visible)
+	if index < 0 {
+		return session.CloneEvents(visible)
+	}
+	if _, ok := CompactEventDataFromEvent(visible[index]); ok {
+		out := make([]*session.Event, 0, len(visible[index:]))
+		if legacy := legacyPromptEventsFromCompactEvent(visible[index]); len(legacy) > 0 {
+			out = append(out, legacy...)
+		} else {
+			if replacement := replacementTextEvent(session.EventText(visible[index])); replacement != nil {
+				out = append(out, replacement)
+			}
+		}
+		for _, event := range visible[index+1:] {
+			out = append(out, session.CloneEvent(event))
+		}
+		return out
+	}
+	return session.CloneEvents(visible[index:])
+}
+
+func LatestCompactEvent(events []*session.Event) (*session.Event, CompactEventData, bool) {
+	visible := filterPromptVisibleEvents(events)
+	if len(visible) == 0 {
+		return nil, CompactEventData{}, false
+	}
+	index := lastCompactIndex(visible)
+	if index < 0 {
+		return nil, CompactEventData{}, false
+	}
+	data, _ := CompactEventDataFromEvent(visible[index])
+	return session.CloneEvent(visible[index]), data, true
+}
+
+func filterPromptVisibleEvents(events []*session.Event) []*session.Event {
+	out := make([]*session.Event, 0, len(events))
+	for _, event := range events {
+		if !session.IsInvocationVisibleEvent(event) {
+			continue
+		}
+		out = append(out, session.CloneEvent(event))
+	}
+	return out
+}
+
+func lastCompactIndex(events []*session.Event) int {
+	for i := len(events) - 1; i >= 0; i-- {
+		if IsCompactEvent(events[i]) {
+			return i
+		}
+	}
+	return -1
+}
+
+func legacyPromptEventsFromCompactEvent(event *session.Event) []*session.Event {
+	if event == nil || event.Meta == nil {
+		return nil
+	}
+	raw, ok := event.Meta[MetaKeyCompact]
+	if !ok {
+		return nil
+	}
+	meta := compactMetaMap(raw)
+	if len(meta) == 0 {
+		return nil
+	}
+	if out := legacyReplacementHistoryEvents(meta["replacement_history"]); len(out) > 0 {
+		return out
+	}
+	retained := legacyRetainedUserInputs(meta["retained_user_inputs"])
+	if len(retained) == 0 {
+		return nil
+	}
+	out := make([]*session.Event, 0, len(retained)+1)
+	for _, text := range retained {
+		if replacement := replacementTextEvent(text); replacement != nil {
+			out = append(out, replacement)
+		}
+	}
+	if replacement := replacementTextEvent(session.EventText(event)); replacement != nil {
+		out = append(out, replacement)
+	}
+	return out
+}
+
+func compactMetaMap(raw any) map[string]any {
+	switch typed := raw.(type) {
+	case map[string]any:
+		return typed
+	default:
+		buf, err := json.Marshal(raw)
+		if err != nil {
+			return nil
+		}
+		out := map[string]any{}
+		if err := json.Unmarshal(buf, &out); err != nil {
+			return nil
+		}
+		return out
+	}
+}
+
+func legacyReplacementHistoryEvents(raw any) []*session.Event {
+	if raw == nil {
+		return nil
+	}
+	buf, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var decoded []*session.Event
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return nil
+	}
+	out := make([]*session.Event, 0, len(decoded))
+	for _, event := range decoded {
+		if event == nil || !session.IsInvocationVisibleEvent(event) {
+			continue
+		}
+		if replacement := replacementTextEvent(session.EventText(event)); replacement != nil {
+			out = append(out, replacement)
+		}
+	}
+	return out
+}
+
+func legacyRetainedUserInputs(raw any) []string {
+	if raw == nil {
+		return nil
+	}
+	buf, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var decoded []string
+	if err := json.Unmarshal(buf, &decoded); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(decoded))
+	seen := map[string]struct{}{}
+	for _, item := range decoded {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func replacementTextEvent(text string) *session.Event {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	return &session.Event{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityOverlay,
+		Actor:      session.ActorRef{Kind: session.ActorKindUser, Name: "user"},
+		Text:       text,
+	}
+}

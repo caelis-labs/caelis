@@ -9,12 +9,12 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/internal/version"
-	gatewaydriverlocal "github.com/OnslaughtSnail/caelis/tui/gatewaydriver/local"
-	tuiapp "github.com/OnslaughtSnail/caelis/tui/tuiapp"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/app"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver/local"
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
-	driver, err := gatewaydriverlocal.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
+	driver, err := local.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
 	}

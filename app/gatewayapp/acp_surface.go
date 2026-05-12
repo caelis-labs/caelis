@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/acp"
-	modelcatalog "github.com/OnslaughtSnail/caelis/sdk/model/catalog"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
 const (
@@ -32,7 +32,7 @@ func newGatewayACPSurface(stack *Stack, fallbackModes acp.ModeProvider, useFallb
 	}
 }
 
-func (p gatewayACPSurface) SessionModes(ctx context.Context, session sdksession.Session) (*acp.SessionModeState, error) {
+func (p gatewayACPSurface) SessionModes(ctx context.Context, session session.Session) (*acp.SessionModeState, error) {
 	if p.useFallbackModes {
 		return p.fallbackModes.SessionModes(ctx, session)
 	}
@@ -66,7 +66,7 @@ func (p gatewayACPSurface) SetSessionMode(ctx context.Context, req acp.SetSessio
 	return acp.SetSessionModeResponse{}, err
 }
 
-func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session sdksession.Session) ([]acp.SessionConfigOption, error) {
+func (p gatewayACPSurface) SessionConfigOptions(ctx context.Context, session session.Session) ([]acp.SessionConfigOption, error) {
 	options := []acp.SessionConfigOption{}
 	modeOption, err := p.modeConfigOption(ctx, session)
 	if err != nil {
@@ -152,7 +152,7 @@ func (p gatewayACPSurface) SetSessionConfigOption(ctx context.Context, req acp.S
 	return acp.SetSessionConfigOptionResponse{ConfigOptions: options}, nil
 }
 
-func (p gatewayACPSurface) SessionModels(ctx context.Context, session sdksession.Session) (*acp.SessionModelState, error) {
+func (p gatewayACPSurface) SessionModels(ctx context.Context, session session.Session) (*acp.SessionModelState, error) {
 	snapshot := p.modelSnapshot()
 	if len(snapshot.Configs) == 0 {
 		return nil, nil
@@ -212,7 +212,7 @@ func (p gatewayACPSurface) AvailableCommands(context.Context, string) ([]acp.Ava
 	}, nil
 }
 
-func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session sdksession.Session) (acp.SessionConfigOption, error) {
+func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session session.Session) (acp.SessionConfigOption, error) {
 	modes, err := p.SessionModes(ctx, session)
 	if err != nil {
 		return acp.SessionConfigOption{}, err
@@ -231,7 +231,7 @@ func (p gatewayACPSurface) modeConfigOption(ctx context.Context, session sdksess
 	}, nil
 }
 
-func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session sdksession.Session) ([]acp.SessionConfigOption, error) {
+func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session session.Session) ([]acp.SessionConfigOption, error) {
 	snapshot := p.modelSnapshot()
 	if len(snapshot.Configs) == 0 {
 		return nil, nil
@@ -267,7 +267,7 @@ func (p gatewayACPSurface) modelConfigOptions(ctx context.Context, session sdkse
 	return options, nil
 }
 
-func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session sdksession.Session) (string, ModelConfig, bool, error) {
+func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session session.Session) (string, ModelConfig, bool, error) {
 	snapshot := p.modelSnapshot()
 	if len(snapshot.Configs) == 0 {
 		return "", ModelConfig{}, false, nil
@@ -284,7 +284,7 @@ func (p gatewayACPSurface) currentModelConfig(ctx context.Context, session sdkse
 	return cfg.ID, cfg, true, nil
 }
 
-func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session sdksession.Session, cfg ModelConfig, levels []string) string {
+func (p gatewayACPSurface) currentReasoningEffort(ctx context.Context, session session.Session, cfg ModelConfig, levels []string) string {
 	state, err := p.stack.SessionRuntimeState(ctx, session.SessionRef)
 	if err == nil {
 		if value := modelcatalog.NormalizeReasoningEffort(state.ReasoningEffort); value != "" {
@@ -321,25 +321,25 @@ func (p gatewayACPSurface) setSessionModel(ctx context.Context, sessionID string
 	return p.stack.UseModel(ctx, p.sessionRef(sessionID), alias, reasoning)
 }
 
-func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (sdksession.Session, error) {
+func (p gatewayACPSurface) session(ctx context.Context, sessionID string) (session.Session, error) {
 	if p.stack == nil || p.stack.Sessions == nil {
-		return sdksession.Session{}, fmt.Errorf("gatewayapp: sessions service unavailable")
+		return session.Session{}, fmt.Errorf("gatewayapp: sessions service unavailable")
 	}
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
-		return sdksession.Session{}, fmt.Errorf("gatewayapp: session id is required")
+		return session.Session{}, fmt.Errorf("gatewayapp: session id is required")
 	}
 	return p.stack.Sessions.Session(ctx, p.sessionRef(sessionID))
 }
 
-func (p gatewayACPSurface) sessionRef(sessionID string) sdksession.SessionRef {
+func (p gatewayACPSurface) sessionRef(sessionID string) session.SessionRef {
 	appName := "caelis"
 	userID := "acp"
 	if p.stack != nil {
 		appName = firstNonEmpty(strings.TrimSpace(p.stack.AppName), appName)
 		userID = firstNonEmpty(strings.TrimSpace(p.stack.UserID), userID)
 	}
-	return sdksession.SessionRef{
+	return session.SessionRef{
 		AppName:   appName,
 		UserID:    userID,
 		SessionID: strings.TrimSpace(sessionID),

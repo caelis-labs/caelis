@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	sdkproviders "github.com/OnslaughtSnail/caelis/sdk/model/providers"
-	sdkplugin "github.com/OnslaughtSnail/caelis/sdk/plugin"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
 )
 
 func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
@@ -22,7 +22,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
@@ -33,7 +33,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	}
 	alias, err := stack.Connect(ModelConfig{
 		Provider: "minimax",
-		API:      sdkproviders.APIAnthropicCompatible,
+		API:      providers.APIAnthropicCompatible,
 		Model:    "MiniMax-M1",
 		Token:    "super-secret-token",
 	})
@@ -54,7 +54,7 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 		WorkspaceKey:   workdir,
 		WorkspaceCWD:   workdir,
 		PermissionMode: "auto-review",
-		Assembly:       sdkplugin.ResolvedAssembly{},
+		Assembly:       assembly.ResolvedAssembly{},
 	})
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
@@ -104,7 +104,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			name: "env token",
 			cfg: ModelConfig{
 				Provider: "deepseek",
-				API:      sdkproviders.APIDeepSeek,
+				API:      providers.APIDeepSeek,
 				Model:    "deepseek-v4-pro",
 				TokenEnv: "CAELIS_DOCTOR_TOKEN",
 			},
@@ -116,7 +116,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			name: "memory token",
 			cfg: ModelConfig{
 				Provider: "deepseek",
-				API:      sdkproviders.APIDeepSeek,
+				API:      providers.APIDeepSeek,
 				Model:    "deepseek-v4-pro",
 				Token:    "memory-secret",
 			},
@@ -127,7 +127,7 @@ func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 			name: "missing token",
 			cfg: ModelConfig{
 				Provider: "deepseek",
-				API:      sdkproviders.APIDeepSeek,
+				API:      providers.APIDeepSeek,
 				Model:    "deepseek-v4-pro",
 				TokenEnv: "CAELIS_DOCTOR_TOKEN_MISSING",
 			},

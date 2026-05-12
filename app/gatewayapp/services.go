@@ -3,10 +3,11 @@ package gatewayapp
 import (
 	"context"
 
-	"github.com/OnslaughtSnail/caelis/acp"
-	sdkcompact "github.com/OnslaughtSnail/caelis/sdk/compact"
-	sdkcontroller "github.com/OnslaughtSnail/caelis/sdk/controller"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/compact"
+	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
 type ModelService struct {
@@ -39,23 +40,34 @@ func (s *Stack) ACPSurface(modes acp.ModeProvider, useFallbackModes bool, config
 	return newGatewayACPSurface(s, modes, useFallbackModes, configs)
 }
 
+func (s *Stack) Kernel() kernel.Service {
+	if s == nil {
+		return nil
+	}
+	gateway := s.CurrentGateway()
+	if gateway == nil {
+		return nil
+	}
+	return gateway
+}
+
 func (s ModelService) Connect(cfg ModelConfig) (string, error) {
 	return s.stack.Connect(cfg)
 }
 
-func (s ModelService) Use(ctx context.Context, ref sdksession.SessionRef, alias string, reasoningEffort ...string) error {
+func (s ModelService) Use(ctx context.Context, ref session.SessionRef, alias string, reasoningEffort ...string) error {
 	return s.stack.UseModel(ctx, ref, alias, reasoningEffort...)
 }
 
-func (s ModelService) Delete(ctx context.Context, ref sdksession.SessionRef, alias string) error {
+func (s ModelService) Delete(ctx context.Context, ref session.SessionRef, alias string) error {
 	return s.stack.DeleteModel(ctx, ref, alias)
 }
 
-func (s ModelService) ListAliases(ctx context.Context, ref sdksession.SessionRef) ([]string, error) {
+func (s ModelService) ListAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
 	return s.stack.ListModelAliases(ctx, ref)
 }
 
-func (s ModelService) ListChoices(ctx context.Context, ref sdksession.SessionRef) ([]ModelChoice, error) {
+func (s ModelService) ListChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
 	return s.stack.ListModelChoices(ctx, ref)
 }
 
@@ -79,19 +91,19 @@ func (s ModelService) ListProviderModels(provider string) []string {
 	return s.stack.ListProviderModels(provider)
 }
 
-func (s ModelService) UsageSnapshot(ctx context.Context, ref sdksession.SessionRef, modelAlias string) (sdkcompact.UsageSnapshot, error) {
+func (s ModelService) UsageSnapshot(ctx context.Context, ref session.SessionRef, modelAlias string) (compact.UsageSnapshot, error) {
 	return s.stack.SessionUsageSnapshot(ctx, ref, modelAlias)
 }
 
-func (s AgentService) ControllerStatus(ctx context.Context, ref sdksession.SessionRef) (sdkcontroller.ControllerStatus, bool, error) {
+func (s AgentService) ControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
 	return s.stack.ACPControllerStatus(ctx, ref)
 }
 
-func (s AgentService) SetControllerModel(ctx context.Context, ref sdksession.SessionRef, model string, reasoningEffort string) (sdkcontroller.ControllerStatus, error) {
+func (s AgentService) SetControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoningEffort string) (controller.ControllerStatus, error) {
 	return s.stack.SetACPControllerModel(ctx, ref, model, reasoningEffort)
 }
 
-func (s AgentService) SetControllerMode(ctx context.Context, ref sdksession.SessionRef, mode string) (sdkcontroller.ControllerStatus, error) {
+func (s AgentService) SetControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
 	return s.stack.SetACPControllerMode(ctx, ref, mode)
 }
 
@@ -131,14 +143,14 @@ func (s StatusService) SetSandboxBackend(ctx context.Context, backend string) (S
 	return s.stack.SetSandboxBackend(ctx, backend)
 }
 
-func (s StatusService) SessionRuntimeState(ctx context.Context, ref sdksession.SessionRef) (SessionRuntimeState, error) {
+func (s StatusService) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 	return s.stack.SessionRuntimeState(ctx, ref)
 }
 
-func (s StatusService) SetSessionMode(ctx context.Context, ref sdksession.SessionRef, mode string) (string, error) {
+func (s StatusService) SetSessionMode(ctx context.Context, ref session.SessionRef, mode string) (string, error) {
 	return s.stack.SetSessionMode(ctx, ref, mode)
 }
 
-func (s StatusService) CycleSessionMode(ctx context.Context, ref sdksession.SessionRef) (string, error) {
+func (s StatusService) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
 	return s.stack.CycleSessionMode(ctx, ref)
 }

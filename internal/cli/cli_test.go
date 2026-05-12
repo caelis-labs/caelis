@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/gateway"
-	sdksession "github.com/OnslaughtSnail/caelis/sdk/session"
+	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestResolveInputFromPrompt(t *testing.T) {
@@ -104,18 +104,18 @@ func cliTestStoreDir(t *testing.T) string {
 }
 
 func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	handle := newFakeHandle([]kernel.EventEnvelope{
 		{
-			Event: gateway.Event{
-				Kind:            gateway.EventKindApprovalRequested,
-				ApprovalPayload: &gateway.ApprovalPayload{Status: gateway.ApprovalStatusPending},
+			Event: kernel.Event{
+				Kind:            kernel.EventKindApprovalRequested,
+				ApprovalPayload: &kernel.ApprovalPayload{Status: kernel.ApprovalStatusPending},
 			},
 		},
 		{
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
+			Event: kernel.Event{
+				Kind: kernel.EventKindAssistantMessage,
+				Narrative: &kernel.NarrativePayload{
+					Role:  kernel.NarrativeRoleAssistant,
 					Text:  "interactive ok",
 					Final: true,
 				},
@@ -139,22 +139,22 @@ func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
 }
 
 func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
-	handle := newFakeHandle([]gateway.EventEnvelope{
+	handle := newFakeHandle([]kernel.EventEnvelope{
 		{
-			Event: gateway.Event{
-				Kind: gateway.EventKindApprovalReview,
-				ApprovalPayload: &gateway.ApprovalPayload{
-					Status:         gateway.ApprovalStatusPending,
-					ReviewStatus:   gateway.ApprovalReviewStatusInProgress,
+			Event: kernel.Event{
+				Kind: kernel.EventKindApprovalReview,
+				ApprovalPayload: &kernel.ApprovalPayload{
+					Status:         kernel.ApprovalStatusPending,
+					ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
 					DecisionSource: "auto-review",
 				},
 			},
 		},
 		{
-			Event: gateway.Event{
-				Kind: gateway.EventKindAssistantMessage,
-				Narrative: &gateway.NarrativePayload{
-					Role:  gateway.NarrativeRoleAssistant,
+			Event: kernel.Event{
+				Kind: kernel.EventKindAssistantMessage,
+				Narrative: &kernel.NarrativePayload{
+					Role:  kernel.NarrativeRoleAssistant,
 					Text:  "interactive ok",
 					Final: true,
 				},
@@ -252,14 +252,14 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 }
 
 type fakeHandle struct {
-	events    chan gateway.EventEnvelope
-	submits   []gateway.SubmitRequest
+	events    chan kernel.EventEnvelope
+	submits   []kernel.SubmitRequest
 	closed    bool
 	cancelled bool
 }
 
-func newFakeHandle(events []gateway.EventEnvelope) *fakeHandle {
-	ch := make(chan gateway.EventEnvelope, len(events))
+func newFakeHandle(events []kernel.EventEnvelope) *fakeHandle {
+	ch := make(chan kernel.EventEnvelope, len(events))
 	for _, event := range events {
 		ch <- event
 	}
@@ -270,23 +270,23 @@ func newFakeHandle(events []gateway.EventEnvelope) *fakeHandle {
 func (h *fakeHandle) HandleID() string { return "h1" }
 func (h *fakeHandle) RunID() string    { return "r1" }
 func (h *fakeHandle) TurnID() string   { return "t1" }
-func (h *fakeHandle) SessionRef() sdksession.SessionRef {
-	return sdksession.SessionRef{SessionID: "s1"}
+func (h *fakeHandle) SessionRef() session.SessionRef {
+	return session.SessionRef{SessionID: "s1"}
 }
 func (h *fakeHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *fakeHandle) Events() <-chan gateway.EventEnvelope {
+func (h *fakeHandle) Events() <-chan kernel.EventEnvelope {
 	return h.events
 }
-func (h *fakeHandle) EventsAfter(string) ([]gateway.EventEnvelope, string, error) {
+func (h *fakeHandle) EventsAfter(string) ([]kernel.EventEnvelope, string, error) {
 	return nil, "", nil
 }
-func (h *fakeHandle) Submit(_ context.Context, req gateway.SubmitRequest) error {
+func (h *fakeHandle) Submit(_ context.Context, req kernel.SubmitRequest) error {
 	h.submits = append(h.submits, req)
 	return nil
 }
-func (h *fakeHandle) Cancel() gateway.CancelResult {
+func (h *fakeHandle) Cancel() kernel.CancelResult {
 	h.cancelled = true
-	return gateway.CancelResult{Status: gateway.CancelStatusCancelled}
+	return kernel.CancelResult{Status: kernel.CancelStatusCancelled}
 }
 func (h *fakeHandle) Close() error {
 	h.closed = true
