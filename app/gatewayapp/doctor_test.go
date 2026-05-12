@@ -92,6 +92,36 @@ func TestDoctorReportFlagsMissingAPIKeyAfterRedactedPersistence(t *testing.T) {
 	}
 }
 
+func TestDoctorReportUsesConfiguredModeWithoutSession(t *testing.T) {
+	ctx := context.Background()
+	root := t.TempDir()
+	workdir := t.TempDir()
+
+	stack, err := newGatewayAppTestStack(t, Config{
+		AppName:        "caelis",
+		UserID:         "doctor-test",
+		StoreDir:       root,
+		WorkspaceKey:   workdir,
+		WorkspaceCWD:   workdir,
+		PermissionMode: "manual",
+		Assembly:       assembly.ResolvedAssembly{},
+	})
+	if err != nil {
+		t.Fatalf("NewLocalStack() error = %v", err)
+	}
+
+	report, err := stack.Doctor(ctx, DoctorRequest{})
+	if err != nil {
+		t.Fatalf("Doctor() error = %v", err)
+	}
+	if report.SessionID != "" {
+		t.Fatalf("Doctor().SessionID = %q, want empty", report.SessionID)
+	}
+	if report.SessionMode != "manual" {
+		t.Fatalf("Doctor().SessionMode = %q, want manual", report.SessionMode)
+	}
+}
+
 func TestDoctorReportTableDrivenTokenSourceAndLeakSafety(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -81,6 +82,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		doctor           = fs.Bool("doctor", false, "Print runtime/session/sandbox diagnostics and exit")
 	)
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
 		return err
 	}
 	if len(fs.Args()) > 0 {

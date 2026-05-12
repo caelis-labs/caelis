@@ -80,7 +80,9 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 
 	ref := s.resolveDoctorSessionRef(ctx, req)
 	report.SessionID = strings.TrimSpace(ref.SessionID)
-	report.SessionMode = "auto-review"
+	s.mu.RLock()
+	report.SessionMode = policyMode(s.runtime.PermissionMode)
+	s.mu.RUnlock()
 	alias := ""
 	modelRef := ""
 	if strings.TrimSpace(ref.SessionID) != "" {

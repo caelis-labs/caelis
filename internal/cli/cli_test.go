@@ -67,6 +67,23 @@ func TestParseOutputFormat(t *testing.T) {
 	}
 }
 
+func TestRunHelpReturnsNil(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := run(context.Background(), []string{"-h"}, strings.NewReader(""), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("run(-h) error = %v, want nil", err)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	if got := stderr.String(); !strings.Contains(got, "Usage of caelis:") ||
+		!strings.Contains(got, "Permission mode: auto-review|manual") {
+		t.Fatalf("stderr = %q, want help usage with permission mode", got)
+	}
+}
+
 func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {

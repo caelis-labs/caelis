@@ -103,7 +103,7 @@ Common flags:
 - `-format`: `text` or `json` for headless output
 - `-interactive`: force the TUI path even when stdin is piped
 - `-session`, `-store-dir`, `-workspace-key`, `-workspace-cwd`
-- `-permission-mode`: `default` or `full_control`
+- `-permission-mode`: `auto-review` or `manual`
 - `-provider`, `-api`, `-model`, `-base-url`, `-token`, `-token-env`
 - `-auth-type`, `-header-key`
 - `-model-alias`, `-context-window`, `-max-output-tokens`
@@ -116,7 +116,7 @@ Interactive TUI:
 caelis \
   -provider openai \
   -model gpt-5 \
-  -permission-mode default
+  -permission-mode auto-review
 ```
 
 Headless single-shot:
@@ -125,7 +125,7 @@ Headless single-shot:
 caelis \
   -provider openai \
   -model gpt-5 \
-  -permission-mode default \
+  -permission-mode auto-review \
   -p "Summarize the repository layout."
 ```
 
@@ -187,11 +187,10 @@ Notes:
 
 `caelis` exposes one CLI permission switch:
 
-- `-permission-mode default`: use the local sandbox runtime when available and
-  require approval for host escalation.
-- `-permission-mode full_control`: accepted compatibility mode for permissive
-  review policy; actual execution route still depends on sandbox backend
-  resolution and is reflected by `/status` and `caelis doctor`.
+- `-permission-mode auto-review`: use model-backed approval review for
+  sensitive requests when the sandbox route requires escalation.
+- `-permission-mode manual`: require an explicit user decision for sensitive
+  requests.
 
 Sandbox backend selection is resolved by the local runtime. The TUI exposes
 `/sandbox [auto|seatbelt|bwrap|landlock]` for inspection and selection. Sandbox
