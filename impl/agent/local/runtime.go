@@ -886,30 +886,90 @@ func (r *Runtime) handlePlanEvent(
 }
 
 func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
-	if event == nil || event.Message == nil {
+	if event == nil {
 		return nil, "", false
 	}
-	results := event.Message.ToolResults()
-	if len(results) == 0 {
-		return nil, "", false
-	}
-	result := results[0]
-	if !strings.EqualFold(strings.TrimSpace(result.Name), plan.ToolName) {
-		return nil, "", false
-	}
-	payload := map[string]any{}
-	if len(result.Content) > 0 && result.Content[0].Kind == model.PartKindJSON && result.Content[0].JSON != nil {
-		_ = json.Unmarshal(result.Content[0].JSONValue(), &payload)
-	}
-	rawEntries, _ := payload["entries"].([]any)
-	entries := make([]plan.Entry, 0, len(rawEntries))
-	for _, item := range rawEntries {
-		row, ok := item.(map[string]any)
-		if !ok {
-			continue
+	name := strings.TrimSpace(planToolNameFromEvent(event))
+	if name == "" && event.Message != nil {
+		if results := event.Message.ToolResults(); len(results) > 0 {
+			name = strings.TrimSpace(results[0].Name)
 		}
-		content, _ := row["content"].(string)
-		status, _ := row["status"].(string)
+	}
+	if !strings.EqualFold(name, plan.ToolName) {
+		return nil, "", false
+	}
+
+	payload := map[string]any{}
+	if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
+		payload = maps.Clone(update.RawOutput)
+	}
+	if len(payload) == 0 && event.Message != nil {
+		results := event.Message.ToolResults()
+		if len(results) == 0 {
+			return nil, "", false
+		}
+		result := results[0]
+		if len(result.Content) > 0 && result.Content[0].Kind == model.PartKindJSON && result.Content[0].JSON != nil {
+			_ = json.Unmarshal(result.Content[0].JSONValue(), &payload)
+		}
+	}
+	entries := planEntriesFromAny(payload["entries"])
+	return entries, strings.TrimSpace(stringValue(payload["explanation"])), true
+}
+
+func planToolNameFromEvent(event *session.Event) string {
+	if event == nil {
+		return ""
+	}
+	if name := nestedString(event.Meta, "caelis", "runtime", "tool", "name"); name != "" {
+		return name
+	}
+	if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
+			return name
+		}
+	}
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
+			return title[0]
+		}
+		return strings.TrimSpace(update.Kind)
+	}
+	return ""
+}
+
+func nestedString(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
+}
+
+func planEntriesFromAny(raw any) []plan.Entry {
+	if raw == nil {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var rows []struct {
+		Content string `json:"content"`
+		Status  string `json:"status"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil
+	}
+	entries := make([]plan.Entry, 0, len(rows))
+	for _, row := range rows {
+		content := row.Content
+		status := row.Status
 		content = strings.TrimSpace(content)
 		status = strings.TrimSpace(status)
 		if content == "" || status == "" {
@@ -920,7 +980,7 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 			Status:  plan.Status(status),
 		})
 	}
-	return entries, strings.TrimSpace(stringValue(payload["explanation"])), true
+	return entries
 }
 
 func entriesToProtocol(entries []plan.Entry) []session.ProtocolPlanEntry {
@@ -963,12 +1023,17 @@ func stringValue(value any) string {
 }
 
 func (r *Runtime) policyMode(spec agent.AgentSpec) string {
+	mode := strings.TrimSpace(r.defaultPolicyMode)
 	if raw, ok := spec.Metadata["policy_mode"].(string); ok {
-		if mode := strings.TrimSpace(raw); mode != "" {
-			return normalizePolicyMode(mode)
+		if trimmed := strings.TrimSpace(raw); trimmed != "" {
+			mode = trimmed
 		}
 	}
-	return normalizePolicyMode(r.defaultPolicyMode)
+	normalized := normalizePolicyMode(mode)
+	if boolMetadata(spec.Metadata, "sandbox_auto_review_disabled") && normalized == presets.ModeAutoReview {
+		return presets.ModeManual
+	}
+	return normalized
 }
 
 func normalizePolicyMode(mode string) string {
@@ -1020,6 +1085,25 @@ func stringSliceMetadata(meta map[string]any, key string) ([]string, bool) {
 		return out, true
 	default:
 		return nil, false
+	}
+}
+
+func boolMetadata(meta map[string]any, key string) bool {
+	if meta == nil {
+		return false
+	}
+	switch typed := meta[key].(type) {
+	case bool:
+		return typed
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	default:
+		return false
 	}
 }
 

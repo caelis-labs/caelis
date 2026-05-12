@@ -1026,8 +1026,12 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	}
 	if detail, ok := sandbox.SandboxPermissionDetail(result, resultErr); ok {
 		task.result["error"] = detail
+		task.result["error_code"] = string(tool.ErrorCodeSandboxDenied)
 	} else if resultErr != nil && strings.TrimSpace(stdoutText) == "" && strings.TrimSpace(stderrText) == "" {
 		task.result["error"] = strings.TrimSpace(resultErr.Error())
+		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
+			task.result["error_code"] = code
+		}
 	}
 	snapshot := task.snapshotLocked(status)
 	entry := task.entrySnapshot(tm.runtime.now())
@@ -1103,10 +1107,11 @@ func (tm *taskRuntime) failBashTask(ctx context.Context, task *bashTask, cause e
 		task.metadata["terminal_id"] = status.Terminal.TerminalID
 	}
 	task.result = map[string]any{
-		"state":     string(state),
-		"error":     reason,
-		"result":    reason,
-		"exit_code": -1,
+		"state":      string(state),
+		"error":      reason,
+		"error_code": string(tool.ErrorCodeInvalidInput),
+		"result":     reason,
+		"exit_code":  -1,
 	}
 	snapshot := task.snapshotLocked(status)
 	entry := task.entrySnapshot(now)

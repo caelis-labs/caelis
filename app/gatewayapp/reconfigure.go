@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
+	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
@@ -71,18 +72,37 @@ func (s *Stack) rebuildGateway() error {
 	if err != nil {
 		return err
 	}
+	effectivePolicyMode := policyMode(runtimeCfg.PermissionMode)
+	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
+	sandboxStatus := sandboxRuntime.Status()
+	if sandboxStatus.FallbackToHost {
+		if effectiveBaseMetadata == nil {
+			effectiveBaseMetadata = map[string]any{}
+		}
+		effectiveBaseMetadata["sandbox_auto_review_disabled"] = true
+		if hint := strings.TrimSpace(sandboxStatus.FallbackInstallHint); hint != "" {
+			effectiveBaseMetadata["sandbox_install_hint"] = hint
+		}
+		if reason := strings.TrimSpace(sandboxStatus.FallbackReason); reason != "" {
+			effectiveBaseMetadata["sandbox_fallback_reason"] = reason
+		}
+		if effectivePolicyMode == presets.ModeAutoReview {
+			effectivePolicyMode = presets.ModeManual
+			effectiveBaseMetadata["policy_mode"] = presets.ModeManual
+		}
+	}
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandboxRuntime})
 	if err != nil {
 		_ = sandboxRuntime.Close()
 		return err
 	}
-	estimatedPrefixTokens := estimateModelPromptPrefixTokens(runtimeCfg.BaseMetadata, tools)
+	estimatedPrefixTokens := estimateModelPromptPrefixTokens(effectiveBaseMetadata, tools)
 	compactionCfg := defaultCompactionConfig(runtimeCfg.ContextWindow)
 	compactionCfg.EstimatedPromptPrefixTokens = estimatedPrefixTokens
 	rt, err := local.New(local.Config{
 		Sessions:          s.Sessions,
 		AgentFactory:      chat.Factory{},
-		DefaultPolicyMode: policyMode(runtimeCfg.PermissionMode),
+		DefaultPolicyMode: effectivePolicyMode,
 		Compaction:        compactionCfg,
 		Assembly:          runtimeCfg.Assembly,
 		TaskStore:         s.taskStore,
@@ -98,7 +118,7 @@ func (s *Stack) rebuildGateway() error {
 		ContextWindow:     runtimeCfg.ContextWindow,
 		ModelLookup:       s.lookup,
 		Tools:             tools,
-		BaseMetadata:      cloneMap(runtimeCfg.BaseMetadata),
+		BaseMetadata:      cloneMap(effectiveBaseMetadata),
 		ToolAugmenter: func(ctx context.Context, req kernel.ToolAugmentContext) (kernel.ToolAugmentation, error) {
 			s.mu.RLock()
 			runtimeCfg := s.runtime
@@ -116,7 +136,7 @@ func (s *Stack) rebuildGateway() error {
 				return kernel.ToolAugmentation{}, nil
 			}
 			metadata := map[string]any{}
-			if systemPrompt := stringFromMap(runtimeCfg.BaseMetadata, "system_prompt"); systemPrompt != "" {
+			if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
 				metadata["system_prompt"] = systemPromptWithDelegationGuidance(systemPrompt)
 			}
 			return kernel.ToolAugmentation{

@@ -4,8 +4,8 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
 	"github.com/OnslaughtSnail/caelis/impl/tool/internal/argparse"
@@ -16,18 +16,14 @@ import (
 const ReadToolName = "READ"
 
 type ReadConfig struct {
-	DefaultLimit     int
-	MaxLimit         int
-	DefaultMaxTokens int
-	MaxTokens        int
+	DefaultLimit int
+	MaxLimit     int
 }
 
 func DefaultReadConfig() ReadConfig {
 	return ReadConfig{
-		DefaultLimit:     200,
-		MaxLimit:         400,
-		DefaultMaxTokens: 2000,
-		MaxTokens:        4000,
+		DefaultLimit: 200,
+		MaxLimit:     400,
 	}
 }
 
@@ -37,14 +33,11 @@ type ReadTool struct {
 }
 
 func NewRead(cfg ReadConfig, runtime sandbox.Runtime) (*ReadTool, error) {
-	if cfg.DefaultLimit <= 0 || cfg.MaxLimit <= 0 || cfg.DefaultMaxTokens <= 0 || cfg.MaxTokens <= 0 {
+	if cfg.DefaultLimit <= 0 || cfg.MaxLimit <= 0 {
 		cfg = DefaultReadConfig()
 	}
 	if cfg.DefaultLimit > cfg.MaxLimit {
 		cfg.DefaultLimit = cfg.MaxLimit
-	}
-	if cfg.DefaultMaxTokens > cfg.MaxTokens {
-		cfg.DefaultMaxTokens = cfg.MaxTokens
 	}
 	resolvedRuntime, err := runtimeOrDefault(runtime)
 	if err != nil {
@@ -56,14 +49,13 @@ func NewRead(cfg ReadConfig, runtime sandbox.Runtime) (*ReadTool, error) {
 func (t *ReadTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ReadToolName,
-		Description: "Read part of a text file. READ first slices by lines, then truncates further to fit the token budget.",
+		Description: "Read part of a text file by line range.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":       map[string]any{"type": "string", "description": "File path, absolute or relative."},
-				"offset":     map[string]any{"type": "integer", "description": "Zero-based starting line offset."},
-				"limit":      map[string]any{"type": "integer", "description": "Optional max lines to read before token truncation."},
-				"max_tokens": map[string]any{"type": "integer", "description": "Optional token budget applied after line slicing."},
+				"path":   map[string]any{"type": "string", "description": "File path, absolute or relative."},
+				"offset": map[string]any{"type": "integer", "description": "Zero-based starting line offset."},
+				"limit":  map[string]any{"type": "integer", "description": "Optional max lines to read."},
 			},
 			"required": []string{"path"},
 		},
@@ -99,17 +91,6 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if limit > t.cfg.MaxLimit {
 		limit = t.cfg.MaxLimit
 	}
-	maxTokens, err := argparse.Int(args, "max_tokens", t.cfg.DefaultMaxTokens)
-	if err != nil {
-		return tool.Result{}, err
-	}
-	if maxTokens <= 0 {
-		maxTokens = t.cfg.DefaultMaxTokens
-	}
-	if maxTokens > t.cfg.MaxTokens {
-		maxTokens = t.cfg.MaxTokens
-	}
-
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 	targetPath, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
@@ -121,43 +102,44 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	hasher := contentHasher()
+	reader := bufio.NewReader(file)
 
 	var (
-		lineNo    int
-		usedToken int
-		lines     []string
-		hasMore   bool
+		lineNo  int
+		lines   []string
+		hasMore bool
 	)
-	for scanner.Scan() {
+	for {
+		rawLine, readErr := reader.ReadString('\n')
+		if rawLine != "" {
+			_, _ = hasher.Write([]byte(rawLine))
+		}
+		if readErr != nil && readErr != io.EOF {
+			return tool.Result{}, readErr
+		}
+		if rawLine == "" && readErr == io.EOF {
+			break
+		}
 		lineNo++
 		if lineNo <= offset {
+			if readErr == io.EOF {
+				break
+			}
 			continue
 		}
+		lines = append(lines, trimReadLineEnding(rawLine))
 		if len(lines) >= limit {
-			hasMore = true
-			break
-		}
-		line := scanner.Text()
-		tokens := estimateToken(line)
-		usedToken += tokens
-		if usedToken > maxTokens {
-			if len(lines) == 0 {
-				budget := maxTokens - (usedToken - tokens)
-				if budget <= 0 {
-					budget = 1
-				}
-				line = truncateByTokenBudget(line, budget)
-				lines = append(lines, line)
+			copied, copyErr := io.Copy(hasher, reader)
+			if copyErr != nil {
+				return tool.Result{}, copyErr
 			}
-			hasMore = true
+			hasMore = copied > 0
 			break
 		}
-		lines = append(lines, line)
-	}
-	if err := scanner.Err(); err != nil {
-		return tool.Result{}, err
+		if readErr == io.EOF {
+			break
+		}
 	}
 
 	var content strings.Builder
@@ -181,51 +163,22 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	exhausted := len(lines) == 0 && offset >= lineNo
 
 	return toolutil.JSONResult(ReadToolName, map[string]any{
-		"path":        targetPath,
 		"start_line":  startLine,
 		"end_line":    endLine,
 		"next_offset": nextOffset,
 		"has_more":    hasMore,
-		"exhausted":   exhausted,
+		"revision":    contentHashRevision(hasher),
 		"content":     content.String(),
+	}, map[string]any{
+		"path":      targetPath,
+		"exhausted": exhausted,
 	})
 }
 
-func estimateToken(text string) int {
-	if text == "" {
-		return 0
-	}
-	token := utf8.RuneCountInString(text) / 4
-	if utf8.RuneCountInString(text)%4 != 0 {
-		token++
-	}
-	if token <= 0 {
-		token = 1
-	}
-	return token
-}
-
-func truncateByTokenBudget(text string, budget int) string {
-	if budget <= 0 || text == "" {
-		return ""
-	}
-	maxRunes := budget * 4
-	if utf8.RuneCountInString(text) <= maxRunes {
-		return text
-	}
-	var (
-		builder strings.Builder
-		count   int
-	)
-	for _, r := range text {
-		if count >= maxRunes {
-			break
-		}
-		builder.WriteRune(r)
-		count++
-	}
-	builder.WriteString(" ...[truncated]")
-	return builder.String()
+func trimReadLineEnding(line string) string {
+	line = strings.TrimSuffix(line, "\n")
+	line = strings.TrimSuffix(line, "\r")
+	return line
 }
 
 var _ tool.Tool = (*ReadTool)(nil)

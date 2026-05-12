@@ -282,30 +282,22 @@ func (t requestPermissionsTool) Definition() tool.Definition {
 					"type":        "string",
 					"description": "Short explanation of why this extra permission is required for the current task.",
 				},
-				"permissions": map[string]any{
-					"type":        "object",
-					"description": "Narrow permissions being requested.",
-					"properties": map[string]any{
-						"file_system": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"read":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Directories or files to grant read access to."},
-								"write": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Directories or files to grant read/write access to."},
-							},
-							"additionalProperties": false,
-						},
-						"network": map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"enabled": map[string]any{"type": "boolean", "description": "Set true to request network access."},
-							},
-							"additionalProperties": false,
-						},
-					},
-					"additionalProperties": false,
+				"read": map[string]any{
+					"type":        "array",
+					"description": "Directories or files to grant read access to.",
+					"items":       map[string]any{"type": "string"},
+				},
+				"write": map[string]any{
+					"type":        "array",
+					"description": "Directories or files to grant read/write access to.",
+					"items":       map[string]any{"type": "string"},
+				},
+				"network": map[string]any{
+					"type":        "boolean",
+					"description": "Set true to request network access.",
 				},
 			},
-			"required": []string{"reason", "permissions"},
+			"required": []string{"reason"},
 		},
 	}
 }
@@ -326,7 +318,8 @@ func (t requestPermissionsTool) Call(ctx context.Context, call tool.Call) (tool.
 	}
 	if t.approval == nil {
 		return jsonToolErrorResult(call, requestPermissionsToolName, map[string]any{
-			"error": "permission request cannot be reviewed because no approval requester is configured",
+			"error":      "permission request cannot be reviewed because no approval requester is configured",
+			"error_code": string(tool.ErrorCodePermissionDenied),
 		})
 	}
 	resp, err := t.approval.RequestApproval(ctx, agent.ApprovalRequest{
@@ -364,10 +357,9 @@ func (t requestPermissionsTool) Call(ctx context.Context, call tool.Call) (tool.
 	if !resp.Approved {
 		reason := strings.TrimSpace(firstNonEmpty(resp.Reason, resp.ReviewText, "permission request was rejected"))
 		return jsonToolErrorResult(call, requestPermissionsToolName, map[string]any{
-			"approved":    false,
-			"error":       reason,
-			"review_text": strings.TrimSpace(resp.ReviewText),
-			"outcome":     strings.TrimSpace(resp.Outcome),
+			"approved":   false,
+			"error":      reason,
+			"error_code": string(tool.ErrorCodePermissionDenied),
 		})
 	}
 	createdAt := time.Now()
@@ -385,8 +377,9 @@ func (t requestPermissionsTool) Call(ctx context.Context, call tool.Call) (tool.
 	}
 	return jsonToolResult(call, requestPermissionsToolName, map[string]any{
 		"approved": true,
-		"granted":  permissionGrantAdditionalPermissions(req),
-		"grant":    permissionGrantPayload(record),
+		"granted":  permissionGrantModelPayload(req),
+	}, map[string]any{
+		"grant": permissionGrantPayload(record),
 	})
 }
 
@@ -410,38 +403,30 @@ func parsePermissionGrantRequest(args map[string]any, cwd string) (permissionGra
 	if req.Reason == "" {
 		return req, fmt.Errorf("request_permissions requires a non-empty reason")
 	}
-	permissions, ok := mapValue(args["permissions"])
-	if !ok || len(permissions) == 0 {
-		return req, fmt.Errorf("request_permissions requires at least one permission")
-	}
-	if fsPerm, ok := mapValue(permissions["file_system"]); ok {
-		for _, path := range stringListValue(fsPerm["read"]) {
-			if resolved := resolvePermissionPath(path, cwd); resolved != "" {
-				if err := validatePermissionPathExists("read", resolved); err != nil {
-					return req, err
-				}
-				req.ReadRoots = append(req.ReadRoots, resolved)
+	for _, path := range stringListValue(args["read"]) {
+		if resolved := resolvePermissionPath(path, cwd); resolved != "" {
+			if err := validatePermissionPathExists("read", resolved); err != nil {
+				return req, err
 			}
+			req.ReadRoots = append(req.ReadRoots, resolved)
 		}
-		for _, path := range stringListValue(fsPerm["write"]) {
-			if resolved := resolvePermissionPath(path, cwd); resolved != "" {
-				if err := validatePermissionPathExists("write", resolved); err != nil {
-					return req, err
-				}
-				req.WriteRoots = append(req.WriteRoots, resolved)
-				if shellRoot := shellWriteRootForPath(resolved); shellRoot != "" {
-					req.ShellWriteRoots = append(req.ShellWriteRoots, shellRoot)
-				}
+	}
+	for _, path := range stringListValue(args["write"]) {
+		if resolved := resolvePermissionPath(path, cwd); resolved != "" {
+			if err := validatePermissionPathExists("write", resolved); err != nil {
+				return req, err
+			}
+			req.WriteRoots = append(req.WriteRoots, resolved)
+			if shellRoot := shellWriteRootForPath(resolved); shellRoot != "" {
+				req.ShellWriteRoots = append(req.ShellWriteRoots, shellRoot)
 			}
 		}
 	}
-	if network, ok := mapValue(permissions["network"]); ok {
-		if enabled, _ := network["enabled"].(bool); enabled {
-			req.NetworkEnabled = true
-		}
+	if enabled, _ := args["network"].(bool); enabled {
+		req.NetworkEnabled = true
 	}
 	if len(req.ReadRoots) == 0 && len(req.WriteRoots) == 0 && !req.NetworkEnabled {
-		return req, fmt.Errorf("request_permissions requires at least one non-empty filesystem path or network.enabled=true")
+		return req, fmt.Errorf("request_permissions requires at least one non-empty read/write path or network=true")
 	}
 	return req, nil
 }
@@ -556,6 +541,20 @@ func permissionGrantAdditionalPermissions(req permissionGrantRequest) map[string
 	return out
 }
 
+func permissionGrantModelPayload(req permissionGrantRequest) map[string]any {
+	out := map[string]any{}
+	if len(req.ReadRoots) > 0 {
+		out["read"] = append([]string(nil), req.ReadRoots...)
+	}
+	if len(req.WriteRoots) > 0 {
+		out["write"] = append([]string(nil), req.WriteRoots...)
+	}
+	if req.NetworkEnabled {
+		out["network"] = true
+	}
+	return out
+}
+
 func permissionGrantPayload(record permissionGrantRecord) map[string]any {
 	record = normalizePermissionGrantRecord(record)
 	payload := map[string]any{
@@ -653,16 +652,24 @@ func appendPermissionGrantRecord(records []permissionGrantRecord, record permiss
 	return normalizePermissionGrantRecords(append(records, record))
 }
 
-func jsonToolResult(call tool.Call, name string, payload map[string]any) (tool.Result, error) {
+func jsonToolResult(call tool.Call, name string, payload map[string]any, metaExtra ...map[string]any) (tool.Result, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return tool.Result{}, err
+	}
+	meta := maps.Clone(payload)
+	for _, extra := range metaExtra {
+		for key, value := range extra {
+			if strings.TrimSpace(key) != "" {
+				meta[key] = value
+			}
+		}
 	}
 	return tool.Result{
 		ID:      strings.TrimSpace(call.ID),
 		Name:    strings.TrimSpace(name),
 		Content: []model.Part{model.NewJSONPart(raw)},
-		Meta:    maps.Clone(payload),
+		Meta:    meta,
 	}, nil
 }
 

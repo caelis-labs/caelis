@@ -323,8 +323,10 @@ func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.Resolved
 	if err := applyAssemblySelections(metadata, resolved, strings.TrimSpace(intent.ModeName), state); err != nil {
 		return nil, err
 	}
-	if sessionMode := CurrentSessionMode(state); sessionMode != "" {
+	if sessionMode, explicit := currentSessionModeOverride(state); explicit {
 		metadata["policy_mode"] = sessionMode
+	} else if stringMetadata(metadata, "policy_mode") == "" {
+		metadata["policy_mode"] = CurrentSessionMode(state)
 	}
 	if reasoning := firstNonEmptyString(
 		CurrentReasoningEffort(state),
@@ -379,6 +381,17 @@ func CurrentSessionMode(state map[string]any) string {
 		return normalizeSessionMode(value)
 	}
 	return string(ApprovalModeAutoReview)
+}
+
+func currentSessionModeOverride(state map[string]any) (string, bool) {
+	if state == nil {
+		return "", false
+	}
+	value, _ := state[StateCurrentSessionMode].(string)
+	if strings.TrimSpace(value) == "" {
+		return "", false
+	}
+	return normalizeSessionMode(value), true
 }
 
 func normalizeSessionMode(mode string) string {

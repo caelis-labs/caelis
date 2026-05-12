@@ -14,6 +14,11 @@ import (
 
 const ListToolName = "LIST"
 
+const (
+	defaultListLimit = 200
+	maxListLimit     = 1000
+)
+
 type ListTool struct {
 	runtime sandbox.Runtime
 }
@@ -33,8 +38,8 @@ func (t *ListTool) Definition() tool.Definition {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":              map[string]any{"type": "string", "description": "directory path"},
-				"respect_gitignore": map[string]any{"type": "boolean", "description": "When true, filter direct entries ignored by .gitignore in the listed directory."},
+				"path":  map[string]any{"type": "string", "description": "directory path"},
+				"limit": map[string]any{"type": "integer", "description": "Optional max entries to return."},
 			},
 		},
 	}
@@ -55,9 +60,15 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if pathArg == "" {
 		pathArg = "."
 	}
-	respectGitignore, err := argparse.Bool(args, "respect_gitignore", false)
+	limit, err := argparse.Int(args, "limit", defaultListLimit)
 	if err != nil {
 		return tool.Result{}, err
+	}
+	if limit <= 0 {
+		limit = defaultListLimit
+	}
+	if limit > maxListLimit {
+		limit = maxListLimit
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 	target, err := normalizePathWithFS(fsys, pathArg)
@@ -68,11 +79,9 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
-	excludeRules := []pathExcludeRule(nil)
-	if respectGitignore {
-		excludeRules = gitignoreExcludePatterns(fsys, target)
-	}
+	excludeRules := gitignoreExcludePatterns(fsys, target)
 	out := make([]map[string]any, 0, len(items))
+	full := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		itemPath := filepath.Join(target, item.Name())
 		if shouldExcludePath(target, itemPath, item.IsDir(), excludeRules) {
@@ -82,10 +91,19 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		if infoErr != nil {
 			continue
 		}
+		entryType := "file"
+		if item.IsDir() {
+			entryType = "dir"
+		}
 		out = append(out, map[string]any{
+			"name": item.Name(),
+			"path": itemPath,
+			"type": entryType,
+		})
+		full = append(full, map[string]any{
 			"name":     item.Name(),
 			"path":     itemPath,
-			"is_dir":   item.IsDir(),
+			"type":     entryType,
 			"size":     info.Size(),
 			"mode":     info.Mode().String(),
 			"mod_time": info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
@@ -94,10 +112,21 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	sort.Slice(out, func(i, j int) bool {
 		return fmt.Sprint(out[i]["name"]) < fmt.Sprint(out[j]["name"])
 	})
+	sort.Slice(full, func(i, j int) bool {
+		return fmt.Sprint(full[i]["name"]) < fmt.Sprint(full[j]["name"])
+	})
+	truncated := len(out) > limit
+	if truncated {
+		out = out[:limit]
+	}
 	return toolutil.JSONResult(ListToolName, map[string]any{
-		"path":    target,
-		"entries": out,
-		"count":   len(out),
+		"path":      target,
+		"entries":   out,
+		"count":     len(out),
+		"truncated": truncated,
+	}, map[string]any{
+		"entries":     full,
+		"total_count": len(full),
 	})
 }
 

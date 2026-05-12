@@ -1255,7 +1255,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
 				RawOutput: map[string]any{
 					"path":          "/tmp/workspace/gm_license_repo.go",
-					"replaced":      2,
+					"replacements":  2,
 					"added_lines":   2,
 					"removed_lines": 2,
 					"diff_hunks": []any{
@@ -1536,12 +1536,8 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 	model := newGatewayEventTestModel()
 	permissionInput := map[string]any{
 		"reason": "need directory access",
-		"permissions": map[string]any{
-			"file_system": map[string]any{
-				"read":  []any{"/tmp/outside"},
-				"write": []any{"/tmp/outside"},
-			},
-		},
+		"read":   []any{"/tmp/outside"},
+		"write":  []any{"/tmp/outside"},
 	}
 
 	updated, _ := model.Update(kernel.EventEnvelope{
@@ -1588,7 +1584,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				ToolName:  "request_permissions",
 				Status:    kernel.ToolStatusCompleted,
 				RawInput:  permissionInput,
-				RawOutput: map[string]any{"approved": true, "granted": permissionInput["permissions"]},
+				RawOutput: map[string]any{"approved": true, "granted": map[string]any{"read": []any{"/tmp/outside"}, "write": []any{"/tmp/outside"}}},
 			},
 		},
 	})
@@ -2540,7 +2536,7 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 		},
 	}
 	rawOutput := map[string]any{
-		"message": "Plan updated",
+		"updated": true,
 		"entries": rawInput["entries"],
 	}
 	for _, env := range []kernel.EventEnvelope{

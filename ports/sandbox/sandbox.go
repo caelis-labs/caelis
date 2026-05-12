@@ -130,10 +130,11 @@ type Config struct {
 
 // Status reports backend selection and fallback state for one runtime.
 type Status struct {
-	RequestedBackend Backend `json:"requested_backend,omitempty"`
-	ResolvedBackend  Backend `json:"resolved_backend,omitempty"`
-	FallbackToHost   bool    `json:"fallback_to_host,omitempty"`
-	FallbackReason   string  `json:"fallback_reason,omitempty"`
+	RequestedBackend    Backend `json:"requested_backend,omitempty"`
+	ResolvedBackend     Backend `json:"resolved_backend,omitempty"`
+	FallbackToHost      bool    `json:"fallback_to_host,omitempty"`
+	FallbackReason      string  `json:"fallback_reason,omitempty"`
+	FallbackInstallHint string  `json:"fallback_install_hint,omitempty"`
 }
 
 // OutputChunk is one stdout/stderr streaming fragment.

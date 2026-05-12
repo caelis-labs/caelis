@@ -94,11 +94,13 @@ type SessionRuntimeState struct {
 }
 
 type SandboxStatus struct {
-	RequestedBackend string
-	ResolvedBackend  string
-	Route            string
-	FallbackReason   string
-	SecuritySummary  string
+	RequestedBackend   string
+	ResolvedBackend    string
+	Route              string
+	FallbackReason     string
+	InstallHint        string
+	SecuritySummary    string
+	AutoReviewDisabled bool
 }
 
 type ACPAgentInfo struct {
@@ -1010,9 +1012,11 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 		status.ResolvedBackend = string(rtStatus.ResolvedBackend)
 	}
 	status.FallbackReason = strings.TrimSpace(rtStatus.FallbackReason)
+	status.InstallHint = strings.TrimSpace(rtStatus.FallbackInstallHint)
 	if rtStatus.FallbackToHost {
 		status.Route = string(sandbox.RouteHost)
 		status.SecuritySummary = "host fallback"
+		status.AutoReviewDisabled = true
 		if status.ResolvedBackend == "" {
 			status.ResolvedBackend = string(sandbox.BackendHost)
 		}

@@ -21,39 +21,41 @@ type DoctorRequest struct {
 }
 
 type DoctorReport struct {
-	GoVersion                string   `json:"go_version,omitempty"`
-	GOOS                     string   `json:"goos,omitempty"`
-	GOARCH                   string   `json:"goarch,omitempty"`
-	StoreDir                 string   `json:"store_dir,omitempty"`
-	ConfigPath               string   `json:"config_path,omitempty"`
-	ConfigDirMode            string   `json:"config_dir_mode,omitempty"`
-	ConfigFileMode           string   `json:"config_file_mode,omitempty"`
-	ConfigDirSecure          bool     `json:"config_dir_secure,omitempty"`
-	ConfigFileSecure         bool     `json:"config_file_secure,omitempty"`
-	ConfigPermissionsSecure  bool     `json:"config_permissions_secure,omitempty"`
-	SessionID                string   `json:"session_id,omitempty"`
-	SessionMode              string   `json:"session_mode,omitempty"`
-	ActiveModelAlias         string   `json:"active_model_alias,omitempty"`
-	ActiveProvider           string   `json:"active_provider,omitempty"`
-	ActiveModel              string   `json:"active_model,omitempty"`
-	MissingAPIKey            bool     `json:"missing_api_key,omitempty"`
-	TokenSource              string   `json:"token_source,omitempty"`
-	PersistedPlaintextToken  bool     `json:"persisted_plaintext_token,omitempty"`
-	SandboxRequestedBackend  string   `json:"sandbox_requested_backend,omitempty"`
-	SandboxResolvedBackend   string   `json:"sandbox_resolved_backend,omitempty"`
-	SandboxRoute             string   `json:"sandbox_route,omitempty"`
-	SandboxFallbackReason    string   `json:"sandbox_fallback_reason,omitempty"`
-	SandboxSecuritySummary   string   `json:"sandbox_security_summary,omitempty"`
-	HostExecution            bool     `json:"host_execution,omitempty"`
-	FullAccessMode           bool     `json:"full_access_mode,omitempty"`
-	PermissionGrantCount     int      `json:"permission_grant_count,omitempty"`
-	PermissionGrantNetwork   bool     `json:"permission_grant_network,omitempty"`
-	PermissionReadRootCount  int      `json:"permission_read_root_count,omitempty"`
-	PermissionWriteRootCount int      `json:"permission_write_root_count,omitempty"`
-	HasActiveTurn            bool     `json:"has_active_turn,omitempty"`
-	ActiveTurnCount          int      `json:"active_turn_count,omitempty"`
-	ActiveTurnSessions       []string `json:"active_turn_sessions,omitempty"`
-	Warnings                 []string `json:"warnings,omitempty"`
+	GoVersion                 string   `json:"go_version,omitempty"`
+	GOOS                      string   `json:"goos,omitempty"`
+	GOARCH                    string   `json:"goarch,omitempty"`
+	StoreDir                  string   `json:"store_dir,omitempty"`
+	ConfigPath                string   `json:"config_path,omitempty"`
+	ConfigDirMode             string   `json:"config_dir_mode,omitempty"`
+	ConfigFileMode            string   `json:"config_file_mode,omitempty"`
+	ConfigDirSecure           bool     `json:"config_dir_secure,omitempty"`
+	ConfigFileSecure          bool     `json:"config_file_secure,omitempty"`
+	ConfigPermissionsSecure   bool     `json:"config_permissions_secure,omitempty"`
+	SessionID                 string   `json:"session_id,omitempty"`
+	SessionMode               string   `json:"session_mode,omitempty"`
+	ActiveModelAlias          string   `json:"active_model_alias,omitempty"`
+	ActiveProvider            string   `json:"active_provider,omitempty"`
+	ActiveModel               string   `json:"active_model,omitempty"`
+	MissingAPIKey             bool     `json:"missing_api_key,omitempty"`
+	TokenSource               string   `json:"token_source,omitempty"`
+	PersistedPlaintextToken   bool     `json:"persisted_plaintext_token,omitempty"`
+	SandboxRequestedBackend   string   `json:"sandbox_requested_backend,omitempty"`
+	SandboxResolvedBackend    string   `json:"sandbox_resolved_backend,omitempty"`
+	SandboxRoute              string   `json:"sandbox_route,omitempty"`
+	SandboxFallbackReason     string   `json:"sandbox_fallback_reason,omitempty"`
+	SandboxInstallHint        string   `json:"sandbox_install_hint,omitempty"`
+	SandboxSecuritySummary    string   `json:"sandbox_security_summary,omitempty"`
+	SandboxAutoReviewDisabled bool     `json:"sandbox_auto_review_disabled,omitempty"`
+	HostExecution             bool     `json:"host_execution,omitempty"`
+	FullAccessMode            bool     `json:"full_access_mode,omitempty"`
+	PermissionGrantCount      int      `json:"permission_grant_count,omitempty"`
+	PermissionGrantNetwork    bool     `json:"permission_grant_network,omitempty"`
+	PermissionReadRootCount   int      `json:"permission_read_root_count,omitempty"`
+	PermissionWriteRootCount  int      `json:"permission_write_root_count,omitempty"`
+	HasActiveTurn             bool     `json:"has_active_turn,omitempty"`
+	ActiveTurnCount           int      `json:"active_turn_count,omitempty"`
+	ActiveTurnSessions        []string `json:"active_turn_sessions,omitempty"`
+	Warnings                  []string `json:"warnings,omitempty"`
 }
 
 func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
@@ -113,11 +115,19 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	report.SandboxResolvedBackend = strings.TrimSpace(sandbox.ResolvedBackend)
 	report.SandboxRoute = strings.TrimSpace(sandbox.Route)
 	report.SandboxFallbackReason = strings.TrimSpace(sandbox.FallbackReason)
+	report.SandboxInstallHint = strings.TrimSpace(sandbox.InstallHint)
 	report.SandboxSecuritySummary = strings.TrimSpace(sandbox.SecuritySummary)
+	report.SandboxAutoReviewDisabled = sandbox.AutoReviewDisabled
 	report.HostExecution = strings.EqualFold(report.SandboxRoute, "host") || strings.EqualFold(report.SandboxResolvedBackend, "host")
 	report.FullAccessMode = false
 	if report.HostExecution {
 		report.Warnings = append(report.Warnings, "sandbox execution is using host route")
+	}
+	if report.SandboxAutoReviewDisabled {
+		report.Warnings = append(report.Warnings, "Auto-Review is disabled until a sandbox backend is available")
+	}
+	if report.SandboxInstallHint != "" {
+		report.Warnings = append(report.Warnings, report.SandboxInstallHint)
 	}
 	if s.engine != nil && strings.TrimSpace(ref.SessionID) != "" {
 		grants := s.engine.PermissionGrantSnapshot(ref)
@@ -171,7 +181,9 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), "-")),
 		fmt.Sprintf("sandbox_route: %s", firstNonEmpty(strings.TrimSpace(report.SandboxRoute), "-")),
 		fmt.Sprintf("sandbox_fallback_reason: %s", firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), "-")),
+		fmt.Sprintf("sandbox_install_hint: %s", firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), "-")),
 		fmt.Sprintf("sandbox_security_summary: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), "-")),
+		fmt.Sprintf("sandbox_auto_review_disabled: %t", report.SandboxAutoReviewDisabled),
 		fmt.Sprintf("host_execution: %t", report.HostExecution),
 		fmt.Sprintf("full_access_mode: %t", report.FullAccessMode),
 		fmt.Sprintf("permission_grant_count: %d", report.PermissionGrantCount),

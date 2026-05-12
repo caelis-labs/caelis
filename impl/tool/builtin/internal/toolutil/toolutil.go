@@ -23,16 +23,25 @@ func DecodeArgs(call tool.Call) (map[string]any, error) {
 	return args, nil
 }
 
-func JSONResult(name string, payload map[string]any) (tool.Result, error) {
+func JSONResult(name string, payload map[string]any, metaExtra ...map[string]any) (tool.Result, error) {
 	raw, err := json.Marshal(payload)
 	if err != nil {
 		return tool.Result{}, err
 	}
 	name = strings.TrimSpace(name)
+	meta := maps.Clone(payload)
+	for _, extra := range metaExtra {
+		for key, value := range extra {
+			if strings.TrimSpace(key) == "" {
+				continue
+			}
+			meta[key] = value
+		}
+	}
 	return tool.Result{
 		Name:    name,
 		Content: []model.Part{model.NewJSONPart(raw)},
-		Meta:    maps.Clone(payload),
+		Meta:    meta,
 	}, nil
 }
 

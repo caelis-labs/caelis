@@ -3164,7 +3164,7 @@ func TestRuntimeReservesRequestPermissionsToolName(t *testing.T) {
 	if _, ok := wrapped[0].(requestPermissionsTool); !ok {
 		t.Fatalf("wrapped request_permissions tool = %T, want built-in requestPermissionsTool", wrapped[0])
 	}
-	raw := []byte(`{"reason":"need network","permissions":{"network":{"enabled":true}}}`)
+	raw := []byte(`{"reason":"need network","network":true}`)
 	result, err := wrapped[0].Call(context.Background(), tool.Call{ID: "perm-1", Name: "request_permissions", Input: raw})
 	if err != nil {
 		t.Fatalf("request_permissions Call() error = %v", err)
@@ -3212,7 +3212,7 @@ func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
 	result, err := permissionsTool.Call(context.Background(), tool.Call{
 		ID:    "perm-1",
 		Name:  requestPermissionsToolName,
-		Input: []byte(`{"reason":"need network","permissions":{"network":{"enabled":true}}}`),
+		Input: []byte(`{"reason":"need network","network":true}`),
 	})
 	if err != nil {
 		t.Fatalf("request_permissions Call() error = %v", err)

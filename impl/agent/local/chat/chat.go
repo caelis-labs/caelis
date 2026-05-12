@@ -397,7 +397,7 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 	rawInput := mustObject(call.Args)
 	selectedTool, ok := a.lookupTool(call.Name)
 	if !ok {
-		rawOutput := map[string]any{"error": fmt.Sprintf("tool %q not found", call.Name)}
+		rawOutput := tool.ErrorPayload(tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", call.Name)))
 		message, truncationMeta := toolResultMessageWithMeta(call, tool.Result{
 			ID:      call.ID,
 			Name:    call.Name,
@@ -424,7 +424,7 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 			ID:      strings.TrimSpace(call.ID),
 			Name:    strings.TrimSpace(call.Name),
 			IsError: true,
-			Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"error": err.Error()}))},
+			Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
 		}
 	}
 	message, truncationMeta := toolResultMessageWithMeta(call, result)

@@ -350,21 +350,23 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	rawModelText := firstNonEmpty(modelText, liveModelText)
 
 	status := StatusSnapshot{
-		SessionID:               sessionID,
-		Workspace:               strings.TrimSpace(d.stack.Workspace.CWD),
-		Model:                   formatReasoningModelDisplay(rawModelText, reasoningEffort),
-		ReasoningEffort:         reasoningEffort,
-		ModeLabel:               firstNonEmpty(sessionMode, liveSessionMode),
-		SessionMode:             firstNonEmpty(sessionMode, liveSessionMode),
-		SandboxType:             firstNonEmpty(sandboxType, liveSandboxType),
-		SandboxRequestedBackend: firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
-		SandboxResolvedBackend:  firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
-		Route:                   route,
-		FallbackReason:          sandboxStatus.FallbackReason,
-		SecuritySummary:         securitySummary,
-		HostExecution:           strings.EqualFold(strings.TrimSpace(route), "host"),
-		FullAccessMode:          false,
-		Surface:                 bindingKey,
+		SessionID:                 sessionID,
+		Workspace:                 strings.TrimSpace(d.stack.Workspace.CWD),
+		Model:                     formatReasoningModelDisplay(rawModelText, reasoningEffort),
+		ReasoningEffort:           reasoningEffort,
+		ModeLabel:                 firstNonEmpty(sessionMode, liveSessionMode),
+		SessionMode:               firstNonEmpty(sessionMode, liveSessionMode),
+		SandboxType:               firstNonEmpty(sandboxType, liveSandboxType),
+		SandboxRequestedBackend:   firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
+		SandboxResolvedBackend:    firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
+		Route:                     route,
+		FallbackReason:            sandboxStatus.FallbackReason,
+		SandboxInstallHint:        sandboxStatus.InstallHint,
+		SecuritySummary:           securitySummary,
+		SandboxAutoReviewDisabled: sandboxStatus.AutoReviewDisabled,
+		HostExecution:             strings.EqualFold(strings.TrimSpace(route), "host"),
+		FullAccessMode:            false,
+		Surface:                   bindingKey,
 	}
 	if d.stack != nil {
 		req := DoctorRequest{}
@@ -386,7 +388,9 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			status.SandboxResolvedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), status.SandboxResolvedBackend)
 			status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)
 			status.FallbackReason = firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), status.FallbackReason)
+			status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxInstallHint)
 			status.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SecuritySummary)
+			status.SandboxAutoReviewDisabled = report.SandboxAutoReviewDisabled || status.SandboxAutoReviewDisabled
 			if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
 				rawModelText = alias
 				status.Model = formatReasoningModelDisplay(alias, status.ReasoningEffort)

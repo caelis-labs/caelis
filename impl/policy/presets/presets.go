@@ -287,7 +287,7 @@ func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
 		Route:      sandbox.RouteSandbox,
 		Permission: sandbox.PermissionWorkspaceWrite,
 		Isolation:  sandbox.IsolationContainer,
-		Network:    sandbox.NetworkInherit,
+		Network:    sandbox.NetworkDisabled,
 		PathRules:  rules,
 	}
 }

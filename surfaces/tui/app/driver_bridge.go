@@ -1396,6 +1396,12 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		if status.FallbackReason != "" {
 			lines = append(lines, fmt.Sprintf("fallback: %s", status.FallbackReason))
 		}
+		if status.SandboxInstallHint != "" {
+			lines = append(lines, fmt.Sprintf("install: %s", status.SandboxInstallHint))
+		}
+		if status.SandboxAutoReviewDisabled {
+			lines = append(lines, "warning: Auto-Review is disabled until a sandbox backend is available")
+		}
 		if status.HostExecution || status.FullAccessMode {
 			lines = append(lines, "warning: commands may execute on the host with reduced isolation")
 		}
@@ -1863,12 +1869,12 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		lines = append(lines, fmt.Sprintf("  Context    %s", usage))
 	}
 	if usage := formatSessionTokenUsageStatus(status); usage != "" {
-		for i, line := range strings.Split(usage, "\n") {
-			if i == 0 {
-				lines = append(lines, fmt.Sprintf("  Token usage: %s", line))
+		lines = append(lines, "  Token usage")
+		for _, line := range strings.Split(usage, "\n") {
+			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			lines = append(lines, fmt.Sprintf("              %s", line))
+			lines = append(lines, "    "+line)
 		}
 	}
 	if status.PermissionGrantCount > 0 {
@@ -1881,6 +1887,9 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	if status.FallbackReason != "" {
 		lines = append(lines, "  Fallback   "+strings.TrimSpace(status.FallbackReason))
 	}
+	if status.SandboxInstallHint != "" {
+		lines = append(lines, "  Install    "+strings.TrimSpace(status.SandboxInstallHint))
+	}
 	if strings.TrimSpace(status.Model) == "" && strings.TrimSpace(status.Provider) == "" && strings.TrimSpace(status.ModelName) == "" {
 		lines = append(lines, "note: Run /connect to configure a provider and model")
 	}
@@ -1889,6 +1898,9 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	}
 	if status.HostExecution || status.FullAccessMode {
 		lines = append(lines, "warn: Commands may run on the host with reduced sandbox isolation")
+	}
+	if status.SandboxAutoReviewDisabled {
+		lines = append(lines, "warn: Auto-Review is disabled until a sandbox backend is available")
 	}
 	if strings.TrimSpace(status.FallbackReason) != "" {
 		lines = append(lines, "warn: Requested sandbox backend is unavailable and a fallback is in effect")
@@ -1910,32 +1922,69 @@ func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
 	if usageSnapshotZero(total) {
 		return ""
 	}
-	lines := []string{formatTokenUsageSnapshot(total)}
+	rows := []tokenUsageStatusRow{{scope: "total", usage: total}}
 	main := normalizedUsageSnapshot(status.SessionUsageMain)
 	subagents := normalizedUsageSnapshot(status.SessionUsageSubagents)
 	autoReview := normalizedUsageSnapshot(status.SessionUsageAutoReview)
 	if !usageSnapshotZero(main) {
-		lines = append(lines, "main usage: "+formatTokenUsageSnapshot(main))
+		rows = append(rows, tokenUsageStatusRow{scope: "main", usage: main})
 	}
 	if !usageSnapshotZero(subagents) {
-		lines = append(lines, "sub-agent usage: "+formatTokenUsageSnapshot(subagents))
+		rows = append(rows, tokenUsageStatusRow{scope: "sub-agent", usage: subagents})
 	}
 	if !usageSnapshotZero(autoReview) {
-		lines = append(lines, "auto-review usage: "+formatTokenUsageSnapshot(autoReview))
+		rows = append(rows, tokenUsageStatusRow{scope: "auto-review", usage: autoReview})
 	}
-	return strings.Join(lines, "\n")
+	return formatTokenUsageTable(rows)
 }
 
-func formatTokenUsageSnapshot(usage kernel.UsageSnapshot) string {
-	usage = normalizedUsageSnapshot(usage)
-	return fmt.Sprintf(
-		"total=%s input=%s (+ %s cached) output=%s (reasoning %s)",
-		formatTokenUsageNumber(usage.TotalTokens),
-		formatTokenUsageNumber(usage.PromptTokens),
-		formatTokenUsageNumber(usage.CachedInputTokens),
-		formatTokenUsageNumber(usage.CompletionTokens),
-		formatTokenUsageNumber(usage.ReasoningTokens),
-	)
+type tokenUsageStatusRow struct {
+	scope string
+	usage kernel.UsageSnapshot
+}
+
+func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
+	if len(rows) == 0 {
+		return ""
+	}
+	table := make([][]string, 0, len(rows)+1)
+	table = append(table, []string{"Scope", "Total", "Input", "Cached", "Output", "Reasoning"})
+	for _, row := range rows {
+		usage := normalizedUsageSnapshot(row.usage)
+		table = append(table, []string{
+			row.scope,
+			formatTokenUsageNumber(usage.TotalTokens),
+			formatTokenUsageNumber(usage.PromptTokens),
+			formatTokenUsageNumber(usage.CachedInputTokens),
+			formatTokenUsageNumber(usage.CompletionTokens),
+			formatTokenUsageNumber(usage.ReasoningTokens),
+		})
+	}
+	widths := make([]int, len(table[0]))
+	for _, cols := range table {
+		for i, col := range cols {
+			if len(col) > widths[i] {
+				widths[i] = len(col)
+			}
+		}
+	}
+	var b strings.Builder
+	for rowIndex, cols := range table {
+		if rowIndex > 0 {
+			b.WriteByte('\n')
+		}
+		for colIndex, col := range cols {
+			if colIndex > 0 {
+				b.WriteString("  ")
+			}
+			if colIndex == 0 {
+				b.WriteString(fmt.Sprintf("%-*s", widths[colIndex], col))
+				continue
+			}
+			b.WriteString(fmt.Sprintf("%*s", widths[colIndex], col))
+		}
+	}
+	return b.String()
 }
 
 func normalizedUsageSnapshot(usage kernel.UsageSnapshot) kernel.UsageSnapshot {

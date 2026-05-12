@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
@@ -17,6 +18,12 @@ import (
 const SearchToolName = "SEARCH"
 
 var errSearchLimitReached = errors.New("search: limit reached")
+
+type searchTerm struct {
+	Raw   string
+	Match string
+	Regex *regexp.Regexp
+}
 
 type SearchTool struct {
 	runtime sandbox.Runtime
@@ -38,15 +45,15 @@ func (t *SearchTool) Definition() tool.Definition {
 			"type": "object",
 			"properties": map[string]any{
 				"path":           map[string]any{"type": "string", "description": "Target file or directory path."},
-				"query":          map[string]any{"type": "string", "description": "Search text."},
+				"query":          map[string]any{"type": "string", "description": "Search text. Separate alternatives with | for multi-keyword search."},
 				"limit":          map[string]any{"type": "integer", "description": "Optional max results."},
 				"case_sensitive": map[string]any{"type": "boolean", "description": "Set true for case-sensitive search."},
+				"regex":          map[string]any{"type": "boolean", "description": "Treat query as one regular expression."},
 				"exclude": map[string]any{
 					"type":        "array",
 					"description": "Optional relative path patterns to exclude after filtering.",
 					"items":       map[string]any{"type": "string"},
 				},
-				"respect_gitignore": map[string]any{"type": "boolean", "description": "When true, filter paths ignored by .gitignore at the search root."},
 			},
 			"required": []string{"path", "query"},
 		},
@@ -83,11 +90,18 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if err != nil {
 		return tool.Result{}, err
 	}
-	exclude, err := parseStringSliceArg(args, "exclude")
+	regexMode, err := argparse.Bool(args, "regex", false)
 	if err != nil {
 		return tool.Result{}, err
 	}
-	respectGitignore, err := argparse.Bool(args, "respect_gitignore", false)
+	terms, err := parseSearchTerms(query, caseSensitive, regexMode)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	if len(terms) == 0 {
+		return tool.Result{}, tool.NewError(tool.ErrorCodeInvalidInput, "SEARCH query must include at least one non-empty keyword")
+	}
+	exclude, err := parseStringSliceArg(args, "exclude")
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -102,19 +116,22 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 		return tool.Result{}, err
 	}
 
-	queryToMatch := query
-	if !caseSensitive {
-		queryToMatch = strings.ToLower(query)
-	}
 	results := make([]map[string]any, 0, limit)
+	fullResults := make([]map[string]any, 0, limit)
 	filesWithHits := map[string]struct{}{}
 	truncated := false
-	appendMatch := func(path string, lineNum, column int, text string) bool {
+	appendMatch := func(path string, lineNum, column int, match string, text string) bool {
 		filesWithHits[path] = struct{}{}
 		results = append(results, map[string]any{
+			"path": path,
+			"line": lineNum,
+			"text": text,
+		})
+		fullResults = append(fullResults, map[string]any{
 			"path":   path,
 			"line":   lineNum,
 			"column": column,
+			"match":  match,
 			"text":   text,
 		})
 		if len(results) >= limit {
@@ -127,10 +144,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if !info.IsDir() {
 		root = filepath.Dir(target)
 	}
-	excludeRules := excludeRulesFromPatterns(exclude)
-	if respectGitignore {
-		excludeRules = append(gitignoreExcludePatterns(fsys, root), excludeRules...)
-	}
+	excludeRules := append(gitignoreExcludePatterns(fsys, root), excludeRulesFromPatterns(exclude)...)
 	if info.IsDir() {
 		walkErr := walkDir(fsys, target, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {
@@ -145,7 +159,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 			if d == nil || d.IsDir() {
 				return nil
 			}
-			_, stop := searchInFile(fsys, path, queryToMatch, caseSensitive, appendMatch)
+			_, stop := searchInFile(fsys, path, terms, caseSensitive, appendMatch)
 			if stop {
 				return errSearchLimitReached
 			}
@@ -165,22 +179,26 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 				"hits":       []map[string]any{},
 			})
 		}
-		if _, stop := searchInFile(fsys, target, queryToMatch, caseSensitive, appendMatch); stop {
+		if _, stop := searchInFile(fsys, target, terms, caseSensitive, appendMatch); stop {
 			truncated = true
 		}
 	}
 
 	return toolutil.JSONResult(SearchToolName, map[string]any{
-		"path":       target,
-		"query":      query,
 		"count":      len(results),
 		"file_count": len(filesWithHits),
 		"truncated":  truncated,
 		"hits":       results,
+	}, map[string]any{
+		"path":  target,
+		"query": query,
+		"regex": regexMode,
+		"terms": searchTermRawValues(terms),
+		"hits":  fullResults,
 	})
 }
 
-func searchInFile(fsys sandbox.FileSystem, path, query string, caseSensitive bool, appendMatch func(string, int, int, string) bool) (bool, bool) {
+func searchInFile(fsys sandbox.FileSystem, path string, terms []searchTerm, caseSensitive bool, appendMatch func(string, int, int, string, string) bool) (bool, bool) {
 	file, err := fsys.Open(path)
 	if err != nil {
 		return false, false
@@ -195,21 +213,101 @@ func searchInFile(fsys sandbox.FileSystem, path, query string, caseSensitive boo
 		lineNum++
 		text := scanner.Text()
 		candidate := text
-		if !caseSensitive {
+		if !caseSensitive && !searchTermsUseRegex(terms) {
 			candidate = strings.ToLower(candidate)
 		}
-		if strings.Contains(candidate, query) {
+		if match, column, ok := firstSearchMatch(candidate, terms); ok {
 			matched = true
-			column := strings.Index(candidate, query) + 1
-			if column <= 0 {
-				column = 1
-			}
-			if appendMatch(path, lineNum, column, text) {
+			if appendMatch(path, lineNum, column, match, text) {
 				return true, true
 			}
 		}
 	}
 	return matched, false
+}
+
+func parseSearchTerms(query string, caseSensitive bool, regexMode bool) ([]searchTerm, error) {
+	query = strings.TrimSpace(query)
+	if regexMode {
+		if query == "" {
+			return nil, nil
+		}
+		pattern := query
+		if !caseSensitive {
+			pattern = "(?i:" + query + ")"
+		}
+		compiled, err := regexp.Compile(pattern)
+		if err != nil {
+			return nil, tool.WrapError(tool.ErrorCodeInvalidInput, err, "SEARCH query is not a valid regular expression")
+		}
+		return []searchTerm{{Raw: query, Regex: compiled}}, nil
+	}
+	parts := strings.Split(query, "|")
+	out := make([]searchTerm, 0, len(parts))
+	for _, part := range parts {
+		raw := strings.TrimSpace(part)
+		if raw == "" {
+			continue
+		}
+		match := raw
+		if !caseSensitive {
+			match = strings.ToLower(raw)
+		}
+		out = append(out, searchTerm{Raw: raw, Match: match})
+	}
+	return out, nil
+}
+
+func firstSearchMatch(candidate string, terms []searchTerm) (string, int, bool) {
+	bestColumn := 0
+	bestMatch := ""
+	for _, term := range terms {
+		if term.Regex != nil {
+			idx := term.Regex.FindStringIndex(candidate)
+			if idx == nil {
+				continue
+			}
+			column := idx[0] + 1
+			match := candidate[idx[0]:idx[1]]
+			if bestColumn == 0 || column < bestColumn {
+				bestColumn = column
+				bestMatch = match
+			}
+			continue
+		}
+		if term.Match == "" {
+			continue
+		}
+		idx := strings.Index(candidate, term.Match)
+		if idx < 0 {
+			continue
+		}
+		column := idx + 1
+		if bestColumn == 0 || column < bestColumn {
+			bestColumn = column
+			bestMatch = term.Raw
+		}
+	}
+	return bestMatch, bestColumn, bestColumn > 0
+}
+
+func searchTermsUseRegex(terms []searchTerm) bool {
+	for _, term := range terms {
+		if term.Regex != nil {
+			return true
+		}
+	}
+	return false
+}
+
+func searchTermRawValues(terms []searchTerm) []string {
+	out := make([]string, 0, len(terms))
+	for _, term := range terms {
+		if term.Raw != "" {
+			out = append(out, term.Raw)
+		}
+	}
+	return out
 }
 
 var _ tool.Tool = (*SearchTool)(nil)

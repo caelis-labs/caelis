@@ -15,6 +15,11 @@ import (
 
 const GlobToolName = "GLOB"
 
+const (
+	defaultGlobLimit = 200
+	maxGlobLimit     = 1000
+)
+
 type GlobTool struct {
 	runtime sandbox.Runtime
 }
@@ -40,7 +45,7 @@ func (t *GlobTool) Definition() tool.Definition {
 					"description": "Optional relative path patterns to exclude after filtering.",
 					"items":       map[string]any{"type": "string"},
 				},
-				"respect_gitignore": map[string]any{"type": "boolean", "description": "When true, filter matches ignored by .gitignore at the search root."},
+				"limit": map[string]any{"type": "integer", "description": "Optional max matches to return."},
 			},
 			"required": []string{"pattern"},
 		},
@@ -63,9 +68,15 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
-	respectGitignore, err := argparse.Bool(args, "respect_gitignore", false)
+	limit, err := argparse.Int(args, "limit", defaultGlobLimit)
 	if err != nil {
 		return tool.Result{}, err
+	}
+	if limit <= 0 {
+		limit = defaultGlobLimit
+	}
+	if limit > maxGlobLimit {
+		limit = maxGlobLimit
 	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 	if !filepath.IsAbs(pattern) {
@@ -81,10 +92,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if !hasPathGlobMeta(filepath.ToSlash(pattern)) {
 		if info, err := fsys.Stat(pattern); err == nil {
 			root := filepath.Dir(pattern)
-			excludeRules := excludeRulesFromPatterns(exclude)
-			if respectGitignore {
-				excludeRules = append(gitignoreExcludePatterns(fsys, root), excludeRules...)
-			}
+			excludeRules := append(gitignoreExcludePatterns(fsys, root), excludeRulesFromPatterns(exclude)...)
 			if !shouldExcludePath(root, pattern, info.IsDir(), excludeRules) {
 				matches = append(matches, pattern)
 			}
@@ -92,28 +100,17 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 			return tool.Result{}, err
 		}
 		sort.Strings(matches)
-		return toolutil.JSONResult(GlobToolName, map[string]any{
-			"pattern": pattern,
-			"matches": matches,
-			"count":   len(matches),
-		})
+		return globResult(pattern, matches, limit)
 	}
 
 	root, relPattern := splitAbsoluteGlobPattern(pattern)
 	if relPattern == "" {
 		relPattern = filepath.Base(pattern)
 	}
-	excludeRules := excludeRulesFromPatterns(exclude)
-	if respectGitignore {
-		excludeRules = append(gitignoreExcludePatterns(fsys, root), excludeRules...)
-	}
+	excludeRules := append(gitignoreExcludePatterns(fsys, root), excludeRulesFromPatterns(exclude)...)
 	if _, err := fsys.Stat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return toolutil.JSONResult(GlobToolName, map[string]any{
-				"pattern": pattern,
-				"matches": matches,
-				"count":   0,
-			})
+			return globResult(pattern, matches, limit)
 		}
 		return tool.Result{}, err
 	}
@@ -140,10 +137,23 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		return tool.Result{}, err
 	}
 	sort.Strings(matches)
+	return globResult(pattern, matches, limit)
+}
+
+func globResult(pattern string, matches []string, limit int) (tool.Result, error) {
+	truncated := len(matches) > limit
+	visible := append([]string(nil), matches...)
+	if truncated {
+		visible = visible[:limit]
+	}
 	return toolutil.JSONResult(GlobToolName, map[string]any{
-		"pattern": pattern,
-		"matches": matches,
-		"count":   len(matches),
+		"matches":   visible,
+		"count":     len(visible),
+		"truncated": truncated,
+	}, map[string]any{
+		"pattern":     pattern,
+		"matches":     append([]string(nil), matches...),
+		"total_count": len(matches),
 	})
 }
 

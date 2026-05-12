@@ -397,6 +397,9 @@ func toolDisplayOutput(name string, input map[string]any, output map[string]any,
 }
 
 func requestPermissionsDisplayArgs(raw map[string]any) string {
+	if summary := permissionGrantDisplay(raw); summary != "" {
+		return summary
+	}
 	permissions, _ := raw["permissions"].(map[string]any)
 	if len(permissions) == 0 {
 		return ""
@@ -419,6 +422,12 @@ func permissionGrantDisplay(raw map[string]any) string {
 		return ""
 	}
 	parts := make([]string, 0, 3)
+	if values := stringListValue(raw["write"]); len(values) > 0 {
+		parts = append(parts, "write "+strings.Join(values, ", "))
+	}
+	if values := stringListValue(raw["read"]); len(values) > 0 {
+		parts = append(parts, "read "+strings.Join(values, ", "))
+	}
 	if fs, _ := raw["file_system"].(map[string]any); len(fs) > 0 {
 		if values := stringListValue(fs["write"]); len(values) > 0 {
 			parts = append(parts, "write "+strings.Join(values, ", "))
@@ -428,6 +437,9 @@ func permissionGrantDisplay(raw map[string]any) string {
 		}
 	}
 	if network, _ := raw["network"].(map[string]any); len(network) > 0 && displayBool(network["enabled"]) {
+		parts = append(parts, "network")
+	}
+	if displayBool(raw["network"]) {
 		parts = append(parts, "network")
 	}
 	return strings.Join(parts, "; ")
@@ -924,7 +936,11 @@ func mutationStructuredDiffLines(output map[string]any) []string {
 }
 
 func mutationSyntheticHunk(output map[string]any) string {
-	if replaced := displayInt(output["replaced"]); replaced > 0 {
+	replaced := displayInt(output["replacements"])
+	if replaced <= 0 {
+		replaced = displayInt(output["replaced"])
+	}
+	if replaced > 0 {
 		return "@@ repeated replacement: " + pluralizeUnit(replaced, "match") + " @@"
 	}
 	return "@@ changed @@"

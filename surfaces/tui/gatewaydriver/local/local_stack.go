@@ -201,11 +201,13 @@ func toRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabi
 
 func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	return SandboxStatus{
-		RequestedBackend: status.RequestedBackend,
-		ResolvedBackend:  status.ResolvedBackend,
-		Route:            status.Route,
-		FallbackReason:   status.FallbackReason,
-		SecuritySummary:  status.SecuritySummary,
+		RequestedBackend:   status.RequestedBackend,
+		ResolvedBackend:    status.ResolvedBackend,
+		Route:              status.Route,
+		FallbackReason:     status.FallbackReason,
+		InstallHint:        status.InstallHint,
+		SecuritySummary:    status.SecuritySummary,
+		AutoReviewDisabled: status.AutoReviewDisabled,
 	}
 }
 
@@ -253,26 +255,28 @@ func toGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
 
 func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorReport, error) {
 	return DoctorReport{
-		StoreDir:                 report.StoreDir,
-		SessionID:                report.SessionID,
-		SessionMode:              report.SessionMode,
-		ActiveModelAlias:         report.ActiveModelAlias,
-		ActiveProvider:           report.ActiveProvider,
-		ActiveModel:              report.ActiveModel,
-		MissingAPIKey:            report.MissingAPIKey,
-		SandboxRequestedBackend:  report.SandboxRequestedBackend,
-		SandboxResolvedBackend:   report.SandboxResolvedBackend,
-		SandboxRoute:             report.SandboxRoute,
-		SandboxFallbackReason:    report.SandboxFallbackReason,
-		SandboxSecuritySummary:   report.SandboxSecuritySummary,
-		HostExecution:            report.HostExecution,
-		FullAccessMode:           report.FullAccessMode,
-		PermissionGrantCount:     report.PermissionGrantCount,
-		PermissionGrantNetwork:   report.PermissionGrantNetwork,
-		PermissionReadRootCount:  report.PermissionReadRootCount,
-		PermissionWriteRootCount: report.PermissionWriteRootCount,
-		ConfigPermissionsSecure:  report.ConfigPermissionsSecure,
-		Warnings:                 append([]string(nil), report.Warnings...),
+		StoreDir:                  report.StoreDir,
+		SessionID:                 report.SessionID,
+		SessionMode:               report.SessionMode,
+		ActiveModelAlias:          report.ActiveModelAlias,
+		ActiveProvider:            report.ActiveProvider,
+		ActiveModel:               report.ActiveModel,
+		MissingAPIKey:             report.MissingAPIKey,
+		SandboxRequestedBackend:   report.SandboxRequestedBackend,
+		SandboxResolvedBackend:    report.SandboxResolvedBackend,
+		SandboxRoute:              report.SandboxRoute,
+		SandboxFallbackReason:     report.SandboxFallbackReason,
+		SandboxInstallHint:        report.SandboxInstallHint,
+		SandboxSecuritySummary:    report.SandboxSecuritySummary,
+		SandboxAutoReviewDisabled: report.SandboxAutoReviewDisabled,
+		HostExecution:             report.HostExecution,
+		FullAccessMode:            report.FullAccessMode,
+		PermissionGrantCount:      report.PermissionGrantCount,
+		PermissionGrantNetwork:    report.PermissionGrantNetwork,
+		PermissionReadRootCount:   report.PermissionReadRootCount,
+		PermissionWriteRootCount:  report.PermissionWriteRootCount,
+		ConfigPermissionsSecure:   report.ConfigPermissionsSecure,
+		Warnings:                  append([]string(nil), report.Warnings...),
 	}, err
 }
 

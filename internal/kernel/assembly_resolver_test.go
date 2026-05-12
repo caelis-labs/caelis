@@ -92,7 +92,7 @@ func TestAssemblyResolverAppliesAssemblyStateAndModelDefaults(t *testing.T) {
 	if got := meta["reasoning_budget_tokens"]; got != 64 {
 		t.Fatalf("reasoning_budget_tokens = %#v", got)
 	}
-	if got := meta["policy_mode"]; got != "auto-review" {
+	if got := meta["policy_mode"]; got != "workspace_write" {
 		t.Fatalf("policy_mode = %#v", got)
 	}
 }

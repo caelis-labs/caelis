@@ -2,6 +2,7 @@ package filesystem
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
@@ -32,6 +33,10 @@ func (t *WriteTool) Definition() tool.Definition {
 			"properties": map[string]any{
 				"path":    map[string]any{"type": "string", "description": "Target file path."},
 				"content": map[string]any{"type": "string", "description": "Full file contents to write."},
+				"if_revision": map[string]any{
+					"type":        "string",
+					"description": "Optional revision returned by READ; WRITE fails if the file changed since then.",
+				},
 			},
 			"required": []string{"path", "content"},
 		},
@@ -55,15 +60,21 @@ func (t *WriteTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		return tool.Result{}, err
 	}
 	diffStats := CountLineDiff(plan.before, plan.after)
-	result, err := toolutil.JSONResult(WriteToolName, map[string]any{
-		"path":           plan.path,
+	payload := map[string]any{
+		"path":    plan.path,
+		"changed": plan.before != plan.after || plan.created,
+		"summary": mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
+	}
+	meta := map[string]any{
 		"created":        plan.created,
 		"previous_empty": plan.before == "",
 		"bytes_written":  len([]byte(plan.after)),
 		"line_count":     lineCount(plan.after),
 		"added_lines":    diffStats.Added,
 		"removed_lines":  diffStats.Removed,
-	})
+		"revision":       textRevision(plan.after),
+	}
+	result, err := toolutil.JSONResult(WriteToolName, payload, meta)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -76,6 +87,27 @@ func lineCount(text string) int {
 		return 0
 	}
 	return strings.Count(text, "\n") + 1
+}
+
+func mutationSummary(created bool, added int, removed int) string {
+	action := "updated"
+	if created {
+		action = "created"
+	}
+	return action + " (" + lineDeltaSummary(added, removed) + ")"
+}
+
+func lineDeltaSummary(added int, removed int) string {
+	switch {
+	case added > 0 && removed > 0:
+		return fmt.Sprintf("+%d/-%d lines", added, removed)
+	case added > 0:
+		return fmt.Sprintf("+%d lines", added)
+	case removed > 0:
+		return fmt.Sprintf("-%d lines", removed)
+	default:
+		return "no line changes"
+	}
 }
 
 var _ tool.Tool = (*WriteTool)(nil)

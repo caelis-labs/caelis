@@ -338,6 +338,50 @@ func TestNewAutoBackendReportsSkippedSandboxCandidate(t *testing.T) {
 	}
 }
 
+func TestNewAutoBackendFallsBackToHostWithInstallHint(t *testing.T) {
+	candidates, err := candidateBackends("")
+	if err != nil {
+		t.Fatalf("candidateBackends(\"\") error = %v", err)
+	}
+	if len(candidates) == 0 {
+		t.Skip("no auto backend candidates for current platform")
+	}
+
+	backendFactoriesMu.Lock()
+	original := maps.Clone(backendFactories)
+	backendFactories = map[Backend]BackendFactory{
+		BackendHost: fakeBackendFactory{backend: BackendHost},
+	}
+	for _, candidate := range candidates {
+		backendFactories[candidate] = fakeBackendFactory{backend: candidate, err: errors.New("sandbox backend unavailable")}
+	}
+	backendFactoriesMu.Unlock()
+	t.Cleanup(func() {
+		backendFactoriesMu.Lock()
+		backendFactories = original
+		backendFactoriesMu.Unlock()
+	})
+
+	rt, err := New(Config{RequestedBackend: "auto"})
+	if err != nil {
+		t.Fatalf("New(auto) error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = rt.Close()
+	})
+
+	status := rt.Status()
+	if !status.FallbackToHost {
+		t.Fatal("Status().FallbackToHost = false, want host fallback for unavailable auto backend")
+	}
+	if status.ResolvedBackend != BackendHost {
+		t.Fatalf("Status().ResolvedBackend = %q, want host", status.ResolvedBackend)
+	}
+	if strings.TrimSpace(status.FallbackInstallHint) == "" {
+		t.Fatal("Status().FallbackInstallHint is empty, want install guidance")
+	}
+}
+
 type fakeBackendFactory struct {
 	backend Backend
 	err     error

@@ -210,6 +210,7 @@ func policyDecisionResultWithOutcome(
 	errorText := strings.TrimSpace(firstNonEmpty(outcome.Reason, outcome.ReviewText, decision.Reason, "tool denied by policy"))
 	payload := map[string]any{
 		"error":         errorText,
+		"error_code":    string(tool.ErrorCodePermissionDenied),
 		"policy_mode":   strings.TrimSpace(mode),
 		"policy_action": string(decision.Action),
 		"tool_name":     strings.TrimSpace(def.Name),
@@ -228,6 +229,7 @@ func policyDecisionResultWithOutcome(
 	}
 	meta := map[string]any{
 		"error":         payload["error"],
+		"error_code":    payload["error_code"],
 		"policy_mode":   payload["policy_mode"],
 		"policy_action": payload["policy_action"],
 	}

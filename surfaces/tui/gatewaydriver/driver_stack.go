@@ -87,11 +87,13 @@ type SessionRuntimeState struct {
 }
 
 type SandboxStatus struct {
-	RequestedBackend string
-	ResolvedBackend  string
-	Route            string
-	FallbackReason   string
-	SecuritySummary  string
+	RequestedBackend   string
+	ResolvedBackend    string
+	Route              string
+	FallbackReason     string
+	InstallHint        string
+	SecuritySummary    string
+	AutoReviewDisabled bool
 }
 
 type DoctorRequest struct {
@@ -101,26 +103,28 @@ type DoctorRequest struct {
 }
 
 type DoctorReport struct {
-	StoreDir                 string
-	SessionID                string
-	SessionMode              string
-	ActiveModelAlias         string
-	ActiveProvider           string
-	ActiveModel              string
-	MissingAPIKey            bool
-	SandboxRequestedBackend  string
-	SandboxResolvedBackend   string
-	SandboxRoute             string
-	SandboxFallbackReason    string
-	SandboxSecuritySummary   string
-	HostExecution            bool
-	FullAccessMode           bool
-	PermissionGrantCount     int
-	PermissionGrantNetwork   bool
-	PermissionReadRootCount  int
-	PermissionWriteRootCount int
-	ConfigPermissionsSecure  bool
-	Warnings                 []string
+	StoreDir                  string
+	SessionID                 string
+	SessionMode               string
+	ActiveModelAlias          string
+	ActiveProvider            string
+	ActiveModel               string
+	MissingAPIKey             bool
+	SandboxRequestedBackend   string
+	SandboxResolvedBackend    string
+	SandboxRoute              string
+	SandboxFallbackReason     string
+	SandboxInstallHint        string
+	SandboxSecuritySummary    string
+	SandboxAutoReviewDisabled bool
+	HostExecution             bool
+	FullAccessMode            bool
+	PermissionGrantCount      int
+	PermissionGrantNetwork    bool
+	PermissionReadRootCount   int
+	PermissionWriteRootCount  int
+	ConfigPermissionsSecure   bool
+	Warnings                  []string
 }
 
 type RegisterBuiltinACPAgentOptions struct {

@@ -93,7 +93,7 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	result, err := permissionsTool.Call(context.Background(), tool.Call{
 		ID:    "perm-1",
 		Name:  requestPermissionsToolName,
-		Input: []byte(`{"reason":"need deps","permissions":{"file_system":{"read":["docs"],"write":["build"]},"network":{"enabled":true}}}`),
+		Input: []byte(`{"reason":"need deps","read":["docs"],"write":["build"],"network":true}`),
 	})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
@@ -140,12 +140,12 @@ func TestRequestPermissionsToolRejectsMissingFilesystemPath(t *testing.T) {
 	}{
 		{
 			name:  "read",
-			input: `{"reason":"need read","permissions":{"file_system":{"read":["missing-read"]}}}`,
+			input: `{"reason":"need read","read":["missing-read"]}`,
 			want:  "request_permissions read path",
 		},
 		{
 			name:  "write",
-			input: `{"reason":"need write","permissions":{"file_system":{"write":["missing-write"]}}}`,
+			input: `{"reason":"need write","write":["missing-write"]}`,
 			want:  "request an existing parent directory",
 		},
 	}
@@ -210,7 +210,7 @@ func TestRequestPermissionsToolPersistsGrantInSessionState(t *testing.T) {
 	result, err := permissionsTool.Call(ctx, tool.Call{
 		ID:    "perm-1",
 		Name:  requestPermissionsToolName,
-		Input: []byte(fmt.Sprintf(`{"reason":"edit ghostty","permissions":{"file_system":{"write":[%q]}}}`, target)),
+		Input: []byte(fmt.Sprintf(`{"reason":"edit ghostty","write":[%q]}`, target)),
 	})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)

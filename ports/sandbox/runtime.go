@@ -100,6 +100,7 @@ func New(cfg Config) (Runtime, error) {
 	rt.status.FallbackToHost = true
 	rt.status.ResolvedBackend = BackendHost
 	rt.status.FallbackReason = strings.Join(failures, "; ")
+	rt.status.FallbackInstallHint = sandboxInstallHint()
 	return rt, nil
 }
 
@@ -173,6 +174,69 @@ func candidateBackends(requested Backend) ([]Backend, error) {
 		}
 		return []Backend{requested}, nil
 	}
+}
+
+func sandboxInstallHint() string {
+	switch runtime.GOOS {
+	case "linux":
+		return linuxSandboxInstallHint()
+	case "darwin":
+		return "macOS sandboxing uses sandbox-exec/seatbelt and should be available by default; update macOS or use manual mode until the backend is available."
+	default:
+		return "Install a supported sandbox backend for this OS or use manual mode until one is available."
+	}
+}
+
+func linuxSandboxInstallHint() string {
+	ids := linuxDistroIDs()
+	for _, id := range ids {
+		switch id {
+		case "debian", "ubuntu", "linuxmint", "pop":
+			return "Install bubblewrap with: sudo apt install bubblewrap. If bubblewrap is blocked, use a Landlock-capable Linux kernel or manual mode."
+		case "fedora", "rhel", "centos", "rocky", "almalinux":
+			return "Install bubblewrap with: sudo dnf install bubblewrap. If user namespaces are blocked, enable them or use manual mode."
+		case "arch", "manjaro":
+			return "Install bubblewrap with: sudo pacman -S bubblewrap. If user namespaces are blocked, enable them or use manual mode."
+		case "opensuse", "suse", "sles":
+			return "Install bubblewrap with: sudo zypper install bubblewrap. If user namespaces are blocked, enable them or use manual mode."
+		}
+	}
+	return "Install bubblewrap for this distribution or use a Landlock-capable Linux kernel; until then Caelis falls back to manual mode without Auto-Review."
+}
+
+func linuxDistroIDs() []string {
+	raw, err := os.ReadFile("/etc/os-release")
+	if err != nil {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	var ids []string
+	appendID := func(value string) {
+		value = strings.ToLower(strings.Trim(strings.TrimSpace(value), `"`))
+		if value == "" {
+			return
+		}
+		if _, ok := seen[value]; ok {
+			return
+		}
+		seen[value] = struct{}{}
+		ids = append(ids, value)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch strings.TrimSpace(key) {
+		case "ID":
+			appendID(value)
+		case "ID_LIKE":
+			for _, item := range strings.Fields(strings.Trim(strings.TrimSpace(value), `"`)) {
+				appendID(item)
+			}
+		}
+	}
+	return ids
 }
 
 func normalizeStringSlice(values []string) []string {

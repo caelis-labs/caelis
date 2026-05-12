@@ -8,6 +8,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/internal/argparse"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 type fileMutationPlan struct {
@@ -29,11 +30,15 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 	rawContent, exists := args["content"]
 	if !exists {
-		return fileMutationPlan{}, fmt.Errorf("tool: missing required arg %q", "content")
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: missing required arg %q", "content"))
 	}
 	content, ok := rawContent.(string)
 	if !ok {
-		return fileMutationPlan{}, fmt.Errorf("tool: arg %q must be string", "content")
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q must be string", "content"))
+	}
+	ifRevision, err := argparse.String(args, "if_revision", false)
+	if err != nil {
+		return fileMutationPlan{}, err
 	}
 
 	target, err := normalizePathWithFS(fsys, pathArg)
@@ -48,7 +53,7 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	switch {
 	case statErr == nil:
 		if info.IsDir() {
-			return fileMutationPlan{}, fmt.Errorf("tool: target %q is directory", target)
+			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: target %q is directory", target))
 		}
 		mode = info.Mode()
 		raw, err := fsys.ReadFile(target)
@@ -57,9 +62,15 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		}
 		before = string(raw)
 	case errors.Is(statErr, os.ErrNotExist):
+		if strings.TrimSpace(ifRevision) != "" {
+			return fileMutationPlan{}, staleRevisionError(target)
+		}
 		created = true
 	default:
 		return fileMutationPlan{}, statErr
+	}
+	if !revisionsMatch(ifRevision, textRevision(before)) {
+		return fileMutationPlan{}, staleRevisionError(target)
 	}
 
 	return fileMutationPlan{
@@ -83,13 +94,24 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 	rawNew, exists := args["new"]
 	if !exists {
-		return fileMutationPlan{}, fmt.Errorf("tool: missing required arg %q", "new")
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: missing required arg %q", "new"))
 	}
 	newValue, ok := rawNew.(string)
 	if !ok {
-		return fileMutationPlan{}, fmt.Errorf("tool: arg %q must be string", "new")
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: arg %q must be string", "new"))
 	}
 	replaceAll, _ := argparse.Bool(args, "replace_all", false)
+	expectedReplacements, err := argparse.Int(args, "expected_replacements", 0)
+	if err != nil {
+		return fileMutationPlan{}, err
+	}
+	if expectedReplacements < 0 {
+		return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, "tool: arg \"expected_replacements\" must be >= 0")
+	}
+	ifRevision, err := argparse.String(args, "if_revision", false)
+	if err != nil {
+		return fileMutationPlan{}, err
+	}
 
 	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
@@ -103,14 +125,22 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	}
 	if fileExists {
 		if fileInfo.IsDir() {
-			return fileMutationPlan{}, fmt.Errorf("tool: target %q is directory", target)
+			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: target %q is directory", target))
 		}
 		mode = fileInfo.Mode()
 	}
 
 	if !fileExists {
+		if strings.TrimSpace(ifRevision) != "" {
+			return fileMutationPlan{}, staleRevisionError(target)
+		}
 		if oldValue != "" {
-			return fileMutationPlan{}, fmt.Errorf("tool: PATCH target %q does not exist; set %q to empty string to create file", target, "old")
+			err := tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool: PATCH target %q does not exist; set %q to empty string to create file", target, "old"))
+			err.Retryable = true
+			return fileMutationPlan{}, err
+		}
+		if expectedReplacements > 0 && expectedReplacements != 1 {
+			return fileMutationPlan{}, replacementCountError(target, expectedReplacements, 1)
 		}
 		return fileMutationPlan{
 			tool:     PatchToolName,
@@ -130,9 +160,15 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		return fileMutationPlan{}, err
 	}
 	content := string(contentRaw)
+	if !revisionsMatch(ifRevision, textRevision(content)) {
+		return fileMutationPlan{}, staleRevisionError(target)
+	}
 	if oldValue == "" {
 		if content != "" {
-			return fileMutationPlan{}, fmt.Errorf("tool: PATCH arg %q can be empty only when target file is empty", "old")
+			return fileMutationPlan{}, tool.NewError(tool.ErrorCodeInvalidInput, fmt.Sprintf("tool: PATCH arg %q can be empty only when target file is empty", "old"))
+		}
+		if expectedReplacements > 0 && expectedReplacements != 1 {
+			return fileMutationPlan{}, replacementCountError(target, expectedReplacements, 1)
 		}
 		return fileMutationPlan{
 			tool:     PatchToolName,
@@ -148,10 +184,19 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 
 	count := strings.Count(content, oldValue)
 	if count == 0 {
-		return fileMutationPlan{}, fmt.Errorf("tool: PATCH target %q did not contain an exact match for \"old\"", target)
+		err := tool.NewError(tool.ErrorCodeOldTextNotFound, fmt.Sprintf("tool: PATCH target %q did not contain an exact match for \"old\"", target))
+		err.Hint = "READ the file again and retry PATCH with the current text."
+		err.Retryable = true
+		return fileMutationPlan{}, err
+	}
+	if expectedReplacements > 0 && count != expectedReplacements {
+		return fileMutationPlan{}, replacementCountError(target, expectedReplacements, count)
 	}
 	if !replaceAll && count != 1 {
-		return fileMutationPlan{}, fmt.Errorf("tool: PATCH requires exact single match, found %d; set replace_all=true to replace all", count)
+		err := tool.NewError(tool.ErrorCodeTooManyMatches, fmt.Sprintf("tool: PATCH requires exact single match, found %d; set replace_all=true with expected_replacements=%d to replace all", count, count))
+		err.Hint = "Use a more specific old text or set replace_all with expected_replacements."
+		err.Retryable = true
+		return fileMutationPlan{}, err
 	}
 	if replaceAll {
 		return fileMutationPlan{
@@ -182,6 +227,17 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		replaced: 1,
 		oldCount: count,
 	}, nil
+}
+
+func replacementCountError(path string, expected int, actual int) error {
+	code := tool.ErrorCodeTooManyMatches
+	if actual < expected {
+		code = tool.ErrorCodeOldTextNotFound
+	}
+	err := tool.NewError(code, fmt.Sprintf("tool: PATCH target %q expected %d replacement(s), found %d", path, expected, actual))
+	err.Hint = "READ the file again and retry PATCH with the current expected_replacements value."
+	err.Retryable = true
+	return err
 }
 
 func patchLineCount(text string) int {

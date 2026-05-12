@@ -89,24 +89,38 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if got := readResult["content"]; !strings.Contains(got.(string), "1: hello") {
 		t.Fatalf("read content = %v, want numbered file lines", got)
 	}
+	revision, _ := readResult["revision"].(string)
+	if revision == "" {
+		t.Fatal("read revision is empty")
+	}
 
 	patchTool := mustLookupTool(t, reg, filesystem.PatchToolName)
 	patchResult := runToolJSON(t, patchTool, map[string]any{
-		"path": "notes.txt",
-		"old":  "world",
-		"new":  "caelis",
+		"path":                  "notes.txt",
+		"old":                   "world",
+		"new":                   "caelis",
+		"if_revision":           revision,
+		"expected_replacements": 1,
 	})
-	if got := patchResult["replaced"]; got != float64(1) {
-		t.Fatalf("patch replaced = %v, want 1", got)
+	if got := patchResult["replacements"]; got != float64(1) {
+		t.Fatalf("patch replacements = %v, want 1", got)
 	}
 
 	searchTool := mustLookupTool(t, reg, filesystem.SearchToolName)
 	searchResult := runToolJSON(t, searchTool, map[string]any{
 		"path":  dir,
-		"query": "caelis",
+		"query": "missing|caelis",
 	})
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("search count = %v, want 1", got)
+	}
+	searchResult = runToolJSON(t, searchTool, map[string]any{
+		"path":  dir,
+		"query": `hello|Meta\[\"error\"\]`,
+		"regex": true,
+	})
+	if got := searchResult["count"]; got != float64(1) {
+		t.Fatalf("regex search count = %v, want 1", got)
 	}
 
 	globTool := mustLookupTool(t, reg, filesystem.GlobToolName)
@@ -142,26 +156,23 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("WriteFile(.gitignore) error = %v", err)
 	}
 	searchResult = runToolJSON(t, searchTool, map[string]any{
-		"path":              dir,
-		"query":             "caelis",
-		"respect_gitignore": true,
+		"path":  dir,
+		"query": "caelis",
 	})
 	if got := searchResult["count"]; got != float64(1) {
-		t.Fatalf("search count with respect_gitignore = %v, want 1", got)
+		t.Fatalf("search count with default gitignore = %v, want 1", got)
 	}
 	globResult = runToolJSON(t, globTool, map[string]any{
-		"pattern":           filepath.Join(dir, "**/*.txt"),
-		"respect_gitignore": true,
+		"pattern": filepath.Join(dir, "**/*.txt"),
 	})
 	if got := globResult["count"]; got != float64(1) {
-		t.Fatalf("glob count with respect_gitignore = %v, want 1", got)
+		t.Fatalf("glob count with default gitignore = %v, want 1", got)
 	}
 	listResult = runToolJSON(t, listTool, map[string]any{
-		"path":              dir,
-		"respect_gitignore": true,
+		"path": dir,
 	})
 	if got := listResult["count"]; got != float64(2) {
-		t.Fatalf("list count with respect_gitignore = %v, want 2", got)
+		t.Fatalf("list count with default gitignore = %v, want 2", got)
 	}
 
 	bashTool := mustLookupTool(t, reg, shell.BashToolName)
@@ -189,8 +200,8 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 			{"content": "Summarize", "status": "in_progress"},
 		},
 	})
-	if got := planResult["message"]; got != "Plan updated" {
-		t.Fatalf("plan message = %v, want %q", got, "Plan updated")
+	if got := planResult["updated"]; got != true {
+		t.Fatalf("plan updated = %v, want true", got)
 	}
 }
 

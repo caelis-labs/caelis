@@ -38,8 +38,11 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSONValue(), &payload); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
-	entries, _ := payload["entries"].([]any)
+	if got := payload["updated"]; got != true {
+		t.Fatalf("updated = %#v, want true", got)
+	}
+	entries, _ := result.Meta["entries"].([]map[string]any)
 	if got, want := len(entries), 2; got != want {
-		t.Fatalf("len(entries) = %d, want %d", got, want)
+		t.Fatalf("len(meta entries) = %d, want %d", got, want)
 	}
 }

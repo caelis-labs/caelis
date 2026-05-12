@@ -1021,10 +1021,13 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"Session", "  Model", "  Mode", "Token usage: total=12,800 input=12,600 (+ 9,000 cached) output=200 (reasoning 50)", "main usage: total=10,150 input=10,000 (+ 7,000 cached) output=150 (reasoning 30)", "sub-agent usage: total=2,040 input=2,000 (+ 1,800 cached) output=40 (reasoning 15)", "auto-review usage: total=610 input=600 (+ 200 cached) output=10 (reasoning 5)", "Grants     2 approved, read roots 3, write roots 1, network yes", "warn: API key is missing", "/tmp/store"} {
+	for _, want := range []string{"Session", "  Model", "  Mode", "  Token usage", "    Scope", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Grants     2 approved, read roots 3, write roots 1, network yes", "warn: API key is missing", "/tmp/store"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}
+	}
+	if strings.Contains(got, "Token usage:") || strings.Contains(got, "main usage:") {
+		t.Fatalf("formatStatusSnapshot() = %q, should use table-style token usage", got)
 	}
 }
 
@@ -1033,10 +1036,15 @@ func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 		SessionUsageTotal: kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
 		SessionUsageMain:  kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
 	})
-	if !strings.Contains(got, "main usage: total=110 input=100 (+ 20 cached) output=10 (reasoning 0)") {
-		t.Fatalf("formatSessionTokenUsageStatus() = %q, want main usage", got)
+	for _, want := range []string{"Scope", "Total", "Cached", "total", "main", "110", "100", "20"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatSessionTokenUsageStatus() = %q, want %q", got, want)
+		}
 	}
-	for _, forbidden := range []string{"sub-agent usage:", "auto-review usage:"} {
+	if strings.Contains(got, "main usage:") {
+		t.Fatalf("formatSessionTokenUsageStatus() = %q, should use table-style token usage", got)
+	}
+	for _, forbidden := range []string{"sub-agent", "auto-review"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatSessionTokenUsageStatus() = %q, should omit %q", got, forbidden)
 		}

@@ -1001,6 +1001,9 @@ func (g *Gateway) resolveApprovalRequest(
 	if modeErr != nil {
 		mode = ApprovalModeManual
 	}
+	if NormalizeApprovalMode(req.Mode) == ApprovalModeManual {
+		mode = ApprovalModeManual
+	}
 	if mode == ApprovalModeManual {
 		wait := handle.publishApproval(req)
 		select {

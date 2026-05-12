@@ -33,6 +33,14 @@ func (t *PatchTool) Definition() tool.Definition {
 				"old":         map[string]any{"type": "string", "description": "Exact original text to replace."},
 				"new":         map[string]any{"type": "string", "description": "Replacement text."},
 				"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences instead of one."},
+				"expected_replacements": map[string]any{
+					"type":        "integer",
+					"description": "Optional exact replacement count required before writing.",
+				},
+				"if_revision": map[string]any{
+					"type":        "string",
+					"description": "Optional revision returned by READ; PATCH fails if the file changed since then.",
+				},
 			},
 			"required": []string{"path", "old", "new"},
 		},
@@ -56,15 +64,21 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 		return tool.Result{}, err
 	}
 	diffStats := CountLineDiff(plan.before, plan.after)
-	result, err := toolutil.JSONResult(PatchToolName, map[string]any{
-		"path":           plan.path,
-		"replaced":       plan.replaced,
+	payload := map[string]any{
+		"path":         plan.path,
+		"replacements": plan.replaced,
+		"changed":      plan.before != plan.after || plan.created,
+		"summary":      mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
+	}
+	meta := map[string]any{
 		"created":        plan.created,
 		"previous_empty": plan.before == "",
 		"added_lines":    diffStats.Added,
 		"removed_lines":  diffStats.Removed,
 		"hunk":           plan.hunk,
-	})
+		"revision":       textRevision(plan.after),
+	}
+	result, err := toolutil.JSONResult(PatchToolName, payload, meta)
 	if err != nil {
 		return tool.Result{}, err
 	}

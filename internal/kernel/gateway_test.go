@@ -1173,6 +1173,56 @@ func TestBeginTurnBridgesApprovalRequestsIntoHandleEvents(t *testing.T) {
 	}
 }
 
+func TestBeginTurnRequestModeManualBypassesDefaultAutoReview(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+	}
+	rt := &approvalRuntime{session: activeSession, mode: string(ApprovalModeManual)}
+	gw, err := New(Config{
+		Sessions: staticSessionService{
+			session: activeSession,
+			state:   map[string]any{},
+		},
+		Runtime:  rt,
+		Resolver: staticResolver{resolved: ResolvedTurn{RunRequest: agent.RunRequest{}}},
+		ApprovalReviewer: staticApprovalReviewer{
+			result: ApprovalReviewResult{Approved: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	first := <-result.Handle.Events()
+	if first.Event.Kind != EventKindApprovalRequested {
+		t.Fatalf("first event kind = %q, want manual approval_requested", first.Event.Kind)
+	}
+	if err := result.Handle.Submit(context.Background(), SubmitRequest{
+		Kind: SubmissionKindApproval,
+		Approval: &ApprovalDecision{
+			Approved: true,
+			Outcome:  "approved",
+		},
+	}); err != nil {
+		t.Fatalf("Submit(approval) error = %v", err)
+	}
+	got := collectHandleEvents(t, result.Handle)
+	if len(got) == 0 {
+		t.Fatal("collectHandleEvents() = empty, want completion event stream")
+	}
+}
+
 func TestBeginTurnApprovalModeSnapshotErrorFailsClosed(t *testing.T) {
 	t.Parallel()
 
@@ -1846,6 +1896,7 @@ func (r *recordingRuntime) RunState(context.Context, session.SessionRef) (agent.
 type approvalRuntime struct {
 	session  session.Session
 	requests int
+	mode     string
 }
 
 func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -1862,6 +1913,7 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			Session:    r.session,
 			RunID:      "run-1",
 			TurnID:     "turn-1",
+			Mode:       strings.TrimSpace(r.mode),
 			Tool:       tool.Definition{Name: "BASH"},
 			Call:       tool.Call{ID: "approval-call", Name: "BASH"},
 			Approval: &session.ProtocolApproval{

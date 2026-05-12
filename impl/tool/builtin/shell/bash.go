@@ -152,7 +152,7 @@ func (t *BashTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 			Constraints: sandbox.Constraints{
 				Route:      sandbox.RouteSandbox,
 				Permission: sandbox.PermissionWorkspaceWrite,
-				Network:    sandbox.NetworkInherit,
+				Network:    sandbox.NetworkDisabled,
 			},
 		})
 	}
@@ -170,8 +170,12 @@ func (t *BashTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		if detail, ok := sandbox.SandboxPermissionDetail(result, err); ok {
 			out.Meta["error"] = detail
+			out.Meta["error_code"] = string(tool.ErrorCodeSandboxDenied)
 		} else {
 			out.Meta["error"] = strings.TrimSpace(err.Error())
+			if code, _ := tool.ErrorPayload(err)["error_code"].(string); code != "" {
+				out.Meta["error_code"] = code
+			}
 		}
 	}
 	return out, resultErr
@@ -199,6 +203,7 @@ func bashCommandPayload(result sandbox.CommandResult, err error) map[string]any 
 	if err != nil {
 		if detail, ok := sandbox.SandboxPermissionDetail(result, err); ok {
 			payload["error"] = detail
+			payload["error_code"] = string(tool.ErrorCodeSandboxDenied)
 		}
 	}
 	return payload
