@@ -115,6 +115,22 @@ func TestTaskWaitResultDoesNotCompleteLinkedSpawnTool(t *testing.T) {
 	}
 }
 
+func TestTaskResultReplacesSelfTaskIDWithVisibleHandle(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait self 3s", "", false, false, ToolUpdateMeta{TaskID: "self"})
+	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait jeff 3s", "still running", false, false, ToolUpdateMeta{TaskID: "jeff"})
+
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one merged TASK event", block.Events)
+	}
+	if got := block.Events[0].TaskID; got != "jeff" {
+		t.Fatalf("TaskID = %q, want visible handle", got)
+	}
+	if got := block.Events[0].Args; got != "Wait jeff 3s" {
+		t.Fatalf("Args = %q, want visible handle", got)
+	}
+}
+
 func TestTaskWaitResultStillUpdatesLinkedBashTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.UpdateToolWithMeta("bash-1", "BASH", "go test", "", false, false, ToolUpdateMeta{TaskID: "task-1"})

@@ -204,6 +204,41 @@ func TestCloneEventPreservesTextWhitespace(t *testing.T) {
 	}
 }
 
+func TestCloneEventProtocolPreservesRuntimeToolNameWithDurableUpdate(t *testing.T) {
+	t.Parallel()
+
+	protocol := CloneEventProtocol(EventProtocol{
+		Update: &ProtocolUpdate{
+			SessionUpdate: string(ProtocolUpdateTypeToolCall),
+			ToolCallID:    "call-1",
+			Title:         "BASH echo hi",
+			Kind:          "execute",
+			Status:        "pending",
+			RawInput:      map[string]any{"command": "echo hi"},
+		},
+		ToolCall: &ProtocolToolCall{
+			ID:     "call-1",
+			Name:   "BASH",
+			Kind:   "execute",
+			Title:  "BASH echo hi",
+			Status: "pending",
+			RawInput: map[string]any{
+				"command": "echo hi",
+			},
+		},
+	})
+
+	if protocol.ToolCall == nil {
+		t.Fatal("ToolCall = nil")
+	}
+	if protocol.ToolCall.Name != "BASH" {
+		t.Fatalf("ToolCall.Name = %q, want original BASH", protocol.ToolCall.Name)
+	}
+	if protocol.ToolCall.Kind != "execute" {
+		t.Fatalf("ToolCall.Kind = %q, want execute", protocol.ToolCall.Kind)
+	}
+}
+
 func TestEventTypeOfProtocolPlan(t *testing.T) {
 	t.Parallel()
 

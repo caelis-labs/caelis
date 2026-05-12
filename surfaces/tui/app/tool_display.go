@@ -543,6 +543,81 @@ func taskControlDisplayFallback(values ...string) string {
 	return ""
 }
 
+func taskDisplayArgsWithTaskID(args string, taskID string) string {
+	handle := taskHandleDisplay(taskID)
+	if handle == "" {
+		return args
+	}
+	verb, detail := splitTaskAction(args)
+	switch strings.ToLower(strings.TrimSpace(verb)) {
+	case "wait", "cancel", "write":
+	default:
+		return args
+	}
+	detail = taskDetailWithDisplayHandle(verb, detail, handle)
+	if detail == "" {
+		return verb
+	}
+	return verb + " " + detail
+}
+
+func taskDetailWithDisplayHandle(verb string, detail string, handle string) string {
+	detail = strings.TrimSpace(detail)
+	handle = strings.TrimSpace(handle)
+	if handle == "" {
+		return detail
+	}
+	if detail == "" {
+		return handle
+	}
+	if before, after, ok := strings.Cut(detail, ":"); ok && taskHandleDisplay(before) != "" {
+		return handle + ":" + after
+	}
+	if strings.EqualFold(strings.TrimSpace(verb), "write") {
+		return taskWriteDetailWithDisplayHandle(detail, handle)
+	}
+	fields := strings.Fields(detail)
+	if len(fields) == 0 {
+		return handle
+	}
+	if taskHandleDisplay(fields[0]) != "" && !looksLikeTaskDuration(fields[0]) {
+		fields[0] = handle
+		return strings.Join(fields, " ")
+	}
+	return strings.TrimSpace(handle + " " + detail)
+}
+
+func taskWriteDetailWithDisplayHandle(detail string, handle string) string {
+	if detail == "" {
+		return handle
+	}
+	fields := strings.Fields(detail)
+	if len(fields) == 1 && isTaskHandleDetail(fields[0]) {
+		return handle
+	}
+	return handle + ": " + detail
+}
+
+func looksLikeTaskDuration(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.HasSuffix(value, "ms") {
+		value = strings.TrimSuffix(value, "ms")
+	} else if strings.HasSuffix(value, "s") {
+		value = strings.TrimSuffix(value, "s")
+	} else {
+		return false
+	}
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 func spawnDisplayArgs(raw map[string]any) string {
 	full := displaypolicy.SpawnDisplayArgs(raw)
 	if full == "" {

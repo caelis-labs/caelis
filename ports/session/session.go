@@ -1070,14 +1070,19 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 		Method:     strings.TrimSpace(in.Method),
 		UpdateType: strings.TrimSpace(in.UpdateType),
 	}
+	var sourceToolCall *ProtocolToolCall
+	if in.ToolCall != nil {
+		call := cloneProtocolToolCall(*in.ToolCall)
+		sourceToolCall = &call
+	}
 	if in.Update != nil {
 		update := cloneProtocolUpdate(*in.Update)
 		out.Update = &update
 	}
 	if out.Update == nil {
 		switch {
-		case in.ToolCall != nil:
-			call := cloneProtocolToolCall(*in.ToolCall)
+		case sourceToolCall != nil:
+			call := *sourceToolCall
 			out.Update = &ProtocolUpdate{
 				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypeToolCall)),
 				ToolCallID:    call.ID,
@@ -1103,11 +1108,19 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 		out.Update = &update
 		switch update.SessionUpdate {
 		case string(ProtocolUpdateTypeToolCall), string(ProtocolUpdateTypeToolUpdate):
+			sourceName := ""
+			sourceKind := ""
+			sourceTitle := ""
+			if sourceToolCall != nil {
+				sourceName = sourceToolCall.Name
+				sourceKind = sourceToolCall.Kind
+				sourceTitle = sourceToolCall.Title
+			}
 			out.ToolCall = &ProtocolToolCall{
 				ID:        strings.TrimSpace(update.ToolCallID),
-				Name:      firstNonEmpty(strings.TrimSpace(update.Kind), strings.TrimSpace(update.Title)),
-				Kind:      strings.TrimSpace(update.Kind),
-				Title:     strings.TrimSpace(update.Title),
+				Name:      firstNonEmpty(sourceName, strings.TrimSpace(update.Kind), strings.TrimSpace(update.Title)),
+				Kind:      firstNonEmpty(strings.TrimSpace(update.Kind), sourceKind),
+				Title:     firstNonEmpty(strings.TrimSpace(update.Title), sourceTitle),
 				Status:    strings.TrimSpace(update.Status),
 				RawInput:  maps.Clone(update.RawInput),
 				RawOutput: maps.Clone(update.RawOutput),

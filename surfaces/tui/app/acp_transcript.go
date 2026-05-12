@@ -700,8 +700,12 @@ func styleTaskSummaryRow(row string, ctx BlockRenderContext) string {
 }
 
 func styleTaskDetail(detail string, ctx BlockRenderContext) string {
-	first, rest, ok := strings.Cut(strings.TrimSpace(detail), " ")
+	detail = strings.TrimSpace(detail)
+	first, rest, ok := strings.Cut(detail, " ")
 	if !ok {
+		if isTaskHandleDetail(detail) {
+			return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Render(detail)
+		}
 		return ctx.Theme.SecondaryTextStyle().Render(detail)
 	}
 	if !isTaskHandleDetail(first) {
@@ -1994,8 +1998,29 @@ func styleSpawnedHeaderDetail(ctx BlockRenderContext, detail string) string {
 	if target == "" {
 		return ctx.Theme.ToolArgsStyle().Render(detail)
 	}
-	return lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true).Render(target) +
+	return styleSpawnedHeaderTarget(ctx, target) +
 		ctx.Theme.ToolArgsStyle().Render(rest)
+}
+
+func styleSpawnedHeaderTarget(ctx BlockRenderContext, target string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return ""
+	}
+	handle := target
+	annotation := ""
+	if before, after, ok := strings.Cut(target, "["); ok && strings.HasSuffix(after, "]") {
+		handle = strings.TrimSpace(before)
+		annotation = "[" + after
+	}
+	if handle == "" {
+		return ctx.Theme.SecondaryTextStyle().Render(target)
+	}
+	styled := lipgloss.NewStyle().Foreground(ctx.Theme.Focus).Bold(true).Render(handle)
+	if annotation != "" {
+		styled += ctx.Theme.SecondaryTextStyle().Render(annotation)
+	}
+	return styled
 }
 
 type shellTokenClass int

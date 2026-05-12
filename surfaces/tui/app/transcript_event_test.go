@@ -734,6 +734,36 @@ func TestProjectGatewayEventTaskArgsUseProtocolRawInput(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventTaskResultPrefersOutputHandleInArgs(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "task-result",
+			ToolName: "TASK",
+			Status:   kernel.ToolStatusRunning,
+			RawInput: map[string]any{"action": "wait", "task_id": "self", "yield_time_ms": 3000},
+			RawOutput: map[string]any{
+				"action":      "wait",
+				"task_id":     "jeff",
+				"target_kind": "subagent",
+				"running":     true,
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolArgs != "Wait jeff 3s" {
+		t.Fatalf("ToolArgs = %q, want output handle in TASK args", got.ToolArgs)
+	}
+	if got.ToolTaskID != "jeff" {
+		t.Fatalf("ToolTaskID = %q, want jeff", got.ToolTaskID)
+	}
+}
+
 func TestProjectGatewayEventTaskWriteUsesCaelisMetaTarget(t *testing.T) {
 	t.Parallel()
 

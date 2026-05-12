@@ -116,13 +116,45 @@ func SpawnFullDisplayArgs(raw map[string]any) string {
 	raw = NormalizeSpawnDisplayRawMap(raw)
 	prompt := strings.Join(strings.Fields(NormalizeDisplayArg(MapString(raw, "prompt"))), " ")
 	agent := strings.TrimSpace(MapString(raw, "agent"))
-	if agent == "" {
+	target := spawnDisplayTarget(raw, agent)
+	if target == "" {
 		return prompt
 	}
 	if prompt == "" {
+		return target
+	}
+	return target + ": " + prompt
+}
+
+func spawnDisplayTarget(raw map[string]any, agent string) string {
+	handle := firstNonEmpty(
+		spawnDisplayHandle(MapString(raw, "handle")),
+		spawnDisplayHandle(MapString(raw, "mention")),
+		spawnDisplayHandle(MapString(raw, "task_id")),
+	)
+	agent = strings.TrimSpace(agent)
+	if handle == "" {
 		return agent
 	}
-	return agent + ": " + prompt
+	if agent != "" && !strings.EqualFold(handle, agent) {
+		return handle + "[" + agent + "]"
+	}
+	return handle
+}
+
+func spawnDisplayHandle(value string) string {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "@")
+	if value == "" {
+		return ""
+	}
+	lower := strings.ToLower(value)
+	if strings.HasPrefix(lower, "task-") || strings.Contains(lower, "-task-") {
+		return ""
+	}
+	if strings.ContainsAny(value, " \t\r\n") {
+		return ""
+	}
+	return value
 }
 
 func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
@@ -131,7 +163,7 @@ func SpawnDisplayInputForResult(input map[string]any, output map[string]any) map
 	if merged == nil {
 		merged = map[string]any{}
 	}
-	for _, key := range []string{"agent", "prompt", "handle", "task_id"} {
+	for _, key := range []string{"agent", "prompt", "handle", "mention", "task_id"} {
 		if strings.TrimSpace(MapString(merged, key)) != "" {
 			continue
 		}

@@ -12,6 +12,17 @@ func TestSpawnDisplayArgsUsesAgentAndPrompt(t *testing.T) {
 	}
 }
 
+func TestSpawnDisplayArgsUsesHandleWithAgentAnnotation(t *testing.T) {
+	raw := map[string]any{
+		"agent":   "self",
+		"task_id": "jeff",
+		"prompt":  "inspect the transcript",
+	}
+	if got := SpawnFullDisplayArgs(raw); got != "jeff[self]: inspect the transcript" {
+		t.Fatalf("SpawnFullDisplayArgs() = %q", got)
+	}
+}
+
 func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T) {
 	input := map[string]any{"agent": "codex"}
 	output := map[string]any{"text": `{"prompt":"inspect repo","task_id":"task-1"} running`}

@@ -146,6 +146,81 @@ func TestApprovalReviewerReusesStablePrefixAndSendsTranscriptDelta(t *testing.T)
 	}
 }
 
+func TestApprovalReviewerRetriesInvalidJSONAssessment(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect the tree and report findings.")
+	testModel := &approvalReviewerFakeModel{responses: []string{
+		`{"outcome":`,
+		`{"outcome":"allow","risk_level":"low","user_authorization":"high","rationale":"read-only inspection is authorized"}`,
+	}}
+	reviewer := newModelApprovalReviewer(service)
+
+	result, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "read-only tree inspection", map[string]any{"cmd": "rg TODO"}))
+	if err != nil {
+		t.Fatalf("ReviewApproval() error = %v", err)
+	}
+	if !result.Approved {
+		t.Fatalf("Approved = false, want true: %#v", result)
+	}
+
+	requests := testModel.Requests()
+	if got, want := len(requests), 2; got != want {
+		t.Fatalf("model calls = %d, want retry after invalid JSON", got)
+	}
+	if !reflect.DeepEqual(requests[1].Messages, requests[0].Messages) {
+		t.Fatal("retry prompt was polluted by the invalid reviewer response")
+	}
+
+	guardian := reviewer.(*guardianApprovalReviewer)
+	guardian.mu.Lock()
+	reviewSession := guardian.sessionsByParent[activeSession.SessionID]
+	guardian.mu.Unlock()
+	if reviewSession == nil {
+		t.Fatal("review session not recorded")
+	}
+	reviewSession.mu.Lock()
+	reviewEvents := len(reviewSession.events)
+	reviewSession.mu.Unlock()
+	if got, want := reviewEvents, 2; got != want {
+		t.Fatalf("review trunk events = %d, want one valid prompt/answer pair", got)
+	}
+}
+
+func TestApprovalReviewerStopsAfterInvalidJSONAssessmentRetries(t *testing.T) {
+	ctx := context.Background()
+	service, activeSession := newApprovalReviewerTestSession(t, ctx)
+	appendApprovalReviewerTextEvent(t, ctx, service, activeSession, session.EventTypeUser, model.RoleUser, "Please inspect the tree and report findings.")
+	responses := make([]string, 0, guardianAssessmentMaxAttempts)
+	for i := 0; i < guardianAssessmentMaxAttempts; i++ {
+		responses = append(responses, `{"outcome":`)
+	}
+	testModel := &approvalReviewerFakeModel{responses: responses}
+	reviewer := newModelApprovalReviewer(service)
+
+	_, err := reviewer.ReviewApproval(ctx, approvalReviewerTestRequest(activeSession, testModel, "read-only tree inspection", map[string]any{"cmd": "rg TODO"}))
+	if err == nil || !strings.Contains(err.Error(), "valid JSON assessment") {
+		t.Fatalf("ReviewApproval() error = %v, want invalid JSON retry exhaustion", err)
+	}
+	if got, want := len(testModel.Requests()), guardianAssessmentMaxAttempts; got != want {
+		t.Fatalf("model calls = %d, want %d", got, want)
+	}
+
+	guardian := reviewer.(*guardianApprovalReviewer)
+	guardian.mu.Lock()
+	reviewSession := guardian.sessionsByParent[activeSession.SessionID]
+	guardian.mu.Unlock()
+	if reviewSession == nil {
+		t.Fatal("review session not recorded")
+	}
+	reviewSession.mu.Lock()
+	reviewEvents := len(reviewSession.events)
+	reviewSession.mu.Unlock()
+	if reviewEvents != 0 {
+		t.Fatalf("review trunk events = %d, want no invalid reviewer responses committed", reviewEvents)
+	}
+}
+
 func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 	ctx := context.Background()
 	service, activeSession := newApprovalReviewerTestSession(t, ctx)

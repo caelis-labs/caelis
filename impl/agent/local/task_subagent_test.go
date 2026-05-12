@@ -136,6 +136,13 @@ func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 	if got := allocateSubagentHandle(session.Session{}, "!!!"); got != "agent" {
 		t.Fatalf("allocateSubagentHandle() = %q, want generic fallback", got)
 	}
+	if got := allocateSubagentHandle(session.Session{}, "self"); got != "jeff" {
+		t.Fatalf("allocateSubagentHandle(self) = %q, want named handle", got)
+	}
+	usedSelfHandle := session.Session{Participants: []session.ParticipantBinding{{Label: "@jeff"}}}
+	if got := allocateSubagentHandle(usedSelfHandle, "self"); got != "emma" {
+		t.Fatalf("allocateSubagentHandle(self with used handle) = %q, want next named handle", got)
+	}
 }
 
 func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {

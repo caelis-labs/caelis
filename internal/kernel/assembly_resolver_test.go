@@ -138,6 +138,62 @@ func TestAssemblyResolverSessionReasoningOverridesModeAndModelDefault(t *testing
 	}
 }
 
+func TestAssemblyResolverControllerTurnPreservesPolicyMetadataWithoutModelLookup(t *testing.T) {
+	t.Parallel()
+
+	modelCalls := 0
+	resolver, err := NewAssemblyResolver(AssemblyResolverConfig{
+		Sessions: snapshotStateFunc(func(context.Context, session.SessionRef) (map[string]any, error) {
+			return map[string]any{
+				StateCurrentSessionMode:     "manual",
+				assembly.StateCurrentModeID: "plan",
+			}, nil
+		}),
+		Assembly: assembly.ResolvedAssembly{
+			Modes: []assembly.ModeConfig{{
+				ID: "plan",
+				Runtime: assembly.RuntimeOverrides{
+					PolicyMode:     "auto-review",
+					SystemPrompt:   "controller prompt",
+					ExtraReadRoots: []string{"/tmp/read"},
+				},
+			}},
+		},
+		DefaultModelAlias: "mini",
+		ModelLookup: modelLookupFunc(func(context.Context, string, int) (ModelResolution, error) {
+			modelCalls++
+			return ModelResolution{Model: fakeLLM{name: "mini"}}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatalf("NewAssemblyResolver() error = %v", err)
+	}
+
+	turn, err := resolver.ResolveControllerTurn(context.Background(), TurnIntent{
+		SessionRef: session.SessionRef{SessionID: "s1"},
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("ResolveControllerTurn() error = %v", err)
+	}
+	if modelCalls != 0 {
+		t.Fatalf("model lookup calls = %d, want 0", modelCalls)
+	}
+	meta := turn.RunRequest.AgentSpec.Metadata
+	if got := meta["policy_mode"]; got != "manual" {
+		t.Fatalf("policy_mode = %#v, want session policy mode", got)
+	}
+	if got := meta["system_prompt"]; got != "controller prompt" {
+		t.Fatalf("system_prompt = %#v, want assembly metadata", got)
+	}
+	if roots, _ := meta["policy_extra_read_roots"].([]string); len(roots) != 1 || roots[0] != "/tmp/read" {
+		t.Fatalf("policy_extra_read_roots = %#v, want assembly roots", meta["policy_extra_read_roots"])
+	}
+	if turn.RunRequest.AgentSpec.Model != nil {
+		t.Fatalf("controller AgentSpec.Model = %#v, want nil without model resolution", turn.RunRequest.AgentSpec.Model)
+	}
+}
+
 func TestAssemblyResolverIntentModeOverridesState(t *testing.T) {
 	t.Parallel()
 

@@ -139,26 +139,9 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 	if err != nil {
 		return ResolvedTurn{}, err
 	}
-	metadata, err := resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, modelResolution)
+	spec, err := resolveAgentSpecWith(ctx, snap, intent, state, modelResolution)
 	if err != nil {
 		return ResolvedTurn{}, err
-	}
-	tools := append([]tool.Tool(nil), snap.tools...)
-	if snap.toolAugmenter != nil {
-		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
-			SessionRef: intent.SessionRef,
-			State:      cloneMap(state),
-		})
-		if err != nil {
-			return ResolvedTurn{}, err
-		}
-		tools = append(tools, augmentation.Tools...)
-		for key, value := range augmentation.Metadata {
-			if strings.TrimSpace(key) == "" {
-				continue
-			}
-			metadata[key] = value
-		}
 	}
 
 	return ResolvedTurn{
@@ -166,12 +149,26 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 			SessionRef:   intent.SessionRef,
 			Input:        intent.Input,
 			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
-			AgentSpec: agent.AgentSpec{
-				Name:     snap.agentName,
-				Model:    modelResolution.Model,
-				Tools:    tools,
-				Metadata: metadata,
-			},
+			AgentSpec:    spec,
+		},
+	}, nil
+}
+
+func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent TurnIntent) (ResolvedTurn, error) {
+	state, err := r.snapshotState(ctx, intent.SessionRef)
+	if err != nil {
+		return ResolvedTurn{}, err
+	}
+	spec, err := resolveAgentSpecWith(ctx, r.snapshot(), intent, state, ModelResolution{})
+	if err != nil {
+		return ResolvedTurn{}, err
+	}
+	return ResolvedTurn{
+		RunRequest: agent.RunRequest{
+			SessionRef:   intent.SessionRef,
+			Input:        intent.Input,
+			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
+			AgentSpec:    spec,
 		},
 	}, nil
 }
@@ -286,6 +283,36 @@ func (r *AssemblyResolver) snapshotState(ctx context.Context, ref session.Sessio
 func (r *AssemblyResolver) resolveMetadata(intent TurnIntent, state map[string]any, model ModelResolution) (map[string]any, error) {
 	snap := r.snapshot()
 	return resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, model)
+}
+
+func resolveAgentSpecWith(ctx context.Context, snap assemblyResolverSnapshot, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (agent.AgentSpec, error) {
+	metadata, err := resolveMetadataWith(snap.baseMetadata, snap.assembly, intent, state, modelResolution)
+	if err != nil {
+		return agent.AgentSpec{}, err
+	}
+	tools := append([]tool.Tool(nil), snap.tools...)
+	if snap.toolAugmenter != nil {
+		augmentation, err := snap.toolAugmenter(ctx, ToolAugmentContext{
+			SessionRef: intent.SessionRef,
+			State:      cloneMap(state),
+		})
+		if err != nil {
+			return agent.AgentSpec{}, err
+		}
+		tools = append(tools, augmentation.Tools...)
+		for key, value := range augmentation.Metadata {
+			if strings.TrimSpace(key) == "" {
+				continue
+			}
+			metadata[key] = value
+		}
+	}
+	return agent.AgentSpec{
+		Name:     snap.agentName,
+		Model:    modelResolution.Model,
+		Tools:    tools,
+		Metadata: metadata,
+	}, nil
 }
 
 func resolveMetadataWith(baseMetadata map[string]any, resolved assembly.ResolvedAssembly, intent TurnIntent, state map[string]any, modelResolution ModelResolution) (map[string]any, error) {

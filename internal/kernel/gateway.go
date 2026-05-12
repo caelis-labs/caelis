@@ -566,7 +566,7 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 	g.active[session.SessionID] = handle
 	g.mu.Unlock()
 
-	resolved, err := g.resolver.ResolveTurn(ctx, req)
+	resolved, err := g.resolveBeginTurn(ctx, session, req)
 	if err != nil {
 		cancelFn()
 		handle.finish()
@@ -586,6 +586,22 @@ func (g *Gateway) BeginTurn(ctx context.Context, req BeginTurnRequest) (BeginTur
 		Session: session,
 		Handle:  handle,
 	}, nil
+}
+
+func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Session, req BeginTurnRequest) (ResolvedTurn, error) {
+	if activeSession.Controller.Kind == session.ControllerKindACP {
+		if resolver, ok := g.resolver.(ControllerTurnResolver); ok && resolver != nil {
+			return resolver.ResolveControllerTurn(ctx, req)
+		}
+		return ResolvedTurn{
+			RunRequest: agent.RunRequest{
+				SessionRef:   activeSession.SessionRef,
+				Input:        req.Input,
+				ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+			},
+		}, nil
+	}
+	return g.resolver.ResolveTurn(ctx, req)
 }
 
 func (g *Gateway) requestOptions(req BeginTurnRequest) agent.ModelRequestOptions {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -789,6 +790,62 @@ func TestBeginTurnPassesIntentToResolver(t *testing.T) {
 
 	if resolver.lastIntent.ModeName != "main" || resolver.lastIntent.ModelHint != "mini" || resolver.lastIntent.Surface != "headless" {
 		t.Fatalf("resolver intent = %+v, want propagated fields", resolver.lastIntent)
+	}
+}
+
+func TestBeginTurnSkipsResolverForACPControllerSession(t *testing.T) {
+	t.Parallel()
+
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		Controller: session.ControllerBinding{
+			Kind:         session.ControllerKindACP,
+			ControllerID: "acp-main",
+			EpochID:      "epoch-1",
+		},
+	}
+	rt := &recordingRuntime{
+		session: activeSession,
+		result:  agent.RunResult{Session: activeSession},
+	}
+	resolver := &recordingControllerResolver{
+		recordingResolver: recordingResolver{err: errors.New("local model should not resolve")},
+		controllerResolved: ResolvedTurn{RunRequest: agent.RunRequest{
+			AgentSpec: agent.AgentSpec{Metadata: map[string]any{"policy_mode": "manual"}},
+		}},
+	}
+	gw, err := New(Config{
+		Sessions: staticSessionService{session: activeSession},
+		Runtime:  rt,
+		Resolver: resolver,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := gw.BeginTurn(context.Background(), BeginTurnRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "hello controller",
+		Surface:    "cli-tui",
+	})
+	if err != nil {
+		t.Fatalf("BeginTurn() error = %v", err)
+	}
+	_ = collectHandleEvents(t, result.Handle)
+
+	if resolver.calls != 0 {
+		t.Fatalf("resolver calls = %d, want 0 for ACP controller session", resolver.calls)
+	}
+	if resolver.controllerCalls != 1 {
+		t.Fatalf("controller resolver calls = %d, want 1", resolver.controllerCalls)
+	}
+	if rt.lastReq.Input != "hello controller" || rt.lastReq.SessionRef.SessionID != "s1" {
+		t.Fatalf("runtime request = %+v, want controller turn input/session", rt.lastReq)
+	}
+	if got := rt.lastReq.AgentSpec.Metadata["policy_mode"]; got != "manual" {
+		t.Fatalf("runtime policy_mode = %#v, want preserved controller policy metadata", got)
 	}
 }
 
@@ -2088,6 +2145,27 @@ func (r *recordingResolver) ResolveTurn(_ context.Context, intent TurnIntent) (R
 		return ResolvedTurn{}, r.err
 	}
 	return r.resolved, nil
+}
+
+type recordingControllerResolver struct {
+	recordingResolver
+	controllerResolved   ResolvedTurn
+	lastControllerIntent TurnIntent
+	controllerCalls      int
+	controllerErr        error
+}
+
+func (r *recordingControllerResolver) ResolveControllerTurn(_ context.Context, intent TurnIntent) (ResolvedTurn, error) {
+	r.controllerCalls++
+	r.lastControllerIntent = intent
+	if r.controllerErr != nil {
+		return ResolvedTurn{}, r.controllerErr
+	}
+	resolved := r.controllerResolved
+	resolved.RunRequest.SessionRef = intent.SessionRef
+	resolved.RunRequest.Input = intent.Input
+	resolved.RunRequest.ContentParts = append([]model.ContentPart(nil), intent.ContentParts...)
+	return resolved, nil
 }
 
 type recordingRunner struct {

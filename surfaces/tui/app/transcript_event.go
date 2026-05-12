@@ -197,6 +197,11 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			}
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
+			toolTaskID := toolDisplayTaskID(rawInput, nil, ev.Meta)
+			toolArgs := toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput))
+			if strings.EqualFold(semanticName, "TASK") {
+				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
+			}
 			out = append(out, TranscriptEvent{
 				Kind:               TranscriptEventTool,
 				Scope:              scope,
@@ -207,10 +212,10 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 				ToolName:           toolName,
 				ToolKind:           strings.TrimSpace(payload.ToolKind),
 				ToolTitle:          strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:           toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput)),
+				ToolArgs:           toolArgs,
 				ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
 				ToolStatus:         status,
-				ToolTaskID:         toolDisplayTaskID(rawInput, nil, ev.Meta),
+				ToolTaskID:         toolTaskID,
 				ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, ev.Meta),
 				ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, ev.Meta),
 				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
@@ -240,6 +245,10 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			}
 			toolOutput := toolDisplayOutput(semanticName, displayInput, rawOutput, acpprojector.FormatToolResult(toolName, displayInput, rawOutput, status), status, toolErr)
 			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
+			toolTaskID := toolDisplayTaskID(rawInput, rawOutput, ev.Meta)
+			if strings.EqualFold(semanticName, "TASK") {
+				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
+			}
 			if !toolErr && (len(rawInput) > 0 || len(rawOutput) > 0) {
 				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
@@ -262,7 +271,7 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 				ToolStream:         transcriptToolStream(status, toolErr),
 				ToolStatus:         status,
 				ToolError:          toolErr,
-				ToolTaskID:         toolDisplayTaskID(rawInput, rawOutput, ev.Meta),
+				ToolTaskID:         toolTaskID,
 				ToolTaskAction:     toolDisplayTaskAction(rawInput, rawOutput, ev.Meta),
 				ToolTaskInput:      toolDisplayTaskInput(rawInput, rawOutput, ev.Meta),
 				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, rawOutput, ev.Meta),

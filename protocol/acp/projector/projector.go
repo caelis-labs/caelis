@@ -457,7 +457,7 @@ func textForUserEvent(event *session.Event) string {
 	if event.Message != nil {
 		return strings.TrimSpace(event.Message.TextContent())
 	}
-	return ""
+	return strings.TrimSpace(session.EventText(event))
 }
 
 func textForAssistantEvent(event *session.Event) string {
@@ -470,14 +470,30 @@ func textForAssistantEvent(event *session.Event) string {
 	if event.Message != nil {
 		return event.Message.TextContent()
 	}
-	return ""
+	return session.EventText(event)
 }
 
 func reasoningForAssistantEvent(event *session.Event) string {
-	if event == nil || event.Message == nil {
+	if event == nil {
 		return ""
 	}
-	return event.Message.ReasoningText()
+	if event.Message != nil {
+		if reasoning := event.Message.ReasoningText(); reasoning != "" {
+			return reasoning
+		}
+	}
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		if reasoning := reasoningFromProtocolContent(update.Content); reasoning != "" {
+			return reasoning
+		}
+		if normalizeUpdateType(update.SessionUpdate) == UpdateAgentThought {
+			return session.EventText(event)
+		}
+	}
+	if event.Protocol != nil && normalizeUpdateType(event.Protocol.UpdateType) == UpdateAgentThought {
+		return session.EventText(event)
+	}
+	return ""
 }
 
 func parseObject(raw string) map[string]any {
@@ -490,6 +506,37 @@ func parseObject(raw string) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func reasoningFromProtocolContent(content any) string {
+	switch typed := content.(type) {
+	case nil:
+		return ""
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return ""
+		}
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return ""
+		}
+		return reasoningFromProtocolContent(decoded)
+	case map[string]any:
+		for _, key := range []string{"reasoningText", "reasoning_text", "reasoning", "thought"} {
+			if text, _ := typed[key].(string); text != "" {
+				return text
+			}
+		}
+	case []any:
+		parts := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text := reasoningFromProtocolContent(item); text != "" {
+				parts = append(parts, text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
 }
 
 func withDisplayTerminal(call ToolCall, name string, args map[string]any) ToolCall {

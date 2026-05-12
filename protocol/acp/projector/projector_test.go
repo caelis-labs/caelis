@@ -42,6 +42,96 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 	}
 }
 
+func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
+	cases := []struct {
+		name       string
+		event      *session.Event
+		updateType string
+		want       string
+	}{
+		{
+			name: "user message",
+			event: &session.Event{
+				SessionID: "session-1",
+				Type:      session.EventTypeUser,
+				Protocol: &session.EventProtocol{
+					UpdateType: UpdateUserMessage,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: UpdateUserMessage,
+						Content:       session.ProtocolTextContent("stored user"),
+					},
+				},
+			},
+			updateType: UpdateUserMessage,
+			want:       "stored user",
+		},
+		{
+			name: "assistant message",
+			event: &session.Event{
+				SessionID: "session-1",
+				Type:      session.EventTypeAssistant,
+				Protocol: &session.EventProtocol{
+					UpdateType: UpdateAgentMessage,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: UpdateAgentMessage,
+						Content:       session.ProtocolTextContent("stored assistant"),
+					},
+				},
+			},
+			updateType: UpdateAgentMessage,
+			want:       "stored assistant",
+		},
+		{
+			name: "assistant thought snapshot",
+			event: &session.Event{
+				SessionID: "session-1",
+				Type:      session.EventTypeAssistant,
+				Protocol: &session.EventProtocol{
+					UpdateType: UpdateAgentThought,
+					Update: &session.ProtocolUpdate{
+						SessionUpdate: UpdateAgentThought,
+						Content: map[string]any{
+							"type":          "assistant_snapshot",
+							"reasoningText": "stored thought",
+						},
+					},
+				},
+			},
+			updateType: UpdateAgentThought,
+			want:       "stored thought",
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			notifications, err := (EventProjector{}).ProjectNotifications(tt.event)
+			if err != nil {
+				t.Fatalf("ProjectNotifications() error = %v", err)
+			}
+			if len(notifications) != 1 {
+				t.Fatalf("ProjectNotifications() produced %d notifications, want 1", len(notifications))
+			}
+			if notifications[0].SessionID != "session-1" {
+				t.Fatalf("SessionID = %q, want session-1", notifications[0].SessionID)
+			}
+			chunk, ok := notifications[0].Update.(ContentChunk)
+			if !ok {
+				t.Fatalf("update = %T, want ContentChunk", notifications[0].Update)
+			}
+			if chunk.SessionUpdate != tt.updateType {
+				t.Fatalf("SessionUpdate = %q, want %q", chunk.SessionUpdate, tt.updateType)
+			}
+			content, ok := chunk.Content.(TextContent)
+			if !ok {
+				t.Fatalf("Content = %T, want TextContent", chunk.Content)
+			}
+			if content.Text != tt.want {
+				t.Fatalf("text = %q, want %q", content.Text, tt.want)
+			}
+		})
+	}
+}
+
 func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",

@@ -375,19 +375,22 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if strings.TrimSpace(ev.ToolKind) == "" {
 		ev.ToolKind = toolKind
 	}
+	preferredTaskID := preferredDisplayTaskID(ev.TaskID, taskID)
 	if strings.TrimSpace(ev.Args) == "" {
 		ev.Args = args
 	} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.Args, args) {
+		ev.Args = args
+	} else if strings.EqualFold(semanticName, "TASK") && preferredTaskID != strings.TrimSpace(ev.TaskID) && strings.TrimSpace(args) != "" {
 		ev.Args = args
 	}
 	if strings.TrimSpace(ev.FullArgs) == "" {
 		ev.FullArgs = fullArgs
 	} else if strings.EqualFold(semanticName, "SPAWN") && shouldReplaceSpawnDisplayArgs(ev.FullArgs, fullArgs) {
 		ev.FullArgs = fullArgs
+	} else if strings.EqualFold(semanticName, "TASK") && preferredTaskID != strings.TrimSpace(ev.TaskID) && strings.TrimSpace(fullArgs) != "" {
+		ev.FullArgs = fullArgs
 	}
-	if ev.TaskID == "" {
-		ev.TaskID = taskID
-	}
+	ev.TaskID = preferredTaskID
 	if ev.TaskAction == "" {
 		ev.TaskAction = taskAction
 	}
@@ -450,9 +453,7 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	ev.Output = finalEvent.Output
 	ev.Done = true
 	ev.Err = finalEvent.Err
-	if ev.TaskID == "" {
-		ev.TaskID = finalEvent.TaskID
-	}
+	ev.TaskID = preferredDisplayTaskID(ev.TaskID, finalEvent.TaskID)
 	if ev.TaskAction == "" {
 		ev.TaskAction = finalEvent.TaskAction
 	}
@@ -470,6 +471,29 @@ func mergeOpenFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	}
 	fillFinalToolEventFromExisting(finalEvent, *ev)
 	mergeFinalToolEvent(ev, finalEvent)
+}
+
+func preferredDisplayTaskID(current string, candidate string) string {
+	current = strings.TrimSpace(current)
+	candidate = strings.TrimSpace(candidate)
+	if candidate == "" {
+		return current
+	}
+	if current == "" {
+		return candidate
+	}
+	if strings.EqualFold(current, candidate) {
+		return current
+	}
+	candidateHandle := taskHandleDisplay(candidate)
+	if candidateHandle == "" {
+		return current
+	}
+	currentHandle := taskHandleDisplay(current)
+	if currentHandle == "" || strings.EqualFold(currentHandle, "self") {
+		return candidate
+	}
+	return current
 }
 
 func NewMainACPTurnBlock(sessionID string) *MainACPTurnBlock {

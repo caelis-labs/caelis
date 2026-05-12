@@ -127,7 +127,7 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 		if event == nil || session.EventTypeOf(event) != session.EventTypeAssistant || event.Scope == nil {
 			continue
 		}
-		if event.Scope.Controller.Kind == session.ControllerKindACP && strings.TrimSpace(event.Text) == "gateway acp main ok" {
+		if event.Scope.Controller.Kind == session.ControllerKindACP && strings.TrimSpace(session.EventText(event)) == "gateway acp main ok" {
 			sawACPAssistant = true
 			break
 		}

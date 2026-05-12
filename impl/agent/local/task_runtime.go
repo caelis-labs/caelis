@@ -2063,20 +2063,30 @@ func allocateSubagentHandle(activeSession session.Session, agent string) string 
 			used[handle] = struct{}{}
 		}
 	}
+	bases := subagentHandleBaseCandidates(agent)
+	for i := 0; i < 1000; i++ {
+		for _, base := range bases {
+			name := base
+			if i > 0 {
+				name = fmt.Sprintf("%s%d", base, i+1)
+			}
+			if _, exists := used[name]; !exists {
+				return name
+			}
+		}
+	}
+	return "agent"
+}
+
+func subagentHandleBaseCandidates(agent string) []string {
 	base := normalizeSubagentHandleBase(agent)
 	if base == "" {
-		base = "agent"
+		return []string{"agent"}
 	}
-	for i := 0; i < 1000; i++ {
-		name := base
-		if i > 0 {
-			name = fmt.Sprintf("%s%d", base, i+1)
-		}
-		if _, exists := used[name]; !exists {
-			return name
-		}
+	if base != "self" {
+		return []string{base}
 	}
-	return base
+	return []string{"jeff", "emma", "nora", "leo", "maya", "ella", "agent"}
 }
 
 func normalizeSubagentHandleBase(value string) string {

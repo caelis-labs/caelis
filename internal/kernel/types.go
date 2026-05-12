@@ -246,6 +246,10 @@ type TurnResolver interface {
 	ResolveTurn(context.Context, TurnIntent) (ResolvedTurn, error)
 }
 
+type ControllerTurnResolver interface {
+	ResolveControllerTurn(context.Context, TurnIntent) (ResolvedTurn, error)
+}
+
 type RequestPolicy interface {
 	ResolveTurnRequest(BeginTurnRequest) agent.ModelRequestOptions
 }

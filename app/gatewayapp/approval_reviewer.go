@@ -20,6 +20,7 @@ import (
 const (
 	defaultApprovalReviewTimeout = 90 * time.Second
 
+	guardianAssessmentMaxAttempts      = 3
 	guardianMaxMessageTranscriptTokens = 10_000
 	guardianMaxToolTranscriptTokens    = 10_000
 	guardianMaxMessageEntryTokens      = 2_000
@@ -107,11 +108,7 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	_, _, assistantEvent, text, err := r.runGuardianReview(ctx, req)
-	if err != nil {
-		return kernel.ApprovalReviewResult{}, err
-	}
-	parsed, err := parseGuardianAssessment(text)
+	_, _, assistantEvent, parsed, err := r.runGuardianReview(ctx, req)
 	if err != nil {
 		return kernel.ApprovalReviewResult{}, err
 	}
@@ -134,29 +131,42 @@ func (r *guardianApprovalReviewer) ReviewApproval(ctx context.Context, req kerne
 func (r *guardianApprovalReviewer) runGuardianReview(
 	ctx context.Context,
 	req kernel.ApprovalReviewRequest,
-) (guardianPromptItems, *session.Event, *session.Event, string, error) {
+) (guardianPromptItems, *session.Event, *session.Event, guardianReviewModelOutput, error) {
 	activeSession, err := r.sessions.Session(ctx, req.SessionRef)
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, "", err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
 	reviewSession := r.reviewSessionFor(req, activeSession)
 	trunkEvents, promptMode, baseVersion := reviewSession.snapshot()
 	parentEvents, err := r.sessions.Events(ctx, session.EventsRequest{SessionRef: req.SessionRef})
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, "", err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
 	promptItems, err := buildGuardianPromptItems(parentEvents, promptMode, req)
 	if err != nil {
-		return guardianPromptItems{}, nil, nil, "", err
+		return guardianPromptItems{}, nil, nil, guardianReviewModelOutput{}, err
 	}
 	promptEvent := guardianUserEvent(activeSession, promptItems.Text)
 	events := append(session.CloneEvents(trunkEvents), promptEvent)
-	assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, activeSession, events, guardianOutputSpec())
-	if err != nil {
-		return promptItems, promptEvent, assistantEvent, "", err
+	var lastAssistantEvent *session.Event
+	var lastParseErr error
+	for attempt := 0; attempt < guardianAssessmentMaxAttempts; attempt++ {
+		assistantEvent, text, err := r.runGuardianAgent(ctx, req.Model, activeSession, events, guardianOutputSpec())
+		if err != nil {
+			return promptItems, promptEvent, assistantEvent, guardianReviewModelOutput{}, err
+		}
+		lastAssistantEvent = assistantEvent
+		parsed, err := parseGuardianAssessment(text)
+		if err != nil {
+			lastParseErr = err
+			continue
+		}
+		// Commit only validated assessments; malformed attempts must not poison
+		// the reusable reviewer prefix for later approval requests.
+		reviewSession.commit(baseVersion, promptItems.TranscriptCursor, promptEvent, assistantEvent)
+		return promptItems, promptEvent, assistantEvent, parsed, nil
 	}
-	reviewSession.commit(baseVersion, promptItems.TranscriptCursor, promptEvent, assistantEvent)
-	return promptItems, promptEvent, assistantEvent, text, nil
+	return promptItems, promptEvent, lastAssistantEvent, guardianReviewModelOutput{}, fmt.Errorf("approval reviewer failed to return a valid JSON assessment after %d attempts: %w", guardianAssessmentMaxAttempts, lastParseErr)
 }
 
 func (r *guardianApprovalReviewer) reviewSessionFor(req kernel.ApprovalReviewRequest, session session.Session) *guardianReviewSession {

@@ -2078,7 +2078,7 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 	}
 	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{"• Spawned self:", "已完成", "✅ 创建 hello_from_spawn.txt", "... +2 lines", "hello_from_spawn.txt  created", "报告位于 spawn_report.md"} {
+	for _, want := range []string{"• Spawned jack[self]:", "已完成", "✅ 创建 hello_from_spawn.txt", "... +2 lines", "hello_from_spawn.txt  created", "报告位于 spawn_report.md"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows missing %q:\n%s", want, joined)
 		}
@@ -2289,7 +2289,7 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 	}
 	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{"• Spawned self:", "摘要", "ool_demo_showcase.md 存在", "结论： 目录用于 SPAWN 演示"} {
+	for _, want := range []string{"• Spawned liam[self]:", "摘要", "ool_demo_showcase.md 存在", "结论： 目录用于 SPAWN 演示"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows missing %q:\n%s", want, joined)
 		}
@@ -2402,7 +2402,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 	}
 	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{"• Spawned self: 创建文件", "old final answer", "• Tasks", "Wait jack", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
+	for _, want := range []string{"• Spawned jack[self]: 创建文件", "old final answer", "• Tasks", "Wait jack", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("running continuation rows missing %q:\n%s", want, joined)
 		}
