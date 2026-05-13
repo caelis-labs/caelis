@@ -40,17 +40,40 @@ func attachMutationDiffMeta(meta map[string]any, before, after, fallbackHunk str
 	if meta == nil {
 		return
 	}
+	toolMeta := mutationToolMetadata(meta)
 	hunks, truncated := mutationDiffResultMeta(before, after)
 	if len(hunks) == 0 {
 		return
 	}
-	meta["diff_hunks"] = hunks
+	toolMeta["diff_hunks"] = hunks
 	if truncated {
-		meta["diff_truncated"] = true
+		toolMeta["diff_truncated"] = true
 	}
 	if fallbackHunk == "" {
-		meta["hunk"] = hunks[0].Header
+		toolMeta["hunk"] = hunks[0].Header
 	}
+}
+
+func mutationToolMetadata(meta map[string]any) map[string]any {
+	caelis, _ := meta["caelis"].(map[string]any)
+	if caelis == nil {
+		caelis = map[string]any{}
+		meta["caelis"] = caelis
+	}
+	if _, ok := caelis["version"]; !ok {
+		caelis["version"] = 1
+	}
+	runtime, _ := caelis["runtime"].(map[string]any)
+	if runtime == nil {
+		runtime = map[string]any{}
+		caelis["runtime"] = runtime
+	}
+	toolMeta, _ := runtime["tool"].(map[string]any)
+	if toolMeta == nil {
+		toolMeta = map[string]any{}
+		runtime["tool"] = toolMeta
+	}
+	return toolMeta
 }
 
 func BuildMutationDiffHunks(before, after string, contextLines, maxHunks, maxLines int) ([]MutationDiffHunk, bool) {

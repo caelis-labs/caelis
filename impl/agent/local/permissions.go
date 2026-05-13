@@ -657,19 +657,30 @@ func jsonToolResult(call tool.Call, name string, payload map[string]any, metaExt
 	if err != nil {
 		return tool.Result{}, err
 	}
-	meta := maps.Clone(payload)
+	toolMeta := map[string]any{}
 	for _, extra := range metaExtra {
 		for key, value := range extra {
 			if strings.TrimSpace(key) != "" {
-				meta[key] = value
+				toolMeta[key] = value
 			}
 		}
 	}
+	var metadata map[string]any
+	if len(toolMeta) > 0 {
+		metadata = map[string]any{
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": toolMeta,
+				},
+			},
+		}
+	}
 	return tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(name),
-		Content: []model.Part{model.NewJSONPart(raw)},
-		Meta:    meta,
+		ID:       strings.TrimSpace(call.ID),
+		Name:     strings.TrimSpace(name),
+		Content:  []model.Part{model.NewJSONPart(raw)},
+		Metadata: metadata,
 	}, nil
 }
 

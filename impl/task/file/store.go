@@ -1,11 +1,11 @@
 package file
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -308,20 +308,16 @@ func (s *Store) readBlobs(ref session.SessionRef) (map[string]blobRecord, error)
 	defer file.Close()
 
 	records := map[string]blobRecord{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
+	decoder := json.NewDecoder(file)
+	for {
 		var record blobRecord
-		if err := json.Unmarshal([]byte(line), &record); err != nil {
+		if err := decoder.Decode(&record); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
 			return nil, err
 		}
 		records[strings.TrimSpace(record.ID)] = record
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
 	}
 	return records, nil
 }

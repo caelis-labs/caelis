@@ -227,27 +227,18 @@ func policyDecisionResultWithOutcome(
 			},
 		}
 	}
-	meta := map[string]any{
-		"error":         payload["error"],
-		"error_code":    payload["error_code"],
-		"policy_mode":   payload["policy_mode"],
-		"policy_action": payload["policy_action"],
-	}
 	if approval {
-		meta["approval_required"] = true
 		if strings.TrimSpace(outcome.Outcome) != "" {
-			meta["approval_outcome"] = strings.TrimSpace(outcome.Outcome)
+			payload["approval_outcome"] = strings.TrimSpace(outcome.Outcome)
 		}
 		if strings.TrimSpace(outcome.OptionID) != "" {
-			meta["approval_option_id"] = strings.TrimSpace(outcome.OptionID)
+			payload["approval_option_id"] = strings.TrimSpace(outcome.OptionID)
 		}
 		if strings.TrimSpace(outcome.Reason) != "" {
 			payload["approval_reason"] = strings.TrimSpace(outcome.Reason)
-			meta["approval_reason"] = strings.TrimSpace(outcome.Reason)
 		}
 		if strings.TrimSpace(outcome.ReviewText) != "" {
 			payload["approval_review_text"] = strings.TrimSpace(outcome.ReviewText)
-			meta["approval_review_text"] = strings.TrimSpace(outcome.ReviewText)
 		}
 	}
 	raw, _ := json.Marshal(payload)
@@ -256,7 +247,6 @@ func policyDecisionResultWithOutcome(
 		Name:    strings.TrimSpace(def.Name),
 		IsError: true,
 		Content: []model.Part{model.NewJSONPart(raw)},
-		Meta:    meta,
 	}
 }
 

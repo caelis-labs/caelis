@@ -801,38 +801,38 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 	}
 }
 
-func TestToolResultEventKeepsRawOutputForDisplayButMessageIsTruncated(t *testing.T) {
+func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
-	message, truncationMeta := toolResultMessageWithMeta(model.ToolCall{
-		ID:   "call-1",
-		Name: "BASH",
-	}, tool.Result{
+	result := tool.Result{
 		ID:   "call-1",
 		Name: "BASH",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"stderr":    large,
 			"exit_code": 1,
 		}))},
-	})
+	}
+	call := model.ToolCall{
+		ID:   "call-1",
+		Name: "BASH",
+		Args: `{"command":"find /tmp -delete"}`,
+	}
+	canonical, truncationMeta := canonicalToolResult(result)
+	message := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
 		Name: "BASH",
 		Args: `{"command":"find /tmp -delete"}`,
-	}, tool.Result{
-		ID:   "call-1",
-		Name: "BASH",
-		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
-			"stderr":    large,
-			"exit_code": 1,
-		}))},
-	}, &message, truncationMeta)
+	}, canonical, &message, truncationMeta)
 
 	rawOutput := event.Protocol.Update.RawOutput
 	stderr, _ := rawOutput["stderr"].(string)
-	if stderr != large {
-		t.Fatalf("raw stderr len = %d, want original len %d for display rawOutput", len(stderr), len(large))
+	if stderr == large {
+		t.Fatalf("raw stderr kept original huge output, want canonical truncated rawOutput")
+	}
+	if !strings.Contains(stderr, "tokens truncated") {
+		t.Fatalf("raw stderr = %q, want truncation marker", stderr)
 	}
 	if rawOutput["_tool_truncation"] != nil {
 		t.Fatalf("raw output = %#v, should not carry model truncation metadata", rawOutput)
@@ -852,8 +852,8 @@ func TestToolResultEventKeepsRawOutputForDisplayButMessageIsTruncated(t *testing
 		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
 	}
 	modelStderr, _ := payload["stderr"].(string)
-	if !strings.Contains(modelStderr, "tokens truncated") {
-		t.Fatalf("model stderr = %q, want truncation marker", modelStderr)
+	if modelStderr != stderr {
+		t.Fatalf("model stderr != rawOutput stderr; model=%q raw=%q", modelStderr, stderr)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)

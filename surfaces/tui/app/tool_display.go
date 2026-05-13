@@ -993,7 +993,14 @@ func bashDisplaySummary(output map[string]any, status string, isErr bool) string
 			return legacy
 		}
 	}
-	return combinedTerminalStreams(asString(output["stdout"]), asString(output["stderr"]))
+	combined := combinedTerminalStreams(asString(output["stdout"]), asString(output["stderr"]))
+	if combined != "(no output)" {
+		return combined
+	}
+	if fallback := firstTrimmed(asString(output["error"]), asString(output["result"]), asString(output["text"])); fallback != "" {
+		return fallback
+	}
+	return combined
 }
 
 func combinedTerminalStreams(stdout, stderr string) string {

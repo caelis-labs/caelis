@@ -41,7 +41,8 @@ func (r StreamRequest) Key() string {
 }
 
 // StreamRequestFromEvent extracts a stream subscription request from a Gateway
-// event without relying on Caelis-only display metadata.
+// event. ACP raw output stays model-visible; Caelis stream cursors live under
+// the internal event metadata namespace.
 func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 	ev := env.Event
 	payload := ev.ToolResult
@@ -55,8 +56,17 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 	if payload.Status != ToolStatusRunning && !boolValue(payload.RawOutput["running"]) && !strings.EqualFold(strings.TrimSpace(stringValue(payload.RawOutput["state"])), "running") {
 		return StreamRequest{}, false
 	}
-	taskID := firstNonEmpty(stringValue(payload.RawOutput["task_id"]), stringValue(payload.RawInput["task_id"]))
-	terminalID := firstNonEmpty(stringValue(payload.RawOutput["terminal_id"]), stringValue(payload.RawInput["terminal_id"]))
+	taskID := firstNonEmpty(
+		stringValue(payload.RawOutput["task_id"]),
+		stringValue(payload.RawInput["task_id"]),
+		stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "task_id"),
+		stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "internal_task_id"),
+	)
+	terminalID := firstNonEmpty(
+		stringValue(payload.RawOutput["terminal_id"]),
+		stringValue(payload.RawInput["terminal_id"]),
+		stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "terminal_id"),
+	)
 	if taskID == "" && terminalID == "" {
 		return StreamRequest{}, false
 	}
@@ -69,13 +79,18 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 		ToolName:   strings.TrimSpace(payload.ToolName),
 		RawInput:   maps.Clone(payload.RawInput),
 		Ref: stream.Ref{
-			SessionID:  firstNonEmpty(strings.TrimSpace(ev.SessionRef.SessionID), stringValue(payload.RawOutput["session_id"]), stringValue(payload.RawInput["session_id"])),
+			SessionID: firstNonEmpty(
+				strings.TrimSpace(ev.SessionRef.SessionID),
+				stringValue(payload.RawOutput["session_id"]),
+				stringValue(payload.RawInput["session_id"]),
+				stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "session_id"),
+			),
 			TaskID:     taskID,
 			TerminalID: terminalID,
 		},
 		Cursor: stream.Cursor{
-			Stdout: int64FromAny(payload.RawOutput["stdout_cursor"]),
-			Stderr: int64FromAny(payload.RawOutput["stderr_cursor"]),
+			Stdout: firstNonZeroInt64(int64FromAny(payload.RawOutput["stdout_cursor"]), int64FromAny(nestedAny(ev.Meta, "caelis", "runtime", "task", "stdout_cursor"))),
+			Stderr: firstNonZeroInt64(int64FromAny(payload.RawOutput["stderr_cursor"]), int64FromAny(nestedAny(ev.Meta, "caelis", "runtime", "task", "stderr_cursor"))),
 		},
 		Origin:        cloneEventOrigin(ev.Origin),
 		Actor:         strings.TrimSpace(payload.Actor),
@@ -491,6 +506,15 @@ func cloneEventOrigin(origin *EventOrigin) *EventOrigin {
 	}
 	cloned := *origin
 	return &cloned
+}
+
+func firstNonZeroInt64(values ...int64) int64 {
+	for _, value := range values {
+		if value != 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 func int64FromAny(value any) int64 {

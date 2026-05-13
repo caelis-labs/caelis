@@ -79,16 +79,23 @@ func (Tool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
 		"updated": true,
 	}
 	meta := map[string]any{
-		"updated":     true,
-		"entries":     entriesToAny(entries),
-		"explanation": strings.TrimSpace(args.Explanation),
+		"caelis": map[string]any{
+			"version": 1,
+			"runtime": map[string]any{
+				"tool": map[string]any{
+					"updated":     true,
+					"entries":     entriesToAny(entries),
+					"explanation": strings.TrimSpace(args.Explanation),
+				},
+			},
+		},
 	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    ToolName,
-		Content: []model.Part{model.NewJSONPart(raw)},
-		Meta:    meta,
+		ID:       strings.TrimSpace(call.ID),
+		Name:     ToolName,
+		Content:  []model.Part{model.NewJSONPart(raw)},
+		Metadata: meta,
 	}, nil
 }
 

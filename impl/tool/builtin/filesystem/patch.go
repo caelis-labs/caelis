@@ -82,7 +82,7 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	if err != nil {
 		return tool.Result{}, err
 	}
-	attachMutationDiffMeta(result.Meta, plan.before, plan.after, plan.hunk)
+	attachMutationDiffMeta(result.Metadata, plan.before, plan.after, plan.hunk)
 	return result, nil
 }
 

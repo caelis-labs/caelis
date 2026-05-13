@@ -158,27 +158,44 @@ func (t *BashTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	}
 	payload := bashCommandPayload(result, err)
 	out, resultErr := toolutil.JSONResult(BashToolName, payload)
-	if out.Meta == nil {
-		out.Meta = map[string]any{}
-	}
 	if result.Route != "" {
-		out.Meta["route"] = result.Route
+		if out.Metadata == nil {
+			out.Metadata = map[string]any{}
+		}
+		bashToolMetadata(out.Metadata)["route"] = result.Route
 	}
 	if result.Backend != "" {
-		out.Meta["backend"] = result.Backend
-	}
-	if err != nil {
-		if detail, ok := sandbox.SandboxPermissionDetail(result, err); ok {
-			out.Meta["error"] = detail
-			out.Meta["error_code"] = string(tool.ErrorCodeSandboxDenied)
-		} else {
-			out.Meta["error"] = strings.TrimSpace(err.Error())
-			if code, _ := tool.ErrorPayload(err)["error_code"].(string); code != "" {
-				out.Meta["error_code"] = code
-			}
+		if out.Metadata == nil {
+			out.Metadata = map[string]any{}
 		}
+		bashToolMetadata(out.Metadata)["backend"] = result.Backend
 	}
 	return out, resultErr
+}
+
+func bashToolMetadata(meta map[string]any) map[string]any {
+	if meta == nil {
+		return nil
+	}
+	caelis, _ := meta["caelis"].(map[string]any)
+	if caelis == nil {
+		caelis = map[string]any{}
+		meta["caelis"] = caelis
+	}
+	if _, ok := caelis["version"]; !ok {
+		caelis["version"] = 1
+	}
+	runtime, _ := caelis["runtime"].(map[string]any)
+	if runtime == nil {
+		runtime = map[string]any{}
+		caelis["runtime"] = runtime
+	}
+	toolMeta, _ := runtime["tool"].(map[string]any)
+	if toolMeta == nil {
+		toolMeta = map[string]any{}
+		runtime["tool"] = toolMeta
+	}
+	return toolMeta
 }
 
 func (t *BashTool) SandboxRuntime() sandbox.Runtime {

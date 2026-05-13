@@ -122,9 +122,12 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
-	rawHunks, ok := result.Meta["diff_hunks"].([]MutationDiffHunk)
+	caelis, _ := result.Metadata["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	rawHunks, ok := toolMeta["diff_hunks"].([]MutationDiffHunk)
 	if !ok {
-		t.Fatalf("result.Meta[diff_hunks] = %T, want []MutationDiffHunk", result.Meta["diff_hunks"])
+		t.Fatalf("result.Metadata diff_hunks = %T, want []MutationDiffHunk", toolMeta["diff_hunks"])
 	}
 	if len(rawHunks) != 2 {
 		t.Fatalf("len(diff_hunks) = %d, want 2: %#v", len(rawHunks), rawHunks)

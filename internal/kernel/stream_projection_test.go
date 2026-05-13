@@ -24,6 +24,17 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 				Actor:         "assistant",
 				ParticipantID: "main",
 			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"task": map[string]any{
+							"terminal_id":   "terminal-1",
+							"stdout_cursor": int64(12),
+							"stderr_cursor": 3,
+						},
+					},
+				},
+			},
 			ToolResult: &ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "BASH",
@@ -31,12 +42,9 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 					"command": "for i in 1 2; do echo $i; done",
 				},
 				RawOutput: map[string]any{
-					"task_id":       "task-1",
-					"terminal_id":   "terminal-1",
-					"running":       true,
-					"state":         "running",
-					"stdout_cursor": int64(12),
-					"stderr_cursor": 3,
+					"task_id": "task-1",
+					"running": true,
+					"state":   "running",
 				},
 				Status:        ToolStatusRunning,
 				Scope:         EventScopeMain,

@@ -464,6 +464,9 @@ func (g *Gateway) ReplayEvents(ctx context.Context, req ReplayEventsRequest) (Re
 	if err != nil {
 		return ReplayEventsResult{}, wrapSessionError(err)
 	}
+	if err := validateReplaySessionEvents(events); err != nil {
+		return ReplayEventsResult{}, err
+	}
 	replayEvents := replayTranscriptEvents(events, req.IncludeTransient)
 	controlEvents := replayControlPlaneEvents(events, req.IncludeTransient)
 	runState, err := g.runtime.RunState(ctx, ref)

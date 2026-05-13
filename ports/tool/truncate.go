@@ -58,9 +58,12 @@ func TruncateResultWithInfo(result Result, policy TruncationPolicy) (Result, Tru
 	out.Content = model.CloneParts(result.Content)
 	out.Meta = maps.Clone(result.Meta)
 	if len(out.Content) == 0 {
-		payload, info := TruncateMap(out.Meta, policy)
+		payload := map[string]any{}
+		if result.IsError {
+			payload["error"] = "tool call failed"
+		}
 		out.Content = []model.Part{model.NewJSONPart(mustMarshalMap(payload))}
-		return out, info
+		return out, newTruncationInfo(policy)
 	}
 	var info TruncationInfo
 	out.Content, info = TruncateParts(out.Content, policy)

@@ -914,7 +914,14 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 		}
 	}
 	entries := planEntriesFromAny(payload["entries"])
-	return entries, strings.TrimSpace(stringValue(payload["explanation"])), true
+	explanation := strings.TrimSpace(stringValue(payload["explanation"]))
+	if len(entries) == 0 {
+		entries = planEntriesFromAny(nestedValue(event.Meta, "caelis", "runtime", "tool", "entries"))
+	}
+	if explanation == "" {
+		explanation = nestedString(event.Meta, "caelis", "runtime", "tool", "explanation")
+	}
+	return entries, explanation, true
 }
 
 func planToolNameFromEvent(event *session.Event) string {
@@ -939,16 +946,21 @@ func planToolNameFromEvent(event *session.Event) string {
 }
 
 func nestedString(values map[string]any, path ...string) string {
+	current := nestedValue(values, path...)
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
+}
+
+func nestedValue(values map[string]any, path ...string) any {
 	var current any = values
 	for _, key := range path {
 		mapped, ok := current.(map[string]any)
 		if !ok {
-			return ""
+			return nil
 		}
 		current = mapped[key]
 	}
-	text, _ := current.(string)
-	return strings.TrimSpace(text)
+	return current
 }
 
 func planEntriesFromAny(raw any) []plan.Entry {

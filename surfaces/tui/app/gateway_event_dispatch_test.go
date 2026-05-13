@@ -928,6 +928,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		want        []string
 		forbidden   []string
 		expandPanel bool
+		meta        map[string]any
 	}{
 		{
 			name: "read line range",
@@ -1254,25 +1255,33 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go", "old": "entity.GMLicense", "new": "entity.GmLicense", "replace_all": true},
 				RawOutput: map[string]any{
-					"path":          "/tmp/workspace/gm_license_repo.go",
-					"replacements":  2,
-					"added_lines":   2,
-					"removed_lines": 2,
-					"diff_hunks": []any{
-						map[string]any{
-							"header": "@@ -2,3 +2,3 @@",
-							"lines":  []any{" context-a", "-entity.GMLicense", "+entity.GmLicense", " context-b"},
-						},
-						map[string]any{
-							"header": "@@ -20,3 +20,3 @@",
-							"lines":  []any{" context-c", "-entity.GMLicense", "+entity.GmLicense", " context-d"},
-						},
-					},
+					"path":         "/tmp/workspace/gm_license_repo.go",
+					"replacements": 2,
 				},
 			},
 			want:        []string{"• Patched gm_license_repo.go +2 -2", "diff / hunk", "@@ -2,3 +2,3 @@", "@@ -20,3 +20,3 @@", "-entity.GMLicense", "+entity.GmLicense"},
 			forbidden:   []string{"@@ repeated replacement", "╭", "╰"},
 			expandPanel: true,
+			meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"tool": map[string]any{
+							"added_lines":   2,
+							"removed_lines": 2,
+							"diff_hunks": []any{
+								map[string]any{
+									"header": "@@ -2,3 +2,3 @@",
+									"lines":  []any{" context-a", "-entity.GMLicense", "+entity.GmLicense", " context-b"},
+								},
+								map[string]any{
+									"header": "@@ -20,3 +20,3 @@",
+									"lines":  []any{" context-c", "-entity.GMLicense", "+entity.GmLicense", " context-d"},
+								},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -1292,6 +1301,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolResult,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
+					Meta:       tt.meta,
 					ToolResult: tt.result,
 				},
 			})

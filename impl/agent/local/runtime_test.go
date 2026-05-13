@@ -3064,7 +3064,8 @@ func TestRuntimePolicyModePreservesCustomRegistryMode(t *testing.T) {
 	if sawMode != "locked-down" {
 		t.Fatalf("policy mode seen by custom mode = %q, want locked-down", sawMode)
 	}
-	if got := result.Meta["policy_mode"]; got != "locked-down" {
+	payload := testToolResultPayload(t, result)
+	if got := payload["policy_mode"]; got != "locked-down" {
 		t.Fatalf("result policy_mode = %v, want locked-down", got)
 	}
 }
@@ -3113,7 +3114,8 @@ func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("result.IsError = false, want policy denial")
 	}
-	if got := result.Meta["policy_mode"]; got != presets.ModeAutoReview {
+	payload := testToolResultPayload(t, result)
+	if got := payload["policy_mode"]; got != presets.ModeAutoReview {
 		t.Fatalf("result policy_mode = %v, want %s", got, presets.ModeAutoReview)
 	}
 }
@@ -3175,8 +3177,9 @@ func TestRuntimeReservesRequestPermissionsToolName(t *testing.T) {
 	if !result.IsError {
 		t.Fatalf("request_permissions result IsError = false, want true without approval requester")
 	}
-	if !strings.Contains(fmt.Sprint(result.Meta["error"]), "no approval requester") {
-		t.Fatalf("request_permissions error = %v, want built-in approval requester error", result.Meta["error"])
+	payload := testToolResultPayload(t, result)
+	if !strings.Contains(fmt.Sprint(payload["error"]), "no approval requester") {
+		t.Fatalf("request_permissions error = %v, want built-in approval requester error", payload["error"])
 	}
 }
 
@@ -3217,9 +3220,10 @@ func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("request_permissions Call() error = %v", err)
 	}
-	grant, ok := result.Meta["grant"].(map[string]any)
+	toolMeta := testToolResultRuntimeMeta(t, result, "tool")
+	grant, ok := toolMeta["grant"].(map[string]any)
 	if !ok {
-		t.Fatalf("grant payload = %#v, want map", result.Meta["grant"])
+		t.Fatalf("grant metadata = %#v, want map", toolMeta["grant"])
 	}
 	if grant["reason"] != "need network" || grant["mode"] != "manual" || grant["run_id"] != "run-1" || grant["turn_id"] != "turn-1" {
 		t.Fatalf("grant payload = %#v, want reason/mode/run/turn metadata", grant)
@@ -3535,9 +3539,9 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 		"workdir":       ".",
 		"yield_time_ms": 0,
 	})
-	taskID, _ := bashResult.Meta["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
 	}
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
@@ -3768,9 +3772,9 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningBash(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := bashResult.Meta["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
 	}
 
 	waitErr := errors.New("transient wait failure")
@@ -3821,9 +3825,9 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := bashResult.Meta["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
 	}
 
 	callRuntimeTaskTool(t, runtimeTaskTool{
@@ -3856,9 +3860,9 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := bashResult.Meta["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result meta = %#v, want task_id", bashResult.Meta)
+		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
 	}
 
 	callRuntimeTaskTool(t, runtimeTaskTool{
@@ -3876,7 +3880,7 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 	}
 }
 
-func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
+func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
@@ -3899,9 +3903,6 @@ func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
 		},
 	)
 
-	if got, _ := result.Meta["stdout"].(string); got != "done\n" {
-		t.Fatalf("result.Meta[stdout] = %q, want terminal stdout", got)
-	}
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
 		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
@@ -3912,8 +3913,11 @@ func TestTaskSnapshotToolResultPreservesTerminalStreamsInMeta(t *testing.T) {
 	if got, _ := payload["stdout"].(string); got != "done\n" {
 		t.Fatalf("payload[stdout] = %q, want full terminal stdout", got)
 	}
-	if got := result.Meta["exit_code"]; got != 0 {
-		t.Fatalf("result.Meta[exit_code] = %#v, want 0", got)
+	if _, exists := result.Meta["stdout"]; exists {
+		t.Fatalf("result.Meta duplicated stdout output: %#v", result.Meta)
+	}
+	if _, exists := result.Meta["exit_code"]; exists {
+		t.Fatalf("result.Meta duplicated exit_code output: %#v", result.Meta)
 	}
 }
 
@@ -3951,12 +3955,12 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
 	}
-	if got, _ := result.Meta["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
-		t.Fatalf("meta error = %q, want concise sandbox permission hint", got)
+	if _, exists := result.Meta["error"]; exists {
+		t.Fatalf("result.Meta duplicated error output: %#v", result.Meta)
 	}
 }
 
-func TestTaskSnapshotToolResultKeepsRawTerminalStreamsForDisplay(t *testing.T) {
+func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *testing.T) {
 	t.Parallel()
 
 	hugeStderr := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
@@ -3982,35 +3986,21 @@ func TestTaskSnapshotToolResultKeepsRawTerminalStreamsForDisplay(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if got, _ := payload["stderr"].(string); got != hugeStderr {
-		t.Fatalf("payload stderr len = %d, want original len %d", len(got), len(hugeStderr))
+	gotStderr := taskStringValue(payload["stderr"])
+	if gotStderr == hugeStderr {
+		t.Fatalf("payload stderr kept original huge output, want canonical truncated result")
 	}
-	if got, _ := result.Meta["stderr"].(string); got != hugeStderr {
-		t.Fatalf("meta stderr len = %d, want original len %d", len(got), len(hugeStderr))
+	if len(gotStderr) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
+		t.Fatalf("payload stderr len = %d, want bounded", len(gotStderr))
 	}
-	if got, _ := result.Meta["result"].(string); got != hugeStderr {
-		t.Fatalf("meta result len = %d, want original len %d", len(got), len(hugeStderr))
+	if !strings.Contains(gotStderr, "tokens truncated") {
+		t.Fatalf("payload stderr = %q, want truncation marker", gotStderr)
 	}
-	truncated, info := tool.TruncateResultWithInfo(result, tool.DefaultTruncationPolicy())
-	if len(truncated.Content) != 1 || truncated.Content[0].JSON == nil {
-		t.Fatalf("truncated content = %#v, want one JSON result", truncated.Content)
+	if _, exists := result.Meta["stderr"]; exists {
+		t.Fatalf("result.Meta duplicated stderr output: %#v", result.Meta)
 	}
-	if meta := tool.TruncationMetadata(info); meta == nil || meta["truncated"] != true {
-		t.Fatalf("TruncationMetadata(%#v) = %#v, want metadata", info, meta)
-	}
-	var modelPayload map[string]any
-	if err := json.Unmarshal(truncated.Content[0].JSON.Value, &modelPayload); err != nil {
-		t.Fatalf("unmarshal model payload: %v", err)
-	}
-	modelStderr := taskStringValue(modelPayload["stderr"])
-	if len(modelStderr) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
-		t.Fatalf("model stderr len = %d, want bounded", len(modelStderr))
-	}
-	if !strings.Contains(modelStderr, "tokens truncated") {
-		t.Fatalf("model stderr = %q, want truncation marker", modelStderr)
-	}
-	if modelPayload["_tool_truncation"] != nil || modelPayload["output_meta"] != nil {
-		t.Fatalf("model payload = %#v, should not expose truncation metadata", modelPayload)
+	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
+		t.Fatalf("payload = %#v, should not expose truncation metadata", payload)
 	}
 }
 
@@ -4042,14 +4032,15 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 		},
 	)
 
-	if got := result.Meta["terminal_id"]; got != "terminal-1" {
-		t.Fatalf("result.Meta[terminal_id] = %#v, want terminal-1", got)
+	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	if got := taskMeta["terminal_id"]; got != "terminal-1" {
+		t.Fatalf("metadata terminal_id = %#v, want terminal-1", got)
 	}
-	if got := result.Meta["stdout_cursor"]; got != int64(12) {
-		t.Fatalf("result.Meta[stdout_cursor] = %#v, want 12", got)
+	if got := taskMeta["stdout_cursor"]; got != int64(12) {
+		t.Fatalf("metadata stdout_cursor = %#v, want 12", got)
 	}
-	if got := result.Meta["stderr_cursor"]; got != int64(3) {
-		t.Fatalf("result.Meta[stderr_cursor] = %#v, want 3", got)
+	if got := taskMeta["stderr_cursor"]; got != int64(3) {
+		t.Fatalf("metadata stderr_cursor = %#v, want 3", got)
 	}
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
@@ -4107,11 +4098,12 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 	if got := payload["final_message"]; got != "done" {
 		t.Fatalf("payload[final_message] = %#v, want done", got)
 	}
-	if got := result.Meta["task_id"]; got != "jeff" {
-		t.Fatalf("meta[task_id] = %#v, want handle jeff", got)
+	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	if got := taskMeta["task_id"]; got != "jeff" {
+		t.Fatalf("metadata task_id = %#v, want handle jeff", got)
 	}
-	if got := result.Meta["prompt"]; got != "summarize startup output" {
-		t.Fatalf("meta[prompt] = %#v, want prompt preserved for SPAWN display", got)
+	if got := taskMeta["prompt"]; got != "summarize startup output" {
+		t.Fatalf("metadata prompt = %#v, want prompt preserved for SPAWN display", got)
 	}
 	if _, ok := payload["prompt"]; ok {
 		t.Fatalf("payload contains prompt: %#v", payload)
@@ -4125,8 +4117,8 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 		if _, ok := payload[key]; ok {
 			t.Fatalf("payload contains %q: %#v", key, payload)
 		}
-		if _, ok := result.Meta[key]; ok {
-			t.Fatalf("meta contains %q: %#v", key, result.Meta)
+		if _, ok := taskMeta[key]; ok {
+			t.Fatalf("metadata contains %q: %#v", key, taskMeta)
 		}
 	}
 }
@@ -4172,8 +4164,9 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	if got := payload["task_id"]; got != "ella" {
 		t.Fatalf("payload[task_id] = %#v, want handle ella", got)
 	}
-	if _, ok := result.Meta["internal_task_id"]; ok {
-		t.Fatalf("meta[internal_task_id] = %#v, want omitted", result.Meta["internal_task_id"])
+	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	if _, ok := taskMeta["internal_task_id"]; ok {
+		t.Fatalf("metadata internal_task_id = %#v, want omitted", taskMeta["internal_task_id"])
 	}
 }
 
@@ -5748,6 +5741,29 @@ func callRuntimeTaskTool(t *testing.T, taskTool runtimeTaskTool, args map[string
 		t.Fatalf("taskTool.Call() error = %v", err)
 	}
 	return result
+}
+
+func testToolResultPayload(t *testing.T, result tool.Result) map[string]any {
+	t.Helper()
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	return payload
+}
+
+func testToolResultRuntimeMeta(t *testing.T, result tool.Result, section string) map[string]any {
+	t.Helper()
+	caelis, _ := result.Metadata["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	values, _ := runtimeMeta[section].(map[string]any)
+	if values == nil {
+		t.Fatalf("result.Metadata caelis.runtime.%s = %#v", section, result.Metadata)
+	}
+	return values
 }
 
 func assertRunningTaskSnapshot(t *testing.T, result tool.Result) {

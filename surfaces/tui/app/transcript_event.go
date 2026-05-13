@@ -239,17 +239,18 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
 			rawOutput := gatewayProtocolRawOutput(ev, payload.RawOutput)
+			displayOutput := toolDisplayOutputMap(semanticName, rawOutput, ev.Meta)
 			displayInput := rawInput
 			if strings.EqualFold(semanticName, "SPAWN") {
-				displayInput = spawnDisplayInputForResult(rawInput, rawOutput)
+				displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
 			}
-			toolOutput := toolDisplayOutput(semanticName, displayInput, rawOutput, acpprojector.FormatToolResult(toolName, displayInput, rawOutput, status), status, toolErr)
+			toolOutput := toolDisplayOutput(semanticName, displayInput, displayOutput, acpprojector.FormatToolResult(toolName, displayInput, rawOutput, status), status, toolErr)
 			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-			toolTaskID := toolDisplayTaskID(rawInput, rawOutput, ev.Meta)
+			toolTaskID := toolDisplayTaskID(rawInput, displayOutput, ev.Meta)
 			if strings.EqualFold(semanticName, "TASK") {
 				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
 			}
-			if !toolErr && (len(rawInput) > 0 || len(rawOutput) > 0) {
+			if !toolErr && (len(rawInput) > 0 || len(displayOutput) > 0) {
 				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
 				}
@@ -272,9 +273,9 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 				ToolStatus:         status,
 				ToolError:          toolErr,
 				ToolTaskID:         toolTaskID,
-				ToolTaskAction:     toolDisplayTaskAction(rawInput, rawOutput, ev.Meta),
-				ToolTaskInput:      toolDisplayTaskInput(rawInput, rawOutput, ev.Meta),
-				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, rawOutput, ev.Meta),
+				ToolTaskAction:     toolDisplayTaskAction(rawInput, displayOutput, ev.Meta),
+				ToolTaskInput:      toolDisplayTaskInput(rawInput, displayOutput, ev.Meta),
+				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, displayOutput, ev.Meta),
 				Final:              transcriptToolStatusFinal(status, toolErr),
 			})
 		}
@@ -442,4 +443,41 @@ func gatewayProtocolRawOutput(ev kernel.Event, fallback map[string]any) map[stri
 		return cloneAnyMap(ev.Protocol.ToolCall.RawOutput)
 	}
 	return cloneAnyMap(fallback)
+}
+
+func toolDisplayOutputMap(toolName string, rawOutput map[string]any, meta map[string]any) map[string]any {
+	out := cloneAnyMap(rawOutput)
+	switch strings.ToUpper(strings.TrimSpace(toolName)) {
+	case "WRITE", "PATCH":
+		toolMeta := eventRuntimeToolMeta(meta)
+		for _, key := range []string{
+			"created",
+			"previous_empty",
+			"bytes_written",
+			"line_count",
+			"added_lines",
+			"removed_lines",
+			"revision",
+			"hunk",
+			"diff_hunks",
+			"diff_truncated",
+		} {
+			value, ok := toolMeta[key]
+			if !ok {
+				continue
+			}
+			if out == nil {
+				out = map[string]any{}
+			}
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func eventRuntimeToolMeta(meta map[string]any) map[string]any {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	return toolMeta
 }

@@ -41,8 +41,11 @@ func TestPlanToolReturnsNormalizedEntries(t *testing.T) {
 	if got := payload["updated"]; got != true {
 		t.Fatalf("updated = %#v, want true", got)
 	}
-	entries, _ := result.Meta["entries"].([]map[string]any)
+	caelis, _ := result.Metadata["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	entries, _ := toolMeta["entries"].([]map[string]any)
 	if got, want := len(entries), 2; got != want {
-		t.Fatalf("len(meta entries) = %d, want %d", got, want)
+		t.Fatalf("len(metadata entries) = %d, want %d", got, want)
 	}
 }

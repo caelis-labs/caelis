@@ -394,23 +394,18 @@ func modelToolCallEvents(message model.Message, resp *model.Response) []*session
 }
 
 func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observer tool.Observer) (model.Message, *session.Event, error) {
-	rawInput := mustObject(call.Args)
 	selectedTool, ok := a.lookupTool(call.Name)
 	if !ok {
 		rawOutput := tool.ErrorPayload(tool.NewError(tool.ErrorCodeNotFound, fmt.Sprintf("tool %q not found", call.Name)))
-		message, truncationMeta := toolResultMessageWithMeta(call, tool.Result{
+		result := tool.Result{
 			ID:      call.ID,
 			Name:    call.Name,
 			IsError: true,
 			Content: []model.Part{model.NewJSONPart(mustJSON(rawOutput))},
-		})
-		return message, &session.Event{
-			Type:     session.EventTypeToolResult,
-			Message:  &message,
-			Text:     message.TextContent(),
-			Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, "failed", rawInput, rawOutput),
-			Meta:     mergeEventMeta(toolMeta(call.Name), truncationMeta),
-		}, nil
+		}
+		canonical, truncationMeta := canonicalToolResult(result)
+		message := toolResultMessageFromCanonical(call, canonical)
+		return message, toolResultEvent(call, canonical, &message, truncationMeta), nil
 	}
 
 	result, err := selectedTool.Call(ctx, tool.Call{
@@ -427,8 +422,9 @@ func (a *Agent) executeToolCall(ctx context.Context, call model.ToolCall, observ
 			Content: []model.Part{model.NewJSONPart(mustJSON(tool.ErrorPayload(err)))},
 		}
 	}
-	message, truncationMeta := toolResultMessageWithMeta(call, result)
-	event := toolResultEvent(call, result, &message, truncationMeta)
+	canonical, truncationMeta := canonicalToolResult(result)
+	message := toolResultMessageFromCanonical(call, canonical)
+	event := toolResultEvent(call, canonical, &message, truncationMeta)
 	return message, event, nil
 }
 
@@ -439,7 +435,7 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 	metaParts = append(metaParts, extraMeta...)
 	event := &session.Event{
 		Type:     session.EventTypeToolResult,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, toolCallStatus(result), rawInput, rawOutput),
+		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, toolCallStatus(result, rawOutput), rawInput, rawOutput),
 		Meta:     mergeEventMeta(metaParts...),
 	}
 	if message != nil {
@@ -450,9 +446,6 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 }
 
 func toolResultRawOutput(result tool.Result) map[string]any {
-	if len(result.Meta) > 0 {
-		return maps.Clone(result.Meta)
-	}
 	for _, part := range result.Content {
 		if part.JSON == nil || len(part.JSON.Value) == 0 {
 			continue
@@ -495,9 +488,17 @@ func toolResultMessage(call model.ToolCall, result tool.Result) model.Message {
 	return message
 }
 
+func canonicalToolResult(result tool.Result) (tool.Result, map[string]any) {
+	canonical, info := tool.TruncateResultWithInfo(result, tool.DefaultTruncationPolicy())
+	return canonical, toolTruncationEventMeta(info)
+}
+
 func toolResultMessageWithMeta(call model.ToolCall, result tool.Result) (model.Message, map[string]any) {
-	var info tool.TruncationInfo
-	result, info = tool.TruncateResultWithInfo(result, tool.DefaultTruncationPolicy())
+	result, truncationMeta := canonicalToolResult(result)
+	return toolResultMessageFromCanonical(call, result), truncationMeta
+}
+
+func toolResultMessageFromCanonical(call model.ToolCall, result tool.Result) model.Message {
 	parts := model.CloneParts(result.Content)
 	if len(parts) == 0 {
 		parts = []model.Part{model.NewJSONPart(mustJSON(map[string]any{}))}
@@ -514,7 +515,7 @@ func toolResultMessageWithMeta(call model.ToolCall, result tool.Result) (model.M
 			},
 		}},
 	}
-	return message, toolTruncationEventMeta(info)
+	return message
 }
 
 func firstNonEmpty(values ...string) string {
@@ -592,8 +593,8 @@ func toolCallTitle(call model.ToolCall) string {
 	return name
 }
 
-func toolCallStatus(result tool.Result) string {
-	if state, _ := result.Meta["state"].(string); strings.TrimSpace(state) != "" {
+func toolCallStatus(result tool.Result, rawOutput map[string]any) string {
+	if state, _ := rawOutput["state"].(string); strings.TrimSpace(state) != "" {
 		switch strings.TrimSpace(state) {
 		case "running", "waiting_input", "waiting_approval":
 			return strings.TrimSpace(state)
@@ -601,7 +602,7 @@ func toolCallStatus(result tool.Result) string {
 			return strings.TrimSpace(state)
 		}
 	}
-	if exitCode, ok := intValue(result.Meta["exit_code"]); ok && exitCode != 0 {
+	if exitCode, ok := intValue(rawOutput["exit_code"]); ok && exitCode != 0 {
 		return "failed"
 	}
 	if result.IsError {

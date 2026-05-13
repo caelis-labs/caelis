@@ -313,11 +313,6 @@ func (t runtimeSpawnTool) Call(ctx context.Context, call tool.Call) (tool.Result
 		return tool.Result{}, err
 	}
 	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
-	if result.Meta == nil {
-		result.Meta = map[string]any{}
-	}
-	result.Meta["agent"] = strings.TrimSpace(agent)
-	result.Meta["prompt"] = strings.TrimSpace(prompt)
 	return result, nil
 }
 
@@ -464,17 +459,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, err
 	}
 	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
-	if result.Meta == nil {
-		result.Meta = map[string]any{}
-	}
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
-	result.Meta["action"] = normalizedAction
-	if normalizedAction == "write" {
-		result.Meta["input"] = input
-	}
-	if normalizedAction == "wait" {
-		result.Meta["yield_time_ms"] = yieldMS
-	}
 	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, snapshot)
 	return result, nil
 }
@@ -484,22 +469,40 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	if out == nil {
 		out = map[string]any{}
 	}
-	toolMeta := map[string]any{
-		"name":        "TASK",
-		"action":      strings.ToLower(strings.TrimSpace(action)),
-		"target_kind": strings.TrimSpace(string(snapshot.Kind)),
-		"target_id":   taskVisibleID(snapshot),
-	}
+	toolMeta := taskRuntimeMetaSection(out, "tool")
+	toolMeta["name"] = "TASK"
+	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
+	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
+	toolMeta["target_id"] = taskVisibleID(snapshot)
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
 		toolMeta["input"] = strings.TrimSpace(input)
 	}
-	out["caelis"] = map[string]any{
-		"version": 1,
-		"runtime": map[string]any{
-			"tool": toolMeta,
-		},
-	}
 	return out
+}
+
+func taskRuntimeMetaSection(meta map[string]any, section string) map[string]any {
+	if meta == nil {
+		return nil
+	}
+	caelis, _ := meta["caelis"].(map[string]any)
+	if caelis == nil {
+		caelis = map[string]any{}
+		meta["caelis"] = caelis
+	}
+	if _, ok := caelis["version"]; !ok {
+		caelis["version"] = 1
+	}
+	runtime, _ := caelis["runtime"].(map[string]any)
+	if runtime == nil {
+		runtime = map[string]any{}
+		caelis["runtime"] = runtime
+	}
+	values, _ := runtime[section].(map[string]any)
+	if values == nil {
+		values = map[string]any{}
+		runtime[section] = values
+	}
+	return values
 }
 
 func (tm *taskRuntime) StartBash(
@@ -1416,10 +1419,18 @@ func (t *bashTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot
 		UpdatedAt:      status.UpdatedAt,
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
-		Result:         maps.Clone(t.result),
+		Result:         canonicalTaskResult(t.result),
 		Metadata:       maps.Clone(t.metadata),
 		Terminal:       status.Terminal,
 	})
+}
+
+func canonicalTaskResult(result map[string]any) map[string]any {
+	if result == nil {
+		return nil
+	}
+	out, _ := tool.TruncateMap(result, tool.DefaultTruncationPolicy())
+	return out
 }
 
 func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskapi.Snapshot) tool.Result {
@@ -1427,54 +1438,49 @@ func taskSnapshotToolResult(call tool.Call, def tool.Definition, snapshot taskap
 	if payload == nil {
 		payload = map[string]any{}
 	}
-	visibleTaskID := taskVisibleID(snapshot)
+	payload, _ = tool.TruncateMap(payload, tool.DefaultTruncationPolicy())
 	meta := taskToolMeta(snapshot)
-	for key, value := range payload {
-		if _, exists := meta[key]; !exists {
-			meta[key] = value
-		}
-	}
-	meta["tool_name"] = strings.TrimSpace(def.Name)
-	meta["tool_call_id"] = strings.TrimSpace(call.ID)
-	meta["state"] = string(snapshot.State)
-	meta["running"] = snapshot.Running
-	meta["task_id"] = visibleTaskID
-	if internalTaskID := strings.TrimSpace(snapshot.Ref.TaskID); snapshot.Kind != taskapi.KindSubagent && internalTaskID != "" && internalTaskID != visibleTaskID {
-		meta["internal_task_id"] = internalTaskID
-	}
-	if snapshot.Kind != taskapi.KindSubagent && snapshot.StdoutCursor > 0 {
-		meta["stdout_cursor"] = snapshot.StdoutCursor
-	}
-	if snapshot.Kind != taskapi.KindSubagent && snapshot.StderrCursor > 0 {
-		meta["stderr_cursor"] = snapshot.StderrCursor
-	}
-	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID)); snapshot.Kind != taskapi.KindSubagent && terminalID != "" {
-		meta["terminal_id"] = terminalID
-	}
 	raw, _ := json.Marshal(payload)
 	return tool.Result{
-		ID:      strings.TrimSpace(call.ID),
-		Name:    strings.TrimSpace(def.Name),
-		Content: []model.Part{model.NewJSONPart(raw)},
-		Meta:    meta,
+		ID:       strings.TrimSpace(call.ID),
+		Name:     strings.TrimSpace(def.Name),
+		Content:  []model.Part{model.NewJSONPart(raw)},
+		Metadata: meta,
 	}
 }
 
 func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
-	if snapshot.Kind == taskapi.KindSubagent {
-		meta := map[string]any{}
-		if prompt := firstNonEmpty(taskStringValue(snapshot.Metadata["prompt"]), taskStringValue(snapshot.Result["prompt"])); strings.TrimSpace(prompt) != "" {
-			meta["prompt"] = strings.TrimSpace(prompt)
-		}
-		return meta
+	meta := map[string]any{}
+	taskMeta := taskRuntimeMetaSection(meta, "task")
+	visibleTaskID := taskVisibleID(snapshot)
+	taskMeta["kind"] = strings.TrimSpace(string(snapshot.Kind))
+	taskMeta["state"] = strings.TrimSpace(string(snapshot.State))
+	taskMeta["running"] = snapshot.Running
+	taskMeta["task_id"] = visibleTaskID
+	if sessionID := strings.TrimSpace(snapshot.Ref.SessionID); sessionID != "" {
+		taskMeta["session_id"] = sessionID
 	}
-	meta := maps.Clone(snapshot.Metadata)
-	if meta == nil {
-		meta = map[string]any{}
+	if internalTaskID := strings.TrimSpace(snapshot.Ref.TaskID); snapshot.Kind != taskapi.KindSubagent && internalTaskID != "" && internalTaskID != visibleTaskID {
+		taskMeta["internal_task_id"] = internalTaskID
 	}
-	for key, value := range snapshot.Result {
-		if _, exists := meta[key]; !exists {
-			meta[key] = value
+	if snapshot.Kind != taskapi.KindSubagent && snapshot.StdoutCursor > 0 {
+		taskMeta["stdout_cursor"] = snapshot.StdoutCursor
+	}
+	if snapshot.Kind != taskapi.KindSubagent && snapshot.StderrCursor > 0 {
+		taskMeta["stderr_cursor"] = snapshot.StderrCursor
+	}
+	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); snapshot.Kind != taskapi.KindSubagent && terminalID != "" {
+		taskMeta["terminal_id"] = terminalID
+	}
+	if snapshot.SupportsInput {
+		taskMeta["supports_input"] = true
+	}
+	if snapshot.SupportsCancel {
+		taskMeta["supports_cancel"] = true
+	}
+	for _, key := range []string{"source", "interaction", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq"} {
+		if value, ok := snapshot.Metadata[key]; ok {
+			taskMeta[key] = value
 		}
 	}
 	return meta
@@ -2151,7 +2157,7 @@ func (t *bashTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"workdir":    t.workdir,
 			"session_id": t.ref.SessionID,
 		},
-		Result:   maps.Clone(t.result),
+		Result:   canonicalTaskResult(t.result),
 		Metadata: maps.Clone(t.metadata),
 		Terminal: t.session.Terminal(),
 	}
@@ -2393,7 +2399,7 @@ func (t *subagentTask) snapshot() taskapi.Snapshot {
 		StdoutCursor:   t.stdoutCursor,
 		StderrCursor:   t.stderrCursor,
 		EventCursor:    int64(len(t.streamFrames)),
-		Result:         result,
+		Result:         canonicalTaskResult(result),
 		Metadata:       metadata,
 	})
 }
@@ -2424,7 +2430,7 @@ func (t *subagentTask) entrySnapshot(now time.Time) *taskapi.Entry {
 			"turn_seq":    t.turnSeq,
 			"turn_id":     subagentTurnID(t.ref.TaskID, t.turnSeq),
 		},
-		Result:   maps.Clone(t.result),
+		Result:   canonicalTaskResult(t.result),
 		Metadata: maps.Clone(t.metadata),
 	}
 }

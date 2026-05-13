@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,9 +102,9 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	if result.IsError {
 		t.Fatalf("Call() IsError = true: %#v", result.Meta)
 	}
-	grant, ok := result.Meta["grant"].(map[string]any)
+	grant, ok := permissionToolResultMeta(t, result)["grant"].(map[string]any)
 	if !ok {
-		t.Fatalf("grant payload = %#v, want map", result.Meta["grant"])
+		t.Fatalf("grant metadata = %#v, want map", permissionToolResultMeta(t, result)["grant"])
 	}
 	for key, want := range map[string]string{
 		"reason":     "need deps",
@@ -119,6 +120,29 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	if snapshot := store.snapshot(); snapshot.Count != 1 || !snapshot.NetworkGranted || snapshot.ReadRootCount != 1 || snapshot.WriteRootCount != 1 {
 		t.Fatalf("snapshot = %+v, want recorded grant", snapshot)
 	}
+}
+
+func permissionToolResultPayload(t *testing.T, result tool.Result) map[string]any {
+	t.Helper()
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	return payload
+}
+
+func permissionToolResultMeta(t *testing.T, result tool.Result) map[string]any {
+	t.Helper()
+	caelis, _ := result.Metadata["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	if toolMeta == nil {
+		t.Fatalf("result.Metadata caelis.runtime.tool = %#v", result.Metadata)
+	}
+	return toolMeta
 }
 
 func TestRequestPermissionsToolRejectsMissingFilesystemPath(t *testing.T) {
