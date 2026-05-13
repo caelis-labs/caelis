@@ -12,6 +12,7 @@ func TestDetectLineStyle(t *testing.T) {
 	}{
 		{"· Hello world", LineStyleAssistant},
 		{"* Hello world", LineStyleAssistant},
+		{"• 文件操作：读写、搜索、替换文件内容，列出目录结构，匹配文件 glob 等", LineStyleAssistant},
 		{"› thinking about it", LineStyleReasoning},
 		{"│ thinking about it", LineStyleReasoning},
 		{"▌ user input", LineStyleUser},
@@ -35,6 +36,7 @@ func TestDetectLineStyle(t *testing.T) {
 		{"", LineStyleDefault},
 		{"   ", LineStyleDefault},
 		{"some: mixed text", LineStyleDefault},
+		{"我具备以下能力：", LineStyleDefault},
 	}
 	for _, tt := range tests {
 		got := DetectLineStyle(tt.line)

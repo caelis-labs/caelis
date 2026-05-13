@@ -121,9 +121,9 @@ func truncateTailDisplay(text string, width int) string {
 
 func buildToolEventViewModel(ev SubagentEvent) ToolEventViewModel {
 	return ToolEventViewModel{
-		Name:   strings.TrimSpace(ev.Name),
-		Args:   strings.TrimSpace(ev.Args),
-		Output: strings.TrimSpace(ev.Output),
+		Name:   strings.TrimSpace(tuikit.SanitizeLogText(ev.Name)),
+		Args:   strings.TrimSpace(tuikit.SanitizeLogText(ev.Args)),
+		Output: strings.TrimSpace(tuikit.SanitizeLogText(ev.Output)),
 		Done:   ev.Done,
 		Err:    ev.Err,
 	}
@@ -158,6 +158,7 @@ func renderToolEventViewModelSegments(vm ToolEventViewModel, width int, theme tu
 }
 
 func styleToolEventLine(theme tuikit.Theme, line string, style tuikit.LineStyle) string {
+	line = tuikit.SanitizeLogText(line)
 	components := theme.ComponentStyles()
 	switch style {
 	case tuikit.LineStyleTool:

@@ -212,7 +212,11 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// No document-level margin; our layout handles outer spacing.
 	zero := uint(0)
 	style.Document.Margin = &zero
-	style.Document.Color = styleForegroundToAnsiPtr(theme.TextStyle())
+	bodyHex := styleForegroundToAnsiPtr(theme.TextStyle())
+	linkHex := styleForegroundToAnsiPtr(theme.MarkdownLinkStyle())
+	style.Document.Color = bodyHex
+	style.Text.Color = bodyHex
+	style.Paragraph.Color = bodyHex
 
 	// ---------------------------------------------------------------
 	// Headings — crush-style: H1 gets background pill, H2+ keep
@@ -250,7 +254,9 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// Lists — bullet marker "• " for unordered, ". " for ordered
 	// ---------------------------------------------------------------
 	style.Item.BlockPrefix = "• "
+	style.Item.Color = bodyHex
 	style.Enumeration.BlockPrefix = ". "
+	style.Enumeration.Color = bodyHex
 	style.List.LevelIndent = 2
 
 	// ---------------------------------------------------------------
@@ -303,8 +309,9 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	// Links — colored + underline, link text bold
 	// ---------------------------------------------------------------
-	style.Link.Color = styleForegroundToAnsiPtr(theme.MarkdownLinkStyle())
+	style.Link.Color = linkHex
 	style.Link.Underline = boolPtr(true)
+	style.LinkText.Color = linkHex
 	style.LinkText.Bold = boolPtr(true)
 
 	// ---------------------------------------------------------------
@@ -318,7 +325,7 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	tableMargin := uint(0)
 	style.Table.Margin = &tableMargin
-	style.Table.Color = styleForegroundToAnsiPtr(theme.TextStyle())
+	style.Table.Color = bodyHex
 	style.Table.CenterSeparator = stringPtr("┼")
 	style.Table.ColumnSeparator = stringPtr("│")
 	style.Table.RowSeparator = stringPtr("─")
@@ -326,6 +333,7 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	// Task list
 	// ---------------------------------------------------------------
+	style.Task.Color = bodyHex
 	style.Task.Ticked = "[✓] "
 	style.Task.Unticked = "[ ] "
 
@@ -333,6 +341,8 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 		reasoningHex := colorToAnsiPtr(theme.ReasoningFg)
 		mutedHex := colorToAnsiPtr(theme.MutedText)
 		style.Document.Color = reasoningHex
+		style.Text.Color = reasoningHex
+		style.Paragraph.Color = reasoningHex
 		style.Heading.Color = reasoningHex
 		style.H1.Color = reasoningHex
 		style.H2.Color = reasoningHex
@@ -342,9 +352,11 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 		style.H6.Color = mutedHex
 		style.Item.Color = reasoningHex
 		style.Enumeration.Color = reasoningHex
+		style.Task.Color = reasoningHex
 		style.BlockQuote.Color = reasoningHex
 		style.Link.Color = reasoningHex
 		style.LinkText.Color = reasoningHex
+		style.Table.Color = reasoningHex
 		style.Code.Color = reasoningHex
 		style.CodeBlock.Color = reasoningHex
 		style.CodeBlock.Chroma.Text.Color = reasoningHex

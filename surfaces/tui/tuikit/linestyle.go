@@ -56,6 +56,8 @@ func DetectLineStyleWithContext(line string, prevStyle LineStyle) LineStyle {
 		return LineStyleAssistant
 	case strings.HasPrefix(trimmed, "* "):
 		return LineStyleAssistant
+	case strings.HasPrefix(trimmed, "• "):
+		return LineStyleAssistant
 	case strings.HasPrefix(trimmed, "› "):
 		return LineStyleReasoning
 	case strings.HasPrefix(trimmed, "│ ") || strings.HasPrefix(trimmed, "│"):
@@ -108,8 +110,8 @@ func DetectLineStyleWithContext(line string, prevStyle LineStyle) LineStyle {
 		}
 	}
 
-	// Section header: no indentation and no structural characters.
-	if leading == 0 && !strings.ContainsAny(trimmed, ":{}[]") {
+	// Section header: no indentation and no sentence/list structural characters.
+	if leading == 0 && !strings.ContainsAny(trimmed, ":：{}[]，。；;、") {
 		return LineStyleSection
 	}
 

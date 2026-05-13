@@ -118,6 +118,69 @@ func TestNarrativeChromaClearsDefaultErrorBackground(t *testing.T) {
 	}
 }
 
+func TestNarrativeStyleConfigPinsSemanticBodyColors(t *testing.T) {
+	dark := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
+	light := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
+	tests := []struct {
+		name  string
+		theme tuikit.Theme
+		role  tuikit.LineStyle
+		body  string
+		link  string
+	}{
+		{
+			name:  "dark assistant",
+			theme: dark,
+			role:  tuikit.LineStyleAssistant,
+			body:  ptrString(styleForegroundToAnsiPtr(dark.TextStyle())),
+			link:  ptrString(styleForegroundToAnsiPtr(dark.MarkdownLinkStyle())),
+		},
+		{
+			name:  "light assistant",
+			theme: light,
+			role:  tuikit.LineStyleAssistant,
+			body:  ptrString(styleForegroundToAnsiPtr(light.TextStyle())),
+			link:  ptrString(styleForegroundToAnsiPtr(light.MarkdownLinkStyle())),
+		},
+		{
+			name:  "dark reasoning",
+			theme: dark,
+			role:  tuikit.LineStyleReasoning,
+			body:  ptrString(colorToAnsiPtr(dark.ReasoningFg)),
+			link:  ptrString(colorToAnsiPtr(dark.ReasoningFg)),
+		},
+		{
+			name:  "light reasoning",
+			theme: light,
+			role:  tuikit.LineStyleReasoning,
+			body:  ptrString(colorToAnsiPtr(light.ReasoningFg)),
+			link:  ptrString(colorToAnsiPtr(light.ReasoningFg)),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			style := narrativeStyleConfig(tt.theme, tt.role)
+			for field, got := range map[string]string{
+				"document":    ptrString(style.Document.Color),
+				"text":        ptrString(style.Text.Color),
+				"paragraph":   ptrString(style.Paragraph.Color),
+				"item":        ptrString(style.Item.Color),
+				"enumeration": ptrString(style.Enumeration.Color),
+				"task":        ptrString(style.Task.Color),
+				"table":       ptrString(style.Table.Color),
+			} {
+				if got != tt.body {
+					t.Fatalf("%s color = %q, want body %q", field, got, tt.body)
+				}
+			}
+			if got := ptrString(style.LinkText.Color); got != tt.link {
+				t.Fatalf("link text color = %q, want %q", got, tt.link)
+			}
+		})
+	}
+}
+
 func TestStreamingNarrativeTailHidesFenceDelimiterAndAvoidsRedBackground(t *testing.T) {
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)
 	tests := []struct {
