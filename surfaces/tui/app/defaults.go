@@ -55,6 +55,7 @@ func slashCommandSpecs() []slashCommandSpec {
 		{Name: "approval", Usage: "/approval [auto-review|manual]", Description: "Inspect or change approval review mode"},
 		{Name: "sandbox", Usage: "/sandbox [auto|seatbelt|bwrap|landlock]", Description: "Inspect or change the sandbox backend"},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info"},
+		{Name: "doctor", Usage: "/doctor", Description: "Diagnose provider, model, session store, and sandbox readiness"},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
 		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id"},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},

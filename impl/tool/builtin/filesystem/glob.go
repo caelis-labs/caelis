@@ -114,6 +114,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		}
 		return tool.Result{}, err
 	}
+	maxMatches := limit + 1
 	err = walkDir(fsys, root, func(candidate string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil || d == nil {
 			return nil
@@ -130,10 +131,13 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		}
 		if pathGlobMatch(relPattern, rel) {
 			matches = append(matches, candidate)
+			if len(matches) >= maxMatches {
+				return fs.SkipAll
+			}
 		}
 		return nil
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, fs.SkipAll) {
 		return tool.Result{}, err
 	}
 	sort.Strings(matches)

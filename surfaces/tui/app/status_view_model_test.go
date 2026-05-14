@@ -16,7 +16,7 @@ func TestStatusViewModelFooterOmitsActiveJobs(t *testing.T) {
 	})
 
 	got := vm.FooterContextText("")
-	if !strings.Contains(got, "42k/128k(32%)") {
+	if !strings.Contains(got, "ctx 42k / 128k · 32%") {
 		t.Fatalf("footerContextText() = %q, want token usage", got)
 	}
 	if strings.Contains(got, "job") {

@@ -7,9 +7,52 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 var errStopSSE = errors.New("providers: stop sse")
+var errStreamInactivityTimeout = errors.New("providers: stream inactivity timeout")
+
+const defaultStreamInactivityTimeout = 90 * time.Second
+
+func readSSEWithInactivity(reader io.Reader, timeout time.Duration, onData func([]byte) error) error {
+	if timeout <= 0 {
+		return readSSE(reader, onData)
+	}
+	errCh := make(chan error, 1)
+	activityCh := make(chan struct{}, 1)
+	go func() {
+		errCh <- readSSE(reader, func(data []byte) error {
+			select {
+			case activityCh <- struct{}{}:
+			default:
+			}
+			return onData(data)
+		})
+	}()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case <-activityCh:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(timeout)
+		case <-timer.C:
+			if closer, ok := reader.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
+			return errStreamInactivityTimeout
+		}
+	}
+}
 
 func readSSE(reader io.Reader, onData func([]byte) error) error {
 	scanner := bufio.NewScanner(reader)

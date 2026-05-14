@@ -40,6 +40,7 @@ const inlinePanelCollapseDuration = 180 * time.Millisecond
 const scrollbarVisibleDuration = 900 * time.Millisecond
 const offscreenViewportSyncIntervalFloor = 80 * time.Millisecond
 const offscreenViewportSyncIntervalMax = 160 * time.Millisecond
+const completionRefreshDebounce = 100 * time.Millisecond
 
 type hintEntry struct {
 	id             uint64
@@ -401,10 +402,11 @@ type Model struct {
 	hintEntries        []hintEntry
 	nextHintID         uint64
 
-	pendingInputAt     time.Time
-	inputLatencyWindow []time.Duration
-	inputLatencyCount  uint64
-	diag               Diagnostics
+	pendingInputAt            time.Time
+	inputLatencyWindow        []time.Duration
+	inputLatencyCount         uint64
+	diag                      Diagnostics
+	lastDiagnosticsDebugWrite time.Time
 
 	ctrlCArmed  bool
 	lastCtrlCAt time.Time

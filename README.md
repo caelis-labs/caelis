@@ -161,6 +161,7 @@ Current built-in slash commands:
 - `/approval [auto-review|manual]`
 - `/sandbox [auto|seatbelt|bwrap|landlock]`
 - `/status`
+- `/doctor`
 - `/new`
 - `/resume [session-id]`
 - `/compact`

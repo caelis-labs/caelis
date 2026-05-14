@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,12 +67,349 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadFile() error = %v", err)
 	}
-	text := string(data)
-	if !strings.Contains(text, "\"hello\"") {
-		t.Fatal("persisted file must contain canonical event text")
+	var persisted map[string]any
+	if err := json.Unmarshal(data, &persisted); err != nil {
+		t.Fatalf("Unmarshal(document) error = %v", err)
 	}
-	if strings.Contains(text, "retrying") {
-		t.Fatal("persisted file must not contain transient notice text")
+	if events, ok := persisted["events"].([]any); ok && len(events) > 0 {
+		t.Fatalf("session document must not store canonical events: %#v", events)
+	}
+	logData, err := os.ReadFile(rolloutEventLogPath(root, "ws-1", at, "sess-1"))
+	if err != nil {
+		t.Fatalf("ReadFile(event log) error = %v", err)
+	}
+	logText := string(logData)
+	if !strings.Contains(logText, "\"hello\"") {
+		t.Fatal("event log must contain canonical event text")
+	}
+	if strings.Contains(logText, "retrying") {
+		t.Fatal("event log must not contain transient notice text")
+	}
+}
+
+func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		Clock:              func() time.Time { return at },
+	})
+	ctx := context.Background()
+
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+		Title: "indexed session",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	docPath := rolloutDocumentPath(root, "ws-1", at, createdSession.SessionID)
+	if err := os.WriteFile(docPath, []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("WriteFile(corrupt doc) error = %v", err)
+	}
+
+	list, err := store.List(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+		Limit:        10,
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := len(list.Sessions), 1; got != want {
+		t.Fatalf("len(List().Sessions) = %d, want %d", got, want)
+	}
+	if got := list.Sessions[0].Title; got != "indexed session" {
+		t.Fatalf("List title = %q, want indexed session", got)
+	}
+}
+
+func TestStoreListRebuildsFromDocumentsWhenSessionIndexIsCorrupt(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		Clock:              func() time.Time { return at },
+	})
+	ctx := context.Background()
+
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+		Title: "valid document",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	if createdSession.SessionID != "sess-1" {
+		t.Fatalf("SessionID = %q, want sess-1", createdSession.SessionID)
+	}
+	if err := os.WriteFile(filepath.Join(root, indexFilename), []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("WriteFile(index) error = %v", err)
+	}
+
+	list, err := store.List(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := len(list.Sessions), 1; got != want {
+		t.Fatalf("len(List().Sessions) = %d, want %d", got, want)
+	}
+	if got := list.Sessions[0].Title; got != "valid document" {
+		t.Fatalf("List title = %q, want valid document", got)
+	}
+}
+
+func TestStoreWriteRebuildsCorruptSessionIndexBeforeUpsert(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	store := NewStore(Config{
+		RootDir: root,
+		Clock: func() time.Time {
+			return at
+		},
+	})
+	ctx := context.Background()
+	for _, id := range []string{"sess-1", "sess-2"} {
+		if _, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+			AppName:            "caelis",
+			UserID:             "user-1",
+			PreferredSessionID: id,
+			Workspace: session.WorkspaceRef{
+				Key: "ws-1",
+				CWD: "/tmp/ws",
+			},
+			Title: id,
+		}); err != nil {
+			t.Fatalf("GetOrCreate(%q) error = %v", id, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, indexFilename), []byte("{not-json"), 0o600); err != nil {
+		t.Fatalf("WriteFile(index) error = %v", err)
+	}
+
+	if _, err := store.BindController(ctx, session.SessionRef{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		SessionID:    "sess-2",
+		WorkspaceKey: "ws-1",
+	}, session.ControllerBinding{ControllerID: "controller-1"}); err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+	list, err := store.List(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got, want := len(list.Sessions), 2; got != want {
+		t.Fatalf("len(List().Sessions) = %d, want %d", got, want)
+	}
+}
+
+func TestStoreEventsIgnoresPartialFinalEventLogRecord(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	nextEventID := 0
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		EventIDGenerator: func() string {
+			nextEventID++
+			return "evt-" + strconv.Itoa(nextEventID)
+		},
+		Clock: func() time.Time { return at },
+	})
+	ctx := context.Background()
+
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	for _, text := range []string{"first", "second"} {
+		if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+			Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, text)),
+			Text:    text,
+		}); err != nil {
+			t.Fatalf("AppendEvent(%q) error = %v", text, err)
+		}
+	}
+	logPath := rolloutEventLogPath(root, "ws-1", at, "sess-1")
+	file, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile(event log) error = %v", err)
+	}
+	if _, err := file.WriteString("{\"id\":\"evt-partial\""); err != nil {
+		file.Close()
+		t.Fatalf("WriteString(partial) error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(event log) error = %v", err)
+	}
+
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if got, want := len(events), 2; got != want {
+		t.Fatalf("len(Events()) = %d, want %d", got, want)
+	}
+}
+
+func TestStoreAppendTruncatesPartialFinalEventLogRecordBeforeWriting(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	nextEventID := 0
+	store := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		EventIDGenerator: func() string {
+			nextEventID++
+			return "evt-" + strconv.Itoa(nextEventID)
+		},
+		Clock: func() time.Time { return at },
+	})
+	ctx := context.Background()
+
+	createdSession, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "first")),
+		Text:    "first",
+	}); err != nil {
+		t.Fatalf("AppendEvent(first) error = %v", err)
+	}
+	logPath := rolloutEventLogPath(root, "ws-1", at, "sess-1")
+	file, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		t.Fatalf("OpenFile(event log) error = %v", err)
+	}
+	if _, err := file.WriteString("{\"id\":\"evt-partial\""); err != nil {
+		file.Close()
+		t.Fatalf("WriteString(partial) error = %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("Close(event log) error = %v", err)
+	}
+
+	if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "second")),
+		Text:    "second",
+	}); err != nil {
+		t.Fatalf("AppendEvent(second) error = %v", err)
+	}
+	events, err := store.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	if got, want := len(events), 2; got != want {
+		t.Fatalf("len(Events()) = %d, want %d", got, want)
+	}
+	if logData, err := os.ReadFile(logPath); err != nil {
+		t.Fatalf("ReadFile(event log) error = %v", err)
+	} else if strings.Contains(string(logData), "evt-partial") {
+		t.Fatalf("event log retained partial record: %q", string(logData))
+	}
+}
+
+func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	const writers = 32
+	baseTime := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	start := make(chan struct{})
+	errs := make(chan error, writers)
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			store := NewStore(Config{
+				RootDir: root,
+				Clock: func() time.Time {
+					return baseTime.Add(time.Duration(i) * time.Second)
+				},
+			})
+			_, err := store.GetOrCreate(ctx, session.StartSessionRequest{
+				AppName:            "caelis",
+				UserID:             "user-1",
+				PreferredSessionID: fmt.Sprintf("sess-%02d", i),
+				Workspace: session.WorkspaceRef{
+					Key: "ws-1",
+					CWD: "/tmp/ws",
+				},
+				Title: fmt.Sprintf("session %02d", i),
+			})
+			if err != nil {
+				errs <- err
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent GetOrCreate() error = %v", err)
+		}
+	}
+
+	list, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+	})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if got := len(list.Sessions); got != writers {
+		t.Fatalf("len(List().Sessions) = %d, want %d", got, writers)
 	}
 }
 
@@ -596,6 +936,10 @@ func rolloutDocumentPath(root, workspaceKey string, at time.Time, sessionID stri
 		at.UTC().Format("02"),
 		"rollout-"+at.UTC().Format("2006-01-02T15-04-05")+"-"+sessionID+".json",
 	)
+}
+
+func rolloutEventLogPath(root, workspaceKey string, at time.Time, sessionID string) string {
+	return strings.TrimSuffix(rolloutDocumentPath(root, workspaceKey, at, sessionID), ".json") + ".events.jsonl"
 }
 
 func writePersistedDocument(t *testing.T, path string, doc persistedDocument) {

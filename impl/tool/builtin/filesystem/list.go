@@ -40,6 +40,10 @@ func (t *ListTool) Definition() tool.Definition {
 			"properties": map[string]any{
 				"path":  map[string]any{"type": "string", "description": "directory path"},
 				"limit": map[string]any{"type": "integer", "description": "Optional max entries to return."},
+				"metadata": map[string]any{
+					"type":        "boolean",
+					"description": "Include size, mode, and modification time metadata.",
+				},
 			},
 		},
 	}
@@ -70,6 +74,10 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if limit > maxListLimit {
 		limit = maxListLimit
 	}
+	includeMetadata, err := argparse.Bool(args, "metadata", false)
+	if err != nil {
+		return tool.Result{}, err
+	}
 	fsys := fileSystemFromRuntime(t.runtime, call.Metadata)
 	target, err := normalizePathWithFS(fsys, pathArg)
 	if err != nil {
@@ -87,27 +95,34 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		if shouldExcludePath(target, itemPath, item.IsDir(), excludeRules) {
 			continue
 		}
-		info, infoErr := item.Info()
-		if infoErr != nil {
-			continue
-		}
 		entryType := "file"
 		if item.IsDir() {
 			entryType = "dir"
 		}
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"name": item.Name(),
 			"path": itemPath,
 			"type": entryType,
-		})
-		full = append(full, map[string]any{
-			"name":     item.Name(),
-			"path":     itemPath,
-			"type":     entryType,
-			"size":     info.Size(),
-			"mode":     info.Mode().String(),
-			"mod_time": info.ModTime().UTC().Format("2006-01-02T15:04:05Z"),
-		})
+		}
+		fullEntry := map[string]any{
+			"name": item.Name(),
+			"path": itemPath,
+			"type": entryType,
+		}
+		if includeMetadata {
+			info, infoErr := item.Info()
+			if infoErr != nil {
+				continue
+			}
+			entry["size"] = info.Size()
+			entry["mode"] = info.Mode().String()
+			entry["mod_time"] = info.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+			fullEntry["size"] = info.Size()
+			fullEntry["mode"] = info.Mode().String()
+			fullEntry["mod_time"] = info.ModTime().UTC().Format("2006-01-02T15:04:05Z")
+		}
+		out = append(out, entry)
+		full = append(full, fullEntry)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return fmt.Sprint(out[i]["name"]) < fmt.Sprint(out[j]["name"])

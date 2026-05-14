@@ -3,7 +3,6 @@ package tuiapp
 import (
 	"fmt"
 	"math"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -17,8 +16,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
-
-var statusContextCompactPattern = regexp.MustCompile(`(\d+)\.(\d+)([km])`)
 
 // ---------------------------------------------------------------------------
 // View sub-components
@@ -1169,21 +1166,7 @@ func formatFooterBindingKeys(bindings []key.Binding) string {
 }
 
 func formatStatusContextDisplay(text string) string {
-	if text == "" {
-		return ""
-	}
-	return statusContextCompactPattern.ReplaceAllStringFunc(text, func(match string) string {
-		parts := statusContextCompactPattern.FindStringSubmatch(match)
-		if len(parts) != 4 {
-			return match
-		}
-		value, err := strconv.ParseFloat(parts[1]+"."+parts[2], 64)
-		if err != nil {
-			return match
-		}
-		suffix := parts[3]
-		return fmt.Sprintf("%d%s", int(math.Round(value)), suffix)
-	})
+	return strings.TrimSpace(text)
 }
 
 func (m *Model) renderPromptModal() string {

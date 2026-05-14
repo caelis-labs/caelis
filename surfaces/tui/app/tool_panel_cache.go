@@ -4,7 +4,10 @@ import (
 	"hash/fnv"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
+
+const maxGenericToolPanelCacheBytes = 64 * 1024
 
 type toolOutputRenderCache struct {
 	key            string
@@ -65,10 +68,51 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 func toolPanelCacheText(toolName string, text string, width int) string {
 	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
 	if !isTerminalPanelTool(toolName) {
-		return text
+		return boundedGenericToolPanelText(text)
 	}
 	segments := tailWrappedTerminalSegmentsFromEnd(text, maxInt(1, width), acpTerminalPanelMaxLines)
 	return strings.Join(segments, "\n")
+}
+
+func boundedGenericToolPanelText(text string) string {
+	if len(text) <= maxGenericToolPanelCacheBytes {
+		return text
+	}
+	const marker = "\n... output truncated for panel rendering ...\n"
+	budget := maxGenericToolPanelCacheBytes - len(marker)
+	if budget <= 0 {
+		return prefixByBytes(text, maxGenericToolPanelCacheBytes)
+	}
+	head := budget / 2
+	tail := budget - head
+	return prefixByBytes(text, head) + marker + suffixByBytes(text, tail)
+}
+
+func prefixByBytes(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(text) <= limit {
+		return text
+	}
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit]
+}
+
+func suffixByBytes(text string, limit int) string {
+	if limit <= 0 {
+		return ""
+	}
+	if len(text) <= limit {
+		return text
+	}
+	start := len(text) - limit
+	for start < len(text) && !utf8.RuneStart(text[start]) {
+		start++
+	}
+	return text[start:]
 }
 
 func toolOutputRenderKey(toolName string, output string, width int) string {

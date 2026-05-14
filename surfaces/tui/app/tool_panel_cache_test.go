@@ -42,6 +42,29 @@ func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
 	}
 }
 
+func TestGenericToolPanelCacheKeyUsesBoundedText(t *testing.T) {
+	m := newPerfTestModel()
+	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
+	cacheByCall := map[string]toolOutputRenderCache{}
+
+	longOutput := strings.Repeat("x", maxGenericToolPanelCacheBytes*2)
+	_ = renderCachedToolPanelRows(&cacheByCall, toolPanelRenderRequest{
+		BlockID:  "block-1",
+		CallID:   "call-1",
+		ToolName: "READ",
+		Text:     longOutput,
+		Width:    ctx.Width,
+		Ctx:      ctx,
+	}, defaultToolPanelScrollState())
+	cache := cacheByCall["call-1"]
+	if cache.lastInputBytes >= len(longOutput) {
+		t.Fatalf("generic panel cache consumed %d bytes, want bounded input below full %d", cache.lastInputBytes, len(longOutput))
+	}
+	if cache.lastInputBytes == 0 {
+		t.Fatal("generic panel cache did not record bounded input bytes")
+	}
+}
+
 func TestParticipantToolPanelRenderCachePreservesHeaderToken(t *testing.T) {
 	m := newPerfTestModel()
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}

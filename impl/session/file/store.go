@@ -1,12 +1,15 @@
 package file
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -22,7 +25,17 @@ import (
 const (
 	documentKind    = "caelis.sdk.session"
 	documentVersion = 1
+	indexKind       = "caelis.sdk.session_index"
+	indexVersion    = 1
+	indexFilename   = ".sessions.index.json"
+	lockFilename    = ".sessions.lock"
 )
+
+var storeRootLocks sync.Map
+
+type storeRootLock struct {
+	mu sync.Mutex
+}
 
 // Config defines one single-file durable session store instance.
 type Config struct {
@@ -56,6 +69,17 @@ type persistedDocument struct {
 	State   map[string]any   `json:"state"`
 }
 
+type persistedSessionIndex struct {
+	Kind     string                       `json:"kind"`
+	Version  int                          `json:"version"`
+	Sessions []persistedSessionIndexEntry `json:"sessions,omitempty"`
+}
+
+type persistedSessionIndexEntry struct {
+	Session session.SessionSummary `json:"session"`
+	Path    string                 `json:"path"`
+}
+
 // NewStore constructs one new file-backed session store.
 func NewStore(cfg Config) *Store {
 	store := &Store{
@@ -82,6 +106,43 @@ func NewService(store *Store) *Service {
 	return &Service{store: store}
 }
 
+func (s *Store) withRootWriteLock(fn func() error) error {
+	if s == nil || fn == nil {
+		return nil
+	}
+	root := s.normalizedRootDir()
+	lockValue, _ := storeRootLocks.LoadOrStore(root, &storeRootLock{})
+	rootLock := lockValue.(*storeRootLock)
+	rootLock.mu.Lock()
+	defer rootLock.mu.Unlock()
+
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		return err
+	}
+	file, err := lockSessionStoreRoot(root)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = unlockSessionStoreRoot(file)
+	}()
+	return fn()
+}
+
+func (s *Store) normalizedRootDir() string {
+	root := strings.TrimSpace(s.rootDir)
+	if root == "" {
+		root = filepath.Join(os.TempDir(), "caelis-sdk-sessions")
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	return filepath.Clean(root)
+}
+
 func (s *Store) GetOrCreate(
 	_ context.Context,
 	req session.StartSessionRequest,
@@ -102,37 +163,45 @@ func (s *Store) GetOrCreate(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocument(ref.SessionID, ref.WorkspaceKey)
-	switch {
-	case err == nil:
-		if !matchesRef(doc.Session, ref) {
-			return session.Session{}, session.ErrSessionNotFound
+	var out session.Session
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocument(ref.SessionID, ref.WorkspaceKey)
+		switch {
+		case err == nil:
+			if !matchesRef(doc.Session, ref) {
+				return session.ErrSessionNotFound
+			}
+			out = session.CloneSession(doc.Session)
+			return nil
+		case !errors.Is(err, session.ErrSessionNotFound):
+			return err
 		}
-		return session.CloneSession(doc.Session), nil
-	case !errors.Is(err, session.ErrSessionNotFound):
-		return session.Session{}, err
-	}
 
-	now := s.now()
-	createdSession := session.Session{
-		SessionRef:   ref,
-		CWD:          strings.TrimSpace(req.Workspace.CWD),
-		Title:        strings.TrimSpace(req.Title),
-		Metadata:     cloneMap(req.Metadata),
-		CreatedAt:    now,
-		UpdatedAt:    now,
-		Participants: nil,
-	}
-	doc = persistedDocument{
-		Kind:    documentKind,
-		Version: documentVersion,
-		Session: createdSession,
-		State:   map[string]any{},
-	}
-	if err := s.writeDocument(doc); err != nil {
+		now := s.now()
+		createdSession := session.Session{
+			SessionRef:   ref,
+			CWD:          strings.TrimSpace(req.Workspace.CWD),
+			Title:        strings.TrimSpace(req.Title),
+			Metadata:     cloneMap(req.Metadata),
+			CreatedAt:    now,
+			UpdatedAt:    now,
+			Participants: nil,
+		}
+		doc = persistedDocument{
+			Kind:    documentKind,
+			Version: documentVersion,
+			Session: createdSession,
+			State:   map[string]any{},
+		}
+		if err := s.writeDocument(doc); err != nil {
+			return err
+		}
+		out = session.CloneSession(createdSession)
+		return nil
+	}); err != nil {
 		return session.Session{}, err
 	}
-	return session.CloneSession(createdSession), nil
+	return out, nil
 }
 
 func (s *Store) Get(
@@ -156,34 +225,83 @@ func (s *Store) List(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	paths, err := s.listDocumentPaths()
+	index, err := s.readSessionIndex()
+	if err == nil {
+		return s.listFromSessionIndex(index, req), nil
+	}
+
+	var out session.SessionList
+	if err := s.withRootWriteLock(func() error {
+		index, err := s.readSessionIndex()
+		if err == nil {
+			out = s.listFromSessionIndex(index, req)
+			return nil
+		}
+		list, err := s.listFromDocuments(req)
+		if err != nil {
+			return err
+		}
+		out = list
+		return nil
+	}); err != nil {
+		return session.SessionList{}, err
+	}
+	return out, nil
+}
+
+func (s *Store) listFromDocuments(req session.ListSessionsRequest) (session.SessionList, error) {
+	index, err := s.rebuildSessionIndexFromDocuments()
 	if err != nil {
 		return session.SessionList{}, err
 	}
+	return s.listFromSessionIndex(index, req), nil
+}
 
-	summaries := make([]session.SessionSummary, 0, len(paths))
+func (s *Store) rebuildSessionIndexFromDocuments() (persistedSessionIndex, error) {
+	paths, err := s.listDocumentPaths()
+	if err != nil {
+		return persistedSessionIndex{}, err
+	}
+
+	entries := make([]persistedSessionIndexEntry, 0, len(paths))
 	for _, path := range paths {
 		doc, err := s.readDocumentAt(path)
 		if err != nil {
-			return session.SessionList{}, err
+			return persistedSessionIndex{}, err
 		}
 		s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
-		storedSession := doc.Session
-		if req.AppName != "" && storedSession.AppName != strings.TrimSpace(req.AppName) {
+		entries = append(entries, s.sessionIndexEntry(doc.Session, path))
+	}
+	index := persistedSessionIndex{Sessions: entries}
+	if err := s.writeSessionIndex(index); err != nil {
+		return persistedSessionIndex{}, err
+	}
+	index.Kind = indexKind
+	index.Version = indexVersion
+	index.Sessions = cloneSessionIndexEntries(entries)
+	return index, nil
+}
+
+func (s *Store) listFromSessionIndex(index persistedSessionIndex, req session.ListSessionsRequest) session.SessionList {
+	summaries := make([]session.SessionSummary, 0, len(index.Sessions))
+	appName := strings.TrimSpace(req.AppName)
+	userID := strings.TrimSpace(req.UserID)
+	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
+	for _, entry := range index.Sessions {
+		summary := session.CloneSessionSummaries([]session.SessionSummary{entry.Session})[0]
+		if appName != "" && summary.AppName != appName {
 			continue
 		}
-		if req.UserID != "" && storedSession.UserID != strings.TrimSpace(req.UserID) {
+		if userID != "" && summary.UserID != userID {
 			continue
 		}
-		if req.WorkspaceKey != "" && storedSession.WorkspaceKey != strings.TrimSpace(req.WorkspaceKey) {
+		if workspaceKey != "" && summary.WorkspaceKey != workspaceKey {
 			continue
 		}
-		summaries = append(summaries, session.SessionSummary{
-			SessionRef: storedSession.SessionRef,
-			CWD:        storedSession.CWD,
-			Title:      storedSession.Title,
-			UpdatedAt:  storedSession.UpdatedAt,
-		})
+		if path := s.indexEntryPath(entry); path != "" {
+			s.pathCache[pathCacheKey(summary.SessionID, summary.WorkspaceKey)] = path
+		}
+		summaries = append(summaries, summary)
 	}
 	sort.Slice(summaries, func(i, j int) bool {
 		return summaries[i].UpdatedAt.After(summaries[j].UpdatedAt)
@@ -191,7 +309,7 @@ func (s *Store) List(
 	if req.Limit > 0 && len(summaries) > req.Limit {
 		summaries = summaries[:req.Limit]
 	}
-	return session.SessionList{Sessions: session.CloneSessionSummaries(summaries)}, nil
+	return session.SessionList{Sessions: session.CloneSessionSummaries(summaries)}
 }
 
 func (s *Store) AppendEvent(
@@ -206,40 +324,57 @@ func (s *Store) AppendEvent(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
-		return nil, err
-	}
-
-	normalized := session.CanonicalizeEvent(event)
-	if normalized.ID == "" {
-		normalized.ID = s.nextID("event", s.eventIDGenerator)
-	}
-	normalized.SessionID = doc.Session.SessionID
-	if normalized.Time.IsZero() {
-		normalized.Time = s.now()
-	}
-	if normalized.Type == "" {
-		normalized.Type = session.EventTypeOf(normalized)
-	}
-	if normalized.Visibility == "" {
-		normalized.Visibility = session.VisibilityCanonical
-	}
-	if !shouldPersistEvent(normalized) {
-		return session.CloneEvent(normalized), nil
-	}
-
-	doc.Events = append(doc.Events, normalized)
-	doc.Session.UpdatedAt = normalized.Time
-	if doc.Session.Title == "" {
-		if text := session.EventText(normalized); text != "" {
-			doc.Session.Title = truncateTitle(text)
+	var out *session.Event
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
 		}
-	}
-	if err := s.writeDocument(doc); err != nil {
+
+		normalized := session.CanonicalizeEvent(event)
+		if normalized.ID == "" {
+			normalized.ID = s.nextID("event", s.eventIDGenerator)
+		}
+		normalized.SessionID = doc.Session.SessionID
+		if normalized.Time.IsZero() {
+			normalized.Time = s.now()
+		}
+		if normalized.Type == "" {
+			normalized.Type = session.EventTypeOf(normalized)
+		}
+		if normalized.Visibility == "" {
+			normalized.Visibility = session.VisibilityCanonical
+		}
+		if !shouldPersistEvent(normalized) {
+			out = session.CloneEvent(normalized)
+			return nil
+		}
+
+		if err := s.migrateDocumentEventsToLog(&doc); err != nil {
+			return err
+		}
+		path, err := s.resolveWritePath(doc.Session)
+		if err != nil {
+			return err
+		}
+		if err := s.appendEventLog(path, []*session.Event{normalized}); err != nil {
+			return err
+		}
+		doc.Session.UpdatedAt = normalized.Time
+		if doc.Session.Title == "" {
+			if text := session.EventText(normalized); text != "" {
+				doc.Session.Title = truncateTitle(text)
+			}
+		}
+		if err := s.writeDocument(doc); err != nil {
+			return err
+		}
+		out = session.CloneEvent(normalized)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	return session.CloneEvent(normalized), nil
+	return out, nil
 }
 
 func (s *Store) Events(
@@ -253,7 +388,11 @@ func (s *Store) Events(
 	if err != nil {
 		return nil, err
 	}
-	return session.FilterEvents(doc.Events, req.Limit, req.IncludeTransient), nil
+	events, err := s.eventsForDocument(doc)
+	if err != nil {
+		return nil, err
+	}
+	return session.FilterEvents(events, req.Limit, req.IncludeTransient), nil
 }
 
 func (s *Store) BindController(
@@ -264,16 +403,23 @@ func (s *Store) BindController(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
+	var out session.Session
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		doc.Session.Controller = session.CloneControllerBinding(binding)
+		doc.Session.UpdatedAt = s.now()
+		if err := s.writeDocument(doc); err != nil {
+			return err
+		}
+		out = session.CloneSession(doc.Session)
+		return nil
+	}); err != nil {
 		return session.Session{}, err
 	}
-	doc.Session.Controller = session.CloneControllerBinding(binding)
-	doc.Session.UpdatedAt = s.now()
-	if err := s.writeDocument(doc); err != nil {
-		return session.Session{}, err
-	}
-	return session.CloneSession(doc.Session), nil
+	return out, nil
 }
 
 func (s *Store) PutParticipant(
@@ -284,27 +430,35 @@ func (s *Store) PutParticipant(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
-		return session.Session{}, err
-	}
-	normalized := session.CloneParticipantBinding(binding)
-	for i := range doc.Session.Participants {
-		if doc.Session.Participants[i].ID == normalized.ID && normalized.ID != "" {
-			doc.Session.Participants[i] = normalized
-			doc.Session.UpdatedAt = s.now()
-			if err := s.writeDocument(doc); err != nil {
-				return session.Session{}, err
-			}
-			return session.CloneSession(doc.Session), nil
+	var out session.Session
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
 		}
-	}
-	doc.Session.Participants = append(doc.Session.Participants, normalized)
-	doc.Session.UpdatedAt = s.now()
-	if err := s.writeDocument(doc); err != nil {
+		normalized := session.CloneParticipantBinding(binding)
+		for i := range doc.Session.Participants {
+			if doc.Session.Participants[i].ID == normalized.ID && normalized.ID != "" {
+				doc.Session.Participants[i] = normalized
+				doc.Session.UpdatedAt = s.now()
+				if err := s.writeDocument(doc); err != nil {
+					return err
+				}
+				out = session.CloneSession(doc.Session)
+				return nil
+			}
+		}
+		doc.Session.Participants = append(doc.Session.Participants, normalized)
+		doc.Session.UpdatedAt = s.now()
+		if err := s.writeDocument(doc); err != nil {
+			return err
+		}
+		out = session.CloneSession(doc.Session)
+		return nil
+	}); err != nil {
 		return session.Session{}, err
 	}
-	return session.CloneSession(doc.Session), nil
+	return out, nil
 }
 
 func (s *Store) RemoveParticipant(
@@ -315,27 +469,35 @@ func (s *Store) RemoveParticipant(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
-		return session.Session{}, err
-	}
-	participantID = strings.TrimSpace(participantID)
-	if participantID == "" {
-		return session.CloneSession(doc.Session), nil
-	}
-	filtered := doc.Session.Participants[:0]
-	for _, item := range doc.Session.Participants {
-		if strings.TrimSpace(item.ID) == participantID {
-			continue
+	var out session.Session
+	if err := s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
 		}
-		filtered = append(filtered, item)
-	}
-	doc.Session.Participants = append([]session.ParticipantBinding(nil), filtered...)
-	doc.Session.UpdatedAt = s.now()
-	if err := s.writeDocument(doc); err != nil {
+		participantID = strings.TrimSpace(participantID)
+		if participantID == "" {
+			out = session.CloneSession(doc.Session)
+			return nil
+		}
+		filtered := doc.Session.Participants[:0]
+		for _, item := range doc.Session.Participants {
+			if strings.TrimSpace(item.ID) == participantID {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		doc.Session.Participants = append([]session.ParticipantBinding(nil), filtered...)
+		doc.Session.UpdatedAt = s.now()
+		if err := s.writeDocument(doc); err != nil {
+			return err
+		}
+		out = session.CloneSession(doc.Session)
+		return nil
+	}); err != nil {
 		return session.Session{}, err
 	}
-	return session.CloneSession(doc.Session), nil
+	return out, nil
 }
 
 func (s *Store) SnapshotState(
@@ -360,13 +522,15 @@ func (s *Store) ReplaceState(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
-		return err
-	}
-	doc.State = cloneState(state)
-	doc.Session.UpdatedAt = s.now()
-	return s.writeDocument(doc)
+	return s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		doc.State = cloneState(state)
+		doc.Session.UpdatedAt = s.now()
+		return s.writeDocument(doc)
+	})
 }
 
 func (s *Store) UpdateState(
@@ -381,17 +545,19 @@ func (s *Store) UpdateState(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
-		return err
-	}
-	next, err := update(cloneState(doc.State))
-	if err != nil {
-		return err
-	}
-	doc.State = cloneState(next)
-	doc.Session.UpdatedAt = s.now()
-	return s.writeDocument(doc)
+	return s.withRootWriteLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		next, err := update(cloneState(doc.State))
+		if err != nil {
+			return err
+		}
+		doc.State = cloneState(next)
+		doc.Session.UpdatedAt = s.now()
+		return s.writeDocument(doc)
+	})
 }
 
 func (s *Store) LoadDocument(
@@ -405,9 +571,13 @@ func (s *Store) LoadDocument(
 	if err != nil {
 		return session.LoadedSession{}, err
 	}
+	events, err := s.eventsForDocument(doc)
+	if err != nil {
+		return session.LoadedSession{}, err
+	}
 	return session.LoadedSession{
 		Session: session.CloneSession(doc.Session),
-		Events:  session.FilterEvents(doc.Events, req.Limit, req.IncludeTransient),
+		Events:  session.FilterEvents(events, req.Limit, req.IncludeTransient),
 		State:   cloneState(doc.State),
 	}, nil
 }
@@ -550,7 +720,10 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 	doc.Kind = documentKind
 	doc.Version = documentVersion
 	doc.Session = session.CloneSession(doc.Session)
-	doc.Events = persistedEvents(doc.Events)
+	if err := s.migrateDocumentEventsToLog(&doc); err != nil {
+		return err
+	}
+	doc.Events = nil
 	doc.State = cloneState(doc.State)
 
 	data, err := json.MarshalIndent(doc, "", "  ")
@@ -597,7 +770,357 @@ func (s *Store) writeDocument(doc persistedDocument) error {
 		return err
 	}
 	s.pathCache[pathCacheKey(doc.Session.SessionID, doc.Session.WorkspaceKey)] = path
+	if err := s.upsertSessionIndex(doc.Session, path); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (s *Store) sessionIndexPath() string {
+	return filepath.Join(s.rootDir, indexFilename)
+}
+
+func (s *Store) readSessionIndex() (persistedSessionIndex, error) {
+	data, err := os.ReadFile(s.sessionIndexPath())
+	if err != nil {
+		return persistedSessionIndex{}, err
+	}
+	var index persistedSessionIndex
+	if err := json.Unmarshal(data, &index); err != nil {
+		return persistedSessionIndex{}, fmt.Errorf("impl/session/file: decode session index: %w", err)
+	}
+	if index.Kind != indexKind || index.Version != indexVersion {
+		return persistedSessionIndex{}, fmt.Errorf(
+			"impl/session/file: unsupported session index %q version %d",
+			index.Kind,
+			index.Version,
+		)
+	}
+	index.Sessions = cloneSessionIndexEntries(index.Sessions)
+	return index, nil
+}
+
+func (s *Store) writeSessionIndex(index persistedSessionIndex) error {
+	index.Kind = indexKind
+	index.Version = indexVersion
+	index.Sessions = cloneSessionIndexEntries(index.Sessions)
+	sort.Slice(index.Sessions, func(i, j int) bool {
+		return index.Sessions[i].Session.UpdatedAt.After(index.Sessions[j].Session.UpdatedAt)
+	})
+	data, err := json.Marshal(index)
+	if err != nil {
+		return fmt.Errorf("impl/session/file: encode session index: %w", err)
+	}
+	data = append(data, '\n')
+	path := s.sessionIndexPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	return syncDir(filepath.Dir(path))
+}
+
+func (s *Store) upsertSessionIndex(sess session.Session, documentPath string) error {
+	index, err := s.readSessionIndex()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			index = persistedSessionIndex{}
+		} else {
+			index, err = s.rebuildSessionIndexFromDocuments()
+			if err != nil {
+				return err
+			}
+		}
+	}
+	entry := s.sessionIndexEntry(sess, documentPath)
+	key := pathCacheKey(sess.SessionID, sess.WorkspaceKey)
+	replaced := false
+	for i := range index.Sessions {
+		if pathCacheKey(index.Sessions[i].Session.SessionID, index.Sessions[i].Session.WorkspaceKey) == key {
+			index.Sessions[i] = entry
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		index.Sessions = append(index.Sessions, entry)
+	}
+	return s.writeSessionIndex(index)
+}
+
+func (s *Store) sessionIndexEntry(sess session.Session, documentPath string) persistedSessionIndexEntry {
+	relPath := documentPath
+	if rel, err := filepath.Rel(s.rootDir, documentPath); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+		relPath = rel
+	}
+	return persistedSessionIndexEntry{
+		Session: session.SessionSummary{
+			SessionRef: sess.SessionRef,
+			CWD:        sess.CWD,
+			Title:      sess.Title,
+			UpdatedAt:  sess.UpdatedAt,
+		},
+		Path: relPath,
+	}
+}
+
+func (s *Store) indexEntryPath(entry persistedSessionIndexEntry) string {
+	path := strings.TrimSpace(entry.Path)
+	if path == "" {
+		return ""
+	}
+	if filepath.IsAbs(path) {
+		return path
+	}
+	return filepath.Join(s.rootDir, path)
+}
+
+func cloneSessionIndexEntries(entries []persistedSessionIndexEntry) []persistedSessionIndexEntry {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]persistedSessionIndexEntry, len(entries))
+	for i, entry := range entries {
+		out[i] = persistedSessionIndexEntry{
+			Session: session.CloneSessionSummaries([]session.SessionSummary{entry.Session})[0],
+			Path:    strings.TrimSpace(entry.Path),
+		}
+	}
+	return out
+}
+
+func (s *Store) eventsForDocument(doc persistedDocument) ([]*session.Event, error) {
+	path, err := s.resolveWritePath(doc.Session)
+	if err != nil {
+		return nil, err
+	}
+	events := persistedEvents(doc.Events)
+	logEvents, err := s.readEventLog(path)
+	if err != nil {
+		return nil, err
+	}
+	events = append(events, logEvents...)
+	return session.CloneEvents(events), nil
+}
+
+func (s *Store) migrateDocumentEventsToLog(doc *persistedDocument) error {
+	if doc == nil || len(doc.Events) == 0 {
+		return nil
+	}
+	events := persistedEvents(doc.Events)
+	doc.Events = nil
+	if len(events) == 0 {
+		return nil
+	}
+	path, err := s.resolveWritePath(doc.Session)
+	if err != nil {
+		return err
+	}
+	existing, err := s.readEventLogIDs(path)
+	if err != nil {
+		return err
+	}
+	missing := make([]*session.Event, 0, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		id := strings.TrimSpace(event.ID)
+		if id != "" && existing[id] {
+			continue
+		}
+		missing = append(missing, event)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return s.appendEventLog(path, missing)
+}
+
+func (s *Store) appendEventLog(documentPath string, events []*session.Event) error {
+	events = persistedEvents(events)
+	if len(events) == 0 {
+		return nil
+	}
+	path := eventLogPath(documentPath)
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return err
+	}
+	if err := truncatePartialEventLogTail(path); err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	encoder := json.NewEncoder(&buf)
+	for _, event := range events {
+		if err := encoder.Encode(session.CloneEvent(event)); err != nil {
+			return err
+		}
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	offset, err := file.Seek(0, io.SeekEnd)
+	if err != nil {
+		file.Close()
+		return err
+	}
+	written, err := file.Write(buf.Bytes())
+	if err != nil || written != buf.Len() {
+		if err == nil {
+			err = io.ErrShortWrite
+		}
+		_ = file.Truncate(offset)
+		_ = file.Sync()
+		file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Truncate(offset)
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return err
+	}
+	return syncDir(dir)
+}
+
+func (s *Store) readEventLog(documentPath string) ([]*session.Event, error) {
+	path := eventLogPath(documentPath)
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer file.Close()
+	reader := bufio.NewReader(file)
+	events := make([]*session.Event, 0)
+	for {
+		line, readErr := reader.ReadString('\n')
+		if readErr != nil && !errors.Is(readErr, io.EOF) {
+			return nil, readErr
+		}
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			var event session.Event
+			if err := json.Unmarshal([]byte(trimmed), &event); err != nil {
+				if errors.Is(readErr, io.EOF) {
+					break
+				}
+				return nil, fmt.Errorf("impl/session/file: decode event log %s: %w", path, err)
+			}
+			events = append(events, session.CloneEvent(&event))
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+	}
+	return events, nil
+}
+
+func truncatePartialEventLogTail(path string) error {
+	file, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+	size := info.Size()
+	if size == 0 {
+		return nil
+	}
+	var last [1]byte
+	if _, err := file.ReadAt(last[:], size-1); err != nil {
+		return err
+	}
+	if last[0] == '\n' {
+		return nil
+	}
+	const chunkSize = 4096
+	buf := make([]byte, chunkSize)
+	offset := size
+	for offset > 0 {
+		n := int64(len(buf))
+		if offset < n {
+			n = offset
+		}
+		offset -= n
+		chunk := buf[:n]
+		if _, err := file.ReadAt(chunk, offset); err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		for i := len(chunk) - 1; i >= 0; i-- {
+			if chunk[i] == '\n' {
+				if err := file.Truncate(offset + int64(i) + 1); err != nil {
+					return err
+				}
+				return file.Sync()
+			}
+		}
+	}
+	if err := file.Truncate(0); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
+func (s *Store) readEventLogIDs(documentPath string) (map[string]bool, error) {
+	events, err := s.readEventLog(documentPath)
+	if err != nil {
+		return nil, err
+	}
+	ids := make(map[string]bool, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if id := strings.TrimSpace(event.ID); id != "" {
+			ids[id] = true
+		}
+	}
+	return ids, nil
+}
+
+func eventLogPath(documentPath string) string {
+	return strings.TrimSuffix(documentPath, ".json") + ".events.jsonl"
 }
 
 func (s *Store) resolveWritePath(sess session.Session) (string, error) {
@@ -645,7 +1168,7 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 			}
 			return err
 		}
-		if d.IsDir() || filepath.Ext(d.Name()) != ".json" {
+		if d.IsDir() || d.Name() == indexFilename || filepath.Ext(d.Name()) != ".json" {
 			return nil
 		}
 		if strings.HasSuffix(d.Name(), "-"+sanitizeSessionID(sessionID)+".json") {
@@ -694,7 +1217,7 @@ func (s *Store) listDocumentPaths() ([]string, error) {
 			}
 			return err
 		}
-		if d.IsDir() || filepath.Ext(d.Name()) != ".json" {
+		if d.IsDir() || d.Name() == indexFilename || filepath.Ext(d.Name()) != ".json" {
 			return nil
 		}
 		paths = append(paths, path)

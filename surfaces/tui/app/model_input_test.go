@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +79,24 @@ func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
 	_ = m.handleViewportMouseMotion(tea.Mouse{X: m.mainColumnX() + tuikit.GutterNarrative + 6, Y: 0})
 	if got := m.viewportSelectionVersion; got != version+1 {
 		t.Fatalf("selection version after changed endpoint = %d, want %d", got, version+1)
+	}
+}
+
+func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
+	model := NewModel(Config{
+		PasteClipboardImage: func() ([]string, string, error) {
+			t.Fatal("PasteClipboardImage must not run while model is running")
+			return nil, "", nil
+		},
+	})
+	model.running = true
+
+	updated, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Text: "ctrl+v"}))
+	m := updated.(*Model)
+	if cmd == nil {
+		t.Fatal("running image paste should schedule hint cleanup")
+	}
+	if !strings.Contains(m.hint, "image") && !strings.Contains(m.hint, "running") {
+		t.Fatalf("model hint = %q, want image/running feedback", m.hint)
 	}
 }

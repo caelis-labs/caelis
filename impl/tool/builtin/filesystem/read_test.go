@@ -50,4 +50,24 @@ func TestReadToolDoesNotScanOversizedTailPastLimit(t *testing.T) {
 	if got, _ := payload["revision"].(string); got == "" {
 		t.Fatal("revision is empty")
 	}
+	if got, _ := payload["revision"].(string); !strings.HasPrefix(got, "stat:") {
+		t.Fatalf("truncated read revision = %q, want stat revision without tail scan", got)
+	}
+	patchTool, err := NewPatch(fakeRuntime{defaultFS: hostFileSystem{cwd: dir}})
+	if err != nil {
+		t.Fatalf("NewPatch() error = %v", err)
+	}
+	patchInput, err := json.Marshal(map[string]any{
+		"path":                  "generated.txt",
+		"old":                   "first",
+		"new":                   "updated",
+		"if_revision":           payload["revision"],
+		"expected_replacements": 1,
+	})
+	if err != nil {
+		t.Fatalf("Marshal(patch) error = %v", err)
+	}
+	if _, err := patchTool.Call(context.Background(), tool.Call{Input: patchInput}); err != nil {
+		t.Fatalf("PATCH with stat revision error = %v", err)
+	}
 }

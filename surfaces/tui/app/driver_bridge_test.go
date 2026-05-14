@@ -302,24 +302,34 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 	var sawUserReplay bool
 	var sawAssistantReplay bool
+	var replayBatchCount int
 	for _, msg := range msgs {
 		if log, ok := msg.(LogChunkMsg); ok && (strings.Contains(log.Chunk, "resumed session") || strings.Contains(log.Chunk, "replayed")) {
 			t.Fatalf("slashResume() emitted noisy resume notice: %#v", log)
 		}
-		if env, ok := msg.(kernel.EventEnvelope); ok {
-			if env.Event.ToolCall != nil || env.Event.ToolResult != nil {
-				t.Fatalf("slashResume() replayed tool process event: %#v", env)
-			}
-			if env.Event.Narrative != nil && env.Event.Narrative.Text == "stream chunk" {
-				t.Fatalf("slashResume() replayed transient assistant chunk: %#v", env)
-			}
-			if env.Event.Narrative != nil && env.Event.Narrative.Text == "history prompt" {
-				sawUserReplay = true
-			}
-			if env.Event.Narrative != nil && env.Event.Narrative.Text == "history reply" {
-				sawAssistantReplay = true
+		if _, ok := msg.(kernel.EventEnvelope); ok {
+			t.Fatalf("slashResume() must batch historical replay, got per-envelope msg: %#v", msg)
+		}
+		if batch, ok := msg.(TranscriptEventsMsg); ok {
+			replayBatchCount++
+			for _, event := range batch.Events {
+				if event.Kind == TranscriptEventTool {
+					t.Fatalf("slashResume() replayed tool process event: %#v", event)
+				}
+				if event.Text == "stream chunk" {
+					t.Fatalf("slashResume() replayed transient assistant chunk: %#v", event)
+				}
+				if event.Text == "history prompt" {
+					sawUserReplay = true
+				}
+				if event.Text == "history reply" {
+					sawAssistantReplay = true
+				}
 			}
 		}
+	}
+	if replayBatchCount != 1 {
+		t.Fatalf("slashResume() replay batches = %d, want 1", replayBatchCount)
 	}
 	if !sawUserReplay || !sawAssistantReplay {
 		t.Fatalf("slashResume() messages = %#v, want user and final assistant replay", msgs)
@@ -372,11 +382,15 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	var sawToolReplay bool
 	var sawMirrorReplay bool
 	for _, msg := range msgs {
-		if env, ok := msg.(kernel.EventEnvelope); ok && env.Event.Kind == kernel.EventKindToolCall {
-			sawToolReplay = true
-		}
-		if env, ok := msg.(kernel.EventEnvelope); ok && env.Event.Narrative != nil && env.Event.Narrative.Text == "partial answer" {
-			sawMirrorReplay = true
+		if batch, ok := msg.(TranscriptEventsMsg); ok {
+			for _, event := range batch.Events {
+				if event.Kind == TranscriptEventTool {
+					sawToolReplay = true
+				}
+				if event.Text == "partial answer" {
+					sawMirrorReplay = true
+				}
+			}
 		}
 	}
 	if !sawToolReplay || !sawMirrorReplay {
@@ -670,8 +684,12 @@ func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
 	var sawReplay bool
 	for _, msg := range msgs {
-		if env, ok := msg.(kernel.EventEnvelope); ok && env.Event.Narrative != nil && env.Event.Narrative.Text == "history reply" {
-			sawReplay = true
+		if batch, ok := msg.(TranscriptEventsMsg); ok {
+			for _, event := range batch.Events {
+				if event.Text == "history reply" {
+					sawReplay = true
+				}
+			}
 		}
 	}
 	if !sawReplay {
@@ -710,11 +728,11 @@ func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 }
 
 func TestFormatContextUsageStatus(t *testing.T) {
-	if got := formatContextUsageStatus(12600, 88000); got != "12.6k/88k(14%)" {
-		t.Fatalf("formatContextUsageStatus() = %q, want %q", got, "12.6k/88k(14%)")
+	if got := formatContextUsageStatus(12600, 88000); got != "ctx 12.6k / 88k · 14%" {
+		t.Fatalf("formatContextUsageStatus() = %q, want %q", got, "ctx 12.6k / 88k · 14%")
 	}
-	if got := formatContextUsageStatus(0, 88000); got != "0/88k(0%)" {
-		t.Fatalf("formatContextUsageStatus() zero = %q, want %q", got, "0/88k(0%)")
+	if got := formatContextUsageStatus(0, 88000); got != "ctx 0 / 88k · 0%" {
+		t.Fatalf("formatContextUsageStatus() zero = %q, want %q", got, "ctx 0 / 88k · 0%")
 	}
 }
 
@@ -1392,6 +1410,39 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	for _, want := range []string{"/connect", "warn: API key is missing", "warn: Commands may run on the host", "/tmp/.caelis"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashStatus() chunk = %q, want substring %q", log.Chunk, want)
+		}
+	}
+}
+
+func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
+	driver := &bridgeTestDriver{
+		status: tuidriver.StatusSnapshot{
+			SessionID:               "sess-1",
+			Provider:                "openai",
+			ModelName:               "gpt-5.5",
+			StoreDir:                "/tmp/.caelis",
+			SandboxRequestedBackend: "seatbelt",
+			SandboxResolvedBackend:  "host",
+			Route:                   "host",
+			HostExecution:           true,
+			MissingAPIKey:           true,
+		},
+	}
+	var msgs []tea.Msg
+	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) })
+	if result.Err != nil {
+		t.Fatalf("slashDoctorWithContext() error = %v", result.Err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("slashDoctorWithContext() emitted %d messages, want 1", len(msgs))
+	}
+	log, ok := msgs[0].(LogChunkMsg)
+	if !ok {
+		t.Fatalf("slashDoctorWithContext() msg = %#v, want LogChunkMsg", msgs[0])
+	}
+	for _, want := range []string{"doctor:", "warn provider key missing", "/connect", "ok session store: /tmp/.caelis", "ok session: sess-1", "warn sandbox: host"} {
+		if !strings.Contains(log.Chunk, want) {
+			t.Fatalf("slashDoctorWithContext() chunk = %q, want substring %q", log.Chunk, want)
 		}
 	}
 }

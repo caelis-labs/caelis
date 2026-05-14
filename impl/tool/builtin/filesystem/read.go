@@ -96,6 +96,10 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
+	info, err := fsys.Stat(targetPath)
+	if err != nil {
+		return tool.Result{}, err
+	}
 	file, err := fsys.Open(targetPath)
 	if err != nil {
 		return tool.Result{}, err
@@ -130,11 +134,13 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 		}
 		lines = append(lines, trimReadLineEnding(rawLine))
 		if len(lines) >= limit {
-			copied, copyErr := io.Copy(hasher, reader)
-			if copyErr != nil {
-				return tool.Result{}, copyErr
+			if readErr != io.EOF {
+				if _, peekErr := reader.Peek(1); peekErr == nil {
+					hasMore = true
+				} else if peekErr != io.EOF {
+					return tool.Result{}, peekErr
+				}
 			}
-			hasMore = copied > 0
 			break
 		}
 		if readErr == io.EOF {
@@ -162,12 +168,17 @@ func (t *ReadTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	}
 	exhausted := len(lines) == 0 && offset >= lineNo
 
+	revision := contentHashRevision(hasher)
+	if hasMore {
+		revision = statRevision(info)
+	}
+
 	return toolutil.JSONResult(ReadToolName, map[string]any{
 		"start_line":  startLine,
 		"end_line":    endLine,
 		"next_offset": nextOffset,
 		"has_more":    hasMore,
-		"revision":    contentHashRevision(hasher),
+		"revision":    revision,
 		"content":     content.String(),
 	}, map[string]any{
 		"path":      targetPath,

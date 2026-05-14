@@ -252,7 +252,7 @@ func (l *openRouterLLM) Generate(ctx context.Context, req *model.Request) iter.S
 		var usage model.Usage
 		finishReason := model.FinishReasonUnknown
 		stopped := false
-		if err := readSSE(resp.Body, func(data []byte) error {
+		if err := readSSEWithInactivity(resp.Body, defaultStreamInactivityTimeout, func(data []byte) error {
 			var chunk openRouterStreamChunk
 			if err := json.Unmarshal(data, &chunk); err != nil {
 				return err

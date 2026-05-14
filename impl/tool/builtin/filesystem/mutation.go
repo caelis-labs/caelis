@@ -69,7 +69,7 @@ func planWriteMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 	default:
 		return fileMutationPlan{}, statErr
 	}
-	if !revisionsMatch(ifRevision, textRevision(before)) {
+	if !revisionsMatchFile(ifRevision, before, info) {
 		return fileMutationPlan{}, staleRevisionError(target)
 	}
 
@@ -160,7 +160,7 @@ func planPatchMutation(fsys sandbox.FileSystem, args map[string]any) (fileMutati
 		return fileMutationPlan{}, err
 	}
 	content := string(contentRaw)
-	if !revisionsMatch(ifRevision, textRevision(content)) {
+	if !revisionsMatchFile(ifRevision, content, fileInfo) {
 		return fileMutationPlan{}, staleRevisionError(target)
 	}
 	if oldValue == "" {

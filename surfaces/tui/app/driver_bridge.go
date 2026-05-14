@@ -732,6 +732,8 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 		return slashResumeWithContext(ctx, driver, send, args)
 	case "status":
 		return slashStatusWithContext(ctx, driver, send)
+	case "doctor":
+		return slashDoctorWithContext(ctx, driver, send)
 	case "connect":
 		return slashConnectWithContext(ctx, driver, send, args)
 	case "model":
@@ -766,7 +768,7 @@ func activeACPAgentStatus(ctx context.Context, driver tuidriver.Driver) (tuidriv
 
 func isCoreLocalSlashCommand(cmd string) bool {
 	switch strings.ToLower(strings.TrimSpace(cmd)) {
-	case "help", "agent", "status", "resume", "model", "approval", "exit", "quit":
+	case "help", "agent", "status", "doctor", "resume", "model", "approval", "exit", "quit":
 		return true
 	default:
 		return false
@@ -1159,15 +1161,25 @@ func slashResumeWithContext(ctx context.Context, driver tuidriver.Driver, send f
 	if err != nil {
 		sendNotice(send, fmt.Sprintf("warning: replay failed: %v", err))
 	} else if len(events) > 0 {
-		for _, env := range resumeTranscriptReplayEvents(events) {
-			if send != nil {
-				send(env)
-			}
+		if transcriptEvents := resumeTranscriptReplayTranscriptEvents(events); len(transcriptEvents) > 0 && send != nil {
+			send(TranscriptEventsMsg{Events: transcriptEvents})
 		}
 	}
 
 	refreshStatusViaSendWithContext(ctx, driver, send)
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func resumeTranscriptReplayTranscriptEvents(events []kernel.EventEnvelope) []TranscriptEvent {
+	envelopes := resumeTranscriptReplayEvents(events)
+	if len(envelopes) == 0 {
+		return nil
+	}
+	out := make([]TranscriptEvent, 0, len(envelopes))
+	for _, env := range envelopes {
+		out = append(out, ProjectGatewayEventToTranscriptEvents(env.Event)...)
+	}
+	return out
 }
 
 func resumeTranscriptReplayEvents(events []kernel.EventEnvelope) []kernel.EventEnvelope {
@@ -1291,6 +1303,55 @@ func slashStatusWithContext(ctx context.Context, driver tuidriver.Driver, send f
 	}
 	sendNotice(send, formatStatusSnapshot(status))
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func slashDoctorWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
+	ctx = contextOrBackground(ctx)
+	status, err := driver.Status(ctx)
+	if err != nil {
+		return TaskResultMsg{Err: friendlyCommandError("doctor", err)}
+	}
+	sendNotice(send, formatDoctorSnapshot(status))
+	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
+	lines := []string{"doctor:"}
+	provider := strings.TrimSpace(firstNonEmpty(status.Provider, status.Model))
+	modelName := strings.TrimSpace(firstNonEmpty(status.ModelName, status.Model))
+	switch {
+	case status.MissingAPIKey:
+		lines = append(lines, "  warn provider key missing - run /connect")
+	case provider == "" && modelName == "":
+		lines = append(lines, "  warn model not configured - run /connect")
+	default:
+		lines = append(lines, "  ok provider/model: "+joinNonEmpty([]string{provider, modelName}, " / "))
+	}
+	if storeDir := strings.TrimSpace(status.StoreDir); storeDir != "" {
+		lines = append(lines, "  ok session store: "+storeDir)
+	} else {
+		lines = append(lines, "  warn session store path unavailable")
+	}
+	if sessionID := strings.TrimSpace(status.SessionID); sessionID != "" {
+		lines = append(lines, "  ok session: "+sessionID)
+	}
+	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxResolvedBackend, status.SandboxRequestedBackend, status.SandboxType))
+	switch {
+	case status.HostExecution || status.FullAccessMode:
+		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
+		lines = append(lines, "  warn sandbox: "+detail)
+	case sandbox != "":
+		lines = append(lines, "  ok sandbox: "+sandbox)
+	default:
+		lines = append(lines, "  warn sandbox status unavailable")
+	}
+	if route := strings.TrimSpace(status.Route); route != "" {
+		lines = append(lines, "  ok route: "+route)
+	}
+	if status.ActiveJobs > 0 || status.Running {
+		lines = append(lines, fmt.Sprintf("  info active jobs: %d", status.ActiveJobs))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func slashConnect(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
@@ -1569,7 +1630,7 @@ func formatContextUsageStatus(totalTokens int, contextWindow int) string {
 			percent = 0
 		}
 	}
-	return fmt.Sprintf("%s/%s(%d%%)", formatCompactTokenCount(totalTokens), formatCompactTokenCount(contextWindow), percent)
+	return fmt.Sprintf("ctx %s / %s · %d%%", formatCompactTokenCount(totalTokens), formatCompactTokenCount(contextWindow), percent)
 }
 
 func formatCompactTokenCount(tokens int) string {

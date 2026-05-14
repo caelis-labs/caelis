@@ -15,6 +15,7 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"approval",
 		"sandbox",
 		"status",
+		"doctor",
 		"new",
 		"resume",
 		"compact",

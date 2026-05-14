@@ -498,15 +498,7 @@ func (m *Model) drainPendingStreamSmoothing(now time.Time) tea.Cmd {
 	if len(m.streamSmoothing) == 0 {
 		return nil
 	}
-	keys := make([]string, 0, len(m.streamSmoothing))
-	for key, state := range m.streamSmoothing {
-		if state == nil || len(state.pending) == 0 {
-			delete(m.streamSmoothing, key)
-			continue
-		}
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
+	keys := m.pendingStreamSmoothingKeys()
 	m.beginDeferredViewportSync()
 	defer m.endDeferredViewportSync()
 	var cmds []tea.Cmd
@@ -557,6 +549,31 @@ func (m *Model) drainPendingStreamSmoothing(now time.Time) tea.Cmd {
 	m.streamSmoothingTickScheduled = true
 	cmds = append(cmds, frameTickCmd(frameTickStreamSmoothing, m.streamTickInterval()))
 	return tea.Batch(cmds...)
+}
+
+func (m *Model) pendingStreamSmoothingKeys() []string {
+	if m == nil || len(m.streamSmoothing) == 0 {
+		return nil
+	}
+	if len(m.streamSmoothing) == 1 {
+		for key, state := range m.streamSmoothing {
+			if state == nil || len(state.pending) == 0 {
+				delete(m.streamSmoothing, key)
+				return nil
+			}
+			return []string{key}
+		}
+	}
+	keys := make([]string, 0, len(m.streamSmoothing))
+	for key, state := range m.streamSmoothing {
+		if state == nil || len(state.pending) == 0 {
+			delete(m.streamSmoothing, key)
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (m *Model) flushDeferredMainStreamSmoothing() {

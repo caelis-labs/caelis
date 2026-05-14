@@ -21,6 +21,7 @@ const (
 	indexKind    = "caelis.sdk.task_index"
 	indexVersion = 1
 	blobKind     = "caelis.sdk.task_blob"
+	lookupKind   = "caelis.sdk.task_lookup"
 )
 
 // Config defines one durable task file store.
@@ -52,6 +53,13 @@ type blobRecord struct {
 	Stream    string    `json:"stream"`
 	Text      string    `json:"text"`
 	CreatedAt time.Time `json:"created_at"`
+}
+
+type lookupDocument struct {
+	Kind      string                        `json:"kind"`
+	Version   int                           `json:"version"`
+	UpdatedAt time.Time                     `json:"updated_at"`
+	Tasks     map[string]session.SessionRef `json:"tasks"`
 }
 
 // NewStore constructs one file-backed task store.
@@ -126,7 +134,10 @@ func (s *Store) Upsert(_ context.Context, entry *task.Entry) error {
 		return doc.Tasks[i].UpdatedAt.After(doc.Tasks[j].UpdatedAt)
 	})
 	doc.UpdatedAt = s.now()
-	return s.writeIndex(doc)
+	if err := s.writeIndex(doc); err != nil {
+		return err
+	}
+	return s.upsertLookup(entry.TaskID, entry.Session)
 }
 
 func (s *Store) Get(_ context.Context, taskID string) (*task.Entry, error) {
@@ -137,6 +148,14 @@ func (s *Store) Get(_ context.Context, taskID string) (*task.Entry, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if ref, ok, err := s.lookupTaskSession(taskID); err == nil && ok {
+		if found, foundOK, err := s.getFromSessionIndex(ref, taskID); err != nil {
+			return nil, err
+		} else if foundOK {
+			return found, nil
+		}
+	}
 
 	files, err := os.ReadDir(s.rootDir)
 	if err != nil {
@@ -157,10 +176,34 @@ func (s *Store) Get(_ context.Context, taskID string) (*task.Entry, error) {
 			if item == nil || strings.TrimSpace(item.TaskID) != taskID {
 				continue
 			}
+			if err := s.upsertLookup(taskID, doc.Session); err != nil {
+				return nil, err
+			}
 			return s.hydrateEntry(doc.Session, item)
 		}
 	}
 	return nil, fmt.Errorf("impl/task/file: task %q not found", taskID)
+}
+
+func (s *Store) getFromSessionIndex(ref session.SessionRef, taskID string) (*task.Entry, bool, error) {
+	doc, err := s.readIndex(ref)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	for _, item := range doc.Tasks {
+		if item == nil || strings.TrimSpace(item.TaskID) != taskID {
+			continue
+		}
+		hydrated, err := s.hydrateEntry(doc.Session, item)
+		if err != nil {
+			return nil, false, err
+		}
+		return hydrated, true, nil
+	}
+	return nil, false, nil
 }
 
 func (s *Store) ListSession(_ context.Context, ref session.SessionRef) ([]*task.Entry, error) {
@@ -299,6 +342,126 @@ func (s *Store) writeIndex(doc indexDocument) error {
 	return os.Rename(tmp, path)
 }
 
+func (s *Store) lookupTaskSession(taskID string) (session.SessionRef, bool, error) {
+	doc, err := s.readLookup()
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return session.SessionRef{}, false, nil
+		}
+		return session.SessionRef{}, false, err
+	}
+	ref, ok := doc.Tasks[strings.TrimSpace(taskID)]
+	if !ok || strings.TrimSpace(ref.SessionID) == "" {
+		return session.SessionRef{}, false, nil
+	}
+	return session.NormalizeSessionRef(ref), true, nil
+}
+
+func (s *Store) upsertLookup(taskID string, ref session.SessionRef) error {
+	taskID = strings.TrimSpace(taskID)
+	ref = session.NormalizeSessionRef(ref)
+	if taskID == "" || strings.TrimSpace(ref.SessionID) == "" {
+		return nil
+	}
+	doc, err := s.readLookup()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		doc, err = s.rebuildLookupFromIndexes()
+		if err != nil {
+			return err
+		}
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		doc = lookupDocument{
+			Kind:    lookupKind,
+			Version: indexVersion,
+			Tasks:   map[string]session.SessionRef{},
+		}
+	}
+	if doc.Tasks == nil {
+		doc.Tasks = map[string]session.SessionRef{}
+	}
+	doc.Kind = lookupKind
+	doc.Version = indexVersion
+	doc.UpdatedAt = s.now()
+	doc.Tasks[taskID] = ref
+	return s.writeLookup(doc)
+}
+
+func (s *Store) rebuildLookupFromIndexes() (lookupDocument, error) {
+	doc := lookupDocument{
+		Kind:    lookupKind,
+		Version: indexVersion,
+		Tasks:   map[string]session.SessionRef{},
+	}
+	files, err := os.ReadDir(s.rootDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return doc, nil
+		}
+		return lookupDocument{}, err
+	}
+	for _, file := range files {
+		if file.IsDir() || !strings.HasSuffix(file.Name(), ".index.json") {
+			continue
+		}
+		index, err := s.readIndexByPath(filepath.Join(s.rootDir, file.Name()))
+		if err != nil {
+			return lookupDocument{}, err
+		}
+		for _, item := range index.Tasks {
+			if item == nil {
+				continue
+			}
+			taskID := strings.TrimSpace(item.TaskID)
+			if taskID == "" {
+				continue
+			}
+			doc.Tasks[taskID] = session.NormalizeSessionRef(index.Session)
+		}
+	}
+	doc.UpdatedAt = s.now()
+	return doc, nil
+}
+
+func (s *Store) readLookup() (lookupDocument, error) {
+	data, err := os.ReadFile(s.lookupPath())
+	if err != nil {
+		return lookupDocument{}, err
+	}
+	var doc lookupDocument
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return lookupDocument{}, err
+	}
+	if doc.Tasks == nil {
+		doc.Tasks = map[string]session.SessionRef{}
+	}
+	for taskID, ref := range doc.Tasks {
+		doc.Tasks[taskID] = session.NormalizeSessionRef(ref)
+	}
+	return doc, nil
+}
+
+func (s *Store) writeLookup(doc lookupDocument) error {
+	if err := os.MkdirAll(s.rootDir, 0o755); err != nil {
+		return err
+	}
+	doc.Kind = lookupKind
+	doc.Version = indexVersion
+	if doc.Tasks == nil {
+		doc.Tasks = map[string]session.SessionRef{}
+	}
+	data, err := json.MarshalIndent(doc, "", "  ")
+	if err != nil {
+		return err
+	}
+	path := s.lookupPath()
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append(data, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
 func (s *Store) readBlobs(ref session.SessionRef) (map[string]blobRecord, error) {
 	path := s.blobPath(ref.SessionID)
 	file, err := os.Open(path)
@@ -357,6 +520,10 @@ func (s *Store) indexPath(sessionID string) string {
 
 func (s *Store) blobPath(sessionID string) string {
 	return filepath.Join(s.rootDir, strings.TrimSpace(sessionID)+".blobs.jsonl")
+}
+
+func (s *Store) lookupPath() string {
+	return filepath.Join(s.rootDir, "tasks.lookup.json")
 }
 
 func (s *Store) now() time.Time {

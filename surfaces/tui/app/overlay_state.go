@@ -51,6 +51,8 @@ type OverlayState struct {
 	slashArgQuery      string
 	slashArgCandidates []SlashArgCandidate
 	slashArgIndex      int
+
+	completionRefreshSeq uint64
 }
 
 // HasActiveOverlay returns true if any overlay is currently visible.

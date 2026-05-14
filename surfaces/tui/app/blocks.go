@@ -245,6 +245,7 @@ type MainACPTurnBlock struct {
 	ExpandedThought      map[string]bool
 	ExpandedExplore      map[string]bool
 	toolPanelRenderCache map[string]toolOutputRenderCache
+	toolEventIndex       map[string]int
 	compactHeightBudget  compactHeightBudgetState
 }
 
@@ -268,7 +269,7 @@ type toolEventUpdate struct {
 	SkipErroredOpen bool
 }
 
-func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out []SubagentEvent, changed bool, collapse bool) {
+func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int) (out []SubagentEvent, changed bool, collapse bool) {
 	out = events
 	callID := strings.TrimSpace(update.CallID)
 	name := strings.TrimSpace(update.Name)
@@ -285,6 +286,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 		var moved bool
 		out, moved = relocateApprovalReviewEventsAfterTool(out, callID)
 		changed = changed || moved
+		updateToolEventIndex(toolIndex, out, callID)
 	}()
 	if updateLinkedTerminalEvent(out, semanticName, taskID, output, update.Final, update.Err, update.Meta) {
 		changed = true
@@ -297,11 +299,8 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 		return out, changed, false
 	}
 	if !update.Final {
-		for i := len(out) - 1; i >= 0; i-- {
+		if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 			ev := &out[i]
-			if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != callID || ev.Done || (update.SkipErroredOpen && ev.Err) {
-				continue
-			}
 			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, semanticName)
 			return out, true, false
 		}
@@ -336,17 +335,20 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 		TaskInput:      taskInput,
 		TaskTargetKind: taskTargetKind,
 	}
-	for i := len(out) - 1; i >= 0; i-- {
+	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 		ev := &out[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != callID {
-			continue
-		}
 		if !ev.Done {
 			mergeOpenFinalToolEvent(ev, &finalEvent)
 			if shouldDefaultCollapseToolEvent(finalEvent) {
 				collapse = true
 			}
 			return out, true, collapse
+		}
+	}
+	for i := len(out) - 1; i >= 0; i-- {
+		ev := &out[i]
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.CallID) != callID {
+			continue
 		}
 		fillMissingFinalToolEventFromExisting(&finalEvent, *ev)
 		if shouldReplaceCompletedSpawnToolEvent(*ev, finalEvent) {
@@ -363,6 +365,49 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate) (out [
 		collapse = true
 	}
 	return out, true, collapse
+}
+
+func openToolEventIndexForUpdate(events []SubagentEvent, update toolEventUpdate, toolIndex map[string]int) int {
+	callID := strings.TrimSpace(update.CallID)
+	if callID == "" {
+		return -1
+	}
+	if toolIndex != nil {
+		if idx, ok := toolIndex[callID]; ok && validOpenToolEventForUpdate(events, idx, callID, update.SkipErroredOpen) {
+			return idx
+		}
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if validOpenToolEventForUpdate(events, i, callID, update.SkipErroredOpen) {
+			return i
+		}
+	}
+	return -1
+}
+
+func validOpenToolEventForUpdate(events []SubagentEvent, idx int, callID string, skipErroredOpen bool) bool {
+	if idx < 0 || idx >= len(events) {
+		return false
+	}
+	ev := events[idx]
+	return ev.Kind == SEToolCall &&
+		strings.TrimSpace(ev.CallID) == callID &&
+		!ev.Done &&
+		(!skipErroredOpen || !ev.Err)
+}
+
+func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID string) {
+	callID = strings.TrimSpace(callID)
+	if index == nil || callID == "" {
+		return
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		if events[i].Kind == SEToolCall && strings.TrimSpace(events[i].CallID) == callID {
+			index[callID] = i
+			return
+		}
+	}
+	delete(index, callID)
 }
 
 func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind string, semanticName string) {
@@ -498,10 +543,11 @@ func preferredDisplayTaskID(current string, candidate string) string {
 
 func NewMainACPTurnBlock(sessionID string) *MainACPTurnBlock {
 	return &MainACPTurnBlock{
-		id:        nextBlockID(),
-		SessionID: strings.TrimSpace(sessionID),
-		Status:    "running",
-		StartedAt: time.Now(),
+		id:             nextBlockID(),
+		SessionID:      strings.TrimSpace(sessionID),
+		Status:         "running",
+		StartedAt:      time.Now(),
+		toolEventIndex: map[string]int{},
 	}
 }
 
@@ -574,7 +620,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 		Final:  final,
 		Err:    err,
 		Meta:   meta,
-	})
+	}, b.toolEventIndex)
 	b.Events = events
 	if collapse {
 		b.setToolPanelExpanded(strings.TrimSpace(callID), false)
@@ -785,17 +831,19 @@ type ParticipantTurnBlock struct {
 	ExpandedThought      map[string]bool
 	ExpandedExplore      map[string]bool
 	toolPanelRenderCache map[string]toolOutputRenderCache
+	toolEventIndex       map[string]int
 	compactHeightBudget  compactHeightBudgetState
 }
 
 func NewParticipantTurnBlock(sessionID, actor string) *ParticipantTurnBlock {
 	return &ParticipantTurnBlock{
-		id:        nextBlockID(),
-		SessionID: strings.TrimSpace(sessionID),
-		Actor:     strings.TrimSpace(actor),
-		Status:    "running",
-		Expanded:  true,
-		StartedAt: time.Now(),
+		id:             nextBlockID(),
+		SessionID:      strings.TrimSpace(sessionID),
+		Actor:          strings.TrimSpace(actor),
+		Status:         "running",
+		Expanded:       true,
+		StartedAt:      time.Now(),
+		toolEventIndex: map[string]int{},
 	}
 }
 
@@ -868,7 +916,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 		Final:  final,
 		Err:    err,
 		Meta:   meta,
-	})
+	}, b.toolEventIndex)
 	b.Events = events
 	if collapse {
 		b.setToolPanelExpanded(strings.TrimSpace(callID), false)
@@ -2154,16 +2202,18 @@ type SubagentSessionState struct {
 
 	// eventsGen is bumped on every Events mutation. Panels use it to
 	// detect staleness without reflect.DeepEqual.
-	eventsGen uint64
+	eventsGen      uint64
+	toolEventIndex map[string]int
 }
 
 func NewSubagentSessionState(spawnID, attachID, agent string) *SubagentSessionState {
 	return &SubagentSessionState{
-		SpawnID:   strings.TrimSpace(spawnID),
-		AttachID:  strings.TrimSpace(attachID),
-		Agent:     strings.TrimSpace(agent),
-		Status:    "running",
-		StartedAt: time.Now(),
+		SpawnID:        strings.TrimSpace(spawnID),
+		AttachID:       strings.TrimSpace(attachID),
+		Agent:          strings.TrimSpace(agent),
+		Status:         "running",
+		StartedAt:      time.Now(),
+		toolEventIndex: map[string]int{},
 	}
 }
 
@@ -2230,7 +2280,7 @@ func (s *SubagentSessionState) UpdateToolCallWithMeta(callID, toolName, args, st
 		Err:             stream == "stderr",
 		Meta:            meta,
 		SkipErroredOpen: true,
-	})
+	}, s.toolEventIndex)
 	s.Events = events
 	if changed {
 		s.eventsGen++

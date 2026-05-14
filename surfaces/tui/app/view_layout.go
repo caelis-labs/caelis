@@ -315,17 +315,18 @@ func (m *Model) renderViewportContent(reason string, activeTailOnly bool) {
 	start := time.Now()
 	lines := m.viewportStyledLines
 	if m.lastViewportContentVersion != m.viewportContentVersion {
-		fingerprint := viewportLinesFingerprint(lines)
-		if fingerprint != m.lastViewportContent {
-			if activeTailOnly && m.isViewportFollowTail() {
-				m.viewportContentStale = true
-			} else {
+		if activeTailOnly && m.isViewportFollowTail() {
+			m.viewportContentStale = true
+			m.lastViewportViewKey = ""
+		} else {
+			fingerprint := viewportLinesFingerprint(lines)
+			if fingerprint != m.lastViewportContent {
 				m.observeViewportSetContent(lines, reason)
 				m.viewport.SetContentLines(append([]string(nil), lines...))
 				m.lastViewportContent = fingerprint
 				m.viewportContentStale = false
+				m.lastViewportViewKey = ""
 			}
-			m.lastViewportViewKey = ""
 		}
 		m.lastViewportContentVersion = m.viewportContentVersion
 	}

@@ -451,6 +451,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.showPalette {
 		return m, m.handlePaletteKey(msg)
 	}
+	m.refreshCompletionOverlaysBeforeAccept(msg)
 	// @mention overlay — intercept navigation keys so they don't
 	// fall through to history browsing.
 	if len(m.mentionCandidates) > 0 {
@@ -681,20 +682,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case matchesInsertNewlineKey(msg, m.keys.InsertNewline):
 		m.insertComposerText("\n")
-		m.refreshMention()
-		m.refreshSkill()
-		if m.isWizardActive() {
-			if m.resumeActive {
-				m.updateResumeCandidates()
-			}
-			if m.slashArgActive {
-				m.updateSlashArgCandidates()
-			}
-		} else {
-			m.syncSlashInputOverlays()
-		}
-		m.refreshSlashCommands()
-		return m, nil
+		return m, m.requestCompletionRefresh()
 
 	case key.Matches(msg, m.keys.Complete):
 		val := m.textarea.Value()
@@ -766,7 +754,11 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.ImagePaste):
 		if m.running {
-			return m, nil
+			return m, m.showHint("image paste unavailable while running; press Esc to interrupt first", hintOptions{
+				priority:       HintPriorityHigh,
+				clearOnMessage: true,
+				clearAfter:     systemHintDuration,
+			})
 		}
 		oldAttachmentCount := len(m.inputAttachments)
 		if m.cfg.PasteClipboardImage != nil {
@@ -830,19 +822,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// terminal protocols; under real PTY input some printable keys may not
 		// populate msg.Key().Text even though the composer changed.
 		if before != after {
-			m.refreshMention()
-			m.refreshSkill()
-			if m.isWizardActive() {
-				if m.resumeActive {
-					m.updateResumeCandidates()
-				}
-				if m.slashArgActive {
-					m.updateSlashArgCandidates()
-				}
-			} else {
-				m.syncSlashInputOverlays()
-			}
-			m.refreshSlashCommands()
+			return m, tea.Batch(cmd, m.requestCompletionRefresh())
 		}
 		return m, cmd
 	}
@@ -861,20 +841,7 @@ func (m *Model) handlePaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	m.inputAttachments = adjustAttachmentOffsetsForTextEdit(m.inputAttachments, before, m.textarea.Value())
 	m.syncAttachmentSummary()
 	m.syncInputFromTextarea()
-	m.refreshMention()
-	m.refreshSkill()
-	if m.isWizardActive() {
-		if m.resumeActive {
-			m.updateResumeCandidates()
-		}
-		if m.slashArgActive {
-			m.updateSlashArgCandidates()
-		}
-	} else {
-		m.syncSlashInputOverlays()
-	}
-	m.refreshSlashCommands()
-	return m, cmd
+	return m, tea.Batch(cmd, m.requestCompletionRefresh())
 }
 
 func (m *Model) insertComposerText(text string) {

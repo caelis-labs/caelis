@@ -120,3 +120,26 @@ func TestRenderDiagnosticsWritesDebugFile(t *testing.T) {
 		t.Fatalf("diagnostics debug file missing render bytes: %s", text)
 	}
 }
+
+func TestRenderDiagnosticsDebugFileIsRateLimited(t *testing.T) {
+	path := t.TempDir() + "/render-diagnostics.json"
+	m := NewModel(Config{
+		NoColor:              true,
+		DiagnosticsDebugFile: path,
+	})
+
+	m.observeRender(time.Millisecond, 42, "incremental")
+	m.observeRender(time.Millisecond, 99, "incremental")
+
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read diagnostics debug file: %v", err)
+	}
+	text := string(payload)
+	if strings.Contains(text, `"Frames": 2`) {
+		t.Fatalf("diagnostics debug file was rewritten inside rate limit window: %s", text)
+	}
+	if !strings.Contains(text, `"Frames": 1`) {
+		t.Fatalf("diagnostics debug file missing initial frame count: %s", text)
+	}
+}

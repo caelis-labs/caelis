@@ -283,6 +283,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.focused = false
 		return m, nil
 
+	case completionRefreshMsg:
+		return m.handleCompletionRefreshMsg(typed)
+
 	case clearHintMsg:
 		m.removeHintByID(typed.id)
 		return m, nil

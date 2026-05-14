@@ -68,6 +68,59 @@ func (m *Model) handlePaletteKey(msg tea.KeyMsg) tea.Cmd {
 	return cmd
 }
 
+func (m *Model) requestCompletionRefresh() tea.Cmd {
+	if m == nil || m.running {
+		return nil
+	}
+	m.completionRefreshSeq++
+	seq := m.completionRefreshSeq
+	return tea.Tick(completionRefreshDebounce, func(time.Time) tea.Msg {
+		return completionRefreshMsg{seq: seq}
+	})
+}
+
+func (m *Model) handleCompletionRefreshMsg(msg completionRefreshMsg) (tea.Model, tea.Cmd) {
+	if m == nil || msg.seq != m.completionRefreshSeq {
+		return m, nil
+	}
+	m.refreshCompletionOverlaysNow()
+	return m, nil
+}
+
+func (m *Model) refreshCompletionOverlaysBeforeAccept(msg tea.KeyMsg) {
+	if m == nil || m.running || (!key.Matches(msg, m.keys.Accept) && !key.Matches(msg, m.keys.Complete)) {
+		return
+	}
+	switch {
+	case len(m.mentionCandidates) > 0:
+		m.refreshMention()
+	case len(m.skillCandidates) > 0:
+		m.refreshSkill()
+	case m.resumeActive || len(m.resumeCandidates) > 0:
+		m.updateResumeCandidates()
+	case m.slashArgActive:
+		m.updateSlashArgCandidates()
+	case len(m.slashCandidates) > 0:
+		m.refreshSlashCommands()
+	}
+}
+
+func (m *Model) refreshCompletionOverlaysNow() {
+	m.refreshMention()
+	m.refreshSkill()
+	if m.isWizardActive() {
+		if m.resumeActive {
+			m.updateResumeCandidates()
+		}
+		if m.slashArgActive {
+			m.updateSlashArgCandidates()
+		}
+	} else {
+		m.syncSlashInputOverlays()
+	}
+	m.refreshSlashCommands()
+}
+
 // ---------------------------------------------------------------------------
 // @Mention completion
 // ---------------------------------------------------------------------------

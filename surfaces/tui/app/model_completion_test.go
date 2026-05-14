@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -131,6 +132,28 @@ func TestSlashCommandSelectionMovesWithArrowKeys(t *testing.T) {
 	}
 	if model.slashIndex != 1 {
 		t.Fatalf("slashIndex after down = %d, want 1", model.slashIndex)
+	}
+}
+
+func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testing.T) {
+	model := NewModel(Config{
+		Commands: []string{"agent", "doctor"},
+	})
+
+	_, cmd := model.handleKey(keyPress("/"))
+	runCompletionCmd(t, model, cmd)
+	if got := model.slashCandidates; len(got) != 2 || got[0] != "/agent" {
+		t.Fatalf("slashCandidates after / = %#v, want stale list starting with /agent", got)
+	}
+	_, cmd = model.handleKey(keyPress("do"))
+	if cmd == nil {
+		t.Fatal("handleKey(do) should schedule a debounced completion refresh")
+	}
+
+	_, cmd = model.handleKey(keyPress("tab"))
+	runCompletionCmd(t, model, cmd)
+	if got := string(model.input); got != "/doctor " {
+		t.Fatalf("input after /do<Tab> = %q, want /doctor ", got)
 	}
 }
 
@@ -398,9 +421,7 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringLiveInput(t *testing.T) {
 	for _, ch := range []string{"/", "m", "o", "d", "e", "l", " ", "d", "e"} {
 		var cmd tea.Cmd
 		_, cmd = model.handleKey(keyPress(ch))
-		if cmd != nil {
-			cmd()
-		}
+		runCompletionCmd(t, model, cmd)
 	}
 
 	if got := string(model.input); got != "/model de" {
@@ -411,6 +432,26 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringLiveInput(t *testing.T) {
 	}
 	if len(model.slashArgCandidates) != 1 || model.slashArgCandidates[0].Value != "del" {
 		t.Fatalf("slashArgCandidates after live input = %#v, want only del candidate", model.slashArgCandidates)
+	}
+}
+
+func TestCompletionRefreshDoesNotBlockTypingPath(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			time.Sleep(200 * time.Millisecond)
+			return []SlashArgCandidate{{Value: "del", Display: "del"}}, nil
+		},
+	})
+
+	start := time.Now()
+	_, cmd := model.handleKey(keyPress("/model de"))
+	elapsed := time.Since(start)
+	if elapsed > 30*time.Millisecond {
+		t.Fatalf("handleKey() took %s, want non-blocking completion path", elapsed)
+	}
+	if cmd == nil {
+		t.Fatal("handleKey() should schedule async completion refresh")
 	}
 }
 
@@ -539,9 +580,7 @@ func TestModelActionPrefixTypingFiltersCandidatesDuringPaste(t *testing.T) {
 	})
 
 	_, cmd := model.handlePaste(tea.PasteMsg{Content: "/model de"})
-	if cmd != nil {
-		cmd()
-	}
+	runCompletionCmd(t, model, cmd)
 
 	if got := string(model.input); got != "/model de" {
 		t.Fatalf("input after paste = %q, want /model de", got)
@@ -571,9 +610,7 @@ func TestModelActionPrefixTypingFiltersCandidatesWhenTerminalBatchesInput(t *tes
 	})
 
 	_, cmd := model.handleKey(keyPress("/model de"))
-	if cmd != nil {
-		cmd()
-	}
+	runCompletionCmd(t, model, cmd)
 
 	if got := string(model.input); got != "/model de" {
 		t.Fatalf("input after batched key = %q, want /model de", got)
@@ -602,12 +639,10 @@ func TestModelActionPrefixTypingFiltersCandidatesAfterSlashThenBatchedTail(t *te
 		},
 	})
 
-	if _, cmd := model.handleKey(keyPress("/")); cmd != nil {
-		cmd()
-	}
-	if _, cmd := model.handleKey(keyPress("model de")); cmd != nil {
-		cmd()
-	}
+	_, cmd := model.handleKey(keyPress("/"))
+	runCompletionCmd(t, model, cmd)
+	_, cmd = model.handleKey(keyPress("model de"))
+	runCompletionCmd(t, model, cmd)
 
 	if got := string(model.input); got != "/model de" {
 		t.Fatalf("input after slash + batched tail = %q, want /model de", got)
@@ -622,4 +657,30 @@ func TestModelActionPrefixTypingFiltersCandidatesAfterSlashThenBatchedTail(t *te
 
 func keyPress(key string) tea.KeyMsg {
 	return tea.KeyPressMsg(tea.Key{Text: key})
+}
+
+func runCompletionCmd(t *testing.T, model *Model, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	msg := cmd()
+	switch typed := msg.(type) {
+	case nil:
+		return
+	case completionRefreshMsg:
+		updated, _ := model.Update(typed)
+		if next, ok := updated.(*Model); ok && next != model {
+			*model = *next
+		}
+	case tea.BatchMsg:
+		for _, sub := range typed {
+			runCompletionCmd(t, model, sub)
+		}
+	default:
+		updated, _ := model.Update(typed)
+		if next, ok := updated.(*Model); ok && next != model {
+			*model = *next
+		}
+	}
 }

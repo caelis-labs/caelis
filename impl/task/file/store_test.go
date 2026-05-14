@@ -141,6 +141,68 @@ func TestStoreUpsertRunningTaskKeepsIndexOnly(t *testing.T) {
 	}
 }
 
+func TestStoreGetUsesTaskIDLookupIndex(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, Clock: fixedClock})
+	entry := &task.Entry{
+		TaskID:    "task-target",
+		Kind:      task.KindBash,
+		Session:   sessionRef("session-target"),
+		Title:     "BASH echo target",
+		State:     task.StateCompleted,
+		Running:   false,
+		UpdatedAt: time.Unix(20, 0),
+		Result:    map[string]any{"state": "completed"},
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "aaa-decoy.index.json"), []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("WriteFile(decoy) error = %v", err)
+	}
+
+	got, err := store.Get(context.Background(), "task-target")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Session.SessionID != "session-target" {
+		t.Fatalf("Get() session = %q, want session-target", got.Session.SessionID)
+	}
+}
+
+func TestStoreGetFallsBackWhenTaskLookupIsCorrupt(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := NewStore(Config{RootDir: root, Clock: fixedClock})
+	entry := &task.Entry{
+		TaskID:    "task-target",
+		Kind:      task.KindBash,
+		Session:   sessionRef("session-target"),
+		Title:     "BASH echo target",
+		State:     task.StateCompleted,
+		Running:   false,
+		UpdatedAt: time.Unix(20, 0),
+		Result:    map[string]any{"state": "completed"},
+	}
+	if err := store.Upsert(context.Background(), entry); err != nil {
+		t.Fatalf("Upsert() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tasks.lookup.json"), []byte("{not-json"), 0o644); err != nil {
+		t.Fatalf("WriteFile(lookup) error = %v", err)
+	}
+
+	got, err := store.Get(context.Background(), "task-target")
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if got.Session.SessionID != "session-target" {
+		t.Fatalf("Get() session = %q, want session-target", got.Session.SessionID)
+	}
+}
+
 func TestStoreConcurrentUpsertKeepsAllTasks(t *testing.T) {
 	t.Parallel()
 

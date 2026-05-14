@@ -170,6 +170,10 @@ func (m *Model) writeDiagnosticsDebugFile() {
 	if path == "" {
 		return
 	}
+	now := time.Now()
+	if !m.lastDiagnosticsDebugWrite.IsZero() && now.Sub(m.lastDiagnosticsDebugWrite) < time.Second {
+		return
+	}
 	payload, err := json.MarshalIndent(m.diag, "", "  ")
 	if err != nil {
 		m.diag.DiagnosticsDebugWriteErrors++
@@ -177,7 +181,9 @@ func (m *Model) writeDiagnosticsDebugFile() {
 	}
 	if err := os.WriteFile(path, append(payload, '\n'), 0o600); err != nil {
 		m.diag.DiagnosticsDebugWriteErrors++
+		return
 	}
+	m.lastDiagnosticsDebugWrite = now
 }
 
 func (m *Model) observeInputLatency() {

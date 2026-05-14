@@ -44,6 +44,10 @@ type frameTickMsg struct {
 	kind frameTickKind
 }
 
+type completionRefreshMsg struct {
+	seq uint64
+}
+
 func animatePaletteCmd() tea.Cmd {
 	return tea.Tick(paletteAnimationInterval, func(time.Time) tea.Msg {
 		return paletteAnimationMsg{}

@@ -131,6 +131,27 @@ func TestTaskResultReplacesSelfTaskIDWithVisibleHandle(t *testing.T) {
 	}
 }
 
+func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateToolWithMeta("bash-1", "BASH", "go test", "first", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	if got := block.toolEventIndex["bash-1"]; got != 0 {
+		t.Fatalf("initial tool index = %d, want 0", got)
+	}
+
+	block.Events = append([]SubagentEvent{{Kind: SEAssistant, Text: "shift"}}, block.Events...)
+	block.UpdateToolWithMeta("bash-1", "BASH", "go test", " second", false, false, ToolUpdateMeta{TaskID: "task-1"})
+
+	if got := block.toolEventIndex["bash-1"]; got != 1 {
+		t.Fatalf("refreshed tool index = %d, want 1", got)
+	}
+	if len(block.Events) != 2 {
+		t.Fatalf("events = %#v, want shifted assistant plus one tool event", block.Events)
+	}
+	if got := block.Events[1].Output; got != "first second" {
+		t.Fatalf("tool output = %q, want merged output after stale-index fallback", got)
+	}
+}
+
 func TestTaskWaitResultStillUpdatesLinkedBashTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.UpdateToolWithMeta("bash-1", "BASH", "go test", "", false, false, ToolUpdateMeta{TaskID: "task-1"})

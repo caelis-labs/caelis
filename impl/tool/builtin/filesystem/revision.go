@@ -3,7 +3,9 @@ package filesystem
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"hash"
+	"os"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -29,6 +31,17 @@ func textRevision(text string) string {
 	return contentRevision([]byte(text))
 }
 
+func statRevision(info os.FileInfo) string {
+	if info == nil {
+		return ""
+	}
+	return fmt.Sprintf("stat:%d:%d:%s", info.Size(), info.ModTime().UTC().UnixNano(), info.Mode().String())
+}
+
+func isStatRevision(revision string) bool {
+	return strings.HasPrefix(strings.TrimSpace(strings.ToLower(revision)), "stat:")
+}
+
 func revisionsMatch(expected string, actual string) bool {
 	expected = strings.TrimSpace(strings.ToLower(expected))
 	actual = strings.TrimSpace(strings.ToLower(actual))
@@ -36,6 +49,17 @@ func revisionsMatch(expected string, actual string) bool {
 		return true
 	}
 	return expected == actual
+}
+
+func revisionsMatchFile(expected string, actualContent string, info os.FileInfo) bool {
+	expected = strings.TrimSpace(strings.ToLower(expected))
+	if expected == "" {
+		return true
+	}
+	if isStatRevision(expected) {
+		return expected == strings.TrimSpace(strings.ToLower(statRevision(info)))
+	}
+	return revisionsMatch(expected, textRevision(actualContent))
 }
 
 func staleRevisionError(path string) error {
