@@ -830,6 +830,67 @@ func TestProjectGatewayEventTaskResultPrefersOutputHandleInArgs(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventTaskResultShowsEffectiveWaitDuration(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Meta: testRuntimeToolMeta(map[string]any{
+			"action":                  "wait",
+			"target_id":               "task-7",
+			"target_kind":             "bash",
+			"effective_yield_time_ms": 7000,
+			"yield_time_ms_defaulted": true,
+		}),
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "task-result",
+			ToolName: "TASK",
+			Status:   kernel.ToolStatusRunning,
+			RawInput: map[string]any{"action": "wait", "task_id": "task-7"},
+			RawOutput: map[string]any{
+				"task_id": "task-7",
+				"state":   "running",
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolArgs; got != "Wait 7s" {
+		t.Fatalf("ToolArgs = %q, want default effective wait duration", got)
+	}
+}
+
+func TestProjectGatewayEventTaskResultShowsExplicitZeroWaitDuration(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Meta: testRuntimeToolMeta(map[string]any{
+			"action":                  "wait",
+			"target_id":               "jeff",
+			"target_kind":             "subagent",
+			"effective_yield_time_ms": 0,
+		}),
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "task-result",
+			ToolName: "TASK",
+			Status:   kernel.ToolStatusRunning,
+			RawInput: map[string]any{"action": "wait", "task_id": "self", "yield_time_ms": 0},
+			RawOutput: map[string]any{
+				"task_id": "jeff",
+				"state":   "running",
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolArgs; got != "Wait jeff 0ms" {
+		t.Fatalf("ToolArgs = %q, want explicit zero wait duration", got)
+	}
+}
+
 func TestProjectGatewayEventTaskWriteUsesCaelisMetaTarget(t *testing.T) {
 	t.Parallel()
 

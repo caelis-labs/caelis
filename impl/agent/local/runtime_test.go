@@ -3845,7 +3845,7 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
 	}
 
-	callRuntimeTaskTool(t, runtimeTaskTool{
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -3856,6 +3856,13 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 
 	if got := fake.session.lastWait; got != defaultBashYield {
 		t.Fatalf("omitted TASK wait yield = %v, want %v", got, defaultBashYield)
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(7000) && got != 7000 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 7000", got)
+	}
+	if got := toolMeta["yield_time_ms_defaulted"]; got != true {
+		t.Fatalf("yield_time_ms_defaulted = %#v, want true", got)
 	}
 }
 
@@ -3880,7 +3887,7 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
 	}
 
-	callRuntimeTaskTool(t, runtimeTaskTool{
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
 		base:       tasktool.New(),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
@@ -3892,6 +3899,13 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 
 	if got := fake.session.lastWait; got != 0 {
 		t.Fatalf("explicit zero TASK wait yield = %v, want 0", got)
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(0) && got != 0 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 0", got)
+	}
+	if got := toolMeta["yield_time_ms_defaulted"]; got != nil {
+		t.Fatalf("yield_time_ms_defaulted = %#v, want omitted", got)
 	}
 }
 

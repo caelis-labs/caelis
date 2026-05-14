@@ -177,7 +177,7 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
 	t.Parallel()
 
-	meta := taskToolResultEventMeta(nil, "write", "请追加两行", task.Snapshot{
+	meta := taskToolResultEventMeta(nil, "write", "请追加两行", 0, false, task.Snapshot{
 		Ref:  task.Ref{TaskID: "task-1"},
 		Kind: task.KindSubagent,
 		Result: map[string]any{

@@ -199,7 +199,11 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
 			toolTaskID := toolDisplayTaskID(rawInput, nil, ev.Meta)
-			toolArgs := toolDisplayArgs(semanticName, rawInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, rawInput))
+			displayInput := rawInput
+			if strings.EqualFold(semanticName, "TASK") {
+				displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, ev.Meta))
+			}
+			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 			if strings.EqualFold(semanticName, "TASK") {
 				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
 			}
@@ -243,6 +247,9 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			displayInput := rawInput
 			if strings.EqualFold(semanticName, "SPAWN") {
 				displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
+			}
+			if strings.EqualFold(semanticName, "TASK") {
+				displayInput = taskDisplayInputForResult(rawInput, displayOutput)
 			}
 			content := gatewayProtocolToolContent(ev, payload.Content)
 			toolOutput := acpprojector.FormatToolContent(content)
@@ -491,6 +498,11 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 	case "BASH", "SPAWN", "TASK":
 		if taskID := firstNonEmpty(asString(toolMeta["target_id"]), asString(taskMeta["task_id"])); taskID != "" {
 			out["task_id"] = taskID
+		}
+		for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted"} {
+			if value, ok := toolMeta[key]; ok {
+				out[key] = value
+			}
 		}
 		if strings.EqualFold(toolName, "BASH") {
 			break

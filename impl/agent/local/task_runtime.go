@@ -438,11 +438,14 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return tool.Result{}, fmt.Errorf("tool: arg %q is required", "task_id")
 	}
 	yieldMS := 0
+	parsedYield := optionalIntArg(args, "yield_time_ms")
+	yieldDefaulted := false
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
 		yieldMS = int(defaultBashYield / time.Millisecond)
+		yieldDefaulted = parsedYield == nil
 	}
-	if parsed := optionalIntArg(args, "yield_time_ms"); parsed != nil {
-		yieldMS = *parsed
+	if parsedYield != nil {
+		yieldMS = *parsedYield
 	}
 	if yieldMS < 0 {
 		yieldMS = 0
@@ -470,11 +473,11 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	}
 	result := taskSnapshotToolResult(call, t.base.Definition(), snapshot)
 	normalizedAction := strings.ToLower(strings.TrimSpace(action))
-	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, snapshot)
+	result.Metadata = taskToolResultEventMeta(result.Metadata, normalizedAction, input, yieldMS, yieldDefaulted, snapshot)
 	return result, nil
 }
 
-func taskToolResultEventMeta(existing map[string]any, action string, input string, snapshot taskapi.Snapshot) map[string]any {
+func taskToolResultEventMeta(existing map[string]any, action string, input string, yieldMS int, yieldDefaulted bool, snapshot taskapi.Snapshot) map[string]any {
 	out := maps.Clone(existing)
 	if out == nil {
 		out = map[string]any{}
@@ -484,6 +487,12 @@ func taskToolResultEventMeta(existing map[string]any, action string, input strin
 	toolMeta["action"] = strings.ToLower(strings.TrimSpace(action))
 	toolMeta["target_kind"] = strings.TrimSpace(string(snapshot.Kind))
 	toolMeta["target_id"] = taskVisibleID(snapshot)
+	if strings.EqualFold(strings.TrimSpace(action), "wait") {
+		toolMeta["effective_yield_time_ms"] = yieldMS
+		if yieldDefaulted {
+			toolMeta["yield_time_ms_defaulted"] = true
+		}
+	}
 	if strings.EqualFold(strings.TrimSpace(action), "write") {
 		toolMeta["input"] = strings.TrimSpace(input)
 	}

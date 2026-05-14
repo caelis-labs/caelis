@@ -365,7 +365,7 @@ func taskControlDisplay(raw map[string]any) string {
 	switch action {
 	case "WAIT":
 		duration := ""
-		if ms := displayInt(raw["yield_time_ms"]); ms > 0 {
+		if ms := taskWaitDurationMS(raw); ms >= 0 {
 			duration = formatDurationMS(ms)
 		}
 		parts := []string{"Wait"}
@@ -399,6 +399,16 @@ func taskControlDisplay(raw map[string]any) string {
 	default:
 		return strings.ToUpper(action[:1]) + strings.ToLower(action[1:])
 	}
+}
+
+func taskWaitDurationMS(raw map[string]any) int {
+	if ms := displayInt(raw["effective_yield_time_ms"]); ms >= 0 {
+		return ms
+	}
+	if ms := displayInt(raw["yield_time_ms"]); ms >= 0 {
+		return ms
+	}
+	return -1
 }
 
 func taskControlDisplayFallback(values ...string) string {
@@ -537,6 +547,22 @@ func spawnDisplayInputForResult(input map[string]any, output map[string]any) map
 	return displaypolicy.SpawnDisplayInputForResult(input, output)
 }
 
+func taskDisplayInputForResult(input map[string]any, output map[string]any) map[string]any {
+	if len(output) == 0 {
+		return input
+	}
+	out := cloneAnyMap(input)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for _, key := range []string{"effective_yield_time_ms", "yield_time_ms_defaulted"} {
+		if value, ok := output[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
 func normalizeTaskWriteDisplayInput(input string) string {
 	input = normalizeToolDisplayArg(input)
 	if input == "" {
@@ -558,6 +584,9 @@ func normalizeToolDisplayArg(input string) string {
 }
 
 func formatDurationMS(ms int) string {
+	if ms <= 0 {
+		return "0ms"
+	}
 	if ms%1000 == 0 {
 		return strconv.Itoa(ms/1000) + "s"
 	}
