@@ -551,16 +551,8 @@ func toolResultDisplayText(name string, input map[string]any, output map[string]
 	case "SPAWN":
 		return spawnResultText(output, status, isErr)
 	case "TASK":
-		if strings.EqualFold(taskToolAction(input, output, meta), "write") && toolStatusFinal(status, isErr) {
-			if summary := displaypolicy.CleanSubagentFinalOutput(firstNonEmpty(
-				toolString(output["result"]),
-				toolString(output["final_message"]),
-				toolString(output["finalMessage"]),
-				toolString(output["text"]),
-				toolString(output["output"]),
-				toolString(output["stdout"]),
-				toolString(output["output_preview"]),
-			)); summary != "" {
+		if toolStatusFinal(status, isErr) {
+			if summary := displaypolicy.CleanSubagentFinalOutput(toolString(output["final_message"])); summary != "" {
 				return summary
 			}
 		}
@@ -800,14 +792,6 @@ func toolResultTerminalID(call model.ToolCall, output map[string]any, meta map[s
 		stringFromNestedMap(meta, "caelis", "runtime", "task", "terminal_id"),
 		strings.TrimSpace(call.ID),
 	)
-}
-
-func taskToolAction(input map[string]any, output map[string]any, meta map[string]any) string {
-	return strings.ToLower(firstNonEmpty(
-		stringFromNestedMap(meta, "caelis", "runtime", "tool", "action"),
-		toolString(output["action"]),
-		toolString(input["action"]),
-	))
 }
 
 func runtimeToolMeta(meta map[string]any) map[string]any {

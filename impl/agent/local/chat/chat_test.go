@@ -841,6 +841,81 @@ func TestToolResultEventPreservesRunningTaskOutputPreviewAsACPContent(t *testing
 	}
 }
 
+func TestToolResultEventPreservesTaskFinalMessageAsACPContent(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Args: `{"action":"wait","task_id":"jeff"}`,
+	}, tool.Result{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"task_id":       "jeff",
+			"state":         "completed",
+			"final_message": "child final answer\n",
+		}))},
+	}, nil)
+
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	}
+	if content[0].Type != "terminal" {
+		t.Fatalf("content type = %q, want terminal", content[0].Type)
+	}
+	textPayload, _ := content[0].Content.(map[string]any)
+	if got, _ := textPayload["text"].(string); got != "child final answer" {
+		t.Fatalf("content text = %q, want final message", got)
+	}
+}
+
+func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Args: `{"action":"wait","task_id":"bash-task"}`,
+	}, tool.Result{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"state":     "failed",
+			"result":    "go: module internal registry: network unreachable\n",
+			"error":     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
+			"exit_code": 1,
+		}))},
+	}, nil)
+
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	}
+	if got := update.Status; got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	}
+	if content[0].Type != "terminal" {
+		t.Fatalf("content type = %q, want terminal", content[0].Type)
+	}
+	textPayload, _ := content[0].Content.(map[string]any)
+	if got, _ := textPayload["text"].(string); got != "go: module internal registry: network unreachable" {
+		t.Fatalf("content text = %q, want failed task result", got)
+	}
+	if got, _ := update.RawOutput["error"].(string); got == "" {
+		t.Fatalf("raw output error = %q, want preserved error for model context", got)
+	}
+}
+
 func TestToolResultEventPreservesBashResultFieldAsACPContent(t *testing.T) {
 	t.Parallel()
 

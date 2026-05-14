@@ -424,6 +424,7 @@ func (s *hostSession) readStream(reader io.Reader, stream string) {
 
 func (s *hostSession) waitForExit() {
 	err := s.cmd.Wait()
+	s.cleanupProcessGroupAfterExit()
 	s.wg.Wait()
 
 	s.mu.Lock()
@@ -439,6 +440,13 @@ func (s *hostSession) waitForExit() {
 	s.updatedAt = time.Now()
 	s.waitErr = err
 	close(s.done)
+}
+
+func (s *hostSession) cleanupProcessGroupAfterExit() {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+	_ = killProcessTree(s.cmd.Process)
 }
 
 type hostFS struct {

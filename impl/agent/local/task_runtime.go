@@ -39,6 +39,7 @@ type taskRuntime struct {
 	pending   map[string][]stream.Frame
 	order     map[string][]string
 	backends  map[sandbox.Backend]sandbox.Runtime
+	handles   map[string]map[string]struct{}
 }
 
 type sandboxRuntimeBackends interface {
@@ -106,6 +107,7 @@ func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 		pending:   map[string][]stream.Frame{},
 		order:     map[string][]string{},
 		backends:  map[sandbox.Backend]sandbox.Runtime{},
+		handles:   map[string]map[string]struct{}{},
 	}
 }
 
@@ -664,7 +666,7 @@ func (tm *taskRuntime) StartSubagent(
 		anchor:     delegation.CloneAnchor(anchor),
 		runner:     runner,
 		agent:      strings.TrimSpace(anchor.Agent),
-		handle:     allocateSubagentHandle(activeSession, anchor.Agent),
+		handle:     tm.reserveSubagentHandle(activeSession, ref, anchor.Agent),
 		title:      spawn.ToolName + " " + strings.TrimSpace(anchor.Agent),
 		prompt:     strings.TrimSpace(req.Prompt),
 		createdAt:  now,
@@ -1376,6 +1378,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	task, ok := tm.subagents[lookupID]
 	if !ok {
 		handle := normalizeSubagentHandle(lookupID)
+		var matches []*subagentTask
 		for _, candidate := range tm.subagents {
 			if candidate == nil {
 				continue
@@ -1384,10 +1387,15 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 				continue
 			}
 			if normalizeSubagentHandle(candidate.handle) == handle || normalizeSubagentHandle(taskStringValue(candidate.metadata["handle"])) == handle {
-				task = candidate
-				ok = true
-				break
+				matches = append(matches, candidate)
 			}
+		}
+		if len(matches) == 1 {
+			task = matches[0]
+			ok = true
+		} else if len(matches) > 1 {
+			tm.mu.RUnlock()
+			return nil, fmt.Errorf("impl/agent/local: subagent handle %q is ambiguous; use the task id", lookupID)
 		}
 	}
 	tm.mu.RUnlock()
@@ -1413,6 +1421,7 @@ func (tm *taskRuntime) lookupSubagent(ctx context.Context, ref session.SessionRe
 	rehydrated := tm.rehydrateSubagentTask(entry)
 	tm.mu.Lock()
 	tm.subagents[rehydrated.ref.TaskID] = rehydrated
+	tm.rememberSubagentHandleLocked(rehydrated.sessionRef.SessionID, rehydrated.handle)
 	tm.mu.Unlock()
 	return rehydrated, nil
 }
@@ -1429,6 +1438,7 @@ func (tm *taskRuntime) lookupStoredSubagentByHandle(ctx context.Context, ref ses
 	if err != nil {
 		return nil, err
 	}
+	var matches []*taskapi.Entry
 	for _, entry := range entries {
 		if entry == nil || entry.Kind != taskapi.KindSubagent {
 			continue
@@ -1436,8 +1446,14 @@ func (tm *taskRuntime) lookupStoredSubagentByHandle(ctx context.Context, ref ses
 		if normalizeSubagentHandle(taskSpecString(entry.Spec, "handle")) == handle ||
 			normalizeSubagentHandle(taskStringValue(entry.Metadata["handle"])) == handle ||
 			normalizeSubagentHandle(taskStringValue(entry.Result["handle"])) == handle {
-			return taskapi.CloneEntry(entry), nil
+			matches = append(matches, entry)
 		}
+	}
+	if len(matches) == 1 {
+		return taskapi.CloneEntry(matches[0]), nil
+	}
+	if len(matches) > 1 {
+		return nil, fmt.Errorf("impl/agent/local: subagent handle %q is ambiguous; use the task id", handle)
 	}
 	return nil, fmt.Errorf("impl/agent/local: task %q not found", handle)
 }
@@ -1854,7 +1870,7 @@ func (tm *taskRuntime) attachSubagentParticipant(ctx context.Context, activeSess
 	}
 	handle := strings.TrimSpace(task.handle)
 	if handle == "" {
-		handle = allocateSubagentHandle(activeSession, task.agent)
+		handle = tm.reserveSubagentHandle(activeSession, task.sessionRef, task.agent)
 		task.handle = handle
 	}
 	mention := "@" + strings.TrimPrefix(handle, "@")
@@ -2092,12 +2108,65 @@ func subagentTerminalID(taskID string) string {
 }
 
 func allocateSubagentHandle(activeSession session.Session, agent string) string {
+	return allocateSubagentHandleFromUsed(subagentHandlesFromSession(activeSession), agent)
+}
+
+func (tm *taskRuntime) reserveSubagentHandle(activeSession session.Session, ref session.SessionRef, agent string) string {
+	used := subagentHandlesFromSession(activeSession)
+	sessionID := strings.TrimSpace(ref.SessionID)
+	tm.mu.Lock()
+	defer tm.mu.Unlock()
+	for _, task := range tm.subagents {
+		if task == nil || strings.TrimSpace(task.sessionRef.SessionID) != sessionID {
+			continue
+		}
+		for _, handle := range []string{task.handle, taskStringValue(task.metadata["handle"]), taskStringValue(task.result["handle"])} {
+			if normalized := normalizeSubagentHandle(handle); normalized != "" {
+				used[normalized] = struct{}{}
+			}
+		}
+	}
+	if sessionID != "" {
+		for handle := range tm.handles[sessionID] {
+			if normalized := normalizeSubagentHandle(handle); normalized != "" {
+				used[normalized] = struct{}{}
+			}
+		}
+	}
+	handle := allocateSubagentHandleFromUsed(used, agent)
+	tm.rememberSubagentHandleLocked(sessionID, handle)
+	return handle
+}
+
+func (tm *taskRuntime) rememberSubagentHandleLocked(sessionID string, handle string) {
+	sessionID = strings.TrimSpace(sessionID)
+	handle = normalizeSubagentHandle(handle)
+	if sessionID == "" || handle == "" {
+		return
+	}
+	if tm.handles == nil {
+		tm.handles = map[string]map[string]struct{}{}
+	}
+	if tm.handles[sessionID] == nil {
+		tm.handles[sessionID] = map[string]struct{}{}
+	}
+	tm.handles[sessionID][handle] = struct{}{}
+}
+
+func subagentHandlesFromSession(activeSession session.Session) map[string]struct{} {
 	used := map[string]struct{}{}
 	for _, participant := range activeSession.Participants {
 		handle := normalizeSubagentHandle(participant.Label)
 		if handle != "" {
 			used[handle] = struct{}{}
 		}
+	}
+	return used
+}
+
+func allocateSubagentHandleFromUsed(used map[string]struct{}, agent string) string {
+	if used == nil {
+		used = map[string]struct{}{}
 	}
 	bases := subagentHandleBaseCandidates(agent)
 	for i := 0; i < 1000; i++ {

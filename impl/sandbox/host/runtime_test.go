@@ -2,7 +2,9 @@ package host
 
 import (
 	"context"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -126,6 +128,33 @@ func TestRuntimeWaitDrainsOutputBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartCleansBackgroundProcessAfterShellExit(t *testing.T) {
+	t.Parallel()
+
+	rt, err := New(Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	session, err := rt.Start(context.Background(), commandRequest("sleep 30 & printf 'bg:%s\\n' \"$!\"; exit 0"))
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = session.Terminate(context.Background()) }()
+	status, err := session.Wait(context.Background(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if status.Running {
+		t.Fatalf("status.Running = true, want false")
+	}
+	result, err := session.Result(context.Background())
+	if err != nil {
+		t.Fatalf("Result() error = %v", err)
+	}
+	pid := parseBackgroundPID(t, result.Stdout)
+	waitForProcessGone(t, pid)
+}
+
 func waitForStdoutContains(t *testing.T, session sandbox.Session, marker int64, want string) ([]byte, int64) {
 	t.Helper()
 
@@ -142,6 +171,36 @@ func waitForStdoutContains(t *testing.T, session sandbox.Session, marker int64, 
 			t.Fatalf("stdout = %q, want %s", string(stdout), want)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func parseBackgroundPID(t *testing.T, stdout string) int {
+	t.Helper()
+	for _, field := range strings.Fields(stdout) {
+		if !strings.HasPrefix(field, "bg:") {
+			continue
+		}
+		pid, err := strconv.Atoi(strings.TrimPrefix(field, "bg:"))
+		if err != nil {
+			t.Fatalf("parse background pid from %q: %v", field, err)
+		}
+		return pid
+	}
+	t.Fatalf("stdout = %q, want bg pid", stdout)
+	return 0
+}
+
+func waitForProcessGone(t *testing.T, pid int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("process %d is still alive", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 

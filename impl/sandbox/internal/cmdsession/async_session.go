@@ -273,6 +273,8 @@ func (s *AsyncSession) readOutput(reader io.Reader, stream string, buffer *RingB
 func (s *AsyncSession) waitForExit() {
 	err := s.cmd.Wait()
 
+	s.cleanupProcessGroupAfterExit()
+
 	// Ensure stdout/stderr reader goroutines have drained the pipes into the
 	// ring buffers before marking the session complete. Without this, callers
 	// can observe HasExited/Wait returning before the final output is readable.
@@ -309,6 +311,13 @@ func (s *AsyncSession) waitForExit() {
 	case s.exitChan <- exitCode:
 	default:
 	}
+}
+
+func (s *AsyncSession) cleanupProcessGroupAfterExit() {
+	if s == nil || s.cmd == nil || s.cmd.Process == nil {
+		return
+	}
+	_ = procutil.KillProcessGroup(s.cmd.Process.Pid)
 }
 
 // enforceTimeouts monitors the session for absolute and idle timeouts and

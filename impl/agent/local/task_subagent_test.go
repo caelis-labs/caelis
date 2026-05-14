@@ -145,6 +145,35 @@ func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 	}
 }
 
+func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T) {
+	ctx := context.Background()
+	runner := &recordingSubagentRunner{
+		spawnResult: delegation.Result{State: delegation.StateCompleted, Result: "done"},
+	}
+	runtime, activeSession := newSubagentTaskTestRuntime(t, runner)
+
+	first, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "first",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(first) error = %v", err)
+	}
+	second, err := runtime.tasks.StartSubagent(ctx, activeSession, activeSession.SessionRef, runner, task.SubagentStartRequest{
+		Agent:  "helper",
+		Prompt: "second",
+	})
+	if err != nil {
+		t.Fatalf("StartSubagent(second) error = %v", err)
+	}
+	if got := taskStringValue(first.Result["handle"]); got != "helper" {
+		t.Fatalf("first handle = %q, want helper", got)
+	}
+	if got := taskStringValue(second.Result["handle"]); got != "helper2" {
+		t.Fatalf("second handle = %q, want helper2", got)
+	}
+}
+
 func TestTaskToolResultEventMetaMarksSubagentWriteTarget(t *testing.T) {
 	t.Parallel()
 

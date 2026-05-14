@@ -4228,6 +4228,47 @@ func TestRuntimeTaskToolScopesSubagentHandleToSession(t *testing.T) {
 	}
 }
 
+func TestRuntimeTaskToolRejectsAmbiguousSubagentHandle(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	runtime.tasks.mu.Lock()
+	runtime.tasks.subagents["task-a"] = &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-a", SessionID: "child-a"},
+		sessionRef: activeSession.SessionRef,
+		handle:     "ella",
+		state:      taskapi.StateCompleted,
+		result:     map[string]any{"handle": "ella", "result": "first"},
+		metadata:   map[string]any{"handle": "ella"},
+	}
+	runtime.tasks.subagents["task-b"] = &subagentTask{
+		ref:        taskapi.Ref{TaskID: "task-b", SessionID: "child-b"},
+		sessionRef: activeSession.SessionRef,
+		handle:     "ella",
+		state:      taskapi.StateCompleted,
+		result:     map[string]any{"handle": "ella", "result": "second"},
+		metadata:   map[string]any{"handle": "ella"},
+	}
+	runtime.tasks.mu.Unlock()
+
+	target := runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	raw, err := json.Marshal(map[string]any{
+		"action":  "wait",
+		"task_id": "ella",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	_, err = target.Call(context.Background(), tool.Call{ID: "task-wait", Name: tasktool.ToolName, Input: raw})
+	if err == nil || !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("TASK wait ambiguous handle error = %v, want ambiguous", err)
+	}
+}
+
 func TestRuntimeBashToolDoesNotFetchResultWhileStillRunning(t *testing.T) {
 	t.Parallel()
 
