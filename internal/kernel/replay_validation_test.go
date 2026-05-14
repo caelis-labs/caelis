@@ -19,6 +19,7 @@ func TestValidateReplaySessionEventsRejectsUnboundedToolOutput(t *testing.T) {
 			RawOutput: map[string]any{
 				"stderr": strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()),
 			},
+			Content: []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("permission denied")}},
 		}},
 	}})
 	if err == nil {
@@ -41,6 +42,7 @@ func TestValidateReplaySessionEventsRejectsOutputFieldsInMeta(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			RawOutput: map[string]any{"stdout": "ok"},
+			Content:   []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("ok")}},
 		}},
 		Meta: map[string]any{"stderr": "duplicated"},
 	}})
@@ -65,9 +67,29 @@ func TestValidateReplaySessionEventsAllowsCanonicalEscapableOutput(t *testing.T)
 		Type: session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			RawOutput: map[string]any{"stdout": stdout},
+			Content:   []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("ok")}},
 		}},
 	}})
 	if err != nil {
 		t.Fatalf("validateReplaySessionEvents() error = %v, want canonical escapable output accepted", err)
+	}
+}
+
+func TestValidateReplaySessionEventsRejectsOldRawOutputOnlyToolResult(t *testing.T) {
+	t.Parallel()
+
+	err := validateReplaySessionEvents([]*session.Event{{
+		ID:   "tool-old",
+		Type: session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			RawOutput: map[string]any{"stdout": "ok"},
+		}},
+	}})
+	if err == nil {
+		t.Fatal("validateReplaySessionEvents() error = nil, want old rawOutput-only rejection")
+	}
+	var gatewayErr *Error
+	if !errors.As(err, &gatewayErr) || !strings.Contains(gatewayErr.Detail, "rawOutput-only") {
+		t.Fatalf("error = %#v, want rawOutput-only rejection", err)
 	}
 }

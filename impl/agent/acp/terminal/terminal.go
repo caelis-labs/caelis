@@ -21,7 +21,8 @@ type TerminalReleaseRequest = schema.TerminalReleaseRequest
 type ToolCallContent = schema.ToolCallContent
 
 type LocalTerminalAdapter struct {
-	Streams stream.Service
+	Streams    stream.Service
+	ResolveRef func(sessionID string, terminalID string) (stream.Ref, bool)
 }
 
 func (a LocalTerminalAdapter) Output(ctx context.Context, req TerminalOutputRequest) (TerminalOutputResponse, error) {
@@ -29,10 +30,7 @@ func (a LocalTerminalAdapter) Output(ctx context.Context, req TerminalOutputRequ
 		return TerminalOutputResponse{}, fmt.Errorf("impl/agent/acp/terminal: stream service is required")
 	}
 	snap, err := a.Streams.Read(ctx, stream.ReadRequest{
-		Ref: stream.Ref{
-			SessionID:  strings.TrimSpace(req.SessionID),
-			TerminalID: strings.TrimSpace(req.TerminalID),
-		},
+		Ref: a.requestRef(req.SessionID, req.TerminalID),
 	})
 	if err != nil {
 		return TerminalOutputResponse{}, err
@@ -53,10 +51,7 @@ func (a LocalTerminalAdapter) WaitForExit(ctx context.Context, req TerminalWaitF
 	if !ok || controller == nil {
 		return TerminalWaitForExitResponse{}, fmt.Errorf("impl/agent/acp/terminal: terminal wait is unsupported")
 	}
-	snap, err := controller.Wait(ctx, stream.Ref{
-		SessionID:  strings.TrimSpace(req.SessionID),
-		TerminalID: strings.TrimSpace(req.TerminalID),
-	})
+	snap, err := controller.Wait(ctx, a.requestRef(req.SessionID, req.TerminalID))
 	if err != nil {
 		return TerminalWaitForExitResponse{}, err
 	}
@@ -73,10 +68,7 @@ func (a LocalTerminalAdapter) Kill(ctx context.Context, req TerminalKillRequest)
 	if !ok || controller == nil {
 		return fmt.Errorf("impl/agent/acp/terminal: terminal kill is unsupported")
 	}
-	return controller.Kill(ctx, stream.Ref{
-		SessionID:  strings.TrimSpace(req.SessionID),
-		TerminalID: strings.TrimSpace(req.TerminalID),
-	})
+	return controller.Kill(ctx, a.requestRef(req.SessionID, req.TerminalID))
 }
 
 func (a LocalTerminalAdapter) Release(ctx context.Context, req TerminalReleaseRequest) error {
@@ -84,10 +76,21 @@ func (a LocalTerminalAdapter) Release(ctx context.Context, req TerminalReleaseRe
 	if !ok || controller == nil {
 		return fmt.Errorf("impl/agent/acp/terminal: terminal release is unsupported")
 	}
-	return controller.Release(ctx, stream.Ref{
-		SessionID:  strings.TrimSpace(req.SessionID),
-		TerminalID: strings.TrimSpace(req.TerminalID),
-	})
+	return controller.Release(ctx, a.requestRef(req.SessionID, req.TerminalID))
+}
+
+func (a LocalTerminalAdapter) requestRef(sessionID string, terminalID string) stream.Ref {
+	sessionID = strings.TrimSpace(sessionID)
+	terminalID = strings.TrimSpace(terminalID)
+	if a.ResolveRef != nil {
+		if ref, ok := a.ResolveRef(sessionID, terminalID); ok {
+			return stream.NormalizeRef(ref)
+		}
+	}
+	return stream.Ref{
+		SessionID:  sessionID,
+		TerminalID: terminalID,
+	}
 }
 
 func terminalSnapshotOutput(snap stream.Snapshot) string {
@@ -95,7 +98,10 @@ func terminalSnapshotOutput(snap stream.Snapshot) string {
 	for _, frame := range snap.Frames {
 		out.WriteString(frame.Text)
 	}
-	return out.String()
+	if text := out.String(); text != "" {
+		return text
+	}
+	return snap.FinalText
 }
 
 func RefFromEvent(event *session.Event) (stream.Ref, bool) {
@@ -113,9 +119,22 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 			ref.TerminalID = strings.TrimSpace(terminalID)
 		}
 	}
-	if ref.TerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil && event.Protocol.ToolCall.RawOutput != nil {
-		if terminalID, _ := event.Protocol.ToolCall.RawOutput["terminal_id"].(string); strings.TrimSpace(terminalID) != "" {
-			ref.TerminalID = strings.TrimSpace(terminalID)
+	if ref.TerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
+		for _, item := range event.Protocol.ToolCall.Content {
+			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+				ref.TerminalID = terminalID
+				break
+			}
+		}
+	}
+	if ref.TerminalID == "" {
+		if update := session.ProtocolUpdateOf(event); update != nil {
+			for _, item := range session.ProtocolToolCallContentOf(update) {
+				if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+					ref.TerminalID = terminalID
+					break
+				}
+			}
 		}
 	}
 	if ref.TerminalID == "" {

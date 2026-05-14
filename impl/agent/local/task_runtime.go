@@ -24,7 +24,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
-const defaultBashYield = 7 * time.Second
+const (
+	defaultBashYield             = 7 * time.Second
+	bashLiveOutputBufferCapBytes = 64 * 1024
+)
 
 type taskRuntime struct {
 	runtime *Runtime
@@ -55,13 +58,18 @@ type bashTask struct {
 	title      string
 	createdAt  time.Time
 
-	mu           sync.Mutex
-	state        taskapi.State
-	running      bool
-	stdoutCursor int64
-	stderrCursor int64
-	result       map[string]any
-	metadata     map[string]any
+	mu             sync.Mutex
+	state          taskapi.State
+	running        bool
+	stdoutCursor   int64
+	stderrCursor   int64
+	modelCursor    int64
+	output         string
+	outputBase     int64
+	outputLive     bool
+	outputCallback bool
+	result         map[string]any
+	metadata       map[string]any
 }
 
 type subagentTask struct {
@@ -512,9 +520,28 @@ func (tm *taskRuntime) StartBash(
 	runtime sandbox.Runtime,
 	req taskapi.BashStartRequest,
 ) (taskapi.Snapshot, error) {
+	var (
+		task          *bashTask
+		pendingOutput strings.Builder
+		pendingMu     sync.Mutex
+	)
 	sandboxReq := sandbox.CommandRequest{
 		Command: req.Command,
 		Dir:     req.Workdir,
+		OnOutput: func(chunk sandbox.OutputChunk) {
+			if chunk.Text == "" {
+				return
+			}
+			pendingMu.Lock()
+			current := task
+			if current == nil {
+				pendingOutput.WriteString(chunk.Text)
+				pendingMu.Unlock()
+				return
+			}
+			pendingMu.Unlock()
+			current.appendOutput(chunk.Text)
+		},
 	}
 	if constraints, ok := req.Constraints.(sandbox.Constraints); ok {
 		sandboxReq.Constraints = constraints
@@ -528,21 +555,28 @@ func (tm *taskRuntime) StartBash(
 	}
 	now := tm.runtime.now()
 	taskID := tm.runtime.nextID("task", nil)
-	task := &bashTask{
+	createdTask := &bashTask{
 		ref: taskapi.Ref{
 			TaskID:     taskID,
 			SessionID:  strings.TrimSpace(sessionHandle.Ref().SessionID),
 			TerminalID: strings.TrimSpace(sessionHandle.Terminal().TerminalID),
 		},
-		sessionRef: session.NormalizeSessionRef(ref),
-		session:    sessionHandle,
-		command:    strings.TrimSpace(req.Command),
-		workdir:    strings.TrimSpace(req.Workdir),
-		title:      shell.BashToolName + " " + strings.TrimSpace(req.Command),
-		createdAt:  now,
-		state:      taskapi.StateRunning,
-		running:    true,
+		sessionRef:     session.NormalizeSessionRef(ref),
+		session:        sessionHandle,
+		command:        strings.TrimSpace(req.Command),
+		workdir:        strings.TrimSpace(req.Workdir),
+		title:          shell.BashToolName + " " + strings.TrimSpace(req.Command),
+		createdAt:      now,
+		state:          taskapi.StateRunning,
+		running:        true,
+		outputCallback: true,
 	}
+	pendingMu.Lock()
+	task = createdTask
+	if pending := pendingOutput.String(); pending != "" {
+		task.appendOutputLocked(pending)
+	}
+	pendingMu.Unlock()
 	tm.mu.Lock()
 	tm.tasks[taskID] = task
 	sessionID := strings.TrimSpace(ref.SessionID)
@@ -977,30 +1011,36 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	task.mu.Lock()
 	task.stdoutCursor = nextStdout
 	task.stderrCursor = nextStderr
+	if !task.outputCallback {
+		task.appendOutputLocked(terminalDeltaText(string(stdout), string(stderr)))
+	}
+	outputText := task.output
+	outputCursor := task.outputCursorLocked()
 	state := stateFromStatus(status)
 	task.state = state
 	task.running = status.Running
 	task.metadata = map[string]any{
-		"task_id":        task.ref.TaskID,
-		"task_kind":      string(taskapi.KindBash),
-		"state":          string(state),
-		"running":        status.Running,
-		"session_id":     task.ref.SessionID,
-		"terminal_id":    task.ref.TerminalID,
-		"supports_input": status.SupportsInput,
+		"task_id":     task.ref.TaskID,
+		"task_kind":   string(taskapi.KindBash),
+		"state":       string(state),
+		"running":     status.Running,
+		"session_id":  task.ref.SessionID,
+		"terminal_id": task.ref.TerminalID,
 	}
 	if status.Terminal.TerminalID != "" {
 		task.metadata["terminal_id"] = status.Terminal.TerminalID
 	}
 	if status.Running {
+		latestOutput := compactLatestOutput(task.outputFromCursorLocked(task.modelCursor))
+		task.modelCursor = outputCursor
+		task.metadata["output_cursor"] = outputCursor
+		task.metadata["model_output_cursor"] = task.modelCursor
 		task.result = map[string]any{
-			"task_id":         task.ref.TaskID,
-			"state":           string(state),
-			"stdout":          string(stdout),
-			"stderr":          string(stderr),
-			"output_preview":  taskOutputPreview(stdout, stderr),
-			"supports_input":  status.SupportsInput,
-			"supports_cancel": true,
+			"task_id": task.ref.TaskID,
+			"state":   string(state),
+		}
+		if latestOutput != "" {
+			task.result["latest_output"] = latestOutput
 		}
 		snapshot := task.snapshotLocked(status)
 		entry := task.entrySnapshot(tm.runtime.now())
@@ -1014,23 +1054,20 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	result, resultErr := task.session.Result(ctx)
 	stdoutText := result.Stdout
 	stderrText := result.Stderr
-	if strings.TrimSpace(stdoutText) == "" && len(stdout) > 0 {
-		stdoutText = string(stdout)
-	}
-	if strings.TrimSpace(stderrText) == "" && len(stderr) > 0 {
-		stderrText = string(stderr)
-	}
+	finalText := terminalFinalText(outputText, stdoutText, stderrText, resultErr)
+	task.metadata["output_cursor"] = int64(len([]byte(finalText)))
+	task.metadata["model_output_cursor"] = int64(len([]byte(finalText)))
 	task.result = map[string]any{
-		"stdout":    stdoutText,
-		"stderr":    stderrText,
-		"result":    compactFinalOutput(stdoutText, stderrText),
-		"exit_code": result.ExitCode,
-		"state":     string(state),
+		"result": finalText,
+		"state":  string(state),
+	}
+	if commandExitCodeAvailable(state, result.ExitCode, resultErr) {
+		task.result["exit_code"] = result.ExitCode
 	}
 	if detail, ok := sandbox.SandboxPermissionDetail(result, resultErr); ok {
 		task.result["error"] = detail
 		task.result["error_code"] = string(tool.ErrorCodeSandboxDenied)
-	} else if resultErr != nil && strings.TrimSpace(stdoutText) == "" && strings.TrimSpace(stderrText) == "" {
+	} else if resultErr != nil && strings.TrimSpace(finalText) == "(no output)" {
 		task.result["error"] = strings.TrimSpace(resultErr.Error())
 		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
 			task.result["error_code"] = code
@@ -1114,7 +1151,6 @@ func (tm *taskRuntime) failBashTask(ctx context.Context, task *bashTask, cause e
 		"error":      reason,
 		"error_code": string(tool.ErrorCodeInvalidInput),
 		"result":     reason,
-		"exit_code":  -1,
 	}
 	snapshot := task.snapshotLocked(status)
 	entry := task.entrySnapshot(now)
@@ -1463,20 +1499,15 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	if internalTaskID := strings.TrimSpace(snapshot.Ref.TaskID); snapshot.Kind != taskapi.KindSubagent && internalTaskID != "" && internalTaskID != visibleTaskID {
 		taskMeta["internal_task_id"] = internalTaskID
 	}
-	if snapshot.Kind != taskapi.KindSubagent && snapshot.StdoutCursor > 0 {
-		taskMeta["stdout_cursor"] = snapshot.StdoutCursor
-	}
-	if snapshot.Kind != taskapi.KindSubagent && snapshot.StderrCursor > 0 {
-		taskMeta["stderr_cursor"] = snapshot.StderrCursor
+	if snapshot.Kind != taskapi.KindSubagent {
+		if cursor, ok := taskInt64Value(snapshot.Metadata["output_cursor"]); ok && cursor >= 0 {
+			taskMeta["output_cursor"] = cursor
+		} else if text, _ := snapshot.Result["result"].(string); text != "" {
+			taskMeta["output_cursor"] = int64(len([]byte(text)))
+		}
 	}
 	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); snapshot.Kind != taskapi.KindSubagent && terminalID != "" {
 		taskMeta["terminal_id"] = terminalID
-	}
-	if snapshot.SupportsInput {
-		taskMeta["supports_input"] = true
-	}
-	if snapshot.SupportsCancel {
-		taskMeta["supports_cancel"] = true
 	}
 	for _, key := range []string{"source", "interaction", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq"} {
 		if value, ok := snapshot.Metadata[key]; ok {
@@ -1499,30 +1530,20 @@ func bashTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	if snapshot.Running {
 		payload["task_id"] = visibleTaskID
 		payload["state"] = string(snapshot.State)
-		if stdout, _ := snapshot.Result["stdout"].(string); stdout != "" {
-			payload["stdout"] = stdout
-		}
-		if stderr, _ := snapshot.Result["stderr"].(string); stderr != "" {
-			payload["stderr"] = stderr
-		}
-		if supportsInput, ok := snapshot.Result["supports_input"].(bool); ok {
-			if supportsInput {
-				payload["supports_input"] = true
-			}
+		if latestOutput, _ := snapshot.Result["latest_output"].(string); strings.TrimSpace(latestOutput) != "" {
+			payload["latest_output"] = latestOutput
 		}
 		return payload
 	}
-	stdout, _ := snapshot.Result["stdout"].(string)
-	stderr, _ := snapshot.Result["stderr"].(string)
-	payload["stdout"] = stdout
-	payload["stderr"] = stderr
+	payload["state"] = string(snapshot.State)
+	if text, _ := snapshot.Result["result"].(string); text != "" {
+		payload["result"] = text
+	}
 	if errText, _ := snapshot.Result["error"].(string); strings.TrimSpace(errText) != "" {
 		payload["error"] = strings.TrimSpace(errText)
 	}
 	if exitCode, ok := snapshot.Result["exit_code"]; ok {
 		payload["exit_code"] = exitCode
-	} else if snapshot.State != taskapi.StateCompleted {
-		payload["exit_code"] = -1
 	}
 	return payload
 }
@@ -1534,7 +1555,7 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	}
 	if snapshot.Running {
 		if preview := strings.TrimSpace(taskStringValue(snapshot.Result["output_preview"])); preview != "" {
-			payload["output_preview"] = preview
+			payload["text"] = preview
 		}
 		return payload
 	}
@@ -1726,8 +1747,12 @@ func (tm *taskRuntime) rehydrateBashTask(entry *taskapi.Entry) (*bashTask, error
 		running:      entry.Running,
 		stdoutCursor: entry.StdoutCursor,
 		stderrCursor: entry.StderrCursor,
+		output:       taskStringValue(entry.Result["result"]),
 		result:       maps.Clone(entry.Result),
 		metadata:     maps.Clone(entry.Metadata),
+	}
+	if cursor, ok := taskInt64Value(entry.Metadata["model_output_cursor"]); ok && cursor >= 0 {
+		task.modelCursor = cursor
 	}
 	if !entry.Running {
 		task.session = completedTaskSession{entry: taskapi.CloneEntry(entry)}
@@ -2213,7 +2238,6 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
 	t.result["agent"] = t.agent
 	t.result["state"] = string(t.state)
-	t.result["supports_cancel"] = t.running
 }
 
 func (t *subagentTask) isRunning() bool {
@@ -2245,7 +2269,6 @@ func (t *subagentTask) applyInterruptedLocked(reason string) {
 	t.result["error"] = reason
 	t.result["result"] = reason
 	t.result["output_preview"] = reason
-	t.result["supports_cancel"] = false
 	t.result["task_id"] = t.handle
 	t.result["handle"] = t.handle
 	t.result["mention"] = "@" + strings.TrimPrefix(t.handle, "@")
@@ -2284,7 +2307,7 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 	if text == "" {
 		return
 	}
-	t.appendStreamLocked("stdout", text)
+	t.appendStreamLocked(text)
 }
 
 func subagentFramesContainAssistantText(frames []stream.Frame) bool {
@@ -2343,7 +2366,7 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 			}
 			continue
 		}
-		t.appendStreamLocked(frame.Stream, text)
+		t.appendStreamLocked(text)
 		if t.result == nil {
 			t.result = map[string]any{}
 		}
@@ -2355,18 +2378,56 @@ func (t *subagentTask) applyStreamFrames(frames []stream.Frame) {
 	}
 }
 
-func (t *subagentTask) appendStreamLocked(stream string, text string) {
+func (t *subagentTask) appendStreamLocked(text string) {
 	if t == nil || text == "" {
 		return
 	}
-	switch strings.ToLower(strings.TrimSpace(stream)) {
-	case "stderr":
-		t.stderr += text
-		t.stderrCursor = int64(len([]byte(t.stderr)))
-	default:
-		t.stdout += text
-		t.stdoutCursor = int64(len([]byte(t.stdout)))
+	t.stdout += text
+	t.stdoutCursor = int64(len([]byte(t.stdout)))
+}
+
+func (t *bashTask) appendOutput(text string) {
+	if t == nil || text == "" {
+		return
 	}
+	t.mu.Lock()
+	t.appendOutputLocked(text)
+	t.mu.Unlock()
+}
+
+func (t *bashTask) appendOutputLocked(text string) {
+	if t == nil || text == "" {
+		return
+	}
+	raw := []byte(t.output)
+	raw = append(raw, text...)
+	if bashLiveOutputBufferCapBytes > 0 && len(raw) > bashLiveOutputBufferCapBytes {
+		dropped := len(raw) - bashLiveOutputBufferCapBytes
+		raw = raw[dropped:]
+		t.outputBase += int64(dropped)
+		if t.modelCursor < t.outputBase {
+			t.modelCursor = t.outputBase
+		}
+	}
+	t.output = string(raw)
+	t.outputLive = true
+}
+
+func (t *bashTask) outputCursorLocked() int64 {
+	if t == nil {
+		return 0
+	}
+	return t.outputBase + int64(len([]byte(t.output)))
+}
+
+func (t *bashTask) outputFromCursorLocked(cursor int64) string {
+	if t == nil || t.output == "" {
+		return ""
+	}
+	if cursor < t.outputBase {
+		cursor = t.outputBase
+	}
+	return sliceStringFromByteCursor(t.output, cursor-t.outputBase)
 }
 
 func (t *subagentTask) snapshot() taskapi.Snapshot {
@@ -2503,8 +2564,7 @@ func (s completedTaskSession) ReadOutput(_ context.Context, stdoutMarker, stderr
 	if s.entry == nil || s.entry.Result == nil {
 		return nil, nil, 0, 0, nil
 	}
-	stdout, _ := s.entry.Result["stdout"].(string)
-	stderr, _ := s.entry.Result["stderr"].(string)
+	stdout, stderr := completedTaskOutput(s.entry.Result)
 	if stdoutMarker < 0 {
 		stdoutMarker = 0
 	}
@@ -2524,13 +2584,12 @@ func (s completedTaskSession) Status(context.Context) (sandbox.SessionStatus, er
 	if s.entry == nil {
 		return sandbox.SessionStatus{}, nil
 	}
-	exitCode, _ := s.entry.Result["exit_code"].(float64)
 	return sandbox.SessionStatus{
 		SessionRef:    s.Ref(),
 		Terminal:      s.Terminal(),
 		Running:       false,
 		SupportsInput: false,
-		ExitCode:      int(exitCode),
+		ExitCode:      completedTaskExitCode(s.entry),
 		StartedAt:     s.entry.CreatedAt,
 		UpdatedAt:     s.entry.UpdatedAt,
 	}, nil
@@ -2544,19 +2603,55 @@ func (s completedTaskSession) Result(context.Context) (sandbox.CommandResult, er
 	if s.entry == nil || s.entry.Result == nil {
 		return sandbox.CommandResult{}, nil
 	}
-	exitCode, _ := s.entry.Result["exit_code"].(float64)
-	stdout, _ := s.entry.Result["stdout"].(string)
-	stderr, _ := s.entry.Result["stderr"].(string)
+	stdout, stderr := completedTaskOutput(s.entry.Result)
 	return sandbox.CommandResult{
 		Stdout:   stdout,
 		Stderr:   stderr,
-		ExitCode: int(exitCode),
+		ExitCode: completedTaskExitCode(s.entry),
 		Route:    sandbox.RouteHost,
 		Backend:  s.entry.Terminal.Backend,
 	}, nil
 }
 
 func (completedTaskSession) Terminate(context.Context) error { return nil }
+
+func completedTaskOutput(result map[string]any) (string, string) {
+	if result == nil {
+		return "", ""
+	}
+	if text, _ := result["result"].(string); text != "" {
+		return text, ""
+	}
+	stdout, _ := result["stdout"].(string)
+	stderr, _ := result["stderr"].(string)
+	return stdout, stderr
+}
+
+func completedTaskExitCode(entry *taskapi.Entry) int {
+	if entry == nil {
+		return 0
+	}
+	if code, ok := parseIntArgValue(entry.Result["exit_code"]); ok {
+		return code
+	}
+	state := entry.State
+	if state == "" {
+		state = taskapi.State(strings.TrimSpace(taskStringValue(entry.Result["state"])))
+	}
+	switch state {
+	case taskapi.StateCompleted:
+		return 0
+	case taskapi.StateCancelled, taskapi.StateInterrupted:
+		return -1
+	case taskapi.StateFailed:
+		return 1
+	default:
+		if entry.Running {
+			return 0
+		}
+		return 1
+	}
+}
 
 func sandboxRuntimeFromTool(tool tool.Tool) (sandbox.Runtime, bool) {
 	provider, ok := tool.(sandboxRuntimeProvider)
@@ -2665,30 +2760,90 @@ func parseIntArgValue(raw any) (int, bool) {
 	}
 }
 
-func taskOutputPreview(stdout, stderr []byte) string {
-	lines := make([]string, 0, 8)
-	appendLines := func(prefix string, raw []byte) {
-		text := strings.TrimSpace(string(raw))
-		if text == "" {
-			return
-		}
-		for _, line := range strings.Split(text, "\n") {
-			line = compactLine(line)
-			if line == "" {
-				continue
-			}
-			lines = append(lines, prefix+line)
-		}
+func taskInt64Value(raw any) (int64, bool) {
+	switch typed := raw.(type) {
+	case int64:
+		return typed, true
+	case int:
+		return int64(typed), true
+	case float64:
+		return int64(typed), true
+	case json.Number:
+		value, err := typed.Int64()
+		return value, err == nil
+	default:
+		return 0, false
 	}
-	appendLines("", stdout)
-	appendLines("stderr: ", stderr)
-	if len(lines) == 0 {
+}
+
+func compactLatestOutput(delta string) string {
+	delta = strings.TrimRight(strings.ReplaceAll(delta, "\r\n", "\n"), "\r\n")
+	if strings.TrimSpace(delta) == "" {
 		return ""
 	}
-	if len(lines) > 3 {
-		lines = lines[len(lines)-3:]
+	lines := strings.Split(delta, "\n")
+	for i := range lines {
+		lines[i] = compactLine(lines[i])
+	}
+	const keepLines = 5
+	if len(lines) > keepLines {
+		hidden := len(lines) - keepLines
+		lines = append([]string{fmt.Sprintf("...%d lines hidden...", hidden)}, lines[len(lines)-keepLines:]...)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func commandExitCodeAvailable(state taskapi.State, exitCode int, resultErr error) bool {
+	if exitCode < 0 {
+		return false
+	}
+	switch state {
+	case taskapi.StateCompleted, taskapi.StateFailed:
+	default:
+		return false
+	}
+	if resultErr != nil && exitCode == 0 && !plainTerminalExitError(resultErr) {
+		return false
+	}
+	return true
+}
+
+func plainTerminalExitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.TrimSpace(err.Error())
+	return strings.HasPrefix(text, "exit status ") || strings.HasPrefix(text, "signal: ")
+}
+
+func terminalDeltaText(stdout string, stderr string) string {
+	switch {
+	case stdout != "" && stderr != "":
+		return stdout + stderr
+	case stdout != "":
+		return stdout
+	case stderr != "":
+		return stderr
+	default:
+		return ""
+	}
+}
+
+func terminalFinalText(output string, stdout string, stderr string, resultErr error) string {
+	if text := terminalDeltaText(stdout, stderr); text != "" {
+		return text
+	}
+	if output != "" {
+		return output
+	}
+	if resultErr != nil {
+		if text := strings.TrimSpace(resultErr.Error()); text != "" {
+			if !strings.HasPrefix(text, "exit status ") && !strings.HasPrefix(text, "signal: ") {
+				return text
+			}
+		}
+	}
+	return "(no output)"
 }
 
 func compactFinalOutput(stdout, stderr string) string {

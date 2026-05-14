@@ -282,6 +282,9 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
 	semanticName := toolSemanticName(name, toolKind)
 	output := update.Output
+	if strings.EqualFold(semanticName, "TASK") && taskAction == "cancel" {
+		args = taskCancelArgsWithLinkedCommand(args, out, taskID)
+	}
 	defer func() {
 		var moved bool
 		out, moved = relocateApprovalReviewEventsAfterTool(out, callID)
@@ -351,7 +354,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			continue
 		}
 		fillMissingFinalToolEventFromExisting(&finalEvent, *ev)
-		if shouldReplaceCompletedSpawnToolEvent(*ev, finalEvent) {
+		if shouldReplaceCompletedTerminalToolEvent(*ev, finalEvent) {
 			mergeFinalToolEvent(ev, &finalEvent)
 			if shouldDefaultCollapseToolEvent(finalEvent) {
 				collapse = true
@@ -495,7 +498,9 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	ev.ToolKind = finalEvent.ToolKind
 	ev.Args = finalEvent.Args
 	ev.FullArgs = finalEvent.FullArgs
-	ev.Output = finalEvent.Output
+	if strings.TrimSpace(finalEvent.Output) != "" || !isTerminalPanelToolEvent(*ev) {
+		ev.Output = finalEvent.Output
+	}
 	ev.Done = true
 	ev.Err = finalEvent.Err
 	ev.TaskID = preferredDisplayTaskID(ev.TaskID, finalEvent.TaskID)
@@ -643,12 +648,11 @@ func shouldReplaceSpawnDisplayArgs(existing string, incoming string) bool {
 		(strings.HasPrefix(incoming, existing+":") || strings.Contains(incoming, ":"))
 }
 
-func shouldReplaceCompletedSpawnToolEvent(existing SubagentEvent, incoming SubagentEvent) bool {
+func shouldReplaceCompletedTerminalToolEvent(existing SubagentEvent, incoming SubagentEvent) bool {
 	if !existing.Done || !incoming.Done {
 		return false
 	}
-	if !strings.EqualFold(toolSemanticName(existing.Name, existing.ToolKind), "SPAWN") &&
-		!strings.EqualFold(toolSemanticName(incoming.Name, incoming.ToolKind), "SPAWN") {
+	if !isTerminalPanelToolEvent(existing) && !isTerminalPanelToolEvent(incoming) {
 		return false
 	}
 	if strings.TrimSpace(existing.CallID) == "" || strings.TrimSpace(existing.CallID) != strings.TrimSpace(incoming.CallID) {
@@ -1873,6 +1877,41 @@ func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID s
 		return updated
 	}
 	return false
+}
+
+func taskCancelArgsWithLinkedCommand(args string, events []SubagentEvent, taskID string) string {
+	verb, _ := splitTaskAction(args)
+	if !strings.EqualFold(verb, "Cancel") {
+		return args
+	}
+	command := linkedTerminalCommandForTask(events, taskID)
+	if command == "" {
+		return args
+	}
+	return "Cancel " + command
+}
+
+func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return ""
+	}
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID || !isTerminalPanelToolEvent(ev) {
+			continue
+		}
+		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+			continue
+		}
+		if command := strings.TrimSpace(ev.FullArgs); command != "" {
+			return command
+		}
+		if command := strings.TrimSpace(ev.Args); command != "" {
+			return command
+		}
+	}
+	return ""
 }
 
 func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output string, final bool, err bool) bool {

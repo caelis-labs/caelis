@@ -199,6 +199,7 @@ func (l *landlockRunner) StartAsync(_ context.Context, req runnerruntime.Request
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
+		OnOutput:        asyncOutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
 			helperArgs, err := buildLandlockHelperArgs(effectivePolicy, policyCWD, policyCWD, cfg.Command)
 			if err != nil {
@@ -772,5 +773,14 @@ func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
 	}
 	return func(stream string, text string) {
 		fn(runnerruntime.OutputChunk{Stream: stream, Text: text})
+	}
+}
+
+func asyncOutputForwarder(fn func(runnerruntime.OutputChunk)) func(cmdsession.AsyncOutputChunk) {
+	if fn == nil {
+		return nil
+	}
+	return func(chunk cmdsession.AsyncOutputChunk) {
+		fn(runnerruntime.OutputChunk{Stream: chunk.Stream, Text: string(chunk.Data)})
 	}
 }

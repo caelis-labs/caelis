@@ -527,7 +527,7 @@ func canonicalToolCallPayload(event *session.Event) *ToolCallPayload {
 	if toolName == "" {
 		toolName = canonicalToolName(event, update)
 	}
-	if callID == "" && toolName == "" && len(canonicalToolRawInput(event)) == 0 {
+	if callID == "" && toolName == "" && len(canonicalToolRawInput(event)) == 0 && len(canonicalToolContent(event)) == 0 {
 		return nil
 	}
 	return &ToolCallPayload{
@@ -536,6 +536,7 @@ func canonicalToolCallPayload(event *session.Event) *ToolCallPayload {
 		ToolKind:      canonicalToolKind(event),
 		ToolTitle:     canonicalToolTitle(event),
 		RawInput:      canonicalToolRawInput(event),
+		Content:       canonicalToolContent(event),
 		Status:        canonicalToolCallStatus(rawStatus),
 		Actor:         actorIDFromSessionEvent(event),
 		Scope:         scopeFromSessionEvent(event),
@@ -563,7 +564,7 @@ func canonicalToolResultPayload(event *session.Event) *ToolResultPayload {
 		toolName = canonicalToolName(event, update)
 	}
 	isErr := strings.EqualFold(rawStatus, "error") || strings.EqualFold(rawStatus, "failed")
-	if callID == "" && toolName == "" && len(canonicalToolRawOutput(event)) == 0 {
+	if callID == "" && toolName == "" && len(canonicalToolRawOutput(event)) == 0 && len(canonicalToolContent(event)) == 0 {
 		return nil
 	}
 	return &ToolResultPayload{
@@ -573,6 +574,7 @@ func canonicalToolResultPayload(event *session.Event) *ToolResultPayload {
 		ToolTitle:     canonicalToolTitle(event),
 		RawInput:      canonicalToolRawInput(event),
 		RawOutput:     canonicalToolRawOutput(event),
+		Content:       canonicalToolContent(event),
 		Status:        canonicalToolResultStatus(rawStatus, isErr),
 		Error:         isErr,
 		Actor:         actorIDFromSessionEvent(event),
@@ -876,6 +878,18 @@ func canonicalToolRawOutput(event *session.Event) map[string]any {
 		if len(event.Protocol.ToolCall.RawOutput) > 0 {
 			return maps.Clone(event.Protocol.ToolCall.RawOutput)
 		}
+	}
+	return nil
+}
+
+func canonicalToolContent(event *session.Event) []session.ProtocolToolCallContent {
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		if content := session.ProtocolToolCallContentOf(update); len(content) > 0 {
+			return content
+		}
+	}
+	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
+		return session.CloneProtocolToolCallContent(event.Protocol.ToolCall.Content)
 	}
 	return nil
 }

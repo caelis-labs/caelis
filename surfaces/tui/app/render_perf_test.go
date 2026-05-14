@@ -307,6 +307,7 @@ func perfGatewayReasoningFrame(text string) kernel.EventEnvelope {
 }
 
 func perfTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
+	_ = cursor
 	return kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
@@ -318,14 +319,7 @@ func perfTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
 				CallID:   "call-1",
 				ToolName: "BASH",
 				Status:   kernel.ToolStatusRunning,
-				RawOutput: map[string]any{
-					"running":       true,
-					"text":          text,
-					"task_id":       "task-1",
-					"terminal_id":   "terminal-1",
-					"stream":        "stdout",
-					"stdout_cursor": cursor,
-				},
+				Content:  testTerminalContentWithID(text, "terminal-1"),
 			},
 		},
 	}

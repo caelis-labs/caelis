@@ -26,6 +26,9 @@ func validateReplaySessionEvent(event *session.Event) error {
 	if update == nil || len(update.RawOutput) == 0 {
 		return nil
 	}
+	if len(session.ProtocolToolCallContentOf(update)) == 0 {
+		return replayValidationError(event.ID, "tool result uses old rawOutput-only format; resume requires ACP tool content")
+	}
 	if err := validateCanonicalReplayRawOutput(event.ID, update.RawOutput); err != nil {
 		return err
 	}

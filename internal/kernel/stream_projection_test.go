@@ -29,8 +29,8 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 					"runtime": map[string]any{
 						"task": map[string]any{
 							"terminal_id":   "terminal-1",
-							"stdout_cursor": int64(12),
-							"stderr_cursor": 3,
+							"task_id":       "task-1",
+							"output_cursor": int64(12),
 						},
 					},
 				},
@@ -41,11 +41,7 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 				RawInput: map[string]any{
 					"command": "for i in 1 2; do echo $i; done",
 				},
-				RawOutput: map[string]any{
-					"task_id": "task-1",
-					"running": true,
-					"state":   "running",
-				},
+				Content:       []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
 				Status:        ToolStatusRunning,
 				Scope:         EventScopeMain,
 				Actor:         "assistant",
@@ -61,8 +57,8 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 	if req.Ref.SessionID != "session-1" || req.Ref.TaskID != "task-1" || req.Ref.TerminalID != "terminal-1" {
 		t.Fatalf("terminal ref = %+v", req.Ref)
 	}
-	if req.Cursor.Stdout != 12 || req.Cursor.Stderr != 3 {
-		t.Fatalf("terminal cursor = %+v, want stdout=12 stderr=3", req.Cursor)
+	if req.Cursor.Output != 12 {
+		t.Fatalf("terminal cursor = %+v, want output=12", req.Cursor)
 	}
 	if req.CallID != "call-1" || req.ToolName != "BASH" {
 		t.Fatalf("terminal request = %+v", req)
@@ -85,10 +81,17 @@ func TestStreamRequestFromEventAllowsRunningTaskControl(t *testing.T) {
 					"task_id": "spawn-1",
 					"input":   "continue",
 				},
-				RawOutput: map[string]any{
-					"task_id": "spawn-1",
-					"running": true,
-					"state":   "running",
+				Content: []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "spawn-1"}},
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"task": map[string]any{
+							"task_id":     "spawn-1",
+							"terminal_id": "spawn-1",
+							"running":     true,
+						},
+					},
 				},
 			},
 		},
@@ -114,17 +117,24 @@ func TestStreamFrameEventsDoNotAppendReasoningTextToParentTool(t *testing.T) {
 	}
 	events := StreamFrameEvents(req, stream.Frame{
 		Ref:     req.Ref,
-		Stream:  "reasoning",
 		Text:    "The user wants me to inspect files.",
 		Running: true,
+		Event: &session.Event{
+			Type: session.EventTypeAssistant,
+			Protocol: &session.EventProtocol{
+				UpdateType: string(session.ProtocolUpdateTypeAgentThought),
+				Update:     &session.ProtocolUpdate{SessionUpdate: string(session.ProtocolUpdateTypeAgentThought)},
+			},
+		},
 	})
-	if len(events) != 0 {
-		t.Fatalf("reasoning-only frame events = %#v, want no parent tool update", events)
+	for _, event := range events {
+		if event.Event.Kind == EventKindToolResult {
+			t.Fatalf("reasoning frame events = %#v, should not append parent tool update", events)
+		}
 	}
 
 	events = StreamFrameEvents(req, stream.Frame{
 		Ref:     req.Ref,
-		Stream:  "stdout",
 		Text:    "final visible output",
 		Running: true,
 	})
@@ -154,9 +164,8 @@ func TestStreamFrameEventPreservesStandardToolUpdateShape(t *testing.T) {
 
 	env := StreamFrameEvent(req, stream.Frame{
 		Ref:       req.Ref,
-		Stream:    "stdout",
 		Text:      "next line\n",
-		Cursor:    stream.Cursor{Stdout: 22, Stderr: 3},
+		Cursor:    stream.Cursor{Output: 22},
 		Running:   true,
 		UpdatedAt: time.Unix(100, 0),
 	})
@@ -170,12 +179,8 @@ func TestStreamFrameEventPreservesStandardToolUpdateShape(t *testing.T) {
 	if env.Event.ToolResult.CallID != "call-1" || env.Event.ToolResult.ToolName != "BASH" {
 		t.Fatalf("tool result = %+v", env.Event.ToolResult)
 	}
-	output := env.Event.ToolResult.RawOutput
-	if output["text"] != "next line\n" || output["stream"] != "stdout" {
-		t.Fatalf("raw output = %#v", output)
-	}
-	if output["stdout_cursor"] != int64(22) || output["stderr_cursor"] != int64(3) {
-		t.Fatalf("raw output cursor = %#v", output)
+	if got := sessionTextContent(t, env.Event.ToolResult.Content); got != "next line\n" {
+		t.Fatalf("content text = %q, want stream delta", got)
 	}
 	caelis, ok := env.Event.Meta["caelis"].(map[string]any)
 	if !ok {
@@ -198,14 +203,11 @@ func TestStreamFrameEventsProjectTaskClosedFrameWithoutText(t *testing.T) {
 		Scope:      EventScopeMain,
 	}
 	events := StreamFrameEvents(req, stream.Frame{
-		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
-		Closed:  true,
-		Running: false,
-		State:   "completed",
-		Result: map[string]any{
-			"target_kind": "subagent",
-			"result":      "已追加",
-		},
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
+		Text:      "已追加",
+		Closed:    true,
+		Running:   false,
+		State:     "completed",
 		UpdatedAt: time.Unix(180, 0),
 	})
 	if len(events) != 1 {
@@ -218,8 +220,70 @@ func TestStreamFrameEventsProjectTaskClosedFrameWithoutText(t *testing.T) {
 	if payload.CallID != "task-write-1" || payload.ToolName != "TASK" || payload.Status != ToolStatusCompleted {
 		t.Fatalf("payload = %+v, want completed TASK result", payload)
 	}
-	if payload.RawOutput["task_id"] != "maya" || payload.RawOutput["result"] != "已追加" || payload.RawOutput["target_kind"] != "subagent" {
-		t.Fatalf("raw output = %#v, want visible task id and final result", payload.RawOutput)
+	if got := sessionTextContent(t, payload.Content); got != "已追加" {
+		t.Fatalf("content text = %q, want final TASK text", got)
+	}
+}
+
+func TestStreamFrameEventsUseNoOutputPlaceholderForSilentBashFailure(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		CallID:     "bash-1",
+		ToolName:   "BASH",
+		RawInput:   map[string]any{"command": "false"},
+		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:      EventScopeMain,
+	}
+	events := StreamFrameEvents(req, stream.Frame{
+		Ref:     stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Closed:  true,
+		Running: false,
+		State:   "failed",
+	})
+	if len(events) != 1 {
+		t.Fatalf("StreamFrameEvents(BASH closed) returned %d events: %#v", len(events), events)
+	}
+	payload := events[0].Event.ToolResult
+	if payload == nil || payload.Status != ToolStatusFailed {
+		t.Fatalf("payload = %+v, want failed BASH result", payload)
+	}
+	if strings.Contains(sessionTextContent(t, payload.Content), "exit 1") {
+		t.Fatalf("content = %#v, should not expose exit code as terminal output", payload.Content)
+	}
+	if got := sessionTextContent(t, payload.Content); got != "(no output)" {
+		t.Fatalf("content text = %q, want no-output placeholder", got)
+	}
+}
+
+func TestStreamFrameEventsProjectBashClosedFrameAsStatusOnlyAfterOutput(t *testing.T) {
+	t.Parallel()
+
+	req := StreamRequest{
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		CallID:     "bash-1",
+		ToolName:   "BASH",
+		RawInput:   map[string]any{"command": "printf hi"},
+		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Scope:      EventScopeMain,
+	}
+	events := StreamFrameEvents(req, stream.Frame{
+		Ref:     stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
+		Closed:  true,
+		Running: false,
+		State:   "completed",
+		Cursor:  stream.Cursor{Output: int64(len("hi"))},
+	})
+	if len(events) != 1 {
+		t.Fatalf("StreamFrameEvents(BASH closed) returned %d events: %#v", len(events), events)
+	}
+	payload := events[0].Event.ToolResult
+	if payload == nil || payload.Status != ToolStatusCompleted {
+		t.Fatalf("payload = %+v, want completed BASH result", payload)
+	}
+	if len(payload.Content) != 0 {
+		t.Fatalf("content = %#v, want status-only close after streamed output", payload.Content)
 	}
 }
 
@@ -243,9 +307,8 @@ func TestStreamFrameEventsPreserveEmbeddedSubagentEventAndToolUpdate(t *testing.
 	}
 	frame := stream.Frame{
 		Ref:       req.Ref,
-		Stream:    "stdout",
 		Text:      "The user wants a file",
-		Cursor:    stream.Cursor{Stdout: 21, Events: 1},
+		Cursor:    stream.Cursor{Output: 21, Events: 1},
 		Running:   true,
 		UpdatedAt: time.Unix(200, 0),
 		Event: &session.Event{
@@ -283,8 +346,8 @@ func TestStreamFrameEventsPreserveEmbeddedSubagentEventAndToolUpdate(t *testing.
 	if tool.Kind != EventKindToolResult || tool.ToolResult == nil {
 		t.Fatalf("tool event = %#v, want stream tool result", tool)
 	}
-	if tool.ToolResult.RawOutput["text"] != "The user wants a file" {
-		t.Fatalf("tool raw output = %#v, want original stream text", tool.ToolResult.RawOutput)
+	if got := sessionTextContent(t, tool.ToolResult.Content); got != "The user wants a file" {
+		t.Fatalf("tool content = %q, want original stream text", got)
 	}
 
 	eventOnly := frame
@@ -308,16 +371,14 @@ func TestStreamFrameEventsPreferRequestTaskIDForSpawnRunningToolUpdate(t *testin
 	}
 	events := StreamFrameEvents(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
-		Stream:  "stdout",
 		Text:    "live continuation output",
 		Running: true,
 	})
 	if len(events) != 1 {
 		t.Fatalf("StreamFrameEvents() returned %d events: %#v", len(events), events)
 	}
-	output := events[0].Event.ToolResult.RawOutput
-	if output["task_id"] != "maya" {
-		t.Fatalf("tool raw output = %#v, want visible task id from stream request", output)
+	if got := EventMetaString(events[0].Event.Meta, "caelis", "runtime", "tool", EventMetaRuntimeTargetID); got != "maya" {
+		t.Fatalf("tool meta target = %q, want visible task id from stream request", got)
 	}
 }
 
@@ -337,15 +398,11 @@ func TestStreamFrameEventsProjectSubagentClosedFrameAsCleanFinalToolResult(t *te
 		Scope:      EventScopeMain,
 	}
 	events := StreamFrameEvents(req, stream.Frame{
-		Ref:     stream.Ref{SessionID: "root-session", TaskID: "task-internal"},
-		Closed:  true,
-		Running: false,
-		State:   "completed",
-		Result: map[string]any{
-			"task_id": "jack",
-			"agent":   "self",
-			"result":  "### 已完成\n- `hello_from_spawn.txt` 内容正确\n| 文件 | 状态 |\n| --- | --- |\n| `hello_from_spawn.txt` | **created** |",
-		},
+		Ref:       stream.Ref{SessionID: "root-session", TaskID: "task-internal"},
+		Text:      "### 已完成\n- `hello_from_spawn.txt` 内容正确\n| 文件 | 状态 |\n| --- | --- |\n| `hello_from_spawn.txt` | **created** |",
+		Closed:    true,
+		Running:   false,
+		State:     "completed",
 		UpdatedAt: time.Unix(300, 0),
 	})
 	if len(events) != 1 {
@@ -361,7 +418,7 @@ func TestStreamFrameEventsProjectSubagentClosedFrameAsCleanFinalToolResult(t *te
 	if payload.CallID != "spawn-call-1" || payload.ToolName != "SPAWN" {
 		t.Fatalf("payload = %+v, want parent SPAWN call", payload)
 	}
-	result, _ := payload.RawOutput["result"].(string)
+	result := sessionTextContent(t, payload.Content)
 	for _, want := range []string{"已完成", "hello_from_spawn.txt 内容正确", "文件  状态", "hello_from_spawn.txt  created"} {
 		if !strings.Contains(result, want) {
 			t.Fatalf("clean result = %q, want %q", result, want)
@@ -417,4 +474,14 @@ func TestStreamFrameEventsSuppressEmbeddedParentToolEcho(t *testing.T) {
 	if len(events) != 0 {
 		t.Fatalf("StreamFrameEvents() = %#v, want parent SPAWN tool echo suppressed", events)
 	}
+}
+
+func sessionTextContent(t *testing.T, content []session.ProtocolToolCallContent) string {
+	t.Helper()
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one item", content)
+	}
+	payload, _ := content[0].Content.(map[string]any)
+	text, _ := payload["text"].(string)
+	return text
 }

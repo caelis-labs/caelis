@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
 
@@ -238,19 +239,24 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			toolErr := payload.Error || strings.EqualFold(status, string(kernel.ToolStatusFailed))
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
-			rawOutput := gatewayProtocolRawOutput(ev, payload.RawOutput)
-			displayOutput := toolDisplayOutputMap(semanticName, rawOutput, ev.Meta)
+			displayOutput := toolDisplayMetaOutput(semanticName, ev.Meta)
 			displayInput := rawInput
 			if strings.EqualFold(semanticName, "SPAWN") {
 				displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
 			}
-			toolOutput := toolDisplayOutput(semanticName, displayInput, displayOutput, acpprojector.FormatToolResult(toolName, displayInput, rawOutput, status), status, toolErr)
+			content := gatewayProtocolToolContent(ev, payload.Content)
+			toolOutput := acpprojector.FormatToolContent(content)
+			if strings.TrimSpace(toolOutput) == "" {
+				if !terminalStreamStatusOnlyUpdate(semanticName, status, toolErr, ev.Meta) {
+					toolOutput = standardToolOutput(status, toolErr)
+				}
+			}
 			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 			toolTaskID := toolDisplayTaskID(rawInput, displayOutput, ev.Meta)
 			if strings.EqualFold(semanticName, "TASK") {
 				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
 			}
-			if !toolErr && (len(rawInput) > 0 || len(displayOutput) > 0) {
+			if !toolErr && (len(rawInput) > 0 || strings.TrimSpace(toolOutput) != "") {
 				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
 					toolArgs = header
 				}
@@ -435,42 +441,71 @@ func gatewayProtocolRawInput(ev kernel.Event, fallback map[string]any) map[strin
 	return cloneAnyMap(fallback)
 }
 
-func gatewayProtocolRawOutput(ev kernel.Event, fallback map[string]any) map[string]any {
-	if ev.Protocol != nil && ev.Protocol.Update != nil && len(ev.Protocol.Update.RawOutput) > 0 {
-		return cloneAnyMap(ev.Protocol.Update.RawOutput)
+func gatewayProtocolToolContent(ev kernel.Event, fallback []session.ProtocolToolCallContent) []session.ProtocolToolCallContent {
+	if ev.Protocol != nil && ev.Protocol.Update != nil {
+		if content := session.ProtocolToolCallContentOf(ev.Protocol.Update); len(content) > 0 {
+			return content
+		}
 	}
-	if ev.Protocol != nil && ev.Protocol.ToolCall != nil && len(ev.Protocol.ToolCall.RawOutput) > 0 {
-		return cloneAnyMap(ev.Protocol.ToolCall.RawOutput)
+	if ev.Protocol != nil && ev.Protocol.ToolCall != nil {
+		if content := session.CloneProtocolToolCallContent(ev.Protocol.ToolCall.Content); len(content) > 0 {
+			return content
+		}
 	}
-	return cloneAnyMap(fallback)
+	if content := session.CloneProtocolToolCallContent(fallback); len(content) > 0 {
+		return content
+	}
+	return nil
 }
 
-func toolDisplayOutputMap(toolName string, rawOutput map[string]any, meta map[string]any) map[string]any {
-	out := cloneAnyMap(rawOutput)
+func standardToolOutput(status string, isErr bool) string {
+	if isErr || strings.EqualFold(strings.TrimSpace(status), string(kernel.ToolStatusFailed)) {
+		return "failed"
+	}
+	if transcriptToolStatusFinal(status, isErr) {
+		return "completed"
+	}
+	return ""
+}
+
+func terminalStreamStatusOnlyUpdate(toolName string, status string, isErr bool, meta map[string]any) bool {
+	if !transcriptToolStatusFinal(status, isErr) {
+		return false
+	}
+	if !strings.EqualFold(kernel.EventMetaString(meta, "caelis", "runtime", "stream", "mode"), "final") {
+		return false
+	}
 	switch strings.ToUpper(strings.TrimSpace(toolName)) {
-	case "WRITE", "PATCH":
-		toolMeta := eventRuntimeToolMeta(meta)
-		for _, key := range []string{
-			"created",
-			"previous_empty",
-			"bytes_written",
-			"line_count",
-			"added_lines",
-			"removed_lines",
-			"revision",
-			"hunk",
-			"diff_hunks",
-			"diff_truncated",
-		} {
-			value, ok := toolMeta[key]
-			if !ok {
-				continue
-			}
-			if out == nil {
-				out = map[string]any{}
-			}
-			out[key] = value
+	case "BASH", "SPAWN", "TASK":
+		return true
+	default:
+		return false
+	}
+}
+
+func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {
+	out := map[string]any{}
+	toolMeta := eventRuntimeToolMeta(meta)
+	taskMeta := eventRuntimeTaskMeta(meta)
+	switch strings.ToUpper(strings.TrimSpace(toolName)) {
+	case "BASH", "SPAWN", "TASK":
+		if taskID := firstNonEmpty(asString(toolMeta["target_id"]), asString(taskMeta["task_id"])); taskID != "" {
+			out["task_id"] = taskID
 		}
+		if strings.EqualFold(toolName, "BASH") {
+			break
+		}
+		for _, key := range []string{"agent", "agent_id", "handle", "mention", "prompt", "target_kind", "action", "input"} {
+			if value, ok := toolMeta[key]; ok {
+				out[key] = value
+			}
+			if value, ok := taskMeta[key]; ok {
+				out[key] = value
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }
@@ -480,4 +515,11 @@ func eventRuntimeToolMeta(meta map[string]any) map[string]any {
 	runtimeMeta, _ := caelis["runtime"].(map[string]any)
 	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
 	return toolMeta
+}
+
+func eventRuntimeTaskMeta(meta map[string]any) map[string]any {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	taskMeta, _ := runtimeMeta["task"].(map[string]any)
+	return taskMeta
 }

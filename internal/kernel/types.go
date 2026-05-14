@@ -340,29 +340,31 @@ const (
 )
 
 type ToolCallPayload struct {
-	CallID        string         `json:"call_id,omitempty"`
-	ToolName      string         `json:"tool_name,omitempty"`
-	ToolKind      string         `json:"tool_kind,omitempty"`
-	ToolTitle     string         `json:"tool_title,omitempty"`
-	RawInput      map[string]any `json:"raw_input,omitempty"`
-	Status        ToolStatus     `json:"status,omitempty"`
-	Actor         string         `json:"actor,omitempty"`
-	Scope         EventScope     `json:"scope,omitempty"`
-	ParticipantID string         `json:"participant_id,omitempty"`
+	CallID        string                            `json:"call_id,omitempty"`
+	ToolName      string                            `json:"tool_name,omitempty"`
+	ToolKind      string                            `json:"tool_kind,omitempty"`
+	ToolTitle     string                            `json:"tool_title,omitempty"`
+	RawInput      map[string]any                    `json:"raw_input,omitempty"`
+	Content       []session.ProtocolToolCallContent `json:"content,omitempty"`
+	Status        ToolStatus                        `json:"status,omitempty"`
+	Actor         string                            `json:"actor,omitempty"`
+	Scope         EventScope                        `json:"scope,omitempty"`
+	ParticipantID string                            `json:"participant_id,omitempty"`
 }
 
 type ToolResultPayload struct {
-	CallID        string         `json:"call_id,omitempty"`
-	ToolName      string         `json:"tool_name,omitempty"`
-	ToolKind      string         `json:"tool_kind,omitempty"`
-	ToolTitle     string         `json:"tool_title,omitempty"`
-	RawInput      map[string]any `json:"raw_input,omitempty"`
-	RawOutput     map[string]any `json:"raw_output,omitempty"`
-	Status        ToolStatus     `json:"status,omitempty"`
-	Error         bool           `json:"error,omitempty"`
-	Actor         string         `json:"actor,omitempty"`
-	Scope         EventScope     `json:"scope,omitempty"`
-	ParticipantID string         `json:"participant_id,omitempty"`
+	CallID        string                            `json:"call_id,omitempty"`
+	ToolName      string                            `json:"tool_name,omitempty"`
+	ToolKind      string                            `json:"tool_kind,omitempty"`
+	ToolTitle     string                            `json:"tool_title,omitempty"`
+	RawInput      map[string]any                    `json:"raw_input,omitempty"`
+	RawOutput     map[string]any                    `json:"raw_output,omitempty"`
+	Content       []session.ProtocolToolCallContent `json:"content,omitempty"`
+	Status        ToolStatus                        `json:"status,omitempty"`
+	Error         bool                              `json:"error,omitempty"`
+	Actor         string                            `json:"actor,omitempty"`
+	Scope         EventScope                        `json:"scope,omitempty"`
+	ParticipantID string                            `json:"participant_id,omitempty"`
 }
 
 type PlanEntryPayload struct {

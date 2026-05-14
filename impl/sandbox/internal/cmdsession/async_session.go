@@ -57,6 +57,7 @@ type AsyncSession struct {
 	timeout      time.Duration // maximum session lifetime
 	idleTimeout  time.Duration // idle timeout
 	tty          bool
+	onOutput     func(AsyncOutputChunk)
 	buildCommand func(context.Context, AsyncSessionConfig) (*exec.Cmd, error)
 }
 
@@ -109,6 +110,7 @@ type AsyncSessionConfig struct {
 	Timeout         time.Duration // Maximum session lifetime (0 = no limit)
 	IdleTimeout     time.Duration // Idle timeout (0 = no idle limit)
 	TTY             bool
+	OnOutput        func(AsyncOutputChunk)
 	BuildCommand    func(context.Context, AsyncSessionConfig) (*exec.Cmd, error)
 }
 
@@ -140,6 +142,7 @@ func NewAsyncSession(cfg AsyncSessionConfig) *AsyncSession {
 		timeout:      cfg.Timeout,
 		idleTimeout:  cfg.IdleTimeout,
 		tty:          cfg.TTY,
+		onOutput:     cfg.OnOutput,
 		buildCommand: cfg.BuildCommand,
 	}
 	session.state.Store(SessionStateRunning)
@@ -252,6 +255,13 @@ func (s *AsyncSession) readOutput(reader io.Reader, stream string, buffer *RingB
 			}:
 			default:
 				// Channel full, skip
+			}
+			if s.onOutput != nil {
+				s.onOutput(AsyncOutputChunk{
+					Stream:    stream,
+					Data:      append([]byte(nil), data...),
+					Timestamp: time.Now(),
+				})
 			}
 		}
 		if err != nil {

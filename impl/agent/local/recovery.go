@@ -51,7 +51,7 @@ func (r *Runtime) recoverBashEntry(ctx context.Context, entry *task.Entry) error
 	}
 	next.Result["state"] = string(task.StateInterrupted)
 	next.Result["error"] = "task interrupted during resume"
-	if _, ok := next.Result["result"]; !ok {
+	if strings.TrimSpace(taskStringValue(next.Result["result"])) == "" {
 		next.Result["result"] = "task interrupted during resume"
 	}
 	if next.Metadata == nil {

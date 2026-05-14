@@ -197,6 +197,7 @@ func (s *seatbeltRunner) StartAsync(_ context.Context, req runnerruntime.Request
 		OutputBufferCap: 256 * 1024,
 		Timeout:         req.Timeout,
 		IdleTimeout:     req.IdleTimeout,
+		OnOutput:        asyncOutputForwarder(req.OnOutput),
 		BuildCommand: func(ctx context.Context, cfg cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
 			profile := buildSeatbeltProfile(effectivePolicy, workDir)
 			cmd := s.execCommand(ctx, "sandbox-exec", "-p", profile, "bash", "-lc", cfg.Command)
@@ -457,6 +458,15 @@ func emitOutput(fn func(runnerruntime.OutputChunk)) func(string, string) {
 	}
 	return func(stream string, text string) {
 		fn(runnerruntime.OutputChunk{Stream: stream, Text: text})
+	}
+}
+
+func asyncOutputForwarder(fn func(runnerruntime.OutputChunk)) func(cmdsession.AsyncOutputChunk) {
+	if fn == nil {
+		return nil
+	}
+	return func(chunk cmdsession.AsyncOutputChunk) {
+		fn(runnerruntime.OutputChunk{Stream: chunk.Stream, Text: string(chunk.Data)})
 	}
 }
 

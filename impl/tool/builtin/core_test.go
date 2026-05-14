@@ -181,8 +181,11 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		"workdir":       dir,
 		"yield_time_ms": 100,
 	})
-	if got := bashResult["stdout"]; !strings.Contains(got.(string), "caelis") {
-		t.Fatalf("bash stdout = %v, want patched file content", got)
+	if got := bashResult["result"]; !strings.Contains(got.(string), "caelis") {
+		t.Fatalf("bash result = %v, want patched file content", got)
+	}
+	if got := bashResult["exit_code"]; got != float64(0) {
+		t.Fatalf("bash exit_code = %v, want 0", got)
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "notes.txt"))

@@ -297,105 +297,6 @@ func genericToolArgs(raw map[string]any) string {
 	}
 }
 
-func toolDisplayOutput(name string, input map[string]any, output map[string]any, fallback string, status string, isErr bool) string {
-	name = strings.ToUpper(strings.TrimSpace(name))
-	if name == "SPAWN" {
-		output = normalizeSpawnDisplayRawMap(output)
-	}
-	if isErr && (name == "WRITE" || name == "PATCH") {
-		if text := mutationErrorDisplay(output, fallback); text != "" {
-			return text
-		}
-	}
-	switch name {
-	case "READ":
-		if summary := readDisplaySummary(input, output); summary != "" {
-			return summary
-		}
-	case "LIST":
-		if summary := listDisplaySummary(input, output); summary != "" {
-			return summary
-		}
-	case "GLOB":
-		if summary := globDisplaySummary(input, output); summary != "" {
-			return summary
-		}
-	case "SEARCH", "RG", "FIND":
-		if summary := searchDisplaySummary(input, output); summary != "" {
-			return summary
-		}
-	case "WRITE", "PATCH":
-		if summary := mutationDisplaySummary(input, output); summary != "" {
-			return summary
-		}
-	case "TASK":
-		if strings.EqualFold(toolDisplayTaskAction(input, output, nil), "write") {
-			final := transcriptToolStatusFinal(status, isErr)
-			if final {
-				if summary := displaypolicy.CleanSubagentFinalOutput(firstTrimmed(
-					asString(output["result"]),
-					asString(output["final_message"]),
-					asString(output["finalMessage"]),
-					asString(output["text"]),
-					asString(output["output"]),
-					asString(output["stdout"]),
-					asString(output["output_preview"]),
-				)); summary != "" {
-					return summary
-				}
-			}
-		}
-		return terminalDisplaySummary(output, isErr)
-	case "SPAWN":
-		final := transcriptToolStatusFinal(status, isErr)
-		if summary := spawnTerminalDisplaySummary(output, isErr, final); summary != "" {
-			return summary
-		}
-		if final {
-			return ""
-		}
-		if !isErr {
-			return ""
-		}
-		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
-			return terminalEmptySummary(name, output, isErr)
-		}
-	case "BASH":
-		final := transcriptToolStatusFinal(status, isErr)
-		if summary := bashDisplaySummary(output, status, isErr); summary != "" {
-			return summary
-		}
-		if final {
-			return ""
-		}
-		if len(output) > 0 && looksLikeRawToolJSON(fallback) {
-			return terminalEmptySummary(name, output, isErr)
-		}
-	case "REQUEST_PERMISSIONS":
-		if summary := requestPermissionsDisplayOutput(output, isErr); summary != "" {
-			return summary
-		}
-	}
-	if summary := genericToolOutput(output, isErr); summary != "" {
-		return summary
-	}
-	if isErr {
-		if text := strings.TrimSpace(fallback); text != "" {
-			return text
-		}
-	}
-	if text := strings.TrimSpace(fallback); text != "" {
-		return text
-	}
-	if transcriptToolStatusFinal(status, isErr) {
-		if isErr {
-			return "failed"
-		}
-		return "completed"
-	}
-	return ""
-}
-
 func requestPermissionsDisplayArgs(raw map[string]any) string {
 	if summary := permissionGrantDisplay(raw); summary != "" {
 		return summary
@@ -405,16 +306,6 @@ func requestPermissionsDisplayArgs(raw map[string]any) string {
 		return ""
 	}
 	return permissionGrantDisplay(permissions)
-}
-
-func requestPermissionsDisplayOutput(output map[string]any, isErr bool) string {
-	if len(output) == 0 {
-		return ""
-	}
-	if isErr || !displayBool(output["approved"]) {
-		return firstTrimmed(asString(output["error"]), asString(output["review_text"]), "denied")
-	}
-	return "completed"
 }
 
 func permissionGrantDisplay(raw map[string]any) string {
@@ -646,67 +537,6 @@ func spawnDisplayInputForResult(input map[string]any, output map[string]any) map
 	return displaypolicy.SpawnDisplayInputForResult(input, output)
 }
 
-func normalizeSpawnDisplayRawMap(raw map[string]any) map[string]any {
-	return displaypolicy.NormalizeSpawnDisplayRawMap(raw)
-}
-
-func splitLeadingJSONObject(text string) (map[string]any, string, bool) {
-	return displaypolicy.SplitLeadingJSONObject(text)
-}
-
-func isSpawnDisplayJSONObject(decoded map[string]any) bool {
-	return displaypolicy.IsSpawnDisplayJSONObject(decoded)
-}
-
-func genericToolOutput(output map[string]any, isErr bool) string {
-	if len(output) == 0 {
-		return ""
-	}
-	if isErr {
-		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
-			return stderr
-		}
-		if errText := strings.TrimSpace(asString(output["error"])); errText != "" {
-			return errText
-		}
-		if summary := strings.TrimSpace(asString(output["summary"])); summary != "" {
-			return summary
-		}
-	}
-	return firstTrimmed(
-		asString(output["text"]),
-		asString(output["stdout"]),
-		asString(output["result"]),
-		asString(output["output"]),
-		asString(output["output_preview"]),
-		asString(output["stderr"]),
-		asString(output["error"]),
-		asString(output["summary"]),
-	)
-}
-
-func mutationErrorDisplay(output map[string]any, fallback string) string {
-	if text := genericToolOutput(output, true); text != "" && !isGenericFailureText(text) {
-		return text
-	}
-	if text := strings.TrimSpace(fallback); text != "" && !isGenericFailureText(text) {
-		return text
-	}
-	if text := genericToolOutput(output, true); text != "" {
-		return text
-	}
-	return strings.TrimSpace(fallback)
-}
-
-func isGenericFailureText(text string) bool {
-	switch strings.ToLower(strings.TrimSpace(text)) {
-	case "", "failed", "error":
-		return true
-	default:
-		return false
-	}
-}
-
 func normalizeTaskWriteDisplayInput(input string) string {
 	input = normalizeToolDisplayArg(input)
 	if input == "" {
@@ -778,7 +608,7 @@ func taskHandleDisplay(value string) string {
 
 func toolDisplayResultHeader(name string, output string) string {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH":
+	case "READ", "LIST", "GLOB", "WRITE", "PATCH":
 	default:
 		return ""
 	}
@@ -961,132 +791,6 @@ func writeCreateHunk(content string) string {
 		lines = strings.Count(strings.TrimRight(content, "\n"), "\n") + 1
 	}
 	return "@@ -0,0 +1," + strconv.Itoa(lines) + " @@"
-}
-
-func terminalDisplaySummary(output map[string]any, isErr bool) string {
-	if isErr {
-		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
-			return stderr
-		}
-		if errText := strings.TrimSpace(asString(output["error"])); errText != "" {
-			return errText
-		}
-	}
-	if text := asString(output["text"]); strings.TrimSpace(text) != "" {
-		return text
-	}
-	return firstTrimmed(asString(output["stdout"]), asString(output["result"]), asString(output["output_preview"]), asString(output["stderr"]))
-}
-
-func bashDisplaySummary(output map[string]any, status string, isErr bool) string {
-	final := transcriptToolStatusFinal(status, isErr)
-	if !final {
-		if text := asString(output["text"]); strings.TrimSpace(text) != "" {
-			return text
-		}
-		return firstTrimmed(asString(output["stdout"]), asString(output["output_preview"]), asString(output["stderr"]))
-	}
-	_, hasStdout := output["stdout"]
-	_, hasStderr := output["stderr"]
-	if !hasStdout && !hasStderr {
-		if legacy := firstTrimmed(asString(output["result"]), asString(output["text"]), asString(output["error"])); legacy != "" {
-			return legacy
-		}
-	}
-	combined := combinedTerminalStreams(asString(output["stdout"]), asString(output["stderr"]))
-	if combined != "(no output)" {
-		return combined
-	}
-	if fallback := firstTrimmed(asString(output["error"]), asString(output["result"]), asString(output["text"])); fallback != "" {
-		return fallback
-	}
-	return combined
-}
-
-func combinedTerminalStreams(stdout, stderr string) string {
-	stdout = strings.TrimSpace(stdout)
-	stderr = strings.TrimSpace(stderr)
-	switch {
-	case stdout != "" && stderr != "":
-		return stdout + "\nstderr:\n" + stderr
-	case stdout != "":
-		return stdout
-	case stderr != "":
-		return stderr
-	default:
-		return "(no output)"
-	}
-}
-
-func spawnTerminalDisplaySummary(output map[string]any, isErr bool, final bool) string {
-	if isErr {
-		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
-			return stderr
-		}
-		if errText := strings.TrimSpace(asString(output["error"])); errText != "" {
-			return errText
-		}
-	}
-	if final {
-		return displaypolicy.CleanSubagentFinalOutput(firstTrimmed(
-			spawnDisplayTextCandidate(asString(output["final_message"])),
-			spawnDisplayTextCandidate(asString(output["finalMessage"])),
-			spawnDisplayTextCandidate(asString(output["result"])),
-			spawnDisplayTextCandidate(asString(output["output"])),
-			spawnDisplayTextCandidate(asString(output["text"])),
-		))
-	}
-	return firstNonEmpty(
-		spawnStreamDisplayTextCandidate(asString(output["text"])),
-		spawnStreamDisplayTextCandidate(asString(output["stdout"])),
-		spawnStreamDisplayTextCandidate(asString(output["output_preview"])),
-		spawnStreamDisplayTextCandidate(asString(output["stderr"])),
-	)
-}
-
-func spawnDisplayTextCandidate(text string) string {
-	return displaypolicy.SpawnDisplayTextCandidate(text)
-}
-
-func spawnStreamDisplayTextCandidate(text string) string {
-	if text == "" {
-		return ""
-	}
-	candidate := strings.TrimLeft(text, " \t\r\n")
-	if !strings.HasPrefix(candidate, "{") {
-		return text
-	}
-	decoder := json.NewDecoder(strings.NewReader(candidate))
-	var decoded map[string]any
-	if err := decoder.Decode(&decoded); err != nil || !isSpawnDisplayJSONObject(decoded) {
-		return text
-	}
-	offset := int(decoder.InputOffset())
-	if offset < 0 || offset > len(candidate) {
-		return text
-	}
-	remainder := candidate[offset:]
-	if strings.TrimSpace(remainder) == "" {
-		return ""
-	}
-	return strings.TrimLeft(remainder, "\r\n")
-}
-
-func terminalEmptySummary(name string, output map[string]any, isErr bool) string {
-	if isErr {
-		if stderr := strings.TrimSpace(asString(output["stderr"])); stderr != "" {
-			return stderr
-		}
-	}
-	if text := asString(output["text"]); strings.TrimSpace(text) != "" {
-		return text
-	}
-	return firstTrimmed(asString(output["stdout"]), asString(output["output_preview"]), asString(output["result"]))
-}
-
-func looksLikeRawToolJSON(text string) bool {
-	trimmed := strings.TrimSpace(text)
-	return strings.HasPrefix(trimmed, "{") && (strings.Contains(trimmed, `"session_id"`) || strings.Contains(trimmed, `"supports_input"`) || strings.Contains(trimmed, `"task_id"`))
 }
 
 func toolPath(raw map[string]any) string {

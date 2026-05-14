@@ -4,12 +4,13 @@ import (
 	"context"
 	"fmt"
 	"iter"
-	"maps"
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
+	"github.com/OnslaughtSnail/caelis/ports/task"
 )
 
 type streamService struct {
@@ -39,9 +40,36 @@ func (s *streamService) readBash(ctx context.Context, task *bashTask, cursor str
 	if err != nil {
 		return stream.Snapshot{}, err
 	}
-	stdout, stderr, nextStdout, nextStderr, err := task.session.ReadOutput(ctx, cursor.Stdout, cursor.Stderr)
-	if err != nil {
-		return stream.Snapshot{}, err
+	task.mu.Lock()
+	stdoutCursor := task.stdoutCursor
+	stderrCursor := task.stderrCursor
+	useReadOutput := !task.outputCallback
+	task.mu.Unlock()
+	if useReadOutput {
+		stdout, stderr, nextStdout, nextStderr, err := task.session.ReadOutput(ctx, stdoutCursor, stderrCursor)
+		if err != nil {
+			return stream.Snapshot{}, err
+		}
+		task.mu.Lock()
+		task.stdoutCursor = nextStdout
+		task.stderrCursor = nextStderr
+		task.appendOutputLocked(terminalDeltaText(string(stdout), string(stderr)))
+		task.mu.Unlock()
+	}
+	var result sandbox.CommandResult
+	var resultErr error
+	if !status.Running {
+		result, resultErr = task.session.Result(ctx)
+	}
+	task.mu.Lock()
+	state := stateFromStatus(status)
+	task.state = state
+	task.running = status.Running
+	outputCursor := task.outputCursorLocked()
+	finalText := ""
+	if !status.Running {
+		finalText = terminalFinalText(task.output, result.Stdout, result.Stderr, resultErr)
+		outputCursor = int64(len([]byte(finalText)))
 	}
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
@@ -50,10 +78,10 @@ func (s *streamService) readBash(ctx context.Context, task *bashTask, cursor str
 			TerminalID: strings.TrimSpace(status.Terminal.TerminalID),
 		},
 		Cursor: stream.Cursor{
-			Stdout: nextStdout,
-			Stderr: nextStderr,
+			Output: outputCursor,
 		},
 		Running:       status.Running,
+		State:         string(state),
 		SupportsInput: status.SupportsInput,
 		StartedAt:     status.StartedAt,
 		UpdatedAt:     status.UpdatedAt,
@@ -61,87 +89,87 @@ func (s *streamService) readBash(ctx context.Context, task *bashTask, cursor str
 	if !status.Running {
 		exitCode := status.ExitCode
 		snap.ExitCode = &exitCode
+		snap.FinalText = finalText
 	}
-	if len(stdout) > 0 {
-		snap.Frames = append(snap.Frames, stream.Frame{
-			Ref:       snap.Ref,
-			Stream:    "stdout",
-			Text:      string(stdout),
-			Cursor:    snap.Cursor,
-			Running:   status.Running,
-			UpdatedAt: status.UpdatedAt,
-		})
+	if status.Running {
+		if delta := task.outputFromCursorLocked(cursor.Output); delta != "" {
+			snap.Frames = append(snap.Frames, stream.Frame{
+				Ref:       snap.Ref,
+				Text:      delta,
+				Cursor:    snap.Cursor,
+				Running:   status.Running,
+				UpdatedAt: status.UpdatedAt,
+			})
+		}
 	}
-	if len(stderr) > 0 {
-		snap.Frames = append(snap.Frames, stream.Frame{
-			Ref:       snap.Ref,
-			Stream:    "stderr",
-			Text:      string(stderr),
-			Cursor:    snap.Cursor,
-			Running:   status.Running,
-			UpdatedAt: status.UpdatedAt,
-		})
-	}
+	task.mu.Unlock()
 	return stream.CloneSnapshot(snap), nil
 }
 
-func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
-	if task == nil {
+func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cursor stream.Cursor) (stream.Snapshot, error) {
+	if sub == nil {
 		return stream.Snapshot{}, fmt.Errorf("impl/agent/local: subagent task is required")
 	}
-	if task.runner != nil {
-		result, err := task.runner.Wait(ctx, task.anchor, 0)
+	if sub.runner != nil {
+		result, err := sub.runner.Wait(ctx, sub.anchor, 0)
 		if err == nil {
-			task.mu.Lock()
-			task.applyResult(result)
-			task.seedStreamFromResult(result)
-			task.mu.Unlock()
+			sub.mu.Lock()
+			sub.applyResult(result)
+			sub.seedStreamFromResult(result)
+			sub.mu.Unlock()
 		} else if ctx.Err() != nil {
 			return stream.Snapshot{}, ctx.Err()
-		} else if task.isRunning() && s != nil && s.tasks != nil {
-			if _, interruptErr := s.tasks.interruptSubagentTask(ctx, task, "subagent session interrupted during recovery: "+strings.TrimSpace(err.Error())); interruptErr != nil {
+		} else if sub.isRunning() && s != nil && s.tasks != nil {
+			if _, interruptErr := s.tasks.interruptSubagentTask(ctx, sub, "subagent session interrupted during recovery: "+strings.TrimSpace(err.Error())); interruptErr != nil {
 				return stream.Snapshot{}, interruptErr
 			}
 		}
 	}
-	task.mu.Lock()
-	defer task.mu.Unlock()
-	stdout := sliceStringFromByteCursor(task.stdout, cursor.Stdout)
-	stderr := sliceStringFromByteCursor(task.stderr, cursor.Stderr)
-	nextStdout := int64(len([]byte(task.stdout)))
-	nextStderr := int64(len([]byte(task.stderr)))
-	nextEvents := int64(len(task.streamFrames))
+	sub.mu.Lock()
+	defer sub.mu.Unlock()
+	output := subagentStreamOutput(sub.stdout, sub.stderr)
+	delta := sliceStringFromByteCursor(output, cursor.Output)
+	nextOutput := int64(len([]byte(output)))
+	nextEvents := int64(len(sub.streamFrames))
+	state := sub.state
+	if state == "" {
+		if sub.running {
+			state = task.StateRunning
+		} else {
+			state = task.StateCompleted
+		}
+	}
 	snap := stream.Snapshot{
 		Ref: stream.Ref{
-			SessionID:  strings.TrimSpace(task.sessionRef.SessionID),
-			TaskID:     strings.TrimSpace(task.ref.TaskID),
-			TerminalID: strings.TrimSpace(task.ref.TerminalID),
+			SessionID:  strings.TrimSpace(sub.sessionRef.SessionID),
+			TaskID:     strings.TrimSpace(sub.ref.TaskID),
+			TerminalID: strings.TrimSpace(sub.ref.TerminalID),
 		},
 		Cursor: stream.Cursor{
-			Stdout: nextStdout,
-			Stderr: nextStderr,
+			Output: nextOutput,
 			Events: nextEvents,
 		},
-		Running:       task.running,
+		Running:       sub.running,
+		State:         string(state),
 		SupportsInput: false,
-		StartedAt:     task.createdAt,
+		StartedAt:     sub.createdAt,
 		UpdatedAt:     time.Now(),
 	}
-	if !task.running {
-		code := 0
-		if task.state != "completed" {
-			code = 1
-		}
-		snap.ExitCode = &code
-		snap.Result = maps.Clone(task.result)
+	if !sub.running {
+		snap.FinalText = firstNonEmpty(
+			taskStringValue(sub.result["final_message"]),
+			taskStringValue(sub.result["result"]),
+			strings.TrimSpace(output),
+			taskStringValue(sub.result["error"]),
+			"(no output)",
+		)
 	}
-	deliveredStdoutFrame := false
-	deliveredStderrFrame := false
+	deliveredTextFrame := false
 	if start := cursor.Events; start < nextEvents {
 		if start < 0 {
 			start = 0
 		}
-		for _, frame := range task.streamFrames[start:] {
+		for _, frame := range sub.streamFrames[start:] {
 			cloned := stream.CloneFrame(frame)
 			terminalID := strings.TrimSpace(cloned.Ref.TerminalID)
 			cloned.Ref = snap.Ref
@@ -153,33 +181,17 @@ func (s *streamService) readSubagent(ctx context.Context, task *subagentTask, cu
 				cloned.UpdatedAt = snap.UpdatedAt
 			}
 			if cloned.Text != "" {
-				switch strings.ToLower(strings.TrimSpace(cloned.Stream)) {
-				case "stderr":
-					deliveredStderrFrame = true
-				default:
-					deliveredStdoutFrame = true
-				}
+				deliveredTextFrame = true
 			}
 			snap.Frames = append(snap.Frames, cloned)
 		}
 	}
-	if stdout != "" && !deliveredStdoutFrame {
+	if delta != "" && !deliveredTextFrame {
 		snap.Frames = append(snap.Frames, stream.Frame{
 			Ref:       snap.Ref,
-			Stream:    "stdout",
-			Text:      stdout,
+			Text:      delta,
 			Cursor:    snap.Cursor,
-			Running:   task.running,
-			UpdatedAt: snap.UpdatedAt,
-		})
-	}
-	if stderr != "" && !deliveredStderrFrame {
-		snap.Frames = append(snap.Frames, stream.Frame{
-			Ref:       snap.Ref,
-			Stream:    "stderr",
-			Text:      stderr,
-			Cursor:    snap.Cursor,
-			Running:   task.running,
+			Running:   sub.running,
 			UpdatedAt: snap.UpdatedAt,
 		})
 	}
@@ -210,18 +222,18 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 			}
 			if !snap.Running {
 				if !closedSent {
+					closeText := ""
+					if snap.ExitCode == nil {
+						closeText = snap.FinalText
+					}
 					frame := stream.Frame{
 						Ref:       snap.Ref,
+						Text:      closeText,
 						Cursor:    snap.Cursor,
 						Running:   false,
 						Closed:    true,
 						State:     streamClosedState(snap),
-						Result:    maps.Clone(snap.Result),
 						UpdatedAt: snap.UpdatedAt,
-					}
-					if snap.ExitCode != nil {
-						code := *snap.ExitCode
-						frame.ExitCode = &code
 					}
 					if !yield(&frame, nil) {
 						return
@@ -242,13 +254,36 @@ func (s *streamService) Subscribe(ctx context.Context, req stream.SubscribeReque
 }
 
 func streamClosedState(snap stream.Snapshot) string {
-	if state, _ := snap.Result["state"].(string); strings.TrimSpace(state) != "" {
-		return strings.TrimSpace(state)
+	switch strings.ToLower(strings.TrimSpace(snap.State)) {
+	case "completed":
+		return "completed"
+	case "failed":
+		return "failed"
+	case "interrupted":
+		return "interrupted"
+	case "cancelled", "canceled":
+		return "cancelled"
 	}
 	if snap.ExitCode != nil && *snap.ExitCode != 0 {
+		if *snap.ExitCode < 0 {
+			return "cancelled"
+		}
 		return "failed"
 	}
 	return "completed"
+}
+
+func subagentStreamOutput(stdout string, stderr string) string {
+	switch {
+	case stdout != "" && stderr != "":
+		return stdout + stderr
+	case stdout != "":
+		return stdout
+	case stderr != "":
+		return stderr
+	default:
+		return ""
+	}
 }
 
 func (s *streamService) Wait(ctx context.Context, ref stream.Ref) (stream.Snapshot, error) {

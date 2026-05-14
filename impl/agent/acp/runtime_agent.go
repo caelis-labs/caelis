@@ -66,8 +66,9 @@ type RuntimeAgent struct {
 	userID                string
 	agentInfo             *acp.Implementation
 
-	mu      sync.Mutex
-	cancels map[string]context.CancelFunc
+	mu           sync.Mutex
+	cancels      map[string]context.CancelFunc
+	terminalRefs map[string]stream.Ref
 }
 
 // New constructs one runtime-backed ACP agent.
@@ -121,6 +122,7 @@ func New(cfg Config) (*RuntimeAgent, error) {
 		userID:                userID,
 		agentInfo:             normalizeAgentInfo(cfg.AgentInfo, appName),
 		cancels:               map[string]context.CancelFunc{},
+		terminalRefs:          map[string]stream.Ref{},
 	}, nil
 }
 
@@ -517,6 +519,7 @@ func (a *RuntimeAgent) maybeStartTerminalBridge(ctx context.Context, cb acp.Prom
 		return
 	}
 	active[key] = struct{}{}
+	a.rememberTerminalRef(event.SessionID, displayTerminalID, ref)
 	go a.streamTerminalToACP(ctx, cb, strings.TrimSpace(event.SessionID), displayTerminalID, ref)
 }
 
@@ -532,32 +535,10 @@ func (a *RuntimeAgent) streamTerminalToACP(ctx context.Context, cb acp.PromptCal
 		if frame == nil {
 			continue
 		}
-		if frame.Text != "" {
-			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
-				SessionID: sessionID,
-				Update: acp.ToolCallUpdate{
-					SessionUpdate: acp.UpdateToolCallInfo,
-					ToolCallID:    displayTerminalID,
-					Meta: map[string]any{
-						"terminal_output": map[string]any{
-							"terminal_id": displayTerminalID,
-							"data":        frame.Text,
-						},
-					},
-				},
-			})
-		}
 		if frame.Closed {
 			status := acp.ToolStatusCompleted
-			if frame.ExitCode != nil && *frame.ExitCode != 0 {
+			if !strings.EqualFold(strings.TrimSpace(frame.State), "completed") {
 				status = acp.ToolStatusFailed
-			}
-			meta := map[string]any{
-				"terminal_id": displayTerminalID,
-				"signal":      nil,
-			}
-			if frame.ExitCode != nil {
-				meta["exit_code"] = *frame.ExitCode
 			}
 			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
 				SessionID: sessionID,
@@ -565,12 +546,33 @@ func (a *RuntimeAgent) streamTerminalToACP(ctx context.Context, cb acp.PromptCal
 					SessionUpdate: acp.UpdateToolCallInfo,
 					ToolCallID:    displayTerminalID,
 					Status:        &status,
-					Meta:          map[string]any{"terminal_exit": meta},
+					Content:       terminalToolContent(displayTerminalID, frame.Text),
 				},
 			})
 			return
 		}
+		if frame.Text != "" {
+			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
+				SessionID: sessionID,
+				Update: acp.ToolCallUpdate{
+					SessionUpdate: acp.UpdateToolCallInfo,
+					ToolCallID:    displayTerminalID,
+					Content:       terminalToolContent(displayTerminalID, frame.Text),
+				},
+			})
+		}
 	}
+}
+
+func terminalToolContent(terminalID string, text string) []acp.ToolCallContent {
+	if text == "" {
+		return nil
+	}
+	return []acp.ToolCallContent{{
+		Type:       "terminal",
+		Content:    acp.TextContent{Type: "text", Text: text},
+		TerminalID: strings.TrimSpace(terminalID),
+	}}
 }
 
 func terminalBridgeEligibleTool(name string) bool {
@@ -862,7 +864,54 @@ func (a *RuntimeAgent) terminalAdapter() (acp.TerminalAdapter, bool) {
 	if !ok || provider.Streams() == nil {
 		return nil, false
 	}
-	return terminal.LocalTerminalAdapter{Streams: provider.Streams()}, true
+	return terminal.LocalTerminalAdapter{Streams: provider.Streams(), ResolveRef: a.resolveTerminalRef}, true
+}
+
+func (a *RuntimeAgent) rememberTerminalRef(sessionID string, displayTerminalID string, ref stream.Ref) {
+	if a == nil {
+		return
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	displayTerminalID = strings.TrimSpace(displayTerminalID)
+	ref = stream.NormalizeRef(ref)
+	if sessionID == "" || displayTerminalID == "" || ref.TerminalID == "" {
+		return
+	}
+	if ref.SessionID == "" {
+		ref.SessionID = sessionID
+	}
+	a.mu.Lock()
+	if a.terminalRefs == nil {
+		a.terminalRefs = map[string]stream.Ref{}
+	}
+	a.terminalRefs[terminalRefKey(sessionID, displayTerminalID)] = ref
+	a.mu.Unlock()
+}
+
+func (a *RuntimeAgent) resolveTerminalRef(sessionID string, terminalID string) (stream.Ref, bool) {
+	if a == nil {
+		return stream.Ref{}, false
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	terminalID = strings.TrimSpace(terminalID)
+	if sessionID == "" || terminalID == "" {
+		return stream.Ref{}, false
+	}
+	a.mu.Lock()
+	ref, ok := a.terminalRefs[terminalRefKey(sessionID, terminalID)]
+	a.mu.Unlock()
+	if !ok {
+		return stream.Ref{}, false
+	}
+	ref = stream.NormalizeRef(ref)
+	if ref.SessionID == "" {
+		ref.SessionID = sessionID
+	}
+	return ref, true
+}
+
+func terminalRefKey(sessionID string, terminalID string) string {
+	return strings.TrimSpace(sessionID) + "\x00" + strings.TrimSpace(terminalID)
 }
 
 var (

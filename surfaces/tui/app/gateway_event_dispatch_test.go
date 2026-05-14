@@ -292,6 +292,7 @@ func TestModelUpdateConsumesGatewayToolEventsWithoutTranscriptRecovery(t *testin
 				ToolName:  "READ",
 				RawInput:  map[string]any{"path": "/tmp/demo.txt"},
 				RawOutput: map[string]any{"path": "/tmp/demo.txt"},
+				Content:   testToolContent("demo.txt"),
 				Status:    "completed",
 				Scope:     kernel.EventScopeMain,
 			},
@@ -346,6 +347,7 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 				ToolName:  "BASH",
 				RawInput:  map[string]any{"command": `go test ./kernel/...`},
 				RawOutput: map[string]any{"stdout": "stdout resolving packages"},
+				Content:   testTerminalContent("stdout resolving packages"),
 				Status:    kernel.ToolStatusRunning,
 				Scope:     kernel.EventScopeMain,
 			},
@@ -395,6 +397,7 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsed(t *testing.T) {
 				ToolName:  "READ",
 				RawInput:  map[string]any{"path": "internal/kernel/types.go"},
 				RawOutput: map[string]any{"text": "package core\n\ntype Event struct{}"},
+				Content:   testToolContent("types.go"),
 				Status:    kernel.ToolStatusCompleted,
 				Scope:     kernel.EventScopeMain,
 			},
@@ -452,6 +455,7 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 					ToolName:  name,
 					RawInput:  rawInput,
 					RawOutput: map[string]any{"text": output},
+					Content:   testToolContent(toolResultLabel(name, rawInput)),
 					Status:    kernel.ToolStatusCompleted,
 					Scope:     kernel.EventScopeMain,
 				},
@@ -578,6 +582,7 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 				ToolName:  "READ",
 				RawInput:  rawInput,
 				RawOutput: map[string]any{"text": "config contents"},
+				Content:   testToolContent("config.go"),
 				Status:    kernel.ToolStatusCompleted,
 				Scope:     kernel.EventScopeMain,
 			},
@@ -873,12 +878,12 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 				SessionRef: session.SessionRef{SessionID: "root-session"},
 				Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
 				ToolResult: &kernel.ToolResultPayload{
-					CallID:    id,
-					ToolName:  name,
-					RawInput:  rawInput,
-					RawOutput: map[string]any{"text": output},
-					Status:    kernel.ToolStatusCompleted,
-					Scope:     kernel.EventScopeMain,
+					CallID:   id,
+					ToolName: name,
+					RawInput: rawInput,
+					Content:  testToolContent(toolResultLabel(name, rawInput)),
+					Status:   kernel.ToolStatusCompleted,
+					Scope:    kernel.EventScopeMain,
 				},
 			},
 		})
@@ -951,6 +956,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"end_line":   100,
 					"content":    "1: package main",
 				},
+				Content: testToolContent("demo.py 1~100"),
 			},
 			want:      []string{"• Read demo.py 1~100"},
 			forbidden: []string{"│   /tmp/workspace/demo.py"},
@@ -975,6 +981,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"count":   5,
 					"matches": []any{"a.py", "b.py", "c.py", "d.py", "e.py"},
 				},
+				Content: testToolContent("**/*.py 5 matches"),
 			},
 			want: []string{"• Glob **/*.py 5 matches"},
 		},
@@ -1001,6 +1008,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"stdout":         "hello\n",
 					"exit_code":      0,
 				},
+				Content: testTerminalContent("hello"),
 			},
 			want:        []string{`• Ran echo "hello"`, "  └ hello"},
 			forbidden:   []string{"session_id", "supports_input", "737bc26a"},
@@ -1027,6 +1035,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"stdout":    "diff --git a/file.go b/file.go\n",
 					"exit_code": 0,
 				},
+				Content: testTerminalContent("diff --git a/file.go b/file.go"),
 			},
 			want:        []string{"• Ran git diff --cached -- file.go", "  └ diff --git a/file.go b/file.go"},
 			forbidden:   []string{"• git diff", "BASH diff", "╭", "╰"},
@@ -1060,6 +1069,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"result":           "stale result that is not the final message\n",
 					"final_message":    "child line 1\nchild line 2\n",
 				},
+				Content: testTerminalContent("child line 1\nchild line 2"),
 			},
 			want:        []string{"• Spawned", "  └ child line 1", "    child line 2"},
 			forbidden:   []string{"task / running", "state completed", "spawn-task-1", "self-001", "internal_task_id", "@leo", "用例| C输出欢迎", "_empty", "了根据", "stale result"},
@@ -1140,6 +1150,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"added_lines":   2,
 					"removed_lines": 0,
 				},
+				Content: testToolContent("tool_demo_summary.md +2 -0\ndiff / hunk\n@@ -0,0 +1,2 @@\n+one\n+two"),
 			},
 			want:        []string{"• Wrote tool_demo_summary.md +2 -0", "diff / hunk", "+one", "+two"},
 			forbidden:   []string{"│", "╭", "╰", "tool_demo_summary.md +2 -0\n  tool_demo_summary.md +2 -0"},
@@ -1161,6 +1172,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Scope:     kernel.EventScopeMain,
 				RawInput:  map[string]any{"path": "/tmp/workspace/workflow.go", "content": "package workflow\n"},
 				RawOutput: map[string]any{"error": "Sandbox permission denied. Use a writable workspace path or request elevated permissions."},
+				Content:   testToolContent("Sandbox permission denied. Use a writable workspace path or request elevated permissions."),
 			},
 			want:        []string{"• Write failed workflow.go", "└ Sandbox permission denied"},
 			forbidden:   []string{"• Wrote workflow.go", "╭", "╰", "│ ! workflow.go"},
@@ -1182,6 +1194,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Scope:     kernel.EventScopeMain,
 				RawInput:  map[string]any{"path": "/tmp/workspace/gm_license.go", "old": "licenseEntity.ESN", "new": "licenseEntity.Esn"},
 				RawOutput: map[string]any{"error": `tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
+				Content:   testToolContent(`tool: PATCH target "gm_license.go" did not contain an exact match for "old"`),
 			},
 			want:        []string{"• Patch failed gm_license.go", `└ tool: PATCH target "gm_license.go" did not contain an exact match for "old"`},
 			forbidden:   []string{"  └ failed", "╭", "╰"},
@@ -1208,6 +1221,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"added_lines":   1,
 					"removed_lines": 1,
 				},
+				Content: testToolContent("demo.py +1 -1\ndiff / hunk\n@@ -1,1 +1,1 @@\n-old line\n+new line"),
 			},
 			want:        []string{"• Patched demo.py +1 -1", "diff / hunk", "-old line", "+new line"},
 			forbidden:   []string{"│", "╭", "╰", "demo.py +1 -1\n  demo.py +1 -1"},
@@ -1234,6 +1248,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"added_lines":   28,
 					"removed_lines": 28,
 				},
+				Content: testToolContent("gm_license_repo.go +28 -28\ndiff / hunk\n@@ repeated replacement: 28 matches @@\n-entity.GMLicense\n+entity.GmLicense"),
 			},
 			want:        []string{"• Patched gm_license_repo.go +28 -28", "diff / hunk", "@@ repeated replacement: 28 matches @@", "-entity.GMLicense", "+entity.GmLicense"},
 			forbidden:   []string{"╭", "╰", "gm_license_repo.go +28 -28\n  gm_license_repo.go +28 -28"},
@@ -1258,6 +1273,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 					"path":         "/tmp/workspace/gm_license_repo.go",
 					"replacements": 2,
 				},
+				Content: testToolContent("gm_license_repo.go +2 -2\ndiff / hunk\n@@ -2,3 +2,3 @@\n context-a\n-entity.GMLicense\n+entity.GmLicense\n context-b\n@@ -20,3 +20,3 @@\n context-c\n-entity.GMLicense\n+entity.GmLicense\n context-d"),
 			},
 			want:        []string{"• Patched gm_license_repo.go +2 -2", "diff / hunk", "@@ -2,3 +2,3 @@", "@@ -20,3 +20,3 @@", "-entity.GMLicense", "+entity.GmLicense"},
 			forbidden:   []string{"@@ repeated replacement", "╭", "╰"},
@@ -1859,6 +1875,7 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7"}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "bash-1",
 				ToolName: "BASH",
@@ -1866,11 +1883,11 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 30); do echo $i; sleep 1; done"},
 				RawOutput: map[string]any{
-					"running":        true,
-					"state":          "running",
-					"task_id":        "task-7",
-					"output_preview": "进度: 1/30\n",
+					"running": true,
+					"state":   "running",
+					"task_id": "task-7",
 				},
+				Content: testTerminalContent("进度: 1/30\n"),
 			},
 		}},
 		{Event: kernel.Event{
@@ -1887,6 +1904,7 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": "wait"}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "task-wait-1",
 				ToolName: "TASK",
@@ -1894,11 +1912,11 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 5000},
 				RawOutput: map[string]any{
-					"running":        true,
-					"state":          "running",
-					"task_id":        "task-7",
-					"output_preview": "进度: 1/30\n进度: 2/30\n进度: 3/30\n",
+					"running": true,
+					"state":   "running",
+					"task_id": "task-7",
 				},
+				Content: testTerminalContent("进度: 1/30\n进度: 2/30\n进度: 3/30\n"),
 			},
 		}},
 	} {
@@ -2042,6 +2060,11 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"target_id": "jack",
+				"agent":     "self",
+				"prompt":    prompt,
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "spawn-clean-final",
 				ToolName: "SPAWN",
@@ -2054,11 +2077,17 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 					"task_id": "jack",
 					"text":    "dirty process line\nls output that should not become final",
 				},
+				Content: testTerminalContent("dirty process line\nls output that should not become final"),
 			},
 		}},
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"target_id": "jack",
+				"agent":     "self",
+				"prompt":    prompt,
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "spawn-clean-final",
 				ToolName: "SPAWN",
@@ -2072,6 +2101,14 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 					"result":        "dirty result that should not become final",
 					"final_message": finalText,
 				},
+				Content: testToolContent(strings.Join([]string{
+					"已完成",
+					"✅ 创建 hello_from_spawn.txt",
+					"内容： Hello from SPAWN child agent!",
+					"文件  状态",
+					"hello_from_spawn.txt  created",
+					"报告位于 spawn_report.md",
+				}, "\n")),
 			},
 		}},
 	} {
@@ -2123,6 +2160,10 @@ func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) 
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"agent":  "claude",
+				"prompt": prompt,
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "spawn-running-json",
 				ToolName: "SPAWN",
@@ -2160,34 +2201,7 @@ func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) 
 	}
 }
 
-func TestSpawnFinalMessageJSONAnswerRemainsVisible(t *testing.T) {
-	t.Parallel()
-
-	for _, answer := range []string{`{"result":"ok"}`, `{"state":"done"}`} {
-		got := toolDisplayOutput("SPAWN", nil, map[string]any{"result": "stale", "final_message": answer}, "", string(kernel.ToolStatusCompleted), false)
-		if got != answer {
-			t.Fatalf("toolDisplayOutput(SPAWN JSON final %q) = %q, want original JSON", answer, got)
-		}
-	}
-}
-
-func TestSpawnFinalLegacyResultFallbackRemainsVisible(t *testing.T) {
-	t.Parallel()
-
-	got := toolDisplayOutput("SPAWN", nil, map[string]any{
-		"result": "### Legacy summary\n- `done`",
-	}, "", string(kernel.ToolStatusCompleted), false)
-	want := "Legacy summary\ndone"
-	if got != want {
-		t.Fatalf("toolDisplayOutput(SPAWN legacy result) = %q, want %q", got, want)
-	}
-}
-
 func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
-	if got := toolDisplayOutput("SPAWN", nil, map[string]any{"text": " let"}, "", string(kernel.ToolStatusRunning), false); got != " let" {
-		t.Fatalf("running SPAWN chunk = %q, want leading space preserved", got)
-	}
-
 	model := newGatewayEventTestModel()
 	prompt := "写分析报告"
 	start := kernel.EventEnvelope{Event: kernel.Event{
@@ -2215,7 +2229,6 @@ func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
 	for _, chunk := range []string{"Now", " let", " me", " write", " the", " report."} {
 		for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
 			Ref:     stream.Ref{SessionID: "root-session", TaskID: "child-task"},
-			Stream:  "stdout",
 			Text:    chunk,
 			Running: true,
 		}) {
@@ -2268,7 +2281,6 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 	}
 	for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
-		Stream:  "stdout",
 		Text:    "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|",
 		Running: true,
 	}) {
@@ -2277,13 +2289,10 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 	}
 	for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
 		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
+		Text:    "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
 		Closed:  true,
 		Running: false,
 		State:   "completed",
-		Result: map[string]any{
-			"result":        "dirty result that should not become final",
-			"final_message": "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
-		},
 	}) {
 		updated, _ = model.Update(env)
 		model = updated.(*Model)
@@ -2325,6 +2334,11 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"target_id": "jack",
+				"agent":     "self",
+				"prompt":    "创建文件",
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "spawn-continue",
 				ToolName: "SPAWN",
@@ -2338,11 +2352,17 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 					"task_id":       "jack",
 					"final_message": "old final answer",
 				},
+				Content: testToolContent("old final answer"),
 			},
 		}},
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"action":      "wait",
+				"target_id":   "jack",
+				"target_kind": "subagent",
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "task-wait-before-write",
 				ToolName: "TASK",
@@ -2358,11 +2378,18 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 					"target_kind": "subagent",
 					"result":      "old final answer",
 				},
+				Content: testToolContent("old final answer"),
 			},
 		}},
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"action":      "write",
+				"target_id":   "jack",
+				"target_kind": "subagent",
+				"input":       "检查刚才创建的文件",
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "task-write-continue",
 				ToolName: "TASK",
@@ -2371,18 +2398,23 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"action": "write", "task_id": "jack", "input": "检查刚才创建的文件"},
 				RawOutput: map[string]any{
-					"action":         "write",
-					"running":        true,
-					"state":          "running",
-					"task_id":        "jack",
-					"target_kind":    "subagent",
-					"output_preview": "正在读取 hello_from_spawn.txt",
+					"action":      "write",
+					"running":     true,
+					"state":       "running",
+					"task_id":     "jack",
+					"target_kind": "subagent",
 				},
+				Content: testTerminalContent("正在读取 hello_from_spawn.txt"),
 			},
 		}},
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta: testRuntimeToolMeta(map[string]any{
+				"target_id": "jack",
+				"agent":     "self",
+				"prompt":    "检查刚才创建的文件",
+			}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "spawn-continued-child",
 				ToolName: "SPAWN",
@@ -2396,6 +2428,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 					"task_id": "jack",
 					"text":    "正在读取 hello_from_spawn.txt",
 				},
+				Content: testTerminalContent("正在读取 hello_from_spawn.txt"),
 			},
 		}},
 	} {
@@ -2420,6 +2453,11 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Meta: testRuntimeToolMeta(map[string]any{
+			"target_id": "jack",
+			"agent":     "self",
+			"prompt":    "检查刚才创建的文件",
+		}),
 		ToolResult: &kernel.ToolResultPayload{
 			CallID:   "spawn-continued-child",
 			ToolName: "SPAWN",
@@ -2433,6 +2471,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 				"task_id":       "jack",
 				"final_message": "### 检查完成\n- `hello_from_spawn.txt` 内容正确",
 			},
+			Content: testToolContent("检查完成\nhello_from_spawn.txt 内容正确"),
 		},
 	}})
 	model = updated.(*Model)
@@ -2492,6 +2531,7 @@ func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
 					"stream":  "stdout",
 					"text":    "[步骤 8/10] 正在处理... 09:05:53\n",
 				},
+				Content: testTerminalContent("[步骤 8/10] 正在处理... 09:05:53\n"),
 			},
 		}},
 		{Event: kernel.Event{
@@ -2510,6 +2550,7 @@ func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
 					"stream":  "stdout",
 					"text":    "[步骤 9/10] 正在处理... 09:05:55\n",
 				},
+				Content: testTerminalContent("[步骤 9/10] 正在处理... 09:05:55\n"),
 			},
 		}},
 	} {
@@ -2610,12 +2651,13 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 	}
 }
 
-func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
+func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
 	tests := []struct {
 		name      string
 		status    kernel.ToolStatus
 		isErr     bool
 		rawOutput map[string]any
+		content   string
 		want      []string
 		forbid    []string
 	}{
@@ -2627,10 +2669,10 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 				"state":          "running",
 				"task_id":        "task-7",
 				"supports_input": true,
-				"output_preview": "进度: 1/5\n",
 			},
-			want:   []string{"• Ran for i in 1 2", "  └ 进度: 1/5"},
-			forbid: []string{"|_", "BASH output", "│", "task / running", "task task-7", "state running", "stdout 进度", "supports_input"},
+			content: "进度: 1/5\n",
+			want:    []string{"• Ran for i in 1 2", "  └ 进度: 1/5"},
+			forbid:  []string{"|_", "BASH output", "│", "task / running", "task task-7", "state running", "stdout 进度", "supports_input"},
 		},
 		{
 			name:   "failed stdout stderr",
@@ -2641,8 +2683,9 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 				"stdout":    "ignored stdout\n",
 				"exit_code": 1,
 			},
-			want:   []string{"  └ ignored stdout", "    stderr:", "    permission denied"},
-			forbid: []string{"|_", "BASH output", "│", "stderr permission denied", "exit 1"},
+			content: "ignored stdout\nstderr:\npermission denied\n",
+			want:    []string{"  └ ignored stdout", "    stderr:", "    permission denied"},
+			forbid:  []string{"|_", "BASH output", "│", "stderr permission denied", "exit 1"},
 		},
 		{
 			name:   "failed stdout diagnostics",
@@ -2654,8 +2697,22 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 				"error":     "exit status 1",
 				"exit_code": 1,
 			},
-			want:   []string{"  └ dangerous command is blocked even in auto-review mode"},
-			forbid: []string{"exit 1", "exit status 1"},
+			content: "dangerous command is blocked even in auto-review mode\n",
+			want:    []string{"  └ dangerous command is blocked even in auto-review mode"},
+			forbid:  []string{"exit 1", "exit status 1"},
+		},
+		{
+			name:   "source normalized output content",
+			status: kernel.ToolStatusCompleted,
+			rawOutput: map[string]any{
+				"stdout":    "",
+				"stderr":    "",
+				"output":    "go: module internal registry: network unreachable\n",
+				"exit_code": 1,
+			},
+			content: "go: module internal registry: network unreachable\n",
+			want:    []string{"  └ go: module internal registry: network unreachable"},
+			forbid:  []string{"no output", "exit 1"},
 		},
 		{
 			name:   "successful empty output",
@@ -2663,8 +2720,9 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 			rawOutput: map[string]any{
 				"exit_code": 0,
 			},
-			want:   []string{"  └ (no output)"},
-			forbid: []string{"exit 0", "completed"},
+			content: "(no output)",
+			want:    []string{"  └ (no output)"},
+			forbid:  []string{"exit 0", "completed"},
 		},
 		{
 			name:   "successful stdout stderr",
@@ -2675,36 +2733,9 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 				"result":    "compact stale result",
 				"exit_code": 0,
 			},
-			want:   []string{"  └ line one", "    line two", "    stderr:", "    warning"},
-			forbid: []string{"compact stale result", "exit 0", "no output"},
-		},
-		{
-			name:   "legacy final result fallback",
-			status: kernel.ToolStatusCompleted,
-			rawOutput: map[string]any{
-				"result": "legacy command output\n",
-			},
-			want:   []string{"  └ legacy command output"},
-			forbid: []string{"no output"},
-		},
-		{
-			name:   "legacy final text fallback",
-			status: kernel.ToolStatusCompleted,
-			rawOutput: map[string]any{
-				"text": "legacy text output\n",
-			},
-			want:   []string{"  └ legacy text output"},
-			forbid: []string{"no output"},
-		},
-		{
-			name:   "legacy final error fallback",
-			status: kernel.ToolStatusFailed,
-			isErr:  true,
-			rawOutput: map[string]any{
-				"error": "legacy error output",
-			},
-			want:   []string{"  └ legacy error output"},
-			forbid: []string{"no output"},
+			content: "line one\nline two\nstderr:\nwarning\n",
+			want:    []string{"  └ line one", "    line two", "    stderr:", "    warning"},
+			forbid:  []string{"compact stale result", "exit 0", "no output"},
 		},
 	}
 	for _, tt := range tests {
@@ -2738,6 +2769,7 @@ func TestGatewayBashPanelRendersRawTerminalOutput(t *testing.T) {
 						Scope:     kernel.EventScopeMain,
 						RawInput:  map[string]any{"command": "for i in 1 2; do echo $i; done"},
 						RawOutput: tt.rawOutput,
+						Content:   testTerminalContent(tt.content),
 					},
 				},
 			})
@@ -2792,11 +2824,11 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "git log --oneline -6"},
 				RawOutput: map[string]any{
-					"running":        true,
-					"state":          "running",
-					"task_id":        "task-7",
-					"output_preview": "stale streamed preview\n",
+					"running": true,
+					"state":   "running",
+					"task_id": "task-7",
 				},
+				Content: testTerminalContent("stale streamed preview\n"),
 			},
 		}},
 		{Event: kernel.Event{
@@ -2809,6 +2841,7 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 				Scope:     kernel.EventScopeMain,
 				RawInput:  map[string]any{"command": "git log --oneline -6"},
 				RawOutput: map[string]any{"exit_code": 0},
+				Content:   testTerminalContent("(no output)"),
 			},
 		}},
 	} {

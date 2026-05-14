@@ -336,13 +336,14 @@ type EventLifecycle struct {
 // ProtocolToolCall is the ACP-compatible tool call or tool update view of one
 // canonical event.
 type ProtocolToolCall struct {
-	ID        string         `json:"id,omitempty"`
-	Name      string         `json:"name,omitempty"`
-	Kind      string         `json:"kind,omitempty"`
-	Title     string         `json:"title,omitempty"`
-	Status    string         `json:"status,omitempty"`
-	RawInput  map[string]any `json:"raw_input,omitempty"`
-	RawOutput map[string]any `json:"raw_output,omitempty"`
+	ID        string                    `json:"id,omitempty"`
+	Name      string                    `json:"name,omitempty"`
+	Kind      string                    `json:"kind,omitempty"`
+	Title     string                    `json:"title,omitempty"`
+	Status    string                    `json:"status,omitempty"`
+	RawInput  map[string]any            `json:"raw_input,omitempty"`
+	RawOutput map[string]any            `json:"raw_output,omitempty"`
+	Content   []ProtocolToolCallContent `json:"content,omitempty"`
 }
 
 // ProtocolToolCallLocation is the ACP tool-call location shape.
@@ -381,6 +382,21 @@ func ProtocolTextContent(text string) map[string]any {
 		return nil
 	}
 	return map[string]any{"type": "text", "text": text}
+}
+
+// ProtocolToolCallContentOf returns the ACP tool content array carried by a
+// tool-call or tool-update protocol payload. Unsupported future shapes are
+// discarded instead of being interpreted as display text.
+func ProtocolToolCallContentOf(update *ProtocolUpdate) []ProtocolToolCallContent {
+	if update == nil {
+		return nil
+	}
+	return protocolToolCallContentFromAny(update.Content)
+}
+
+// CloneProtocolToolCallContent returns a deep copy of ACP tool-call content.
+func CloneProtocolToolCallContent(in []ProtocolToolCallContent) []ProtocolToolCallContent {
+	return cloneProtocolToolCallContents(in)
 }
 
 // ProtocolPlanEntry is one ACP-compatible plan row.
@@ -890,6 +906,85 @@ func textFromProtocolContent(content any) string {
 	return ""
 }
 
+func protocolToolCallContentFromAny(content any) []ProtocolToolCallContent {
+	switch typed := content.(type) {
+	case nil:
+		return nil
+	case []ProtocolToolCallContent:
+		return cloneProtocolToolCallContents(typed)
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return nil
+		}
+		var decoded []ProtocolToolCallContent
+		if err := json.Unmarshal(typed, &decoded); err == nil {
+			return cloneProtocolToolCallContents(decoded)
+		}
+		var generic any
+		if err := json.Unmarshal(typed, &generic); err != nil {
+			return nil
+		}
+		return protocolToolCallContentFromAny(generic)
+	case []any:
+		out := make([]ProtocolToolCallContent, 0, len(typed))
+		for _, item := range typed {
+			if content, ok := protocolToolCallContentItemFromAny(item); ok {
+				out = append(out, content)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil || len(raw) == 0 {
+			return nil
+		}
+		var decoded []ProtocolToolCallContent
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return nil
+		}
+		return cloneProtocolToolCallContents(decoded)
+	}
+}
+
+func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool) {
+	switch typed := item.(type) {
+	case nil:
+		return ProtocolToolCallContent{}, false
+	case ProtocolToolCallContent:
+		cloned := cloneProtocolToolCallContents([]ProtocolToolCallContent{typed})
+		return cloned[0], true
+	case map[string]any:
+		out := ProtocolToolCallContent{
+			Type:       strings.TrimSpace(protocolContentString(typed["type"])),
+			Content:    cloneProtocolAny(typed["content"]),
+			TerminalID: strings.TrimSpace(protocolContentString(typed["terminalId"])),
+		}
+		if out.TerminalID == "" {
+			out.TerminalID = strings.TrimSpace(protocolContentString(typed["terminal_id"]))
+		}
+		return out, out.Type != "" || out.Content != nil || out.TerminalID != ""
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil || len(raw) == 0 {
+			return ProtocolToolCallContent{}, false
+		}
+		var decoded ProtocolToolCallContent
+		if err := json.Unmarshal(raw, &decoded); err != nil {
+			return ProtocolToolCallContent{}, false
+		}
+		cloned := cloneProtocolToolCallContents([]ProtocolToolCallContent{decoded})
+		return cloned[0], cloned[0].Type != "" || cloned[0].Content != nil || cloned[0].TerminalID != ""
+	}
+}
+
+func protocolContentString(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
 // NormalizeSessionRef returns one normalized session ref.
 func NormalizeSessionRef(ref SessionRef) SessionRef {
 	return SessionRef{
@@ -1083,7 +1178,7 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 		switch {
 		case sourceToolCall != nil:
 			call := *sourceToolCall
-			out.Update = &ProtocolUpdate{
+			update := &ProtocolUpdate{
 				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypeToolCall)),
 				ToolCallID:    call.ID,
 				Title:         call.Title,
@@ -1092,6 +1187,10 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 				RawInput:      maps.Clone(call.RawInput),
 				RawOutput:     maps.Clone(call.RawOutput),
 			}
+			if len(call.Content) > 0 {
+				update.Content = cloneProtocolToolCallContents(call.Content)
+			}
+			out.Update = update
 		case in.Plan != nil:
 			out.Update = &ProtocolUpdate{
 				SessionUpdate: firstNonEmpty(out.UpdateType, string(ProtocolUpdateTypePlan)),
@@ -1124,6 +1223,7 @@ func CloneEventProtocol(in EventProtocol) EventProtocol {
 				Status:    strings.TrimSpace(update.Status),
 				RawInput:  maps.Clone(update.RawInput),
 				RawOutput: maps.Clone(update.RawOutput),
+				Content:   ProtocolToolCallContentOf(&update),
 			}
 		case string(ProtocolUpdateTypePlan):
 			out.Plan = &ProtocolPlan{Entries: cloneProtocolPlanEntries(update.Entries)}
@@ -1206,6 +1306,21 @@ func cloneProtocolPlanEntries(in []ProtocolPlanEntry) []ProtocolPlanEntry {
 	return out
 }
 
+func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolCallContent {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ProtocolToolCallContent, 0, len(in))
+	for _, item := range in {
+		out = append(out, ProtocolToolCallContent{
+			Type:       strings.TrimSpace(item.Type),
+			Content:    cloneProtocolAny(item.Content),
+			TerminalID: strings.TrimSpace(item.TerminalID),
+		})
+	}
+	return out
+}
+
 func cloneProtocolApproval(in ProtocolApproval) ProtocolApproval {
 	out := ProtocolApproval{
 		ToolCall: cloneProtocolToolCall(in.ToolCall),
@@ -1231,6 +1346,11 @@ func cloneProtocolAny(in any) any {
 		return slices.Clone(typed)
 	case map[string]any:
 		return maps.Clone(typed)
+	case []ProtocolToolCallContent:
+		if len(typed) == 0 {
+			return nil
+		}
+		return cloneProtocolToolCallContents(typed)
 	case []any:
 		out := make([]any, 0, len(typed))
 		for _, item := range typed {
@@ -1260,6 +1380,7 @@ func cloneProtocolToolCall(in ProtocolToolCall) ProtocolToolCall {
 	call.Status = strings.TrimSpace(call.Status)
 	call.RawInput = maps.Clone(call.RawInput)
 	call.RawOutput = maps.Clone(call.RawOutput)
+	call.Content = cloneProtocolToolCallContents(call.Content)
 	return call
 }
 

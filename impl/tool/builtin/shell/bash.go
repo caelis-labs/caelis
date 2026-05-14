@@ -203,27 +203,63 @@ func (t *BashTool) SandboxRuntime() sandbox.Runtime {
 }
 
 func bashCommandPayload(result sandbox.CommandResult, err error) map[string]any {
-	stdout := result.Stdout
-	stderr := result.Stderr
-	exitCode := result.ExitCode
-	if err != nil && strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == "" {
-		stderr = strings.TrimSpace(err.Error())
-		if exitCode == 0 {
-			exitCode = -1
-		}
-	}
-	payload := map[string]any{
-		"stdout":    stdout,
-		"stderr":    stderr,
-		"exit_code": exitCode,
+	merged := bashMergedOutput(result.Stdout, result.Stderr)
+	payload := map[string]any{}
+	if err != nil || result.ExitCode != 0 {
+		payload["state"] = "failed"
+	} else {
+		payload["state"] = "completed"
 	}
 	if err != nil {
 		if detail, ok := sandbox.SandboxPermissionDetail(result, err); ok {
 			payload["error"] = detail
 			payload["error_code"] = string(tool.ErrorCodeSandboxDenied)
+		} else if strings.TrimSpace(merged) == "" && !plainCommandExitError(err) {
+			payload["error"] = strings.TrimSpace(err.Error())
 		}
 	}
+	if strings.TrimSpace(merged) != "" {
+		payload["result"] = strings.TrimSpace(merged)
+	} else if err == nil {
+		payload["result"] = "(no output)"
+	}
+	if commandExitCodeAvailable(result.ExitCode, err) {
+		payload["exit_code"] = result.ExitCode
+	}
 	return payload
+}
+
+func bashMergedOutput(stdout string, stderr string) string {
+	stdout = strings.TrimRight(stdout, "\r\n")
+	stderr = strings.TrimRight(stderr, "\r\n")
+	switch {
+	case stdout != "" && stderr != "":
+		return stdout + "\n" + stderr
+	case stdout != "":
+		return stdout
+	case stderr != "":
+		return stderr
+	default:
+		return ""
+	}
+}
+
+func commandExitCodeAvailable(exitCode int, err error) bool {
+	if exitCode < 0 {
+		return false
+	}
+	if err != nil && exitCode == 0 && !plainCommandExitError(err) {
+		return false
+	}
+	return true
+}
+
+func plainCommandExitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.TrimSpace(err.Error())
+	return strings.HasPrefix(text, "exit status ") || strings.HasPrefix(text, "signal: ")
 }
 
 func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {

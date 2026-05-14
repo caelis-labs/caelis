@@ -7,6 +7,8 @@
 - Use sub-agents only for bounded sidecar work with clear ownership; do not
   delegate final design decisions or cross-cutting release judgment.
 - Prefer `rg`/`rg --files` for repository search.
+- Avoid unnecessary import aliases; use an alias only for name conflicts,
+  package-name mismatches, or established local convention.
 - Preserve unrelated user changes in the worktree.
 
 ## Architecture Direction

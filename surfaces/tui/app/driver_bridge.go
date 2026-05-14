@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
@@ -606,10 +607,10 @@ func gatewayTerminalBatchKey(env kernel.EventEnvelope) (string, bool) {
 		return "", false
 	}
 	payload := env.Event.ToolResult
-	if !rawBool(payload.RawOutput, "running") {
+	if payload.Status != kernel.ToolStatusRunning {
 		return "", false
 	}
-	text := rawString(payload.RawOutput, "text")
+	text, terminalID := gatewayTerminalContent(env)
 	if text == "" {
 		return "", false
 	}
@@ -620,9 +621,7 @@ func gatewayTerminalBatchKey(env kernel.EventEnvelope) (string, bool) {
 		strings.TrimSpace(env.Event.SessionRef.SessionID),
 		strings.TrimSpace(payload.CallID),
 		strings.TrimSpace(payload.ToolName),
-		rawString(payload.RawOutput, "task_id"),
-		rawString(payload.RawOutput, "terminal_id"),
-		rawString(payload.RawOutput, "stream"),
+		terminalID,
 	}, "\x00"), true
 }
 
@@ -632,7 +631,12 @@ func cloneGatewayTerminalEnvelope(env kernel.EventEnvelope) kernel.EventEnvelope
 		payload := *env.Event.ToolResult
 		payload.RawInput = cloneAnyMap(payload.RawInput)
 		payload.RawOutput = cloneAnyMap(payload.RawOutput)
+		payload.Content = session.CloneProtocolToolCallContent(payload.Content)
 		out.Event.ToolResult = &payload
+	}
+	if env.Event.Protocol != nil {
+		protocol := session.CloneEventProtocol(*env.Event.Protocol)
+		out.Event.Protocol = &protocol
 	}
 	if env.Event.Meta != nil {
 		out.Event.Meta = cloneAnyMap(env.Event.Meta)
@@ -647,22 +651,82 @@ func mergeGatewayTerminalEnvelope(dst *kernel.EventEnvelope, src kernel.EventEnv
 	dst.Cursor = src.Cursor
 	dst.Event.OccurredAt = src.Event.OccurredAt
 	dstPayload := dst.Event.ToolResult
-	srcPayload := src.Event.ToolResult
-	if dstPayload.RawOutput == nil {
-		dstPayload.RawOutput = map[string]any{}
-	}
-	if text := rawString(srcPayload.RawOutput, "text"); text != "" {
-		existing := rawString(dstPayload.RawOutput, "text")
+	if text, terminalID := gatewayTerminalContent(src); text != "" {
+		existing, existingTerminalID := gatewayTerminalContent(*dst)
 		if strings.EqualFold(strings.TrimSpace(dstPayload.ToolName), "BASH") {
-			dstPayload.RawOutput["text"] = appendDeltaStreamChunk(existing, text)
+			text = appendDeltaStreamChunk(existing, text)
 		} else {
-			dstPayload.RawOutput["text"] = mergeSubagentStreamChunk(existing, text)
+			text = mergeSubagentStreamChunk(existing, text)
+		}
+		if terminalID == "" {
+			terminalID = existingTerminalID
+		}
+		setGatewayTerminalEnvelopeContent(dst, text, terminalID)
+	}
+}
+
+func gatewayTerminalContent(env kernel.EventEnvelope) (string, string) {
+	if env.Event.ToolResult == nil {
+		return "", ""
+	}
+	content := gatewayProtocolToolContent(env.Event, env.Event.ToolResult.Content)
+	for _, item := range content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			continue
+		}
+		if text := protocolTextContent(item.Content); text != "" {
+			return text, strings.TrimSpace(item.TerminalID)
 		}
 	}
-	for _, key := range []string{"running", "state", "stdout_cursor", "stderr_cursor", "exit_code"} {
-		if value, ok := srcPayload.RawOutput[key]; ok {
-			dstPayload.RawOutput[key] = value
+	return "", ""
+}
+
+func setGatewayTerminalEnvelopeContent(env *kernel.EventEnvelope, text string, terminalID string) {
+	if env == nil || env.Event.ToolResult == nil {
+		return
+	}
+	if text == "" {
+		return
+	}
+	content := []session.ProtocolToolCallContent{{
+		Type:       "terminal",
+		Content:    session.ProtocolTextContent(text),
+		TerminalID: strings.TrimSpace(terminalID),
+	}}
+	env.Event.ToolResult.Content = session.CloneProtocolToolCallContent(content)
+	if env.Event.Protocol != nil && env.Event.Protocol.Update != nil {
+		env.Event.Protocol.Update.Content = session.CloneProtocolToolCallContent(content)
+	}
+}
+
+func protocolTextContent(raw any) string {
+	switch typed := raw.(type) {
+	case nil:
+		return ""
+	case map[string]any:
+		if typ, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), "text") {
+			return ""
 		}
+		text, _ := typed["text"].(string)
+		return text
+	case session.ProtocolToolCallContent:
+		return protocolTextContent(typed.Content)
+	default:
+		data, err := json.Marshal(raw)
+		if err != nil {
+			return ""
+		}
+		var decoded struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return ""
+		}
+		if !strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
+			return ""
+		}
+		return decoded.Text
 	}
 }
 
@@ -1066,6 +1130,17 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 			rawOutput["stdout"] = output
 		}
 	}
+	contentText := output
+	if contentText == "" && status == kernel.ToolStatusCompleted {
+		contentText = "(no output)"
+	}
+	content := []session.ProtocolToolCallContent{}
+	if contentText != "" {
+		content = []session.ProtocolToolCallContent{{
+			Type:    "terminal",
+			Content: session.ProtocolTextContent(contentText),
+		}}
+	}
 	send(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindToolResult,
 		OccurredAt: time.Now(),
@@ -1076,6 +1151,7 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 			Scope:     kernel.EventScopeMain,
 			RawInput:  map[string]any{"command": strings.TrimSpace(command)},
 			RawOutput: rawOutput,
+			Content:   content,
 			Error:     isErr,
 		},
 	}})

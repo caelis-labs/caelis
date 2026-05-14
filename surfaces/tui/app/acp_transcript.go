@@ -694,7 +694,11 @@ func styleTaskSummaryRow(row string, ctx BlockRenderContext) string {
 		styled += toolActionStyle(ctx, verb).Render(verb)
 	}
 	if detail != "" {
-		styled += " " + styleTaskDetail(detail, ctx)
+		if strings.EqualFold(verb, "Cancel") {
+			styled += " " + ctx.Theme.SecondaryTextStyle().Render(detail)
+		} else {
+			styled += " " + styleTaskDetail(detail, ctx)
+		}
 	}
 	return styled
 }

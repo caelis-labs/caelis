@@ -226,7 +226,7 @@ func TestRuntimeAgentListResumeAndCloseSession(t *testing.T) {
 	}
 }
 
-func TestRuntimeAgentBridgesTerminalStreamToACPDisplayMeta(t *testing.T) {
+func TestRuntimeAgentBridgesTerminalStreamToACPTerminalContent(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := terminalBridgeRuntime{}
 	agent, err := runtimeacp.New(runtimeacp.Config{
@@ -262,7 +262,49 @@ func TestRuntimeAgentBridgesTerminalStreamToACPDisplayMeta(t *testing.T) {
 		}
 		select {
 		case <-deadline:
-			t.Fatalf("notifications = %#v, want terminal info, streamed output, and exit meta", notes)
+			t.Fatalf("notifications = %#v, want terminal info, streamed terminal content, and completed terminal status", notes)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+func TestRuntimeAgentMapsCancelledTerminalCloseToFailed(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := terminalBridgeRuntime{closedState: "cancelled"}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "fake"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+		AgentInfo: &acp.Implementation{
+			Name:    "caelis-sdk",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &terminalBridgeCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		notes := cb.snapshot()
+		if hasFailedTerminalExit(notes, "call-1") {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("notifications = %#v, want cancelled terminal close mapped to failed status", notes)
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -562,7 +604,9 @@ func (r staticApprovalModelResolver) ResolveApprovalModel(context.Context, sessi
 	return r.model, nil
 }
 
-type terminalBridgeRuntime struct{}
+type terminalBridgeRuntime struct {
+	closedState string
+}
 
 func (terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
 	sessionID := req.SessionRef.SessionID
@@ -590,18 +634,22 @@ func (terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (agent
 				Protocol: &session.EventProtocol{
 					UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
 					ToolCall: &session.ProtocolToolCall{
-						ID:     "call-1",
-						Name:   "BASH",
-						Status: "running",
-						RawOutput: map[string]any{
-							"task_id":     "task-1",
-							"terminal_id": "terminal-1",
-						},
+						ID:      "call-1",
+						Name:    "BASH",
+						Status:  "running",
+						Content: []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
 					},
 				},
 				Meta: map[string]any{
-					"task_id":     "task-1",
-					"terminal_id": "terminal-1",
+					"caelis": map[string]any{
+						"runtime": map[string]any{
+							"task": map[string]any{
+								"task_id":     "task-1",
+								"terminal_id": "terminal-1",
+								"running":     true,
+							},
+						},
+					},
 				},
 			},
 		}},
@@ -612,7 +660,9 @@ func (terminalBridgeRuntime) RunState(context.Context, session.SessionRef) (agen
 	return agent.RunState{}, nil
 }
 
-func (terminalBridgeRuntime) Streams() stream.Service { return terminalBridgeStream{} }
+func (r terminalBridgeRuntime) Streams() stream.Service {
+	return terminalBridgeStream(r)
+}
 
 type terminalBridgeRun struct {
 	events []*session.Event
@@ -636,19 +686,24 @@ func (terminalBridgeRun) Cancel() agent.CancelResult {
 }
 func (terminalBridgeRun) Close() error { return nil }
 
-type terminalBridgeStream struct{}
+type terminalBridgeStream struct {
+	closedState string
+}
 
 func (terminalBridgeStream) Read(context.Context, stream.ReadRequest) (stream.Snapshot, error) {
 	return stream.Snapshot{}, nil
 }
 
-func (terminalBridgeStream) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
+func (s terminalBridgeStream) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
 	return func(yield func(*stream.Frame, error) bool) {
 		if !yield(&stream.Frame{Text: "streamed output\n"}, nil) {
 			return
 		}
-		code := 0
-		yield(&stream.Frame{Closed: true, ExitCode: &code}, nil)
+		state := strings.TrimSpace(s.closedState)
+		if state == "" {
+			state = "completed"
+		}
+		yield(&stream.Frame{Closed: true, State: state}, nil)
 	}
 }
 
@@ -694,8 +749,7 @@ func hasTerminalOutput(notifications []acp.SessionNotification, terminalID strin
 		if !ok {
 			continue
 		}
-		output, ok := update.Meta["terminal_output"].(map[string]any)
-		if ok && output["terminal_id"] == terminalID && output["data"] == data {
+		if terminalContentText(update.Content, terminalID) == data {
 			return true
 		}
 	}
@@ -707,20 +761,47 @@ func hasTerminalExit(notifications []acp.SessionNotification, terminalID string,
 }
 
 func hasCompletedTerminalExit(notifications []acp.SessionNotification, terminalID string, exitCode int) bool {
-	update := terminalExit(notifications, terminalID, exitCode)
-	return update != nil && update.Status != nil && *update.Status == acp.ToolStatusCompleted
+	return terminalStatusUpdate(notifications, terminalID, acp.ToolStatusCompleted) != nil
+}
+
+func hasFailedTerminalExit(notifications []acp.SessionNotification, terminalID string) bool {
+	return terminalStatusUpdate(notifications, terminalID, acp.ToolStatusFailed) != nil
 }
 
 func terminalExit(notifications []acp.SessionNotification, terminalID string, exitCode int) *acp.ToolCallUpdate {
+	_ = exitCode
+	return terminalStatusUpdate(notifications, terminalID, "")
+}
+
+func terminalStatusUpdate(notifications []acp.SessionNotification, terminalID string, status string) *acp.ToolCallUpdate {
 	for _, notification := range notifications {
 		update, ok := notification.Update.(acp.ToolCallUpdate)
 		if !ok {
 			continue
 		}
-		exit, ok := update.Meta["terminal_exit"].(map[string]any)
-		if ok && exit["terminal_id"] == terminalID && exit["exit_code"] == exitCode {
+		if update.Status == nil {
+			continue
+		}
+		if status != "" && *update.Status != status {
+			continue
+		}
+		if terminalContentText(update.Content, terminalID) != "" || strings.TrimSpace(update.ToolCallID) == terminalID {
 			return &update
 		}
 	}
 	return nil
+}
+
+func terminalContentText(content []acp.ToolCallContent, terminalID string) string {
+	for _, item := range content {
+		if item.Type != "terminal" || item.TerminalID != terminalID {
+			continue
+		}
+		text, ok := item.Content.(acp.TextContent)
+		if !ok {
+			continue
+		}
+		return text.Text
+	}
+	return ""
 }

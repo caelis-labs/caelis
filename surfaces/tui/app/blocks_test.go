@@ -171,6 +171,34 @@ func TestTaskWaitResultStillUpdatesLinkedBashTool(t *testing.T) {
 	}
 }
 
+func TestTaskCancelShowsLinkedBashCommandAndAvoidsDuplicateFinal(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	command := `echo "启动一个长任务" && sleep 30 && echo "这行不会输出"`
+	block.UpdateToolWithMeta("bash-1", "BASH", command, "启动一个长任务\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("task-cancel-1", "TASK", "Cancel", "", true, false, ToolUpdateMeta{
+		TaskID:     "task-1",
+		TaskAction: "cancel",
+	})
+
+	if len(block.Events) != 2 {
+		t.Fatalf("events = %#v, want linked BASH event plus TASK cancel row", block.Events)
+	}
+	if ev := block.Events[0]; !ev.Done || ev.Output != "启动一个长任务\n" {
+		t.Fatalf("linked bash event = %#v, want cancelled BASH to keep current output", ev)
+	}
+	if got := block.Events[1].Args; got != "Cancel "+command {
+		t.Fatalf("cancel args = %q, want linked command", got)
+	}
+
+	block.UpdateToolWithMeta("bash-1", "BASH", command, "启动一个长任务\n", true, false, ToolUpdateMeta{TaskID: "task-1"})
+	if len(block.Events) != 2 {
+		t.Fatalf("events = %#v, want final BASH update to replace existing event", block.Events)
+	}
+	if got := block.Events[0].Output; strings.TrimSpace(got) != "启动一个长任务" {
+		t.Fatalf("bash output = %q, want final output on original event", got)
+	}
+}
+
 func TestCompletedSpawnFinalWithSameCallIDReplacesExistingEvent(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.UpdateToolWithMeta("spawn-1", "SPAWN", "claude: first very long original prompt", "first done", true, false, ToolUpdateMeta{TaskID: "amy"})

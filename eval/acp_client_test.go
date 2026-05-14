@@ -126,22 +126,23 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 			case client.ToolCallUpdate:
 				for _, content := range call.Content {
 					if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
-						mu.Lock()
-						terminalID = strings.TrimSpace(content.TerminalID)
-						mu.Unlock()
-						break
+						if strings.TrimSpace(content.TerminalID) == "bash-approval-1" {
+							mu.Lock()
+							terminalID = strings.TrimSpace(content.TerminalID)
+							mu.Unlock()
+							if text := clientTerminalContentText(content); strings.Contains(text, "child approval ok") {
+								mu.Lock()
+								displayTerminalOutput = true
+								mu.Unlock()
+							}
+							if call.Status != nil && *call.Status == "completed" {
+								mu.Lock()
+								displayTerminalExit = true
+								displayTerminalDone = true
+								mu.Unlock()
+							}
+						}
 					}
-				}
-				if output, ok := call.Meta["terminal_output"].(map[string]any); ok && output["terminal_id"] == "bash-approval-1" && output["data"] == "child approval ok" {
-					mu.Lock()
-					displayTerminalOutput = true
-					mu.Unlock()
-				}
-				if exit, ok := call.Meta["terminal_exit"].(map[string]any); ok && exit["terminal_id"] == "bash-approval-1" && exit["exit_code"] == float64(0) {
-					mu.Lock()
-					displayTerminalExit = true
-					displayTerminalDone = call.Status != nil && *call.Status == "completed"
-					mu.Unlock()
 				}
 			}
 		},
@@ -203,6 +204,29 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 			t.Fatalf("display terminal meta info=%v output=%v exit=%v done=%v, want all true", gotInfo, gotOutput, gotExit, gotDone)
 		case <-time.After(10 * time.Millisecond):
 		}
+	}
+}
+
+func clientTerminalContentText(content client.ToolCallContent) string {
+	switch typed := content.Content.(type) {
+	case client.TextContent:
+		return typed.Text
+	case map[string]any:
+		if typ, _ := typed["type"].(string); typ != "text" {
+			return ""
+		}
+		text, _ := typed["text"].(string)
+		return text
+	default:
+		data, err := json.Marshal(typed)
+		if err != nil {
+			return ""
+		}
+		var decoded client.TextContent
+		if err := json.Unmarshal(data, &decoded); err != nil || decoded.Type != "text" {
+			return ""
+		}
+		return decoded.Text
 	}
 }
 

@@ -4,35 +4,68 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func FormatToolStart(name string, args map[string]any) string {
 	return sanitizeToolDisplayText(FormatToolArgsValue(name, args))
 }
 
-func FormatToolResult(name string, args map[string]any, result map[string]any, status string) string {
-	if result != nil {
-		if display := strings.TrimSpace(asString(result["summary"])); display != "" {
-			return display
+func FormatToolContent(content []session.ProtocolToolCallContent) string {
+	if len(content) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(content))
+	for _, item := range content {
+		switch strings.TrimSpace(item.Type) {
+		case "content", "terminal":
+			if text := toolContentText(item.Content); text != "" {
+				parts = append(parts, text)
+			}
+		default:
+			continue
 		}
 	}
-	name = strings.TrimSpace(strings.ToUpper(name))
-	_ = args
-	summary := strings.TrimSpace(toolOutput(result))
-	if summary == "" {
-		if strings.EqualFold(status, "failed") {
-			summary = "failed"
-		} else {
-			summary = "completed"
+	return strings.Join(parts, "\n")
+}
+
+func toolContentText(raw any) string {
+	switch typed := raw.(type) {
+	case nil:
+		return ""
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return ""
 		}
-	}
-	if strings.EqualFold(summary, name) {
-		if strings.EqualFold(status, "failed") {
-			return "failed"
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return ""
 		}
-		return "completed"
+		return toolContentText(decoded)
+	case map[string]any:
+		if typeText, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typeText), "text") {
+			return ""
+		}
+		text, _ := typed["text"].(string)
+		return text
+	default:
+		rawJSON, err := json.Marshal(typed)
+		if err != nil || len(rawJSON) == 0 {
+			return ""
+		}
+		var decoded struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(rawJSON, &decoded); err != nil {
+			return ""
+		}
+		if !strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
+			return ""
+		}
+		return decoded.Text
 	}
-	return summary
 }
 
 func FormatToolArgsValue(name string, raw any) string {
@@ -104,113 +137,6 @@ func toolArgsWithName(name string, raw any) string {
 	return ""
 }
 
-func toolOutput(raw any) string {
-	values, ok := raw.(map[string]any)
-	if !ok || len(values) == 0 {
-		if ok && len(values) == 0 {
-			return ""
-		}
-		if value := strings.TrimSpace(extractACPDisplayText(raw)); value != "" {
-			return truncateInline(value, 160)
-		}
-		if value := strings.TrimSpace(primaryValue(raw)); value != "" {
-			return truncateInline(value, 160)
-		}
-		return ""
-	}
-	for _, key := range []string{"error", "stderr", "message", "summary", "result", "stdout"} {
-		if value := strings.TrimSpace(asString(values[key])); value != "" && value != "{}" && value != "map[]" {
-			return truncateInline(value, 160)
-		}
-	}
-	for _, key := range []string{"content", "detailedContent", "text"} {
-		if value := strings.TrimSpace(extractACPDisplayText(values[key])); value != "" {
-			return truncateInline(value, 160)
-		}
-	}
-	if path := strings.TrimSpace(asString(values["path"])); path != "" {
-		if exitCode, ok := asInt(values["exit_code"]); ok {
-			return truncateInline(fmt.Sprintf("%s (exit %d)", path, exitCode), 160)
-		}
-		return truncateInline(path, 160)
-	}
-	if exitCode, ok := asInt(values["exit_code"]); ok {
-		return fmt.Sprintf("exit %d", exitCode)
-	}
-	if value := strings.TrimSpace(primaryValue(values)); value != "" {
-		return truncateInline(value, 160)
-	}
-	rawJSON, err := json.Marshal(values)
-	if err != nil {
-		return ""
-	}
-	return truncateInline(string(rawJSON), 160)
-}
-
-func extractACPDisplayText(raw any) string {
-	switch typed := raw.(type) {
-	case nil:
-		return ""
-	case string:
-		text := strings.TrimSpace(typed)
-		if text == "" {
-			return ""
-		}
-		if decoded := decodeACPJSONTextString(text); decoded != "" {
-			return decoded
-		}
-		return normalizeInlineText(text)
-	case []any:
-		parts := make([]string, 0, len(typed))
-		for _, item := range typed {
-			if text := strings.TrimSpace(extractACPDisplayText(item)); text != "" {
-				parts = append(parts, text)
-			}
-		}
-		return strings.Join(parts, "\n")
-	case map[string]any:
-		if text := strings.TrimSpace(extractACPDisplayText(typed["text"])); text != "" {
-			return text
-		}
-		if text := strings.TrimSpace(extractACPDisplayText(typed["value"])); text != "" {
-			return text
-		}
-		if text := strings.TrimSpace(extractACPDisplayText(typed["content"])); text != "" {
-			return text
-		}
-		if text := strings.TrimSpace(extractACPDisplayText(typed["detailedContent"])); text != "" {
-			return text
-		}
-	}
-	return ""
-}
-
-func decodeACPJSONTextString(input string) string {
-	if !strings.HasPrefix(strings.TrimSpace(input), "{") && !strings.HasPrefix(strings.TrimSpace(input), "[") {
-		return ""
-	}
-	var payload any
-	if err := json.Unmarshal([]byte(input), &payload); err != nil {
-		return ""
-	}
-	return normalizeInlineText(extractACPDisplayText(payload))
-}
-
-func normalizeInlineText(input string) string {
-	input = strings.ReplaceAll(input, "\r\n", "\n")
-	input = strings.ReplaceAll(input, "\r", "\n")
-	lines := strings.Split(input, "\n")
-	out := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
-}
-
 func primaryValue(raw any) string {
 	switch typed := raw.(type) {
 	case nil:
@@ -269,21 +195,6 @@ func asString(v any) string {
 			return ""
 		}
 		return fmt.Sprint(v)
-	}
-}
-
-func asInt(v any) (int, bool) {
-	switch typed := v.(type) {
-	case int:
-		return typed, true
-	case int32:
-		return int(typed), true
-	case int64:
-		return int(typed), true
-	case float64:
-		return int(typed), true
-	default:
-		return 0, false
 	}
 }
 

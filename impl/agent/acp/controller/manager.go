@@ -1149,6 +1149,7 @@ func normalizeACPUpdateEvent(
 			Title:    strings.TrimSpace(typed.Title),
 			Status:   strings.TrimSpace(typed.Status),
 			RawInput: acpToolRawInput(typed.Kind, typed.Title, typed.RawInput),
+			Content:  acpToolContent(typed.Content),
 		}
 		return &session.Event{
 			Type:       session.EventTypeToolCall,
@@ -1160,16 +1161,7 @@ func normalizeACPUpdateEvent(
 			Protocol: &session.EventProtocol{
 				UpdateType: typed.SessionUpdate,
 				ToolCall:   targetTool,
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
-					ToolCallID:    targetTool.ID,
-					Kind:          targetTool.Kind,
-					Title:         targetTool.Title,
-					Status:        targetTool.Status,
-					RawInput:      maps.Clone(targetTool.RawInput),
-					RawOutput:     maps.Clone(targetTool.RawOutput),
-					Meta:          maps.Clone(typed.Meta),
-				},
+				Update:     acpToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
 			},
 		}
 	case client.ToolCallUpdate:
@@ -1181,7 +1173,8 @@ func normalizeACPUpdateEvent(
 			Title:     strings.TrimSpace(derefString(typed.Title)),
 			Status:    strings.TrimSpace(derefString(typed.Status)),
 			RawInput:  acpToolRawInput(derefString(typed.Kind), derefString(typed.Title), typed.RawInput),
-			RawOutput: acpToolRawOutput(typed.RawOutput, typed.Content),
+			RawOutput: acpToolRawOutput(typed.RawOutput),
+			Content:   acpToolContent(typed.Content),
 		}
 		return &session.Event{
 			Type:       toolEventTypeFromStatus(derefString(typed.Status)),
@@ -1193,16 +1186,7 @@ func normalizeACPUpdateEvent(
 			Protocol: &session.EventProtocol{
 				UpdateType: typed.SessionUpdate,
 				ToolCall:   targetTool,
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: strings.TrimSpace(typed.SessionUpdate),
-					ToolCallID:    targetTool.ID,
-					Kind:          targetTool.Kind,
-					Title:         targetTool.Title,
-					Status:        targetTool.Status,
-					RawInput:      maps.Clone(targetTool.RawInput),
-					RawOutput:     maps.Clone(targetTool.RawOutput),
-					Meta:          maps.Clone(typed.Meta),
-				},
+				Update:     acpToolProtocolUpdate(typed.SessionUpdate, targetTool, typed.Meta),
 			},
 		}
 	case client.PlanUpdate:
@@ -1929,26 +1913,47 @@ func acpToolRawInput(kind string, title string, raw any) map[string]any {
 	return out
 }
 
-func acpToolRawOutput(raw any, content []client.ToolCallContent) map[string]any {
+func acpToolRawOutput(raw any) map[string]any {
 	out := acpRawMap(raw)
-	if out == nil {
-		out = map[string]any{}
-	}
-	if text := strings.TrimSpace(acpToolContentText(content)); text != "" {
-		if _, exists := out["text"]; !exists {
-			out["text"] = text
-		}
-	}
-	for _, item := range content {
-		if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
-			out["terminal_id"] = terminalID
-			break
-		}
-	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func acpToolProtocolUpdate(updateType string, tool *session.ProtocolToolCall, meta map[string]any) *session.ProtocolUpdate {
+	if tool == nil {
+		return &session.ProtocolUpdate{SessionUpdate: strings.TrimSpace(updateType)}
+	}
+	update := &session.ProtocolUpdate{
+		SessionUpdate: strings.TrimSpace(updateType),
+		ToolCallID:    strings.TrimSpace(tool.ID),
+		Kind:          strings.TrimSpace(tool.Kind),
+		Title:         strings.TrimSpace(tool.Title),
+		Status:        strings.TrimSpace(tool.Status),
+		RawInput:      maps.Clone(tool.RawInput),
+		RawOutput:     maps.Clone(tool.RawOutput),
+		Meta:          maps.Clone(meta),
+	}
+	if len(tool.Content) > 0 {
+		update.Content = session.CloneProtocolToolCallContent(tool.Content)
+	}
+	return update
+}
+
+func acpToolContent(content []client.ToolCallContent) []session.ProtocolToolCallContent {
+	if len(content) == 0 {
+		return nil
+	}
+	out := make([]session.ProtocolToolCallContent, 0, len(content))
+	for _, item := range content {
+		out = append(out, session.ProtocolToolCallContent{
+			Type:       strings.TrimSpace(item.Type),
+			Content:    item.Content,
+			TerminalID: strings.TrimSpace(item.TerminalID),
+		})
+	}
+	return session.CloneProtocolToolCallContent(out)
 }
 
 func acpRawMap(raw any) map[string]any {
@@ -1966,19 +1971,6 @@ func acpRawMap(raw any) map[string]any {
 		}
 		return nil
 	}
-}
-
-func acpToolContentText(content []client.ToolCallContent) string {
-	if len(content) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(content))
-	for _, item := range content {
-		if text := strings.TrimSpace(textFromContentValue(item.Content)); text != "" {
-			parts = append(parts, text)
-		}
-	}
-	return strings.Join(parts, "\n")
 }
 
 func messageForContentChunk(chunk client.ContentChunk, text string) model.Message {

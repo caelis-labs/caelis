@@ -114,14 +114,14 @@ func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	if stderr, _ := payload["stderr"].(string); !strings.Contains(stderr, "module cache denied") {
-		t.Fatalf("stderr = %q, want raw command diagnostics", stderr)
+	if resultText, _ := payload["result"].(string); !strings.Contains(resultText, "module cache denied") {
+		t.Fatalf("result = %q, want raw command diagnostics", resultText)
 	}
 	if exitCode, _ := payload["exit_code"].(float64); exitCode != 7 {
 		t.Fatalf("exit_code = %v, want 7", payload["exit_code"])
 	}
 	if _, ok := payload["error"]; ok {
-		t.Fatalf("payload contains error = %#v, want terminal-like stdout/stderr/exit_code only", payload["error"])
+		t.Fatalf("payload contains error = %#v, want command result and exit_code only", payload["error"])
 	}
 }
 
@@ -155,9 +155,9 @@ func TestBashCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	stderr, _ := payload["stderr"].(string)
-	if !strings.Contains(stderr, "/home/test/go/pkg/mod/cache") {
-		t.Fatalf("stderr = %q, want original denied path", stderr)
+	resultText, _ := payload["result"].(string)
+	if !strings.Contains(resultText, "/home/test/go/pkg/mod/cache") {
+		t.Fatalf("result = %q, want original denied path", resultText)
 	}
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
@@ -198,9 +198,9 @@ func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
-	stdout, _ := payload["stdout"].(string)
-	if !strings.Contains(stdout, deniedPath) {
-		t.Fatalf("stdout = %q, want original denied path", stdout)
+	resultText, _ := payload["result"].(string)
+	if !strings.Contains(resultText, deniedPath) {
+		t.Fatalf("result = %q, want original denied path", resultText)
 	}
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
@@ -238,7 +238,7 @@ func TestBashCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
 		t.Fatalf("json.Unmarshal(result) error = %v", err)
 	}
 	if _, ok := payload["error"]; ok {
-		t.Fatalf("payload contains error = %#v, want terminal-like stdout/stderr/exit_code only", payload["error"])
+		t.Fatalf("payload contains error = %#v, want command result and exit_code only", payload["error"])
 	}
 }
 

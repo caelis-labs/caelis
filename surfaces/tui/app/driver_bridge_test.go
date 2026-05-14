@@ -117,11 +117,11 @@ func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	if !ok {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
-	if got := rawString(env.Event.ToolResult.RawOutput, "text"); got != "hello world" {
+	if got, _ := gatewayTerminalContent(env); got != "hello world" {
 		t.Fatalf("merged text = %q, want hello world", got)
 	}
-	if got := env.Event.ToolResult.RawOutput["stdout_cursor"]; got != int64(2) {
-		t.Fatalf("stdout_cursor = %#v, want int64(2)", got)
+	if len(env.Event.ToolResult.RawOutput) != 0 {
+		t.Fatalf("raw output = %#v, want terminal content only", env.Event.ToolResult.RawOutput)
 	}
 }
 
@@ -148,7 +148,7 @@ func TestGatewayTerminalBatcherMergesCumulativeRunningFrames(t *testing.T) {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
 	want := "Let me write the script. Now let me run the script."
-	if got := rawString(env.Event.ToolResult.RawOutput, "text"); got != want {
+	if got, _ := gatewayTerminalContent(env); got != want {
 		t.Fatalf("merged text = %q, want %q", got, want)
 	}
 }
@@ -175,7 +175,7 @@ func TestGatewayTerminalBatcherPreservesBashPrefixDeltas(t *testing.T) {
 	if !ok {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
-	if got := rawString(env.Event.ToolResult.RawOutput, "text"); got != "abcabcdef" {
+	if got, _ := gatewayTerminalContent(env); got != "abcabcdef" {
 		t.Fatalf("merged BASH text = %q, want both byte deltas preserved", got)
 	}
 }
@@ -185,6 +185,7 @@ func testTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
 }
 
 func testTerminalFrameForTool(toolName string, text string, cursor int64) kernel.EventEnvelope {
+	_ = cursor
 	return kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
@@ -195,14 +196,8 @@ func testTerminalFrameForTool(toolName string, text string, cursor int64) kernel
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: toolName,
-				RawOutput: map[string]any{
-					"running":       true,
-					"text":          text,
-					"task_id":       "task-1",
-					"terminal_id":   "term-1",
-					"stream":        "stdout",
-					"stdout_cursor": cursor,
-				},
+				Status:   kernel.ToolStatusRunning,
+				Content:  testTerminalContentWithID(text, "term-1"),
 			},
 		},
 	}
@@ -601,14 +596,21 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "BASH",
-				RawOutput: map[string]any{
-					"task_id":       "task-1",
-					"terminal_id":   "terminal-1",
-					"running":       true,
-					"state":         "running",
-					"stdout_cursor": int64(4),
+				Content:  testTerminalContentWithID("seed\n", "terminal-1"),
+				Status:   kernel.ToolStatusRunning,
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"task": map[string]any{
+							"task_id":       "task-1",
+							"terminal_id":   "terminal-1",
+							"running":       true,
+							"state":         "running",
+							"output_cursor": int64(5),
+						},
+					},
 				},
-				Status: kernel.ToolStatusRunning,
 			},
 		},
 	}
@@ -620,11 +622,8 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "call-1",
 				ToolName: "BASH",
-				RawOutput: map[string]any{
-					"stream": "stdout",
-					"text":   "streamed\n",
-				},
-				Status: kernel.ToolStatusRunning,
+				Content:  testTerminalContentWithID("streamed\n", "terminal-1"),
+				Status:   kernel.ToolStatusRunning,
 			},
 		},
 	}
@@ -644,7 +643,7 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 			if !ok || env.Event.ToolResult == nil {
 				continue
 			}
-			if env.Event.ToolResult.RawOutput["text"] == "streamed\n" {
+			if text, _ := gatewayTerminalContent(env); text == "streamed\n" {
 				sawStream = true
 			}
 		}

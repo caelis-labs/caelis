@@ -268,6 +268,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 							ToolName:  "BASH",
 							RawInput:  map[string]any{"command": `echo "hi"`},
 							RawOutput: map[string]any{"text": "line 1"},
+							Content:   testTerminalContent("line 1"),
 							Status:    kernel.ToolStatusRunning,
 						},
 					},
@@ -283,6 +284,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 							ToolName:  "BASH",
 							RawInput:  map[string]any{"command": `echo "hi"`},
 							RawOutput: map[string]any{"stdout": "done"},
+							Content:   testTerminalContent("done"),
 							Status:    kernel.ToolStatusCompleted,
 						},
 					},
@@ -290,6 +292,62 @@ func TestTranscriptSnapshots(t *testing.T) {
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,BASH,done,args=echo \"hi\",output=done)",
+		},
+		{
+			name: "terminal status-only final preserves streamed output",
+			run: func(m *Model) *Model {
+				updated, _ := m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolCall,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						ToolCall: &kernel.ToolCallPayload{
+							CallID:   "call-1",
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": `printf hi`},
+							Status:   kernel.ToolStatusRunning,
+						},
+					},
+				})
+				m = updated.(*Model)
+				updated, _ = m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolResult,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						ToolResult: &kernel.ToolResultPayload{
+							CallID:   "call-1",
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": `printf hi`},
+							Content:  testTerminalContent("hi"),
+							Status:   kernel.ToolStatusRunning,
+						},
+					},
+				})
+				m = updated.(*Model)
+				updated, _ = m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolResult,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						Meta: map[string]any{
+							"caelis": map[string]any{
+								"runtime": map[string]any{
+									"stream": map[string]any{"mode": "final"},
+								},
+							},
+						},
+						ToolResult: &kernel.ToolResultPayload{
+							CallID:   "call-1",
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": `printf hi`},
+							Status:   kernel.ToolStatusCompleted,
+						},
+					},
+				})
+				return updated.(*Model)
+			},
+			want: "Main(session=root-session,status=running)\n  tool(call-1,BASH,done,args=printf hi,output=hi)",
 		},
 		{
 			name: "approval overlay is not transcript",
@@ -449,6 +507,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 							ToolName:  "BASH",
 							RawInput:  map[string]any{"command": "false"},
 							RawOutput: map[string]any{"stderr": "exit 1"},
+							Content:   testTerminalContent("exit 1"),
 							Status:    kernel.ToolStatusFailed,
 							Error:     true,
 						},
@@ -503,6 +562,7 @@ func TestStructuredSubagentGatewayToolRendersThroughTranscriptModel(t *testing.T
 					"stdout":    "ok\n",
 					"exit_code": 0,
 				},
+				Content: testTerminalContent("ok\n"),
 			},
 		}},
 	} {
@@ -591,6 +651,7 @@ func TestProjectGatewayEventACPFetchResultKeepsInputQueryWhenOutputHasText(t *te
 			RawOutput: map[string]any{
 				"text": "result 01\nresult 02",
 			},
+			Content: testToolContent("result 01\nresult 02"),
 		},
 	})
 	if len(events) != 1 {
@@ -739,6 +800,11 @@ func TestProjectGatewayEventTaskResultPrefersOutputHandleInArgs(t *testing.T) {
 
 	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
 		Kind: kernel.EventKindToolResult,
+		Meta: testRuntimeToolMeta(map[string]any{
+			"action":      "wait",
+			"target_id":   "jeff",
+			"target_kind": "subagent",
+		}),
 		ToolResult: &kernel.ToolResultPayload{
 			CallID:   "task-result",
 			ToolName: "TASK",
@@ -826,6 +892,53 @@ func TestProjectGatewayEventPreservesStreamParentAnchor(t *testing.T) {
 	}
 	if events[0].AnchorToolCallID != "spawn-1" || events[0].AnchorToolName != "SPAWN" {
 		t.Fatalf("anchor = (%q, %q), want spawn parent", events[0].AnchorToolCallID, events[0].AnchorToolName)
+	}
+}
+
+func TestProjectGatewayEventToolResultDoesNotDisplayRawOutputOnly(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:    "bash-raw-only",
+			ToolName:  "BASH",
+			Status:    kernel.ToolStatusCompleted,
+			RawInput:  map[string]any{"command": "go mod tidy"},
+			RawOutput: map[string]any{"stdout": "network error that must not be rendered"},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "completed" {
+		t.Fatalf("ToolOutput = %q, want standard status fallback", got)
+	}
+	if strings.Contains(events[0].ToolOutput, "network error") {
+		t.Fatalf("ToolOutput = %q, must not display rawOutput-only text", events[0].ToolOutput)
+	}
+}
+
+func TestProjectGatewayEventToolResultDiscardsUnsupportedACPContent(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "tool-future-content",
+			ToolName: "BASH",
+			Status:   kernel.ToolStatusCompleted,
+			Content: []session.ProtocolToolCallContent{{
+				Type:    "image",
+				Content: map[string]any{"type": "image", "url": "ignored"},
+			}},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "completed" {
+		t.Fatalf("ToolOutput = %q, want unsupported content discarded to standard status", got)
 	}
 }
 

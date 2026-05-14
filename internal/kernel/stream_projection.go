@@ -53,18 +53,17 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 	if toolName != "BASH" && toolName != "SPAWN" && toolName != "TASK" {
 		return StreamRequest{}, false
 	}
-	if payload.Status != ToolStatusRunning && !boolValue(payload.RawOutput["running"]) && !strings.EqualFold(strings.TrimSpace(stringValue(payload.RawOutput["state"])), "running") {
+	if payload.Status != ToolStatusRunning &&
+		!boolValue(nestedAny(ev.Meta, "caelis", "runtime", "task", "running")) &&
+		!strings.EqualFold(strings.TrimSpace(stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "state")), "running") {
 		return StreamRequest{}, false
 	}
 	taskID := firstNonEmpty(
-		stringValue(payload.RawOutput["task_id"]),
-		stringValue(payload.RawInput["task_id"]),
 		stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "task_id"),
 		stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "internal_task_id"),
 	)
 	terminalID := firstNonEmpty(
-		stringValue(payload.RawOutput["terminal_id"]),
-		stringValue(payload.RawInput["terminal_id"]),
+		terminalIDFromProtocolContent(gatewayToolContent(ev, payload.Content)),
 		stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "terminal_id"),
 	)
 	if taskID == "" && terminalID == "" {
@@ -81,16 +80,13 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 		Ref: stream.Ref{
 			SessionID: firstNonEmpty(
 				strings.TrimSpace(ev.SessionRef.SessionID),
-				stringValue(payload.RawOutput["session_id"]),
-				stringValue(payload.RawInput["session_id"]),
 				stringFromNestedMap(ev.Meta, "caelis", "runtime", "task", "session_id"),
 			),
 			TaskID:     taskID,
 			TerminalID: terminalID,
 		},
 		Cursor: stream.Cursor{
-			Stdout: firstNonZeroInt64(int64FromAny(payload.RawOutput["stdout_cursor"]), int64FromAny(nestedAny(ev.Meta, "caelis", "runtime", "task", "stdout_cursor"))),
-			Stderr: firstNonZeroInt64(int64FromAny(payload.RawOutput["stderr_cursor"]), int64FromAny(nestedAny(ev.Meta, "caelis", "runtime", "task", "stderr_cursor"))),
+			Output: int64FromAny(nestedAny(ev.Meta, "caelis", "runtime", "task", "output_cursor")),
 		},
 		Origin:        cloneEventOrigin(ev.Origin),
 		Actor:         strings.TrimSpace(payload.Actor),
@@ -112,23 +108,45 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 	return req, true
 }
 
+func gatewayToolContent(ev Event, fallback []session.ProtocolToolCallContent) []session.ProtocolToolCallContent {
+	if ev.Protocol != nil && ev.Protocol.Update != nil {
+		if content := session.ProtocolToolCallContentOf(ev.Protocol.Update); len(content) > 0 {
+			return content
+		}
+	}
+	if ev.Protocol != nil && ev.Protocol.ToolCall != nil {
+		if content := session.CloneProtocolToolCallContent(ev.Protocol.ToolCall.Content); len(content) > 0 {
+			return content
+		}
+	}
+	return session.CloneProtocolToolCallContent(fallback)
+}
+
+func terminalIDFromProtocolContent(content []session.ProtocolToolCallContent) string {
+	for _, item := range content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			continue
+		}
+		if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+			return terminalID
+		}
+	}
+	return ""
+}
+
 // StreamFrameEvent projects one stream frame into the same ACP-native tool
 // update shape used by normal Gateway output. The event is intentionally
 // transient; adapters should not append it to durable session history.
 func StreamFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
-	output := map[string]any{
+	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
+	metaOutput := map[string]any{
 		"task_id":       firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID),
-		"terminal_id":   firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID),
-		"stream":        strings.TrimSpace(frame.Stream),
-		"text":          frame.Text,
+		"terminal_id":   terminalID,
 		"running":       frame.Running,
 		"state":         streamFrameState(frame),
-		"stdout_cursor": frame.Cursor.Stdout,
-		"stderr_cursor": frame.Cursor.Stderr,
+		"output_cursor": frame.Cursor.Output,
 	}
-	if frame.ExitCode != nil {
-		output["exit_code"] = *frame.ExitCode
-	}
+	content := terminalACPContent(frame.Text, terminalID)
 	occurredAt := frame.UpdatedAt
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
@@ -142,7 +160,7 @@ func StreamFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 			OccurredAt: occurredAt,
 			SessionRef: req.SessionRef,
 			Origin:     cloneEventOrigin(req.Origin),
-			Meta:       streamFrameMeta("append"),
+			Meta:       streamFrameToolMeta(streamFrameMeta("append"), req.RawInput, metaOutput, "", firstNonEmpty(frame.Ref.TaskID, req.Ref.TaskID)),
 			Protocol: &session.EventProtocol{
 				Method:     session.ProtocolMethodSessionUpdate,
 				UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
@@ -153,14 +171,14 @@ func StreamFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 					Title:         req.ToolName,
 					Status:        string(ToolStatusRunning),
 					RawInput:      maps.Clone(req.RawInput),
-					RawOutput:     output,
+					Content:       session.CloneProtocolToolCallContent(content),
 				},
 			},
 			ToolResult: &ToolResultPayload{
 				CallID:        req.CallID,
 				ToolName:      req.ToolName,
 				RawInput:      maps.Clone(req.RawInput),
-				RawOutput:     output,
+				Content:       session.CloneProtocolToolCallContent(content),
 				Status:        ToolStatusRunning,
 				Actor:         req.Actor,
 				Scope:         req.Scope,
@@ -213,29 +231,19 @@ func subagentStreamFrameEvent(req StreamRequest, frame stream.Frame) (EventEnvel
 
 func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 	status, isErr := subagentFinalToolStatus(frame)
-	output := map[string]any{
+	terminalID := firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID)
+	metaOutput := map[string]any{
 		"task_id":       firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID),
-		"terminal_id":   firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID),
-		"stream":        strings.TrimSpace(frame.Stream),
+		"terminal_id":   terminalID,
 		"running":       false,
 		"state":         string(status),
-		"stdout_cursor": frame.Cursor.Stdout,
-		"stderr_cursor": frame.Cursor.Stderr,
+		"output_cursor": frame.Cursor.Output,
 	}
 	if state := strings.TrimSpace(frame.State); state != "" {
-		output["state"] = state
+		metaOutput["state"] = state
 	}
-	if text := strings.TrimSpace(frame.Text); text != "" {
-		output["text"] = text
-	}
-	for _, key := range []string{"target_kind", "handle", "mention", "agent", "prompt", "result", "final_message", "finalMessage", "output", "stdout", "stderr", "output_preview", "error"} {
-		if value := strings.TrimSpace(stringValue(frame.Result[key])); value != "" {
-			output[key] = value
-		}
-	}
-	if frame.ExitCode != nil {
-		output["exit_code"] = *frame.ExitCode
-	}
+	finalText := streamFinalTerminalText(frame.Text, frame.Cursor, status)
+	content := terminalACPContent(finalText, terminalID)
 	occurredAt := frame.UpdatedAt
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
@@ -249,7 +257,7 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope 
 			OccurredAt: occurredAt,
 			SessionRef: req.SessionRef,
 			Origin:     cloneEventOrigin(req.Origin),
-			Meta:       streamFrameMeta("final"),
+			Meta:       streamFrameToolMeta(streamFrameMeta("final"), req.RawInput, metaOutput, "", firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID)),
 			Protocol: &session.EventProtocol{
 				Method:     session.ProtocolMethodSessionUpdate,
 				UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
@@ -260,14 +268,14 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope 
 					Title:         req.ToolName,
 					Status:        string(status),
 					RawInput:      maps.Clone(req.RawInput),
-					RawOutput:     output,
+					Content:       session.CloneProtocolToolCallContent(content),
 				},
 			},
 			ToolResult: &ToolResultPayload{
 				CallID:        req.CallID,
 				ToolName:      req.ToolName,
 				RawInput:      maps.Clone(req.RawInput),
-				RawOutput:     output,
+				Content:       session.CloneProtocolToolCallContent(content),
 				Status:        status,
 				Error:         isErr,
 				Actor:         req.Actor,
@@ -280,35 +288,21 @@ func streamFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope 
 
 func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 	status, isErr := subagentFinalToolStatus(frame)
-	output := map[string]any{
-		"task_id":     firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID),
+	taskID := firstNonEmpty(req.Ref.TaskID, frame.Ref.TaskID)
+	metaOutput := map[string]any{
+		"task_id":     taskID,
 		"terminal_id": firstNonEmpty(frame.Ref.TerminalID, req.Ref.TerminalID),
 		"running":     false,
 		"state":       string(status),
 	}
 	if state := strings.TrimSpace(frame.State); state != "" {
-		output["state"] = state
+		metaOutput["state"] = state
 	}
-	for _, key := range []string{"handle", "mention", "agent", "prompt"} {
-		if value := strings.TrimSpace(stringValue(frame.Result[key])); value != "" {
-			output[key] = value
-		}
+	finalMessage := CleanSubagentFinalOutput(frame.Text)
+	if finalMessage != "" {
+		metaOutput["result"] = finalMessage
 	}
-	if finalMessage := CleanSubagentFinalOutput(firstNonEmpty(
-		stringValue(frame.Result["final_message"]),
-		stringValue(frame.Result["finalMessage"]),
-		stringValue(frame.Result["result"]),
-		frame.Text,
-	)); finalMessage != "" {
-		output["final_message"] = finalMessage
-		output["result"] = finalMessage
-	}
-	if errText := strings.TrimSpace(stringValue(frame.Result["error"])); errText != "" {
-		output["error"] = errText
-	}
-	if frame.ExitCode != nil {
-		output["exit_code"] = *frame.ExitCode
-	}
+	content := textACPContent(finalMessage)
 	occurredAt := frame.UpdatedAt
 	if occurredAt.IsZero() {
 		occurredAt = time.Now()
@@ -322,7 +316,7 @@ func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelop
 			OccurredAt: occurredAt,
 			SessionRef: req.SessionRef,
 			Origin:     cloneEventOrigin(req.Origin),
-			Meta:       streamFrameMeta("final"),
+			Meta:       streamFrameToolMeta(streamFrameMeta("final"), req.RawInput, metaOutput, "", taskID),
 			Protocol: &session.EventProtocol{
 				Method:     session.ProtocolMethodSessionUpdate,
 				UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
@@ -333,14 +327,14 @@ func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelop
 					Title:         req.ToolName,
 					Status:        string(status),
 					RawInput:      maps.Clone(req.RawInput),
-					RawOutput:     output,
+					Content:       session.CloneProtocolToolCallContent(content),
 				},
 			},
 			ToolResult: &ToolResultPayload{
 				CallID:        req.CallID,
 				ToolName:      req.ToolName,
 				RawInput:      maps.Clone(req.RawInput),
-				RawOutput:     output,
+				Content:       session.CloneProtocolToolCallContent(content),
 				Status:        status,
 				Error:         isErr,
 				Actor:         req.Actor,
@@ -352,7 +346,7 @@ func subagentFinalFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelop
 }
 
 func subagentFinalToolStatus(frame stream.Frame) (ToolStatus, bool) {
-	state := strings.ToLower(strings.TrimSpace(firstNonEmpty(frame.State, stringValue(frame.Result["state"]))))
+	state := strings.ToLower(strings.TrimSpace(frame.State))
 	switch state {
 	case "failed":
 		return ToolStatusFailed, true
@@ -361,16 +355,61 @@ func subagentFinalToolStatus(frame stream.Frame) (ToolStatus, bool) {
 	case "cancelled", "canceled":
 		return ToolStatusCancelled, true
 	}
-	if frame.ExitCode != nil && *frame.ExitCode != 0 {
-		return ToolStatusFailed, true
-	}
 	return ToolStatusCompleted, false
 }
 
-func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
-	if strings.EqualFold(strings.TrimSpace(frame.Stream), "reasoning") {
-		return false
+func terminalACPContent(text string, terminalID string) []session.ProtocolToolCallContent {
+	if text == "" {
+		return nil
 	}
+	item := session.ProtocolToolCallContent{
+		Type:       "terminal",
+		Content:    session.ProtocolTextContent(text),
+		TerminalID: strings.TrimSpace(terminalID),
+	}
+	return []session.ProtocolToolCallContent{item}
+}
+
+func textACPContent(text string) []session.ProtocolToolCallContent {
+	if text == "" {
+		return nil
+	}
+	return []session.ProtocolToolCallContent{{
+		Type:    "content",
+		Content: session.ProtocolTextContent(text),
+	}}
+}
+
+func streamFinalTerminalText(text string, cursor stream.Cursor, status ToolStatus) string {
+	if text := strings.TrimSpace(text); text != "" {
+		return text
+	}
+	if cursor.Output == 0 && (status == ToolStatusCompleted || status == ToolStatusFailed) {
+		return "(no output)"
+	}
+	return ""
+}
+
+func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskID string) map[string]any {
+	values := map[string]any{}
+	if action = firstNonEmpty(action, stringValue(output["action"]), stringValue(input["action"])); action != "" {
+		values[EventMetaRuntimeToolAction] = action
+	}
+	if taskID = firstNonEmpty(taskID, stringValue(output["handle"]), stringValue(output["task_id"]), stringValue(input["task_id"])); taskID != "" {
+		values[EventMetaRuntimeTargetID] = taskID
+	}
+	for _, key := range []string{"agent", "handle", "mention", "prompt", "target_kind", "input"} {
+		if value := firstNonEmpty(stringValue(output[key]), stringValue(input[key])); value != "" {
+			values[key] = value
+		}
+	}
+	if len(values) == 0 {
+		return meta
+	}
+	return withCaelisRuntimeSection(meta, EventMetaRuntimeTool, values)
+}
+
+func shouldProjectFrameTextToParentTool(frame stream.Frame) bool {
 	if update := session.ProtocolUpdateOf(frame.Event); update != nil &&
 		strings.TrimSpace(update.SessionUpdate) == string(session.ProtocolUpdateTypeAgentThought) {
 		return false

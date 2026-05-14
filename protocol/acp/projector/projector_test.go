@@ -42,6 +42,42 @@ func TestEventProjectorNormalizesRuntimeToolStatus(t *testing.T) {
 	}
 }
 
+func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: UpdateToolCallInfo,
+			ToolCall: &session.ProtocolToolCall{
+				ID:     "call-1",
+				Name:   "BASH",
+				Status: "running",
+				Content: []session.ProtocolToolCallContent{{
+					Type:       "terminal",
+					TerminalID: "runtime-terminal-1",
+					Content:    session.ProtocolTextContent("line\n"),
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
+	}
+	update, ok := updates[0].(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	if len(update.Content) != 1 {
+		t.Fatalf("content = %#v, want one terminal content item", update.Content)
+	}
+	if got := update.Content[0].TerminalID; got != "call-1" {
+		t.Fatalf("terminal id = %q, want display tool call id", got)
+	}
+}
+
 func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -146,10 +182,8 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 					"agent":  "codex",
 					"prompt": "child work",
 				},
-				RawOutput: map[string]any{
-					"task_id":     "task-1",
-					"terminal_id": "terminal-1",
-				},
+				RawOutput: map[string]any{"task_id": "task-1"},
+				Content:   []session.ProtocolToolCallContent{{Type: "terminal", TerminalID: "terminal-1"}},
 			},
 		},
 	})
@@ -169,8 +203,8 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 	if update.Title == nil || *update.Title != "SPAWN codex" {
 		t.Fatalf("title = %v, want SPAWN codex", update.Title)
 	}
-	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "terminal-1" {
-		t.Fatalf("content = %#v, want terminal content for terminal-1", update.Content)
+	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "call-1" {
+		t.Fatalf("content = %#v, want terminal content remapped to display id call-1", update.Content)
 	}
 }
 

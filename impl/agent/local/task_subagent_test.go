@@ -356,7 +356,6 @@ func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
 	}
 	runtime.tasks.PublishStream(stream.Frame{
 		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Stream:  "stdout",
 		Text:    "first streamed\n",
 		State:   string(delegation.StateCompleted),
 		Running: false,
@@ -379,7 +378,6 @@ func TestTaskWriteClearsPreviousSubagentStreamFrames(t *testing.T) {
 	}
 	runtime.tasks.PublishStream(stream.Frame{
 		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Stream:  "stdout",
 		Text:    "second streamed",
 		State:   string(delegation.StateRunning),
 		Running: true,
@@ -477,7 +475,6 @@ func TestSubagentStreamsAppendsIncrementalTerminalFrames(t *testing.T) {
 	}
 	runtime.tasks.PublishStream(stream.Frame{
 		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Stream:  "stdout",
 		Text:    "line one\n",
 		State:   string(delegation.StateRunning),
 		Running: true,
@@ -494,7 +491,6 @@ func TestSubagentStreamsAppendsIncrementalTerminalFrames(t *testing.T) {
 
 	runtime.tasks.PublishStream(stream.Frame{
 		Ref:     stream.Ref{TaskID: started.Ref.TaskID},
-		Stream:  "stdout",
 		Text:    "line two\n",
 		State:   string(delegation.StateRunning),
 		Running: true,
@@ -600,7 +596,7 @@ func TestSubagentStructuredToolFramesStillSurfaceFinalResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read(first structured frame) error = %v", err)
 	}
-	if len(first.Frames) != 2 || first.Frames[0].Event == nil || first.Frames[1].Text != "final answer" {
+	if len(first.Frames) != 2 || first.Frames[0].Event == nil || strings.TrimSpace(first.Frames[1].Text) != "final answer" {
 		t.Fatalf("first frames = %#v, want tool frame followed by final answer", first.Frames)
 	}
 	if first.Frames[0].Text != "" {
@@ -642,11 +638,8 @@ func TestSubagentStreamSubscribeClosedFrameCarriesFinalResult(t *testing.T) {
 	if closed.State != string(task.StateCompleted) {
 		t.Fatalf("closed state = %q, want completed", closed.State)
 	}
-	if got, _ := closed.Result["result"].(string); got != "### Done\n- `child.txt` written" {
-		t.Fatalf("closed result = %#v, want final subagent result", closed.Result)
-	}
-	if got, _ := closed.Result["final_message"].(string); got != "### Done\n- `child.txt` written" {
-		t.Fatalf("closed final_message = %#v, want final subagent message", closed.Result)
+	if got := closed.Text; got != "### Done\n- `child.txt` written" {
+		t.Fatalf("closed text = %#v, want final subagent result", got)
 	}
 }
 
@@ -706,14 +699,14 @@ func TestSubagentStreamReadInterruptsStaleRunningChild(t *testing.T) {
 	if snap.Running {
 		t.Fatalf("stream snapshot Running = true, want false")
 	}
-	if snap.ExitCode == nil || *snap.ExitCode == 0 {
-		t.Fatalf("stream snapshot ExitCode = %#v, want non-zero", snap.ExitCode)
+	if snap.State != string(task.StateInterrupted) {
+		t.Fatalf("stream snapshot State = %q, want interrupted", snap.State)
 	}
-	if got, _ := snap.Result["state"].(string); got != string(task.StateInterrupted) {
-		t.Fatalf("stream snapshot state = %q, want interrupted", got)
+	if snap.ExitCode != nil {
+		t.Fatalf("stream snapshot ExitCode = %#v, want nil for interrupted subagent", snap.ExitCode)
 	}
-	if got, _ := snap.Result["error"].(string); !strings.Contains(got, "child session") {
-		t.Fatalf("stream snapshot error = %q, want child session detail", got)
+	if got := snap.FinalText; !strings.Contains(got, "child session") {
+		t.Fatalf("stream snapshot final text = %q, want child session detail", got)
 	}
 
 	waited, err := runtime.tasks.Wait(ctx, activeSession.SessionRef, task.ControlRequest{TaskID: started.Ref.TaskID})
@@ -839,7 +832,6 @@ func (r *recordingSubagentRunner) Spawn(_ context.Context, spawn subagent.SpawnC
 	if r.publishOnSpawn && spawn.Streams != nil {
 		spawn.Streams.PublishStream(stream.Frame{
 			Ref:     stream.Ref{TaskID: strings.TrimSpace(spawn.TaskID)},
-			Stream:  "stdout",
 			Text:    r.spawnStreamText,
 			State:   string(delegation.StateRunning),
 			Running: true,

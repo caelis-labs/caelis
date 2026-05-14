@@ -101,10 +101,6 @@ func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	var resp InitializeResponse
 	clientCapabilities := map[string]any{
 		"auth": map[string]any{"terminal": c.cfg.Terminal != nil},
-		"_meta": map[string]any{
-			"terminal_output": c.cfg.Terminal != nil,
-			"terminal-auth":   c.cfg.Terminal != nil,
-		},
 	}
 	if c.cfg.FileSystem != nil {
 		clientCapabilities["fs"] = map[string]any{"readTextFile": true, "writeTextFile": true}

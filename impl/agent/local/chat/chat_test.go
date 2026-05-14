@@ -741,7 +741,7 @@ func TestMessagesFromContextSkipsDelegatedACPToolRawOutput(t *testing.T) {
 	}
 }
 
-func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T) {
+func TestToolResultMessagePreservesCanonicalBashPayloadForModel(t *testing.T) {
 	t.Parallel()
 
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
@@ -751,7 +751,7 @@ func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T)
 	}, tool.Result{
 		ID:      "call-1",
 		Name:    "BASH",
-		Content: []model.Part{model.NewJSONPart([]byte(`{"stdout":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp: read-only file system\n","stderr":"","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
+		Content: []model.Part{model.NewJSONPart([]byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
 	})
 
 	results := message.ToolResults()
@@ -771,8 +771,8 @@ func TestToolResultMessagePreservesTerminalLikeBashPayloadForModel(t *testing.T)
 	if got, _ := payload["error"].(string); got == "" {
 		t.Fatalf("error = %q, want concise sandbox permission hint", got)
 	}
-	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, deniedPath) {
-		t.Fatalf("stdout = %q, want original denied path", stdout)
+	if resultText, _ := payload["result"].(string); !strings.Contains(resultText, deniedPath) {
+		t.Fatalf("result = %q, want original denied path", resultText)
 	}
 }
 
@@ -801,6 +801,147 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 	}
 }
 
+func TestToolResultEventPreservesRunningTaskOutputPreviewAsACPContent(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Args: `{"action":"wait","task_id":"jack","yield_time_ms":5000}`,
+	}, tool.Result{
+		ID:   "task-wait-1",
+		Name: "TASK",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"action":         "wait",
+			"running":        true,
+			"state":          "running",
+			"task_id":        "jack",
+			"target_kind":    "subagent",
+			"output_preview": "正在读取 hello_from_spawn.txt\n",
+		}))},
+	}, nil)
+
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	}
+	if got := update.Status; got != "running" {
+		t.Fatalf("status = %q, want running", got)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	}
+	if content[0].Type != "terminal" {
+		t.Fatalf("content type = %q, want terminal", content[0].Type)
+	}
+	textPayload, _ := content[0].Content.(map[string]any)
+	if got, _ := textPayload["text"].(string); got != "正在读取 hello_from_spawn.txt" {
+		t.Fatalf("content text = %q, want running output_preview", got)
+	}
+}
+
+func TestToolResultEventPreservesBashResultFieldAsACPContent(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "bash-status-1",
+		Name: "BASH",
+		Args: `{"command":"git status"}`,
+	}, tool.Result{
+		ID:   "bash-status-1",
+		Name: "BASH",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"result":    "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
+			"exit_code": 0,
+		}))},
+	}, nil)
+
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	}
+	if content[0].Type != "terminal" {
+		t.Fatalf("content type = %q, want terminal", content[0].Type)
+	}
+	textPayload, _ := content[0].Content.(map[string]any)
+	got, _ := textPayload["text"].(string)
+	if got != "On branch dev\nYour branch is behind 'origin/dev' by 3 commits." {
+		t.Fatalf("content text = %q, want result field", got)
+	}
+}
+
+func TestToolResultEventPreservesFailedBashOutputBeforeExitSummary(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "bash-tidy-1",
+		Name: "BASH",
+		Args: `{"command":"go mod tidy"}`,
+	}, tool.Result{
+		ID:   "bash-tidy-1",
+		Name: "BASH",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"result":    "go: module internal registry: network unreachable\n",
+			"exit_code": 1,
+		}))},
+	}, nil)
+
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	}
+	if got := update.Status; got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	}
+	textPayload, _ := content[0].Content.(map[string]any)
+	got, _ := textPayload["text"].(string)
+	if got != "go: module internal registry: network unreachable" {
+		t.Fatalf("content text = %q, want failed result field", got)
+	}
+}
+
+func TestToolResultEventUsesNoOutputPlaceholderForSilentBashFailure(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "bash-silent-failure-1",
+		Name: "BASH",
+		Args: `{"command":"false"}`,
+	}, tool.Result{
+		ID:   "bash-silent-failure-1",
+		Name: "BASH",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"exit_code": 1,
+		}))},
+	}, nil)
+
+	update := session.ProtocolUpdateOf(event)
+	if update == nil {
+		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	}
+	if got := update.Status; got != "failed" {
+		t.Fatalf("status = %q, want failed", got)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	}
+	textPayload, _ := content[0].Content.(map[string]any)
+	got, _ := textPayload["text"].(string)
+	if got != "(no output)" {
+		t.Fatalf("content text = %q, want no-output placeholder", got)
+	}
+}
+
 func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *testing.T) {
 	t.Parallel()
 
@@ -809,7 +950,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		ID:   "call-1",
 		Name: "BASH",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
-			"stderr":    large,
+			"result":    large,
 			"exit_code": 1,
 		}))},
 	}
@@ -827,12 +968,12 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	}, canonical, &message, truncationMeta)
 
 	rawOutput := event.Protocol.Update.RawOutput
-	stderr, _ := rawOutput["stderr"].(string)
-	if stderr == large {
-		t.Fatalf("raw stderr kept original huge output, want canonical truncated rawOutput")
+	resultText, _ := rawOutput["result"].(string)
+	if resultText == large {
+		t.Fatalf("raw result kept original huge output, want canonical truncated rawOutput")
 	}
-	if !strings.Contains(stderr, "tokens truncated") {
-		t.Fatalf("raw stderr = %q, want truncation marker", stderr)
+	if !strings.Contains(resultText, "tokens truncated") {
+		t.Fatalf("raw result = %q, want truncation marker", resultText)
 	}
 	if rawOutput["_tool_truncation"] != nil {
 		t.Fatalf("raw output = %#v, should not carry model truncation metadata", rawOutput)
@@ -851,9 +992,9 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
 	}
-	modelStderr, _ := payload["stderr"].(string)
-	if modelStderr != stderr {
-		t.Fatalf("model stderr != rawOutput stderr; model=%q raw=%q", modelStderr, stderr)
+	modelResult, _ := payload["result"].(string)
+	if modelResult != resultText {
+		t.Fatalf("model result != rawOutput result; model=%q raw=%q", modelResult, resultText)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
@@ -871,7 +1012,7 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 		ID:   "call-1",
 		Name: "BASH",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
-			"stderr": large,
+			"result": large,
 		}))},
 	})
 
@@ -887,9 +1028,9 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 	if encoded := results[0].Content[0].JSON.Value; len(encoded) > limit {
 		t.Fatalf("encoded payload len = %d, want <= %d", len(encoded), limit)
 	}
-	stderr, _ := payload["stderr"].(string)
-	if !strings.Contains(stderr, "tokens truncated") {
-		t.Fatalf("stderr = %q, want truncation marker", stderr)
+	resultText, _ := payload["result"].(string)
+	if !strings.Contains(resultText, "tokens truncated") {
+		t.Fatalf("result = %q, want truncation marker", resultText)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
@@ -909,7 +1050,7 @@ func TestProtocolToolResultContextCompactsRawOutput(t *testing.T) {
 				ToolCallID:    "call-1",
 				Title:         "BASH echo",
 				Status:        "completed",
-				RawOutput:     map[string]any{"stdout": large},
+				RawOutput:     map[string]any{"result": large},
 			},
 		},
 	})
@@ -924,12 +1065,48 @@ func TestProtocolToolResultContextCompactsRawOutput(t *testing.T) {
 	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
 	}
-	stdout, _ := payload["stdout"].(string)
-	if !strings.Contains(stdout, "tokens truncated") {
-		t.Fatalf("stdout = %q, want truncation marker", stdout)
+	resultText, _ := payload["result"].(string)
+	if !strings.Contains(resultText, "tokens truncated") {
+		t.Fatalf("result = %q, want truncation marker", resultText)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
+	}
+}
+
+func TestProtocolToolResultContextUsesACPContentWhenRawOutputAbsent(t *testing.T) {
+	t.Parallel()
+
+	message, ok := messageFromProtocolEvent(&session.Event{
+		Type: session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			ToolCall: &session.ProtocolToolCall{ID: "call-1", Name: "BASH"},
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "call-1",
+				Title:         "BASH printf",
+				Status:        "completed",
+				Content: []session.ProtocolToolCallContent{{
+					Type:       "terminal",
+					TerminalID: "call-1",
+					Content:    session.ProtocolTextContent("  output\n"),
+				}},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("messageFromProtocolEvent() ok = false, want true")
+	}
+	results := message.ToolResults()
+	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
+		t.Fatalf("ToolResults() = %#v, want one JSON tool result", results)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(results[0].Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
+	}
+	if got, _ := payload["result"].(string); got != "  output\n" {
+		t.Fatalf("payload[result] = %q, want ACP terminal content text", got)
 	}
 }
 
@@ -947,12 +1124,10 @@ func TestProtocolToolResultContextTruncatesPersistedBashFailureShape(t *testing.
 				Title:         "BASH find /tmp/gomod -delete",
 				Status:        "failed",
 				RawOutput: map[string]any{
-					"stderr":        large,
-					"result":        "stderr:\n" + large,
-					"stderr_cursor": 1119342,
-					"exit_code":     1,
-					"task_id":       "task-11",
-					"state":         "failed",
+					"result":    "stderr:\n" + large,
+					"exit_code": 1,
+					"task_id":   "task-11",
+					"state":     "failed",
 				},
 			},
 		},
@@ -975,9 +1150,9 @@ func TestProtocolToolResultContextTruncatesPersistedBashFailureShape(t *testing.
 	if payload["task_id"] != "task-11" || payload["exit_code"] != float64(1) {
 		t.Fatalf("payload lost task identity or exit code: %#v", payload)
 	}
-	stderr, _ := payload["stderr"].(string)
-	if !strings.Contains(stderr, "tokens truncated") {
-		t.Fatalf("stderr = %q, want truncation marker", stderr)
+	resultText, _ := payload["result"].(string)
+	if !strings.Contains(resultText, "tokens truncated") {
+		t.Fatalf("result = %q, want truncation marker", resultText)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata to model", payload)
@@ -1321,7 +1496,7 @@ func persistedToolCallEvent(id string, name string, input map[string]any) *sessi
 	}
 	return &session.Event{
 		Type:     session.EventTypeToolCall,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolCall, "pending", maps.Clone(input), nil),
+		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolCall, "pending", maps.Clone(input), nil, nil),
 		Meta:     mergeEventMeta(toolMeta(name)),
 	}
 }
@@ -1332,10 +1507,11 @@ func persistedToolResultEvent(id string, name string, input map[string]any, outp
 		Name: name,
 		Args: string(mustRawJSON(input)),
 	}
+	meta := mergeEventMeta(toolMeta(name))
 	return &session.Event{
 		Type:     session.EventTypeToolResult,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, "completed", maps.Clone(input), maps.Clone(output)),
-		Meta:     mergeEventMeta(toolMeta(name)),
+		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, "completed", maps.Clone(input), maps.Clone(output), toolResultACPContent(call, input, output, meta, "completed", false)),
+		Meta:     meta,
 	}
 }
 

@@ -82,7 +82,7 @@ func TestRunnerCodexACPWebSearchLiveE2E(t *testing.T) {
 			continue
 		}
 		if frame.Text != "" {
-			t.Logf("frame[%d] text stream=%q text=%q", i, frame.Stream, frame.Text)
+			t.Logf("frame[%d] text=%q", i, frame.Text)
 			if strings.Contains(frame.Text, "Searching the Web") || strings.Contains(frame.Text, "Searching for:") {
 				t.Fatalf("frame[%d] rendered ACP tool activity as text: %q", i, frame.Text)
 			}

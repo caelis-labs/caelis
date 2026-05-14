@@ -3498,9 +3498,9 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 	if status.Running {
 		t.Fatalf("rehydrated completed task still running: %+v", status)
 	}
-	resultPayload, _ := task.result["stdout"].(string)
+	resultPayload, _ := task.result["result"].(string)
 	if !strings.Contains(resultPayload, "async bash done") {
-		t.Fatalf("rehydrated task stdout = %q, want async bash done", resultPayload)
+		t.Fatalf("rehydrated task result = %q, want async bash done", resultPayload)
 	}
 	terminals := runtime.Streams()
 	if terminals == nil {
@@ -3518,7 +3518,10 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 	if snap.Running {
 		t.Fatalf("terminal snapshot still running: %+v", snap)
 	}
-	terminalText := terminalFramesText(snap.Frames)
+	terminalText := snap.FinalText
+	if terminalText == "" {
+		terminalText = terminalFramesText(snap.Frames)
+	}
 	if !strings.Contains(terminalText, "async bash done") {
 		t.Fatalf("terminal snapshot text = %q, want async bash done", terminalText)
 	}
@@ -3570,15 +3573,20 @@ func TestTaskToolPayloadReturnsCompletedBashTerminalStreams(t *testing.T) {
 		State:   taskapi.StateCompleted,
 		Running: false,
 		Result: map[string]any{
-			"stdout":    "waiting\nhello Codex\n",
+			"result":    "waiting\nhello Codex\n",
 			"exit_code": 0,
 		},
 	})
-	if got, _ := payload["stdout"].(string); !strings.Contains(got, "hello Codex") {
-		t.Fatalf("taskToolPayload stdout = %q, want terminal stdout", got)
+	if got, _ := payload["result"].(string); !strings.Contains(got, "hello Codex") {
+		t.Fatalf("taskToolPayload result = %q, want terminal text", got)
 	}
-	if _, ok := payload["result"]; ok {
-		t.Fatalf("taskToolPayload contains result = %#v, want raw streams only", payload["result"])
+}
+
+func TestCompactLatestOutputKeepsTailOnly(t *testing.T) {
+	got := compactLatestOutput("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n")
+	want := "...2 lines hidden...\nline 3\nline 4\nline 5\nline 6\nline 7"
+	if got != want {
+		t.Fatalf("compactLatestOutput() = %q, want %q", got, want)
 	}
 }
 
@@ -3611,8 +3619,8 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 	defer cancel()
 
 	var (
-		text   strings.Builder
-		closed bool
+		text        strings.Builder
+		closedFrame *stream.Frame
 	)
 	for frame, seqErr := range terminals.Subscribe(ctx, stream.SubscribeRequest{
 		Ref: stream.Ref{
@@ -3629,14 +3637,21 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 		}
 		text.WriteString(frame.Text)
 		if frame.Closed {
-			closed = true
+			cloned := stream.CloneFrame(*frame)
+			closedFrame = &cloned
 		}
 	}
-	if !closed {
+	if closedFrame == nil {
 		t.Fatal("expected terminal subscription to emit closed frame")
 	}
 	if got := text.String(); !strings.Contains(got, "stream terminal") {
 		t.Fatalf("terminal text = %q, want %q", got, "stream terminal")
+	}
+	if got := strings.Count(text.String(), "stream terminal"); got != 1 {
+		t.Fatalf("terminal text = %q, want streamed output once", text.String())
+	}
+	if got := closedFrame.Text; got != "" {
+		t.Fatalf("closed frame text = %q, want status-only close after streamed output", got)
 	}
 }
 
@@ -3891,9 +3906,7 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 			State:   taskapi.StateCompleted,
 			Running: false,
 			Result: map[string]any{
-				"stdout":    "done\n",
-				"stderr":    "",
-				"result":    "done",
+				"result":    "done\n",
 				"exit_code": 0,
 			},
 			Metadata: map[string]any{
@@ -3910,11 +3923,11 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if got, _ := payload["stdout"].(string); got != "done\n" {
-		t.Fatalf("payload[stdout] = %q, want full terminal stdout", got)
+	if got, _ := payload["result"].(string); got != "done\n" {
+		t.Fatalf("payload[result] = %q, want full terminal text", got)
 	}
-	if _, exists := result.Meta["stdout"]; exists {
-		t.Fatalf("result.Meta duplicated stdout output: %#v", result.Meta)
+	if _, exists := result.Meta["text"]; exists {
+		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)
 	}
 	if _, exists := result.Meta["exit_code"]; exists {
 		t.Fatalf("result.Meta duplicated exit_code output: %#v", result.Meta)
@@ -3932,8 +3945,7 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 			State:   taskapi.StateFailed,
 			Running: false,
 			Result: map[string]any{
-				"stdout":    "go: writing stat cache: open /home/test/go/pkg/mod/cache: read-only file system",
-				"result":    "touch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system",
+				"result":    "go: writing stat cache: open /home/test/go/pkg/mod/cache: read-only file system",
 				"exit_code": 1,
 				"error":     sandbox.SandboxPermissionDeniedMessage,
 			},
@@ -3949,8 +3961,8 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	if stdout, _ := payload["stdout"].(string); !strings.Contains(stdout, "/home/test/go/pkg/mod/cache") {
-		t.Fatalf("payload[stdout] = %q, want original stdout denied path", stdout)
+	if text, _ := payload["result"].(string); !strings.Contains(text, "/home/test/go/pkg/mod/cache") {
+		t.Fatalf("payload[result] = %q, want original terminal text denied path", text)
 	}
 	if got, _ := payload["error"].(string); got != sandbox.SandboxPermissionDeniedMessage {
 		t.Fatalf("payload error = %q, want concise sandbox permission hint", got)
@@ -3972,7 +3984,6 @@ func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *tes
 			State:   taskapi.StateFailed,
 			Running: false,
 			Result: map[string]any{
-				"stderr":    hugeStderr,
 				"result":    hugeStderr,
 				"exit_code": 1,
 			},
@@ -3986,18 +3997,18 @@ func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *tes
 	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
 		t.Fatalf("unmarshal result payload: %v", err)
 	}
-	gotStderr := taskStringValue(payload["stderr"])
-	if gotStderr == hugeStderr {
-		t.Fatalf("payload stderr kept original huge output, want canonical truncated result")
+	gotText := taskStringValue(payload["result"])
+	if gotText == hugeStderr {
+		t.Fatalf("payload result kept original huge output, want canonical truncated result")
 	}
-	if len(gotStderr) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
-		t.Fatalf("payload stderr len = %d, want bounded", len(gotStderr))
+	if len(gotText) > tool.DefaultTruncationPolicy().ByteBudget()+1024 {
+		t.Fatalf("payload result len = %d, want bounded", len(gotText))
 	}
-	if !strings.Contains(gotStderr, "tokens truncated") {
-		t.Fatalf("payload stderr = %q, want truncation marker", gotStderr)
+	if !strings.Contains(gotText, "tokens truncated") {
+		t.Fatalf("payload result = %q, want truncation marker", gotText)
 	}
-	if _, exists := result.Meta["stderr"]; exists {
-		t.Fatalf("result.Meta duplicated stderr output: %#v", result.Meta)
+	if _, exists := result.Meta["text"]; exists {
+		t.Fatalf("result.Meta duplicated terminal text: %#v", result.Meta)
 	}
 	if payload["_tool_truncation"] != nil || payload["output_meta"] != nil {
 		t.Fatalf("payload = %#v, should not expose truncation metadata", payload)
@@ -4024,10 +4035,8 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 			SupportsInput:  true,
 			SupportsCancel: true,
 			Result: map[string]any{
-				"stdout":          "already shown\n",
-				"output_preview":  "already shown\n",
-				"supports_input":  true,
-				"supports_cancel": true,
+				"latest_output": "line A\nline B\n",
+				"result":        "already shown\nline A\nline B\n",
 			},
 		},
 	)
@@ -4036,11 +4045,8 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 	if got := taskMeta["terminal_id"]; got != "terminal-1" {
 		t.Fatalf("metadata terminal_id = %#v, want terminal-1", got)
 	}
-	if got := taskMeta["stdout_cursor"]; got != int64(12) {
-		t.Fatalf("metadata stdout_cursor = %#v, want 12", got)
-	}
-	if got := taskMeta["stderr_cursor"]; got != int64(3) {
-		t.Fatalf("metadata stderr_cursor = %#v, want 3", got)
+	if got := taskMeta["output_cursor"]; got != int64(len([]byte("already shown\nline A\nline B\n"))) {
+		t.Fatalf("metadata output_cursor = %#v, want terminal text length", got)
 	}
 	var payload map[string]any
 	if len(result.Content) == 0 || result.Content[0].JSON == nil {
@@ -4058,8 +4064,14 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 	if got := payload["stderr_cursor"]; got != nil {
 		t.Fatalf("payload[stderr_cursor] = %#v, want omitted from model payload", got)
 	}
-	if got, _ := payload["stdout"].(string); got != "already shown\n" {
-		t.Fatalf("payload[stdout] = %q, want running stdout", got)
+	if got, _ := payload["latest_output"].(string); got != "line A\nline B\n" {
+		t.Fatalf("payload[latest_output] = %q, want running terminal delta", got)
+	}
+	if _, exists := payload["result"]; exists {
+		t.Fatalf("payload[result] = %#v, want omitted while running", payload["result"])
+	}
+	if _, exists := payload["supports_input"]; exists {
+		t.Fatalf("payload[supports_input] = %#v, want omitted", payload["supports_input"])
 	}
 }
 

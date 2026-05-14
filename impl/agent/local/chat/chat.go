@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"iter"
 	"maps"
+	"path/filepath"
+	"strconv"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/internal/displaypolicy"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -380,7 +383,7 @@ func modelToolCallEvents(message model.Message, resp *model.Response) []*session
 		}
 		event := &session.Event{
 			Type:     session.EventTypeToolCall,
-			Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolCall, "pending", rawInput, nil),
+			Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolCall, "pending", rawInput, nil, nil),
 			Meta:     meta,
 		}
 		if i == 0 {
@@ -433,10 +436,12 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 	rawOutput := toolResultRawOutput(result)
 	metaParts := []map[string]any{toolMeta(call.Name), result.Metadata}
 	metaParts = append(metaParts, extraMeta...)
+	status := toolCallStatus(result, rawOutput)
+	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
 		Type:     session.EventTypeToolResult,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, toolCallStatus(result, rawOutput), rawInput, rawOutput),
-		Meta:     mergeEventMeta(metaParts...),
+		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, status, rawInput, rawOutput, toolResultACPContent(call, rawInput, rawOutput, meta, status, result.IsError)),
+		Meta:     meta,
 	}
 	if message != nil {
 		event.Message = message
@@ -468,6 +473,381 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 		return map[string]any{"error": "tool call failed"}
 	}
 	return map[string]any{}
+}
+
+func toolResultACPContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.ProtocolToolCallContent {
+	name := strings.ToUpper(strings.TrimSpace(call.Name))
+	displayOutput := toolResultDisplayOutput(name, output, meta)
+	text := toolResultDisplayText(name, input, displayOutput, meta, status, isErr)
+	if strings.TrimSpace(text) == "" {
+		text = toolResultStatusText(status, isErr)
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	item := session.ProtocolToolCallContent{
+		Type:    "content",
+		Content: session.ProtocolTextContent(text),
+	}
+	switch name {
+	case "BASH", "SPAWN", "TASK":
+		item.Type = "terminal"
+		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
+	}
+	return []session.ProtocolToolCallContent{item}
+}
+
+func toolResultDisplayOutput(name string, output map[string]any, meta map[string]any) map[string]any {
+	out := maps.Clone(output)
+	if out == nil {
+		out = map[string]any{}
+	}
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "WRITE", "PATCH":
+		for _, key := range []string{
+			"created",
+			"previous_empty",
+			"bytes_written",
+			"line_count",
+			"added_lines",
+			"removed_lines",
+			"revision",
+			"hunk",
+			"diff_hunks",
+			"diff_truncated",
+		} {
+			if value, ok := runtimeToolMeta(meta)[key]; ok {
+				out[key] = value
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func toolResultDisplayText(name string, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) string {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	switch name {
+	case "READ":
+		if summary := readResultSummary(input, output); summary != "" {
+			return summary
+		}
+		return toolString(output["content"])
+	case "LIST":
+		return listResultSummary(input, output)
+	case "GLOB":
+		return globResultSummary(input, output, meta)
+	case "SEARCH", "RG", "FIND":
+		return searchResultSummary(input, output, meta)
+	case "WRITE", "PATCH":
+		if isErr || strings.EqualFold(status, "failed") {
+			return firstNonEmpty(toolString(output["error"]), toolString(output["summary"]))
+		}
+		return mutationResultSummary(input, output)
+	case "BASH":
+		return terminalResultText(output, status, isErr)
+	case "SPAWN":
+		return spawnResultText(output, status, isErr)
+	case "TASK":
+		if strings.EqualFold(taskToolAction(input, output, meta), "write") && toolStatusFinal(status, isErr) {
+			if summary := displaypolicy.CleanSubagentFinalOutput(firstNonEmpty(
+				toolString(output["result"]),
+				toolString(output["final_message"]),
+				toolString(output["finalMessage"]),
+				toolString(output["text"]),
+				toolString(output["output"]),
+				toolString(output["stdout"]),
+				toolString(output["output_preview"]),
+			)); summary != "" {
+				return summary
+			}
+		}
+		return terminalResultText(output, status, isErr)
+	case "REQUEST_PERMISSIONS":
+		if isErr || !toolBool(output["approved"]) {
+			return firstNonEmpty(toolString(output["error"]), toolString(output["review_text"]), "denied")
+		}
+		return "completed"
+	default:
+		return genericResultText(output, isErr)
+	}
+}
+
+func readResultSummary(input map[string]any, output map[string]any) string {
+	path := firstNonEmpty(toolPath(output), toolPath(input))
+	if path == "" {
+		return ""
+	}
+	start := toolInt(output["start_line"])
+	end := toolInt(output["end_line"])
+	if start <= 0 {
+		if offset := toolInt(input["offset"]); offset >= 0 {
+			start = offset + 1
+		}
+	}
+	if end <= 0 {
+		if limit := toolInt(input["limit"]); limit > 0 && start > 0 {
+			end = start + limit - 1
+		}
+	}
+	if start > 0 && end > 0 {
+		return filepath.Base(path) + " " + strconv.Itoa(start) + "~" + strconv.Itoa(end)
+	}
+	return filepath.Base(path)
+}
+
+func listResultSummary(input map[string]any, output map[string]any) string {
+	path := firstNonEmpty(toolPath(output), toolPath(input))
+	count := toolInt(output["count"])
+	if path == "" && count <= 0 {
+		return ""
+	}
+	if count > 0 {
+		return strings.TrimSpace(filepath.Base(path) + " " + pluralize(count, "entry"))
+	}
+	return filepath.Base(path)
+}
+
+func globResultSummary(input map[string]any, output map[string]any, meta map[string]any) string {
+	pattern := firstNonEmpty(toolString(input["pattern"]), toolString(output["pattern"]), toolString(runtimeToolMeta(meta)["pattern"]))
+	count := toolInt(output["count"])
+	switch {
+	case pattern != "" && count >= 0:
+		return pattern + " " + pluralize(count, "match")
+	case pattern != "":
+		return pattern
+	default:
+		return ""
+	}
+}
+
+func searchResultSummary(input map[string]any, output map[string]any, meta map[string]any) string {
+	query := firstNonEmpty(toolString(output["query"]), toolString(input["query"]), toolString(input["pattern"]), toolString(runtimeToolMeta(meta)["query"]))
+	count := toolInt(output["count"])
+	files := toolInt(output["file_count"])
+	if query == "" && count <= 0 {
+		return ""
+	}
+	summary := ""
+	if query != "" {
+		summary = strconv.Quote(query)
+	}
+	if count >= 0 {
+		summary = strings.TrimSpace(summary + " " + pluralize(count, "hit"))
+	}
+	if files > 0 {
+		summary += " in " + pluralize(files, "file")
+	}
+	return summary
+}
+
+func mutationResultSummary(input map[string]any, output map[string]any) string {
+	path := firstNonEmpty(toolPath(output), toolPath(input))
+	if path == "" {
+		return firstNonEmpty(toolString(output["summary"]), "completed")
+	}
+	header := filepath.Base(path)
+	added := toolInt(output["added_lines"])
+	removed := toolInt(output["removed_lines"])
+	if added > 0 || removed > 0 {
+		header += fmt.Sprintf(" +%d -%d", added, removed)
+	}
+	if diffLines := mutationDiffLines(output); len(diffLines) > 0 {
+		return strings.Join(append([]string{header, "diff / hunk"}, diffLines...), "\n")
+	}
+	if hunk := strings.TrimSpace(toolString(output["hunk"])); hunk != "" {
+		return strings.Join([]string{header, "diff / hunk", hunk}, "\n")
+	}
+	return header
+}
+
+func mutationDiffLines(output map[string]any) []string {
+	raw, ok := output["diff_hunks"]
+	if !ok || raw == nil {
+		return nil
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return nil
+	}
+	var hunks []struct {
+		Header string   `json:"header"`
+		Lines  []string `json:"lines"`
+	}
+	if err := json.Unmarshal(data, &hunks); err != nil {
+		return nil
+	}
+	lines := make([]string, 0, len(hunks)*4)
+	for _, hunk := range hunks {
+		if header := strings.TrimSpace(hunk.Header); header != "" {
+			lines = append(lines, header)
+		}
+		lines = append(lines, hunk.Lines...)
+	}
+	if len(lines) == 0 {
+		return nil
+	}
+	if toolBool(output["diff_truncated"]) {
+		lines = append(lines, "@@ diff truncated @@")
+	}
+	return lines
+}
+
+func terminalResultText(output map[string]any, status string, isErr bool) string {
+	if !toolStatusFinal(status, isErr) {
+		if text := firstNonEmpty(
+			toolString(output["latest_output"]),
+			toolString(output["output_preview"]),
+		); text != "" {
+			return text
+		}
+		return ""
+	}
+	if text := toolString(output["result"]); text != "" {
+		return text
+	}
+	if errText := toolString(output["error"]); errText != "" {
+		return errText
+	}
+	return "(no output)"
+}
+
+func spawnResultText(output map[string]any, status string, isErr bool) string {
+	if isErr || strings.EqualFold(status, "failed") {
+		if stderr := strings.TrimSpace(toolString(output["stderr"])); stderr != "" {
+			return stderr
+		}
+		if errText := strings.TrimSpace(toolString(output["error"])); errText != "" {
+			return errText
+		}
+	}
+	if toolStatusFinal(status, isErr) {
+		return displaypolicy.CleanSubagentFinalOutput(firstNonEmpty(
+			spawnDisplayText(toolString(output["final_message"])),
+			spawnDisplayText(toolString(output["finalMessage"])),
+			spawnDisplayText(toolString(output["result"])),
+			spawnDisplayText(toolString(output["output"])),
+			spawnDisplayText(toolString(output["text"])),
+		))
+	}
+	return firstNonEmpty(
+		spawnStreamText(toolString(output["text"])),
+		spawnStreamText(toolString(output["stdout"])),
+		spawnStreamText(toolString(output["output_preview"])),
+		spawnStreamText(toolString(output["stderr"])),
+	)
+}
+
+func spawnDisplayText(text string) string {
+	return displaypolicy.SpawnDisplayTextCandidate(text)
+}
+
+func spawnStreamText(text string) string {
+	if text == "" {
+		return ""
+	}
+	candidate := strings.TrimLeft(text, " \t\r\n")
+	if !strings.HasPrefix(candidate, "{") {
+		return text
+	}
+	decoded, remainder, ok := displaypolicy.SplitLeadingJSONObject(candidate)
+	if !ok || !displaypolicy.IsSpawnDisplayJSONObject(decoded) {
+		return text
+	}
+	if strings.TrimSpace(remainder) == "" {
+		return ""
+	}
+	return strings.TrimLeft(remainder, "\r\n")
+}
+
+func genericResultText(output map[string]any, isErr bool) string {
+	if len(output) == 0 {
+		return ""
+	}
+	if isErr {
+		return firstNonEmpty(toolString(output["stderr"]), toolString(output["error"]), toolString(output["summary"]))
+	}
+	return firstNonEmpty(toolString(output["summary"]), toolString(output["result"]), toolString(output["text"]))
+}
+
+func toolResultStatusText(status string, isErr bool) string {
+	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
+		return "failed"
+	}
+	if toolStatusFinal(status, isErr) {
+		return "completed"
+	}
+	return ""
+}
+
+func toolStatusFinal(status string, isErr bool) bool {
+	if isErr {
+		return true
+	}
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated":
+		return true
+	default:
+		return false
+	}
+}
+
+func toolResultTerminalID(call model.ToolCall, output map[string]any, meta map[string]any) string {
+	return firstNonEmpty(
+		toolString(output["terminal_id"]),
+		stringFromNestedMap(meta, "caelis", "runtime", "task", "terminal_id"),
+		strings.TrimSpace(call.ID),
+	)
+}
+
+func taskToolAction(input map[string]any, output map[string]any, meta map[string]any) string {
+	return strings.ToLower(firstNonEmpty(
+		stringFromNestedMap(meta, "caelis", "runtime", "tool", "action"),
+		toolString(output["action"]),
+		toolString(input["action"]),
+	))
+}
+
+func runtimeToolMeta(meta map[string]any) map[string]any {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	return toolMeta
+}
+
+func toolPath(values map[string]any) string {
+	return firstNonEmpty(toolString(values["path"]), toolString(values["target"]), toolString(values["source"]))
+}
+
+func toolString(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func toolInt(value any) int {
+	if intValue, ok := intValue(value); ok {
+		return intValue
+	}
+	if text := toolString(value); text != "" {
+		if parsed, err := strconv.Atoi(text); err == nil {
+			return parsed
+		}
+	}
+	return -1
+}
+
+func toolBool(value any) bool {
+	typed, _ := value.(bool)
+	return typed
+}
+
+func pluralize(count int, unit string) string {
+	if count == 1 {
+		return "1 " + unit
+	}
+	return strconv.Itoa(count) + " " + unit + "s"
 }
 
 func (a *Agent) lookupTool(name string) (tool.Tool, bool) {
@@ -733,7 +1113,7 @@ func toolTruncationEventMeta(info tool.TruncationInfo) map[string]any {
 	}
 }
 
-func toolCallProtocol(call model.ToolCall, updateType session.ProtocolUpdateType, status string, rawInput map[string]any, rawOutput map[string]any) *session.EventProtocol {
+func toolCallProtocol(call model.ToolCall, updateType session.ProtocolUpdateType, status string, rawInput map[string]any, rawOutput map[string]any, content []session.ProtocolToolCallContent) *session.EventProtocol {
 	tool := &session.ProtocolToolCall{
 		ID:        strings.TrimSpace(call.ID),
 		Name:      strings.TrimSpace(call.Name),
@@ -742,19 +1122,24 @@ func toolCallProtocol(call model.ToolCall, updateType session.ProtocolUpdateType
 		Status:    strings.TrimSpace(status),
 		RawInput:  maps.Clone(rawInput),
 		RawOutput: maps.Clone(rawOutput),
+		Content:   session.CloneProtocolToolCallContent(content),
+	}
+	update := &session.ProtocolUpdate{
+		SessionUpdate: string(updateType),
+		ToolCallID:    tool.ID,
+		Kind:          tool.Kind,
+		Title:         tool.Title,
+		Status:        tool.Status,
+		RawInput:      maps.Clone(rawInput),
+		RawOutput:     maps.Clone(rawOutput),
+	}
+	if len(content) > 0 {
+		update.Content = session.CloneProtocolToolCallContent(content)
 	}
 	return &session.EventProtocol{
 		UpdateType: string(updateType),
 		ToolCall:   tool,
-		Update: &session.ProtocolUpdate{
-			SessionUpdate: string(updateType),
-			ToolCallID:    tool.ID,
-			Kind:          tool.Kind,
-			Title:         tool.Title,
-			Status:        tool.Status,
-			RawInput:      maps.Clone(rawInput),
-			RawOutput:     maps.Clone(rawOutput),
-		},
+		Update:     update,
 	}
 }
 
@@ -781,12 +1166,14 @@ func cloneChatEventProtocol(protocol *session.EventProtocol) session.EventProtoc
 		update := *protocol.Update
 		update.RawInput = maps.Clone(protocol.Update.RawInput)
 		update.RawOutput = maps.Clone(protocol.Update.RawOutput)
+		update.Content = cloneChatProtocolAny(protocol.Update.Content)
 		out.Update = &update
 	}
 	if protocol.ToolCall != nil {
 		toolCall := *protocol.ToolCall
 		toolCall.RawInput = maps.Clone(protocol.ToolCall.RawInput)
 		toolCall.RawOutput = maps.Clone(protocol.ToolCall.RawOutput)
+		toolCall.Content = session.CloneProtocolToolCallContent(protocol.ToolCall.Content)
 		out.ToolCall = &toolCall
 	}
 	if protocol.Plan != nil {
@@ -795,6 +1182,30 @@ func cloneChatEventProtocol(protocol *session.EventProtocol) session.EventProtoc
 		out.Plan = &plan
 	}
 	return out
+}
+
+func cloneChatProtocolAny(in any) any {
+	switch typed := in.(type) {
+	case nil:
+		return nil
+	case json.RawMessage:
+		return append(json.RawMessage(nil), typed...)
+	case map[string]any:
+		return maps.Clone(typed)
+	case []session.ProtocolToolCallContent:
+		if len(typed) == 0 {
+			return nil
+		}
+		return session.CloneProtocolToolCallContent(typed)
+	case []any:
+		out := make([]any, 0, len(typed))
+		for _, item := range typed {
+			out = append(out, cloneChatProtocolAny(item))
+		}
+		return out
+	default:
+		return typed
+	}
 }
 
 func messagesFromContext(ctx agent.Context) []model.Message {
@@ -1068,7 +1479,7 @@ func messageFromProtocolEvent(event *session.Event) (model.Message, bool) {
 			Parts: []model.Part{model.NewToolResultJSONPart(
 				strings.TrimSpace(update.ToolCallID),
 				name,
-				truncatedToolOutputMap(update.RawOutput),
+				truncatedToolOutputMap(toolResultContextPayload(update)),
 				strings.EqualFold(strings.TrimSpace(update.Status), "failed"),
 			)},
 		}
@@ -1080,6 +1491,73 @@ func messageFromProtocolEvent(event *session.Event) (model.Message, bool) {
 func truncatedToolOutputMap(values map[string]any) map[string]any {
 	out, _ := tool.TruncateMap(values, tool.DefaultTruncationPolicy())
 	return out
+}
+
+func toolResultContextPayload(update *session.ProtocolUpdate) map[string]any {
+	if update == nil {
+		return map[string]any{}
+	}
+	if len(update.RawOutput) > 0 {
+		return maps.Clone(update.RawOutput)
+	}
+	if text := protocolToolContentText(session.ProtocolToolCallContentOf(update)); text != "" {
+		return map[string]any{"result": text}
+	}
+	return map[string]any{}
+}
+
+func protocolToolContentText(content []session.ProtocolToolCallContent) string {
+	if len(content) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(content))
+	for _, item := range content {
+		switch strings.TrimSpace(item.Type) {
+		case "content", "terminal":
+			if text := protocolTextContent(item.Content); text != "" {
+				parts = append(parts, text)
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func protocolTextContent(raw any) string {
+	switch typed := raw.(type) {
+	case nil:
+		return ""
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return ""
+		}
+		var decoded any
+		if err := json.Unmarshal(typed, &decoded); err != nil {
+			return ""
+		}
+		return protocolTextContent(decoded)
+	case map[string]any:
+		if typ, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), "text") {
+			return ""
+		}
+		text, _ := typed["text"].(string)
+		return text
+	default:
+		data, err := json.Marshal(raw)
+		if err != nil || len(data) == 0 {
+			return ""
+		}
+		var decoded struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return ""
+		}
+		if !strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
+			return ""
+		}
+		return decoded.Text
+	}
 }
 
 func toolNameFromEvent(event *session.Event) string {

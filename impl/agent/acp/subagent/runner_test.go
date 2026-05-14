@@ -281,8 +281,8 @@ func TestRunnerHandleUpdatePublishesStructuredThoughtEvent(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one thought frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Stream != "reasoning" || got.Text != "thinking about the command" {
-		t.Fatalf("stream frame = %#v, want reasoning thought text", got)
+	if got.Text != "" {
+		t.Fatalf("stream frame text = %q, want structured thought event only", got.Text)
 	}
 	if got.Event == nil || got.Event.Protocol == nil || got.Event.Protocol.UpdateType != client.UpdateAgentThought || got.Event.Text != "thinking about the command" {
 		t.Fatalf("stream event = %#v, want structured thought event", got.Event)
@@ -308,8 +308,8 @@ func TestRunnerHandleUpdatePreservesWhitespaceThoughtChunk(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one whitespace thought frame", sink.frames)
 	}
 	got := sink.frames[0]
-	if got.Stream != "reasoning" || got.Text != " " {
-		t.Fatalf("stream frame = %#v, want single-space reasoning chunk", got)
+	if got.Text != "" {
+		t.Fatalf("stream frame text = %q, want structured thought event only", got.Text)
 	}
 	if got.Event == nil || got.Event.Text != " " {
 		t.Fatalf("stream event = %#v, want single-space structured thought event", got.Event)

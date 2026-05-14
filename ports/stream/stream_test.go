@@ -12,7 +12,6 @@ func TestFrameEventJSONRoundTrip(t *testing.T) {
 
 	frame := Frame{
 		Ref:     Ref{SessionID: "root-session", TaskID: "task-1"},
-		Stream:  "stdout",
 		Text:    "fallback",
 		Running: true,
 		Event: &session.Event{
