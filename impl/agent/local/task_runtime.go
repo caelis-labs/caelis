@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/shell"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	tasktool "github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -2117,7 +2118,7 @@ func subagentTerminalID(taskID string) string {
 }
 
 func allocateSubagentHandle(activeSession session.Session, agent string) string {
-	return allocateSubagentHandleFromUsed(subagentHandlesFromSession(activeSession), agent)
+	return agenthandle.Allocate(subagentHandlesFromSession(activeSession), agent)
 }
 
 func (tm *taskRuntime) reserveSubagentHandle(activeSession session.Session, ref session.SessionRef, agent string) string {
@@ -2142,7 +2143,7 @@ func (tm *taskRuntime) reserveSubagentHandle(activeSession session.Session, ref 
 			}
 		}
 	}
-	handle := allocateSubagentHandleFromUsed(used, agent)
+	handle := agenthandle.Allocate(used, agent)
 	tm.rememberSubagentHandleLocked(sessionID, handle)
 	return handle
 }
@@ -2173,68 +2174,8 @@ func subagentHandlesFromSession(activeSession session.Session) map[string]struct
 	return used
 }
 
-func allocateSubagentHandleFromUsed(used map[string]struct{}, agent string) string {
-	if used == nil {
-		used = map[string]struct{}{}
-	}
-	bases := subagentHandleBaseCandidates(agent)
-	for i := 0; i < 1000; i++ {
-		for _, base := range bases {
-			name := base
-			if i > 0 {
-				name = fmt.Sprintf("%s%d", base, i+1)
-			}
-			if _, exists := used[name]; !exists {
-				return name
-			}
-		}
-	}
-	return "agent"
-}
-
-func subagentHandleBaseCandidates(agent string) []string {
-	base := normalizeSubagentHandleBase(agent)
-	if base == "" {
-		return []string{"agent"}
-	}
-	if base != "self" {
-		return []string{base}
-	}
-	return []string{"jeff", "emma", "nora", "leo", "maya", "ella", "agent"}
-}
-
-func normalizeSubagentHandleBase(value string) string {
-	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		var keep rune
-		switch {
-		case r >= 'a' && r <= 'z':
-			keep = r
-		case r >= '0' && r <= '9':
-			keep = r
-		case r == '-' || r == '_':
-			keep = r
-		case r == '/' || r == '.' || r == ' ' || r == '\t':
-			if !lastDash && b.Len() > 0 {
-				keep = '-'
-				lastDash = true
-			}
-		}
-		if keep == 0 {
-			continue
-		}
-		if keep != '-' {
-			lastDash = false
-		}
-		b.WriteRune(keep)
-	}
-	return strings.Trim(b.String(), "-_")
-}
-
 func normalizeSubagentHandle(value string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
+	return agenthandle.Normalize(value)
 }
 
 func (t *bashTask) entrySnapshot(now time.Time) *taskapi.Entry {

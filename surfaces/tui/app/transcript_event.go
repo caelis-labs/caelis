@@ -43,20 +43,21 @@ type TranscriptEvent struct {
 	Text          string
 	Final         bool
 
-	ToolCallID         string
-	ToolName           string
-	ToolKind           string
-	ToolTitle          string
-	ToolArgs           string
-	ToolFullArgs       string
-	ToolOutput         string
-	ToolStream         string
-	ToolStatus         string
-	ToolError          bool
-	ToolTaskID         string
-	ToolTaskAction     string
-	ToolTaskInput      string
-	ToolTaskTargetKind string
+	ToolCallID          string
+	ToolName            string
+	ToolKind            string
+	ToolTitle           string
+	ToolArgs            string
+	ToolFullArgs        string
+	ToolOutput          string
+	ToolStream          string
+	ToolStatus          string
+	ToolError           bool
+	ToolOutputSynthetic bool
+	ToolTaskID          string
+	ToolTaskAction      string
+	ToolTaskInput       string
+	ToolTaskTargetKind  string
 
 	PlanEntries []PlanEntry
 
@@ -253,9 +254,11 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			}
 			content := gatewayProtocolToolContent(ev, payload.Content)
 			toolOutput := acpprojector.FormatToolContent(content)
+			toolOutputSynthetic := false
 			if strings.TrimSpace(toolOutput) == "" {
-				if !terminalStreamStatusOnlyUpdate(semanticName, status, toolErr, ev.Meta) {
+				if !terminalFinalWithoutContent(semanticName, payload.ToolKind, status, toolErr) {
 					toolOutput = standardToolOutput(status, toolErr)
+					toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 				}
 			}
 			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
@@ -270,26 +273,27 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			}
 			toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
 			out = append(out, TranscriptEvent{
-				Kind:               TranscriptEventTool,
-				Scope:              scope,
-				ScopeID:            scopeID,
-				Actor:              gatewayDisplayActor(ev, payload.Actor),
-				OccurredAt:         occurredAt,
-				ToolCallID:         strings.TrimSpace(payload.CallID),
-				ToolName:           toolName,
-				ToolKind:           strings.TrimSpace(payload.ToolKind),
-				ToolTitle:          strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:           toolArgs,
-				ToolFullArgs:       toolDisplayFullArgs(semanticName, displayInput),
-				ToolOutput:         toolOutput,
-				ToolStream:         transcriptToolStream(status, toolErr),
-				ToolStatus:         status,
-				ToolError:          toolErr,
-				ToolTaskID:         toolTaskID,
-				ToolTaskAction:     toolDisplayTaskAction(rawInput, displayOutput, ev.Meta),
-				ToolTaskInput:      toolDisplayTaskInput(rawInput, displayOutput, ev.Meta),
-				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, displayOutput, ev.Meta),
-				Final:              transcriptToolStatusFinal(status, toolErr),
+				Kind:                TranscriptEventTool,
+				Scope:               scope,
+				ScopeID:             scopeID,
+				Actor:               gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt:          occurredAt,
+				ToolCallID:          strings.TrimSpace(payload.CallID),
+				ToolName:            toolName,
+				ToolKind:            strings.TrimSpace(payload.ToolKind),
+				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
+				ToolArgs:            toolArgs,
+				ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
+				ToolOutput:          toolOutput,
+				ToolStream:          transcriptToolStream(status, toolErr),
+				ToolStatus:          status,
+				ToolError:           toolErr,
+				ToolOutputSynthetic: toolOutputSynthetic,
+				ToolTaskID:          toolTaskID,
+				ToolTaskAction:      toolDisplayTaskAction(rawInput, displayOutput, ev.Meta),
+				ToolTaskInput:       toolDisplayTaskInput(rawInput, displayOutput, ev.Meta),
+				ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, ev.Meta),
+				Final:               transcriptToolStatusFinal(status, toolErr),
 			})
 		}
 	case kernel.EventKindPlanUpdate:
@@ -475,19 +479,14 @@ func standardToolOutput(status string, isErr bool) string {
 	return ""
 }
 
-func terminalStreamStatusOnlyUpdate(toolName string, status string, isErr bool, meta map[string]any) bool {
+func terminalFinalWithoutContent(toolName string, toolKind string, status string, isErr bool) bool {
 	if !transcriptToolStatusFinal(status, isErr) {
 		return false
 	}
-	if !strings.EqualFold(kernel.EventMetaString(meta, "caelis", "runtime", "stream", "mode"), "final") {
+	if isErr || strings.EqualFold(strings.TrimSpace(status), string(kernel.ToolStatusFailed)) {
 		return false
 	}
-	switch strings.ToUpper(strings.TrimSpace(toolName)) {
-	case "BASH", "SPAWN", "TASK":
-		return true
-	default:
-		return false
-	}
+	return isTerminalPanelToolKind(toolName, toolKind)
 }
 
 func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {

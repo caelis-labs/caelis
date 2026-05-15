@@ -257,7 +257,7 @@ func TestStreamFrameEventsUseNoOutputPlaceholderForSilentBashFailure(t *testing.
 	}
 }
 
-func TestStreamFrameEventsProjectBashClosedFrameAsStatusOnlyAfterOutput(t *testing.T) {
+func TestStreamFrameEventsProjectBashClosedFrameAsContentlessFinalAfterOutput(t *testing.T) {
 	t.Parallel()
 
 	req := StreamRequest{
@@ -283,7 +283,7 @@ func TestStreamFrameEventsProjectBashClosedFrameAsStatusOnlyAfterOutput(t *testi
 		t.Fatalf("payload = %+v, want completed BASH result", payload)
 	}
 	if len(payload.Content) != 0 {
-		t.Fatalf("content = %#v, want status-only close after streamed output", payload.Content)
+		t.Fatalf("content = %#v, want contentless final after streamed output", payload.Content)
 	}
 }
 

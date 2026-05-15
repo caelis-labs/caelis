@@ -472,7 +472,8 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base as
 		return assembly.AgentConfig{}, fmt.Errorf("gatewayapp: ACP agent %q does not support local npm install", strings.TrimSpace(name))
 	}
 	root := s.managedACPAgentRoot()
-	installCommand := []string{"npm", "install", "--prefix", root, pkg.Package + "@latest"}
+	installSpec := builtinACPAdapterInstallSpec(pkg)
+	installCommand := []string{"npm", "install", "--prefix", root, installSpec}
 	npm, err := exec.LookPath("npm")
 	if err != nil || strings.TrimSpace(npm) == "" {
 		return assembly.AgentConfig{}, &ACPAgentInstallError{
@@ -484,7 +485,7 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base as
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return assembly.AgentConfig{}, err
 	}
-	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, pkg.Package+"@latest")
+	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, installSpec)
 	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -686,7 +687,14 @@ func (s *Stack) ListInstallableACPAgentOptions() []ACPAgentAddOption {
 }
 
 func (s *Stack) builtinACPAgentInstallCommand(pkg builtinACPAdapterPackage) string {
-	return strings.Join([]string{"npm", "install", "--prefix", s.managedACPAgentRoot(), pkg.Package + "@latest"}, " ")
+	return strings.Join([]string{"npm", "install", "--prefix", s.managedACPAgentRoot(), builtinACPAdapterInstallSpec(pkg)}, " ")
+}
+
+func builtinACPAdapterInstallSpec(pkg builtinACPAdapterPackage) string {
+	if strings.TrimSpace(pkg.Version) != "" {
+		return strings.TrimSpace(pkg.Package) + "@" + strings.TrimSpace(pkg.Version)
+	}
+	return strings.TrimSpace(pkg.Package) + "@latest"
 }
 
 func lookupBuiltInACPAgent(name string) (assembly.AgentConfig, bool) {

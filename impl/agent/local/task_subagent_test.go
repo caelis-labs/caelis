@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/session/memory"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
+	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -127,21 +128,21 @@ func TestAllocateSubagentHandleUsesAgentDerivedFallback(t *testing.T) {
 		{Label: "@codex"},
 		{Label: "@codex2"},
 	}}
-	if got := allocateSubagentHandle(activeSession, "codex"); got != "codex3" {
-		t.Fatalf("allocateSubagentHandle() = %q, want codex3", got)
+	if got := allocateSubagentHandle(activeSession, "codex"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSubagentHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSubagentHandle(session.Session{}, "Anthropic/Claude Agent"); got != "anthropic-claude-agent" {
-		t.Fatalf("allocateSubagentHandle() = %q, want normalized agent handle", got)
+	if got := allocateSubagentHandle(session.Session{}, "Anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSubagentHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSubagentHandle(session.Session{}, "!!!"); got != "agent" {
-		t.Fatalf("allocateSubagentHandle() = %q, want generic fallback", got)
+	if got := allocateSubagentHandle(session.Session{}, "!!!"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSubagentHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSubagentHandle(session.Session{}, "self"); got != "jeff" {
-		t.Fatalf("allocateSubagentHandle(self) = %q, want named handle", got)
+	if got := allocateSubagentHandle(session.Session{}, "self"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSubagentHandle(self) = %q, want shared human-name pool handle", got)
 	}
 	usedSelfHandle := session.Session{Participants: []session.ParticipantBinding{{Label: "@jeff"}}}
-	if got := allocateSubagentHandle(usedSelfHandle, "self"); got != "emma" {
-		t.Fatalf("allocateSubagentHandle(self with used handle) = %q, want next named handle", got)
+	if got := allocateSubagentHandle(usedSelfHandle, "self"); got == "jeff" || !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSubagentHandle(self with used handle) = %q, want unused shared pool handle", got)
 	}
 }
 
@@ -166,11 +167,16 @@ func TestStartSubagentAllocatesUniqueHandlesFromRuntimeReservations(t *testing.T
 	if err != nil {
 		t.Fatalf("StartSubagent(second) error = %v", err)
 	}
-	if got := taskStringValue(first.Result["handle"]); got != "helper" {
-		t.Fatalf("first handle = %q, want helper", got)
+	firstHandle := taskStringValue(first.Result["handle"])
+	secondHandle := taskStringValue(second.Result["handle"])
+	if firstHandle == "" || !agenthandle.ContainsPoolName(firstHandle) {
+		t.Fatalf("first handle = %q, want shared pool handle", firstHandle)
 	}
-	if got := taskStringValue(second.Result["handle"]); got != "helper2" {
-		t.Fatalf("second handle = %q, want helper2", got)
+	if secondHandle == "" || !agenthandle.ContainsPoolName(secondHandle) {
+		t.Fatalf("second handle = %q, want shared pool handle", secondHandle)
+	}
+	if firstHandle == secondHandle {
+		t.Fatalf("handles = %q and %q, want unique runtime reservations", firstHandle, secondHandle)
 	}
 }
 

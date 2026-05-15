@@ -512,8 +512,17 @@ func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 		t.Fatalf("mirror replay protocol update = nil")
 	}
 	content, _ := update.Content.(map[string]any)
-	if got, _ := content["reasoningText"].(string); got != "partial thought" {
-		t.Fatalf("mirror replay reasoning content = %#v, want partial thought", update.Content)
+	if got, _ := content["type"].(string); got != "text" {
+		t.Fatalf("mirror replay content type = %#v, want standard text content", update.Content)
+	}
+	if got, _ := content["text"].(string); got != "partial answer" {
+		t.Fatalf("mirror replay content text = %#v, want partial answer", update.Content)
+	}
+	caelisMeta, _ := replay.Meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
+	replayMeta, _ := runtimeMeta["replay"].(map[string]any)
+	if got, _ := replayMeta["reasoning_text"].(string); got != "partial thought" {
+		t.Fatalf("mirror replay meta = %#v, want reasoning retained outside ACP content", replay.Meta)
 	}
 	if session.IsInvocationVisibleEvent(replay) {
 		t.Fatalf("mirror replay snapshot must not be invocation-visible: %#v", replay)
@@ -834,6 +843,28 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 					},
 				})
 				handle.publishEvent(&session.Event{
+					Type:       session.EventTypeToolCall,
+					Visibility: session.VisibilityUIOnly,
+					Text:       "running external bash",
+					Actor:      session.ActorRef{Kind: session.ActorKindParticipant, ID: "emma", Name: "@emma"},
+					Scope: &session.EventScope{
+						Source: "acp_participant",
+						Participant: session.ParticipantRef{
+							ID:   req.ParticipantID,
+							Kind: session.ParticipantKindACP,
+							Role: session.ParticipantRoleSidecar,
+						},
+					},
+					Protocol: &session.EventProtocol{
+						UpdateType: string(session.ProtocolUpdateTypeToolCall),
+						ToolCall: &session.ProtocolToolCall{
+							ID:     "external-bash",
+							Name:   "BASH",
+							Status: "completed",
+						},
+					},
+				})
+				handle.publishEvent(&session.Event{
 					Type:       session.EventTypeAssistant,
 					Visibility: session.VisibilityUIOnly,
 					Text:       "emma summary",
@@ -895,6 +926,9 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 	for _, event := range loaded.Events {
 		if event == nil || event.Scope == nil || strings.TrimSpace(event.Scope.Participant.ID) != "emma" {
 			continue
+		}
+		if session.EventTypeOf(event) == session.EventTypeToolCall {
+			t.Fatalf("external ACP process event was persisted into main session: %#v", event)
 		}
 		switch session.EventTypeOf(event) {
 		case session.EventTypeUser:
@@ -1027,6 +1061,22 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 			handle := newTestControllerTurnHandle(nil)
 			go func() {
 				handle.publishEvent(acpControllerChunk("hel"))
+				handle.publishEvent(&session.Event{
+					Type:       session.EventTypeToolCall,
+					Visibility: session.VisibilityUIOnly,
+					Text:       "external search",
+					Scope: &session.EventScope{
+						Source: "acp",
+					},
+					Protocol: &session.EventProtocol{
+						UpdateType: string(session.ProtocolUpdateTypeToolCall),
+						ToolCall: &session.ProtocolToolCall{
+							ID:     "external-search",
+							Name:   "Search",
+							Status: "completed",
+						},
+					},
+				})
 				handle.publishEvent(acpControllerChunk("hello"))
 				handle.finish()
 			}()
@@ -1085,6 +1135,9 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 		if event == nil || event.Protocol == nil || event.Scope == nil {
 			continue
 		}
+		if session.EventTypeOf(event) == session.EventTypeToolCall {
+			t.Fatalf("persisted external ACP process event: %#v", event)
+		}
 		if event.Protocol.UpdateType == string(session.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
 			persistedTexts = append(persistedTexts, session.EventText(event))
 			if strings.TrimSpace(event.ID) == "" {
@@ -1094,6 +1147,68 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 	if !reflect.DeepEqual(persistedTexts, []string{"hello"}) {
 		t.Fatalf("persisted ACP texts = %#v, want final assistant snapshot only", persistedTexts)
+	}
+}
+
+func TestRuntimeACPControllerInterruptedTurnDoesNotPersistLocalReplaySnapshot(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-acp-interrupted-no-local-replay")
+	activeSession, err := sessions.BindController(context.Background(), session.BindControllerRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ControllerBinding{
+			Kind:            session.ControllerKindACP,
+			ControllerID:    "acp-main",
+			AgentName:       "codex",
+			Label:           "ACP Main",
+			RemoteSessionID: "remote-main",
+			EpochID:         "epoch-interrupted",
+			Source:          "test",
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindController() error = %v", err)
+	}
+	testController := stubACPController{
+		runTurn: func(context.Context, controller.TurnRequest) (controller.TurnResult, error) {
+			handle := newTestControllerTurnHandle(nil)
+			go func() {
+				handle.publishEvent(acpControllerChunk("partial answer"))
+				handle.publishError(errors.New("remote stream interrupted"))
+				handle.finish()
+			}()
+			return controller.TurnResult{Handle: handle}, nil
+		},
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:  testController,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := runtime.Run(context.Background(), agent.RunRequest{
+		SessionRef: activeSession.SessionRef,
+		Input:      "resume me later",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if _, err := drainRunnerEvents(t, result.Handle); err == nil {
+		t.Fatal("runner error = nil, want interrupted external ACP turn")
+	}
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	for _, event := range loaded.Events {
+		if session.EventTypeOf(event) == session.EventTypeAssistant {
+			t.Fatalf("external ACP interrupted assistant replay was persisted locally: %#v", event)
+		}
+	}
+	if got, want := len(loaded.Events), 1; got != want {
+		t.Fatalf("len(loaded.Events) = %d, want only the user prompt", got)
 	}
 }
 
@@ -3402,6 +3517,48 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 	}
 }
 
+func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
+	t.Parallel()
+
+	var captured agent.ApprovalRequest
+	requester := controllerApprovalRequester{
+		requester: approvalRequesterFunc(func(_ context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			captured = req
+			return agent.ApprovalResponse{Outcome: "selected", OptionID: "allow_once", Approved: true}, nil
+		}),
+		sessionRef:           session.SessionRef{SessionID: "sess-approval"},
+		session:              session.Session{SessionRef: session.SessionRef{SessionID: "sess-approval"}},
+		runID:                "run-1",
+		turnID:               "participant-turn-1",
+		participantID:        "side-1",
+		participantKind:      string(session.ParticipantKindACP),
+		participantSessionID: "remote-side-1",
+	}
+	_, err := requester.RequestControllerApproval(context.Background(), controller.ApprovalRequest{
+		Agent: "claude",
+		Mode:  "default",
+		ToolCall: controller.ApprovalToolCall{
+			ID:   "call-1",
+			Name: "BASH",
+		},
+	})
+	if err != nil {
+		t.Fatalf("RequestControllerApproval() error = %v", err)
+	}
+	for key, want := range map[string]string{
+		"scope":                  "participant",
+		"scope_id":               "participant-turn-1",
+		"participant_id":         "side-1",
+		"participant_kind":       string(session.ParticipantKindACP),
+		"participant_session_id": "remote-side-1",
+		"source":                 "acp_participant",
+	} {
+		if got := taskStringValue(captured.Metadata[key]); got != want {
+			t.Fatalf("metadata[%s] = %q, want %q; metadata=%#v", key, got, want, captured.Metadata)
+		}
+	}
+}
+
 func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 	t.Parallel()
 
@@ -3651,7 +3808,7 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 		t.Fatalf("terminal text = %q, want streamed output once", text.String())
 	}
 	if got := closedFrame.Text; got != "" {
-		t.Fatalf("closed frame text = %q, want status-only close after streamed output", got)
+		t.Fatalf("closed frame text = %q, want contentless final after streamed output", got)
 	}
 }
 

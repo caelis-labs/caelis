@@ -69,15 +69,6 @@ func toolContentText(raw any) string {
 }
 
 func FormatToolArgsValue(name string, raw any) string {
-	values, ok := raw.(map[string]any)
-	if ok && values != nil {
-		if display := sanitizeToolDisplayText(asString(values["_display"])); display != "" {
-			return display
-		}
-		if _, hasDisplay := values["_display"]; hasDisplay && len(values) == 1 {
-			return ""
-		}
-	}
 	return sanitizeToolDisplayText(toolArgsWithName(name, raw))
 }
 
@@ -103,7 +94,7 @@ func toolArgsWithName(name string, raw any) string {
 		}
 		return ""
 	}
-	kind := strings.ToLower(strings.TrimSpace(firstNonEmpty(asString(values["_acp_kind"]), asString(values["kind"]))))
+	kind := strings.ToLower(strings.TrimSpace(asString(values["kind"])))
 	switch kind {
 	case "search":
 		if query := strings.TrimSpace(firstNonEmpty(asString(values["query"]), asString(values["pattern"]), asString(values["text"]))); query != "" {
@@ -124,11 +115,6 @@ func toolArgsWithName(name string, raw any) string {
 	case "fetch":
 		if url := strings.TrimSpace(firstNonEmpty(asString(values["url"]), asString(values["uri"]))); url != "" {
 			return truncateInline(url, 120)
-		}
-	}
-	if title := strings.TrimSpace(asString(values["_acp_title"])); title != "" {
-		if summary := titleSummary(name, kind, title); summary != "" {
-			return truncateInline(summary, 120)
 		}
 	}
 	if value := strings.TrimSpace(primaryValue(values)); value != "" {
@@ -157,22 +143,6 @@ func primaryValue(raw any) string {
 		return fmt.Sprint(raw)
 	}
 	return string(data)
-}
-
-func titleSummary(name string, kind string, title string) string {
-	title = strings.TrimSpace(title)
-	name = strings.TrimSpace(strings.ToUpper(name))
-	kind = strings.TrimSpace(strings.ToLower(kind))
-	if title == "" {
-		return ""
-	}
-	if prefix := name + " "; len(title) > len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
-		return strings.TrimSpace(title[len(prefix):])
-	}
-	if prefix := kind + " "; len(title) > len(prefix) && strings.EqualFold(title[:len(prefix)], prefix) {
-		return strings.TrimSpace(title[len(prefix):])
-	}
-	return title
 }
 
 func firstNonEmpty(values ...string) string {

@@ -527,6 +527,9 @@ func reasoningForAssistantEvent(event *session.Event) string {
 			return reasoning
 		}
 	}
+	if reasoning := nestedString(event.Meta, "caelis", "runtime", "replay", "reasoning_text"); reasoning != "" {
+		return reasoning
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if reasoning := reasoningFromProtocolContent(update.Content); reasoning != "" {
 			return reasoning
@@ -673,6 +676,19 @@ func anyStringMap(value any) map[string]any {
 		return typed
 	}
 	return nil
+}
+
+func nestedString(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		m, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = m[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
 }
 
 func summarizeToolCallTitle(name string, args map[string]any) string {

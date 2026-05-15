@@ -77,7 +77,7 @@ func TestLookupBuiltInACPAgentIncludesClaude(t *testing.T) {
 	if agent.Command != "npx" {
 		t.Fatalf("claude command = %q, want npx", agent.Command)
 	}
-	if got, want := strings.Join(agent.Args, " "), "-y @agentclientprotocol/claude-agent-acp"; got != want {
+	if got, want := strings.Join(agent.Args, " "), "-y @agentclientprotocol/claude-agent-acp@^0.31.0"; got != want {
 		t.Fatalf("claude args = %q, want %q", got, want)
 	}
 	if len(agent.Env) != 0 {
@@ -169,7 +169,7 @@ func TestRegisterBuiltinACPAgentNpxDoesNotPreferPATHAdapterBinary(t *testing.T) 
 	if agent.Command != "npx" {
 		t.Fatalf("stored command = %q, want npx", agent.Command)
 	}
-	if got, want := strings.Join(agent.Args, " "), "-y @agentclientprotocol/claude-agent-acp"; got != want {
+	if got, want := strings.Join(agent.Args, " "), "-y @agentclientprotocol/claude-agent-acp@^0.31.0"; got != want {
 		t.Fatalf("stored args = %q, want %q", got, want)
 	}
 }
@@ -207,7 +207,7 @@ func TestRegisterBuiltinACPAgentInstallRunsNPMEvenWhenPATHAdapterExists(t *testi
 	if err != nil {
 		t.Fatalf("ReadFile(npm log) error = %v", err)
 	}
-	if got, want := strings.Count(string(logData), "@agentclientprotocol/claude-agent-acp@latest"), 1; got != want {
+	if got, want := strings.Count(string(logData), "@agentclientprotocol/claude-agent-acp@^0.31.0"), 1; got != want {
 		t.Fatalf("npm install count = %d, want %d; log=%q", got, want, string(logData))
 	}
 }

@@ -365,11 +365,12 @@ func (m *Model) shouldRenderSubagentPanelEvent(event TranscriptEvent) bool {
 
 func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 	return ToolUpdateMeta{
-		TaskID:         event.ToolTaskID,
-		TaskAction:     event.ToolTaskAction,
-		TaskInput:      event.ToolTaskInput,
-		TaskTargetKind: event.ToolTaskTargetKind,
-		ToolKind:       event.ToolKind,
-		FullArgs:       event.ToolFullArgs,
+		TaskID:          event.ToolTaskID,
+		TaskAction:      event.ToolTaskAction,
+		TaskInput:       event.ToolTaskInput,
+		TaskTargetKind:  event.ToolTaskTargetKind,
+		ToolKind:        event.ToolKind,
+		FullArgs:        event.ToolFullArgs,
+		OutputSynthetic: event.ToolOutputSynthetic,
 	}
 }

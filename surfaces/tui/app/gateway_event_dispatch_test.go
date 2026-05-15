@@ -626,6 +626,38 @@ func TestGatewaySingleExplorationStepSettlesOnNextAssistantNarrative(t *testing.
 	}
 }
 
+func TestGatewayAssistantExplorationStepSettlesOnlyAtStepBoundary(t *testing.T) {
+	model := newGatewayEventTestModel()
+	block := NewMainACPTurnBlock("root-session")
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEAssistant, Text: "I will inspect the build script next."},
+		SubagentEvent{Kind: SEToolCall, CallID: "read-build", Name: "READ", Args: "scripts/build.sh", Output: "script contents", Done: true},
+	)
+	ctx := BlockRenderContext{Width: 96, Height: 20, TermWidth: 96, Theme: model.theme}
+	live := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if strings.Contains(live, "• Explored") {
+		t.Fatalf("live rows = %q, assistant exploration step should remain expanded until next step", live)
+	}
+	if !strings.Contains(live, "I will inspect the build script next.") {
+		t.Fatalf("live rows = %q, want assistant text visible before step boundary", live)
+	}
+
+	block.Events = append(block.Events,
+		SubagentEvent{Kind: SEAssistant, Text: "Now I can run the build."},
+		SubagentEvent{Kind: SEToolCall, CallID: "bash-build", Name: "BASH", Args: "bash scripts/build.sh debug ./bin/storage"},
+	)
+	settled := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	if !strings.Contains(settled, "• Explored") || !strings.Contains(settled, "Read scripts/build.sh") {
+		t.Fatalf("settled rows = %q, want completed exploration step folded after next step arrives", settled)
+	}
+	if strings.Contains(settled, "I will inspect the build script next.") {
+		t.Fatalf("settled rows = %q, folded exploration step should hide its assistant text", settled)
+	}
+	if !strings.Contains(settled, "Now I can run the build.") || !strings.Contains(settled, "• Ran bash scripts/build.sh debug ./bin/storage") {
+		t.Fatalf("settled rows = %q, next non-exploration step should stay visible", settled)
+	}
+}
+
 func TestGatewayLongExplorationHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")
@@ -934,6 +966,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 		forbidden   []string
 		expandPanel bool
 		meta        map[string]any
+		settleStep  bool
 	}{
 		{
 			name: "read line range",
@@ -1128,6 +1161,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			want:        []string{"• Tasks", "  └ Wait 5s"},
 			forbidden:   []string{"TASK", "task-9", "task / control", "state running", "session_id", "supports_input", "556d7447"},
 			expandPanel: true,
+			settleStep:  true,
 		},
 		{
 			name: "write rich diff panel",
@@ -1322,6 +1356,21 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				},
 			})
 			model = updated.(*Model)
+			if tt.settleStep {
+				updated, _ = model.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindAssistantMessage,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Narrative: &kernel.NarrativePayload{
+							Role:  kernel.NarrativeRoleAssistant,
+							Text:  "next step",
+							Final: true,
+							Scope: kernel.EventScopeMain,
+						},
+					},
+				})
+				model = updated.(*Model)
+			}
 			block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 			if !ok {
 				t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
@@ -1427,36 +1476,34 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	}
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "› 两个子任务已启动") ||
-		!strings.Contains(joined, "• Tasks") ||
-		!strings.Contains(joined, `  └ Write "Alice"`) ||
-		!strings.Contains(joined, `    Wait ella 5s`) ||
-		!strings.Contains(joined, `    Wait 8s`) {
-		t.Fatalf("rendered rows = %q, want live reasoning followed by merged TASK controls", joined)
+		!strings.Contains(joined, `▸ TASK Write "Alice"`) ||
+		!strings.Contains(joined, `▸ TASK Wait ella 5s`) ||
+		!strings.Contains(joined, `▸ TASK Wait 8s`) ||
+		strings.Contains(joined, "• Tasks") {
+		t.Fatalf("rendered rows = %q, want active TASK step to stay expanded until the next step", joined)
 	}
-	if strings.Contains(joined, "TASK") || strings.Contains(joined, "task-9") {
+	if strings.Contains(joined, "task-9") {
 		t.Fatalf("rendered rows = %q, should hide raw TASK tool and task id", joined)
-	}
-	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_task_stage:tasks:task-0,task-1,task-2") {
-		t.Fatal("expected task stage click token to expand grouped TASK controls")
-	}
-	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
-	joined = strings.Join(renderedPlainRows(rows), "\n")
-	if strings.Contains(joined, `  └ 两个子任务已启动`) {
-		t.Fatalf("expanded live rows = %q, should keep live reasoning outside the TASK group", joined)
-	}
-	if !strings.Contains(joined, `› 两个子任务已启动`) ||
-		!strings.Contains(joined, `  └ Write "Alice"`) ||
-		!strings.Contains(joined, `    Wait ella 5s`) {
-		t.Fatalf("expanded live rows = %q, want visible reasoning and expanded controls", joined)
 	}
 	sendReasoning("继续处理")
 	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	joined = strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, `  └ 两个子任务已启动`) ||
-		!strings.Contains(joined, `    Write "Alice"`) ||
-		!strings.Contains(joined, `    Wait ella 5s`) ||
+	if !strings.Contains(joined, `› 两个子任务已启动`) ||
+		!strings.Contains(joined, `▸ TASK Write "Alice"`) ||
+		!strings.Contains(joined, `• Tasks`) ||
+		!strings.Contains(joined, `  └ Wait ella 5s, 8s`) ||
 		!strings.Contains(joined, `› 继续处理`) {
-		t.Fatalf("settled rows = %q, want previous TASK step settled before new reasoning", joined)
+		t.Fatalf("settled rows = %q, want previous wait controls settled before new reasoning", joined)
+	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_task_stage:tasks:task-1,task-2") {
+		t.Fatal("expected task stage click token to expand grouped TASK controls")
+	}
+	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, `  └ Wait ella 5s`) ||
+		!strings.Contains(joined, `    Wait 8s`) ||
+		strings.Contains(joined, `  └ Write "Alice"`) {
+		t.Fatalf("expanded settled rows = %q, want wait controls expanded while Write stays independent", joined)
 	}
 }
 
@@ -1468,13 +1515,12 @@ func TestGatewayTaskHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
 			Kind: SEReasoning,
 			Text: strings.Repeat("I am coordinating child work before continuing.\n", 30),
 		},
-		SubagentEvent{Kind: SEToolCall, CallID: "task-0", Name: "TASK", Args: "write Alice"},
 		SubagentEvent{Kind: SEToolCall, CallID: "task-1", Name: "TASK", Args: "wait ella 5s"},
 	)
 	ctx := BlockRenderContext{Width: 110, Height: 12, TermWidth: 110, Theme: model.theme}
 	live := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
-	if !strings.Contains(live, "I am coordinating child work before continuing.") || !strings.Contains(live, "• Tasks") {
-		t.Fatalf("live rows = %q, want live reasoning followed by task controls", live)
+	if !strings.Contains(live, "I am coordinating child work before continuing.") || strings.Contains(live, "• Tasks") {
+		t.Fatalf("live rows = %q, want active task step expanded without premature Tasks group", live)
 	}
 
 	block.Events = append(block.Events, SubagentEvent{Kind: SEReasoning, Text: "继续处理"})
@@ -1823,6 +1869,7 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 		{callID: "task-raw-2", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
 		{callID: "task-raw-3", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
 		{callID: "task-raw-4", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
+		{callID: "task-raw-5", input: map[string]any{"action": "cancel", "task_id": "nora"}},
 	} {
 		updated, _ := model.Update(kernel.EventEnvelope{
 			Event: kernel.Event{
@@ -1839,13 +1886,28 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 		})
 		model = updated.(*Model)
 	}
+	updated, _ := model.Update(kernel.EventEnvelope{
+		Event: kernel.Event{
+			Kind:       kernel.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Narrative: &kernel.NarrativePayload{
+				Role:  kernel.NarrativeRoleAssistant,
+				Text:  "task controls settled",
+				Final: true,
+				Scope: kernel.EventScopeMain,
+			},
+		},
+	})
+	model = updated.(*Model)
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
 		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
 	}
 	rows := block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	if !strings.Contains(joined, "• Tasks") || !strings.Contains(joined, "  └ Wait 5s") || !strings.Contains(joined, "    Wait nora 3s") {
+	if !strings.Contains(joined, "• Tasks") ||
+		!strings.Contains(joined, "  └ Wait 5s, nora 3s, nora 3s, nora 3s") ||
+		!strings.Contains(joined, "    Cancel nora") {
 		t.Fatalf("rendered rows = %q, want cleaned task action rows", joined)
 	}
 	for _, forbidden := range []string{"TASK wait", "task-12"} {
@@ -1853,8 +1915,8 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
 		}
 	}
-	if got := strings.Count(joined, "Wait nora 3s"); got != 3 {
-		t.Fatalf("rendered rows = %q, Wait nora 3s count = %d, want 3", joined, got)
+	if got := strings.Count(joined, "nora 3s"); got != 3 {
+		t.Fatalf("rendered rows = %q, nora 3s count = %d, want 3", joined, got)
 	}
 }
 
@@ -1934,7 +1996,7 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	for _, want := range []string{"  └ 进度: 1/30", "    进度: 3/30", "• Tasks", "  └ Wait 5s"} {
+	for _, want := range []string{"  └ 进度: 1/30", "    进度: 3/30", "▸ TASK Wait 5s"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
 		}
@@ -2860,6 +2922,80 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 	}
 	if strings.Contains(joined, "stale streamed preview") {
 		t.Fatalf("rendered rows = %q, should replace streamed preview with final output", joined)
+	}
+}
+
+func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T) {
+	model := newGatewayEventTestModel()
+	callID := "participant-bash-contentless-final"
+	origin := &kernel.EventOrigin{
+		Source:        "acp_participant",
+		Scope:         kernel.EventScopeParticipant,
+		ScopeID:       "codex-turn-1",
+		Actor:         "@codex",
+		ParticipantID: "codex-001",
+	}
+	for _, env := range []kernel.EventEnvelope{
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     origin,
+			ToolCall: &kernel.ToolCallPayload{
+				CallID:   callID,
+				ToolName: "BASH",
+				Status:   kernel.ToolStatusRunning,
+				Scope:    kernel.EventScopeParticipant,
+				RawInput: map[string]any{"command": "go test ./..."},
+			},
+		}},
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     origin,
+			ToolResult: &kernel.ToolResultPayload{
+				CallID:   callID,
+				ToolName: "BASH",
+				Status:   kernel.ToolStatusRunning,
+				Scope:    kernel.EventScopeParticipant,
+				RawInput: map[string]any{"command": "go test ./..."},
+				Content:  testTerminalContent("internal/service: missing mysql.default\n"),
+			},
+		}},
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     origin,
+			ToolResult: &kernel.ToolResultPayload{
+				CallID:   callID,
+				ToolName: "BASH",
+				Status:   kernel.ToolStatusFailed,
+				Error:    true,
+				Scope:    kernel.EventScopeParticipant,
+				RawInput: map[string]any{"command": "go test ./..."},
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+
+	block, ok := model.doc.Blocks()[0].(*ParticipantTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want ParticipantTurnBlock", model.doc.Blocks()[0])
+	}
+	if len(block.Events) != 1 || !block.Events[0].Done || !block.Events[0].Err {
+		t.Fatalf("participant events = %#v, want failed completed BASH event", block.Events)
+	}
+	if got := strings.TrimSpace(block.Events[0].Output); got != "internal/service: missing mysql.default" {
+		t.Fatalf("terminal output = %q, want streamed output preserved", got)
+	}
+	block.setToolPanelExpanded(callID, true)
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "internal/service: missing mysql.default") {
+		t.Fatalf("rendered rows = %q, want streamed terminal output", joined)
+	}
+	if strings.Contains(joined, "  └ failed") {
+		t.Fatalf("rendered rows = %q, contentless final should not replace streamed output", joined)
 	}
 }
 

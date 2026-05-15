@@ -118,7 +118,7 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 			want:       "stored assistant",
 		},
 		{
-			name: "assistant thought snapshot",
+			name: "legacy assistant thought snapshot",
 			event: &session.Event{
 				SessionID: "session-1",
 				Type:      session.EventTypeAssistant,

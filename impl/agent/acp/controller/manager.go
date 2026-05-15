@@ -153,7 +153,13 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	if err != nil {
 		return session.ControllerBinding{}, err
 	}
-	run.applyStartupStateLocked(client, remoteSessionID, state, req.ContextSyncSeq)
+	contextSyncSeq := req.ContextSyncSeq
+	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
+		contextSyncSeq = 0
+		run.contextPrelude = ""
+		run.contextPreludePending = false
+	}
+	run.applyStartupStateLocked(client, remoteSessionID, state, contextSyncSeq)
 
 	m.mu.Lock()
 	if old := m.controllers[parentSessionID]; old != nil && old.client != nil {
@@ -455,21 +461,23 @@ func (m *Manager) startACPClient(
 	remoteSessionID := strings.TrimSpace(resumeRemoteSessionID)
 	if remoteSessionID != "" && acpSessionCapability(initResp, "resume") {
 		resp, err := client.ResumeSession(ctx, remoteSessionID, strings.TrimSpace(cwd), nil)
-		if err != nil {
+		if err == nil {
+			state := controllerClientState{
+				configOptions: controllerConfigOptionsFromACP(resp.ConfigOptions),
+				models:        cloneACPSessionModelState(resp.Models),
+				mode:          currentModeID(resp.Modes),
+				modeOptions:   controllerModesFromACP(resp.Modes),
+				supportsClose: acpSessionCapability(initResp, "close"),
+			}
+			if initResp.AgentInfo != nil {
+				state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
+			}
+			return client, remoteSessionID, state, nil
+		}
+		if ctx.Err() != nil {
 			_ = client.Close(ctx)
 			return nil, "", controllerClientState{}, err
 		}
-		state := controllerClientState{
-			configOptions: controllerConfigOptionsFromACP(resp.ConfigOptions),
-			models:        cloneACPSessionModelState(resp.Models),
-			mode:          currentModeID(resp.Modes),
-			modeOptions:   controllerModesFromACP(resp.Modes),
-			supportsClose: acpSessionCapability(initResp, "close"),
-		}
-		if initResp.AgentInfo != nil {
-			state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
-		}
-		return client, remoteSessionID, state, nil
 	}
 	resp, err := client.NewSession(ctx, strings.TrimSpace(cwd), nil)
 	if err != nil {
@@ -969,33 +977,41 @@ func (r *participantRun) handleUpdate(clock func() time.Time, env client.UpdateE
 		r.mu.Unlock()
 		return
 	}
-	event.Actor = session.ActorRef{Kind: session.ActorKindParticipant, ID: r.id, Name: strings.TrimSpace(firstNonEmpty(r.binding.Label, r.agent, r.id))}
+	applyACPParticipantEventScope(event, r.binding, r.agent)
+	r.updatedAt = clock()
+	r.events = append(r.events, session.CloneEvent(event))
+	r.mu.Unlock()
+	if stream && handle != nil {
+		handle.publishEvent(event)
+	}
+}
+
+func applyACPParticipantEventScope(event *session.Event, binding session.ParticipantBinding, agent string) {
+	if event == nil {
+		return
+	}
+	participantID := strings.TrimSpace(binding.ID)
+	event.Actor = session.ActorRef{Kind: session.ActorKindParticipant, ID: participantID, Name: strings.TrimSpace(firstNonEmpty(binding.Label, agent, participantID))}
 	if event.Scope == nil {
 		event.Scope = &session.EventScope{}
 	}
 	event.Scope.Source = "acp_participant"
 	event.Scope.Controller = session.ControllerRef{}
 	event.Scope.Participant = session.ParticipantRef{
-		ID:           r.id,
-		Kind:         r.binding.Kind,
-		Role:         r.binding.Role,
-		DelegationID: r.binding.DelegationID,
+		ID:           participantID,
+		Kind:         binding.Kind,
+		Role:         binding.Role,
+		DelegationID: binding.DelegationID,
 	}
 	if event.Meta == nil {
 		event.Meta = map[string]any{}
 	}
-	if agent := strings.TrimSpace(r.agent); agent != "" {
+	if agent := strings.TrimSpace(agent); agent != "" {
 		event.Meta["agent"] = agent
 	}
-	if label := strings.TrimSpace(r.binding.Label); label != "" {
+	if label := strings.TrimSpace(binding.Label); label != "" {
 		event.Meta["mention"] = label
 		event.Meta["handle"] = strings.TrimPrefix(label, "@")
-	}
-	r.updatedAt = clock()
-	r.events = append(r.events, session.CloneEvent(event))
-	r.mu.Unlock()
-	if stream && handle != nil {
-		handle.publishEvent(event)
 	}
 }
 

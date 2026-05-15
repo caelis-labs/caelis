@@ -3,7 +3,6 @@ package local
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -174,8 +173,12 @@ func (r *Runtime) executeACPControllerTurn(
 			activeSession, bindErr = r.sessions.BindController(ctx, session.BindControllerRequest{SessionRef: ref, Binding: binding})
 			if bindErr == nil {
 				turnReq.Session = activeSession
-				turnReq.ContextPrelude = ""
-				turnReq.ContextSyncSeq = 0
+				if binding.ContextSyncSeq < contextSeq {
+					turnReq.ContextPrelude, turnReq.ContextSyncSeq = r.buildControllerHandoffContext(ctx, activeSession, ref, binding, binding.ContextSyncSeq, turnID)
+				} else {
+					turnReq.ContextPrelude = ""
+					turnReq.ContextSyncSeq = 0
+				}
 				turnResult, err = r.controllers.RunTurn(ctx, turnReq)
 			} else {
 				err = bindErr
@@ -202,14 +205,10 @@ func (r *Runtime) executeACPControllerTurn(
 		accumulator := acpNarrativeAccumulator{}
 		for event, seqErr := range turnResult.Handle.Events() {
 			if seqErr != nil {
-				stateErr := seqErr
-				if replayErr := r.persistInterruptedACPAssistantReplay(context.WithoutCancel(ctx), activeSession, ref, turnID, &accumulator, seqErr); replayErr != nil {
-					stateErr = errors.Join(seqErr, replayErr)
-				}
 				r.setRunState(ref.SessionID, agent.RunState{
 					Status:      interruptedOrFailedStatus(ctx, seqErr),
 					ActiveRunID: runID,
-					LastError:   stateErr.Error(),
+					LastError:   seqErr.Error(),
 					UpdatedAt:   r.now(),
 				})
 				handle.publishError(seqErr)
@@ -233,7 +232,7 @@ func (r *Runtime) executeACPControllerTurn(
 				normalized = persistedEvent
 				publishEvent = nil
 			}
-			if session.IsCanonicalHistoryEvent(normalized) {
+			if shouldPersistExternalACPEvent(normalized) {
 				persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 					SessionRef: ref,
 					Event:      normalized,
@@ -249,16 +248,6 @@ func (r *Runtime) executeACPControllerTurn(
 					return
 				}
 				normalized = persisted
-			}
-			if err := r.handleControllerPlanEvent(ctx, ref, normalized); err != nil {
-				r.setRunState(ref.SessionID, agent.RunState{
-					Status:      interruptedOrFailedStatus(ctx, err),
-					ActiveRunID: runID,
-					LastError:   err.Error(),
-					UpdatedAt:   r.now(),
-				})
-				handle.publishError(err)
-				return
 			}
 			if publishEvent == nil {
 				publishEvent = normalized
@@ -356,48 +345,6 @@ func (a *acpNarrativeAccumulator) finalAssistantEvent() *session.Event {
 	return event
 }
 
-func (r *Runtime) persistInterruptedACPAssistantReplay(
-	ctx context.Context,
-	activeSession session.Session,
-	ref session.SessionRef,
-	turnID string,
-	accumulator *acpNarrativeAccumulator,
-	cause error,
-) error {
-	if r == nil || r.sessions == nil || accumulator == nil {
-		return nil
-	}
-	event := accumulator.interruptedAssistantReplayEvent(activeSession, turnID, cause)
-	if event == nil {
-		return nil
-	}
-	_, err := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: ref,
-		Event:      event,
-	})
-	return err
-}
-
-func (a *acpNarrativeAccumulator) interruptedAssistantReplayEvent(
-	session session.Session,
-	turnID string,
-	cause error,
-) *session.Event {
-	if a == nil {
-		return nil
-	}
-	answerText := a.assistantText
-	reasoningText := a.reasoningText
-	if strings.TrimSpace(answerText) == "" && strings.TrimSpace(reasoningText) == "" {
-		return nil
-	}
-	template := a.lastAssistantEvent
-	if template == nil {
-		template = a.lastNarrativeEvent
-	}
-	return buildInterruptedAssistantReplayEvent(template, session, turnID, answerText, reasoningText, cause)
-}
-
 func isACPControllerNarrativeChunk(event *session.Event) bool {
 	if event == nil || event.Protocol == nil || event.Scope == nil {
 		return false
@@ -407,6 +354,18 @@ func isACPControllerNarrativeChunk(event *session.Event) bool {
 	}
 	switch strings.TrimSpace(event.Protocol.UpdateType) {
 	case string(session.ProtocolUpdateTypeAgentMessage), string(session.ProtocolUpdateTypeAgentThought):
+		return true
+	default:
+		return false
+	}
+}
+
+func shouldPersistExternalACPEvent(event *session.Event) bool {
+	if event == nil || !session.IsCanonicalHistoryEvent(event) || session.IsUIOnly(event) {
+		return false
+	}
+	switch session.EventTypeOf(event) {
+	case session.EventTypeUser, session.EventTypeAssistant:
 		return true
 	default:
 		return false
@@ -497,34 +456,6 @@ func appendNarrativeText(existing string, incoming string) (string, string) {
 		return existing, ""
 	}
 	return existing + incoming, incoming
-}
-
-func (r *Runtime) handleControllerPlanEvent(ctx context.Context, ref session.SessionRef, event *session.Event) error {
-	if r == nil || r.sessions == nil || event == nil || event.Protocol == nil || event.Protocol.Plan == nil {
-		return nil
-	}
-	entries := event.Protocol.Plan.Entries
-	if len(entries) == 0 {
-		return nil
-	}
-	return r.sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
-		if state == nil {
-			state = map[string]any{}
-		}
-		out := make([]map[string]any, 0, len(entries))
-		for _, item := range entries {
-			out = append(out, map[string]any{
-				"content": strings.TrimSpace(item.Content),
-				"status":  strings.TrimSpace(item.Status),
-			})
-		}
-		state["plan"] = map[string]any{
-			"version":     1,
-			"entries":     out,
-			"explanation": strings.TrimSpace(session.EventText(event)),
-		}
-		return state, nil
-	})
 }
 
 func (r *Runtime) AttachACPParticipant(ctx context.Context, req agent.AttachACPParticipantRequest) (session.Session, error) {
@@ -658,16 +589,25 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishEvent(persisted)
 	}
 	turnResult, err := r.controllers.PromptParticipant(ctx, controller.ParticipantPromptRequest{
-		SessionRef:        ref,
-		Session:           activeSession,
-		TurnID:            turnID,
-		ParticipantID:     participantID,
-		Input:             strings.TrimSpace(req.Input),
-		ContentParts:      req.ContentParts,
-		ContextPrelude:    contextPrelude,
-		Stream:            req.Stream,
-		Mode:              r.policyMode(agent.AgentSpec{}),
-		ApprovalRequester: controllerApprovalRequester{requester: req.ApprovalRequester, sessionRef: ref, session: activeSession, runID: runID, turnID: turnID},
+		SessionRef:     ref,
+		Session:        activeSession,
+		TurnID:         turnID,
+		ParticipantID:  participantID,
+		Input:          strings.TrimSpace(req.Input),
+		ContentParts:   req.ContentParts,
+		ContextPrelude: contextPrelude,
+		Stream:         req.Stream,
+		Mode:           r.policyMode(agent.AgentSpec{}),
+		ApprovalRequester: controllerApprovalRequester{
+			requester:            req.ApprovalRequester,
+			sessionRef:           ref,
+			session:              activeSession,
+			runID:                runID,
+			turnID:               turnID,
+			participantID:        strings.TrimSpace(binding.ID),
+			participantKind:      strings.TrimSpace(string(binding.Kind)),
+			participantSessionID: strings.TrimSpace(binding.SessionID),
+		},
 	})
 	if err != nil {
 		handle.publishError(err)
@@ -704,7 +644,7 @@ func (r *Runtime) executeACPParticipantTurn(
 			normalized = persistedEvent
 			publishEvent = nil
 		}
-		if session.IsCanonicalHistoryEvent(normalized) {
+		if shouldPersistExternalACPEvent(normalized) {
 			persisted, appendErr := r.sessions.AppendEvent(ctx, session.AppendEventRequest{
 				SessionRef: ref,
 				Event:      normalized,
@@ -1281,11 +1221,14 @@ func handoffEvent(from session.ControllerBinding, to session.ControllerBinding, 
 }
 
 type controllerApprovalRequester struct {
-	requester  agent.ApprovalRequester
-	sessionRef session.SessionRef
-	session    session.Session
-	runID      string
-	turnID     string
+	requester            agent.ApprovalRequester
+	sessionRef           session.SessionRef
+	session              session.Session
+	runID                string
+	turnID               string
+	participantID        string
+	participantKind      string
+	participantSessionID string
 }
 
 func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Context, req controller.ApprovalRequest) (controller.ApprovalResponse, error) {
@@ -1307,6 +1250,17 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 		if data, marshalErr := json.Marshal(rawInput); marshalErr == nil {
 			callInput = data
 		}
+	}
+	metadata := map[string]any{
+		"agent": strings.TrimSpace(req.Agent),
+	}
+	if strings.TrimSpace(r.participantID) != "" || strings.TrimSpace(r.participantSessionID) != "" {
+		metadata["scope"] = "participant"
+		metadata["scope_id"] = strings.TrimSpace(r.turnID)
+		metadata["participant_id"] = strings.TrimSpace(r.participantID)
+		metadata["participant_kind"] = strings.TrimSpace(r.participantKind)
+		metadata["participant_session_id"] = strings.TrimSpace(r.participantSessionID)
+		metadata["source"] = "acp_participant"
 	}
 	resp, err := r.requester.RequestApproval(ctx, agent.ApprovalRequest{
 		SessionRef: session.NormalizeSessionRef(r.sessionRef),
@@ -1334,9 +1288,7 @@ func (r controllerApprovalRequester) RequestControllerApproval(ctx context.Conte
 			},
 			Options: options,
 		},
-		Metadata: map[string]any{
-			"agent": strings.TrimSpace(req.Agent),
-		},
+		Metadata: metadata,
 	})
 	if err != nil {
 		return controller.ApprovalResponse{}, err

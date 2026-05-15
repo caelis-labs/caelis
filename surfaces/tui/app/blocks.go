@@ -250,12 +250,13 @@ type MainACPTurnBlock struct {
 }
 
 type ToolUpdateMeta struct {
-	TaskID         string
-	TaskAction     string
-	TaskInput      string
-	TaskTargetKind string
-	ToolKind       string
-	FullArgs       string
+	TaskID          string
+	TaskAction      string
+	TaskInput       string
+	TaskTargetKind  string
+	ToolKind        string
+	FullArgs        string
+	OutputSynthetic bool
 }
 
 type toolEventUpdate struct {
@@ -308,35 +309,37 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
-			Kind:           SEToolCall,
-			CallID:         callID,
-			Name:           name,
-			ToolKind:       toolKind,
-			Args:           args,
-			FullArgs:       fullArgs,
-			Output:         output,
-			TaskID:         taskID,
-			TaskAction:     taskAction,
-			TaskInput:      taskInput,
-			TaskTargetKind: taskTargetKind,
+			Kind:            SEToolCall,
+			CallID:          callID,
+			Name:            name,
+			ToolKind:        toolKind,
+			Args:            args,
+			FullArgs:        fullArgs,
+			Output:          output,
+			OutputSynthetic: update.Meta.OutputSynthetic,
+			TaskID:          taskID,
+			TaskAction:      taskAction,
+			TaskInput:       taskInput,
+			TaskTargetKind:  taskTargetKind,
 		})
 		return out, true, false
 	}
 
 	finalEvent := SubagentEvent{
-		Kind:           SEToolCall,
-		CallID:         callID,
-		Name:           name,
-		ToolKind:       toolKind,
-		Args:           args,
-		FullArgs:       fullArgs,
-		Output:         output,
-		Done:           true,
-		Err:            update.Err,
-		TaskID:         taskID,
-		TaskAction:     taskAction,
-		TaskInput:      taskInput,
-		TaskTargetKind: taskTargetKind,
+		Kind:            SEToolCall,
+		CallID:          callID,
+		Name:            name,
+		ToolKind:        toolKind,
+		Args:            args,
+		FullArgs:        fullArgs,
+		Output:          output,
+		OutputSynthetic: update.Meta.OutputSynthetic,
+		Done:            true,
+		Err:             update.Err,
+		TaskID:          taskID,
+		TaskAction:      taskAction,
+		TaskInput:       taskInput,
+		TaskTargetKind:  taskTargetKind,
 	}
 	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 		ev := &out[i]
@@ -450,6 +453,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	}
 	if output != "" {
 		ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+		ev.OutputSynthetic = false
 	}
 }
 
@@ -498,8 +502,9 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	ev.ToolKind = finalEvent.ToolKind
 	ev.Args = finalEvent.Args
 	ev.FullArgs = finalEvent.FullArgs
-	if strings.TrimSpace(finalEvent.Output) != "" || !isTerminalPanelToolEvent(*ev) {
+	if finalToolOutputShouldReplace(*ev, *finalEvent) {
 		ev.Output = finalEvent.Output
+		ev.OutputSynthetic = finalEvent.OutputSynthetic
 	}
 	ev.Done = true
 	ev.Err = finalEvent.Err
@@ -521,6 +526,16 @@ func mergeOpenFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	}
 	fillFinalToolEventFromExisting(finalEvent, *ev)
 	mergeFinalToolEvent(ev, finalEvent)
+}
+
+func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEvent) bool {
+	if !isTerminalPanelToolEvent(existing) {
+		return true
+	}
+	if finalEvent.OutputSynthetic && strings.TrimSpace(existing.Output) != "" {
+		return false
+	}
+	return strings.TrimSpace(finalEvent.Output) != ""
 }
 
 func preferredDisplayTaskID(current string, candidate string) string {
@@ -1865,8 +1880,9 @@ func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID s
 			ev.Output = ""
 			updated = true
 		}
-		if output != "" {
+		if output != "" && !(meta.OutputSynthetic && strings.TrimSpace(ev.Output) != "") {
 			ev.Output = output
+			ev.OutputSynthetic = meta.OutputSynthetic
 			updated = true
 		}
 		if final {
@@ -2165,18 +2181,19 @@ type SubagentEvent struct {
 	EndedAt   time.Time
 
 	// ToolCall fields.
-	CallID         string
-	Name           string
-	ToolKind       string
-	Args           string
-	FullArgs       string
-	Output         string
-	TaskID         string
-	TaskAction     string
-	TaskInput      string
-	TaskTargetKind string
-	Done           bool
-	Err            bool
+	CallID          string
+	Name            string
+	ToolKind        string
+	Args            string
+	FullArgs        string
+	Output          string
+	OutputSynthetic bool
+	TaskID          string
+	TaskAction      string
+	TaskInput       string
+	TaskTargetKind  string
+	Done            bool
+	Err             bool
 	// Plan fields.
 	PlanEntries []planEntryState
 

@@ -32,8 +32,11 @@ type DefaultSelfConfig struct {
 
 type BuiltinAdapterPackage struct {
 	Package string
+	Version string
 	Bin     string
 }
+
+const claudeACPAdapterVersion = "^0.31.0"
 
 func WithConfiguredAgents(resolved assembly.ResolvedAssembly, configured []configstore.AgentConfig, self assembly.AgentConfig) assembly.ResolvedAssembly {
 	out := assembly.CloneResolvedAssembly(resolved)
@@ -165,7 +168,7 @@ func SelfRuntimeInvocation(cfg RuntimeConfig) ([]string, map[string]string) {
 func BuiltInAgents() []assembly.AgentConfig {
 	return []assembly.AgentConfig{
 		npxAgentConfig("codex", "OpenAI Codex ACP agent", "@zed-industries/codex-acp"),
-		npxAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp"),
+		npxAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp@"+claudeACPAdapterVersion),
 		{
 			Name:        "copilot",
 			Description: "GitHub Copilot ACP agent",
@@ -195,7 +198,7 @@ func BuiltinAdapterPackageFor(name string) (BuiltinAdapterPackage, bool) {
 	case "codex":
 		return BuiltinAdapterPackage{Package: "@zed-industries/codex-acp", Bin: "codex-acp"}, true
 	case "claude":
-		return BuiltinAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Bin: "claude-agent-acp"}, true
+		return BuiltinAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Version: claudeACPAdapterVersion, Bin: "claude-agent-acp"}, true
 	default:
 		return BuiltinAdapterPackage{}, false
 	}

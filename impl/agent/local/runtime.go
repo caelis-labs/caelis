@@ -373,24 +373,20 @@ func buildInterruptedAssistantReplayEvent(
 			Content:       content,
 		},
 	}
-	event.Meta = interruptedReplayMeta(event.Meta, cause)
+	event.Meta = interruptedReplayMeta(event.Meta, cause, reasoningText)
 	return event
 }
 
 func interruptedAssistantReplayContent(answerText string, reasoningText string) map[string]any {
 	answerText = strings.TrimSpace(answerText)
 	reasoningText = strings.TrimSpace(reasoningText)
-	if answerText == "" && reasoningText == "" {
-		return nil
-	}
-	content := map[string]any{"type": "assistant_snapshot"}
 	if answerText != "" {
-		content["text"] = answerText
+		return session.ProtocolTextContent(answerText)
 	}
 	if reasoningText != "" {
-		content["reasoningText"] = reasoningText
+		return session.ProtocolTextContent(reasoningText)
 	}
-	return content
+	return nil
 }
 
 func mainTurnEvent(event *session.Event, turnID string) bool {
@@ -430,7 +426,7 @@ func assistantReplayUpdateType(event *session.Event) string {
 	return string(session.ProtocolUpdateTypeAgentMessage)
 }
 
-func interruptedReplayMeta(meta map[string]any, cause error) map[string]any {
+func interruptedReplayMeta(meta map[string]any, cause error, reasoningText string) map[string]any {
 	out := maps.Clone(meta)
 	if out == nil {
 		out = map[string]any{}
@@ -448,6 +444,9 @@ func interruptedReplayMeta(meta map[string]any, cause error) map[string]any {
 	replay := map[string]any{"interrupted": true}
 	if cause != nil && strings.TrimSpace(cause.Error()) != "" {
 		replay["reason"] = cause.Error()
+	}
+	if reasoningText = strings.TrimSpace(reasoningText); reasoningText != "" {
+		replay["reasoning_text"] = reasoningText
 	}
 	runtimeMeta["replay"] = replay
 	caelis["runtime"] = runtimeMeta

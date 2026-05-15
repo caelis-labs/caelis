@@ -294,7 +294,7 @@ func TestTranscriptSnapshots(t *testing.T) {
 			want: "Main(session=root-session,status=running)\n  tool(call-1,BASH,done,args=echo \"hi\",output=done)",
 		},
 		{
-			name: "terminal status-only final preserves streamed output",
+			name: "terminal contentless final preserves streamed output",
 			run: func(m *Model) *Model {
 				updated, _ := m.Update(kernel.EventEnvelope{
 					Event: kernel.Event{
@@ -348,6 +348,41 @@ func TestTranscriptSnapshots(t *testing.T) {
 				return updated.(*Model)
 			},
 			want: "Main(session=root-session,status=running)\n  tool(call-1,BASH,done,args=printf hi,output=hi)",
+		},
+		{
+			name: "terminal contentless failed final shows failure",
+			run: func(m *Model) *Model {
+				updated, _ := m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolCall,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						ToolCall: &kernel.ToolCallPayload{
+							CallID:   "call-1",
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": `false`},
+							Status:   kernel.ToolStatusRunning,
+						},
+					},
+				})
+				m = updated.(*Model)
+				updated, _ = m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolResult,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						ToolResult: &kernel.ToolResultPayload{
+							CallID:   "call-1",
+							ToolName: "BASH",
+							RawInput: map[string]any{"command": `false`},
+							Status:   kernel.ToolStatusFailed,
+							Error:    true,
+						},
+					},
+				})
+				return updated.(*Model)
+			},
+			want: "Main(session=root-session,status=running)\n  tool(call-1,BASH,failed,args=false,output=failed)",
 		},
 		{
 			name: "approval overlay is not transcript",
@@ -972,8 +1007,8 @@ func TestProjectGatewayEventToolResultDoesNotDisplayRawOutputOnly(t *testing.T) 
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one tool event", events)
 	}
-	if got := events[0].ToolOutput; got != "completed" {
-		t.Fatalf("ToolOutput = %q, want standard status fallback", got)
+	if got := events[0].ToolOutput; got != "" {
+		t.Fatalf("ToolOutput = %q, want no synthesized terminal output", got)
 	}
 	if strings.Contains(events[0].ToolOutput, "network error") {
 		t.Fatalf("ToolOutput = %q, must not display rawOutput-only text", events[0].ToolOutput)
@@ -998,8 +1033,8 @@ func TestProjectGatewayEventToolResultDiscardsUnsupportedACPContent(t *testing.T
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one tool event", events)
 	}
-	if got := events[0].ToolOutput; got != "completed" {
-		t.Fatalf("ToolOutput = %q, want unsupported content discarded to standard status", got)
+	if got := events[0].ToolOutput; got != "" {
+		t.Fatalf("ToolOutput = %q, want unsupported terminal content discarded without synthetic output", got)
 	}
 }
 

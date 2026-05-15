@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -1413,7 +1414,7 @@ func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref session.
 	if gw, err := d.gateway(); err == nil {
 		if state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref}); err == nil {
 			for _, participant := range state.Participants {
-				label := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(participant.Label), "@"))
+				label := agenthandle.Normalize(participant.Label)
 				if label != "" {
 					used[label] = struct{}{}
 				}
@@ -1424,50 +1425,7 @@ func (d *GatewayDriver) allocateSideAgentLabel(ctx context.Context, ref session.
 }
 
 func allocateSideAgentHandle(used map[string]struct{}, agent string) string {
-	base := normalizeAgentHandleBase(agent)
-	if base == "" {
-		base = "agent"
-	}
-	for i := 0; i < 1000; i++ {
-		candidate := base
-		if i > 0 {
-			candidate = fmt.Sprintf("%s%d", base, i+1)
-		}
-		if _, exists := used[candidate]; !exists {
-			return candidate
-		}
-	}
-	return base
-}
-
-func normalizeAgentHandleBase(value string) string {
-	value = strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "@"))
-	var b strings.Builder
-	lastDash := false
-	for _, r := range value {
-		var keep rune
-		switch {
-		case r >= 'a' && r <= 'z':
-			keep = r
-		case r >= '0' && r <= '9':
-			keep = r
-		case r == '-' || r == '_':
-			keep = r
-		case r == '/' || r == '.' || r == ' ' || r == '\t':
-			if !lastDash && b.Len() > 0 {
-				keep = '-'
-				lastDash = true
-			}
-		}
-		if keep == 0 {
-			continue
-		}
-		if keep != '-' {
-			lastDash = false
-		}
-		b.WriteRune(keep)
-	}
-	return strings.Trim(b.String(), "-_")
+	return agenthandle.Allocate(used, agent)
 }
 
 func sideAgentParticipantID(activeSession session.Session, agent string, label string) (string, error) {
@@ -1551,10 +1509,14 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 		if query != "" && !hasSlashArgPrefix(query, handle, agent, participant.SessionID, participant.DelegationID) {
 			continue
 		}
+		display := handle
+		if agent != "" {
+			display = handle + "(" + agent + ")"
+		}
 		out = append(out, CompletionCandidate{
 			Value:   handle,
-			Display: handle,
-			Detail:  strings.Join(compactNonEmpty([]string{agent, string(participant.Role), participant.SessionID}), " · "),
+			Display: display,
+			Detail:  strings.Join(compactNonEmpty([]string{string(participant.Role), participant.SessionID}), " · "),
 		})
 		if len(out) >= limit {
 			break

@@ -745,6 +745,9 @@ func reasoningTextFromSessionEvent(event *session.Event) string {
 			return reasoning
 		}
 	}
+	if reasoning := stringFromNestedMap(event.Meta, "caelis", "runtime", "replay", "reasoning_text"); reasoning != "" {
+		return reasoning
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if reasoning := reasoningTextFromProtocolContent(update.Content); reasoning != "" {
 			return reasoning

@@ -1253,48 +1253,54 @@ func resumeTranscriptReplayTranscriptEvents(events []kernel.EventEnvelope) []Tra
 	}
 	out := make([]TranscriptEvent, 0, len(envelopes))
 	for _, env := range envelopes {
-		out = append(out, ProjectGatewayEventToTranscriptEvents(env.Event)...)
+		projected := ProjectGatewayEventToTranscriptEvents(env.Event)
+		if len(projected) == 0 {
+			if event, ok := resumeParticipantUserTranscriptEvent(env.Event); ok {
+				projected = append(projected, event)
+			}
+		}
+		out = append(out, projected...)
 	}
 	return out
+}
+
+func resumeParticipantUserTranscriptEvent(event kernel.Event) (TranscriptEvent, bool) {
+	if event.Kind != kernel.EventKindUserMessage || gatewayEventScope(event) != ACPProjectionParticipant {
+		return TranscriptEvent{}, false
+	}
+	text := strings.TrimSpace(gatewayUserText(event))
+	if text == "" {
+		return TranscriptEvent{}, false
+	}
+	label := firstNonEmpty(
+		kernel.EventMetaString(event.Meta, "mention"),
+		kernel.EventMetaString(event.Meta, "handle"),
+	)
+	if label != "" && !strings.HasPrefix(label, "@") {
+		label = "@" + label
+	}
+	if event.Origin != nil {
+		label = firstNonEmpty(label, event.Origin.ParticipantID, event.Origin.Actor)
+	}
+	label = firstNonEmpty(label, "side ACP")
+	return TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		NarrativeKind: TranscriptNarrativeUser,
+		Text:          fmt.Sprintf("User to %s: %s", label, text),
+		Final:         true,
+		OccurredAt:    event.OccurredAt,
+	}, true
 }
 
 func resumeTranscriptReplayEvents(events []kernel.EventEnvelope) []kernel.EventEnvelope {
 	if len(events) == 0 {
 		return nil
 	}
-	incompleteTurns := resumeIncompleteTurnIDs(events)
 	out := make([]kernel.EventEnvelope, 0, len(events))
 	for _, env := range events {
-		if shouldReplayEventInTUIResume(env.Event) || shouldReplayInterruptedTurnEvent(env.Event, incompleteTurns) {
+		if shouldReplayEventInTUIResume(env.Event) {
 			out = append(out, env)
-		}
-	}
-	return out
-}
-
-func resumeIncompleteTurnIDs(events []kernel.EventEnvelope) map[string]bool {
-	hasUser := map[string]bool{}
-	hasAssistantFinal := map[string]bool{}
-	for _, env := range events {
-		turnID := strings.TrimSpace(env.Event.TurnID)
-		if turnID == "" || gatewayEventScope(env.Event) != ACPProjectionMain {
-			continue
-		}
-		switch env.Event.Kind {
-		case kernel.EventKindUserMessage:
-			if strings.TrimSpace(gatewayUserText(env.Event)) != "" {
-				hasUser[turnID] = true
-			}
-		case kernel.EventKindAssistantMessage:
-			if completedResumeAssistant(env.Event) {
-				hasAssistantFinal[turnID] = true
-			}
-		}
-	}
-	out := map[string]bool{}
-	for turnID := range hasUser {
-		if !hasAssistantFinal[turnID] {
-			out[turnID] = true
 		}
 	}
 	return out
@@ -1336,35 +1342,7 @@ func replayableResumeAssistant(event kernel.Event) bool {
 	if strings.EqualFold(strings.TrimSpace(payload.Visibility), "ui_only") {
 		return false
 	}
-	scope := payload.Scope
-	if scope == "" && event.Origin != nil {
-		scope = event.Origin.Scope
-	}
-	return scope == "" || scope == kernel.EventScopeMain
-}
-
-func completedResumeAssistant(event kernel.Event) bool {
-	if !replayableResumeAssistant(event) {
-		return false
-	}
-	payload := event.Narrative
-	return payload == nil || !strings.EqualFold(strings.TrimSpace(payload.Visibility), "mirror")
-}
-
-func shouldReplayInterruptedTurnEvent(event kernel.Event, incompleteTurns map[string]bool) bool {
-	turnID := strings.TrimSpace(event.TurnID)
-	if turnID == "" || !incompleteTurns[turnID] {
-		return false
-	}
-	if gatewayEventScope(event) != ACPProjectionMain {
-		return false
-	}
-	switch event.Kind {
-	case kernel.EventKindPlanUpdate, kernel.EventKindToolCall, kernel.EventKindToolResult:
-		return true
-	default:
-		return false
-	}
+	return true
 }
 
 func slashStatus(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
@@ -2246,7 +2224,7 @@ func formatAgentStatusSnapshot(status tuidriver.AgentStatusSnapshot) string {
 	} else {
 		lines = append(lines, "  Side agents")
 		for _, participant := range participants {
-			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), firstNonEmpty(strings.TrimSpace(participant.Label), "-"), strings.TrimSpace(participant.Role)))
+			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), agentParticipantDisplayLabel(participant), strings.TrimSpace(participant.Role)))
 		}
 	}
 	delegated := displayableAgentParticipants(status.DelegatedParticipants)
@@ -2255,7 +2233,7 @@ func formatAgentStatusSnapshot(status tuidriver.AgentStatusSnapshot) string {
 	} else {
 		lines = append(lines, "  Delegated tasks")
 		for _, participant := range delegated {
-			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), firstNonEmpty(strings.TrimSpace(participant.Label), "-"), strings.TrimSpace(participant.AgentName)))
+			lines = append(lines, fmt.Sprintf("    %s  %s  %s", firstNonEmpty(strings.TrimSpace(participant.ID), "-"), agentParticipantDisplayLabel(participant), strings.TrimSpace(participant.AgentName)))
 		}
 	}
 	if len(status.AvailableAgents) == 0 {
@@ -2290,6 +2268,21 @@ func agentPromptCommand(status tuidriver.AgentStatusSnapshot) string {
 		return "/<agent>"
 	}
 	return "/" + controller
+}
+
+func agentParticipantDisplayLabel(participant tuidriver.AgentParticipantSnapshot) string {
+	label := strings.TrimSpace(participant.Label)
+	agent := strings.TrimSpace(participant.AgentName)
+	if label == "" {
+		if agent != "" {
+			return agent
+		}
+		return "-"
+	}
+	if agent == "" {
+		return label
+	}
+	return label + "(" + agent + ")"
 }
 
 func displayableAgentParticipants(participants []tuidriver.AgentParticipantSnapshot) []tuidriver.AgentParticipantSnapshot {

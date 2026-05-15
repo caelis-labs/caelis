@@ -160,6 +160,9 @@ func TestInitializeAdvertisesClientCapabilitiesFromHandlers(t *testing.T) {
 		if terminal, ok := req.ClientCapabilities["terminal"].(bool); !ok || !terminal {
 			t.Fatalf("terminal capability = %#v, want true", req.ClientCapabilities["terminal"])
 		}
+		if _, ok := req.ClientCapabilities["auth"]; ok {
+			t.Fatalf("client capabilities included non-standard auth key: %#v", req.ClientCapabilities["auth"])
+		}
 		fs, ok := req.ClientCapabilities["fs"].(map[string]any)
 		if !ok || fs["readTextFile"] != true || fs["writeTextFile"] != true {
 			t.Fatalf("fs capability = %#v, want read/write true", req.ClientCapabilities["fs"])

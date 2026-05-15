@@ -100,13 +100,10 @@ func NewProcessClient(ctx context.Context, proc *stdio.Process, cfg Config) *Cli
 func (c *Client) Initialize(ctx context.Context) (InitializeResponse, error) {
 	var resp InitializeResponse
 	clientCapabilities := map[string]any{
-		"auth": map[string]any{"terminal": c.cfg.Terminal != nil},
+		"terminal": c.cfg.Terminal != nil,
 	}
 	if c.cfg.FileSystem != nil {
 		clientCapabilities["fs"] = map[string]any{"readTextFile": true, "writeTextFile": true}
-	}
-	if c.cfg.Terminal != nil {
-		clientCapabilities["terminal"] = true
 	}
 	err := c.conn.Call(ctx, MethodInitialize, InitializeRequest{
 		ProtocolVersion:    1,

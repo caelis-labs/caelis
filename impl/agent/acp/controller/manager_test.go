@@ -3,6 +3,9 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +13,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
@@ -516,6 +521,134 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	if starts != 2 {
 		t.Fatalf("client starts = %d, want 2 (controller + participant)", starts)
 	}
+}
+
+func TestManagerStartACPClientFallsBackToNewSessionWhenResumeFails(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	manager := &Manager{}
+	acpClient, remoteSessionID, _, err := manager.startACPClient(ctx, t.TempDir(), acp.AgentConfig{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerACPResumeFallbackHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER": "resume-fallback",
+		},
+	}, "stale-remote-session", nil, func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
+		return client.RequestPermissionResponse{}, nil
+	})
+	if err != nil {
+		t.Fatalf("startACPClient() error = %v", err)
+	}
+	defer acpClient.Close(context.Background())
+	if got, want := remoteSessionID, "new-session"; got != want {
+		t.Fatalf("remoteSessionID = %q, want %q", got, want)
+	}
+}
+
+func TestManagerActivateResetsContextCheckpointForNewRemoteSession(t *testing.T) {
+	t.Parallel()
+
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: "helper-acp",
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		cfg acp.AgentConfig,
+		resumeRemoteSessionID string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		if cfg.Name != "helper" {
+			t.Fatalf("startClient cfg = %q, want helper", cfg.Name)
+		}
+		if resumeRemoteSessionID != "old-remote" {
+			t.Fatalf("resumeRemoteSessionID = %q, want old-remote", resumeRemoteSessionID)
+		}
+		return nil, "new-remote", controllerClientState{}, nil
+	}
+
+	binding, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: session.Session{
+			SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+			},
+			Controller: session.ControllerBinding{
+				Kind:            session.ControllerKindACP,
+				AgentName:       "helper",
+				RemoteSessionID: "old-remote",
+				ContextSyncSeq:  42,
+			},
+		},
+		Agent:          "helper",
+		ContextPrelude: "incremental context for old remote",
+		ContextSyncSeq: 42,
+	})
+	if err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	if binding.RemoteSessionID != "new-remote" {
+		t.Fatalf("RemoteSessionID = %q, want new-remote", binding.RemoteSessionID)
+	}
+	if binding.ContextSyncSeq != 0 {
+		t.Fatalf("ContextSyncSeq = %d, want reset for fresh remote session", binding.ContextSyncSeq)
+	}
+}
+
+func TestManagerACPResumeFallbackHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_ACP_HELPER") != "resume-fallback" {
+		return
+	}
+	conn := jsonrpc.New(os.Stdin, os.Stdout)
+	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		switch msg.Method {
+		case client.MethodInitialize:
+			return client.InitializeResponse{
+				ProtocolVersion: 1,
+				AgentCapabilities: schema.AgentCapabilities{
+					SessionCapabilities: map[string]json.RawMessage{
+						"resume": json.RawMessage("{}"),
+					},
+				},
+			}, nil
+		case client.MethodSessionResume:
+			var req client.ResumeSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "stale-remote-session" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
+			}
+			return nil, &jsonrpc.RPCError{Code: -32004, Message: "session not found"}
+		case client.MethodSessionNew:
+			var req client.NewSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if strings.TrimSpace(req.CWD) == "" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "session/new cwd is required"}
+			}
+			return client.NewSessionResponse{SessionID: "new-session"}, nil
+		default:
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper Serve() error = %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
 }
 
 func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {

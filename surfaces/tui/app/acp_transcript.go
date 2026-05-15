@@ -298,10 +298,10 @@ func liveTailHasPotentialDeferredCompactStage(events []SubagentEvent, idx int, s
 	if idx < 0 || idx >= len(events) || isTerminalACPTranscriptStatus(status) {
 		return false
 	}
-	if stage, end := compactTaskStage(events, idx); len(taskControlEvents(stage)) > 0 && hasTaskNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
+	if stage, end := potentialTaskStage(events, idx, status); len(taskControlEvents(stage)) > 0 && hasTaskNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
 		return true
 	}
-	if stage, end := compactExplorationStage(events, idx); compactExplorationStageHasSummary(stage) && hasExplorationNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
+	if stage, end := potentialExplorationStage(events, idx, status); compactExplorationStageHasSummary(stage) && hasExplorationNarrative(stage) && shouldDeferLiveTailStageCompaction(events, end, status) {
 		return true
 	}
 	return false
@@ -447,7 +447,7 @@ func applyClickTokenToRows(rows []RenderedRow, token string) []RenderedRow {
 }
 
 func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	stage, end := compactTaskStage(events, idx)
+	stage, end := compactTaskStage(events, idx, status)
 	actions := taskControlEvents(stage)
 	if len(actions) == 0 {
 		return nil, idx, false
@@ -473,30 +473,61 @@ func renderACPTaskStageRows(blockID string, events []SubagentEvent, idx int, sta
 	return rows, end, true
 }
 
-func compactTaskStage(events []SubagentEvent, idx int) ([]SubagentEvent, int) {
+func compactTaskStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
+	return collectTaskStage(events, idx, status, false)
+}
+
+func potentialTaskStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
+	return collectTaskStage(events, idx, status, true)
+}
+
+func collectTaskStage(events []SubagentEvent, idx int, status string, includeLiveTail bool) ([]SubagentEvent, int) {
 	if idx < 0 || idx >= len(events) {
-		return nil, idx
-	}
-	if !isGroupedTaskControlEvent(events, idx) && (!isTaskNarrativeEvent(events[idx]) || !hasLaterTaskControl(events, idx+1)) {
 		return nil, idx
 	}
 	stage := make([]SubagentEvent, 0, 6)
 	end := idx - 1
-	for i := idx; i < len(events); i++ {
-		ev := events[i]
-		if isGroupedTaskControlEvent(events, i) {
-			stage = append(stage, ev)
-			end = i
-			continue
+	for i := idx; i < len(events); {
+		step, ok := collectTaskTranscriptStep(events, i)
+		if !ok {
+			break
 		}
-		if isTaskNarrativeEvent(ev) && hasLaterTaskControl(events, i+1) {
-			stage = append(stage, ev)
-			end = i
-			continue
+		settled := isTerminalACPTranscriptStatus(status) || (step.allDone && hasLaterTranscriptStep(events, step.end+1))
+		if !settled {
+			if includeLiveTail && len(stage) == 0 {
+				stage = append(stage, events[step.start:step.end+1]...)
+				end = step.end
+			}
+			break
 		}
-		break
+		stage = append(stage, events[step.start:step.end+1]...)
+		end = step.end
+		i = step.end + 1
 	}
 	return stage, end
+}
+
+func collectTaskTranscriptStep(events []SubagentEvent, idx int) (transcriptStep, bool) {
+	if idx < 0 || idx >= len(events) {
+		return transcriptStep{}, false
+	}
+	i := idx
+	for i < len(events) && isTaskNarrativeEvent(events[i]) {
+		i++
+	}
+	if i >= len(events) || !isGroupedTaskControlEvent(events, i) {
+		return transcriptStep{}, false
+	}
+	step := transcriptStep{
+		start:   idx,
+		end:     i,
+		allDone: true,
+	}
+	for i < len(events) && isGroupedTaskControlEvent(events, i) {
+		step.end = i
+		i++
+	}
+	return step, true
 }
 
 func taskControlEvents(events []SubagentEvent) []SubagentEvent {
@@ -520,19 +551,38 @@ func taskControlEvents(events []SubagentEvent) []SubagentEvent {
 }
 
 func taskStageDetailRows(events []SubagentEvent, width int) []string {
-	rows := make([]string, 0, len(events))
+	type taskSummaryItem struct {
+		verb   string
+		detail string
+	}
+	var waits []string
+	items := make([]taskSummaryItem, 0, len(events))
 	for _, ev := range events {
 		verb, detail := splitTaskAction(ev.Args)
 		if verb == "" {
 			continue
 		}
+		if strings.EqualFold(verb, "Wait") {
+			waits = append(waits, detail)
+			continue
+		}
+		items = append(items, taskSummaryItem{verb: verb, detail: detail})
+	}
+	if len(waits) > 0 {
+		items = append([]taskSummaryItem{{
+			verb:   "Wait",
+			detail: strings.Join(compactNonEmpty(waits), ", "),
+		}}, items...)
+	}
+	rows := make([]string, 0, len(items))
+	for _, item := range items {
 		prefix := "  "
 		if len(rows) == 0 {
 			prefix += "└ "
 		} else {
 			prefix += "  "
 		}
-		rows = append(rows, wrapExplorationSummaryDetail(prefix, verb, detail, width)...)
+		rows = append(rows, wrapExplorationSummaryDetail(prefix, item.verb, item.detail, width)...)
 	}
 	return rows
 }
@@ -662,19 +712,6 @@ func hasTaskNarrative(events []SubagentEvent) bool {
 	return false
 }
 
-func hasLaterTaskControl(events []SubagentEvent, start int) bool {
-	for i := start; i < len(events); i++ {
-		ev := events[i]
-		if isGroupedTaskControlEvent(events, i) {
-			return true
-		}
-		if !isTaskNarrativeEvent(ev) {
-			return false
-		}
-	}
-	return false
-}
-
 func styleTaskSummaryRow(row string, ctx BlockRenderContext) string {
 	plainPrefix := ""
 	content := row
@@ -741,7 +778,7 @@ func isGroupedTaskControlEvent(events []SubagentEvent, idx int) bool {
 	if idx < 0 || idx >= len(events) {
 		return false
 	}
-	return isTaskControlEvent(events[idx]) && !isSubagentTaskWriteEvent(events, idx)
+	return isTaskControlEvent(events[idx]) && taskEventAction(events[idx]) != "write"
 }
 
 func isSubagentTaskWriteEvent(events []SubagentEvent, idx int) bool {
@@ -789,8 +826,7 @@ func taskEventAction(ev SubagentEvent) string {
 }
 
 func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx int, status string, width int, ctx BlockRenderContext, opts acpTranscriptRenderOptions) ([]RenderedRow, int, bool) {
-	stage, end := compactExplorationStage(events, idx)
-	stage, end = settledExplorationStage(events, idx, stage, end, status)
+	stage, end := compactExplorationStage(events, idx, status)
 	if !compactExplorationStageHasSummary(stage) {
 		return nil, idx, false
 	}
@@ -819,65 +855,93 @@ func compactExplorationStageHasSummary(stage []SubagentEvent) bool {
 	return count > 0 && (count >= 2 || hasExplorationNarrative(stage))
 }
 
-func settledExplorationStage(events []SubagentEvent, idx int, stage []SubagentEvent, end int, status string) ([]SubagentEvent, int) {
-	if len(stage) == 0 || isTerminalACPTranscriptStatus(status) || hasLaterTranscriptBoundary(events, end+1) {
-		return stage, end
-	}
-	trimAt := lastExplorationStepStart(stage)
-	if trimAt <= 0 {
-		return nil, idx - 1
-	}
-	return stage[:trimAt], idx + trimAt - 1
+func compactExplorationStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
+	return collectExplorationStage(events, idx, status, false)
 }
 
-func lastExplorationStepStart(stage []SubagentEvent) int {
-	lastStart := 0
-	seenTool := false
-	for i, ev := range stage {
-		if i > 0 && isExplorationNarrativeEvent(ev) && seenTool {
-			lastStart = i
-			seenTool = false
-		}
-		if isCompactExplorationTool(ev) {
-			seenTool = true
-		}
-	}
-	return lastStart
+func potentialExplorationStage(events []SubagentEvent, idx int, status string) ([]SubagentEvent, int) {
+	return collectExplorationStage(events, idx, status, true)
 }
 
-func hasLaterTranscriptBoundary(events []SubagentEvent, start int) bool {
-	for i := maxInt(0, start); i < len(events); i++ {
-		if reasoningFoldBoundaryEvent(events[i]) {
-			return true
-		}
-	}
-	return false
-}
-
-func compactExplorationStage(events []SubagentEvent, idx int) ([]SubagentEvent, int) {
+func collectExplorationStage(events []SubagentEvent, idx int, status string, includeLiveTail bool) ([]SubagentEvent, int) {
 	if idx < 0 || idx >= len(events) {
-		return nil, idx
-	}
-	if !isCompactExplorationTool(events[idx]) && (!isExplorationNarrativeEvent(events[idx]) || !hasLaterExplorationTool(events, idx+1)) {
 		return nil, idx
 	}
 	stage := make([]SubagentEvent, 0, 8)
 	end := idx - 1
-	for i := idx; i < len(events); i++ {
-		ev := events[i]
-		if isCompactExplorationTool(ev) {
-			stage = append(stage, ev)
-			end = i
-			continue
+	for i := idx; i < len(events); {
+		step, ok := collectTranscriptStep(events, i)
+		if !ok || !step.allExploration {
+			break
 		}
-		if isExplorationNarrativeEvent(ev) && hasLaterExplorationTool(events, i+1) {
-			stage = append(stage, ev)
-			end = i
-			continue
+		settled := isTerminalACPTranscriptStatus(status) || (step.allDone && hasLaterTranscriptStep(events, step.end+1))
+		if !settled {
+			if includeLiveTail && len(stage) == 0 {
+				stage = append(stage, events[step.start:step.end+1]...)
+				end = step.end
+			}
+			break
 		}
-		break
+		stage = append(stage, events[step.start:step.end+1]...)
+		end = step.end
+		i = step.end + 1
 	}
 	return stage, end
+}
+
+type transcriptStep struct {
+	start          int
+	end            int
+	allExploration bool
+	allDone        bool
+}
+
+func collectTranscriptStep(events []SubagentEvent, idx int) (transcriptStep, bool) {
+	if idx < 0 || idx >= len(events) {
+		return transcriptStep{}, false
+	}
+	i := idx
+	for i < len(events) && isExplorationNarrativeEvent(events[i]) {
+		i++
+	}
+	if i >= len(events) || events[i].Kind != SEToolCall {
+		return transcriptStep{}, false
+	}
+	firstToolExploration := isCompactExplorationTool(events[i])
+	step := transcriptStep{
+		start:          idx,
+		end:            i,
+		allExploration: true,
+		allDone:        true,
+	}
+	for i < len(events) && events[i].Kind == SEToolCall {
+		toolExploration := isCompactExplorationTool(events[i])
+		if toolExploration != firstToolExploration {
+			break
+		}
+		if !toolExploration {
+			step.allExploration = false
+		}
+		if !events[i].Done {
+			step.allDone = false
+		}
+		step.end = i
+		i++
+	}
+	return step, true
+}
+
+func hasLaterTranscriptStep(events []SubagentEvent, start int) bool {
+	for i := maxInt(0, start); i < len(events); {
+		if step, ok := collectTranscriptStep(events, i); ok {
+			return step.end >= i
+		}
+		if reasoningFoldBoundaryEvent(events[i]) {
+			return true
+		}
+		i++
+	}
+	return false
 }
 
 func isExplorationNarrativeEvent(ev SubagentEvent) bool {
@@ -888,19 +952,6 @@ func hasExplorationNarrative(events []SubagentEvent) bool {
 	for _, ev := range events {
 		if isExplorationNarrativeEvent(ev) {
 			return true
-		}
-	}
-	return false
-}
-
-func hasLaterExplorationTool(events []SubagentEvent, start int) bool {
-	for i := start; i < len(events); i++ {
-		ev := events[i]
-		if isCompactExplorationTool(ev) {
-			return true
-		}
-		if !isExplorationNarrativeEvent(ev) {
-			return false
 		}
 	}
 	return false
@@ -2621,11 +2672,7 @@ func renderACPToolDetailRowsWithToken(blockID string, prefix string, text string
 		}
 		plain := linePrefix + segment
 		styled := stylePrefixedContentLine(ctx, linePrefix, segment, width, style)
-		if token != "" {
-			rows = append(rows, StyledPlainClickableRow(blockID, plain, styled, token))
-		} else {
-			rows = append(rows, StyledPlainRow(blockID, plain, styled))
-		}
+		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, plain, styled, token))
 	}
 	return rows
 }
@@ -2658,11 +2705,7 @@ func renderACPToolOutputRowsWithToken(blockID string, prefix string, text string
 		}
 		plain := linePrefix + segment
 		styled := stylePrefixedContentLine(ctx, linePrefix, segment, width, style)
-		if token != "" {
-			rows = append(rows, StyledPlainClickableRow(blockID, plain, styled, token))
-		} else {
-			rows = append(rows, StyledPlainRow(blockID, plain, styled))
-		}
+		rows = append(rows, StyledPlainClickablePreWrappedRow(blockID, plain, styled, token))
 	}
 	return rows
 }

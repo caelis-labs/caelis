@@ -18,6 +18,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -139,25 +140,28 @@ func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 	}
 }
 
-func TestAllocateSideAgentHandleUsesAgentDerivedHandles(t *testing.T) {
+func TestAllocateSideAgentHandleUsesSharedNamePool(t *testing.T) {
 	used := map[string]struct{}{}
 
-	if got := allocateSideAgentHandle(used, "claude"); got != "claude" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want claude", got)
+	first := allocateSideAgentHandle(used, "claude")
+	if !agenthandle.ContainsPoolName(first) {
+		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", first)
 	}
-	used["claude"] = struct{}{}
-	if got := allocateSideAgentHandle(used, "claude"); got != "claude2" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want claude2", got)
+	used[first] = struct{}{}
+	second := allocateSideAgentHandle(used, "claude")
+	if !agenthandle.ContainsPoolName(second) || second == first {
+		t.Fatalf("allocateSideAgentHandle() = %q after %q, want unique shared pool handle", second, first)
 	}
-	used["claude2"] = struct{}{}
-	if got := allocateSideAgentHandle(used, "claude"); got != "claude3" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want claude3", got)
+	used[second] = struct{}{}
+	third := allocateSideAgentHandle(used, "claude")
+	if !agenthandle.ContainsPoolName(third) || third == first || third == second {
+		t.Fatalf("allocateSideAgentHandle() = %q after %q/%q, want unique shared pool handle", third, first, second)
 	}
-	if got := allocateSideAgentHandle(used, "anthropic/Claude Agent"); got != "anthropic-claude-agent" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want normalized agent handle", got)
+	if got := allocateSideAgentHandle(used, "anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", got)
 	}
-	if got := allocateSideAgentHandle(used, "!!!"); got != "agent" {
-		t.Fatalf("allocateSideAgentHandle() = %q, want generic fallback", got)
+	if got := allocateSideAgentHandle(used, "!!!"); !agenthandle.ContainsPoolName(got) {
+		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", got)
 	}
 }
 
@@ -1555,8 +1559,8 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if len(status.Participants) != 1 {
 		t.Fatalf("AgentStatus().Participants = %#v, want only first sidecar after rollback", status.Participants)
 	}
-	if status.Participants[0].Label != "@copilot" {
-		t.Fatalf("remaining participant label = %q, want @copilot", status.Participants[0].Label)
+	if status.Participants[0].AgentName != "copilot" || !agenthandle.ContainsPoolName(strings.TrimPrefix(status.Participants[0].Label, "@")) {
+		t.Fatalf("remaining participant = %#v, want original copilot sidecar with shared pool label", status.Participants[0])
 	}
 }
 
@@ -2739,7 +2743,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteMention() error = %v", err)
 	}
-	if len(candidates) != 1 || candidates[0].Value != "jeff" {
+	if len(candidates) != 1 || candidates[0].Value != "jeff" || candidates[0].Display != "jeff(codex)" {
 		t.Fatalf("CompleteMention() = %#v, want side target", candidates)
 	}
 	status, err := driver.AgentStatus(ctx)

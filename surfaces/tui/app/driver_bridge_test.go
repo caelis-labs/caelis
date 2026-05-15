@@ -331,6 +331,116 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 }
 
+func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T) {
+	driver := &bridgeTestDriver{
+		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		replay: []kernel.EventEnvelope{
+			{
+				Event: kernel.Event{
+					Kind:   kernel.EventKindUserMessage,
+					TurnID: "participant-turn-1",
+					Origin: &kernel.EventOrigin{
+						Source:  "acp_participant",
+						Scope:   kernel.EventScopeParticipant,
+						ScopeID: "participant-turn-1",
+						Actor:   "@codex",
+					},
+					Narrative: &kernel.NarrativePayload{
+						Role:  kernel.NarrativeRoleUser,
+						Text:  "review this change",
+						Scope: kernel.EventScopeParticipant,
+					},
+				},
+			},
+			{
+				Event: kernel.Event{
+					Kind:   kernel.EventKindToolCall,
+					TurnID: "participant-turn-1",
+					Origin: &kernel.EventOrigin{
+						Source:  "acp_participant",
+						Scope:   kernel.EventScopeParticipant,
+						ScopeID: "participant-turn-1",
+						Actor:   "@codex",
+					},
+					ToolCall: &kernel.ToolCallPayload{
+						CallID:   "side-bash",
+						ToolName: "BASH",
+						Status:   kernel.ToolStatusCompleted,
+						Scope:    kernel.EventScopeParticipant,
+					},
+				},
+			},
+			{
+				Event: kernel.Event{
+					Kind:   kernel.EventKindAssistantMessage,
+					TurnID: "participant-turn-1",
+					Origin: &kernel.EventOrigin{
+						Source:  "acp_participant",
+						Scope:   kernel.EventScopeParticipant,
+						ScopeID: "participant-turn-1",
+						Actor:   "@codex",
+					},
+					Narrative: &kernel.NarrativePayload{
+						Role:  kernel.NarrativeRoleAssistant,
+						Actor: "@codex",
+						Text:  "review final message",
+						Final: true,
+						Scope: kernel.EventScopeParticipant,
+					},
+				},
+			},
+			{
+				Event: kernel.Event{
+					Kind:   kernel.EventKindAssistantMessage,
+					TurnID: "participant-turn-1",
+					Origin: &kernel.EventOrigin{
+						Source:  "side_subagent",
+						Scope:   kernel.EventScopeSubagent,
+						ScopeID: "participant-turn-1",
+						Actor:   "@reviewer",
+					},
+					Narrative: &kernel.NarrativePayload{
+						Role:  kernel.NarrativeRoleAssistant,
+						Actor: "@reviewer",
+						Text:  "scoped final message",
+						Final: true,
+						Scope: kernel.EventScopeSubagent,
+					},
+				},
+			},
+		},
+	}
+	var msgs []tea.Msg
+	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
+	var sawSidePrompt bool
+	var sawSideFinal bool
+	var sawScopedFinal bool
+	for _, msg := range msgs {
+		batch, ok := msg.(TranscriptEventsMsg)
+		if !ok {
+			continue
+		}
+		for _, event := range batch.Events {
+			if event.Kind == TranscriptEventTool {
+				t.Fatalf("slashResume() replayed side ACP process event: %#v", event)
+			}
+			if event.Scope == ACPProjectionMain && event.Text == "User to @codex: review this change" {
+				sawSidePrompt = true
+			}
+			if event.Scope == ACPProjectionParticipant && event.Text == "review final message" {
+				sawSideFinal = true
+			}
+			if event.Scope == ACPProjectionSubagent && event.Text == "scoped final message" {
+				sawScopedFinal = true
+			}
+		}
+	}
+	if !sawSidePrompt || !sawSideFinal || !sawScopedFinal {
+		t.Fatalf("slashResume() messages = %#v, want scoped prompt and final messages replayed", msgs)
+	}
+}
+
 func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
@@ -374,13 +484,12 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	}
 	var msgs []tea.Msg
 	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
-	var sawToolReplay bool
 	var sawMirrorReplay bool
 	for _, msg := range msgs {
 		if batch, ok := msg.(TranscriptEventsMsg); ok {
 			for _, event := range batch.Events {
 				if event.Kind == TranscriptEventTool {
-					sawToolReplay = true
+					t.Fatalf("slashResume() replayed interrupted process event: %#v", event)
 				}
 				if event.Text == "partial answer" {
 					sawMirrorReplay = true
@@ -388,8 +497,8 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 			}
 		}
 	}
-	if !sawToolReplay || !sawMirrorReplay {
-		t.Fatalf("slashResume() messages = %#v, want interrupted turn tool and mirror replay", msgs)
+	if !sawMirrorReplay {
+		t.Fatalf("slashResume() messages = %#v, want interrupted assistant replay", msgs)
 	}
 }
 
@@ -991,10 +1100,10 @@ func TestFormatAgentStatusSnapshotShowsDelegatedParticipants(t *testing.T) {
 	}
 
 	got := formatAgentStatusSnapshot(status)
-	if !strings.Contains(got, "side-001") || !strings.Contains(got, "@codex") {
+	if !strings.Contains(got, "side-001") || !strings.Contains(got, "@codex(codex)") {
 		t.Fatalf("formatAgentStatusSnapshot() = %q, want side agent participant", got)
 	}
-	if !strings.Contains(got, "self-001") || !strings.Contains(got, "@jude") || !strings.Contains(got, "codex-001") || !strings.Contains(got, "@kate") {
+	if !strings.Contains(got, "self-001") || !strings.Contains(got, "@jude(self)") || !strings.Contains(got, "codex-001") || !strings.Contains(got, "@kate(codex)") {
 		t.Fatalf("formatAgentStatusSnapshot() = %q, want delegated task summary", got)
 	}
 	if strings.Contains(got, "agent status:") || strings.Contains(got, "active turn:") {
