@@ -67,6 +67,15 @@ func TestPermissionGrantStoreAppliesPathRulesAndNetwork(t *testing.T) {
 	}
 }
 
+func TestRequestPermissionsSchemaDisallowsUnknownRootProperties(t *testing.T) {
+	t.Parallel()
+
+	def := (requestPermissionsTool{}).Definition()
+	if got := def.InputSchema["additionalProperties"]; got != false {
+		t.Fatalf("additionalProperties = %#v, want false", got)
+	}
+}
+
 func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	store := newPermissionGrantStore()
 	now := time.Date(2026, 5, 8, 10, 0, 0, 0, time.UTC)

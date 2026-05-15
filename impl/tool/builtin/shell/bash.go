@@ -47,39 +47,39 @@ func NewBash(cfg BashConfig) (*BashTool, error) {
 func (t *BashTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        BashToolName,
-		Description: "Run a shell command. Use it for commands that are simpler in the shell than via file tools.",
+		Description: "Run a shell command.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "shell command to execute"},
-				"workdir": map[string]any{"type": "string", "description": "Optional working directory."},
+				"command": map[string]any{"type": "string", "description": "Command to execute."},
+				"workdir": map[string]any{"type": "string", "description": "Working directory."},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
-					"description": "Optional wait window before control returns when runtime-backed async execution is available.",
+					"description": "Wait before yielding async control.",
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
-					"description": "Sandbox permissions for this command. Omit for default sandboxed execution. Use \"with_additional_permissions\" for a narrow sandboxed filesystem or network grant, or \"require_escalated\" when this command must run outside the sandbox.",
+					"description": "Sandbox mode for this command.",
 					"enum":        []string{"use_default", "with_additional_permissions", "require_escalated"},
 				},
 				"additional_permissions": map[string]any{
 					"type":        "object",
-					"description": "Only set when sandbox_permissions is \"with_additional_permissions\". Requests extra permissions while keeping execution inside the sandbox.",
+					"description": "Extra sandbox grants for with_additional_permissions.",
 					"properties": map[string]any{
 						"network": map[string]any{
 							"type":        "object",
-							"description": "Optional network permission overlay.",
+							"description": "Network grant.",
 							"properties": map[string]any{
-								"enabled": map[string]any{"type": "boolean", "description": "Set to true to request network access."},
+								"enabled": map[string]any{"type": "boolean", "description": "Allow network."},
 							},
 							"additionalProperties": false,
 						},
 						"file_system": map[string]any{
 							"type":        "object",
-							"description": "Optional filesystem permission overlay.",
+							"description": "Filesystem grants.",
 							"properties": map[string]any{
-								"read":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Paths to grant read access to."},
-								"write": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Paths to grant write access to."},
+								"read":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Readable paths."},
+								"write": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Writable paths."},
 							},
 							"additionalProperties": false,
 						},
@@ -88,10 +88,11 @@ func (t *BashTool) Definition() tool.Definition {
 				},
 				"justification": map[string]any{
 					"type":        "string",
-					"description": "Only set when sandbox_permissions is \"require_escalated\". A short user-facing approval question explaining why host execution is needed.",
+					"description": "Short approval question for require_escalated.",
 				},
 			},
-			"required": []string{"command"},
+			"required":             []string{"command"},
+			"additionalProperties": false,
 		},
 	}
 }

@@ -37,17 +37,17 @@ func New() tool.Tool { return Tool{} }
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Replace the current execution plan for non-trivial multi-step work. Keep steps concise and provide the full current list.",
+		Description: "Replace the current execution plan.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"explanation": map[string]any{
 					"type":        "string",
-					"description": "Optional short note explaining why the plan changed.",
+					"description": "Why the plan changed.",
 				},
 				"entries": map[string]any{
 					"type":        "array",
-					"description": "The complete current plan.",
+					"description": "Complete current plan.",
 					"items": map[string]any{
 						"type": "object",
 						"properties": map[string]any{
@@ -57,11 +57,13 @@ func (Tool) Definition() tool.Definition {
 								"enum": []string{string(StatusPending), string(StatusInProgress), string(StatusCompleted)},
 							},
 						},
-						"required": []string{"content", "status"},
+						"required":             []string{"content", "status"},
+						"additionalProperties": false,
 					},
 				},
 			},
-			"required": []string{"entries"},
+			"required":             []string{"entries"},
+			"additionalProperties": false,
 		},
 	}
 }

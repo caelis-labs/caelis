@@ -25,24 +25,25 @@ func NewPatch(runtime sandbox.Runtime) (*PatchTool, error) {
 func (t *PatchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        PatchToolName,
-		Description: "Patch one file by exact old-to-new replacement.",
+		Description: "Replace exact text in one file.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "Target file path."},
-				"old":         map[string]any{"type": "string", "description": "Exact original text to replace."},
+				"path":        map[string]any{"type": "string", "description": "Target file."},
+				"old":         map[string]any{"type": "string", "description": "Exact text to replace."},
 				"new":         map[string]any{"type": "string", "description": "Replacement text."},
-				"replace_all": map[string]any{"type": "boolean", "description": "Replace all occurrences instead of one."},
+				"replace_all": map[string]any{"type": "boolean", "description": "Replace all matches."},
 				"expected_replacements": map[string]any{
 					"type":        "integer",
-					"description": "Optional exact replacement count required before writing.",
+					"description": "Required replacement count.",
 				},
 				"if_revision": map[string]any{
 					"type":        "string",
-					"description": "Optional revision returned by READ; PATCH fails if the file changed since then.",
+					"description": "Revision guard from READ.",
 				},
 			},
-			"required": []string{"path", "old", "new"},
+			"required":             []string{"path", "old", "new"},
+			"additionalProperties": false,
 		},
 	}
 }

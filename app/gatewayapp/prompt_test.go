@@ -43,7 +43,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"## Core Stable Rules",
 		"## BASH Permissions",
 		"sandbox_permissions",
-		"Start each command with default sandbox permissions",
+		"Start BASH commands with default sandbox permissions",
 		"<user_custom_instructions>",
 		"Workspace rule.",
 		"Global rule.",
@@ -54,6 +54,38 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)
+		}
+	}
+}
+
+func TestBuildSystemPromptOmitsDynamicTimeContext(t *testing.T) {
+	globalHome := t.TempDir()
+	t.Setenv("HOME", globalHome)
+	t.Setenv("SHELL", "/bin/zsh")
+	workspace := t.TempDir()
+
+	t.Setenv("TZ", "Asia/Shanghai")
+	first, err := buildSystemPrompt(promptConfig{
+		AppName:      "CAELIS",
+		WorkspaceDir: workspace,
+	})
+	if err != nil {
+		t.Fatalf("buildSystemPrompt(first) error = %v", err)
+	}
+	t.Setenv("TZ", "UTC")
+	second, err := buildSystemPrompt(promptConfig{
+		AppName:      "CAELIS",
+		WorkspaceDir: workspace,
+	})
+	if err != nil {
+		t.Fatalf("buildSystemPrompt(second) error = %v", err)
+	}
+	if first != second {
+		t.Fatalf("prompt changed across timezone-only change:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+	for _, forbidden := range []string{"<current_date>", "<timezone>"} {
+		if strings.Contains(first, forbidden) {
+			t.Fatalf("prompt contains dynamic context %q:\n%s", forbidden, first)
 		}
 	}
 }
@@ -70,11 +102,10 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
 	for _, required := range []string{
-		"Use BASH for shell work that advances the current task.",
-		"Default BASH runs in the sandbox",
-		"workspace and temp directory are writable",
-		"Use `sandbox_permissions=with_additional_permissions` only",
-		"Use `sandbox_permissions=require_escalated` only when this command must run outside the sandbox",
+		"Start BASH commands with default sandbox permissions",
+		"workspace-local reads, builds, tests, and temp writes should stay default",
+		"Use `sandbox_permissions=with_additional_permissions`",
+		"Use `sandbox_permissions=require_escalated` only when host execution is required",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)

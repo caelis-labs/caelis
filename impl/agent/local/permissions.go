@@ -274,30 +274,31 @@ type requestPermissionsTool struct {
 func (t requestPermissionsTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        requestPermissionsToolName,
-		Description: "Request a narrow permission grant for specific filesystem paths or network access before retrying an operation that the sandbox cannot currently perform.",
+		Description: "Request a narrow sandbox grant.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"reason": map[string]any{
 					"type":        "string",
-					"description": "Short explanation of why this extra permission is required for the current task.",
+					"description": "Why this grant is needed.",
 				},
 				"read": map[string]any{
 					"type":        "array",
-					"description": "Directories or files to grant read access to.",
+					"description": "Readable files or directories.",
 					"items":       map[string]any{"type": "string"},
 				},
 				"write": map[string]any{
 					"type":        "array",
-					"description": "Directories or files to grant read/write access to.",
+					"description": "Writable files or directories.",
 					"items":       map[string]any{"type": "string"},
 				},
 				"network": map[string]any{
 					"type":        "boolean",
-					"description": "Set true to request network access.",
+					"description": "Allow network access.",
 				},
 			},
-			"required": []string{"reason"},
+			"required":             []string{"reason"},
+			"additionalProperties": false,
 		},
 	}
 }

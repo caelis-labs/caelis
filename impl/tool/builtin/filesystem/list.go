@@ -34,17 +34,18 @@ func NewList(runtime sandbox.Runtime) (*ListTool, error) {
 func (t *ListTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ListToolName,
-		Description: "List files and directories in one path.",
+		Description: "List one directory.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":  map[string]any{"type": "string", "description": "directory path"},
-				"limit": map[string]any{"type": "integer", "description": "Optional max entries to return."},
+				"path":  map[string]any{"type": "string", "description": "Directory path. Defaults to cwd."},
+				"limit": map[string]any{"type": "integer", "description": "Max entries."},
 				"metadata": map[string]any{
 					"type":        "boolean",
-					"description": "Include size, mode, and modification time metadata.",
+					"description": "Include size, mode, and mtime.",
 				},
 			},
+			"additionalProperties": false,
 		},
 	}
 }

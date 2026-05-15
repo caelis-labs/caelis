@@ -46,6 +46,25 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	}
 }
 
+func TestCoreToolSchemasDisallowUnknownRootProperties(t *testing.T) {
+	t.Parallel()
+
+	rt, err := host.New(host.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("host.New() error = %v", err)
+	}
+	tools, err := BuildCoreTools(CoreToolsConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("BuildCoreTools() error = %v", err)
+	}
+	for _, one := range tools {
+		def := one.Definition()
+		if got := def.InputSchema["additionalProperties"]; got != false {
+			t.Fatalf("%s additionalProperties = %#v, want false", def.Name, got)
+		}
+	}
+}
+
 func TestEnsureCoreToolsRejectsReservedBuiltinNames(t *testing.T) {
 	t.Parallel()
 

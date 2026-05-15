@@ -27,18 +27,19 @@ func NewWrite(runtime sandbox.Runtime) (*WriteTool, error) {
 func (t *WriteTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        WriteToolName,
-		Description: "Write complete file contents to one path.",
+		Description: "Overwrite or create one file.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":    map[string]any{"type": "string", "description": "Target file path."},
-				"content": map[string]any{"type": "string", "description": "Full file contents to write."},
+				"path":    map[string]any{"type": "string", "description": "Target file."},
+				"content": map[string]any{"type": "string", "description": "Full new contents."},
 				"if_revision": map[string]any{
 					"type":        "string",
-					"description": "Optional revision returned by READ; WRITE fails if the file changed since then.",
+					"description": "Revision guard from READ.",
 				},
 			},
-			"required": []string{"path", "content"},
+			"required":             []string{"path", "content"},
+			"additionalProperties": false,
 		},
 	}
 }

@@ -18,26 +18,26 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control a previously yielded async task from BASH or SPAWN. Use wait to check progress, write to send stdin to BASH or a follow-up prompt to a completed SPAWN child, and cancel to stop a running task.",
+		Description: "Control a yielded BASH or SPAWN task.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
 					"enum":        []string{"wait", "write", "cancel"},
-					"description": "Task control action.",
+					"description": "Action to perform.",
 				},
 				"task_id": map[string]any{
 					"type":        "string",
-					"description": "Task handle returned by BASH or SPAWN after yielding.",
+					"description": "Yielded task handle.",
 				},
 				"input": map[string]any{
 					"type":        "string",
-					"description": "For action=write: stdin for BASH; follow-up prompt for a completed SPAWN child. Running SPAWN tasks must be checked with wait before write.",
+					"description": "Input for action=write.",
 				},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
-					"description": "Optional wait window before control returns again.",
+					"description": "Wait before returning.",
 				},
 			},
 			"required":             []string{"action", "task_id"},

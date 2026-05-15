@@ -40,22 +40,23 @@ func NewSearch(runtime sandbox.Runtime) (*SearchTool, error) {
 func (t *SearchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        SearchToolName,
-		Description: "Search text in one file or a directory tree.",
+		Description: "Search text in files.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":           map[string]any{"type": "string", "description": "Target file or directory path."},
-				"query":          map[string]any{"type": "string", "description": "Search text. Separate alternatives with | for multi-keyword search."},
-				"limit":          map[string]any{"type": "integer", "description": "Optional max results."},
-				"case_sensitive": map[string]any{"type": "boolean", "description": "Set true for case-sensitive search."},
-				"regex":          map[string]any{"type": "boolean", "description": "Treat query as one regular expression."},
+				"path":           map[string]any{"type": "string", "description": "File or directory path."},
+				"query":          map[string]any{"type": "string", "description": "Text or regex; use | for alternatives unless regex=true."},
+				"limit":          map[string]any{"type": "integer", "description": "Max results."},
+				"case_sensitive": map[string]any{"type": "boolean", "description": "Case-sensitive match."},
+				"regex":          map[string]any{"type": "boolean", "description": "Treat query as regex."},
 				"exclude": map[string]any{
 					"type":        "array",
-					"description": "Optional relative path patterns to exclude after filtering.",
+					"description": "Relative exclude globs.",
 					"items":       map[string]any{"type": "string"},
 				},
 			},
-			"required": []string{"path", "query"},
+			"required":             []string{"path", "query"},
+			"additionalProperties": false,
 		},
 	}
 }

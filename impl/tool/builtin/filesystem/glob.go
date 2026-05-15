@@ -35,19 +35,20 @@ func NewGlob(runtime sandbox.Runtime) (*GlobTool, error) {
 func (t *GlobTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        GlobToolName,
-		Description: "Match files by glob pattern.",
+		Description: "Find files by glob.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"pattern": map[string]any{"type": "string", "description": "glob pattern"},
+				"pattern": map[string]any{"type": "string", "description": "Glob pattern."},
 				"exclude": map[string]any{
 					"type":        "array",
-					"description": "Optional relative path patterns to exclude after filtering.",
+					"description": "Relative exclude globs.",
 					"items":       map[string]any{"type": "string"},
 				},
-				"limit": map[string]any{"type": "integer", "description": "Optional max matches to return."},
+				"limit": map[string]any{"type": "integer", "description": "Max matches."},
 			},
-			"required": []string{"pattern"},
+			"required":             []string{"pattern"},
+			"additionalProperties": false,
 		},
 	}
 }

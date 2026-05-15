@@ -277,7 +277,7 @@ func delegationAgentsForSpawn(assembly assembly.ResolvedAssembly, _ []session.Pa
 
 func systemPromptWithDelegationGuidance(systemPrompt string) string {
 	systemPrompt = strings.TrimRight(strings.TrimSpace(systemPrompt), "\n")
-	guidance := "- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write to send stdin to a running BASH task or a follow-up prompt to a completed SPAWN child."
+	guidance := "- Use SPAWN for bounded child ACP work that can run independently; use TASK wait, cancel, or write to control yielded work."
 	if strings.Contains(systemPrompt, "SPAWN for bounded child ACP work") {
 		return systemPrompt
 	}

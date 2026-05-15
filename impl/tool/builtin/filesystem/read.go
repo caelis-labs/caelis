@@ -49,15 +49,16 @@ func NewRead(cfg ReadConfig, runtime sandbox.Runtime) (*ReadTool, error) {
 func (t *ReadTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ReadToolName,
-		Description: "Read part of a text file by line range.",
+		Description: "Read a text file slice.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":   map[string]any{"type": "string", "description": "File path, absolute or relative."},
-				"offset": map[string]any{"type": "integer", "description": "Zero-based starting line offset."},
-				"limit":  map[string]any{"type": "integer", "description": "Optional max lines to read."},
+				"path":   map[string]any{"type": "string", "description": "File path."},
+				"offset": map[string]any{"type": "integer", "description": "Zero-based start line."},
+				"limit":  map[string]any{"type": "integer", "description": "Max lines."},
 			},
-			"required": []string{"path"},
+			"required":             []string{"path"},
+			"additionalProperties": false,
 		},
 	}
 }

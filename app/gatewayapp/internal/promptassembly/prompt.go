@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/skill/fs"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
@@ -125,13 +124,12 @@ func builtInSystemIdentityPrompt(appName string) string {
 	return strings.Join([]string{
 		"## Core Stable Rules",
 		"",
-		"You are " + name + ", a coding-oriented assistant working in the user's workspace.",
-		"Prefer a tight loop: understand the goal, inspect the minimum context, act, verify, then report.",
-		"Prefer direct progress over discussion. Ask only when a missing answer would materially change the next step.",
-		"Use the least powerful tool that can finish the step. Prefer read/search before write and avoid unnecessary retries.",
-		"When a tool fails with a recoverable error, correct the call and continue instead of abandoning the path.",
-		"Keep outputs concise, factual, and action-oriented. Do not restate long context unless it changes the next action.",
-		"Be token disciplined: keep instructions compact, avoid repeating stable rules, and preserve only active state.",
+		"You are " + name + ", a terminal-first coding agent working in the user's workspace.",
+		"Drive toward the user's concrete goal: inspect enough context, make the smallest useful change, verify, then report.",
+		"Preserve user work. Do not revert unrelated changes; adapt to the existing code, architecture, and project boundaries.",
+		"Prefer repository truth over assumptions. Read or search before editing, and use shell checks when they are the clearest verification path.",
+		"Ask only when the answer cannot be discovered locally and would materially change the next action.",
+		"Keep responses concise, factual, and focused on what changed, what was verified, and what remains.",
 	}, "\n")
 }
 
@@ -139,8 +137,8 @@ func builtInRolePrompt() string {
 	return strings.Join([]string{
 		"## Main Session Role",
 		"",
-		"You are the primary session responsible for end-to-end progress.",
-		"Choose tools, plan when useful, and integrate results into one user-facing answer.",
+		"Own architecture, task decomposition, integration, validation, and final judgment.",
+		"Use plans for non-trivial work, keep them current, and close the loop with concrete verification.",
 	}, "\n")
 }
 
@@ -148,14 +146,14 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 	lines := []string{
 		"## Capability Guidance",
 		"",
-		"- Tool families: use READ/SEARCH/GLOB/LIST to inspect, WRITE/PATCH for targeted file changes, BASH for shell work, and TASK for async follow-up.",
-		"- Permissions: use request_permissions to request a narrow read/write directory or network grant before retrying file tools that need access outside the current workspace policy.",
-		"- Skills: load a skill only when its description clearly matches the current task; read the minimum needed from its `SKILL.md`.",
-		"- Modes: obey active approval mode rules; auto-review denials return a concrete reason without requiring user interaction.",
+		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use BASH for shell-native work and TASK for yielded async work.",
+		"- Use request_permissions for the smallest read/write path or network grant needed before retrying denied work.",
+		"- Load a skill only when its description clearly matches the task; read only the needed parts of its `SKILL.md`.",
+		"- Obey the active approval mode; treat auto-review denials as concrete feedback to narrow or adjust the next step.",
 	}
 	if len(agents) > 0 {
 		lines = append(lines,
-			"- Delegation: use SPAWN for bounded child ACP work that can run independently. Use TASK wait for progress, TASK cancel to stop a running child, and TASK write to send stdin to a running BASH task or a follow-up prompt to a completed SPAWN child.",
+			delegationGuidanceLine(),
 		)
 	}
 	return strings.Join(lines, "\n")
@@ -165,12 +163,15 @@ func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
 		"## BASH Permissions",
 		"",
-		"- Use BASH for shell work that advances the current task. Start each command with default sandbox permissions.",
-		"- Default BASH runs in the sandbox: the workspace and temp directory are writable, and workspace-local reads, builds, tests, and inspections should stay default.",
-		"- Use `sandbox_permissions=with_additional_permissions` only for a narrow extra read/write path or network access, with the smallest required `additional_permissions`.",
-		"- Use `sandbox_permissions=require_escalated` only when this command must run outside the sandbox; include a short `justification`.",
-		"- If policy denies a command or file tool, retry with a smaller scope or request the missing permission explicitly with request_permissions.",
+		"- Start BASH commands with default sandbox permissions; workspace-local reads, builds, tests, and temp writes should stay default.",
+		"- Use `sandbox_permissions=with_additional_permissions` for the smallest extra read/write path or network grant.",
+		"- Use `sandbox_permissions=require_escalated` only when host execution is required; include a short `justification`.",
+		"- If policy denies a command or file tool, narrow the scope or request the missing permission with request_permissions.",
 	}, "\n")
+}
+
+func delegationGuidanceLine() string {
+	return "- Use SPAWN for bounded child ACP work that can run independently; use TASK wait, cancel, or write to control yielded work."
 }
 
 func builtInEnvironmentContextPrompt(workspaceDir string) string {
@@ -181,9 +182,7 @@ func builtInEnvironmentContextPrompt(workspaceDir string) string {
 	return fmt.Sprintf(`<environment_context>
   <cwd>%s</cwd>
   <shell>%s</shell>
-  <current_date>%s</current_date>
-  <timezone>%s</timezone>
-</environment_context>`, workspaceDir, currentShellName(), time.Now().Format("2006-01-02"), currentTimezoneLabel())
+</environment_context>`, workspaceDir, currentShellName())
 }
 
 func currentShellName() string {
@@ -197,23 +196,6 @@ func currentShellName() string {
 		return shell
 	}
 	return base
-}
-
-func currentTimezoneLabel() string {
-	now := time.Now()
-	name, offsetSeconds := now.Zone()
-	name = strings.TrimSpace(name)
-	if name == "" {
-		name = now.Location().String()
-	}
-	sign := "+"
-	if offsetSeconds < 0 {
-		sign = "-"
-		offsetSeconds = -offsetSeconds
-	}
-	hours := offsetSeconds / 3600
-	minutes := (offsetSeconds % 3600) / 60
-	return fmt.Sprintf("%s %s%02d:%02d", name, sign, hours, minutes)
 }
 
 func buildUserCustomInstructionsPrompt(sessionPrompt string, workspaceAgents string, globalAgents string) string {
@@ -261,9 +243,13 @@ func buildSkillsMetaPrompt(metas []fs.Meta) string {
 	b.WriteString("Use a skill only when its description clearly matches the task. Read the minimum needed from its `SKILL.md`.\n")
 	b.WriteString("### Available skills\n")
 	for _, meta := range metas {
-		fmt.Fprintf(&b, "- %s: %s (file: %s)\n", meta.Name, meta.Description, meta.Path)
+		fmt.Fprintf(&b, "- %s: %s (file: %s)\n", promptSingleLine(meta.Name), promptSingleLine(meta.Description), strings.TrimSpace(meta.Path))
 	}
 	return strings.TrimSpace(b.String())
+}
+
+func promptSingleLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 func renderPromptFragments(fragments []fragment) string {

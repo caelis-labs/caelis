@@ -35,7 +35,7 @@ func (t Tool) Definition() tool.Definition {
 		},
 		"prompt": map[string]any{
 			"type":        "string",
-			"description": "The sub-task for the selected agent. Keep it specific and self-contained.",
+			"description": "Specific self-contained sub-task.",
 		},
 	}
 	if enum := agentNames(t.agents); len(enum) > 0 {
@@ -43,7 +43,7 @@ func (t Tool) Definition() tool.Definition {
 	}
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Delegate a sub-task to self or one registered ACP agent. SPAWN starts a child session and returns a task handle; use that handle with TASK wait, cancel, or write for follow-up control.",
+		Description: "Start a delegated child session.",
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":           props,
@@ -69,7 +69,7 @@ func agentNames(agents []delegation.Agent) []string {
 
 func agentDescription(agents []delegation.Agent) string {
 	if len(agents) == 0 {
-		return "Optional ACP agent name. Omit to use self."
+		return "Agent name; omit for self."
 	}
 	parts := make([]string, 0, len(agents))
 	for _, one := range agents {
@@ -84,9 +84,9 @@ func agentDescription(agents []delegation.Agent) string {
 		parts = append(parts, name)
 	}
 	if len(parts) == 0 {
-		return "Optional ACP agent name. Omit to use self."
+		return "Agent name; omit for self."
 	}
-	return "Optional ACP agent name. Available agents include self plus attached external ACP agents: " + strings.Join(parts, "; ") + ". Omit to use self."
+	return "Agent name from enum; omit for self. Agents: " + strings.Join(parts, "; ") + "."
 }
 
 var _ tool.Tool = Tool{}
