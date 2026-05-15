@@ -54,12 +54,59 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 			p.NetworkAccess = true
 		}
 		applyPathRules(&p, constraints.PathRules)
+		p.ReadOnlySubpaths = removeOverriddenReadOnlySubpaths(p.ReadOnlySubpaths, constraints.PathRules, cfg.CWD)
 	}
 	p.ReadableRoots = normalizeStringList(p.ReadableRoots)
 	p.WritableRoots = normalizeStringList(p.WritableRoots)
 	p.HiddenRoots = normalizeStringList(p.HiddenRoots)
 	p.ReadOnlySubpaths = normalizeStringList(p.ReadOnlySubpaths)
 	return p
+}
+
+func removeOverriddenReadOnlySubpaths(subpaths []string, rules []sandbox.PathRule, cwd string) []string {
+	if len(subpaths) == 0 || len(rules) == 0 {
+		return subpaths
+	}
+	out := make([]string, 0, len(subpaths))
+	for _, subpath := range subpaths {
+		if readOnlySubpathOverridden(subpath, rules, cwd) {
+			continue
+		}
+		out = append(out, subpath)
+	}
+	return out
+}
+
+func readOnlySubpathOverridden(subpath string, rules []sandbox.PathRule, cwd string) bool {
+	readOnlyRoot := ResolveSandboxPath(cwd, subpath)
+	if readOnlyRoot == "" {
+		return false
+	}
+	readOnlyRoot = filepath.Clean(readOnlyRoot)
+	for _, rule := range rules {
+		if rule.Access != sandbox.PathAccessReadWrite {
+			continue
+		}
+		writeRoot := ResolveSandboxPath(cwd, rule.Path)
+		if writeRoot == "" {
+			continue
+		}
+		writeRoot = filepath.Clean(writeRoot)
+		if pathIsUnder(writeRoot, readOnlyRoot) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathIsUnder(target, root string) bool {
+	if target == root {
+		return true
+	}
+	if !strings.HasSuffix(root, string(filepath.Separator)) {
+		root += string(filepath.Separator)
+	}
+	return strings.HasPrefix(target, root)
 }
 
 func applyPathRules(p *Policy, rules []sandbox.PathRule) {

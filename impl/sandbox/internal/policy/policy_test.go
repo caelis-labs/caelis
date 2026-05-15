@@ -31,6 +31,47 @@ func TestDefaultMergesConstraintPathRules(t *testing.T) {
 	}
 }
 
+func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
+	t.Parallel()
+
+	p := Default(sandbox.Config{
+		CWD: "/workspace",
+	}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+		PathRules: []sandbox.PathRule{
+			{Path: "/workspace", Access: sandbox.PathAccessReadWrite},
+		},
+	})
+	if !slices.Contains(p.ReadOnlySubpaths, ".git") {
+		t.Fatalf("ReadOnlySubpaths = %#v, want default .git protection", p.ReadOnlySubpaths)
+	}
+
+	p = Default(sandbox.Config{
+		CWD: "/workspace",
+	}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+		PathRules: []sandbox.PathRule{
+			{Path: "/workspace", Access: sandbox.PathAccessReadWrite},
+			{Path: "/workspace/.git", Access: sandbox.PathAccessReadWrite},
+		},
+	})
+	if slices.Contains(p.ReadOnlySubpaths, ".git") {
+		t.Fatalf("ReadOnlySubpaths = %#v, did not expect .git after explicit .git write grant", p.ReadOnlySubpaths)
+	}
+
+	p = Default(sandbox.Config{
+		CWD: "/workspace",
+	}, sandbox.Constraints{
+		Permission: sandbox.PermissionWorkspaceWrite,
+		PathRules: []sandbox.PathRule{
+			{Path: "/workspace/.git/hooks", Access: sandbox.PathAccessReadWrite},
+		},
+	})
+	if slices.Contains(p.ReadOnlySubpaths, ".git") {
+		t.Fatalf("ReadOnlySubpaths = %#v, did not expect .git after explicit nested .git write grant", p.ReadOnlySubpaths)
+	}
+}
+
 func TestDefaultMergesHiddenPathRules(t *testing.T) {
 	t.Parallel()
 

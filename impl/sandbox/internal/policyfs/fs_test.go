@@ -101,6 +101,32 @@ func TestWriteAllowedByConstraintPathRule(t *testing.T) {
 	}
 }
 
+func TestWriteAllowedWhenExplicitGrantOverridesDefaultGitReadOnlySubpath(t *testing.T) {
+	t.Parallel()
+
+	workspace := deniedAbsoluteTestPath("sandbox-policy-workspace")
+	target := filepath.Join(workspace, ".git", "index.lock")
+	fsys := New(testFileSystem{
+		wd:         workspace,
+		home:       deniedAbsoluteTestPath("sandbox-home"),
+		allowWrite: true,
+	}, func() policy.Policy {
+		return policy.Default(sandbox.Config{
+			CWD: workspace,
+		}, sandbox.Constraints{
+			Permission: sandbox.PermissionWorkspaceWrite,
+			PathRules: []sandbox.PathRule{
+				{Path: workspace, Access: sandbox.PathAccessReadWrite},
+				{Path: filepath.Join(workspace, ".git"), Access: sandbox.PathAccessReadWrite},
+			},
+		})
+	})
+
+	if err := fsys.WriteFile(target, []byte("lock"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v, want allowed by explicit .git write grant", err)
+	}
+}
+
 func TestHiddenPathRuleDeniesReadAndWrite(t *testing.T) {
 	t.Parallel()
 

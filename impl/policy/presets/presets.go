@@ -114,6 +114,7 @@ func decideBashCommand(input policy.ToolContext, def sandbox.Constraints, modeNa
 	if err != nil {
 		return deny(err.Error()), nil
 	}
+	def = applyDefaultBashCommandAllowances(def, input, command)
 	if commandRequiresDestructiveApproval(command) {
 		return askDestructiveCommandApproval(input, def, req)
 	}
@@ -267,7 +268,8 @@ func approvalTitle(name string, call map[string]any) string {
 }
 
 func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
-	rules := make([]sandbox.PathRule, 0, 2+len(opts.ExtraWriteRoots)+len(opts.ExtraReadRoots))
+	devWriteRoots := defaultDeveloperWritableRoots()
+	rules := make([]sandbox.PathRule, 0, 2+len(devWriteRoots)+len(opts.ExtraWriteRoots)+len(opts.ExtraReadRoots))
 	appendRule := func(path string, access sandbox.PathAccess) {
 		path = strings.TrimSpace(path)
 		if path == "" {
@@ -277,6 +279,9 @@ func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
 	}
 	appendRule(opts.WorkspaceRoot, sandbox.PathAccessReadWrite)
 	appendRule(opts.TempRoot, sandbox.PathAccessReadWrite)
+	for _, path := range devWriteRoots {
+		appendRule(path, sandbox.PathAccessReadWrite)
+	}
 	for _, path := range opts.ExtraWriteRoots {
 		appendRule(path, sandbox.PathAccessReadWrite)
 	}

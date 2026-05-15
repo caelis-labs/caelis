@@ -161,6 +161,165 @@ func TestDefaultModeOnlyApprovesBashEscalation(t *testing.T) {
 	}
 }
 
+func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "caelis-cache-test")
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".xdg-cache"))
+	t.Setenv("GOCACHE", filepath.Join(home, "custom-go-build"))
+	t.Setenv("GOMODCACHE", filepath.Join(home, "custom-go-mod"))
+	t.Setenv("GOPATH", strings.Join([]string{
+		filepath.Join(home, "go-one"),
+		filepath.Join(home, "go-two"),
+	}, string(filepath.ListSeparator)))
+	t.Setenv("CARGO_HOME", filepath.Join(home, ".custom-cargo"))
+	t.Setenv("GRADLE_USER_HOME", filepath.Join(home, ".custom-gradle"))
+
+	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx("go test ./...", false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("Action = %q, want allow", decision.Action)
+	}
+	for _, root := range []string{
+		filepath.Join(home, ".xdg-cache"),
+		filepath.Join(home, "custom-go-build"),
+		filepath.Join(home, "custom-go-mod"),
+		filepath.Join(home, "go-one", "pkg", "mod"),
+		filepath.Join(home, "go-two", "pkg", "mod"),
+		filepath.Join(home, ".npm"),
+		filepath.Join(home, ".custom-cargo", "registry"),
+		filepath.Join(home, ".custom-cargo", "git"),
+		filepath.Join(home, ".custom-gradle", "caches"),
+		filepath.Join(home, ".m2", "repository"),
+	} {
+		if !hasPathRule(decision.Constraints.PathRules, root, sandbox.PathAccessReadWrite) {
+			t.Fatalf("PathRules = %#v, want default developer cache write root %q", decision.Constraints.PathRules, root)
+		}
+	}
+}
+
+func TestDefaultModeEnablesNetworkOnlyForSafeDependencyCommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		command string
+		want    sandbox.Network
+	}{
+		{command: "go mod download", want: sandbox.NetworkEnabled},
+		{command: "GOPROXY=https://proxy.golang.org go mod tidy", want: sandbox.NetworkEnabled},
+		{command: "go get ./...", want: sandbox.NetworkEnabled},
+		{command: "cargo fetch", want: sandbox.NetworkEnabled},
+		{command: "npm ci --ignore-scripts", want: sandbox.NetworkEnabled},
+		{command: "pnpm fetch", want: sandbox.NetworkEnabled},
+		{command: "pip download -r requirements.txt", want: sandbox.NetworkEnabled},
+		{command: "uv pip download flask", want: sandbox.NetworkEnabled},
+		{command: "go test ./...", want: sandbox.NetworkDisabled},
+		{command: "npm ci", want: sandbox.NetworkDisabled},
+		{command: "go mod download && curl https://example.com", want: sandbox.NetworkDisabled},
+		{command: "go mod download & curl https://example.com", want: sandbox.NetworkDisabled},
+		{command: "go mod download | cat", want: sandbox.NetworkDisabled},
+		{command: "go mod download > deps.log", want: sandbox.NetworkDisabled},
+		{command: "go mod download $(cat args)", want: sandbox.NetworkDisabled},
+		{command: "./go mod download", want: sandbox.NetworkDisabled},
+		{command: "/usr/bin/go mod download", want: sandbox.NetworkDisabled},
+		{command: "PATH=.:$PATH go mod download", want: sandbox.NetworkDisabled},
+		{command: "env PATH=.:$PATH go mod download", want: sandbox.NetworkDisabled},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.command, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx(tt.command, false))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow", decision.Action)
+			}
+			if decision.Constraints.Network != tt.want {
+				t.Fatalf("Network = %q, want %q", decision.Constraints.Network, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
+	t.Parallel()
+
+	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx("git add .", false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("Action = %q, want allow", decision.Action)
+	}
+	if !hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want .git write grant for git add", decision.Constraints.PathRules)
+	}
+	if decision.Constraints.Network != sandbox.NetworkDisabled {
+		t.Fatalf("Network = %q, want disabled for local git metadata command", decision.Constraints.Network)
+	}
+
+	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("git add . && git commit -m update", false))
+	if err != nil {
+		t.Fatalf("DecideTool() git chain error = %v", err)
+	}
+	if !hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want .git write grant for git add/commit chain", decision.Constraints.PathRules)
+	}
+
+	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("git push origin main", false))
+	if err != nil {
+		t.Fatalf("DecideTool() push error = %v", err)
+	}
+	if hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, did not expect .git write grant for git push", decision.Constraints.PathRules)
+	}
+
+	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("git add . && git push origin main", false))
+	if err != nil {
+		t.Fatalf("DecideTool() mixed git chain error = %v", err)
+	}
+	if hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, did not expect .git write grant for mixed git chain", decision.Constraints.PathRules)
+	}
+}
+
+func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"git add . & touch .git/index.lock",
+		"git add . | cat",
+		"git add . > staged.log",
+		"git add $(cat files)",
+		"./git add .",
+		"/usr/bin/git add .",
+		"PATH=.:$PATH git add .",
+		"env PATH=.:$PATH git add .",
+		"git add . && ./git commit -m update",
+	}
+	for _, command := range tests {
+		command := command
+		t.Run(command, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx(command, false))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow", decision.Action)
+			}
+			if hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+				t.Fatalf("PathRules = %#v, did not expect .git write grant for ambiguous command %q", decision.Constraints.PathRules, command)
+			}
+		})
+	}
+}
+
 func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 	t.Parallel()
 

@@ -1880,7 +1880,7 @@ func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID s
 			ev.Output = ""
 			updated = true
 		}
-		if output != "" && !(meta.OutputSynthetic && strings.TrimSpace(ev.Output) != "") {
+		if output != "" && (!meta.OutputSynthetic || strings.TrimSpace(ev.Output) == "") {
 			ev.Output = output
 			ev.OutputSynthetic = meta.OutputSynthetic
 			updated = true
