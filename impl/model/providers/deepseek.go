@@ -6,14 +6,16 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
+var deepSeekCompatProfile = openAICompatProfile{
+	IncludeReasoningContent:        true,
+	EmitEmptyReasoningForToolCall:  true,
+	EmitEmptyReasoningForAssistant: true,
+	ApplyReasoning:                 applyThinkingReasoning,
+	StructuredOutput:               openAICompatStructuredOutputJSONOutput,
+}
+
 func newDeepSeek(cfg Config, token string) model.LLM {
-	llm := newOpenAICompat(cfg, token)
-	llm.options.IncludeReasoningContent = true
-	llm.options.EmitEmptyReasoningForToolCall = true
-	llm.options.EmitEmptyReasoningForAssistant = true
-	llm.options.ApplyReasoning = applyThinkingReasoning
-	llm.options.StructuredOutput = openAICompatStructuredOutputJSONOutput
-	return llm
+	return newOpenAICompatWithProfile(cfg, token, deepSeekCompatProfile)
 }
 
 // thinkingModeMinTokens is the minimum max_tokens value required for DeepSeek

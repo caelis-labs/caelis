@@ -19,9 +19,29 @@ func validateReplaySessionEvents(events []*session.Event) error {
 }
 
 func validateReplaySessionEvent(event *session.Event) error {
-	if event == nil || session.EventTypeOf(event) != session.EventTypeToolResult {
+	if event == nil || !session.IsCanonicalHistoryEvent(event) {
 		return nil
 	}
+	switch session.EventTypeOf(event) {
+	case session.EventTypeUser, session.EventTypeAssistant, session.EventTypeSystem:
+		if event.Message == nil {
+			return replayValidationError(event.ID, "model-visible event is missing durable Event.Message")
+		}
+	case session.EventTypeToolCall:
+		if event.Tool != nil {
+			return validateCanonicalReplayMeta(event.ID, event.Meta)
+		}
+		if event.Message != nil && len(event.Message.ToolCalls()) > 0 {
+			return validateCanonicalReplayMeta(event.ID, event.Meta)
+		}
+		return replayValidationError(event.ID, "tool call is missing durable Event.Tool or model tool-call payload")
+	case session.EventTypeToolResult:
+		return validateReplayToolResultEvent(event)
+	}
+	return nil
+}
+
+func validateReplayToolResultEvent(event *session.Event) error {
 	if event.Tool != nil {
 		if len(event.Tool.Output) > 0 {
 			if err := validateCanonicalReplayRawOutput(event.ID, event.Tool.Output); err != nil {

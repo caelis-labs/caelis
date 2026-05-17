@@ -11,6 +11,8 @@ package modelcatalog
 // (for example from /connect). Static model lists do not use this data.
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,7 +28,7 @@ import (
 	_ "embed"
 )
 
-//go:embed models_dev_snapshot.json
+//go:embed models_dev_snapshot.compact.json.gz
 var embeddedCatalogSnapshot []byte
 
 const (
@@ -77,9 +79,9 @@ type capSnapshot map[string]capEntry
 
 var (
 	dynamicMu       sync.RWMutex
-	remoteCatalog   capSnapshot                                   // loaded from models.dev
-	embeddedCatalog = parseSnapshotBytes(embeddedCatalogSnapshot) // loaded from embedded snapshot
-	localOverrides  capSnapshot                                   // loaded from the user's override file
+	remoteCatalog   capSnapshot // loaded from models.dev
+	embeddedCatalog = parseEmbeddedSnapshotBytes(embeddedCatalogSnapshot)
+	localOverrides  capSnapshot // loaded from the user's override file
 )
 
 // CatalogInitStatus describes the result of one dynamic catalog refresh.
@@ -117,7 +119,7 @@ func InitModelCatalogWithStatus(ctx context.Context, client *http.Client, overri
 		}
 	}
 
-	embedded := parseSnapshotBytes(embeddedCatalogSnapshot)
+	embedded := parseEmbeddedSnapshotBytes(embeddedCatalogSnapshot)
 
 	// 1. Try remote fetch.
 	remote, err := fetchModelsDev(ctx, client)
@@ -479,8 +481,27 @@ func splitVendorModelID(modelID string) (provider string, model string, ok bool)
 // Snapshot / override file loading
 // ---------------------------------------------------------------------------
 
-// parseSnapshotBytes parses the embedded JSON snapshot into a capSnapshot.
-// Errors are swallowed (the embedded data is trusted).
+// parseEmbeddedSnapshotBytes parses the embedded snapshot asset. The production
+// asset is gzip-compressed, while tests can still pass plain JSON.
+func parseEmbeddedSnapshotBytes(data []byte) capSnapshot {
+	if len(data) >= 2 && data[0] == 0x1f && data[1] == 0x8b {
+		zr, err := gzip.NewReader(bytes.NewReader(data))
+		if err != nil {
+			return nil
+		}
+		defer zr.Close()
+		raw, err := io.ReadAll(zr)
+		if err != nil {
+			return nil
+		}
+		return parseSnapshotBytes(raw)
+	}
+	return parseSnapshotBytes(data)
+}
+
+// parseSnapshotBytes parses a compact or full models.dev JSON snapshot into a
+// capSnapshot. Errors are swallowed because snapshots and overrides are
+// best-effort fallback data.
 func parseSnapshotBytes(data []byte) capSnapshot {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -517,7 +538,7 @@ func parseSnapshotBytes(data []byte) capSnapshot {
 }
 
 // loadOverrideFile reads and parses a local capability override file.
-// The file format is the same as models_dev_snapshot.json.
+// The file format is the same compact JSON shape used by the embedded snapshot.
 func loadOverrideFile(path string) (capSnapshot, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

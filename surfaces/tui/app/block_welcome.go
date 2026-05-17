@@ -1,5 +1,7 @@
 package tuiapp
 
+import "github.com/OnslaughtSnail/caelis/surfaces/tui/displaymodel"
+
 type WelcomeBlock struct {
 	id        string
 	Version   string
@@ -20,7 +22,7 @@ func (b *WelcomeBlock) BlockID() string { return b.id }
 func (b *WelcomeBlock) Kind() BlockKind { return BlockWelcome }
 func (b *WelcomeBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	vm := buildWelcomePanelViewModel(
-		buildWelcomeViewModel(b.Version, b.Workspace, b.ModelName),
+		displaymodel.BuildWelcomeViewModel(b.Version, b.Workspace, b.ModelName),
 		maxInt(30, minInt(68, maxInt(30, ctx.Width-6))),
 		ctx.Theme,
 	)

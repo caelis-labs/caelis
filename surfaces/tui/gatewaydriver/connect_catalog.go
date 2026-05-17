@@ -3,13 +3,13 @@ package gatewaydriver
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
 const (
@@ -69,13 +69,7 @@ type connectModelDefaults struct {
 	DefaultReasoningEffort string
 }
 
-type connectWizardPayload struct {
-	Provider string
-	BaseURL  string
-	Timeout  string
-	APIKey   string
-	Model    string
-}
+type connectWizardPayload = tuicommands.ConnectWizardState
 
 var providerTemplates = []providerTemplate{
 	{label: "openai", api: model.APIOpenAI, provider: "openai", description: "OpenAI-hosted models", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
@@ -103,13 +97,13 @@ func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command str
 	case strings.HasPrefix(command, "connect-apikey:"):
 		return nil, nil
 	case strings.HasPrefix(command, "connect-model:"):
-		return completeConnectModels(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
+		return completeConnectModels(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
 	case strings.HasPrefix(command, "connect-context:"):
-		return completeConnectContext(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
+		return completeConnectContext(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
 	case strings.HasPrefix(command, "connect-maxout:"):
-		return completeConnectMaxOutput(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
+		return completeConnectMaxOutput(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
 	case strings.HasPrefix(command, "connect-reasoning-levels:"):
-		return completeConnectReasoningLevels(ctx, driver, parseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
+		return completeConnectReasoningLevels(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
 	default:
 		return nil, nil
 	}
@@ -241,18 +235,18 @@ func connectDefaultsForConfigWithStack(ctx context.Context, stack *DriverStack, 
 	if !ok {
 		return connectModelDefaults{}, nil
 	}
-	payload := connectWizardPayload{
-		Provider: strings.ToLower(strings.TrimSpace(cfg.Provider)),
-		BaseURL:  strings.TrimSpace(cfg.BaseURL),
-		Timeout:  strconv.Itoa(cfg.TimeoutSeconds),
-		APIKey:   strings.TrimSpace(cfg.APIKey),
-		Model:    strings.TrimSpace(cfg.Model),
+	payload := tuicommands.ConnectWizardState{
+		Provider:       strings.ToLower(strings.TrimSpace(cfg.Provider)),
+		BaseURL:        strings.TrimSpace(cfg.BaseURL),
+		TimeoutSeconds: cfg.TimeoutSeconds,
+		TokenRef:       strings.TrimSpace(cfg.APIKey),
+		Model:          strings.TrimSpace(cfg.Model),
 	}
 	if payload.BaseURL == "" {
 		payload.BaseURL = tpl.defaultBaseURL
 	}
-	if strings.TrimSpace(payload.Timeout) == "" || strings.TrimSpace(payload.Timeout) == "0" {
-		payload.Timeout = "60"
+	if payload.TimeoutSeconds <= 0 {
+		payload.TimeoutSeconds = tuicommands.DefaultConnectTimeoutSeconds
 	}
 	return connectDefaultsForPayload(ctx, stack, payload)
 }
@@ -328,28 +322,6 @@ func connectDefaultsForPayload(ctx context.Context, stack *DriverStack, payload 
 		ReasoningLevels:        reasoningLevels,
 		DefaultReasoningEffort: defaultReasoningEffort,
 	}, nil
-}
-
-func parseConnectWizardPayload(raw string) connectWizardPayload {
-	parts := strings.SplitN(raw, "|", 5)
-	for len(parts) < 5 {
-		parts = append(parts, "")
-	}
-	return connectWizardPayload{
-		Provider: strings.TrimSpace(parts[0]),
-		BaseURL:  decodeConnectWizardPart(parts[1]),
-		Timeout:  strings.TrimSpace(parts[2]),
-		APIKey:   decodeConnectWizardPart(parts[3]),
-		Model:    decodeConnectWizardPart(parts[4]),
-	}
-}
-
-func decodeConnectWizardPart(value string) string {
-	decoded, err := url.QueryUnescape(strings.TrimSpace(value))
-	if err != nil {
-		return strings.TrimSpace(value)
-	}
-	return decoded
 }
 
 func filterSlashArgCandidates(candidates []SlashArgCandidate, query string, limit int) []SlashArgCandidate {

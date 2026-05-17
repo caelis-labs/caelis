@@ -2,12 +2,13 @@ package tuiapp
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
+
+	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
-
-const defaultConnectTimeoutSeconds = 60
 
 var connectWizardEndpointProviders = map[string]struct{}{
 	"volcengine": {},
@@ -39,51 +40,8 @@ var connectWizardTokenEnvByEndpoint = map[string]string{
 	"volcengine|https://ark.cn-beijing.volces.com/api/coding/v3": "VOLCENGINE_API_KEY",
 }
 
-type slashCommandSpec struct {
-	Name        string
-	Usage       string
-	Description string
-	Hidden      bool
-}
-
-func slashCommandSpecs() []slashCommandSpec {
-	return []slashCommandSpec{
-		{Name: "help", Usage: "/help", Description: "Show available slash commands"},
-		{Name: "agent", Usage: "/agent list | /agent add <builtin> | /agent install <adapter> | /agent use <agent|local> | /agent remove <agent>", Description: "Manage registered ACP agents and main-controller switching"},
-		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard"},
-		{Name: "model", Usage: "/model use <alias> | /model del <alias>", Description: "Switch or delete a configured model alias"},
-		{Name: "approval", Usage: "/approval [auto-review|manual]", Description: "Inspect or change approval review mode"},
-		{Name: "sandbox", Usage: "/sandbox [auto|seatbelt|bwrap|landlock]", Description: "Inspect or change the sandbox backend"},
-		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info"},
-		{Name: "doctor", Usage: "/doctor", Description: "Diagnose provider, model, session store, and sandbox readiness"},
-		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
-		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id"},
-		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
-		{Name: "exit", Usage: "/exit", Description: "Exit the TUI"},
-		{Name: "quit", Usage: "/quit", Description: "Exit the TUI"},
-	}
-}
-
-func visibleSlashCommandSpecs() []slashCommandSpec {
-	specs := slashCommandSpecs()
-	out := make([]slashCommandSpec, 0, len(specs))
-	for _, spec := range specs {
-		if spec.Hidden {
-			continue
-		}
-		out = append(out, spec)
-	}
-	return out
-}
-
-func lookupSlashCommandSpec(name string) (slashCommandSpec, bool) {
-	name = strings.ToLower(strings.TrimSpace(name))
-	for _, spec := range slashCommandSpecs() {
-		if spec.Name == name {
-			return spec, true
-		}
-	}
-	return slashCommandSpec{}, false
+func lookupSlashCommandSpec(name string) (tuicommands.CommandSpec, bool) {
+	return tuicommands.Lookup(name)
 }
 
 func defaultHelpText() string {
@@ -91,37 +49,7 @@ func defaultHelpText() string {
 }
 
 func helpTextForCommands(commands []string) string {
-	if len(commands) == 0 {
-		commands = DefaultCommands()
-	}
-	lines := []string{"available commands:"}
-	seen := map[string]struct{}{}
-	for _, command := range commands {
-		name := strings.ToLower(strings.TrimSpace(strings.TrimPrefix(command, "/")))
-		if name == "" {
-			continue
-		}
-		if _, exists := seen[name]; exists {
-			continue
-		}
-		seen[name] = struct{}{}
-		spec, known := lookupSlashCommandSpec(name)
-		if !known {
-			lines = append(lines, "  /"+name)
-			continue
-		}
-		usage := strings.TrimSpace(spec.Usage)
-		description := strings.TrimSpace(spec.Description)
-		switch {
-		case usage == "":
-			lines = append(lines, "  /"+spec.Name)
-		case description == "":
-			lines = append(lines, "  "+usage)
-		default:
-			lines = append(lines, "  "+usage+"  "+description)
-		}
-	}
-	return strings.Join(lines, "\n")
+	return tuicommands.HelpText(commands)
 }
 
 // joinNonEmpty joins non-empty parts with the given separator.
@@ -137,12 +65,7 @@ func joinNonEmpty(parts []string, sep string) string {
 
 // DefaultCommands returns the set of slash commands available in the TUI.
 func DefaultCommands() []string {
-	specs := visibleSlashCommandSpecs()
-	out := make([]string, 0, len(specs))
-	for _, spec := range specs {
-		out = append(out, spec.Name)
-	}
-	return out
+	return tuicommands.DefaultNames()
 }
 
 // DefaultWizards returns the set of multi-step wizard flows for the TUI.
@@ -354,15 +277,11 @@ func connectWizardProviderHasBaseURLStep(provider string) bool {
 }
 
 func buildConnectWizardPayload(state map[string]string) string {
-	return strings.TrimSpace(state["provider"]) +
-		"|" + url.QueryEscape(strings.TrimSpace(state["baseurl"])) +
-		"|" + connectWizardTimeout() +
-		"|" + url.QueryEscape(strings.TrimSpace(state["apikey"])) +
-		"|" + url.QueryEscape(strings.TrimSpace(state["model"]))
+	return tuicommands.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
 }
 
 func connectWizardTimeout() string {
-	return "60"
+	return strconv.Itoa(tuicommands.DefaultConnectTimeoutSeconds)
 }
 
 func emptyAsDash(value string) string {

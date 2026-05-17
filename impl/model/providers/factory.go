@@ -13,6 +13,22 @@ type Factory struct {
 	configs map[string]Config
 }
 
+var supportedAPITypes = map[APIType]struct{}{
+	APIOpenAI:              {},
+	APIOpenAICompatible:    {},
+	APIOpenRouter:          {},
+	APICodeFree:            {},
+	APIGemini:              {},
+	APIAnthropic:           {},
+	APIAnthropicCompatible: {},
+	APIDeepSeek:            {},
+	APIMiniMax:             {},
+	APIMimo:                {},
+	APIVolcengine:          {},
+	APIVolcengineCoding:    {},
+	APIOllama:              {},
+}
+
 // NewFactory returns an empty provider factory.
 func NewFactory() *Factory {
 	return &Factory{configs: map[string]Config{}}
@@ -27,7 +43,7 @@ func (f *Factory) Register(cfg Config) error {
 	if alias == "" {
 		return fmt.Errorf("providers: alias is required")
 	}
-	if cfg.API != APIOpenAI && cfg.API != APIOpenAICompatible && cfg.API != APIOpenRouter && cfg.API != APICodeFree && cfg.API != APIGemini && cfg.API != APIAnthropic && cfg.API != APIAnthropicCompatible && cfg.API != APIDeepSeek && cfg.API != APIMiniMax && cfg.API != APIMimo && cfg.API != APIVolcengine && cfg.API != APIVolcengineCoding && cfg.API != APIOllama {
+	if !isSupportedAPIType(cfg.API) {
 		return fmt.Errorf("providers: unsupported api type %q", cfg.API)
 	}
 	authType := strings.TrimSpace(string(cfg.Auth.Type))
@@ -35,18 +51,27 @@ func (f *Factory) Register(cfg Config) error {
 		return fmt.Errorf("providers: unsupported auth type %q", cfg.Auth.Type)
 	}
 	if cfg.Auth.Type == "" {
-		switch cfg.API {
-		case APIOllama, APICodeFree:
-			cfg.Auth.Type = AuthNone
-		case APIMiniMax:
-			cfg.Auth.Type = AuthBearerToken
-		default:
-			cfg.Auth.Type = AuthAPIKey
-		}
+		cfg.Auth.Type = defaultAuthType(cfg.API)
 	}
 	cfg.Alias = alias
 	f.configs[alias] = cfg
 	return nil
+}
+
+func isSupportedAPIType(api APIType) bool {
+	_, ok := supportedAPITypes[api]
+	return ok
+}
+
+func defaultAuthType(api APIType) AuthType {
+	switch api {
+	case APIOllama, APICodeFree:
+		return AuthNone
+	case APIMiniMax:
+		return AuthBearerToken
+	default:
+		return AuthAPIKey
+	}
 }
 
 // NewByAlias creates a model provider by alias.

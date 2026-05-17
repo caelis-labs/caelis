@@ -6,13 +6,15 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
+var mimoCompatProfile = openAICompatProfile{
+	IncludeReasoningContent:       true,
+	EmitEmptyReasoningForToolCall: true,
+	ApplyReasoning:                applyMimoThinkingReasoning,
+	StructuredOutput:              openAICompatStructuredOutputJSONOutput,
+}
+
 func newMimo(cfg Config, token string) model.LLM {
-	llm := newOpenAICompat(cfg, token)
-	llm.options.IncludeReasoningContent = true
-	llm.options.EmitEmptyReasoningForToolCall = true
-	llm.options.ApplyReasoning = applyMimoThinkingReasoning
-	llm.options.StructuredOutput = openAICompatStructuredOutputJSONOutput
-	return llm
+	return newOpenAICompatWithProfile(cfg, token, mimoCompatProfile)
 }
 
 func applyMimoThinkingReasoning(payload *openAICompatRequest, cfg model.ReasoningConfig) {

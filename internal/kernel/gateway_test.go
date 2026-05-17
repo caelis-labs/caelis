@@ -15,6 +15,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
+func modelMessagePtr(message model.Message) *model.Message {
+	return &message
+}
+
 func TestNewRequiresSessionsRuntimeAndResolver(t *testing.T) {
 	t.Parallel()
 
@@ -1643,8 +1647,8 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 	svc := &recordingSessionService{
 		sessionResult: activeSession,
 		eventsResult: []*session.Event{
-			{ID: "e1", Type: session.EventTypeUser, Scope: &session.EventScope{TurnID: "turn-1"}},
-			{ID: "e2", Type: session.EventTypeAssistant, Scope: &session.EventScope{
+			{ID: "e1", Type: session.EventTypeUser, Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "prompt")), Scope: &session.EventScope{TurnID: "turn-1"}},
+			{ID: "e2", Type: session.EventTypeAssistant, Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "done")), Scope: &session.EventScope{
 				TurnID:     "turn-1",
 				Controller: session.ControllerRef{Kind: session.ControllerKindACP, ID: "acp-controller", EpochID: "epoch-1"},
 				ACP:        session.ACPRef{SessionID: "acp-main", EventType: "agent_message_chunk"},
@@ -1735,7 +1739,7 @@ func TestReplayEventsIncludesDurableMirrorTranscriptEvents(t *testing.T) {
 	svc := &recordingSessionService{
 		sessionResult: activeSession,
 		eventsResult: []*session.Event{
-			{ID: "e1", Type: session.EventTypeUser, Text: "prompt", Scope: &session.EventScope{TurnID: "turn-1"}},
+			{ID: "e1", Type: session.EventTypeUser, Text: "prompt", Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "prompt")), Scope: &session.EventScope{TurnID: "turn-1"}},
 			mirror,
 			session.MarkUIOnly(&session.Event{ID: "ui-1", Type: session.EventTypeAssistant, Text: "live only"}),
 		},
@@ -1781,9 +1785,9 @@ func TestReplayEventsResolvesBindingAndAppliesCursorLimit(t *testing.T) {
 	svc := &recordingSessionService{
 		sessionResult: activeSession,
 		eventsResult: []*session.Event{
-			{ID: "e1", Type: session.EventTypeUser, Text: "first"},
-			{ID: "e2", Type: session.EventTypeAssistant, Text: "second", Visibility: session.VisibilityCanonical},
-			{ID: "e3", Type: session.EventTypeAssistant, Text: "third", Visibility: session.VisibilityCanonical},
+			{ID: "e1", Type: session.EventTypeUser, Text: "first", Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "first"))},
+			{ID: "e2", Type: session.EventTypeAssistant, Text: "second", Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "second")), Visibility: session.VisibilityCanonical},
+			{ID: "e3", Type: session.EventTypeAssistant, Text: "third", Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "third")), Visibility: session.VisibilityCanonical},
 		},
 	}
 	gw, err := New(Config{
@@ -1832,8 +1836,8 @@ func TestReplayEventsReturnsCursorNotFoundForStaleCursor(t *testing.T) {
 	svc := &recordingSessionService{
 		sessionResult: activeSession,
 		eventsResult: []*session.Event{
-			{ID: "e1", Type: session.EventTypeUser, Text: "first"},
-			{ID: "e2", Type: session.EventTypeAssistant, Text: "second"},
+			{ID: "e1", Type: session.EventTypeUser, Text: "first", Message: modelMessagePtr(model.NewTextMessage(model.RoleUser, "first"))},
+			{ID: "e2", Type: session.EventTypeAssistant, Text: "second", Message: modelMessagePtr(model.NewTextMessage(model.RoleAssistant, "second"))},
 		},
 	}
 	gw, err := New(Config{

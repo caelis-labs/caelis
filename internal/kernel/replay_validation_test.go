@@ -1,10 +1,12 @@
 package kernel
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -98,5 +100,69 @@ func TestValidateReplaySessionEventsRejectsProtocolOnlyToolResult(t *testing.T) 
 	var gatewayErr *Error
 	if !errors.As(err, &gatewayErr) || !strings.Contains(gatewayErr.Detail, "missing durable Event.Tool") {
 		t.Fatalf("error = %#v, want durable Event.Tool rejection", err)
+	}
+}
+
+func TestValidateReplaySessionEventsRejectsProtocolOnlyNarrative(t *testing.T) {
+	t.Parallel()
+
+	err := validateReplaySessionEvents([]*session.Event{{
+		ID:   "assistant-old",
+		Type: session.EventTypeAssistant,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+			Content:       session.ProtocolTextContent("ok"),
+		}},
+	}})
+	if err == nil {
+		t.Fatal("validateReplaySessionEvents() error = nil, want protocol-only narrative rejection")
+	}
+	var gatewayErr *Error
+	if !errors.As(err, &gatewayErr) || !strings.Contains(gatewayErr.Detail, "missing durable Event.Message") {
+		t.Fatalf("error = %#v, want durable Event.Message rejection", err)
+	}
+}
+
+func TestValidateReplaySessionEventsRejectsProtocolOnlyToolCall(t *testing.T) {
+	t.Parallel()
+
+	err := validateReplaySessionEvents([]*session.Event{{
+		ID:   "tool-call-old",
+		Type: session.EventTypeToolCall,
+		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
+			SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+			ToolCallID:    "call-1",
+			Kind:          "BASH",
+			RawInput:      map[string]any{"command": "echo hi"},
+		}},
+	}})
+	if err == nil {
+		t.Fatal("validateReplaySessionEvents() error = nil, want protocol-only tool call rejection")
+	}
+	var gatewayErr *Error
+	if !errors.As(err, &gatewayErr) || !strings.Contains(gatewayErr.Detail, "missing durable Event.Tool") {
+		t.Fatalf("error = %#v, want durable Event.Tool rejection", err)
+	}
+}
+
+func TestValidateReplaySessionEventsAllowsModelToolCallPayload(t *testing.T) {
+	t.Parallel()
+
+	args, err := json.Marshal(map[string]any{"command": "echo hi"})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	msg := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
+		ID:   "call-1",
+		Name: "BASH",
+		Args: string(args),
+	}}, "")
+	err = validateReplaySessionEvents([]*session.Event{{
+		ID:      "tool-call-message",
+		Type:    session.EventTypeToolCall,
+		Message: &msg,
+	}})
+	if err != nil {
+		t.Fatalf("validateReplaySessionEvents() error = %v, want canonical model tool-call payload accepted", err)
 	}
 }

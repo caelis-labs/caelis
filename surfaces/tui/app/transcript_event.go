@@ -6,7 +6,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
 
 type TranscriptEventKind string
@@ -207,43 +206,19 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			if strings.EqualFold(strings.TrimSpace(toolName), "PLAN") {
 				break
 			}
-			status := strings.TrimSpace(string(payload.Status))
-			if status == "" || payload.Status == kernel.ToolStatusStarted {
-				status = string(kernel.ToolStatusRunning)
-			}
-			semanticName := toolSemanticName(toolName, payload.ToolKind)
-			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
-			if refinedName := refinedToolDisplayName(semanticName, payload.ToolKind, payload.ToolTitle, rawInput); refinedName != "" {
-				toolName = refinedName
-				semanticName = refinedName
-			}
-			toolTaskID := toolDisplayTaskID(rawInput, nil, ev.Meta)
-			displayInput := rawInput
-			if strings.EqualFold(semanticName, "TASK") {
-				displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, ev.Meta))
-			}
-			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-			if strings.EqualFold(semanticName, "TASK") {
-				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
-			}
-			out = append(out, TranscriptEvent{
-				Kind:               TranscriptEventTool,
-				Scope:              scope,
-				ScopeID:            scopeID,
-				Actor:              gatewayDisplayActor(ev, payload.Actor),
-				OccurredAt:         occurredAt,
-				ToolCallID:         strings.TrimSpace(payload.CallID),
-				ToolName:           toolName,
-				ToolKind:           strings.TrimSpace(payload.ToolKind),
-				ToolTitle:          strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:           toolArgs,
-				ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
-				ToolStatus:         status,
-				ToolTaskID:         toolTaskID,
-				ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, ev.Meta),
-				ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, ev.Meta),
-				ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
-			})
+			out = append(out, projectTranscriptToolCall(transcriptToolProjection{
+				Event:      ev,
+				Scope:      scope,
+				ScopeID:    scopeID,
+				Actor:      gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt: occurredAt,
+				CallID:     payload.CallID,
+				ToolName:   toolName,
+				ToolKind:   payload.ToolKind,
+				ToolTitle:  payload.ToolTitle,
+				Status:     string(payload.Status),
+				RawInput:   gatewayProtocolRawInput(ev, payload.RawInput),
+			}))
 		}
 	case kernel.EventKindToolResult:
 		if payload := ev.ToolResult; payload != nil {
@@ -251,82 +226,25 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			if strings.EqualFold(strings.TrimSpace(toolName), "PLAN") {
 				break
 			}
-			status := strings.TrimSpace(string(payload.Status))
-			if status == "" {
-				if payload.Error {
-					status = string(kernel.ToolStatusFailed)
-				} else {
-					status = string(kernel.ToolStatusCompleted)
-				}
+			event, ok := projectTranscriptToolResult(transcriptToolProjection{
+				Event:      ev,
+				Scope:      scope,
+				ScopeID:    scopeID,
+				Actor:      gatewayDisplayActor(ev, payload.Actor),
+				OccurredAt: occurredAt,
+				CallID:     payload.CallID,
+				ToolName:   toolName,
+				ToolKind:   payload.ToolKind,
+				ToolTitle:  payload.ToolTitle,
+				Status:     string(payload.Status),
+				RawInput:   gatewayProtocolRawInput(ev, payload.RawInput),
+				RawOutput:  payload.RawOutput,
+				Content:    gatewayProtocolToolContent(ev, payload.Content),
+				Error:      payload.Error,
+			}, string(kernel.ToolStatusCompleted))
+			if ok {
+				out = append(out, event)
 			}
-			toolErr := payload.Error || strings.EqualFold(status, string(kernel.ToolStatusFailed))
-			semanticName := toolSemanticName(toolName, payload.ToolKind)
-			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
-			if refinedName := refinedToolDisplayName(semanticName, payload.ToolKind, payload.ToolTitle, rawInput); refinedName != "" {
-				toolName = refinedName
-				semanticName = refinedName
-			}
-			displayOutput := toolDisplayMetaOutput(semanticName, ev.Meta)
-			displayInput := rawInput
-			if strings.EqualFold(semanticName, "SPAWN") {
-				displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
-			}
-			if strings.EqualFold(semanticName, "TASK") {
-				displayInput = taskDisplayInputForResult(rawInput, displayOutput)
-			}
-			content := gatewayProtocolToolContent(ev, payload.Content)
-			toolOutput := acpprojector.FormatToolContent(content)
-			toolOutputSynthetic := false
-			if strings.TrimSpace(toolOutput) == "" {
-				if terminalOutput := terminalToolOutputText(semanticName, payload.ToolKind, payload.RawOutput, ev.Meta, content, status, toolErr); terminalOutput != "" {
-					toolOutput = terminalOutput
-				} else if !terminalFinalWithoutContent(semanticName, payload.ToolKind, status, toolErr) {
-					toolOutput = standardToolOutput(status, toolErr)
-					toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
-				}
-			}
-			if taskWaitControlResult(semanticName, rawInput, displayOutput, ev.Meta) && !toolErr {
-				toolOutput = ""
-				toolOutputSynthetic = false
-			}
-			if suppressToolResultOutput(semanticName, payload.ToolKind, toolOutput, toolOutputSynthetic, toolErr) {
-				toolOutput = ""
-				toolOutputSynthetic = false
-			}
-			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
-			toolTaskID := toolDisplayTaskID(rawInput, displayOutput, ev.Meta)
-			if strings.EqualFold(semanticName, "TASK") {
-				toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
-			}
-			if !toolErr && (len(rawInput) > 0 || strings.TrimSpace(toolOutput) != "") {
-				if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
-					toolArgs = header
-				}
-			}
-			toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
-			out = append(out, TranscriptEvent{
-				Kind:                TranscriptEventTool,
-				Scope:               scope,
-				ScopeID:             scopeID,
-				Actor:               gatewayDisplayActor(ev, payload.Actor),
-				OccurredAt:          occurredAt,
-				ToolCallID:          strings.TrimSpace(payload.CallID),
-				ToolName:            toolName,
-				ToolKind:            strings.TrimSpace(payload.ToolKind),
-				ToolTitle:           strings.TrimSpace(payload.ToolTitle),
-				ToolArgs:            toolArgs,
-				ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
-				ToolOutput:          toolOutput,
-				ToolStream:          transcriptToolStream(status, toolErr),
-				ToolStatus:          status,
-				ToolError:           toolErr,
-				ToolOutputSynthetic: toolOutputSynthetic,
-				ToolTaskID:          toolTaskID,
-				ToolTaskAction:      toolDisplayTaskAction(rawInput, displayOutput, ev.Meta),
-				ToolTaskInput:       toolDisplayTaskInput(rawInput, displayOutput, ev.Meta),
-				ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, ev.Meta),
-				Final:               transcriptToolStatusFinal(status, toolErr),
-			})
 		}
 	case kernel.EventKindPlanUpdate:
 		if payload := ev.Plan; payload != nil {
@@ -538,125 +456,38 @@ func gatewayProtocolNarrativeFinal(ev kernel.Event) bool {
 }
 
 func projectACPProtocolToolCallEvent(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) TranscriptEvent {
-	toolName := protocolUpdateToolName(ev, update)
-	status := strings.TrimSpace(update.Status)
-	if status == "" || strings.EqualFold(status, string(kernel.ToolStatusStarted)) {
-		status = string(kernel.ToolStatusRunning)
-	}
-	semanticName := toolSemanticName(toolName, update.Kind)
-	rawInput := cloneAnyMap(update.RawInput)
-	if refinedName := refinedToolDisplayName(semanticName, update.Kind, update.Title, rawInput); refinedName != "" {
-		toolName = refinedName
-		semanticName = refinedName
-	}
-	toolTaskID := toolDisplayTaskID(rawInput, nil, ev.Meta)
-	displayInput := rawInput
-	if strings.EqualFold(semanticName, "TASK") {
-		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, ev.Meta))
-	}
-	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, update.Kind, update.Title), acpprojector.FormatToolStart(toolName, displayInput))
-	if strings.EqualFold(semanticName, "TASK") {
-		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
-	}
-	return TranscriptEvent{
-		Kind:               TranscriptEventTool,
-		Scope:              scope,
-		ScopeID:            scopeID,
-		Actor:              gatewayDisplayActor(ev, ""),
-		OccurredAt:         occurredAt,
-		ToolCallID:         strings.TrimSpace(update.ToolCallID),
-		ToolName:           toolName,
-		ToolKind:           strings.TrimSpace(update.Kind),
-		ToolTitle:          strings.TrimSpace(update.Title),
-		ToolArgs:           toolArgs,
-		ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
-		ToolStatus:         status,
-		ToolTaskID:         toolTaskID,
-		ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, ev.Meta),
-		ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, ev.Meta),
-		ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
-	}
+	return projectTranscriptToolCall(transcriptToolProjection{
+		Event:      ev,
+		Scope:      scope,
+		ScopeID:    scopeID,
+		Actor:      gatewayDisplayActor(ev, ""),
+		OccurredAt: occurredAt,
+		CallID:     update.ToolCallID,
+		ToolName:   protocolUpdateToolName(ev, update),
+		ToolKind:   update.Kind,
+		ToolTitle:  update.Title,
+		Status:     update.Status,
+		RawInput:   cloneAnyMap(update.RawInput),
+	})
 }
 
 func projectACPProtocolToolResultEvent(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) (TranscriptEvent, bool) {
-	toolName := protocolUpdateToolName(ev, update)
-	status := strings.TrimSpace(update.Status)
-	toolErr := protocolUpdateToolError(update)
-	if status == "" {
-		if toolErr {
-			status = string(kernel.ToolStatusFailed)
-		} else {
-			status = string(kernel.ToolStatusRunning)
-		}
-	}
-	semanticName := toolSemanticName(toolName, update.Kind)
-	rawInput := cloneAnyMap(update.RawInput)
-	rawOutput := cloneAnyMap(update.RawOutput)
-	if refinedName := refinedToolDisplayName(semanticName, update.Kind, update.Title, rawInput); refinedName != "" {
-		toolName = refinedName
-		semanticName = refinedName
-	}
-	displayOutput := toolDisplayMetaOutput(semanticName, ev.Meta)
-	displayInput := rawInput
-	if strings.EqualFold(semanticName, "SPAWN") {
-		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
-	}
-	if strings.EqualFold(semanticName, "TASK") {
-		displayInput = taskDisplayInputForResult(rawInput, displayOutput)
-	}
-	content := session.ProtocolToolCallContentOf(update)
-	toolOutput := acpprojector.FormatToolContent(content)
-	toolOutputSynthetic := false
-	if strings.TrimSpace(toolOutput) == "" {
-		if terminalOutput := terminalToolOutputText(semanticName, update.Kind, rawOutput, ev.Meta, content, status, toolErr); terminalOutput != "" {
-			toolOutput = terminalOutput
-		} else if !terminalFinalWithoutContent(semanticName, update.Kind, status, toolErr) {
-			toolOutput = standardToolOutput(status, toolErr)
-			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
-		}
-	}
-	if taskWaitControlResult(semanticName, rawInput, displayOutput, ev.Meta) && !toolErr {
-		toolOutput = ""
-		toolOutputSynthetic = false
-	}
-	if suppressToolResultOutput(semanticName, update.Kind, toolOutput, toolOutputSynthetic, toolErr) {
-		toolOutput = ""
-		toolOutputSynthetic = false
-	}
-	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, update.Kind, update.Title), acpprojector.FormatToolStart(toolName, displayInput))
-	toolTaskID := toolDisplayTaskID(rawInput, displayOutput, ev.Meta)
-	if strings.EqualFold(semanticName, "TASK") {
-		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
-	}
-	if !toolErr && (len(rawInput) > 0 || strings.TrimSpace(toolOutput) != "") {
-		if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
-			toolArgs = header
-		}
-	}
-	toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
-	return TranscriptEvent{
-		Kind:                TranscriptEventTool,
-		Scope:               scope,
-		ScopeID:             scopeID,
-		Actor:               gatewayDisplayActor(ev, ""),
-		OccurredAt:          occurredAt,
-		ToolCallID:          strings.TrimSpace(update.ToolCallID),
-		ToolName:            toolName,
-		ToolKind:            strings.TrimSpace(update.Kind),
-		ToolTitle:           strings.TrimSpace(update.Title),
-		ToolArgs:            toolArgs,
-		ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
-		ToolOutput:          toolOutput,
-		ToolStream:          transcriptToolStream(status, toolErr),
-		ToolStatus:          status,
-		ToolError:           toolErr,
-		ToolOutputSynthetic: toolOutputSynthetic,
-		ToolTaskID:          toolTaskID,
-		ToolTaskAction:      toolDisplayTaskAction(rawInput, displayOutput, ev.Meta),
-		ToolTaskInput:       toolDisplayTaskInput(rawInput, displayOutput, ev.Meta),
-		ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, ev.Meta),
-		Final:               transcriptToolStatusFinal(status, toolErr),
-	}, true
+	return projectTranscriptToolResult(transcriptToolProjection{
+		Event:      ev,
+		Scope:      scope,
+		ScopeID:    scopeID,
+		Actor:      gatewayDisplayActor(ev, ""),
+		OccurredAt: occurredAt,
+		CallID:     update.ToolCallID,
+		ToolName:   protocolUpdateToolName(ev, update),
+		ToolKind:   update.Kind,
+		ToolTitle:  update.Title,
+		Status:     update.Status,
+		RawInput:   cloneAnyMap(update.RawInput),
+		RawOutput:  cloneAnyMap(update.RawOutput),
+		Content:    session.ProtocolToolCallContentOf(update),
+		Error:      protocolUpdateToolError(update),
+	}, string(kernel.ToolStatusRunning))
 }
 
 func protocolUpdateIsPlanTool(ev kernel.Event, update *session.ProtocolUpdate) bool {

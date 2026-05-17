@@ -1,6 +1,10 @@
 package modelcatalog
 
-import "testing"
+import (
+	"bytes"
+	"compress/gzip"
+	"testing"
+)
 
 func TestLookupModelCapabilitiesFallsBackToBuiltinWhenDynamicCatalogUnavailable(t *testing.T) {
 	dynamicMu.Lock()
@@ -275,6 +279,26 @@ func TestLookupModelCapabilitiesUsesSnapshotForCustomModel(t *testing.T) {
 func TestParseSnapshotBytesInvalidJSONGracefullyDegrades(t *testing.T) {
 	if snap := parseSnapshotBytes([]byte("{not-json")); snap != nil {
 		t.Fatalf("parseSnapshotBytes(invalid) = %#v, want nil", snap)
+	}
+}
+
+func TestParseEmbeddedSnapshotBytesSupportsGzip(t *testing.T) {
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	if _, err := zw.Write([]byte(`{"openai:custom-gzip-model":{"context_window":1234,"max_output":567,"tool_calls":true,"json_output":true}}`)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := parseEmbeddedSnapshotBytes(buf.Bytes())
+	caps, ok := searchCapSnapshot(snap, "openai", "custom-gzip-model")
+	if !ok {
+		t.Fatal("searchCapSnapshot(openai, custom-gzip-model) = false, want true")
+	}
+	if caps.ContextWindowTokens != 1234 || caps.MaxOutputTokens != 567 || !caps.SupportsToolCalls || !caps.SupportsJSONOutput {
+		t.Fatalf("caps = %#v, want gzip snapshot values", caps)
 	}
 }
 

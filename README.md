@@ -58,9 +58,8 @@ TUI, ACP stdio, and the headless one-shot runner.
   ACP, CLI, local-config model, and TUI gateway-driver flows.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 
-Documentation map: [docs/README.md](docs/README.md)
-
-Architecture overview: [docs/architecture.md](docs/architecture.md)
+Architecture plan:
+[docs/agent-sdk-acp-architecture-plan.md](docs/agent-sdk-acp-architecture-plan.md)
 
 ## Install
 
@@ -213,11 +212,16 @@ Caelis currently requires Go `1.25.1` as declared in `go.mod`.
 make quality
 make test
 make build
+make arch-lint
+make size-report
 ```
 
 - `make quality`: runs formatting check, `golangci-lint`, tests, `go vet`, and
   `go build ./...`
 - `make test`: runs `go test ./...`
+- `make arch-lint`: checks the repository layer boundaries.
+- `make size-report`: prints code size, package, embedded resource, binary, npm,
+  and dependency metrics.
 - `make build`: runs `go build ./...`
 
 The Makefile defaults Go and lint caches to `.tmp/cache` so local quality checks

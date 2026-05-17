@@ -129,6 +129,151 @@ func BuildModel(payload Payload) Model {
 	}
 }
 
+// BuildUnifiedLines returns plain unified-diff lines for ACP transcript content.
+func BuildUnifiedLines(oldText string, newText string) []string {
+	oldLines := splitUnifiedContentLines(oldText)
+	newLines := splitUnifiedContentLines(newText)
+	rows := buildUnifiedRows(oldLines, newLines)
+	return unifiedHunkLines(rows)
+}
+
+type unifiedRow struct {
+	kind  byte
+	oldNo int
+	newNo int
+	text  string
+}
+
+func buildUnifiedRows(oldLines []string, newLines []string) []unifiedRow {
+	pairs := unifiedLinePairs(oldLines, newLines)
+	rows := make([]unifiedRow, 0, len(oldLines)+len(newLines))
+	oldIdx, newIdx := 0, 0
+	for _, pair := range pairs {
+		rows = appendUnifiedChangedRows(rows, oldLines, newLines, oldIdx, pair.a, newIdx, pair.b)
+		rows = append(rows, unifiedRow{
+			kind:  ' ',
+			oldNo: pair.a + 1,
+			newNo: pair.b + 1,
+			text:  oldLines[pair.a],
+		})
+		oldIdx = pair.a + 1
+		newIdx = pair.b + 1
+	}
+	rows = appendUnifiedChangedRows(rows, oldLines, newLines, oldIdx, len(oldLines), newIdx, len(newLines))
+	return rows
+}
+
+func appendUnifiedChangedRows(rows []unifiedRow, oldLines []string, newLines []string, oldStart int, oldEnd int, newStart int, newEnd int) []unifiedRow {
+	for idx := oldStart; idx < oldEnd; idx++ {
+		rows = append(rows, unifiedRow{kind: '-', oldNo: idx + 1, text: oldLines[idx]})
+	}
+	for idx := newStart; idx < newEnd; idx++ {
+		rows = append(rows, unifiedRow{kind: '+', newNo: idx + 1, text: newLines[idx]})
+	}
+	return rows
+}
+
+func unifiedLinePairs(oldLines []string, newLines []string) []indexPair {
+	const maxCells = 250000
+	prefix, suffix := commonLineAffixCounts(oldLines, newLines)
+	pairs := make([]indexPair, 0, prefix+suffix)
+	for idx := 0; idx < prefix; idx++ {
+		pairs = append(pairs, indexPair{a: idx, b: idx})
+	}
+	oldCore := oldLines[prefix : len(oldLines)-suffix]
+	newCore := newLines[prefix : len(newLines)-suffix]
+	if len(oldCore) > 0 && len(newCore) > 0 && len(oldCore) <= maxCells/len(newCore) {
+		for _, pair := range lcsLinePairs(oldCore, newCore) {
+			pairs = append(pairs, indexPair{a: prefix + pair.a, b: prefix + pair.b})
+		}
+	}
+	for idx := 0; idx < suffix; idx++ {
+		oldIndex := len(oldLines) - suffix + idx
+		newIndex := len(newLines) - suffix + idx
+		pairs = append(pairs, indexPair{a: oldIndex, b: newIndex})
+	}
+	return pairs
+}
+
+func unifiedHunkLines(rows []unifiedRow) []string {
+	ranges := unifiedHunkRanges(rows)
+	if len(ranges) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(rows)+len(ranges))
+	for _, item := range ranges {
+		hunkRows := rows[item[0] : item[1]+1]
+		out = append(out, unifiedHunkHeader(hunkRows))
+		for _, row := range hunkRows {
+			out = append(out, string(row.kind)+row.text)
+		}
+	}
+	return out
+}
+
+func unifiedHunkRanges(rows []unifiedRow) [][2]int {
+	const mergeContextGap = 1
+	ranges := make([][2]int, 0)
+	lastChange := -1
+	for idx, row := range rows {
+		if row.kind == ' ' {
+			continue
+		}
+		if len(ranges) == 0 || idx-lastChange > mergeContextGap+1 {
+			ranges = append(ranges, [2]int{idx, idx})
+		} else {
+			ranges[len(ranges)-1][1] = idx
+		}
+		lastChange = idx
+	}
+	return ranges
+}
+
+func unifiedHunkHeader(rows []unifiedRow) string {
+	oldStart, oldLines := 0, 0
+	newStart, newLines := 0, 0
+	for _, row := range rows {
+		if row.kind != '+' {
+			if oldStart == 0 {
+				oldStart = row.oldNo
+			}
+			oldLines++
+		}
+		if row.kind != '-' {
+			if newStart == 0 {
+				newStart = row.newNo
+			}
+			newLines++
+		}
+	}
+	if oldStart == 0 {
+		oldStart = previousDiffLine(newStart)
+	}
+	if newStart == 0 {
+		newStart = previousDiffLine(oldStart)
+	}
+	return fmt.Sprintf("@@ -%d,%d +%d,%d @@", oldStart, oldLines, newStart, newLines)
+}
+
+func previousDiffLine(line int) int {
+	if line <= 1 {
+		return 0
+	}
+	return line - 1
+}
+
+func splitUnifiedContentLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	normalized := strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	normalized = strings.TrimSuffix(normalized, "\n")
+	if normalized == "" {
+		return nil
+	}
+	return strings.Split(normalized, "\n")
+}
+
 func richDiffMaxRowsHint(oldLines, newLines []string) int {
 	const extraRows = 16
 	return (FoldContextLines * 4) + len(oldLines) + len(newLines) + extraRows

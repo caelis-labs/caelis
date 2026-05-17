@@ -1,10 +1,9 @@
 package tuiapp
 
 import (
-	"cmp"
-	"os"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/displaymodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
@@ -16,22 +15,9 @@ type PanelViewModel struct {
 	Footer  string
 }
 
-type ToolEventViewModel struct {
-	Name       string
-	Args       string
-	Output     string
-	Done       bool
-	Err        bool
-	Expandable bool
-	Expanded   bool
-	ClickToken string
-}
+type ToolEventViewModel = displaymodel.ToolEventViewModel
 
-type WelcomeViewModel struct {
-	VersionLabel string
-	Workspace    string
-	ModelAlias   string
-}
+type WelcomeViewModel = displaymodel.WelcomeViewModel
 
 type renderedSegment struct {
 	Plain  string
@@ -56,25 +42,6 @@ func renderPanelViewModel(theme tuikit.Theme, vm PanelViewModel) []string {
 		Body:    vm.Body,
 		Footer:  strings.TrimSpace(vm.Footer),
 	})
-}
-
-func buildWelcomeViewModel(version, workspace, modelName string) WelcomeViewModel {
-	versionText := cmp.Or(strings.TrimSpace(version), "unknown")
-	versionLabel := versionText
-	if !strings.HasPrefix(strings.ToLower(versionText), "v") {
-		versionLabel = "v" + versionText
-	}
-
-	workspace = cmp.Or(strings.TrimSpace(workspace), ".")
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		workspace = strings.Replace(workspace, home, "~", 1)
-	}
-
-	return WelcomeViewModel{
-		VersionLabel: versionLabel,
-		Workspace:    workspace,
-		ModelAlias:   cmp.Or(strings.TrimSpace(modelName), "not configured (/connect)"),
-	}
 }
 
 func buildWelcomePanelViewModel(w WelcomeViewModel, width int, theme tuikit.Theme) PanelViewModel {
@@ -120,13 +87,13 @@ func truncateTailDisplay(text string, width int) string {
 }
 
 func buildToolEventViewModel(ev SubagentEvent) ToolEventViewModel {
-	return ToolEventViewModel{
-		Name:   strings.TrimSpace(tuikit.SanitizeLogText(ev.Name)),
-		Args:   strings.TrimSpace(tuikit.SanitizeLogText(ev.Args)),
-		Output: strings.TrimSpace(tuikit.SanitizeLogText(ev.Output)),
+	return displaymodel.BuildToolEventViewModel(displaymodel.ToolEvent{
+		Name:   tuikit.SanitizeLogText(ev.Name),
+		Args:   tuikit.SanitizeLogText(ev.Args),
+		Output: tuikit.SanitizeLogText(ev.Output),
 		Done:   ev.Done,
 		Err:    ev.Err,
-	}
+	})
 }
 
 func renderToolEventViewModelLines(blockID string, vm ToolEventViewModel, width int, theme tuikit.Theme) []RenderedRow {
@@ -232,49 +199,9 @@ func splitToolLifecycleHeader(line string) (prefix string, rest string, ok bool)
 }
 
 func renderToolEventViewModelPlain(vm ToolEventViewModel) (string, tuikit.LineStyle) {
-	name := toolEventDisplayName(vm.Name)
-	if !vm.Done {
-		prefix := "▸"
-		if vm.Expandable && vm.Expanded {
-			prefix = "▾"
-		}
-		line := prefix + " " + name
-		if vm.Args != "" {
-			line += " " + vm.Args
-		}
-		return line, tuikit.LineStyleTool
-	}
-	if vm.Err {
-		line := "✗ " + name
-		if vm.Output != "" {
-			line += " " + vm.Output
-		}
-		return line, tuikit.LineStyleTool
-	}
-	line := "✓ " + name
-	if vm.Output != "" {
-		line += " " + vm.Output
-	} else {
-		line += " completed"
-	}
-	return line, tuikit.LineStyleTool
+	return displaymodel.RenderToolEventLine(vm), tuikit.LineStyleTool
 }
 
 func toolEventDisplayName(name string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return "TOOL"
-	}
-	switch strings.ToLower(name) {
-	case "read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other":
-		return strings.ToUpper(name[:1]) + name[1:]
-	}
-	switch strings.ToUpper(strings.ReplaceAll(name, " ", "_")) {
-	case "REQUEST_PERMISSIONS":
-		return "Request permissions"
-	case "THINK":
-		return "Think"
-	default:
-		return cmp.Or(strings.TrimSpace(name), "TOOL")
-	}
+	return displaymodel.ToolEventDisplayName(name)
 }

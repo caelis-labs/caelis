@@ -36,6 +36,15 @@ type openAICompatOptions struct {
 	StructuredOutput               openAICompatStructuredOutput
 }
 
+type openAICompatProfile struct {
+	IncludeReasoningContent        bool
+	EmitEmptyReasoningForToolCall  bool
+	EmitEmptyReasoningForAssistant bool
+	DisableReasoning               bool
+	ApplyReasoning                 func(*openAICompatRequest, model.ReasoningConfig)
+	StructuredOutput               openAICompatStructuredOutput
+}
+
 func defaultOpenAICompatOptions() openAICompatOptions {
 	return openAICompatOptions{
 		ApplyReasoning:   applyOpenAIReasoning,
@@ -64,6 +73,28 @@ func newOpenAICompat(cfg Config, token string) *openAICompatLLM {
 		options:             defaultOpenAICompatOptions(),
 	}
 	return llm
+}
+
+func newOpenAICompatWithProfile(cfg Config, token string, profile openAICompatProfile) *openAICompatLLM {
+	llm := newOpenAICompat(cfg, token)
+	llm.options = openAICompatOptionsForProfile(profile)
+	return llm
+}
+
+func openAICompatOptionsForProfile(profile openAICompatProfile) openAICompatOptions {
+	options := defaultOpenAICompatOptions()
+	options.IncludeReasoningContent = profile.IncludeReasoningContent
+	options.EmitEmptyReasoningForToolCall = profile.EmitEmptyReasoningForToolCall
+	options.EmitEmptyReasoningForAssistant = profile.EmitEmptyReasoningForAssistant
+	if profile.DisableReasoning {
+		options.ApplyReasoning = nil
+	} else if profile.ApplyReasoning != nil {
+		options.ApplyReasoning = profile.ApplyReasoning
+	}
+	if profile.StructuredOutput != "" {
+		options.StructuredOutput = profile.StructuredOutput
+	}
+	return options
 }
 
 func (l *openAICompatLLM) Name() string {

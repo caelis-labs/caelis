@@ -12,7 +12,7 @@ GOTMPDIR ?= $(CACHE_ROOT)/gotmp
 GOLANGCI_LINT_CACHE ?= $(CACHE_ROOT)/golangci-lint
 XDG_CACHE_HOME ?= $(CACHE_ROOT)/xdg
 export GOMODCACHE GOCACHE GOTMPDIR GOLANGCI_LINT_CACHE XDG_CACHE_HOME
-.PHONY: build build-cli cache-dirs fmt fmt-check install lint quality test vet release-dry-run
+.PHONY: arch-lint build build-cli cache-dirs fmt fmt-check install lint quality size-report test vet release-dry-run
 
 cache-dirs:
 	mkdir -p "$(GOMODCACHE)" "$(GOCACHE)" "$(GOTMPDIR)" "$(GOLANGCI_LINT_CACHE)" "$(XDG_CACHE_HOME)"
@@ -38,6 +38,12 @@ vet: cache-dirs
 
 lint: cache-dirs
 	golangci-lint run ./...
+
+arch-lint:
+	go run ./scripts/arch_lint.go
+
+size-report:
+	bash scripts/size_report.sh
 
 quality: fmt-check lint vet test build
 
