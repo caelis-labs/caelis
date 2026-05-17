@@ -128,6 +128,64 @@ func TestRuntimeWaitDrainsOutputBeforeCompletion(t *testing.T) {
 	}
 }
 
+func TestRuntimeRunCapsCapturedOutput(t *testing.T) {
+	t.Parallel()
+
+	rt, err := New(Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	result, err := rt.Run(context.Background(), commandRequest("printf 'start-marker\\n'; yes x | head -c 2097152; printf '\\nend-marker\\n'"))
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(result.Stdout) > hostOutputCap {
+		t.Fatalf("stdout len = %d, want <= %d", len(result.Stdout), hostOutputCap)
+	}
+	if !strings.Contains(result.Stdout, "end-marker") {
+		t.Fatalf("stdout missing end marker, tail=%q", tailString(result.Stdout, 120))
+	}
+	if strings.Contains(result.Stdout, "start-marker") {
+		t.Fatalf("stdout still contains early output, tail=%q", tailString(result.Stdout, 120))
+	}
+}
+
+func TestRuntimeStartReadOutputCursorSurvivesCappedStream(t *testing.T) {
+	t.Parallel()
+
+	rt, err := New(Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	session, err := rt.Start(context.Background(), commandRequest("yes x | head -c "+strconv.Itoa(hostOutputCap)+"; read line; printf 'tail-marker\\n'"))
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer func() { _ = session.Terminate(context.Background()) }()
+
+	_, cursor := waitForStdoutMarkerAtLeast(t, session, hostOutputCap)
+	if err := session.WriteInput(context.Background(), []byte("\n")); err != nil {
+		t.Fatalf("WriteInput() error = %v", err)
+	}
+	status, err := session.Wait(context.Background(), 2*time.Second)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if status.Running {
+		t.Fatal("status.Running = true, want false")
+	}
+	stdout, _, nextCursor, _, err := session.ReadOutput(context.Background(), cursor, 0)
+	if err != nil {
+		t.Fatalf("ReadOutput(%d,0) error = %v", cursor, err)
+	}
+	if got := string(stdout); !strings.Contains(got, "tail-marker") {
+		t.Fatalf("stdout after cursor %d = %q, next cursor %d; want tail-marker", cursor, tailString(got, 120), nextCursor)
+	}
+	if nextCursor <= cursor {
+		t.Fatalf("next stdout cursor = %d, want > %d", nextCursor, cursor)
+	}
+}
+
 func TestRuntimeStartCleansBackgroundProcessAfterShellExit(t *testing.T) {
 	t.Parallel()
 
@@ -153,6 +211,25 @@ func TestRuntimeStartCleansBackgroundProcessAfterShellExit(t *testing.T) {
 	}
 	pid := parseBackgroundPID(t, result.Stdout)
 	waitForProcessGone(t, pid)
+}
+
+func waitForStdoutMarkerAtLeast(t *testing.T, session sandbox.Session, want int) ([]byte, int64) {
+	t.Helper()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		stdout, _, cursor, _, err := session.ReadOutput(context.Background(), 0, 0)
+		if err != nil {
+			t.Fatalf("ReadOutput(0,0) error = %v", err)
+		}
+		if cursor >= int64(want) {
+			return stdout, cursor
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("stdout cursor = %d, want >= %d", cursor, want)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
 
 func waitForStdoutContains(t *testing.T, session sandbox.Session, marker int64, want string) ([]byte, int64) {

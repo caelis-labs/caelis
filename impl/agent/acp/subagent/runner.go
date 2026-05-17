@@ -652,10 +652,18 @@ func acpToolContent(content []client.ToolCallContent) []session.ProtocolToolCall
 	}
 	out := make([]session.ProtocolToolCallContent, 0, len(content))
 	for _, item := range content {
+		var oldText *string
+		if item.OldText != nil {
+			value := *item.OldText
+			oldText = &value
+		}
 		out = append(out, session.ProtocolToolCallContent{
 			Type:       strings.TrimSpace(item.Type),
 			Content:    item.Content,
 			TerminalID: strings.TrimSpace(item.TerminalID),
+			Path:       strings.TrimSpace(item.Path),
+			OldText:    oldText,
+			NewText:    item.NewText,
 		})
 	}
 	return session.CloneProtocolToolCallContent(out)

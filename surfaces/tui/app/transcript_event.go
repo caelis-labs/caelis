@@ -261,6 +261,11 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 					toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 				}
 			}
+			if strings.EqualFold(semanticName, "TASK") && !toolErr && !transcriptToolStatusFinal(status, toolErr) &&
+				!strings.EqualFold(toolDisplayTaskAction(rawInput, displayOutput, ev.Meta), "write") {
+				toolOutput = ""
+				toolOutputSynthetic = false
+			}
 			toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, payload.ToolKind, payload.ToolTitle), acpprojector.FormatToolStart(toolName, displayInput))
 			toolTaskID := toolDisplayTaskID(rawInput, displayOutput, ev.Meta)
 			if strings.EqualFold(semanticName, "TASK") {

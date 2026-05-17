@@ -865,6 +865,31 @@ func TestProjectGatewayEventTaskResultPrefersOutputHandleInArgs(t *testing.T) {
 	}
 }
 
+func TestProjectGatewayEventTaskResultPreservesSuccessfulOutput(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Meta: testRuntimeToolMeta(map[string]any{
+			"action":    "wait",
+			"target_id": "jeff",
+		}),
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "task-wait",
+			ToolName: "TASK",
+			Status:   kernel.ToolStatusCompleted,
+			RawInput: map[string]any{"action": "wait", "task_id": "jeff"},
+			Content:  testToolContent("final task output\n"),
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "final task output\n" {
+		t.Fatalf("ToolOutput = %q, want successful TASK output preserved", got)
+	}
+}
+
 func TestProjectGatewayEventTaskResultShowsEffectiveWaitDuration(t *testing.T) {
 	t.Parallel()
 

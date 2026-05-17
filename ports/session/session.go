@@ -354,9 +354,12 @@ type ProtocolToolCallLocation struct {
 
 // ProtocolToolCallContent is the ACP tool-call content shape.
 type ProtocolToolCallContent struct {
-	Type       string `json:"type,omitempty"`
-	Content    any    `json:"content,omitempty"`
-	TerminalID string `json:"terminalId,omitempty"`
+	Type       string  `json:"type,omitempty"`
+	Content    any     `json:"content,omitempty"`
+	TerminalID string  `json:"terminalId,omitempty"`
+	Path       string  `json:"path,omitempty"`
+	OldText    *string `json:"oldText,omitempty"`
+	NewText    string  `json:"newText,omitempty"`
 }
 
 // ProtocolUpdate is the normalized ACP session/update payload carried by one
@@ -961,11 +964,21 @@ func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool
 			Type:       strings.TrimSpace(protocolContentString(typed["type"])),
 			Content:    cloneProtocolAny(typed["content"]),
 			TerminalID: strings.TrimSpace(protocolContentString(typed["terminalId"])),
+			Path:       strings.TrimSpace(protocolContentString(typed["path"])),
 		}
+		out.NewText, _ = protocolRawString(typed["newText"])
 		if out.TerminalID == "" {
 			out.TerminalID = strings.TrimSpace(protocolContentString(typed["terminal_id"]))
 		}
-		return out, out.Type != "" || out.Content != nil || out.TerminalID != ""
+		if out.NewText == "" {
+			out.NewText, _ = protocolRawString(typed["new_text"])
+		}
+		if oldText, ok := protocolOptionalString(typed["oldText"]); ok {
+			out.OldText = &oldText
+		} else if oldText, ok := protocolOptionalString(typed["old_text"]); ok {
+			out.OldText = &oldText
+		}
+		return out, out.Type != "" || out.Content != nil || out.TerminalID != "" || out.Path != "" || out.OldText != nil || out.NewText != ""
 	default:
 		raw, err := json.Marshal(typed)
 		if err != nil || len(raw) == 0 {
@@ -976,13 +989,22 @@ func protocolToolCallContentItemFromAny(item any) (ProtocolToolCallContent, bool
 			return ProtocolToolCallContent{}, false
 		}
 		cloned := cloneProtocolToolCallContents([]ProtocolToolCallContent{decoded})
-		return cloned[0], cloned[0].Type != "" || cloned[0].Content != nil || cloned[0].TerminalID != ""
+		return cloned[0], cloned[0].Type != "" || cloned[0].Content != nil || cloned[0].TerminalID != "" || cloned[0].Path != "" || cloned[0].OldText != nil || cloned[0].NewText != ""
 	}
 }
 
 func protocolContentString(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func protocolRawString(value any) (string, bool) {
+	text, ok := value.(string)
+	return text, ok
+}
+
+func protocolOptionalString(value any) (string, bool) {
+	return protocolRawString(value)
 }
 
 // NormalizeSessionRef returns one normalized session ref.
@@ -1312,10 +1334,18 @@ func cloneProtocolToolCallContents(in []ProtocolToolCallContent) []ProtocolToolC
 	}
 	out := make([]ProtocolToolCallContent, 0, len(in))
 	for _, item := range in {
+		var oldText *string
+		if item.OldText != nil {
+			value := *item.OldText
+			oldText = &value
+		}
 		out = append(out, ProtocolToolCallContent{
 			Type:       strings.TrimSpace(item.Type),
 			Content:    cloneProtocolAny(item.Content),
 			TerminalID: strings.TrimSpace(item.TerminalID),
+			Path:       strings.TrimSpace(item.Path),
+			OldText:    oldText,
+			NewText:    item.NewText,
 		})
 	}
 	return out

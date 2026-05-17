@@ -92,6 +92,37 @@ func TestStreamReadBashCompletedUsesFinalTextWithoutFrame(t *testing.T) {
 	}
 }
 
+func TestStreamReadBashCompletedEmitsUndeliveredTailFrame(t *testing.T) {
+	t.Parallel()
+
+	const shown = "already shown\n"
+	const tail = "final tail\n"
+	task := &bashTask{
+		ref:          taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
+		sessionRef:   session.SessionRef{SessionID: "session-1"},
+		session:      &liveOutputRaceSession{stdout: shown + tail, completed: true},
+		state:        taskapi.StateRunning,
+		running:      true,
+		createdAt:    time.Now(),
+		output:       shown,
+		stdoutCursor: int64(len([]byte(shown))),
+	}
+
+	snap, err := (&streamService{}).readBash(context.Background(), task, stream.Cursor{Output: int64(len([]byte(shown)))})
+	if err != nil {
+		t.Fatalf("readBash() error = %v", err)
+	}
+	if got := streamFrameText(snap.Frames); got != tail {
+		t.Fatalf("stream frame text = %q, want undelivered final tail", got)
+	}
+	if snap.Running {
+		t.Fatal("snapshot.Running = true, want completed snapshot")
+	}
+	if snap.FinalText != shown+tail {
+		t.Fatalf("FinalText = %q, want complete command result", snap.FinalText)
+	}
+}
+
 func TestBashLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	t.Parallel()
 
@@ -271,11 +302,21 @@ func (s *liveOutputRaceSession) Terminal() sandbox.TerminalRef {
 
 func (s *liveOutputRaceSession) WriteInput(context.Context, []byte) error { return nil }
 
-func (s *liveOutputRaceSession) ReadOutput(context.Context, int64, int64) ([]byte, []byte, int64, int64, error) {
+func (s *liveOutputRaceSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) ([]byte, []byte, int64, int64, error) {
 	if s.onRead != nil {
 		s.onRead()
 	}
-	return []byte(s.stdout), nil, int64(len([]byte(s.stdout))), 0, nil
+	stdout := []byte(s.stdout)
+	if stdoutMarker < 0 {
+		stdoutMarker = 0
+	}
+	if stdoutMarker > int64(len(stdout)) {
+		stdoutMarker = int64(len(stdout))
+	}
+	if stderrMarker < 0 {
+		stderrMarker = 0
+	}
+	return append([]byte(nil), stdout[stdoutMarker:]...), nil, int64(len(stdout)), stderrMarker, nil
 }
 
 func (s *liveOutputRaceSession) Status(context.Context) (sandbox.SessionStatus, error) {

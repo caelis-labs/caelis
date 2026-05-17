@@ -91,16 +91,14 @@ func (s *streamService) readBash(ctx context.Context, task *bashTask, cursor str
 		snap.ExitCode = &exitCode
 		snap.FinalText = finalText
 	}
-	if status.Running {
-		if delta := task.outputFromCursorLocked(cursor.Output); delta != "" {
-			snap.Frames = append(snap.Frames, stream.Frame{
-				Ref:       snap.Ref,
-				Text:      delta,
-				Cursor:    snap.Cursor,
-				Running:   status.Running,
-				UpdatedAt: status.UpdatedAt,
-			})
-		}
+	if delta := task.outputFromCursorLocked(cursor.Output); delta != "" {
+		snap.Frames = append(snap.Frames, stream.Frame{
+			Ref:       snap.Ref,
+			Text:      delta,
+			Cursor:    snap.Cursor,
+			Running:   status.Running,
+			UpdatedAt: status.UpdatedAt,
+		})
 	}
 	task.mu.Unlock()
 	return stream.CloneSnapshot(snap), nil

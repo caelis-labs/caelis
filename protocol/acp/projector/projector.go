@@ -425,10 +425,18 @@ func projectToolContent(content []session.ProtocolToolCallContent, displayTermin
 		if strings.EqualFold(contentType, "terminal") && strings.TrimSpace(displayTerminalID) != "" {
 			terminalID = strings.TrimSpace(displayTerminalID)
 		}
+		var oldText *string
+		if item.OldText != nil {
+			value := *item.OldText
+			oldText = &value
+		}
 		out = append(out, ToolCallContent{
 			Type:       contentType,
 			Content:    item.Content,
 			TerminalID: terminalID,
+			Path:       strings.TrimSpace(item.Path),
+			OldText:    oldText,
+			NewText:    item.NewText,
 		})
 	}
 	return out

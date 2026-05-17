@@ -108,9 +108,10 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	if len(req.Stdin) > 0 {
 		cmd.Stdin = bytes.NewReader(req.Stdin)
 	}
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	stdout := &cappedOutputBuffer{max: hostOutputCap}
+	stderr := &cappedOutputBuffer{max: hostOutputCap}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	err := cmd.Run()
 
 	result := sandbox.CommandResult{
@@ -281,6 +282,8 @@ type hostSession struct {
 	mu            sync.RWMutex
 	stdout        []byte
 	stderr        []byte
+	stdoutTotal   int64
+	stderrTotal   int64
 	running       bool
 	supportsInput bool
 	exitCode      int
@@ -324,15 +327,9 @@ func (s *hostSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker i
 	if stderrMarker < 0 {
 		stderrMarker = 0
 	}
-	if stdoutMarker > int64(len(s.stdout)) {
-		stdoutMarker = int64(len(s.stdout))
-	}
-	if stderrMarker > int64(len(s.stderr)) {
-		stderrMarker = int64(len(s.stderr))
-	}
-	stdout = append([]byte(nil), s.stdout[stdoutMarker:]...)
-	stderr = append([]byte(nil), s.stderr[stderrMarker:]...)
-	return stdout, stderr, int64(len(s.stdout)), int64(len(s.stderr)), nil
+	stdout, newStdoutMarker = cappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
+	stderr, newStderrMarker = cappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
+	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
 }
 
 func (s *hostSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
@@ -406,9 +403,11 @@ func (s *hostSession) readStream(reader io.Reader, stream string) {
 			s.mu.Lock()
 			switch stream {
 			case "stderr":
-				s.stderr = append(s.stderr, chunk...)
+				s.stderr = appendCappedBytes(s.stderr, chunk, hostOutputCap)
+				s.stderrTotal += int64(len(chunk))
 			default:
-				s.stdout = append(s.stdout, chunk...)
+				s.stdout = appendCappedBytes(s.stdout, chunk, hostOutputCap)
+				s.stdoutTotal += int64(len(chunk))
 			}
 			s.updatedAt = time.Now()
 			s.mu.Unlock()
@@ -472,6 +471,13 @@ func (h hostFS) WriteFile(path string, data []byte, perm os.FileMode) error {
 	return os.WriteFile(path, data, perm)
 }
 
+func (h hostFS) MkdirAll(path string, perm os.FileMode) error {
+	if perm == 0 {
+		perm = 0o755
+	}
+	return os.MkdirAll(path, perm)
+}
+
 func (h hostFS) Glob(pattern string) ([]string, error) { return filepath.Glob(pattern) }
 
 func (h hostFS) WalkDir(root string, fn fs.WalkDirFunc) error { return filepath.WalkDir(root, fn) }
@@ -485,6 +491,61 @@ func mergeEnv(extra map[string]string) []string {
 		env = append(env, key+"="+value)
 	}
 	return env
+}
+
+const hostOutputCap = 1024 * 1024
+
+type cappedOutputBuffer struct {
+	max int
+	buf []byte
+}
+
+func (b *cappedOutputBuffer) Write(p []byte) (int, error) {
+	b.buf = appendCappedBytes(b.buf, p, b.max)
+	return len(p), nil
+}
+
+func (b *cappedOutputBuffer) String() string {
+	return string(b.buf)
+}
+
+func appendCappedBytes(dst []byte, src []byte, max int) []byte {
+	if max <= 0 {
+		return append(dst, src...)
+	}
+	if len(src) >= max {
+		return append([]byte(nil), src[len(src)-max:]...)
+	}
+	keep := max - len(src)
+	if len(dst) > keep {
+		dst = dst[len(dst)-keep:]
+	}
+	out := append([]byte(nil), dst...)
+	return append(out, src...)
+}
+
+func cappedOutputSince(buf []byte, total int64, marker int64) ([]byte, int64) {
+	if total < 0 {
+		total = 0
+	}
+	base := total - int64(len(buf))
+	if base < 0 {
+		base = 0
+	}
+	if marker < base {
+		marker = base
+	}
+	if marker > total {
+		marker = total
+	}
+	start := marker - base
+	if start < 0 {
+		start = 0
+	}
+	if start > int64(len(buf)) {
+		start = int64(len(buf))
+	}
+	return append([]byte(nil), buf[start:]...), total
 }
 
 var _ sandbox.Runtime = (*Runtime)(nil)

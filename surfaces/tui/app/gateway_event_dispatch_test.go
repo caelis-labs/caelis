@@ -1920,7 +1920,7 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 	}
 }
 
-func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
+func TestGatewayTaskSnapshotDoesNotRefreshBashPanelOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []kernel.EventEnvelope{
 		{Event: kernel.Event{
@@ -1996,9 +1996,14 @@ func TestGatewayTaskSnapshotRefreshesBashPanelOutput(t *testing.T) {
 		plain = append(plain, row.Plain)
 	}
 	joined := strings.Join(plain, "\n")
-	for _, want := range []string{"  └ 进度: 1/30", "    进度: 3/30", "▸ TASK Wait 5s"} {
+	for _, want := range []string{"• Ran for i in $(seq 1 30); do echo $i; sleep 1; done", "  └ 进度: 1/30", "▸ TASK Wait 5s"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("rendered rows = %q, want %q", joined, want)
+		}
+	}
+	for _, forbidden := range []string{"    进度: 2/30", "    进度: 3/30"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, TASK wait output should not refresh BASH panel", joined)
 		}
 	}
 	for _, forbidden := range []string{"|_", "BASH output", "│", "task / running", "state running", "stdout 进度", "task-7"} {
@@ -2503,7 +2508,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 	}
 	rows := block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
 	joined := strings.Join(renderedPlainRows(rows), "\n")
-	for _, want := range []string{"• Spawned jack[self]: 创建文件", "old final answer", "• Tasks", "Wait jack", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
+	for _, want := range []string{"• Spawned jack[self]: 创建文件", "• Tasks", "Wait jack", "• Write jack: 检查刚才创建的文件", "正在读取 hello_from_spawn.txt"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("running continuation rows missing %q:\n%s", want, joined)
 		}

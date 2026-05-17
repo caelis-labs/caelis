@@ -144,7 +144,8 @@ func (f hostFileSystem) ReadFile(name string) ([]byte, error)       { return os.
 func (f hostFileSystem) WriteFile(name string, data []byte, mode os.FileMode) error {
 	return os.WriteFile(name, data, mode)
 }
-func (f hostFileSystem) Glob(pattern string) ([]string, error) { return filepath.Glob(pattern) }
+func (f hostFileSystem) MkdirAll(name string, mode os.FileMode) error { return os.MkdirAll(name, mode) }
+func (f hostFileSystem) Glob(pattern string) ([]string, error)        { return filepath.Glob(pattern) }
 func (f hostFileSystem) WalkDir(root string, fn fs.WalkDirFunc) error {
 	return filepath.WalkDir(root, fn)
 }

@@ -3,6 +3,8 @@ package filesystem
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/internal/toolutil"
@@ -57,6 +59,11 @@ func (t *WriteTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	if err != nil {
 		return tool.Result{}, err
 	}
+	if plan.created {
+		if err := createWorkspaceParentDirs(fsys, plan.path); err != nil {
+			return tool.Result{}, err
+		}
+	}
 	if err := fsys.WriteFile(plan.path, []byte(plan.after), plan.mode); err != nil {
 		return tool.Result{}, err
 	}
@@ -81,6 +88,32 @@ func (t *WriteTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	}
 	attachMutationDiffMeta(result.Metadata, plan.before, plan.after, plan.hunk)
 	return result, nil
+}
+
+type mkdirAllFileSystem interface {
+	MkdirAll(path string, perm os.FileMode) error
+}
+
+func createWorkspaceParentDirs(fsys sandbox.FileSystem, target string) error {
+	mkdirer, ok := fsys.(mkdirAllFileSystem)
+	if !ok {
+		return nil
+	}
+	cwd, err := fsys.Getwd()
+	if err != nil {
+		return err
+	}
+	cwd = filepath.Clean(cwd)
+	target = filepath.Clean(target)
+	rel, err := filepath.Rel(cwd, target)
+	if err != nil || rel == "." || rel == ".." || filepath.IsAbs(rel) || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return nil
+	}
+	parent := filepath.Dir(target)
+	if parent == "." || parent == target || parent == cwd {
+		return nil
+	}
+	return mkdirer.MkdirAll(parent, 0o755)
 }
 
 func lineCount(text string) int {

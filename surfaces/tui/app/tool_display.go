@@ -21,6 +21,9 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if path := toolPath(raw); path != "" {
 			return compactPathDisplay(path)
 		}
+		if metadataOnlyToolArgs(raw) {
+			return ""
+		}
 	case "GLOB":
 		if pattern := strings.TrimSpace(asString(raw["pattern"])); pattern != "" {
 			return pattern
@@ -66,6 +69,21 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		return summary
 	}
 	return firstTrimmed(fallback...)
+}
+
+func metadataOnlyToolArgs(raw map[string]any) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	for key := range raw {
+		switch strings.ToLower(strings.TrimSpace(key)) {
+		case "metadata", "_meta":
+			continue
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func compactPathDisplay(path string) string {
@@ -636,17 +654,74 @@ func taskHandleDisplay(value string) string {
 }
 
 func toolDisplayResultHeader(name string, output string) string {
-	switch strings.ToUpper(strings.TrimSpace(name)) {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	switch name {
 	case "READ", "LIST", "GLOB", "WRITE", "PATCH":
 	default:
 		return ""
 	}
+	mutationDiff := (name == "WRITE" || name == "PATCH") && toolOutputLooksLikeMutationDiff(output)
 	for _, line := range strings.Split(output, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" && trimmed != "diff / hunk" {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if mutationDiff && mutationDiffLine(trimmed) {
+			continue
+		}
+		if !mutationDiff && strings.EqualFold(trimmed, "diff / hunk") {
+			continue
+		}
+		if trimmed != "" {
 			return trimmed
 		}
 	}
 	return ""
+}
+
+func toolOutputLooksLikeMutationDiff(output string) bool {
+	nonEmpty := 0
+	hasScaffold := false
+	hasAdd := false
+	hasRemove := false
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		nonEmpty++
+		switch {
+		case strings.EqualFold(trimmed, "diff / hunk"):
+			hasScaffold = true
+			continue
+		case isDiffHunkHeader(trimmed):
+			hasScaffold = true
+			continue
+		case strings.HasPrefix(trimmed, "+"):
+			hasAdd = true
+			continue
+		case strings.HasPrefix(trimmed, "-"):
+			hasRemove = true
+			continue
+		}
+		return false
+	}
+	return nonEmpty > 0 && (hasScaffold || (hasAdd && hasRemove))
+}
+
+func mutationDiffLine(trimmed string) bool {
+	if strings.EqualFold(trimmed, "diff / hunk") {
+		return true
+	}
+	if isDiffHunkHeader(trimmed) {
+		return true
+	}
+	return strings.HasPrefix(trimmed, "+") || strings.HasPrefix(trimmed, "-")
+}
+
+func isDiffHunkHeader(trimmed string) bool {
+	_, _, _, _, ok := parseDiffHunkHeader(trimmed)
+	return ok
 }
 
 func readDisplaySummary(input map[string]any, output map[string]any) string {

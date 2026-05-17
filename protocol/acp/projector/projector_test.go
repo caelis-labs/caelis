@@ -78,6 +78,45 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	}
 }
 
+func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
+	oldText := "old line\n"
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: UpdateToolCallInfo,
+			ToolCall: &session.ProtocolToolCall{
+				ID:     "call-1",
+				Name:   "PATCH",
+				Status: "completed",
+				Content: []session.ProtocolToolCallContent{{
+					Type:    "diff",
+					Path:    "/workspace/demo.txt",
+					OldText: &oldText,
+					NewText: "new line\n",
+				}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
+	}
+	update, ok := updates[0].(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	if len(update.Content) != 1 {
+		t.Fatalf("content = %#v, want one diff content item", update.Content)
+	}
+	diff := update.Content[0]
+	if diff.Type != "diff" || diff.Path != "/workspace/demo.txt" || diff.OldText == nil || *diff.OldText != oldText || diff.NewText != "new line\n" {
+		t.Fatalf("diff content = %#v, want standard path/oldText/newText", diff)
+	}
+}
+
 func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 	cases := []struct {
 		name       string

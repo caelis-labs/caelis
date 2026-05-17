@@ -61,9 +61,12 @@ type ToolCallLocation struct {
 }
 
 type ToolCallContent struct {
-	Type       string `json:"type"`
-	Content    any    `json:"content,omitempty"`
-	TerminalID string `json:"terminalId,omitempty"`
+	Type       string  `json:"type"`
+	Content    any     `json:"content,omitempty"`
+	TerminalID string  `json:"terminalId,omitempty"`
+	Path       string  `json:"path,omitempty"`
+	OldText    *string `json:"oldText,omitempty"`
+	NewText    string  `json:"newText,omitempty"`
 }
 
 type ContentChunk struct {

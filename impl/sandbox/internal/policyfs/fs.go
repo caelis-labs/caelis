@@ -79,6 +79,19 @@ func (f *policyFileSystem) WriteFile(path string, data []byte, perm os.FileMode)
 	return f.base.WriteFile(path, data, perm)
 }
 
+func (f *policyFileSystem) MkdirAll(path string, perm os.FileMode) error {
+	if err := f.checkWritePath(path); err != nil {
+		return err
+	}
+	mkdirer, ok := f.base.(interface {
+		MkdirAll(string, os.FileMode) error
+	})
+	if !ok {
+		return fmt.Errorf("sandbox filesystem does not support recursive directory creation")
+	}
+	return mkdirer.MkdirAll(path, perm)
+}
+
 func (f *policyFileSystem) checkWritePath(path string) error {
 	p := f.policy()
 	switch p.Type {

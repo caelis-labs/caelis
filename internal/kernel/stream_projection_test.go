@@ -65,10 +65,10 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 	}
 }
 
-func TestStreamRequestFromEventAllowsRunningTaskControl(t *testing.T) {
+func TestStreamRequestFromEventIgnoresRunningTaskControl(t *testing.T) {
 	t.Parallel()
 
-	req, ok := StreamRequestFromEvent(EventEnvelope{
+	_, ok := StreamRequestFromEvent(EventEnvelope{
 		Event: Event{
 			Kind:       EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "session-1"},
@@ -96,11 +96,8 @@ func TestStreamRequestFromEventAllowsRunningTaskControl(t *testing.T) {
 			},
 		},
 	})
-	if !ok {
-		t.Fatal("StreamRequestFromEvent(TASK running) ok = false, want true")
-	}
-	if req.ToolName != "TASK" || req.Ref.TaskID != "spawn-1" || req.CallID != "task-write-1" {
-		t.Fatalf("request = %+v, want TASK stream request for spawn-1", req)
+	if ok {
+		t.Fatal("StreamRequestFromEvent(TASK running) ok = true, want false")
 	}
 }
 

@@ -292,7 +292,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		changed = changed || moved
 		updateToolEventIndex(toolIndex, out, callID)
 	}()
-	if updateLinkedTerminalEvent(out, semanticName, taskID, output, update.Final, update.Err, update.Meta) {
+	if updateLinkedTerminalEvent(out, callID, semanticName, taskID, output, update.Final, update.Err, update.Meta) {
 		changed = true
 		if strings.EqualFold(semanticName, "SPAWN") {
 			return out, changed, false
@@ -1852,45 +1852,50 @@ func visibleNarrativeEvents(events []SubagentEvent, status string) []SubagentEve
 	return out
 }
 
-func updateLinkedTerminalEvent(events []SubagentEvent, toolName string, taskID string, output string, final bool, err bool, meta ToolUpdateMeta) bool {
+func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName string, taskID string, output string, final bool, err bool, meta ToolUpdateMeta) bool {
 	toolName = strings.TrimSpace(toolName)
 	taskID = strings.TrimSpace(taskID)
-	taskAction := strings.ToLower(strings.TrimSpace(meta.TaskAction))
 	if strings.EqualFold(toolName, "SPAWN") {
-		return updateLinkedTaskWriteEvent(events, taskID, output, final, err)
+		if updateLinkedTaskWriteEvent(events, taskID, output, final, err) {
+			return true
+		}
+		return updateLinkedSpawnEvent(events, strings.TrimSpace(callID), taskID, output, final, err)
 	}
-	if !strings.EqualFold(toolName, "TASK") {
-		return false
-	}
-	if taskID == "" || (output == "" && !final && taskAction != "write") {
+	return false
+}
+
+func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string, output string, final bool, err bool) bool {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" || (output == "" && !final) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := &events[i]
-		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID || !isTerminalPanelToolEvent(*ev) {
+		if ev.Kind != SEToolCall || strings.TrimSpace(ev.TaskID) != taskID {
 			continue
 		}
-		if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+		if !strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+			continue
+		}
+		if strings.TrimSpace(ev.CallID) == callID {
 			return false
 		}
-		updated := false
-		if taskAction == "write" {
-			ev.Done = false
-			ev.Err = false
-			ev.Output = ""
-			updated = true
-		}
-		if output != "" && (!meta.OutputSynthetic || strings.TrimSpace(ev.Output) == "") {
-			ev.Output = output
-			ev.OutputSynthetic = meta.OutputSynthetic
-			updated = true
+		if output != "" {
+			if final || ev.Done {
+				ev.Output = strings.TrimSpace(output)
+			} else {
+				ev.Output = mergeSubagentStreamChunk(ev.Output, output)
+			}
+			ev.OutputSynthetic = false
 		}
 		if final {
 			ev.Done = true
 			ev.Err = err
-			updated = true
+		} else if output != "" {
+			ev.Done = false
+			ev.Err = false
 		}
-		return updated
+		return true
 	}
 	return false
 }
@@ -1955,6 +1960,7 @@ func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output st
 			} else {
 				ev.Output = mergeSubagentStreamChunk(ev.Output, output)
 			}
+			ev.OutputSynthetic = false
 		}
 		if final {
 			ev.Done = true

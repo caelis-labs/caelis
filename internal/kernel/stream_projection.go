@@ -50,7 +50,7 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 		return StreamRequest{}, false
 	}
 	toolName := strings.ToUpper(strings.TrimSpace(payload.ToolName))
-	if toolName != "BASH" && toolName != "SPAWN" && toolName != "TASK" {
+	if toolName != "BASH" && toolName != "SPAWN" {
 		return StreamRequest{}, false
 	}
 	if payload.Status != ToolStatusRunning &&

@@ -152,7 +152,7 @@ func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
 	}
 }
 
-func TestTaskWaitResultStillUpdatesLinkedBashTool(t *testing.T) {
+func TestTaskWaitResultDoesNotCompleteLinkedBashTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.UpdateToolWithMeta("bash-1", "BASH", "go test", "", false, false, ToolUpdateMeta{TaskID: "task-1"})
 	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait task-1", "final answer", true, false, ToolUpdateMeta{TaskID: "task-1"})
@@ -161,17 +161,20 @@ func TestTaskWaitResultStillUpdatesLinkedBashTool(t *testing.T) {
 		t.Fatalf("events = %#v, want BASH event plus TASK control event", block.Events)
 	}
 	ev := block.Events[0]
-	if !ev.Done || ev.Err || ev.Output != "final answer" {
-		t.Fatalf("linked event = %#v, want completed BASH output", ev)
+	if ev.Done || ev.Err || ev.Output != "" {
+		t.Fatalf("linked event = %#v, want BASH unchanged until its own stream final", ev)
+	}
+	if block.Events[1].Name != "TASK" || block.Events[1].Output != "final answer" {
+		t.Fatalf("task control event = %#v, want TASK result kept separate", block.Events[1])
 	}
 
 	block.UpdateToolWithMeta("bash-1", "BASH", "", "late running output", false, false, ToolUpdateMeta{TaskID: "task-1"})
-	if got := block.Events[0].Output; got != "final answer" {
-		t.Fatalf("late running update output = %q, want final answer preserved", got)
+	if got := block.Events[0].Output; got != "late running output" {
+		t.Fatalf("late running update output = %q, want BASH stream to update original panel", got)
 	}
 }
 
-func TestTaskCancelShowsLinkedBashCommandAndAvoidsDuplicateFinal(t *testing.T) {
+func TestTaskCancelShowsLinkedBashCommandWithoutCompletingBash(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	command := `echo "启动一个长任务" && sleep 30 && echo "这行不会输出"`
 	block.UpdateToolWithMeta("bash-1", "BASH", command, "启动一个长任务\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
@@ -183,8 +186,8 @@ func TestTaskCancelShowsLinkedBashCommandAndAvoidsDuplicateFinal(t *testing.T) {
 	if len(block.Events) != 2 {
 		t.Fatalf("events = %#v, want linked BASH event plus TASK cancel row", block.Events)
 	}
-	if ev := block.Events[0]; !ev.Done || ev.Output != "启动一个长任务\n" {
-		t.Fatalf("linked bash event = %#v, want cancelled BASH to keep current output", ev)
+	if ev := block.Events[0]; ev.Done || ev.Output != "启动一个长任务\n" {
+		t.Fatalf("linked bash event = %#v, want TASK cancel to leave BASH open until stream final", ev)
 	}
 	if got := block.Events[1].Args; got != "Cancel "+command {
 		t.Fatalf("cancel args = %q, want linked command", got)

@@ -2502,12 +2502,22 @@ func styleTerminalOutputLine(ctx BlockRenderContext, prefix string, segment stri
 }
 
 func isDiffPanelText(text string) bool {
+	hasHunk := false
+	hasChange := false
 	for _, line := range strings.Split(text, "\n") {
-		if strings.EqualFold(strings.TrimSpace(line), "diff / hunk") {
+		trimmed := strings.TrimSpace(line)
+		if strings.EqualFold(trimmed, "diff / hunk") {
 			return true
 		}
+		if isDiffHunkHeader(trimmed) {
+			hasHunk = true
+			continue
+		}
+		if strings.HasPrefix(trimmed, "+") || strings.HasPrefix(trimmed, "-") {
+			hasChange = true
+		}
 	}
-	return false
+	return hasHunk && hasChange
 }
 
 func renderACPDiffPanelRows(blockID string, text string, width int, ctx BlockRenderContext) []RenderedRow {

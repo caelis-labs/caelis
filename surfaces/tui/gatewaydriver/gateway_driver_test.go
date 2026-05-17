@@ -165,37 +165,6 @@ func TestAllocateSideAgentHandleUsesSharedNamePool(t *testing.T) {
 	}
 }
 
-func TestGatewayDriverMapsTaskStreamToSpawnParent(t *testing.T) {
-	driver := &GatewayDriver{streamParents: map[string]terminalStreamParent{}}
-	spawnReq := kernel.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "session-1"},
-		CallID:     "spawn-call-1",
-		ToolName:   "SPAWN",
-		RawInput:   map[string]any{"agent": "self", "prompt": "first prompt"},
-		Ref:        stream.Ref{SessionID: "session-1", TaskID: "liam"},
-	}
-	driver.bindTerminalStreamRequest(&spawnReq)
-
-	taskReq := kernel.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "session-1"},
-		CallID:     "task-write-1",
-		ToolName:   "TASK",
-		RawInput:   map[string]any{"action": "write", "task_id": "liam", "input": "follow up"},
-		Ref:        stream.Ref{SessionID: "session-1", TaskID: "liam"},
-	}
-	driver.bindTerminalStreamRequest(&taskReq)
-
-	if taskReq.CallID != "spawn-call-1" || taskReq.ToolName != "SPAWN" {
-		t.Fatalf("mapped task request = %+v, want parent SPAWN call", taskReq)
-	}
-	if got, _ := taskReq.RawInput["agent"].(string); got != "self" {
-		t.Fatalf("mapped raw input agent = %q, want self", got)
-	}
-	if got, _ := taskReq.RawInput["prompt"].(string); got != "follow up" {
-		t.Fatalf("mapped raw input prompt = %q, want continuation prompt", got)
-	}
-}
-
 func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	ctx := context.Background()
 	storeDir := t.TempDir()
