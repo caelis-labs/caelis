@@ -76,6 +76,64 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	if got := update.Content[0].TerminalID; got != "call-1" {
 		t.Fatalf("terminal id = %q, want display tool call id", got)
 	}
+	if update.Content[0].Content != nil {
+		t.Fatalf("terminal content body = %#v, want output carried in _meta", update.Content[0].Content)
+	}
+	output, ok := update.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
+	}
+	if output["terminal_id"] != "call-1" || output["data"] != "line\n" {
+		t.Fatalf("terminal_output = %#v, want display id call-1 and line output", output)
+	}
+}
+
+func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolCall,
+		Protocol: &session.EventProtocol{
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: UpdateToolCall,
+				ToolCallID:    "call-1",
+				Title:         "BASH date",
+				Kind:          ToolKindExecute,
+				Status:        ToolStatusPending,
+				RawInput:      map[string]any{"command": "date"},
+				Content: []session.ProtocolToolCallContent{{
+					Type:       "terminal",
+					TerminalID: "call-1",
+					Content:    session.ProtocolTextContent("ignored body\n"),
+				}},
+				Meta: map[string]any{
+					"terminal_info": map[string]any{
+						"terminal_id": "call-1",
+						"tool":        "BASH",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want protocol tool_call only", len(updates))
+	}
+	call, ok := updates[0].(ToolCall)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCall", updates[0])
+	}
+	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "BASH date" {
+		t.Fatalf("tool call = %#v, want durable protocol identity", call)
+	}
+	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" || call.Content[0].Content != nil {
+		t.Fatalf("content = %#v, want standard terminal marker without body", call.Content)
+	}
+	output, ok := call.Meta["terminal_output"].(map[string]any)
+	if !ok || output["data"] != "ignored body\n" {
+		t.Fatalf("meta = %#v, want terminal body moved to _meta.terminal_output", call.Meta)
+	}
 }
 
 func TestEventProjectorPreservesStandardDiffContent(t *testing.T) {
@@ -207,6 +265,54 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 	}
 }
 
+func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing.T) {
+	message := model.MessageFromAssistantParts("I will run the command.", "Need shell output first.", []model.ToolCall{{
+		ID:   "call-1",
+		Name: "BASH",
+		Args: `{"command":"date","workdir":"/tmp/work"}`,
+	}, {
+		ID:   "call-2",
+		Name: "ECHO",
+		Args: `{"value":"done"}`,
+	}})
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolCall,
+		Message:   &message,
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if got, want := len(updates), 4; got != want {
+		t.Fatalf("ProjectEvent() produced %d updates, want %d: %#v", got, want, updates)
+	}
+	thought, ok := updates[0].(ContentChunk)
+	if !ok || thought.SessionUpdate != UpdateAgentThought {
+		t.Fatalf("updates[0] = %#v, want agent thought chunk", updates[0])
+	}
+	messageChunk, ok := updates[1].(ContentChunk)
+	if !ok || messageChunk.SessionUpdate != UpdateAgentMessage {
+		t.Fatalf("updates[1] = %#v, want agent message chunk", updates[1])
+	}
+	firstCall, ok := updates[2].(ToolCall)
+	if !ok {
+		t.Fatalf("updates[2] = %T, want ToolCall", updates[2])
+	}
+	if firstCall.ToolCallID != "call-1" || firstCall.Kind != ToolKindExecute {
+		t.Fatalf("first call = %#v, want BASH execute call", firstCall)
+	}
+	if len(firstCall.Content) != 1 || firstCall.Content[0].Type != "terminal" || firstCall.Content[0].TerminalID != "call-1" {
+		t.Fatalf("first call content = %#v, want display terminal marker", firstCall.Content)
+	}
+	secondCall, ok := updates[3].(ToolCall)
+	if !ok {
+		t.Fatalf("updates[3] = %T, want ToolCall", updates[3])
+	}
+	if secondCall.ToolCallID != "call-2" || secondCall.Title != "ECHO" {
+		t.Fatalf("second call = %#v, want ECHO call", secondCall)
+	}
+}
+
 func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
@@ -239,11 +345,14 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 	if update.Kind == nil || *update.Kind != ToolKindExecute {
 		t.Fatalf("kind = %v, want %q", update.Kind, ToolKindExecute)
 	}
-	if update.Title == nil || *update.Title != "SPAWN codex" {
-		t.Fatalf("title = %v, want SPAWN codex", update.Title)
+	if update.Title == nil || *update.Title != "SPAWN codex: child work" {
+		t.Fatalf("title = %v, want SPAWN codex: child work", update.Title)
 	}
 	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "call-1" {
 		t.Fatalf("content = %#v, want terminal content remapped to display id call-1", update.Content)
+	}
+	if update.Content[0].Content != nil {
+		t.Fatalf("terminal content body = %#v, want empty standard terminal marker", update.Content[0].Content)
 	}
 }
 
@@ -280,12 +389,15 @@ func TestEventProjectorProjectsBashDisplayTerminalMetadata(t *testing.T) {
 	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" {
 		t.Fatalf("content = %#v, want display terminal content for call-1", call.Content)
 	}
+	if call.Content[0].Content != nil {
+		t.Fatalf("terminal content body = %#v, want empty standard terminal marker", call.Content[0].Content)
+	}
 	info, ok := call.Meta["terminal_info"].(map[string]any)
 	if !ok {
 		t.Fatalf("meta = %#v, want terminal_info", call.Meta)
 	}
-	if info["terminal_id"] != "call-1" || info["cwd"] != "/tmp/work" {
-		t.Fatalf("terminal_info = %#v, want terminal_id call-1 cwd /tmp/work", info)
+	if info["terminal_id"] != "call-1" || info["cwd"] != "/tmp/work" || info["tool"] != "BASH" {
+		t.Fatalf("terminal_info = %#v, want terminal_id call-1 cwd /tmp/work tool BASH", info)
 	}
 }
 

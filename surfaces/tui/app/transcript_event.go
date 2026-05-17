@@ -80,6 +80,10 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 	scope := gatewayEventScope(ev)
 	scopeID := gatewayEventScopeID(ev)
 	occurredAt := ev.OccurredAt
+	update := gatewayACPProtocolUpdate(ev)
+	if update != nil {
+		ev = gatewayEventWithProtocolUpdateMeta(ev, update)
+	}
 	anchorToolCallID := kernel.EventMetaString(ev.Meta, "caelis", "runtime", "stream", "parent_call_id")
 	anchorToolName := kernel.EventMetaString(ev.Meta, "caelis", "runtime", "stream", "parent_tool")
 	out := make([]TranscriptEvent, 0, 4)
@@ -96,6 +100,16 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			OccurredAt: occurredAt,
 			Usage:      &usage,
 		})
+	}
+
+	if projected, handled := projectACPProtocolUpdateToTranscriptEvents(ev, update, scope, scopeID, occurredAt); handled {
+		out = append(out, projected...)
+		for i := range out {
+			out[i].AnchorToolCallID = anchorToolCallID
+			out[i].AnchorToolName = anchorToolName
+		}
+		appendUsage()
+		return out
 	}
 
 	switch ev.Kind {
@@ -199,6 +213,10 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			}
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
+			if refinedName := refinedToolDisplayName(semanticName, payload.ToolKind, payload.ToolTitle, rawInput); refinedName != "" {
+				toolName = refinedName
+				semanticName = refinedName
+			}
 			toolTaskID := toolDisplayTaskID(rawInput, nil, ev.Meta)
 			displayInput := rawInput
 			if strings.EqualFold(semanticName, "TASK") {
@@ -244,6 +262,10 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			toolErr := payload.Error || strings.EqualFold(status, string(kernel.ToolStatusFailed))
 			semanticName := toolSemanticName(toolName, payload.ToolKind)
 			rawInput := gatewayProtocolRawInput(ev, payload.RawInput)
+			if refinedName := refinedToolDisplayName(semanticName, payload.ToolKind, payload.ToolTitle, rawInput); refinedName != "" {
+				toolName = refinedName
+				semanticName = refinedName
+			}
 			displayOutput := toolDisplayMetaOutput(semanticName, ev.Meta)
 			displayInput := rawInput
 			if strings.EqualFold(semanticName, "SPAWN") {
@@ -256,13 +278,18 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 			toolOutput := acpprojector.FormatToolContent(content)
 			toolOutputSynthetic := false
 			if strings.TrimSpace(toolOutput) == "" {
-				if !terminalFinalWithoutContent(semanticName, payload.ToolKind, status, toolErr) {
+				if terminalOutput := terminalToolOutputText(semanticName, payload.ToolKind, payload.RawOutput, ev.Meta, content, status, toolErr); terminalOutput != "" {
+					toolOutput = terminalOutput
+				} else if !terminalFinalWithoutContent(semanticName, payload.ToolKind, status, toolErr) {
 					toolOutput = standardToolOutput(status, toolErr)
 					toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
 				}
 			}
-			if strings.EqualFold(semanticName, "TASK") && !toolErr && !transcriptToolStatusFinal(status, toolErr) &&
-				!strings.EqualFold(toolDisplayTaskAction(rawInput, displayOutput, ev.Meta), "write") {
+			if taskWaitControlResult(semanticName, rawInput, displayOutput, ev.Meta) && !toolErr {
+				toolOutput = ""
+				toolOutputSynthetic = false
+			}
+			if suppressToolResultOutput(semanticName, payload.ToolKind, toolOutput, toolOutputSynthetic, toolErr) {
 				toolOutput = ""
 				toolOutputSynthetic = false
 			}
@@ -388,6 +415,301 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 	return out
 }
 
+func gatewayACPProtocolUpdate(ev kernel.Event) *session.ProtocolUpdate {
+	if ev.Protocol == nil {
+		return nil
+	}
+	return session.ProtocolUpdateOf(&session.Event{Protocol: ev.Protocol})
+}
+
+func gatewayEventWithProtocolUpdateMeta(ev kernel.Event, update *session.ProtocolUpdate) kernel.Event {
+	if update == nil || len(update.Meta) == 0 {
+		return ev
+	}
+	ev.Meta = mergeTranscriptMeta(update.Meta, ev.Meta)
+	return ev
+}
+
+func mergeTranscriptMeta(base map[string]any, overlay map[string]any) map[string]any {
+	if len(base) == 0 {
+		return cloneAnyMap(overlay)
+	}
+	out := cloneAnyMap(base)
+	for key, value := range overlay {
+		if baseMap, ok := out[key].(map[string]any); ok {
+			if overlayMap, ok := value.(map[string]any); ok {
+				out[key] = mergeTranscriptMeta(baseMap, overlayMap)
+				continue
+			}
+		}
+		out[key] = value
+	}
+	return out
+}
+
+func projectACPProtocolUpdateToTranscriptEvents(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) ([]TranscriptEvent, bool) {
+	if update == nil {
+		return nil, false
+	}
+	switch strings.TrimSpace(update.SessionUpdate) {
+	case string(session.ProtocolUpdateTypeUserMessage):
+		if scope != ACPProjectionMain {
+			return nil, true
+		}
+		if text := strings.TrimSpace(protocolTextContent(update.Content)); text != "" {
+			return []TranscriptEvent{{
+				Kind:          TranscriptEventNarrative,
+				Scope:         scope,
+				ScopeID:       scopeID,
+				OccurredAt:    occurredAt,
+				NarrativeKind: TranscriptNarrativeUser,
+				Text:          text,
+				Final:         true,
+			}}, true
+		}
+		return nil, true
+	case string(session.ProtocolUpdateTypeAgentMessage):
+		if text := protocolTextContent(update.Content); text != "" {
+			return []TranscriptEvent{{
+				Kind:          TranscriptEventNarrative,
+				Scope:         scope,
+				ScopeID:       scopeID,
+				Actor:         gatewayDisplayActor(ev, ""),
+				OccurredAt:    occurredAt,
+				NarrativeKind: TranscriptNarrativeAssistant,
+				Text:          text,
+				Final:         gatewayProtocolNarrativeFinal(ev),
+			}}, true
+		}
+		return nil, true
+	case string(session.ProtocolUpdateTypeAgentThought):
+		if text := protocolTextContent(update.Content); text != "" {
+			return []TranscriptEvent{{
+				Kind:          TranscriptEventNarrative,
+				Scope:         scope,
+				ScopeID:       scopeID,
+				Actor:         gatewayDisplayActor(ev, ""),
+				OccurredAt:    occurredAt,
+				NarrativeKind: TranscriptNarrativeReasoning,
+				Text:          text,
+				Final:         gatewayProtocolNarrativeFinal(ev),
+			}}, true
+		}
+		return nil, true
+	case string(session.ProtocolUpdateTypeToolCall):
+		if protocolUpdateIsPlanTool(ev, update) {
+			return nil, true
+		}
+		return []TranscriptEvent{projectACPProtocolToolCallEvent(ev, update, scope, scopeID, occurredAt)}, true
+	case string(session.ProtocolUpdateTypeToolUpdate):
+		if protocolUpdateIsPlanTool(ev, update) {
+			return nil, true
+		}
+		event, ok := projectACPProtocolToolResultEvent(ev, update, scope, scopeID, occurredAt)
+		if !ok {
+			return nil, true
+		}
+		return []TranscriptEvent{event}, true
+	case string(session.ProtocolUpdateTypePlan):
+		entries := make([]PlanEntry, 0, len(update.Entries))
+		for _, entry := range update.Entries {
+			entries = append(entries, PlanEntry{Content: entry.Content, Status: entry.Status})
+		}
+		if len(entries) == 0 {
+			return nil, true
+		}
+		return []TranscriptEvent{{
+			Kind:        TranscriptEventPlan,
+			Scope:       scope,
+			ScopeID:     scopeID,
+			OccurredAt:  occurredAt,
+			PlanEntries: entries,
+		}}, true
+	default:
+		return nil, false
+	}
+}
+
+func gatewayProtocolNarrativeFinal(ev kernel.Event) bool {
+	if ev.Narrative != nil {
+		return ev.Narrative.Final
+	}
+	return false
+}
+
+func projectACPProtocolToolCallEvent(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) TranscriptEvent {
+	toolName := protocolUpdateToolName(ev, update)
+	status := strings.TrimSpace(update.Status)
+	if status == "" || strings.EqualFold(status, string(kernel.ToolStatusStarted)) {
+		status = string(kernel.ToolStatusRunning)
+	}
+	semanticName := toolSemanticName(toolName, update.Kind)
+	rawInput := cloneAnyMap(update.RawInput)
+	if refinedName := refinedToolDisplayName(semanticName, update.Kind, update.Title, rawInput); refinedName != "" {
+		toolName = refinedName
+		semanticName = refinedName
+	}
+	toolTaskID := toolDisplayTaskID(rawInput, nil, ev.Meta)
+	displayInput := rawInput
+	if strings.EqualFold(semanticName, "TASK") {
+		displayInput = taskDisplayInputForResult(rawInput, toolDisplayMetaOutput(semanticName, ev.Meta))
+	}
+	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, update.Kind, update.Title), acpprojector.FormatToolStart(toolName, displayInput))
+	if strings.EqualFold(semanticName, "TASK") {
+		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
+	}
+	return TranscriptEvent{
+		Kind:               TranscriptEventTool,
+		Scope:              scope,
+		ScopeID:            scopeID,
+		Actor:              gatewayDisplayActor(ev, ""),
+		OccurredAt:         occurredAt,
+		ToolCallID:         strings.TrimSpace(update.ToolCallID),
+		ToolName:           toolName,
+		ToolKind:           strings.TrimSpace(update.Kind),
+		ToolTitle:          strings.TrimSpace(update.Title),
+		ToolArgs:           toolArgs,
+		ToolFullArgs:       toolDisplayFullArgs(semanticName, rawInput),
+		ToolStatus:         status,
+		ToolTaskID:         toolTaskID,
+		ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, ev.Meta),
+		ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, ev.Meta),
+		ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, ev.Meta),
+	}
+}
+
+func projectACPProtocolToolResultEvent(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) (TranscriptEvent, bool) {
+	toolName := protocolUpdateToolName(ev, update)
+	status := strings.TrimSpace(update.Status)
+	toolErr := protocolUpdateToolError(update)
+	if status == "" {
+		if toolErr {
+			status = string(kernel.ToolStatusFailed)
+		} else {
+			status = string(kernel.ToolStatusRunning)
+		}
+	}
+	semanticName := toolSemanticName(toolName, update.Kind)
+	rawInput := cloneAnyMap(update.RawInput)
+	rawOutput := cloneAnyMap(update.RawOutput)
+	if refinedName := refinedToolDisplayName(semanticName, update.Kind, update.Title, rawInput); refinedName != "" {
+		toolName = refinedName
+		semanticName = refinedName
+	}
+	displayOutput := toolDisplayMetaOutput(semanticName, ev.Meta)
+	displayInput := rawInput
+	if strings.EqualFold(semanticName, "SPAWN") {
+		displayInput = spawnDisplayInputForResult(rawInput, displayOutput)
+	}
+	if strings.EqualFold(semanticName, "TASK") {
+		displayInput = taskDisplayInputForResult(rawInput, displayOutput)
+	}
+	content := session.ProtocolToolCallContentOf(update)
+	toolOutput := acpprojector.FormatToolContent(content)
+	toolOutputSynthetic := false
+	if strings.TrimSpace(toolOutput) == "" {
+		if terminalOutput := terminalToolOutputText(semanticName, update.Kind, rawOutput, ev.Meta, content, status, toolErr); terminalOutput != "" {
+			toolOutput = terminalOutput
+		} else if !terminalFinalWithoutContent(semanticName, update.Kind, status, toolErr) {
+			toolOutput = standardToolOutput(status, toolErr)
+			toolOutputSynthetic = strings.TrimSpace(toolOutput) != ""
+		}
+	}
+	if taskWaitControlResult(semanticName, rawInput, displayOutput, ev.Meta) && !toolErr {
+		toolOutput = ""
+		toolOutputSynthetic = false
+	}
+	if suppressToolResultOutput(semanticName, update.Kind, toolOutput, toolOutputSynthetic, toolErr) {
+		toolOutput = ""
+		toolOutputSynthetic = false
+	}
+	toolArgs := toolDisplayArgs(semanticName, displayInput, toolTitleDisplayArgs(semanticName, update.Kind, update.Title), acpprojector.FormatToolStart(toolName, displayInput))
+	toolTaskID := toolDisplayTaskID(rawInput, displayOutput, ev.Meta)
+	if strings.EqualFold(semanticName, "TASK") {
+		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
+	}
+	if !toolErr && (len(rawInput) > 0 || strings.TrimSpace(toolOutput) != "") {
+		if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
+			toolArgs = header
+		}
+	}
+	toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)
+	return TranscriptEvent{
+		Kind:                TranscriptEventTool,
+		Scope:               scope,
+		ScopeID:             scopeID,
+		Actor:               gatewayDisplayActor(ev, ""),
+		OccurredAt:          occurredAt,
+		ToolCallID:          strings.TrimSpace(update.ToolCallID),
+		ToolName:            toolName,
+		ToolKind:            strings.TrimSpace(update.Kind),
+		ToolTitle:           strings.TrimSpace(update.Title),
+		ToolArgs:            toolArgs,
+		ToolFullArgs:        toolDisplayFullArgs(semanticName, displayInput),
+		ToolOutput:          toolOutput,
+		ToolStream:          transcriptToolStream(status, toolErr),
+		ToolStatus:          status,
+		ToolError:           toolErr,
+		ToolOutputSynthetic: toolOutputSynthetic,
+		ToolTaskID:          toolTaskID,
+		ToolTaskAction:      toolDisplayTaskAction(rawInput, displayOutput, ev.Meta),
+		ToolTaskInput:       toolDisplayTaskInput(rawInput, displayOutput, ev.Meta),
+		ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, ev.Meta),
+		Final:               transcriptToolStatusFinal(status, toolErr),
+	}, true
+}
+
+func protocolUpdateIsPlanTool(ev kernel.Event, update *session.ProtocolUpdate) bool {
+	if update == nil {
+		return false
+	}
+	for _, value := range []string{
+		protocolUpdateToolName(ev, update),
+		update.Kind,
+		update.Title,
+	} {
+		if strings.EqualFold(strings.TrimSpace(value), "PLAN") {
+			return true
+		}
+	}
+	return false
+}
+
+func protocolUpdateToolName(ev kernel.Event, update *session.ProtocolUpdate) string {
+	if update == nil {
+		return ""
+	}
+	if name := kernel.EventMetaString(ev.Meta, "caelis", "runtime", "tool", "name"); name != "" {
+		return name
+	}
+	if name := terminalInfoToolName(ev.Meta); name != "" {
+		return name
+	}
+	if ev.Protocol != nil && ev.Protocol.ToolCall != nil {
+		if name := strings.TrimSpace(ev.Protocol.ToolCall.Name); name != "" {
+			return name
+		}
+	}
+	return gatewayToolDisplayName("", update.Title, update.Kind)
+}
+
+func protocolUpdateToolError(update *session.ProtocolUpdate) bool {
+	if update == nil {
+		return false
+	}
+	status := strings.ToLower(strings.TrimSpace(update.Status))
+	if status == "failed" || status == "error" {
+		return true
+	}
+	if value, ok := update.RawOutput["is_error"].(bool); ok && value {
+		return true
+	}
+	if value, ok := update.RawOutput["error"].(string); ok && strings.TrimSpace(value) != "" && status != "completed" {
+		return true
+	}
+	return false
+}
+
 func payloadNarrativeChunkHasContent(text string, final bool) bool {
 	if text == "" {
 		return false
@@ -484,6 +806,26 @@ func standardToolOutput(status string, isErr bool) string {
 	return ""
 }
 
+func suppressToolResultOutput(toolName string, toolKind string, output string, synthetic bool, isErr bool) bool {
+	if isErr {
+		return false
+	}
+	if !isExplorationSummaryTool(toolName, toolKind) {
+		return false
+	}
+	trimmed := strings.TrimSpace(output)
+	return synthetic || strings.EqualFold(trimmed, "completed")
+}
+
+func isExplorationSummaryTool(toolName string, toolKind string) bool {
+	switch strings.ToUpper(strings.TrimSpace(toolSemanticName(toolName, toolKind))) {
+	case "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND":
+		return true
+	default:
+		return false
+	}
+}
+
 func terminalFinalWithoutContent(toolName string, toolKind string, status string, isErr bool) bool {
 	if !transcriptToolStatusFinal(status, isErr) {
 		return false
@@ -492,6 +834,126 @@ func terminalFinalWithoutContent(toolName string, toolKind string, status string
 		return false
 	}
 	return isTerminalPanelToolKind(toolName, toolKind)
+}
+
+func terminalToolOutputText(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []session.ProtocolToolCallContent, status string, isErr bool) string {
+	if !isTerminalPanelToolKind(toolName, toolKind) && !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
+		return ""
+	}
+	if text := terminalOutputMetaText(meta); text != "" {
+		return text
+	}
+	if text := terminalRuntimeOutputText(meta); text != "" {
+		return text
+	}
+	if text := terminalContentText(content); text != "" {
+		return text
+	}
+	if !hasStandardTerminalContent(content) {
+		return ""
+	}
+	name := strings.ToUpper(strings.TrimSpace(toolName))
+	if name == "SPAWN" {
+		if isErr || strings.EqualFold(strings.TrimSpace(status), string(kernel.ToolStatusFailed)) {
+			return firstNonEmpty(asString(rawOutput["stderr"]), asString(rawOutput["error"]))
+		}
+		if transcriptToolStatusFinal(status, isErr) {
+			return firstNonEmpty(asString(rawOutput["final_message"]), asString(rawOutput["finalMessage"]), asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["text"]))
+		}
+		return firstNonEmpty(asString(rawOutput["text"]), asString(rawOutput["stdout"]), asString(rawOutput["output_preview"]), asString(rawOutput["stderr"]))
+	}
+	if terminalTaskStillRunning(rawOutput, meta) {
+		return firstNonEmpty(asString(rawOutput["latest_output"]), asString(rawOutput["output_preview"]))
+	}
+	if !transcriptToolStatusFinal(status, isErr) {
+		return firstNonEmpty(asString(rawOutput["latest_output"]), asString(rawOutput["output_preview"]))
+	}
+	if text := firstNonEmpty(asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["stdout"]), asString(rawOutput["stderr"]), asString(rawOutput["error"])); text != "" {
+		return text
+	}
+	if isTerminalPanelToolKind(toolName, toolKind) || strings.EqualFold(name, "TASK") {
+		return "(no output)"
+	}
+	return ""
+}
+
+func taskWaitControlResult(semanticName string, rawInput map[string]any, displayOutput map[string]any, meta map[string]any) bool {
+	return strings.EqualFold(strings.TrimSpace(semanticName), "TASK") &&
+		strings.EqualFold(toolDisplayTaskAction(rawInput, displayOutput, meta), "wait")
+}
+
+func terminalTaskStillRunning(rawOutput map[string]any, meta map[string]any) bool {
+	if boolValue(rawOutput["running"]) {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(asString(rawOutput["state"])), "running") {
+		return true
+	}
+	taskMeta := eventRuntimeTaskMeta(meta)
+	if boolValue(taskMeta["running"]) {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(asString(taskMeta["state"])), "running")
+}
+
+func boolValue(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func hasStandardTerminalContent(content []session.ProtocolToolCallContent) bool {
+	for _, item := range content {
+		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") && strings.TrimSpace(item.TerminalID) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func terminalContentText(content []session.ProtocolToolCallContent) string {
+	for _, item := range content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			continue
+		}
+		if text := protocolTextContent(item.Content); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func terminalOutputMetaText(meta map[string]any) string {
+	output := terminalMetaSection(meta, "terminal_output")
+	return asString(output["data"])
+}
+
+func terminalRuntimeOutputText(meta map[string]any) string {
+	taskMeta := eventRuntimeTaskMeta(meta)
+	for _, key := range []string{"output_text", "latest_output", "output_preview", "result", "output", "stdout", "stderr", "error", "final_message", "finalMessage", "text"} {
+		if text := asString(taskMeta[key]); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func terminalInfoToolName(meta map[string]any) string {
+	info := terminalMetaSection(meta, "terminal_info")
+	return firstNonEmpty(asString(info["tool"]), asString(info["tool_name"]), asString(info["name"]))
+}
+
+func terminalMetaSection(meta map[string]any, key string) map[string]any {
+	if len(meta) == 0 {
+		return nil
+	}
+	section, _ := meta[key].(map[string]any)
+	return section
 }
 
 func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any {

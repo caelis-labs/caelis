@@ -66,6 +66,38 @@ func TestNormalizeACPUpdateEventKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 }
 
+func TestNormalizeACPUpdateEventPreservesToolUpdateMeta(t *testing.T) {
+	t.Parallel()
+
+	event := normalizeACPUpdateEvent(func() time.Time { return time.Unix(0, 0) }, session.ControllerBinding{
+		Kind:         session.ControllerKindACP,
+		ControllerID: "codex",
+		Label:        "codex",
+	}, "remote-1", "turn-1", client.ToolCallUpdate{
+		SessionUpdate: client.UpdateToolCallState,
+		ToolCallID:    "call-1",
+		Kind:          testStringPtr("execute"),
+		Status:        testStringPtr("in_progress"),
+		Meta: map[string]any{
+			"terminal_output": map[string]any{
+				"terminal_id": "call-1",
+				"data":        "line\n",
+			},
+		},
+	})
+
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil {
+		t.Fatalf("event = %#v, want protocol update", event)
+	}
+	output, ok := event.Protocol.Update.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("Protocol.Update.Meta = %#v, want terminal_output", event.Protocol.Update.Meta)
+	}
+	if output["terminal_id"] != "call-1" || output["data"] != "line\n" {
+		t.Fatalf("terminal_output = %#v, want preserved ACP meta", output)
+	}
+}
+
 func TestTranslateApprovalRequestPreservesToolRawInput(t *testing.T) {
 	t.Parallel()
 

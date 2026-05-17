@@ -15,12 +15,14 @@ func TestValidateReplaySessionEventsRejectsUnboundedToolOutput(t *testing.T) {
 	err := validateReplaySessionEvents([]*session.Event{{
 		ID:   "tool-1",
 		Type: session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-			RawOutput: map[string]any{
+		Tool: &session.EventTool{
+			ID:   "call-1",
+			Name: "BASH",
+			Output: map[string]any{
 				"stderr": strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()),
 			},
-			Content: []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("permission denied")}},
-		}},
+			Content: []session.EventToolContent{{Type: "terminal", Text: "permission denied"}},
+		},
 	}})
 	if err == nil {
 		t.Fatal("validateReplaySessionEvents() error = nil, want non-canonical replay rejection")
@@ -40,10 +42,12 @@ func TestValidateReplaySessionEventsRejectsOutputFieldsInMeta(t *testing.T) {
 	err := validateReplaySessionEvents([]*session.Event{{
 		ID:   "tool-2",
 		Type: session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-			RawOutput: map[string]any{"stdout": "ok"},
-			Content:   []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("ok")}},
-		}},
+		Tool: &session.EventTool{
+			ID:      "call-2",
+			Name:    "BASH",
+			Output:  map[string]any{"stdout": "ok"},
+			Content: []session.EventToolContent{{Type: "terminal", Text: "ok"}},
+		},
 		Meta: map[string]any{"stderr": "duplicated"},
 	}})
 	if err == nil {
@@ -65,17 +69,19 @@ func TestValidateReplaySessionEventsAllowsCanonicalEscapableOutput(t *testing.T)
 	err := validateReplaySessionEvents([]*session.Event{{
 		ID:   "tool-3",
 		Type: session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
-			RawOutput: map[string]any{"stdout": stdout},
-			Content:   []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("ok")}},
-		}},
+		Tool: &session.EventTool{
+			ID:      "call-3",
+			Name:    "BASH",
+			Output:  map[string]any{"stdout": stdout},
+			Content: []session.EventToolContent{{Type: "terminal", Text: "ok"}},
+		},
 	}})
 	if err != nil {
 		t.Fatalf("validateReplaySessionEvents() error = %v, want canonical escapable output accepted", err)
 	}
 }
 
-func TestValidateReplaySessionEventsRejectsOldRawOutputOnlyToolResult(t *testing.T) {
+func TestValidateReplaySessionEventsRejectsProtocolOnlyToolResult(t *testing.T) {
 	t.Parallel()
 
 	err := validateReplaySessionEvents([]*session.Event{{
@@ -83,13 +89,14 @@ func TestValidateReplaySessionEventsRejectsOldRawOutputOnlyToolResult(t *testing
 		Type: session.EventTypeToolResult,
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			RawOutput: map[string]any{"stdout": "ok"},
+			Content:   []session.ProtocolToolCallContent{{Type: "terminal", Content: session.ProtocolTextContent("ok")}},
 		}},
 	}})
 	if err == nil {
-		t.Fatal("validateReplaySessionEvents() error = nil, want old rawOutput-only rejection")
+		t.Fatal("validateReplaySessionEvents() error = nil, want protocol-only rejection")
 	}
 	var gatewayErr *Error
-	if !errors.As(err, &gatewayErr) || !strings.Contains(gatewayErr.Detail, "rawOutput-only") {
-		t.Fatalf("error = %#v, want rawOutput-only rejection", err)
+	if !errors.As(err, &gatewayErr) || !strings.Contains(gatewayErr.Detail, "missing durable Event.Tool") {
+		t.Fatalf("error = %#v, want durable Event.Tool rejection", err)
 	}
 }

@@ -103,9 +103,14 @@ func TestRunnerHandleUpdatePublishesStructuredToolAndPlanEvents(t *testing.T) {
 	if got := len(sink.frames); got != 3 {
 		t.Fatalf("stream frames = %#v, want three structured updates", sink.frames)
 	}
+	wantText := []string{
+		"run go test\n",
+		"run go test completed\n",
+		"Plan Run tests completed\n",
+	}
 	for i, frame := range sink.frames {
-		if frame.Text != "" {
-			t.Fatalf("structured frame %d text = %q, want empty text fallback", i, frame.Text)
+		if frame.Text != wantText[i] {
+			t.Fatalf("structured frame %d text = %q, want %q", i, frame.Text, wantText[i])
 		}
 	}
 	callEvent := sink.frames[0].Event
@@ -160,8 +165,8 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 		t.Fatalf("stream frames = %#v, want one structured search update", sink.frames)
 	}
 	frame := sink.frames[0]
-	if frame.Text != "" {
-		t.Fatalf("stream frame text = %q, want no fallback text", frame.Text)
+	if frame.Text != "Searching for: weather: Shanghai, China\n" {
+		t.Fatalf("stream frame text = %q, want readable search trace", frame.Text)
 	}
 	event := frame.Event
 	if event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
@@ -178,6 +183,47 @@ func TestRunnerKeepsCodexWebSearchToolIdentity(t *testing.T) {
 	}
 	if got := event.Protocol.ToolCall.RawInput["query"]; got != "weather: Shanghai, China" {
 		t.Fatalf("raw input query = %#v", got)
+	}
+}
+
+func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "bash-1",
+			Kind:          stringPtr("execute"),
+			Title:         stringPtr("run date loop"),
+			Meta: map[string]any{
+				"terminal_output": map[string]any{
+					"terminal_id": "bash-1",
+					"data":        "17:21:17\n",
+				},
+			},
+		},
+	})
+
+	if got := len(sink.frames); got != 1 {
+		t.Fatalf("stream frames = %#v, want one terminal output frame", sink.frames)
+	}
+	if got := sink.frames[0].Text; got != "17:21:17\n" {
+		t.Fatalf("stream frame text = %q, want terminal output data", got)
+	}
+	event := sink.frames[0].Event
+	if event == nil || event.Protocol == nil || event.Protocol.Update == nil || event.Protocol.Update.Meta["terminal_output"] == nil {
+		t.Fatalf("stream event = %#v, want structured terminal meta preserved", event)
 	}
 }
 
@@ -222,6 +268,60 @@ func TestRunnerHandleUpdateUsesAgentMessageDeltas(t *testing.T) {
 	run.mu.RUnlock()
 	if result != "我来按步骤执行这个任务。" {
 		t.Fatalf("run.result = %q, want deduped final text", result)
+	}
+}
+
+func TestRunnerResultKeepsOnlyLatestAssistantSegmentAfterTools(t *testing.T) {
+	t.Parallel()
+
+	sink := &recordingStreams{}
+	run := &childRun{
+		anchor:  delegation.Anchor{TaskID: "task-1", SessionID: "child-1", Agent: "claude", AgentID: "agent-1"},
+		taskID:  "task-1",
+		sink:    sink,
+		state:   delegation.StateRunning,
+		running: true,
+	}
+	runner := &Runner{clock: time.Now}
+
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "我先读取文件。"))
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCall{
+			SessionUpdate: client.UpdateToolCall,
+			ToolCallID:    "read-1",
+			Kind:          "read",
+			Title:         "Read hello_spawn.txt",
+			Status:        "in_progress",
+			RawInput:      map[string]any{"path": "hello_spawn.txt"},
+		},
+	})
+	runner.handleUpdate(run, client.UpdateEnvelope{
+		SessionID: "child-1",
+		Update: client.ToolCallUpdate{
+			SessionUpdate: client.UpdateToolCallState,
+			ToolCallID:    "read-1",
+			Kind:          stringPtr("read"),
+			Title:         stringPtr("Read hello_spawn.txt"),
+			Status:        stringPtr("completed"),
+		},
+	})
+	runner.handleUpdate(run, contentUpdate(t, client.UpdateAgentMessage, "总结一下执行结果：\n步骤 操作 结果"))
+
+	run.mu.RLock()
+	result := run.result
+	run.mu.RUnlock()
+	if result != "总结一下执行结果：\n步骤 操作 结果" {
+		t.Fatalf("run.result = %q, want latest assistant segment only", result)
+	}
+	var streamed string
+	for _, frame := range sink.frames {
+		streamed += frame.Text
+	}
+	for _, want := range []string{"我先读取文件。", "Read hello_spawn.txt", "总结一下执行结果"} {
+		if !strings.Contains(streamed, want) {
+			t.Fatalf("streamed text = %q, want %q preserved in running trace", streamed, want)
+		}
 	}
 }
 

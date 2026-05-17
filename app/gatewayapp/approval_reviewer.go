@@ -363,12 +363,16 @@ func guardianTranscriptEntryFromEvent(event *session.Event) (guardianTranscriptE
 		kind = "assistant"
 	case session.EventTypeToolCall:
 		kind = "tool " + firstNonEmpty(toolNameFromSessionEvent(event), "call") + " call"
-		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawInput) > 0 {
+		if event.Tool != nil && len(event.Tool.Input) > 0 {
+			text = mustPrettyJSON(map[string]any{"tool": toolNameFromSessionEvent(event), "input": event.Tool.Input})
+		} else if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawInput) > 0 {
 			text = mustPrettyJSON(map[string]any{"tool": toolNameFromSessionEvent(event), "input": update.RawInput})
 		}
 	case session.EventTypeToolResult:
 		kind = "tool " + firstNonEmpty(toolNameFromSessionEvent(event), "result") + " result"
-		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
+		if event.Tool != nil && len(event.Tool.Output) > 0 {
+			text = mustPrettyJSON(map[string]any{"tool": toolNameFromSessionEvent(event), "output": event.Tool.Output})
+		} else if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
 			text = mustPrettyJSON(map[string]any{"tool": toolNameFromSessionEvent(event), "output": update.RawOutput})
 		}
 	default:
@@ -825,6 +829,11 @@ func guardianUserEvent(_ session.Session, text string) *session.Event {
 func toolNameFromSessionEvent(event *session.Event) string {
 	if event == nil {
 		return ""
+	}
+	if event.Tool != nil {
+		if name := strings.TrimSpace(event.Tool.Name); name != "" {
+			return name
+		}
 	}
 	if event.Protocol != nil && event.Protocol.ToolCall != nil {
 		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {

@@ -516,7 +516,11 @@ func canonicalToolCallPayload(event *session.Event) *ToolCallPayload {
 	callID := ""
 	toolName := ""
 	rawStatus := ""
-	if update != nil {
+	if event.Tool != nil {
+		callID = strings.TrimSpace(event.Tool.ID)
+		toolName = canonicalToolName(event, update)
+		rawStatus = strings.TrimSpace(event.Tool.Status)
+	} else if update != nil {
 		callID = strings.TrimSpace(update.ToolCallID)
 		toolName = canonicalToolName(event, update)
 		rawStatus = strings.TrimSpace(update.Status)
@@ -552,7 +556,11 @@ func canonicalToolResultPayload(event *session.Event) *ToolResultPayload {
 	callID := ""
 	toolName := ""
 	rawStatus := ""
-	if update != nil {
+	if event.Tool != nil {
+		callID = strings.TrimSpace(event.Tool.ID)
+		toolName = canonicalToolName(event, update)
+		rawStatus = strings.TrimSpace(event.Tool.Status)
+	} else if update != nil {
 		callID = strings.TrimSpace(update.ToolCallID)
 		toolName = canonicalToolName(event, update)
 		rawStatus = strings.TrimSpace(update.Status)
@@ -835,6 +843,9 @@ func scopeFromSessionEvent(event *session.Event) EventScope {
 }
 
 func canonicalToolKind(event *session.Event) string {
+	if event != nil && event.Tool != nil {
+		return strings.TrimSpace(event.Tool.Kind)
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return strings.TrimSpace(update.Kind)
 	}
@@ -845,6 +856,9 @@ func canonicalToolKind(event *session.Event) string {
 }
 
 func canonicalToolTitle(event *session.Event) string {
+	if event != nil && event.Tool != nil {
+		return strings.TrimSpace(event.Tool.Title)
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return strings.TrimSpace(update.Title)
 	}
@@ -855,6 +869,11 @@ func canonicalToolTitle(event *session.Event) string {
 }
 
 func canonicalToolRawInput(event *session.Event) map[string]any {
+	if event != nil && event.Tool != nil {
+		if len(event.Tool.Input) > 0 {
+			return maps.Clone(event.Tool.Input)
+		}
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if len(update.RawInput) > 0 {
 			return maps.Clone(update.RawInput)
@@ -872,6 +891,11 @@ func canonicalToolRawInput(event *session.Event) map[string]any {
 }
 
 func canonicalToolRawOutput(event *session.Event) map[string]any {
+	if event != nil && event.Tool != nil {
+		if len(event.Tool.Output) > 0 {
+			return maps.Clone(event.Tool.Output)
+		}
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if len(update.RawOutput) > 0 {
 			return maps.Clone(update.RawOutput)
@@ -886,6 +910,9 @@ func canonicalToolRawOutput(event *session.Event) map[string]any {
 }
 
 func canonicalToolContent(event *session.Event) []session.ProtocolToolCallContent {
+	if event != nil && event.Tool != nil {
+		return protocolContentFromEventTool(event.Tool.Content)
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		if content := session.ProtocolToolCallContentOf(update); len(content) > 0 {
 			return content
@@ -897,12 +924,43 @@ func canonicalToolContent(event *session.Event) []session.ProtocolToolCallConten
 	return nil
 }
 
+func protocolContentFromEventTool(content []session.EventToolContent) []session.ProtocolToolCallContent {
+	if len(content) == 0 {
+		return nil
+	}
+	out := make([]session.ProtocolToolCallContent, 0, len(content))
+	for _, item := range content {
+		var oldText *string
+		if item.OldText != nil {
+			value := *item.OldText
+			oldText = &value
+		}
+		var payload any
+		if strings.TrimSpace(item.Text) != "" {
+			payload = session.ProtocolTextContent(item.Text)
+		}
+		out = append(out, session.ProtocolToolCallContent{
+			Type:       strings.TrimSpace(item.Type),
+			Content:    payload,
+			TerminalID: strings.TrimSpace(item.TerminalID),
+			Path:       strings.TrimSpace(item.Path),
+			OldText:    oldText,
+			NewText:    item.NewText,
+		})
+	}
+	return out
+}
+
 func toolUseRawInputFromMessage(event *session.Event) map[string]any {
 	if event == nil || event.Message == nil {
 		return nil
 	}
 	callID := ""
 	toolName := ""
+	if event.Tool != nil {
+		callID = strings.TrimSpace(event.Tool.ID)
+		toolName = strings.TrimSpace(event.Tool.Name)
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		callID = strings.TrimSpace(update.ToolCallID)
 		toolName = canonicalToolName(event, update)
@@ -915,7 +973,7 @@ func toolUseRawInputFromMessage(event *session.Event) map[string]any {
 		if callID != "" && strings.TrimSpace(call.ID) != callID {
 			continue
 		}
-		if toolName != "" && !strings.EqualFold(strings.TrimSpace(call.Name), toolName) {
+		if callID == "" && toolName != "" && !strings.EqualFold(strings.TrimSpace(call.Name), toolName) {
 			continue
 		}
 		raw := rawInputFromJSONString(call.Args)
@@ -930,16 +988,23 @@ func canonicalToolName(event *session.Event, update *session.ProtocolUpdate) str
 	if name := stringFromNestedMap(eventMeta(event), "caelis", "runtime", "tool", "name"); name != "" {
 		return name
 	}
+	if event != nil && event.Tool != nil {
+		if name := strings.TrimSpace(event.Tool.Name); name != "" {
+			return name
+		}
+	}
 	if event != nil && event.Protocol != nil && event.Protocol.ToolCall != nil {
 		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
 			return name
 		}
 	}
 	if update != nil {
+		if kind := strings.TrimSpace(update.Kind); kind != "" {
+			return kind
+		}
 		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
 			return title[0]
 		}
-		return strings.TrimSpace(update.Kind)
 	}
 	return ""
 }

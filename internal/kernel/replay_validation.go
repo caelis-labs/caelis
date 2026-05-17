@@ -22,20 +22,18 @@ func validateReplaySessionEvent(event *session.Event) error {
 	if event == nil || session.EventTypeOf(event) != session.EventTypeToolResult {
 		return nil
 	}
-	update := session.ProtocolUpdateOf(event)
-	if update == nil || len(update.RawOutput) == 0 {
-		return nil
+	if event.Tool != nil {
+		if len(event.Tool.Output) > 0 {
+			if err := validateCanonicalReplayRawOutput(event.ID, event.Tool.Output); err != nil {
+				return err
+			}
+		}
+		return validateCanonicalReplayMeta(event.ID, event.Meta)
 	}
-	if len(session.ProtocolToolCallContentOf(update)) == 0 {
-		return replayValidationError(event.ID, "tool result uses old rawOutput-only format; resume requires ACP tool content")
+	if event.Message != nil && len(event.Message.ToolResults()) > 0 {
+		return validateCanonicalReplayMeta(event.ID, event.Meta)
 	}
-	if err := validateCanonicalReplayRawOutput(event.ID, update.RawOutput); err != nil {
-		return err
-	}
-	if err := validateCanonicalReplayMeta(event.ID, event.Meta); err != nil {
-		return err
-	}
-	return nil
+	return replayValidationError(event.ID, "tool result is missing durable Event.Tool or model tool-result payload")
 }
 
 func validateCanonicalReplayRawOutput(cursor string, rawOutput map[string]any) error {

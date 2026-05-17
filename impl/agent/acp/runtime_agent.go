@@ -389,9 +389,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		}
 		return acp.PromptResponse{}, err
 	}
-	streamedAssistant := false
-	var lastLive liveChunkFingerprint
-	hasLastLive := false
+	outboundFilter := newACPNarrativeFilter()
 	bridgedTerminals := map[string]struct{}{}
 	for event, seqErr := range result.Handle.Events() {
 		if seqErr != nil {
@@ -403,22 +401,7 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		if event == nil {
 			continue
 		}
-		if isLiveAssistantChunk(event) {
-			streamedAssistant = true
-		}
-		if fingerprint, ok := liveChunkFingerprintForEvent(event); ok {
-			if hasLastLive && fingerprint == lastLive {
-				continue
-			}
-			lastLive = fingerprint
-			hasLastLive = true
-		} else {
-			hasLastLive = false
-			if streamedAssistant && isFinalAssistantMessage(event) {
-				continue
-			}
-		}
-		if err := a.emitEvent(runCtx, cb, event); err != nil {
+		if err := a.emitEvent(runCtx, cb, event, outboundFilter); err != nil {
 			return acp.PromptResponse{}, err
 		}
 		a.maybeStartTerminalBridge(context.WithoutCancel(ctx), cb, event, bridgedTerminals)
@@ -476,13 +459,16 @@ func (a *RuntimeAgent) Release(ctx context.Context, req acp.TerminalReleaseReque
 	return adapter.Release(ctx, req)
 }
 
-func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, event *session.Event) error {
+func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, event *session.Event, outboundFilter *acpNarrativeFilter) error {
 	if cb == nil || event == nil {
 		return nil
 	}
 	if permission, ok, err := a.projector.ProjectPermissionRequest(event); err != nil {
 		return err
 	} else if ok && permission != nil {
+		if outboundFilter != nil {
+			outboundFilter.resetSegment()
+		}
 		_, err := cb.RequestPermission(ctx, *permission)
 		return err
 	}
@@ -491,7 +477,15 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 		return err
 	}
 	for _, notification := range notifications {
-		if err := cb.SessionUpdate(ctx, notification); err != nil {
+		filtered := notification
+		if outboundFilter != nil {
+			var ok bool
+			filtered, ok = outboundFilter.FilterNotification(notification)
+			if !ok {
+				continue
+			}
+		}
+		if err := cb.SessionUpdate(ctx, filtered); err != nil {
 			return err
 		}
 	}
@@ -499,18 +493,25 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 }
 
 func (a *RuntimeAgent) maybeStartTerminalBridge(ctx context.Context, cb acp.PromptCallbacks, event *session.Event, active map[string]struct{}) {
-	if cb == nil || event == nil || event.Protocol == nil || event.Protocol.ToolCall == nil {
+	if cb == nil || event == nil {
 		return
 	}
-	call := event.Protocol.ToolCall
-	if !terminalBridgeEligibleTool(call.Name) {
+	name := ""
+	displayTerminalID := ""
+	if event.Tool != nil {
+		name = strings.TrimSpace(event.Tool.Name)
+		displayTerminalID = strings.TrimSpace(event.Tool.ID)
+	} else if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		name = strings.TrimSpace(event.Protocol.ToolCall.Name)
+		displayTerminalID = strings.TrimSpace(event.Protocol.ToolCall.ID)
+	}
+	if !terminalBridgeEligibleTool(name) {
 		return
 	}
 	ref, ok := terminal.RefFromEvent(event)
 	if !ok {
 		return
 	}
-	displayTerminalID := strings.TrimSpace(call.ID)
 	if displayTerminalID == "" {
 		return
 	}
@@ -528,51 +529,100 @@ func (a *RuntimeAgent) streamTerminalToACP(ctx context.Context, cb acp.PromptCal
 	if !ok || provider.Streams() == nil {
 		return
 	}
-	for frame, err := range provider.Streams().Subscribe(ctx, stream.SubscribeRequest{Ref: ref}) {
+	sessionID = strings.TrimSpace(sessionID)
+	displayTerminalID = strings.TrimSpace(displayTerminalID)
+	if sessionID == "" || displayTerminalID == "" {
+		return
+	}
+	emittedOutput := false
+	for frame, err := range provider.Streams().Subscribe(ctx, stream.SubscribeRequest{Ref: stream.NormalizeRef(ref)}) {
 		if err != nil {
+			_ = cb.SessionUpdate(ctx, terminalExitNotification(sessionID, displayTerminalID, acp.ToolStatusFailed, 1))
 			return
 		}
 		if frame == nil {
 			continue
 		}
-		if frame.Closed {
-			status := acp.ToolStatusCompleted
-			if !strings.EqualFold(strings.TrimSpace(frame.State), "completed") {
-				status = acp.ToolStatusFailed
+		if !frame.Closed {
+			if frame.Text != "" {
+				emittedOutput = true
+				if err := cb.SessionUpdate(ctx, terminalOutputNotification(sessionID, displayTerminalID, frame.Text)); err != nil {
+					return
+				}
 			}
-			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
-				SessionID: sessionID,
-				Update: acp.ToolCallUpdate{
-					SessionUpdate: acp.UpdateToolCallInfo,
-					ToolCallID:    displayTerminalID,
-					Status:        &status,
-					Content:       terminalToolContent(displayTerminalID, frame.Text),
-				},
-			})
-			return
+			continue
 		}
-		if frame.Text != "" {
-			_ = cb.SessionUpdate(ctx, acp.SessionNotification{
-				SessionID: sessionID,
-				Update: acp.ToolCallUpdate{
-					SessionUpdate: acp.UpdateToolCallInfo,
-					ToolCallID:    displayTerminalID,
-					Content:       terminalToolContent(displayTerminalID, frame.Text),
-				},
-			})
+		if frame.Text != "" && !emittedOutput {
+			emittedOutput = true
+			if err := cb.SessionUpdate(ctx, terminalOutputNotification(sessionID, displayTerminalID, frame.Text)); err != nil {
+				return
+			}
 		}
+		if !emittedOutput {
+			if err := cb.SessionUpdate(ctx, terminalOutputNotification(sessionID, displayTerminalID, "(no output)")); err != nil {
+				return
+			}
+		}
+		status := acp.ToolStatusCompleted
+		exitCode := 0
+		if terminalFrameFailed(frame.State) {
+			status = acp.ToolStatusFailed
+			exitCode = 1
+		}
+		_ = cb.SessionUpdate(ctx, terminalExitNotification(sessionID, displayTerminalID, status, exitCode))
+		return
 	}
 }
 
-func terminalToolContent(terminalID string, text string) []acp.ToolCallContent {
-	if text == "" {
-		return nil
+func terminalOutputNotification(sessionID string, terminalID string, data string) acp.SessionNotification {
+	return acp.SessionNotification{
+		SessionID: strings.TrimSpace(sessionID),
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCallID:    strings.TrimSpace(terminalID),
+			Meta:          terminalOutputMeta(terminalID, data),
+		},
 	}
-	return []acp.ToolCallContent{{
-		Type:       "terminal",
-		Content:    acp.TextContent{Type: "text", Text: text},
-		TerminalID: strings.TrimSpace(terminalID),
-	}}
+}
+
+func terminalExitNotification(sessionID string, terminalID string, status string, exitCode int) acp.SessionNotification {
+	return acp.SessionNotification{
+		SessionID: strings.TrimSpace(sessionID),
+		Update: acp.ToolCallUpdate{
+			SessionUpdate: acp.UpdateToolCallInfo,
+			ToolCallID:    strings.TrimSpace(terminalID),
+			Status:        stringPtr(status),
+			Meta:          terminalExitMeta(terminalID, exitCode),
+		},
+	}
+}
+
+func terminalOutputMeta(terminalID string, data string) map[string]any {
+	return map[string]any{
+		"terminal_output": map[string]any{
+			"terminal_id": strings.TrimSpace(terminalID),
+			"data":        data,
+		},
+	}
+}
+
+func terminalExitMeta(terminalID string, exitCode int) map[string]any {
+	return map[string]any{
+		"terminal_exit": map[string]any{
+			"terminal_id": strings.TrimSpace(terminalID),
+			"exit_code":   exitCode,
+			"signal":      nil,
+		},
+	}
+}
+
+func terminalFrameFailed(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+		return true
+	default:
+		return false
+	}
 }
 
 func terminalBridgeEligibleTool(name string) bool {
@@ -584,76 +634,97 @@ func terminalBridgeEligibleTool(name string) bool {
 	}
 }
 
-func isLiveAssistantChunk(event *session.Event) bool {
-	return event != nil &&
-		event.Visibility == session.VisibilityUIOnly &&
-		event.Protocol != nil &&
-		strings.TrimSpace(event.Protocol.UpdateType) == string(session.ProtocolUpdateTypeAgentMessage)
+const acpNarrativeReplayMinRunes = 4
+
+type acpNarrativeFilter struct {
+	sent map[string]string
 }
 
-func isFinalAssistantMessage(event *session.Event) bool {
-	return event != nil &&
-		event.Visibility != session.VisibilityUIOnly &&
-		event.Protocol != nil &&
-		strings.TrimSpace(event.Protocol.UpdateType) == string(session.ProtocolUpdateTypeAgentMessage) &&
-		session.EventTypeOf(event) == session.EventTypeAssistant
+func newACPNarrativeFilter() *acpNarrativeFilter {
+	return &acpNarrativeFilter{sent: map[string]string{}}
 }
 
-type liveChunkFingerprint struct {
-	updateType string
-	text       string
-}
-
-func liveChunkFingerprintForEvent(event *session.Event) (liveChunkFingerprint, bool) {
-	if event == nil || event.Visibility != session.VisibilityUIOnly || event.Protocol == nil {
-		return liveChunkFingerprint{}, false
+func (f *acpNarrativeFilter) FilterNotification(notification acp.SessionNotification) (acp.SessionNotification, bool) {
+	if f == nil {
+		return notification, true
 	}
-	updateType := strings.TrimSpace(event.Protocol.UpdateType)
-	var text string
-	switch updateType {
-	case string(session.ProtocolUpdateTypeAgentMessage):
-		text = assistantTextForEvent(event)
-	case string(session.ProtocolUpdateTypeAgentThought):
-		text = thoughtTextForEvent(event)
-	default:
-		return liveChunkFingerprint{}, false
+	updateType, text, ok := acpContentChunkText(notification.Update)
+	if !ok {
+		f.resetSegment()
+		return notification, true
 	}
 	if text == "" {
-		return liveChunkFingerprint{}, false
+		return notification, true
 	}
-	if len([]rune(strings.TrimSpace(text))) < 12 {
-		return liveChunkFingerprint{}, false
+	previous := f.sent[updateType]
+	if replacement, cumulative := acpNarrativeCumulativeSuffix(previous, text); cumulative {
+		if replacement == "" {
+			return acp.SessionNotification{}, false
+		}
+		f.sent[updateType] = text
+		return cloneContentChunkNotificationWithText(notification, replacement), true
 	}
-	return liveChunkFingerprint{updateType: updateType, text: text}, true
+	f.sent[updateType] = previous + text
+	return notification, true
 }
 
-func assistantTextForEvent(event *session.Event) string {
-	if event == nil {
-		return ""
+func (f *acpNarrativeFilter) resetSegment() {
+	if f == nil {
+		return
 	}
-	if event.Text != "" {
-		return event.Text
-	}
-	if event.Message != nil {
-		return event.Message.TextContent()
-	}
-	return ""
+	clear(f.sent)
 }
 
-func thoughtTextForEvent(event *session.Event) string {
-	if event == nil {
-		return ""
+func acpContentChunkText(update acp.Update) (string, string, bool) {
+	chunk, ok := update.(acp.ContentChunk)
+	if !ok {
+		return "", "", false
 	}
-	if event.Text != "" {
-		return event.Text
+	updateType := strings.TrimSpace(chunk.SessionUpdate)
+	switch updateType {
+	case acp.UpdateAgentMessage, acp.UpdateAgentThought:
+	default:
+		return "", "", false
 	}
-	if event.Message == nil {
-		return ""
-	}
-	if text := event.Message.ReasoningText(); text != "" {
+	return updateType, acpTextContentText(chunk.Content), true
+}
+
+func acpTextContentText(content any) string {
+	switch typed := content.(type) {
+	case acp.TextContent:
+		return typed.Text
+	case map[string]any:
+		text, _ := typed["text"].(string)
 		return text
+	default:
+		return ""
 	}
-	return event.Message.TextContent()
+}
+
+func cloneContentChunkNotificationWithText(notification acp.SessionNotification, text string) acp.SessionNotification {
+	chunk, ok := notification.Update.(acp.ContentChunk)
+	if !ok {
+		return notification
+	}
+	chunk.Content = acp.TextContent{Type: "text", Text: text}
+	notification.Update = chunk
+	return notification
+}
+
+func acpNarrativeCumulativeSuffix(previous string, incoming string) (string, bool) {
+	if previous == "" || incoming == "" {
+		return "", false
+	}
+	if incoming == previous && len([]rune(incoming)) >= acpNarrativeReplayMinRunes {
+		return "", true
+	}
+	if strings.HasPrefix(previous, incoming) && len([]rune(incoming)) >= acpNarrativeReplayMinRunes {
+		return "", true
+	}
+	if strings.HasPrefix(incoming, previous) && len([]rune(previous)) >= acpNarrativeReplayMinRunes {
+		return strings.TrimPrefix(incoming, previous), true
+	}
+	return "", false
 }
 
 func (a *RuntimeAgent) setCancel(sessionID string, cancel context.CancelFunc) {
@@ -669,6 +740,14 @@ func (a *RuntimeAgent) clearCancel(sessionID string) {
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+func stringPtr(v string) *string {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		return nil
+	}
+	return &v
+}
 
 func promptContent(prompt []json.RawMessage) (string, []model.ContentPart, error) {
 	texts := make([]string, 0, len(prompt))

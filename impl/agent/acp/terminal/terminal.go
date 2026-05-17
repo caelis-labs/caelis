@@ -118,6 +118,12 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 		if terminalID, _ := event.Meta["terminal_id"].(string); strings.TrimSpace(terminalID) != "" {
 			ref.TerminalID = strings.TrimSpace(terminalID)
 		}
+		if ref.TaskID == "" {
+			ref.TaskID = nestedString(event.Meta, "caelis", "runtime", "task", "task_id")
+		}
+		if ref.TerminalID == "" {
+			ref.TerminalID = nestedString(event.Meta, "caelis", "runtime", "task", "terminal_id")
+		}
 	}
 	if ref.TerminalID == "" && event.Protocol != nil && event.Protocol.ToolCall != nil {
 		for _, item := range event.Protocol.ToolCall.Content {
@@ -127,8 +133,28 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 			}
 		}
 	}
-	if ref.TerminalID == "" {
-		if update := session.ProtocolUpdateOf(event); update != nil {
+	if ref.TerminalID == "" && event.Tool != nil {
+		for _, item := range event.Tool.Content {
+			if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+				continue
+			}
+			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+				ref.TerminalID = terminalID
+				break
+			}
+		}
+	}
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		if ref.TaskID == "" {
+			ref.TaskID = protocolTerminalMetaValue(update.Meta, "task_id")
+		}
+		if ref.TerminalID == "" {
+			ref.TerminalID = protocolTerminalMetaValue(update.Meta, "terminal_id")
+			if ref.TerminalID == "" {
+				ref.TerminalID = protocolTerminalMetaValue(update.Meta, "terminalId")
+			}
+		}
+		if ref.TerminalID == "" {
 			for _, item := range session.ProtocolToolCallContentOf(update) {
 				if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
 					ref.TerminalID = terminalID
@@ -141,6 +167,28 @@ func RefFromEvent(event *session.Event) (stream.Ref, bool) {
 		return stream.Ref{}, false
 	}
 	return ref, true
+}
+
+func protocolTerminalMetaValue(meta map[string]any, key string) string {
+	for _, section := range []string{"terminal_output", "terminal_exit", "terminal_info"} {
+		if value := nestedString(meta, section, key); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func nestedString(values map[string]any, path ...string) string {
+	var current any = values
+	for _, key := range path {
+		mapped, ok := current.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = mapped[key]
+	}
+	text, _ := current.(string)
+	return strings.TrimSpace(text)
 }
 
 func ContentFromEvent(event *session.Event) []ToolCallContent {

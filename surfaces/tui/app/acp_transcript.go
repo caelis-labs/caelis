@@ -1160,6 +1160,9 @@ func explorationToolDetail(ev SubagentEvent) string {
 	}
 	fromOutput := !fromArgs && item != ""
 	if item == "" {
+		if explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind)) != "" {
+			return ""
+		}
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
 	item = normalizeExplorationFailedDetail(item)

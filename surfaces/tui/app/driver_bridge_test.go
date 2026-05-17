@@ -180,8 +180,69 @@ func TestGatewayTerminalBatcherPreservesBashPrefixDeltas(t *testing.T) {
 	}
 }
 
+func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
+	var sent []tea.Msg
+	send := func(msg tea.Msg) {
+		sent = append(sent, msg)
+	}
+	var batcher gatewayNarrativeBatcher
+
+	if !batcher.enqueue(testNarrativeFrame("hello "), send) {
+		t.Fatal("first narrative frame was not accepted for batching")
+	}
+	if !batcher.enqueue(testNarrativeFrame("world"), send) {
+		t.Fatal("second narrative frame was not accepted for batching")
+	}
+
+	batcher.flush(send)
+	if len(sent) != 1 {
+		t.Fatalf("flush sent %d messages, want 1", len(sent))
+	}
+	env, ok := sent[0].(kernel.EventEnvelope)
+	if !ok {
+		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
+	}
+	if got := env.Event.Narrative.Text; got != "hello world" {
+		t.Fatalf("narrative text = %q, want merged text", got)
+	}
+	if env.Event.Protocol == nil || env.Event.Protocol.Update == nil {
+		t.Fatalf("protocol = %#v, want protocol update", env.Event.Protocol)
+	}
+	if got := protocolTextContent(env.Event.Protocol.Update.Content); got != "hello world" {
+		t.Fatalf("protocol content = %q, want merged text", got)
+	}
+	events := ProjectGatewayEventToTranscriptEvents(env.Event)
+	if len(events) != 1 || events[0].Text != "hello world" {
+		t.Fatalf("projected events = %#v, want protocol-first merged text", events)
+	}
+}
+
 func testTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
 	return testTerminalFrameForTool("BASH", text, cursor)
+}
+
+func testNarrativeFrame(text string) kernel.EventEnvelope {
+	return kernel.EventEnvelope{
+		Event: kernel.Event{
+			Kind:       kernel.EventKindAssistantMessage,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+			Narrative: &kernel.NarrativePayload{
+				Role:       kernel.NarrativeRoleAssistant,
+				Text:       text,
+				Visibility: string(session.VisibilityUIOnly),
+				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+				Scope:      kernel.EventScopeMain,
+			},
+			Protocol: &session.EventProtocol{
+				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
+				Update: &session.ProtocolUpdate{
+					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
+					Content:       session.ProtocolTextContent(text),
+				},
+			},
+		},
+	}
 }
 
 func testTerminalFrameForTool(toolName string, text string, cursor int64) kernel.EventEnvelope {

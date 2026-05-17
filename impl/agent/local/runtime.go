@@ -744,7 +744,7 @@ func normalizeEvent(activeSession session.Session, turnID string, event *session
 	if event.Text == "" && event.Message != nil {
 		event.Text = event.Message.TextContent()
 	}
-	if event.Protocol == nil {
+	if event.Protocol == nil && event.Message == nil {
 		switch session.EventTypeOf(event) {
 		case session.EventTypeUser:
 			event.Protocol = &session.EventProtocol{Update: &session.ProtocolUpdate{
@@ -757,7 +757,7 @@ func normalizeEvent(activeSession session.Session, turnID string, event *session
 				Content:       session.ProtocolTextContent(event.Text),
 			}}
 		}
-	} else {
+	} else if event.Protocol != nil && event.Message == nil {
 		protocol := session.CloneEventProtocol(*event.Protocol)
 		if protocol.Update != nil && protocol.Update.Content == nil {
 			switch session.EventTypeOf(event) {
@@ -899,8 +899,13 @@ func planEntriesFromEvent(event *session.Event) ([]plan.Entry, string, bool) {
 	}
 
 	payload := map[string]any{}
-	if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
-		payload = maps.Clone(update.RawOutput)
+	if event.Tool != nil && len(event.Tool.Output) > 0 {
+		payload = maps.Clone(event.Tool.Output)
+	}
+	if len(payload) == 0 {
+		if update := session.ProtocolUpdateOf(event); update != nil && len(update.RawOutput) > 0 {
+			payload = maps.Clone(update.RawOutput)
+		}
 	}
 	if len(payload) == 0 && event.Message != nil {
 		results := event.Message.ToolResults()
@@ -929,6 +934,11 @@ func planToolNameFromEvent(event *session.Event) string {
 	}
 	if name := nestedString(event.Meta, "caelis", "runtime", "tool", "name"); name != "" {
 		return name
+	}
+	if event.Tool != nil {
+		if name := strings.TrimSpace(event.Tool.Name); name != "" {
+			return name
+		}
 	}
 	if event.Protocol != nil && event.Protocol.ToolCall != nil {
 		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {

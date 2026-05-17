@@ -21,6 +21,11 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if path := toolPath(raw); path != "" {
 			return compactPathDisplay(path)
 		}
+		if strings.EqualFold(parsedCommandType(raw), "list_files") {
+			if cwd := strings.TrimSpace(asString(raw["cwd"])); cwd != "" {
+				return compactPathDisplay(cwd)
+			}
+		}
 		if metadataOnlyToolArgs(raw) {
 			return ""
 		}
@@ -103,6 +108,17 @@ func toolDisplayFullArgs(name string, raw map[string]any) string {
 	}
 }
 
+func refinedToolDisplayName(semanticName string, kind string, title string, raw map[string]any) string {
+	if !strings.EqualFold(strings.TrimSpace(kind), "search") && !strings.EqualFold(strings.TrimSpace(semanticName), "SEARCH") {
+		return ""
+	}
+	switch parsedCommandType(raw) {
+	case "list_files":
+		return "LIST"
+	}
+	return ""
+}
+
 func toolTitleDisplayArgs(name string, kind string, title string) string {
 	title = strings.TrimSpace(title)
 	if title == "" {
@@ -115,8 +131,11 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case "READ", "LIST":
 		return prefixedTitleDetail(title, "Read", "List")
 	case "SEARCH", "RG", "FIND":
-		if detail := prefixedTitleDetail(title, "Search", "Searching for:"); detail != "" {
+		if detail := prefixedSearchTitleDetail(title); detail != "" {
 			return fmt.Sprintf("%q", detail)
+		}
+		if genericSearchTitle(title) {
+			return ""
 		}
 		return title
 	case "WRITE", "PATCH":
@@ -128,8 +147,11 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	case "read":
 		return prefixedTitleDetail(title, "Read")
 	case "search":
-		if detail := prefixedTitleDetail(title, "Search"); detail != "" {
+		if detail := prefixedSearchTitleDetail(title); detail != "" {
 			return fmt.Sprintf("%q", detail)
+		}
+		if genericSearchTitle(title) {
+			return ""
 		}
 	case "fetch":
 		if detail := prefixedTitleDetail(title, "Fetch", "Searching for:"); detail != "" {
@@ -137,6 +159,23 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 		}
 	}
 	return title
+}
+
+func prefixedSearchTitleDetail(title string) string {
+	detail := prefixedTitleDetail(title, "Search", "Find", "Searching for:", "Finding:")
+	if genericSearchTitle(detail) {
+		return ""
+	}
+	return detail
+}
+
+func genericSearchTitle(title string) bool {
+	switch strings.ToLower(strings.TrimSpace(title)) {
+	case "search", "find", "rg", "grep", "search files", "find files", "search repository", "find repository":
+		return true
+	default:
+		return false
+	}
 }
 
 func executeTitleDisplayArgs(title string) string {
@@ -948,6 +987,15 @@ func parsedCommandString(raw map[string]any) string {
 func parsedCommandField(raw map[string]any, key string) string {
 	for _, entry := range parsedCommandEntries(raw["parsed_cmd"]) {
 		if value := strings.TrimSpace(asString(entry[key])); value != "" && value != "<nil>" {
+			return value
+		}
+	}
+	return ""
+}
+
+func parsedCommandType(raw map[string]any) string {
+	for _, entry := range parsedCommandEntries(raw["parsed_cmd"]) {
+		if value := strings.ToLower(strings.TrimSpace(asString(entry["type"]))); value != "" && value != "<nil>" {
 			return value
 		}
 	}

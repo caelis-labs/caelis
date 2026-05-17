@@ -957,6 +957,194 @@ func TestGatewayACPExplorationNamedToolsCanRenderExploredGroup(t *testing.T) {
 	}
 }
 
+func TestGatewayACPExplorationStatusOnlyCompletedDoesNotBecomeDetail(t *testing.T) {
+	model := newGatewayEventTestModel()
+	sendRead := func(id string) {
+		updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+			Kind:       kernel.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+			ToolCall: &kernel.ToolCallPayload{
+				CallID:   id,
+				ToolName: "READ",
+				Status:   kernel.ToolStatusRunning,
+				Scope:    kernel.EventScopeMain,
+			},
+		}})
+		model = updated.(*Model)
+		updated, _ = model.Update(kernel.EventEnvelope{Event: kernel.Event{
+			Kind:       kernel.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+			ToolResult: &kernel.ToolResultPayload{
+				CallID:   id,
+				ToolName: "READ",
+				Content:  testToolContent("completed"),
+				Status:   kernel.ToolStatusCompleted,
+				Scope:    kernel.EventScopeMain,
+			},
+		}})
+		model = updated.(*Model)
+	}
+
+	sendRead("read-1")
+	sendRead("read-2")
+	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		Kind:       kernel.EventKindAssistantMessage,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Narrative: &kernel.NarrativePayload{
+			Role:          kernel.NarrativeRoleAssistant,
+			ReasoningText: "continue",
+			Final:         true,
+			Scope:         kernel.EventScopeMain,
+		},
+	}})
+	model = updated.(*Model)
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "• Explored") || !strings.Contains(joined, "  └ Read") {
+		t.Fatalf("rendered rows = %q, want compact read exploration group", joined)
+	}
+	if strings.Contains(joined, "Read completed") || strings.Contains(joined, "completed, completed") {
+		t.Fatalf("rendered rows = %q, status-only completions must not become exploration details", joined)
+	}
+}
+
+func TestGatewayACPClaudeReadLifecycleKeepsIncrementalInput(t *testing.T) {
+	model := newGatewayEventTestModel()
+	path := "/Users/xueyongzhi/WorkDir/xueyongzhi/demo/a.py"
+	sendUpdate := func(update session.ProtocolUpdate) {
+		updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+			Kind:       kernel.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+			Protocol: &session.EventProtocol{
+				UpdateType: update.SessionUpdate,
+				Update:     &update,
+			},
+		}})
+		model = updated.(*Model)
+	}
+
+	sendUpdate(session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
+		ToolCallID:    "read-1",
+		Title:         "Read File",
+		Kind:          "read",
+		Status:        "pending",
+		Meta:          map[string]any{"claudeCode": map[string]any{"toolName": "Read"}},
+	})
+	sendUpdate(session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+		ToolCallID:    "read-1",
+		Title:         "Read a.py",
+		Kind:          "read",
+		RawInput:      map[string]any{"file_path": path},
+		Locations: []session.ProtocolToolCallLocation{{
+			Path: path,
+		}},
+		Meta: map[string]any{"claudeCode": map[string]any{"toolName": "Read"}},
+	})
+	sendUpdate(session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+		ToolCallID:    "read-1",
+		Meta: map[string]any{"claudeCode": map[string]any{
+			"toolName": "Read",
+			"toolResponse": map[string]any{
+				"type": "text",
+				"file": map[string]any{"filePath": path, "numLines": 16},
+			},
+		}},
+	})
+	sendUpdate(session.ProtocolUpdate{
+		SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+		ToolCallID:    "read-1",
+		Status:        "completed",
+		Meta:          map[string]any{"claudeCode": map[string]any{"toolName": "Read"}},
+	})
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	if len(block.Events) != 1 {
+		t.Fatalf("events = %#v, want one merged Read lifecycle event", block.Events)
+	}
+	ev := block.Events[0]
+	if !ev.Done {
+		t.Fatalf("event = %#v, want completed Read event", ev)
+	}
+	if ev.Args != path {
+		t.Fatalf("Read args = %q, want incremental file_path %q", ev.Args, path)
+	}
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "Read "+path) {
+		t.Fatalf("rendered rows = %q, want Read row with file path", joined)
+	}
+	if strings.Contains(joined, "Read completed") || strings.Contains(joined, "completed, completed") {
+		t.Fatalf("rendered rows = %q, status-only final update must not replace Read parameters", joined)
+	}
+}
+
+func TestGatewayACPThinkToolUsesTitleCaseDisplayName(t *testing.T) {
+	model := newGatewayEventTestModel()
+	prompt := "Quickly scan the project at /Users/xueyongzhi/WorkDir/xueyongzhi/demo and report directories and Python files."
+	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		Kind:       kernel.EventKindToolCall,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+		ToolCall: &kernel.ToolCallPayload{
+			CallID:    "think-1",
+			ToolName:  "think",
+			ToolKind:  "think",
+			ToolTitle: "Analyze demo codebase",
+			RawInput: map[string]any{
+				"prompt": prompt,
+			},
+			Status: kernel.ToolStatusRunning,
+			Scope:  kernel.EventScopeMain,
+		},
+	}})
+	model = updated.(*Model)
+	updated, _ = model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		Kind:       kernel.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session", Source: "acp"},
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:    "think-1",
+			ToolName:  "think",
+			ToolKind:  "think",
+			ToolTitle: "Analyze demo codebase",
+			RawInput: map[string]any{
+				"prompt": prompt,
+			},
+			Content: testToolContent(prompt),
+			Status:  kernel.ToolStatusCompleted,
+			Scope:   kernel.EventScopeMain,
+		},
+	}})
+	model = updated.(*Model)
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "• Think Analyze demo codebase") {
+		t.Fatalf("rendered rows = %q, want title-case Think tool row", joined)
+	}
+	if strings.Contains(joined, "• think") {
+		t.Fatalf("rendered rows = %q, want think mapped to Think", joined)
+	}
+	if !strings.Contains(joined, "Quickly scan") {
+		t.Fatalf("rendered rows = %q, want think tool content still rendered", joined)
+	}
+}
+
 func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -2009,6 +2197,57 @@ func TestGatewayTaskSnapshotDoesNotRefreshBashPanelOutput(t *testing.T) {
 	for _, forbidden := range []string{"|_", "BASH output", "│", "task / running", "state running", "stdout 进度", "task-7"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
+		}
+	}
+}
+
+func TestGatewayTaskWaitCompletedShowsActionWithoutResultOutput(t *testing.T) {
+	model := newGatewayEventTestModel()
+	for _, env := range []kernel.EventEnvelope{
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolCall: &kernel.ToolCallPayload{
+				CallID:   "task-wait-12",
+				ToolName: "TASK",
+				Status:   kernel.ToolStatusRunning,
+				Scope:    kernel.EventScopeMain,
+				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 12000},
+			},
+		}},
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindToolResult,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": "wait", "target_kind": "bash"}),
+			ToolResult: &kernel.ToolResultPayload{
+				CallID:   "task-wait-12",
+				ToolName: "TASK",
+				Status:   kernel.ToolStatusCompleted,
+				Scope:    kernel.EventScopeMain,
+				RawInput: map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 12000},
+				RawOutput: map[string]any{
+					"state":  "completed",
+					"result": "line 1\nline 2\nline 3\n",
+				},
+				Content: testTerminalContent("line 1\nline 2\nline 3\n"),
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	rows := block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "Wait 12s") {
+		t.Fatalf("rendered rows = %q, want TASK wait action only", joined)
+	}
+	for _, forbidden := range []string{"line 1", "line 2", "line 3"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("rendered rows = %q, should not render TASK wait result %q", joined, forbidden)
 		}
 	}
 }
@@ -3853,5 +4092,96 @@ func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing
 		if panel, ok := block.(*SubagentPanelBlock); ok {
 			t.Fatalf("anchored child stream created standalone panel: %#v", panel)
 		}
+	}
+}
+
+func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.T) {
+	model := newGatewayEventTestModel()
+	for _, env := range []kernel.EventEnvelope{
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindToolCall,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			ToolCall: &kernel.ToolCallPayload{
+				CallID:   "spawn-approval",
+				ToolName: "SPAWN",
+				Status:   kernel.ToolStatusRunning,
+				Scope:    kernel.EventScopeMain,
+				RawInput: map[string]any{"agent": "claude", "prompt": "create hello_claude.txt"},
+			},
+		}},
+		{Event: kernel.Event{
+			Kind:       kernel.EventKindApprovalReview,
+			SessionRef: session.SessionRef{SessionID: "root-session"},
+			Origin: &kernel.EventOrigin{
+				Scope:   kernel.EventScopeSubagent,
+				ScopeID: "task-claude",
+				Actor:   "claude",
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"stream": map[string]any{
+							"parent_call_id": "spawn-approval",
+							"parent_tool":    "SPAWN",
+						},
+					},
+				},
+			},
+			ApprovalPayload: &kernel.ApprovalPayload{
+				ToolCallID:     "perm-1",
+				ToolName:       "request_permissions",
+				RawInput:       map[string]any{"path": "hello_claude.txt"},
+				ReviewStatus:   kernel.ApprovalReviewStatusApproved,
+				ReviewText:     "Automatic approval review approved (risk: low, authorization: high): creating the requested file is narrow and authorized.",
+				Risk:           "low",
+				Authorization:  "high",
+				DecisionSource: string(kernel.ApprovalModeAutoReview),
+			},
+		}},
+	} {
+		updated, _ := model.Update(env)
+		model = updated.(*Model)
+	}
+	for _, docBlock := range model.doc.Blocks() {
+		if panel, ok := docBlock.(*SubagentPanelBlock); ok {
+			t.Fatalf("anchored child approval created standalone panel: %#v", panel)
+		}
+	}
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme})), "\n")
+	for _, want := range []string{"• Spawned claude:", "Approval review approved request_permissions path: hello_claude.txt", "creating the requested file"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("rendered rows = %q, want approval tail %q", joined, want)
+		}
+	}
+
+	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+		Kind:       kernel.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "spawn-approval",
+			ToolName: "SPAWN",
+			Status:   kernel.ToolStatusCompleted,
+			Scope:    kernel.EventScopeMain,
+			RawInput: map[string]any{"agent": "claude", "prompt": "create hello_claude.txt"},
+			RawOutput: map[string]any{
+				"state":         "completed",
+				"task_id":       "task-claude",
+				"final_message": "created hello_claude.txt",
+			},
+			Content: testToolContent("created hello_claude.txt"),
+		},
+	}})
+	model = updated.(*Model)
+	block = model.doc.Blocks()[0].(*MainACPTurnBlock)
+	joined = strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "created hello_claude.txt") {
+		t.Fatalf("rendered rows = %q, want final SPAWN output", joined)
+	}
+	if strings.Contains(joined, "Approval review approved") || strings.Contains(joined, "creating the requested file") {
+		t.Fatalf("rendered rows = %q, final SPAWN output should replace temporary approval tail", joined)
 	}
 }

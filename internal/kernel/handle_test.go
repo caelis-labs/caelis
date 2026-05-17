@@ -126,6 +126,51 @@ func TestTurnHandleCanonicalizesApprovalEvent(t *testing.T) {
 	}
 }
 
+func TestTurnHandleAnchorsSubagentApprovalToParentTool(t *testing.T) {
+	t.Parallel()
+
+	handle := newTurnHandle(turnHandleConfig{
+		handleID: "h1",
+		runID:    "run-1",
+		turnID:   "turn-1",
+		sessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "s1", WorkspaceKey: "ws",
+		},
+		createdAt: time.Unix(100, 0),
+	})
+	handle.publishApprovalReviewPayload(&agent.ApprovalRequest{
+		Tool: tool.Definition{Name: "request_permissions"},
+		Metadata: map[string]any{
+			"subagent":       true,
+			"scope_id":       "task-1",
+			"parent_call_id": "spawn-1",
+			"parent_tool":    "SPAWN",
+		},
+	}, &ApprovalPayload{
+		ToolName:     "request_permissions",
+		ReviewStatus: ApprovalReviewStatusApproved,
+		ReviewText:   "Automatic approval review approved",
+	})
+
+	replayed, _, err := handle.EventsAfter("")
+	if err != nil {
+		t.Fatalf("EventsAfter() error = %v", err)
+	}
+	if len(replayed) != 1 {
+		t.Fatalf("EventsAfter() len = %d, want 1", len(replayed))
+	}
+	event := replayed[0].Event
+	if event.Origin == nil || event.Origin.Scope != EventScopeSubagent || event.Origin.ScopeID != "task-1" {
+		t.Fatalf("approval origin = %+v, want subagent task scope", event.Origin)
+	}
+	if got := EventMetaString(event.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeStream, EventMetaRuntimeStreamParentCallID); got != "spawn-1" {
+		t.Fatalf("parent_call_id meta = %q, want spawn-1", got)
+	}
+	if got := EventMetaString(event.Meta, EventMetaRoot, EventMetaRuntime, EventMetaRuntimeStream, EventMetaRuntimeStreamParentTool); got != "SPAWN" {
+		t.Fatalf("parent_tool meta = %q, want SPAWN", got)
+	}
+}
+
 func TestTurnHandleSubmitRoutesApprovalAndContinuation(t *testing.T) {
 	t.Parallel()
 

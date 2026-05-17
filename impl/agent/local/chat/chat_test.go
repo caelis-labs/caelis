@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -62,6 +63,19 @@ func TestChatAgentUsesSessionMessages(t *testing.T) {
 	}
 	if final == nil || final.Text != "world" {
 		t.Fatalf("final event = %+v, want assistant world", final)
+	}
+}
+
+func TestToolCallTitleIncludesSpawnPrompt(t *testing.T) {
+	t.Parallel()
+
+	call := model.ToolCall{
+		ID:   "spawn-1",
+		Name: "SPAWN",
+		Args: `{"agent":"self","prompt":"总结当前目录"}`,
+	}
+	if got := toolCallTitle(call); got != "SPAWN self: 总结当前目录" {
+		t.Fatalf("toolCallTitle(SPAWN) = %q", got)
 	}
 }
 
@@ -340,14 +354,14 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	if events[0].Type != session.EventTypeToolCall {
 		t.Fatalf("events[0].Type = %q, want tool_call", events[0].Type)
 	}
-	if events[0].Protocol == nil || events[0].Protocol.ToolCall == nil || events[0].Protocol.UpdateType != string(session.ProtocolUpdateTypeToolCall) {
-		t.Fatalf("events[0].Protocol = %+v, want tool_call protocol payload", events[0].Protocol)
+	if events[0].Message == nil || len(events[0].Message.ToolCalls()) != 1 {
+		t.Fatalf("events[0].Message = %+v, want one durable tool call message", events[0].Message)
 	}
 	if events[1].Type != session.EventTypeToolResult {
 		t.Fatalf("events[1].Type = %q, want tool_result", events[1].Type)
 	}
-	if events[1].Protocol == nil || events[1].Protocol.ToolCall == nil || events[1].Protocol.UpdateType != string(session.ProtocolUpdateTypeToolUpdate) {
-		t.Fatalf("events[1].Protocol = %+v, want tool_call_update protocol payload", events[1].Protocol)
+	if events[1].Tool == nil || events[1].Tool.Name != "ECHO" || events[1].Tool.Status != "completed" {
+		t.Fatalf("events[1].Tool = %+v, want durable ECHO tool result payload", events[1].Tool)
 	}
 	caelis, ok := events[1].Meta["caelis"].(map[string]any)
 	if !ok {
@@ -364,8 +378,8 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	if events[2].Type != session.EventTypeAssistant || events[2].Text != "pong" {
 		t.Fatalf("events[2] = %+v, want final assistant pong", events[2])
 	}
-	if events[2].Protocol == nil || events[2].Protocol.UpdateType != string(session.ProtocolUpdateTypeAgentMessage) {
-		t.Fatalf("events[2].Protocol = %+v, want agent_message protocol payload", events[2].Protocol)
+	if events[2].Message == nil || events[2].Message.TextContent() != "pong" {
+		t.Fatalf("events[2].Message = %+v, want durable assistant message", events[2].Message)
 	}
 }
 
@@ -443,19 +457,22 @@ func TestChatAgentDrainsPendingUserSubmissionAfterToolResults(t *testing.T) {
 	}
 }
 
-func TestToolCallEventsPersistAssistantTextInProtocolContent(t *testing.T) {
+func TestToolCallEventsPersistCompleteAssistantMessage(t *testing.T) {
 	t.Parallel()
 
 	text := "I will inspect the files first."
-	message := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-		ID:   "call-1",
-		Name: "ECHO",
-		Args: `{"value":"one"}`,
+	reasoning := "Need to inspect both values before answering."
+	message := model.MessageFromAssistantParts(text, reasoning, []model.ToolCall{{
+		ID:               "call-1",
+		Name:             "ECHO",
+		Args:             `{"value":"one"}`,
+		ThoughtSignature: "sig-one",
 	}, {
-		ID:   "call-2",
-		Name: "ECHO",
-		Args: `{"value":"two"}`,
-	}}, text)
+		ID:               "call-2",
+		Name:             "ECHO",
+		Args:             `{"value":"two"}`,
+		ThoughtSignature: "sig-two",
+	}})
 	resp := &model.Response{
 		Message: message,
 		Usage: model.Usage{
@@ -470,16 +487,16 @@ func TestToolCallEventsPersistAssistantTextInProtocolContent(t *testing.T) {
 		t.Fatalf("len(events) = %d, want %d", got, want)
 	}
 	if got := session.EventText(events[0]); got != text {
-		t.Fatalf("first tool-call text = %q, want %q", got, text)
+		t.Fatalf("tool-call text = %q, want %q", got, text)
 	}
 	if got := session.EventText(events[1]); got != "" {
-		t.Fatalf("second tool-call text = %q, want empty", got)
+		t.Fatalf("second tool-call anchor text = %q, want empty", got)
 	}
 	if usage := nestedMap(events[0].Meta, "caelis", "sdk", "usage"); usage == nil {
-		t.Fatalf("first tool-call meta = %#v, want usage", events[0].Meta)
+		t.Fatalf("tool-call meta = %#v, want usage", events[0].Meta)
 	}
 	if usage := nestedMap(events[1].Meta, "caelis", "sdk", "usage"); usage != nil {
-		t.Fatalf("second tool-call meta usage = %#v, want nil", usage)
+		t.Fatalf("second tool-call anchor usage = %#v, want nil", usage)
 	}
 
 	raw, err := json.Marshal(events[0])
@@ -493,6 +510,16 @@ func TestToolCallEventsPersistAssistantTextInProtocolContent(t *testing.T) {
 	if got := session.EventText(&decoded); got != text {
 		t.Fatalf("round-tripped tool-call text = %q, want %q", got, text)
 	}
+	if decoded.Message == nil {
+		t.Fatal("round-tripped tool-call message = nil, want durable model message")
+	}
+	if got := decoded.Message.ReasoningText(); got != reasoning {
+		t.Fatalf("round-tripped reasoning = %q, want %q", got, reasoning)
+	}
+	calls := decoded.Message.ToolCalls()
+	if len(calls) != 2 || calls[0].ThoughtSignature != "sig-one" || calls[1].ThoughtSignature != "sig-two" {
+		t.Fatalf("round-tripped tool calls = %#v, want both calls with replay signatures", calls)
+	}
 
 	ctx := agent.NewContext(agent.ContextSpec{
 		Context: context.Background(),
@@ -500,14 +527,199 @@ func TestToolCallEventsPersistAssistantTextInProtocolContent(t *testing.T) {
 		Events: []*session.Event{
 			&decoded,
 			persistedToolResultEvent("call-1", "ECHO", map[string]any{"value": "one"}, map[string]any{"value": "ok"}),
+			persistedToolResultEvent("call-2", "ECHO", map[string]any{"value": "two"}, map[string]any{"value": "ok"}),
 		},
 	})
 	messages := messagesFromContext(ctx)
-	if got, want := len(messages), 2; got != want {
+	if got, want := len(messages), 3; got != want {
 		t.Fatalf("len(messages) = %d, want %d: %#v", got, want, messages)
 	}
 	if got := messages[0].TextContent(); got != text {
 		t.Fatalf("tool-call message text = %q, want %q", got, text)
+	}
+	if got := messages[0].ReasoningText(); got != reasoning {
+		t.Fatalf("tool-call message reasoning = %q, want %q", got, reasoning)
+	}
+}
+
+func TestModelContextRoundTripsThroughSessionStore(t *testing.T) {
+	t.Parallel()
+
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-context-roundtrip" },
+	}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-context-roundtrip",
+			CWD: t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	user := model.NewTextMessage(model.RoleUser, "inspect both values")
+	appendEvent := func(event *session.Event) {
+		t.Helper()
+		if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+			SessionRef: activeSession.SessionRef,
+			Event:      event,
+		}); err != nil {
+			t.Fatalf("AppendEvent() error = %v", err)
+		}
+	}
+	appendEvent(&session.Event{Type: session.EventTypeUser, Message: &user})
+
+	assistant := model.MessageFromAssistantParts("I will inspect both values.", "Need both tool results.", []model.ToolCall{{
+		ID:               "call-1",
+		Name:             "ECHO",
+		Args:             `{"value":"one"}`,
+		ThoughtSignature: "sig-one",
+	}, {
+		ID:               "call-2",
+		Name:             "ECHO",
+		Args:             `{"value":"two"}`,
+		ThoughtSignature: "sig-two",
+	}})
+	for _, event := range modelToolCallEvents(assistant, &model.Response{Message: assistant}) {
+		appendEvent(event)
+	}
+	appendEvent(persistedToolResultEvent("call-1", "ECHO", map[string]any{"value": "one"}, map[string]any{"value": "ok"}))
+	appendEvent(persistedToolResultEvent("call-2", "ECHO", map[string]any{"value": "two"}, map[string]any{"value": "ok"}))
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: activeSession,
+		Events:  loaded.Events,
+	})
+	messages := messagesFromContext(ctx)
+	if got, want := len(messages), 4; got != want {
+		t.Fatalf("len(messages) = %d, want %d: %#v", got, want, messages)
+	}
+	if got := messages[0].TextContent(); got != "inspect both values" {
+		t.Fatalf("user text = %q, want original text", got)
+	}
+	if got := messages[1].ReasoningText(); got != "Need both tool results." {
+		t.Fatalf("assistant reasoning = %q, want original reasoning", got)
+	}
+	calls := messages[1].ToolCalls()
+	if len(calls) != 2 || calls[0].ThoughtSignature != "sig-one" || calls[1].ThoughtSignature != "sig-two" {
+		t.Fatalf("assistant tool calls = %#v, want calls with replay signatures", calls)
+	}
+	if got := len(messages[2].ToolResults()) + len(messages[3].ToolResults()); got != 2 {
+		t.Fatalf("tool result count = %d, want 2", got)
+	}
+}
+
+func TestLiveModelContextPrefixMatchesPersistedReplay(t *testing.T) {
+	t.Parallel()
+
+	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
+		RootDir:            t.TempDir(),
+		SessionIDGenerator: func() string { return "sess-context-stability" },
+	}))
+	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-context-stability",
+			CWD: t.TempDir(),
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartSession() error = %v", err)
+	}
+
+	testModel := &contextStabilityModel{}
+	echoTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "ECHO",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			var payload map[string]any
+			_ = json.Unmarshal(call.Input, &payload)
+			return tool.Result{
+				ID:   call.ID,
+				Name: call.Name,
+				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+					"value": payload["value"],
+				}))},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{echoTool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+
+	user := model.NewTextMessage(model.RoleUser, "inspect alpha and beta")
+	liveEvents := []*session.Event{{
+		Type:       session.EventTypeUser,
+		Visibility: session.VisibilityCanonical,
+		Message:    &user,
+		Text:       user.TextContent(),
+	}}
+	runCtx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: activeSession,
+		Events:  liveEvents,
+	})
+	for event, runErr := range chatAgent.Run(runCtx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+		liveEvents = append(liveEvents, event)
+	}
+
+	liveMessages := messagesFromContext(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: activeSession,
+		Events:  liveEvents,
+	}))
+	for _, event := range liveEvents {
+		if _, err := sessions.AppendEvent(context.Background(), session.AppendEventRequest{
+			SessionRef: activeSession.SessionRef,
+			Event:      event,
+		}); err != nil {
+			t.Fatalf("AppendEvent(%s) error = %v", event.Type, err)
+		}
+	}
+
+	loaded, err := sessions.LoadSession(context.Background(), session.LoadSessionRequest{SessionRef: activeSession.SessionRef})
+	if err != nil {
+		t.Fatalf("LoadSession() error = %v", err)
+	}
+	for _, event := range loaded.Events {
+		if event == nil || event.Tool == nil {
+			continue
+		}
+		if event.Protocol != nil {
+			t.Fatalf("loaded tool event %s persisted protocol payload: %#v", event.ID, event.Protocol)
+		}
+	}
+	replayedMessages := messagesFromContext(agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: loaded.Session,
+		Events:  loaded.Events,
+	}))
+
+	if got, want := canonicalMessagesJSON(t, replayedMessages), canonicalMessagesJSON(t, liveMessages); got != want {
+		t.Fatalf("replayed context diverged from live prefix\nlive:   %s\nreplay: %s", want, got)
+	}
+	if got, want := len(testModel.requests), 2; got != want {
+		t.Fatalf("model request count = %d, want %d", got, want)
+	}
+	if got, want := canonicalMessagesJSON(t, testModel.requests[1].Messages), canonicalMessagesJSON(t, liveMessages[:4]); got != want {
+		t.Fatalf("second live LLM request prefix diverged from live event context\nrequest: %s\ncontext: %s", got, want)
 	}
 }
 
@@ -790,18 +1002,18 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 		Content: []model.Part{model.NewJSONPart([]byte(`{"error":"terminal session failed"}`))},
 	}, nil)
 
-	if event.Protocol == nil || event.Protocol.Update == nil {
-		t.Fatalf("event.Protocol = %#v, want tool result protocol", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event.Tool = nil, want tool result payload")
 	}
-	if got, _ := event.Protocol.Update.RawOutput["error"].(string); got != "terminal session failed" {
+	if got, _ := event.Tool.Output["error"].(string); got != "terminal session failed" {
 		t.Fatalf("raw output error = %q, want terminal session failed", got)
 	}
-	if got := event.Protocol.Update.Status; got != "failed" {
+	if got := event.Tool.Status; got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
 }
 
-func TestToolResultEventPreservesRunningTaskOutputPreviewAsACPContent(t *testing.T) {
+func TestToolResultEventSuppressesSuccessfulTaskWaitACPContent(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
@@ -821,27 +1033,22 @@ func TestToolResultEventPreservesRunningTaskOutputPreviewAsACPContent(t *testing
 		}))},
 	}, nil)
 
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
-		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := update.Status; got != "running" {
+	if got := event.Tool.Status; got != "running" {
 		t.Fatalf("status = %q, want running", got)
 	}
-	content := session.ProtocolToolCallContentOf(update)
-	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+	content := event.Tool.Content
+	if len(content) != 0 {
+		t.Fatalf("content = %#v, want no display content for successful TASK wait", content)
 	}
-	if content[0].Type != "terminal" {
-		t.Fatalf("content type = %q, want terminal", content[0].Type)
-	}
-	textPayload, _ := content[0].Content.(map[string]any)
-	if got, _ := textPayload["text"].(string); got != "正在读取 hello_from_spawn.txt" {
-		t.Fatalf("content text = %q, want running output_preview", got)
+	if got, _ := event.Tool.Output["output_preview"].(string); got != "正在读取 hello_from_spawn.txt\n" {
+		t.Fatalf("raw output output_preview = %q, want model-visible wait slice preserved", got)
 	}
 }
 
-func TestToolResultEventPreservesTaskFinalMessageAsACPContent(t *testing.T) {
+func TestToolResultEventSuppressesCompletedTaskWaitACPContent(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
@@ -858,20 +1065,47 @@ func TestToolResultEventPreservesTaskFinalMessageAsACPContent(t *testing.T) {
 		}))},
 	}, nil)
 
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
-		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
 	}
-	content := session.ProtocolToolCallContentOf(update)
+	content := event.Tool.Content
+	if len(content) != 0 {
+		t.Fatalf("content = %#v, want no display content for completed TASK wait", content)
+	}
+	if got, _ := event.Tool.Output["final_message"].(string); got != "child final answer\n" {
+		t.Fatalf("raw output final_message = %q, want model-visible final message preserved", got)
+	}
+}
+
+func TestToolResultEventPreservesTaskWriteACPContent(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "task-write-1",
+		Name: "TASK",
+		Args: `{"action":"write","task_id":"jeff","input":"continue"}`,
+	}, tool.Result{
+		ID:   "task-write-1",
+		Name: "TASK",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"task_id":       "jeff",
+			"state":         "running",
+			"latest_output": "input accepted\n",
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	content := event.Tool.Content
 	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
 	if content[0].Type != "terminal" {
 		t.Fatalf("content type = %q, want terminal", content[0].Type)
 	}
-	textPayload, _ := content[0].Content.(map[string]any)
-	if got, _ := textPayload["text"].(string); got != "child final answer" {
-		t.Fatalf("content text = %q, want final message", got)
+	if got := content[0].Text; got != "input accepted" {
+		t.Fatalf("content text = %q, want TASK write result", got)
 	}
 }
 
@@ -893,25 +1127,23 @@ func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
 		}))},
 	}, nil)
 
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
-		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := update.Status; got != "failed" {
+	if got := event.Tool.Status; got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	content := session.ProtocolToolCallContentOf(update)
+	content := event.Tool.Content
 	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
 	if content[0].Type != "terminal" {
 		t.Fatalf("content type = %q, want terminal", content[0].Type)
 	}
-	textPayload, _ := content[0].Content.(map[string]any)
-	if got, _ := textPayload["text"].(string); got != "go: module internal registry: network unreachable" {
+	if got := content[0].Text; got != "go: module internal registry: network unreachable" {
 		t.Fatalf("content text = %q, want failed task result", got)
 	}
-	if got, _ := update.RawOutput["error"].(string); got == "" {
+	if got, _ := event.Tool.Output["error"].(string); got == "" {
 		t.Fatalf("raw output error = %q, want preserved error for model context", got)
 	}
 }
@@ -932,19 +1164,17 @@ func TestToolResultEventPreservesBashResultFieldAsACPContent(t *testing.T) {
 		}))},
 	}, nil)
 
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
-		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
 	}
-	content := session.ProtocolToolCallContentOf(update)
+	content := event.Tool.Content
 	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
 	if content[0].Type != "terminal" {
 		t.Fatalf("content type = %q, want terminal", content[0].Type)
 	}
-	textPayload, _ := content[0].Content.(map[string]any)
-	got, _ := textPayload["text"].(string)
+	got := content[0].Text
 	if got != "On branch dev\nYour branch is behind 'origin/dev' by 3 commits." {
 		t.Fatalf("content text = %q, want result field", got)
 	}
@@ -966,19 +1196,17 @@ func TestToolResultEventPreservesFailedBashOutputBeforeExitSummary(t *testing.T)
 		}))},
 	}, nil)
 
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
-		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := update.Status; got != "failed" {
+	if got := event.Tool.Status; got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	content := session.ProtocolToolCallContentOf(update)
+	content := event.Tool.Content
 	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
-	textPayload, _ := content[0].Content.(map[string]any)
-	got, _ := textPayload["text"].(string)
+	got := content[0].Text
 	if got != "go: module internal registry: network unreachable" {
 		t.Fatalf("content text = %q, want failed result field", got)
 	}
@@ -999,19 +1227,17 @@ func TestToolResultEventUsesNoOutputPlaceholderForSilentBashFailure(t *testing.T
 		}))},
 	}, nil)
 
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
-		t.Fatalf("event protocol = %#v, want tool update", event.Protocol)
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
 	}
-	if got := update.Status; got != "failed" {
+	if got := event.Tool.Status; got != "failed" {
 		t.Fatalf("status = %q, want failed", got)
 	}
-	content := session.ProtocolToolCallContentOf(update)
+	content := event.Tool.Content
 	if len(content) != 1 {
-		t.Fatalf("content = %#v, want one ACP terminal content item", content)
+		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
-	textPayload, _ := content[0].Content.(map[string]any)
-	got, _ := textPayload["text"].(string)
+	got := content[0].Text
 	if got != "(no output)" {
 		t.Fatalf("content text = %q, want no-output placeholder", got)
 	}
@@ -1042,7 +1268,10 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 		Args: `{"command":"find /tmp -delete"}`,
 	}, canonical, &message, truncationMeta)
 
-	rawOutput := event.Protocol.Update.RawOutput
+	if event.Tool == nil {
+		t.Fatal("event.Tool = nil, want durable tool payload")
+	}
+	rawOutput := event.Tool.Output
 	resultText, _ := rawOutput["result"].(string)
 	if resultText == large {
 		t.Fatalf("raw result kept original huge output, want canonical truncated rawOutput")
@@ -1112,25 +1341,22 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 	}
 }
 
-func TestProtocolToolResultContextCompactsRawOutput(t *testing.T) {
+func TestToolResultContextCompactsRawOutput(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("x", tool.DefaultTruncationPolicy().ByteBudget()*2)
-	message, ok := messageFromProtocolEvent(&session.Event{
+	message, ok := messageFromDurableEvent(&session.Event{
 		Type: session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{
-			ToolCall: &session.ProtocolToolCall{ID: "call-1", Name: "BASH"},
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
-				ToolCallID:    "call-1",
-				Title:         "BASH echo",
-				Status:        "completed",
-				RawOutput:     map[string]any{"result": large},
-			},
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "BASH",
+			Title:  "BASH echo",
+			Status: "completed",
+			Output: map[string]any{"result": large},
 		},
 	})
 	if !ok {
-		t.Fatal("messageFromProtocolEvent() ok = false, want true")
+		t.Fatal("messageFromDurableEvent() ok = false, want true")
 	}
 	results := message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
@@ -1149,28 +1375,25 @@ func TestProtocolToolResultContextCompactsRawOutput(t *testing.T) {
 	}
 }
 
-func TestProtocolToolResultContextUsesACPContentWhenRawOutputAbsent(t *testing.T) {
+func TestToolResultContextUsesContentWhenRawOutputAbsent(t *testing.T) {
 	t.Parallel()
 
-	message, ok := messageFromProtocolEvent(&session.Event{
+	message, ok := messageFromDurableEvent(&session.Event{
 		Type: session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{
-			ToolCall: &session.ProtocolToolCall{ID: "call-1", Name: "BASH"},
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
-				ToolCallID:    "call-1",
-				Title:         "BASH printf",
-				Status:        "completed",
-				Content: []session.ProtocolToolCallContent{{
-					Type:       "terminal",
-					TerminalID: "call-1",
-					Content:    session.ProtocolTextContent("  output\n"),
-				}},
-			},
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "BASH",
+			Title:  "BASH printf",
+			Status: "completed",
+			Content: []session.EventToolContent{{
+				Type:       "terminal",
+				TerminalID: "call-1",
+				Text:       "  output\n",
+			}},
 		},
 	})
 	if !ok {
-		t.Fatal("messageFromProtocolEvent() ok = false, want true")
+		t.Fatal("messageFromDurableEvent() ok = false, want true")
 	}
 	results := message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
@@ -1181,34 +1404,31 @@ func TestProtocolToolResultContextUsesACPContentWhenRawOutputAbsent(t *testing.T
 		t.Fatalf("json.Unmarshal(tool result payload) error = %v", err)
 	}
 	if got, _ := payload["result"].(string); got != "  output\n" {
-		t.Fatalf("payload[result] = %q, want ACP terminal content text", got)
+		t.Fatalf("payload[result] = %q, want terminal content text", got)
 	}
 }
 
-func TestProtocolToolResultContextTruncatesPersistedBashFailureShape(t *testing.T) {
+func TestToolResultContextTruncatesPersistedBashFailureShape(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("find: cannot delete /tmp/gomod/pkg: permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/4)
-	message, ok := messageFromProtocolEvent(&session.Event{
+	message, ok := messageFromDurableEvent(&session.Event{
 		Type: session.EventTypeToolResult,
-		Protocol: &session.EventProtocol{
-			ToolCall: &session.ProtocolToolCall{ID: "call-1", Name: "BASH"},
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
-				ToolCallID:    "call-1",
-				Title:         "BASH find /tmp/gomod -delete",
-				Status:        "failed",
-				RawOutput: map[string]any{
-					"result":    "stderr:\n" + large,
-					"exit_code": 1,
-					"task_id":   "task-11",
-					"state":     "failed",
-				},
+		Tool: &session.EventTool{
+			ID:     "call-1",
+			Name:   "BASH",
+			Title:  "BASH find /tmp/gomod -delete",
+			Status: "failed",
+			Output: map[string]any{
+				"result":    "stderr:\n" + large,
+				"exit_code": 1,
+				"task_id":   "task-11",
+				"state":     "failed",
 			},
 		},
 	})
 	if !ok {
-		t.Fatal("messageFromProtocolEvent() ok = false, want true")
+		t.Fatal("messageFromDurableEvent() ok = false, want true")
 	}
 	results := message.ToolResults()
 	if len(results) != 1 || len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
@@ -1314,7 +1534,7 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 			if event == nil {
 				t.Fatal("Run() ended before tool progress")
 			}
-			if event.Type == session.EventTypeToolResult && event.Protocol != nil && event.Protocol.ToolCall != nil && event.Protocol.ToolCall.Status == "running" {
+			if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "running" {
 				progress = event
 			}
 		case <-deadline:
@@ -1327,11 +1547,10 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 	if progress.Message != nil {
 		t.Fatalf("progress message = %+v, want nil so it is not appended to model history", progress.Message)
 	}
-	update := session.ProtocolUpdateOf(progress)
-	if update == nil {
-		t.Fatalf("progress protocol = %#v, want tool update", progress.Protocol)
+	if progress.Tool == nil {
+		t.Fatalf("progress tool = nil, want tool update")
 	}
-	if got, _ := update.RawOutput["task_id"].(string); got != "task-1" {
+	if got, _ := progress.Tool.Output["task_id"].(string); got != "task-1" {
 		t.Fatalf("progress task_id = %q, want task-1", got)
 	}
 
@@ -1570,9 +1789,9 @@ func persistedToolCallEvent(id string, name string, input map[string]any) *sessi
 		Args: string(mustRawJSON(input)),
 	}
 	return &session.Event{
-		Type:     session.EventTypeToolCall,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolCall, "pending", maps.Clone(input), nil, nil),
-		Meta:     mergeEventMeta(toolMeta(name)),
+		Type: session.EventTypeToolCall,
+		Tool: toolEventPayload(call, "pending", maps.Clone(input), nil, nil),
+		Meta: mergeEventMeta(toolMeta(name)),
 	}
 }
 
@@ -1584,9 +1803,9 @@ func persistedToolResultEvent(id string, name string, input map[string]any, outp
 	}
 	meta := mergeEventMeta(toolMeta(name))
 	return &session.Event{
-		Type:     session.EventTypeToolResult,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, "completed", maps.Clone(input), maps.Clone(output), toolResultACPContent(call, input, output, meta, "completed", false)),
-		Meta:     meta,
+		Type: session.EventTypeToolResult,
+		Tool: toolEventPayload(call, "completed", maps.Clone(input), maps.Clone(output), toolResultContent(call, input, output, meta, "completed", false)),
+		Meta: meta,
 	}
 }
 
@@ -1654,6 +1873,68 @@ func (m *toolLoopModel) Generate(_ context.Context, req *model.Request) iter.Seq
 			},
 		}, nil)
 	}
+}
+
+type contextStabilityModel struct {
+	requests []model.Request
+}
+
+func (m *contextStabilityModel) Name() string { return "context-stability" }
+
+func (m *contextStabilityModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+	if req != nil {
+		cp := *req
+		cp.Messages = model.CloneMessages(req.Messages)
+		cp.Instructions = model.CloneParts(req.Instructions)
+		cp.Tools = append([]model.ToolSpec(nil), req.Tools...)
+		m.requests = append(m.requests, cp)
+	}
+	index := len(m.requests)
+	return func(yield func(*model.StreamEvent, error) bool) {
+		switch index {
+		case 1:
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message: model.MessageFromAssistantParts("I will inspect both values.", "Need both tool results before answering.", []model.ToolCall{{
+						ID:               "call-alpha",
+						Name:             "ECHO",
+						Args:             `{"value":"alpha"}`,
+						ThoughtSignature: "sig-alpha",
+					}, {
+						ID:               "call-beta",
+						Name:             "ECHO",
+						Args:             `{"value":"beta"}`,
+						ThoughtSignature: "sig-beta",
+					}}),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonToolCalls,
+				},
+			}, nil)
+		default:
+			yield(&model.StreamEvent{
+				Type: model.StreamEventTurnDone,
+				Response: &model.Response{
+					Message:      model.NewTextMessage(model.RoleAssistant, "alpha and beta inspected"),
+					TurnComplete: true,
+					StepComplete: true,
+					Status:       model.ResponseStatusCompleted,
+					FinishReason: model.FinishReasonStop,
+				},
+			}, nil)
+		}
+	}
+}
+
+func canonicalMessagesJSON(t *testing.T, messages []model.Message) string {
+	t.Helper()
+	raw, err := json.Marshal(messages)
+	if err != nil {
+		t.Fatalf("json.Marshal(messages) error = %v", err)
+	}
+	return string(raw)
 }
 
 type streamingModel struct {

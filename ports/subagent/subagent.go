@@ -37,13 +37,14 @@ type ApprovalToolCall struct {
 // child ACP agent. It is system-controlled and never exposed on the LLM-facing
 // SPAWN or TASK results.
 type ApprovalRequest struct {
-	SessionRef session.SessionRef `json:"session_ref,omitempty"`
-	Session    session.Session    `json:"session,omitempty"`
-	TaskID     string             `json:"task_id,omitempty"`
-	Agent      string             `json:"agent,omitempty"`
-	Mode       string             `json:"mode,omitempty"`
-	ToolCall   ApprovalToolCall   `json:"tool_call,omitempty"`
-	Options    []ApprovalOption   `json:"options,omitempty"`
+	SessionRef   session.SessionRef `json:"session_ref,omitempty"`
+	Session      session.Session    `json:"session,omitempty"`
+	TaskID       string             `json:"task_id,omitempty"`
+	ParentCallID string             `json:"parent_call_id,omitempty"`
+	Agent        string             `json:"agent,omitempty"`
+	Mode         string             `json:"mode,omitempty"`
+	ToolCall     ApprovalToolCall   `json:"tool_call,omitempty"`
+	Options      []ApprovalOption   `json:"options,omitempty"`
 }
 
 // ApprovalResponse is one bridged child approval outcome.
@@ -67,6 +68,7 @@ type SpawnContext struct {
 	Session           session.Session    `json:"session,omitempty"`
 	CWD               string             `json:"cwd,omitempty"`
 	TaskID            string             `json:"task_id,omitempty"`
+	ParentCallID      string             `json:"parent_call_id,omitempty"`
 	Mode              string             `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester  `json:"-"`
 	Streams           stream.Sink        `json:"-"`

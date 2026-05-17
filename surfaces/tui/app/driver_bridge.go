@@ -502,6 +502,10 @@ func cloneGatewayNarrativeEnvelope(env kernel.EventEnvelope) kernel.EventEnvelop
 		payload := *env.Event.Narrative
 		out.Event.Narrative = &payload
 	}
+	if env.Event.Protocol != nil {
+		protocol := session.CloneEventProtocol(*env.Event.Protocol)
+		out.Event.Protocol = &protocol
+	}
 	return out
 }
 
@@ -513,6 +517,29 @@ func mergeGatewayNarrativeEnvelope(dst *kernel.EventEnvelope, src kernel.EventEn
 	dst.Event.OccurredAt = src.Event.OccurredAt
 	dst.Event.Narrative.Text += src.Event.Narrative.Text
 	dst.Event.Narrative.ReasoningText += src.Event.Narrative.ReasoningText
+	updateGatewayNarrativeProtocolContent(&dst.Event)
+}
+
+func updateGatewayNarrativeProtocolContent(event *kernel.Event) {
+	if event == nil || event.Narrative == nil || event.Protocol == nil {
+		return
+	}
+	protocol := session.CloneEventProtocol(*event.Protocol)
+	if protocol.Update == nil {
+		protocol.Update = &session.ProtocolUpdate{}
+	}
+	switch {
+	case event.Narrative.ReasoningText != "" && event.Narrative.Text == "":
+		protocol.Update.SessionUpdate = string(session.ProtocolUpdateTypeAgentThought)
+		protocol.Update.Content = session.ProtocolTextContent(event.Narrative.ReasoningText)
+	case event.Narrative.Text != "":
+		protocol.Update.SessionUpdate = string(session.ProtocolUpdateTypeAgentMessage)
+		protocol.Update.Content = session.ProtocolTextContent(event.Narrative.Text)
+	default:
+		return
+	}
+	protocol.UpdateType = strings.TrimSpace(protocol.Update.SessionUpdate)
+	event.Protocol = &protocol
 }
 
 func startTerminalStreamForwarder(ctx context.Context, driver tuidriver.Driver, env kernel.EventEnvelope, sender *ProgramSender) {

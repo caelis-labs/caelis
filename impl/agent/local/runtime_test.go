@@ -507,16 +507,14 @@ func TestRuntimePersistsInterruptedAssistantReplaySnapshot(t *testing.T) {
 	if got := session.EventText(replay); got != "partial answer" {
 		t.Fatalf("mirror replay text = %q, want partial answer", got)
 	}
-	update := session.ProtocolUpdateOf(replay)
-	if update == nil {
-		t.Fatalf("mirror replay protocol update = nil")
+	if replay.Message == nil {
+		t.Fatal("mirror replay message = nil, want durable assistant snapshot")
 	}
-	content, _ := update.Content.(map[string]any)
-	if got, _ := content["type"].(string); got != "text" {
-		t.Fatalf("mirror replay content type = %#v, want standard text content", update.Content)
+	if got := replay.Message.TextContent(); got != "partial answer" {
+		t.Fatalf("mirror replay message text = %q, want partial answer", got)
 	}
-	if got, _ := content["text"].(string); got != "partial answer" {
-		t.Fatalf("mirror replay content text = %#v, want partial answer", update.Content)
+	if got := replay.Message.ReasoningText(); got != "partial thought" {
+		t.Fatalf("mirror replay message reasoning = %q, want partial thought", got)
 	}
 	caelisMeta, _ := replay.Meta["caelis"].(map[string]any)
 	runtimeMeta, _ := caelisMeta["runtime"].(map[string]any)
@@ -1132,13 +1130,13 @@ func TestRuntimeACPControllerPublishesChunksAsLiveDeltas(t *testing.T) {
 	}
 	var persistedTexts []string
 	for _, event := range loaded.Events {
-		if event == nil || event.Protocol == nil || event.Scope == nil {
+		if event == nil || event.Scope == nil {
 			continue
 		}
 		if session.EventTypeOf(event) == session.EventTypeToolCall {
 			t.Fatalf("persisted external ACP process event: %#v", event)
 		}
-		if event.Protocol.UpdateType == string(session.ProtocolUpdateTypeAgentMessage) && strings.HasPrefix(event.Scope.Source, "acp") {
+		if session.EventTypeOf(event) == session.EventTypeAssistant && strings.HasPrefix(event.Scope.Source, "acp") {
 			persistedTexts = append(persistedTexts, session.EventText(event))
 			if strings.TrimSpace(event.ID) == "" {
 				t.Fatalf("persisted ACP chunk missing event ID")
@@ -2983,23 +2981,23 @@ func TestRuntimeRunPersistsToolLoopEvents(t *testing.T) {
 	if loaded.Events[1].Type != session.EventTypeToolCall {
 		t.Fatalf("loaded.Events[1].Type = %q, want tool_call", loaded.Events[1].Type)
 	}
-	if loaded.Events[1].Protocol == nil || loaded.Events[1].Protocol.ToolCall == nil || loaded.Events[1].Protocol.UpdateType != string(session.ProtocolUpdateTypeToolCall) {
-		t.Fatalf("loaded.Events[1].Protocol = %+v, want tool_call protocol payload", loaded.Events[1].Protocol)
+	if loaded.Events[1].Message == nil || len(loaded.Events[1].Message.ToolCalls()) != 1 {
+		t.Fatalf("loaded.Events[1].Message = %+v, want durable tool call message", loaded.Events[1].Message)
 	}
 	if loaded.Events[2].Type != session.EventTypeToolResult {
 		t.Fatalf("loaded.Events[2].Type = %q, want tool_result", loaded.Events[2].Type)
 	}
-	if loaded.Events[2].Protocol == nil || loaded.Events[2].Protocol.ToolCall == nil || loaded.Events[2].Protocol.UpdateType != string(session.ProtocolUpdateTypeToolUpdate) {
-		t.Fatalf("loaded.Events[2].Protocol = %+v, want tool_call_update protocol payload", loaded.Events[2].Protocol)
+	if loaded.Events[2].Tool == nil || loaded.Events[2].Tool.Name != "ECHO" || loaded.Events[2].Tool.Status == "" {
+		t.Fatalf("loaded.Events[2].Tool = %+v, want durable ECHO tool result payload", loaded.Events[2].Tool)
 	}
 	if got := session.EventText(loaded.Events[3]); got != "pong" {
 		t.Fatalf("final assistant text = %q, want %q", got, "pong")
 	}
-	if loaded.Events[0].Protocol == nil || loaded.Events[0].Protocol.UpdateType != string(session.ProtocolUpdateTypeUserMessage) {
-		t.Fatalf("loaded.Events[0].Protocol = %+v, want user_message protocol payload", loaded.Events[0].Protocol)
+	if loaded.Events[0].Message == nil || loaded.Events[0].Message.TextContent() != "say pong" {
+		t.Fatalf("loaded.Events[0].Message = %+v, want durable user message", loaded.Events[0].Message)
 	}
-	if loaded.Events[3].Protocol == nil || loaded.Events[3].Protocol.UpdateType != string(session.ProtocolUpdateTypeAgentMessage) {
-		t.Fatalf("loaded.Events[3].Protocol = %+v, want agent_message protocol payload", loaded.Events[3].Protocol)
+	if loaded.Events[3].Message == nil || loaded.Events[3].Message.TextContent() != "pong" {
+		t.Fatalf("loaded.Events[3].Message = %+v, want durable assistant message", loaded.Events[3].Message)
 	}
 }
 
@@ -3602,7 +3600,7 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 		if event == nil {
 			continue
 		}
-		if event.Type == session.EventTypeToolResult && event.Protocol != nil && event.Protocol.ToolCall != nil && event.Protocol.ToolCall.Status == "running" {
+		if event.Type == session.EventTypeToolResult && event.Tool != nil && event.Tool.Status == "running" {
 			runningToolUpdate = true
 		}
 		if event.Type == session.EventTypeAssistant {
@@ -4066,6 +4064,69 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 	}
 }
 
+func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	fakeSession := newYieldProbeSandboxSession()
+	fake := &yieldProbeSandboxRuntime{session: fakeSession}
+	bashTool := runtimeBashTool{
+		base:       mustRuntimeBashTool(t, fake),
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+		"command":       "for i in $(seq 1 8); do echo line $i; done",
+		"workdir":       activeSession.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
+	}
+
+	fakeSession.stdout = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
+	if fakeSession.onOutput == nil {
+		t.Fatal("fake session output callback is nil")
+	}
+	fakeSession.onOutput(sandbox.OutputChunk{Text: fakeSession.stdout})
+	taskTool := runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	runningResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+		"action":        "wait",
+		"task_id":       taskID,
+		"yield_time_ms": 100,
+	})
+	runningPayload := testToolResultPayload(t, runningResult)
+	wantTail := "...3 lines hidden...\nline 4\nline 5\nline 6\nline 7\nline 8"
+	if got, _ := runningPayload["latest_output"].(string); got != wantTail {
+		t.Fatalf("running latest_output = %q, want %q", got, wantTail)
+	}
+	if _, exists := runningPayload["result"]; exists {
+		t.Fatalf("running payload[result] = %#v, want omitted", runningPayload["result"])
+	}
+
+	completed := false
+	fakeSession.statusRunning = &completed
+	fakeSession.result = sandbox.CommandResult{Stdout: fakeSession.stdout, ExitCode: 0}
+	completedResult := callRuntimeTaskTool(t, taskTool, map[string]any{
+		"action":        "wait",
+		"task_id":       taskID,
+		"yield_time_ms": 12000,
+	})
+	completedPayload := testToolResultPayload(t, completedResult)
+	if got, _ := completedPayload["result"].(string); got != fakeSession.stdout {
+		t.Fatalf("completed result = %q, want full output %q", got, fakeSession.stdout)
+	}
+	if _, exists := completedPayload["latest_output"]; exists {
+		t.Fatalf("completed payload[latest_output] = %#v, want omitted", completedPayload["latest_output"])
+	}
+}
+
 func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	t.Parallel()
 
@@ -4302,6 +4363,48 @@ func TestTaskSnapshotToolResultSimplifiesSubagentPayload(t *testing.T) {
 		}
 		if _, ok := taskMeta[key]; ok {
 			t.Fatalf("metadata contains %q: %#v", key, taskMeta)
+		}
+	}
+}
+
+func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) {
+	t.Parallel()
+
+	result := taskSnapshotToolResult(
+		tool.Call{ID: "call-1", Name: spawn.ToolName},
+		tool.Definition{Name: spawn.ToolName},
+		taskapi.Snapshot{
+			Ref: taskapi.Ref{
+				TaskID:     "task-1",
+				SessionID:  "root-session",
+				TerminalID: "subagent-task-1",
+			},
+			Kind:         taskapi.KindSubagent,
+			State:        taskapi.StateRunning,
+			Running:      true,
+			StdoutCursor: 42,
+			Result: map[string]any{
+				"output_preview": "child is working",
+			},
+		},
+	)
+	taskMeta := testToolResultRuntimeMeta(t, result, "task")
+	if got := taskMeta["terminal_id"]; got != "subagent-task-1" {
+		t.Fatalf("metadata terminal_id = %#v, want subagent-task-1", got)
+	}
+	if got := taskMeta["output_cursor"]; got != int64(42) {
+		t.Fatalf("metadata output_cursor = %#v, want 42", got)
+	}
+	var payload map[string]any
+	if len(result.Content) == 0 || result.Content[0].JSON == nil {
+		t.Fatalf("result.Content = %#v, want JSON payload", result.Content)
+	}
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("unmarshal result payload: %v", err)
+	}
+	for _, key := range []string{"terminal_id", "output_cursor"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("payload contains %q: %#v", key, payload)
 		}
 	}
 }
@@ -5596,6 +5699,9 @@ func mustSessionTaskID(t *testing.T, events []*session.Event) string {
 }
 
 func eventToolRawOutput(event *session.Event) map[string]any {
+	if event != nil && event.Tool != nil {
+		return event.Tool.Output
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return update.RawOutput
 	}
@@ -5603,6 +5709,9 @@ func eventToolRawOutput(event *session.Event) map[string]any {
 }
 
 func eventToolRawInput(event *session.Event) map[string]any {
+	if event != nil && event.Tool != nil {
+		return event.Tool.Input
+	}
 	if update := session.ProtocolUpdateOf(event); update != nil {
 		return update.RawInput
 	}
@@ -5716,6 +5825,7 @@ func (r *yieldProbeSandboxRuntime) Start(_ context.Context, req sandbox.CommandR
 	}
 	r.session.command = req.Command
 	r.session.workdir = req.Dir
+	r.session.onOutput = req.OnOutput
 	return r.session, nil
 }
 
@@ -5750,6 +5860,11 @@ type yieldProbeSandboxSession struct {
 	waitErr       error
 	statusRunning *bool
 	terminated    bool
+	stdout        string
+	stderr        string
+	result        sandbox.CommandResult
+	resultErr     error
+	onOutput      func(sandbox.OutputChunk)
 }
 
 func newYieldProbeSandboxSession() *yieldProbeSandboxSession {
@@ -5770,8 +5885,10 @@ func (s *yieldProbeSandboxSession) Terminal() sandbox.TerminalRef {
 
 func (s *yieldProbeSandboxSession) WriteInput(context.Context, []byte) error { return nil }
 
-func (s *yieldProbeSandboxSession) ReadOutput(context.Context, int64, int64) ([]byte, []byte, int64, int64, error) {
-	return nil, nil, 0, 0, nil
+func (s *yieldProbeSandboxSession) ReadOutput(_ context.Context, stdoutCursor int64, stderrCursor int64) ([]byte, []byte, int64, int64, error) {
+	stdout, nextStdout := probeOutputFromCursor(s.stdout, stdoutCursor)
+	stderr, nextStderr := probeOutputFromCursor(s.stderr, stderrCursor)
+	return stdout, stderr, nextStdout, nextStderr, nil
 }
 
 func (s *yieldProbeSandboxSession) Status(context.Context) (sandbox.SessionStatus, error) {
@@ -5797,12 +5914,23 @@ func (s *yieldProbeSandboxSession) Wait(_ context.Context, timeout time.Duration
 }
 
 func (s *yieldProbeSandboxSession) Result(context.Context) (sandbox.CommandResult, error) {
-	return sandbox.CommandResult{}, nil
+	return s.result, s.resultErr
 }
 
 func (s *yieldProbeSandboxSession) Terminate(context.Context) error {
 	s.terminated = true
 	return nil
+}
+
+func probeOutputFromCursor(text string, cursor int64) ([]byte, int64) {
+	raw := []byte(text)
+	if cursor < 0 {
+		cursor = 0
+	}
+	if cursor > int64(len(raw)) {
+		cursor = int64(len(raw))
+	}
+	return raw[cursor:], int64(len(raw))
 }
 
 type runningOnlyProbeSandboxSession struct {

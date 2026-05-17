@@ -1653,6 +1653,11 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 				TurnID:      "turn-1",
 				Controller:  session.ControllerRef{Kind: session.ControllerKindACP, ID: "acp-controller", EpochID: "epoch-1"},
 				Participant: session.ParticipantRef{ID: "participant-1"},
+			}, Tool: &session.EventTool{
+				ID:     "tool-1",
+				Name:   "BASH",
+				Status: "completed",
+				Output: map[string]any{"stdout": "ok"},
 			}},
 		},
 	}

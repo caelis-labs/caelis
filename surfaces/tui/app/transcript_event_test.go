@@ -201,6 +201,93 @@ func TestProjectGatewayEventToTranscriptEvents_KeepsMainUserMessage(t *testing.T
 	}
 }
 
+func TestProjectGatewayEventProtocolUpdateRendersTerminalOutputMeta(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "call-1",
+				Title:         "BASH date",
+				Kind:          "execute",
+				Status:        "in_progress",
+				RawInput:      map[string]any{"command": "date"},
+				Content: []session.ProtocolToolCallContent{{
+					Type:       "terminal",
+					TerminalID: "call-1",
+				}},
+				Meta: map[string]any{
+					"terminal_info": map[string]any{
+						"terminal_id": "call-1",
+						"tool":        "BASH",
+					},
+					"terminal_output": map[string]any{
+						"terminal_id": "call-1",
+						"data":        "line 1\n",
+					},
+				},
+			},
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one protocol tool event", events)
+	}
+	got := events[0]
+	if got.ToolName != "BASH" || got.ToolCallID != "call-1" {
+		t.Fatalf("tool identity = %#v, want BASH call-1", got)
+	}
+	if got.ToolOutput != "line 1\n" {
+		t.Fatalf("ToolOutput = %q, want terminal output from _meta", got.ToolOutput)
+	}
+}
+
+func TestProjectGatewayEventProtocolTaskWaitShowsActionWithoutOutput(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "task-wait",
+				Title:         "TASK wait task-7",
+				Kind:          "execute",
+				Status:        "in_progress",
+				RawInput:      map[string]any{"action": "wait", "task_id": "task-7", "yield_time_ms": 2000},
+				RawOutput:     map[string]any{"task_id": "task-7", "running": true},
+				Meta: map[string]any{
+					"caelis": map[string]any{
+						"runtime": map[string]any{
+							"tool": map[string]any{
+								"name":        "TASK",
+								"action":      "wait",
+								"target_id":   "task-7",
+								"target_kind": "bash",
+							},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one TASK wait action event", events)
+	}
+	got := events[0]
+	if got.ToolArgs != "Wait 2s" {
+		t.Fatalf("ToolArgs = %q, want Wait 2s", got.ToolArgs)
+	}
+	if got.ToolOutput != "" {
+		t.Fatalf("ToolOutput = %q, want no TASK wait display output", got.ToolOutput)
+	}
+}
+
 func TestTranscriptSnapshots(t *testing.T) {
 	t.Parallel()
 
@@ -865,7 +952,7 @@ func TestProjectGatewayEventTaskResultPrefersOutputHandleInArgs(t *testing.T) {
 	}
 }
 
-func TestProjectGatewayEventTaskResultPreservesSuccessfulOutput(t *testing.T) {
+func TestProjectGatewayEventTaskWaitHidesSuccessfulOutput(t *testing.T) {
 	t.Parallel()
 
 	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
@@ -885,8 +972,11 @@ func TestProjectGatewayEventTaskResultPreservesSuccessfulOutput(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("events = %#v, want one tool event", events)
 	}
-	if got := events[0].ToolOutput; got != "final task output\n" {
-		t.Fatalf("ToolOutput = %q, want successful TASK output preserved", got)
+	if got := events[0].ToolArgs; got != "Wait jeff" {
+		t.Fatalf("ToolArgs = %q, want Wait jeff", got)
+	}
+	if got := events[0].ToolOutput; got != "" {
+		t.Fatalf("ToolOutput = %q, want no TASK wait display output", got)
 	}
 }
 

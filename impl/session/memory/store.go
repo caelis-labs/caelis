@@ -163,9 +163,7 @@ func (s *Store) AppendEvent(
 	}
 
 	normalized := session.CanonicalizeEvent(event)
-	if normalized.ID == "" {
-		normalized.ID = s.nextID("event", s.eventIDGenerator)
-	}
+	s.ensureUniqueEventID(normalized, existingEventIDSet(record.events))
 	normalized.SessionID = record.session.SessionID
 	if normalized.Time.IsZero() {
 		normalized.Time = s.now()
@@ -178,8 +176,10 @@ func (s *Store) AppendEvent(
 	}
 	record.events = append(record.events, normalized)
 	record.session.UpdatedAt = normalized.Time
-	if record.session.Title == "" && normalized.Text != "" {
-		record.session.Title = truncateTitle(normalized.Text)
+	if record.session.Title == "" {
+		if text := session.EventText(normalized); text != "" {
+			record.session.Title = truncateTitle(text)
+		}
 	}
 	return session.CloneEvent(normalized), nil
 }
@@ -462,6 +462,49 @@ func (s *Store) nextID(prefix string, custom func() string) string {
 	}
 	n := s.idCounter.Add(1)
 	return fmt.Sprintf("%s-%d", prefix, n)
+}
+
+func (s *Store) ensureUniqueEventID(event *session.Event, existing map[string]struct{}) {
+	if event == nil {
+		return
+	}
+	id := strings.TrimSpace(event.ID)
+	if id != "" {
+		if _, used := existing[id]; !used {
+			event.ID = id
+			return
+		}
+	}
+	for attempt := 0; attempt < 8; attempt++ {
+		id = strings.TrimSpace(s.nextID("event", s.eventIDGenerator))
+		if id == "" {
+			continue
+		}
+		if _, used := existing[id]; !used {
+			event.ID = id
+			return
+		}
+	}
+	for {
+		id = fmt.Sprintf("event-%d", s.idCounter.Add(1))
+		if _, used := existing[id]; !used {
+			event.ID = id
+			return
+		}
+	}
+}
+
+func existingEventIDSet(events []*session.Event) map[string]struct{} {
+	out := make(map[string]struct{}, len(events))
+	for _, event := range events {
+		if event == nil {
+			continue
+		}
+		if id := strings.TrimSpace(event.ID); id != "" {
+			out[id] = struct{}{}
+		}
+	}
+	return out
 }
 
 func (s *Store) now() time.Time {

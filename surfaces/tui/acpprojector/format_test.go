@@ -95,6 +95,20 @@ func TestFormatToolContentSkipsEmptyDiff(t *testing.T) {
 	}
 }
 
+func TestFormatToolContentDoesNotRenderTerminalContentBodies(t *testing.T) {
+	t.Parallel()
+
+	got := FormatToolContent([]session.ProtocolToolCallContent{{
+		Type:       "terminal",
+		TerminalID: "call-1",
+		Content:    session.ProtocolTextContent("terminal output\n"),
+	}})
+
+	if got != "" {
+		t.Fatalf("formatted terminal content = %q, want terminal output to come from _meta", got)
+	}
+}
+
 func TestFormatToolStartHidesMetadataOnlyListArgs(t *testing.T) {
 	t.Parallel()
 

@@ -79,11 +79,8 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 			return strings.TrimSpace(name + " " + action)
 		}
 	case "SPAWN":
-		if agent := MapString(args, "agent"); strings.TrimSpace(agent) != "" {
-			return strings.TrimSpace(name + " " + agent)
-		}
-		if prompt := MapString(args, "prompt"); strings.TrimSpace(prompt) != "" {
-			return strings.TrimSpace(name + " " + prompt)
+		if display := SpawnFullDisplayArgs(args); strings.TrimSpace(display) != "" {
+			return strings.TrimSpace(name + " " + display)
 		}
 	}
 	return name

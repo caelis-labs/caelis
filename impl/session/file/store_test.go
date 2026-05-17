@@ -87,6 +87,67 @@ func TestStoreAppendAndPersistCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestStoreAppendRegeneratesDuplicateEventIDAcrossProcesses(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	at := time.Date(2026, time.May, 17, 8, 30, 0, 0, time.UTC)
+	firstStore := NewStore(Config{
+		RootDir:            root,
+		SessionIDGenerator: func() string { return "sess-1" },
+		Clock:              func() time.Time { return at },
+	})
+	ctx := context.Background()
+	createdSession, err := firstStore.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+	first, err := firstStore.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Message: ptrMessage(model.NewTextMessage(model.RoleUser, "first")),
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent(first) error = %v", err)
+	}
+	if first.ID != "event-1" {
+		t.Fatalf("first event id = %q, want event-1", first.ID)
+	}
+
+	secondStore := NewStore(Config{
+		RootDir: root,
+		Clock:   func() time.Time { return at.Add(time.Second) },
+	})
+	second, err := secondStore.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+		Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, "second")),
+	})
+	if err != nil {
+		t.Fatalf("AppendEvent(second) error = %v", err)
+	}
+	if second.ID == "" || second.ID == first.ID {
+		t.Fatalf("second event id = %q, want non-empty id distinct from %q", second.ID, first.ID)
+	}
+	events, err := secondStore.Events(ctx, session.EventsRequest{SessionRef: createdSession.SessionRef})
+	if err != nil {
+		t.Fatalf("Events() error = %v", err)
+	}
+	seen := map[string]struct{}{}
+	for _, event := range events {
+		if event.ID == "" {
+			t.Fatalf("event with empty id: %#v", event)
+		}
+		if _, ok := seen[event.ID]; ok {
+			t.Fatalf("duplicate persisted event id %q in %#v", event.ID, events)
+		}
+		seen[event.ID] = struct{}{}
+	}
+}
+
 func TestStoreListUsesSessionMetadataIndex(t *testing.T) {
 	t.Parallel()
 

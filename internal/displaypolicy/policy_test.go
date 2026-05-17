@@ -23,6 +23,16 @@ func TestSpawnDisplayArgsUsesHandleWithAgentAnnotation(t *testing.T) {
 	}
 }
 
+func TestSummarizeToolCallTitleIncludesSpawnPrompt(t *testing.T) {
+	raw := map[string]any{
+		"agent":  "self",
+		"prompt": "创建 hello_spawn.txt",
+	}
+	if got := SummarizeToolCallTitle("SPAWN", raw); got != "SPAWN self: 创建 hello_spawn.txt" {
+		t.Fatalf("SummarizeToolCallTitle(SPAWN) = %q", got)
+	}
+}
+
 func TestSpawnDisplayInputForResultMergesPromptFromLifecycleOutput(t *testing.T) {
 	input := map[string]any{"agent": "codex"}
 	output := map[string]any{"text": `{"prompt":"inspect repo","task_id":"task-1"} running`}

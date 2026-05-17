@@ -351,13 +351,6 @@ func modelResponseEvent(message model.Message, resp *model.Response) *session.Ev
 		Visibility: session.VisibilityCanonical,
 		Message:    &message,
 		Text:       message.TextContent(),
-		Protocol: &session.EventProtocol{
-			UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-			Update: &session.ProtocolUpdate{
-				SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-				Content:       session.ProtocolTextContent(message.TextContent()),
-			},
-		},
 	}
 	if resp != nil {
 		out.Meta = responseMeta(resp)
@@ -382,14 +375,14 @@ func modelToolCallEvents(message model.Message, resp *model.Response) []*session
 			meta = mergeEventMeta(baseMeta, meta)
 		}
 		event := &session.Event{
-			Type:     session.EventTypeToolCall,
-			Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolCall, "pending", rawInput, nil, nil),
-			Meta:     meta,
+			Type:       session.EventTypeToolCall,
+			Visibility: session.VisibilityCanonical,
+			Tool:       toolEventPayload(call, "pending", rawInput, nil, nil),
+			Meta:       meta,
 		}
 		if i == 0 {
 			event.Message = &message
 			event.Text = message.TextContent()
-			event.Protocol = protocolWithText(event.Protocol, event.Text)
 		}
 		out = append(out, event)
 	}
@@ -439,9 +432,9 @@ func toolResultEvent(call model.ToolCall, result tool.Result, message *model.Mes
 	status := toolCallStatus(result, rawOutput)
 	meta := mergeEventMeta(metaParts...)
 	event := &session.Event{
-		Type:     session.EventTypeToolResult,
-		Protocol: toolCallProtocol(call, session.ProtocolUpdateTypeToolUpdate, status, rawInput, rawOutput, toolResultACPContent(call, rawInput, rawOutput, meta, status, result.IsError)),
-		Meta:     meta,
+		Type: session.EventTypeToolResult,
+		Tool: toolEventPayload(call, status, rawInput, rawOutput, toolResultContent(call, rawInput, rawOutput, meta, status, result.IsError)),
+		Meta: meta,
 	}
 	if message != nil {
 		event.Message = message
@@ -475,9 +468,13 @@ func toolResultRawOutput(result tool.Result) map[string]any {
 	return map[string]any{}
 }
 
-func toolResultACPContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.ProtocolToolCallContent {
+func toolResultContent(call model.ToolCall, input map[string]any, output map[string]any, meta map[string]any, status string, isErr bool) []session.EventToolContent {
 	name := strings.ToUpper(strings.TrimSpace(call.Name))
 	displayOutput := toolResultDisplayOutput(name, output, meta)
+	if name == "TASK" && !isErr && !strings.EqualFold(strings.TrimSpace(status), "failed") &&
+		strings.EqualFold(displaypolicy.ToolTaskAction(input, displayOutput, meta), "wait") {
+		return nil
+	}
 	text := toolResultDisplayText(name, input, displayOutput, meta, status, isErr)
 	if strings.TrimSpace(text) == "" {
 		text = toolResultStatusText(status, isErr)
@@ -485,16 +482,16 @@ func toolResultACPContent(call model.ToolCall, input map[string]any, output map[
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	item := session.ProtocolToolCallContent{
-		Type:    "content",
-		Content: session.ProtocolTextContent(text),
+	item := session.EventToolContent{
+		Type: "content",
+		Text: text,
 	}
 	switch name {
 	case "BASH", "SPAWN", "TASK":
 		item.Type = "terminal"
 		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
 	}
-	return []session.ProtocolToolCallContent{item}
+	return []session.EventToolContent{item}
 }
 
 func toolResultDisplayOutput(name string, output map[string]any, meta map[string]any) map[string]any {
@@ -941,11 +938,8 @@ func toolCallTitle(call model.ToolCall) string {
 			return fmt.Sprintf("BASH %s", strings.TrimSpace(command))
 		}
 	case "SPAWN":
-		if agent, _ := args["agent"].(string); strings.TrimSpace(agent) != "" {
-			return fmt.Sprintf("SPAWN %s", strings.TrimSpace(agent))
-		}
-		if prompt, _ := args["prompt"].(string); strings.TrimSpace(prompt) != "" {
-			return fmt.Sprintf("SPAWN %s", strings.TrimSpace(prompt))
+		if title := displaypolicy.SummarizeToolCallTitle(name, args); strings.TrimSpace(title) != "" {
+			return title
 		}
 	case "TASK":
 		action, _ := args["action"].(string)
@@ -1097,99 +1091,41 @@ func toolTruncationEventMeta(info tool.TruncationInfo) map[string]any {
 	}
 }
 
-func toolCallProtocol(call model.ToolCall, updateType session.ProtocolUpdateType, status string, rawInput map[string]any, rawOutput map[string]any, content []session.ProtocolToolCallContent) *session.EventProtocol {
-	tool := &session.ProtocolToolCall{
-		ID:        strings.TrimSpace(call.ID),
-		Name:      strings.TrimSpace(call.Name),
-		Kind:      toolKindForName(call.Name),
-		Title:     toolCallTitle(call),
-		Status:    strings.TrimSpace(status),
-		RawInput:  maps.Clone(rawInput),
-		RawOutput: maps.Clone(rawOutput),
-		Content:   session.CloneProtocolToolCallContent(content),
+func toolEventPayload(call model.ToolCall, status string, rawInput map[string]any, rawOutput map[string]any, content []session.EventToolContent) *session.EventTool {
+	payload := &session.EventTool{
+		ID:      strings.TrimSpace(call.ID),
+		Name:    strings.TrimSpace(call.Name),
+		Kind:    toolKindForName(call.Name),
+		Title:   toolCallTitle(call),
+		Status:  strings.TrimSpace(status),
+		Input:   maps.Clone(rawInput),
+		Output:  maps.Clone(rawOutput),
+		Content: cloneEventToolContent(content),
 	}
-	update := &session.ProtocolUpdate{
-		SessionUpdate: string(updateType),
-		ToolCallID:    tool.ID,
-		Kind:          tool.Kind,
-		Title:         tool.Title,
-		Status:        tool.Status,
-		RawInput:      maps.Clone(rawInput),
-		RawOutput:     maps.Clone(rawOutput),
-	}
-	if len(content) > 0 {
-		update.Content = session.CloneProtocolToolCallContent(content)
-	}
-	return &session.EventProtocol{
-		UpdateType: string(updateType),
-		ToolCall:   tool,
-		Update:     update,
-	}
+	return payload
 }
 
-func protocolWithText(protocol *session.EventProtocol, text string) *session.EventProtocol {
-	if strings.TrimSpace(text) == "" {
-		return protocol
+func cloneEventToolContent(in []session.EventToolContent) []session.EventToolContent {
+	if len(in) == 0 {
+		return nil
 	}
-	out := cloneChatEventProtocol(protocol)
-	if out.Update == nil {
-		out.Update = &session.ProtocolUpdate{}
-	}
-	if out.Update.Content == nil {
-		out.Update.Content = session.ProtocolTextContent(text)
-	}
-	return &out
-}
-
-func cloneChatEventProtocol(protocol *session.EventProtocol) session.EventProtocol {
-	if protocol == nil {
-		return session.EventProtocol{}
-	}
-	out := *protocol
-	if protocol.Update != nil {
-		update := *protocol.Update
-		update.RawInput = maps.Clone(protocol.Update.RawInput)
-		update.RawOutput = maps.Clone(protocol.Update.RawOutput)
-		update.Content = cloneChatProtocolAny(protocol.Update.Content)
-		out.Update = &update
-	}
-	if protocol.ToolCall != nil {
-		toolCall := *protocol.ToolCall
-		toolCall.RawInput = maps.Clone(protocol.ToolCall.RawInput)
-		toolCall.RawOutput = maps.Clone(protocol.ToolCall.RawOutput)
-		toolCall.Content = session.CloneProtocolToolCallContent(protocol.ToolCall.Content)
-		out.ToolCall = &toolCall
-	}
-	if protocol.Plan != nil {
-		plan := *protocol.Plan
-		plan.Entries = append([]session.ProtocolPlanEntry(nil), protocol.Plan.Entries...)
-		out.Plan = &plan
+	out := make([]session.EventToolContent, 0, len(in))
+	for _, item := range in {
+		var oldText *string
+		if item.OldText != nil {
+			value := *item.OldText
+			oldText = &value
+		}
+		out = append(out, session.EventToolContent{
+			Type:       strings.TrimSpace(item.Type),
+			Text:       item.Text,
+			TerminalID: strings.TrimSpace(item.TerminalID),
+			Path:       strings.TrimSpace(item.Path),
+			OldText:    oldText,
+			NewText:    item.NewText,
+		})
 	}
 	return out
-}
-
-func cloneChatProtocolAny(in any) any {
-	switch typed := in.(type) {
-	case nil:
-		return nil
-	case json.RawMessage:
-		return append(json.RawMessage(nil), typed...)
-	case map[string]any:
-		return maps.Clone(typed)
-	case []session.ProtocolToolCallContent:
-		if len(typed) == 0 {
-			return nil
-		}
-		return session.CloneProtocolToolCallContent(typed)
-	case []any:
-		out := make([]any, 0, len(typed))
-		for _, item := range typed {
-			out = append(out, cloneChatProtocolAny(item))
-		}
-		return out
-	default:
-		return typed
-	}
 }
 
 func messagesFromContext(ctx agent.Context) []model.Message {
@@ -1284,6 +1220,30 @@ func toolCallMessageFromEventRun(events []*session.Event, start int) (model.Mess
 	if start < 0 || start >= len(events) {
 		return model.Message{}, start + 1, false
 	}
+	if first := events[start]; first != nil && first.Message != nil && len(first.Message.ToolCalls()) > 0 {
+		known := map[string]struct{}{}
+		for _, call := range first.Message.ToolCalls() {
+			if id := strings.TrimSpace(call.ID); id != "" {
+				known[id] = struct{}{}
+			}
+		}
+		next := start + 1
+		for next < len(events) {
+			event := events[next]
+			if event == nil || !session.IsMainInvocationVisibleEvent(event) || session.EventTypeOf(event) != session.EventTypeToolCall {
+				break
+			}
+			call, ok := toolCallFromEventTool(event)
+			if !ok {
+				break
+			}
+			if _, exists := known[strings.TrimSpace(call.ID)]; !exists {
+				break
+			}
+			next++
+		}
+		return model.CloneMessage(*first.Message), next, true
+	}
 	calls := make([]model.ToolCall, 0, 1)
 	text := ""
 	next := start
@@ -1295,7 +1255,7 @@ func toolCallMessageFromEventRun(events []*session.Event, start int) (model.Mess
 		if text == "" {
 			text = strings.TrimSpace(session.EventText(event))
 		}
-		call, ok := toolCallFromProtocolEvent(event)
+		call, ok := toolCallFromEventTool(event)
 		if !ok {
 			if event.Message != nil {
 				for _, item := range event.Message.ToolCalls() {
@@ -1316,15 +1276,14 @@ func toolCallMessageFromEventRun(events []*session.Event, start int) (model.Mess
 	return model.MessageFromToolCalls(model.RoleAssistant, calls, text), next, true
 }
 
-func toolCallFromProtocolEvent(event *session.Event) (model.ToolCall, bool) {
-	update := session.ProtocolUpdateOf(event)
-	if update == nil {
+func toolCallFromEventTool(event *session.Event) (model.ToolCall, bool) {
+	if event == nil || event.Tool == nil {
 		return model.ToolCall{}, false
 	}
 	call := model.ToolCall{
-		ID:   strings.TrimSpace(update.ToolCallID),
+		ID:   strings.TrimSpace(event.Tool.ID),
 		Name: toolNameFromEvent(event),
-		Args: string(mustJSON(update.RawInput)),
+		Args: string(mustJSON(event.Tool.Input)),
 	}
 	if call.ID == "" || call.Name == "" {
 		return model.ToolCall{}, false
@@ -1403,7 +1362,7 @@ func messageFromInvocationEvent(event *session.Event) (model.Message, bool) {
 		if event.Message != nil {
 			return model.CloneMessage(*event.Message), true
 		}
-		return messageFromProtocolEvent(event)
+		return messageFromDurableEvent(event)
 	}
 	text := strings.TrimSpace(session.EventText(event))
 	if text == "" {
@@ -1422,12 +1381,11 @@ func messageFromInvocationEvent(event *session.Event) (model.Message, bool) {
 		if event.Message != nil {
 			return model.CloneMessage(*event.Message), true
 		}
-		return messageFromProtocolEvent(event)
+		return messageFromDurableEvent(event)
 	}
 }
 
-func messageFromProtocolEvent(event *session.Event) (model.Message, bool) {
-	update := session.ProtocolUpdateOf(event)
+func messageFromDurableEvent(event *session.Event) (model.Message, bool) {
 	switch session.EventTypeOf(event) {
 	case session.EventTypeUser:
 		if text := strings.TrimSpace(session.EventText(event)); text != "" {
@@ -1438,33 +1396,33 @@ func messageFromProtocolEvent(event *session.Event) (model.Message, bool) {
 			return model.NewTextMessage(model.RoleAssistant, text), true
 		}
 	case session.EventTypeToolCall:
-		if update == nil {
+		if event == nil || event.Tool == nil {
 			return model.Message{}, false
 		}
 		call := model.ToolCall{
-			ID:   strings.TrimSpace(update.ToolCallID),
+			ID:   strings.TrimSpace(event.Tool.ID),
 			Name: toolNameFromEvent(event),
-			Args: string(mustJSON(update.RawInput)),
+			Args: string(mustJSON(event.Tool.Input)),
 		}
 		if call.ID == "" || call.Name == "" {
 			return model.Message{}, false
 		}
 		return model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{call}, ""), true
 	case session.EventTypeToolResult:
-		if update == nil {
+		if event == nil || event.Tool == nil {
 			return model.Message{}, false
 		}
 		name := toolNameFromEvent(event)
-		if update.ToolCallID == "" || name == "" {
+		if event.Tool.ID == "" || name == "" {
 			return model.Message{}, false
 		}
 		message := model.Message{
 			Role: model.RoleTool,
 			Parts: []model.Part{model.NewToolResultJSONPart(
-				strings.TrimSpace(update.ToolCallID),
+				strings.TrimSpace(event.Tool.ID),
 				name,
-				truncatedToolOutputMap(toolResultContextPayload(update)),
-				strings.EqualFold(strings.TrimSpace(update.Status), "failed"),
+				truncatedToolOutputMap(toolResultContextPayload(event.Tool)),
+				strings.EqualFold(strings.TrimSpace(event.Tool.Status), "failed"),
 			)},
 		}
 		return message, true
@@ -1477,20 +1435,20 @@ func truncatedToolOutputMap(values map[string]any) map[string]any {
 	return out
 }
 
-func toolResultContextPayload(update *session.ProtocolUpdate) map[string]any {
-	if update == nil {
+func toolResultContextPayload(toolPayload *session.EventTool) map[string]any {
+	if toolPayload == nil {
 		return map[string]any{}
 	}
-	if len(update.RawOutput) > 0 {
-		return maps.Clone(update.RawOutput)
+	if len(toolPayload.Output) > 0 {
+		return maps.Clone(toolPayload.Output)
 	}
-	if text := protocolToolContentText(session.ProtocolToolCallContentOf(update)); text != "" {
+	if text := eventToolContentText(toolPayload.Content); text != "" {
 		return map[string]any{"result": text}
 	}
 	return map[string]any{}
 }
 
-func protocolToolContentText(content []session.ProtocolToolCallContent) string {
+func eventToolContentText(content []session.EventToolContent) string {
 	if len(content) == 0 {
 		return ""
 	}
@@ -1498,50 +1456,12 @@ func protocolToolContentText(content []session.ProtocolToolCallContent) string {
 	for _, item := range content {
 		switch strings.TrimSpace(item.Type) {
 		case "content", "terminal":
-			if text := protocolTextContent(item.Content); text != "" {
-				parts = append(parts, text)
+			if item.Text != "" {
+				parts = append(parts, item.Text)
 			}
 		}
 	}
 	return strings.Join(parts, "\n")
-}
-
-func protocolTextContent(raw any) string {
-	switch typed := raw.(type) {
-	case nil:
-		return ""
-	case json.RawMessage:
-		if len(typed) == 0 {
-			return ""
-		}
-		var decoded any
-		if err := json.Unmarshal(typed, &decoded); err != nil {
-			return ""
-		}
-		return protocolTextContent(decoded)
-	case map[string]any:
-		if typ, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), "text") {
-			return ""
-		}
-		text, _ := typed["text"].(string)
-		return text
-	default:
-		data, err := json.Marshal(raw)
-		if err != nil || len(data) == 0 {
-			return ""
-		}
-		var decoded struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
-		}
-		if err := json.Unmarshal(data, &decoded); err != nil {
-			return ""
-		}
-		if !strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
-			return ""
-		}
-		return decoded.Text
-	}
 }
 
 func toolNameFromEvent(event *session.Event) string {
@@ -1551,16 +1471,10 @@ func toolNameFromEvent(event *session.Event) string {
 	if name := strings.TrimSpace(stringFromNestedMap(event.Meta, "caelis", "runtime", "tool", "name")); name != "" {
 		return name
 	}
-	if event.Protocol != nil && event.Protocol.ToolCall != nil {
-		if name := strings.TrimSpace(event.Protocol.ToolCall.Name); name != "" {
+	if event.Tool != nil {
+		if name := strings.TrimSpace(event.Tool.Name); name != "" {
 			return name
 		}
-	}
-	if update := session.ProtocolUpdateOf(event); update != nil {
-		if title := strings.Fields(strings.TrimSpace(update.Title)); len(title) > 0 {
-			return title[0]
-		}
-		return strings.TrimSpace(update.Kind)
 	}
 	return ""
 }

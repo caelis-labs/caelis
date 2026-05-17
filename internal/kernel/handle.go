@@ -336,9 +336,27 @@ func (h *turnHandle) publishApprovalEvent(req *agent.ApprovalRequest, payload *A
 			TurnID:          h.turnID,
 			SessionRef:      h.sessionRef,
 			Origin:          canonicalOriginFromApproval(req, h.sessionRef, h.turnID),
+			Meta:            canonicalApprovalEventMeta(req),
 			Usage:           eventUsage,
 			ApprovalPayload: cloneApprovalPayload(payload),
 		},
+	})
+}
+
+func canonicalApprovalEventMeta(req *agent.ApprovalRequest) map[string]any {
+	if req == nil || len(req.Metadata) == 0 {
+		return nil
+	}
+	parentCallID := metadataString(req.Metadata, "parent_call_id")
+	parentTool := firstNonEmpty(metadataString(req.Metadata, "parent_tool"), metadataString(req.Metadata, "parent_tool_name"))
+	parentTaskID := metadataString(req.Metadata, "parent_task_id")
+	if parentCallID == "" && parentTool == "" && parentTaskID == "" {
+		return nil
+	}
+	return withCaelisRuntimeSection(nil, EventMetaRuntimeStream, map[string]any{
+		EventMetaRuntimeStreamParentCallID: parentCallID,
+		EventMetaRuntimeStreamParentTool:   parentTool,
+		EventMetaRuntimeStreamParentTaskID: parentTaskID,
 	})
 }
 

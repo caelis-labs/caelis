@@ -404,11 +404,13 @@ func (r subagentApprovalRequester) RequestSubagentApproval(
 			Options: options,
 		},
 		Metadata: map[string]any{
-			"subagent": true,
-			"scope":    "subagent",
-			"scope_id": strings.TrimSpace(req.TaskID),
-			"task_id":  strings.TrimSpace(req.TaskID),
-			"agent":    strings.TrimSpace(req.Agent),
+			"subagent":       true,
+			"scope":          "subagent",
+			"scope_id":       strings.TrimSpace(req.TaskID),
+			"task_id":        strings.TrimSpace(req.TaskID),
+			"agent":          strings.TrimSpace(req.Agent),
+			"parent_call_id": strings.TrimSpace(req.ParentCallID),
+			"parent_tool":    "SPAWN",
 		},
 	})
 	if err != nil {
@@ -654,6 +656,7 @@ func (tm *taskRuntime) StartSubagent(
 		Session:           session.CloneSession(activeSession),
 		CWD:               strings.TrimSpace(activeSession.CWD),
 		TaskID:            taskID,
+		ParentCallID:      strings.TrimSpace(req.ParentCall),
 		Mode:              mode,
 		ApprovalRequester: req.Approval,
 		Streams:           tm,
@@ -1525,14 +1528,16 @@ func taskToolMeta(snapshot taskapi.Snapshot) map[string]any {
 	if internalTaskID := strings.TrimSpace(snapshot.Ref.TaskID); snapshot.Kind != taskapi.KindSubagent && internalTaskID != "" && internalTaskID != visibleTaskID {
 		taskMeta["internal_task_id"] = internalTaskID
 	}
-	if snapshot.Kind != taskapi.KindSubagent {
-		if cursor, ok := taskInt64Value(snapshot.Metadata["output_cursor"]); ok && cursor >= 0 {
-			taskMeta["output_cursor"] = cursor
-		} else if text, _ := snapshot.Result["result"].(string); text != "" {
+	if cursor, ok := taskInt64Value(snapshot.Metadata["output_cursor"]); ok && cursor >= 0 {
+		taskMeta["output_cursor"] = cursor
+	} else if snapshot.Kind == taskapi.KindSubagent && snapshot.StdoutCursor >= 0 {
+		taskMeta["output_cursor"] = snapshot.StdoutCursor
+	} else if snapshot.Kind != taskapi.KindSubagent {
+		if text, _ := snapshot.Result["result"].(string); text != "" {
 			taskMeta["output_cursor"] = int64(len([]byte(text)))
 		}
 	}
-	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); snapshot.Kind != taskapi.KindSubagent && terminalID != "" {
+	if terminalID := firstNonEmpty(strings.TrimSpace(snapshot.Terminal.TerminalID), strings.TrimSpace(snapshot.Ref.TerminalID), taskStringValue(snapshot.Metadata["terminal_id"])); terminalID != "" {
 		taskMeta["terminal_id"] = terminalID
 	}
 	for _, key := range []string{"source", "interaction", "agent", "agent_id", "handle", "mention", "prompt", "turn_id", "turn_seq"} {

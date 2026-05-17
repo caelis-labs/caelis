@@ -222,6 +222,11 @@ func (m *Model) applyTranscriptApproval(event TranscriptEvent) (tea.Model, tea.C
 }
 
 func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(event.AnchorToolCallID) != "" {
+		if applied, cmd := m.applyAnchoredApprovalReviewToTool(event); applied {
+			return m, cmd
+		}
+	}
 	switch event.Scope {
 	case ACPProjectionParticipant:
 		block := m.ensureParticipantTurnBlock(event.ScopeID, event.Actor)
@@ -264,6 +269,84 @@ func (m *Model) applyTranscriptApprovalReview(event TranscriptEvent) (tea.Model,
 		m.markViewportBlockDirty(block.BlockID())
 		return m, m.requestStreamViewportSync()
 	}
+}
+
+func (m *Model) applyAnchoredApprovalReviewToTool(event TranscriptEvent) (bool, tea.Cmd) {
+	if m == nil {
+		return false, nil
+	}
+	callID := strings.TrimSpace(event.AnchorToolCallID)
+	if callID == "" {
+		return false, nil
+	}
+	output := approvalReviewTailOutput(event)
+	if output == "" {
+		return true, nil
+	}
+	toolName := firstNonEmpty(strings.TrimSpace(event.AnchorToolName), "SPAWN")
+	for _, docBlock := range m.doc.Blocks() {
+		block, ok := docBlock.(*MainACPTurnBlock)
+		if !ok || !mainACPBlockHasToolCall(block, callID) {
+			continue
+		}
+		block.UpdateToolWithMeta(callID, toolName, "", output, false, false, ToolUpdateMeta{ToolKind: "execute"})
+		m.markViewportBlockDirty(block.BlockID())
+		return true, m.requestStreamViewportSync()
+	}
+	return false, nil
+}
+
+func mainACPBlockHasToolCall(block *MainACPTurnBlock, callID string) bool {
+	if block == nil {
+		return false
+	}
+	callID = strings.TrimSpace(callID)
+	if callID == "" {
+		return false
+	}
+	for _, ev := range block.Events {
+		if ev.Kind == SEToolCall && strings.TrimSpace(ev.CallID) == callID {
+			return true
+		}
+	}
+	return false
+}
+
+func approvalReviewTailOutput(event TranscriptEvent) string {
+	review := SubagentEvent{
+		ApprovalTool:    strings.TrimSpace(event.ApprovalTool),
+		ApprovalCommand: strings.TrimSpace(event.ApprovalCommand),
+		ApprovalStatus:  strings.TrimSpace(event.ApprovalStatus),
+		ApprovalRisk:    strings.TrimSpace(event.ApprovalRisk),
+		ApprovalAuth:    strings.TrimSpace(event.ApprovalAuth),
+		ApprovalText:    strings.TrimSpace(event.ApprovalText),
+	}
+	display := approvalReviewDisplayParts(review)
+	status := strings.TrimSpace(display.Status)
+	if status == "" {
+		status = "reviewed"
+	}
+	line := "Approval review " + status
+	if tool := strings.TrimSpace(event.ApprovalTool); tool != "" {
+		line += " " + tool
+	}
+	if command := strings.TrimSpace(event.ApprovalCommand); command != "" {
+		line += " " + command
+	}
+	meta := make([]string, 0, 2)
+	if risk := strings.TrimSpace(display.Risk); risk != "" {
+		meta = append(meta, "risk: "+risk)
+	}
+	if authorization := strings.TrimSpace(display.Authorization); authorization != "" {
+		meta = append(meta, "authorization: "+authorization)
+	}
+	if len(meta) > 0 {
+		line += " (" + strings.Join(meta, ", ") + ")"
+	}
+	if rationale := strings.TrimSpace(display.Rationale); rationale != "" {
+		line += "\n" + rationale
+	}
+	return line + "\n"
 }
 
 func (m *Model) applyTranscriptParticipant(event TranscriptEvent) (tea.Model, tea.Cmd) {

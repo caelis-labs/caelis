@@ -333,6 +333,39 @@ type EventLifecycle struct {
 	Meta   map[string]any `json:"meta,omitempty"`
 }
 
+// EventTool is the durable SDK tool-execution payload for one tool call or
+// result event. ACP wire shapes are derived from this payload by surface
+// projectors; they are not the storage contract.
+type EventTool struct {
+	ID        string              `json:"id,omitempty"`
+	Name      string              `json:"name,omitempty"`
+	Kind      string              `json:"kind,omitempty"`
+	Title     string              `json:"title,omitempty"`
+	Status    string              `json:"status,omitempty"`
+	Input     map[string]any      `json:"input,omitempty"`
+	Output    map[string]any      `json:"output,omitempty"`
+	Content   []EventToolContent  `json:"content,omitempty"`
+	Locations []EventToolLocation `json:"locations,omitempty"`
+}
+
+// EventToolLocation points at one file location involved in a tool event.
+type EventToolLocation struct {
+	Path string `json:"path,omitempty"`
+	Line *int   `json:"line,omitempty"`
+}
+
+// EventToolContent is durable display-oriented tool content. It intentionally
+// avoids ACP's content envelope; ACP projectors map it to standard
+// tool_call_update content and _meta terminal updates.
+type EventToolContent struct {
+	Type       string  `json:"type,omitempty"`
+	Text       string  `json:"text,omitempty"`
+	TerminalID string  `json:"terminal_id,omitempty"`
+	Path       string  `json:"path,omitempty"`
+	OldText    *string `json:"old_text,omitempty"`
+	NewText    string  `json:"new_text,omitempty"`
+}
+
 // ProtocolToolCall is the ACP-compatible tool call or tool update view of one
 // canonical event.
 type ProtocolToolCall struct {
@@ -479,8 +512,9 @@ func (p *EventProtocol) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Event is the compact canonical event envelope. Durable semantics live in
-// typed nested payloads and scope refs rather than top-level ad-hoc fields.
+// Event is the compact canonical event envelope. Durable model-visible
+// semantics live in Message; client-facing ACP shapes live in Protocol and may
+// be projected from Message when possible.
 type Event struct {
 	ID         string          `json:"id,omitempty"`
 	SessionID  string          `json:"session_id,omitempty"`
@@ -489,9 +523,10 @@ type Event struct {
 	Time       time.Time       `json:"time,omitempty"`
 	Actor      ActorRef        `json:"actor,omitempty"`
 	Scope      *EventScope     `json:"scope,omitempty"`
-	Message    *model.Message  `json:"-"`
-	Notice     *EventNotice    `json:"-"`
-	Lifecycle  *EventLifecycle `json:"-"`
+	Message    *model.Message  `json:"message,omitempty"`
+	Tool       *EventTool      `json:"tool,omitempty"`
+	Notice     *EventNotice    `json:"notice,omitempty"`
+	Lifecycle  *EventLifecycle `json:"lifecycle,omitempty"`
 	Protocol   *EventProtocol  `json:"protocol,omitempty"`
 	Text       string          `json:"-"`
 	Meta       map[string]any  `json:"_meta,omitempty"`
@@ -637,9 +672,9 @@ func ProtocolUpdateOf(event *Event) *ProtocolUpdate {
 	return protocol.Update
 }
 
-// EventText returns the user/assistant text carried by one canonical event.
-// Text/Message remain runtime-only conveniences; durable session text is read
-// from the normalized ACP content payload.
+// EventText returns the display text carried by one event. Durable
+// model-visible events should keep full Message payloads; ACP content remains a
+// protocol projection source for protocol-native events.
 func EventText(event *Event) string {
 	if event == nil {
 		return ""
@@ -663,9 +698,9 @@ func EventText(event *Event) string {
 	return ""
 }
 
-// CanonicalizeEvent returns a normalized event copy whose durable protocol
-// payload carries any user/assistant text that callers supplied through legacy
-// runtime-only Text/Message fields.
+// CanonicalizeEvent returns a normalized event copy. Full model-visible
+// messages remain durable Message payloads. Tool execution state is stored in
+// Event.Tool, while Protocol is reserved for ACP/control-plane projection data.
 func CanonicalizeEvent(event *Event) *Event {
 	out := CloneEvent(event)
 	if out == nil {
@@ -673,6 +708,13 @@ func CanonicalizeEvent(event *Event) *Event {
 	}
 	if out.Type == "" {
 		out.Type = EventTypeOf(out)
+	}
+	if out.Tool != nil {
+		removeToolProjectionProtocol(out)
+	}
+	if out.Message != nil {
+		removeModelProjectionContent(out)
+		return out
 	}
 	ensureProtocolText(out)
 	return out
@@ -795,6 +837,14 @@ func EventTypeOf(event *Event) EventType {
 			return EventTypeHandoff
 		}
 	}
+	if event.Tool != nil {
+		switch strings.ToLower(strings.TrimSpace(event.Tool.Status)) {
+		case "completed", "failed", "error", "interrupted", "cancelled", "canceled", "terminated":
+			return EventTypeToolResult
+		default:
+			return EventTypeToolCall
+		}
+	}
 	if event.Message == nil {
 		return EventTypeCustom
 	}
@@ -861,6 +911,78 @@ func ensureProtocolText(event *Event) {
 		protocol.Update.Content = ProtocolTextContent(text)
 	}
 	event.Protocol = &protocol
+}
+
+func removeModelProjectionContent(event *Event) {
+	if event == nil || event.Message == nil || event.Protocol == nil {
+		return
+	}
+	protocol := CloneEventProtocol(*event.Protocol)
+	if protocol.Update == nil {
+		event.Protocol = &protocol
+		return
+	}
+	if protocolContentIsText(protocol.Update.Content, event.Message.TextContent()) {
+		protocol.Update.Content = nil
+	}
+	switch EventTypeOf(event) {
+	case EventTypeUser, EventTypeAssistant:
+		if protocolUpdateHasOnlySessionUpdate(protocol.Update) && protocol.Permission == nil {
+			protocol.Update = nil
+		}
+	}
+	if protocol.Method == ProtocolMethodSessionUpdate && protocol.Update == nil && protocol.Permission == nil {
+		event.Protocol = nil
+		return
+	}
+	event.Protocol = &protocol
+}
+
+func removeToolProjectionProtocol(event *Event) {
+	if event == nil || event.Tool == nil || event.Protocol == nil {
+		return
+	}
+	protocol := CloneEventProtocol(*event.Protocol)
+	if protocol.Update != nil {
+		switch strings.TrimSpace(protocol.Update.SessionUpdate) {
+		case string(ProtocolUpdateTypeToolCall), string(ProtocolUpdateTypeToolUpdate):
+			protocol.Update = nil
+			protocol.ToolCall = nil
+			protocol.UpdateType = ""
+		}
+	}
+	if protocol.ToolCall != nil {
+		protocol.ToolCall = nil
+	}
+	if protocol.Method == ProtocolMethodSessionUpdate && protocol.Update == nil && protocol.Permission == nil {
+		event.Protocol = nil
+		return
+	}
+	event.Protocol = &protocol
+}
+
+func protocolContentIsText(content any, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" || content == nil {
+		return false
+	}
+	return strings.TrimSpace(textFromProtocolContent(content)) == want
+}
+
+func protocolUpdateHasOnlySessionUpdate(update *ProtocolUpdate) bool {
+	if update == nil {
+		return true
+	}
+	return strings.TrimSpace(update.ToolCallID) == "" &&
+		strings.TrimSpace(update.Title) == "" &&
+		strings.TrimSpace(update.Kind) == "" &&
+		strings.TrimSpace(update.Status) == "" &&
+		update.Content == nil &&
+		len(update.RawInput) == 0 &&
+		len(update.RawOutput) == 0 &&
+		len(update.Locations) == 0 &&
+		len(update.Entries) == 0 &&
+		len(update.Meta) == 0
 }
 
 func runtimeText(event *Event) string {
@@ -1065,6 +1187,10 @@ func CloneEvent(in *Event) *Event {
 		message := model.CloneMessage(*in.Message)
 		out.Message = &message
 	}
+	if in.Tool != nil {
+		tool := CloneEventTool(*in.Tool)
+		out.Tool = &tool
+	}
 	return &out
 }
 
@@ -1179,6 +1305,52 @@ func CloneEventScope(in EventScope) EventScope {
 			EventType: strings.TrimSpace(in.ACP.EventType),
 		},
 	}
+}
+
+// CloneEventTool returns one normalized copy of a durable tool payload.
+func CloneEventTool(in EventTool) EventTool {
+	out := EventTool{
+		ID:     strings.TrimSpace(in.ID),
+		Name:   strings.TrimSpace(in.Name),
+		Kind:   strings.TrimSpace(in.Kind),
+		Title:  strings.TrimSpace(in.Title),
+		Status: strings.TrimSpace(in.Status),
+		Input:  maps.Clone(in.Input),
+		Output: maps.Clone(in.Output),
+	}
+	if len(in.Content) > 0 {
+		out.Content = make([]EventToolContent, 0, len(in.Content))
+		for _, item := range in.Content {
+			var oldText *string
+			if item.OldText != nil {
+				value := *item.OldText
+				oldText = &value
+			}
+			out.Content = append(out.Content, EventToolContent{
+				Type:       strings.TrimSpace(item.Type),
+				Text:       item.Text,
+				TerminalID: strings.TrimSpace(item.TerminalID),
+				Path:       strings.TrimSpace(item.Path),
+				OldText:    oldText,
+				NewText:    item.NewText,
+			})
+		}
+	}
+	if len(in.Locations) > 0 {
+		out.Locations = make([]EventToolLocation, 0, len(in.Locations))
+		for _, item := range in.Locations {
+			var line *int
+			if item.Line != nil {
+				value := *item.Line
+				line = &value
+			}
+			out.Locations = append(out.Locations, EventToolLocation{
+				Path: strings.TrimSpace(item.Path),
+				Line: line,
+			})
+		}
+	}
+	return out
 }
 
 // CloneEventProtocol returns one normalized event protocol payload copy.

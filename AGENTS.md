@@ -1,89 +1,54 @@
 # AGENTS.md
-
 ## Working Rules
-
-- Keep the main agent responsible for architecture, task decomposition,
-  integration, validation, and final judgment.
-- Use sub-agents only for bounded sidecar work with clear ownership; do not
-  delegate final design decisions or cross-cutting release judgment.
-- Prefer `rg`/`rg --files` for repository search.
-- Avoid unnecessary import aliases; use an alias only for name conflicts,
-  package-name mismatches, or established local convention.
-- Preserve unrelated user changes in the worktree.
-
-## Architecture Direction
-
-- Keep the internal core centered on one durable Session workspace, ACP-native
-  event semantics, and multiple agents working in the same session context.
-- Treat ACP protocol shapes such as `session/update` and
-  `session/request_permission` as first-class event semantics. UI layers may
-  project or decorate them, but should not replace them with UI-only protocol
-  concepts.
-- Prefer small public extension ports over hard-wired implementations. Approval
-  review, session storage, model providers, sandbox policy, tools, skills, and
-  prompt assembly should be replaceable through narrow interfaces.
-- Put reusable extension contracts in `ports/*` when they are intended for
-  outside implementations. Use `internal/*` only for private glue that should
-  not become a public integration point.
-- Keep `ports/agent` focused on runtime orchestration and abstract callbacks. It
-  should depend on generic ports such as approval requesters, not know whether a
-  decision came from a human, a guardian agent, or a future policy engine.
-- Model approval as a pluggable port: human/manual approval and agent
-  Auto-Review are implementations of the same approval contract. Shared
-  approval payload normalization and response conversion belong with that
-  contract, not in surface adapters.
-- Keep generic ACP adapters independent from `internal/kernel`. They may depend on
-  `ports/*` contracts and ACP protocol packages. Composition packages may wire
-  kernel defaults into ACP adapters, but generic adapters should not import kernel
-  orchestration types unless the dependency is explicitly part of a migration
-  step.
-- Keep `internal/kernel` responsible for local turn/session orchestration,
-  canonical event projection, and lifecycle coordination. It should not import
-  TUI packages or generic ACP surface adapters.
-- Keep `app/gatewayapp` as the default local composition layer. It wires default
-  implementations and persisted config, but reusable architecture contracts
-  should live below it.
-- Avoid broad framework rewrites. When moving toward the port-based architecture,
-  make narrow, validated extractions that reduce duplicated semantics or remove
-  dependency inversion.
-
-## Commit Messages
-
-- Treat commit history as the project changelog. Every commit should explain the
-  user-visible or maintainer-visible reason for the change.
-- Use concise conventional-style subjects when possible: `feat:`, `fix:`,
-  `docs:`, `refactor:`, `test:`, `build:`, or `chore:`.
-- Put release-relevant context in the commit body when the subject is not enough.
-- Do not maintain `CHANGELOG.md`; release notes are generated from git history.
-
-## README Policy
-
-- Keep `README.md` stable and version-agnostic.
-- Do not update README for version bumps, tag creation, package publication, or
-  changelog-only work.
-- Update README only when core architecture, public commands, installation
-  shape, runtime behavior, or documented user workflows materially change.
-- Do not pin npm install examples to a concrete package version.
-
-## Versioning
-
-- The release version source of truth is the annotated git tag `vX.Y.Z`.
-- Do not add or update a repository `VERSION` file.
-- Binary version metadata is injected from the tag by `Makefile`/GoReleaser
-  ldflags. Untagged or dirty source builds report `dev`.
-- Source npm manifests stay on the development placeholder version. The release
-  workflow rewrites npm package versions from the pushed tag before publishing.
-
+- Main agent owns architecture, decomposition, integration, validation, and final judgment.
+- Sub-agents are allowed only for bounded sidecar work with clear ownership.
+- Prefer `rg` / `rg --files`; preserve unrelated user changes.
+- Avoid unnecessary import aliases.
+## Architecture Contract
+- One durable Agent SDK session is the source of truth for runtime context.
+- Store canonical model semantics, not UI transcript cache: user content,
+  assistant reasoning/text, tool calls/results, replay signatures, provider
+  metadata, compaction/system context, approvals, and lifecycle state.
+- Reloaded model input must match the runtime semantic message sequence, except
+  when system prompt, tools, or skills intentionally changed.
+- `session.Event.Message` is durable model-visible message state.
+- `session.Event.Tool` is durable tool execution state: ids, names, args,
+  status, output, content, truncation, and replay boundaries.
+- `session.Event.Protocol.Update` is the ACP client projection contract, not
+  the local Agent SDK replay source.
+- Gateway emits standard ACP `session/update` and `request_permission` for TUI,
+  `caelis acp`, and external ACP clients.
+- Caelis display hints belong in ACP `_meta`; `_meta` must not be the only copy
+  of model-critical data unless explicitly defined as replay metadata.
+- `VisibilityUIOnly` chunks are transient live rendering events; persisted final
+  canonical events must contain complete model-visible state.
+- Built-in agents and external ACP agents meet at the Gateway boundary; external
+  ACP input must normalize into canonical session events before storage.
+- TUI and ACP clients consume the same ACP-native event stream and may decorate
+  it, but must not invent a built-in-only protocol.
+## Layer Boundaries
+- Public extension contracts live in `ports/*`; private glue lives in `internal/*`.
+- `internal/kernel` owns local turn/session orchestration, canonical projection,
+  replay validation, approvals, participants, and lifecycle coordination.
+- `impl/*` provides concrete ports and must not import surfaces or `internal/kernel`.
+- `protocol/acp` owns ACP schema, JSON-RPC, client/server, terminal, and projector code.
+- `surfaces/*` adapt UI/CLI/ACP interactions to kernel or app services and must
+  not own model, sandbox, tool, or persistence semantics.
+- `app/gatewayapp` is the default composition root for concrete implementations and config.
+- Before `v1.0.0`, prefer clean schema and boundary fixes over compatibility
+  fallbacks or legacy replay guesses.
+## Validation
+- Persistence changes require store round-trip tests comparing rebuilt model
+  context with runtime-produced context.
+- ACP/TUI reload tests verify projections, but do not replace model-context
+  round-trip tests.
+- Run affected `go test` packages and `git diff --check`.
 ## Release Flow
-
 1. Confirm the worktree only contains intended changes.
-2. Confirm `main` is the release branch and is up to date with `origin/main`.
-3. Run `make quality`.
-4. Run `git diff --check`.
-5. Run `make release-dry-run` when packaging behavior changed.
-6. Commit and push the release-ready code to `main`.
-7. Create an annotated tag on the exact published `main` commit:
-   `git tag -a vX.Y.Z -m vX.Y.Z`.
-8. Push the tag to trigger `.github/workflows/release.yml`.
-9. Verify the release workflow, GitHub Release, npm package versions, and that
-   `HEAD`, `origin/main`, and `vX.Y.Z^{}` identify the intended commit.
+2. Confirm `main` is current with `origin/main`.
+3. Run `make quality`, then `git diff --check`.
+4. Run `make release-dry-run` when packaging changed.
+5. Commit and push release-ready code to `main`.
+6. Tag the exact published commit: `git tag -a vX.Y.Z -m vX.Y.Z`.
+7. Push the tag and verify the workflow, GitHub Release, npm versions, `HEAD`,
+   `origin/main`, and `vX.Y.Z^{}`.

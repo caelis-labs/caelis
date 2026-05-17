@@ -265,9 +265,15 @@ func toolEventDisplayName(name string) string {
 	if name == "" {
 		return "TOOL"
 	}
+	switch strings.ToLower(name) {
+	case "read", "edit", "delete", "move", "search", "execute", "think", "fetch", "other":
+		return strings.ToUpper(name[:1]) + name[1:]
+	}
 	switch strings.ToUpper(strings.ReplaceAll(name, " ", "_")) {
 	case "REQUEST_PERMISSIONS":
 		return "Request permissions"
+	case "THINK":
+		return "Think"
 	default:
 		return cmp.Or(strings.TrimSpace(name), "TOOL")
 	}
