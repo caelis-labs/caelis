@@ -5,6 +5,9 @@ package win32
 import (
 	"strings"
 	"testing"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestProtectStringRoundTrip(t *testing.T) {
@@ -64,5 +67,22 @@ func TestRestrictedCurrentProcessTokenWithCapabilitySIDs(t *testing.T) {
 	}
 	if err := token.Close(); err != nil {
 		t.Fatalf("token.Close() error = %v", err)
+	}
+}
+
+func TestLogonProcessCreationUsesPlainStartupInfo(t *testing.T) {
+	if flags := logonCreationFlags(); flags&windows.EXTENDED_STARTUPINFO_PRESENT != 0 {
+		t.Fatalf("logonCreationFlags() = %#x, must not include EXTENDED_STARTUPINFO_PRESENT", flags)
+	}
+	startupInfo := logonStartupInfo(1, 2, 3)
+	wantSize := uint32(unsafe.Sizeof(windows.StartupInfo{}))
+	if startupInfo.Cb != wantSize {
+		t.Fatalf("StartupInfo.Cb = %d, want %d", startupInfo.Cb, wantSize)
+	}
+	if startupInfo.Flags&windows.STARTF_USESTDHANDLES == 0 {
+		t.Fatalf("StartupInfo.Flags = %#x, want STARTF_USESTDHANDLES", startupInfo.Flags)
+	}
+	if startupInfo.StdInput != 1 || startupInfo.StdOutput != 2 || startupInfo.StdErr != 3 {
+		t.Fatalf("StartupInfo std handles = %d/%d/%d", startupInfo.StdInput, startupInfo.StdOutput, startupInfo.StdErr)
 	}
 }

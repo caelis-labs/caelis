@@ -31,6 +31,16 @@ func TestWindowsElevatedSandboxE2E(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatalf("MkdirAll(workspace) error = %v", err)
 	}
+	for _, name := range []string{".git", ".codex", ".agents"} {
+		if err := os.MkdirAll(filepath.Join(workspace, name), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", name, err)
+		}
+	}
+	readOnlyCarveout := "future-readonly"
+	readOnlyCarveoutPath := filepath.Join(workspace, readOnlyCarveout)
+	if _, err := os.Stat(readOnlyCarveoutPath); !os.IsNotExist(err) {
+		t.Fatalf("read-only carveout exists before sandbox refresh: %v", err)
+	}
 	stateRoot := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_STATE"))
 	if stateRoot == "" {
 		stateRoot = filepath.Join(t.TempDir(), "state")
@@ -40,6 +50,7 @@ func TestWindowsElevatedSandboxE2E(t *testing.T) {
 		StateDir:         stateRoot,
 		HelperPath:       helper,
 		RequestedBackend: sandbox.BackendWindowsElevated,
+		ReadOnlySubpaths: []string{readOnlyCarveout},
 	})
 	if err != nil {
 		t.Fatalf("New() error = %v", err)
@@ -93,6 +104,9 @@ Get-Content -LiteralPath '.\workspace-write.txt'
 	if data, err := os.ReadFile(filepath.Join(workspace, "workspace-write.txt")); err != nil || !strings.Contains(string(data), "workspace-write-ok") {
 		t.Fatalf("host read workspace file = %q/%v", data, err)
 	}
+	verifyControlDirsDenyWriteE2E(ctx, t, rt, workspace)
+	verifyMissingReadOnlyCarveoutE2E(ctx, t, rt, workspace, readOnlyCarveout)
+	verifyMissingHiddenCarveoutE2E(ctx, t, rt, workspace)
 
 	result, err = runE2ECommand(ctx, rt, workspace, `Write-Output '中文输出正常'`, sandbox.NetworkDisabled, nil)
 	if err != nil {
@@ -274,6 +288,132 @@ try {
 	if !strings.Contains(result.Stdout, "async-e2e-ok") {
 		t.Fatalf("async stdout = %q", result.Stdout)
 	}
+	verifyCanceledRunTerminatesChildE2E(ctx, t, rt, workspace)
+}
+
+func verifyControlDirsDenyWriteE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+	t.Helper()
+	for _, name := range []string{".git", ".codex", ".agents"} {
+		hostPath := filepath.Join(workspace, name, "e2e-denied.txt")
+		relPath := filepath.Join(".", name, "e2e-denied.txt")
+		assertSandboxWriteDeniedE2E(ctx, t, rt, workspace, relPath, nil)
+		assertHostPathMissingE2E(t, hostPath)
+	}
+}
+
+func verifyMissingReadOnlyCarveoutE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string, carveout string) {
+	t.Helper()
+	hostDir := filepath.Join(workspace, carveout)
+	if info, err := os.Stat(hostDir); err != nil || !info.IsDir() {
+		t.Fatalf("read-only carveout was not materialized by sandbox refresh: info=%v err=%v", info, err)
+	}
+	hostPath := filepath.Join(hostDir, "leak.txt")
+	relPath := filepath.Join(".", carveout, "leak.txt")
+	assertSandboxWriteDeniedE2E(ctx, t, rt, workspace, relPath, nil)
+	assertHostPathMissingE2E(t, hostPath)
+}
+
+func verifyMissingHiddenCarveoutE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+	t.Helper()
+	hiddenDir := filepath.Join(workspace, "future-hidden")
+	if err := os.RemoveAll(hiddenDir); err != nil {
+		t.Fatalf("RemoveAll(future-hidden) error = %v", err)
+	}
+	if _, err := os.Stat(hiddenDir); !os.IsNotExist(err) {
+		t.Fatalf("future-hidden exists before hidden carveout refresh: %v", err)
+	}
+	hiddenRules := []sandbox.PathRule{{Path: hiddenDir, Access: sandbox.PathAccessHidden}}
+	hostPath := filepath.Join(hiddenDir, "leak.txt")
+	assertSandboxWriteDeniedE2E(ctx, t, rt, workspace, filepath.Join(".", "future-hidden", "leak.txt"), hiddenRules)
+	if info, err := os.Stat(hiddenDir); err != nil || !info.IsDir() {
+		t.Fatalf("hidden carveout was not materialized by sandbox refresh: info=%v err=%v", info, err)
+	}
+	assertHostPathMissingE2E(t, hostPath)
+}
+
+func verifyCanceledRunTerminatesChildE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+	t.Helper()
+	startedPath := filepath.Join(workspace, "cancel-started.txt")
+	leakPath := filepath.Join(workspace, "cancel-leak.txt")
+	_ = os.Remove(startedPath)
+	_ = os.Remove(leakPath)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct {
+		result sandbox.CommandResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := rt.Run(runCtx, sandbox.CommandRequest{
+			Command: strings.TrimSpace(`
+Set-Content -LiteralPath '.\cancel-started.txt' -Value 'started'
+Start-Sleep -Seconds 6
+Set-Content -LiteralPath '.\cancel-leak.txt' -Value 'leaked'
+`),
+			Dir:     workspace,
+			Timeout: 30 * time.Second,
+			Constraints: sandbox.Constraints{
+				Route:      sandbox.RouteSandbox,
+				Backend:    sandbox.BackendWindowsElevated,
+				Permission: sandbox.PermissionWorkspaceWrite,
+				Network:    sandbox.NetworkDisabled,
+			},
+		})
+		done <- struct {
+			result sandbox.CommandResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	waitForHostPathE2E(t, startedPath, 15*time.Second)
+	cancel()
+	select {
+	case got := <-done:
+		if got.err == nil {
+			t.Fatalf("canceled Run() error = nil; result=%+v", got.result)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("canceled Run() did not return after context cancellation")
+	}
+	time.Sleep(7 * time.Second)
+	assertHostPathMissingE2E(t, leakPath)
+}
+
+func assertSandboxWriteDeniedE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string, relPath string, rules []sandbox.PathRule) {
+	t.Helper()
+	command := "$ErrorActionPreference = 'Stop'; Set-Content -LiteralPath '" + escapePowerShellSingleQuote(relPath) + "' -Value 'blocked'"
+	result, err := runE2ECommand(ctx, rt, workspace, command, sandbox.NetworkDisabled, rules)
+	if err == nil || result.ExitCode == 0 {
+		t.Fatalf("sandbox write to %s was not denied: err=%v result=%+v", relPath, err, result)
+	}
+}
+
+func waitForHostPathE2E(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("Stat(%s) error = %v", path, err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", path)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func assertHostPathMissingE2E(t *testing.T, path string) {
+	t.Helper()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("host path %s exists or stat failed unexpectedly: %v", path, err)
+	}
+}
+
+func escapePowerShellSingleQuote(value string) string {
+	return strings.ReplaceAll(value, "'", "''")
 }
 
 func runE2EListingCommandWithTimings(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) (sandbox.CommandResult, error) {

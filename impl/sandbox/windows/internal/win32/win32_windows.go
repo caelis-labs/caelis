@@ -489,19 +489,9 @@ func StartProcessWithLogon(creds LogonCredentials, executable string, args []str
 		return nil, err
 	}
 
-	startupInfo, cleanupStartupInfo, err := childStartupInfo(stdinRead, stdoutWrite, stderrWrite)
-	if err != nil {
-		closeHandle(stdinRead)
-		closeHandle(stdinWrite)
-		closeHandle(stdoutRead)
-		closeHandle(stdoutWrite)
-		closeHandle(stderrRead)
-		closeHandle(stderrWrite)
-		return nil, err
-	}
-	defer cleanupStartupInfo()
+	startupInfo := logonStartupInfo(stdinRead, stdoutWrite, stderrWrite)
 	var processInfo windows.ProcessInformation
-	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT)
+	flags := logonCreationFlags()
 	r1, _, callErr := syscall.SyscallN(
 		procCreateProcessWithLogonW.Addr(),
 		ptr(userPtr),
@@ -513,7 +503,7 @@ func StartProcessWithLogon(creds LogonCredentials, executable string, args []str
 		uintptr(flags),
 		0,
 		ptr(cwdPtr),
-		uintptr(unsafe.Pointer(&startupInfo.StartupInfo)),
+		uintptr(unsafe.Pointer(startupInfo)),
 		uintptr(unsafe.Pointer(&processInfo)),
 	)
 	if r1 == 0 {
@@ -1011,6 +1001,20 @@ func createChildPipe(direction pipeDirection) (windows.Handle, windows.Handle, e
 		}
 	}
 	return readHandle, writeHandle, nil
+}
+
+func logonCreationFlags() uint32 {
+	return uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
+}
+
+func logonStartupInfo(stdinRead, stdoutWrite, stderrWrite windows.Handle) *windows.StartupInfo {
+	return &windows.StartupInfo{
+		Cb:        uint32(unsafe.Sizeof(windows.StartupInfo{})),
+		Flags:     windows.STARTF_USESTDHANDLES,
+		StdInput:  stdinRead,
+		StdOutput: stdoutWrite,
+		StdErr:    stderrWrite,
+	}
 }
 
 func childStartupInfo(stdinRead, stdoutWrite, stderrWrite windows.Handle) (*windows.StartupInfoEx, func(), error) {
