@@ -12,7 +12,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 
 	entry := &Entry{
 		TaskID: " task-1 ",
-		Kind:   " bash ",
+		Kind:   " command ",
 		Session: session.SessionRef{
 			AppName:   " app ",
 			UserID:    " user ",
@@ -27,7 +27,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 			"exit_code": 0,
 		},
 		Metadata: map[string]any{
-			"tool_name": "BASH",
+			"tool_name": "RUN_COMMAND",
 		},
 		Terminal: sandbox.TerminalRef{
 			Backend:    " host ",
@@ -44,8 +44,8 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	if got := cloned.TaskID; got != "task-1" {
 		t.Fatalf("TaskID = %q, want %q", got, "task-1")
 	}
-	if got := cloned.Kind; got != KindBash {
-		t.Fatalf("Kind = %q, want %q", got, KindBash)
+	if got := cloned.Kind; got != KindCommand {
+		t.Fatalf("Kind = %q, want %q", got, KindCommand)
 	}
 	if got := cloned.Session.SessionID; got != "sess-1" {
 		t.Fatalf("SessionID = %q, want %q", got, "sess-1")
@@ -59,7 +59,7 @@ func TestCloneEntryNormalizesMutableFields(t *testing.T) {
 	if got := entry.Result["exit_code"]; got != 0 {
 		t.Fatalf("original result mutated: %v", got)
 	}
-	if got := entry.Metadata["tool_name"]; got != "BASH" {
+	if got := entry.Metadata["tool_name"]; got != "RUN_COMMAND" {
 		t.Fatalf("original metadata mutated: %v", got)
 	}
 }

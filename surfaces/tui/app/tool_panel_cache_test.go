@@ -11,7 +11,7 @@ func TestToolPanelRenderCacheReusesUnchangedTerminalBody(t *testing.T) {
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
 	block := NewMainACPTurnBlock("session-1")
 
-	block.UpdateToolWithMeta("call-1", "BASH", "go test", strings.Join(numberedToolLines(24), "\n"), false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", strings.Join(numberedToolLines(24), "\n"), false, false, ToolUpdateMeta{TaskID: "task-1"})
 	_ = block.Render(ctx)
 	cache := block.toolPanelRenderCache["call-1"]
 	if cache.bodyRenders != 1 {
@@ -31,7 +31,7 @@ func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 
 	longOutput := strings.Join(numberedToolLines(500), "\n")
-	block.UpdateToolWithMeta("call-1", "BASH", "go test", longOutput, false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", longOutput, false, false, ToolUpdateMeta{TaskID: "task-1"})
 	_ = block.Render(ctx)
 	cache := block.toolPanelRenderCache["call-1"]
 	if cache.lastInputBytes >= len(longOutput) {
@@ -70,7 +70,7 @@ func TestParticipantToolPanelRenderCachePreservesHeaderToken(t *testing.T) {
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
 	block := NewParticipantTurnBlock("session-1", "worker")
 
-	block.UpdateToolWithMeta("call-1", "BASH", "go test", "first\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", "first\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
 	rows := block.Render(ctx)
 	if !rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
 		t.Fatalf("initial rows missing panel click token: %#v", renderedPlainRows(rows))

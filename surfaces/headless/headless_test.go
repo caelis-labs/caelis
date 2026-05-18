@@ -61,7 +61,7 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 			Event: kernel.Event{
 				Kind: kernel.EventKindApprovalRequested,
 				ApprovalPayload: &kernel.ApprovalPayload{
-					ToolName: "bash",
+					ToolName: "RUN_COMMAND",
 				},
 			},
 		},
@@ -100,7 +100,7 @@ func TestRunOnceIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 			Event: kernel.Event{
 				Kind: kernel.EventKindApprovalReview,
 				ApprovalPayload: &kernel.ApprovalPayload{
-					ToolName:       "bash",
+					ToolName:       "RUN_COMMAND",
 					ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
 					DecisionSource: "auto-review",
 				},

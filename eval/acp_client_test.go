@@ -102,7 +102,7 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		SessionRoot: filepath.Join(root, "sessions"),
 		TaskRoot:    filepath.Join(root, "tasks"),
 		Env: map[string]string{
-			"SDK_ACP_SCRIPTED_MODE": "approval_bash",
+			"SDK_ACP_SCRIPTED_MODE": "approval_command",
 		},
 		OnPermissionRequest: func(_ context.Context, _ client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
 			mu.Lock()
@@ -118,27 +118,38 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		OnUpdate: func(update client.UpdateEnvelope) {
 			switch call := update.Update.(type) {
 			case client.ToolCall:
-				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && info["terminal_id"] == "bash-approval-1" {
+				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && info["terminal_id"] == "command-approval-1" {
 					mu.Lock()
 					displayTerminalInfo = true
 					mu.Unlock()
 				}
 			case client.ToolCallUpdate:
+				if output, ok := call.Meta["terminal_output"].(map[string]any); ok && output["terminal_id"] == "command-approval-1" {
+					if text, _ := output["data"].(string); strings.Contains(text, "child approval ok") {
+						mu.Lock()
+						displayTerminalOutput = true
+						mu.Unlock()
+					}
+				}
+				if exit, ok := call.Meta["terminal_exit"].(map[string]any); ok && exit["terminal_id"] == "command-approval-1" {
+					mu.Lock()
+					displayTerminalExit = true
+					mu.Unlock()
+				}
+				if strings.TrimSpace(call.ToolCallID) == "command-approval-1" && call.Status != nil && *call.Status == "completed" {
+					mu.Lock()
+					displayTerminalDone = true
+					mu.Unlock()
+				}
 				for _, content := range call.Content {
 					if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
-						if strings.TrimSpace(content.TerminalID) == "bash-approval-1" {
+						if strings.TrimSpace(content.TerminalID) == "command-approval-1" {
 							mu.Lock()
 							terminalID = strings.TrimSpace(content.TerminalID)
 							mu.Unlock()
 							if text := clientTerminalContentText(content); strings.Contains(text, "child approval ok") {
 								mu.Lock()
 								displayTerminalOutput = true
-								mu.Unlock()
-							}
-							if call.Status != nil && *call.Status == "completed" {
-								mu.Lock()
-								displayTerminalExit = true
-								displayTerminalDone = true
 								mu.Unlock()
 							}
 						}
@@ -156,7 +167,7 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if _, err := acpClient.Prompt(ctx, session.SessionID, "Run the scripted approval bash flow.", nil); err != nil {
+	if _, err := acpClient.Prompt(ctx, session.SessionID, "Run the scripted approval command flow.", nil); err != nil {
 		t.Fatalf("Prompt() error = %v", err)
 	}
 

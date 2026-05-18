@@ -73,8 +73,8 @@ func TestACPHeaderAndToolLineSanitizeSourceANSI(t *testing.T) {
 		t.Fatalf("source ANSI color leaked into header: %q", header)
 	}
 
-	line := styleToolEventLine(model.theme, "✓ BASH \x1b[31m└ failed\x1b[0m", tuikit.LineStyleTool)
-	if got := ansi.Strip(line); got != "✓ BASH └ failed" {
+	line := styleToolEventLine(model.theme, "✓ RUN_COMMAND \x1b[31m└ failed\x1b[0m", tuikit.LineStyleTool)
+	if got := ansi.Strip(line); got != "✓ RUN_COMMAND └ failed" {
 		t.Fatalf("tool line strips to %q, want sanitized suffix", got)
 	}
 	if strings.Contains(line, "[31m") {

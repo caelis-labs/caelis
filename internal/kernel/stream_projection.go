@@ -50,7 +50,7 @@ func StreamRequestFromEvent(env EventEnvelope) (StreamRequest, bool) {
 		return StreamRequest{}, false
 	}
 	toolName := strings.ToUpper(strings.TrimSpace(payload.ToolName))
-	if toolName != "BASH" && toolName != "SPAWN" {
+	if toolName != "RUN_COMMAND" && toolName != "SPAWN" {
 		return StreamRequest{}, false
 	}
 	if payload.Status != ToolStatusRunning &&
@@ -191,7 +191,7 @@ func StreamFrameEvent(req StreamRequest, frame stream.Frame) EventEnvelope {
 // StreamFrameEvents projects one runtime stream frame into all transient gateway
 // events needed by renderers. Structured child session events are preserved for
 // subagent panels, while the standard tool-result update remains available for
-// the owning SPAWN/BASH panel.
+// the owning SPAWN/RUN_COMMAND panel.
 func StreamFrameEvents(req StreamRequest, frame stream.Frame) []EventEnvelope {
 	out := make([]EventEnvelope, 0, 2)
 	if frame.Event != nil {

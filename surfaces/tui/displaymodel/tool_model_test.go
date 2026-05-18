@@ -12,13 +12,13 @@ func TestRenderToolEventLineLifecycle(t *testing.T) {
 	}{
 		{
 			name: "running",
-			vm:   ToolEventViewModel{Name: "BASH", Args: "go test"},
-			want: "▸ BASH go test",
+			vm:   ToolEventViewModel{Name: "RUN_COMMAND", Args: "go test"},
+			want: "▸ RUN_COMMAND go test",
 		},
 		{
 			name: "expanded",
-			vm:   ToolEventViewModel{Name: "BASH", Args: "go test", Expandable: true, Expanded: true},
-			want: "▾ BASH go test",
+			vm:   ToolEventViewModel{Name: "RUN_COMMAND", Args: "go test", Expandable: true, Expanded: true},
+			want: "▾ RUN_COMMAND go test",
 		},
 		{
 			name: "done",

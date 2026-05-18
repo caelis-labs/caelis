@@ -17,10 +17,10 @@
       "method": "session/request_permission",
       "permission": {
         "tool_call": {
-          "id": "call-bash-approval",
-          "name": "BASH",
+          "id": "call-command-approval",
+          "name": "RUN_COMMAND",
           "kind": "execute",
-          "title": "BASH",
+          "title": "RUN_COMMAND",
           "raw_input": {
             "command": "rm -rf /tmp/demo"
           }

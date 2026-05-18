@@ -15,7 +15,7 @@ import (
 type Kind string
 
 const (
-	KindBash     Kind = "bash"
+	KindCommand  Kind = "command"
 	KindSubagent Kind = "subagent"
 )
 
@@ -66,8 +66,8 @@ type Observer interface {
 	ObserveTaskSnapshot(Snapshot)
 }
 
-// BashStartRequest defines one yielded BASH launch request.
-type BashStartRequest struct {
+// CommandStartRequest defines one yielded RUN_COMMAND launch request.
+type CommandStartRequest struct {
 	Command     string        `json:"command,omitempty"`
 	Workdir     string        `json:"workdir,omitempty"`
 	Yield       time.Duration `json:"yield,omitempty"`
@@ -130,7 +130,7 @@ type Store interface {
 
 // Manager is the runtime-owned task control surface used by yielded tools.
 type Manager interface {
-	StartBash(context.Context, BashStartRequest) (Snapshot, error)
+	StartCommand(context.Context, CommandStartRequest) (Snapshot, error)
 	Wait(context.Context, ControlRequest) (Snapshot, error)
 	Write(context.Context, ControlRequest) (Snapshot, error)
 	Cancel(context.Context, ControlRequest) (Snapshot, error)

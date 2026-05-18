@@ -14,7 +14,7 @@ func TestRenderBlockShell_CollapsedRail(t *testing.T) {
 		Variant:  BlockShellRail,
 		Width:    60,
 		Expanded: false,
-		Kind:     "BASH",
+		Kind:     "RUN_COMMAND",
 		Title:    "ls -la",
 		State:    "completed",
 	})
@@ -25,7 +25,7 @@ func TestRenderBlockShell_CollapsedRail(t *testing.T) {
 	if !strings.Contains(plain, "▸") {
 		t.Fatalf("collapsed should show ▸, got %q", plain)
 	}
-	if !strings.Contains(plain, "BASH") {
+	if !strings.Contains(plain, "RUN_COMMAND") {
 		t.Fatalf("expected kind, got %q", plain)
 	}
 }

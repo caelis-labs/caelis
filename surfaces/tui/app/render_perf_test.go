@@ -162,7 +162,7 @@ func BenchmarkToolOutputStream10kChunks(b *testing.B) {
 	block := m.ensureMainACPTurnBlock("session-1")
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		block.UpdateToolWithMeta("call-1", "BASH", "go test", "line\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+		block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", "line\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
 		m.markViewportBlockDirty(block.BlockID())
 		m.syncViewportContent()
 	}
@@ -317,7 +317,7 @@ func perfTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
 			SessionRef: session.SessionRef{SessionID: "session-1"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Content:  testTerminalContentWithID(text, "terminal-1"),
 			},

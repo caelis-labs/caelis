@@ -57,7 +57,7 @@ func TestMergeSubagentStreamChunkAcceptsCumulativeReplay(t *testing.T) {
 func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	block.AppendStreamChunk(SEAssistant, "Before tool.")
-	block.UpdateToolWithMeta("bash-1", "BASH", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
 	block.AppendStreamChunk(SEAssistant, "After")
 
 	block.ReplaceFinalStreamChunk(SEAssistant, "Before tool.\n\nAfter tool done.")
@@ -68,8 +68,8 @@ func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool." {
 		t.Fatalf("pre-tool event = %#v, want original assistant text", block.Events[0])
 	}
-	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "BASH" {
-		t.Fatalf("tool event = %#v, want BASH between assistant chunks", block.Events[1])
+	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RUN_COMMAND" {
+		t.Fatalf("tool event = %#v, want RUN_COMMAND between assistant chunks", block.Events[1])
 	}
 	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool done." {
 		t.Fatalf("post-tool event = %#v, want only final suffix after prior text", block.Events[2])
@@ -79,7 +79,7 @@ func TestMainACPFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	block := NewParticipantTurnBlock("session-1", "@self")
 	block.AppendStreamChunk(SEAssistant, "Before tool.")
-	block.UpdateToolWithMeta("bash-1", "BASH", "pwd", "ok", true, false, ToolUpdateMeta{})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "pwd", "ok", true, false, ToolUpdateMeta{})
 	block.AppendStreamChunk(SEAssistant, "After")
 
 	block.ReplaceFinalStreamChunk(SEAssistant, "Before tool.\n\nAfter tool done.")
@@ -90,8 +90,8 @@ func TestParticipantFinalCumulativeSuffixKeepsPreToolTextInPlace(t *testing.T) {
 	if block.Events[0].Kind != SEAssistant || block.Events[0].Text != "Before tool." {
 		t.Fatalf("pre-tool event = %#v, want original assistant text", block.Events[0])
 	}
-	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "BASH" {
-		t.Fatalf("tool event = %#v, want BASH between assistant chunks", block.Events[1])
+	if block.Events[1].Kind != SEToolCall || block.Events[1].Name != "RUN_COMMAND" {
+		t.Fatalf("tool event = %#v, want RUN_COMMAND between assistant chunks", block.Events[1])
 	}
 	if block.Events[2].Kind != SEAssistant || block.Events[2].Text != "After tool done." {
 		t.Fatalf("post-tool event = %#v, want only final suffix after prior text", block.Events[2])
@@ -133,15 +133,15 @@ func TestTaskResultReplacesSelfTaskIDWithVisibleHandle(t *testing.T) {
 
 func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("bash-1", "BASH", "go test", "first", false, false, ToolUpdateMeta{TaskID: "task-1"})
-	if got := block.toolEventIndex["bash-1"]; got != 0 {
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "go test", "first", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	if got := block.toolEventIndex["command-1"]; got != 0 {
 		t.Fatalf("initial tool index = %d, want 0", got)
 	}
 
 	block.Events = append([]SubagentEvent{{Kind: SEAssistant, Text: "shift"}}, block.Events...)
-	block.UpdateToolWithMeta("bash-1", "BASH", "go test", " second", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "go test", " second", false, false, ToolUpdateMeta{TaskID: "task-1"})
 
-	if got := block.toolEventIndex["bash-1"]; got != 1 {
+	if got := block.toolEventIndex["command-1"]; got != 1 {
 		t.Fatalf("refreshed tool index = %d, want 1", got)
 	}
 	if len(block.Events) != 2 {
@@ -152,53 +152,53 @@ func TestToolEventIndexSurvivesStaleShiftAndUpdatesOpenTool(t *testing.T) {
 	}
 }
 
-func TestTaskWaitResultDoesNotCompleteLinkedBashTool(t *testing.T) {
+func TestTaskWaitResultDoesNotCompleteLinkedRunCommandTool(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateToolWithMeta("bash-1", "BASH", "go test", "", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "go test", "", false, false, ToolUpdateMeta{TaskID: "task-1"})
 	block.UpdateToolWithMeta("task-wait-1", "TASK", "Wait task-1", "final answer", true, false, ToolUpdateMeta{TaskID: "task-1"})
 
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want BASH event plus TASK control event", block.Events)
+		t.Fatalf("events = %#v, want RUN_COMMAND event plus TASK control event", block.Events)
 	}
 	ev := block.Events[0]
 	if ev.Done || ev.Err || ev.Output != "" {
-		t.Fatalf("linked event = %#v, want BASH unchanged until its own stream final", ev)
+		t.Fatalf("linked event = %#v, want RUN_COMMAND unchanged until its own stream final", ev)
 	}
 	if block.Events[1].Name != "TASK" || block.Events[1].Output != "final answer" {
 		t.Fatalf("task control event = %#v, want TASK result kept separate", block.Events[1])
 	}
 
-	block.UpdateToolWithMeta("bash-1", "BASH", "", "late running output", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "", "late running output", false, false, ToolUpdateMeta{TaskID: "task-1"})
 	if got := block.Events[0].Output; got != "late running output" {
-		t.Fatalf("late running update output = %q, want BASH stream to update original panel", got)
+		t.Fatalf("late running update output = %q, want RUN_COMMAND stream to update original panel", got)
 	}
 }
 
-func TestTaskCancelShowsLinkedBashCommandWithoutCompletingBash(t *testing.T) {
+func TestTaskCancelShowsLinkedCommandWithoutCompletingCommand(t *testing.T) {
 	block := NewMainACPTurnBlock("session-1")
 	command := `echo "启动一个长任务" && sleep 30 && echo "这行不会输出"`
-	block.UpdateToolWithMeta("bash-1", "BASH", command, "启动一个长任务\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", command, "启动一个长任务\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
 	block.UpdateToolWithMeta("task-cancel-1", "TASK", "Cancel", "", true, false, ToolUpdateMeta{
 		TaskID:     "task-1",
 		TaskAction: "cancel",
 	})
 
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want linked BASH event plus TASK cancel row", block.Events)
+		t.Fatalf("events = %#v, want linked RUN_COMMAND event plus TASK cancel row", block.Events)
 	}
 	if ev := block.Events[0]; ev.Done || ev.Output != "启动一个长任务\n" {
-		t.Fatalf("linked bash event = %#v, want TASK cancel to leave BASH open until stream final", ev)
+		t.Fatalf("linked command event = %#v, want TASK cancel to leave RUN_COMMAND open until stream final", ev)
 	}
 	if got := block.Events[1].Args; got != "Cancel "+command {
 		t.Fatalf("cancel args = %q, want linked command", got)
 	}
 
-	block.UpdateToolWithMeta("bash-1", "BASH", command, "启动一个长任务\n", true, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", command, "启动一个长任务\n", true, false, ToolUpdateMeta{TaskID: "task-1"})
 	if len(block.Events) != 2 {
-		t.Fatalf("events = %#v, want final BASH update to replace existing event", block.Events)
+		t.Fatalf("events = %#v, want final RUN_COMMAND update to replace existing event", block.Events)
 	}
 	if got := block.Events[0].Output; strings.TrimSpace(got) != "启动一个长任务" {
-		t.Fatalf("bash output = %q, want final output on original event", got)
+		t.Fatalf("command output = %q, want final output on original event", got)
 	}
 }
 

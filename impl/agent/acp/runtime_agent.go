@@ -627,7 +627,7 @@ func terminalFrameFailed(state string) bool {
 
 func terminalBridgeEligibleTool(name string) bool {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "BASH", "SPAWN":
+	case "RUN_COMMAND", "SPAWN":
 		return true
 	default:
 		return false

@@ -533,15 +533,15 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 	}
 }
 
-func TestGatewayTaskSnapshotDoesNotRefreshBashPanelOutput(t *testing.T) {
+func TestGatewayTaskSnapshotDoesNotRefreshCommandPanelOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []kernel.EventEnvelope{
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 30); do echo $i; sleep 1; done"},
@@ -552,8 +552,8 @@ func TestGatewayTaskSnapshotDoesNotRefreshBashPanelOutput(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7"}),
 			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 30); do echo $i; sleep 1; done"},
@@ -602,7 +602,7 @@ func TestGatewayTaskSnapshotDoesNotRefreshBashPanelOutput(t *testing.T) {
 	if !ok {
 		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
 	}
-	block.setToolPanelExpanded("bash-1", true)
+	block.setToolPanelExpanded("command-1", true)
 	rows := block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	plain := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -616,10 +616,10 @@ func TestGatewayTaskSnapshotDoesNotRefreshBashPanelOutput(t *testing.T) {
 	}
 	for _, forbidden := range []string{"    进度: 2/30", "    进度: 3/30"} {
 		if strings.Contains(joined, forbidden) {
-			t.Fatalf("rendered rows = %q, TASK wait output should not refresh BASH panel", joined)
+			t.Fatalf("rendered rows = %q, TASK wait output should not refresh RUN_COMMAND panel", joined)
 		}
 	}
-	for _, forbidden := range []string{"|_", "BASH output", "│", "task / running", "state running", "stdout 进度", "task-7"} {
+	for _, forbidden := range []string{"|_", "RUN_COMMAND output", "│", "task / running", "state running", "stdout 进度", "task-7"} {
 		if strings.Contains(joined, forbidden) {
 			t.Fatalf("rendered rows = %q, should not contain %q", joined, forbidden)
 		}
@@ -643,7 +643,7 @@ func TestGatewayTaskWaitCompletedShowsActionWithoutResultOutput(t *testing.T) {
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": "wait", "target_kind": "bash"}),
+			Meta:       testRuntimeToolMeta(map[string]any{"target_id": "task-7", "action": "wait", "target_kind": "command"}),
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "task-wait-12",
 				ToolName: "TASK",
@@ -687,8 +687,8 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "bash-full-args",
-				ToolName: "BASH",
+				CallID:   "command-full-args",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": command},
@@ -700,7 +700,7 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 
 	joined := strings.Join(model.viewportPlainLines, "\n")
 	if !strings.Contains(joined, "TERMINAL_ARG_TAIL_MARKER") {
-		t.Fatalf("viewport lines = %#v, want full BASH command tail", model.viewportPlainLines)
+		t.Fatalf("viewport lines = %#v, want full RUN_COMMAND command tail", model.viewportPlainLines)
 	}
 	if strings.Contains(joined, "echo ...") || strings.Contains(joined, "TERMINAL_ARG_TAIL...") {
 		t.Fatalf("viewport lines = %#v, command was truncated", model.viewportPlainLines)
@@ -708,7 +708,7 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 	headerIdx := indexPlainLineContaining(model.viewportPlainLines, "• Ran ")
 	tailIdx := indexPlainLineContaining(model.viewportPlainLines, "TERMINAL_ARG_TAIL_MARKER")
 	if headerIdx < 0 || tailIdx <= headerIdx {
-		t.Fatalf("viewport lines = %#v, want wrapped BASH header", model.viewportPlainLines)
+		t.Fatalf("viewport lines = %#v, want wrapped RUN_COMMAND header", model.viewportPlainLines)
 	}
 	if !strings.HasPrefix(model.viewportPlainLines[tailIdx], "  │ ") {
 		t.Fatalf("wrapped tail line = %q, want terminal continuation rail", model.viewportPlainLines[tailIdx])
@@ -1232,15 +1232,15 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 	}
 }
 
-func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
+func TestGatewayCommandTerminalDeltasPreserveLineBreaks(t *testing.T) {
 	model := newGatewayEventTestModel()
 	for _, env := range []kernel.EventEnvelope{
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 10); do echo $i; done"},
@@ -1250,8 +1250,8 @@ func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 10); do echo $i; done"},
@@ -1269,8 +1269,8 @@ func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "for i in $(seq 1 10); do echo $i; done"},
@@ -1292,7 +1292,7 @@ func TestGatewayBashTerminalDeltasPreserveLineBreaks(t *testing.T) {
 	if !ok {
 		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
 	}
-	block.setToolPanelExpanded("bash-1", true)
+	block.setToolPanelExpanded("command-1", true)
 	rows := block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
 	plain := make([]string, 0, len(rows))
 	for _, row := range rows {
@@ -1382,7 +1382,7 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 	}
 }
 
-func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
+func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 	tests := []struct {
 		name      string
 		status    kernel.ToolStatus
@@ -1403,7 +1403,7 @@ func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
 			},
 			content: "进度: 1/5\n",
 			want:    []string{"• Ran for i in 1 2", "  └ 进度: 1/5"},
-			forbid:  []string{"|_", "BASH output", "│", "task / running", "task task-7", "state running", "stdout 进度", "supports_input"},
+			forbid:  []string{"|_", "RUN_COMMAND output", "│", "task / running", "task task-7", "state running", "stdout 进度", "supports_input"},
 		},
 		{
 			name:   "failed stdout stderr",
@@ -1416,7 +1416,7 @@ func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
 			},
 			content: "ignored stdout\nstderr:\npermission denied\n",
 			want:    []string{"  └ ignored stdout", "    stderr:", "    permission denied"},
-			forbid:  []string{"|_", "BASH output", "│", "stderr permission denied", "exit 1"},
+			forbid:  []string{"|_", "RUN_COMMAND output", "│", "stderr permission denied", "exit 1"},
 		},
 		{
 			name:   "failed stdout diagnostics",
@@ -1473,14 +1473,14 @@ func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			model := newGatewayEventTestModel()
-			callID := "bash-" + strings.ReplaceAll(tt.name, " ", "-")
+			callID := "command-" + strings.ReplaceAll(tt.name, " ", "-")
 			updated, _ := model.Update(kernel.EventEnvelope{
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolCall,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
 					ToolCall: &kernel.ToolCallPayload{
 						CallID:   callID,
-						ToolName: "BASH",
+						ToolName: "RUN_COMMAND",
 						Status:   kernel.ToolStatusRunning,
 						Scope:    kernel.EventScopeMain,
 						RawInput: map[string]any{"command": "for i in 1 2; do echo $i; done"},
@@ -1494,7 +1494,7 @@ func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
 					SessionRef: session.SessionRef{SessionID: "root-session"},
 					ToolResult: &kernel.ToolResultPayload{
 						CallID:    callID,
-						ToolName:  "BASH",
+						ToolName:  "RUN_COMMAND",
 						Status:    tt.status,
 						Error:     tt.isErr,
 						Scope:     kernel.EventScopeMain,
@@ -1532,14 +1532,14 @@ func TestGatewayBashPanelRendersACPTerminalContent(t *testing.T) {
 
 func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 	model := newGatewayEventTestModel()
-	callID := "bash-stream-final-empty"
+	callID := "command-stream-final-empty"
 	for _, env := range []kernel.EventEnvelope{
 		{Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   callID,
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "git log --oneline -6"},
@@ -1550,7 +1550,7 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   callID,
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "git log --oneline -6"},
@@ -1567,7 +1567,7 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:    callID,
-				ToolName:  "BASH",
+				ToolName:  "RUN_COMMAND",
 				Status:    kernel.ToolStatusCompleted,
 				Scope:     kernel.EventScopeMain,
 				RawInput:  map[string]any{"command": "git log --oneline -6"},
@@ -1596,7 +1596,7 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 
 func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
-	callID := "participant-bash-contentless-final"
+	callID := "participant-command-contentless-final"
 	origin := &kernel.EventOrigin{
 		Source:        "acp_participant",
 		Scope:         kernel.EventScopeParticipant,
@@ -1611,7 +1611,7 @@ func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t
 			Origin:     origin,
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   callID,
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeParticipant,
 				RawInput: map[string]any{"command": "go test ./..."},
@@ -1623,7 +1623,7 @@ func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t
 			Origin:     origin,
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   callID,
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeParticipant,
 				RawInput: map[string]any{"command": "go test ./..."},
@@ -1636,7 +1636,7 @@ func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t
 			Origin:     origin,
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   callID,
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusFailed,
 				Error:    true,
 				Scope:    kernel.EventScopeParticipant,
@@ -1653,7 +1653,7 @@ func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t
 		t.Fatalf("first block = %#v, want ParticipantTurnBlock", model.doc.Blocks()[0])
 	}
 	if len(block.Events) != 1 || !block.Events[0].Done || !block.Events[0].Err {
-		t.Fatalf("participant events = %#v, want failed completed BASH event", block.Events)
+		t.Fatalf("participant events = %#v, want failed completed RUN_COMMAND event", block.Events)
 	}
 	if got := strings.TrimSpace(block.Events[0].Output); got != "internal/service: missing mysql.default" {
 		t.Fatalf("terminal output = %q, want streamed output preserved", got)

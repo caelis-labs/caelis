@@ -16,15 +16,15 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
-func (tm *taskRuntime) StartBash(
+func (tm *taskRuntime) StartCommand(
 	ctx context.Context,
 	activeSession session.Session,
 	ref session.SessionRef,
 	runtime sandbox.Runtime,
-	req taskapi.BashStartRequest,
+	req taskapi.CommandStartRequest,
 ) (taskapi.Snapshot, error) {
 	var (
-		task          *bashTask
+		task          *commandTask
 		pendingOutput strings.Builder
 		pendingMu     sync.Mutex
 	)
@@ -58,7 +58,7 @@ func (tm *taskRuntime) StartBash(
 	}
 	now := tm.runtime.now()
 	taskID := tm.runtime.nextID("task", nil)
-	createdTask := &bashTask{
+	createdTask := &commandTask{
 		ref: taskapi.Ref{
 			TaskID:     taskID,
 			SessionID:  strings.TrimSpace(sessionHandle.Ref().SessionID),
@@ -68,7 +68,7 @@ func (tm *taskRuntime) StartBash(
 		session:        sessionHandle,
 		command:        strings.TrimSpace(req.Command),
 		workdir:        strings.TrimSpace(req.Workdir),
-		title:          shell.BashToolName + " " + strings.TrimSpace(req.Command),
+		title:          shell.RunCommandToolName + " " + strings.TrimSpace(req.Command),
 		createdAt:      now,
 		state:          taskapi.StateRunning,
 		running:        true,
@@ -104,14 +104,14 @@ func (tm *taskRuntime) StartBash(
 		task.mu.Unlock()
 		req.Observer.ObserveTaskSnapshot(snapshot)
 	}
-	snapshot, err := tm.waitBash(ctx, task, req.Yield)
+	snapshot, err := tm.waitCommand(ctx, task, req.Yield)
 	if err != nil {
-		return tm.failBashTaskIfStopped(ctx, task, err)
+		return tm.failCommandTaskIfStopped(ctx, task, err)
 	}
 	return snapshot, nil
 }
 
-func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.Duration) (taskapi.Snapshot, error) {
+func (tm *taskRuntime) waitCommand(ctx context.Context, task *commandTask, yield time.Duration) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("impl/agent/local: task is required")
 	}
@@ -137,7 +137,7 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	task.running = status.Running
 	task.metadata = map[string]any{
 		"task_id":     task.ref.TaskID,
-		"task_kind":   string(taskapi.KindBash),
+		"task_kind":   string(taskapi.KindCommand),
 		"state":       string(state),
 		"running":     status.Running,
 		"session_id":  task.ref.SessionID,
@@ -201,9 +201,9 @@ func (tm *taskRuntime) waitBash(ctx context.Context, task *bashTask, yield time.
 	return snapshot, nil
 }
 
-func (tm *taskRuntime) failBashTaskIfStopped(ctx context.Context, task *bashTask, cause error) (taskapi.Snapshot, error) {
+func (tm *taskRuntime) failCommandTaskIfStopped(ctx context.Context, task *commandTask, cause error) (taskapi.Snapshot, error) {
 	if task == nil || task.session == nil {
-		return tm.failBashTask(ctx, task, cause)
+		return tm.failCommandTask(ctx, task, cause)
 	}
 	if err := ctx.Err(); err != nil {
 		return taskapi.Snapshot{}, cause
@@ -212,16 +212,16 @@ func (tm *taskRuntime) failBashTaskIfStopped(ctx context.Context, task *bashTask
 	if statusErr == nil && status.Running {
 		return taskapi.Snapshot{}, cause
 	}
-	return tm.failBashTask(ctx, task, cause)
+	return tm.failCommandTask(ctx, task, cause)
 }
 
-func (tm *taskRuntime) failBashTask(ctx context.Context, task *bashTask, cause error) (taskapi.Snapshot, error) {
+func (tm *taskRuntime) failCommandTask(ctx context.Context, task *commandTask, cause error) (taskapi.Snapshot, error) {
 	if task == nil {
 		return taskapi.Snapshot{}, fmt.Errorf("impl/agent/local: task is required")
 	}
 	reason := strings.TrimSpace(fmt.Sprint(cause))
 	if reason == "" {
-		reason = "bash task failed"
+		reason = "command task failed"
 	}
 	state := taskapi.StateFailed
 	if errors.Is(cause, context.Canceled) {
@@ -253,7 +253,7 @@ func (tm *taskRuntime) failBashTask(ctx context.Context, task *bashTask, cause e
 	task.running = false
 	task.metadata = map[string]any{
 		"task_id":     task.ref.TaskID,
-		"task_kind":   string(taskapi.KindBash),
+		"task_kind":   string(taskapi.KindCommand),
 		"state":       string(state),
 		"running":     false,
 		"session_id":  task.ref.SessionID,
@@ -281,7 +281,7 @@ func (tm *taskRuntime) failBashTask(ctx context.Context, task *bashTask, cause e
 	return snapshot, nil
 }
 
-func (tm *taskRuntime) lookupBash(ctx context.Context, ref session.SessionRef, taskID string) (*bashTask, error) {
+func (tm *taskRuntime) lookupCommand(ctx context.Context, ref session.SessionRef, taskID string) (*commandTask, error) {
 	tm.mu.RLock()
 	task, ok := tm.tasks[strings.TrimSpace(taskID)]
 	tm.mu.RUnlock()
@@ -301,10 +301,10 @@ func (tm *taskRuntime) lookupBash(ctx context.Context, ref session.SessionRef, t
 	if strings.TrimSpace(entry.Session.SessionID) != strings.TrimSpace(ref.SessionID) {
 		return nil, fmt.Errorf("impl/agent/local: task %q not found", taskID)
 	}
-	if entry.Kind != taskapi.KindBash {
+	if entry.Kind != taskapi.KindCommand {
 		return nil, fmt.Errorf("impl/agent/local: task %q not found", taskID)
 	}
-	rehydrated, err := tm.rehydrateBashTask(entry)
+	rehydrated, err := tm.rehydrateCommandTask(entry)
 	if err != nil {
 		return nil, err
 	}
@@ -314,10 +314,10 @@ func (tm *taskRuntime) lookupBash(ctx context.Context, ref session.SessionRef, t
 	return rehydrated, nil
 }
 
-func (t *bashTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot {
+func (t *commandTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot {
 	return taskapi.CloneSnapshot(taskapi.Snapshot{
 		Ref:            t.ref,
-		Kind:           taskapi.KindBash,
+		Kind:           taskapi.KindCommand,
 		Title:          t.title,
 		State:          t.state,
 		Running:        t.running,
@@ -333,11 +333,11 @@ func (t *bashTask) snapshotLocked(status sandbox.SessionStatus) taskapi.Snapshot
 	})
 }
 
-func (tm *taskRuntime) rehydrateBashTask(entry *taskapi.Entry) (*bashTask, error) {
+func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask, error) {
 	if entry == nil {
 		return nil, fmt.Errorf("impl/agent/local: task entry is required")
 	}
-	task := &bashTask{
+	task := &commandTask{
 		ref: taskapi.Ref{
 			TaskID:     strings.TrimSpace(entry.TaskID),
 			SessionID:  strings.TrimSpace(entry.Terminal.SessionID),
@@ -411,13 +411,13 @@ func (tm *taskRuntime) rehydrateBashTask(entry *taskapi.Entry) (*bashTask, error
 	return task, nil
 }
 
-func (t *bashTask) entrySnapshot(now time.Time) *taskapi.Entry {
+func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	if t == nil {
 		return nil
 	}
 	return &taskapi.Entry{
 		TaskID:         t.ref.TaskID,
-		Kind:           taskapi.KindBash,
+		Kind:           taskapi.KindCommand,
 		Session:        t.sessionRef,
 		Title:          t.title,
 		State:          t.state,
@@ -440,7 +440,7 @@ func (t *bashTask) entrySnapshot(now time.Time) *taskapi.Entry {
 	}
 }
 
-func (t *bashTask) appendOutput(text string) {
+func (t *commandTask) appendOutput(text string) {
 	if t == nil || text == "" {
 		return
 	}
@@ -449,14 +449,14 @@ func (t *bashTask) appendOutput(text string) {
 	t.mu.Unlock()
 }
 
-func (t *bashTask) appendOutputLocked(text string) {
+func (t *commandTask) appendOutputLocked(text string) {
 	if t == nil || text == "" {
 		return
 	}
 	raw := []byte(t.output)
 	raw = append(raw, text...)
-	if bashLiveOutputBufferCapBytes > 0 && len(raw) > bashLiveOutputBufferCapBytes {
-		dropped := len(raw) - bashLiveOutputBufferCapBytes
+	if commandLiveOutputBufferCapBytes > 0 && len(raw) > commandLiveOutputBufferCapBytes {
+		dropped := len(raw) - commandLiveOutputBufferCapBytes
 		raw = raw[dropped:]
 		t.outputBase += int64(dropped)
 		if t.modelCursor < t.outputBase {
@@ -467,14 +467,14 @@ func (t *bashTask) appendOutputLocked(text string) {
 	t.outputLive = true
 }
 
-func (t *bashTask) outputCursorLocked() int64 {
+func (t *commandTask) outputCursorLocked() int64 {
 	if t == nil {
 		return 0
 	}
 	return t.outputBase + int64(len([]byte(t.output)))
 }
 
-func (t *bashTask) outputFromCursorLocked(cursor int64) string {
+func (t *commandTask) outputFromCursorLocked(cursor int64) string {
 	if t == nil || t.output == "" {
 		return ""
 	}

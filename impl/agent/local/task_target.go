@@ -22,8 +22,8 @@ func (tm *taskRuntime) control(ctx context.Context, ref session.SessionRef, req 
 }
 
 func (tm *taskRuntime) lookupControlTarget(ctx context.Context, ref session.SessionRef, taskID string) (taskControlTarget, error) {
-	if task, err := tm.lookupBash(ctx, ref, taskID); err == nil {
-		return bashControlTarget{runtime: tm, task: task}, nil
+	if task, err := tm.lookupCommand(ctx, ref, taskID); err == nil {
+		return commandControlTarget{runtime: tm, task: task}, nil
 	}
 	task, err := tm.lookupSubagent(ctx, ref, taskID)
 	if err != nil {
@@ -32,28 +32,28 @@ func (tm *taskRuntime) lookupControlTarget(ctx context.Context, ref session.Sess
 	return subagentControlTarget{runtime: tm, task: task}, nil
 }
 
-type bashControlTarget struct {
+type commandControlTarget struct {
 	runtime *taskRuntime
-	task    *bashTask
+	task    *commandTask
 }
 
-func (t bashControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
-	return t.runtime.waitBash(ctx, t.task, req.Yield)
+func (t commandControlTarget) Wait(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+	return t.runtime.waitCommand(ctx, t.task, req.Yield)
 }
 
-func (t bashControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
+func (t commandControlTarget) Write(ctx context.Context, req taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	input := normalizeTaskWriteInput(req.Input)
 	if err := t.task.session.WriteInput(ctx, []byte(input)); err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	return t.runtime.waitBash(ctx, t.task, req.Yield)
+	return t.runtime.waitCommand(ctx, t.task, req.Yield)
 }
 
-func (t bashControlTarget) Cancel(ctx context.Context, _ taskapi.ControlRequest) (taskapi.Snapshot, error) {
+func (t commandControlTarget) Cancel(ctx context.Context, _ taskapi.ControlRequest) (taskapi.Snapshot, error) {
 	if err := t.task.session.Terminate(ctx); err != nil {
 		return taskapi.Snapshot{}, err
 	}
-	return t.runtime.waitBash(ctx, t.task, taskCancelWait)
+	return t.runtime.waitCommand(ctx, t.task, taskCancelWait)
 }
 
 type subagentControlTarget struct {

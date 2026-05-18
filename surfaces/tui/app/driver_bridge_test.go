@@ -155,7 +155,7 @@ func TestGatewayTerminalBatcherMergesCumulativeRunningFrames(t *testing.T) {
 	}
 }
 
-func TestGatewayTerminalBatcherPreservesBashPrefixDeltas(t *testing.T) {
+func TestGatewayTerminalBatcherPreservesCommandPrefixDeltas(t *testing.T) {
 	var sent []tea.Msg
 	send := func(msg tea.Msg) {
 		sent = append(sent, msg)
@@ -178,7 +178,7 @@ func TestGatewayTerminalBatcherPreservesBashPrefixDeltas(t *testing.T) {
 		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
 	}
 	if got, _ := gatewayTerminalContent(env); got != "abcabcdef" {
-		t.Fatalf("merged BASH text = %q, want both byte deltas preserved", got)
+		t.Fatalf("merged RUN_COMMAND text = %q, want both byte deltas preserved", got)
 	}
 }
 
@@ -220,7 +220,7 @@ func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 }
 
 func testTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
-	return testTerminalFrameForTool("BASH", text, cursor)
+	return testTerminalFrameForTool("RUN_COMMAND", text, cursor)
 }
 
 func testNarrativeFrame(text string) kernel.EventEnvelope {
@@ -318,8 +318,8 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 					Kind:   kernel.EventKindToolCall,
 					TurnID: "turn-complete",
 					ToolCall: &kernel.ToolCallPayload{
-						CallID:   "bash-1",
-						ToolName: "BASH",
+						CallID:   "command-1",
+						ToolName: "RUN_COMMAND",
 						Status:   kernel.ToolStatusRunning,
 					},
 				},
@@ -427,8 +427,8 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 						Actor:   "@codex",
 					},
 					ToolCall: &kernel.ToolCallPayload{
-						CallID:   "side-bash",
-						ToolName: "BASH",
+						CallID:   "side-command",
+						ToolName: "RUN_COMMAND",
 						Status:   kernel.ToolStatusCompleted,
 						Scope:    kernel.EventScopeParticipant,
 					},
@@ -524,8 +524,8 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 					Kind:   kernel.EventKindToolCall,
 					TurnID: "turn-interrupted",
 					ToolCall: &kernel.ToolCallPayload{
-						CallID:   "bash-1",
-						ToolName: "BASH",
+						CallID:   "command-1",
+						ToolName: "RUN_COMMAND",
 						Status:   kernel.ToolStatusRunning,
 					},
 				},
@@ -767,7 +767,7 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Content:  testTerminalContentWithID("seed\n", "terminal-1"),
 				Status:   kernel.ToolStatusRunning,
 			},
@@ -793,7 +793,7 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 			Kind: kernel.EventKindToolResult,
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				Content:  testTerminalContentWithID("streamed\n", "terminal-1"),
 				Status:   kernel.ToolStatusRunning,
 			},
@@ -1038,7 +1038,7 @@ func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
 	}
 }
 
-func TestSlashAgentInstallFailureEmitsBASHToolResult(t *testing.T) {
+func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
 	driver := &bridgeTestDriver{
 		addAgentErr: fmt.Errorf("gatewayapp: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
 		slashArgCandidates: map[string][]tuidriver.SlashArgCandidate{
@@ -1062,14 +1062,14 @@ func TestSlashAgentInstallFailureEmitsBASHToolResult(t *testing.T) {
 		switch {
 		case env.Event.ToolCall != nil:
 			call := env.Event.ToolCall
-			if call.ToolName == "BASH" &&
+			if call.ToolName == "RUN_COMMAND" &&
 				call.Status == kernel.ToolStatusRunning &&
 				strings.Contains(fmt.Sprint(call.RawInput["command"]), "npm install --prefix") {
 				sawCall = true
 			}
 		case env.Event.ToolResult != nil:
 			toolResult := env.Event.ToolResult
-			if toolResult.ToolName == "BASH" &&
+			if toolResult.ToolName == "RUN_COMMAND" &&
 				toolResult.Status == kernel.ToolStatusFailed &&
 				toolResult.Error &&
 				strings.Contains(fmt.Sprint(toolResult.RawOutput["stderr"]), "npm ERR install failed") {
@@ -1399,7 +1399,7 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 			},
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": "go test ./surfaces/tui/app/..."},
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeParticipant,
@@ -1426,8 +1426,8 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 			if !ok {
 				continue
 			}
-			if envMsg.Event.ToolCall == nil || envMsg.Event.ToolCall.ToolName != "BASH" {
-				t.Fatalf("event envelope = %#v, want BASH tool call", envMsg)
+			if envMsg.Event.ToolCall == nil || envMsg.Event.ToolCall.ToolName != "RUN_COMMAND" {
+				t.Fatalf("event envelope = %#v, want RUN_COMMAND tool call", envMsg)
 			}
 			if envMsg.Event.Origin == nil || envMsg.Event.Origin.Scope != kernel.EventScopeParticipant {
 				t.Fatalf("event origin = %#v, want dynamic side ACP participant scope", envMsg.Event.Origin)

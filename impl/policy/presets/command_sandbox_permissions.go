@@ -11,12 +11,12 @@ import (
 )
 
 const (
-	bashSandboxPermissionUseDefault                = "use_default"
-	bashSandboxPermissionRequireEscalated          = "require_escalated"
-	bashSandboxPermissionWithAdditionalPermissions = "with_additional_permissions"
+	commandSandboxPermissionUseDefault                = "use_default"
+	commandSandboxPermissionRequireEscalated          = "require_escalated"
+	commandSandboxPermissionWithAdditionalPermissions = "with_additional_permissions"
 )
 
-type bashSandboxRequest struct {
+type commandSandboxRequest struct {
 	SandboxPermissions         string
 	ExplicitSandboxPermissions bool
 	Justification              string
@@ -25,19 +25,19 @@ type bashSandboxRequest struct {
 	AdditionalNetwork          sandbox.Network
 }
 
-func parseBashSandboxRequest(input policy.ToolContext) (bashSandboxRequest, error) {
+func parseCommandSandboxRequest(input policy.ToolContext) (commandSandboxRequest, error) {
 	args, err := policy.CallArgs(input.Call)
 	if err != nil {
-		return bashSandboxRequest{}, err
+		return commandSandboxRequest{}, err
 	}
-	req := bashSandboxRequest{SandboxPermissions: bashSandboxPermissionUseDefault}
+	req := commandSandboxRequest{SandboxPermissions: commandSandboxPermissionUseDefault}
 
 	if raw, ok := args["sandbox_permissions"]; ok && raw != nil {
 		value, ok := raw.(string)
 		if !ok {
 			return req, fmt.Errorf("sandbox_permissions must be a string")
 		}
-		permission, err := normalizeBashSandboxPermission(value)
+		permission, err := normalizeCommandSandboxPermission(value)
 		if err != nil {
 			return req, err
 		}
@@ -54,7 +54,7 @@ func parseBashSandboxRequest(input policy.ToolContext) (bashSandboxRequest, erro
 	}
 
 	if raw, ok := args["additional_permissions"]; ok && raw != nil {
-		additional, err := parseBashAdditionalPermissions(raw, input, args)
+		additional, err := parseCommandAdditionalPermissions(raw, input, args)
 		if err != nil {
 			return req, err
 		}
@@ -63,36 +63,36 @@ func parseBashSandboxRequest(input policy.ToolContext) (bashSandboxRequest, erro
 		req.AdditionalNetwork = additional.Network
 	}
 
-	if req.SandboxPermissions != bashSandboxPermissionWithAdditionalPermissions && req.AdditionalPermissions != nil {
-		return req, fmt.Errorf("additional_permissions requires sandbox_permissions=%q", bashSandboxPermissionWithAdditionalPermissions)
+	if req.SandboxPermissions != commandSandboxPermissionWithAdditionalPermissions && req.AdditionalPermissions != nil {
+		return req, fmt.Errorf("additional_permissions requires sandbox_permissions=%q", commandSandboxPermissionWithAdditionalPermissions)
 	}
-	if req.SandboxPermissions == bashSandboxPermissionRequireEscalated && req.ExplicitSandboxPermissions && req.Justification == "" {
-		return req, fmt.Errorf("sandbox_permissions=%q requires a non-empty justification", bashSandboxPermissionRequireEscalated)
+	if req.SandboxPermissions == commandSandboxPermissionRequireEscalated && req.ExplicitSandboxPermissions && req.Justification == "" {
+		return req, fmt.Errorf("sandbox_permissions=%q requires a non-empty justification", commandSandboxPermissionRequireEscalated)
 	}
-	if req.SandboxPermissions == bashSandboxPermissionWithAdditionalPermissions && !req.hasAdditionalGrant() {
-		return req, fmt.Errorf("sandbox_permissions=%q requires non-empty additional_permissions", bashSandboxPermissionWithAdditionalPermissions)
+	if req.SandboxPermissions == commandSandboxPermissionWithAdditionalPermissions && !req.hasAdditionalGrant() {
+		return req, fmt.Errorf("sandbox_permissions=%q requires non-empty additional_permissions", commandSandboxPermissionWithAdditionalPermissions)
 	}
 	return req, nil
 }
 
-func normalizeBashSandboxPermission(value string) (string, error) {
+func normalizeCommandSandboxPermission(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", "default", bashSandboxPermissionUseDefault:
-		return bashSandboxPermissionUseDefault, nil
-	case bashSandboxPermissionRequireEscalated:
-		return bashSandboxPermissionRequireEscalated, nil
-	case bashSandboxPermissionWithAdditionalPermissions:
-		return bashSandboxPermissionWithAdditionalPermissions, nil
+	case "", "default", commandSandboxPermissionUseDefault:
+		return commandSandboxPermissionUseDefault, nil
+	case commandSandboxPermissionRequireEscalated:
+		return commandSandboxPermissionRequireEscalated, nil
+	case commandSandboxPermissionWithAdditionalPermissions:
+		return commandSandboxPermissionWithAdditionalPermissions, nil
 	default:
 		return "", fmt.Errorf("unknown sandbox_permissions value %q", value)
 	}
 }
 
-func (r bashSandboxRequest) hasAdditionalGrant() bool {
+func (r commandSandboxRequest) hasAdditionalGrant() bool {
 	return len(r.AdditionalPathRules) > 0 || r.AdditionalNetwork == sandbox.NetworkEnabled
 }
 
-func (r bashSandboxRequest) approvalMetadata(reason string) map[string]any {
+func (r commandSandboxRequest) approvalMetadata(reason string) map[string]any {
 	out := map[string]any{
 		"approval_reason":     strings.TrimSpace(reason),
 		"sandbox_permissions": r.SandboxPermissions,
@@ -106,7 +106,7 @@ func (r bashSandboxRequest) approvalMetadata(reason string) map[string]any {
 	return out
 }
 
-func (r bashSandboxRequest) normalizedAdditionalPermissions() map[string]any {
+func (r commandSandboxRequest) normalizedAdditionalPermissions() map[string]any {
 	out := map[string]any{}
 	if r.AdditionalNetwork == sandbox.NetworkEnabled {
 		out["network"] = map[string]any{"enabled": true}
@@ -140,7 +140,7 @@ func (r bashSandboxRequest) normalizedAdditionalPermissions() map[string]any {
 	return out
 }
 
-func applyBashAdditionalPermissions(base sandbox.Constraints, req bashSandboxRequest) sandbox.Constraints {
+func applyCommandAdditionalPermissions(base sandbox.Constraints, req commandSandboxRequest) sandbox.Constraints {
 	out := sandbox.NormalizeConstraints(base)
 	out.Route = sandbox.RouteSandbox
 	out.Permission = sandbox.PermissionWorkspaceWrite
@@ -180,17 +180,17 @@ func mergePathRules(base []sandbox.PathRule, extra []sandbox.PathRule) []sandbox
 	return out
 }
 
-type parsedBashAdditionalPermissions struct {
+type parsedCommandAdditionalPermissions struct {
 	Network   sandbox.Network
 	PathRules []sandbox.PathRule
 }
 
-func parseBashAdditionalPermissions(raw any, input policy.ToolContext, args map[string]any) (parsedBashAdditionalPermissions, error) {
+func parseCommandAdditionalPermissions(raw any, input policy.ToolContext, args map[string]any) (parsedCommandAdditionalPermissions, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
-		return parsedBashAdditionalPermissions{}, fmt.Errorf("additional_permissions must be an object")
+		return parsedCommandAdditionalPermissions{}, fmt.Errorf("additional_permissions must be an object")
 	}
-	out := parsedBashAdditionalPermissions{}
+	out := parsedCommandAdditionalPermissions{}
 	for key := range obj {
 		switch key {
 		case "network", "file_system":
@@ -199,14 +199,14 @@ func parseBashAdditionalPermissions(raw any, input policy.ToolContext, args map[
 		}
 	}
 	if rawNetwork, ok := obj["network"]; ok && rawNetwork != nil {
-		network, err := parseBashAdditionalNetwork(rawNetwork)
+		network, err := parseCommandAdditionalNetwork(rawNetwork)
 		if err != nil {
 			return out, err
 		}
 		out.Network = network
 	}
 	if rawFileSystem, ok := obj["file_system"]; ok && rawFileSystem != nil {
-		pathRules, err := parseBashAdditionalFileSystem(rawFileSystem, input, args)
+		pathRules, err := parseCommandAdditionalFileSystem(rawFileSystem, input, args)
 		if err != nil {
 			return out, err
 		}
@@ -215,7 +215,7 @@ func parseBashAdditionalPermissions(raw any, input policy.ToolContext, args map[
 	return out, nil
 }
 
-func parseBashAdditionalNetwork(raw any) (sandbox.Network, error) {
+func parseCommandAdditionalNetwork(raw any) (sandbox.Network, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
 		return "", fmt.Errorf("additional_permissions.network must be an object")
@@ -239,7 +239,7 @@ func parseBashAdditionalNetwork(raw any) (sandbox.Network, error) {
 	return "", nil
 }
 
-func parseBashAdditionalFileSystem(raw any, input policy.ToolContext, args map[string]any) ([]sandbox.PathRule, error) {
+func parseCommandAdditionalFileSystem(raw any, input policy.ToolContext, args map[string]any) ([]sandbox.PathRule, error) {
 	obj, ok := raw.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("additional_permissions.file_system must be an object")

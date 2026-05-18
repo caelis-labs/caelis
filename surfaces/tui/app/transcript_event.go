@@ -792,7 +792,7 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 	toolMeta := eventRuntimeToolMeta(meta)
 	taskMeta := eventRuntimeTaskMeta(meta)
 	switch strings.ToUpper(strings.TrimSpace(toolName)) {
-	case "BASH", "SPAWN", "TASK":
+	case "RUN_COMMAND", "SPAWN", "TASK":
 		if taskID := firstNonEmpty(asString(toolMeta["target_id"]), asString(taskMeta["task_id"])); taskID != "" {
 			out["task_id"] = taskID
 		}
@@ -801,7 +801,7 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 				out[key] = value
 			}
 		}
-		if strings.EqualFold(toolName, "BASH") {
+		if strings.EqualFold(toolName, "RUN_COMMAND") {
 			break
 		}
 		for _, key := range []string{"agent", "agent_id", "handle", "mention", "prompt", "target_kind", "action", "input"} {

@@ -11,7 +11,7 @@ func TestTerminalToolPanelShowsTailWithoutInternalScroll(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 
-	for _, toolName := range []string{"BASH", "SPAWN"} {
+	for _, toolName := range []string{"RUN_COMMAND", "SPAWN"} {
 		t.Run(toolName, func(t *testing.T) {
 			block := NewMainACPTurnBlock("session-1")
 			callID := strings.ToLower(toolName) + "-1"
@@ -62,15 +62,15 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 	for i := 1; i <= 12; i++ {
 		lines = append(lines, fmt.Sprintf("line %02d", i))
 	}
-	block.UpdateTool("bash-1", "BASH", "run long task", strings.Join(lines, "\n"), false, false)
-	block.UpdateTool("bash-1", "BASH", "run long task", strings.Join(lines, "\n"), true, false)
+	block.UpdateTool("command-1", "RUN_COMMAND", "run long task", strings.Join(lines, "\n"), false, false)
+	block.UpdateTool("command-1", "RUN_COMMAND", "run long task", strings.Join(lines, "\n"), true, false)
 	block.SetStatus("completed", "", "", nowForToolPanelTest())
 
 	rows := block.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
 	if !strings.Contains(joined, "• Ran run long task") || !strings.Contains(joined, "line 01") || !strings.Contains(joined, "line 12") {
-		t.Fatalf("rendered rows = %q, want completed BASH output still expanded", joined)
+		t.Fatalf("rendered rows = %q, want completed RUN_COMMAND output still expanded", joined)
 	}
 	for _, want := range []string{"line 01", "line 02", "... +8 lines", "line 11", "line 12"} {
 		if !strings.Contains(joined, want) {
@@ -81,7 +81,7 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 		t.Fatalf("completed terminal output should keep first two and last two lines, got\n%s", joined)
 	}
 
-	if !block.toggleToolPanelClick("bash-1") {
+	if !block.toggleToolPanelClick("command-1") {
 		t.Fatal("expected completed terminal summary click to expand full output")
 	}
 	rows = block.Render(ctx)
@@ -239,7 +239,7 @@ func TestCompletedSubagentPanelShowsFinalMessageOnly(t *testing.T) {
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	panel := NewSubagentPanelBlock("spawn-1", "", "helper", "spawn-call-1")
 	panel.AppendStreamChunk(SEAssistant, "I will run tests.")
-	panel.UpdateToolCall("bash-1", "BASH", "go test ./...", "stdout", "ok\n", true)
+	panel.UpdateToolCall("command-1", "RUN_COMMAND", "go test ./...", "stdout", "ok\n", true)
 	panel.AppendStreamChunk(SEAssistant, "Tests passed.")
 	panel.ReplaceFinalStreamChunk(SEAssistant, "I will run tests.\n\nTests passed.")
 	panel.Status = "completed"
@@ -250,7 +250,7 @@ func TestCompletedSubagentPanelShowsFinalMessageOnly(t *testing.T) {
 	if !strings.Contains(joined, "I will run tests.") || !strings.Contains(joined, "Tests passed.") {
 		t.Fatalf("completed subagent panel rows = %#v, want final message", plain)
 	}
-	if strings.Contains(joined, "BASH go test ./...") || strings.Contains(joined, "ok") {
+	if strings.Contains(joined, "RUN_COMMAND go test ./...") || strings.Contains(joined, "ok") {
 		t.Fatalf("completed subagent panel rows = %#v, should hide tool trace", plain)
 	}
 }

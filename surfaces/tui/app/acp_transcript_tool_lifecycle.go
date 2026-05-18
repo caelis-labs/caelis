@@ -282,7 +282,7 @@ func renderACPStandardToolCollapsedRows(blockID string, ev SubagentEvent, callID
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
 	semanticName := toolSemanticName(ev.Name, ev.ToolKind)
 	switch strings.ToUpper(strings.TrimSpace(semanticName)) {
-	case "BASH", "SPAWN":
+	case "RUN_COMMAND", "SPAWN":
 		ev.Name = semanticName
 		return terminalLifecycleHeader(ev)
 	case "TASK":
@@ -392,7 +392,7 @@ func isTerminalPanelTool(name string) bool {
 
 func isTerminalPanelToolKind(name string, kind string) bool {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "BASH", "SPAWN":
+	case "RUN_COMMAND", "SPAWN":
 		return true
 	case "TASK":
 		return false
@@ -467,11 +467,11 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 	name := strings.ToUpper(strings.TrimSpace(rawName))
 	args := strings.TrimSpace(ev.Args)
 	switch name {
-	case "BASH":
+	case "RUN_COMMAND":
 		if args != "" {
 			return "• Ran " + args
 		}
-		return "• Ran bash"
+		return "• Ran"
 	case "SPAWN":
 		args = displaypolicy.SanitizeSpawnHeaderArgs(args)
 		if args != "" {
@@ -483,7 +483,7 @@ func terminalLifecycleHeader(ev SubagentEvent) string {
 			if command := executeToolCommandDisplay(rawName, args); command != "" {
 				return "• Ran " + command
 			}
-			return "• Ran bash"
+			return "• Ran"
 		}
 		if args != "" {
 			return "• " + rawName + " " + args

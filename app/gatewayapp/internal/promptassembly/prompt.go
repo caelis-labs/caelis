@@ -147,8 +147,7 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 	lines := []string{
 		"## Capability Guidance",
 		"",
-		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use the BASH tool for platform shell work and TASK for yielded async work.",
-		"- BASH is a historical tool identifier, not a promise that POSIX bash is available; on Windows, write PowerShell commands.",
+		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use RUN_COMMAND for shell work and TASK for yielded async work.",
 		"- Use request_permissions for the smallest read/write path or network grant needed before retrying denied work.",
 		"- Load a skill only when its description clearly matches the task; read only the needed parts of its `SKILL.md`.",
 		"- Obey the active approval mode; treat auto-review denials as concrete feedback to narrow or adjust the next step.",

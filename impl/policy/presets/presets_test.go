@@ -141,10 +141,10 @@ func TestDefaultModeDeniesSensitiveUserConfigReadsWithoutExplicitGrant(t *testin
 	}
 }
 
-func TestDefaultModeOnlyApprovesBashEscalation(t *testing.T) {
+func TestDefaultModeOnlyApprovesCommandEscalation(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx("go test ./...", false))
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -152,7 +152,7 @@ func TestDefaultModeOnlyApprovesBashEscalation(t *testing.T) {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("go test ./...", true))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", true))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -177,7 +177,7 @@ func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
 	t.Setenv("CARGO_HOME", filepath.Join(home, ".custom-cargo"))
 	t.Setenv("GRADLE_USER_HOME", filepath.Join(home, ".custom-gradle"))
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx("go test ./...", false))
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -234,7 +234,7 @@ func TestDefaultModeEnablesNetworkOnlyForSafeDependencyCommands(t *testing.T) {
 		t.Run(tt.command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx(tt.command, false))
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(tt.command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -251,7 +251,7 @@ func TestDefaultModeEnablesNetworkOnlyForSafeDependencyCommands(t *testing.T) {
 func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx("git add .", false))
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("git add .", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -266,7 +266,7 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 		t.Fatalf("Network = %q, want disabled for local git metadata command", decision.Constraints.Network)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("git add . && git commit -m update", false))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git add . && git commit -m update", false))
 	if err != nil {
 		t.Fatalf("DecideTool() git chain error = %v", err)
 	}
@@ -274,7 +274,7 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 		t.Fatalf("PathRules = %#v, want .git write grant for git add/commit chain", decision.Constraints.PathRules)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("git push origin main", false))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git push origin main", false))
 	if err != nil {
 		t.Fatalf("DecideTool() push error = %v", err)
 	}
@@ -282,7 +282,7 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 		t.Fatalf("PathRules = %#v, did not expect .git write grant for git push", decision.Constraints.PathRules)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("git add . && git push origin main", false))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git add . && git push origin main", false))
 	if err != nil {
 		t.Fatalf("DecideTool() mixed git chain error = %v", err)
 	}
@@ -310,7 +310,7 @@ func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
 		t.Run(command, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx(command, false))
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx(command, false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -327,7 +327,7 @@ func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
 func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtxWithArgs(map[string]any{
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
 		"command":             "go test ./...",
 		"sandbox_permissions": "require_escalated",
 	}))
@@ -345,7 +345,7 @@ func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 func TestDefaultModeEscalationApprovalCarriesPromptMetadata(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtxWithArgs(map[string]any{
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
 		"command":             "go test ./...",
 		"sandbox_permissions": "require_escalated",
 		"justification":       "Do you want to run tests outside the sandbox?",
@@ -370,7 +370,7 @@ func TestDefaultModeEscalationApprovalCarriesPromptMetadata(t *testing.T) {
 func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtxWithArgs(map[string]any{
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
 		"command":             "make generate",
 		"workdir":             "subdir",
 		"sandbox_permissions": "with_additional_permissions",
@@ -454,7 +454,7 @@ func TestDefaultModeRejectsMisScopedSandboxPermissionFields(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtxWithArgs(tt.args))
+			decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(tt.args))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -513,7 +513,7 @@ func TestDefaultModeDeniesRelativeFilesystemPathsOutsideWorkspace(t *testing.T) 
 func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), bashCtx("rm -rf /", false))
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("rm -rf /", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -521,7 +521,7 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 		t.Fatalf("Action = %q, want deny", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("rm -rf $HOME", false))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("rm -rf $HOME", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -529,7 +529,7 @@ func TestFullAccessBlocksDangerousCommands(t *testing.T) {
 		t.Fatalf("Action = %q, want deny for home target", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), bashCtx("rm $HOME -rf", false))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("rm $HOME -rf", false))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -552,7 +552,7 @@ func TestScopedRecursiveDeleteRequiresApproval(t *testing.T) {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
 
-			decision, err := mode.mode.DecideTool(context.Background(), bashCtx("rm -rf /tmp/caelis-gocache", false))
+			decision, err := mode.mode.DecideTool(context.Background(), commandCtx("rm -rf /tmp/caelis-gocache", false))
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
@@ -569,7 +569,7 @@ func TestScopedRecursiveDeleteRequiresApproval(t *testing.T) {
 				t.Fatalf("Metadata[destructive_command] = %#v, want true", decision.Metadata["destructive_command"])
 			}
 
-			decision, err = mode.mode.DecideTool(context.Background(), bashCtx("rm /tmp/caelis-gocache -rf", false))
+			decision, err = mode.mode.DecideTool(context.Background(), commandCtx("rm /tmp/caelis-gocache -rf", false))
 			if err != nil {
 				t.Fatalf("DecideTool() trailing flags error = %v", err)
 			}
@@ -593,20 +593,20 @@ func writeCtx(path string) policy.ToolContext {
 	}
 }
 
-func bashCtx(command string, requireEscalated bool) policy.ToolContext {
+func commandCtx(command string, requireEscalated bool) policy.ToolContext {
 	args := map[string]any{"command": command}
 	if requireEscalated {
 		args["sandbox_permissions"] = "require_escalated"
 		args["justification"] = "Do you want to run this command outside the sandbox?"
 	}
-	return bashCtxWithArgs(args)
+	return commandCtxWithArgs(args)
 }
 
-func bashCtxWithArgs(args map[string]any) policy.ToolContext {
+func commandCtxWithArgs(args map[string]any) policy.ToolContext {
 	raw, _ := json.Marshal(args)
 	return policy.ToolContext{
-		Tool: tool.Definition{Name: "BASH"},
-		Call: tool.Call{Name: "BASH", Input: raw},
+		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Call: tool.Call{Name: "RUN_COMMAND", Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),

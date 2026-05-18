@@ -22,9 +22,9 @@ func TestStoreUpsertCompletedTaskSplitsIndexAndBlob(t *testing.T) {
 	store := NewStore(Config{RootDir: root, Clock: fixedClock})
 	entry := &task.Entry{
 		TaskID:    "task-1",
-		Kind:      task.KindBash,
+		Kind:      task.KindCommand,
 		Session:   sessionRef("sess-1"),
-		Title:     "BASH echo hi",
+		Title:     "RUN_COMMAND echo hi",
 		State:     task.StateCompleted,
 		Running:   false,
 		CreatedAt: time.Unix(10, 0),
@@ -118,9 +118,9 @@ func TestStoreUpsertRunningTaskKeepsIndexOnly(t *testing.T) {
 	store := NewStore(Config{RootDir: root, Clock: fixedClock})
 	entry := &task.Entry{
 		TaskID:  "task-running",
-		Kind:    task.KindBash,
+		Kind:    task.KindCommand,
 		Session: sessionRef("sess-2"),
-		Title:   "BASH sleep 1",
+		Title:   "RUN_COMMAND sleep 1",
 		State:   task.StateRunning,
 		Running: true,
 		Result: map[string]any{
@@ -148,9 +148,9 @@ func TestStoreGetUsesTaskIDLookupIndex(t *testing.T) {
 	store := NewStore(Config{RootDir: root, Clock: fixedClock})
 	entry := &task.Entry{
 		TaskID:    "task-target",
-		Kind:      task.KindBash,
+		Kind:      task.KindCommand,
 		Session:   sessionRef("session-target"),
-		Title:     "BASH echo target",
+		Title:     "RUN_COMMAND echo target",
 		State:     task.StateCompleted,
 		Running:   false,
 		UpdatedAt: time.Unix(20, 0),
@@ -179,9 +179,9 @@ func TestStoreGetFallsBackWhenTaskLookupIsCorrupt(t *testing.T) {
 	store := NewStore(Config{RootDir: root, Clock: fixedClock})
 	entry := &task.Entry{
 		TaskID:    "task-target",
-		Kind:      task.KindBash,
+		Kind:      task.KindCommand,
 		Session:   sessionRef("session-target"),
-		Title:     "BASH echo target",
+		Title:     "RUN_COMMAND echo target",
 		State:     task.StateCompleted,
 		Running:   false,
 		UpdatedAt: time.Unix(20, 0),
@@ -216,9 +216,9 @@ func TestStoreConcurrentUpsertKeepsAllTasks(t *testing.T) {
 			defer wg.Done()
 			entry := &task.Entry{
 				TaskID:    "task-concurrent-" + time.Unix(int64(i), 0).Format("150405"),
-				Kind:      task.KindBash,
+				Kind:      task.KindCommand,
 				Session:   sessionRef("sess-concurrent"),
-				Title:     "BASH concurrent",
+				Title:     "RUN_COMMAND concurrent",
 				State:     task.StateCompleted,
 				Running:   false,
 				UpdatedAt: time.Unix(int64(i), 0),

@@ -9,7 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
-func applyDefaultBashCommandAllowances(base sandbox.Constraints, input policy.ToolContext, command string) sandbox.Constraints {
+func applyDefaultCommandAllowances(base sandbox.Constraints, input policy.ToolContext, command string) sandbox.Constraints {
 	out := sandbox.NormalizeConstraints(base)
 	if defaultNetworkCommand(command) {
 		out.Network = sandbox.NetworkEnabled

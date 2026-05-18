@@ -17,12 +17,12 @@ const (
 func SemanticToolName(name string, kind string) string {
 	name = strings.TrimSpace(name)
 	switch strings.ToUpper(name) {
-	case "BASH", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH":
+	case "RUN_COMMAND", "SPAWN", "TASK", "READ", "LIST", "GLOB", "SEARCH", "RG", "FIND", "WRITE", "PATCH":
 		return strings.ToUpper(name)
 	}
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "execute":
-		return "BASH"
+		return "RUN_COMMAND"
 	case "read":
 		return "READ"
 	case "search", "fetch":
@@ -36,7 +36,7 @@ func SemanticToolName(name string, kind string) string {
 
 func DisplayTerminalID(toolCallID string, name string) (string, bool) {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "BASH", "SPAWN":
+	case "RUN_COMMAND", "SPAWN":
 		if id := strings.TrimSpace(toolCallID); id != "" {
 			return id, true
 		}
@@ -68,7 +68,7 @@ func SummarizeToolCallTitle(name string, args map[string]any) string {
 		if path := MapString(args, "path"); strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(name + " " + path)
 		}
-	case "BASH", "TASK":
+	case "RUN_COMMAND", "TASK":
 		if command := MapString(args, "command"); strings.TrimSpace(command) != "" {
 			return strings.TrimSpace(name + " " + command)
 		}
@@ -94,7 +94,7 @@ func ToolKindForName(name string) string {
 		return ToolKindEdit
 	case "SEARCH", "GLOB", "LIST":
 		return ToolKindSearch
-	case "BASH", "SPAWN", "TASK":
+	case "RUN_COMMAND", "SPAWN", "TASK":
 		return ToolKindExecute
 	default:
 		return ToolKindOther

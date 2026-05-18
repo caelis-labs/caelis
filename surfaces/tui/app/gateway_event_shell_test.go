@@ -56,7 +56,7 @@ func TestRanHeaderShellCommandUsesDistinctTokenStyles(t *testing.T) {
 	}
 }
 
-func TestShellCommandTokensClassifyCompoundBashCommand(t *testing.T) {
+func TestShellCommandTokensClassifyCompoundShellCommand(t *testing.T) {
 	command := `ls -la /home/xueyongzhi/WorkDir/code/demo/.venv/bin/ 2>/dev/null | head -20; echo "---"; cat /home/xueyongzhi/WorkDir/code/demo/.venv/pyvenv.cfg 2>/dev/null`
 	got := compactShellTokens(shellCommandTokens(command))
 	want := []shellCommandToken{

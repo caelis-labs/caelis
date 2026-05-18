@@ -75,7 +75,7 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 		Text: text,
 	}
 	switch name {
-	case "BASH", "SPAWN", "TASK":
+	case "RUN_COMMAND", "SPAWN", "TASK":
 		item.Type = "terminal"
 		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
 	}
@@ -92,7 +92,7 @@ func toolKindForName(name string) string {
 		return "search"
 	case "PLAN":
 		return "other"
-	case "BASH", "SPAWN", "TASK":
+	case "RUN_COMMAND", "SPAWN", "TASK":
 		return "execute"
 	default:
 		return "other"
@@ -107,9 +107,9 @@ func toolCallTitle(call model.ToolCall) string {
 		if path, _ := args["path"].(string); strings.TrimSpace(path) != "" {
 			return fmt.Sprintf("%s %s", name, strings.TrimSpace(path))
 		}
-	case "BASH":
+	case "RUN_COMMAND":
 		if command, _ := args["command"].(string); strings.TrimSpace(command) != "" {
-			return fmt.Sprintf("BASH %s", strings.TrimSpace(command))
+			return fmt.Sprintf("RUN_COMMAND %s", strings.TrimSpace(command))
 		}
 	case "SPAWN":
 		if title := displaypolicy.SummarizeToolCallTitle(name, args); strings.TrimSpace(title) != "" {

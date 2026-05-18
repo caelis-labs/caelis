@@ -235,7 +235,7 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": `go test ./kernel/...`},
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
@@ -249,7 +249,7 @@ func TestGatewayRunningToolResultStreamsOutputWithoutFinalizing(t *testing.T) {
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
 				CallID:    "call-1",
-				ToolName:  "BASH",
+				ToolName:  "RUN_COMMAND",
 				RawInput:  map[string]any{"command": `go test ./kernel/...`},
 				RawOutput: map[string]any{"stdout": "stdout resolving packages"},
 				Content:   testTerminalContent("stdout resolving packages"),
@@ -280,8 +280,8 @@ func TestToolGroupsUseActionColorAndBlankSeparation(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
 	block := NewMainACPTurnBlock("session-1")
-	block.UpdateTool("bash-1", "BASH", "echo hi", "hi", false, false)
-	block.UpdateTool("bash-1", "BASH", "echo hi", "hi", true, false)
+	block.UpdateTool("command-1", "RUN_COMMAND", "echo hi", "hi", false, false)
+	block.UpdateTool("command-1", "RUN_COMMAND", "echo hi", "hi", true, false)
 	block.UpdateTool("read-1", "READ", "README.md", "README.md 1~20", false, false)
 	block.UpdateTool("read-1", "READ", "README.md", "README.md 1~20", true, false)
 	block.UpdateTool("write-1", "WRITE", "out.txt", "+1 -0", false, false)
@@ -397,8 +397,8 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./surfaces/tui/..."},
@@ -408,8 +408,8 @@ func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusCompleted,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./surfaces/tui/..."},
@@ -477,8 +477,8 @@ func TestGatewayExpandedReasoningReplacesFoldedPreviewInPlace(t *testing.T) {
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./..."},
@@ -488,8 +488,8 @@ func TestGatewayExpandedReasoningReplacesFoldedPreviewInPlace(t *testing.T) {
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusCompleted,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "go test ./..."},
@@ -589,8 +589,8 @@ func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 			OccurredAt: start.Add(1600 * time.Millisecond),
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "echo ok"},
@@ -601,8 +601,8 @@ func TestGatewayReasoningFoldUsesTimedDurationWhenAvailable(t *testing.T) {
 			OccurredAt: start.Add(1700 * time.Millisecond),
 			SessionRef: session.SessionRef{SessionID: "root-session"},
 			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusCompleted,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": "echo ok"},

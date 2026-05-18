@@ -13,45 +13,42 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
-func TestBashDefinitionExposesMinimalArguments(t *testing.T) {
+func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	t.Parallel()
 
 	rt, err := host.New(host.Config{CWD: t.TempDir()})
 	if err != nil {
 		t.Fatalf("host.New() error = %v", err)
 	}
-	bashTool, err := NewBash(BashConfig{Runtime: rt})
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
-		t.Fatalf("NewBash() error = %v", err)
+		t.Fatalf("NewRunCommand() error = %v", err)
 	}
-	definition := bashTool.Definition()
-	for _, want := range []string{"platform shell", "historical tool name", "PowerShell syntax on Windows"} {
-		if !strings.Contains(definition.Description, want) {
-			t.Fatalf("Description = %q, want %q", definition.Description, want)
-		}
+	definition := runCommandTool.Definition()
+	if definition.Name != RunCommandToolName {
+		t.Fatalf("Name = %q, want %q", definition.Name, RunCommandToolName)
+	}
+	if definition.Description != "Run a shell command in the session workspace." {
+		t.Fatalf("Description = %q", definition.Description)
 	}
 	properties, _ := definition.InputSchema["properties"].(map[string]any)
-	if _, ok := properties["command"]; !ok {
-		t.Fatal("command property missing")
+	wantDescriptions := map[string]string{
+		"command":                "Command to execute.",
+		"workdir":                "Working directory.",
+		"yield_time_ms":          "Wait before yielding async control.",
+		"timeout_ms":             "Maximum runtime in milliseconds.",
+		"sandbox_permissions":    "Sandbox mode for this command.",
+		"additional_permissions": "Extra sandbox grants for with_additional_permissions.",
+		"justification":          "Short approval question for require_escalated.",
 	}
-	command, _ := properties["command"].(map[string]any)
-	description, _ := command["description"].(string)
-	if !strings.Contains(description, "PowerShell syntax on Windows") {
-		t.Fatalf("command description = %q, want Windows platform shell hint", description)
-	}
-	if _, ok := properties["workdir"]; !ok {
-		t.Fatal("workdir property missing")
-	}
-	if _, ok := properties["yield_time_ms"]; !ok {
-		t.Fatal("yield_time_ms property missing")
-	}
-	for _, key := range []string{"sandbox_permissions", "additional_permissions", "justification"} {
-		if _, ok := properties[key]; !ok {
-			t.Fatalf("%s property missing", key)
+	for key, want := range wantDescriptions {
+		property, ok := properties[key].(map[string]any)
+		if !ok {
+			t.Fatalf("%s property missing or malformed", key)
 		}
-	}
-	if _, ok := properties["timeout_ms"]; ok {
-		t.Fatal("timeout_ms property unexpectedly exposed")
+		if got, _ := property["description"].(string); got != want {
+			t.Fatalf("%s description = %q, want %q", key, got, want)
+		}
 	}
 	if _, ok := properties["tty"]; ok {
 		t.Fatal("tty property unexpectedly exposed")
@@ -64,7 +61,7 @@ func TestBashDefinitionExposesMinimalArguments(t *testing.T) {
 	}
 }
 
-func TestBashCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
+func TestRunCommandCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -72,9 +69,9 @@ func TestBashCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host.New() error = %v", err)
 	}
-	bashTool, err := NewBash(BashConfig{Runtime: rt})
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
-		t.Fatalf("NewBash() error = %v", err)
+		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	raw, err := json.Marshal(map[string]any{
 		"command":       "printf 'ok'",
@@ -84,7 +81,7 @@ func TestBashCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := bashTool.Call(context.Background(), tool.Call{Name: BashToolName, Input: raw})
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
 		t.Fatalf("Call() error = %v", err)
 	}
@@ -93,7 +90,7 @@ func TestBashCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	}
 }
 
-func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
+func TestRunCommandCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -101,9 +98,9 @@ func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host.New() error = %v", err)
 	}
-	bashTool, err := NewBash(BashConfig{Runtime: rt})
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
-		t.Fatalf("NewBash() error = %v", err)
+		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	command := "printf 'module cache denied\\n' >&2; exit 7"
 	if runtime.GOOS == "windows" {
@@ -116,7 +113,7 @@ func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := bashTool.Call(context.Background(), tool.Call{Name: BashToolName, Input: raw})
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
 		t.Fatalf("Call() error = %v, want structured tool error result", err)
 	}
@@ -141,7 +138,7 @@ func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	}
 }
 
-func TestBashCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
+func TestRunCommandCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
 	t.Parallel()
 
 	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
@@ -150,9 +147,9 @@ func TestBashCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
 		Route:    sandbox.RouteSandbox,
 		Backend:  sandbox.BackendBwrap,
 	}, err: fmt.Errorf("exit status 1")}
-	bashTool, err := NewBash(BashConfig{Runtime: rt})
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
-		t.Fatalf("NewBash() error = %v", err)
+		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	raw, err := json.Marshal(map[string]any{
 		"command": "printf 'touch: cannot touch /home/test/go/pkg/mod/cache: Read-only file system\\n' >&2; exit 1",
@@ -160,7 +157,7 @@ func TestBashCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := bashTool.Call(context.Background(), tool.Call{Name: BashToolName, Input: raw})
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
 		t.Fatalf("Call() error = %v, want structured tool error result", err)
 	}
@@ -183,7 +180,7 @@ func TestBashCallPreservesSandboxPermissionStderrWithErrorHint(t *testing.T) {
 	}
 }
 
-func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
+func TestRunCommandCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
 	t.Parallel()
 
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
@@ -193,9 +190,9 @@ func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
 		Route:    sandbox.RouteSandbox,
 		Backend:  sandbox.BackendBwrap,
 	}, err: fmt.Errorf("exit status 1")}
-	bashTool, err := NewBash(BashConfig{Runtime: rt})
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
-		t.Fatalf("NewBash() error = %v", err)
+		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	raw, err := json.Marshal(map[string]any{
 		"command": "go build ./... 2>&1",
@@ -203,7 +200,7 @@ func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := bashTool.Call(context.Background(), tool.Call{Name: BashToolName, Input: raw})
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
 		t.Fatalf("Call() error = %v, want structured tool error result", err)
 	}
@@ -226,7 +223,7 @@ func TestBashCallDetectsSandboxPermissionErrorFromStdoutRedirect(t *testing.T) {
 	}
 }
 
-func TestBashCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
+func TestRunCommandCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -234,9 +231,9 @@ func TestBashCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("host.New() error = %v", err)
 	}
-	bashTool, err := NewBash(BashConfig{Runtime: rt})
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
-		t.Fatalf("NewBash() error = %v", err)
+		t.Fatalf("NewRunCommand() error = %v", err)
 	}
 	raw, err := json.Marshal(map[string]any{
 		"command": "printf 'git@github.com: Permission denied (publickey).\\n' >&2; exit 128",
@@ -245,7 +242,7 @@ func TestBashCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := bashTool.Call(context.Background(), tool.Call{Name: BashToolName, Input: raw})
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
 	if err != nil {
 		t.Fatalf("Call() error = %v, want structured tool error result", err)
 	}

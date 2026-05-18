@@ -50,7 +50,7 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 			UpdateType: UpdateToolCallInfo,
 			ToolCall: &session.ProtocolToolCall{
 				ID:     "call-1",
-				Name:   "BASH",
+				Name:   "RUN_COMMAND",
 				Status: "running",
 				Content: []session.ProtocolToolCallContent{{
 					Type:       "terminal",
@@ -96,7 +96,7 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: UpdateToolCall,
 				ToolCallID:    "call-1",
-				Title:         "BASH date",
+				Title:         "RUN_COMMAND date",
 				Kind:          ToolKindExecute,
 				Status:        ToolStatusPending,
 				RawInput:      map[string]any{"command": "date"},
@@ -108,7 +108,7 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 				Meta: map[string]any{
 					"terminal_info": map[string]any{
 						"terminal_id": "call-1",
-						"tool":        "BASH",
+						"tool":        "RUN_COMMAND",
 					},
 				},
 			},
@@ -124,7 +124,7 @@ func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T
 	if !ok {
 		t.Fatalf("update = %T, want ToolCall", updates[0])
 	}
-	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "BASH date" {
+	if call.ToolCallID != "call-1" || call.Kind != ToolKindExecute || call.Title != "RUN_COMMAND date" {
 		t.Fatalf("tool call = %#v, want durable protocol identity", call)
 	}
 	if len(call.Content) != 1 || call.Content[0].Type != "terminal" || call.Content[0].TerminalID != "call-1" || call.Content[0].Content != nil {
@@ -268,7 +268,7 @@ func TestEventProjectorReplaysDurableProtocolTextContent(t *testing.T) {
 func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing.T) {
 	message := model.MessageFromAssistantParts("I will run the command.", "Need shell output first.", []model.ToolCall{{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"date","workdir":"/tmp/work"}`,
 	}, {
 		ID:   "call-2",
@@ -299,7 +299,7 @@ func TestEventProjectorProjectsCanonicalAssistantMessageWithToolCalls(t *testing
 		t.Fatalf("updates[2] = %T, want ToolCall", updates[2])
 	}
 	if firstCall.ToolCallID != "call-1" || firstCall.Kind != ToolKindExecute {
-		t.Fatalf("first call = %#v, want BASH execute call", firstCall)
+		t.Fatalf("first call = %#v, want RUN_COMMAND execute call", firstCall)
 	}
 	if len(firstCall.Content) != 1 || firstCall.Content[0].Type != "terminal" || firstCall.Content[0].TerminalID != "call-1" {
 		t.Fatalf("first call content = %#v, want display terminal marker", firstCall.Content)
@@ -356,7 +356,7 @@ func TestEventProjectorProjectsSpawnAsExecuteWithTerminalContent(t *testing.T) {
 	}
 }
 
-func TestEventProjectorProjectsBashDisplayTerminalMetadata(t *testing.T) {
+func TestEventProjectorProjectsRunCommandDisplayTerminalMetadata(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",
 		Type:      session.EventTypeToolCall,
@@ -364,7 +364,7 @@ func TestEventProjectorProjectsBashDisplayTerminalMetadata(t *testing.T) {
 			UpdateType: UpdateToolCall,
 			ToolCall: &session.ProtocolToolCall{
 				ID:     "call-1",
-				Name:   "BASH",
+				Name:   "RUN_COMMAND",
 				Status: "pending",
 				RawInput: map[string]any{
 					"command": "echo hi",
@@ -396,8 +396,8 @@ func TestEventProjectorProjectsBashDisplayTerminalMetadata(t *testing.T) {
 	if !ok {
 		t.Fatalf("meta = %#v, want terminal_info", call.Meta)
 	}
-	if info["terminal_id"] != "call-1" || info["cwd"] != "/tmp/work" || info["tool"] != "BASH" {
-		t.Fatalf("terminal_info = %#v, want terminal_id call-1 cwd /tmp/work tool BASH", info)
+	if info["terminal_id"] != "call-1" || info["cwd"] != "/tmp/work" || info["tool"] != "RUN_COMMAND" {
+		t.Fatalf("terminal_info = %#v, want terminal_id call-1 cwd /tmp/work tool RUN_COMMAND", info)
 	}
 }
 

@@ -61,7 +61,7 @@ func toolResultDisplayText(name string, input map[string]any, output map[string]
 			return firstNonEmpty(toolString(output["error"]), toolString(output["summary"]))
 		}
 		return mutationResultSummary(input, output)
-	case "BASH":
+	case "RUN_COMMAND":
 		return terminalResultText(output, status, isErr)
 	case "SPAWN":
 		return spawnResultText(output, status, isErr)

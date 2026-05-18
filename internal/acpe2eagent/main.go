@@ -87,10 +87,10 @@ func main() {
 func resolveLLM() (model.LLM, error) {
 	if mode := strings.TrimSpace(os.Getenv("SDK_ACP_SCRIPTED_MODE")); mode != "" {
 		switch mode {
-		case "async_bash":
-			return &scriptedAsyncBashLLM{}, nil
-		case "approval_bash":
-			return &scriptedApprovalBashLLM{}, nil
+		case "async_command":
+			return &scriptedAsyncCommandLLM{}, nil
+		case "approval_command":
+			return &scriptedApprovalCommandLLM{}, nil
 		case "probe_spawn":
 			return &scriptedProbeSpawnLLM{}, nil
 		case "spawn":
@@ -294,7 +294,7 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-type scriptedAsyncBashLLM struct {
+type scriptedAsyncCommandLLM struct {
 	calls  int
 	taskID string
 }
@@ -304,7 +304,7 @@ type scriptedSpawnLLM struct {
 	taskID string
 }
 
-type scriptedApprovalBashLLM struct {
+type scriptedApprovalCommandLLM struct {
 	calls  int
 	taskID string
 }
@@ -377,15 +377,15 @@ func (m *scriptedSpawnLLM) Generate(_ context.Context, req *model.Request) iter.
 	}
 }
 
-func (m *scriptedAsyncBashLLM) Name() string { return "scripted-async-bash" }
+func (m *scriptedAsyncCommandLLM) Name() string { return "scripted-async-command" }
 
-func (m *scriptedApprovalBashLLM) Name() string { return "scripted-approval-bash" }
+func (m *scriptedApprovalCommandLLM) Name() string { return "scripted-approval-command" }
 
 func (m *scriptedProbeSpawnLLM) Name() string       { return "scripted-probe-spawn" }
 func (m *scriptedSpawnPassthroughLLM) Name() string { return "scripted-spawn-passthrough" }
 func (m *scriptedModeConfigLLM) Name() string       { return "scripted-mode-config" }
 
-func (m *scriptedAsyncBashLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *scriptedAsyncCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	if m.calls == 2 {
 		m.taskID = findTaskID(req)
@@ -397,10 +397,10 @@ func (m *scriptedAsyncBashLLM) Generate(_ context.Context, req *model.Request) i
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "bash-async-1",
-						Name: "BASH",
+						ID:   "command-async-1",
+						Name: "RUN_COMMAND",
 						Args: string(mustJSON(map[string]any{
-							"command":       "sleep 0.05; printf 'acpx async bash ok'",
+							"command":       "sleep 0.05; printf 'acpx async command ok'",
 							"workdir":       ".",
 							"yield_time_ms": 5,
 						})),
@@ -434,7 +434,7 @@ func (m *scriptedAsyncBashLLM) Generate(_ context.Context, req *model.Request) i
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:      model.NewTextMessage(model.RoleAssistant, "acpx async bash ok"),
+					Message:      model.NewTextMessage(model.RoleAssistant, "acpx async command ok"),
 					TurnComplete: true,
 					StepComplete: true,
 					Status:       model.ResponseStatusCompleted,
@@ -445,7 +445,7 @@ func (m *scriptedAsyncBashLLM) Generate(_ context.Context, req *model.Request) i
 	}
 }
 
-func (m *scriptedApprovalBashLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *scriptedApprovalCommandLLM) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	if m.calls == 2 {
 		m.taskID = findTaskID(req)
@@ -457,10 +457,10 @@ func (m *scriptedApprovalBashLLM) Generate(_ context.Context, req *model.Request
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "bash-approval-1",
-						Name: "BASH",
+						ID:   "command-approval-1",
+						Name: "RUN_COMMAND",
 						Args: string(mustJSON(map[string]any{
-							"command":             "printf 'child approval ok'",
+							"command":             "printf 'child approval ok\n'; sleep 0.2",
 							"workdir":             ".",
 							"yield_time_ms":       5,
 							"sandbox_permissions": "require_escalated",

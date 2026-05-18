@@ -48,7 +48,7 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		if path := toolPath(raw); path != "" {
 			return filepath.Base(path)
 		}
-	case "BASH", "SPAWN", "TASK":
+	case "RUN_COMMAND", "SPAWN", "TASK":
 		if name == "TASK" {
 			if action := taskControlDisplay(raw); action != "" {
 				return action
@@ -126,7 +126,7 @@ func toolTitleDisplayArgs(name string, kind string, title string) string {
 	}
 	name = strings.ToUpper(strings.TrimSpace(name))
 	switch name {
-	case "BASH":
+	case "RUN_COMMAND":
 		return executeTitleDisplayArgs(title)
 	case "READ", "LIST":
 		return prefixedTitleDetail(title, "Read", "List")

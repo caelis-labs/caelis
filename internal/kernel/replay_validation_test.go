@@ -19,7 +19,7 @@ func TestValidateReplaySessionEventsRejectsUnboundedToolOutput(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:   "call-1",
-			Name: "BASH",
+			Name: "RUN_COMMAND",
 			Output: map[string]any{
 				"stderr": strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()),
 			},
@@ -46,7 +46,7 @@ func TestValidateReplaySessionEventsRejectsOutputFieldsInMeta(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:      "call-2",
-			Name:    "BASH",
+			Name:    "RUN_COMMAND",
 			Output:  map[string]any{"stdout": "ok"},
 			Content: []session.EventToolContent{{Type: "terminal", Text: "ok"}},
 		},
@@ -73,7 +73,7 @@ func TestValidateReplaySessionEventsAllowsCanonicalEscapableOutput(t *testing.T)
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:      "call-3",
-			Name:    "BASH",
+			Name:    "RUN_COMMAND",
 			Output:  map[string]any{"stdout": stdout},
 			Content: []session.EventToolContent{{Type: "terminal", Text: "ok"}},
 		},
@@ -132,7 +132,7 @@ func TestValidateReplaySessionEventsRejectsProtocolOnlyToolCall(t *testing.T) {
 		Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 			SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 			ToolCallID:    "call-1",
-			Kind:          "BASH",
+			Kind:          "RUN_COMMAND",
 			RawInput:      map[string]any{"command": "echo hi"},
 		}},
 	}})
@@ -154,7 +154,7 @@ func TestValidateReplaySessionEventsAllowsModelToolCallPayload(t *testing.T) {
 	}
 	msg := model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Args: string(args),
 	}}, "")
 	err = validateReplaySessionEvents([]*session.Event{{

@@ -96,7 +96,7 @@ func approvalActionLabel(req *kernel.ApprovalPayload) string {
 	switch {
 	case strings.Contains(tool, "write"), strings.Contains(tool, "patch"):
 		return "write"
-	case strings.Contains(tool, "bash"), strings.Contains(tool, "spawn"):
+	case strings.Contains(tool, "run_command"), strings.Contains(tool, "spawn"):
 		return "execute"
 	case strings.Contains(tool, "read"), strings.Contains(tool, "search"):
 		return "read"

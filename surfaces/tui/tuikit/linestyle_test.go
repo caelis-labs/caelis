@@ -89,11 +89,11 @@ func TestColorizeToolResult(t *testing.T) {
 
 func TestColorizeToolFailure(t *testing.T) {
 	theme := DefaultTheme()
-	result := ColorizeLogLine("✗ BASH exit 1", LineStyleTool, theme)
+	result := ColorizeLogLine("✗ RUN_COMMAND exit 1", LineStyleTool, theme)
 	if result == "" {
 		t.Fatal("expected non-empty colored tool failure output")
 	}
-	if !strings.Contains(result, "BASH") || !strings.Contains(result, "exit 1") {
+	if !strings.Contains(result, "RUN_COMMAND") || !strings.Contains(result, "exit 1") {
 		t.Fatalf("expected tool failure text preserved, got %q", result)
 	}
 }

@@ -203,12 +203,12 @@ func TestRunnerPublishesChildTerminalOutputMetaAsStreamText(t *testing.T) {
 		SessionID: "child-1",
 		Update: client.ToolCallUpdate{
 			SessionUpdate: client.UpdateToolCallState,
-			ToolCallID:    "bash-1",
+			ToolCallID:    "command-1",
 			Kind:          stringPtr("execute"),
 			Title:         stringPtr("run date loop"),
 			Meta: map[string]any{
 				"terminal_output": map[string]any{
-					"terminal_id": "bash-1",
+					"terminal_id": "command-1",
 					"data":        "17:21:17\n",
 				},
 			},

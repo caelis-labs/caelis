@@ -16,7 +16,7 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 		Approval: &session.ProtocolApproval{
 			ToolCall: session.ProtocolToolCall{
 				ID:   "call-from-protocol",
-				Name: "BASH",
+				Name: "RUN_COMMAND",
 				RawInput: map[string]any{
 					"command":             "git restore hello.py",
 					"approval_reason":     "destructive edit",
@@ -37,8 +37,8 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	if payload == nil {
 		t.Fatal("PayloadFromRuntimeRequest() = nil, want payload")
 	}
-	if payload.ToolCallID != "call-from-protocol" || payload.ToolName != "BASH" {
-		t.Fatalf("payload tool = %q/%q, want protocol call BASH", payload.ToolCallID, payload.ToolName)
+	if payload.ToolCallID != "call-from-protocol" || payload.ToolName != "RUN_COMMAND" {
+		t.Fatalf("payload tool = %q/%q, want protocol call RUN_COMMAND", payload.ToolCallID, payload.ToolName)
 	}
 	if payload.RawInput["command"] != "git restore hello.py" {
 		t.Fatalf("payload raw input = %#v, want command", payload.RawInput)
@@ -59,8 +59,8 @@ func TestPayloadFromRuntimeRequestFallsBackToCallInput(t *testing.T) {
 		"command": "git status --short",
 	})
 	payload := PayloadFromRuntimeRequest(agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "BASH"},
-		Call: tool.Call{ID: "call-1", Name: "BASH", Input: raw},
+		Tool: tool.Definition{Name: "RUN_COMMAND"},
+		Call: tool.Call{ID: "call-1", Name: "RUN_COMMAND", Input: raw},
 	})
 
 	if payload == nil {

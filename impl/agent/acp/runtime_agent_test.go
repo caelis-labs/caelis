@@ -517,8 +517,8 @@ func TestRuntimeAgentPromptAutoReviewUsesReviewerInsteadOfClientPermission(t *te
 	if reviewer.last.Model == nil {
 		t.Fatal("reviewer request model = nil, want resolved session model")
 	}
-	if reviewer.last.Approval == nil || reviewer.last.Approval.ToolName != "BASH" {
-		t.Fatalf("reviewer approval payload = %#v, want BASH payload", reviewer.last.Approval)
+	if reviewer.last.Approval == nil || reviewer.last.Approval.ToolName != "RUN_COMMAND" {
+		t.Fatalf("reviewer approval payload = %#v, want RUN_COMMAND payload", reviewer.last.Approval)
 	}
 	if got := reviewer.last.Approval.RawInput["command"]; got != "git restore hello.py" {
 		t.Fatalf("reviewer approval raw command = %#v, want git restore hello.py", got)
@@ -708,12 +708,12 @@ func (r *approvalReviewRuntime) Run(ctx context.Context, req agent.RunRequest) (
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			Mode:       mode,
-			Tool:       tool.Definition{Name: "BASH"},
-			Call:       tool.Call{ID: "call-1", Name: "BASH"},
+			Tool:       tool.Definition{Name: "RUN_COMMAND"},
+			Call:       tool.Call{ID: "call-1", Name: "RUN_COMMAND"},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:   "call-1",
-					Name: "BASH",
+					Name: "RUN_COMMAND",
 					RawInput: map[string]any{
 						"command": "git restore hello.py",
 					},
@@ -772,7 +772,7 @@ func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (age
 	sessionID := req.SessionRef.SessionID
 	toolName := strings.TrimSpace(r.toolName)
 	if toolName == "" {
-		toolName = "BASH"
+		toolName = "RUN_COMMAND"
 	}
 	taskID := strings.TrimSpace(r.taskID)
 	if taskID == "" {

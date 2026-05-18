@@ -102,7 +102,7 @@ func TestTurnHandleCanonicalizesApprovalEvent(t *testing.T) {
 		createdAt: time.Unix(100, 0),
 	})
 	wait := handle.publishApproval(&agent.ApprovalRequest{
-		Tool: tool.Definition{Name: "bash"},
+		Tool: tool.Definition{Name: "RUN_COMMAND"},
 	})
 	if wait == nil {
 		t.Fatal("publishApproval() returned nil wait channel")
@@ -118,8 +118,8 @@ func TestTurnHandleCanonicalizesApprovalEvent(t *testing.T) {
 	if replayed[0].Event.ApprovalPayload == nil {
 		t.Fatal("approval payload = nil, want canonical approval payload")
 	}
-	if replayed[0].Event.ApprovalPayload.ToolName != "bash" {
-		t.Fatalf("approval payload tool name = %q, want %q", replayed[0].Event.ApprovalPayload.ToolName, "bash")
+	if replayed[0].Event.ApprovalPayload.ToolName != "RUN_COMMAND" {
+		t.Fatalf("approval payload tool name = %q, want %q", replayed[0].Event.ApprovalPayload.ToolName, "RUN_COMMAND")
 	}
 	if replayed[0].Event.Origin == nil || replayed[0].Event.Origin.Scope != EventScopeMain || replayed[0].Event.Origin.ScopeID != "s1" {
 		t.Fatalf("approval origin = %+v, want main session scope", replayed[0].Event.Origin)
@@ -419,7 +419,7 @@ func TestTurnHandleLiveStreamDoesNotDropApprovalWhenConsumerIsSlow(t *testing.T)
 	for i := 0; i < 96; i++ {
 		handle.publishSessionEvent(&session.Event{ID: fmt.Sprintf("e%d", i), Type: session.EventTypeAssistant})
 	}
-	handle.publishApproval(&agent.ApprovalRequest{Tool: tool.Definition{Name: "bash"}})
+	handle.publishApproval(&agent.ApprovalRequest{Tool: tool.Definition{Name: "RUN_COMMAND"}})
 	handle.finish()
 
 	deadline := time.After(time.Second)

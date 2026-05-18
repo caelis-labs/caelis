@@ -1659,7 +1659,7 @@ func TestReplayEventsReturnsSessionBackedCanonicalReplay(t *testing.T) {
 				Participant: session.ParticipantRef{ID: "participant-1"},
 			}, Tool: &session.EventTool{
 				ID:     "tool-1",
-				Name:   "BASH",
+				Name:   "RUN_COMMAND",
 				Status: "completed",
 				Output: map[string]any{"stdout": "ok"},
 			}},
@@ -1923,14 +1923,14 @@ func (r *approvalRuntime) Run(ctx context.Context, req agent.RunRequest) (agent.
 			RunID:      "run-1",
 			TurnID:     "turn-1",
 			Mode:       strings.TrimSpace(r.mode),
-			Tool:       tool.Definition{Name: "BASH"},
-			Call:       tool.Call{ID: "approval-call", Name: "BASH"},
+			Tool:       tool.Definition{Name: "RUN_COMMAND"},
+			Call:       tool.Call{ID: "approval-call", Name: "RUN_COMMAND"},
 			Approval: &session.ProtocolApproval{
 				ToolCall: session.ProtocolToolCall{
 					ID:     "approval-call",
-					Name:   "BASH",
+					Name:   "RUN_COMMAND",
 					Kind:   "execute",
-					Title:  "BASH test",
+					Title:  "RUN_COMMAND test",
 					Status: "pending",
 				},
 				Options: []session.ProtocolApprovalOption{

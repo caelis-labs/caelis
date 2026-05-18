@@ -59,11 +59,11 @@ func extractToolCallName(line string) (string, bool) {
 
 // panelProducingTools lists the tool names that can claim a transcript anchor.
 var panelProducingTools = map[string]bool{
-	"BASH":  true,
-	"SPAWN": true,
+	"RUN_COMMAND": true,
+	"SPAWN":       true,
 }
 
-func inlineBashAnchorLabel(raw string, expanded bool) string {
+func inlineCommandAnchorLabel(raw string, expanded bool) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return raw

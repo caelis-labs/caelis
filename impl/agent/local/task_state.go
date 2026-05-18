@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	defaultBashYield             = 7 * time.Second
-	taskCancelWait               = 10 * time.Millisecond
-	bashLiveOutputBufferCapBytes = 64 * 1024
+	defaultCommandYield             = 7 * time.Second
+	taskCancelWait                  = 10 * time.Millisecond
+	commandLiveOutputBufferCapBytes = 64 * 1024
 )
 
 type taskRuntime struct {
@@ -25,7 +25,7 @@ type taskRuntime struct {
 	store   taskapi.Store
 
 	mu        sync.RWMutex
-	tasks     map[string]*bashTask
+	tasks     map[string]*commandTask
 	subagents map[string]*subagentTask
 	pending   map[string][]stream.Frame
 	order     map[string][]string
@@ -41,7 +41,7 @@ type sandboxSessionRefOpener interface {
 	OpenSessionRef(sandbox.SessionRef) (sandbox.Session, error)
 }
 
-type bashTask struct {
+type commandTask struct {
 	ref        taskapi.Ref
 	sessionRef session.SessionRef
 	session    sandbox.Session
@@ -93,7 +93,7 @@ func newTaskRuntime(runtime *Runtime, store taskapi.Store) *taskRuntime {
 	return &taskRuntime{
 		runtime:   runtime,
 		store:     store,
-		tasks:     map[string]*bashTask{},
+		tasks:     map[string]*commandTask{},
 		subagents: map[string]*subagentTask{},
 		pending:   map[string][]stream.Frame{},
 		order:     map[string][]string{},

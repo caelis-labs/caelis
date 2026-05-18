@@ -319,7 +319,7 @@ func mergeGatewayTerminalEnvelope(dst *kernel.EventEnvelope, src kernel.EventEnv
 	dstPayload := dst.Event.ToolResult
 	if text, terminalID := gatewayTerminalContent(src); text != "" {
 		existing, existingTerminalID := gatewayTerminalContent(*dst)
-		if strings.EqualFold(strings.TrimSpace(dstPayload.ToolName), "BASH") {
+		if strings.EqualFold(strings.TrimSpace(dstPayload.ToolName), "RUN_COMMAND") {
 			text = appendDeltaStreamChunk(existing, text)
 		} else {
 			text = mergeSubagentStreamChunk(existing, text)

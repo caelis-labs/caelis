@@ -104,10 +104,10 @@ func taskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	if snapshot.Kind == taskapi.KindSubagent {
 		return subagentTaskToolPayload(snapshot)
 	}
-	return bashTaskToolPayload(snapshot)
+	return commandTaskToolPayload(snapshot)
 }
 
-func bashTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
+func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	visibleTaskID := taskVisibleID(snapshot)
 	payload := map[string]any{}
 	if snapshot.Running {

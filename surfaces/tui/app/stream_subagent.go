@@ -538,7 +538,7 @@ func (m *Model) syncInlineSubagentAnchorLabel(callID string, expanded bool) {
 	if tb == nil {
 		return
 	}
-	next := inlineBashAnchorLabel(tb.Raw, expanded)
+	next := inlineCommandAnchorLabel(tb.Raw, expanded)
 	if next != tb.Raw {
 		tb.Raw = next
 		m.markViewportBlockDirty(tb.BlockID())

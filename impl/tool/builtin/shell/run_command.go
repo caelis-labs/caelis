@@ -14,48 +14,52 @@ import (
 )
 
 const (
-	BashToolName       = "BASH"
-	defaultBashTimeout = 30 * time.Minute
-	defaultBashIdle    = 0
+	RunCommandToolName       = "RUN_COMMAND"
+	defaultRunCommandTimeout = 30 * time.Minute
+	defaultRunCommandIdle    = 0
 )
 
-type BashConfig struct {
+type RunCommandConfig struct {
 	Timeout     time.Duration
 	IdleTimeout time.Duration
 	Runtime     sandbox.Runtime
 }
 
-type BashTool struct {
-	cfg     BashConfig
+type RunCommandTool struct {
+	cfg     RunCommandConfig
 	runtime sandbox.Runtime
 }
 
-func NewBash(cfg BashConfig) (*BashTool, error) {
+func NewRunCommand(cfg RunCommandConfig) (*RunCommandTool, error) {
 	resolvedRuntime, err := runtimeOrDefault(cfg.Runtime)
 	if err != nil {
 		return nil, err
 	}
 	if cfg.Timeout <= 0 {
-		cfg.Timeout = defaultBashTimeout
+		cfg.Timeout = defaultRunCommandTimeout
 	}
 	if cfg.IdleTimeout <= 0 {
-		cfg.IdleTimeout = defaultBashIdle
+		cfg.IdleTimeout = defaultRunCommandIdle
 	}
-	return &BashTool{cfg: cfg, runtime: resolvedRuntime}, nil
+	return &RunCommandTool{cfg: cfg, runtime: resolvedRuntime}, nil
 }
 
-func (t *BashTool) Definition() tool.Definition {
+func (t *RunCommandTool) Definition() tool.Definition {
 	return tool.Definition{
-		Name:        BashToolName,
-		Description: "Run a platform shell command. BASH is the historical tool name; use PowerShell syntax on Windows and POSIX shell syntax on Unix.",
+		Name:        RunCommandToolName,
+		Description: "Run a shell command in the session workspace.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Command to execute in the platform shell. Use PowerShell syntax on Windows; use POSIX shell syntax on Unix."},
+				"command": map[string]any{"type": "string", "description": "Command to execute."},
 				"workdir": map[string]any{"type": "string", "description": "Working directory."},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",
 					"description": "Wait before yielding async control.",
+				},
+				"timeout_ms": map[string]any{
+					"type":        "integer",
+					"description": "Maximum runtime in milliseconds.",
 				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
@@ -97,7 +101,7 @@ func (t *BashTool) Definition() tool.Definition {
 	}
 }
 
-func (t *BashTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if err := toolutil.WithContextCancel(ctx); err != nil {
 		return tool.Result{}, err
 	}
@@ -157,24 +161,24 @@ func (t *BashTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 			},
 		})
 	}
-	payload := bashCommandPayload(result, err)
-	out, resultErr := toolutil.JSONResult(BashToolName, payload)
+	payload := runCommandPayload(result, err)
+	out, resultErr := toolutil.JSONResult(RunCommandToolName, payload)
 	if result.Route != "" {
 		if out.Metadata == nil {
 			out.Metadata = map[string]any{}
 		}
-		bashToolMetadata(out.Metadata)["route"] = result.Route
+		runCommandToolMetadata(out.Metadata)["route"] = result.Route
 	}
 	if result.Backend != "" {
 		if out.Metadata == nil {
 			out.Metadata = map[string]any{}
 		}
-		bashToolMetadata(out.Metadata)["backend"] = result.Backend
+		runCommandToolMetadata(out.Metadata)["backend"] = result.Backend
 	}
 	return out, resultErr
 }
 
-func bashToolMetadata(meta map[string]any) map[string]any {
+func runCommandToolMetadata(meta map[string]any) map[string]any {
 	if meta == nil {
 		return nil
 	}
@@ -199,12 +203,12 @@ func bashToolMetadata(meta map[string]any) map[string]any {
 	return toolMeta
 }
 
-func (t *BashTool) SandboxRuntime() sandbox.Runtime {
+func (t *RunCommandTool) SandboxRuntime() sandbox.Runtime {
 	return t.runtime
 }
 
-func bashCommandPayload(result sandbox.CommandResult, err error) map[string]any {
-	merged := bashMergedOutput(result.Stdout, result.Stderr)
+func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
+	merged := runCommandMergedOutput(result.Stdout, result.Stderr)
 	payload := map[string]any{}
 	if err != nil || result.ExitCode != 0 {
 		payload["state"] = "failed"
@@ -230,7 +234,7 @@ func bashCommandPayload(result sandbox.CommandResult, err error) map[string]any 
 	return payload
 }
 
-func bashMergedOutput(stdout string, stderr string) string {
+func runCommandMergedOutput(stdout string, stderr string) string {
 	stdout = strings.TrimRight(stdout, "\r\n")
 	stderr = strings.TrimRight(stderr, "\r\n")
 	switch {
@@ -270,7 +274,7 @@ func runtimeOrDefault(runtime sandbox.Runtime) (sandbox.Runtime, error) {
 	return runtime, nil
 }
 
-var _ tool.Tool = (*BashTool)(nil)
+var _ tool.Tool = (*RunCommandTool)(nil)
 
 func constraintsFromMetadata(meta map[string]any) (sandbox.Constraints, bool) {
 	if meta == nil {

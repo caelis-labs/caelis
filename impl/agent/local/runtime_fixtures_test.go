@@ -860,11 +860,11 @@ func (m *denyWriteRuntimeModel) Generate(context.Context, *model.Request) iter.S
 	}
 }
 
-type denyBashRuntimeModel struct{ calls int }
+type denyCommandRuntimeModel struct{ calls int }
 
-func (m *denyBashRuntimeModel) Name() string { return "deny-bash" }
+func (m *denyCommandRuntimeModel) Name() string { return "deny-command" }
 
-func (m *denyBashRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *denyCommandRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	callIndex := m.calls
 	return func(yield func(*model.StreamEvent, error) bool) {
@@ -873,8 +873,8 @@ func (m *denyBashRuntimeModel) Generate(context.Context, *model.Request) iter.Se
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "bash-1",
-						Name: shell.BashToolName,
+						ID:   "command-1",
+						Name: shell.RunCommandToolName,
 						Args: string(mustJSONRaw(map[string]any{"command": "rm -rf /"})),
 					}}, ""),
 					TurnComplete: true,
@@ -898,14 +898,14 @@ func (m *denyBashRuntimeModel) Generate(context.Context, *model.Request) iter.Se
 	}
 }
 
-type approveEscalatedBashRuntimeModel struct {
+type approveEscalatedCommandRuntimeModel struct {
 	calls   int
 	command string
 }
 
-func (m *approveEscalatedBashRuntimeModel) Name() string { return "approve-escalated-bash" }
+func (m *approveEscalatedCommandRuntimeModel) Name() string { return "approve-escalated-command" }
 
-func (m *approveEscalatedBashRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *approveEscalatedCommandRuntimeModel) Generate(context.Context, *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	callIndex := m.calls
 	return func(yield func(*model.StreamEvent, error) bool) {
@@ -914,8 +914,8 @@ func (m *approveEscalatedBashRuntimeModel) Generate(context.Context, *model.Requ
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "bash-approve-1",
-						Name: shell.BashToolName,
+						ID:   "command-approve-1",
+						Name: shell.RunCommandToolName,
 						Args: string(mustJSONRaw(map[string]any{
 							"command":             m.command,
 							"workdir":             ".",
@@ -1027,15 +1027,15 @@ func jsonStringForTest(value string) string {
 	return string(raw)
 }
 
-type bashTaskLoopRuntimeModel struct {
+type commandTaskLoopRuntimeModel struct {
 	t      *testing.T
 	calls  int
 	taskID string
 }
 
-func (m *bashTaskLoopRuntimeModel) Name() string { return "bash-task-loop" }
+func (m *commandTaskLoopRuntimeModel) Name() string { return "command-task-loop" }
 
-func (m *bashTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
+func (m *commandTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Request) iter.Seq2[*model.StreamEvent, error] {
 	m.calls++
 	callIndex := m.calls
 	if callIndex == 2 {
@@ -1048,10 +1048,10 @@ func (m *bashTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Reques
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
-						ID:   "bash-async-1",
-						Name: shell.BashToolName,
+						ID:   "command-async-1",
+						Name: shell.RunCommandToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"command":       shellSleepThenPrintForTest("async bash done", shellAsyncDelayForTest()),
+							"command":       shellSleepThenPrintForTest("async command done", shellAsyncDelayForTest()),
 							"workdir":       ".",
 							"yield_time_ms": shellRunningYieldMillisForTest(5),
 						})),
@@ -1085,7 +1085,7 @@ func (m *bashTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Reques
 			yield(&model.StreamEvent{
 				Type: model.StreamEventTurnDone,
 				Response: &model.Response{
-					Message:      model.NewTextMessage(model.RoleAssistant, "async bash done"),
+					Message:      model.NewTextMessage(model.RoleAssistant, "async command done"),
 					TurnComplete: true,
 					StepComplete: true,
 					Status:       model.ResponseStatusCompleted,
@@ -1622,7 +1622,7 @@ func (s *runningOnlyProbeSandboxSession) Wait(_ context.Context, timeout time.Du
 }
 
 func (s *runningOnlyProbeSandboxSession) Result(context.Context) (sandbox.CommandResult, error) {
-	panic("waitBash should not request Result while task is still running")
+	panic("waitCommand should not request Result while task is still running")
 }
 
 func (s *runningOnlyProbeSandboxSession) Terminate(context.Context) error { return nil }
@@ -1679,10 +1679,10 @@ func (r *runningOnlyProbeSandboxRuntime) Status() sandbox.Status {
 
 func (r *runningOnlyProbeSandboxRuntime) Close() error { return nil }
 
-func newRuntimeBashToolTestHarness(t *testing.T) (session.Service, session.Session, *Runtime) {
+func newRuntimeRunCommandToolTestHarness(t *testing.T) (session.Service, session.Session, *Runtime) {
 	t.Helper()
 
-	sessions, activeSession := newTestSessionService(t, "sess-bash-yield-default")
+	sessions, activeSession := newTestSessionService(t, "sess-command-yield-default")
 	runtime, err := New(Config{
 		Sessions: sessions,
 		AgentFactory: chat.Factory{
@@ -1696,30 +1696,30 @@ func newRuntimeBashToolTestHarness(t *testing.T) (session.Service, session.Sessi
 	return sessions, activeSession, runtime
 }
 
-func mustRuntimeBashTool(t *testing.T, runtime sandbox.Runtime) tool.Tool {
+func mustRuntimeRunCommandTool(t *testing.T, runtime sandbox.Runtime) tool.Tool {
 	t.Helper()
 
-	targetTool, err := shell.NewBash(shell.BashConfig{Runtime: runtime})
+	targetTool, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: runtime})
 	if err != nil {
-		t.Fatalf("shell.NewBash() error = %v", err)
+		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
 	return targetTool
 }
 
-func callRuntimeBashTool(t *testing.T, bashTool runtimeBashTool, args map[string]any) tool.Result {
+func callRuntimeRunCommandTool(t *testing.T, runCommandTool runtimeCommandTool, args map[string]any) tool.Result {
 	t.Helper()
 
 	raw, err := json.Marshal(args)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	result, err := bashTool.Call(context.Background(), tool.Call{
-		ID:    "bash-yield-test",
-		Name:  shell.BashToolName,
+	result, err := runCommandTool.Call(context.Background(), tool.Call{
+		ID:    "command-yield-test",
+		Name:  shell.RunCommandToolName,
 		Input: raw,
 	})
 	if err != nil {
-		t.Fatalf("bashTool.Call() error = %v", err)
+		t.Fatalf("runCommandTool.Call() error = %v", err)
 	}
 	return result
 }

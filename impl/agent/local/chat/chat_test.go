@@ -756,9 +756,9 @@ func TestMessagesFromContextGroupsConsecutiveToolCalls(t *testing.T) {
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "demo async tools")),
 				Text:    "demo async tools",
 			},
-			persistedToolCallEvent("bash-1", "BASH", map[string]any{"command": "sleep 1", "yield_time_ms": 5}),
+			persistedToolCallEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1", "yield_time_ms": 5}),
 			persistedToolCallEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}),
-			persistedToolResultEvent("bash-1", "BASH", map[string]any{"command": "sleep 1", "yield_time_ms": 5}, map[string]any{"task_id": "bash-task", "state": "running"}),
+			persistedToolResultEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1", "yield_time_ms": 5}, map[string]any{"task_id": "command-task", "state": "running"}),
 			persistedToolResultEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}, map[string]any{"task_id": "spawn-task", "state": "running"}),
 			{
 				Type:    session.EventTypeUser,
@@ -776,11 +776,11 @@ func TestMessagesFromContextGroupsConsecutiveToolCalls(t *testing.T) {
 	if got, want := len(calls), 2; got != want {
 		t.Fatalf("len(tool calls) = %d, want %d: %#v", got, want, calls)
 	}
-	if calls[0].ID != "bash-1" || calls[1].ID != "spawn-1" {
-		t.Fatalf("tool call order = %#v, want bash then spawn", calls)
+	if calls[0].ID != "command-1" || calls[1].ID != "spawn-1" {
+		t.Fatalf("tool call order = %#v, want command then spawn", calls)
 	}
-	if got := messages[2].ToolResults()[0].ToolUseID; got != "bash-1" {
-		t.Fatalf("first tool result id = %q, want bash-1", got)
+	if got := messages[2].ToolResults()[0].ToolUseID; got != "command-1" {
+		t.Fatalf("first tool result id = %q, want command-1", got)
 	}
 	if got := messages[3].ToolResults()[0].ToolUseID; got != "spawn-1" {
 		t.Fatalf("second tool result id = %q, want spawn-1", got)
@@ -802,9 +802,9 @@ func TestMessagesFromContextDropsIncompleteToolCallRun(t *testing.T) {
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "demo async tools")),
 				Text:    "demo async tools",
 			},
-			persistedToolCallEvent("bash-1", "BASH", map[string]any{"command": "sleep 1"}),
+			persistedToolCallEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1"}),
 			persistedToolCallEvent("spawn-1", "SPAWN", map[string]any{"agent": "self", "prompt": "check"}),
-			persistedToolResultEvent("bash-1", "BASH", map[string]any{"command": "sleep 1"}, map[string]any{"task_id": "bash-task", "state": "running"}),
+			persistedToolResultEvent("command-1", "RUN_COMMAND", map[string]any{"command": "sleep 1"}, map[string]any{"task_id": "command-task", "state": "running"}),
 			{
 				Type:    session.EventTypeUser,
 				Message: ptrMessage(model.NewTextMessage(model.RoleUser, "next turn")),
@@ -953,16 +953,16 @@ func TestMessagesFromContextSkipsDelegatedACPToolRawOutput(t *testing.T) {
 	}
 }
 
-func TestToolResultMessagePreservesCanonicalBashPayloadForModel(t *testing.T) {
+func TestToolResultMessagePreservesCanonicalCommandPayloadForModel(t *testing.T) {
 	t.Parallel()
 
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
 	message := toolResultMessage(model.ToolCall{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 	}, tool.Result{
 		ID:      "call-1",
-		Name:    "BASH",
+		Name:    "RUN_COMMAND",
 		Content: []model.Part{model.NewJSONPart([]byte(`{"result":"go: writing stat cache: open /home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp: read-only file system\n","exit_code":1,"error":"Sandbox permission denied. Use a writable workspace path or request elevated permissions."}`))},
 	})
 
@@ -971,7 +971,7 @@ func TestToolResultMessagePreservesCanonicalBashPayloadForModel(t *testing.T) {
 		t.Fatalf("ToolResults() len = %d, want 1", len(results))
 	}
 	if results[0].IsError {
-		t.Fatal("tool result IsError = true for bash exit status, want false")
+		t.Fatal("tool result IsError = true for command exit status, want false")
 	}
 	var payload map[string]any
 	if len(results[0].Content) == 0 || results[0].Content[0].JSON == nil {
@@ -993,11 +993,11 @@ func TestToolResultEventFallsBackToJSONContentForRawOutput(t *testing.T) {
 
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"echo hello"}`,
 	}, tool.Result{
 		ID:      "call-1",
-		Name:    "BASH",
+		Name:    "RUN_COMMAND",
 		IsError: true,
 		Content: []model.Part{model.NewJSONPart([]byte(`{"error":"terminal session failed"}`))},
 	}, nil)
@@ -1115,7 +1115,7 @@ func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
 	event := toolResultEvent(model.ToolCall{
 		ID:   "task-wait-1",
 		Name: "TASK",
-		Args: `{"action":"wait","task_id":"bash-task"}`,
+		Args: `{"action":"wait","task_id":"command-task"}`,
 	}, tool.Result{
 		ID:   "task-wait-1",
 		Name: "TASK",
@@ -1148,16 +1148,16 @@ func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
 	}
 }
 
-func TestToolResultEventPreservesBashResultFieldAsACPContent(t *testing.T) {
+func TestToolResultEventPreservesCommandResultFieldAsACPContent(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
-		ID:   "bash-status-1",
-		Name: "BASH",
+		ID:   "command-status-1",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"git status"}`,
 	}, tool.Result{
-		ID:   "bash-status-1",
-		Name: "BASH",
+		ID:   "command-status-1",
+		Name: "RUN_COMMAND",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n",
 			"exit_code": 0,
@@ -1180,16 +1180,16 @@ func TestToolResultEventPreservesBashResultFieldAsACPContent(t *testing.T) {
 	}
 }
 
-func TestToolResultEventPreservesFailedBashOutputBeforeExitSummary(t *testing.T) {
+func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
-		ID:   "bash-tidy-1",
-		Name: "BASH",
+		ID:   "command-tidy-1",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"go mod tidy"}`,
 	}, tool.Result{
-		ID:   "bash-tidy-1",
-		Name: "BASH",
+		ID:   "command-tidy-1",
+		Name: "RUN_COMMAND",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    "go: module internal registry: network unreachable\n",
 			"exit_code": 1,
@@ -1212,16 +1212,16 @@ func TestToolResultEventPreservesFailedBashOutputBeforeExitSummary(t *testing.T)
 	}
 }
 
-func TestToolResultEventUsesNoOutputPlaceholderForSilentBashFailure(t *testing.T) {
+func TestToolResultEventUsesNoOutputPlaceholderForSilentCommandFailure(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
-		ID:   "bash-silent-failure-1",
-		Name: "BASH",
+		ID:   "command-silent-failure-1",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"false"}`,
 	}, tool.Result{
-		ID:   "bash-silent-failure-1",
-		Name: "BASH",
+		ID:   "command-silent-failure-1",
+		Name: "RUN_COMMAND",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"exit_code": 1,
 		}))},
@@ -1249,7 +1249,7 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	result := tool.Result{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result":    large,
 			"exit_code": 1,
@@ -1257,14 +1257,14 @@ func TestToolResultEventUsesCanonicalTruncatedOutputForDisplayAndMessage(t *test
 	}
 	call := model.ToolCall{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"find /tmp -delete"}`,
 	}
 	canonical, truncationMeta := canonicalToolResult(result)
 	message := toolResultMessageFromCanonical(call, canonical)
 	event := toolResultEvent(model.ToolCall{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Args: `{"command":"find /tmp -delete"}`,
 	}, canonical, &message, truncationMeta)
 
@@ -1311,10 +1311,10 @@ func TestToolResultMessageCompactsLargeJSONPayloadForModel(t *testing.T) {
 	large := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	message := toolResultMessage(model.ToolCall{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 	}, tool.Result{
 		ID:   "call-1",
-		Name: "BASH",
+		Name: "RUN_COMMAND",
 		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
 			"result": large,
 		}))},
@@ -1349,8 +1349,8 @@ func TestToolResultContextCompactsRawOutput(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "BASH",
-			Title:  "BASH echo",
+			Name:   "RUN_COMMAND",
+			Title:  "RUN_COMMAND echo",
 			Status: "completed",
 			Output: map[string]any{"result": large},
 		},
@@ -1382,8 +1382,8 @@ func TestToolResultContextUsesContentWhenRawOutputAbsent(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "BASH",
-			Title:  "BASH printf",
+			Name:   "RUN_COMMAND",
+			Title:  "RUN_COMMAND printf",
 			Status: "completed",
 			Content: []session.EventToolContent{{
 				Type:       "terminal",
@@ -1408,7 +1408,7 @@ func TestToolResultContextUsesContentWhenRawOutputAbsent(t *testing.T) {
 	}
 }
 
-func TestToolResultContextTruncatesPersistedBashFailureShape(t *testing.T) {
+func TestToolResultContextTruncatesPersistedCommandFailureShape(t *testing.T) {
 	t.Parallel()
 
 	large := strings.Repeat("find: cannot delete /tmp/gomod/pkg: permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/4)
@@ -1416,8 +1416,8 @@ func TestToolResultContextTruncatesPersistedBashFailureShape(t *testing.T) {
 		Type: session.EventTypeToolResult,
 		Tool: &session.EventTool{
 			ID:     "call-1",
-			Name:   "BASH",
-			Title:  "BASH find /tmp/gomod -delete",
+			Name:   "RUN_COMMAND",
+			Title:  "RUN_COMMAND find /tmp/gomod -delete",
 			Status: "failed",
 			Output: map[string]any{
 				"result":    "stderr:\n" + large,
@@ -1505,8 +1505,8 @@ func TestChatAgentEmitsToolProgressWhileCallIsRunning(t *testing.T) {
 		},
 		Events: []*session.Event{{
 			Type:    session.EventTypeUser,
-			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "run bash")),
-			Text:    "run bash",
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "run command")),
+			Text:    "run command",
 		}},
 	})
 

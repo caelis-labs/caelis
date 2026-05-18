@@ -211,16 +211,16 @@ func TestCloneEventProtocolPreservesRuntimeToolNameWithDurableUpdate(t *testing.
 		Update: &ProtocolUpdate{
 			SessionUpdate: string(ProtocolUpdateTypeToolCall),
 			ToolCallID:    "call-1",
-			Title:         "BASH echo hi",
+			Title:         "RUN_COMMAND echo hi",
 			Kind:          "execute",
 			Status:        "pending",
 			RawInput:      map[string]any{"command": "echo hi"},
 		},
 		ToolCall: &ProtocolToolCall{
 			ID:     "call-1",
-			Name:   "BASH",
+			Name:   "RUN_COMMAND",
 			Kind:   "execute",
-			Title:  "BASH echo hi",
+			Title:  "RUN_COMMAND echo hi",
 			Status: "pending",
 			RawInput: map[string]any{
 				"command": "echo hi",
@@ -231,8 +231,8 @@ func TestCloneEventProtocolPreservesRuntimeToolNameWithDurableUpdate(t *testing.
 	if protocol.ToolCall == nil {
 		t.Fatal("ToolCall = nil")
 	}
-	if protocol.ToolCall.Name != "BASH" {
-		t.Fatalf("ToolCall.Name = %q, want original BASH", protocol.ToolCall.Name)
+	if protocol.ToolCall.Name != "RUN_COMMAND" {
+		t.Fatalf("ToolCall.Name = %q, want original RUN_COMMAND", protocol.ToolCall.Name)
 	}
 	if protocol.ToolCall.Kind != "execute" {
 		t.Fatalf("ToolCall.Kind = %q, want execute", protocol.ToolCall.Kind)
@@ -251,7 +251,7 @@ func TestEventTypeOfProtocolPlan(t *testing.T) {
 			Approval: &ProtocolApproval{
 				ToolCall: ProtocolToolCall{
 					ID:     "call-1",
-					Name:   "BASH",
+					Name:   "RUN_COMMAND",
 					Status: "pending",
 				},
 				Options: []ProtocolApprovalOption{

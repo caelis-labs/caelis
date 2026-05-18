@@ -64,8 +64,8 @@ func AutoReviewMode() policy.Mode {
 				return allow(def), nil
 			case "TASK":
 				return allow(def), nil
-			case "BASH":
-				return decideBashCommand(input, def, "auto-review mode")
+			case "RUN_COMMAND":
+				return decideCommand(input, def, "auto-review mode")
 			default:
 				return deny(fmt.Sprintf("tool %q is not allowed in auto-review mode", input.Tool.Name)), nil
 			}
@@ -93,8 +93,8 @@ func ManualMode() policy.Mode {
 				return allow(def), nil
 			case "TASK":
 				return allow(def), nil
-			case "BASH":
-				return decideBashCommand(input, def, "manual mode")
+			case "RUN_COMMAND":
+				return decideCommand(input, def, "manual mode")
 			default:
 				return deny(fmt.Sprintf("tool %q is not allowed in manual mode", input.Tool.Name)), nil
 			}
@@ -102,7 +102,7 @@ func ManualMode() policy.Mode {
 	}
 }
 
-func decideBashCommand(input policy.ToolContext, def sandbox.Constraints, modeName string) (policy.Decision, error) {
+func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName string) (policy.Decision, error) {
 	command, err := commandArg(input)
 	if err != nil {
 		return policy.Decision{}, err
@@ -110,20 +110,20 @@ func decideBashCommand(input policy.ToolContext, def sandbox.Constraints, modeNa
 	if commandLooksDangerous(command) {
 		return deny("dangerous command is blocked even in " + strings.TrimSpace(modeName)), nil
 	}
-	req, err := parseBashSandboxRequest(input)
+	req, err := parseCommandSandboxRequest(input)
 	if err != nil {
 		return deny(err.Error()), nil
 	}
-	def = applyDefaultBashCommandAllowances(def, input, command)
+	def = applyDefaultCommandAllowances(def, input, command)
 	if commandRequiresDestructiveApproval(command) {
 		return askDestructiveCommandApproval(input, def, req)
 	}
 	switch req.SandboxPermissions {
-	case bashSandboxPermissionRequireEscalated:
+	case commandSandboxPermissionRequireEscalated:
 		return askEscalationApproval(input, req)
-	case bashSandboxPermissionWithAdditionalPermissions:
+	case commandSandboxPermissionWithAdditionalPermissions:
 		reason := "additional sandbox permissions require user approval"
-		decision, err := askApproval(reason, applyBashAdditionalPermissions(def, req), input)
+		decision, err := askApproval(reason, applyCommandAdditionalPermissions(def, req), input)
 		if err != nil {
 			return policy.Decision{}, err
 		}
@@ -182,7 +182,7 @@ func askApproval(reason string, constraints sandbox.Constraints, input policy.To
 	}, nil
 }
 
-func askEscalationApproval(input policy.ToolContext, req bashSandboxRequest) (policy.Decision, error) {
+func askEscalationApproval(input policy.ToolContext, req commandSandboxRequest) (policy.Decision, error) {
 	reason := "host execution requires user approval"
 	decision, err := askApproval(reason, hostExecutionConstraints(), input)
 	if err != nil {
@@ -192,19 +192,19 @@ func askEscalationApproval(input policy.ToolContext, req bashSandboxRequest) (po
 	return decision, nil
 }
 
-func askDestructiveCommandApproval(input policy.ToolContext, def sandbox.Constraints, req bashSandboxRequest) (policy.Decision, error) {
+func askDestructiveCommandApproval(input policy.ToolContext, def sandbox.Constraints, req commandSandboxRequest) (policy.Decision, error) {
 	reason := "destructive filesystem command requires user approval"
 	constraints := def
 	metadata := req.approvalMetadata(reason)
 	metadata["destructive_command"] = true
 	switch req.SandboxPermissions {
-	case bashSandboxPermissionRequireEscalated:
+	case commandSandboxPermissionRequireEscalated:
 		reason = "destructive host command requires user approval"
 		constraints = hostExecutionConstraints()
 		metadata = req.approvalMetadata(reason)
 		metadata["destructive_command"] = true
-	case bashSandboxPermissionWithAdditionalPermissions:
-		constraints = applyBashAdditionalPermissions(def, req)
+	case commandSandboxPermissionWithAdditionalPermissions:
+		constraints = applyCommandAdditionalPermissions(def, req)
 		metadata = req.approvalMetadata(reason)
 		metadata["destructive_command"] = true
 	}
@@ -234,7 +234,7 @@ func toolKind(name string) string {
 		return "edit"
 	case "SEARCH", "GLOB", "LIST":
 		return "search"
-	case "BASH", "TASK", "SPAWN":
+	case "RUN_COMMAND", "TASK", "SPAWN":
 		return "execute"
 	default:
 		return "other"
@@ -248,7 +248,7 @@ func approvalTitle(name string, call map[string]any) string {
 		if path, _ := call["path"].(string); strings.TrimSpace(path) != "" {
 			return strings.TrimSpace(name + " " + path)
 		}
-	case "BASH":
+	case "RUN_COMMAND":
 		if command, _ := call["command"].(string); strings.TrimSpace(command) != "" {
 			return strings.TrimSpace(name + " " + command)
 		}

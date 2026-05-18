@@ -402,10 +402,8 @@ Required support:
 
 Current UI/prompt cleanup:
 
-- The shell tool remains protocol-compatible as `BASH`, but the model-visible
-  description and assembled prompt describe it as a historical tool identifier.
-  On Windows the model is told to write PowerShell commands; on Unix it should
-  write POSIX shell commands.
+- The model-visible shell tool is named `RUN_COMMAND`; shell selection stays in
+  the injected environment context rather than the tool description.
 - The prompt environment context reports `powershell` on Windows instead of
   trusting POSIX-oriented `SHELL` values.
 - Diagnostics should report the resolved backend, setup status, account names,
@@ -667,9 +665,8 @@ Cross-platform tests:
 - [x] Stream `/sandbox setup` progress into the TUI viewport and suppress
   PowerShell progress UI from firewall refresh.
 - [x] Add clear remediation for UAC cancellation.
-- [x] Keep user-visible command transcript copy stable while updating
-  model-visible `BASH` description/prompt guidance so Windows commands are
-  written as PowerShell.
+- [x] Keep user-visible command transcript copy stable while exposing the
+  model-visible shell tool as `RUN_COMMAND`.
 
 ### Phase 9: Extraction Decision
 

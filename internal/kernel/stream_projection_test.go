@@ -37,7 +37,7 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 			},
 			ToolResult: &ToolResultPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{
 					"command": "for i in 1 2; do echo $i; done",
 				},
@@ -60,7 +60,7 @@ func TestStreamRequestFromEventUsesRunningToolCursor(t *testing.T) {
 	if req.Cursor.Output != 12 {
 		t.Fatalf("terminal cursor = %+v, want output=12", req.Cursor)
 	}
-	if req.CallID != "call-1" || req.ToolName != "BASH" {
+	if req.CallID != "call-1" || req.ToolName != "RUN_COMMAND" {
 		t.Fatalf("terminal request = %+v", req)
 	}
 }
@@ -149,7 +149,7 @@ func TestStreamFrameEventPreservesStandardToolUpdateShape(t *testing.T) {
 		TurnID:     "turn-1",
 		SessionRef: session.SessionRef{SessionID: "session-1"},
 		CallID:     "call-1",
-		ToolName:   "BASH",
+		ToolName:   "RUN_COMMAND",
 		RawInput:   map[string]any{"command": "echo ok"},
 		Ref: stream.Ref{
 			SessionID:  "session-1",
@@ -173,7 +173,7 @@ func TestStreamFrameEventPreservesStandardToolUpdateShape(t *testing.T) {
 	if env.Event.ToolResult == nil {
 		t.Fatal("env.Event.ToolResult = nil")
 	}
-	if env.Event.ToolResult.CallID != "call-1" || env.Event.ToolResult.ToolName != "BASH" {
+	if env.Event.ToolResult.CallID != "call-1" || env.Event.ToolResult.ToolName != "RUN_COMMAND" {
 		t.Fatalf("tool result = %+v", env.Event.ToolResult)
 	}
 	if got := sessionTextContent(t, env.Event.ToolResult.Content); got != "next line\n" {
@@ -222,13 +222,13 @@ func TestStreamFrameEventsProjectTaskClosedFrameWithoutText(t *testing.T) {
 	}
 }
 
-func TestStreamFrameEventsUseNoOutputPlaceholderForSilentBashFailure(t *testing.T) {
+func TestStreamFrameEventsUseNoOutputPlaceholderForSilentCommandFailure(t *testing.T) {
 	t.Parallel()
 
 	req := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "bash-1",
-		ToolName:   "BASH",
+		CallID:     "command-1",
+		ToolName:   "RUN_COMMAND",
 		RawInput:   map[string]any{"command": "false"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
 		Scope:      EventScopeMain,
@@ -240,11 +240,11 @@ func TestStreamFrameEventsUseNoOutputPlaceholderForSilentBashFailure(t *testing.
 		State:   "failed",
 	})
 	if len(events) != 1 {
-		t.Fatalf("StreamFrameEvents(BASH closed) returned %d events: %#v", len(events), events)
+		t.Fatalf("StreamFrameEvents(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	payload := events[0].Event.ToolResult
 	if payload == nil || payload.Status != ToolStatusFailed {
-		t.Fatalf("payload = %+v, want failed BASH result", payload)
+		t.Fatalf("payload = %+v, want failed RUN_COMMAND result", payload)
 	}
 	if strings.Contains(sessionTextContent(t, payload.Content), "exit 1") {
 		t.Fatalf("content = %#v, should not expose exit code as terminal output", payload.Content)
@@ -254,13 +254,13 @@ func TestStreamFrameEventsUseNoOutputPlaceholderForSilentBashFailure(t *testing.
 	}
 }
 
-func TestStreamFrameEventsProjectBashClosedFrameAsContentlessFinalAfterOutput(t *testing.T) {
+func TestStreamFrameEventsProjectCommandClosedFrameAsContentlessFinalAfterOutput(t *testing.T) {
 	t.Parallel()
 
 	req := StreamRequest{
 		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "bash-1",
-		ToolName:   "BASH",
+		CallID:     "command-1",
+		ToolName:   "RUN_COMMAND",
 		RawInput:   map[string]any{"command": "printf hi"},
 		Ref:        stream.Ref{SessionID: "root-session", TaskID: "task-1", TerminalID: "terminal-1"},
 		Scope:      EventScopeMain,
@@ -273,11 +273,11 @@ func TestStreamFrameEventsProjectBashClosedFrameAsContentlessFinalAfterOutput(t 
 		Cursor:  stream.Cursor{Output: int64(len("hi"))},
 	})
 	if len(events) != 1 {
-		t.Fatalf("StreamFrameEvents(BASH closed) returned %d events: %#v", len(events), events)
+		t.Fatalf("StreamFrameEvents(RUN_COMMAND closed) returned %d events: %#v", len(events), events)
 	}
 	payload := events[0].Event.ToolResult
 	if payload == nil || payload.Status != ToolStatusCompleted {
-		t.Fatalf("payload = %+v, want completed BASH result", payload)
+		t.Fatalf("payload = %+v, want completed RUN_COMMAND result", payload)
 	}
 	if len(payload.Content) != 0 {
 		t.Fatalf("content = %#v, want contentless final after streamed output", payload.Content)

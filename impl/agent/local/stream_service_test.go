@@ -12,12 +12,12 @@ import (
 	taskapi "github.com/OnslaughtSnail/caelis/ports/task"
 )
 
-func TestStreamReadBashUsesCallbackOutputWithoutReadFallback(t *testing.T) {
+func TestStreamReadCommandUsesCallbackOutputWithoutReadFallback(t *testing.T) {
 	t.Parallel()
 
 	const chunk = "chunk\n"
 	sess := &liveOutputRaceSession{stdout: chunk}
-	task := &bashTask{
+	task := &commandTask{
 		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
 		sessionRef:     session.SessionRef{SessionID: "session-1"},
 		session:        sess,
@@ -29,9 +29,9 @@ func TestStreamReadBashUsesCallbackOutputWithoutReadFallback(t *testing.T) {
 	task.appendOutput(chunk)
 	sess.onRead = func() { t.Fatal("ReadOutput fallback should not be used for callback-backed live output") }
 
-	snap, err := (&streamService{}).readBash(context.Background(), task, stream.Cursor{})
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
 	if err != nil {
-		t.Fatalf("readBash() error = %v", err)
+		t.Fatalf("readCommand() error = %v", err)
 	}
 	if got := streamFrameText(snap.Frames); got != chunk {
 		t.Fatalf("stream frame text = %q, want one live chunk", got)
@@ -44,11 +44,11 @@ func TestStreamReadBashUsesCallbackOutputWithoutReadFallback(t *testing.T) {
 	}
 }
 
-func TestStreamReadBashUsesReadOutputFallbackWithoutCallbackSource(t *testing.T) {
+func TestStreamReadCommandUsesReadOutputFallbackWithoutCallbackSource(t *testing.T) {
 	t.Parallel()
 
 	const chunk = "fallback\n"
-	task := &bashTask{
+	task := &commandTask{
 		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
 		sessionRef: session.SessionRef{SessionID: "session-1"},
 		session:    &liveOutputRaceSession{stdout: chunk},
@@ -57,19 +57,19 @@ func TestStreamReadBashUsesReadOutputFallbackWithoutCallbackSource(t *testing.T)
 		createdAt:  time.Now(),
 	}
 
-	snap, err := (&streamService{}).readBash(context.Background(), task, stream.Cursor{})
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
 	if err != nil {
-		t.Fatalf("readBash() error = %v", err)
+		t.Fatalf("readCommand() error = %v", err)
 	}
 	if got := streamFrameText(snap.Frames); got != chunk {
 		t.Fatalf("stream frame text = %q, want ReadOutput fallback chunk", got)
 	}
 }
 
-func TestStreamReadBashCompletedUsesFinalTextWithoutFrame(t *testing.T) {
+func TestStreamReadCommandCompletedUsesFinalTextWithoutFrame(t *testing.T) {
 	t.Parallel()
 
-	task := &bashTask{
+	task := &commandTask{
 		ref:            taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
 		sessionRef:     session.SessionRef{SessionID: "session-1"},
 		session:        &liveOutputRaceSession{stdout: "final\n", completed: true},
@@ -80,9 +80,9 @@ func TestStreamReadBashCompletedUsesFinalTextWithoutFrame(t *testing.T) {
 		outputCallback: true,
 	}
 
-	snap, err := (&streamService{}).readBash(context.Background(), task, stream.Cursor{Output: int64(len("live\n"))})
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len("live\n"))})
 	if err != nil {
-		t.Fatalf("readBash() error = %v", err)
+		t.Fatalf("readCommand() error = %v", err)
 	}
 	if len(snap.Frames) != 0 {
 		t.Fatalf("frames = %#v, want no duplicate final terminal frame", snap.Frames)
@@ -92,12 +92,12 @@ func TestStreamReadBashCompletedUsesFinalTextWithoutFrame(t *testing.T) {
 	}
 }
 
-func TestStreamReadBashCompletedEmitsUndeliveredTailFrame(t *testing.T) {
+func TestStreamReadCommandCompletedEmitsUndeliveredTailFrame(t *testing.T) {
 	t.Parallel()
 
 	const shown = "already shown\n"
 	const tail = "final tail\n"
-	task := &bashTask{
+	task := &commandTask{
 		ref:          taskapi.Ref{TaskID: "task-1", SessionID: "term-session", TerminalID: "term-1"},
 		sessionRef:   session.SessionRef{SessionID: "session-1"},
 		session:      &liveOutputRaceSession{stdout: shown + tail, completed: true},
@@ -108,9 +108,9 @@ func TestStreamReadBashCompletedEmitsUndeliveredTailFrame(t *testing.T) {
 		stdoutCursor: int64(len([]byte(shown))),
 	}
 
-	snap, err := (&streamService{}).readBash(context.Background(), task, stream.Cursor{Output: int64(len([]byte(shown)))})
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{Output: int64(len([]byte(shown)))})
 	if err != nil {
-		t.Fatalf("readBash() error = %v", err)
+		t.Fatalf("readCommand() error = %v", err)
 	}
 	if got := streamFrameText(snap.Frames); got != tail {
 		t.Fatalf("stream frame text = %q, want undelivered final tail", got)
@@ -123,15 +123,15 @@ func TestStreamReadBashCompletedEmitsUndeliveredTailFrame(t *testing.T) {
 	}
 }
 
-func TestBashLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
+func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	t.Parallel()
 
-	task := &bashTask{}
-	task.appendOutput(strings.Repeat("a", bashLiveOutputBufferCapBytes+10))
+	task := &commandTask{}
+	task.appendOutput(strings.Repeat("a", commandLiveOutputBufferCapBytes+10))
 
 	task.mu.Lock()
-	if got := len([]byte(task.output)); got != bashLiveOutputBufferCapBytes {
-		t.Fatalf("retained output bytes = %d, want %d", got, bashLiveOutputBufferCapBytes)
+	if got := len([]byte(task.output)); got != commandLiveOutputBufferCapBytes {
+		t.Fatalf("retained output bytes = %d, want %d", got, commandLiveOutputBufferCapBytes)
 	}
 	if task.outputBase != 10 {
 		t.Fatalf("outputBase = %d, want dropped byte count 10", task.outputBase)

@@ -345,7 +345,7 @@ func sendAgentInstallToolCall(send func(tea.Msg), target string, command string)
 		OccurredAt: time.Now(),
 		ToolCall: &kernel.ToolCallPayload{
 			CallID:   callID,
-			ToolName: "BASH",
+			ToolName: "RUN_COMMAND",
 			Status:   kernel.ToolStatusRunning,
 			Scope:    kernel.EventScopeMain,
 			RawInput: map[string]any{"command": strings.TrimSpace(command)},
@@ -386,7 +386,7 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 		OccurredAt: time.Now(),
 		ToolResult: &kernel.ToolResultPayload{
 			CallID:    callID,
-			ToolName:  "BASH",
+			ToolName:  "RUN_COMMAND",
 			Status:    status,
 			Scope:     kernel.EventScopeMain,
 			RawInput:  map[string]any{"command": strings.TrimSpace(command)},

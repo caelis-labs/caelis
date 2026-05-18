@@ -1066,8 +1066,8 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 				Protocol: &session.EventProtocol{Update: &session.ProtocolUpdate{
 					SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 					ToolCallID:    id,
-					Kind:          "BASH",
-					Title:         "BASH",
+					Kind:          "RUN_COMMAND",
+					Title:         "RUN_COMMAND",
 					Status:        "pending",
 					RawInput:      map[string]any{"cmd": "pwd"},
 				}},

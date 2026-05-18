@@ -538,7 +538,7 @@ func TestRunningGatewayToolCallIsVisibleBeforeTaskCompletes(t *testing.T) {
 			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
 			ToolCall: &kernel.ToolCallPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": `echo "hi"`},
 				Status:   "running",
 				Scope:    kernel.EventScopeMain,

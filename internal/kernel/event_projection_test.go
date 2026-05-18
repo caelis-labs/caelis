@@ -26,7 +26,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 			name: "runtime call fallback",
 			req: &agent.ApprovalRequest{
 				Call: tool.Call{
-					Name:  "bash",
+					Name:  "RUN_COMMAND",
 					Input: json.RawMessage(`{"command":"echo hi"}`),
 				},
 			},
@@ -36,8 +36,8 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
 					return
 				}
-				if payload.ToolName != "bash" {
-					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "bash")
+				if payload.ToolName != "RUN_COMMAND" {
+					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "RUN_COMMAND")
 				}
 				if payload.RawInput["command"] != "echo hi" {
 					t.Fatalf("payload.RawInput = %#v, want command", payload.RawInput)
@@ -52,8 +52,8 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 			req: &agent.ApprovalRequest{
 				Approval: &session.ProtocolApproval{
 					ToolCall: session.ProtocolToolCall{
-						ID:       "call-bash-approval",
-						Name:     "BASH",
+						ID:       "call-command-approval",
+						Name:     "RUN_COMMAND",
 						RawInput: map[string]any{"command": "rm -rf /tmp/demo"},
 					},
 					Options: []session.ProtocolApprovalOption{
@@ -67,11 +67,11 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
 					return
 				}
-				if payload.ToolName != "BASH" {
-					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "BASH")
+				if payload.ToolName != "RUN_COMMAND" {
+					t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "RUN_COMMAND")
 				}
-				if payload.ToolCallID != "call-bash-approval" {
-					t.Fatalf("payload.ToolCallID = %q, want %q", payload.ToolCallID, "call-bash-approval")
+				if payload.ToolCallID != "call-command-approval" {
+					t.Fatalf("payload.ToolCallID = %q, want %q", payload.ToolCallID, "call-command-approval")
 				}
 				if payload.RawInput["command"] != "rm -rf /tmp/demo" {
 					t.Fatalf("payload.RawInput = %#v, want command", payload.RawInput)
@@ -87,9 +87,9 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 		{
 			name: "permission metadata",
 			req: &agent.ApprovalRequest{
-				Tool: tool.Definition{Name: "BASH"},
+				Tool: tool.Definition{Name: "RUN_COMMAND"},
 				Call: tool.Call{
-					Name:  "BASH",
+					Name:  "RUN_COMMAND",
 					Input: json.RawMessage(`{"command":"make generate"}`),
 				},
 				Metadata: map[string]any{
@@ -254,17 +254,17 @@ func TestProjectSessionEventACPNativeGolden(t *testing.T) {
 						"version": 1,
 						"runtime": map[string]any{
 							"tool": map[string]any{
-								"name": "BASH",
+								"name": "RUN_COMMAND",
 							},
 						},
 					},
 				},
 				Protocol: &session.EventProtocol{
 					ToolCall: &session.ProtocolToolCall{
-						ID:       "call-bash-1",
-						Name:     "BASH",
+						ID:       "call-command-1",
+						Name:     "RUN_COMMAND",
 						Kind:     "execute",
-						Title:    "BASH",
+						Title:    "RUN_COMMAND",
 						Status:   "running",
 						RawInput: map[string]any{"command": "echo hi"},
 					},
@@ -279,10 +279,10 @@ func TestProjectSessionEventACPNativeGolden(t *testing.T) {
 				Protocol: &session.EventProtocol{
 					Approval: &session.ProtocolApproval{
 						ToolCall: session.ProtocolToolCall{
-							ID:       "call-bash-approval",
-							Name:     "BASH",
+							ID:       "call-command-approval",
+							Name:     "RUN_COMMAND",
 							Kind:     "execute",
-							Title:    "BASH",
+							Title:    "RUN_COMMAND",
 							RawInput: map[string]any{"command": "rm -rf /tmp/demo"},
 						},
 						Options: []session.ProtocolApprovalOption{
@@ -509,7 +509,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Protocol: &session.EventProtocol{
 					ToolCall: &session.ProtocolToolCall{
 						ID:       "call-2",
-						Name:     "BASH",
+						Name:     "RUN_COMMAND",
 						Status:   "running",
 						RawInput: map[string]any{"command": "sleep 1"},
 					},
@@ -602,7 +602,7 @@ func TestProjectSessionEventsCanonicalPayloadsTableDriven(t *testing.T) {
 				Protocol: &session.EventProtocol{
 					ToolCall: &session.ProtocolToolCall{
 						ID:        "call-4",
-						Name:      "BASH",
+						Name:      "RUN_COMMAND",
 						Status:    "error",
 						RawInput:  map[string]any{"command": "exit 1"},
 						RawOutput: map[string]any{"error": "exit status 1"},
@@ -747,13 +747,13 @@ func TestProjectSessionEventsPreservesProtocolToolCallID(t *testing.T) {
 	events := projectSessionEvents(session.SessionRef{SessionID: "root-session"}, []*session.Event{{
 		ID:   "tool-1",
 		Type: session.EventTypeToolCall,
-		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "BASH"}}}},
+		Meta: map[string]any{"caelis": map[string]any{"runtime": map[string]any{"tool": map[string]any{"name": "RUN_COMMAND"}}}},
 		Protocol: &session.EventProtocol{
 			Update: &session.ProtocolUpdate{
 				SessionUpdate: string(session.ProtocolUpdateTypeToolCall),
 				ToolCallID:    "call-1",
 				Kind:          "execute",
-				Title:         "BASH echo hi",
+				Title:         "RUN_COMMAND echo hi",
 				RawInput:      map[string]any{"command": "echo hi"},
 			},
 		},
@@ -772,8 +772,8 @@ func TestProjectSessionEventsPreservesProtocolToolCallID(t *testing.T) {
 	if payload.CallID != "call-1" {
 		t.Fatalf("payload.CallID = %q, want %q", payload.CallID, "call-1")
 	}
-	if payload.ToolName != "BASH" {
-		t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "BASH")
+	if payload.ToolName != "RUN_COMMAND" {
+		t.Fatalf("payload.ToolName = %q, want %q", payload.ToolName, "RUN_COMMAND")
 	}
 	if payload.Status != ToolStatusStarted {
 		t.Fatalf("payload.Status = %q, want %q", payload.Status, ToolStatusStarted)
@@ -997,7 +997,7 @@ func TestEventEnvelopeJSONUsesStableProtocolNames(t *testing.T) {
 			TurnID:   "turn-1",
 			ToolCall: &ToolCallPayload{
 				CallID:   "call-1",
-				ToolName: "BASH",
+				ToolName: "RUN_COMMAND",
 				RawInput: map[string]any{"command": "go test ./kernel/..."},
 				Status:   ToolStatusWaitingApproval,
 				Scope:    EventScopeMain,

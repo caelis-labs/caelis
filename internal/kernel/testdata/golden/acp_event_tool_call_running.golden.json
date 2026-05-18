@@ -17,7 +17,7 @@
       "caelis": {
         "runtime": {
           "tool": {
-            "name": "BASH"
+            "name": "RUN_COMMAND"
           }
         },
         "version": 1
@@ -27,8 +27,8 @@
       "method": "session/update",
       "update": {
         "sessionUpdate": "tool_call",
-        "toolCallId": "call-bash-1",
-        "title": "BASH",
+        "toolCallId": "call-command-1",
+        "title": "RUN_COMMAND",
         "kind": "execute",
         "status": "running",
         "rawInput": {
@@ -37,10 +37,10 @@
       }
     },
     "tool_call": {
-      "call_id": "call-bash-1",
-      "tool_name": "BASH",
+      "call_id": "call-command-1",
+      "tool_name": "RUN_COMMAND",
       "tool_kind": "execute",
-      "tool_title": "BASH",
+      "tool_title": "RUN_COMMAND",
       "raw_input": {
         "command": "echo hi"
       },

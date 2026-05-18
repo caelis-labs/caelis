@@ -283,7 +283,7 @@ func TestGatewayAssistantExplorationStepSettlesOnlyAtStepBoundary(t *testing.T) 
 
 	block.Events = append(block.Events,
 		SubagentEvent{Kind: SEAssistant, Text: "Now I can run the build."},
-		SubagentEvent{Kind: SEToolCall, CallID: "bash-build", Name: "BASH", Args: "bash scripts/build.sh debug ./bin/storage"},
+		SubagentEvent{Kind: SEToolCall, CallID: "command-build", Name: "RUN_COMMAND", Args: "bash scripts/build.sh debug ./bin/storage"},
 	)
 	settled := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
 	if !strings.Contains(settled, "• Explored") || !strings.Contains(settled, "Read scripts/build.sh") {
@@ -846,17 +846,17 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			want: []string{"• Glob **/*.py 5 matches"},
 		},
 		{
-			name: "bash terminal panel",
+			name: "command terminal panel",
 			call: &kernel.ToolCallPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": `echo "hello"`},
 			},
 			result: &kernel.ToolResultPayload{
-				CallID:   "bash-1",
-				ToolName: "BASH",
+				CallID:   "command-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusCompleted,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": `echo "hello"`},
@@ -898,7 +898,7 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				Content: testTerminalContent("diff --git a/file.go b/file.go"),
 			},
 			want:        []string{"• Ran git diff --cached -- file.go", "  └ diff --git a/file.go b/file.go"},
-			forbidden:   []string{"• git diff", "BASH diff", "╭", "╰"},
+			forbidden:   []string{"• git diff", "RUN_COMMAND diff", "╭", "╰"},
 			expandPanel: true,
 		},
 		{
@@ -936,17 +936,17 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 			expandPanel: true,
 		},
 		{
-			name: "bash task snapshot does not expose raw session json",
+			name: "command task snapshot does not expose raw session json",
 			call: &kernel.ToolCallPayload{
-				CallID:   "bash-task-1",
-				ToolName: "BASH",
+				CallID:   "command-task-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": `sleep 10`},
 			},
 			result: &kernel.ToolResultPayload{
-				CallID:   "bash-task-1",
-				ToolName: "BASH",
+				CallID:   "command-task-1",
+				ToolName: "RUN_COMMAND",
 				Status:   kernel.ToolStatusRunning,
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": `sleep 10`},

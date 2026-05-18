@@ -44,7 +44,7 @@ type BlockShellModel struct {
 	Expanded bool
 
 	// Header fields
-	Kind    string // e.g. "BASH", "DIFF", "SPAWN"
+	Kind    string // e.g. "RUN_COMMAND", "DIFF", "SPAWN"
 	Title   string // e.g. command text, file path, agent name
 	State   string // e.g. "running", "completed", "failed"
 	Elapsed time.Duration

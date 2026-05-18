@@ -35,8 +35,14 @@ func TestBuildCoreToolsCreatesDefaultCodingGroup(t *testing.T) {
 	if got := tools[0].Definition().Name; got != filesystem.ReadToolName {
 		t.Fatalf("first tool = %q, want %q", got, filesystem.ReadToolName)
 	}
-	if got := tools[6].Definition().Name; got != shell.BashToolName {
-		t.Fatalf("bash tool = %q, want %q", got, shell.BashToolName)
+	if got := tools[6].Definition().Name; got != shell.RunCommandToolName {
+		t.Fatalf("run command tool = %q, want %q", got, shell.RunCommandToolName)
+	}
+	legacyCommandToolName := "BA" + "SH"
+	for _, one := range tools {
+		if got := one.Definition().Name; got == legacyCommandToolName {
+			t.Fatalf("core tools exposed legacy %s tool", legacyCommandToolName)
+		}
 	}
 	if got := tools[7].Definition().Name; got != task.ToolName {
 		t.Fatalf("task tool = %q, want %q", got, task.ToolName)
@@ -194,17 +200,17 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 		t.Fatalf("list count with default gitignore = %v, want 2", got)
 	}
 
-	bashTool := mustLookupTool(t, reg, shell.BashToolName)
-	bashResult := runToolJSON(t, bashTool, map[string]any{
+	runCommandTool := mustLookupTool(t, reg, shell.RunCommandToolName)
+	runCommandResult := runToolJSON(t, runCommandTool, map[string]any{
 		"command":       "cat notes.txt",
 		"workdir":       dir,
 		"yield_time_ms": 100,
 	})
-	if got := bashResult["result"]; !strings.Contains(got.(string), "caelis") {
-		t.Fatalf("bash result = %v, want patched file content", got)
+	if got := runCommandResult["result"]; !strings.Contains(got.(string), "caelis") {
+		t.Fatalf("run command result = %v, want patched file content", got)
 	}
-	if got := bashResult["exit_code"]; got != float64(0) {
-		t.Fatalf("bash exit_code = %v, want 0", got)
+	if got := runCommandResult["exit_code"]; got != float64(0) {
+		t.Fatalf("run command exit_code = %v, want 0", got)
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "notes.txt"))

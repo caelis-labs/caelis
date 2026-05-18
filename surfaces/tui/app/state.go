@@ -323,7 +323,7 @@ type Model struct {
 	participantTurnIDs             map[string]string
 	activeParticipantTurnSessionID string
 
-	// pendingToolAnchors tracks tool-style TranscriptBlocks ("▸ BASH ...",
+	// pendingToolAnchors tracks tool-style TranscriptBlocks ("▸ RUN_COMMAND ...",
 	// "▸ SPAWN ...") that haven't yet been claimed by a panel. FIFO order.
 	pendingToolAnchors []toolAnchor
 

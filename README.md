@@ -18,7 +18,7 @@ TUI, ACP stdio, and the headless one-shot runner.
   output report whether execution is isolated or using the host.
 - Connects external agents through the Agent Client Protocol (ACP) as
   participants, subagents, or main-controller handoffs.
-- Keeps async `BASH` and `SPAWN` work addressable through `TASK wait`,
+- Keeps async `RUN_COMMAND` and `SPAWN` work addressable through `TASK wait`,
   `TASK write`, and `TASK cancel`, including stdin writes to interactive shell
   commands.
 - Projects built-in and ACP tools through one transcript renderer so `Ran`,
@@ -75,7 +75,7 @@ or without a global install:
 npx @onslaughtsnail/caelis --help
 ```
 
-Supported npm platforms: macOS/Linux (`x64`, `arm64`).
+Supported npm platforms: macOS/Linux/Windows (`x64`, `arm64`).
 
 From source:
 

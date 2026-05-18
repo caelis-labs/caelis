@@ -26,7 +26,7 @@ func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (strea
 	cursor := stream.CloneCursor(req.Cursor)
 	task, err := s.resolveTask(ctx, ref)
 	if err == nil {
-		return s.readBash(ctx, task, cursor)
+		return s.readCommand(ctx, task, cursor)
 	}
 	subagent, subagentErr := s.resolveSubagent(ctx, ref)
 	if subagentErr != nil {
@@ -35,7 +35,7 @@ func (s *streamService) Read(ctx context.Context, req stream.ReadRequest) (strea
 	return s.readSubagent(ctx, subagent, cursor)
 }
 
-func (s *streamService) readBash(ctx context.Context, task *bashTask, cursor stream.Cursor) (stream.Snapshot, error) {
+func (s *streamService) readCommand(ctx context.Context, task *commandTask, cursor stream.Cursor) (stream.Snapshot, error) {
 	status, err := task.session.Status(ctx)
 	if err != nil {
 		return stream.Snapshot{}, err
@@ -328,7 +328,7 @@ func (s *streamService) Release(ctx context.Context, ref stream.Ref) error {
 	return nil
 }
 
-func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*bashTask, error) {
+func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*commandTask, error) {
 	if s == nil || s.tasks == nil {
 		return nil, fmt.Errorf("impl/agent/local: terminal service is unavailable")
 	}
@@ -337,7 +337,7 @@ func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*bashT
 	}
 	sessionRef := session.SessionRef{SessionID: ref.SessionID}
 	if ref.TaskID != "" {
-		return s.tasks.lookupBash(ctx, sessionRef, ref.TaskID)
+		return s.tasks.lookupCommand(ctx, sessionRef, ref.TaskID)
 	}
 	if ref.TerminalID == "" {
 		return nil, fmt.Errorf("impl/agent/local: task_id or terminal_id is required")
@@ -371,7 +371,7 @@ func (s *streamService) resolveTask(ctx context.Context, ref stream.Ref) (*bashT
 		if err != nil {
 			return nil, err
 		}
-		return s.tasks.rehydrateBashTask(hydrated)
+		return s.tasks.rehydrateCommandTask(hydrated)
 	}
 	return nil, fmt.Errorf("impl/agent/local: terminal %q not found", ref.TerminalID)
 }

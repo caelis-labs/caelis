@@ -16,7 +16,7 @@ import (
 func isReservedCoreToolName(name string) bool {
 	switch strings.TrimSpace(strings.ToUpper(name)) {
 	case filesystem.ReadToolName, filesystem.WriteToolName, filesystem.PatchToolName,
-		filesystem.ListToolName, filesystem.GlobToolName, filesystem.SearchToolName, shell.BashToolName, task.ToolName, plan.ToolName:
+		filesystem.ListToolName, filesystem.GlobToolName, filesystem.SearchToolName, shell.RunCommandToolName, task.ToolName, plan.ToolName:
 		return true
 	default:
 		return false
@@ -55,14 +55,14 @@ func BuildCoreTools(cfg CoreToolsConfig) ([]tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	bashTool, err := shell.NewBash(shell.BashConfig{Runtime: cfg.Runtime})
+	runCommandTool, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: cfg.Runtime})
 	if err != nil {
 		return nil, err
 	}
 	taskTool := task.New()
 	planTool := plan.New()
 	return []tool.Tool{
-		readTool, writeTool, patchTool, listTool, globTool, searchTool, bashTool, taskTool, planTool,
+		readTool, writeTool, patchTool, listTool, globTool, searchTool, runCommandTool, taskTool, planTool,
 	}, nil
 }
 

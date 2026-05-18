@@ -990,7 +990,7 @@ func TestOpenAICompatMessageTransform_SkipsInvalidToolResponses(t *testing.T) {
 	}
 }
 
-func TestOpenAICompatMessageTransformPreservesTerminalLikeBashPayload(t *testing.T) {
+func TestOpenAICompatMessageTransformPreservesTerminalLikeCommandPayload(t *testing.T) {
 	const deniedPath = "/home/test/go/pkg/mod/cache/download/work.ctyun.cn/git/ctstack_cmp_v2/system/@v/v0.0.0.tmp"
 	llm := newOpenAICompat(Config{
 		Provider: "openai-compatible",
@@ -1001,12 +1001,12 @@ func TestOpenAICompatMessageTransformPreservesTerminalLikeBashPayload(t *testing
 	messages := llm.fromKernelMessages(nil, []model.Message{
 		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 			ID:   "call_1",
-			Name: "BASH",
+			Name: "RUN_COMMAND",
 			Args: jsonArgs(map[string]any{"command": "go build ./... 2>&1"}),
 		}}, ""),
 		{
 			Role: model.RoleTool,
-			Parts: []model.Part{model.NewToolResultJSONPart("call_1", "BASH", map[string]any{
+			Parts: []model.Part{model.NewToolResultJSONPart("call_1", "RUN_COMMAND", map[string]any{
 				"stdout":    "go: writing stat cache: open " + deniedPath + ": read-only file system\n",
 				"stderr":    "",
 				"error":     "Sandbox permission denied. Use a writable workspace path or request elevated permissions.",
@@ -1415,7 +1415,7 @@ func TestGeminiMessageTransform_SkipsToolCallWithoutThoughtSignature(t *testing.
 	_, msgs, err := toGeminiContents(nil, []model.Message{
 		model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 			ID:   "call1",
-			Name: "BASH",
+			Name: "RUN_COMMAND",
 			Args: jsonArgs(map[string]any{"command": "ls"}),
 		}}, "tool planned"),
 	})
@@ -1442,7 +1442,7 @@ func TestGeminiResponseToMessage_PreservesThoughtSignature(t *testing.T) {
 						{
 							ThoughtSignature: []byte("sig-call-1"),
 							FunctionCall: &genai.FunctionCall{
-								Name: "BASH",
+								Name: "RUN_COMMAND",
 								Args: map[string]any{"command": "ls"},
 							},
 						},
@@ -1521,7 +1521,7 @@ func TestGeminiResponseDecode_PartLevelThoughtSignature(t *testing.T) {
 				"content":{
 					"parts":[
 						{
-							"functionCall":{"name":"BASH","args":{"command":"ls"}},
+							"functionCall":{"name":"RUN_COMMAND","args":{"command":"ls"}},
 							"thoughtSignature":"c2lnLXBhcnQtMQ=="
 						}
 					]
@@ -1548,13 +1548,13 @@ func TestGeminiResponseDecode_PartLevelThoughtSignature(t *testing.T) {
 func TestDedupToolCalls_MergesLateThoughtSignature(t *testing.T) {
 	calls := dedupToolCalls([]model.ToolCall{
 		{
-			ID:   "BASH",
-			Name: "BASH",
+			ID:   "RUN_COMMAND",
+			Name: "RUN_COMMAND",
 			Args: jsonArgs(map[string]any{"command": "ls"}),
 		},
 		{
-			ID:               "BASH",
-			Name:             "BASH",
+			ID:               "RUN_COMMAND",
+			Name:             "RUN_COMMAND",
 			Args:             jsonArgs(map[string]any{"command": "ls -la"}),
 			ThoughtSignature: "sig-late-1",
 		},

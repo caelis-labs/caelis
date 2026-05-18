@@ -10,7 +10,7 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	t.Parallel()
 
 	msg := approvalToPromptRequest(&kernel.ApprovalPayload{
-		ToolName:           "BASH",
+		ToolName:           "RUN_COMMAND",
 		RawInput:           map[string]any{"command": "make generate"},
 		Reason:             "additional sandbox permissions require user approval",
 		Justification:      "Do you want to grant a cache path?",

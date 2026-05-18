@@ -24,7 +24,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 		return spec.Tools
 	}
 	out := make([]tool.Tool, 0, len(spec.Tools)+1)
-	hasBash := false
+	hasCommand := false
 	hasSpawn := false
 	hasTask := false
 	hasRequestPermissions := false
@@ -39,12 +39,12 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 				hasRequestPermissions = true
 				out = append(out, runtimeRequestPermissionsTool(r.sessions, activeSession, ref, toolCtx))
 			}
-		case shell.BashToolName:
-			hasBash = true
+		case shell.RunCommandToolName:
+			hasCommand = true
 			if runtime, ok := sandboxRuntimeFromTool(one); ok {
 				r.tasks.registerSandboxRuntime(runtime)
 			}
-			out = append(out, runtimeBashTool{
+			out = append(out, runtimeCommandTool{
 				base:       one,
 				session:    session.CloneSession(activeSession),
 				sessionRef: session.NormalizeSessionRef(ref),
@@ -72,7 +72,7 @@ func (r *Runtime) wrapToolsForRuntime(activeSession session.Session, ref session
 			out = append(out, one)
 		}
 	}
-	if (hasBash || hasSpawn) && !hasTask {
+	if (hasCommand || hasSpawn) && !hasTask {
 		out = append(out, runtimeTaskTool{
 			base:       tasktool.New(),
 			sessionRef: session.NormalizeSessionRef(ref),
@@ -121,18 +121,18 @@ func (tm *taskRuntime) registerSandboxRuntime(runtime sandbox.Runtime) {
 	tm.backends[backend] = runtime
 }
 
-type runtimeBashTool struct {
+type runtimeCommandTool struct {
 	base       tool.Tool
 	session    session.Session
 	sessionRef session.SessionRef
 	tasks      *taskRuntime
 }
 
-func (t runtimeBashTool) Definition() tool.Definition {
+func (t runtimeCommandTool) Definition() tool.Definition {
 	return tool.CloneDefinition(t.base.Definition())
 }
 
-func (t runtimeBashTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
+func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	runtime, ok := sandboxRuntimeFromTool(t.base)
 	if !ok || runtime == nil {
 		return t.base.Call(ctx, call)
@@ -149,14 +149,14 @@ func (t runtimeBashTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if strings.TrimSpace(workdir) == "" && runtime.FileSystem() != nil {
 		workdir, _ = runtime.FileSystem().Getwd()
 	}
-	yieldMS := int(defaultBashYield / time.Millisecond)
+	yieldMS := int(defaultCommandYield / time.Millisecond)
 	if parsed := optionalIntArg(args, "yield_time_ms"); parsed != nil {
 		yieldMS = *parsed
 	}
 	if yieldMS < 0 {
 		yieldMS = 0
 	}
-	req := taskapi.BashStartRequest{
+	req := taskapi.CommandStartRequest{
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),
 		Yield:       time.Duration(yieldMS) * time.Millisecond,
@@ -169,7 +169,7 @@ func (t runtimeBashTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 			observer: call.Observer,
 		},
 	}
-	snapshot, err := t.tasks.StartBash(ctx, t.session, t.sessionRef, runtime, req)
+	snapshot, err := t.tasks.StartCommand(ctx, t.session, t.sessionRef, runtime, req)
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -342,7 +342,7 @@ func (t runtimeTaskTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	parsedYield := optionalIntArg(args, "yield_time_ms")
 	yieldDefaulted := false
 	if strings.EqualFold(strings.TrimSpace(action), "wait") {
-		yieldMS = int(defaultBashYield / time.Millisecond)
+		yieldMS = int(defaultCommandYield / time.Millisecond)
 		yieldDefaulted = parsedYield == nil
 	}
 	if parsedYield != nil {

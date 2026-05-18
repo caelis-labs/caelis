@@ -19,8 +19,8 @@ func (r *Runtime) recoverRuntimeState(ctx context.Context, ref session.SessionRe
 			continue
 		}
 		switch entry.Kind {
-		case task.KindBash:
-			if err := r.recoverBashEntry(ctx, entry); err != nil {
+		case task.KindCommand:
+			if err := r.recoverCommandEntry(ctx, entry); err != nil {
 				return err
 			}
 		case task.KindSubagent:
@@ -32,11 +32,11 @@ func (r *Runtime) recoverRuntimeState(ctx context.Context, ref session.SessionRe
 	return nil
 }
 
-func (r *Runtime) recoverBashEntry(ctx context.Context, entry *task.Entry) error {
+func (r *Runtime) recoverCommandEntry(ctx context.Context, entry *task.Entry) error {
 	if r == nil || r.tasks == nil || entry == nil || !entry.Running {
 		return nil
 	}
-	rehydrated, err := r.tasks.rehydrateBashTask(entry)
+	rehydrated, err := r.tasks.rehydrateCommandTask(entry)
 	if err != nil {
 		return nil
 	}

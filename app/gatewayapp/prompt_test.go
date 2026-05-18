@@ -43,8 +43,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"## Core Stable Rules",
 		"## Shell Tool Permissions",
 		"sandbox_permissions",
-		"BASH is a historical tool identifier",
-		"on Windows, write PowerShell commands",
+		"use RUN_COMMAND for shell work",
 		"Start platform shell commands with default sandbox permissions",
 		"<user_custom_instructions>",
 		"Workspace rule.",
@@ -105,7 +104,7 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	}
 	for _, required := range []string{
 		"Start platform shell commands with default sandbox permissions",
-		"BASH is a historical tool identifier",
+		"use RUN_COMMAND for shell work",
 		"workspace-local reads, builds, tests, and temp writes should stay default",
 		"Use `sandbox_permissions=with_additional_permissions`",
 		"Use `sandbox_permissions=require_escalated` only when host execution is required",
@@ -117,10 +116,10 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	for _, forbidden := range []string{
 		"Default permission mode:",
 		"Sandbox backend request:",
-		"Start BASH commands",
-		"Default BASH execution uses the sandbox route",
-		"Default BASH execution uses the host route",
-		"Default BASH execution uses the host backend",
+		"Start RUN_COMMAND commands",
+		"Default RUN_COMMAND execution uses the sandbox route",
+		"Default RUN_COMMAND execution uses the host route",
+		"Default RUN_COMMAND execution uses the host backend",
 		"Configured readable roots:",
 		"Configured writable roots:",
 		"Configured read-only subpaths:",

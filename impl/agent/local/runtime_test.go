@@ -840,7 +840,7 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 				handle.publishEvent(&session.Event{
 					Type:       session.EventTypeToolCall,
 					Visibility: session.VisibilityUIOnly,
-					Text:       "running external bash",
+					Text:       "running external command",
 					Actor:      session.ActorRef{Kind: session.ActorKindParticipant, ID: "emma", Name: "@emma"},
 					Scope: &session.EventScope{
 						Source: "acp_participant",
@@ -853,8 +853,8 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 					Protocol: &session.EventProtocol{
 						UpdateType: string(session.ProtocolUpdateTypeToolCall),
 						ToolCall: &session.ProtocolToolCall{
-							ID:     "external-bash",
-							Name:   "BASH",
+							ID:     "external-command",
+							Name:   "RUN_COMMAND",
 							Status: "completed",
 						},
 					},
@@ -1668,14 +1668,14 @@ func TestRuntimeRunReplaysPersistedHistoryFromFileStore(t *testing.T) {
 	}
 }
 
-func TestRuntimeRecoveryInterruptsOrphanedBashTask(t *testing.T) {
+func TestRuntimeRecoveryInterruptsOrphanedCommandTask(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	workdir := t.TempDir()
 	sessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{
 		RootDir:            root,
-		SessionIDGenerator: func() string { return "sess-orphan-bash" },
+		SessionIDGenerator: func() string { return "sess-orphan-command" },
 	}))
 	tasks := taskfile.NewStore(taskfile.Config{RootDir: filepath.Join(root, "tasks")})
 	activeSession, err := sessions.StartSession(context.Background(), session.StartSessionRequest{
@@ -1699,15 +1699,15 @@ func TestRuntimeRecoveryInterruptsOrphanedBashTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(runtime1) error = %v", err)
 	}
-	snapshot, err := runtime1.tasks.StartBash(context.Background(), activeSession, activeSession.SessionRef, hostRuntimeForTest(t, workdir), taskapi.BashStartRequest{
+	snapshot, err := runtime1.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, hostRuntimeForTest(t, workdir), taskapi.CommandStartRequest{
 		Command:    shellSleepThenPrintForTest("late output", 5*time.Second),
 		Workdir:    workdir,
 		Yield:      5 * time.Millisecond,
-		ParentCall: "bash-1",
-		ParentTool: shell.BashToolName,
+		ParentCall: "command-1",
+		ParentTool: shell.RunCommandToolName,
 	})
 	if err != nil {
-		t.Fatalf("StartBash() error = %v", err)
+		t.Fatalf("StartCommand() error = %v", err)
 	}
 	if !snapshot.Running {
 		t.Fatalf("snapshot.Running = %v, want true", snapshot.Running)
@@ -2289,7 +2289,7 @@ func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
 	store := newPermissionGrantStore()
 	runtime := &Runtime{clock: func() time.Time { return createdAt }}
 	wrapped := runtime.wrapToolsForRuntime(activeSession, activeSession.SessionRef, agent.AgentSpec{
-		Tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "BASH"}}},
+		Tools: []tool.Tool{tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND"}}},
 	}, runtimeToolContext{
 		mode:   "manual",
 		runID:  "run-1",
@@ -2331,7 +2331,7 @@ func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
 	}
 }
 
-func TestRuntimePolicyFullAccessBlocksDangerousBash(t *testing.T) {
+func TestRuntimePolicyFullAccessBlocksDangerousCommand(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-policy-full")
@@ -2346,18 +2346,18 @@ func TestRuntimePolicyFullAccessBlocksDangerousBash(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	bashTool, err := shell.NewBash(shell.BashConfig{Runtime: hostRuntimeForTest(t, activeSession.CWD)})
+	runCommandTool, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: hostRuntimeForTest(t, activeSession.CWD)})
 	if err != nil {
-		t.Fatalf("shell.NewBash() error = %v", err)
+		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
-	testModel := &denyBashRuntimeModel{}
+	testModel := &denyCommandRuntimeModel{}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
-		Input:      "run dangerous bash",
+		Input:      "run dangerous command",
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
-			Tools: []tool.Tool{bashTool},
+			Tools: []tool.Tool{runCommandTool},
 		},
 	})
 	if err != nil {
@@ -2379,7 +2379,7 @@ func TestRuntimePolicyFullAccessBlocksDangerousBash(t *testing.T) {
 	}
 }
 
-func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.T) {
+func TestRuntimePolicyDefaultCommandEscalationWaitsApprovalThenExecutes(t *testing.T) {
 	t.Parallel()
 
 	sessions, activeSession := newTestSessionService(t, "sess-policy-approval")
@@ -2394,12 +2394,12 @@ func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.
 		t.Fatalf("New() error = %v", err)
 	}
 
-	bashTool, err := shell.NewBash(shell.BashConfig{Runtime: hostRuntimeForTest(t, activeSession.CWD)})
+	runCommandTool, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: hostRuntimeForTest(t, activeSession.CWD)})
 	if err != nil {
-		t.Fatalf("shell.NewBash() error = %v", err)
+		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
 	target := filepath.Join(activeSession.CWD, "approved.txt")
-	testModel := &approveEscalatedBashRuntimeModel{command: shellWriteFileForTest(target, "approved\n")}
+	testModel := &approveEscalatedCommandRuntimeModel{command: shellWriteFileForTest(target, "approved\n")}
 	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
@@ -2408,8 +2408,8 @@ func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.
 		if state.Status != agent.RunLifecycleStatusWaitingApproval || !state.WaitingApproval {
 			t.Fatalf("run state during approval = %+v, want waiting_approval", state)
 		}
-		if req.Approval == nil || req.Approval.ToolCall.Name != shell.BashToolName {
-			t.Fatalf("approval request = %+v, want BASH tool call", req.Approval)
+		if req.Approval == nil || req.Approval.ToolCall.Name != shell.RunCommandToolName {
+			t.Fatalf("approval request = %+v, want RUN_COMMAND tool call", req.Approval)
 		}
 		return agent.ApprovalResponse{
 			Outcome:  "selected",
@@ -2424,7 +2424,7 @@ func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
 			Model: testModel,
-			Tools: []tool.Tool{bashTool},
+			Tools: []tool.Tool{runCommandTool},
 		},
 	})
 	if err != nil {
@@ -2473,7 +2473,7 @@ func TestControllerApprovalRequesterPreservesToolRawInput(t *testing.T) {
 		Mode:  "default",
 		ToolCall: controller.ApprovalToolCall{
 			ID:     "call-1",
-			Name:   "BASH",
+			Name:   "RUN_COMMAND",
 			Kind:   "execute",
 			Title:  "Run command",
 			Status: "pending",
@@ -2522,7 +2522,7 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 		Mode:  "default",
 		ToolCall: controller.ApprovalToolCall{
 			ID:   "call-1",
-			Name: "BASH",
+			Name: "RUN_COMMAND",
 		},
 	})
 	if err != nil {
@@ -2542,10 +2542,10 @@ func TestControllerApprovalRequesterMarksParticipantScope(t *testing.T) {
 	}
 }
 
-func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
+func TestRuntimeCommandYieldThenTaskWaitLoop(t *testing.T) {
 	t.Parallel()
 
-	sessions, activeSession := newTestSessionService(t, "sess-bash-task-loop")
+	sessions, activeSession := newTestSessionService(t, "sess-command-task-loop")
 	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
 	runtime, err := New(Config{
 		Sessions:  sessions,
@@ -2559,17 +2559,17 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 
-	bashTool, err := shell.NewBash(shell.BashConfig{Runtime: hostRuntimeForTest(t, activeSession.CWD)})
+	runCommandTool, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: hostRuntimeForTest(t, activeSession.CWD)})
 	if err != nil {
-		t.Fatalf("shell.NewBash() error = %v", err)
+		t.Fatalf("shell.NewRunCommand() error = %v", err)
 	}
 	result, err := runtime.Run(context.Background(), agent.RunRequest{
 		SessionRef: activeSession.SessionRef,
-		Input:      "run async bash",
+		Input:      "run async command",
 		AgentSpec: agent.AgentSpec{
 			Name:  "chat",
-			Model: &bashTaskLoopRuntimeModel{t: t},
-			Tools: []tool.Tool{bashTool, tasktool.New()},
+			Model: &commandTaskLoopRuntimeModel{t: t},
+			Tools: []tool.Tool{runCommandTool, tasktool.New()},
 		},
 	})
 	if err != nil {
@@ -2593,10 +2593,10 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 		}
 	}
 	if !runningToolUpdate {
-		t.Fatal("expected running tool update after yielded BASH")
+		t.Fatal("expected running tool update after yielded RUN_COMMAND")
 	}
-	if finalText != "async bash done" {
-		t.Fatalf("finalText = %q, want %q", finalText, "async bash done")
+	if finalText != "async command done" {
+		t.Fatalf("finalText = %q, want %q", finalText, "async command done")
 	}
 	runtime.tasks.mu.RLock()
 	activeCount := len(runtime.tasks.tasks)
@@ -2627,7 +2627,7 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 	if !sawTaskID {
 		t.Fatal("expected persisted tool result with task_id metadata")
 	}
-	task, err := runtime.tasks.lookupBash(context.Background(), activeSession.SessionRef, mustSessionTaskID(t, loaded.Events))
+	task, err := runtime.tasks.lookupCommand(context.Background(), activeSession.SessionRef, mustSessionTaskID(t, loaded.Events))
 	if err != nil {
 		t.Fatalf("task fallback lookup error = %v", err)
 	}
@@ -2639,8 +2639,8 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 		t.Fatalf("rehydrated completed task still running: %+v", status)
 	}
 	resultPayload, _ := task.result["result"].(string)
-	if !strings.Contains(resultPayload, "async bash done") {
-		t.Fatalf("rehydrated task result = %q, want async bash done", resultPayload)
+	if !strings.Contains(resultPayload, "async command done") {
+		t.Fatalf("rehydrated task result = %q, want async command done", resultPayload)
 	}
 	terminals := runtime.Streams()
 	if terminals == nil {
@@ -2662,29 +2662,29 @@ func TestRuntimeBashYieldThenTaskWaitLoop(t *testing.T) {
 	if terminalText == "" {
 		terminalText = terminalFramesText(snap.Frames)
 	}
-	if !strings.Contains(terminalText, "async bash done") {
-		t.Fatalf("terminal snapshot text = %q, want async bash done", terminalText)
+	if !strings.Contains(terminalText, "async command done") {
+		t.Fatalf("terminal snapshot text = %q, want async command done", terminalText)
 	}
 }
 
-func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
+func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveCommand(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
-	bashTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, hostRuntimeForTest(t, activeSession.CWD)),
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, hostRuntimeForTest(t, activeSession.CWD)),
 		session:    activeSession,
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
 		"command":       shellInteractiveGreetingForTest(),
 		"workdir":       ".",
 		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
 	}
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
@@ -2706,10 +2706,10 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 	}
 }
 
-func TestTaskToolPayloadReturnsCompletedBashTerminalStreams(t *testing.T) {
+func TestTaskToolPayloadReturnsCompletedCommandTerminalStreams(t *testing.T) {
 	payload := taskToolPayload(taskapi.Snapshot{
 		Ref:     taskapi.Ref{TaskID: "task-1", TerminalID: "term-1"},
-		Kind:    taskapi.KindBash,
+		Kind:    taskapi.KindCommand,
 		State:   taskapi.StateCompleted,
 		Running: false,
 		Result: map[string]any{
@@ -2743,13 +2743,13 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 		t.Fatalf("New() error = %v", err)
 	}
 	sandbox := hostRuntimeForTest(t, activeSession.CWD)
-	snapshot, err := runtime.tasks.StartBash(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.BashStartRequest{
+	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.CommandStartRequest{
 		Command: shellPrintThenSleepForTest("stream terminal", 50*time.Millisecond),
 		Workdir: activeSession.CWD,
 		Yield:   1 * time.Millisecond,
 	})
 	if err != nil {
-		t.Fatalf("StartBash() error = %v", err)
+		t.Fatalf("StartCommand() error = %v", err)
 	}
 	terminals := runtime.Streams()
 	if terminals == nil {
@@ -2799,42 +2799,42 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 	}
 }
 
-func TestRuntimeBashToolUsesDefaultYieldWhenOmitted(t *testing.T) {
+func TestRuntimeRunCommandToolUsesDefaultYieldWhenOmitted(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	targetTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	targetTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
 
-	result := callRuntimeBashTool(t, targetTool, map[string]any{
+	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
 		"command": "printf 'ok'",
 		"workdir": activeSession.CWD,
 	})
 
-	if got := fake.session.lastWait; got != defaultBashYield {
-		t.Fatalf("omitted yield wait = %v, want %v", got, defaultBashYield)
+	if got := fake.session.lastWait; got != defaultCommandYield {
+		t.Fatalf("omitted yield wait = %v, want %v", got, defaultCommandYield)
 	}
 	assertRunningTaskSnapshot(t, result)
 }
 
-func TestRuntimeBashToolKeepsExplicitZeroYield(t *testing.T) {
+func TestRuntimeRunCommandToolKeepsExplicitZeroYield(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	targetTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	targetTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
 
-	result := callRuntimeBashTool(t, targetTool, map[string]any{
+	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
 		"command":       "printf 'ok'",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
@@ -2846,19 +2846,19 @@ func TestRuntimeBashToolKeepsExplicitZeroYield(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
-func TestRuntimeBashToolPassesExplicitYieldThrough(t *testing.T) {
+func TestRuntimeRunCommandToolPassesExplicitYieldThrough(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	targetTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	targetTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
 
-	result := callRuntimeBashTool(t, targetTool, map[string]any{
+	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
 		"command":       "printf 'ok'",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 125,
@@ -2870,22 +2870,22 @@ func TestRuntimeBashToolPassesExplicitYieldThrough(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
-func TestStartBashMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
+func TestStartCommandMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	waitErr := errors.New("terminal session failed")
 	fake := &yieldProbeSandboxRuntime{session: &yieldProbeSandboxSession{waitErr: waitErr, statusRunning: boolPtr(false)}}
 	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
 	runtime.tasks.store = taskStore
 
-	snapshot, err := runtime.tasks.StartBash(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.BashStartRequest{
+	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.CommandStartRequest{
 		Command: "echo hello",
 		Workdir: activeSession.CWD,
 		Yield:   0,
 	})
 	if err != nil {
-		t.Fatalf("StartBash() error = %v", err)
+		t.Fatalf("StartCommand() error = %v", err)
 	}
 	if snapshot.Running {
 		t.Fatalf("snapshot.Running = true, want false")
@@ -2914,26 +2914,26 @@ func TestStartBashMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
 	}
 }
 
-func TestRuntimeTaskWaitErrorDoesNotTerminateRunningBash(t *testing.T) {
+func TestRuntimeTaskWaitErrorDoesNotTerminateRunningCommand(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fakeSession := newYieldProbeSandboxSession()
 	fake := &yieldProbeSandboxRuntime{session: fakeSession}
-	bashTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
 		"command":       "sleep 60",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
 	}
 
 	waitErr := errors.New("transient wait failure")
@@ -2971,22 +2971,22 @@ func TestRuntimeTaskWaitErrorDoesNotTerminateRunningBash(t *testing.T) {
 func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	bashTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
 		"command":       "printf 'ok'",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
 	}
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
@@ -2998,8 +2998,8 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 		"task_id": taskID,
 	})
 
-	if got := fake.session.lastWait; got != defaultBashYield {
-		t.Fatalf("omitted TASK wait yield = %v, want %v", got, defaultBashYield)
+	if got := fake.session.lastWait; got != defaultCommandYield {
+		t.Fatalf("omitted TASK wait yield = %v, want %v", got, defaultCommandYield)
 	}
 	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
 	if got := toolMeta["effective_yield_time_ms"]; got != float64(7000) && got != 7000 {
@@ -3013,22 +3013,22 @@ func TestRuntimeTaskWaitUsesDefaultYieldWhenOmitted(t *testing.T) {
 func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
-	bashTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
 		"command":       "printf 'ok'",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
 	}
 
 	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
@@ -3056,23 +3056,23 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fakeSession := newYieldProbeSandboxSession()
 	fake := &yieldProbeSandboxRuntime{session: fakeSession}
-	bashTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
-	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
 		"command":       "for i in $(seq 1 8); do echo line $i; done",
 		"workdir":       activeSession.CWD,
 		"yield_time_ms": 0,
 	})
-	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
-		t.Fatalf("bash result metadata = %#v, want task_id", bashResult.Metadata)
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
 	}
 
 	fakeSession.stdout = "line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\nline 8\n"
@@ -3120,8 +3120,8 @@ func TestTaskSnapshotToolResultKeepsTerminalStreamsInPayloadOnly(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.BashToolName},
-		tool.Definition{Name: shell.BashToolName},
+		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
+		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			State:   taskapi.StateCompleted,
@@ -3159,8 +3159,8 @@ func TestTaskSnapshotToolResultKeepsRawStreamsAndConciseError(t *testing.T) {
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.BashToolName},
-		tool.Definition{Name: shell.BashToolName},
+		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
+		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			State:   taskapi.StateFailed,
@@ -3198,8 +3198,8 @@ func TestTaskSnapshotToolResultTruncatesTerminalStreamsForDisplayAndModel(t *tes
 
 	hugeStderr := strings.Repeat("permission denied\n", tool.DefaultTruncationPolicy().ByteBudget()/2)
 	result := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.BashToolName},
-		tool.Definition{Name: shell.BashToolName},
+		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
+		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
 			Ref:     taskapi.Ref{TaskID: "task-1", SessionID: "session-1"},
 			State:   taskapi.StateFailed,
@@ -3240,8 +3240,8 @@ func TestTaskSnapshotToolResultKeepsRunningTerminalCursorInMetaOnly(t *testing.T
 	t.Parallel()
 
 	result := taskSnapshotToolResult(
-		tool.Call{ID: "call-1", Name: shell.BashToolName},
-		tool.Definition{Name: shell.BashToolName},
+		tool.Call{ID: "call-1", Name: shell.RunCommandToolName},
+		tool.Definition{Name: shell.RunCommandToolName},
 		taskapi.Snapshot{
 			Ref: taskapi.Ref{
 				SessionID:  "session-1",
@@ -3401,7 +3401,7 @@ func TestTaskSnapshotToolResultKeepsSubagentTerminalRefInMetaOnly(t *testing.T) 
 func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	runtime.tasks.mu.Lock()
 	runtime.tasks.subagents["task-1"] = &subagentTask{
 		ref:        taskapi.Ref{TaskID: "task-1", SessionID: "child-session", TerminalID: "subagent-task-1"},
@@ -3448,7 +3448,7 @@ func TestRuntimeTaskToolResolvesSubagentHandle(t *testing.T) {
 func TestRuntimeTaskToolScopesSubagentHandleToSession(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	runtime.tasks.mu.Lock()
 	for i := 0; i < 32; i++ {
 		taskID := fmt.Sprintf("other-task-%02d", i)
@@ -3494,7 +3494,7 @@ func TestRuntimeTaskToolScopesSubagentHandleToSession(t *testing.T) {
 func TestRuntimeTaskToolRejectsAmbiguousSubagentHandle(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	runtime.tasks.mu.Lock()
 	runtime.tasks.subagents["task-a"] = &subagentTask{
 		ref:        taskapi.Ref{TaskID: "task-a", SessionID: "child-a"},
@@ -3532,25 +3532,25 @@ func TestRuntimeTaskToolRejectsAmbiguousSubagentHandle(t *testing.T) {
 	}
 }
 
-func TestRuntimeBashToolDoesNotFetchResultWhileStillRunning(t *testing.T) {
+func TestRuntimeRunCommandToolDoesNotFetchResultWhileStillRunning(t *testing.T) {
 	t.Parallel()
 
-	_, activeSession, runtime := newRuntimeBashToolTestHarness(t)
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
 	fake := &runningOnlyProbeSandboxRuntime{session: &runningOnlyProbeSandboxSession{}}
-	targetTool := runtimeBashTool{
-		base:       mustRuntimeBashTool(t, fake),
+	targetTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
 		session:    session.CloneSession(activeSession),
 		sessionRef: activeSession.SessionRef,
 		tasks:      runtime.tasks,
 	}
 
-	result := callRuntimeBashTool(t, targetTool, map[string]any{
+	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
 		"command": "printf 'still-running'",
 		"workdir": activeSession.CWD,
 	})
 
-	if got := fake.session.lastWait; got != defaultBashYield {
-		t.Fatalf("omitted yield wait = %v, want %v", got, defaultBashYield)
+	if got := fake.session.lastWait; got != defaultCommandYield {
+		t.Fatalf("omitted yield wait = %v, want %v", got, defaultCommandYield)
 	}
 	assertRunningTaskSnapshot(t, result)
 }
