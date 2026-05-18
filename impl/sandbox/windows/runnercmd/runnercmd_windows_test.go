@@ -9,12 +9,14 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerproto"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
 )
 
 func TestRunnerCommandEmitsOutputAndExit(t *testing.T) {
 	var input bytes.Buffer
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
-		Command: "Write-Output runner-ok",
+		Command:       "Write-Output runner-ok",
+		CapabilitySID: testCapabilitySIDs(t),
 	})
 	if err != nil {
 		t.Fatalf("NewFrame() error = %v", err)
@@ -79,9 +81,10 @@ func TestRunnerCommandUsesUTF8AndReadHostStdin(t *testing.T) {
 	var input bytes.Buffer
 	writer := runnerproto.NewWriter(&input)
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
-		Command:   "$name = Read-Host '请输入你的名字'; Write-Host ('你好，' + $name + '！')",
-		StdinOpen: true,
-		Timeout:   10 * time.Second,
+		Command:       "$name = Read-Host '请输入你的名字'; Write-Host ('你好，' + $name + '！')",
+		StdinOpen:     true,
+		Timeout:       10 * time.Second,
+		CapabilitySID: testCapabilitySIDs(t),
 	})
 	if err != nil {
 		t.Fatalf("NewFrame(spawn) error = %v", err)
@@ -198,11 +201,12 @@ func readRunnerOutputForTest(t *testing.T, output *bytes.Buffer) (string, string
 func TestRunnerTTYCommandUsesConPTY(t *testing.T) {
 	var input bytes.Buffer
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
-		Command: "Write-Output tty-ok",
-		TTY:     true,
-		Rows:    24,
-		Cols:    80,
-		Timeout: 10 * time.Second,
+		Command:       "Write-Output tty-ok",
+		TTY:           true,
+		Rows:          24,
+		Cols:          80,
+		Timeout:       10 * time.Second,
+		CapabilitySID: testCapabilitySIDs(t),
 	})
 	if err != nil {
 		t.Fatalf("NewFrame() error = %v", err)
@@ -275,4 +279,16 @@ func containsString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func testCapabilitySIDs(t *testing.T) []string {
+	t.Helper()
+	sids, err := win32.DeriveCapabilitySIDs("internetClient")
+	if err != nil {
+		t.Fatalf("DeriveCapabilitySIDs() error = %v", err)
+	}
+	if len(sids.Group) == 0 {
+		t.Fatalf("DeriveCapabilitySIDs() = %#v, want capability group SID", sids)
+	}
+	return sids.Group
 }

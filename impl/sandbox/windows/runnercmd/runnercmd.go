@@ -67,15 +67,15 @@ func (r *runner) runSpawn(spawn runnerproto.Spawn) error {
 	if strings.TrimSpace(spawn.Command) == "" {
 		return fmt.Errorf("command runner: command is required")
 	}
+	if len(spawn.CapabilitySID) == 0 {
+		return fmt.Errorf("command runner: capability SIDs are required")
+	}
 	if spawn.TTY {
 		return r.runTTY(spawn)
 	}
 	env, err := mergeEnv(spawn.Env, spawn.Network, spawn.CWD)
 	if err != nil {
 		return err
-	}
-	if len(spawn.CapabilitySID) == 0 {
-		return fmt.Errorf("command runner: capability SIDs are required")
 	}
 	token, releaseToken, err := restrictedToken(spawn.CapabilitySID)
 	if err != nil {
