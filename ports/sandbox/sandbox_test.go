@@ -382,6 +382,26 @@ func TestNewAutoBackendFallsBackToHostWithInstallHint(t *testing.T) {
 	}
 }
 
+func TestCandidateBackendsForWindowsDefaultsToElevated(t *testing.T) {
+	candidates, err := candidateBackendsForGOOS("windows", "")
+	if err != nil {
+		t.Fatalf("candidateBackendsForGOOS(windows, auto) error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0] != BackendWindowsElevated {
+		t.Fatalf("candidateBackendsForGOOS(windows, auto) = %v, want [%s]", candidates, BackendWindowsElevated)
+	}
+}
+
+func TestCandidateBackendsForWindowsRejectsUnixBackends(t *testing.T) {
+	_, err := candidateBackendsForGOOS("windows", BackendBwrap)
+	if err == nil {
+		t.Fatal("candidateBackendsForGOOS(windows, bwrap) error = nil, want unsupported backend error")
+	}
+	if !strings.Contains(err.Error(), "unsupported on windows") {
+		t.Fatalf("candidateBackendsForGOOS(windows, bwrap) error = %v, want unsupported on windows", err)
+	}
+}
+
 type fakeBackendFactory struct {
 	backend Backend
 	err     error

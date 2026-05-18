@@ -88,15 +88,6 @@ func (s *Store) findDocumentPath(sessionID string, workspaceKey string) (string,
 	}
 }
 
-func syncDir(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
-}
-
 func (s *Store) listDocumentPaths() ([]string, error) {
 	paths := make([]string, 0)
 	err := filepath.WalkDir(s.rootDir, func(path string, d fs.DirEntry, err error) error {

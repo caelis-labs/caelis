@@ -8,7 +8,7 @@ import (
 
 func TestDefaultSkillSandboxRootsIncludeGlobalAndWorkspaceSkillDirs(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeForGatewayAppTest(t, home)
 	workspace := filepath.Join(t.TempDir(), "workspace")
 
 	got := defaultSkillSandboxRoots(workspace)
@@ -26,7 +26,7 @@ func TestDefaultSkillSandboxRootsIncludeGlobalAndWorkspaceSkillDirs(t *testing.T
 
 func TestSandboxPolicyRootMetadataIncludesConfiguredAndSkillWriteRoots(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeForGatewayAppTest(t, home)
 	workspace := filepath.Join(t.TempDir(), "workspace")
 
 	got := withSandboxPolicyRootMetadata(map[string]any{
@@ -63,7 +63,7 @@ func TestSandboxPolicyRootMetadataIncludesConfiguredAndSkillWriteRoots(t *testin
 
 func TestEffectiveSandboxConfigAddsSkillWritableRootsWithoutMutatingStoredConfig(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeForGatewayAppTest(t, home)
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	stored := SandboxConfig{WritableRoots: []string{"/configured-write"}}
 

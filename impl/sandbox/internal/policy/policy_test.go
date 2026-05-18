@@ -1,6 +1,8 @@
 package policy
 
 import (
+	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 
@@ -10,21 +12,23 @@ import (
 func TestDefaultMergesConstraintPathRules(t *testing.T) {
 	t.Parallel()
 
+	workspace := testWorkspaceRoot()
+	readOnly := testReadOnlyRoot()
 	p := Default(sandbox.Config{
 		CWD: "/sandbox-cwd",
 	}, sandbox.Constraints{
 		Permission: sandbox.PermissionWorkspaceWrite,
 		PathRules: []sandbox.PathRule{
-			{Path: "/workspace", Access: sandbox.PathAccessReadWrite},
-			{Path: "/read-only", Access: sandbox.PathAccessReadOnly},
+			{Path: workspace, Access: sandbox.PathAccessReadWrite},
+			{Path: readOnly, Access: sandbox.PathAccessReadOnly},
 		},
 	})
 
-	if !slices.Contains(p.WritableRoots, "/workspace") {
-		t.Fatalf("WritableRoots = %#v, want /workspace from constraints", p.WritableRoots)
+	if !slices.Contains(p.WritableRoots, workspace) {
+		t.Fatalf("WritableRoots = %#v, want %s from constraints", p.WritableRoots, workspace)
 	}
-	if !slices.Contains(p.ReadableRoots, "/read-only") {
-		t.Fatalf("ReadableRoots = %#v, want /read-only from constraints", p.ReadableRoots)
+	if !slices.Contains(p.ReadableRoots, readOnly) {
+		t.Fatalf("ReadableRoots = %#v, want %s from constraints", p.ReadableRoots, readOnly)
 	}
 	if slices.Contains(p.HiddenRoots, "/hidden") {
 		t.Fatalf("HiddenRoots = %#v, did not expect /hidden without hidden path rule", p.HiddenRoots)
@@ -34,12 +38,14 @@ func TestDefaultMergesConstraintPathRules(t *testing.T) {
 func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
 	t.Parallel()
 
+	workspace := testWorkspaceRoot()
+	gitPath := filepath.Join(workspace, ".git")
 	p := Default(sandbox.Config{
-		CWD: "/workspace",
+		CWD: workspace,
 	}, sandbox.Constraints{
 		Permission: sandbox.PermissionWorkspaceWrite,
 		PathRules: []sandbox.PathRule{
-			{Path: "/workspace", Access: sandbox.PathAccessReadWrite},
+			{Path: workspace, Access: sandbox.PathAccessReadWrite},
 		},
 	})
 	if !slices.Contains(p.ReadOnlySubpaths, ".git") {
@@ -47,12 +53,12 @@ func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
 	}
 
 	p = Default(sandbox.Config{
-		CWD: "/workspace",
+		CWD: workspace,
 	}, sandbox.Constraints{
 		Permission: sandbox.PermissionWorkspaceWrite,
 		PathRules: []sandbox.PathRule{
-			{Path: "/workspace", Access: sandbox.PathAccessReadWrite},
-			{Path: "/workspace/.git", Access: sandbox.PathAccessReadWrite},
+			{Path: workspace, Access: sandbox.PathAccessReadWrite},
+			{Path: gitPath, Access: sandbox.PathAccessReadWrite},
 		},
 	})
 	if slices.Contains(p.ReadOnlySubpaths, ".git") {
@@ -60,11 +66,11 @@ func TestDefaultKeepsGitReadOnlyUnlessExplicitGitPathIsWritable(t *testing.T) {
 	}
 
 	p = Default(sandbox.Config{
-		CWD: "/workspace",
+		CWD: workspace,
 	}, sandbox.Constraints{
 		Permission: sandbox.PermissionWorkspaceWrite,
 		PathRules: []sandbox.PathRule{
-			{Path: "/workspace/.git/hooks", Access: sandbox.PathAccessReadWrite},
+			{Path: filepath.Join(gitPath, "hooks"), Access: sandbox.PathAccessReadWrite},
 		},
 	})
 	if slices.Contains(p.ReadOnlySubpaths, ".git") {
@@ -92,16 +98,31 @@ func TestDefaultMergesHiddenPathRules(t *testing.T) {
 func TestDefaultFullAccessIgnoresConstraintPathRules(t *testing.T) {
 	t.Parallel()
 
+	workspace := testWorkspaceRoot()
 	p := Default(sandbox.Config{
 		CWD: "/sandbox-cwd",
 	}, sandbox.Constraints{
 		Permission: sandbox.PermissionFullAccess,
 		PathRules: []sandbox.PathRule{
-			{Path: "/workspace", Access: sandbox.PathAccessReadWrite},
+			{Path: workspace, Access: sandbox.PathAccessReadWrite},
 		},
 	})
 
 	if len(p.WritableRoots) != 0 || len(p.ReadableRoots) != 0 {
 		t.Fatalf("full access roots = readable %#v writable %#v, want unrestricted nil roots", p.ReadableRoots, p.WritableRoots)
 	}
+}
+
+func testWorkspaceRoot() string {
+	if runtime.GOOS == "windows" {
+		return `C:\workspace`
+	}
+	return "/workspace"
+}
+
+func testReadOnlyRoot() string {
+	if runtime.GOOS == "windows" {
+		return `C:\read-only`
+	}
+	return "/read-only"
 }

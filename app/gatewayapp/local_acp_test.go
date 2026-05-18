@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -196,7 +197,7 @@ func TestRegisterBuiltinACPAgentInstallRunsNPMEvenWhenPATHAdapterExists(t *testi
 		t.Fatalf("stored agents = %#v, want one", doc.Agents)
 	}
 	agent := doc.Agents[0]
-	wantCommand := filepath.Join(stack.storeDir, "acp-agents", "npm", "node_modules", ".bin", "claude-agent-acp")
+	wantCommand := managedACPAgentBinPath(stack.managedACPAgentRoot(), "claude-agent-acp")
 	if agent.Command != wantCommand {
 		t.Fatalf("stored command = %q, want managed adapter %q", agent.Command, wantCommand)
 	}
@@ -235,7 +236,7 @@ func TestRegisterBuiltinACPAgentInstallUpdatesManagedAdapterOnRepeatedRuns(t *te
 	if len(doc.Agents) != 1 {
 		t.Fatalf("stored agents = %#v, want one", doc.Agents)
 	}
-	wantCommand := filepath.Join(stack.storeDir, "acp-agents", "npm", "node_modules", ".bin", "codex-acp")
+	wantCommand := managedACPAgentBinPath(stack.managedACPAgentRoot(), "codex-acp")
 	if doc.Agents[0].Command != wantCommand {
 		t.Fatalf("stored command = %q, want managed adapter %q", doc.Agents[0].Command, wantCommand)
 	}
@@ -268,7 +269,7 @@ func TestRegisterBuiltinACPAgentInstallUsesManagedAdapter(t *testing.T) {
 		t.Fatalf("stored agents = %#v, want one", doc.Agents)
 	}
 	agent := doc.Agents[0]
-	wantCommand := filepath.Join(stack.storeDir, "acp-agents", "npm", "node_modules", ".bin", "claude-agent-acp")
+	wantCommand := managedACPAgentBinPath(stack.managedACPAgentRoot(), "claude-agent-acp")
 	if agent.Command != wantCommand {
 		t.Fatalf("stored command = %q, want %q", agent.Command, wantCommand)
 	}
@@ -596,17 +597,76 @@ func repoRootForGatewayAppTest(t *testing.T) string {
 func writeExecutableForGatewayAppTest(t *testing.T, dir string, name string, body string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
+	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+		path += ".cmd"
+		if strings.Contains(body, "install failed") {
+			body = "@echo off\r\necho install failed 1>&2\r\nexit /b 7\r\n"
+		} else {
+			body = "@echo off\r\nexit /b 0\r\n"
+		}
+	}
 	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v", path, err)
 	}
-	if err := os.Chmod(path, 0o755); err != nil {
-		t.Fatalf("Chmod(%s) error = %v", path, err)
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(path, 0o755); err != nil {
+			t.Fatalf("Chmod(%s) error = %v", path, err)
+		}
 	}
 	return path
 }
 
 func writeFakeNPMInstallerForGatewayAppTest(t *testing.T, dir string) string {
 	t.Helper()
+	if runtime.GOOS == "windows" {
+		scriptPath := filepath.Join(dir, "npm-installer.ps1")
+		script := `$ErrorActionPreference = 'Stop'
+$prefix = ''
+$pkg = ''
+for ($i = 0; $i -lt $args.Count; $i++) {
+  $arg = $args[$i]
+  if ($arg -eq '--prefix') {
+    $i++
+    if ($i -lt $args.Count) {
+      $prefix = $args[$i]
+    }
+    continue
+  }
+  if ($arg -like '@zed-industries/codex-acp@*' -or $arg -like '@agentclientprotocol/claude-agent-acp@*') {
+    $pkg = $arg
+  }
+}
+if ([string]::IsNullOrWhiteSpace($prefix)) {
+  Write-Error 'missing --prefix'
+  exit 2
+}
+$bin = Join-Path $prefix 'node_modules\.bin'
+New-Item -ItemType Directory -Force -Path $bin | Out-Null
+$name = ''
+switch -Wildcard ($pkg) {
+  '@zed-industries/codex-acp@*' { $name = 'codex-acp.cmd'; break }
+  '@agentclientprotocol/claude-agent-acp@*' { $name = 'claude-agent-acp.cmd'; break }
+}
+if ([string]::IsNullOrWhiteSpace($name)) {
+  Write-Error "unexpected package: $pkg"
+  exit 2
+}
+if ($env:CAELIS_FAKE_NPM_LOG) {
+  Add-Content -LiteralPath $env:CAELIS_FAKE_NPM_LOG -Value $pkg
+}
+$adapter = "@echo off" + [Environment]::NewLine + "exit /b 0" + [Environment]::NewLine
+Set-Content -LiteralPath (Join-Path $bin $name) -Value $adapter -NoNewline -Encoding ASCII
+exit 0
+`
+		if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", scriptPath, err)
+		}
+		body := `@echo off
+powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "%~dp0npm-installer.ps1" %*
+exit /b %ERRORLEVEL%
+`
+		return writeCommandFileForGatewayAppTest(t, dir, "npm.cmd", body)
+	}
 	body := `#!/bin/sh
 set -eu
 prefix=""
@@ -647,4 +707,18 @@ SCRIPT
 chmod +x "$bin/$name"
 `
 	return writeExecutableForGatewayAppTest(t, dir, "npm", body)
+}
+
+func writeCommandFileForGatewayAppTest(t *testing.T, dir string, name string, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
+	if runtime.GOOS != "windows" {
+		if err := os.Chmod(path, 0o755); err != nil {
+			t.Fatalf("Chmod(%s) error = %v", path, err)
+		}
+	}
+	return path
 }

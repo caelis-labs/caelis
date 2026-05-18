@@ -314,8 +314,9 @@ func TestProjectSessionEventACPNativeGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("ReadFile(%s) error = %v\nactual:\n%s", path, err, actual)
 			}
-			if actual != string(expected) {
-				t.Fatalf("ACP event golden mismatch for %s\nexpected:\n%s\nactual:\n%s", path, string(expected), actual)
+			expectedText := strings.ReplaceAll(string(expected), "\r\n", "\n")
+			if actual != expectedText {
+				t.Fatalf("ACP event golden mismatch for %s\nexpected:\n%s\nactual:\n%s", path, expectedText, actual)
 			}
 		})
 	}

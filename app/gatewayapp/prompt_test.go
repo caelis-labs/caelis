@@ -9,7 +9,7 @@ import (
 
 func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	globalHome := t.TempDir()
-	t.Setenv("HOME", globalHome)
+	setHomeForGatewayAppTest(t, globalHome)
 	t.Setenv("SHELL", "/bin/zsh")
 	t.Setenv("TZ", "Asia/Shanghai")
 
@@ -131,7 +131,7 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 
 func TestBuildSystemPromptPreservesSessionOverridePrecedence(t *testing.T) {
 	globalHome := t.TempDir()
-	t.Setenv("HOME", globalHome)
+	setHomeForGatewayAppTest(t, globalHome)
 
 	if err := os.MkdirAll(filepath.Join(globalHome, ".agents"), 0o755); err != nil {
 		t.Fatalf("mkdir global agents: %v", err)

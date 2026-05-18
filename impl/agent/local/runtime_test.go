@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1699,7 +1700,7 @@ func TestRuntimeRecoveryInterruptsOrphanedBashTask(t *testing.T) {
 		t.Fatalf("New(runtime1) error = %v", err)
 	}
 	snapshot, err := runtime1.tasks.StartBash(context.Background(), activeSession, activeSession.SessionRef, hostRuntimeForTest(t, workdir), taskapi.BashStartRequest{
-		Command:    "sleep 5; printf 'late output'",
+		Command:    shellSleepThenPrintForTest("late output", 5*time.Second),
 		Workdir:    workdir,
 		Yield:      5 * time.Millisecond,
 		ParentCall: "bash-1",
@@ -1711,6 +1712,14 @@ func TestRuntimeRecoveryInterruptsOrphanedBashTask(t *testing.T) {
 	if !snapshot.Running {
 		t.Fatalf("snapshot.Running = %v, want true", snapshot.Running)
 	}
+	t.Cleanup(func() {
+		runtime1.tasks.mu.RLock()
+		task := runtime1.tasks.tasks[snapshot.Ref.TaskID]
+		runtime1.tasks.mu.RUnlock()
+		if task != nil && task.session != nil {
+			_ = task.session.Terminate(context.Background())
+		}
+	})
 
 	reopenedSessions := sessionfile.NewService(sessionfile.NewStore(sessionfile.Config{RootDir: root}))
 	runtime2, err := New(Config{
@@ -2195,7 +2204,7 @@ func TestRuntimePolicyUnknownModeFallsBackToDefaultPolicy(t *testing.T) {
 	result, err := wrapped[0].Call(context.Background(), tool.Call{
 		ID:    "call-1",
 		Name:  "WRITE",
-		Input: []byte(`{"path":"/etc/passwd"}`),
+		Input: []byte(`{"path":` + jsonStringForTest(policyOutsidePathForRuntimeTest()) + `}`),
 	})
 	if err != nil {
 		t.Fatalf("wrapped tool Call() error = %v", err)
@@ -2390,7 +2399,7 @@ func TestRuntimePolicyDefaultBashEscalationWaitsApprovalThenExecutes(t *testing.
 		t.Fatalf("shell.NewBash() error = %v", err)
 	}
 	target := filepath.Join(activeSession.CWD, "approved.txt")
-	testModel := &approveEscalatedBashRuntimeModel{command: "printf 'approved\\n' > " + shellQuoteForTest(target)}
+	testModel := &approveEscalatedBashRuntimeModel{command: shellWriteFileForTest(target, "approved\n")}
 	requester := approvalRequesterFunc(func(ctx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		state, err := runtime.RunState(ctx, activeSession.SessionRef)
 		if err != nil {
@@ -2669,9 +2678,9 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 		tasks:      runtime.tasks,
 	}
 	bashResult := callRuntimeBashTool(t, bashTool, map[string]any{
-		"command":       "printf 'waiting\\n'; read name; printf 'hello %s\\n' \"$name\"",
+		"command":       shellInteractiveGreetingForTest(),
 		"workdir":       ".",
-		"yield_time_ms": 0,
+		"yield_time_ms": shellRunningYieldMillisForTest(0),
 	})
 	taskID, _ := testToolResultRuntimeMeta(t, bashResult, "task")["task_id"].(string)
 	if strings.TrimSpace(taskID) == "" {
@@ -2686,7 +2695,7 @@ func TestRuntimeTaskWriteAddsLineTerminatorForInteractiveBash(t *testing.T) {
 		"action":        "write",
 		"task_id":       taskID,
 		"input":         "Codex",
-		"yield_time_ms": 250,
+		"yield_time_ms": shellCompletionYieldMillisForTest(250),
 	})
 	if len(taskResult.Content) == 0 || taskResult.Content[0].JSON == nil {
 		t.Fatalf("task result content = %#v, want json payload", taskResult.Content)
@@ -2735,7 +2744,7 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 	}
 	sandbox := hostRuntimeForTest(t, activeSession.CWD)
 	snapshot, err := runtime.tasks.StartBash(context.Background(), activeSession, activeSession.SessionRef, sandbox, taskapi.BashStartRequest{
-		Command: "printf 'stream terminal'; sleep 0.05",
+		Command: shellPrintThenSleepForTest("stream terminal", 50*time.Millisecond),
 		Workdir: activeSession.CWD,
 		Yield:   1 * time.Millisecond,
 	})
@@ -2746,7 +2755,11 @@ func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
 	if terminals == nil {
 		t.Fatal("Streams() = nil")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	subscribeTimeout := 2 * time.Second
+	if goruntime.GOOS == "windows" {
+		subscribeTimeout = 8 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), subscribeTimeout)
 	defer cancel()
 
 	var (

@@ -37,11 +37,12 @@ const (
 type Backend string
 
 const (
-	BackendHost     Backend = "host"
-	BackendSeatbelt Backend = "seatbelt"
-	BackendBwrap    Backend = "bwrap"
-	BackendLandlock Backend = "landlock"
-	BackendCustom   Backend = "custom"
+	BackendHost            Backend = "host"
+	BackendSeatbelt        Backend = "seatbelt"
+	BackendBwrap           Backend = "bwrap"
+	BackendLandlock        Backend = "landlock"
+	BackendWindowsElevated Backend = "windows-elevated"
+	BackendCustom          Backend = "custom"
 )
 
 // Route identifies one preferred execution route.

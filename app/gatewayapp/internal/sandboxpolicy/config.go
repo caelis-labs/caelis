@@ -18,6 +18,8 @@ func NormalizeBackend(backend string) (string, error) {
 		return "bwrap", nil
 	case "landlock":
 		return "landlock", nil
+	case "windows", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		return "windows-elevated", nil
 	default:
 		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
 	}

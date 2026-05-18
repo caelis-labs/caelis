@@ -446,6 +446,12 @@ func (s *AsyncSession) Status() SessionStatus {
 }
 
 func buildAsyncSessionCommand(ctx context.Context, command string, tty bool) (*exec.Cmd, error) {
+	if stdruntime.GOOS == "windows" {
+		if tty {
+			return nil, fmt.Errorf("tty mode is not supported by cmdsession on windows")
+		}
+		return exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command), nil
+	}
 	if !tty {
 		return exec.CommandContext(ctx, "bash", "-lc", command), nil
 	}

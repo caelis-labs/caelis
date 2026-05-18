@@ -150,8 +150,12 @@ func buildRegisteredRuntime(backend Backend, cfg Config) (Runtime, error) {
 }
 
 func candidateBackends(requested Backend) ([]Backend, error) {
+	return candidateBackendsForGOOS(runtime.GOOS, requested)
+}
+
+func candidateBackendsForGOOS(goos string, requested Backend) ([]Backend, error) {
 	requested = Backend(strings.TrimSpace(string(requested)))
-	switch runtime.GOOS {
+	switch goos {
 	case "darwin":
 		if requested == "" {
 			return []Backend{BackendSeatbelt}, nil
@@ -168,9 +172,20 @@ func candidateBackends(requested Backend) ([]Backend, error) {
 			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on linux", requested)
 		}
 		return []Backend{requested}, nil
+	case "windows":
+		if requested == "" {
+			return []Backend{BackendWindowsElevated}, nil
+		}
+		if requested != BackendWindowsElevated && requested != BackendHost {
+			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on windows", requested)
+		}
+		return []Backend{requested}, nil
 	default:
 		if requested == "" {
-			return []Backend{BackendBwrap}, nil
+			return nil, nil
+		}
+		if requested != BackendHost {
+			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on %s", requested, goos)
 		}
 		return []Backend{requested}, nil
 	}
@@ -182,6 +197,8 @@ func sandboxInstallHint() string {
 		return linuxSandboxInstallHint()
 	case "darwin":
 		return "macOS sandboxing uses sandbox-exec/seatbelt and should be available by default; update macOS or use manual mode until the backend is available."
+	case "windows":
+		return "Enable and complete Windows Elevated sandbox setup, or use manual mode until the backend is available."
 	default:
 		return "Install a supported sandbox backend for this OS or use manual mode until one is available."
 	}

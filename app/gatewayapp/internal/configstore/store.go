@@ -208,18 +208,6 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 	return ops.FsyncDir(dir)
 }
 
-func syncDir(dir string) error {
-	f, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := f.Sync(); err != nil {
-		return err
-	}
-	return nil
-}
-
 func DedupeAgentConfigs(configs []AgentConfig) []AgentConfig {
 	if len(configs) == 0 {
 		return nil

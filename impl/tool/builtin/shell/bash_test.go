@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -93,8 +94,12 @@ func TestBashCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBash() error = %v", err)
 	}
+	command := "printf 'module cache denied\\n' >&2; exit 7"
+	if runtime.GOOS == "windows" {
+		command = `[Console]::Error.WriteLine('module cache denied'); exit 7`
+	}
 	raw, err := json.Marshal(map[string]any{
-		"command": "printf 'module cache denied\\n' >&2; exit 7",
+		"command": command,
 		"workdir": dir,
 	})
 	if err != nil {

@@ -8,10 +8,12 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1466,7 +1468,11 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	repo := repoRootForGatewayDriverTest(t)
 	root := t.TempDir()
 	workdir := t.TempDir()
-	agentBin := filepath.Join(t.TempDir(), "e2eagent")
+	agentBin := filepath.Join(os.TempDir(), fmt.Sprintf("caelis-e2eagent-%d", time.Now().UnixNano()))
+	if runtime.GOOS == "windows" {
+		agentBin += ".exe"
+	}
+	t.Cleanup(func() { _ = os.Remove(agentBin) })
 	build := exec.Command("go", "build", "-o", agentBin, "./internal/acpe2eagent")
 	build.Dir = repo
 	if output, err := build.CombinedOutput(); err != nil {
@@ -1511,7 +1517,12 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if err != nil {
 		t.Fatalf("StartAgentSubagent(first) error = %v", err)
 	}
-	defer closeGatewayDriverTestTurn(t, first)
+	defer func() {
+		closeGatewayDriverTestTurn(t, first)
+		if runtime.GOOS == "windows" {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}()
 
 	_, err = driver.StartAgentSubagent(ctx, "copilot", "second prompt")
 	if err == nil {
@@ -2106,6 +2117,10 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 	started := filepath.Join(t.TempDir(), "npm-started")
 	npmPath := filepath.Join(binDir, "npm")
 	body := "#!/bin/sh\nprintf started > \"$CAELIS_NPM_STARTED\"\nwhile true; do /bin/sleep 1; done\n"
+	if runtime.GOOS == "windows" {
+		npmPath += ".cmd"
+		body = "@echo off\r\necho started> \"%CAELIS_NPM_STARTED%\"\r\n:loop\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n"
+	}
 	if err := os.WriteFile(npmPath, []byte(body), 0o755); err != nil {
 		t.Fatalf("WriteFile(npm) error = %v", err)
 	}
@@ -2575,7 +2590,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 	ctx := context.Background()
 	home := t.TempDir()
 	workspace := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeForGatewayDriverTest(t, home)
 
 	globalSkill := filepath.Join(home, ".agents", "skills", "echo")
 	workspaceSkill := filepath.Join(workspace, ".agents", "skills", "lint")
@@ -3076,6 +3091,21 @@ func repoRootForGatewayDriverTest(t *testing.T) string {
 		}
 		dir = parent
 	}
+}
+
+func setHomeForGatewayDriverTest(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	if runtime.GOOS != "windows" {
+		return
+	}
+	t.Setenv("USERPROFILE", home)
+	volume := filepath.VolumeName(home)
+	if volume == "" {
+		return
+	}
+	t.Setenv("HOMEDRIVE", volume)
+	t.Setenv("HOMEPATH", strings.TrimPrefix(home, volume))
 }
 
 func agentCandidatesHaveName(candidates []AgentCandidate, name string) bool {

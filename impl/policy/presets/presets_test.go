@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -15,7 +16,7 @@ import (
 func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx("/workspace/notes.md"))
+	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "notes.md")))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -23,7 +24,7 @@ func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx("/workspace/main.go"))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "main.go")))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -35,7 +36,7 @@ func TestAutoReviewModeAllowsWorkspaceWrites(t *testing.T) {
 func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 	t.Parallel()
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx("/workspace/main.go"))
+	decision, err := AutoReviewMode().DecideTool(context.Background(), writeCtx(filepath.Join(testWorkspaceRoot(), "main.go")))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -43,7 +44,7 @@ func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx("/etc/passwd"))
+	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx(testOutsidePath()))
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
@@ -55,7 +56,7 @@ func TestDefaultModeRestrictsWriteRoots(t *testing.T) {
 func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 	t.Parallel()
 
-	input := writeCtx("/workspace/main.go")
+	input := writeCtx(filepath.Join(testWorkspaceRoot(), "main.go"))
 	input.Call.Input = []byte(`{"path":`)
 
 	_, err := AutoReviewMode().DecideTool(context.Background(), input)
@@ -68,8 +69,8 @@ func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 }
 
 func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
-	home := "/home/caelis-policy-test"
-	t.Setenv("HOME", home)
+	home := t.TempDir()
+	setHomeForPresetsTest(t, home)
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
 
 	decision, err := AutoReviewMode().DecideTool(context.Background(), readCtx(configPath))
@@ -90,11 +91,12 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 }
 
 func TestDefaultModeReadConstraintsIncludeDefaultUserRootsWithExtraReadRoot(t *testing.T) {
-	home := "/home/caelis-policy-test"
-	t.Setenv("HOME", home)
+	home := t.TempDir()
+	setHomeForPresetsTest(t, home)
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
 	input := readCtx(configPath)
-	input.Options.ExtraReadRoots = []string{"/var/log"}
+	extraReadRoot := testExtraReadRoot()
+	input.Options.ExtraReadRoots = []string{extraReadRoot}
 
 	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
 	if err != nil {
@@ -112,8 +114,8 @@ func TestDefaultModeReadConstraintsIncludeDefaultUserRootsWithExtraReadRoot(t *t
 }
 
 func TestDefaultModeDeniesSensitiveUserConfigReadsWithoutExplicitGrant(t *testing.T) {
-	home := "/home/caelis-policy-test"
-	t.Setenv("HOME", home)
+	home := t.TempDir()
+	setHomeForPresetsTest(t, home)
 	secretPath := filepath.Join(home, ".config", "gh", "hosts.yml")
 
 	decision, err := AutoReviewMode().DecideTool(context.Background(), readCtx(secretPath))
@@ -162,8 +164,8 @@ func TestDefaultModeOnlyApprovesBashEscalation(t *testing.T) {
 }
 
 func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
-	home := filepath.Join(string(filepath.Separator), "home", "caelis-cache-test")
-	t.Setenv("HOME", home)
+	home := filepath.Join(testTempRoot(), "caelis-cache-test")
+	setHomeForPresetsTest(t, home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".xdg-cache"))
 	t.Setenv("GOCACHE", filepath.Join(home, "custom-go-build"))
 	t.Setenv("GOMODCACHE", filepath.Join(home, "custom-go-mod"))
@@ -255,7 +257,8 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 	if decision.Action != policy.ActionAllow {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+	gitMetadataRoot := testWorkspaceGitRoot()
+	if !hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
 		t.Fatalf("PathRules = %#v, want .git write grant for git add", decision.Constraints.PathRules)
 	}
 	if decision.Constraints.Network != sandbox.NetworkDisabled {
@@ -266,7 +269,7 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() git chain error = %v", err)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+	if !hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
 		t.Fatalf("PathRules = %#v, want .git write grant for git add/commit chain", decision.Constraints.PathRules)
 	}
 
@@ -274,7 +277,7 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() push error = %v", err)
 	}
-	if hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+	if hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
 		t.Fatalf("PathRules = %#v, did not expect .git write grant for git push", decision.Constraints.PathRules)
 	}
 
@@ -282,7 +285,7 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() mixed git chain error = %v", err)
 	}
-	if hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+	if hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
 		t.Fatalf("PathRules = %#v, did not expect .git write grant for mixed git chain", decision.Constraints.PathRules)
 	}
 }
@@ -313,7 +316,7 @@ func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
 			if decision.Action != policy.ActionAllow {
 				t.Fatalf("Action = %q, want allow", decision.Action)
 			}
-			if hasPathRule(decision.Constraints.PathRules, "/workspace/.git", sandbox.PathAccessReadWrite) {
+			if hasPathRule(decision.Constraints.PathRules, testWorkspaceGitRoot(), sandbox.PathAccessReadWrite) {
 				t.Fatalf("PathRules = %#v, did not expect .git write grant for ambiguous command %q", decision.Constraints.PathRules, command)
 			}
 		})
@@ -373,7 +376,7 @@ func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
 		"additional_permissions": map[string]any{
 			"network": map[string]any{"enabled": true},
 			"file_system": map[string]any{
-				"read":  []string{"/var/log"},
+				"read":  []string{testExtraReadRoot()},
 				"write": []string{"./generated"},
 			},
 		},
@@ -390,11 +393,13 @@ func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
 	if decision.Constraints.Network != sandbox.NetworkEnabled {
 		t.Fatalf("Network = %q, want enabled", decision.Constraints.Network)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, "/var/log", sandbox.PathAccessReadOnly) {
-		t.Fatalf("PathRules = %#v, want read-only /var/log", decision.Constraints.PathRules)
+	extraReadRoot := testExtraReadRoot()
+	if !hasPathRule(decision.Constraints.PathRules, extraReadRoot, sandbox.PathAccessReadOnly) {
+		t.Fatalf("PathRules = %#v, want read-only %s", decision.Constraints.PathRules, extraReadRoot)
 	}
-	if !hasPathRule(decision.Constraints.PathRules, "/workspace/subdir", sandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, want read-write /workspace/subdir shell write root", decision.Constraints.PathRules)
+	wantWriteRoot := filepath.Join(testWorkspaceRoot(), "subdir")
+	if !hasPathRule(decision.Constraints.PathRules, wantWriteRoot, sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want read-write %s shell write root", decision.Constraints.PathRules, wantWriteRoot)
 	}
 	if decision.Approval == nil {
 		t.Fatal("Approval = nil, want protocol approval payload")
@@ -411,7 +416,7 @@ func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
 		t.Fatalf("additional_permissions.file_system = %#v, want map", additional["file_system"])
 	}
 	writePaths, ok := fileSystem["write"].([]string)
-	if !ok || len(writePaths) != 1 || writePaths[0] != "/workspace/subdir" {
+	if !ok || len(writePaths) != 1 || !samePolicyPathForTest(writePaths[0], wantWriteRoot) {
 		t.Fatalf("additional_permissions.file_system.write = %#v, want shell write root", fileSystem["write"])
 	}
 }
@@ -580,8 +585,8 @@ func writeCtx(path string) policy.ToolContext {
 		Tool: tool.Definition{Name: "WRITE"},
 		Call: tool.Call{Name: "WRITE", Input: raw},
 		Options: policy.ModeOptions{
-			WorkspaceRoot: "/workspace",
-			TempRoot:      "/tmp",
+			WorkspaceRoot: testWorkspaceRoot(),
+			TempRoot:      testTempRoot(),
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
@@ -602,8 +607,8 @@ func bashCtxWithArgs(args map[string]any) policy.ToolContext {
 		Tool: tool.Definition{Name: "BASH"},
 		Call: tool.Call{Name: "BASH", Input: raw},
 		Options: policy.ModeOptions{
-			WorkspaceRoot: "/workspace",
-			TempRoot:      "/tmp",
+			WorkspaceRoot: testWorkspaceRoot(),
+			TempRoot:      testTempRoot(),
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
@@ -611,7 +616,7 @@ func bashCtxWithArgs(args map[string]any) policy.ToolContext {
 
 func hasPathRule(rules []sandbox.PathRule, path string, access sandbox.PathAccess) bool {
 	for _, rule := range rules {
-		if rule.Path == path && rule.Access == access {
+		if samePolicyPathForTest(rule.Path, path) && rule.Access == access {
 			return true
 		}
 	}
@@ -624,8 +629,8 @@ func readCtx(path string) policy.ToolContext {
 		Tool: tool.Definition{Name: "READ"},
 		Call: tool.Call{Name: "READ", Input: raw},
 		Options: policy.ModeOptions{
-			WorkspaceRoot: "/workspace/project",
-			TempRoot:      "/tmp",
+			WorkspaceRoot: testWorkspaceProjectRoot(),
+			TempRoot:      testTempRoot(),
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
@@ -637,8 +642,8 @@ func listCtx(path string) policy.ToolContext {
 		Tool: tool.Definition{Name: "LIST"},
 		Call: tool.Call{Name: "LIST", Input: raw},
 		Options: policy.ModeOptions{
-			WorkspaceRoot: "/workspace/project",
-			TempRoot:      "/tmp",
+			WorkspaceRoot: testWorkspaceProjectRoot(),
+			TempRoot:      testTempRoot(),
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
@@ -650,8 +655,8 @@ func searchCtx(path string, query string) policy.ToolContext {
 		Tool: tool.Definition{Name: "SEARCH"},
 		Call: tool.Call{Name: "SEARCH", Input: raw},
 		Options: policy.ModeOptions{
-			WorkspaceRoot: "/workspace/project",
-			TempRoot:      "/tmp",
+			WorkspaceRoot: testWorkspaceProjectRoot(),
+			TempRoot:      testTempRoot(),
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
@@ -663,9 +668,69 @@ func globCtx(pattern string) policy.ToolContext {
 		Tool: tool.Definition{Name: "GLOB"},
 		Call: tool.Call{Name: "GLOB", Input: raw},
 		Options: policy.ModeOptions{
-			WorkspaceRoot: "/workspace/project",
-			TempRoot:      "/tmp",
+			WorkspaceRoot: testWorkspaceProjectRoot(),
+			TempRoot:      testTempRoot(),
 		},
 		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
 	}
+}
+
+func testWorkspaceRoot() string {
+	if runtime.GOOS == "windows" {
+		return `C:\workspace`
+	}
+	return "/workspace"
+}
+
+func testWorkspaceProjectRoot() string {
+	return filepath.Join(testWorkspaceRoot(), "project")
+}
+
+func testWorkspaceGitRoot() string {
+	return filepath.Join(testWorkspaceRoot(), ".git")
+}
+
+func testTempRoot() string {
+	if runtime.GOOS == "windows" {
+		return `C:\tmp`
+	}
+	return "/tmp"
+}
+
+func testOutsidePath() string {
+	if runtime.GOOS == "windows" {
+		return `C:\outside\passwd`
+	}
+	return "/etc/passwd"
+}
+
+func testExtraReadRoot() string {
+	if runtime.GOOS == "windows" {
+		return `C:\var\log`
+	}
+	return "/var/log"
+}
+
+func setHomeForPresetsTest(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	if runtime.GOOS != "windows" {
+		return
+	}
+	t.Setenv("USERPROFILE", home)
+	volume := filepath.VolumeName(home)
+	if volume == "" {
+		return
+	}
+	t.Setenv("HOMEDRIVE", volume)
+	t.Setenv("HOMEPATH", strings.TrimPrefix(home, volume))
+}
+
+func samePolicyPathForTest(left string, right string) bool {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(left, right)
+	}
+	return left == right
 }

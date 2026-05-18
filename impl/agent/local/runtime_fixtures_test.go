@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"iter"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -835,7 +837,7 @@ func (m *denyWriteRuntimeModel) Generate(context.Context, *model.Request) iter.S
 					Message: model.MessageFromToolCalls(model.RoleAssistant, []model.ToolCall{{
 						ID:   "write-1",
 						Name: filesystem.WriteToolName,
-						Args: string(mustJSONRaw(map[string]any{"path": "/etc/blocked.txt", "content": "x"})),
+						Args: string(mustJSONRaw(map[string]any{"path": policyOutsidePathForRuntimeTest(), "content": "x"})),
 					}}, ""),
 					TurnComplete: true,
 					StepComplete: true,
@@ -917,7 +919,7 @@ func (m *approveEscalatedBashRuntimeModel) Generate(context.Context, *model.Requ
 						Args: string(mustJSONRaw(map[string]any{
 							"command":             m.command,
 							"workdir":             ".",
-							"yield_time_ms":       200,
+							"yield_time_ms":       shellCompletionYieldMillisForTest(200),
 							"sandbox_permissions": "require_escalated",
 							"justification":       "Do you want to run this command outside the sandbox?",
 						})),
@@ -950,6 +952,81 @@ func shellQuoteForTest(value string) string {
 	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
+func powershellQuoteForTest(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+}
+
+func shellWriteFileForTest(path string, content string) string {
+	if goruntime.GOOS == "windows" {
+		return "[IO.File]::WriteAllText(" + powershellQuoteForTest(path) + ", " + powershellQuoteForTest(content) + ")"
+	}
+	return "printf " + shellQuoteForTest(content) + " > " + shellQuoteForTest(path)
+}
+
+func shellSleepThenPrintForTest(text string, delay time.Duration) string {
+	if goruntime.GOOS == "windows" {
+		ms := delay.Milliseconds()
+		if ms <= 0 {
+			ms = 1
+		}
+		return fmt.Sprintf("Start-Sleep -Milliseconds %d; [Console]::Out.WriteLine(%s)", ms, powershellQuoteForTest(text))
+	}
+	seconds := float64(delay) / float64(time.Second)
+	return fmt.Sprintf("sleep %.3f; printf %s", seconds, shellQuoteForTest(text))
+}
+
+func shellPrintThenSleepForTest(text string, delay time.Duration) string {
+	if goruntime.GOOS == "windows" {
+		ms := delay.Milliseconds()
+		if ms <= 0 {
+			ms = 1
+		}
+		return fmt.Sprintf("[Console]::Out.Write(%s); Start-Sleep -Milliseconds %d", powershellQuoteForTest(text), ms)
+	}
+	seconds := float64(delay) / float64(time.Second)
+	return fmt.Sprintf("printf %s; sleep %.3f", shellQuoteForTest(text), seconds)
+}
+
+func shellInteractiveGreetingForTest() string {
+	if goruntime.GOOS == "windows" {
+		return "[Console]::Out.WriteLine('waiting'); $name = [Console]::In.ReadLine(); [Console]::Out.WriteLine('hello ' + $name)"
+	}
+	return "printf 'waiting\n'; read name; printf 'hello %s\n' \"$name\""
+}
+
+func shellRunningYieldMillisForTest(fallback int) int {
+	if goruntime.GOOS == "windows" {
+		return 100
+	}
+	return fallback
+}
+
+func shellCompletionYieldMillisForTest(fallback int) int {
+	if goruntime.GOOS == "windows" {
+		return 7000
+	}
+	return fallback
+}
+
+func shellAsyncDelayForTest() time.Duration {
+	if goruntime.GOOS == "windows" {
+		return time.Second
+	}
+	return 50 * time.Millisecond
+}
+
+func policyOutsidePathForRuntimeTest() string {
+	if goruntime.GOOS == "windows" {
+		return `C:\outside\blocked.txt`
+	}
+	return "/etc/blocked.txt"
+}
+
+func jsonStringForTest(value string) string {
+	raw, _ := json.Marshal(value)
+	return string(raw)
+}
+
 type bashTaskLoopRuntimeModel struct {
 	t      *testing.T
 	calls  int
@@ -974,9 +1051,9 @@ func (m *bashTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Reques
 						ID:   "bash-async-1",
 						Name: shell.BashToolName,
 						Args: string(mustJSONRaw(map[string]any{
-							"command":       "sleep 0.05; printf 'async bash done'",
+							"command":       shellSleepThenPrintForTest("async bash done", shellAsyncDelayForTest()),
 							"workdir":       ".",
-							"yield_time_ms": 5,
+							"yield_time_ms": shellRunningYieldMillisForTest(5),
 						})),
 					}}, ""),
 					TurnComplete: true,
@@ -995,7 +1072,7 @@ func (m *bashTaskLoopRuntimeModel) Generate(_ context.Context, req *model.Reques
 						Args: string(mustJSONRaw(map[string]any{
 							"action":        "wait",
 							"task_id":       m.taskID,
-							"yield_time_ms": 250,
+							"yield_time_ms": shellCompletionYieldMillisForTest(250),
 						})),
 					}}, ""),
 					TurnComplete: true,

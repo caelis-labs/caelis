@@ -3,6 +3,7 @@ package runnerruntime
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -59,8 +60,12 @@ func (r *waitResultTestRunner) GetSession(_ string) (*cmdsession.AsyncSession, e
 }
 
 func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
+	command := "printf 'ok\\n'"
+	if runtime.GOOS == "windows" {
+		command = "Write-Output ok"
+	}
 	async := cmdsession.NewAsyncSession(cmdsession.AsyncSessionConfig{
-		Command: "printf 'ok\\n'",
+		Command: command,
 	})
 	if err := async.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -87,8 +92,8 @@ func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Result() error = %v", err)
 	}
-	if result.Stdout != "ok\n" {
-		t.Fatalf("Result().Stdout = %q, want %q", result.Stdout, "ok\n")
+	if strings.TrimSpace(result.Stdout) != "ok" {
+		t.Fatalf("Result().Stdout = %q, want ok", result.Stdout)
 	}
 }
 

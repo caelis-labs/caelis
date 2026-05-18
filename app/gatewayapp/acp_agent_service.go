@@ -274,7 +274,7 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base as
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return assembly.AgentConfig{}, err
 	}
-	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, installSpec)
+	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, npmInstallSpecForExec(npm, installSpec))
 	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -484,6 +484,18 @@ func builtinACPAdapterInstallSpec(pkg builtinACPAdapterPackage) string {
 		return strings.TrimSpace(pkg.Package) + "@" + strings.TrimSpace(pkg.Version)
 	}
 	return strings.TrimSpace(pkg.Package) + "@latest"
+}
+
+func npmInstallSpecForExec(npmPath string, spec string) string {
+	if goruntime.GOOS != "windows" {
+		return spec
+	}
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(npmPath))) {
+	case ".bat", ".cmd":
+		return strings.ReplaceAll(spec, "^", "^^^^")
+	default:
+		return spec
+	}
 }
 
 func lookupBuiltInACPAgent(name string) (assembly.AgentConfig, bool) {

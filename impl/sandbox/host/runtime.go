@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
@@ -102,7 +101,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		defer cancel()
 	}
 
-	cmd := exec.CommandContext(runCtx, "/bin/sh", "-c", req.Command)
+	cmd := newShellCommand(runCtx, req.Command)
 	cmd.Dir = dir
 	cmd.Env = mergeEnv(req.Env)
 	if len(req.Stdin) > 0 {
@@ -157,7 +156,7 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if req.Timeout > 0 {
 		cmdCtx, cancel = context.WithTimeout(cmdCtx, req.Timeout)
 	}
-	cmd := exec.CommandContext(cmdCtx, "/bin/sh", "-c", req.Command)
+	cmd := newShellCommand(cmdCtx, req.Command)
 	cmd.Dir = dir
 	cmd.Env = mergeEnv(req.Env)
 	setProcessGroup(cmd)
@@ -587,21 +586,4 @@ func newID(prefix string) (string, error) {
 		return "", err
 	}
 	return prefix + "-" + hex.EncodeToString(buf), nil
-}
-
-func setProcessGroup(cmd *exec.Cmd) {
-	if cmd == nil {
-		return
-	}
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-}
-
-func killProcessTree(proc *os.Process) error {
-	if proc == nil {
-		return nil
-	}
-	if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err == nil {
-		return nil
-	}
-	return proc.Kill()
 }

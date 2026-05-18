@@ -13,6 +13,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -211,7 +212,7 @@ func TestCodeFreeNonStream_UsesLocalOAuthCredsAndEndpoint(t *testing.T) {
 
 func TestResolveCodeFreeCredentialPath_DefaultsToCaelisStore(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeForCodeFreeTest(t, home)
 	t.Setenv(codeFreeCredsPathEnv, "")
 
 	got, err := resolveCodeFreeCredentialPath()
@@ -226,7 +227,7 @@ func TestResolveCodeFreeCredentialPath_DefaultsToCaelisStore(t *testing.T) {
 
 func TestReadCodeFreeStoredCredentials_ImportsLegacyCodeFreeCredsIntoCaelisStore(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHomeForCodeFreeTest(t, home)
 	t.Setenv(codeFreeCredsPathEnv, "")
 
 	primary, legacy, err := resolveCodeFreeDefaultCredentialPaths()
@@ -255,6 +256,21 @@ func TestReadCodeFreeStoredCredentials_ImportsLegacyCodeFreeCredsIntoCaelisStore
 	if _, err := os.Stat(legacy); err != nil {
 		t.Fatalf("expected legacy credentials to remain at %q: %v", legacy, err)
 	}
+}
+
+func setHomeForCodeFreeTest(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	if runtime.GOOS != "windows" {
+		return
+	}
+	t.Setenv("USERPROFILE", home)
+	volume := filepath.VolumeName(home)
+	if volume == "" {
+		return
+	}
+	t.Setenv("HOMEDRIVE", volume)
+	t.Setenv("HOMEPATH", strings.TrimPrefix(home, volume))
 }
 
 func TestCodeFreeStream_ParsesSSE(t *testing.T) {

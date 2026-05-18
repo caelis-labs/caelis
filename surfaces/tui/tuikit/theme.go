@@ -4,6 +4,8 @@ import (
 	"image/color"
 	"math"
 	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -259,6 +261,9 @@ func resolvedDarkBackground(opts themeResolveOptions) bool {
 	if opts.backgroundKnown {
 		return opts.backgroundDark
 	}
+	if opts.noColor || runningUnderGoTest() {
+		return true
+	}
 	return lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 }
 
@@ -276,6 +281,14 @@ func supportsTrueColor() bool {
 	}
 	term := strings.ToLower(strings.TrimSpace(os.Getenv("TERM")))
 	return strings.Contains(term, "truecolor") || strings.Contains(term, "24bit") || strings.Contains(term, "direct")
+}
+
+func runningUnderGoTest() bool {
+	name := strings.ToLower(filepath.Base(os.Args[0]))
+	if runtime.GOOS == "windows" {
+		return strings.HasSuffix(name, ".test.exe")
+	}
+	return strings.HasSuffix(name, ".test")
 }
 
 func supportsANSI256() bool {

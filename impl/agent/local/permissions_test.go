@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -44,16 +45,16 @@ func TestPermissionGrantStoreAppliesPathRulesAndNetwork(t *testing.T) {
 		t.Fatalf("Network = %q, want enabled", got.Network)
 	}
 	want := map[string]sandbox.PathAccess{
-		"/workspace": sandbox.PathAccessReadWrite,
-		"/readonly":  sandbox.PathAccessReadOnly,
-		"/writable":  sandbox.PathAccessReadWrite,
-		"/upgrade":   sandbox.PathAccessReadWrite,
+		permissionPathKeyForTest("/workspace"): sandbox.PathAccessReadWrite,
+		permissionPathKeyForTest("/readonly"):  sandbox.PathAccessReadOnly,
+		permissionPathKeyForTest("/writable"):  sandbox.PathAccessReadWrite,
+		permissionPathKeyForTest("/upgrade"):   sandbox.PathAccessReadWrite,
 	}
 	if len(got.PathRules) != len(want) {
 		t.Fatalf("PathRules len = %d, want %d: %#v", len(got.PathRules), len(want), got.PathRules)
 	}
 	for _, rule := range got.PathRules {
-		access, ok := want[rule.Path]
+		access, ok := want[permissionPathKeyForTest(rule.Path)]
 		if !ok {
 			t.Fatalf("unexpected path rule: %#v", rule)
 		}
@@ -129,6 +130,14 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 	if snapshot := store.snapshot(); snapshot.Count != 1 || !snapshot.NetworkGranted || snapshot.ReadRootCount != 1 || snapshot.WriteRootCount != 1 {
 		t.Fatalf("snapshot = %+v, want recorded grant", snapshot)
 	}
+}
+
+func permissionPathKeyForTest(path string) string {
+	path = filepath.Clean(path)
+	if runtime.GOOS == "windows" {
+		path = strings.ToLower(path)
+	}
+	return path
 }
 
 func permissionToolResultPayload(t *testing.T, result tool.Result) map[string]any {

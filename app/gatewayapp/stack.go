@@ -11,6 +11,7 @@ import (
 	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/host"
 	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/landlock"
 	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/seatbelt"
+	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/windows"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/kernel"

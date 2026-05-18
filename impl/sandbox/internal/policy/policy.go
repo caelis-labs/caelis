@@ -100,6 +100,12 @@ func readOnlySubpathOverridden(subpath string, rules []sandbox.PathRule, cwd str
 }
 
 func pathIsUnder(target, root string) bool {
+	target = filepath.Clean(target)
+	root = filepath.Clean(root)
+	if runtime.GOOS == "windows" {
+		target = strings.ToLower(target)
+		root = strings.ToLower(root)
+	}
 	if target == root {
 		return true
 	}
