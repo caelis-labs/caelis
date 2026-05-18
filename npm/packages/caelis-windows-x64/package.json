@@ -1,0 +1,31 @@
+{
+  "name": "@onslaughtsnail/caelis-windows-x64",
+  "version": "0.0.0-dev",
+  "description": "Platform-specific caelis binary for Windows x64",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OnslaughtSnail/caelis.git",
+    "directory": "npm/packages/caelis-windows-x64"
+  },
+  "homepage": "https://github.com/OnslaughtSnail/caelis",
+  "bugs": {
+    "url": "https://github.com/OnslaughtSnail/caelis/issues"
+  },
+  "files": [
+    "runtime/caelis.exe",
+    "runtime/caelis-command-runner.exe",
+    "runtime/caelis-windows-sandbox-setup.exe",
+    "README.md"
+  ],
+  "os": [
+    "win32"
+  ],
+  "cpu": [
+    "x64"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}

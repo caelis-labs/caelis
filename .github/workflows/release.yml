@@ -54,6 +54,8 @@ jobs:
           ./npm/packages/caelis-darwin-x64
           ./npm/packages/caelis-linux-arm64
           ./npm/packages/caelis-linux-x64
+          ./npm/packages/caelis-windows-arm64
+          ./npm/packages/caelis-windows-x64
       - name: Publish main package
         if: startsWith(github.ref, 'refs/tags/v')
         env:

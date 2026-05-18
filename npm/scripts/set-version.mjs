@@ -11,6 +11,8 @@ const platformPackages = [
   '@onslaughtsnail/caelis-darwin-x64',
   '@onslaughtsnail/caelis-linux-arm64',
   '@onslaughtsnail/caelis-linux-x64',
+  '@onslaughtsnail/caelis-windows-arm64',
+  '@onslaughtsnail/caelis-windows-x64',
 ];
 
 const manifestPaths = [
@@ -19,6 +21,8 @@ const manifestPaths = [
   path.join(packageRoot, 'packages', 'caelis-darwin-x64', 'package.json'),
   path.join(packageRoot, 'packages', 'caelis-linux-arm64', 'package.json'),
   path.join(packageRoot, 'packages', 'caelis-linux-x64', 'package.json'),
+  path.join(packageRoot, 'packages', 'caelis-windows-arm64', 'package.json'),
+  path.join(packageRoot, 'packages', 'caelis-windows-x64', 'package.json'),
 ];
 
 function normalizeVersion(input) {

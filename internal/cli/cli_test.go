@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -195,7 +196,7 @@ func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
 }
 
 func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -224,7 +225,7 @@ func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
 }
 
 func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -243,7 +244,7 @@ func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 }
 
 func TestRunDoctorSubcommandTextOutput(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
 	err := run(context.Background(), []string{
@@ -265,6 +266,75 @@ func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	}
 	if strings.Contains(text, "super-secret") {
 		t.Fatalf("doctor text leaked secret: %q", text)
+	}
+}
+
+func TestRunSandboxSetupSubcommandTextOutput(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"sandbox", "setup",
+		"-sandbox-backend", "host",
+		"-store-dir", cliTestStoreDir(t),
+		"-workspace-key", "sandbox-ws",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(sandbox setup) error = %v; stderr=%q", err, errBuf.String())
+	}
+	text := out.String()
+	for _, want := range []string{
+		"sandbox_requested_backend: host",
+		"sandbox_resolved_backend: host",
+		"sandbox_setup_required: false",
+	} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("sandbox setup text = %q, want %q", text, want)
+		}
+	}
+}
+
+func TestRunSandboxSetupSubcommandJSONOutput(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"sandbox", "setup",
+		"-format", "json",
+		"-sandbox-backend", "host",
+		"-store-dir", cliTestStoreDir(t),
+		"-workspace-key", "sandbox-ws",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(sandbox setup json) error = %v; stderr=%q", err, errBuf.String())
+	}
+	var report map[string]any
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("sandbox setup json decode error = %v", err)
+	}
+	if got := report["ResolvedBackend"]; got != "host" {
+		t.Fatalf("ResolvedBackend = %#v, want host", got)
+	}
+}
+
+func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"sandbox", "setup",
+		"-sandbox-backend", "host",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "sandbox-ws",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(sandbox setup -sandbox-backend host) error = %v; stderr=%q", err, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
+		t.Fatalf("sandbox setup output = %q, want requested host backend", out.String())
 	}
 }
 

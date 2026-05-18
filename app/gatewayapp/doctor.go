@@ -44,8 +44,21 @@ type DoctorReport struct {
 	SandboxRoute              string   `json:"sandbox_route,omitempty"`
 	SandboxFallbackReason     string   `json:"sandbox_fallback_reason,omitempty"`
 	SandboxInstallHint        string   `json:"sandbox_install_hint,omitempty"`
+	SandboxSetupRequired      bool     `json:"sandbox_setup_required,omitempty"`
+	SandboxSetupError         string   `json:"sandbox_setup_error,omitempty"`
+	SandboxSetupVersion       int      `json:"sandbox_setup_version,omitempty"`
+	SandboxSetupMarkerCurrent bool     `json:"sandbox_setup_marker_current,omitempty"`
+	SandboxSetupMarkerReason  string   `json:"sandbox_setup_marker_reason,omitempty"`
+	SandboxSetupRunnerHash    string   `json:"sandbox_setup_runner_hash,omitempty"`
+	SandboxSetupPolicyHash    string   `json:"sandbox_setup_policy_hash,omitempty"`
+	SandboxSetupOfflineUser   string   `json:"sandbox_setup_offline_user,omitempty"`
+	SandboxSetupOnlineUser    string   `json:"sandbox_setup_online_user,omitempty"`
+	SandboxSetupOwnerUser     string   `json:"sandbox_setup_owner_user,omitempty"`
+	SandboxSetupReadRoots     int      `json:"sandbox_setup_read_roots,omitempty"`
+	SandboxSetupWriteRoots    int      `json:"sandbox_setup_write_roots,omitempty"`
+	SandboxSetupDenyRead      int      `json:"sandbox_setup_deny_read,omitempty"`
+	SandboxSetupDenyWrite     int      `json:"sandbox_setup_deny_write,omitempty"`
 	SandboxSecuritySummary    string   `json:"sandbox_security_summary,omitempty"`
-	SandboxAutoReviewDisabled bool     `json:"sandbox_auto_review_disabled,omitempty"`
 	HostExecution             bool     `json:"host_execution,omitempty"`
 	FullAccessMode            bool     `json:"full_access_mode,omitempty"`
 	PermissionGrantCount      int      `json:"permission_grant_count,omitempty"`
@@ -118,18 +131,31 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	report.SandboxRoute = strings.TrimSpace(sandbox.Route)
 	report.SandboxFallbackReason = strings.TrimSpace(sandbox.FallbackReason)
 	report.SandboxInstallHint = strings.TrimSpace(sandbox.InstallHint)
+	report.SandboxSetupRequired = sandbox.SetupRequired
+	report.SandboxSetupError = strings.TrimSpace(sandbox.SetupError)
+	report.SandboxSetupVersion = sandbox.SetupVersion
+	report.SandboxSetupMarkerCurrent = sandbox.SetupMarkerCurrent
+	report.SandboxSetupMarkerReason = strings.TrimSpace(sandbox.SetupMarkerReason)
+	report.SandboxSetupRunnerHash = strings.TrimSpace(sandbox.SetupRunnerHash)
+	report.SandboxSetupPolicyHash = strings.TrimSpace(sandbox.SetupPolicyHash)
+	report.SandboxSetupOfflineUser = strings.TrimSpace(sandbox.SetupOfflineUser)
+	report.SandboxSetupOnlineUser = strings.TrimSpace(sandbox.SetupOnlineUser)
+	report.SandboxSetupOwnerUser = strings.TrimSpace(sandbox.SetupOwnerUser)
+	report.SandboxSetupReadRoots = sandbox.SetupReadRoots
+	report.SandboxSetupWriteRoots = sandbox.SetupWriteRoots
+	report.SandboxSetupDenyRead = sandbox.SetupDenyRead
+	report.SandboxSetupDenyWrite = sandbox.SetupDenyWrite
 	report.SandboxSecuritySummary = strings.TrimSpace(sandbox.SecuritySummary)
-	report.SandboxAutoReviewDisabled = sandbox.AutoReviewDisabled
 	report.HostExecution = strings.EqualFold(report.SandboxRoute, "host") || strings.EqualFold(report.SandboxResolvedBackend, "host")
 	report.FullAccessMode = false
 	if report.HostExecution {
 		report.Warnings = append(report.Warnings, "sandbox execution is using host route")
 	}
-	if report.SandboxAutoReviewDisabled {
-		report.Warnings = append(report.Warnings, "Auto-Review is disabled until a sandbox backend is available")
-	}
 	if report.SandboxInstallHint != "" {
 		report.Warnings = append(report.Warnings, report.SandboxInstallHint)
+	}
+	if report.SandboxSetupError != "" {
+		report.Warnings = append(report.Warnings, "Windows sandbox setup error: "+report.SandboxSetupError)
 	}
 	if s.engine != nil && strings.TrimSpace(ref.SessionID) != "" {
 		grants := s.engine.PermissionGrantSnapshot(ref)
@@ -184,8 +210,21 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("sandbox_route: %s", firstNonEmpty(strings.TrimSpace(report.SandboxRoute), "-")),
 		fmt.Sprintf("sandbox_fallback_reason: %s", firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), "-")),
 		fmt.Sprintf("sandbox_install_hint: %s", firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), "-")),
+		fmt.Sprintf("sandbox_setup_required: %t", report.SandboxSetupRequired),
+		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), "-")),
+		fmt.Sprintf("sandbox_setup_version: %d", report.SandboxSetupVersion),
+		fmt.Sprintf("sandbox_setup_marker_current: %t", report.SandboxSetupMarkerCurrent),
+		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), "-")),
+		fmt.Sprintf("sandbox_setup_runner_hash: %s", firstNonEmpty(shortHash(report.SandboxSetupRunnerHash), "-")),
+		fmt.Sprintf("sandbox_setup_policy_hash: %s", firstNonEmpty(shortHash(report.SandboxSetupPolicyHash), "-")),
+		fmt.Sprintf("sandbox_setup_offline_user: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSetupOfflineUser), "-")),
+		fmt.Sprintf("sandbox_setup_online_user: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSetupOnlineUser), "-")),
+		fmt.Sprintf("sandbox_setup_owner_user: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSetupOwnerUser), "-")),
+		fmt.Sprintf("sandbox_setup_read_roots: %d", report.SandboxSetupReadRoots),
+		fmt.Sprintf("sandbox_setup_write_roots: %d", report.SandboxSetupWriteRoots),
+		fmt.Sprintf("sandbox_setup_deny_read: %d", report.SandboxSetupDenyRead),
+		fmt.Sprintf("sandbox_setup_deny_write: %d", report.SandboxSetupDenyWrite),
 		fmt.Sprintf("sandbox_security_summary: %s", firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), "-")),
-		fmt.Sprintf("sandbox_auto_review_disabled: %t", report.SandboxAutoReviewDisabled),
 		fmt.Sprintf("host_execution: %t", report.HostExecution),
 		fmt.Sprintf("full_access_mode: %t", report.FullAccessMode),
 		fmt.Sprintf("permission_grant_count: %d", report.PermissionGrantCount),
@@ -273,6 +312,14 @@ func modelConfigTokenSource(cfg ModelConfig) string {
 	default:
 		return ""
 	}
+}
+
+func shortHash(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 12 {
+		return value
+	}
+	return value[:12]
 }
 
 func checkConfigPermissions(path string) (dirMode string, dirSecure bool, fileMode string, fileSecure bool) {

@@ -41,9 +41,11 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	for _, required := range []string{
 		"<system_instructions>",
 		"## Core Stable Rules",
-		"## BASH Permissions",
+		"## Shell Tool Permissions",
 		"sandbox_permissions",
-		"Start BASH commands with default sandbox permissions",
+		"BASH is a historical tool identifier",
+		"on Windows, write PowerShell commands",
+		"Start platform shell commands with default sandbox permissions",
 		"<user_custom_instructions>",
 		"Workspace rule.",
 		"Global rule.",
@@ -60,7 +62,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 
 func TestBuildSystemPromptOmitsDynamicTimeContext(t *testing.T) {
 	globalHome := t.TempDir()
-	t.Setenv("HOME", globalHome)
+	setHomeForGatewayAppTest(t, globalHome)
 	t.Setenv("SHELL", "/bin/zsh")
 	workspace := t.TempDir()
 
@@ -102,7 +104,8 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		t.Fatalf("buildSystemPrompt() error = %v", err)
 	}
 	for _, required := range []string{
-		"Start BASH commands with default sandbox permissions",
+		"Start platform shell commands with default sandbox permissions",
+		"BASH is a historical tool identifier",
 		"workspace-local reads, builds, tests, and temp writes should stay default",
 		"Use `sandbox_permissions=with_additional_permissions`",
 		"Use `sandbox_permissions=require_escalated` only when host execution is required",
@@ -114,6 +117,7 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 	for _, forbidden := range []string{
 		"Default permission mode:",
 		"Sandbox backend request:",
+		"Start BASH commands",
 		"Default BASH execution uses the sandbox route",
 		"Default BASH execution uses the host route",
 		"Default BASH execution uses the host backend",

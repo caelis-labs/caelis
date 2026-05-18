@@ -326,7 +326,7 @@ func isExecutableSlashArgInput(line string) bool {
 			return false
 		}
 	case "/sandbox":
-		return len(fields) >= 2
+		return len(fields) == 2 && strings.EqualFold(strings.TrimSpace(fields[1]), "setup")
 	case "/model":
 		action := strings.ToLower(strings.TrimSpace(fields[1]))
 		switch action {

@@ -24,9 +24,20 @@ func TestBashDefinitionExposesMinimalArguments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewBash() error = %v", err)
 	}
-	properties, _ := bashTool.Definition().InputSchema["properties"].(map[string]any)
+	definition := bashTool.Definition()
+	for _, want := range []string{"platform shell", "historical tool name", "PowerShell syntax on Windows"} {
+		if !strings.Contains(definition.Description, want) {
+			t.Fatalf("Description = %q, want %q", definition.Description, want)
+		}
+	}
+	properties, _ := definition.InputSchema["properties"].(map[string]any)
 	if _, ok := properties["command"]; !ok {
 		t.Fatal("command property missing")
+	}
+	command, _ := properties["command"].(map[string]any)
+	description, _ := command["description"].(string)
+	if !strings.Contains(description, "PowerShell syntax on Windows") {
+		t.Fatalf("command description = %q, want Windows platform shell hint", description)
 	}
 	if _, ok := properties["workdir"]; !ok {
 		t.Fatal("workdir property missing")

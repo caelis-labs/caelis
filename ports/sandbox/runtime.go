@@ -90,6 +90,9 @@ func New(cfg Config) (Runtime, error) {
 		rt.status.ResolvedBackend = candidate
 		rt.status.FallbackToHost = false
 		rt.status.FallbackReason = strings.Join(failures, "; ")
+		if len(failures) > 0 {
+			rt.status.FallbackInstallHint = sandboxInstallHint()
+		}
 		return rt, nil
 	}
 
@@ -123,6 +126,12 @@ func NormalizeConfig(cfg Config) Config {
 		cfg.RequestedBackend = Backend(strings.TrimSpace(string(cfg.RequestedBackend)))
 	}
 	cfg.HelperPath = strings.TrimSpace(cfg.HelperPath)
+	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
+	if cfg.StateDir != "" {
+		if abs, err := filepath.Abs(cfg.StateDir); err == nil {
+			cfg.StateDir = abs
+		}
+	}
 	cfg.ReadableRoots = normalizeStringSlice(cfg.ReadableRoots)
 	cfg.WritableRoots = normalizeStringSlice(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = normalizeStringSlice(cfg.ReadOnlySubpaths)
@@ -196,11 +205,11 @@ func sandboxInstallHint() string {
 	case "linux":
 		return linuxSandboxInstallHint()
 	case "darwin":
-		return "macOS sandboxing uses sandbox-exec/seatbelt and should be available by default; update macOS or use manual mode until the backend is available."
+		return "macOS sandboxing uses sandbox-exec/seatbelt and should be available by default; update macOS if the backend is unavailable."
 	case "windows":
-		return "Enable and complete Windows Elevated sandbox setup, or use manual mode until the backend is available."
+		return "Run `caelis sandbox setup` or TUI `/sandbox setup` once to initialize Windows Elevated sandbox."
 	default:
-		return "Install a supported sandbox backend for this OS or use manual mode until one is available."
+		return "Install a supported sandbox backend for this OS; until then commands may run on the host."
 	}
 }
 
@@ -209,16 +218,16 @@ func linuxSandboxInstallHint() string {
 	for _, id := range ids {
 		switch id {
 		case "debian", "ubuntu", "linuxmint", "pop":
-			return "Install bubblewrap with: sudo apt install bubblewrap. If bubblewrap is blocked, use a Landlock-capable Linux kernel or manual mode."
+			return "Install bubblewrap with: sudo apt install bubblewrap. If bubblewrap is blocked, Caelis can fall back to Landlock on supported kernels."
 		case "fedora", "rhel", "centos", "rocky", "almalinux":
-			return "Install bubblewrap with: sudo dnf install bubblewrap. If user namespaces are blocked, enable them or use manual mode."
+			return "Install bubblewrap with: sudo dnf install bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
 		case "arch", "manjaro":
-			return "Install bubblewrap with: sudo pacman -S bubblewrap. If user namespaces are blocked, enable them or use manual mode."
+			return "Install bubblewrap with: sudo pacman -S bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
 		case "opensuse", "suse", "sles":
-			return "Install bubblewrap with: sudo zypper install bubblewrap. If user namespaces are blocked, enable them or use manual mode."
+			return "Install bubblewrap with: sudo zypper install bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
 		}
 	}
-	return "Install bubblewrap for this distribution or use a Landlock-capable Linux kernel; until then Caelis falls back to manual mode without Auto-Review."
+	return "Install bubblewrap for this distribution or use a Landlock-capable Linux kernel; until then commands may run on the host."
 }
 
 func linuxDistroIDs() []string {

@@ -8,7 +8,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
-	"github.com/OnslaughtSnail/caelis/impl/policy/presets"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
@@ -65,6 +64,7 @@ func (s *Stack) rebuildGateway() error {
 		CWD:              s.Workspace.CWD,
 		RequestedBackend: sandbox.Backend(sandboxCfg.RequestedType),
 		HelperPath:       sandboxCfg.HelperPath,
+		StateDir:         s.storeDir,
 		ReadableRoots:    append([]string(nil), sandboxCfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), sandboxCfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
@@ -79,16 +79,11 @@ func (s *Stack) rebuildGateway() error {
 		if effectiveBaseMetadata == nil {
 			effectiveBaseMetadata = map[string]any{}
 		}
-		effectiveBaseMetadata["sandbox_auto_review_disabled"] = true
 		if hint := strings.TrimSpace(sandboxStatus.FallbackInstallHint); hint != "" {
 			effectiveBaseMetadata["sandbox_install_hint"] = hint
 		}
 		if reason := strings.TrimSpace(sandboxStatus.FallbackReason); reason != "" {
 			effectiveBaseMetadata["sandbox_fallback_reason"] = reason
-		}
-		if effectivePolicyMode == presets.ModeAutoReview {
-			effectivePolicyMode = presets.ModeManual
-			effectiveBaseMetadata["policy_mode"] = presets.ModeManual
 		}
 	}
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandboxRuntime})

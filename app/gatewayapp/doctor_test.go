@@ -218,3 +218,39 @@ func TestFormatDoctorTextIncludesPermissionGrantSummaryWithoutPaths(t *testing.T
 		}
 	}
 }
+
+func TestFormatDoctorTextIncludesSandboxSetupDiagnostics(t *testing.T) {
+	report := DoctorReport{
+		SandboxSetupRequired:      true,
+		SandboxSetupVersion:       1,
+		SandboxSetupMarkerCurrent: false,
+		SandboxSetupMarkerReason:  "setup marker missing",
+		SandboxSetupRunnerHash:    "1234567890abcdef",
+		SandboxSetupPolicyHash:    "abcdef1234567890",
+		SandboxSetupOfflineUser:   "CaelisSandboxOffline",
+		SandboxSetupOnlineUser:    "CaelisSandboxOnline",
+		SandboxSetupReadRoots:     5,
+		SandboxSetupWriteRoots:    2,
+		SandboxSetupDenyRead:      3,
+		SandboxSetupDenyWrite:     4,
+	}
+	out := FormatDoctorText(report)
+	for _, want := range []string{
+		"sandbox_setup_required: true",
+		"sandbox_setup_version: 1",
+		"sandbox_setup_marker_current: false",
+		"sandbox_setup_marker_reason: setup marker missing",
+		"sandbox_setup_runner_hash: 1234567890ab",
+		"sandbox_setup_policy_hash: abcdef123456",
+		"sandbox_setup_offline_user: CaelisSandboxOffline",
+		"sandbox_setup_online_user: CaelisSandboxOnline",
+		"sandbox_setup_read_roots: 5",
+		"sandbox_setup_write_roots: 2",
+		"sandbox_setup_deny_read: 3",
+		"sandbox_setup_deny_write: 4",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("FormatDoctorText() = %q, want %q", out, want)
+		}
+	}
+}

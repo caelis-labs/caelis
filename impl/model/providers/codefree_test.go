@@ -13,11 +13,11 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
@@ -260,17 +260,7 @@ func TestReadCodeFreeStoredCredentials_ImportsLegacyCodeFreeCredsIntoCaelisStore
 
 func setHomeForCodeFreeTest(t *testing.T, home string) {
 	t.Helper()
-	t.Setenv("HOME", home)
-	if runtime.GOOS != "windows" {
-		return
-	}
-	t.Setenv("USERPROFILE", home)
-	volume := filepath.VolumeName(home)
-	if volume == "" {
-		return
-	}
-	t.Setenv("HOMEDRIVE", volume)
-	t.Setenv("HOMEPATH", strings.TrimPrefix(home, volume))
+	testenv.SetHome(t, home)
 }
 
 func TestCodeFreeStream_ParsesSSE(t *testing.T) {

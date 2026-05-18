@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
@@ -632,6 +634,9 @@ func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
 	case status.HostExecution || status.FullAccessMode:
 		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
 		lines = append(lines, "  warn sandbox: "+detail)
+	case status.SandboxSetupRequired:
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupMarkerReason, "setup required"))
+		lines = append(lines, "  warn sandbox setup: "+detail+" - run /sandbox setup")
 	case sandbox != "":
 		lines = append(lines, "  ok sandbox: "+sandbox)
 	default:
@@ -734,40 +739,47 @@ func slashSandbox(driver tuidriver.Driver, send func(tea.Msg), args string) Task
 
 func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
-	backend := strings.TrimSpace(args)
-	if backend == "" {
-		status, err := driver.Status(ctx)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("sandbox", err)}
-		}
-		lines := []string{
-			fmt.Sprintf("sandbox requested: %s", firstNonEmpty(strings.TrimSpace(status.SandboxRequestedBackend), "-")),
-			fmt.Sprintf("sandbox resolved: %s", firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), firstNonEmpty(strings.TrimSpace(status.SandboxType), "-"))),
-			fmt.Sprintf("session mode: %s", firstNonEmpty(strings.TrimSpace(status.SessionMode), "auto-review")),
-			fmt.Sprintf("route: %s", firstNonEmpty(strings.TrimSpace(status.Route), "-")),
-		}
-		if status.FallbackReason != "" {
-			lines = append(lines, fmt.Sprintf("fallback: %s", status.FallbackReason))
-		}
-		if status.SandboxInstallHint != "" {
-			lines = append(lines, fmt.Sprintf("install: %s", status.SandboxInstallHint))
-		}
-		if status.SandboxAutoReviewDisabled {
-			lines = append(lines, "warning: Auto-Review is disabled until a sandbox backend is available")
-		}
-		if status.HostExecution || status.FullAccessMode {
-			lines = append(lines, "warning: commands may execute on the host with reduced isolation")
-		}
-		sendNotice(send, strings.Join(lines, "\n"))
+	action := strings.TrimSpace(args)
+	if runtime.GOOS != "windows" {
+		sendNotice(send, "sandbox setup is only available on Windows; use /status to inspect sandbox readiness")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	status, err := driver.SetSandboxBackend(ctx, backend)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("sandbox", err)}
+	if action == "" {
+		sendNotice(send, "usage: /sandbox setup\nuse /status to inspect sandbox readiness")
+		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	sendNotice(send, fmt.Sprintf("sandbox backend: %s", status.SandboxType))
-	sendStatusUpdate(send, status)
+	if strings.EqualFold(action, "setup") {
+		sendNotice(send, "starting Windows sandbox setup; this may take a minute while Windows accounts, ACLs, and firewall rules are refreshed")
+		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
+			if text := formatSandboxSetupProgress(progress); text != "" {
+				sendNotice(send, text)
+			}
+		})
+		status, err := driver.PrepareSandbox(progressCtx)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("sandbox setup", err)}
+		}
+		sendNotice(send, "sandbox setup complete")
+		sendStatusUpdate(send, status)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	sendNotice(send, "usage: /sandbox setup\nuse -sandbox-backend or CAELIS_SANDBOX_BACKEND for advanced backend overrides")
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func formatSandboxSetupProgress(progress sandbox.PrepareProgress) string {
+	message := strings.TrimSpace(progress.Message)
+	if message == "" {
+		message = strings.TrimSpace(progress.Phase)
+	}
+	if message == "" {
+		return ""
+	}
+	prefix := "sandbox setup"
+	if progress.Step > 0 && progress.Total > 0 {
+		prefix = fmt.Sprintf("%s [%d/%d]", prefix, progress.Step, progress.Total)
+	}
+	return prefix + ": " + message
 }
 
 func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

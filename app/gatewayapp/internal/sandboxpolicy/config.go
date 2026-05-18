@@ -12,6 +12,8 @@ func NormalizeBackend(backend string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(backend)) {
 	case "", "auto":
 		return "auto", nil
+	case "host":
+		return "host", nil
 	case "seatbelt":
 		return "seatbelt", nil
 	case "bwrap":

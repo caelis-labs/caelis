@@ -12,6 +12,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/spawn"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin/task"
+	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -596,9 +597,9 @@ func repoRootForGatewayAppTest(t *testing.T) string {
 
 func writeExecutableForGatewayAppTest(t *testing.T, dir string, name string, body string) string {
 	t.Helper()
-	path := filepath.Join(dir, name)
-	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
-		path += ".cmd"
+	commandName := testenv.CommandScriptName(name)
+	path := filepath.Join(dir, commandName)
+	if runtime.GOOS == "windows" && commandName != name {
 		if strings.Contains(body, "install failed") {
 			body = "@echo off\r\necho install failed 1>&2\r\nexit /b 7\r\n"
 		} else {

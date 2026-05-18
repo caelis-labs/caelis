@@ -124,6 +124,7 @@ type Config struct {
 	CWD              string   `json:"cwd,omitempty"`
 	RequestedBackend Backend  `json:"requested_backend,omitempty"`
 	HelperPath       string   `json:"helper_path,omitempty"`
+	StateDir         string   `json:"state_dir,omitempty"`
 	ReadableRoots    []string `json:"readable_roots,omitempty"`
 	WritableRoots    []string `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
@@ -136,6 +137,62 @@ type Status struct {
 	FallbackToHost      bool    `json:"fallback_to_host,omitempty"`
 	FallbackReason      string  `json:"fallback_reason,omitempty"`
 	FallbackInstallHint string  `json:"fallback_install_hint,omitempty"`
+	SetupRequired       bool    `json:"setup_required,omitempty"`
+	SetupError          string  `json:"setup_error,omitempty"`
+	SetupVersion        int     `json:"setup_version,omitempty"`
+	SetupMarkerCurrent  bool    `json:"setup_marker_current,omitempty"`
+	SetupMarkerReason   string  `json:"setup_marker_reason,omitempty"`
+	SetupRunnerHash     string  `json:"setup_runner_hash,omitempty"`
+	SetupPolicyHash     string  `json:"setup_policy_hash,omitempty"`
+	SetupOfflineUser    string  `json:"setup_offline_user,omitempty"`
+	SetupOnlineUser     string  `json:"setup_online_user,omitempty"`
+	SetupOwnerUser      string  `json:"setup_owner_user,omitempty"`
+	SetupReadRootCount  int     `json:"setup_read_root_count,omitempty"`
+	SetupWriteRootCount int     `json:"setup_write_root_count,omitempty"`
+	SetupDenyReadCount  int     `json:"setup_deny_read_count,omitempty"`
+	SetupDenyWriteCount int     `json:"setup_deny_write_count,omitempty"`
+}
+
+// PrepareProgress is an optional, best-effort progress update emitted during a
+// user-triggered sandbox setup step.
+type PrepareProgress struct {
+	Phase   string `json:"phase,omitempty"`
+	Message string `json:"message,omitempty"`
+	Step    int    `json:"step,omitempty"`
+	Total   int    `json:"total,omitempty"`
+	Done    bool   `json:"done,omitempty"`
+}
+
+// PrepareProgressFunc receives best-effort setup progress. Implementations must
+// return quickly; slow callbacks can delay setup.
+type PrepareProgressFunc func(PrepareProgress)
+
+type prepareProgressContextKey struct{}
+
+// ContextWithPrepareProgress attaches a setup progress callback to ctx.
+func ContextWithPrepareProgress(ctx context.Context, fn PrepareProgressFunc) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, prepareProgressContextKey{}, fn)
+}
+
+// ReportPrepareProgress emits one setup progress update if ctx carries a
+// progress callback.
+func ReportPrepareProgress(ctx context.Context, progress PrepareProgress) {
+	if ctx == nil {
+		return
+	}
+	fn, ok := ctx.Value(prepareProgressContextKey{}).(PrepareProgressFunc)
+	if !ok || fn == nil {
+		return
+	}
+	progress.Phase = strings.TrimSpace(progress.Phase)
+	progress.Message = strings.TrimSpace(progress.Message)
+	fn(progress)
 }
 
 // OutputChunk is one stdout/stderr streaming fragment.
@@ -235,6 +292,12 @@ type Runtime interface {
 	SupportedBackends() []Backend
 	Status() Status
 	Close() error
+}
+
+// PreparableRuntime is implemented by backends that need an explicit
+// user-triggered setup step before normal sandboxed execution can run.
+type PreparableRuntime interface {
+	Prepare(context.Context) error
 }
 
 // BackendFactory builds one concrete backend runtime.

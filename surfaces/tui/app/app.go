@@ -163,12 +163,15 @@ func (m *Model) setCommands(commands []string) {
 }
 
 func (m *Model) Init() tea.Cmd {
+	if m.cfg.ShowWelcomeCard && m.welcomeCardPending {
+		m.appendWelcomeCard()
+		m.welcomeCardPending = false
+	}
 	for _, line := range m.cfg.InitialLogs {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		style := tuikit.DetectLineStyle(line)
-		m.doc.Append(NewTranscriptBlock(line, style))
+		m.commitLine(line)
 	}
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()

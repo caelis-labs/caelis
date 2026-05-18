@@ -80,8 +80,21 @@ type SandboxStatus struct {
 	Route              string
 	FallbackReason     string
 	InstallHint        string
+	SetupRequired      bool
+	SetupError         string
+	SetupVersion       int
+	SetupMarkerCurrent bool
+	SetupMarkerReason  string
+	SetupRunnerHash    string
+	SetupPolicyHash    string
+	SetupOfflineUser   string
+	SetupOnlineUser    string
+	SetupOwnerUser     string
+	SetupReadRoots     int
+	SetupWriteRoots    int
+	SetupDenyRead      int
+	SetupDenyWrite     int
 	SecuritySummary    string
-	AutoReviewDisabled bool
 }
 
 type StartSubagentOptions struct {

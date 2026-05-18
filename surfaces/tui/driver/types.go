@@ -43,8 +43,11 @@ type StatusSnapshot struct {
 	Route                     string
 	FallbackReason            string
 	SandboxInstallHint        string
+	SandboxSetupRequired      bool
+	SandboxSetupError         string
+	SandboxSetupMarkerCurrent bool
+	SandboxSetupMarkerReason  string
 	SecuritySummary           string
-	SandboxAutoReviewDisabled bool
 	MissingAPIKey             bool
 	HostExecution             bool
 	FullAccessMode            bool
@@ -185,6 +188,7 @@ type Driver interface {
 	DeleteModel(context.Context, string) error
 	CycleSessionMode(context.Context) (StatusSnapshot, error)
 	SetSandboxBackend(context.Context, string) (StatusSnapshot, error)
+	PrepareSandbox(context.Context) (StatusSnapshot, error)
 	SetSessionMode(context.Context, string) (StatusSnapshot, error)
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)

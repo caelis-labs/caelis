@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"io"
+	"runtime"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -28,6 +29,7 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 		Workspace:       stack.Workspace.CWD,
 		ModelAlias:      modelText,
 		ShowWelcomeCard: true,
+		InitialLogs:     initialSandboxStatusLogs(stack.SandboxStatus()),
 		Commands:        tuiapp.DefaultCommands(),
 		Wizards:         tuiapp.DefaultWizards(),
 		RenderFPS:       envInt("CAELIS_TUI_RENDER_FPS", 0),
@@ -38,6 +40,59 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 	defer sender.Close()
 	_, err = program.Run()
 	return err
+}
+
+func initialSandboxStatusLogs(status gatewayapp.SandboxStatus) []string {
+	var logs []string
+	backend := strings.TrimSpace(firstNonEmptyString(status.ResolvedBackend, status.RequestedBackend))
+	if status.SetupRequired && strings.EqualFold(backend, "windows-elevated") {
+		message := "Windows sandbox setup is not ready. Run /sandbox setup once and approve the UAC prompt before using sandboxed commands."
+		if reason := strings.TrimSpace(status.SetupMarkerReason); reason != "" {
+			message += " Reason: " + reason + "."
+		}
+		if setupErr := strings.TrimSpace(status.SetupError); setupErr != "" {
+			message += " Last error: " + setupErr + "."
+		}
+		logs = append(logs, message)
+	}
+	if sandboxHostFallback(status) {
+		message := platformSandboxUnavailableMessage(status)
+		if message != "" {
+			logs = append(logs, message)
+		}
+	}
+	return logs
+}
+
+func sandboxHostFallback(status gatewayapp.SandboxStatus) bool {
+	if strings.EqualFold(strings.TrimSpace(status.Route), "host") || strings.EqualFold(strings.TrimSpace(status.ResolvedBackend), "host") {
+		return !strings.EqualFold(strings.TrimSpace(status.RequestedBackend), "host")
+	}
+	return false
+}
+
+func platformSandboxUnavailableMessage(status gatewayapp.SandboxStatus) string {
+	reason := strings.TrimSpace(status.FallbackReason)
+	hint := strings.TrimSpace(status.InstallHint)
+	parts := []string{"Sandbox isolation is not available; commands will run on the host."}
+	switch runtime.GOOS {
+	case "linux":
+		parts = append(parts, "Install bubblewrap or use a Landlock-capable kernel to restore sandbox isolation.")
+	case "darwin":
+		parts = append(parts, "macOS seatbelt sandboxing should be available by default; update macOS if sandbox-exec is missing.")
+	case "windows":
+		parts = append(parts, "Run /sandbox setup once to initialize Windows Elevated sandbox.")
+	default:
+		parts = append(parts, "Install a supported sandbox backend for this platform.")
+	}
+	if hint != "" {
+		parts = append(parts, hint)
+	}
+	if reason != "" {
+		parts = append(parts, "Reason: "+reason+".")
+	}
+	parts = append(parts, "Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work.")
+	return strings.Join(parts, " ")
 }
 
 func tuiProgramOptions(stdin io.Reader, stdout io.Writer, ctx context.Context, fps int) []tea.ProgramOption {

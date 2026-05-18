@@ -33,6 +33,7 @@ type runResult struct {
 }
 
 type doctorResult = gatewayapp.DoctorReport
+type sandboxStatusResult = gatewayapp.SandboxStatus
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	return run(ctx, args, stdin, stdout, stderr)
@@ -46,6 +47,14 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	doctorSubcommand := len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "doctor")
 	if doctorSubcommand {
 		args = args[1:]
+	}
+	sandboxSetupSubcommand := false
+	if len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "sandbox") {
+		if len(args) < 2 || !strings.EqualFold(strings.TrimSpace(args[1]), "setup") {
+			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
+		}
+		sandboxSetupSubcommand = true
+		args = args[2:]
 	}
 	fs := flag.NewFlagSet("caelis", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -76,6 +85,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		tokenEnv         = fs.String("token-env", envOr("CAELIS_TOKEN_ENV", ""), "Environment variable for provider token")
 		authType         = fs.String("auth-type", envOr("CAELIS_AUTH_TYPE", ""), "Auth type")
 		headerKey        = fs.String("header-key", envOr("CAELIS_HEADER_KEY", ""), "Optional auth header key")
+		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend: auto|host|bwrap|landlock|seatbelt|windows-elevated")
+		sandboxHelper    = fs.String("sandbox-helper-path", envOr("CAELIS_SANDBOX_HELPER_PATH", ""), "Sandbox helper executable path")
 		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
 		maxOutputTokens  = fs.Int("max-output-tokens", envInt("CAELIS_MAX_OUTPUT_TOKENS", 4096), "Max output tokens")
 		forceInteractive = fs.Bool("interactive", false, "Force interactive local main path")
@@ -112,6 +123,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			HeaderKey:    *headerKey,
 			MaxOutputTok: *maxOutputTokens,
 		},
+		Sandbox: gatewayapp.SandboxConfig{
+			RequestedType: strings.TrimSpace(*sandboxBackend),
+			HelperPath:    strings.TrimSpace(*sandboxHelper),
+		},
 	})
 	if err != nil {
 		return err
@@ -130,6 +145,13 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return err
 		}
 		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
+	}
+	if sandboxSetupSubcommand {
+		outFmt, err := parseOutputFormat(*format)
+		if err != nil {
+			return err
+		}
+		return runSandboxSetup(ctx, stack, outFmt, stdout)
 	}
 
 	stdinTTY := readerIsTTY(stdin)
@@ -212,6 +234,14 @@ func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, f
 	return writeDoctorResult(stdout, format, report)
 }
 
+func runSandboxSetup(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
+	status, err := stack.PrepareSandbox(ctx)
+	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
+		err = writeErr
+	}
+	return err
+}
+
 func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	_ = stderr
 	_ = cfg
@@ -284,6 +314,40 @@ func writeDoctorResult(w io.Writer, format outputFormat, result doctorResult) er
 		_, err := fmt.Fprintln(w, gatewayapp.FormatDoctorText(result))
 		return err
 	}
+}
+
+func writeSandboxStatusResult(w io.Writer, format outputFormat, result sandboxStatusResult) error {
+	switch format {
+	case outputJSON:
+		enc := json.NewEncoder(w)
+		enc.SetEscapeHTML(false)
+		return enc.Encode(result)
+	default:
+		_, err := fmt.Fprintln(w, formatSandboxStatus(result))
+		return err
+	}
+}
+
+func formatSandboxStatus(status sandboxStatusResult) string {
+	lines := []string{
+		fmt.Sprintf("sandbox_requested_backend: %s", firstNonEmptyString(strings.TrimSpace(status.RequestedBackend), "-")),
+		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmptyString(strings.TrimSpace(status.ResolvedBackend), "-")),
+		fmt.Sprintf("sandbox_route: %s", firstNonEmptyString(strings.TrimSpace(status.Route), "-")),
+		fmt.Sprintf("sandbox_setup_required: %t", status.SetupRequired),
+		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(strings.TrimSpace(status.SetupError), "-")),
+		fmt.Sprintf("sandbox_setup_marker_current: %t", status.SetupMarkerCurrent),
+		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(strings.TrimSpace(status.SetupMarkerReason), "-")),
+	}
+	return strings.Join(lines, "\n")
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func writeResult(w io.Writer, format outputFormat, result runResult) error {

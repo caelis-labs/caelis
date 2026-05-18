@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
@@ -146,7 +147,8 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 	lines := []string{
 		"## Capability Guidance",
 		"",
-		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use BASH for shell-native work and TASK for yielded async work.",
+		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use the BASH tool for platform shell work and TASK for yielded async work.",
+		"- BASH is a historical tool identifier, not a promise that POSIX bash is available; on Windows, write PowerShell commands.",
 		"- Use request_permissions for the smallest read/write path or network grant needed before retrying denied work.",
 		"- Load a skill only when its description clearly matches the task; read only the needed parts of its `SKILL.md`.",
 		"- Obey the active approval mode; treat auto-review denials as concrete feedback to narrow or adjust the next step.",
@@ -161,9 +163,9 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 
 func builtInPermissionBoundariesPrompt() string {
 	return strings.Join([]string{
-		"## BASH Permissions",
+		"## Shell Tool Permissions",
 		"",
-		"- Start BASH commands with default sandbox permissions; workspace-local reads, builds, tests, and temp writes should stay default.",
+		"- Start platform shell commands with default sandbox permissions; workspace-local reads, builds, tests, and temp writes should stay default.",
 		"- Use `sandbox_permissions=with_additional_permissions` for the smallest extra read/write path or network grant.",
 		"- Use `sandbox_permissions=require_escalated` only when host execution is required; include a short `justification`.",
 		"- If policy denies a command or file tool, narrow the scope or request the missing permission with request_permissions.",
@@ -186,6 +188,9 @@ func builtInEnvironmentContextPrompt(workspaceDir string) string {
 }
 
 func currentShellName() string {
+	if runtime.GOOS == "windows" {
+		return "powershell"
+	}
 	shell := strings.TrimSpace(os.Getenv("SHELL"))
 	if shell == "" {
 		return "unknown"

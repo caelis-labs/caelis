@@ -47,11 +47,11 @@ func NewBash(cfg BashConfig) (*BashTool, error) {
 func (t *BashTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        BashToolName,
-		Description: "Run a shell command.",
+		Description: "Run a platform shell command. BASH is the historical tool name; use PowerShell syntax on Windows and POSIX shell syntax on Unix.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"command": map[string]any{"type": "string", "description": "Command to execute."},
+				"command": map[string]any{"type": "string", "description": "Command to execute in the platform shell. Use PowerShell syntax on Windows; use POSIX shell syntax on Unix."},
 				"workdir": map[string]any{"type": "string", "description": "Working directory."},
 				"yield_time_ms": map[string]any{
 					"type":        "integer",

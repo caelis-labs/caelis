@@ -11,10 +11,22 @@ const __dirname = path.dirname(__filename);
 const packageRoot = path.resolve(__dirname, '..');
 
 const targets = [
-  { os: 'darwin', arch: 'arm64', dir: 'caelis-darwin-arm64' },
-  { os: 'darwin', arch: 'amd64', dir: 'caelis-darwin-x64' },
-  { os: 'linux', arch: 'arm64', dir: 'caelis-linux-arm64' },
-  { os: 'linux', arch: 'amd64', dir: 'caelis-linux-x64' },
+  { os: 'darwin', arch: 'arm64', dir: 'caelis-darwin-arm64', runtimeFiles: ['caelis'] },
+  { os: 'darwin', arch: 'amd64', dir: 'caelis-darwin-x64', runtimeFiles: ['caelis'] },
+  { os: 'linux', arch: 'arm64', dir: 'caelis-linux-arm64', runtimeFiles: ['caelis'] },
+  { os: 'linux', arch: 'amd64', dir: 'caelis-linux-x64', runtimeFiles: ['caelis'] },
+  {
+    os: 'windows',
+    arch: 'arm64',
+    dir: 'caelis-windows-arm64',
+    runtimeFiles: ['caelis.exe', 'caelis-command-runner.exe', 'caelis-windows-sandbox-setup.exe'],
+  },
+  {
+    os: 'windows',
+    arch: 'amd64',
+    dir: 'caelis-windows-x64',
+    runtimeFiles: ['caelis.exe', 'caelis-command-runner.exe', 'caelis-windows-sandbox-setup.exe'],
+  },
 ];
 
 function normalizeVersion(input) {
@@ -53,14 +65,22 @@ async function stageTarget(version, distDir, target) {
   try {
     await fs.access(archivePath);
     await execFileAsync('tar', ['-xzf', archivePath, '-C', tempDir]);
-    const extractedBin = await findFile(tempDir, 'caelis');
-    if (!extractedBin) {
-      throw new Error(`binary not found in ${archiveName}`);
+    const runtimeFiles = target.runtimeFiles || ['caelis'];
+    const extractedFiles = new Map();
+    for (const name of runtimeFiles) {
+      const extracted = await findFile(tempDir, name);
+      if (!extracted) {
+        throw new Error(`${name} not found in ${archiveName}`);
+      }
+      extractedFiles.set(name, extracted);
     }
+    await fs.rm(runtimeDir, { recursive: true, force: true });
     await fs.mkdir(runtimeDir, { recursive: true });
-    const destPath = path.join(runtimeDir, 'caelis');
-    await fs.copyFile(extractedBin, destPath);
-    await fs.chmod(destPath, 0o755);
+    for (const [name, extracted] of extractedFiles) {
+      const destPath = path.join(runtimeDir, name);
+      await fs.copyFile(extracted, destPath);
+      await fs.chmod(destPath, 0o755);
+    }
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }

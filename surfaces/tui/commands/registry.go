@@ -20,13 +20,12 @@ type CommandSpec struct {
 
 // DefaultSpecs returns the canonical core slash command specs in display order.
 func DefaultSpecs() []CommandSpec {
-	return []CommandSpec{
+	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show available slash commands", LocalDuringACP: true},
 		{Name: "agent", Usage: "/agent list | /agent add <builtin> | /agent install <adapter> | /agent use <agent|local> | /agent remove <agent>", Description: "Manage registered ACP agents and main-controller switching", LocalDuringACP: true, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
 		{Name: "model", Usage: "/model use <alias> | /model del <alias>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "approval", Usage: "/approval [auto-review|manual]", Description: "Inspect or change approval review mode", LocalDuringACP: true, ArgCandidates: approvalCandidates()},
-		{Name: "sandbox", Usage: "/sandbox [auto|seatbelt|bwrap|landlock]", Description: "Inspect or change the sandbox backend", ArgCandidates: SandboxCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
@@ -35,6 +34,10 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", LocalDuringACP: true},
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},
 	}
+	if runtime.GOOS == "windows" {
+		specs = append(specs[:5], append([]CommandSpec{{Name: "sandbox", Usage: "/sandbox setup", Description: "Initialize Windows Elevated sandbox", ArgCandidates: SandboxCandidates()}}, specs[5:]...)...)
+	}
+	return specs
 }
 
 // DefaultNames returns visible command names in canonical display order.
@@ -123,22 +126,13 @@ func RootArgCandidates(command string) []driver.SlashArgCandidate {
 	return out
 }
 
-// SandboxCandidates returns OS-specific sandbox backend candidates.
+// SandboxCandidates returns lifecycle actions for the Windows sandbox command.
 func SandboxCandidates() []driver.SlashArgCandidate {
-	switch runtime.GOOS {
-	case "darwin":
-		return []driver.SlashArgCandidate{
-			{Value: "auto", Display: "auto", Detail: "Use the default macOS sandbox backend"},
-			{Value: "seatbelt", Display: "seatbelt", Detail: "Use sandbox-exec seatbelt isolation"},
-		}
-	case "linux":
-		return []driver.SlashArgCandidate{
-			{Value: "auto", Display: "auto", Detail: "Prefer bwrap, then fall back to landlock"},
-			{Value: "bwrap", Display: "bwrap", Detail: "Use bubblewrap container isolation"},
-			{Value: "landlock", Display: "landlock", Detail: "Use the landlock helper sandbox"},
-		}
-	default:
-		return []driver.SlashArgCandidate{{Value: "auto", Display: "auto", Detail: "Use the default sandbox backend"}}
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	return []driver.SlashArgCandidate{
+		{Value: "setup", Display: "setup", Detail: "Initialize Windows Elevated sandbox with UAC"},
 	}
 }
 

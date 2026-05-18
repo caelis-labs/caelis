@@ -402,6 +402,33 @@ func TestCandidateBackendsForWindowsRejectsUnixBackends(t *testing.T) {
 	}
 }
 
+func TestCompositeRuntimeStatusForwardsBackendSetupDetails(t *testing.T) {
+	rt := &compositeRuntime{
+		host: fakeRuntime{backend: BackendHost},
+		sandbox: fakeRuntime{
+			backend: BackendWindowsElevated,
+			status: Status{
+				ResolvedBackend:    BackendWindowsElevated,
+				SetupRequired:      true,
+				SetupMarkerReason:  "setup marker missing",
+				SetupOfflineUser:   "CaelisSandboxOffline",
+				SetupReadRootCount: 5,
+			},
+		},
+		status: Status{
+			RequestedBackend: BackendWindowsElevated,
+			ResolvedBackend:  BackendWindowsElevated,
+		},
+	}
+	status := rt.Status()
+	if status.RequestedBackend != BackendWindowsElevated || status.ResolvedBackend != BackendWindowsElevated {
+		t.Fatalf("Status backend = %q/%q, want windows-elevated", status.RequestedBackend, status.ResolvedBackend)
+	}
+	if !status.SetupRequired || status.SetupMarkerReason != "setup marker missing" || status.SetupOfflineUser != "CaelisSandboxOffline" || status.SetupReadRootCount != 5 {
+		t.Fatalf("Status() = %+v, want forwarded setup diagnostics", status)
+	}
+}
+
 type fakeBackendFactory struct {
 	backend Backend
 	err     error
@@ -420,6 +447,7 @@ type fakeRuntime struct {
 	backend Backend
 	fs      FileSystem
 	fsFor   func(Constraints) FileSystem
+	status  Status
 }
 
 func (r fakeRuntime) Describe() Descriptor   { return Descriptor{Backend: r.backend} }
@@ -438,6 +466,9 @@ func (r fakeRuntime) OpenSession(string) (Session, error)                    { r
 func (r fakeRuntime) OpenSessionRef(SessionRef) (Session, error)             { return nil, nil }
 func (r fakeRuntime) SupportedBackends() []Backend                           { return []Backend{r.backend} }
 func (r fakeRuntime) Status() Status {
+	if r.status.RequestedBackend != "" || r.status.ResolvedBackend != "" {
+		return r.status
+	}
 	return Status{RequestedBackend: r.backend, ResolvedBackend: r.backend}
 }
 func (r fakeRuntime) Close() error { return nil }

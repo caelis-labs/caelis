@@ -55,10 +55,6 @@ func (r *waitResultTestRunner) TerminateSession(string) error {
 
 func (r *waitResultTestRunner) Close() error { return nil }
 
-func (r *waitResultTestRunner) GetSession(_ string) (*cmdsession.AsyncSession, error) {
-	return r.session, nil
-}
-
 func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 	command := "printf 'ok\\n'"
 	if runtime.GOOS == "windows" {

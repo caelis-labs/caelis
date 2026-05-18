@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/policy"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -713,17 +714,7 @@ func testExtraReadRoot() string {
 
 func setHomeForPresetsTest(t *testing.T, home string) {
 	t.Helper()
-	t.Setenv("HOME", home)
-	if runtime.GOOS != "windows" {
-		return
-	}
-	t.Setenv("USERPROFILE", home)
-	volume := filepath.VolumeName(home)
-	if volume == "" {
-		return
-	}
-	t.Setenv("HOMEDRIVE", volume)
-	t.Setenv("HOMEPATH", strings.TrimPrefix(home, volume))
+	testenv.SetHome(t, home)
 }
 
 func samePolicyPathForTest(left string, right string) bool {

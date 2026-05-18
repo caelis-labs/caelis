@@ -18,7 +18,7 @@ func New() Tool {
 func (Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Control a yielded BASH or SPAWN task.",
+		Description: "Control a yielded shell or SPAWN task.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -1576,7 +1578,7 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	if !ok {
 		t.Fatalf("slashStatus() msg = %#v, want LogChunkMsg", msgs[0])
 	}
-	for _, want := range []string{"/connect", "warn: API key is missing", "warn: Commands may run on the host", "/tmp/.caelis"} {
+	for _, want := range []string{"/connect", "warn: API key is missing", "warn: Commands may run on the host", "Auto-Review remains enabled", "/tmp/.caelis"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashStatus() chunk = %q, want substring %q", log.Chunk, want)
 		}
@@ -1613,6 +1615,48 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashDoctorWithContext() chunk = %q, want substring %q", log.Chunk, want)
 		}
+	}
+}
+
+func TestSlashSandboxSetupCallsDriver(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only slash command")
+	}
+	driver := &bridgeTestDriver{
+		status: tuidriver.StatusSnapshot{
+			SandboxRequestedBackend:   "windows-elevated",
+			SandboxResolvedBackend:    "windows-elevated",
+			SandboxSetupMarkerCurrent: true,
+		},
+	}
+	var msgs []tea.Msg
+	result := slashSandboxWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "setup")
+	if result.Err != nil {
+		t.Fatalf("slashSandbox(setup) error = %v", result.Err)
+	}
+	if driver.prepareSandboxCalls != 1 {
+		t.Fatalf("prepareSandboxCalls = %d, want 1", driver.prepareSandboxCalls)
+	}
+	if !noticeMessagesContain(msgs, "sandbox setup complete") {
+		t.Fatalf("slashSandbox(setup) messages = %#v, want completion notice", msgs)
+	}
+	if !noticeMessagesContain(msgs, "sandbox setup [1/2]: refreshing Windows Firewall rules") {
+		t.Fatalf("slashSandbox(setup) messages = %#v, want setup progress notice", msgs)
+	}
+}
+
+func TestSlashSandboxWithoutArgsPointsToStatus(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows-only slash command")
+	}
+	driver := &bridgeTestDriver{}
+	var msgs []tea.Msg
+	result := slashSandboxWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
+	if result.Err != nil {
+		t.Fatalf("slashSandbox() error = %v", result.Err)
+	}
+	if !noticeMessagesContain(msgs, "usage: /sandbox setup") || !noticeMessagesContain(msgs, "/status") {
+		t.Fatalf("slashSandbox() messages = %#v, want setup usage and status guidance", msgs)
 	}
 }
 
@@ -1676,6 +1720,7 @@ type bridgeTestDriver struct {
 	addAgentCalls       int
 	removeAgentCalls    int
 	handoffAgentCalls   int
+	prepareSandboxCalls int
 	compactCalls        int
 	lastConnect         tuidriver.ConnectConfig
 	lastModelAlias      string
@@ -1794,6 +1839,9 @@ func (d *bridgeSubmitDriver) CycleSessionMode(context.Context) (tuidriver.Status
 func (d *bridgeSubmitDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return tuidriver.StatusSnapshot{}, nil
 }
+func (d *bridgeSubmitDriver) PrepareSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
+	return tuidriver.StatusSnapshot{}, nil
+}
 func (d *bridgeSubmitDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return tuidriver.StatusSnapshot{}, nil
 }
@@ -1894,6 +1942,15 @@ func (d *bridgeTestDriver) CycleSessionMode(context.Context) (tuidriver.StatusSn
 	return d.status, nil
 }
 func (d *bridgeTestDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
+	return d.status, nil
+}
+func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+	d.prepareSandboxCalls++
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Message: "refreshing Windows Firewall rules",
+		Step:    1,
+		Total:   2,
+	})
 	return d.status, nil
 }
 func (d *bridgeTestDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {

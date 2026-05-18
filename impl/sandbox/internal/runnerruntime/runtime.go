@@ -25,6 +25,7 @@ type Request struct {
 	IdleTimeout  time.Duration
 	TTY          bool
 	EnvOverrides map[string]string
+	Stdin        []byte
 	Constraints  sandbox.Constraints
 	OnOutput     func(OutputChunk)
 }
@@ -181,13 +182,9 @@ func (s *session) Wait(ctx context.Context, timeout time.Duration) (sandbox.Sess
 	if timeout <= 0 {
 		return s.Status(ctx)
 	}
-	inner, err := getSession(s.runner, s.sessionID)
-	if err != nil {
-		return sandbox.SessionStatus{}, err
-	}
 	waitCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if _, err := inner.Wait(waitCtx); err != nil {
+	if _, err := s.runner.WaitSession(waitCtx, s.sessionID, timeout); err != nil {
 		if errors.Is(err, context.DeadlineExceeded) {
 			return s.Status(ctx)
 		}
@@ -220,6 +217,7 @@ func translateRequest(req sandbox.CommandRequest) Request {
 		IdleTimeout:  req.IdleTimeout,
 		TTY:          req.TTY,
 		EnvOverrides: req.Env,
+		Stdin:        append([]byte(nil), req.Stdin...),
 		Constraints:  sandbox.EffectiveConstraints(req),
 		OnOutput: func(chunk OutputChunk) {
 			if req.OnOutput == nil {
@@ -243,16 +241,4 @@ func translateStatus(backend sandbox.Backend, sessionID string, status cmdsessio
 		StartedAt:     status.StartTime,
 		UpdatedAt:     status.LastActivity,
 	}
-}
-
-type sessionLookup interface {
-	GetSession(id string) (*cmdsession.AsyncSession, error)
-}
-
-func getSession(r Runner, sessionID string) (*cmdsession.AsyncSession, error) {
-	lookup, ok := r.(sessionLookup)
-	if !ok {
-		return nil, fmt.Errorf("ports/sandbox: backend session lookup is unavailable")
-	}
-	return lookup.GetSession(sessionID)
 }

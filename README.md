@@ -158,7 +158,7 @@ Current built-in slash commands:
 - `/connect`
 - `/model use <alias>` or `/model del <alias>`
 - `/approval [auto-review|manual]`
-- `/sandbox [auto|seatbelt|bwrap|landlock]`
+- `/sandbox setup` on Windows to initialize Windows Elevated sandbox
 - `/status`
 - `/doctor`
 - `/new`
@@ -192,8 +192,10 @@ Notes:
 - `-permission-mode manual`: require an explicit user decision for sensitive
   requests.
 
-Sandbox backend selection is resolved by the local runtime. The TUI exposes
-`/sandbox [auto|seatbelt|bwrap|landlock]` for inspection and selection. Sandbox
+Sandbox backend selection is resolved by the local runtime: macOS uses seatbelt,
+Linux prefers bubblewrap and falls back to Landlock when available, and Windows
+uses Windows Elevated sandbox after explicit setup. The TUI reports sandbox
+readiness in `/status`; Windows setup is started with `/sandbox setup`. Sandbox
 permission failures are surfaced with backend-neutral denial metadata and the raw
 path-bearing error needed for recovery.
 

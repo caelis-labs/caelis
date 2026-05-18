@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/textstream"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
@@ -101,7 +102,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 		defer cancel()
 	}
 
-	cmd := newShellCommand(runCtx, req.Command)
+	cmd := newShellCommand(runCtx, req.Command, len(req.Stdin) > 0)
 	cmd.Dir = dir
 	cmd.Env = mergeEnv(req.Env)
 	if len(req.Stdin) > 0 {
@@ -156,7 +157,7 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if req.Timeout > 0 {
 		cmdCtx, cancel = context.WithTimeout(cmdCtx, req.Timeout)
 	}
-	cmd := newShellCommand(cmdCtx, req.Command)
+	cmd := newShellCommand(cmdCtx, req.Command, true)
 	cmd.Dir = dir
 	cmd.Env = mergeEnv(req.Env)
 	setProcessGroup(cmd)
@@ -283,6 +284,8 @@ type hostSession struct {
 	stderr        []byte
 	stdoutTotal   int64
 	stderrTotal   int64
+	stdoutText    textstream.UTF8Decoder
+	stderrText    textstream.UTF8Decoder
 	running       bool
 	supportsInput bool
 	exitCode      int
@@ -400,18 +403,21 @@ func (s *hostSession) readStream(reader io.Reader, stream string) {
 		if n > 0 {
 			chunk := append([]byte(nil), buf[:n]...)
 			s.mu.Lock()
+			text := ""
 			switch stream {
 			case "stderr":
 				s.stderr = appendCappedBytes(s.stderr, chunk, hostOutputCap)
 				s.stderrTotal += int64(len(chunk))
+				text = s.stderrText.Decode(chunk)
 			default:
 				s.stdout = appendCappedBytes(s.stdout, chunk, hostOutputCap)
 				s.stdoutTotal += int64(len(chunk))
+				text = s.stdoutText.Decode(chunk)
 			}
 			s.updatedAt = time.Now()
 			s.mu.Unlock()
-			if s.onOutput != nil {
-				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(chunk)})
+			if s.onOutput != nil && text != "" {
+				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: text})
 			}
 		}
 		if err != nil {
@@ -426,7 +432,8 @@ func (s *hostSession) waitForExit() {
 	s.wg.Wait()
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	stdoutTail := s.stdoutText.Flush()
+	stderrTail := s.stderrText.Flush()
 	if s.stdin != nil {
 		_ = s.stdin.Close()
 		s.stdin = nil
@@ -438,6 +445,15 @@ func (s *hostSession) waitForExit() {
 	s.updatedAt = time.Now()
 	s.waitErr = err
 	close(s.done)
+	s.mu.Unlock()
+	if s.onOutput != nil {
+		if stdoutTail != "" {
+			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: stdoutTail})
+		}
+		if stderrTail != "" {
+			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: stderrTail})
+		}
+	}
 }
 
 func (s *hostSession) cleanupProcessGroupAfterExit() {

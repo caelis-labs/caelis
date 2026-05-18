@@ -269,8 +269,11 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		Route:                     route,
 		FallbackReason:            sandboxStatus.FallbackReason,
 		SandboxInstallHint:        sandboxStatus.InstallHint,
+		SandboxSetupRequired:      sandboxStatus.SetupRequired,
+		SandboxSetupError:         sandboxStatus.SetupError,
+		SandboxSetupMarkerCurrent: sandboxStatus.SetupMarkerCurrent,
+		SandboxSetupMarkerReason:  sandboxStatus.SetupMarkerReason,
 		SecuritySummary:           securitySummary,
-		SandboxAutoReviewDisabled: sandboxStatus.AutoReviewDisabled,
 		HostExecution:             strings.EqualFold(strings.TrimSpace(route), "host"),
 		FullAccessMode:            false,
 		Surface:                   bindingKey,
@@ -296,8 +299,11 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)
 			status.FallbackReason = firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), status.FallbackReason)
 			status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxInstallHint)
+			status.SandboxSetupRequired = report.SandboxSetupRequired || status.SandboxSetupRequired
+			status.SandboxSetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxSetupError)
+			status.SandboxSetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxSetupMarkerCurrent
+			status.SandboxSetupMarkerReason = firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), status.SandboxSetupMarkerReason)
 			status.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SecuritySummary)
-			status.SandboxAutoReviewDisabled = report.SandboxAutoReviewDisabled || status.SandboxAutoReviewDisabled
 			if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
 				rawModelText = alias
 				status.Model = formatReasoningModelDisplay(alias, status.ReasoningEffort)

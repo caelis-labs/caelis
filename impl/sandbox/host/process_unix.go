@@ -9,7 +9,7 @@ import (
 	"syscall"
 )
 
-func newShellCommand(ctx context.Context, command string) *exec.Cmd {
+func newShellCommand(ctx context.Context, command string, _ bool) *exec.Cmd {
 	return exec.CommandContext(ctx, "/bin/sh", "-c", command)
 }
 

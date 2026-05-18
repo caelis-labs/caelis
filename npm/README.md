@@ -8,7 +8,7 @@ Install `caelis` from npm.
 npm i -g @onslaughtsnail/caelis
 ```
 
-Supported platforms: macOS/Linux (`x64`, `arm64`).
+Supported platforms: macOS/Linux/Windows (`x64`, `arm64`).
 
 or run without global install:
 

@@ -9,6 +9,8 @@ const packageMap = {
   'darwin:x64': '@onslaughtsnail/caelis-darwin-x64',
   'linux:arm64': '@onslaughtsnail/caelis-linux-arm64',
   'linux:x64': '@onslaughtsnail/caelis-linux-x64',
+  'win32:arm64': '@onslaughtsnail/caelis-windows-arm64',
+  'win32:x64': '@onslaughtsnail/caelis-windows-x64',
 };
 
 function resolvePackageName() {
@@ -24,7 +26,8 @@ function resolvePackageName() {
 function resolveBinaryPath(packageName) {
   try {
     const packageJsonPath = require.resolve(`${packageName}/package.json`);
-    return path.join(path.dirname(packageJsonPath), 'runtime', 'caelis');
+    const binaryName = process.platform === 'win32' ? 'caelis.exe' : 'caelis';
+    return path.join(path.dirname(packageJsonPath), 'runtime', binaryName);
   } catch (err) {
     console.error(`[caelis] platform package not installed: ${packageName}`);
     console.error('[caelis] reinstall without --omit=optional, then try again.');

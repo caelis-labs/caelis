@@ -21,6 +21,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
+	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -1468,10 +1469,7 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	repo := repoRootForGatewayDriverTest(t)
 	root := t.TempDir()
 	workdir := t.TempDir()
-	agentBin := filepath.Join(os.TempDir(), fmt.Sprintf("caelis-e2eagent-%d", time.Now().UnixNano()))
-	if runtime.GOOS == "windows" {
-		agentBin += ".exe"
-	}
+	agentBin := filepath.Join(os.TempDir(), testenv.ExecutableName(fmt.Sprintf("caelis-e2eagent-%d", time.Now().UnixNano())))
 	t.Cleanup(func() { _ = os.Remove(agentBin) })
 	build := exec.Command("go", "build", "-o", agentBin, "./internal/acpe2eagent")
 	build.Dir = repo
@@ -2115,10 +2113,9 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 	ctx := context.Background()
 	binDir := t.TempDir()
 	started := filepath.Join(t.TempDir(), "npm-started")
-	npmPath := filepath.Join(binDir, "npm")
+	npmPath := filepath.Join(binDir, testenv.CommandScriptName("npm"))
 	body := "#!/bin/sh\nprintf started > \"$CAELIS_NPM_STARTED\"\nwhile true; do /bin/sleep 1; done\n"
 	if runtime.GOOS == "windows" {
-		npmPath += ".cmd"
 		body = "@echo off\r\necho started> \"%CAELIS_NPM_STARTED%\"\r\n:loop\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n"
 	}
 	if err := os.WriteFile(npmPath, []byte(body), 0o755); err != nil {
@@ -3095,17 +3092,7 @@ func repoRootForGatewayDriverTest(t *testing.T) string {
 
 func setHomeForGatewayDriverTest(t *testing.T, home string) {
 	t.Helper()
-	t.Setenv("HOME", home)
-	if runtime.GOOS != "windows" {
-		return
-	}
-	t.Setenv("USERPROFILE", home)
-	volume := filepath.VolumeName(home)
-	if volume == "" {
-		return
-	}
-	t.Setenv("HOMEDRIVE", volume)
-	t.Setenv("HOMEPATH", strings.TrimPrefix(home, volume))
+	testenv.SetHome(t, home)
 }
 
 func agentCandidatesHaveName(candidates []AgentCandidate, name string) bool {

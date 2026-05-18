@@ -1,14 +1,16 @@
 # Windows Elevated Sandbox Design
 
-This document is the implementation target for native Windows support and the
-Windows Elevated sandbox backend in Caelis.
+This document records the implementation target and current design for native
+Windows support and the Windows Elevated sandbox backend in Caelis.
 
 The design follows the same dependency direction as the rest of the repository:
 
 - `ports/sandbox` owns the stable backend-neutral contract.
 - `impl/sandbox/windows` owns the Windows implementation.
 - `app/gatewayapp` wires the default backend and persisted config.
-- setup helpers and command runners are separate binaries under `cmd/*`.
+- setup helpers and command runners can be built as separate binaries under
+  `cmd/*`, while the normal `caelis.exe` also dispatches the internal helper
+  and runner subcommands for local development and E2E validation.
 
 The initial backend name is `windows-elevated`. The backend is intentionally
 implemented inside this repository first. It should only move to a standalone
@@ -41,23 +43,47 @@ Codex source anchors used for this direction:
 - `codex-rs/windows-sandbox-rs/src/spawn_prep.rs`: maps sandbox policy to ACLs,
   capability SIDs, environment, and command context.
 
-## Current Caelis Baseline
+## Current Caelis Implementation
 
-The first Caelis integration layer should remain truthful:
+The current integration layer is intended to be truthful about what is actually
+enforced:
 
 - `ports/sandbox.BackendWindowsElevated` exists as `windows-elevated`.
-- Windows auto backend selection should choose `windows-elevated`.
-- Explicit Unix backends should be rejected on Windows.
-- `app/gatewayapp/internal/sandboxpolicy` should accept `windows`,
-  `elevated`, and `windows-elevated` aliases.
-- `app/gatewayapp` should register `impl/sandbox/windows`.
-- Until the backend is complete, `impl/sandbox/windows` should fail with a clear
-  "not implemented yet" error instead of silently using host execution as if it
-  were isolated.
+- Windows auto backend selection chooses `windows-elevated`.
+- Explicit Unix backends are rejected on Windows.
+- `app/gatewayapp/internal/sandboxpolicy` accepts `windows`, `elevated`,
+  `windows-elevated`, and `host` aliases.
+- `app/gatewayapp` registers `impl/sandbox/windows`.
+- `impl/sandbox/windows` now provides real setup and runner paths instead of an
+  unimplemented stub.
+- Windows setup is explicit: normal sandbox command execution never launches a
+  UAC prompt. Users initialize or refresh full setup through
+  `caelis sandbox setup` or TUI `/sandbox setup`.
+- Host execution remains native on Windows and uses PowerShell rather than a
+  POSIX shell.
 
-The host backend must compile and behave natively on Windows. It can use
-PowerShell for host execution while the sandbox backend develops a stronger
-runner path.
+The default Windows Elevated enforcement path is:
+
+- local sandbox users and the `CaelisSandboxUsers` group;
+- idempotent elevated setup with marker/error state and DPAPI-protected
+  credentials;
+- ACL grants/denies on read, write, hidden, and protected roots;
+- offline/online sandbox identities with Windows Firewall outbound block rules
+  for the offline identity, scoped by `LocalUser` and split across non-loopback,
+  loopback TCP, and loopback UDP traffic;
+- workspace-scoped `USERPROFILE`, `HOME`, `TEMP`, `TMP`, `LOCALAPPDATA`, and
+  `APPDATA` values;
+- command runner IPC, PowerShell command execution, ConPTY support, Job Object
+  cleanup, timeout, kill, and async session plumbing.
+- non-elevated per-command ACL refresh for current read/write/deny roots, so
+  approved `request_permissions` grants do not change the full setup marker and
+  do not cause later commands to pop UAC.
+
+Capability SID work follows the Codex design direction: Caelis persists random
+per-workspace/per-write-root SIDs, applies matching ACLs, and attaches those
+capability SIDs to the child restricted token by default. The debug escape hatch
+`CAELIS_WINDOWS_SANDBOX_ATTACH_CAPS=0` disables attachment if a Windows machine
+exposes a process-startup incompatibility that needs investigation.
 
 ## Goals
 
@@ -113,7 +139,7 @@ cmd/caelis-command-runner/
 Suggested responsibilities:
 
 - `internal/win32`: thin, tested wrappers for token, SID, ACL, process,
-  ShellExecute, logon, profile, desktop, pipe, Job Object, and WFP calls.
+  ShellExecute, logon, profile, desktop, pipe, and Job Object calls.
 - `internal/policy`: conversion from `sandbox.Config` and
   `sandbox.Constraints` to Windows read/write/hidden roots.
 - `internal/setupstate`: marker files, setup version, runner hash, policy hash,
@@ -124,8 +150,7 @@ Suggested responsibilities:
 - `internal/conpty`: TTY support, resize, and stream fan-out.
 - `internal/pathutil`: Windows path canonicalization, drive handling, UNC paths,
   case folding, and short-name normalization.
-- `internal/netpolicy`: online/offline identity selection and firewall/WFP
-  refresh.
+- `internal/netpolicy`: online/offline identity selection and firewall refresh.
 
 ## On-Disk State
 
@@ -137,10 +162,11 @@ Use the Caelis app store root as the sandbox home. By default this is under
   .sandbox/
     setup_marker.json
     setup_error.json
+    setup_progress.json
+    cap_sids.json
     logs/
   .sandbox-bin/
-    caelis-command-runner-<version-or-hash>.exe
-    caelis-windows-sandbox-setup-<version-or-hash>.exe
+    caelis-windows-sandbox-<hash>.exe
   .sandbox-secrets/
     sandbox_users.json
     dpapi-protected credentials
@@ -150,18 +176,30 @@ Security expectations:
 
 - `.sandbox-secrets` is readable only by the real user and Administrators.
 - The command runner is materialized under `.sandbox-bin` with content hashing
-  so stale binaries can be replaced safely.
+  so stale binaries can be replaced safely. If `caelis-command-runner.exe` is
+  available next to the main binary, sandboxed commands use that lightweight
+  runner; local development can still fall back to the helper-capable
+  `caelis.exe` internal runner command.
 - Setup marker version changes force refresh.
-- Runner hash changes force refresh.
-- Policy root changes force ACL refresh.
+- Local sandbox identity or owner changes force refresh.
+- Runner hash changes are diagnostic and cause helper rematerialization when
+  needed; they do not force another elevated setup prompt.
+- Policy root changes force non-elevated request ACL refresh, not full setup.
+- `cap_sids.json` stores random capability-style SIDs by normalized workspace
+  and write root. It is state, not a secret; it should still be kept under the
+  protected sandbox state directory to avoid accidental tampering.
 
 ## Windows Identities
 
 Target local accounts and group:
 
 - `CaelisSandboxUsers`: shared local group for sandbox identities.
-- `CaelisSandboxOffline`: no direct outbound network by default.
-- `CaelisSandboxOnline`: network allowed when policy asks for it.
+- `CaelisSbxOff<hash>`: no direct outbound network by default.
+- `CaelisSbxOn<hash>`: network allowed when policy asks for it.
+
+The `<hash>` suffix is derived from the Caelis sandbox state root. This keeps
+normal user state and development/E2E state from rotating the same global
+Windows account passwords.
 
 The elevated setup helper is responsible for:
 
@@ -174,16 +212,48 @@ The elevated setup helper is responsible for:
 
 ## Setup Flow
 
-Parent process flow:
+Status and startup flow:
 
-1. Build a setup request from current `sandbox.Config`, workspace, env, and
-   constraints.
-2. Check setup marker, runner hash, identity state, and root policy hash.
-3. If setup is stale or missing, materialize helper binaries into
-   `.sandbox-bin`.
-4. Launch `caelis-windows-sandbox-setup.exe` with ShellExecute `runas`.
-5. Wait for completion and read `setup_error.json` on failure.
-6. Continue only after marker and secrets are consistent.
+1. TUI startup, `/status`, and `doctor` inspect setup marker and identity
+   state. Runner hash and policy hash are reported for diagnostics, but normal
+   local rebuilds and workspace changes do not make setup stale.
+2. If setup is missing or stale, the status is `setup_required` with a
+   remediation hint. No command path launches UAC automatically.
+3. The TUI shows a startup notice for Windows Elevated setup gaps and asks the
+   user to run `/sandbox setup`.
+
+Explicit setup flow:
+
+1. The user runs `caelis sandbox setup` or TUI `/sandbox setup`.
+2. The parent builds a setup request from current `sandbox.Config`, workspace,
+   and the stable base Windows sandbox constraints.
+3. The full setup payload uses a root-independent policy hash. Workspace roots,
+   configured roots, and per-command `request_permissions` read/write roots are
+   intentionally excluded from the marker freshness check.
+4. The parent materializes the current helper-capable `caelis.exe` into
+   `.sandbox-bin` under a hash-qualified name.
+5. If the parent is already elevated, it executes setup in-process. Otherwise it
+   launches the helper with ShellExecute `runas`.
+6. The parent reports phase progress to the TUI while setup checks accounts,
+   protects Caelis sandbox state directories, and refreshes Windows Firewall
+   policy. Workspace ACLs are not part of full setup. When the helper runs in a
+   separate elevated process, progress is mirrored through
+   `.sandbox/setup_progress.json`.
+7. The parent waits for completion and reads `setup_error.json` on failure.
+8. Normal sandbox execution is allowed only after marker and secrets are
+   consistent.
+
+Normal command flow:
+
+1. Check the stable setup marker and sandbox user secrets.
+2. If setup is missing, stale, or incomplete, fail closed with guidance to run
+   `/sandbox setup` or `caelis sandbox setup`.
+3. Build the request-specific Windows policy, including dynamic
+   `request_permissions` read/write roots and hidden/read-only path rules.
+4. Refresh request ACLs without elevation. This may update workspace/read-root
+   ACLs for the sandbox group and per-root capability SIDs, but it never uses
+   `runas` and never displays UAC.
+5. Launch the command runner as the selected sandbox identity.
 
 Elevated helper flow:
 
@@ -193,11 +263,12 @@ Elevated helper flow:
 4. Apply allow ACLs for read roots and write roots.
 5. Apply deny-write ACLs for hidden or protected write paths.
 6. Apply deny-read ACLs for hidden paths.
-7. Refresh WFP/firewall rules for offline and online identities.
+7. Refresh Windows Firewall rules for the offline identity and validate the
+   online identity exists.
 8. Write setup marker atomically.
 
-Setup must be idempotent. Refresh should be the normal path, not an exceptional
-repair path.
+Full setup must be idempotent. Per-command ACL refresh should be the normal
+non-elevated path, not an elevated repair path.
 
 ## Command Runner Protocol
 
@@ -223,13 +294,20 @@ The runner owns:
 
 - Loading or receiving sandbox credentials.
 - Creating the final restricted token.
-- Attaching capability SIDs.
+- Attaching capability SIDs by default, with
+  `CAELIS_WINDOWS_SANDBOX_ATTACH_CAPS=0` as a temporary debug override.
 - Creating the process with the requested cwd and env.
 - Creating a private desktop when configured.
 - Creating a Job Object and assigning the process tree.
 - Creating ConPTY when `TTY=true`.
 - Streaming stdout/stderr and honoring stdin.
 - Killing the whole job on timeout or explicit termination.
+
+The non-TTY default runs PowerShell as the selected sandbox user and attaches
+the per-root capability SIDs to a restricted child token. The token path mirrors
+the relevant Codex model pieces: per-root random SIDs, user/logon and Everyone
+restricting SIDs, a permissive default DACL for allowed SIDs, null device
+access, and `SeChangeNotifyPrivilege`.
 
 ## Policy Mapping
 
@@ -262,6 +340,21 @@ Mapping rules:
 - `NetworkInherit` should default to disabled for sandbox route unless product
   policy explicitly grants network.
 
+Offline network enforcement currently uses persistent Windows Firewall rules
+modeled after the relevant Codex firewall setup shape:
+
+- `LocalUser` SDDL is `O:LSD:(A;;CC;;;offline-sid)`.
+- Non-loopback outbound traffic is blocked for all protocols.
+- Loopback TCP and loopback UDP are blocked separately so local services are not
+  accidentally reachable in no-network mode.
+- The sandbox environment also points common proxy variables at
+  `http://127.0.0.1:9` and sets `CAELIS_SANDBOX_NETWORK=disabled`.
+
+Codex also adds WFP filters for DNS, DNS-over-TLS, SMB, and ICMP as
+defense-in-depth. Caelis can add that later if a target Windows fleet shows
+firewall policy drift, but the first implementation relies on broad
+per-identity Windows Firewall blocks plus the real external socket E2E below.
+
 Default read roots on Windows should include only what is required:
 
 - `C:\Windows`
@@ -275,7 +368,8 @@ Default read roots on Windows should include only what is required:
 Default write roots:
 
 - active workspace
-- temp directory for the sandbox identity
+- workspace-scoped temp/home directories prepared by the runner under
+  `.caelis-sandbox`
 - configured writable roots
 - approved skill directories already added by `sandboxpolicy.EffectiveConfig`
 
@@ -306,10 +400,14 @@ Required support:
   possible.
 - Drive roots and UNC roots must be treated as policy boundaries.
 
-Future UI/prompt cleanup:
+Current UI/prompt cleanup:
 
-- The shell tool can remain protocol-compatible, but Windows prompts should not
-  imply that every command runs in POSIX bash.
+- The shell tool remains protocol-compatible as `BASH`, but the model-visible
+  description and assembled prompt describe it as a historical tool identifier.
+  On Windows the model is told to write PowerShell commands; on Unix it should
+  write POSIX shell commands.
+- The prompt environment context reports `powershell` on Windows instead of
+  trusting POSIX-oriented `SHELL` values.
 - Diagnostics should report the resolved backend, setup status, account names,
   runner version, and policy roots.
 
@@ -331,6 +429,9 @@ Future UI/prompt cleanup:
 - `SupportedBackends`: include host and `windows-elevated` through the composed
   runtime.
 - `Status`: surface setup failure details and fallback hints.
+- `Prepare`: optional `ports/sandbox.PreparableRuntime` hook used by
+  `caelis sandbox setup` and TUI `/sandbox setup` to run the full elevated setup
+  flow explicitly.
 - `Close`: terminate live runner transports and jobs owned by this runtime.
 
 Fallback policy:
@@ -340,6 +441,9 @@ Fallback policy:
 - Explicit `windows-elevated` must fail closed if setup or runner spawn fails.
 - A command that asks for sandbox route must not silently run on host after a
   backend-specific denial.
+- Missing or stale Windows setup is a backend-specific denial, not a lazy setup
+  trigger. Ordinary command execution must return actionable setup guidance
+  instead of launching UAC.
 
 ## Error Model
 
@@ -362,6 +466,40 @@ They must not include secrets or full DPAPI payload paths.
 
 ## Test Plan
 
+Real-machine E2E is intentionally gated because it creates local users,
+refreshes ACLs, and writes Windows Firewall policy:
+
+```powershell
+$env:CAELIS_WINDOWS_SANDBOX_E2E = '1'
+$env:CAELIS_WINDOWS_SANDBOX_E2E_HELPER = 'C:\path\to\caelis.exe'
+$env:CAELIS_WINDOWS_SANDBOX_E2E_STATE = 'C:\path\to\isolated\state'
+go test ./impl/sandbox/windows -run TestWindowsElevatedSandboxE2E -count=1 -timeout 300s -v
+```
+
+Place `caelis-command-runner.exe` next to that helper to exercise the
+lightweight command-runner path. Without it, local E2E falls back to the
+helper-capable `caelis.exe` internal runner path.
+
+Windows npm platform packages must stage `runtime/caelis.exe`,
+`runtime/caelis-command-runner.exe`, and
+`runtime/caelis-windows-sandbox-setup.exe` from the Windows release archive.
+The launcher still starts `caelis.exe`; the sandbox runtime discovers the
+sibling command runner from that install directory.
+
+The current E2E covers workspace file write/read, PowerShell command execution,
+execution of real Windows developer tools (`go.exe`, `git.exe`, `npm.cmd`, and
+nested `powershell.exe`) when standard installs are present, offline and online
+network environment behavior, a real external TCP probe where the online
+identity connects and the offline identity is denied, hidden path denial,
+capability SID restricted-token attachment, explicit setup, and async session
+wait/result. It passed on the local Windows development machine on 2026-05-18
+using a helper built from this worktree.
+
+Do not use a listener bound to the same host's non-loopback address as the
+primary no-network proof. On Windows that can exercise a same-machine local path
+instead of the outbound path that the offline firewall rule is meant to prove.
+Use a separate host or the gated external probe above.
+
 Unit tests:
 
 - backend normalization aliases
@@ -369,6 +507,7 @@ Unit tests:
 - path canonicalization and case-insensitive dedupe
 - policy mapping from constraints to roots
 - setup marker stale/current decisions
+- missing setup fails closed without UAC and includes `/sandbox setup` guidance
 - runner framed protocol encode/decode
 - `.cmd` executable discovery in tests
 - no-op directory fsync on Windows
@@ -376,19 +515,22 @@ Unit tests:
 Integration tests on Windows:
 
 - setup creates users, group, marker, bin dir, and secrets dir
-- setup refresh is idempotent
+- non-elevated setup refresh is idempotent
+- per-command ACL refresh runs without elevation after setup is complete
 - workspace write can create and edit files inside workspace
 - write outside workspace is denied
 - read of hidden path is denied
 - write of read-only subpath is denied
 - network disabled cannot reach external endpoints
-- network enabled can reach a local test endpoint when allowed
+- network enabled can reach external endpoints when allowed
 - stdin works
 - stdout and stderr stream independently without TTY
 - TTY session uses ConPTY and receives resize events
 - timeout kills the full process tree
 - terminate kills background grandchildren via Job Object
 - explicit `windows-elevated` fails closed if setup is missing
+- TUI startup and `/status` show setup-required guidance
+- TUI `/sandbox setup` invokes the explicit setup path
 - auto backend fallback status includes an install/setup hint
 
 Cross-platform tests:
@@ -418,113 +560,169 @@ Cross-platform tests:
 - [x] Make ACP fake npm tests use `.cmd` on Windows.
 - [x] Normalize managed ACP adapter expectations through
   `managedACPAgentBinPath`.
-- [ ] Add a shared cross-package Windows test helper for home and executable
+- [x] Add a shared cross-package Windows test helper for home and executable
   suffix handling if more packages need it.
-- [ ] Audit remaining `os.UserHomeDir` tests for Windows env assumptions.
-- [ ] Audit shell-based tests for POSIX-only snippets.
+- [x] Audit remaining `os.UserHomeDir` tests for Windows env assumptions.
+- [x] Audit shell-based tests for POSIX-only snippets.
 
 ### Phase 2: Win32 Foundation
 
-- [ ] Add `internal/win32` wrappers for SID lookup and string conversion.
-- [ ] Add token restriction and capability SID wrappers.
-- [ ] Add ACL read/modify/write wrappers.
-- [ ] Add `ShellExecuteExW` wrapper for elevated helper launch.
-- [ ] Add `LogonUser` and profile loading wrappers.
-- [ ] Add named pipe or anonymous pipe transport wrappers.
-- [ ] Add Job Object wrapper for process tree cleanup.
-- [ ] Add ConPTY wrapper with resize support.
-- [ ] Add WFP/firewall rule wrapper or documented fallback.
+- [x] Add `internal/win32` wrappers for SID lookup and string conversion.
+- [x] Add token restriction wrappers.
+- [x] Add capability SID wrappers.
+- [x] Add ACL read/modify/write wrappers.
+- [x] Add `ShellExecuteExW` wrapper for elevated helper launch.
+- [x] Add logon/profile process launch wrappers.
+- [x] Add named pipe or anonymous pipe transport wrappers.
+- [x] Add Job Object wrapper for process tree cleanup.
+- [x] Add ConPTY wrapper with resize support.
+- [x] Add firewall rule refresh wrapper.
 
 ### Phase 3: Setup Helper
 
-- [ ] Create `cmd/caelis-windows-sandbox-setup`.
-- [ ] Define setup payload schema and version.
-- [ ] Materialize helper binary into `.sandbox-bin`.
-- [ ] Implement UAC launch from parent runtime.
-- [ ] Create `CaelisSandboxUsers`.
-- [ ] Create or update offline and online users.
-- [ ] Store credentials with DPAPI.
-- [ ] ACL `.sandbox`, `.sandbox-bin`, and `.sandbox-secrets`.
-- [ ] Apply read/write/hidden root ACL refresh.
-- [ ] Apply network policy refresh.
-- [ ] Write setup marker atomically.
-- [ ] Write sanitized setup error reports.
+- [x] Create `cmd/caelis-windows-sandbox-setup`.
+- [x] Define setup payload schema and version.
+- [x] Materialize helper binary into `.sandbox-bin`.
+- [x] Implement UAC launch from parent runtime.
+- [x] Create `CaelisSandboxUsers`.
+- [x] Create or update offline and online users.
+- [x] Store credentials with DPAPI.
+- [x] ACL `.sandbox`, `.sandbox-bin`, and `.sandbox-secrets`.
+- [x] Apply read/write/hidden root ACL refresh.
+- [x] Apply network policy refresh.
+- [x] Write setup marker atomically.
+- [x] Write sanitized setup error reports.
 
 ### Phase 4: Command Runner
 
-- [ ] Create `cmd/caelis-command-runner`.
-- [ ] Define runner framed protocol.
-- [ ] Implement parent-runner handshake.
-- [ ] Spawn child process with restricted token and capability SIDs.
-- [ ] Implement non-TTY pipes.
-- [ ] Implement ConPTY mode.
-- [ ] Implement stdin, resize, interrupt, kill, and timeout.
-- [ ] Assign children to a Job Object.
-- [ ] Stream stdout/stderr into `sandbox.Session`.
-- [ ] Return structured exit status and errors.
+- [x] Create `cmd/caelis-command-runner`.
+- [x] Define runner framed protocol.
+- [x] Implement parent-runner handshake.
+- [x] Implement restricted-token helpers and a debug-controllable capability SID
+  attach path.
+- [x] Persist random per-workspace/per-write-root capability SIDs and grant
+  matching write-root ACLs.
+- [x] Make capability SID attachment the default after validating the current
+  PowerShell workload E2E on real Windows.
+- [x] Expand the real-machine capability-token matrix to common Windows
+  developer tools such as `go`, `git`, `npm.cmd`, and nested PowerShell.
+- [x] Launch the command runner as the configured sandbox user.
+- [x] Implement non-TTY pipes.
+- [x] Implement ConPTY mode.
+- [x] Implement stdin, interrupt, kill, and timeout.
+- [x] Implement resize handling for ConPTY.
+- [x] Assign children to a Job Object.
+- [x] Stream stdout/stderr into `sandbox.Session`.
+- [x] Return structured exit status and errors.
 
 ### Phase 5: Windows Runtime
 
-- [ ] Implement `impl/sandbox/windows.Runtime.Describe`.
-- [ ] Implement setup freshness checks.
-- [ ] Implement setup refresh orchestration.
-- [ ] Implement `Run`.
-- [ ] Implement `Start`.
-- [ ] Implement live session registry.
-- [ ] Implement `OpenSession` and `OpenSessionRef`.
-- [ ] Implement `Close`.
-- [ ] Expose setup failure hints through `sandbox.Status`.
-- [ ] Preserve explicit-backend fail-closed behavior.
+- [x] Implement `impl/sandbox/windows.Runtime.Describe`.
+- [x] Implement setup freshness checks.
+- [x] Implement explicit setup orchestration.
+- [x] Keep full setup marker independent from workspace roots and local runner
+  hash churn so setup is normally a one-time user-triggered action.
+- [x] Implement non-elevated per-command ACL refresh after setup is complete.
+- [x] Implement `Run`.
+- [x] Implement `Start`.
+- [x] Implement live session registry.
+- [x] Implement `OpenSession` and `OpenSessionRef`.
+- [x] Implement `Close`.
+- [x] Expose setup failure hints through `sandbox.Status`.
+- [x] Ensure normal command execution fails closed instead of launching UAC when
+  setup is missing or stale.
+- [x] Preserve explicit-backend fail-closed behavior.
 
 ### Phase 6: Policy and Filesystem
 
-- [ ] Implement Windows path canonicalization.
-- [ ] Implement case-insensitive root dedupe.
-- [ ] Map `sandbox.Config` and `sandbox.Constraints` to Windows roots.
-- [ ] Support `PathAccessHidden` as deny-read and deny-write.
-- [ ] Protect known user secret directories by default.
-- [ ] Add policy-aware filesystem reads for tools.
-- [ ] Add tests for drive roots, UNC roots, short paths, and long paths.
+- [x] Implement Windows path canonicalization.
+- [x] Implement case-insensitive root dedupe.
+- [x] Map `sandbox.Config` and `sandbox.Constraints` to Windows roots.
+- [x] Support `PathAccessHidden` as deny-read and deny-write.
+- [x] Protect known user secret directories by default.
+- [x] Add policy-aware filesystem reads for tools.
+- [x] Add tests for drive roots, UNC roots, and long path prefixes.
+- [x] Add tests for short 8.3 paths where the filesystem exposes them.
 
 ### Phase 7: Network Control
 
-- [ ] Define online/offline identity semantics.
-- [ ] Implement WFP/firewall setup.
-- [ ] Add no-network environment hardening.
-- [ ] Add local proxy compatibility if needed.
-- [ ] Add integration tests for disabled and enabled network modes.
+- [x] Define online/offline identity semantics.
+- [x] Implement Windows Firewall setup for the offline identity, including
+  non-loopback and loopback rule scopes.
+- [x] Add no-network environment hardening.
+- [x] Add local proxy compatibility if needed.
+- [x] Add integration tests for disabled and enabled network environment modes.
+- [x] Add a real socket E2E that proves offline identity outbound denial and
+  online identity allowance on a reachable external TCP endpoint.
 
 ### Phase 8: Diagnostics and UX
 
-- [ ] Add doctor checks for Windows Elevated setup.
-- [ ] Report setup version, marker status, helper hash, runner hash, and user
-  existence.
-- [ ] Add a manual setup command if useful.
-- [ ] Add clear remediation for UAC cancellation.
-- [ ] Update prompts or tool labels so Windows users are not told every shell is
-  POSIX bash.
+- [x] Add doctor checks for Windows Elevated setup.
+- [x] Report setup version, marker status, helper hash, runner hash, and
+  configured user names.
+- [x] Add manual setup through `caelis sandbox setup`.
+- [x] Add TUI `/sandbox setup`.
+- [x] Show TUI startup and `/status` guidance when setup is not
+  ready.
+- [x] Stream `/sandbox setup` progress into the TUI viewport and suppress
+  PowerShell progress UI from firewall refresh.
+- [x] Add clear remediation for UAC cancellation.
+- [x] Keep user-visible command transcript copy stable while updating
+  model-visible `BASH` description/prompt guidance so Windows commands are
+  written as PowerShell.
 
 ### Phase 9: Extraction Decision
 
-- [ ] Keep implementation internal until setup, runner, policy, and tests are
+- [x] Keep implementation internal until setup, runner, policy, and tests are
   stable.
-- [ ] Extract only if another repository needs to implement Caelis sandbox
+- [x] Extract only if another repository needs to implement Caelis sandbox
   ports.
-- [ ] If extracted, keep `ports/sandbox` in Caelis and publish only the concrete
+- [x] If extracted, keep `ports/sandbox` in Caelis and publish only the concrete
   Windows backend plus helper binaries.
-- [ ] Version runner protocol and setup payload before extraction.
+- [x] Version runner protocol and setup payload before extraction.
+
+## Future Hardening
+
+These are not required for the current acceptance target, but they are worth
+tracking as the Windows fleet grows:
+
+- Add Codex-style WFP filters for DNS, DNS-over-TLS, SMB, and ICMP if field
+  validation shows Windows Firewall policy is insufficient on target machines.
 
 ## Acceptance Criteria
 
-The Windows Elevated backend is complete when:
+The current locally validated subset includes:
+
+- setup and command runner execution through the helper-capable `caelis.exe`;
+- explicit setup through `caelis sandbox setup` or TUI `/sandbox setup`, with
+  no lazy UAC from normal command execution;
+- workspace file creation and host-side readback;
+- PowerShell command execution under the sandbox identity;
+- real developer tool execution with `go.exe`, `git.exe`, `npm.cmd`, and nested
+  `powershell.exe` when they are installed in standard Windows locations;
+- capability SID restricted-token attachment on the default non-TTY path;
+- offline and online network environment selection plus external socket
+  denial/allowance;
+- hidden path denial through ACL refresh;
+- async session start, wait, and result collection.
+
+The hardened Windows Elevated backend is complete when:
 
 - A fresh Windows machine can run setup through UAC and then run sandboxed
   commands without manual account preparation.
+- TUI startup clearly prompts for `/sandbox setup` when Windows setup is not
+  ready.
+- TUI `/sandbox setup` shows live progress during account, ACL, and firewall
+  setup instead of appearing stuck.
+- Dynamic `request_permissions` read/write roots are applied through
+  non-elevated ACL refresh and do not force a new elevated setup prompt.
 - Workspace-write commands can read required platform/tool roots and write only
   allowed roots.
 - Hidden paths cannot be read by sandboxed commands.
 - Read-only subpaths cannot be written by sandboxed commands.
-- Network-disabled commands cannot reach the network.
+- Network-disabled commands cannot reach external network endpoints.
+- Capability SID restricted-token attachment is safe as the default for
+  PowerShell and common Windows developer tools.
 - Timeout and terminate clean the full process tree.
 - TTY and non-TTY sessions both work.
 - `go test` covers port selection, policy mapping, runner protocol, and Windows

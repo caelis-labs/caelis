@@ -214,6 +214,10 @@ func (s StatusService) SetSandboxBackend(ctx context.Context, backend string) (S
 	return s.stack.SetSandboxBackend(ctx, backend)
 }
 
+func (s StatusService) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
+	return s.stack.PrepareSandbox(ctx)
+}
+
 func (s StatusService) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
 	return s.stack.SessionRuntimeState(ctx, ref)
 }

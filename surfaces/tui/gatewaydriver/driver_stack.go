@@ -92,8 +92,11 @@ type SandboxStatus struct {
 	Route              string
 	FallbackReason     string
 	InstallHint        string
+	SetupRequired      bool
+	SetupError         string
+	SetupMarkerCurrent bool
+	SetupMarkerReason  string
 	SecuritySummary    string
-	AutoReviewDisabled bool
 }
 
 type DoctorRequest struct {
@@ -115,8 +118,11 @@ type DoctorReport struct {
 	SandboxRoute              string
 	SandboxFallbackReason     string
 	SandboxInstallHint        string
+	SandboxSetupRequired      bool
+	SandboxSetupError         string
+	SandboxSetupMarkerCurrent bool
+	SandboxSetupMarkerReason  string
 	SandboxSecuritySummary    string
-	SandboxAutoReviewDisabled bool
 	HostExecution             bool
 	FullAccessMode            bool
 	PermissionGrantCount      int
@@ -170,6 +176,7 @@ type DriverStack struct {
 	SetACPControllerModelFn              func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
 	CycleSessionModeFn                   func(context.Context, session.SessionRef) (string, error)
 	SetSandboxBackendFn                  func(context.Context, string) (SandboxStatus, error)
+	PrepareSandboxFn                     func(context.Context) (SandboxStatus, error)
 	SetACPControllerModeFn               func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
 	SetSessionModeFn                     func(context.Context, session.SessionRef, string) (string, error)
 	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
@@ -304,6 +311,13 @@ func (s *DriverStack) SetSandboxBackend(ctx context.Context, backend string) (Sa
 		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox backend dependency is unavailable")
 	}
 	return s.SetSandboxBackendFn(ctx, backend)
+}
+
+func (s *DriverStack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
+	if s == nil || s.PrepareSandboxFn == nil {
+		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox setup dependency is unavailable")
+	}
+	return s.PrepareSandboxFn(ctx)
 }
 
 func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {

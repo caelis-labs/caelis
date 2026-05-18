@@ -17,11 +17,7 @@ func (r *Runtime) policyMode(spec agent.AgentSpec) string {
 			mode = trimmed
 		}
 	}
-	normalized := normalizePolicyMode(mode)
-	if boolMetadata(spec.Metadata, "sandbox_auto_review_disabled") && normalized == presets.ModeAutoReview {
-		return presets.ModeManual
-	}
-	return normalized
+	return normalizePolicyMode(mode)
 }
 
 func normalizePolicyMode(mode string) string {
@@ -73,24 +69,5 @@ func stringSliceMetadata(meta map[string]any, key string) ([]string, bool) {
 		return out, true
 	default:
 		return nil, false
-	}
-}
-
-func boolMetadata(meta map[string]any, key string) bool {
-	if meta == nil {
-		return false
-	}
-	switch typed := meta[key].(type) {
-	case bool:
-		return typed
-	case string:
-		switch strings.ToLower(strings.TrimSpace(typed)) {
-		case "1", "true", "yes", "on":
-			return true
-		default:
-			return false
-		}
-	default:
-		return false
 	}
 }

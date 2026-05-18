@@ -6,10 +6,12 @@ import (
 	"context"
 	"os"
 	"os/exec"
+
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
 )
 
-func newShellCommand(ctx context.Context, command string) *exec.Cmd {
-	return exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command)
+func newShellCommand(ctx context.Context, command string, interactive bool) *exec.Cmd {
+	return exec.CommandContext(ctx, "powershell.exe", winps.Args(command, winps.Options{Interactive: interactive})...)
 }
 
 func setProcessGroup(_ *exec.Cmd) {

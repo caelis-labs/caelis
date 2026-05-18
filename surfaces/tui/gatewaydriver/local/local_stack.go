@@ -66,6 +66,9 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		SetSandboxBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
 			return toRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
 		},
+		PrepareSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
+			return toRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
+		},
 		SetACPControllerModeFn: agents.SetControllerMode,
 		SetSessionModeFn:       status.SetSessionMode,
 		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
@@ -206,8 +209,11 @@ func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 		Route:              status.Route,
 		FallbackReason:     status.FallbackReason,
 		InstallHint:        status.InstallHint,
+		SetupRequired:      status.SetupRequired,
+		SetupError:         status.SetupError,
+		SetupMarkerCurrent: status.SetupMarkerCurrent,
+		SetupMarkerReason:  status.SetupMarkerReason,
 		SecuritySummary:    status.SecuritySummary,
-		AutoReviewDisabled: status.AutoReviewDisabled,
 	}
 }
 
@@ -267,8 +273,11 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 		SandboxRoute:              report.SandboxRoute,
 		SandboxFallbackReason:     report.SandboxFallbackReason,
 		SandboxInstallHint:        report.SandboxInstallHint,
+		SandboxSetupRequired:      report.SandboxSetupRequired,
+		SandboxSetupError:         report.SandboxSetupError,
+		SandboxSetupMarkerCurrent: report.SandboxSetupMarkerCurrent,
+		SandboxSetupMarkerReason:  report.SandboxSetupMarkerReason,
 		SandboxSecuritySummary:    report.SandboxSecuritySummary,
-		SandboxAutoReviewDisabled: report.SandboxAutoReviewDisabled,
 		HostExecution:             report.HostExecution,
 		FullAccessMode:            report.FullAccessMode,
 		PermissionGrantCount:      report.PermissionGrantCount,

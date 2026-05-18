@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/procutil"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/google/uuid"
 )
@@ -450,7 +451,7 @@ func buildAsyncSessionCommand(ctx context.Context, command string, tty bool) (*e
 		if tty {
 			return nil, fmt.Errorf("tty mode is not supported by cmdsession on windows")
 		}
-		return exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", command), nil
+		return exec.CommandContext(ctx, "powershell.exe", winps.Args(command, winps.Options{})...), nil
 	}
 	if !tty {
 		return exec.CommandContext(ctx, "bash", "-lc", command), nil

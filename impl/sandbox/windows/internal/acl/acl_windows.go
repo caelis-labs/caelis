@@ -1,0 +1,291 @@
+//go:build windows
+
+package acl
+
+import (
+	"fmt"
+	"runtime"
+	"strings"
+	"unsafe"
+
+	"golang.org/x/sys/windows"
+)
+
+type Mode string
+
+const (
+	Grant Mode = "grant"
+	Deny  Mode = "deny"
+	Set   Mode = "set"
+)
+
+type Rights string
+
+const (
+	ReadExecute Rights = "read_execute"
+	Traverse    Rights = "traverse"
+	Write       Rights = "write"
+	Modify      Rights = "modify"
+	FullControl Rights = "full_control"
+)
+
+type Entry struct {
+	Principal string
+	Rights    Rights
+	Mode      Mode
+	Inherit   bool
+}
+
+type Descriptor struct {
+	sd *windows.SECURITY_DESCRIPTOR
+}
+
+func ReadFileDACL(path string) (Descriptor, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return Descriptor{}, fmt.Errorf("acl: path is required")
+	}
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return Descriptor{}, fmt.Errorf("acl: read %s DACL: %w", path, err)
+	}
+	return Descriptor{sd: sd}, nil
+}
+
+func (d Descriptor) HasDACL() bool {
+	if d.sd == nil {
+		return false
+	}
+	_, _, err := d.sd.DACL()
+	return err == nil
+}
+
+func ModifyFileDACL(path string, entries ...Entry) error {
+	current, err := ReadFileDACL(path)
+	if err != nil {
+		return err
+	}
+	missing, err := missingEntries(current.sd, entries)
+	if err != nil {
+		return err
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return writeBuiltFileDACL(path, current.sd, false, missing...)
+}
+
+func ReplaceFileDACL(path string, protect bool, entries ...Entry) error {
+	return writeBuiltFileDACL(path, nil, protect, entries...)
+}
+
+func writeBuiltFileDACL(path string, base *windows.SECURITY_DESCRIPTOR, protect bool, entries ...Entry) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("acl: path is required")
+	}
+	explicit, sids, err := explicitAccessEntries(entries)
+	if err != nil {
+		return err
+	}
+	next, err := windows.BuildSecurityDescriptor(nil, nil, explicit, nil, base)
+	runtime.KeepAlive(sids)
+	if err != nil {
+		return fmt.Errorf("acl: build %s DACL: %w", path, err)
+	}
+	return WriteFileDACL(path, Descriptor{sd: next}, protect)
+}
+
+func WriteFileDACL(path string, descriptor Descriptor, protect bool) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("acl: path is required")
+	}
+	if descriptor.sd == nil {
+		return fmt.Errorf("acl: descriptor is required")
+	}
+	dacl, _, err := descriptor.sd.DACL()
+	if err != nil {
+		return fmt.Errorf("acl: extract %s DACL: %w", path, err)
+	}
+	info := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION)
+	if protect {
+		info |= windows.PROTECTED_DACL_SECURITY_INFORMATION
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, info, nil, nil, dacl, nil); err != nil {
+		return fmt.Errorf("acl: write %s DACL: %w", path, err)
+	}
+	return nil
+}
+
+func missingEntries(base *windows.SECURITY_DESCRIPTOR, entries []Entry) ([]Entry, error) {
+	if len(entries) == 0 || base == nil {
+		return entries, nil
+	}
+	dacl, _, err := base.DACL()
+	if err != nil {
+		return nil, err
+	}
+	missing := make([]Entry, 0, len(entries))
+	for _, entry := range entries {
+		principal := strings.TrimSpace(entry.Principal)
+		if principal == "" {
+			continue
+		}
+		_, sid, err := trustee(principal)
+		if err != nil {
+			return nil, err
+		}
+		if sid == nil || !daclHasEntry(dacl, sid, entry) {
+			missing = append(missing, entry)
+		}
+	}
+	return missing, nil
+}
+
+func daclHasEntry(dacl *windows.ACL, sid *windows.SID, entry Entry) bool {
+	if dacl == nil || sid == nil {
+		return false
+	}
+	wantType := uint8(windows.ACCESS_ALLOWED_ACE_TYPE)
+	if entry.Mode == Deny {
+		wantType = windows.ACCESS_DENIED_ACE_TYPE
+	}
+	wantMask := mappedFileMask(rightsMask(entry.Rights))
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil || ace == nil {
+			continue
+		}
+		header := (*windows.ACE_HEADER)(unsafe.Pointer(ace))
+		if header.AceType != wantType {
+			continue
+		}
+		if entry.Inherit && header.AceFlags&(windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE) != (windows.OBJECT_INHERIT_ACE|windows.CONTAINER_INHERIT_ACE) {
+			continue
+		}
+		if header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
+			continue
+		}
+		aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+		if !windows.EqualSid(aceSID, sid) {
+			continue
+		}
+		mask := mappedFileMask(ace.Mask)
+		if mask&wantMask == wantMask {
+			return true
+		}
+	}
+	return false
+}
+
+func mappedFileMask(mask windows.ACCESS_MASK) windows.ACCESS_MASK {
+	out := mask
+	if mask&windows.GENERIC_ALL != 0 {
+		out |= windows.STANDARD_RIGHTS_ALL | windows.SPECIFIC_RIGHTS_ALL
+	}
+	if mask&windows.GENERIC_READ != 0 {
+		out |= windows.FILE_GENERIC_READ
+	}
+	if mask&windows.GENERIC_WRITE != 0 {
+		out |= windows.FILE_GENERIC_WRITE
+	}
+	if mask&windows.GENERIC_EXECUTE != 0 {
+		out |= windows.FILE_GENERIC_EXECUTE
+	}
+	return out
+}
+
+func explicitAccessEntries(entries []Entry) ([]windows.EXPLICIT_ACCESS, []*windows.SID, error) {
+	if len(entries) == 0 {
+		return nil, nil, nil
+	}
+	out := make([]windows.EXPLICIT_ACCESS, 0, len(entries))
+	sids := make([]*windows.SID, 0, len(entries))
+	for _, entry := range entries {
+		principal := strings.TrimSpace(entry.Principal)
+		if principal == "" {
+			continue
+		}
+		trustee, sid, err := trustee(principal)
+		if err != nil {
+			return nil, nil, err
+		}
+		if sid != nil {
+			sids = append(sids, sid)
+		}
+		out = append(out, windows.EXPLICIT_ACCESS{
+			AccessPermissions: rightsMask(entry.Rights),
+			AccessMode:        accessMode(entry.Mode),
+			Inheritance:       inheritance(entry.Inherit),
+			Trustee:           trustee,
+		})
+	}
+	if len(out) == 0 {
+		return nil, nil, nil
+	}
+	return out, sids, nil
+}
+
+func trustee(principal string) (windows.TRUSTEE, *windows.SID, error) {
+	var (
+		sid *windows.SID
+		err error
+	)
+	if strings.HasPrefix(strings.ToUpper(principal), "S-1-") {
+		sid, err = windows.StringToSid(principal)
+		if err != nil {
+			return windows.TRUSTEE{}, nil, fmt.Errorf("acl: parse SID %q: %w", principal, err)
+		}
+	} else {
+		sid, _, _, err = windows.LookupSID("", principal)
+		if err != nil {
+			return windows.TRUSTEE{}, nil, fmt.Errorf("acl: lookup principal %q: %w", principal, err)
+		}
+	}
+	if sid == nil || !sid.IsValid() {
+		return windows.TRUSTEE{}, nil, fmt.Errorf("acl: principal %q has no valid SID", principal)
+	}
+	return windows.TRUSTEE{
+		TrusteeForm:  windows.TRUSTEE_IS_SID,
+		TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
+		TrusteeValue: windows.TrusteeValueFromSID(sid),
+	}, sid, nil
+}
+
+func rightsMask(rights Rights) windows.ACCESS_MASK {
+	switch rights {
+	case FullControl:
+		return windows.GENERIC_ALL
+	case Modify:
+		return windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | windows.DELETE
+	case Write:
+		return windows.FILE_GENERIC_WRITE | windows.DELETE
+	case Traverse:
+		return windows.FILE_GENERIC_EXECUTE
+	case ReadExecute:
+		fallthrough
+	default:
+		return windows.FILE_GENERIC_READ | windows.FILE_GENERIC_EXECUTE
+	}
+}
+
+func accessMode(mode Mode) windows.ACCESS_MODE {
+	switch mode {
+	case Deny:
+		return windows.DENY_ACCESS
+	case Set:
+		return windows.SET_ACCESS
+	case Grant:
+		fallthrough
+	default:
+		return windows.GRANT_ACCESS
+	}
+}
+
+func inheritance(enabled bool) uint32 {
+	if !enabled {
+		return windows.NO_INHERITANCE
+	}
+	return windows.SUB_CONTAINERS_AND_OBJECTS_INHERIT
+}

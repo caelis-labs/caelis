@@ -25,6 +25,7 @@ func TestModelViewShowsWelcomeCard(t *testing.T) {
 		Wizards:         DefaultWizards(),
 	})
 
+	_ = model.Init()
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	view := updated.View().Content
 	if !strings.Contains(view, "CAELIS") {
@@ -33,6 +34,31 @@ func TestModelViewShowsWelcomeCard(t *testing.T) {
 	// The transplanted legacy TUI should show model info and the workspace
 	if !strings.Contains(view, "/tmp/workspace") {
 		t.Fatalf("expected workspace in view, got %q", view)
+	}
+}
+
+func TestInitialLogsRenderAfterWelcomeCard(t *testing.T) {
+	model := NewModel(Config{
+		AppName:         "CAELIS",
+		Version:         "dev",
+		Workspace:       "/tmp/workspace",
+		ModelAlias:      "minimax/MiniMax-M1",
+		ShowWelcomeCard: true,
+		InitialLogs:     []string{"Windows sandbox setup is not ready."},
+		Commands:        DefaultCommands(),
+		Wizards:         DefaultWizards(),
+	})
+
+	_ = model.Init()
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m := updated.(*Model)
+	welcomeIdx := indexPlainLineContaining(m.viewportPlainLines, "CAELIS")
+	logIdx := indexPlainLineContaining(m.viewportPlainLines, "Windows sandbox setup is not ready.")
+	if welcomeIdx < 0 || logIdx < 0 {
+		t.Fatalf("viewport lines = %#v, want welcome card and initial log", m.viewportPlainLines)
+	}
+	if logIdx <= welcomeIdx {
+		t.Fatalf("initial log index = %d, welcome index = %d; want log after welcome", logIdx, welcomeIdx)
 	}
 }
 

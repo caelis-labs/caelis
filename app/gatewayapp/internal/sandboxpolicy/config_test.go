@@ -15,3 +15,15 @@ func TestNormalizeBackendAcceptsWindowsElevatedAliases(t *testing.T) {
 		}
 	}
 }
+
+func TestNormalizeBackendAcceptsHost(t *testing.T) {
+	t.Parallel()
+
+	got, err := NormalizeBackend("host")
+	if err != nil {
+		t.Fatalf("NormalizeBackend(host) error = %v", err)
+	}
+	if got != "host" {
+		t.Fatalf("NormalizeBackend(host) = %q, want host", got)
+	}
+}

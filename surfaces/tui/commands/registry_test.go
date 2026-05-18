@@ -2,6 +2,7 @@ package commands
 
 import (
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -14,7 +15,6 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"connect",
 		"model",
 		"approval",
-		"sandbox",
 		"status",
 		"doctor",
 		"new",
@@ -22,6 +22,9 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"compact",
 		"exit",
 		"quit",
+	}
+	if runtime.GOOS == "windows" {
+		want = append(want[:5], append([]string{"sandbox"}, want[5:]...)...)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultNames() = %#v, want %#v", got, want)

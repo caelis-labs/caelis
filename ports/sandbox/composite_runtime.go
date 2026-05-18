@@ -81,7 +81,32 @@ func (r *compositeRuntime) SupportedBackends() []Backend {
 }
 
 func (r *compositeRuntime) Status() Status {
-	return r.status
+	status := r.status
+	if r.sandbox == nil || status.FallbackToHost {
+		return status
+	}
+	backendStatus := r.sandbox.Status()
+	if backendStatus.RequestedBackend == "" {
+		backendStatus.RequestedBackend = status.RequestedBackend
+	}
+	if backendStatus.ResolvedBackend == "" {
+		backendStatus.ResolvedBackend = status.ResolvedBackend
+	}
+	if backendStatus.FallbackReason == "" {
+		backendStatus.FallbackReason = status.FallbackReason
+	}
+	return backendStatus
+}
+
+func (r *compositeRuntime) Prepare(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	preparer, ok := r.sandbox.(PreparableRuntime)
+	if !ok {
+		return nil
+	}
+	return preparer.Prepare(ctx)
 }
 
 func (r *compositeRuntime) Close() error {

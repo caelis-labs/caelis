@@ -75,10 +75,23 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 	}
 	status.FallbackReason = strings.TrimSpace(rtStatus.FallbackReason)
 	status.InstallHint = strings.TrimSpace(rtStatus.FallbackInstallHint)
+	status.SetupRequired = rtStatus.SetupRequired
+	status.SetupError = strings.TrimSpace(rtStatus.SetupError)
+	status.SetupVersion = rtStatus.SetupVersion
+	status.SetupMarkerCurrent = rtStatus.SetupMarkerCurrent
+	status.SetupMarkerReason = strings.TrimSpace(rtStatus.SetupMarkerReason)
+	status.SetupRunnerHash = strings.TrimSpace(rtStatus.SetupRunnerHash)
+	status.SetupPolicyHash = strings.TrimSpace(rtStatus.SetupPolicyHash)
+	status.SetupOfflineUser = strings.TrimSpace(rtStatus.SetupOfflineUser)
+	status.SetupOnlineUser = strings.TrimSpace(rtStatus.SetupOnlineUser)
+	status.SetupOwnerUser = strings.TrimSpace(rtStatus.SetupOwnerUser)
+	status.SetupReadRoots = rtStatus.SetupReadRootCount
+	status.SetupWriteRoots = rtStatus.SetupWriteRootCount
+	status.SetupDenyRead = rtStatus.SetupDenyReadCount
+	status.SetupDenyWrite = rtStatus.SetupDenyWriteCount
 	if rtStatus.FallbackToHost {
 		status.Route = string(sandbox.RouteHost)
 		status.SecuritySummary = "host fallback"
-		status.AutoReviewDisabled = true
 		if status.ResolvedBackend == "" {
 			status.ResolvedBackend = string(sandbox.BackendHost)
 		}
@@ -89,6 +102,24 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 		status.ResolvedBackend = status.RequestedBackend
 	}
 	return status
+}
+
+func (s *Stack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
+	if s == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	s.mu.RLock()
+	exec := s.exec
+	s.mu.RUnlock()
+	if exec == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
+	}
+	preparer, ok := exec.(sandbox.PreparableRuntime)
+	if !ok {
+		return s.SandboxStatus(), nil
+	}
+	err := preparer.Prepare(ctx)
+	return s.SandboxStatus(), err
 }
 
 func normalizeSandboxBackend(backend string) (string, error) {
