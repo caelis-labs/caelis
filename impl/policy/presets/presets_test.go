@@ -72,9 +72,12 @@ func TestDefaultModeRejectsMalformedToolInput(t *testing.T) {
 func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 	home := t.TempDir()
 	setHomeForPresetsTest(t, home)
+	tempRoot := filepath.Join(filepath.Dir(home), "caelis-temp-root")
 	configPath := filepath.Join(home, ".config", "ghostty", "config")
 
-	decision, err := AutoReviewMode().DecideTool(context.Background(), readCtx(configPath))
+	readInput := readCtx(configPath)
+	readInput.Options.TempRoot = tempRoot
+	decision, err := AutoReviewMode().DecideTool(context.Background(), readInput)
 	if err != nil {
 		t.Fatalf("READ DecideTool() error = %v", err)
 	}
@@ -82,7 +85,9 @@ func TestDefaultModeAllowsUserConfigReadsButRequiresWriteGrant(t *testing.T) {
 		t.Fatalf("READ action = %q, want allow (reason=%q)", decision.Action, decision.Reason)
 	}
 
-	decision, err = AutoReviewMode().DecideTool(context.Background(), writeCtx(configPath))
+	writeInput := writeCtx(configPath)
+	writeInput.Options.TempRoot = tempRoot
+	decision, err = AutoReviewMode().DecideTool(context.Background(), writeInput)
 	if err != nil {
 		t.Fatalf("WRITE DecideTool() error = %v", err)
 	}
