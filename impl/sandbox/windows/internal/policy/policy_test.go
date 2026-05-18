@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -54,6 +55,59 @@ func TestBuildMapsPathRulesAndReadOnlySubpaths(t *testing.T) {
 	}
 	if !containsPath(p.DenyWritePaths, hidden) || !containsPath(p.DenyWritePaths, readonly) {
 		t.Fatalf("DenyWritePaths = %#v, want hidden and read-only subpath", p.DenyWritePaths)
+	}
+	if !containsPath(p.MaterializeDenyWritePaths, hidden) || !containsPath(p.MaterializeDenyWritePaths, readonly) {
+		t.Fatalf("MaterializeDenyWritePaths = %#v, want hidden and read-only subpath", p.MaterializeDenyWritePaths)
+	}
+}
+
+func TestBuildMaterializesExplicitWritableCarveouts(t *testing.T) {
+	workspace := pathutil.Normalize(t.TempDir())
+	readonly := filepath.Join(workspace, "vendor")
+	hidden := filepath.Join(workspace, "secret")
+
+	p := Build(Input{
+		Config: sandbox.Config{
+			CWD:              workspace,
+			ReadOnlySubpaths: []string{"vendor"},
+		},
+		Constraints: sandbox.Constraints{
+			PathRules: []sandbox.PathRule{
+				{Path: hidden, Access: sandbox.PathAccessHidden},
+			},
+		},
+	})
+
+	if !containsPath(p.DenyWritePaths, hidden) || !containsPath(p.DenyWritePaths, readonly) {
+		t.Fatalf("DenyWritePaths = %#v, want hidden and read-only carveouts", p.DenyWritePaths)
+	}
+	if !containsPath(p.MaterializeDenyWritePaths, hidden) || !containsPath(p.MaterializeDenyWritePaths, readonly) {
+		t.Fatalf("MaterializeDenyWritePaths = %#v, want hidden and read-only carveouts", p.MaterializeDenyWritePaths)
+	}
+}
+
+func TestBuildProtectsExistingControlDirsUnderWritableRoots(t *testing.T) {
+	workspace := pathutil.Normalize(t.TempDir())
+	gitDir := filepath.Join(workspace, ".git")
+	codexDir := filepath.Join(workspace, ".codex")
+	agentsDir := filepath.Join(workspace, ".agents")
+	if err := os.MkdirAll(gitDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.git) error = %v", err)
+	}
+	if err := os.MkdirAll(codexDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll(.codex) error = %v", err)
+	}
+
+	p := Build(Input{Config: sandbox.Config{CWD: workspace}})
+
+	if !containsPath(p.DenyWritePaths, gitDir) || !containsPath(p.DenyWritePaths, codexDir) {
+		t.Fatalf("DenyWritePaths = %#v, want existing control dirs", p.DenyWritePaths)
+	}
+	if containsPath(p.DenyWritePaths, agentsDir) {
+		t.Fatalf("DenyWritePaths = %#v, want missing .agents skipped", p.DenyWritePaths)
+	}
+	if containsPath(p.MaterializeDenyWritePaths, gitDir) || containsPath(p.MaterializeDenyWritePaths, codexDir) {
+		t.Fatalf("MaterializeDenyWritePaths = %#v, want control dirs not materialized", p.MaterializeDenyWritePaths)
 	}
 }
 

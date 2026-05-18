@@ -42,12 +42,19 @@ func TestHelpTextUsesRegistrySpecs(t *testing.T) {
 
 func TestLocalDuringACPMatchesLegacyLocalCommands(t *testing.T) {
 	local := []string{"help", "agent", "status", "doctor", "resume", "model", "approval", "exit", "quit"}
+	if runtime.GOOS == "windows" {
+		local = append(local, "sandbox")
+	}
 	for _, name := range local {
 		if !IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = false, want true", name)
 		}
 	}
-	for _, name := range []string{"connect", "new", "sandbox", "compact"} {
+	remote := []string{"connect", "new", "compact"}
+	if runtime.GOOS != "windows" {
+		remote = append(remote, "sandbox")
+	}
+	for _, name := range remote {
 		if IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = true, want false", name)
 		}

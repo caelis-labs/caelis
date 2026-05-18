@@ -35,7 +35,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},
 	}
 	if runtime.GOOS == "windows" {
-		specs = append(specs[:5], append([]CommandSpec{{Name: "sandbox", Usage: "/sandbox setup", Description: "Initialize Windows Elevated sandbox", ArgCandidates: SandboxCandidates()}}, specs[5:]...)...)
+		specs = append(specs[:5], append([]CommandSpec{{Name: "sandbox", Usage: "/sandbox setup", Description: "Initialize Windows Elevated sandbox", LocalDuringACP: true, ArgCandidates: SandboxCandidates()}}, specs[5:]...)...)
 	}
 	return specs
 }

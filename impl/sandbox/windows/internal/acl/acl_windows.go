@@ -29,6 +29,8 @@ const (
 	FullControl Rights = "full_control"
 )
 
+const fileDeleteChild windows.ACCESS_MASK = 0x00000040
+
 type Entry struct {
 	Principal string
 	Rights    Rights
@@ -258,9 +260,9 @@ func rightsMask(rights Rights) windows.ACCESS_MASK {
 	case FullControl:
 		return windows.GENERIC_ALL
 	case Modify:
-		return windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | windows.DELETE
+		return windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | windows.DELETE | fileDeleteChild
 	case Write:
-		return windows.FILE_GENERIC_WRITE | windows.DELETE
+		return windows.FILE_GENERIC_WRITE | windows.DELETE | fileDeleteChild
 	case Traverse:
 		return windows.FILE_GENERIC_EXECUTE
 	case ReadExecute:

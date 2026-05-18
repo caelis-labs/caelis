@@ -185,6 +185,24 @@ func TestSiblingRunnerHelperPrefersDedicatedRunner(t *testing.T) {
 	}
 }
 
+func TestSiblingSetupHelperPrefersDedicatedSetup(t *testing.T) {
+	dir := t.TempDir()
+	main := filepath.Join(dir, "caelis.exe")
+	setup := filepath.Join(dir, "caelis-windows-sandbox-setup.exe")
+	if err := os.WriteFile(main, []byte("main"), 0o600); err != nil {
+		t.Fatalf("WriteFile(main) error = %v", err)
+	}
+	if got := siblingSetupHelper(main); got != "" {
+		t.Fatalf("siblingSetupHelper without setup helper = %q, want empty", got)
+	}
+	if err := os.WriteFile(setup, []byte("setup"), 0o600); err != nil {
+		t.Fatalf("WriteFile(setup) error = %v", err)
+	}
+	if got := siblingSetupHelper(main); !strings.EqualFold(got, setup) {
+		t.Fatalf("siblingSetupHelper = %q, want %q", got, setup)
+	}
+}
+
 func TestRefreshPolicyCacheTracksPolicyHash(t *testing.T) {
 	r := &setupRunner{}
 	if r.refreshAlreadyApplied("abc") {

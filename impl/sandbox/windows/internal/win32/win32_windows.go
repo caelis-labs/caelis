@@ -182,7 +182,7 @@ func RunElevatedAndWait(file string, args []string, cwd string) error {
 		return fmt.Errorf("ShellExecuteExW runas %s did not return a process handle", file)
 	}
 	defer closeHandle(info.Process)
-	waitResult, err := windows.WaitForSingleObject(info.Process, 30_000)
+	waitResult, err := windows.WaitForSingleObject(info.Process, windows.INFINITE)
 	if err != nil {
 		return fmt.Errorf("wait elevated %s: %w", file, err)
 	}
@@ -489,15 +489,19 @@ func StartProcessWithLogon(creds LogonCredentials, executable string, args []str
 		return nil, err
 	}
 
-	startupInfo := windows.StartupInfo{
-		Cb:        uint32(unsafe.Sizeof(windows.StartupInfo{})),
-		Flags:     windows.STARTF_USESTDHANDLES,
-		StdInput:  stdinRead,
-		StdOutput: stdoutWrite,
-		StdErr:    stderrWrite,
+	startupInfo, cleanupStartupInfo, err := childStartupInfo(stdinRead, stdoutWrite, stderrWrite)
+	if err != nil {
+		closeHandle(stdinRead)
+		closeHandle(stdinWrite)
+		closeHandle(stdoutRead)
+		closeHandle(stdoutWrite)
+		closeHandle(stderrRead)
+		closeHandle(stderrWrite)
+		return nil, err
 	}
+	defer cleanupStartupInfo()
 	var processInfo windows.ProcessInformation
-	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
+	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT)
 	r1, _, callErr := syscall.SyscallN(
 		procCreateProcessWithLogonW.Addr(),
 		ptr(userPtr),
@@ -509,7 +513,7 @@ func StartProcessWithLogon(creds LogonCredentials, executable string, args []str
 		uintptr(flags),
 		0,
 		ptr(cwdPtr),
-		uintptr(unsafe.Pointer(&startupInfo)),
+		uintptr(unsafe.Pointer(&startupInfo.StartupInfo)),
 		uintptr(unsafe.Pointer(&processInfo)),
 	)
 	if r1 == 0 {
@@ -587,15 +591,19 @@ func StartProcessAsUser(token Token, executable string, args []string, cwd strin
 		return nil, err
 	}
 
-	startupInfo := windows.StartupInfo{
-		Cb:        uint32(unsafe.Sizeof(windows.StartupInfo{})),
-		Flags:     windows.STARTF_USESTDHANDLES,
-		StdInput:  stdinRead,
-		StdOutput: stdoutWrite,
-		StdErr:    stderrWrite,
+	startupInfo, cleanupStartupInfo, err := childStartupInfo(stdinRead, stdoutWrite, stderrWrite)
+	if err != nil {
+		closeHandle(stdinRead)
+		closeHandle(stdinWrite)
+		closeHandle(stdoutRead)
+		closeHandle(stdoutWrite)
+		closeHandle(stderrRead)
+		closeHandle(stderrWrite)
+		return nil, err
 	}
+	defer cleanupStartupInfo()
 	var processInfo windows.ProcessInformation
-	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
+	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT)
 	err = windows.CreateProcessAsUser(
 		windows.Token(token),
 		executablePtr,
@@ -606,7 +614,7 @@ func StartProcessAsUser(token Token, executable string, args []string, cwd strin
 		flags,
 		envPtr,
 		cwdPtr,
-		&startupInfo,
+		&startupInfo.StartupInfo,
 		&processInfo,
 	)
 	runtime.KeepAlive(envBlock)
@@ -1003,6 +1011,37 @@ func createChildPipe(direction pipeDirection) (windows.Handle, windows.Handle, e
 		}
 	}
 	return readHandle, writeHandle, nil
+}
+
+func childStartupInfo(stdinRead, stdoutWrite, stderrWrite windows.Handle) (*windows.StartupInfoEx, func(), error) {
+	attributes, err := windows.NewProcThreadAttributeList(1)
+	if err != nil {
+		return nil, nil, fmt.Errorf("win32: create child handle allowlist: %w", err)
+	}
+	handles := []windows.Handle{stdinRead, stdoutWrite, stderrWrite}
+	if err := attributes.Update(
+		windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+		unsafe.Pointer(&handles[0]),
+		uintptr(len(handles))*unsafe.Sizeof(handles[0]),
+	); err != nil {
+		attributes.Delete()
+		return nil, nil, fmt.Errorf("win32: update child handle allowlist: %w", err)
+	}
+	startupInfo := &windows.StartupInfoEx{
+		StartupInfo: windows.StartupInfo{
+			Cb:        uint32(unsafe.Sizeof(windows.StartupInfoEx{})),
+			Flags:     windows.STARTF_USESTDHANDLES,
+			StdInput:  stdinRead,
+			StdOutput: stdoutWrite,
+			StdErr:    stderrWrite,
+		},
+		ProcThreadAttributeList: attributes.List(),
+	}
+	cleanup := func() {
+		runtime.KeepAlive(handles)
+		attributes.Delete()
+	}
+	return startupInfo, cleanup, nil
 }
 
 func splitDomainUser(username string, explicitDomain string) (string, string) {

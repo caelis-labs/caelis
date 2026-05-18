@@ -63,6 +63,7 @@ archives:
       - caelis-command-runner
       - caelis-windows-sandbox-setup
     formats: [tar.gz]
+    allow_different_binary_count: true
 
 checksum:
   name_template: checksums.txt

@@ -2,6 +2,7 @@ package runnercmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -74,7 +75,7 @@ func (r *runner) runSpawn(spawn runnerproto.Spawn) error {
 		return err
 	}
 	if len(spawn.CapabilitySID) == 0 {
-		return r.runSpawnAsCurrentUser(spawn, env)
+		return fmt.Errorf("command runner: capability SIDs are required")
 	}
 	token, releaseToken, err := restrictedToken(spawn.CapabilitySID)
 	if err != nil {
@@ -128,7 +129,8 @@ func (r *runner) runSpawn(spawn runnerproto.Spawn) error {
 	}
 	exitCode := 0
 	reason := ""
-	if exitErr, ok := waitErr.(win32.ExitError); ok {
+	var exitErr win32.ExitError
+	if errors.As(waitErr, &exitErr) {
 		exitCode = exitErr.ExitCode
 	}
 	if timedOut.Load() {

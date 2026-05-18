@@ -639,7 +639,11 @@ func (r *setupRunner) helperExecutablePath(runnerruntime.Request) (string, error
 }
 
 func (r *setupRunner) materializeHelper() (string, string, error) {
-	return r.materializeHelperFromSource(strings.TrimSpace(r.executable), "caelis-windows-sandbox-")
+	source := strings.TrimSpace(r.executable)
+	if dedicated := siblingSetupHelper(source); dedicated != "" {
+		source = dedicated
+	}
+	return r.materializeHelperFromSource(source, "caelis-windows-sandbox-")
 }
 
 func (r *setupRunner) materializeRunnerHelper() (string, string, error) {
@@ -723,6 +727,23 @@ func siblingRunnerHelper(executable string) string {
 	for _, candidate := range []string{
 		filepath.Join(dir, "caelis-command-runner.exe"),
 		filepath.Join(dir, "caelis-resources", "caelis-command-runner.exe"),
+	} {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
+}
+
+func siblingSetupHelper(executable string) string {
+	executable = strings.TrimSpace(executable)
+	if executable == "" {
+		return ""
+	}
+	dir := filepath.Dir(executable)
+	for _, candidate := range []string{
+		filepath.Join(dir, "caelis-windows-sandbox-setup.exe"),
+		filepath.Join(dir, "caelis-resources", "caelis-windows-sandbox-setup.exe"),
 	} {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate

@@ -19,14 +19,15 @@ const (
 const CapabilityWrite = "caelis.sandbox.write"
 
 type Policy struct {
-	ReadRoots               []string
-	WriteRoots              []string
-	DenyReadPaths           []string
-	DenyWritePaths          []string
-	Network                 NetworkIdentity
-	CapabilitySIDs          []string
-	WriteRootCapabilitySIDs map[string]string
-	FullAccess              bool
+	ReadRoots                 []string
+	WriteRoots                []string
+	DenyReadPaths             []string
+	DenyWritePaths            []string
+	MaterializeDenyWritePaths []string
+	Network                   NetworkIdentity
+	CapabilitySIDs            []string
+	WriteRootCapabilitySIDs   map[string]string
+	FullAccess                bool
 }
 
 type Input struct {
@@ -61,6 +62,7 @@ func Build(input Input) Policy {
 
 	var denyRead []string
 	var denyWrite []string
+	var materializeDenyWrite []string
 	for _, rule := range constraints.PathRules {
 		path := pathutil.Normalize(rule.Path)
 		if path == "" {
@@ -75,25 +77,34 @@ func Build(input Input) Policy {
 		case sandbox.PathAccessHidden:
 			denyRead = append(denyRead, path)
 			denyWrite = append(denyWrite, path)
+			materializeDenyWrite = append(materializeDenyWrite, path)
 		}
 	}
 	for _, root := range writeRoots {
+		normalizedRoot := pathutil.Normalize(root)
+		if normalizedRoot == "" {
+			continue
+		}
+		denyWrite = append(denyWrite, existingControlDirs(normalizedRoot)...)
 		for _, subpath := range cfg.ReadOnlySubpaths {
 			if strings.TrimSpace(subpath) == "" {
 				continue
 			}
-			denyWrite = append(denyWrite, filepath.Join(root, subpath))
+			path := filepath.Join(normalizedRoot, subpath)
+			denyWrite = append(denyWrite, path)
+			materializeDenyWrite = append(materializeDenyWrite, path)
 		}
 	}
 	denyRead = append(denyRead, protectedUserSecretRoots()...)
 	denyWrite = append(denyWrite, protectedUserSecretRoots()...)
 
 	return Policy{
-		ReadRoots:      pathutil.Dedupe(readRoots),
-		WriteRoots:     pathutil.Dedupe(writeRoots),
-		DenyReadPaths:  pathutil.Dedupe(denyRead),
-		DenyWritePaths: pathutil.Dedupe(denyWrite),
-		Network:        networkIdentity(constraints.Network),
+		ReadRoots:                 pathutil.Dedupe(readRoots),
+		WriteRoots:                pathutil.Dedupe(writeRoots),
+		DenyReadPaths:             pathutil.Dedupe(denyRead),
+		DenyWritePaths:            pathutil.Dedupe(denyWrite),
+		MaterializeDenyWritePaths: pathutil.Dedupe(materializeDenyWrite),
+		Network:                   networkIdentity(constraints.Network),
 	}
 }
 
@@ -124,6 +135,22 @@ func protectedUserSecretRoots() []string {
 		roots = append(roots, filepath.Join(home, name))
 	}
 	return roots
+}
+
+func existingControlDirs(root string) []string {
+	root = pathutil.Normalize(root)
+	if root == "" {
+		return nil
+	}
+	names := []string{".git", ".codex", ".agents"}
+	paths := make([]string, 0, len(names))
+	for _, name := range names {
+		path := filepath.Join(root, name)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func firstNonEmpty(values ...string) string {

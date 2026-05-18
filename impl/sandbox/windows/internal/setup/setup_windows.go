@@ -256,6 +256,13 @@ func applyPolicyACLs(policy winpolicy.Policy, users ...string) error {
 			writeRootKeys[key] = struct{}{}
 		}
 	}
+	materializeDenyWriteKeys := map[string]struct{}{}
+	for _, root := range policy.MaterializeDenyWritePaths {
+		key := pathutil.Key(root)
+		if key != "" {
+			materializeDenyWriteKeys[key] = struct{}{}
+		}
+	}
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
@@ -282,6 +289,11 @@ func applyPolicyACLs(policy winpolicy.Policy, users ...string) error {
 		for _, sid := range policy.CapabilitySIDs {
 			if strings.TrimSpace(sid) != "" {
 				targets = append(targets, sid)
+			}
+		}
+		if _, shouldMaterialize := materializeDenyWriteKeys[pathutil.Key(root)]; shouldMaterialize {
+			if err := os.MkdirAll(root, 0o700); err != nil {
+				return fmt.Errorf("materialize deny-write path %s: %w", root, err)
 			}
 		}
 		if err := denyPath(root, targets, "W"); err != nil {

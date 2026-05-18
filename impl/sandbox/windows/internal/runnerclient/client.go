@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -72,6 +71,14 @@ func (c *Client) Run(ctx context.Context, req runnerruntime.Request) (sandbox.Co
 		return sandbox.CommandResult{}, err
 	}
 	result, err := s.WaitResult(ctx, 0)
+	if err != nil && ctx.Err() != nil {
+		_ = s.TerminateSession()
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if cleanupResult, cleanupErr := s.WaitResult(cleanupCtx, 0); cleanupErr == nil {
+			result = cleanupResult
+		}
+	}
 	c.removeSession(s.id)
 	return result, err
 }
@@ -209,9 +216,9 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 			return nil, err
 		}
 	}
-	attachCapabilitySIDs := p.CapabilitySIDs
-	if os.Getenv("CAELIS_WINDOWS_SANDBOX_ATTACH_CAPS") == "0" {
-		attachCapabilitySIDs = nil
+	if !p.FullAccess && len(p.CapabilitySIDs) == 0 {
+		_ = s.TerminateSession()
+		return nil, fmt.Errorf("windows runner: capability SIDs are required")
 	}
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
 		Command:       req.Command,
@@ -225,7 +232,7 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 		DenyRead:      p.DenyReadPaths,
 		DenyWrite:     p.DenyWritePaths,
 		Network:       string(p.Network),
-		CapabilitySID: attachCapabilitySIDs,
+		CapabilitySID: p.CapabilitySIDs,
 	})
 	if err != nil {
 		_ = s.TerminateSession()
