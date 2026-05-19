@@ -36,6 +36,21 @@ func TestRefreshScriptIsScopedToCaelisGroupAndOfflineUser(t *testing.T) {
 	}
 }
 
+func TestClearScriptRemovesCaelisGroup(t *testing.T) {
+	script := clearScript()
+	for _, want := range []string{
+		"$group = 'Caelis Sandbox'",
+		"Remove-NetFirewallRule -Group $group -ErrorAction SilentlyContinue",
+	} {
+		if !strings.Contains(script, want) {
+			t.Fatalf("clearScript() = %q, want %q", script, want)
+		}
+	}
+	if strings.Contains(script, "New-NetFirewallRule") {
+		t.Fatalf("clearScript() = %q, should not create rules", script)
+	}
+}
+
 func TestQuotePowerShellEscapesSingleQuotes(t *testing.T) {
 	got := quotePowerShell("Caelis 'Sandbox'")
 	want := "'Caelis ''Sandbox'''"

@@ -15,6 +15,7 @@ import (
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
+	_, _ = stack.PreflightSandbox(ctx, true)
 	driver, err := local.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
@@ -47,7 +48,10 @@ func initialSandboxStatusLogs(status gatewayapp.SandboxStatus) []string {
 	backend := strings.TrimSpace(firstNonEmptyString(status.ResolvedBackend, status.RequestedBackend))
 	if status.SetupRequired && strings.EqualFold(backend, "windows-elevated") {
 		message := "Windows sandbox setup is not ready. Run /sandbox setup once and approve the UAC prompt before using sandboxed commands."
-		if reason := strings.TrimSpace(status.SetupMarkerReason); reason != "" {
+		if status.WorkspaceSetupRequired && !status.GlobalSetupRequired {
+			message = "Current workspace needs Windows sandbox ACL setup. Run /sandbox setup once for this workspace before using sandboxed commands."
+		}
+		if reason := strings.TrimSpace(firstNonEmptyString(status.GlobalSetupReason, status.WorkspaceSetupReason, status.SetupMarkerReason)); reason != "" {
 			message += " Reason: " + reason + "."
 		}
 		if setupErr := strings.TrimSpace(status.SetupError); setupErr != "" {

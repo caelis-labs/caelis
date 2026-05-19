@@ -211,6 +211,7 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	}
 	sandboxStatus := SandboxStatus{}
 	if d.stack != nil {
+		_, _ = d.stack.PreflightSandbox(ctx, true)
 		sandboxStatus = d.stack.SandboxStatus()
 	}
 	activeSession, ok := d.currentSession()
@@ -257,26 +258,36 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	rawModelText := firstNonEmpty(modelText, liveModelText)
 
 	status := StatusSnapshot{
-		SessionID:                 sessionID,
-		Workspace:                 strings.TrimSpace(d.stack.Workspace.CWD),
-		Model:                     formatReasoningModelDisplay(rawModelText, reasoningEffort),
-		ReasoningEffort:           reasoningEffort,
-		ModeLabel:                 firstNonEmpty(sessionMode, liveSessionMode),
-		SessionMode:               firstNonEmpty(sessionMode, liveSessionMode),
-		SandboxType:               firstNonEmpty(sandboxType, liveSandboxType),
-		SandboxRequestedBackend:   firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
-		SandboxResolvedBackend:    firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
-		Route:                     route,
-		FallbackReason:            sandboxStatus.FallbackReason,
-		SandboxInstallHint:        sandboxStatus.InstallHint,
-		SandboxSetupRequired:      sandboxStatus.SetupRequired,
-		SandboxSetupError:         sandboxStatus.SetupError,
-		SandboxSetupMarkerCurrent: sandboxStatus.SetupMarkerCurrent,
-		SandboxSetupMarkerReason:  sandboxStatus.SetupMarkerReason,
-		SecuritySummary:           securitySummary,
-		HostExecution:             strings.EqualFold(strings.TrimSpace(route), "host"),
-		FullAccessMode:            false,
-		Surface:                   bindingKey,
+		SessionID:                       sessionID,
+		Workspace:                       strings.TrimSpace(d.stack.Workspace.CWD),
+		Model:                           formatReasoningModelDisplay(rawModelText, reasoningEffort),
+		ReasoningEffort:                 reasoningEffort,
+		ModeLabel:                       firstNonEmpty(sessionMode, liveSessionMode),
+		SessionMode:                     firstNonEmpty(sessionMode, liveSessionMode),
+		SandboxType:                     firstNonEmpty(sandboxType, liveSandboxType),
+		SandboxRequestedBackend:         firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
+		SandboxResolvedBackend:          firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
+		Route:                           route,
+		FallbackReason:                  sandboxStatus.FallbackReason,
+		SandboxInstallHint:              sandboxStatus.InstallHint,
+		SandboxSetupRequired:            sandboxStatus.SetupRequired,
+		SandboxSetupError:               sandboxStatus.SetupError,
+		SandboxSetupMarkerCurrent:       sandboxStatus.SetupMarkerCurrent,
+		SandboxSetupMarkerReason:        sandboxStatus.SetupMarkerReason,
+		SandboxGlobalSetupCurrent:       sandboxStatus.GlobalSetupCurrent,
+		SandboxGlobalSetupRequired:      sandboxStatus.GlobalSetupRequired,
+		SandboxGlobalSetupReason:        sandboxStatus.GlobalSetupReason,
+		SandboxWorkspaceSetupCurrent:    sandboxStatus.WorkspaceSetupCurrent,
+		SandboxWorkspaceSetupRequired:   sandboxStatus.WorkspaceSetupRequired,
+		SandboxWorkspaceSetupReason:     sandboxStatus.WorkspaceSetupReason,
+		SandboxWorkspaceSetupRoot:       sandboxStatus.WorkspaceSetupRoot,
+		SandboxWorkspaceSetupWriteRoots: sandboxStatus.WorkspaceSetupWriteRoots,
+		SandboxWorkspaceSetupPolicyHash: sandboxStatus.WorkspaceSetupPolicyHash,
+		SandboxWorkspaceSetupUpdatedAt:  sandboxStatus.WorkspaceSetupUpdatedAt,
+		SecuritySummary:                 securitySummary,
+		HostExecution:                   strings.EqualFold(strings.TrimSpace(route), "host"),
+		FullAccessMode:                  false,
+		Surface:                         bindingKey,
 	}
 	if d.stack != nil {
 		req := DoctorRequest{}
@@ -303,6 +314,20 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			status.SandboxSetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxSetupError)
 			status.SandboxSetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxSetupMarkerCurrent
 			status.SandboxSetupMarkerReason = firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), status.SandboxSetupMarkerReason)
+			status.SandboxGlobalSetupCurrent = report.SandboxGlobalSetupCurrent || status.SandboxGlobalSetupCurrent
+			status.SandboxGlobalSetupRequired = report.SandboxGlobalSetupRequired || status.SandboxGlobalSetupRequired
+			status.SandboxGlobalSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxGlobalSetupReason), status.SandboxGlobalSetupReason)
+			status.SandboxWorkspaceSetupCurrent = report.SandboxWorkspaceSetupCurrent || status.SandboxWorkspaceSetupCurrent
+			status.SandboxWorkspaceSetupRequired = report.SandboxWorkspaceSetupRequired || status.SandboxWorkspaceSetupRequired
+			status.SandboxWorkspaceSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupReason), status.SandboxWorkspaceSetupReason)
+			status.SandboxWorkspaceSetupRoot = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupRoot), status.SandboxWorkspaceSetupRoot)
+			if report.SandboxWorkspaceSetupWriteRoots > 0 {
+				status.SandboxWorkspaceSetupWriteRoots = report.SandboxWorkspaceSetupWriteRoots
+			}
+			status.SandboxWorkspaceSetupPolicyHash = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupPolicyHash), status.SandboxWorkspaceSetupPolicyHash)
+			if !report.SandboxWorkspaceSetupUpdatedAt.IsZero() {
+				status.SandboxWorkspaceSetupUpdatedAt = report.SandboxWorkspaceSetupUpdatedAt
+			}
 			status.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SecuritySummary)
 			if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
 				rawModelText = alias

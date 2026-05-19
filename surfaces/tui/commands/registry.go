@@ -35,7 +35,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},
 	}
 	if runtime.GOOS == "windows" {
-		specs = append(specs[:5], append([]CommandSpec{{Name: "sandbox", Usage: "/sandbox setup", Description: "Initialize Windows Elevated sandbox", LocalDuringACP: true, ArgCandidates: SandboxCandidates()}}, specs[5:]...)...)
+		specs = append(specs[:5], append([]CommandSpec{{Name: "sandbox", Usage: "/sandbox setup | reset", Description: "Initialize or reset Windows Elevated sandbox", LocalDuringACP: true, ArgCandidates: SandboxCandidates()}}, specs[5:]...)...)
 	}
 	return specs
 }
@@ -133,6 +133,8 @@ func SandboxCandidates() []driver.SlashArgCandidate {
 	}
 	return []driver.SlashArgCandidate{
 		{Value: "setup", Display: "setup", Detail: "Initialize Windows Elevated sandbox with UAC"},
+		{Value: "reset", Display: "reset", Detail: "Remove Windows Elevated sandbox users, ACL state, and firewall rules"},
+		{Value: "clean", Display: "clean", Detail: "Alias for reset"},
 	}
 }
 

@@ -634,9 +634,12 @@ func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
 	case status.HostExecution || status.FullAccessMode:
 		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
 		lines = append(lines, "  warn sandbox: "+detail)
-	case status.SandboxSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupMarkerReason, "setup required"))
-		lines = append(lines, "  warn sandbox setup: "+detail+" - run /sandbox setup")
+	case status.SandboxGlobalSetupRequired:
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
+		lines = append(lines, "  warn sandbox global setup: "+detail+" - run /sandbox setup")
+	case status.SandboxWorkspaceSetupRequired:
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
+		lines = append(lines, "  warn sandbox workspace setup: "+detail+" - run /sandbox setup")
 	case sandbox != "":
 		lines = append(lines, "  ok sandbox: "+sandbox)
 	default:
@@ -745,7 +748,7 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 	if action == "" {
-		sendNotice(send, "usage: /sandbox setup\nuse /status to inspect sandbox readiness")
+		sendNotice(send, "usage: /sandbox setup | reset\nuse /status to inspect sandbox readiness")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 	if strings.EqualFold(action, "setup") {
@@ -763,7 +766,28 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		sendStatusUpdate(send, status)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	sendNotice(send, "usage: /sandbox setup\nuse -sandbox-backend or CAELIS_SANDBOX_BACKEND for advanced backend overrides")
+	if strings.EqualFold(action, "reset") || strings.EqualFold(action, "clean") {
+		resetter, ok := driver.(interface {
+			ResetSandbox(context.Context) (tuidriver.StatusSnapshot, error)
+		})
+		if !ok {
+			return TaskResultMsg{Err: friendlyCommandError("sandbox reset", fmt.Errorf("sandbox reset is unavailable for this driver"))}
+		}
+		sendNotice(send, "resetting Windows sandbox state; this removes Caelis sandbox users, ACL records, firewall rules, and local sandbox state")
+		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
+			if text := formatSandboxSetupProgress(progress); text != "" {
+				sendNotice(send, text)
+			}
+		})
+		status, err := resetter.ResetSandbox(progressCtx)
+		if err != nil {
+			return TaskResultMsg{Err: friendlyCommandError("sandbox reset", err)}
+		}
+		sendNotice(send, "sandbox reset complete")
+		sendStatusUpdate(send, status)
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
+	sendNotice(send, "usage: /sandbox setup | reset\nuse -sandbox-backend or CAELIS_SANDBOX_BACKEND for advanced backend overrides")
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 

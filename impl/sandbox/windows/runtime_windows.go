@@ -110,6 +110,20 @@ func (r *runtime) Prepare(ctx context.Context) error {
 	return r.runner.Prepare(ctx)
 }
 
+func (r *runtime) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
+	if r == nil || r.runner == nil {
+		return fmt.Errorf("impl/sandbox/windows: runtime is unavailable")
+	}
+	return r.runner.Preflight(ctx, opts)
+}
+
+func (r *runtime) Reset(ctx context.Context) error {
+	if r == nil || r.runner == nil {
+		return fmt.Errorf("impl/sandbox/windows: runtime is unavailable")
+	}
+	return r.runner.Reset(ctx)
+}
+
 type setupRunner struct {
 	cfg        sandbox.Config
 	stateRoot  string
@@ -186,20 +200,38 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 		return err
 	}
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "inspect", Message: "checking Windows sandbox setup state"})
-	payload, _, err := r.setupPayload(r.baseSetupRequest(), false)
+	globalPayload, err := r.globalSetupPayload()
 	if err != nil {
 		return err
 	}
 	dirs := setupstate.NewDirs(r.stateRoot)
-	payload.ProgressPath = dirs.ProgressPath
 	_ = setupstate.ClearProgress(dirs.ProgressPath)
-	if freshness := r.freshnessForPayload(payload); freshness.Current && r.usersFileReady() == nil {
+	globalFreshness := r.freshnessForPayload(globalPayload)
+	if globalFreshness.Current {
+		if usersReadyErr := r.usersFileReady(); usersReadyErr != nil {
+			globalFreshness = setupstate.Freshness{Reason: usersReadyErr.Error()}
+		}
+	}
+	workspace := workspaceSetupSnapshot{}
+	if globalFreshness.Current {
+		workspace = r.workspaceSetupSnapshot()
+	}
+	if globalFreshness.Current && workspace.Current {
 		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "complete", Message: "Windows sandbox setup is already current", Done: true})
 		return nil
 	}
 	r.clearUsersReadyCache()
 	r.clearRefreshCache()
 	r.clearPolicyCache()
+	kind := setup.SetupKindFull
+	if globalFreshness.Current {
+		kind = setup.SetupKindWorkspaceOnly
+	}
+	payload, _, err := r.setupPayload(r.baseSetupRequest(), kind)
+	if err != nil {
+		return err
+	}
+	payload.ProgressPath = dirs.ProgressPath
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "payload", Message: "encoding setup payload"})
 	encoded, err := setup.EncodePayload(payload)
 	if err != nil {
@@ -229,7 +261,7 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 		stopProgress()
 	}
 	if err := setupErr; err != nil {
-		if freshness := r.freshnessForPayload(payload); freshness.Current {
+		if r.prepareTargetCurrent(kind) {
 			return nil
 		}
 		code := "elevated_setup_failed"
@@ -254,14 +286,120 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 		return fmt.Errorf("impl/sandbox/windows: %s: %w", message, err)
 	}
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "verify", Message: "verifying setup marker"})
-	if freshness := r.setupFreshness(r.baseSetupRequest()); !freshness.Current {
+	if freshness := r.setupReadyFreshness(); !freshness.Current {
 		return fmt.Errorf("impl/sandbox/windows: elevated setup did not become current: %s", freshness.Reason)
+	}
+	if freshness := r.workspaceSetupSnapshot(); !freshness.Current {
+		return fmt.Errorf("impl/sandbox/windows: workspace setup did not become current: %s", freshness.Reason)
 	}
 	r.clearUsersReadyCache()
 	r.clearRefreshCache()
 	r.clearPolicyCache()
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "complete", Message: "Windows sandbox setup is ready", Done: true})
 	return nil
+}
+
+func (r *setupRunner) prepareTargetCurrent(kind setup.SetupKind) bool {
+	switch kind {
+	case setup.SetupKindWorkspaceOnly:
+		return r.workspaceSetupSnapshot().Current
+	case setup.SetupKindFull:
+		return r.setupReadyFreshness().Current && r.workspaceSetupSnapshot().Current
+	default:
+		return false
+	}
+}
+
+func (r *setupRunner) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if freshness := r.setupReadyFreshness(); !freshness.Current {
+		return nil
+	}
+	workspace := r.workspaceSetupSnapshot()
+	if workspace.Current || !opts.AllowNonElevatedRepair {
+		return nil
+	}
+	payload, _, err := r.setupPayload(r.baseSetupRequest(), setup.SetupKindWorkspaceOnly)
+	if err != nil {
+		return err
+	}
+	if err := setup.Execute(payload); err != nil {
+		dirs := setupstate.NewDirs(r.stateRoot)
+		_ = setupstate.WriteError(dirs.ErrorPath, setupstate.ErrorReport{
+			Phase:   "workspace_preflight",
+			Code:    "workspace_acl_refresh_failed",
+			Message: err.Error(),
+		})
+		return err
+	}
+	r.clearRefreshCache()
+	r.clearPolicyCache()
+	return nil
+}
+
+func (r *setupRunner) Reset(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	r.clearUsersReadyCache()
+	r.clearRefreshCache()
+	r.clearPolicyCache()
+	dirs := setupstate.NewDirs(r.stateRoot)
+	payload := setup.Payload{
+		Version:         setup.PayloadVersion,
+		Kind:            setup.SetupKindReset,
+		StateRoot:       r.stateRoot,
+		OfflineUsername: setupOfflineUser(r.stateRoot),
+		OnlineUsername:  setupOnlineUser(r.stateRoot),
+		OwnerUsername:   currentWindowsUser(),
+		ProgressPath:    dirs.ProgressPath,
+	}.Normalize()
+	_ = setupstate.ClearProgress(dirs.ProgressPath)
+	if elevated, err := win32.IsElevated(); err == nil && elevated {
+		return setup.ExecuteWithProgress(payload, func(progress setup.Progress) {
+			sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+				Phase:   progress.Phase,
+				Message: progress.Message,
+				Step:    progress.Step,
+				Total:   progress.Total,
+				Done:    progress.Done,
+			})
+		})
+	}
+	encoded, err := setup.EncodePayload(payload)
+	if err != nil {
+		return err
+	}
+	helperPath := r.resetHelperPath()
+	if helperPath == "" {
+		return fmt.Errorf("impl/sandbox/windows: reset helper executable path is required")
+	}
+	stopProgress := forwardSetupProgressFile(ctx, dirs.ProgressPath)
+	err = win32.RunElevatedAndWait(helperPath, []string{setupHelperCommand, encoded}, r.cfg.CWD)
+	stopProgress()
+	r.clearUsersReadyCache()
+	r.clearRefreshCache()
+	r.clearPolicyCache()
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (r *setupRunner) resetHelperPath() string {
+	source := strings.TrimSpace(r.executable)
+	if dedicated := siblingSetupHelper(source); dedicated != "" {
+		return dedicated
+	}
+	return source
 }
 
 func forwardSetupProgressFile(ctx context.Context, path string) func() {
@@ -318,7 +456,7 @@ func (r *setupRunner) requireSetupReady() error {
 		if reason == "" {
 			reason = "setup marker missing"
 		}
-		return fmt.Errorf("impl/sandbox/windows: Windows Elevated sandbox setup is required (%s). Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal, then retry", reason)
+		return fmt.Errorf("impl/sandbox/windows: Windows Elevated sandbox global setup is required (%s)", reason)
 	}
 	return nil
 }
@@ -328,7 +466,7 @@ func (r *setupRunner) refreshRequestACLs(req runnerruntime.Request) error {
 	if keyErr == nil && r.refreshAlreadyApplied(requestKey) {
 		return nil
 	}
-	payload, _, err := r.setupPayload(req, true)
+	payload, _, err := r.setupPayload(req, setup.SetupKindRuntimeRefresh)
 	if err != nil {
 		return err
 	}
@@ -350,7 +488,7 @@ func (r *setupRunner) refreshRequestACLs(req runnerruntime.Request) error {
 }
 
 func (r *setupRunner) setupReadyFreshness() setupstate.Freshness {
-	payload, _, err := r.setupPayload(r.baseSetupRequest(), false)
+	payload, err := r.globalSetupPayload()
 	if err != nil {
 		return setupstate.Freshness{Reason: err.Error()}
 	}
@@ -481,13 +619,13 @@ func (r *setupRunner) checkUsersFileReady() error {
 	expectedOffline := setupOfflineUser(r.stateRoot)
 	expectedOnline := setupOnlineUser(r.stateRoot)
 	if !strings.EqualFold(strings.TrimSpace(users.Offline.Username), expectedOffline) || !strings.EqualFold(strings.TrimSpace(users.Online.Username), expectedOnline) {
-		return fmt.Errorf("sandbox users file does not match expected sandbox accounts; run /sandbox setup to refresh")
+		return fmt.Errorf("sandbox users file does not match expected sandbox accounts")
 	}
 	if err := validateUserSecret(users.Offline); err != nil {
-		return fmt.Errorf("offline sandbox credentials are stale; run /sandbox setup to refresh: %w", err)
+		return fmt.Errorf("offline sandbox credentials are stale: %w", err)
 	}
 	if err := validateUserSecret(users.Online); err != nil {
-		return fmt.Errorf("online sandbox credentials are stale; run /sandbox setup to refresh: %w", err)
+		return fmt.Errorf("online sandbox credentials are stale: %w", err)
 	}
 	return nil
 }
@@ -508,18 +646,14 @@ func (r *setupRunner) status() sandbox.Status {
 		RequestedBackend: sandbox.BackendWindowsElevated,
 		ResolvedBackend:  sandbox.BackendWindowsElevated,
 	}
-	payload, _, err := r.setupPayload(r.baseSetupRequest(), false)
+	payload, err := r.globalSetupPayload()
 	if err == nil {
 		status.SetupVersion = payload.Version
 		status.SetupRunnerHash = payload.RunnerHash
-		status.SetupPolicyHash = payload.PolicyHash
+		status.SetupPolicyHash = payload.GlobalPolicyHash
 		status.SetupOfflineUser = payload.OfflineUsername
 		status.SetupOnlineUser = payload.OnlineUsername
 		status.SetupOwnerUser = payload.OwnerUsername
-		status.SetupReadRootCount = len(payload.Policy.ReadRoots)
-		status.SetupWriteRootCount = len(payload.Policy.WriteRoots)
-		status.SetupDenyReadCount = len(payload.Policy.DenyReadPaths)
-		status.SetupDenyWriteCount = len(payload.Policy.DenyWritePaths)
 	}
 	freshness := setupstate.Freshness{Reason: strings.TrimSpace(errString(err))}
 	if err == nil {
@@ -532,10 +666,34 @@ func (r *setupRunner) status() sandbox.Status {
 	}
 	status.SetupMarkerCurrent = freshness.Current
 	status.SetupMarkerReason = strings.TrimSpace(freshness.Reason)
+	status.GlobalSetupCurrent = freshness.Current
+	status.GlobalSetupReason = strings.TrimSpace(freshness.Reason)
 	if !freshness.Current {
+		status.GlobalSetupRequired = true
 		status.SetupRequired = true
 		status.FallbackReason = status.SetupMarkerReason
 		status.FallbackInstallHint = "Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal to initialize Windows Elevated sandbox with one UAC prompt."
+		if report, err := setupstate.ReadError(setupstate.NewDirs(r.stateRoot).ErrorPath); err == nil {
+			status.SetupError = strings.TrimSpace(report.Message)
+		}
+		return status
+	}
+	workspace := r.workspaceSetupSnapshot()
+	status.WorkspaceSetupCurrent = workspace.Current
+	status.WorkspaceSetupRequired = !workspace.Current
+	status.WorkspaceSetupReason = strings.TrimSpace(workspace.Reason)
+	status.WorkspaceSetupRoot = strings.TrimSpace(workspace.Root)
+	status.WorkspaceSetupWriteRoots = workspace.WriteRoots
+	status.WorkspaceSetupPolicyHash = strings.TrimSpace(workspace.PolicyHash)
+	status.WorkspaceSetupUpdatedAt = workspace.UpdatedAt
+	status.SetupReadRootCount = workspace.ReadRoots
+	status.SetupWriteRootCount = workspace.WriteRoots
+	status.SetupDenyReadCount = workspace.DenyRead
+	status.SetupDenyWriteCount = workspace.DenyWrite
+	if !workspace.Current {
+		status.SetupRequired = true
+		status.FallbackReason = workspace.Reason
+		status.FallbackInstallHint = "Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal to authorize this Windows sandbox workspace."
 		if report, err := setupstate.ReadError(setupstate.NewDirs(r.stateRoot).ErrorPath); err == nil {
 			status.SetupError = strings.TrimSpace(report.Message)
 		}
@@ -543,12 +701,67 @@ func (r *setupRunner) status() sandbox.Status {
 	return status
 }
 
-func (r *setupRunner) setupFreshness(req runnerruntime.Request) setupstate.Freshness {
-	payload, _, err := r.setupPayload(req, false)
-	if err != nil {
-		return setupstate.Freshness{Reason: err.Error()}
+type workspaceSetupSnapshot struct {
+	Current    bool
+	Reason     string
+	Root       string
+	PolicyHash string
+	UpdatedAt  time.Time
+	ReadRoots  int
+	WriteRoots int
+	DenyRead   int
+	DenyWrite  int
+}
+
+func (r *setupRunner) workspaceSetupSnapshot() workspaceSetupSnapshot {
+	req := r.baseSetupRequest()
+	root := firstNonEmpty(req.Dir, r.cfg.CWD)
+	policy, policyHash, missingCaps, err := r.policyForRequestWithHashReadOnly(req)
+	out := workspaceSetupSnapshot{
+		Root:       root,
+		PolicyHash: policyHash,
+		ReadRoots:  len(policy.ReadRoots),
+		WriteRoots: len(policy.WriteRoots),
+		DenyRead:   len(policy.DenyReadPaths),
+		DenyWrite:  len(policy.DenyWritePaths),
 	}
-	return r.freshnessForPayload(payload)
+	dirs := setupstate.NewDirs(r.stateRoot)
+	if record, readErr := setupstate.ReadWorkspace(dirs.WorkspacePath); readErr == nil {
+		out.UpdatedAt = record.UpdatedAt
+	}
+	if err != nil {
+		out.Reason = err.Error()
+		return out
+	}
+	if policy.FullAccess || len(policy.WriteRoots) == 0 {
+		out.Current = true
+		return out
+	}
+	if len(missingCaps) > 0 {
+		out.Reason = "workspace capability SIDs are missing"
+		return out
+	}
+	results, err := setup.CheckPolicyACLs(policy, setupOfflineUser(r.stateRoot), setupOnlineUser(r.stateRoot))
+	if err != nil {
+		out.Reason = err.Error()
+		return out
+	}
+	for _, result := range results {
+		if result.Current {
+			continue
+		}
+		reason := strings.TrimSpace(result.Reason)
+		if reason == "" {
+			reason = "ACL entries missing"
+		}
+		if path := strings.TrimSpace(result.Path); path != "" {
+			reason = path + ": " + reason
+		}
+		out.Reason = reason
+		return out
+	}
+	out.Current = true
+	return out
 }
 
 func (r *setupRunner) freshnessForPayload(payload setup.Payload) setupstate.Freshness {
@@ -567,38 +780,59 @@ func (r *setupRunner) freshnessForPayload(payload setup.Payload) setupstate.Fres
 	})
 }
 
-func (r *setupRunner) setupPayload(req runnerruntime.Request, refreshOnly bool) (setup.Payload, setupstate.Freshness, error) {
+func (r *setupRunner) globalSetupPayload() (setup.Payload, error) {
 	policy := fullSetupPolicy()
-	var (
-		policyHash string
-		err        error
-	)
-	if refreshOnly {
-		policy, policyHash, err = r.policyForRequestWithHash(req)
-		if err != nil {
-			return setup.Payload{}, setupstate.Freshness{}, err
-		}
-	}
-	if policyHash == "" {
-		policyHash, err = stablePolicyHash(policy)
-		if err != nil {
-			return setup.Payload{}, setupstate.Freshness{}, err
-		}
+	policyHash, err := stablePolicyHash(policy)
+	if err != nil {
+		return setup.Payload{}, err
 	}
 	runnerHash, err := r.cachedExecutableHash()
 	if err != nil {
-		return setup.Payload{}, setupstate.Freshness{}, err
+		return setup.Payload{}, err
 	}
 	payload := setup.Payload{
-		Version:         setup.PayloadVersion,
-		StateRoot:       r.stateRoot,
-		RunnerHash:      runnerHash,
-		PolicyHash:      policyHash,
-		Policy:          policy,
-		OfflineUsername: setupOfflineUser(r.stateRoot),
-		OnlineUsername:  setupOnlineUser(r.stateRoot),
-		OwnerUsername:   currentWindowsUser(),
-		RefreshOnly:     refreshOnly,
+		Version:          setup.PayloadVersion,
+		Kind:             setup.SetupKindFull,
+		StateRoot:        r.stateRoot,
+		RunnerHash:       runnerHash,
+		PolicyHash:       policyHash,
+		GlobalPolicyHash: policyHash,
+		Policy:           policy,
+		OfflineUsername:  setupOfflineUser(r.stateRoot),
+		OnlineUsername:   setupOnlineUser(r.stateRoot),
+		OwnerUsername:    currentWindowsUser(),
+	}.Normalize()
+	return payload, nil
+}
+
+func (r *setupRunner) setupPayload(req runnerruntime.Request, kind setup.SetupKind) (setup.Payload, setupstate.Freshness, error) {
+	if kind == "" {
+		kind = setup.SetupKindFull
+	}
+	globalPayload, err := r.globalSetupPayload()
+	if err != nil {
+		return setup.Payload{}, setupstate.Freshness{}, err
+	}
+	policy, workspacePolicyHash, err := r.policyForRequestWithHash(req)
+	if err != nil {
+		return setup.Payload{}, setupstate.Freshness{}, err
+	}
+	dirs := setupstate.NewDirs(r.stateRoot)
+	payload := setup.Payload{
+		Version:             setup.PayloadVersion,
+		Kind:                kind,
+		StateRoot:           r.stateRoot,
+		RunnerHash:          globalPayload.RunnerHash,
+		PolicyHash:          globalPayload.GlobalPolicyHash,
+		GlobalPolicyHash:    globalPayload.GlobalPolicyHash,
+		WorkspacePolicyHash: workspacePolicyHash,
+		Policy:              policy,
+		OfflineUsername:     globalPayload.OfflineUsername,
+		OnlineUsername:      globalPayload.OnlineUsername,
+		OwnerUsername:       globalPayload.OwnerUsername,
+		WorkspaceRoot:       firstNonEmpty(req.Dir, r.cfg.CWD),
+		WorkspaceStatePath:  dirs.WorkspacePath,
+		RefreshOnly:         kind == setup.SetupKindRuntimeRefresh,
 	}.Normalize()
 	return payload, setupstate.Freshness{}, nil
 }
@@ -808,6 +1042,25 @@ func (r *setupRunner) policyForRequestWithHash(req runnerruntime.Request) (winpo
 	policy.WriteRootCapabilitySIDs = binding.WriteRootTo
 	r.markPolicyCached(cacheKey, policy, policyHash)
 	return policy, policyHash, nil
+}
+
+func (r *setupRunner) policyForRequestWithHashReadOnly(req runnerruntime.Request) (winpolicy.Policy, string, []string, error) {
+	policy := windowsPolicyForRequest(r.cfg, req)
+	policyHash, err := stablePolicyHash(policy)
+	if err != nil {
+		return winpolicy.Policy{}, "", nil, err
+	}
+	if policy.FullAccess || len(policy.WriteRoots) == 0 {
+		return policy, policyHash, nil, nil
+	}
+	dirs := setupstate.NewDirs(r.stateRoot)
+	binding, err := capability.LookupWriteRoots(dirs.CapPath, firstNonEmpty(req.Dir, r.cfg.CWD), policy.WriteRoots)
+	if err != nil {
+		return winpolicy.Policy{}, "", nil, fmt.Errorf("impl/sandbox/windows: inspect capability SIDs: %w", err)
+	}
+	policy.CapabilitySIDs = binding.AllSIDs
+	policy.WriteRootCapabilitySIDs = binding.WriteRootTo
+	return policy, policyHash, append([]string(nil), binding.Missing...), nil
 }
 
 func (r *setupRunner) policyRequestKey(req runnerruntime.Request) (string, error) {

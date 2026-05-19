@@ -11,19 +11,20 @@ import (
 	"time"
 )
 
-const CurrentSetupVersion = 1
+const CurrentSetupVersion = 2
 
 type Dirs struct {
-	Root         string
-	Sandbox      string
-	Bin          string
-	Secrets      string
-	Logs         string
-	MarkerPath   string
-	ErrorPath    string
-	ProgressPath string
-	UsersPath    string
-	CapPath      string
+	Root          string
+	Sandbox       string
+	Bin           string
+	Secrets       string
+	Logs          string
+	MarkerPath    string
+	ErrorPath     string
+	ProgressPath  string
+	UsersPath     string
+	CapPath       string
+	WorkspacePath string
 }
 
 type Marker struct {
@@ -53,6 +54,24 @@ type ProgressReport struct {
 	Time    time.Time `json:"time,omitempty"`
 }
 
+type WorkspaceRecord struct {
+	Version                 int               `json:"version"`
+	WorkspaceRoot           string            `json:"workspace_root,omitempty"`
+	ReadRoots               []string          `json:"read_roots,omitempty"`
+	WriteRoots              []string          `json:"write_roots,omitempty"`
+	TraverseRoots           []string          `json:"traverse_roots,omitempty"`
+	DenyReadPaths           []string          `json:"deny_read_paths,omitempty"`
+	DenyWritePaths          []string          `json:"deny_write_paths,omitempty"`
+	PolicyHash              string            `json:"policy_hash,omitempty"`
+	CapabilitySIDs          []string          `json:"capability_sids,omitempty"`
+	WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids,omitempty"`
+	OfflineUsername         string            `json:"offline_username,omitempty"`
+	OnlineUsername          string            `json:"online_username,omitempty"`
+	OwnerUsername           string            `json:"owner_username,omitempty"`
+	SetupVersion            int               `json:"setup_version,omitempty"`
+	UpdatedAt               time.Time         `json:"updated_at,omitempty"`
+}
+
 type Expectation struct {
 	Version         int
 	RunnerHash      string
@@ -70,16 +89,17 @@ type Freshness struct {
 func NewDirs(root string) Dirs {
 	root = strings.TrimSpace(root)
 	return Dirs{
-		Root:         root,
-		Sandbox:      filepath.Join(root, ".sandbox"),
-		Bin:          filepath.Join(root, ".sandbox-bin"),
-		Secrets:      filepath.Join(root, ".sandbox-secrets"),
-		Logs:         filepath.Join(root, ".sandbox", "logs"),
-		MarkerPath:   filepath.Join(root, ".sandbox", "setup_marker.json"),
-		ErrorPath:    filepath.Join(root, ".sandbox", "setup_error.json"),
-		ProgressPath: filepath.Join(root, ".sandbox", "setup_progress.json"),
-		UsersPath:    filepath.Join(root, ".sandbox-secrets", "sandbox_users.json"),
-		CapPath:      filepath.Join(root, ".sandbox", "cap_sids.json"),
+		Root:          root,
+		Sandbox:       filepath.Join(root, ".sandbox"),
+		Bin:           filepath.Join(root, ".sandbox-bin"),
+		Secrets:       filepath.Join(root, ".sandbox-secrets"),
+		Logs:          filepath.Join(root, ".sandbox", "logs"),
+		MarkerPath:    filepath.Join(root, ".sandbox", "setup_marker.json"),
+		ErrorPath:     filepath.Join(root, ".sandbox", "setup_error.json"),
+		ProgressPath:  filepath.Join(root, ".sandbox", "setup_progress.json"),
+		UsersPath:     filepath.Join(root, ".sandbox-secrets", "sandbox_users.json"),
+		CapPath:       filepath.Join(root, ".sandbox", "cap_sids.json"),
+		WorkspacePath: filepath.Join(root, ".sandbox", "workspace_setup.json"),
 	}
 }
 
@@ -225,6 +245,63 @@ func ClearProgress(path string) error {
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	return nil
+}
+
+func ReadWorkspace(path string) (WorkspaceRecord, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return WorkspaceRecord{}, err
+	}
+	var record WorkspaceRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return WorkspaceRecord{}, fmt.Errorf("decode workspace setup state: %w", err)
+	}
+	return record, nil
+}
+
+func WriteWorkspace(path string, record WorkspaceRecord) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	if record.Version == 0 {
+		record.Version = 1
+	}
+	record.UpdatedAt = time.Now().UTC()
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".workspace_setup.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	committed = true
 	return nil
 }
 

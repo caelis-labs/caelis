@@ -19,6 +19,7 @@ type Rights string
 
 const (
 	ReadExecute Rights = "read_execute"
+	Traverse    Rights = "traverse"
 	Write       Rights = "write"
 	Modify      Rights = "modify"
 	FullControl Rights = "full_control"
@@ -43,6 +44,10 @@ func (Descriptor) HasDACL() bool {
 
 func ModifyFileDACL(string, ...Entry) error {
 	return fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
+}
+
+func MissingFileDACLEntries(string, ...Entry) ([]Entry, error) {
+	return nil, fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
 }
 
 func ReplaceFileDACL(string, bool, ...Entry) error {

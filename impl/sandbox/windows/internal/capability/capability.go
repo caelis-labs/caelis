@@ -20,9 +20,18 @@ type Store struct {
 type Binding struct {
 	AllSIDs     []string
 	WriteRootTo map[string]string
+	Missing     []string
 }
 
 func BindWriteRoots(storePath string, cwd string, writeRoots []string) (Binding, error) {
+	return bindWriteRoots(storePath, cwd, writeRoots, true)
+}
+
+func LookupWriteRoots(storePath string, cwd string, writeRoots []string) (Binding, error) {
+	return bindWriteRoots(storePath, cwd, writeRoots, false)
+}
+
+func bindWriteRoots(storePath string, cwd string, writeRoots []string, create bool) (Binding, error) {
 	writeRoots = pathutil.Dedupe(writeRoots)
 	if len(writeRoots) == 0 {
 		return Binding{}, nil
@@ -52,6 +61,10 @@ func BindWriteRoots(storePath string, cwd string, writeRoots []string) (Binding,
 		}
 		sid := strings.TrimSpace(table[key])
 		if sid == "" {
+			if !create {
+				binding.Missing = append(binding.Missing, pathutil.Normalize(root))
+				continue
+			}
 			sid, err = randomSID()
 			if err != nil {
 				return Binding{}, err

@@ -48,12 +48,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if doctorSubcommand {
 		args = args[1:]
 	}
-	sandboxSetupSubcommand := false
+	sandboxSubcommand := ""
 	if len(args) > 0 && strings.EqualFold(strings.TrimSpace(args[0]), "sandbox") {
-		if len(args) < 2 || !strings.EqualFold(strings.TrimSpace(args[1]), "setup") {
+		if len(args) < 2 {
 			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
 		}
-		sandboxSetupSubcommand = true
+		switch subcommand := strings.ToLower(strings.TrimSpace(args[1])); subcommand {
+		case "setup", "reset", "clean":
+			sandboxSubcommand = subcommand
+		default:
+			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
+		}
 		args = args[2:]
 	}
 	fs := flag.NewFlagSet("caelis", flag.ContinueOnError)
@@ -146,12 +151,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		}
 		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
 	}
-	if sandboxSetupSubcommand {
+	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
 		if err != nil {
 			return err
 		}
-		return runSandboxSetup(ctx, stack, outFmt, stdout)
+		switch sandboxSubcommand {
+		case "setup":
+			return runSandboxSetup(ctx, stack, outFmt, stdout)
+		case "reset", "clean":
+			return runSandboxReset(ctx, stack, outFmt, stdout)
+		}
 	}
 
 	stdinTTY := readerIsTTY(stdin)
@@ -236,6 +246,14 @@ func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, f
 
 func runSandboxSetup(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
 	status, err := stack.PrepareSandbox(ctx)
+	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
+		err = writeErr
+	}
+	return err
+}
+
+func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
+	status, err := stack.ResetSandbox(ctx)
 	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
 		err = writeErr
 	}

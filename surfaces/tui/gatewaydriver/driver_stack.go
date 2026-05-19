@@ -87,16 +87,26 @@ type SessionRuntimeState struct {
 }
 
 type SandboxStatus struct {
-	RequestedBackend   string
-	ResolvedBackend    string
-	Route              string
-	FallbackReason     string
-	InstallHint        string
-	SetupRequired      bool
-	SetupError         string
-	SetupMarkerCurrent bool
-	SetupMarkerReason  string
-	SecuritySummary    string
+	RequestedBackend         string
+	ResolvedBackend          string
+	Route                    string
+	FallbackReason           string
+	InstallHint              string
+	SetupRequired            bool
+	SetupError               string
+	SetupMarkerCurrent       bool
+	SetupMarkerReason        string
+	SecuritySummary          string
+	GlobalSetupCurrent       bool
+	GlobalSetupRequired      bool
+	GlobalSetupReason        string
+	WorkspaceSetupCurrent    bool
+	WorkspaceSetupRequired   bool
+	WorkspaceSetupReason     string
+	WorkspaceSetupRoot       string
+	WorkspaceSetupWriteRoots int
+	WorkspaceSetupPolicyHash string
+	WorkspaceSetupUpdatedAt  time.Time
 }
 
 type DoctorRequest struct {
@@ -106,31 +116,41 @@ type DoctorRequest struct {
 }
 
 type DoctorReport struct {
-	StoreDir                  string
-	SessionID                 string
-	SessionMode               string
-	ActiveModelAlias          string
-	ActiveProvider            string
-	ActiveModel               string
-	MissingAPIKey             bool
-	SandboxRequestedBackend   string
-	SandboxResolvedBackend    string
-	SandboxRoute              string
-	SandboxFallbackReason     string
-	SandboxInstallHint        string
-	SandboxSetupRequired      bool
-	SandboxSetupError         string
-	SandboxSetupMarkerCurrent bool
-	SandboxSetupMarkerReason  string
-	SandboxSecuritySummary    string
-	HostExecution             bool
-	FullAccessMode            bool
-	PermissionGrantCount      int
-	PermissionGrantNetwork    bool
-	PermissionReadRootCount   int
-	PermissionWriteRootCount  int
-	ConfigPermissionsSecure   bool
-	Warnings                  []string
+	StoreDir                        string
+	SessionID                       string
+	SessionMode                     string
+	ActiveModelAlias                string
+	ActiveProvider                  string
+	ActiveModel                     string
+	MissingAPIKey                   bool
+	SandboxRequestedBackend         string
+	SandboxResolvedBackend          string
+	SandboxRoute                    string
+	SandboxFallbackReason           string
+	SandboxInstallHint              string
+	SandboxSetupRequired            bool
+	SandboxSetupError               string
+	SandboxSetupMarkerCurrent       bool
+	SandboxSetupMarkerReason        string
+	SandboxSecuritySummary          string
+	SandboxGlobalSetupCurrent       bool
+	SandboxGlobalSetupRequired      bool
+	SandboxGlobalSetupReason        string
+	SandboxWorkspaceSetupCurrent    bool
+	SandboxWorkspaceSetupRequired   bool
+	SandboxWorkspaceSetupReason     string
+	SandboxWorkspaceSetupRoot       string
+	SandboxWorkspaceSetupWriteRoots int
+	SandboxWorkspaceSetupPolicyHash string
+	SandboxWorkspaceSetupUpdatedAt  time.Time
+	HostExecution                   bool
+	FullAccessMode                  bool
+	PermissionGrantCount            int
+	PermissionGrantNetwork          bool
+	PermissionReadRootCount         int
+	PermissionWriteRootCount        int
+	ConfigPermissionsSecure         bool
+	Warnings                        []string
 }
 
 type RegisterBuiltinACPAgentOptions struct {
@@ -177,6 +197,8 @@ type DriverStack struct {
 	CycleSessionModeFn                   func(context.Context, session.SessionRef) (string, error)
 	SetSandboxBackendFn                  func(context.Context, string) (SandboxStatus, error)
 	PrepareSandboxFn                     func(context.Context) (SandboxStatus, error)
+	PreflightSandboxFn                   func(context.Context, bool) (SandboxStatus, error)
+	ResetSandboxFn                       func(context.Context) (SandboxStatus, error)
 	SetACPControllerModeFn               func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
 	SetSessionModeFn                     func(context.Context, session.SessionRef, string) (string, error)
 	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
@@ -318,6 +340,20 @@ func (s *DriverStack) PrepareSandbox(ctx context.Context) (SandboxStatus, error)
 		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox setup dependency is unavailable")
 	}
 	return s.PrepareSandboxFn(ctx)
+}
+
+func (s *DriverStack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
+	if s == nil || s.PreflightSandboxFn == nil {
+		return s.SandboxStatus(), nil
+	}
+	return s.PreflightSandboxFn(ctx, allowNonElevatedRepair)
+}
+
+func (s *DriverStack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
+	if s == nil || s.ResetSandboxFn == nil {
+		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox reset dependency is unavailable")
+	}
+	return s.ResetSandboxFn(ctx)
 }
 
 func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {

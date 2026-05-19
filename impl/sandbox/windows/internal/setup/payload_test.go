@@ -17,4 +17,17 @@ func TestPayloadEncodeDecodeDefaultsUsersAndVersion(t *testing.T) {
 	if payload.OfflineUsername != OfflineUser || payload.OnlineUsername != OnlineUser {
 		t.Fatalf("users = %q/%q", payload.OfflineUsername, payload.OnlineUsername)
 	}
+	if payload.Kind != SetupKindFull {
+		t.Fatalf("Kind = %q, want full", payload.Kind)
+	}
+}
+
+func TestPayloadNormalizeMapsLegacyRefreshOnlyToRuntimeRefresh(t *testing.T) {
+	payload := Payload{StateRoot: `C:\caelis`, RefreshOnly: true}.Normalize()
+	if payload.Kind != SetupKindRuntimeRefresh {
+		t.Fatalf("Kind = %q, want runtime_refresh", payload.Kind)
+	}
+	if !payload.RefreshOnly {
+		t.Fatal("RefreshOnly = false, want true")
+	}
 }

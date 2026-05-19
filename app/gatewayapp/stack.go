@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
@@ -75,26 +76,36 @@ type SessionRuntimeState struct {
 }
 
 type SandboxStatus struct {
-	RequestedBackend   string
-	ResolvedBackend    string
-	Route              string
-	FallbackReason     string
-	InstallHint        string
-	SetupRequired      bool
-	SetupError         string
-	SetupVersion       int
-	SetupMarkerCurrent bool
-	SetupMarkerReason  string
-	SetupRunnerHash    string
-	SetupPolicyHash    string
-	SetupOfflineUser   string
-	SetupOnlineUser    string
-	SetupOwnerUser     string
-	SetupReadRoots     int
-	SetupWriteRoots    int
-	SetupDenyRead      int
-	SetupDenyWrite     int
-	SecuritySummary    string
+	RequestedBackend         string
+	ResolvedBackend          string
+	Route                    string
+	FallbackReason           string
+	InstallHint              string
+	SetupRequired            bool
+	SetupError               string
+	SetupVersion             int
+	SetupMarkerCurrent       bool
+	SetupMarkerReason        string
+	SetupRunnerHash          string
+	SetupPolicyHash          string
+	SetupOfflineUser         string
+	SetupOnlineUser          string
+	SetupOwnerUser           string
+	SetupReadRoots           int
+	SetupWriteRoots          int
+	SetupDenyRead            int
+	SetupDenyWrite           int
+	SecuritySummary          string
+	GlobalSetupCurrent       bool
+	GlobalSetupRequired      bool
+	GlobalSetupReason        string
+	WorkspaceSetupCurrent    bool
+	WorkspaceSetupRequired   bool
+	WorkspaceSetupReason     string
+	WorkspaceSetupRoot       string
+	WorkspaceSetupWriteRoots int
+	WorkspaceSetupPolicyHash string
+	WorkspaceSetupUpdatedAt  time.Time
 }
 
 type StartSubagentOptions struct {

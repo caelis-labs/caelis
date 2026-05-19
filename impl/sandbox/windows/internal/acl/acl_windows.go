@@ -77,6 +77,14 @@ func ModifyFileDACL(path string, entries ...Entry) error {
 	return writeBuiltFileDACL(path, current.sd, false, missing...)
 }
 
+func MissingFileDACLEntries(path string, entries ...Entry) ([]Entry, error) {
+	current, err := ReadFileDACL(path)
+	if err != nil {
+		return nil, err
+	}
+	return missingEntries(current.sd, entries)
+}
+
 func ReplaceFileDACL(path string, protect bool, entries ...Entry) error {
 	return writeBuiltFileDACL(path, nil, protect, entries...)
 }

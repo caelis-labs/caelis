@@ -58,12 +58,12 @@ func TestRuntimeDoesNotAutoElevateWhenSetupIsMissing(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Run() error = nil; result=%+v", result)
 	}
-	if !strings.Contains(err.Error(), "/sandbox setup") {
-		t.Fatalf("Run() error = %v, want explicit setup guidance", err)
+	if strings.Contains(err.Error(), "/sandbox setup") || !strings.Contains(err.Error(), "global setup is required") {
+		t.Fatalf("Run() error = %v, want model-safe global setup error without slash command guidance", err)
 	}
 }
 
-func TestFullSetupPayloadIsWorkspaceIndependent(t *testing.T) {
+func TestFullSetupPayloadCarriesWorkspacePolicy(t *testing.T) {
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	rt, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
@@ -72,12 +72,18 @@ func TestFullSetupPayloadIsWorkspaceIndependent(t *testing.T) {
 	}
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
-	payload, _, err := windowsRT.runner.setupPayload(runnerruntimeRequest(workspace), false)
+	payload, _, err := windowsRT.runner.setupPayload(runnerruntimeRequest(workspace), setup.SetupKindFull)
 	if err != nil {
 		t.Fatalf("setupPayload(full) error = %v", err)
 	}
-	if len(payload.Policy.ReadRoots) != 0 || len(payload.Policy.WriteRoots) != 0 || len(payload.Policy.DenyReadPaths) != 0 || len(payload.Policy.DenyWritePaths) != 0 {
-		t.Fatalf("full setup policy = %+v, want no workspace-specific roots", payload.Policy)
+	if !containsPath(payload.Policy.WriteRoots, workspace) {
+		t.Fatalf("full setup write roots = %#v, want workspace %q", payload.Policy.WriteRoots, workspace)
+	}
+	if payload.WorkspacePolicyHash == "" {
+		t.Fatal("WorkspacePolicyHash is empty")
+	}
+	if payload.GlobalPolicyHash == "" {
+		t.Fatal("GlobalPolicyHash is empty")
 	}
 	if _, err := os.Stat(filepath.Join(stateDir, ".sandbox-bin")); !os.IsNotExist(err) {
 		t.Fatalf("full setup status materialized helper bin dir or unexpected error: %v", err)
@@ -92,7 +98,7 @@ func TestSetupFreshnessIgnoresRunnerAndPolicyHashChanges(t *testing.T) {
 	}
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
-	payload, _, err := windowsRT.runner.setupPayload(windowsRT.runner.baseSetupRequest(), false)
+	payload, err := windowsRT.runner.globalSetupPayload()
 	if err != nil {
 		t.Fatalf("setupPayload(full) error = %v", err)
 	}
@@ -120,7 +126,7 @@ func TestSetupReadyFreshnessDetectsStaleSandboxCredentials(t *testing.T) {
 	}
 	defer rt.Close()
 	windowsRT := rt.(*runtime)
-	payload, _, err := windowsRT.runner.setupPayload(windowsRT.runner.baseSetupRequest(), false)
+	payload, err := windowsRT.runner.globalSetupPayload()
 	if err != nil {
 		t.Fatalf("setupPayload(full) error = %v", err)
 	}
@@ -153,6 +159,58 @@ func TestSetupReadyFreshnessDetectsStaleSandboxCredentials(t *testing.T) {
 	freshness := windowsRT.runner.setupReadyFreshness()
 	if freshness.Current || !strings.Contains(freshness.Reason, "credentials are stale") {
 		t.Fatalf("setupReadyFreshness() = %+v, want stale credentials", freshness)
+	}
+}
+
+func TestStatusSeparatesGlobalAndWorkspaceSetup(t *testing.T) {
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+	payload, err := windowsRT.runner.globalSetupPayload()
+	if err != nil {
+		t.Fatalf("globalSetupPayload() error = %v", err)
+	}
+	dirs := setupstate.NewDirs(stateDir)
+	if err := setupstate.WriteMarker(dirs.MarkerPath, setupstate.Marker{
+		Version:         setup.PayloadVersion,
+		OfflineUsername: payload.OfflineUsername,
+		OnlineUsername:  payload.OnlineUsername,
+		OwnerUsername:   payload.OwnerUsername,
+	}); err != nil {
+		t.Fatalf("WriteMarker() error = %v", err)
+	}
+	if err := setupstate.WriteWorkspace(dirs.WorkspacePath, setupstate.WorkspaceRecord{
+		Version:       1,
+		WorkspaceRoot: workspace,
+		PolicyHash:    "stale-policy",
+	}); err != nil {
+		t.Fatalf("WriteWorkspace() error = %v", err)
+	}
+	windowsRT.runner.usersReadyMu.Lock()
+	windowsRT.runner.usersReadyCheckedAt = time.Now()
+	windowsRT.runner.usersReadyErr = ""
+	windowsRT.runner.usersReadyMu.Unlock()
+
+	status := rt.Status()
+	if !status.GlobalSetupCurrent || status.GlobalSetupRequired {
+		t.Fatalf("global setup status = current %t required %t reason %q", status.GlobalSetupCurrent, status.GlobalSetupRequired, status.GlobalSetupReason)
+	}
+	if status.SetupMarkerReason != "" {
+		t.Fatalf("SetupMarkerReason = %q, want empty global marker reason", status.SetupMarkerReason)
+	}
+	if !status.WorkspaceSetupRequired || status.WorkspaceSetupCurrent {
+		t.Fatalf("workspace setup status = current %t required %t reason %q", status.WorkspaceSetupCurrent, status.WorkspaceSetupRequired, status.WorkspaceSetupReason)
+	}
+	if !strings.Contains(strings.ToLower(status.WorkspaceSetupReason), "capability") {
+		t.Fatalf("WorkspaceSetupReason = %q, want missing capability SID reason", status.WorkspaceSetupReason)
+	}
+	if !status.SetupRequired {
+		t.Fatal("SetupRequired = false, want aggregate required")
 	}
 }
 
@@ -231,4 +289,17 @@ func runnerruntimeRequest(dir string) runnerruntime.Request {
 			Network:    sandbox.NetworkDisabled,
 		},
 	}
+}
+
+func containsPath(paths []string, want string) bool {
+	wantInfo, wantErr := os.Stat(want)
+	for _, path := range paths {
+		if info, err := os.Stat(path); err == nil && wantErr == nil && os.SameFile(info, wantInfo) {
+			return true
+		}
+		if strings.EqualFold(filepath.Clean(path), filepath.Clean(want)) {
+			return true
+		}
+	}
+	return false
 }

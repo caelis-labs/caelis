@@ -16,17 +16,31 @@ const (
 	PayloadVersion = setupstate.CurrentSetupVersion
 )
 
+type SetupKind string
+
+const (
+	SetupKindFull           SetupKind = "full"
+	SetupKindWorkspaceOnly  SetupKind = "workspace_only"
+	SetupKindRuntimeRefresh SetupKind = "runtime_refresh"
+	SetupKindReset          SetupKind = "reset"
+)
+
 type Payload struct {
-	Version         int              `json:"version"`
-	StateRoot       string           `json:"state_root"`
-	RunnerHash      string           `json:"runner_hash,omitempty"`
-	PolicyHash      string           `json:"policy_hash,omitempty"`
-	Policy          winpolicy.Policy `json:"policy"`
-	OfflineUsername string           `json:"offline_username,omitempty"`
-	OnlineUsername  string           `json:"online_username,omitempty"`
-	OwnerUsername   string           `json:"owner_username,omitempty"`
-	RefreshOnly     bool             `json:"refresh_only,omitempty"`
-	ProgressPath    string           `json:"progress_path,omitempty"`
+	Version             int              `json:"version"`
+	Kind                SetupKind        `json:"kind,omitempty"`
+	StateRoot           string           `json:"state_root"`
+	RunnerHash          string           `json:"runner_hash,omitempty"`
+	PolicyHash          string           `json:"policy_hash,omitempty"`
+	GlobalPolicyHash    string           `json:"global_policy_hash,omitempty"`
+	WorkspacePolicyHash string           `json:"workspace_policy_hash,omitempty"`
+	Policy              winpolicy.Policy `json:"policy"`
+	OfflineUsername     string           `json:"offline_username,omitempty"`
+	OnlineUsername      string           `json:"online_username,omitempty"`
+	OwnerUsername       string           `json:"owner_username,omitempty"`
+	WorkspaceRoot       string           `json:"workspace_root,omitempty"`
+	WorkspaceStatePath  string           `json:"workspace_state_path,omitempty"`
+	RefreshOnly         bool             `json:"refresh_only,omitempty"`
+	ProgressPath        string           `json:"progress_path,omitempty"`
 }
 
 type UserSecret struct {
@@ -52,6 +66,25 @@ type ProgressFunc func(Progress)
 func (p Payload) Normalize() Payload {
 	if p.Version == 0 {
 		p.Version = PayloadVersion
+	}
+	if p.Kind == "" {
+		if p.RefreshOnly {
+			p.Kind = SetupKindRuntimeRefresh
+		} else {
+			p.Kind = SetupKindFull
+		}
+	}
+	if p.Kind == SetupKindRuntimeRefresh {
+		p.RefreshOnly = true
+	}
+	if p.GlobalPolicyHash == "" {
+		p.GlobalPolicyHash = p.PolicyHash
+	}
+	if p.WorkspacePolicyHash == "" && p.Kind != SetupKindRuntimeRefresh && p.Kind != SetupKindReset {
+		p.WorkspacePolicyHash = p.PolicyHash
+	}
+	if p.PolicyHash == "" {
+		p.PolicyHash = p.GlobalPolicyHash
 	}
 	if p.OfflineUsername == "" {
 		p.OfflineUsername = OfflineUser

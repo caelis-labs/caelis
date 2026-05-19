@@ -89,6 +89,16 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 	status.SetupWriteRoots = rtStatus.SetupWriteRootCount
 	status.SetupDenyRead = rtStatus.SetupDenyReadCount
 	status.SetupDenyWrite = rtStatus.SetupDenyWriteCount
+	status.GlobalSetupCurrent = rtStatus.GlobalSetupCurrent
+	status.GlobalSetupRequired = rtStatus.GlobalSetupRequired
+	status.GlobalSetupReason = strings.TrimSpace(rtStatus.GlobalSetupReason)
+	status.WorkspaceSetupCurrent = rtStatus.WorkspaceSetupCurrent
+	status.WorkspaceSetupRequired = rtStatus.WorkspaceSetupRequired
+	status.WorkspaceSetupReason = strings.TrimSpace(rtStatus.WorkspaceSetupReason)
+	status.WorkspaceSetupRoot = strings.TrimSpace(rtStatus.WorkspaceSetupRoot)
+	status.WorkspaceSetupWriteRoots = rtStatus.WorkspaceSetupWriteRoots
+	status.WorkspaceSetupPolicyHash = strings.TrimSpace(rtStatus.WorkspaceSetupPolicyHash)
+	status.WorkspaceSetupUpdatedAt = rtStatus.WorkspaceSetupUpdatedAt
 	if rtStatus.FallbackToHost {
 		status.Route = string(sandbox.RouteHost)
 		status.SecuritySummary = "host fallback"
@@ -119,6 +129,42 @@ func (s *Stack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
 		return s.SandboxStatus(), nil
 	}
 	err := preparer.Prepare(ctx)
+	return s.SandboxStatus(), err
+}
+
+func (s *Stack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
+	if s == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	s.mu.RLock()
+	exec := s.exec
+	s.mu.RUnlock()
+	if exec == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
+	}
+	preflight, ok := exec.(sandbox.PreflightRuntime)
+	if !ok {
+		return s.SandboxStatus(), nil
+	}
+	err := preflight.Preflight(ctx, sandbox.PreflightOptions{AllowNonElevatedRepair: allowNonElevatedRepair})
+	return s.SandboxStatus(), err
+}
+
+func (s *Stack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
+	if s == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	s.mu.RLock()
+	exec := s.exec
+	s.mu.RUnlock()
+	if exec == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
+	}
+	resetter, ok := exec.(sandbox.ResettableRuntime)
+	if !ok {
+		return s.SandboxStatus(), nil
+	}
+	err := resetter.Reset(ctx)
 	return s.SandboxStatus(), err
 }
 

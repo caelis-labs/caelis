@@ -21,6 +21,7 @@ import (
 )
 
 func Run(stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	hideCurrentUserProfileDir()
 	runner := &runner{
 		reader: runnerproto.NewReader(stdin),
 		writer: runnerproto.NewWriter(stdout),

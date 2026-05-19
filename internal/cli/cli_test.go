@@ -338,6 +338,44 @@ func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
 	}
 }
 
+func TestRunSandboxResetSubcommandTextOutput(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"sandbox", "reset",
+		"-sandbox-backend", "host",
+		"-store-dir", cliTestStoreDir(t),
+		"-workspace-key", "sandbox-ws",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(sandbox reset) error = %v; stderr=%q", err, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
+		t.Fatalf("sandbox reset output = %q, want requested host backend", out.String())
+	}
+}
+
+func TestRunSandboxCleanSubcommandAlias(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"sandbox", "clean",
+		"-sandbox-backend", "host",
+		"-store-dir", cliTestStoreDir(t),
+		"-workspace-key", "sandbox-ws",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(sandbox clean) error = %v; stderr=%q", err, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "sandbox_resolved_backend: host") {
+		t.Fatalf("sandbox clean output = %q, want resolved host backend", out.String())
+	}
+}
+
 type fakeHandle struct {
 	events    chan kernel.EventEnvelope
 	submits   []kernel.SubmitRequest

@@ -109,6 +109,28 @@ func (r *compositeRuntime) Prepare(ctx context.Context) error {
 	return preparer.Prepare(ctx)
 }
 
+func (r *compositeRuntime) Preflight(ctx context.Context, opts PreflightOptions) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	preflight, ok := r.sandbox.(PreflightRuntime)
+	if !ok {
+		return nil
+	}
+	return preflight.Preflight(ctx, opts)
+}
+
+func (r *compositeRuntime) Reset(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	resetter, ok := r.sandbox.(ResettableRuntime)
+	if !ok {
+		return nil
+	}
+	return resetter.Reset(ctx)
+}
+
 func (r *compositeRuntime) Close() error {
 	var firstErr error
 	closed := map[Runtime]struct{}{}

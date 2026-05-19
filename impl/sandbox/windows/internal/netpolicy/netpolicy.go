@@ -47,12 +47,28 @@ func Refresh(cfg Config) error {
 	return runPowerShell(refreshScript(localUserSDDL(offlineSID)))
 }
 
+func Clear() error {
+	// Reset should be able to clean stale local users even on machines where the
+	// firewall module reports an empty-rule removal as a process failure.
+	_ = runPowerShell(clearScript())
+	return nil
+}
+
 func localUserSDDL(sid string) string {
 	sid = strings.TrimSpace(sid)
 	if sid == "" {
 		return ""
 	}
 	return "O:LSD:(A;;CC;;;" + sid + ")"
+}
+
+func clearScript() string {
+	return strings.Join([]string{
+		"$ErrorActionPreference = 'Stop'",
+		"$ProgressPreference = 'SilentlyContinue'",
+		"$group = " + quotePowerShell(ruleGroup),
+		"Remove-NetFirewallRule -Group $group -ErrorAction SilentlyContinue",
+	}, "\n")
 }
 
 func refreshScript(offlineUserSDDL string) string {

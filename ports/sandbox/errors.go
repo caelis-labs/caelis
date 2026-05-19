@@ -36,6 +36,9 @@ func SandboxPermissionDetail(result CommandResult, err error) (string, bool) {
 	if !IsSandboxPermissionDeniedText(raw) {
 		return "", false
 	}
+	if IsSandboxACLRefreshDeniedText(raw) {
+		return raw, true
+	}
 	return SandboxPermissionDeniedMessage, true
 }
 
@@ -82,13 +85,38 @@ func IsSandboxPermissionDeniedText(text string) bool {
 		"read-only file system",
 		"只读文件系统",
 		"permission denied",
+		"access is denied",
 		"operation not permitted",
+		"write_dac",
+		"write dac",
+		"acl: write",
+		" dacl",
 		"could not lock config file",
 		"cannot lock config file",
 		"unable to lock config file",
 		"无法锁定配置文件",
 		"eacces",
 		"eperm",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsSandboxACLRefreshDeniedText(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	patterns := []string{
+		"refresh sandbox acls",
+		"acl: write",
+		" dacl",
+		"write_dac",
+		"write dac",
 	}
 	for _, pattern := range patterns {
 		if strings.Contains(text, pattern) {

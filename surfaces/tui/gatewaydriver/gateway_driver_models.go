@@ -239,6 +239,17 @@ func (d *GatewayDriver) PrepareSandbox(ctx context.Context) (StatusSnapshot, err
 	return d.Status(ctx)
 }
 
+func (d *GatewayDriver) ResetSandbox(ctx context.Context) (StatusSnapshot, error) {
+	status, err := d.stack.ResetSandbox(ctx)
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
+	d.mu.Lock()
+	d.sandboxType = firstNonEmpty(status.ResolvedBackend, status.RequestedBackend, d.sandboxType)
+	d.mu.Unlock()
+	return d.Status(ctx)
+}
+
 func (d *GatewayDriver) SetSessionMode(ctx context.Context, mode string) (StatusSnapshot, error) {
 	activeSession, err := d.ensureSession(ctx)
 	if err != nil {

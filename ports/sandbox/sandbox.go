@@ -151,6 +151,17 @@ type Status struct {
 	SetupWriteRootCount int     `json:"setup_write_root_count,omitempty"`
 	SetupDenyReadCount  int     `json:"setup_deny_read_count,omitempty"`
 	SetupDenyWriteCount int     `json:"setup_deny_write_count,omitempty"`
+
+	GlobalSetupCurrent       bool      `json:"global_setup_current,omitempty"`
+	GlobalSetupRequired      bool      `json:"global_setup_required,omitempty"`
+	GlobalSetupReason        string    `json:"global_setup_reason,omitempty"`
+	WorkspaceSetupCurrent    bool      `json:"workspace_setup_current,omitempty"`
+	WorkspaceSetupRequired   bool      `json:"workspace_setup_required,omitempty"`
+	WorkspaceSetupReason     string    `json:"workspace_setup_reason,omitempty"`
+	WorkspaceSetupRoot       string    `json:"workspace_setup_root,omitempty"`
+	WorkspaceSetupWriteRoots int       `json:"workspace_setup_write_roots,omitempty"`
+	WorkspaceSetupPolicyHash string    `json:"workspace_setup_policy_hash,omitempty"`
+	WorkspaceSetupUpdatedAt  time.Time `json:"workspace_setup_updated_at,omitempty"`
 }
 
 // PrepareProgress is an optional, best-effort progress update emitted during a
@@ -298,6 +309,25 @@ type Runtime interface {
 // user-triggered setup step before normal sandboxed execution can run.
 type PreparableRuntime interface {
 	Prepare(context.Context) error
+}
+
+// PreflightOptions controls best-effort setup checks that must not request
+// elevation. Preflight can repair state only when the current user already has
+// enough permissions to do so.
+type PreflightOptions struct {
+	AllowNonElevatedRepair bool `json:"allow_non_elevated_repair,omitempty"`
+}
+
+// PreflightRuntime is implemented by backends that can inspect or lightly repair
+// setup state without prompting for elevation.
+type PreflightRuntime interface {
+	Preflight(context.Context, PreflightOptions) error
+}
+
+// ResettableRuntime is implemented by backends that can remove local sandbox
+// infrastructure through an explicit user-triggered maintenance command.
+type ResettableRuntime interface {
+	Reset(context.Context) error
 }
 
 // BackendFactory builds one concrete backend runtime.

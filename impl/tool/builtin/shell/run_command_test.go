@@ -255,6 +255,42 @@ func TestRunCommandCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testin
 	}
 }
 
+func TestRunCommandCallPreservesWindowsDACLRefreshFailure(t *testing.T) {
+	t.Parallel()
+
+	denied := `impl/sandbox/windows: refresh sandbox ACLs without elevation: acl: write D:\xue\code\storage DACL: Access is denied.`
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
+		ExitCode: 0,
+		Route:    sandbox.RouteSandbox,
+		Backend:  sandbox.BackendWindowsElevated,
+	}, err: fmt.Errorf("%s", denied)}
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewRunCommand() error = %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"command": "echo hello",
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
+	if err != nil {
+		t.Fatalf("Call() error = %v, want structured tool error result", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(result.Content[0].JSON.Value, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(result) error = %v", err)
+	}
+	if got, _ := payload["error_code"].(string); got != string(tool.ErrorCodeSandboxDenied) {
+		t.Fatalf("error_code = %q, want sandbox_denied", got)
+	}
+	got, _ := payload["error"].(string)
+	if !strings.Contains(got, `D:\xue\code\storage`) || strings.Contains(got, "/sandbox setup") {
+		t.Fatalf("error = %q, want DACL path without setup command guidance", got)
+	}
+}
+
 type sandboxPermissionRuntime struct {
 	result sandbox.CommandResult
 	err    error
