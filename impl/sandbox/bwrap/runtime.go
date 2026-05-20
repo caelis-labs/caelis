@@ -281,18 +281,11 @@ func (b *bwrapRunner) WaitSession(ctx context.Context, sessionID string, timeout
 		return sandbox.CommandResult{}, err
 	}
 	if timeout > 0 {
-		timer := time.NewTimer(timeout)
-		defer timer.Stop()
-		session, err := manager.GetSession(sessionID)
-		if err != nil {
+		if _, err := manager.WaitSessionWithContextTimeout(ctx, sessionID, timeout); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+				return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendBwrap}, nil
+			}
 			return sandbox.CommandResult{}, err
-		}
-		select {
-		case <-ctx.Done():
-			return sandbox.CommandResult{}, ctx.Err()
-		case <-session.ExitChannel():
-		case <-timer.C:
-			return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendBwrap}, nil
 		}
 	} else if _, err := manager.WaitSession(ctx, sessionID); err != nil {
 		return sandbox.CommandResult{}, err

@@ -231,6 +231,22 @@ func (sm *SessionManager) WaitSessionWithTimeout(id string, timeout time.Duratio
 	return session.WaitWithTimeout(timeout)
 }
 
+// WaitSessionWithContextTimeout waits for a session with both caller
+// cancellation and a timeout. It routes through AsyncSession.Wait so the exit
+// notification remains reusable by later Result/Wait calls.
+func (sm *SessionManager) WaitSessionWithContextTimeout(ctx context.Context, id string, timeout time.Duration) (int, error) {
+	session, err := sm.GetSession(id)
+	if err != nil {
+		return -1, err
+	}
+	if timeout <= 0 {
+		return session.Wait(ctx)
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return session.Wait(waitCtx)
+}
+
 // GetResult gets the command result if the session has exited.
 func (sm *SessionManager) GetResult(id string) (sandbox.CommandResult, error) {
 	session, err := sm.GetSession(id)
