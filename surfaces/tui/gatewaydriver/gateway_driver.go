@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -269,6 +270,7 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		Route:                           route,
 		FallbackReason:                  sandboxStatus.FallbackReason,
 		SandboxInstallHint:              sandboxStatus.InstallHint,
+		SandboxSetup:                    sandbox.CloneSetupStatus(sandboxStatus.Setup),
 		SandboxSetupRequired:            sandboxStatus.SetupRequired,
 		SandboxSetupError:               sandboxStatus.SetupError,
 		SandboxSetupMarkerCurrent:       sandboxStatus.SetupMarkerCurrent,
@@ -309,6 +311,9 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)
 			status.FallbackReason = firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), status.FallbackReason)
 			status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxInstallHint)
+			if report.SandboxSetup != nil {
+				status.SandboxSetup = sandbox.CloneSetupStatus(*report.SandboxSetup)
+			}
 			status.SandboxSetupRequired = report.SandboxSetupRequired || status.SandboxSetupRequired
 			status.SandboxSetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxSetupError)
 			status.SandboxSetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxSetupMarkerCurrent

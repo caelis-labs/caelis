@@ -56,7 +56,11 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 	if !strings.EqualFold(backend, string(sandbox.BackendWindowsElevated)) {
 		return
 	}
-	if !initial.WorkspaceSetupRequired || initial.GlobalSetupRequired {
+	globalSetup, _ := initial.Setup.Check("global")
+	workspaceSetup, _ := initial.Setup.Check("workspace")
+	workspaceRequired := initial.WorkspaceSetupRequired || workspaceSetup.Required
+	globalRequired := initial.GlobalSetupRequired || globalSetup.Required
+	if !workspaceRequired || globalRequired {
 		return
 	}
 	go func() {
@@ -78,6 +82,9 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 		})
 		progressCtx := sandbox.ContextWithPrepareProgress(ctx, sendWorkspaceProgress)
 		status, err := stack.PreflightSandbox(progressCtx, true)
+		nextWorkspaceSetup, _ := status.Setup.Check("workspace")
+		workspaceCurrent := status.WorkspaceSetupCurrent || nextWorkspaceSetup.Current
+		workspaceRequired := status.WorkspaceSetupRequired || nextWorkspaceSetup.Required
 		if err != nil {
 			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox workspace setup failed: " + err.Error() + "\n"})
 			sendWorkspaceProgress(sandbox.PrepareProgress{
@@ -85,7 +92,7 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 				Message: "workspace sandbox setup failed",
 				Done:    true,
 			})
-		} else if status.WorkspaceSetupCurrent || !status.WorkspaceSetupRequired {
+		} else if workspaceCurrent || !workspaceRequired {
 			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox workspace setup complete.\n"})
 			sendWorkspaceProgress(sandbox.PrepareProgress{
 				Phase:   "complete",
@@ -103,15 +110,20 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 func initialSandboxStatusLogs(status gatewayapp.SandboxStatus) []string {
 	var logs []string
 	backend := strings.TrimSpace(firstNonEmptyString(status.ResolvedBackend, status.RequestedBackend))
-	if status.SetupRequired && strings.EqualFold(backend, "windows-elevated") {
+	globalSetup, _ := status.Setup.Check("global")
+	workspaceSetup, _ := status.Setup.Check("workspace")
+	setupRequired := status.Setup.Required || status.SetupRequired
+	globalRequired := globalSetup.Required || status.GlobalSetupRequired
+	workspaceRequired := workspaceSetup.Required || status.WorkspaceSetupRequired
+	if setupRequired && strings.EqualFold(backend, "windows-elevated") {
 		message := "Windows sandbox setup is not ready. Run /sandbox setup once and approve the UAC prompt before using sandboxed commands."
-		if status.WorkspaceSetupRequired && !status.GlobalSetupRequired {
+		if workspaceRequired && !globalRequired {
 			message = "Current workspace needs Windows sandbox ACL setup. Preparing it in the background; commands may wait until it completes."
 		}
-		if reason := strings.TrimSpace(firstNonEmptyString(status.GlobalSetupReason, status.WorkspaceSetupReason, status.SetupMarkerReason)); reason != "" {
+		if reason := strings.TrimSpace(firstNonEmptyString(globalSetup.Reason, workspaceSetup.Reason, status.GlobalSetupReason, status.WorkspaceSetupReason, status.SetupMarkerReason)); reason != "" {
 			message += " Reason: " + reason + "."
 		}
-		if setupErr := strings.TrimSpace(status.SetupError); setupErr != "" {
+		if setupErr := strings.TrimSpace(firstNonEmptyString(status.Setup.Error, globalSetup.Error, workspaceSetup.Error, status.SetupError)); setupErr != "" {
 			message += " Last error: " + setupErr + "."
 		}
 		logs = append(logs, message)

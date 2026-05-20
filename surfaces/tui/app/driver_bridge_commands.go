@@ -630,15 +630,19 @@ func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
 		lines = append(lines, "  ok session: "+sessionID)
 	}
 	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxResolvedBackend, status.SandboxRequestedBackend, status.SandboxType))
+	globalSetup, hasGlobalSetup := status.SandboxSetup.Check("global")
+	workspaceSetup, hasWorkspaceSetup := status.SandboxSetup.Check("workspace")
+	globalSetupRequired := status.SandboxGlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
+	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
 	switch {
 	case status.HostExecution || status.FullAccessMode:
 		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
 		lines = append(lines, "  warn sandbox: "+detail)
-	case status.SandboxGlobalSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
+	case globalSetupRequired:
+		detail := strings.TrimSpace(firstNonEmpty(globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
 		lines = append(lines, "  warn sandbox global setup: "+detail+" - run /sandbox setup")
-	case status.SandboxWorkspaceSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
+	case workspaceSetupRequired:
+		detail := strings.TrimSpace(firstNonEmpty(workspaceSetup.Reason, status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
 		lines = append(lines, "  warn sandbox workspace setup: "+detail+" - run /sandbox setup")
 	case sandbox != "":
 		lines = append(lines, "  ok sandbox: "+sandbox)

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
@@ -215,6 +216,7 @@ func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 		Route:                    status.Route,
 		FallbackReason:           status.FallbackReason,
 		InstallHint:              status.InstallHint,
+		Setup:                    sandbox.CloneSetupStatus(status.Setup),
 		SetupRequired:            status.SetupRequired,
 		SetupError:               status.SetupError,
 		SetupMarkerCurrent:       status.SetupMarkerCurrent,
@@ -289,6 +291,7 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 		SandboxRoute:                    report.SandboxRoute,
 		SandboxFallbackReason:           report.SandboxFallbackReason,
 		SandboxInstallHint:              report.SandboxInstallHint,
+		SandboxSetup:                    cloneOptionalSetupStatus(report.SandboxSetup),
 		SandboxSetupRequired:            report.SandboxSetupRequired,
 		SandboxSetupError:               report.SandboxSetupError,
 		SandboxSetupMarkerCurrent:       report.SandboxSetupMarkerCurrent,
@@ -313,6 +316,14 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 		ConfigPermissionsSecure:         report.ConfigPermissionsSecure,
 		Warnings:                        append([]string(nil), report.Warnings...),
 	}, err
+}
+
+func cloneOptionalSetupStatus(status *sandbox.SetupStatus) *sandbox.SetupStatus {
+	if status == nil {
+		return nil
+	}
+	out := sandbox.CloneSetupStatus(*status)
+	return &out
 }
 
 func toRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAgentAddOption {

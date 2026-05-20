@@ -63,7 +63,7 @@ func New(cfg Config) *Runtime {
 	return &Runtime{
 		backend:    cfg.Backend,
 		descriptor: sandbox.CloneDescriptor(cfg.Descriptor),
-		status:     cfg.Status,
+		status:     sandbox.CloneStatus(cfg.Status),
 		baseFS:     cfg.BaseFS,
 		policy:     cfg.Policy,
 		runner:     cfg.Runner,
@@ -136,7 +136,7 @@ func (r *Runtime) SupportedBackends() []sandbox.Backend {
 }
 
 func (r *Runtime) Status() sandbox.Status {
-	return r.status
+	return sandbox.CloneStatus(r.status)
 }
 
 func (r *Runtime) Close() error {

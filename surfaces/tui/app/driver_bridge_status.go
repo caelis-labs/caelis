@@ -50,20 +50,25 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	if status.SandboxInstallHint != "" {
 		lines = append(lines, "  Install    "+strings.TrimSpace(status.SandboxInstallHint))
 	}
-	if status.SandboxGlobalSetupRequired {
+	globalSetup, hasGlobalSetup := status.SandboxSetup.Check("global")
+	workspaceSetup, hasWorkspaceSetup := status.SandboxSetup.Check("workspace")
+	globalSetupRequired := status.SandboxGlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
+	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
+	globalSetupReason := firstNonEmpty(globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason)
+	workspaceSetupReason := firstNonEmpty(workspaceSetup.Reason, status.SandboxWorkspaceSetupReason)
+	setupError := firstNonEmpty(status.SandboxSetup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxSetupError)
+	if globalSetupRequired {
 		lines = append(lines, "  Setup      Windows sandbox infrastructure required; run /sandbox setup")
-	} else if status.SandboxWorkspaceSetupRequired {
+	} else if workspaceSetupRequired {
 		lines = append(lines, "  Setup      current workspace ACL required; run /sandbox setup")
 	}
-	if status.SandboxGlobalSetupReason != "" {
-		lines = append(lines, "  Reason     "+strings.TrimSpace(status.SandboxGlobalSetupReason))
-	} else if status.SandboxWorkspaceSetupReason != "" {
-		lines = append(lines, "  Reason     "+strings.TrimSpace(status.SandboxWorkspaceSetupReason))
-	} else if status.SandboxSetupMarkerReason != "" {
-		lines = append(lines, "  Reason     "+strings.TrimSpace(status.SandboxSetupMarkerReason))
+	if globalSetupReason != "" {
+		lines = append(lines, "  Reason     "+strings.TrimSpace(globalSetupReason))
+	} else if workspaceSetupReason != "" {
+		lines = append(lines, "  Reason     "+strings.TrimSpace(workspaceSetupReason))
 	}
-	if status.SandboxSetupError != "" {
-		lines = append(lines, "  Error      "+strings.TrimSpace(status.SandboxSetupError))
+	if setupError != "" {
+		lines = append(lines, "  Error      "+strings.TrimSpace(setupError))
 	}
 	if strings.TrimSpace(status.Model) == "" && strings.TrimSpace(status.Provider) == "" && strings.TrimSpace(status.ModelName) == "" {
 		lines = append(lines, "note: Run /connect to configure a provider and model")
@@ -75,9 +80,9 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		lines = append(lines, "warn: Commands may run on the host with reduced sandbox isolation")
 		lines = append(lines, "warn: Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work")
 	}
-	if status.SandboxGlobalSetupRequired {
+	if globalSetupRequired {
 		lines = append(lines, "warn: Windows sandbox infrastructure setup is required before sandboxed commands can run")
-	} else if status.SandboxWorkspaceSetupRequired {
+	} else if workspaceSetupRequired {
 		lines = append(lines, "warn: Current workspace needs Windows sandbox ACL setup before sandboxed commands can run")
 	}
 	if strings.TrimSpace(status.FallbackReason) != "" {

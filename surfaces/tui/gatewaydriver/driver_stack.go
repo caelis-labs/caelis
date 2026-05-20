@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -92,6 +93,7 @@ type SandboxStatus struct {
 	Route                    string
 	FallbackReason           string
 	InstallHint              string
+	Setup                    sandbox.SetupStatus
 	SetupRequired            bool
 	SetupError               string
 	SetupMarkerCurrent       bool
@@ -128,6 +130,7 @@ type DoctorReport struct {
 	SandboxRoute                    string
 	SandboxFallbackReason           string
 	SandboxInstallHint              string
+	SandboxSetup                    *sandbox.SetupStatus
 	SandboxSetupRequired            bool
 	SandboxSetupError               string
 	SandboxSetupMarkerCurrent       bool

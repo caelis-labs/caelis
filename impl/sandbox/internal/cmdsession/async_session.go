@@ -7,14 +7,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	stdruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/procutil"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/google/uuid"
 )
@@ -447,25 +445,7 @@ func (s *AsyncSession) Status() SessionStatus {
 }
 
 func buildAsyncSessionCommand(ctx context.Context, command string, tty bool) (*exec.Cmd, error) {
-	if stdruntime.GOOS == "windows" {
-		if tty {
-			return nil, fmt.Errorf("tty mode is not supported by cmdsession on windows")
-		}
-		return exec.CommandContext(ctx, "powershell.exe", winps.Args(command, winps.Options{})...), nil
-	}
-	if !tty {
-		return exec.CommandContext(ctx, "bash", "-lc", command), nil
-	}
-	scriptPath, err := exec.LookPath("script")
-	if err != nil {
-		return nil, fmt.Errorf("failed to locate script utility for tty mode: %w", err)
-	}
-	switch stdruntime.GOOS {
-	case "linux":
-		return exec.CommandContext(ctx, scriptPath, "-qefc", command, "/dev/null"), nil
-	default:
-		return exec.CommandContext(ctx, scriptPath, "-q", "/dev/null", "bash", "-lc", command), nil
-	}
+	return buildPlatformShellCommand(ctx, command, tty)
 }
 
 func buildAsyncSessionCommandFromConfig(ctx context.Context, cfg AsyncSessionConfig) (*exec.Cmd, error) {

@@ -251,7 +251,7 @@ func (r *Runtime) SupportedBackends() []sandbox.Backend {
 }
 
 func (r *Runtime) Status() sandbox.Status {
-	return r.status
+	return sandbox.CloneStatus(r.status)
 }
 
 func (r *Runtime) Close() error {

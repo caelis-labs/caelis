@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 )
 
@@ -23,6 +22,7 @@ func RegisterBackendFactory(factory BackendFactory) error {
 		return fmt.Errorf("ports/sandbox: duplicated backend factory %q", backend)
 	}
 	backendFactories[backend] = factory
+	backendFactoryOrder = append(backendFactoryOrder, backend)
 	return nil
 }
 
@@ -66,14 +66,17 @@ func New(cfg Config) (Runtime, error) {
 		return rt, nil
 	}
 
-	candidates, err := candidateBackends(requested)
+	candidates, err := candidateBackends(cfg)
 	if err != nil {
 		_ = hostRuntime.Close()
 		return nil, err
 	}
 	if len(candidates) == 0 {
-		_ = hostRuntime.Close()
-		return nil, fmt.Errorf("ports/sandbox: no sandbox backend candidates")
+		rt.status.FallbackToHost = true
+		rt.status.ResolvedBackend = BackendHost
+		rt.status.FallbackReason = "no sandbox backend candidates"
+		rt.status.FallbackInstallHint = fallbackInstallHint(cfg)
+		return rt, nil
 	}
 	rt.status.RequestedBackend = requested
 	rt.status.ResolvedBackend = candidates[0]
@@ -91,7 +94,7 @@ func New(cfg Config) (Runtime, error) {
 		rt.status.FallbackToHost = false
 		rt.status.FallbackReason = strings.Join(failures, "; ")
 		if len(failures) > 0 {
-			rt.status.FallbackInstallHint = sandboxInstallHint()
+			rt.status.FallbackInstallHint = fallbackInstallHint(cfg)
 		}
 		return rt, nil
 	}
@@ -103,7 +106,7 @@ func New(cfg Config) (Runtime, error) {
 	rt.status.FallbackToHost = true
 	rt.status.ResolvedBackend = BackendHost
 	rt.status.FallbackReason = strings.Join(failures, "; ")
-	rt.status.FallbackInstallHint = sandboxInstallHint()
+	rt.status.FallbackInstallHint = fallbackInstallHint(cfg)
 	return rt, nil
 }
 
@@ -135,6 +138,8 @@ func NormalizeConfig(cfg Config) Config {
 	cfg.ReadableRoots = normalizeStringSlice(cfg.ReadableRoots)
 	cfg.WritableRoots = normalizeStringSlice(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = normalizeStringSlice(cfg.ReadOnlySubpaths)
+	cfg.BackendCandidates = normalizeBackendCandidates(cfg.BackendCandidates)
+	cfg.FallbackInstallHint = strings.TrimSpace(cfg.FallbackInstallHint)
 	return cfg
 }
 
@@ -158,111 +163,44 @@ func buildRegisteredRuntime(backend Backend, cfg Config) (Runtime, error) {
 	return runtime, nil
 }
 
-func candidateBackends(requested Backend) ([]Backend, error) {
-	return candidateBackendsForGOOS(runtime.GOOS, requested)
-}
-
-func candidateBackendsForGOOS(goos string, requested Backend) ([]Backend, error) {
-	requested = Backend(strings.TrimSpace(string(requested)))
-	switch goos {
-	case "darwin":
-		if requested == "" {
-			return []Backend{BackendSeatbelt}, nil
-		}
-		if requested != BackendSeatbelt && requested != BackendHost {
-			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on darwin", requested)
-		}
-		return []Backend{requested}, nil
-	case "linux":
-		if requested == "" {
-			return []Backend{BackendBwrap, BackendLandlock}, nil
-		}
-		if requested != BackendBwrap && requested != BackendLandlock && requested != BackendHost {
-			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on linux", requested)
-		}
-		return []Backend{requested}, nil
-	case "windows":
-		if requested == "" {
-			return []Backend{BackendWindowsElevated}, nil
-		}
-		if requested != BackendWindowsElevated && requested != BackendHost {
-			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on windows", requested)
-		}
-		return []Backend{requested}, nil
-	default:
-		if requested == "" {
-			return nil, nil
-		}
-		if requested != BackendHost {
-			return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported on %s", requested, goos)
-		}
+func candidateBackends(cfg Config) ([]Backend, error) {
+	requested := Backend(strings.TrimSpace(string(cfg.RequestedBackend)))
+	if requested != "" {
 		return []Backend{requested}, nil
 	}
-}
-
-func sandboxInstallHint() string {
-	switch runtime.GOOS {
-	case "linux":
-		return linuxSandboxInstallHint()
-	case "darwin":
-		return "macOS sandboxing uses sandbox-exec/seatbelt and should be available by default; update macOS if the backend is unavailable."
-	case "windows":
-		return "Run `caelis sandbox setup` or TUI `/sandbox setup` once to initialize Windows Elevated sandbox."
-	default:
-		return "Install a supported sandbox backend for this OS; until then commands may run on the host."
+	if len(cfg.BackendCandidates) > 0 {
+		return normalizeBackendCandidates(cfg.BackendCandidates), nil
 	}
-}
-
-func linuxSandboxInstallHint() string {
-	ids := linuxDistroIDs()
-	for _, id := range ids {
-		switch id {
-		case "debian", "ubuntu", "linuxmint", "pop":
-			return "Install bubblewrap with: sudo apt install bubblewrap. If bubblewrap is blocked, Caelis can fall back to Landlock on supported kernels."
-		case "fedora", "rhel", "centos", "rocky", "almalinux":
-			return "Install bubblewrap with: sudo dnf install bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
-		case "arch", "manjaro":
-			return "Install bubblewrap with: sudo pacman -S bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
-		case "opensuse", "suse", "sles":
-			return "Install bubblewrap with: sudo zypper install bubblewrap. If user namespaces are blocked, enable them or rely on Landlock when supported."
-		}
+	backendFactoriesMu.RLock()
+	order := append([]Backend(nil), backendFactoryOrder...)
+	factories := make(map[Backend]BackendFactory, len(backendFactories))
+	for backend, factory := range backendFactories {
+		factories[backend] = factory
 	}
-	return "Install bubblewrap for this distribution or use a Landlock-capable Linux kernel; until then commands may run on the host."
-}
-
-func linuxDistroIDs() []string {
-	raw, err := os.ReadFile("/etc/os-release")
-	if err != nil {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	var ids []string
-	appendID := func(value string) {
-		value = strings.ToLower(strings.Trim(strings.TrimSpace(value), `"`))
-		if value == "" {
-			return
-		}
-		if _, ok := seen[value]; ok {
-			return
-		}
-		seen[value] = struct{}{}
-		ids = append(ids, value)
-	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		key, value, ok := strings.Cut(line, "=")
-		if !ok {
+	backendFactoriesMu.RUnlock()
+	var out []Backend
+	seen := map[Backend]struct{}{}
+	for _, backend := range order {
+		if backend == "" || backend == BackendHost {
 			continue
 		}
-		switch strings.TrimSpace(key) {
-		case "ID":
-			appendID(value)
-		case "ID_LIKE":
-			for _, item := range strings.Fields(strings.Trim(strings.TrimSpace(value), `"`)) {
-				appendID(item)
-			}
+		if _, ok := factories[backend]; !ok {
+			continue
 		}
+		if _, ok := seen[backend]; ok {
+			continue
+		}
+		seen[backend] = struct{}{}
+		out = append(out, backend)
 	}
-	return ids
+	return out, nil
+}
+
+func fallbackInstallHint(cfg Config) string {
+	if hint := strings.TrimSpace(cfg.FallbackInstallHint); hint != "" {
+		return hint
+	}
+	return "Install or enable a supported sandbox backend for this environment; until then commands may run on the host."
 }
 
 func normalizeStringSlice(values []string) []string {

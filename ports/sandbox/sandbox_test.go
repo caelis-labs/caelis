@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"maps"
 	"os"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -222,8 +221,10 @@ func TestRegisterBuiltInBackendFactoryRecordsDuplicateWithoutPanic(t *testing.T)
 	backend := Backend("test-duplicate-backend")
 	backendFactoriesMu.Lock()
 	oldFactory, hadFactory := backendFactories[backend]
+	oldOrder := append([]Backend(nil), backendFactoryOrder...)
 	oldErrs := append([]error(nil), backendRegistrationErrs...)
 	delete(backendFactories, backend)
+	backendFactoryOrder = removeBackendForTest(backendFactoryOrder, backend)
 	backendRegistrationErrs = nil
 	backendFactoriesMu.Unlock()
 	t.Cleanup(func() {
@@ -233,6 +234,7 @@ func TestRegisterBuiltInBackendFactoryRecordsDuplicateWithoutPanic(t *testing.T)
 		} else {
 			delete(backendFactories, backend)
 		}
+		backendFactoryOrder = oldOrder
 		backendRegistrationErrs = oldErrs
 		backendFactoriesMu.Unlock()
 	})
@@ -252,29 +254,25 @@ func TestRegisterBuiltInBackendFactoryRecordsDuplicateWithoutPanic(t *testing.T)
 }
 
 func TestNewAutoBackendPrefersSandboxCandidate(t *testing.T) {
-	wantCandidates, err := candidateBackends("")
-	if err != nil {
-		t.Fatalf("candidateBackends(\"\") error = %v", err)
-	}
-	if len(wantCandidates) == 0 {
-		t.Skip("no auto backend candidates for current platform")
-	}
-	want := wantCandidates[0]
+	want := Backend("test-auto-backend")
 
 	backendFactoriesMu.Lock()
 	original := maps.Clone(backendFactories)
+	originalOrder := append([]Backend(nil), backendFactoryOrder...)
 	backendFactories = map[Backend]BackendFactory{
 		BackendHost: fakeBackendFactory{backend: BackendHost},
 		want:        fakeBackendFactory{backend: want},
 	}
+	backendFactoryOrder = []Backend{BackendHost, want}
 	backendFactoriesMu.Unlock()
 	t.Cleanup(func() {
 		backendFactoriesMu.Lock()
 		backendFactories = original
+		backendFactoryOrder = originalOrder
 		backendFactoriesMu.Unlock()
 	})
 
-	rt, err := New(Config{RequestedBackend: "auto"})
+	rt, err := New(Config{RequestedBackend: "auto", BackendCandidates: []Backend{want}})
 	if err != nil {
 		t.Fatalf("New(auto) error = %v", err)
 	}
@@ -284,7 +282,7 @@ func TestNewAutoBackendPrefersSandboxCandidate(t *testing.T) {
 
 	status := rt.Status()
 	if status.ResolvedBackend != want {
-		t.Fatalf("Status().ResolvedBackend = %q, want %q on %s", status.ResolvedBackend, want, runtime.GOOS)
+		t.Fatalf("Status().ResolvedBackend = %q, want %q", status.ResolvedBackend, want)
 	}
 	if status.FallbackToHost {
 		t.Fatalf("Status().FallbackToHost = true, want false for auto backend")
@@ -292,31 +290,27 @@ func TestNewAutoBackendPrefersSandboxCandidate(t *testing.T) {
 }
 
 func TestNewAutoBackendReportsSkippedSandboxCandidate(t *testing.T) {
-	candidates, err := candidateBackends("")
-	if err != nil {
-		t.Fatalf("candidateBackends(\"\") error = %v", err)
-	}
-	if len(candidates) < 2 {
-		t.Skip("auto backend has no secondary sandbox candidate on this platform")
-	}
-	failed := candidates[0]
-	resolved := candidates[1]
+	failed := Backend("test-failed-backend")
+	resolved := Backend("test-resolved-backend")
 
 	backendFactoriesMu.Lock()
 	original := maps.Clone(backendFactories)
+	originalOrder := append([]Backend(nil), backendFactoryOrder...)
 	backendFactories = map[Backend]BackendFactory{
 		BackendHost: fakeBackendFactory{backend: BackendHost},
 		failed:      fakeBackendFactory{backend: failed, err: errors.New("probe blocked by AppArmor")},
 		resolved:    fakeBackendFactory{backend: resolved},
 	}
+	backendFactoryOrder = []Backend{BackendHost, failed, resolved}
 	backendFactoriesMu.Unlock()
 	t.Cleanup(func() {
 		backendFactoriesMu.Lock()
 		backendFactories = original
+		backendFactoryOrder = originalOrder
 		backendFactoriesMu.Unlock()
 	})
 
-	rt, err := New(Config{RequestedBackend: "auto"})
+	rt, err := New(Config{RequestedBackend: "auto", BackendCandidates: []Backend{failed, resolved}})
 	if err != nil {
 		t.Fatalf("New(auto) error = %v", err)
 	}
@@ -339,30 +333,31 @@ func TestNewAutoBackendReportsSkippedSandboxCandidate(t *testing.T) {
 }
 
 func TestNewAutoBackendFallsBackToHostWithInstallHint(t *testing.T) {
-	candidates, err := candidateBackends("")
-	if err != nil {
-		t.Fatalf("candidateBackends(\"\") error = %v", err)
-	}
-	if len(candidates) == 0 {
-		t.Skip("no auto backend candidates for current platform")
-	}
+	candidates := []Backend{Backend("test-failed-backend")}
 
 	backendFactoriesMu.Lock()
 	original := maps.Clone(backendFactories)
+	originalOrder := append([]Backend(nil), backendFactoryOrder...)
 	backendFactories = map[Backend]BackendFactory{
 		BackendHost: fakeBackendFactory{backend: BackendHost},
 	}
 	for _, candidate := range candidates {
 		backendFactories[candidate] = fakeBackendFactory{backend: candidate, err: errors.New("sandbox backend unavailable")}
 	}
+	backendFactoryOrder = append([]Backend{BackendHost}, candidates...)
 	backendFactoriesMu.Unlock()
 	t.Cleanup(func() {
 		backendFactoriesMu.Lock()
 		backendFactories = original
+		backendFactoryOrder = originalOrder
 		backendFactoriesMu.Unlock()
 	})
 
-	rt, err := New(Config{RequestedBackend: "auto"})
+	rt, err := New(Config{
+		RequestedBackend:    "auto",
+		BackendCandidates:   candidates,
+		FallbackInstallHint: "install test sandbox backend",
+	})
 	if err != nil {
 		t.Fatalf("New(auto) error = %v", err)
 	}
@@ -380,25 +375,8 @@ func TestNewAutoBackendFallsBackToHostWithInstallHint(t *testing.T) {
 	if strings.TrimSpace(status.FallbackInstallHint) == "" {
 		t.Fatal("Status().FallbackInstallHint is empty, want install guidance")
 	}
-}
-
-func TestCandidateBackendsForWindowsDefaultsToElevated(t *testing.T) {
-	candidates, err := candidateBackendsForGOOS("windows", "")
-	if err != nil {
-		t.Fatalf("candidateBackendsForGOOS(windows, auto) error = %v", err)
-	}
-	if len(candidates) != 1 || candidates[0] != BackendWindowsElevated {
-		t.Fatalf("candidateBackendsForGOOS(windows, auto) = %v, want [%s]", candidates, BackendWindowsElevated)
-	}
-}
-
-func TestCandidateBackendsForWindowsRejectsUnixBackends(t *testing.T) {
-	_, err := candidateBackendsForGOOS("windows", BackendBwrap)
-	if err == nil {
-		t.Fatal("candidateBackendsForGOOS(windows, bwrap) error = nil, want unsupported backend error")
-	}
-	if !strings.Contains(err.Error(), "unsupported on windows") {
-		t.Fatalf("candidateBackendsForGOOS(windows, bwrap) error = %v, want unsupported on windows", err)
+	if status.FallbackInstallHint != "install test sandbox backend" {
+		t.Fatalf("FallbackInstallHint = %q, want configured hint", status.FallbackInstallHint)
 	}
 }
 
@@ -408,11 +386,28 @@ func TestCompositeRuntimeStatusForwardsBackendSetupDetails(t *testing.T) {
 		sandbox: fakeRuntime{
 			backend: BackendWindowsElevated,
 			status: Status{
-				ResolvedBackend:    BackendWindowsElevated,
-				SetupRequired:      true,
-				SetupMarkerReason:  "setup marker missing",
-				SetupOfflineUser:   "CaelisSandboxOffline",
-				SetupReadRootCount: 5,
+				ResolvedBackend: BackendWindowsElevated,
+				Setup: SetupStatus{
+					Required: true,
+					Checks: []SetupCheck{
+						{
+							Name:     "global",
+							Scope:    SetupScopeGlobal,
+							Required: true,
+							Reason:   "setup marker missing",
+							Details: map[string]string{
+								"offline_user": "CaelisSandboxOffline",
+							},
+						},
+						{
+							Name:  "workspace",
+							Scope: SetupScopeWorkspace,
+							Counts: map[string]int{
+								"read_roots": 5,
+							},
+						},
+					},
+				},
 			},
 		},
 		status: Status{
@@ -424,7 +419,9 @@ func TestCompositeRuntimeStatusForwardsBackendSetupDetails(t *testing.T) {
 	if status.RequestedBackend != BackendWindowsElevated || status.ResolvedBackend != BackendWindowsElevated {
 		t.Fatalf("Status backend = %q/%q, want windows-elevated", status.RequestedBackend, status.ResolvedBackend)
 	}
-	if !status.SetupRequired || status.SetupMarkerReason != "setup marker missing" || status.SetupOfflineUser != "CaelisSandboxOffline" || status.SetupReadRootCount != 5 {
+	global, globalOK := status.Setup.Check("global")
+	workspace, workspaceOK := status.Setup.Check("workspace")
+	if !status.Setup.Required || !globalOK || global.Reason != "setup marker missing" || global.Details["offline_user"] != "CaelisSandboxOffline" || !workspaceOK || workspace.Counts["read_roots"] != 5 {
 		t.Fatalf("Status() = %+v, want forwarded setup diagnostics", status)
 	}
 }
@@ -441,6 +438,16 @@ func (f fakeBackendFactory) Build(Config) (Runtime, error) {
 		return nil, f.err
 	}
 	return &fakeRuntime{backend: f.backend}, nil
+}
+
+func removeBackendForTest(values []Backend, backend Backend) []Backend {
+	out := values[:0]
+	for _, value := range values {
+		if value != backend {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 type fakeRuntime struct {

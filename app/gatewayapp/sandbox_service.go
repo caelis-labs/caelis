@@ -75,30 +75,8 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 	}
 	status.FallbackReason = strings.TrimSpace(rtStatus.FallbackReason)
 	status.InstallHint = strings.TrimSpace(rtStatus.FallbackInstallHint)
-	status.SetupRequired = rtStatus.SetupRequired
-	status.SetupError = strings.TrimSpace(rtStatus.SetupError)
-	status.SetupVersion = rtStatus.SetupVersion
-	status.SetupMarkerCurrent = rtStatus.SetupMarkerCurrent
-	status.SetupMarkerReason = strings.TrimSpace(rtStatus.SetupMarkerReason)
-	status.SetupRunnerHash = strings.TrimSpace(rtStatus.SetupRunnerHash)
-	status.SetupPolicyHash = strings.TrimSpace(rtStatus.SetupPolicyHash)
-	status.SetupOfflineUser = strings.TrimSpace(rtStatus.SetupOfflineUser)
-	status.SetupOnlineUser = strings.TrimSpace(rtStatus.SetupOnlineUser)
-	status.SetupOwnerUser = strings.TrimSpace(rtStatus.SetupOwnerUser)
-	status.SetupReadRoots = rtStatus.SetupReadRootCount
-	status.SetupWriteRoots = rtStatus.SetupWriteRootCount
-	status.SetupDenyRead = rtStatus.SetupDenyReadCount
-	status.SetupDenyWrite = rtStatus.SetupDenyWriteCount
-	status.GlobalSetupCurrent = rtStatus.GlobalSetupCurrent
-	status.GlobalSetupRequired = rtStatus.GlobalSetupRequired
-	status.GlobalSetupReason = strings.TrimSpace(rtStatus.GlobalSetupReason)
-	status.WorkspaceSetupCurrent = rtStatus.WorkspaceSetupCurrent
-	status.WorkspaceSetupRequired = rtStatus.WorkspaceSetupRequired
-	status.WorkspaceSetupReason = strings.TrimSpace(rtStatus.WorkspaceSetupReason)
-	status.WorkspaceSetupRoot = strings.TrimSpace(rtStatus.WorkspaceSetupRoot)
-	status.WorkspaceSetupWriteRoots = rtStatus.WorkspaceSetupWriteRoots
-	status.WorkspaceSetupPolicyHash = strings.TrimSpace(rtStatus.WorkspaceSetupPolicyHash)
-	status.WorkspaceSetupUpdatedAt = rtStatus.WorkspaceSetupUpdatedAt
+	status.Setup = sandbox.CloneSetupStatus(rtStatus.Setup)
+	applySandboxSetupProjection(&status, status.Setup)
 	if rtStatus.FallbackToHost {
 		status.Route = string(sandbox.RouteHost)
 		status.SecuritySummary = "host fallback"
@@ -112,6 +90,49 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 		status.ResolvedBackend = status.RequestedBackend
 	}
 	return status
+}
+
+func applySandboxSetupProjection(status *SandboxStatus, setup sandbox.SetupStatus) {
+	if status == nil {
+		return
+	}
+	status.SetupRequired = setup.Required
+	status.SetupError = strings.TrimSpace(setup.Error)
+	if global, ok := setup.Check("global"); ok {
+		status.SetupVersion = global.Version
+		status.SetupMarkerCurrent = global.Current
+		status.SetupMarkerReason = strings.TrimSpace(global.Reason)
+		status.SetupRunnerHash = strings.TrimSpace(global.Details["runner_hash"])
+		status.SetupPolicyHash = strings.TrimSpace(global.Details["policy_hash"])
+		status.SetupOfflineUser = strings.TrimSpace(global.Details["offline_user"])
+		status.SetupOnlineUser = strings.TrimSpace(global.Details["online_user"])
+		status.SetupOwnerUser = strings.TrimSpace(global.Details["owner_user"])
+		status.GlobalSetupCurrent = global.Current
+		status.GlobalSetupRequired = global.Required
+		status.GlobalSetupReason = strings.TrimSpace(global.Reason)
+		if status.SetupError == "" {
+			status.SetupError = strings.TrimSpace(global.Error)
+		}
+	}
+	if workspace, ok := setup.Check("workspace"); ok {
+		if status.SetupPolicyHash == "" {
+			status.SetupPolicyHash = strings.TrimSpace(workspace.Details["policy_hash"])
+		}
+		status.SetupReadRoots = workspace.Counts["read_roots"]
+		status.SetupWriteRoots = workspace.Counts["write_roots"]
+		status.SetupDenyRead = workspace.Counts["deny_read"]
+		status.SetupDenyWrite = workspace.Counts["deny_write"]
+		status.WorkspaceSetupCurrent = workspace.Current
+		status.WorkspaceSetupRequired = workspace.Required
+		status.WorkspaceSetupReason = strings.TrimSpace(workspace.Reason)
+		status.WorkspaceSetupRoot = strings.TrimSpace(workspace.Root)
+		status.WorkspaceSetupWriteRoots = workspace.Counts["write_roots"]
+		status.WorkspaceSetupPolicyHash = strings.TrimSpace(workspace.Details["policy_hash"])
+		status.WorkspaceSetupUpdatedAt = workspace.UpdatedAt
+		if status.SetupError == "" {
+			status.SetupError = strings.TrimSpace(workspace.Error)
+		}
+	}
 }
 
 func (s *Stack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {

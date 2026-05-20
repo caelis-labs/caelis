@@ -81,11 +81,11 @@ func (r *compositeRuntime) SupportedBackends() []Backend {
 }
 
 func (r *compositeRuntime) Status() Status {
-	status := r.status
+	status := CloneStatus(r.status)
 	if r.sandbox == nil || status.FallbackToHost {
 		return status
 	}
-	backendStatus := r.sandbox.Status()
+	backendStatus := CloneStatus(r.sandbox.Status())
 	if backendStatus.RequestedBackend == "" {
 		backendStatus.RequestedBackend = status.RequestedBackend
 	}

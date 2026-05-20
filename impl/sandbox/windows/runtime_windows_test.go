@@ -294,20 +294,28 @@ func TestStatusSeparatesGlobalAndWorkspaceSetup(t *testing.T) {
 	windowsRT.runner.usersReadyMu.Unlock()
 
 	status := rt.Status()
-	if !status.GlobalSetupCurrent || status.GlobalSetupRequired {
-		t.Fatalf("global setup status = current %t required %t reason %q", status.GlobalSetupCurrent, status.GlobalSetupRequired, status.GlobalSetupReason)
+	global, ok := status.Setup.Check("global")
+	if !ok {
+		t.Fatalf("missing global setup check in %+v", status.Setup)
 	}
-	if status.SetupMarkerReason != "" {
-		t.Fatalf("SetupMarkerReason = %q, want empty global marker reason", status.SetupMarkerReason)
+	if !global.Current || global.Required {
+		t.Fatalf("global setup status = current %t required %t reason %q", global.Current, global.Required, global.Reason)
 	}
-	if !status.WorkspaceSetupRequired || status.WorkspaceSetupCurrent {
-		t.Fatalf("workspace setup status = current %t required %t reason %q", status.WorkspaceSetupCurrent, status.WorkspaceSetupRequired, status.WorkspaceSetupReason)
+	if global.Reason != "" {
+		t.Fatalf("global setup reason = %q, want empty global marker reason", global.Reason)
 	}
-	if !strings.Contains(strings.ToLower(status.WorkspaceSetupReason), "capability") {
-		t.Fatalf("WorkspaceSetupReason = %q, want missing capability SID reason", status.WorkspaceSetupReason)
+	workspaceCheck, ok := status.Setup.Check("workspace")
+	if !ok {
+		t.Fatalf("missing workspace setup check in %+v", status.Setup)
 	}
-	if !status.SetupRequired {
-		t.Fatal("SetupRequired = false, want aggregate required")
+	if !workspaceCheck.Required || workspaceCheck.Current {
+		t.Fatalf("workspace setup status = current %t required %t reason %q", workspaceCheck.Current, workspaceCheck.Required, workspaceCheck.Reason)
+	}
+	if !strings.Contains(strings.ToLower(workspaceCheck.Reason), "capability") {
+		t.Fatalf("WorkspaceSetupReason = %q, want missing capability SID reason", workspaceCheck.Reason)
+	}
+	if !status.Setup.Required {
+		t.Fatal("Setup.Required = false, want aggregate required")
 	}
 }
 

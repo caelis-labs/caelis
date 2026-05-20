@@ -102,7 +102,7 @@ func (r *runtime) Status() sandbox.Status {
 	if r == nil || r.runner == nil {
 		return sandbox.Status{}
 	}
-	return r.runner.status()
+	return sandbox.CloneStatus(r.runner.status())
 }
 
 func (r *runtime) Prepare(ctx context.Context) error {
@@ -839,14 +839,20 @@ func (r *setupRunner) status() sandbox.Status {
 		RequestedBackend: sandbox.BackendWindowsElevated,
 		ResolvedBackend:  sandbox.BackendWindowsElevated,
 	}
+	globalCheck := sandbox.SetupCheck{
+		Name:  "global",
+		Scope: sandbox.SetupScopeGlobal,
+	}
 	payload, err := r.globalSetupPayload()
 	if err == nil {
-		status.SetupVersion = payload.Version
-		status.SetupRunnerHash = payload.RunnerHash
-		status.SetupPolicyHash = payload.GlobalPolicyHash
-		status.SetupOfflineUser = payload.OfflineUsername
-		status.SetupOnlineUser = payload.OnlineUsername
-		status.SetupOwnerUser = payload.OwnerUsername
+		globalCheck.Version = payload.Version
+		globalCheck.Details = map[string]string{
+			"runner_hash":  payload.RunnerHash,
+			"policy_hash":  payload.GlobalPolicyHash,
+			"offline_user": payload.OfflineUsername,
+			"online_user":  payload.OnlineUsername,
+			"owner_user":   payload.OwnerUsername,
+		}
 	}
 	freshness := setupstate.Freshness{Reason: strings.TrimSpace(errString(err))}
 	if err == nil {
@@ -857,40 +863,49 @@ func (r *setupRunner) status() sandbox.Status {
 			}
 		}
 	}
-	status.SetupMarkerCurrent = freshness.Current
-	status.SetupMarkerReason = strings.TrimSpace(freshness.Reason)
-	status.GlobalSetupCurrent = freshness.Current
-	status.GlobalSetupReason = strings.TrimSpace(freshness.Reason)
+	globalCheck.Current = freshness.Current
+	globalCheck.Required = !freshness.Current
+	globalCheck.Reason = strings.TrimSpace(freshness.Reason)
 	if !freshness.Current {
-		status.GlobalSetupRequired = true
-		status.SetupRequired = true
-		status.FallbackReason = status.SetupMarkerReason
+		status.Setup.Required = true
+		status.FallbackReason = globalCheck.Reason
 		status.FallbackInstallHint = "Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal to initialize Windows Elevated sandbox with one UAC prompt."
 		if report, err := readLatestSetupError(setupstate.NewDirs(r.stateRoot)); err == nil {
-			status.SetupError = strings.TrimSpace(report.Message)
+			status.Setup.Error = strings.TrimSpace(report.Message)
+			globalCheck.Error = status.Setup.Error
 		}
+		status.Setup.Checks = []sandbox.SetupCheck{globalCheck}
 		return status
 	}
 	workspace := r.workspaceSetupSnapshot()
-	status.WorkspaceSetupCurrent = workspace.Current
-	status.WorkspaceSetupRequired = !workspace.Current
-	status.WorkspaceSetupReason = strings.TrimSpace(workspace.Reason)
-	status.WorkspaceSetupRoot = strings.TrimSpace(workspace.Root)
-	status.WorkspaceSetupWriteRoots = workspace.WriteRoots
-	status.WorkspaceSetupPolicyHash = strings.TrimSpace(workspace.PolicyHash)
-	status.WorkspaceSetupUpdatedAt = workspace.UpdatedAt
-	status.SetupReadRootCount = workspace.ReadRoots
-	status.SetupWriteRootCount = workspace.WriteRoots
-	status.SetupDenyReadCount = workspace.DenyRead
-	status.SetupDenyWriteCount = workspace.DenyWrite
+	workspaceCheck := sandbox.SetupCheck{
+		Name:      "workspace",
+		Scope:     sandbox.SetupScopeWorkspace,
+		Current:   workspace.Current,
+		Required:  !workspace.Current,
+		Reason:    strings.TrimSpace(workspace.Reason),
+		Root:      strings.TrimSpace(workspace.Root),
+		UpdatedAt: workspace.UpdatedAt,
+		Details: map[string]string{
+			"policy_hash": strings.TrimSpace(workspace.PolicyHash),
+		},
+		Counts: map[string]int{
+			"read_roots":  workspace.ReadRoots,
+			"write_roots": workspace.WriteRoots,
+			"deny_read":   workspace.DenyRead,
+			"deny_write":  workspace.DenyWrite,
+		},
+	}
 	if !workspace.Current {
-		status.SetupRequired = true
+		status.Setup.Required = true
 		status.FallbackReason = workspace.Reason
 		status.FallbackInstallHint = "Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal to authorize this Windows sandbox workspace."
 		if report, err := readLatestSetupError(setupstate.NewDirs(r.stateRoot)); err == nil {
-			status.SetupError = strings.TrimSpace(report.Message)
+			status.Setup.Error = strings.TrimSpace(report.Message)
+			workspaceCheck.Error = status.Setup.Error
 		}
 	}
+	status.Setup.Checks = []sandbox.SetupCheck{globalCheck, workspaceCheck}
 	return status
 }
 

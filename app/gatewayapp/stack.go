@@ -8,11 +8,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/modelregistry"
 	"github.com/OnslaughtSnail/caelis/impl/agent/local"
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/bwrap"
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/landlock"
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/seatbelt"
-	_ "github.com/OnslaughtSnail/caelis/impl/sandbox/windows"
 	sessionfile "github.com/OnslaughtSnail/caelis/impl/session/file"
 	taskfile "github.com/OnslaughtSnail/caelis/impl/task/file"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -81,6 +76,7 @@ type SandboxStatus struct {
 	Route                    string
 	FallbackReason           string
 	InstallHint              string
+	Setup                    sandbox.SetupStatus
 	SetupRequired            bool
 	SetupError               string
 	SetupVersion             int

@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/local/chat"
 	"github.com/OnslaughtSnail/caelis/impl/approval/agentreview"
 	"github.com/OnslaughtSnail/caelis/impl/tool/builtin"
+	"github.com/OnslaughtSnail/caelis/internal/sandboxrouter"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -60,14 +61,20 @@ func (s *Stack) rebuildGateway() error {
 	if err := rejectReconfigureWithActiveTurns(oldGateway, "rebuild gateway"); err != nil {
 		return err
 	}
+	route, err := sandboxrouter.Current(sandbox.Backend(sandboxCfg.RequestedType))
+	if err != nil {
+		return err
+	}
 	sandboxRuntime, err := sandbox.New(sandbox.Config{
-		CWD:              s.Workspace.CWD,
-		RequestedBackend: sandbox.Backend(sandboxCfg.RequestedType),
-		HelperPath:       sandboxCfg.HelperPath,
-		StateDir:         s.storeDir,
-		ReadableRoots:    append([]string(nil), sandboxCfg.ReadableRoots...),
-		WritableRoots:    append([]string(nil), sandboxCfg.WritableRoots...),
-		ReadOnlySubpaths: append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
+		CWD:                 s.Workspace.CWD,
+		RequestedBackend:    sandbox.Backend(sandboxCfg.RequestedType),
+		BackendCandidates:   route.BackendCandidates,
+		FallbackInstallHint: route.FallbackInstallHint,
+		HelperPath:          sandboxCfg.HelperPath,
+		StateDir:            s.storeDir,
+		ReadableRoots:       append([]string(nil), sandboxCfg.ReadableRoots...),
+		WritableRoots:       append([]string(nil), sandboxCfg.WritableRoots...),
+		ReadOnlySubpaths:    append([]string(nil), sandboxCfg.ReadOnlySubpaths...),
 	})
 	if err != nil {
 		return err

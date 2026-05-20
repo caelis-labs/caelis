@@ -347,14 +347,19 @@ func writeSandboxStatusResult(w io.Writer, format outputFormat, result sandboxSt
 }
 
 func formatSandboxStatus(status sandboxStatusResult) string {
+	globalSetup, _ := status.Setup.Check("global")
+	setupRequired := status.Setup.Required || status.SetupRequired
+	setupError := firstNonEmptyString(status.Setup.Error, globalSetup.Error, status.SetupError)
+	setupMarkerCurrent := status.SetupMarkerCurrent || globalSetup.Current
+	setupMarkerReason := firstNonEmptyString(globalSetup.Reason, status.SetupMarkerReason)
 	lines := []string{
 		fmt.Sprintf("sandbox_requested_backend: %s", firstNonEmptyString(strings.TrimSpace(status.RequestedBackend), "-")),
 		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmptyString(strings.TrimSpace(status.ResolvedBackend), "-")),
 		fmt.Sprintf("sandbox_route: %s", firstNonEmptyString(strings.TrimSpace(status.Route), "-")),
-		fmt.Sprintf("sandbox_setup_required: %t", status.SetupRequired),
-		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(strings.TrimSpace(status.SetupError), "-")),
-		fmt.Sprintf("sandbox_setup_marker_current: %t", status.SetupMarkerCurrent),
-		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(strings.TrimSpace(status.SetupMarkerReason), "-")),
+		fmt.Sprintf("sandbox_setup_required: %t", setupRequired),
+		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(strings.TrimSpace(setupError), "-")),
+		fmt.Sprintf("sandbox_setup_marker_current: %t", setupMarkerCurrent),
+		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(strings.TrimSpace(setupMarkerReason), "-")),
 	}
 	return strings.Join(lines, "\n")
 }

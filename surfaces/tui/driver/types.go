@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -43,6 +44,7 @@ type StatusSnapshot struct {
 	Route                           string
 	FallbackReason                  string
 	SandboxInstallHint              string
+	SandboxSetup                    sandbox.SetupStatus
 	SandboxSetupRequired            bool
 	SandboxSetupError               string
 	SandboxSetupMarkerCurrent       bool

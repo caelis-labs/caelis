@@ -121,47 +121,60 @@ type Descriptor struct {
 
 // Config configures one composed sandbox runtime.
 type Config struct {
-	CWD              string   `json:"cwd,omitempty"`
-	RequestedBackend Backend  `json:"requested_backend,omitempty"`
-	HelperPath       string   `json:"helper_path,omitempty"`
-	StateDir         string   `json:"state_dir,omitempty"`
-	ReadableRoots    []string `json:"readable_roots,omitempty"`
-	WritableRoots    []string `json:"writable_roots,omitempty"`
-	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
+	CWD                 string    `json:"cwd,omitempty"`
+	RequestedBackend    Backend   `json:"requested_backend,omitempty"`
+	BackendCandidates   []Backend `json:"backend_candidates,omitempty"`
+	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
+	HelperPath          string    `json:"helper_path,omitempty"`
+	StateDir            string    `json:"state_dir,omitempty"`
+	ReadableRoots       []string  `json:"readable_roots,omitempty"`
+	WritableRoots       []string  `json:"writable_roots,omitempty"`
+	ReadOnlySubpaths    []string  `json:"read_only_subpaths,omitempty"`
 }
 
 // Status reports backend selection and fallback state for one runtime.
 type Status struct {
-	RequestedBackend    Backend `json:"requested_backend,omitempty"`
-	ResolvedBackend     Backend `json:"resolved_backend,omitempty"`
-	FallbackToHost      bool    `json:"fallback_to_host,omitempty"`
-	FallbackReason      string  `json:"fallback_reason,omitempty"`
-	FallbackInstallHint string  `json:"fallback_install_hint,omitempty"`
-	SetupRequired       bool    `json:"setup_required,omitempty"`
-	SetupError          string  `json:"setup_error,omitempty"`
-	SetupVersion        int     `json:"setup_version,omitempty"`
-	SetupMarkerCurrent  bool    `json:"setup_marker_current,omitempty"`
-	SetupMarkerReason   string  `json:"setup_marker_reason,omitempty"`
-	SetupRunnerHash     string  `json:"setup_runner_hash,omitempty"`
-	SetupPolicyHash     string  `json:"setup_policy_hash,omitempty"`
-	SetupOfflineUser    string  `json:"setup_offline_user,omitempty"`
-	SetupOnlineUser     string  `json:"setup_online_user,omitempty"`
-	SetupOwnerUser      string  `json:"setup_owner_user,omitempty"`
-	SetupReadRootCount  int     `json:"setup_read_root_count,omitempty"`
-	SetupWriteRootCount int     `json:"setup_write_root_count,omitempty"`
-	SetupDenyReadCount  int     `json:"setup_deny_read_count,omitempty"`
-	SetupDenyWriteCount int     `json:"setup_deny_write_count,omitempty"`
+	RequestedBackend    Backend     `json:"requested_backend,omitempty"`
+	ResolvedBackend     Backend     `json:"resolved_backend,omitempty"`
+	FallbackToHost      bool        `json:"fallback_to_host,omitempty"`
+	FallbackReason      string      `json:"fallback_reason,omitempty"`
+	FallbackInstallHint string      `json:"fallback_install_hint,omitempty"`
+	Setup               SetupStatus `json:"setup,omitempty"`
+}
 
-	GlobalSetupCurrent       bool      `json:"global_setup_current,omitempty"`
-	GlobalSetupRequired      bool      `json:"global_setup_required,omitempty"`
-	GlobalSetupReason        string    `json:"global_setup_reason,omitempty"`
-	WorkspaceSetupCurrent    bool      `json:"workspace_setup_current,omitempty"`
-	WorkspaceSetupRequired   bool      `json:"workspace_setup_required,omitempty"`
-	WorkspaceSetupReason     string    `json:"workspace_setup_reason,omitempty"`
-	WorkspaceSetupRoot       string    `json:"workspace_setup_root,omitempty"`
-	WorkspaceSetupWriteRoots int       `json:"workspace_setup_write_roots,omitempty"`
-	WorkspaceSetupPolicyHash string    `json:"workspace_setup_policy_hash,omitempty"`
-	WorkspaceSetupUpdatedAt  time.Time `json:"workspace_setup_updated_at,omitempty"`
+// SetupScope identifies the lifecycle scope of one backend setup check.
+type SetupScope string
+
+const (
+	SetupScopeGlobal    SetupScope = "global"
+	SetupScopeWorkspace SetupScope = "workspace"
+)
+
+// SetupStatus reports backend setup readiness without exposing platform-specific
+// fields in the stable sandbox contract. Implementations can attach
+// backend-specific values through Details and Counts.
+type SetupStatus struct {
+	Required bool              `json:"required,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	Details  map[string]string `json:"details,omitempty"`
+	Counts   map[string]int    `json:"counts,omitempty"`
+	Checks   []SetupCheck      `json:"checks,omitempty"`
+}
+
+// SetupCheck reports one scoped setup requirement such as global backend
+// infrastructure or per-workspace authorization.
+type SetupCheck struct {
+	Name      string            `json:"name,omitempty"`
+	Scope     SetupScope        `json:"scope,omitempty"`
+	Current   bool              `json:"current,omitempty"`
+	Required  bool              `json:"required,omitempty"`
+	Reason    string            `json:"reason,omitempty"`
+	Error     string            `json:"error,omitempty"`
+	Version   int               `json:"version,omitempty"`
+	Root      string            `json:"root,omitempty"`
+	UpdatedAt time.Time         `json:"updated_at,omitempty"`
+	Details   map[string]string `json:"details,omitempty"`
+	Counts    map[string]int    `json:"counts,omitempty"`
 }
 
 // PrepareProgress is an optional, best-effort progress update emitted during a
@@ -340,6 +353,7 @@ type BackendFactory interface {
 var (
 	backendFactoriesMu      sync.RWMutex
 	backendFactories        = map[Backend]BackendFactory{}
+	backendFactoryOrder     []Backend
 	backendRegistrationErrs []error
 )
 
@@ -372,6 +386,94 @@ func CloneResult(in CommandResult, err error) (CommandResult, error) {
 	out.Stderr = in.Stderr
 	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
 	return out, err
+}
+
+// CloneStatus returns one isolated copy of one runtime status.
+func CloneStatus(in Status) Status {
+	out := in
+	out.RequestedBackend = Backend(strings.TrimSpace(string(in.RequestedBackend)))
+	out.ResolvedBackend = Backend(strings.TrimSpace(string(in.ResolvedBackend)))
+	out.FallbackReason = strings.TrimSpace(in.FallbackReason)
+	out.FallbackInstallHint = strings.TrimSpace(in.FallbackInstallHint)
+	out.Setup = CloneSetupStatus(in.Setup)
+	return out
+}
+
+// CloneSetupStatus returns one isolated copy of one setup status.
+func CloneSetupStatus(in SetupStatus) SetupStatus {
+	out := in
+	out.Error = strings.TrimSpace(in.Error)
+	out.Details = cloneTrimmedStringMap(in.Details)
+	out.Counts = maps.Clone(in.Counts)
+	if len(in.Checks) > 0 {
+		out.Checks = make([]SetupCheck, len(in.Checks))
+		for i, check := range in.Checks {
+			out.Checks[i] = CloneSetupCheck(check)
+		}
+	}
+	return out
+}
+
+// CloneSetupCheck returns one isolated copy of one setup check.
+func CloneSetupCheck(in SetupCheck) SetupCheck {
+	out := in
+	out.Name = strings.TrimSpace(in.Name)
+	out.Scope = SetupScope(strings.TrimSpace(string(in.Scope)))
+	out.Reason = strings.TrimSpace(in.Reason)
+	out.Error = strings.TrimSpace(in.Error)
+	out.Root = strings.TrimSpace(in.Root)
+	out.Details = cloneTrimmedStringMap(in.Details)
+	out.Counts = maps.Clone(in.Counts)
+	return out
+}
+
+// Check returns the first setup check with the requested name.
+func (s SetupStatus) Check(name string) (SetupCheck, bool) {
+	name = strings.TrimSpace(name)
+	for _, check := range s.Checks {
+		if strings.TrimSpace(check.Name) == name {
+			return CloneSetupCheck(check), true
+		}
+	}
+	return SetupCheck{}, false
+}
+
+func cloneTrimmedStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = strings.TrimSpace(value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeBackendCandidates(values []Backend) []Backend {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]Backend, 0, len(values))
+	seen := map[Backend]struct{}{}
+	for _, value := range values {
+		backend := Backend(strings.TrimSpace(string(value)))
+		if backend == "" || backend == BackendHost {
+			continue
+		}
+		if _, ok := seen[backend]; ok {
+			continue
+		}
+		seen[backend] = struct{}{}
+		out = append(out, backend)
+	}
+	return out
 }
 
 // CloneSessionRef returns one normalized copy of one session ref.
