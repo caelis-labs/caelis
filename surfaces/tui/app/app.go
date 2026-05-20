@@ -176,6 +176,12 @@ func (m *Model) Init() tea.Cmd {
 	m.hasCommittedLine = m.doc.Len() > 0
 	m.syncViewportContent()
 	cmds := []tea.Cmd{tickStatusCmd(), m.spinner.Tick}
+	if m.cfg.OnStart != nil {
+		cmds = append(cmds, func() tea.Msg {
+			m.cfg.OnStart()
+			return nil
+		})
+	}
 	if m.themeAuto {
 		cmds = append(cmds, requestBackgroundColorCmd())
 	}

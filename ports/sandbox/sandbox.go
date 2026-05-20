@@ -172,6 +172,7 @@ type PrepareProgress struct {
 	Step    int    `json:"step,omitempty"`
 	Total   int    `json:"total,omitempty"`
 	Done    bool   `json:"done,omitempty"`
+	Debug   bool   `json:"debug,omitempty"`
 }
 
 // PrepareProgressFunc receives best-effort setup progress. Implementations must

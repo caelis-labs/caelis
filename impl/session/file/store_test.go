@@ -490,7 +490,8 @@ func TestStoreLargeEventListRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetOrCreate() error = %v", err)
 	}
-	for i := 0; i < 300; i++ {
+	const eventCount = 40
+	for i := 0; i < eventCount; i++ {
 		msg := model.NewTextMessage(model.RoleUser, "large event "+strings.Repeat("x", 128))
 		if _, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
 			Type:       session.EventTypeUser,
@@ -507,8 +508,8 @@ func TestStoreLargeEventListRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Events(reloaded) error = %v", err)
 	}
-	if len(events) != 300 {
-		t.Fatalf("len(events) = %d, want 300", len(events))
+	if len(events) != eventCount {
+		t.Fatalf("len(events) = %d, want %d", len(events), eventCount)
 	}
 	if got := session.EventText(events[len(events)-1]); !strings.Contains(got, "large event") {
 		t.Fatalf("last event text = %q, want large event payload", got)

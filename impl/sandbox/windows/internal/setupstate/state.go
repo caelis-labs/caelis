@@ -14,17 +14,20 @@ import (
 const CurrentSetupVersion = 2
 
 type Dirs struct {
-	Root          string
-	Sandbox       string
-	Bin           string
-	Secrets       string
-	Logs          string
-	MarkerPath    string
-	ErrorPath     string
-	ProgressPath  string
-	UsersPath     string
-	CapPath       string
-	WorkspacePath string
+	Root              string
+	Sandbox           string
+	Bin               string
+	Secrets           string
+	Logs              string
+	Reset             string
+	MarkerPath        string
+	ErrorPath         string
+	ResetErrorPath    string
+	ProgressPath      string
+	ResetProgressPath string
+	UsersPath         string
+	CapPath           string
+	WorkspacePath     string
 }
 
 type Marker struct {
@@ -51,6 +54,7 @@ type ProgressReport struct {
 	Step    int       `json:"step,omitempty"`
 	Total   int       `json:"total,omitempty"`
 	Done    bool      `json:"done,omitempty"`
+	Debug   bool      `json:"debug,omitempty"`
 	Time    time.Time `json:"time,omitempty"`
 }
 
@@ -89,17 +93,20 @@ type Freshness struct {
 func NewDirs(root string) Dirs {
 	root = strings.TrimSpace(root)
 	return Dirs{
-		Root:          root,
-		Sandbox:       filepath.Join(root, ".sandbox"),
-		Bin:           filepath.Join(root, ".sandbox-bin"),
-		Secrets:       filepath.Join(root, ".sandbox-secrets"),
-		Logs:          filepath.Join(root, ".sandbox", "logs"),
-		MarkerPath:    filepath.Join(root, ".sandbox", "setup_marker.json"),
-		ErrorPath:     filepath.Join(root, ".sandbox", "setup_error.json"),
-		ProgressPath:  filepath.Join(root, ".sandbox", "setup_progress.json"),
-		UsersPath:     filepath.Join(root, ".sandbox-secrets", "sandbox_users.json"),
-		CapPath:       filepath.Join(root, ".sandbox", "cap_sids.json"),
-		WorkspacePath: filepath.Join(root, ".sandbox", "workspace_setup.json"),
+		Root:              root,
+		Sandbox:           filepath.Join(root, ".sandbox"),
+		Bin:               filepath.Join(root, ".sandbox-bin"),
+		Secrets:           filepath.Join(root, ".sandbox-secrets"),
+		Logs:              filepath.Join(root, ".sandbox", "logs"),
+		Reset:             filepath.Join(root, ".sandbox-reset"),
+		MarkerPath:        filepath.Join(root, ".sandbox", "setup_marker.json"),
+		ErrorPath:         filepath.Join(root, ".sandbox", "setup_error.json"),
+		ResetErrorPath:    filepath.Join(root, ".sandbox-reset", "reset_error.json"),
+		ProgressPath:      filepath.Join(root, ".sandbox", "setup_progress.json"),
+		ResetProgressPath: filepath.Join(root, ".sandbox-reset", "reset_progress.json"),
+		UsersPath:         filepath.Join(root, ".sandbox-secrets", "sandbox_users.json"),
+		CapPath:           filepath.Join(root, ".sandbox", "cap_sids.json"),
+		WorkspacePath:     filepath.Join(root, ".sandbox", "workspace_setup.json"),
 	}
 }
 

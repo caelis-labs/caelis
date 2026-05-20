@@ -98,12 +98,28 @@ func writeBuiltFileDACL(path string, base *windows.SECURITY_DESCRIPTOR, protect 
 	if err != nil {
 		return err
 	}
-	next, err := windows.BuildSecurityDescriptor(nil, nil, explicit, nil, base)
+	var baseDACL *windows.ACL
+	if base != nil {
+		baseDACL, _, err = base.DACL()
+		if err != nil {
+			return fmt.Errorf("acl: extract base %s DACL: %w", path, err)
+		}
+	}
+	nextDACL, err := windows.ACLFromEntries(explicit, baseDACL)
 	runtime.KeepAlive(sids)
 	if err != nil {
 		return fmt.Errorf("acl: build %s DACL: %w", path, err)
 	}
-	return WriteFileDACL(path, Descriptor{sd: next}, protect)
+	info := windows.SECURITY_INFORMATION(windows.DACL_SECURITY_INFORMATION)
+	if protect {
+		info |= windows.PROTECTED_DACL_SECURITY_INFORMATION
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, info, nil, nil, nextDACL, nil); err != nil {
+		return fmt.Errorf("acl: write %s DACL: %w", path, err)
+	}
+	runtime.KeepAlive(base)
+	runtime.KeepAlive(nextDACL)
+	return nil
 }
 
 func WriteFileDACL(path string, descriptor Descriptor, protect bool) error {

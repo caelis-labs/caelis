@@ -50,7 +50,6 @@ func Start(cfg Config) (*Session, error) {
 		if err != nil {
 			return nil, err
 		}
-		command = resolved
 		cfg.Command = resolved
 	}
 	console, input, output, err := createConsole(cfg.Rows, cfg.Cols)
@@ -199,17 +198,17 @@ func (s *Session) startProcess(cfg Config) error {
 	}
 
 	startupInfo := windows.StartupInfoEx{}
-	startupInfo.StartupInfo.Cb = uint32(unsafe.Sizeof(startupInfo))
-	startupInfo.StartupInfo.Flags = windows.STARTF_USESTDHANDLES
-	startupInfo.StartupInfo.StdInput = windows.InvalidHandle
-	startupInfo.StartupInfo.StdOutput = windows.InvalidHandle
-	startupInfo.StartupInfo.StdErr = windows.InvalidHandle
+	startupInfo.Cb = uint32(unsafe.Sizeof(startupInfo))
+	startupInfo.Flags = windows.STARTF_USESTDHANDLES
+	startupInfo.StdInput = windows.InvalidHandle
+	startupInfo.StdOutput = windows.InvalidHandle
+	startupInfo.StdErr = windows.InvalidHandle
 	startupInfo.ProcThreadAttributeList = attrList.List()
 	processInfo := windows.ProcessInformation{}
 	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.EXTENDED_STARTUPINFO_PRESENT)
 	if cfg.Token != 0 {
 		err = windows.CreateProcessAsUser(
-			windows.Token(cfg.Token),
+			cfg.Token,
 			commandUTF16,
 			&commandLine[0],
 			nil,

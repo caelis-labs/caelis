@@ -22,6 +22,9 @@ func NormalizeWithBase(base string, path string) (string, error) {
 		return "", nil
 	}
 	value = stripWindowsExtendedPrefix(value)
+	if isWindowsUNCPath(value) {
+		return filepath.Clean(value), nil
+	}
 	if !filepath.IsAbs(value) {
 		base = strings.TrimSpace(base)
 		if base != "" {
@@ -76,6 +79,39 @@ func Dedupe(paths []string) []string {
 	return out
 }
 
+// CompactCovered normalizes paths and removes roots already covered by an
+// earlier or later ancestor root.
+func CompactCovered(paths []string) []string {
+	paths = Dedupe(paths)
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, path := range paths {
+		covered := false
+		for _, existing := range out {
+			if IsUnder(path, existing) {
+				covered = true
+				break
+			}
+		}
+		if covered {
+			continue
+		}
+		kept := out[:0]
+		for _, existing := range out {
+			if !IsUnder(existing, path) {
+				kept = append(kept, existing)
+			}
+		}
+		out = append(kept, path)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 // IsUnder reports whether target is equal to or below root.
 func IsUnder(target string, root string) bool {
 	targetKey := Key(target)
@@ -105,4 +141,8 @@ func stripWindowsExtendedPrefix(path string) string {
 	default:
 		return path
 	}
+}
+
+func isWindowsUNCPath(path string) bool {
+	return runtime.GOOS == "windows" && strings.HasPrefix(path, `\\`) && !strings.HasPrefix(path, `\\?\`)
 }

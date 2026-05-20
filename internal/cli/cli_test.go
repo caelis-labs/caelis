@@ -357,7 +357,7 @@ func TestRunSandboxResetSubcommandTextOutput(t *testing.T) {
 	}
 }
 
-func TestRunSandboxCleanSubcommandAlias(t *testing.T) {
+func TestRunSandboxCleanSubcommandIsUnknown(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer
 	var errBuf bytes.Buffer
@@ -368,11 +368,11 @@ func TestRunSandboxCleanSubcommandAlias(t *testing.T) {
 		"-workspace-key", "sandbox-ws",
 		"-workspace-cwd", t.TempDir(),
 	}, strings.NewReader(""), &out, &errBuf)
-	if err != nil {
-		t.Fatalf("run(sandbox clean) error = %v; stderr=%q", err, errBuf.String())
+	if err == nil || !strings.Contains(err.Error(), "unknown sandbox subcommand: clean") {
+		t.Fatalf("run(sandbox clean) error = %v, want unknown subcommand", err)
 	}
-	if !strings.Contains(out.String(), "sandbox_resolved_backend: host") {
-		t.Fatalf("sandbox clean output = %q, want resolved host backend", out.String())
+	if out.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty for unknown sandbox clean", out.String())
 	}
 }
 

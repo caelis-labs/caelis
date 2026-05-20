@@ -65,10 +65,7 @@ func TestRunCommandCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	rt, err := host.New(host.Config{CWD: dir})
-	if err != nil {
-		t.Fatalf("host.New() error = %v", err)
-	}
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{Stdout: "ok", ExitCode: 0, Route: sandbox.RouteSandbox, Backend: sandbox.BackendHost}}
 	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
 		t.Fatalf("NewRunCommand() error = %v", err)
@@ -94,10 +91,12 @@ func TestRunCommandCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	rt, err := host.New(host.Config{CWD: dir})
-	if err != nil {
-		t.Fatalf("host.New() error = %v", err)
-	}
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
+		Stderr:   "module cache denied\n",
+		ExitCode: 7,
+		Route:    sandbox.RouteSandbox,
+		Backend:  sandbox.BackendHost,
+	}, err: fmt.Errorf("exit status 7")}
 	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
 		t.Fatalf("NewRunCommand() error = %v", err)
@@ -227,10 +226,12 @@ func TestRunCommandCallDoesNotLabelHostPermissionErrorsAsSandboxDenied(t *testin
 	t.Parallel()
 
 	dir := t.TempDir()
-	rt, err := host.New(host.Config{CWD: dir})
-	if err != nil {
-		t.Fatalf("host.New() error = %v", err)
-	}
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{
+		Stderr:   "git@github.com: Permission denied (publickey).\n",
+		ExitCode: 128,
+		Route:    sandbox.RouteHost,
+		Backend:  sandbox.BackendHost,
+	}, err: fmt.Errorf("exit status 128")}
 	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
 	if err != nil {
 		t.Fatalf("NewRunCommand() error = %v", err)
@@ -288,6 +289,21 @@ func TestRunCommandCallPreservesWindowsDACLRefreshFailure(t *testing.T) {
 	got, _ := payload["error"].(string)
 	if !strings.Contains(got, `D:\xue\code\storage`) || strings.Contains(got, "/sandbox setup") {
 		t.Fatalf("error = %q, want DACL path without setup command guidance", got)
+	}
+}
+
+func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
+	t.Parallel()
+
+	payload := runCommandPayload(sandbox.CommandResult{ExitCode: 1}, fmt.Errorf("process exited with code 1"))
+	if got, _ := payload["result"].(string); got != "" {
+		t.Fatalf("result = %q, want no synthetic Windows exit summary", got)
+	}
+	if _, ok := payload["error"]; ok {
+		t.Fatalf("error = %#v, want no synthetic Windows exit summary", payload["error"])
+	}
+	if got, _ := payload["exit_code"].(int); got != 1 {
+		t.Fatalf("exit_code = %#v, want 1", payload["exit_code"])
 	}
 }
 

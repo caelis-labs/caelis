@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -27,6 +30,7 @@ type Config struct {
 	ExecutablePath func(runnerruntime.Request) (string, error)
 	Args           []string
 	Dir            string
+	StateRoot      string
 	Policy         func(runnerruntime.Request) (winpolicy.Policy, error)
 	Credentials    func(runnerruntime.Request) (Credentials, error)
 }
@@ -42,6 +46,7 @@ type Client struct {
 	executablePath func(runnerruntime.Request) (string, error)
 	args           []string
 	dir            string
+	stateRoot      string
 	policy         func(runnerruntime.Request) (winpolicy.Policy, error)
 	credentials    func(runnerruntime.Request) (Credentials, error)
 
@@ -55,6 +60,7 @@ func New(cfg Config) *Client {
 		executablePath: cfg.ExecutablePath,
 		args:           append([]string(nil), cfg.Args...),
 		dir:            strings.TrimSpace(cfg.Dir),
+		stateRoot:      strings.TrimSpace(cfg.StateRoot),
 		policy:         cfg.Policy,
 		credentials:    cfg.Credentials,
 		sessions:       map[string]*session{},
@@ -154,6 +160,14 @@ func (c *Client) TerminateSession(sessionID string) error {
 }
 
 func (c *Client) Close() error {
+	return c.closeSessions()
+}
+
+func (c *Client) Invalidate() error {
+	return c.closeSessions()
+}
+
+func (c *Client) closeSessions() error {
 	c.mu.RLock()
 	sessions := make([]*session, 0, len(c.sessions))
 	for _, s := range c.sessions {
@@ -163,6 +177,9 @@ func (c *Client) Close() error {
 	for _, s := range sessions {
 		_ = s.TerminateSession()
 	}
+	c.mu.Lock()
+	c.sessions = map[string]*session{}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -259,13 +276,200 @@ func (c *Client) launch(ctx context.Context, req runnerruntime.Request) (process
 		}
 	}
 	if strings.TrimSpace(creds.Username) != "" {
+		env, err := c.runnerEnvironment(creds)
+		if err != nil {
+			return nil, err
+		}
 		return win32.StartProcessWithLogon(win32.LogonCredentials{
 			Username: creds.Username,
 			Domain:   creds.Domain,
 			Password: creds.Password,
-		}, executable, c.args, c.dir)
+		}, executable, c.args, c.dir, win32.LogonProcessOptions{
+			LoadProfile: false,
+			Env:         env,
+		})
 	}
-	return startExecProcess(context.WithoutCancel(ctx), executable, c.args, c.dir)
+	env, err := c.runnerEnvironment(creds)
+	if err != nil {
+		return nil, err
+	}
+	return startExecProcess(context.WithoutCancel(ctx), executable, c.args, c.dir, env)
+}
+
+func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
+	env := map[string]string{}
+	copyEnv := func(key string) {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			env[key] = value
+		}
+	}
+	for _, key := range []string{"SystemRoot", "WINDIR", "ComSpec", "PATHEXT"} {
+		copyEnv(key)
+	}
+	systemRoot := env["SystemRoot"]
+	if systemRoot == "" {
+		systemRoot = env["WINDIR"]
+	}
+	if systemRoot == "" {
+		systemRoot = `C:\Windows`
+	}
+	env["SystemRoot"] = systemRoot
+	if env["WINDIR"] == "" {
+		env["WINDIR"] = systemRoot
+	}
+	if env["ComSpec"] == "" {
+		env["ComSpec"] = filepath.Join(systemRoot, "System32", "cmd.exe")
+	}
+	if env["PATHEXT"] == "" {
+		env["PATHEXT"] = `.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`
+	}
+	env["PATH"] = minimalWindowsPath(systemRoot)
+
+	root := strings.TrimSpace(c.stateRoot)
+	if root == "" {
+		root = strings.TrimSpace(os.Getenv("TEMP"))
+	}
+	if root == "" {
+		root = os.TempDir()
+	}
+	name := strings.TrimSpace(creds.Username)
+	if name == "" {
+		name = "current"
+	}
+	name = strings.NewReplacer(`\`, "_", `/`, "_", ":", "_").Replace(name)
+	home := filepath.Join(root, ".sandbox", "runner-home", name)
+	tmp := filepath.Join(root, ".sandbox", "runner-tmp", name)
+	localAppData := filepath.Join(home, "AppData", "Local")
+	roamingAppData := filepath.Join(home, "AppData", "Roaming")
+	for _, dir := range []string{home, tmp, localAppData, roamingAppData} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	env["USERPROFILE"] = home
+	env["HOME"] = home
+	env["CAELIS_SANDBOX_HOME"] = home
+	env["TEMP"] = tmp
+	env["TMP"] = tmp
+	env["LOCALAPPDATA"] = localAppData
+	env["APPDATA"] = roamingAppData
+	for key, value := range sandboxLocalCacheEnv(home, tmp, localAppData) {
+		env[key] = value
+	}
+	if strings.TrimSpace(c.stateRoot) != "" {
+		env["CAELIS_SANDBOX_STATE"] = c.stateRoot
+	}
+	for _, dir := range sandboxLocalCacheDirs(env) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	}
+
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out, nil
+}
+
+func sandboxLocalCacheEnv(home string, tmp string, localAppData string) map[string]string {
+	goPath := filepath.Join(home, "go")
+	bunInstall := filepath.Join(home, ".bun")
+	return map[string]string{
+		"GOCACHE":               filepath.Join(localAppData, "go-build"),
+		"GOPATH":                goPath,
+		"GOMODCACHE":            filepath.Join(goPath, "pkg", "mod"),
+		"npm_config_cache":      filepath.Join(localAppData, "npm-cache"),
+		"YARN_CACHE_FOLDER":     filepath.Join(localAppData, "yarn-cache"),
+		"PIP_CACHE_DIR":         filepath.Join(localAppData, "pip-cache"),
+		"UV_CACHE_DIR":          filepath.Join(localAppData, "uv-cache"),
+		"CARGO_HOME":            filepath.Join(home, ".cargo"),
+		"GRADLE_USER_HOME":      filepath.Join(home, ".gradle"),
+		"NUGET_PACKAGES":        filepath.Join(home, ".nuget", "packages"),
+		"npm_config_store_dir":  filepath.Join(localAppData, "pnpm-store"),
+		"PNPM_HOME":             filepath.Join(localAppData, "pnpm-home"),
+		"BUN_INSTALL":           bunInstall,
+		"BUN_INSTALL_CACHE_DIR": filepath.Join(bunInstall, "cache"),
+		"XDG_CACHE_HOME":        filepath.Join(localAppData, "xdg-cache"),
+		"XDG_DATA_HOME":         filepath.Join(localAppData, "xdg-data"),
+		"XDG_CONFIG_HOME":       filepath.Join(home, ".config"),
+		"TMPDIR":                tmp,
+	}
+}
+
+func sandboxLocalCacheDirs(env map[string]string) []string {
+	keys := []string{
+		"GOCACHE",
+		"GOPATH",
+		"GOMODCACHE",
+		"npm_config_cache",
+		"YARN_CACHE_FOLDER",
+		"PIP_CACHE_DIR",
+		"UV_CACHE_DIR",
+		"CARGO_HOME",
+		"GRADLE_USER_HOME",
+		"NUGET_PACKAGES",
+		"npm_config_store_dir",
+		"PNPM_HOME",
+		"BUN_INSTALL",
+		"BUN_INSTALL_CACHE_DIR",
+		"XDG_CACHE_HOME",
+		"XDG_DATA_HOME",
+		"XDG_CONFIG_HOME",
+		"TMPDIR",
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value := strings.TrimSpace(env[key]); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
+}
+
+func minimalWindowsPath(systemRoot string) string {
+	parts := []string{
+		filepath.Join(systemRoot, "System32"),
+		filepath.Join(systemRoot, "System32", "WindowsPowerShell", "v1.0"),
+		systemRoot,
+	}
+	for _, key := range []string{"ProgramFiles", "ProgramFiles(x86)"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			parts = append(parts, filepath.Join(value, "Git", "cmd"))
+			parts = append(parts, filepath.Join(value, "Git", "bin"))
+			parts = append(parts, filepath.Join(value, "Go", "bin"))
+			parts = append(parts, filepath.Join(value, "nodejs"))
+		}
+	}
+	if path := strings.TrimSpace(os.Getenv("PATH")); path != "" {
+		parts = append(parts, path)
+	}
+	return strings.Join(dedupePathParts(parts...), string(os.PathListSeparator))
+}
+
+func dedupePathParts(values ...string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		for _, part := range strings.Split(value, string(os.PathListSeparator)) {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			key := strings.ToLower(filepath.Clean(part))
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, part)
+		}
+	}
+	return out
 }
 
 func (c *Client) resolveExecutable(req runnerruntime.Request) (string, error) {
@@ -373,8 +577,9 @@ func (s *session) readLoop() {
 				return
 			}
 			var waitErr error
-			if strings.TrimSpace(payload.Reason) != "" && payload.ExitCode != 0 {
-				waitErr = errors.New(payload.Reason)
+			reason := strings.TrimSpace(payload.Reason)
+			if reason != "" && payload.ExitCode != 0 && !plainCommandExitReason(reason) {
+				waitErr = errors.New(reason)
 			}
 			s.flushOutputText()
 			s.finish(payload.ExitCode, waitErr)
@@ -391,6 +596,13 @@ func (s *session) readLoop() {
 			return
 		}
 	}
+}
+
+func plainCommandExitReason(reason string) bool {
+	reason = strings.TrimSpace(reason)
+	return strings.HasPrefix(reason, "exit status ") ||
+		strings.HasPrefix(reason, "signal: ") ||
+		strings.HasPrefix(reason, "process exited with code ")
 }
 
 func (s *session) captureRunnerStderr(reader io.Reader) {
@@ -553,10 +765,13 @@ type execProcess struct {
 	stderr io.Reader
 }
 
-func startExecProcess(ctx context.Context, executable string, args []string, dir string) (*execProcess, error) {
+func startExecProcess(ctx context.Context, executable string, args []string, dir string, env []string) (*execProcess, error) {
 	cmd := exec.CommandContext(ctx, executable, args...)
 	if strings.TrimSpace(dir) != "" {
 		cmd.Dir = dir
+	}
+	if len(env) > 0 {
+		cmd.Env = append([]string(nil), env...)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
@@ -28,11 +29,15 @@ const (
 type Payload struct {
 	Version             int              `json:"version"`
 	Kind                SetupKind        `json:"kind,omitempty"`
+	OperationID         string           `json:"operation_id,omitempty"`
+	StartedAt           time.Time        `json:"started_at,omitempty"`
+	ExpiresAt           time.Time        `json:"expires_at,omitempty"`
 	StateRoot           string           `json:"state_root"`
 	RunnerHash          string           `json:"runner_hash,omitempty"`
 	PolicyHash          string           `json:"policy_hash,omitempty"`
 	GlobalPolicyHash    string           `json:"global_policy_hash,omitempty"`
 	WorkspacePolicyHash string           `json:"workspace_policy_hash,omitempty"`
+	GlobalPolicy        winpolicy.Policy `json:"global_policy,omitempty"`
 	Policy              winpolicy.Policy `json:"policy"`
 	OfflineUsername     string           `json:"offline_username,omitempty"`
 	OnlineUsername      string           `json:"online_username,omitempty"`
@@ -41,6 +46,7 @@ type Payload struct {
 	WorkspaceStatePath  string           `json:"workspace_state_path,omitempty"`
 	RefreshOnly         bool             `json:"refresh_only,omitempty"`
 	ProgressPath        string           `json:"progress_path,omitempty"`
+	Debug               bool             `json:"debug,omitempty"`
 }
 
 type UserSecret struct {
@@ -59,6 +65,7 @@ type Progress struct {
 	Step    int    `json:"step,omitempty"`
 	Total   int    `json:"total,omitempty"`
 	Done    bool   `json:"done,omitempty"`
+	Debug   bool   `json:"debug,omitempty"`
 }
 
 type ProgressFunc func(Progress)

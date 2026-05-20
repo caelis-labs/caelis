@@ -1543,10 +1543,15 @@ func (s *yieldProbeSandboxSession) Status(context.Context) (sandbox.SessionStatu
 	if s.statusRunning != nil {
 		running = *s.statusRunning
 	}
+	exitCode := 0
+	if !running {
+		exitCode = s.result.ExitCode
+	}
 	return sandbox.SessionStatus{
 		SessionRef:    s.Ref(),
 		Terminal:      s.Terminal(),
 		Running:       running,
+		ExitCode:      exitCode,
 		SupportsInput: true,
 		UpdatedAt:     time.Now(),
 	}, nil

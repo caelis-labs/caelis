@@ -5,17 +5,19 @@ import (
 	"io"
 	"runtime"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/internal/version"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/app"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver/local"
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
-	_, _ = stack.PreflightSandbox(ctx, true)
+	initialSandboxStatus := stack.SandboxStatus()
 	driver, err := local.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
@@ -30,10 +32,13 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 		Workspace:       stack.Workspace.CWD,
 		ModelAlias:      modelText,
 		ShowWelcomeCard: true,
-		InitialLogs:     initialSandboxStatusLogs(stack.SandboxStatus()),
+		InitialLogs:     initialSandboxStatusLogs(initialSandboxStatus),
 		Commands:        tuiapp.DefaultCommands(),
 		Wizards:         tuiapp.DefaultWizards(),
 		RenderFPS:       envInt("CAELIS_TUI_RENDER_FPS", 0),
+		OnStart: func() {
+			startWorkspaceSandboxPreflight(programCtx, stack, sender, initialSandboxStatus)
+		},
 	})
 	model := tuiapp.NewModel(cfg)
 	program := tea.NewProgram(model, tuiProgramOptions(stdin, stdout, programCtx, cfg.RenderFPS)...)
@@ -43,13 +48,65 @@ func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, mode
 	return err
 }
 
+func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack, sender *tuiapp.ProgramSender, initial gatewayapp.SandboxStatus) {
+	if runtime.GOOS != "windows" || stack == nil || sender == nil {
+		return
+	}
+	backend := strings.TrimSpace(firstNonEmptyString(initial.ResolvedBackend, initial.RequestedBackend))
+	if !strings.EqualFold(backend, string(sandbox.BackendWindowsElevated)) {
+		return
+	}
+	if !initial.WorkspaceSetupRequired || initial.GlobalSetupRequired {
+		return
+	}
+	go func() {
+		title := "Windows sandbox workspace"
+		sendWorkspaceProgress := func(progress sandbox.PrepareProgress) {
+			sender.SendMsg(tuiapp.SandboxProgressMsg{
+				Title:   title,
+				Source:  title,
+				Phase:   strings.TrimSpace(progress.Phase),
+				Message: strings.TrimSpace(progress.Message),
+				Step:    progress.Step,
+				Total:   progress.Total,
+				Done:    progress.Done,
+			})
+		}
+		sendWorkspaceProgress(sandbox.PrepareProgress{
+			Phase:   "workspace",
+			Message: "preparing sandbox ACLs for this workspace in the background",
+		})
+		progressCtx := sandbox.ContextWithPrepareProgress(ctx, sendWorkspaceProgress)
+		status, err := stack.PreflightSandbox(progressCtx, true)
+		if err != nil {
+			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox workspace setup failed: " + err.Error() + "\n"})
+			sendWorkspaceProgress(sandbox.PrepareProgress{
+				Phase:   "workspace",
+				Message: "workspace sandbox setup failed",
+				Done:    true,
+			})
+		} else if status.WorkspaceSetupCurrent || !status.WorkspaceSetupRequired {
+			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox workspace setup complete.\n"})
+			sendWorkspaceProgress(sandbox.PrepareProgress{
+				Phase:   "complete",
+				Message: "workspace sandbox ACLs are ready",
+				Step:    3,
+				Total:   3,
+				Done:    true,
+			})
+		}
+		time.Sleep(1600 * time.Millisecond)
+		sender.SendMsg(tuiapp.SandboxProgressMsg{Source: title, Clear: true})
+	}()
+}
+
 func initialSandboxStatusLogs(status gatewayapp.SandboxStatus) []string {
 	var logs []string
 	backend := strings.TrimSpace(firstNonEmptyString(status.ResolvedBackend, status.RequestedBackend))
 	if status.SetupRequired && strings.EqualFold(backend, "windows-elevated") {
 		message := "Windows sandbox setup is not ready. Run /sandbox setup once and approve the UAC prompt before using sandboxed commands."
 		if status.WorkspaceSetupRequired && !status.GlobalSetupRequired {
-			message = "Current workspace needs Windows sandbox ACL setup. Run /sandbox setup once for this workspace before using sandboxed commands."
+			message = "Current workspace needs Windows sandbox ACL setup. Preparing it in the background; commands may wait until it completes."
 		}
 		if reason := strings.TrimSpace(firstNonEmptyString(status.GlobalSetupReason, status.WorkspaceSetupReason, status.SetupMarkerReason)); reason != "" {
 			message += " Reason: " + reason + "."

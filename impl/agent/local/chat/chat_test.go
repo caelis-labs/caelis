@@ -6,6 +6,7 @@ import (
 	"iter"
 	"maps"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -380,6 +381,118 @@ func TestChatAgentRunsMinimalToolLoop(t *testing.T) {
 	}
 	if events[2].Message == nil || events[2].Message.TextContent() != "pong" {
 		t.Fatalf("events[2].Message = %+v, want durable assistant message", events[2].Message)
+	}
+}
+
+func TestChatAgentExecutesSameStepToolCallsConcurrently(t *testing.T) {
+	t.Parallel()
+
+	testModel := &contextStabilityModel{toolNames: []string{"RUN_COMMAND", "RUN_COMMAND"}}
+	var active int32
+	var overlapped atomic.Bool
+	runCommandTool := tool.NamedTool{
+		Def: tool.Definition{
+			Name:        "RUN_COMMAND",
+			Description: "echo input",
+			InputSchema: map[string]any{"type": "object"},
+		},
+		Invoke: func(ctx context.Context, call tool.Call) (tool.Result, error) {
+			if atomic.AddInt32(&active, 1) > 1 {
+				overlapped.Store(true)
+			}
+			defer atomic.AddInt32(&active, -1)
+			select {
+			case <-time.After(120 * time.Millisecond):
+			case <-ctx.Done():
+				return tool.Result{}, ctx.Err()
+			}
+			return tool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"value": call.ID}))},
+			}, nil
+		},
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{runCommandTool}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-1"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "inspect both")),
+			Text:    "inspect both",
+		}},
+	})
+
+	for _, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+	if !overlapped.Load() {
+		t.Fatal("same-step tool calls did not overlap; want concurrent execution")
+	}
+	if got := len(testModel.requests); got != 2 {
+		t.Fatalf("len(requests) = %d, want two model turns", got)
+	}
+	results := testModel.requests[1].Messages[len(testModel.requests[1].Messages)-2:]
+	if got := results[0].ToolResults()[0].ToolUseID; got != "call-alpha" {
+		t.Fatalf("first tool result id = %q, want call-alpha", got)
+	}
+	if got := results[1].ToolResults()[0].ToolUseID; got != "call-beta" {
+		t.Fatalf("second tool result id = %q, want call-beta", got)
+	}
+}
+
+func TestChatAgentExecutesMixedSameStepToolCallsSerially(t *testing.T) {
+	t.Parallel()
+
+	testModel := &contextStabilityModel{toolNames: []string{"RUN_COMMAND", "ECHO"}}
+	var active int32
+	var overlapped atomic.Bool
+	invoke := func(ctx context.Context, call tool.Call) (tool.Result, error) {
+		if atomic.AddInt32(&active, 1) > 1 {
+			overlapped.Store(true)
+		}
+		defer atomic.AddInt32(&active, -1)
+		select {
+		case <-time.After(30 * time.Millisecond):
+		case <-ctx.Done():
+			return tool.Result{}, ctx.Err()
+		}
+		return tool.Result{
+			ID:      call.ID,
+			Name:    call.Name,
+			Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{"value": call.ID}))},
+		}, nil
+	}
+	chatAgent, err := NewWithTools("chat", testModel, []tool.Tool{
+		tool.NamedTool{Def: tool.Definition{Name: "RUN_COMMAND", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
+		tool.NamedTool{Def: tool.Definition{Name: "ECHO", InputSchema: map[string]any{"type": "object"}}, Invoke: invoke},
+	}, "Use tools when needed.")
+	if err != nil {
+		t.Fatalf("NewWithTools() error = %v", err)
+	}
+	ctx := agent.NewContext(agent.ContextSpec{
+		Context: context.Background(),
+		Session: session.Session{SessionRef: session.SessionRef{SessionID: "sess-1"}},
+		Events: []*session.Event{{
+			Type:    session.EventTypeUser,
+			Message: ptrMessage(model.NewTextMessage(model.RoleUser, "inspect both")),
+			Text:    "inspect both",
+		}},
+	})
+
+	for _, runErr := range chatAgent.Run(ctx) {
+		if runErr != nil {
+			t.Fatalf("Run() error = %v", runErr)
+		}
+	}
+	if overlapped.Load() {
+		t.Fatal("mixed same-step tool calls overlapped; want serial execution for non-RUN_COMMAND tools")
 	}
 }
 
@@ -1876,7 +1989,8 @@ func (m *toolLoopModel) Generate(_ context.Context, req *model.Request) iter.Seq
 }
 
 type contextStabilityModel struct {
-	requests []model.Request
+	requests  []model.Request
+	toolNames []string
 }
 
 func (m *contextStabilityModel) Name() string { return "context-stability" }
@@ -1898,12 +2012,12 @@ func (m *contextStabilityModel) Generate(_ context.Context, req *model.Request) 
 				Response: &model.Response{
 					Message: model.MessageFromAssistantParts("I will inspect both values.", "Need both tool results before answering.", []model.ToolCall{{
 						ID:               "call-alpha",
-						Name:             "ECHO",
+						Name:             m.toolName(0),
 						Args:             `{"value":"alpha"}`,
 						ThoughtSignature: "sig-alpha",
 					}, {
 						ID:               "call-beta",
-						Name:             "ECHO",
+						Name:             m.toolName(1),
 						Args:             `{"value":"beta"}`,
 						ThoughtSignature: "sig-beta",
 					}}),
@@ -1926,6 +2040,15 @@ func (m *contextStabilityModel) Generate(_ context.Context, req *model.Request) 
 			}, nil)
 		}
 	}
+}
+
+func (m *contextStabilityModel) toolName(index int) string {
+	if m != nil && index >= 0 && index < len(m.toolNames) {
+		if name := strings.TrimSpace(m.toolNames[index]); name != "" {
+			return name
+		}
+	}
+	return "ECHO"
 }
 
 func canonicalMessagesJSON(t *testing.T, messages []model.Message) string {

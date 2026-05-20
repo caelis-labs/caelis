@@ -27,6 +27,18 @@ type SetStatusMsg struct {
 	Status    StatusViewModel
 }
 
+type StatusRefreshResultMsg struct {
+	Workspace    string
+	HasWorkspace bool
+	Model        string
+	Context      string
+	HasStatus    bool
+	ModeLabel    string
+	HasModeLabel bool
+	Status       StatusViewModel
+	HasView      bool
+}
+
 type SetCommandsMsg struct {
 	Commands []string
 }
@@ -53,6 +65,21 @@ type TaskResultMsg struct {
 	Interrupted         bool
 	ContinueRunning     bool
 	SuppressTurnDivider bool
+}
+
+type RunningInterruptResultMsg struct {
+	Accepted bool
+}
+
+type SandboxProgressMsg struct {
+	Title   string
+	Source  string
+	Phase   string
+	Message string
+	Step    int
+	Total   int
+	Done    bool
+	Clear   bool
 }
 
 type PromptRequestMsg struct {

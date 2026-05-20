@@ -211,7 +211,6 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	}
 	sandboxStatus := SandboxStatus{}
 	if d.stack != nil {
-		_, _ = d.stack.PreflightSandbox(ctx, true)
 		sandboxStatus = d.stack.SandboxStatus()
 	}
 	activeSession, ok := d.currentSession()

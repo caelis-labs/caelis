@@ -8,9 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -1466,69 +1464,65 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 
 func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing.T) {
 	ctx := context.Background()
-	repo := repoRootForGatewayDriverTest(t)
-	root := t.TempDir()
-	workdir := t.TempDir()
-	agentBin := filepath.Join(os.TempDir(), testenv.ExecutableName(fmt.Sprintf("caelis-e2eagent-%d", time.Now().UnixNano())))
-	t.Cleanup(func() { _ = os.Remove(agentBin) })
-	build := exec.Command("go", "build", "-o", agentBin, "./internal/acpe2eagent")
-	build.Dir = repo
-	if output, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("go build e2eagent error = %v\n%s", err, string(output))
-	}
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "agent-conflict-rollback-test",
-		StoreDir:       root,
-		WorkspaceKey:   workdir,
-		WorkspaceCWD:   workdir,
-		PermissionMode: "default",
-		Assembly: assembly.ResolvedAssembly{
-			Agents: []assembly.AgentConfig{{
-				Name:        "copilot",
-				Description: "ACP sidecar agent.",
-				Command:     agentBin,
-				WorkDir:     repo,
-				Env: map[string]string{
-					"SDK_ACP_STUB_REPLY":    "slow sidecar",
-					"SDK_ACP_STUB_DELAY_MS": "2000",
-					"SDK_ACP_SESSION_ROOT":  filepath.Join(root, "agent-sessions"),
-					"SDK_ACP_TASK_ROOT":     filepath.Join(root, "agent-tasks"),
-				},
-			}},
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:      "caelis",
+			UserID:       "agent-conflict-rollback-test",
+			SessionID:    "agent-conflict-session",
+			WorkspaceKey: "ws",
 		},
-		Model: gatewayapp.ModelConfig{
-			Provider: "ollama",
-			API:      providers.APIOllama,
-			Model:    "llama3",
-		},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
+		CWD:        t.TempDir(),
+		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
+		Participants: []session.ParticipantBinding{{
+			ID:        "side-existing",
+			Kind:      session.ParticipantKindACP,
+			Role:      session.ParticipantRoleSidecar,
+			AgentName: "copilot",
+			Label:     "@ari",
+			SessionID: "remote-existing",
+		}},
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-conflict-session", "surface", "ollama/llama3")
+	gw := &sideAgentRollbackGatewayService{
+		session: activeSession,
+		promptErr: &kernel.Error{
+			Kind:    kernel.KindConflict,
+			Code:    kernel.CodeActiveRunConflict,
+			Message: "active participant run already in progress",
+		},
+	}
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		GatewayFn: func() GatewayService { return gw },
+		Workspace: session.WorkspaceRef{
+			Key: "ws",
+			CWD: activeSession.CWD,
+		},
+		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
+			return session.CloneSession(gw.session), nil
+		},
+		ListACPAgentsFn: func() []ACPAgentInfo {
+			return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
+		},
+	}, activeSession.SessionID, "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("NewGatewayDriver() error = %v", err)
 	}
 
-	first, err := driver.StartAgentSubagent(ctx, "copilot", "first prompt")
-	if err != nil {
-		t.Fatalf("StartAgentSubagent(first) error = %v", err)
-	}
-	defer func() {
-		closeGatewayDriverTestTurn(t, first)
-		if runtime.GOOS == "windows" {
-			time.Sleep(500 * time.Millisecond)
-		}
-	}()
-
-	_, err = driver.StartAgentSubagent(ctx, "copilot", "second prompt")
+	_, err = driver.StartAgentSubagent(ctx, "copilot", "  second prompt  ")
 	if err == nil {
-		t.Fatal("StartAgentSubagent(second) error = nil, want active run conflict")
+		t.Fatal("StartAgentSubagent() error = nil, want active run conflict")
 	}
 	var gwErr *kernel.Error
 	if !kernel.As(err, &gwErr) || gwErr.Code != kernel.CodeActiveRunConflict {
-		t.Fatalf("StartAgentSubagent(second) error = %v, want active run conflict", err)
+		t.Fatalf("StartAgentSubagent() error = %v, want active run conflict", err)
+	}
+	if len(gw.attachReqs) != 1 {
+		t.Fatalf("AttachParticipant calls = %d, want 1", len(gw.attachReqs))
+	}
+	if len(gw.promptReqs) != 1 || gw.promptReqs[0].Input != "second prompt" {
+		t.Fatalf("PromptParticipant requests = %#v, want trimmed prompt", gw.promptReqs)
+	}
+	if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-new" {
+		t.Fatalf("DetachParticipant requests = %#v, want rollback of new sidecar", gw.detachReqs)
 	}
 	status, err := driver.AgentStatus(ctx)
 	if err != nil {
@@ -1537,7 +1531,7 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if len(status.Participants) != 1 {
 		t.Fatalf("AgentStatus().Participants = %#v, want only first sidecar after rollback", status.Participants)
 	}
-	if status.Participants[0].AgentName != "copilot" || !agenthandle.ContainsPoolName(strings.TrimPrefix(status.Participants[0].Label, "@")) {
+	if status.Participants[0].ID != "side-existing" || status.Participants[0].AgentName != "copilot" || !agenthandle.ContainsPoolName(strings.TrimPrefix(status.Participants[0].Label, "@")) {
 		t.Fatalf("remaining participant = %#v, want original copilot sidecar with shared pool label", status.Participants[0])
 	}
 }
@@ -3011,6 +3005,82 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	if status.PermissionGrantCount != 2 || !status.PermissionGrantNetwork || status.PermissionReadRootCount != 3 || status.PermissionWriteRootCount != 1 {
 		t.Fatalf("permission grant summary = count:%d network:%v read:%d write:%d, want 2/true/3/1", status.PermissionGrantCount, status.PermissionGrantNetwork, status.PermissionReadRootCount, status.PermissionWriteRootCount)
 	}
+}
+
+type sideAgentRollbackGatewayService struct {
+	activeSubmitGatewayService
+	session    session.Session
+	promptErr  error
+	attachReqs []kernel.AttachParticipantRequest
+	promptReqs []kernel.PromptParticipantRequest
+	detachReqs []kernel.DetachParticipantRequest
+}
+
+func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
+	participants := make([]kernel.ParticipantState, 0, len(g.session.Participants))
+	for _, participant := range g.session.Participants {
+		participants = append(participants, kernel.ParticipantState{
+			ID:             participant.ID,
+			Kind:           participant.Kind,
+			Role:           participant.Role,
+			AgentName:      participant.AgentName,
+			Label:          participant.Label,
+			SessionID:      participant.SessionID,
+			Source:         participant.Source,
+			ParentTurnID:   participant.ParentTurnID,
+			DelegationID:   participant.DelegationID,
+			ContextSyncSeq: participant.ContextSyncSeq,
+			AttachedAt:     participant.AttachedAt,
+			ControllerRef:  participant.ControllerRef,
+		})
+	}
+	return kernel.ControlPlaneState{
+		SessionRef: g.session.SessionRef,
+		Controller: kernel.ControllerState{
+			Kind:            g.session.Controller.Kind,
+			ControllerID:    g.session.Controller.ControllerID,
+			AgentName:       g.session.Controller.AgentName,
+			Label:           g.session.Controller.Label,
+			EpochID:         g.session.Controller.EpochID,
+			RemoteSessionID: g.session.Controller.RemoteSessionID,
+			ContextSyncSeq:  g.session.Controller.ContextSyncSeq,
+			AttachedAt:      g.session.Controller.AttachedAt,
+			Source:          g.session.Controller.Source,
+		},
+		Participants: participants,
+	}, nil
+}
+
+func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, req kernel.AttachParticipantRequest) (session.Session, error) {
+	g.attachReqs = append(g.attachReqs, req)
+	g.session.Participants = append(g.session.Participants, session.ParticipantBinding{
+		ID:        "side-new",
+		Kind:      session.ParticipantKindACP,
+		Role:      req.Role,
+		AgentName: req.Agent,
+		Label:     req.Label,
+		SessionID: "remote-new",
+		Source:    req.Source,
+	})
+	return session.CloneSession(g.session), nil
+}
+
+func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
+	g.promptReqs = append(g.promptReqs, req)
+	return kernel.BeginTurnResult{}, g.promptErr
+}
+
+func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, req kernel.DetachParticipantRequest) (session.Session, error) {
+	g.detachReqs = append(g.detachReqs, req)
+	kept := g.session.Participants[:0]
+	for _, participant := range g.session.Participants {
+		if participant.ID == req.ParticipantID {
+			continue
+		}
+		kept = append(kept, participant)
+	}
+	g.session.Participants = kept
+	return session.CloneSession(g.session), nil
 }
 
 type activeSubmitGatewayService struct {

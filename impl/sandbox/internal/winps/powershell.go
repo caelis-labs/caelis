@@ -23,4 +23,4 @@ func Command(command string) string {
 	return utf8Prelude + command
 }
 
-const utf8Prelude = "$__caelisUtf8Encoding = New-Object System.Text.UTF8Encoding $false; [Console]::InputEncoding = $__caelisUtf8Encoding; [Console]::OutputEncoding = $__caelisUtf8Encoding; $OutputEncoding = $__caelisUtf8Encoding; "
+const utf8Prelude = "$__caelisUtf8Encoding = [System.Text.Encoding]::UTF8; $OutputEncoding = $__caelisUtf8Encoding; if ($ExecutionContext.SessionState.LanguageMode -ne 'ConstrainedLanguage') { [Console]::InputEncoding = $__caelisUtf8Encoding; [Console]::OutputEncoding = $__caelisUtf8Encoding; }; "

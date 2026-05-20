@@ -44,7 +44,7 @@ func TestTerminalToolPanelCacheKeyUsesBoundedTail(t *testing.T) {
 
 func TestGenericToolPanelCacheKeyUsesBoundedText(t *testing.T) {
 	m := newPerfTestModel()
-	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
+	ctx := BlockRenderContext{Width: maxGenericToolPanelCacheBytes, TermWidth: maxGenericToolPanelCacheBytes, Theme: m.theme}
 	cacheByCall := map[string]toolOutputRenderCache{}
 
 	longOutput := strings.Repeat("x", maxGenericToolPanelCacheBytes*2)

@@ -3,6 +3,7 @@ package runnerruntime
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -13,11 +14,13 @@ import (
 )
 
 type waitResultTestRunner struct {
-	session *cmdsession.AsyncSession
-	result  sandbox.CommandResult
-	err     error
-	stdout  []byte
-	stderr  []byte
+	session           *cmdsession.AsyncSession
+	result            sandbox.CommandResult
+	err               error
+	waitSessionResult *sandbox.CommandResult
+	waitSessionErr    error
+	stdout            []byte
+	stderr            []byte
 }
 
 func (r *waitResultTestRunner) Run(context.Context, Request) (sandbox.CommandResult, error) {
@@ -39,6 +42,21 @@ func (r *waitResultTestRunner) GetSessionStatus(string) (cmdsession.SessionStatu
 }
 
 func (r *waitResultTestRunner) WaitSession(ctx context.Context, _ string, timeout time.Duration) (sandbox.CommandResult, error) {
+	if r.waitSessionResult != nil || r.waitSessionErr != nil {
+		if r.session != nil {
+			if timeout > 0 {
+				if _, err := r.session.WaitWithTimeout(timeout); err != nil {
+					return sandbox.CommandResult{}, err
+				}
+			} else if _, err := r.session.Wait(ctx); err != nil {
+				return sandbox.CommandResult{}, err
+			}
+		}
+		if r.waitSessionResult != nil {
+			return *r.waitSessionResult, r.waitSessionErr
+		}
+		return sandbox.CommandResult{}, r.waitSessionErr
+	}
 	if timeout > 0 {
 		if _, err := r.session.WaitWithTimeout(timeout); err != nil {
 			return sandbox.CommandResult{}, err
@@ -55,6 +73,45 @@ func (r *waitResultTestRunner) TerminateSession(string) error {
 
 func (r *waitResultTestRunner) Close() error { return nil }
 
+func TestSessionWaitTreatsPlainExitReasonAsCommandStatus(t *testing.T) {
+	command := "exit 1"
+	if runtime.GOOS == "windows" {
+		command = "exit /b 1"
+	}
+	async := cmdsession.NewAsyncSession(cmdsession.AsyncSessionConfig{
+		Command: command,
+		BuildCommand: func(ctx context.Context, _ cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
+			if runtime.GOOS == "windows" {
+				return exec.CommandContext(ctx, "cmd.exe", "/d", "/c", "exit /b 1"), nil
+			}
+			return exec.CommandContext(ctx, "sh", "-c", "exit 1"), nil
+		},
+	})
+	if err := async.Start(); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = async.Close() })
+
+	waitResult := sandbox.CommandResult{ExitCode: 1}
+	sess := &session{
+		backend: sandbox.BackendHost,
+		runner: &waitResultTestRunner{
+			session:           async,
+			waitSessionResult: &waitResult,
+			waitSessionErr:    fmt.Errorf("process exited with code 1"),
+		},
+		sessionID: async.ID,
+	}
+
+	status, err := sess.Wait(context.Background(), 5*time.Second)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if status.Running || status.ExitCode != 1 {
+		t.Fatalf("Wait() status = %+v, want exited command with code 1", status)
+	}
+}
+
 func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 	command := "printf 'ok\\n'"
 	if runtime.GOOS == "windows" {
@@ -62,6 +119,12 @@ func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 	}
 	async := cmdsession.NewAsyncSession(cmdsession.AsyncSessionConfig{
 		Command: command,
+		BuildCommand: func(ctx context.Context, _ cmdsession.AsyncSessionConfig) (*exec.Cmd, error) {
+			if runtime.GOOS == "windows" {
+				return exec.CommandContext(ctx, "cmd.exe", "/d", "/c", "echo ok"), nil
+			}
+			return exec.CommandContext(ctx, "sh", "-c", "printf 'ok\\n'"), nil
+		},
 	})
 	if err := async.Start(); err != nil {
 		t.Fatalf("Start() error = %v", err)

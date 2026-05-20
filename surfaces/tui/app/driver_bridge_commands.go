@@ -752,11 +752,12 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 	if strings.EqualFold(action, "setup") {
-		sendNotice(send, "starting Windows sandbox setup; this may take a minute while Windows accounts, ACLs, and firewall rules are refreshed")
+		sendSandboxProgress(send, "Windows sandbox setup", sandbox.PrepareProgress{
+			Phase:   "start",
+			Message: "starting Windows sandbox setup; this may take a minute while Windows accounts, ACLs, and firewall rules are refreshed",
+		})
 		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
-			if text := formatSandboxSetupProgress(progress); text != "" {
-				sendNotice(send, text)
-			}
+			sendSandboxProgress(send, "Windows sandbox setup", progress)
 		})
 		status, err := driver.PrepareSandbox(progressCtx)
 		if err != nil {
@@ -766,18 +767,19 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		sendStatusUpdate(send, status)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	if strings.EqualFold(action, "reset") || strings.EqualFold(action, "clean") {
+	if strings.EqualFold(action, "reset") {
 		resetter, ok := driver.(interface {
 			ResetSandbox(context.Context) (tuidriver.StatusSnapshot, error)
 		})
 		if !ok {
 			return TaskResultMsg{Err: friendlyCommandError("sandbox reset", fmt.Errorf("sandbox reset is unavailable for this driver"))}
 		}
-		sendNotice(send, "resetting Windows sandbox state; this removes Caelis sandbox users, ACL records, firewall rules, and local sandbox state")
+		sendSandboxProgress(send, "Windows sandbox reset", sandbox.PrepareProgress{
+			Phase:   "start",
+			Message: "resetting Windows sandbox state; this removes Caelis sandbox users, ACL records, firewall rules, and local sandbox state",
+		})
 		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
-			if text := formatSandboxSetupProgress(progress); text != "" {
-				sendNotice(send, text)
-			}
+			sendSandboxProgress(send, "Windows sandbox reset", progress)
 		})
 		status, err := resetter.ResetSandbox(progressCtx)
 		if err != nil {
@@ -791,7 +793,31 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func formatSandboxSetupProgress(progress sandbox.PrepareProgress) string {
+const sandboxProgressBarWidth = 18
+
+func sendSandboxProgress(send func(tea.Msg), title string, progress sandbox.PrepareProgress) {
+	if send == nil || progress.Debug {
+		return
+	}
+	message := strings.TrimSpace(progress.Message)
+	if message == "" {
+		message = strings.TrimSpace(progress.Phase)
+	}
+	if message == "" {
+		return
+	}
+	send(SandboxProgressMsg{
+		Title:   title,
+		Source:  title,
+		Phase:   strings.TrimSpace(progress.Phase),
+		Message: message,
+		Step:    progress.Step,
+		Total:   progress.Total,
+		Done:    progress.Done,
+	})
+}
+
+func formatSandboxProgress(_ string, progress sandbox.PrepareProgress) string {
 	message := strings.TrimSpace(progress.Message)
 	if message == "" {
 		message = strings.TrimSpace(progress.Phase)
@@ -799,11 +825,41 @@ func formatSandboxSetupProgress(progress sandbox.PrepareProgress) string {
 	if message == "" {
 		return ""
 	}
-	prefix := "sandbox setup"
-	if progress.Step > 0 && progress.Total > 0 {
-		prefix = fmt.Sprintf("%s [%d/%d]", prefix, progress.Step, progress.Total)
+	if progress.Debug {
+		return message
 	}
-	return prefix + ": " + message
+	if progress.Step <= 0 || progress.Total <= 0 {
+		return message
+	}
+	pct := float64(progress.Step) / float64(progress.Total)
+	if progress.Done {
+		pct = 1
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+	bar := sandboxProgressBar(pct, sandboxProgressBarWidth)
+	return fmt.Sprintf("%s %3.0f%% (%d/%d): %s", bar, pct*100, progress.Step, progress.Total, message)
+}
+
+func sandboxProgressBar(pct float64, width int) string {
+	if width <= 0 {
+		width = sandboxProgressBarWidth
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	if pct > 1 {
+		pct = 1
+	}
+	filled := int(pct*float64(width) + 0.5)
+	if filled > width {
+		filled = width
+	}
+	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
 }
 
 func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

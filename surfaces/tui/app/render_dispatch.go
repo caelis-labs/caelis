@@ -47,7 +47,8 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 	case SubagentStatusMsg, SubagentDoneMsg:
 		return renderEventPolicy{lane: renderLaneSubagent, flushSmoothing: true, flushLogChunks: true}, true
 	case PlanUpdateMsg, SetHintMsg, ApprovalReviewHintMsg, SetRunningMsg,
-		SetStatusMsg, SetCommandsMsg, AttachmentCountMsg:
+		SetStatusMsg, StatusRefreshResultMsg, SetCommandsMsg, AttachmentCountMsg,
+		RunningInterruptResultMsg, SandboxProgressMsg:
 		return renderEventPolicy{lane: renderLaneUIState}, true
 	case ClearHistoryMsg, UserMessageMsg, TaskResultMsg:
 		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
@@ -241,10 +242,17 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m.handleSetRunningMsg(typed), policyCmd, true
 	case SetStatusMsg:
 		return m.handleSetStatusMsg(typed), policyCmd, true
+	case StatusRefreshResultMsg:
+		return m.handleStatusRefreshResultMsg(typed), policyCmd, true
 	case SetCommandsMsg:
 		return m.handleSetCommandsMsg(typed), policyCmd, true
 	case AttachmentCountMsg:
 		return m.handleAttachmentCountMsg(typed), policyCmd, true
+	case RunningInterruptResultMsg:
+		model, cmd := m.handleRunningInterruptResultMsg(typed)
+		return model, tea.Batch(policyCmd, cmd), true
+	case SandboxProgressMsg:
+		return m.handleSandboxProgressMsg(typed), policyCmd, true
 
 	case ClearHistoryMsg:
 		m.resetConversationView()
@@ -418,6 +426,37 @@ func (m *Model) handleSetStatusMsg(msg SetStatusMsg) tea.Model {
 	return m
 }
 
+func (m *Model) handleStatusRefreshResultMsg(msg StatusRefreshResultMsg) tea.Model {
+	m.statusRefreshInFlight = false
+	welcomeMayChange := false
+	if msg.HasWorkspace {
+		if workspace := strings.TrimSpace(msg.Workspace); workspace != "" {
+			if workspace != m.cfg.Workspace {
+				m.cfg.Workspace = workspace
+				welcomeMayChange = true
+			}
+		}
+	}
+	if msg.HasStatus {
+		nextModel := normalizeStatusModel(msg.Model)
+		if nextModel != m.statusModel {
+			m.statusModel = nextModel
+			welcomeMayChange = true
+		}
+		m.statusContext = strings.TrimSpace(msg.Context)
+	}
+	if msg.HasView {
+		m.statusView = msg.Status
+	}
+	if msg.HasModeLabel {
+		m.statusModeLabel = strings.TrimSpace(msg.ModeLabel)
+	}
+	if welcomeMayChange && m.syncWelcomeCardBlock() {
+		m.syncViewportContent()
+	}
+	return m
+}
+
 func (m *Model) handleSetCommandsMsg(msg SetCommandsMsg) tea.Model {
 	m.setCommands(msg.Commands)
 	return m
@@ -454,33 +493,48 @@ func (m *Model) handleBTWErrorMsg(msg BTWErrorMsg) tea.Model {
 }
 
 func (m *Model) handleStatusTickMsg() (tea.Model, tea.Cmd) {
-	welcomeMayChange := false
-	if m.cfg.RefreshWorkspace != nil {
-		if workspace := strings.TrimSpace(m.cfg.RefreshWorkspace()); workspace != "" {
-			if workspace != m.cfg.Workspace {
-				m.cfg.Workspace = workspace
-				welcomeMayChange = true
-			}
-		}
-	}
-	if m.cfg.RefreshStatus != nil {
+	cmds := []tea.Cmd{tickStatusCmd()}
+	if !m.statusRefreshInFlight && m.hasStatusRefreshCallbacks() {
+		m.statusRefreshInFlight = true
 		m.observeDriverStatusCall()
-		modelText, contextText := m.cfg.RefreshStatus()
-		nextModel := normalizeStatusModel(modelText)
-		if nextModel != m.statusModel {
-			m.statusModel = nextModel
-			welcomeMayChange = true
+		cmds = append(cmds, m.statusRefreshCmd())
+	}
+	return m, tea.Batch(cmds...)
+}
+
+func (m *Model) hasStatusRefreshCallbacks() bool {
+	return m != nil &&
+		(m.cfg.RefreshWorkspace != nil ||
+			m.cfg.RefreshStatus != nil ||
+			m.cfg.RefreshStatusView != nil ||
+			m.cfg.ModeLabel != nil)
+}
+
+func (m *Model) statusRefreshCmd() tea.Cmd {
+	if m == nil {
+		return nil
+	}
+	cfg := m.cfg
+	return func() tea.Msg {
+		msg := StatusRefreshResultMsg{}
+		if cfg.RefreshWorkspace != nil {
+			msg.Workspace = strings.TrimSpace(cfg.RefreshWorkspace())
+			msg.HasWorkspace = true
 		}
-		m.statusContext = strings.TrimSpace(contextText)
+		if cfg.RefreshStatus != nil {
+			msg.Model, msg.Context = cfg.RefreshStatus()
+			msg.HasStatus = true
+		}
+		if cfg.RefreshStatusView != nil {
+			msg.Status = cfg.RefreshStatusView()
+			msg.HasView = true
+		}
+		if cfg.ModeLabel != nil {
+			msg.ModeLabel = strings.TrimSpace(cfg.ModeLabel())
+			msg.HasModeLabel = true
+		}
+		return msg
 	}
-	if m.cfg.RefreshStatusView != nil {
-		m.statusView = m.cfg.RefreshStatusView()
-	}
-	m.refreshModeLabelFromConfig()
-	if welcomeMayChange && m.syncWelcomeCardBlock() {
-		m.syncViewportContent()
-	}
-	return m, tickStatusCmd()
 }
 
 func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
@@ -518,6 +572,8 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		m.pendingQueue = nil
 	}
 	m.running = false
+	m.runningInterruptRequested = false
+	m.sandboxProgress = nil
 	m.stopRunningAnimation()
 	m.planEntries = m.planEntries[:0]
 	m.clearInputAttachments()
@@ -560,6 +616,53 @@ func (m *Model) handleTaskResultMsg(msg TaskResultMsg) (tea.Model, tea.Cmd) {
 		return m.submitPendingPrompt(nextPending)
 	}
 	return m, nil
+}
+
+func (m *Model) handleRunningInterruptResultMsg(msg RunningInterruptResultMsg) (tea.Model, tea.Cmd) {
+	if msg.Accepted {
+		return m, nil
+	}
+	m.runningInterruptRequested = false
+	if !m.running {
+		return m, nil
+	}
+	return m, m.showHint("interrupt request did not reach the running task", hintOptions{
+		priority:       HintPriorityHigh,
+		clearOnMessage: true,
+		clearAfter:     systemHintDuration,
+	})
+}
+
+func (m *Model) handleSandboxProgressMsg(msg SandboxProgressMsg) tea.Model {
+	if msg.Clear {
+		source := strings.TrimSpace(msg.Source)
+		if source != "" && (m.sandboxProgress == nil || m.sandboxProgress.Source != source) {
+			return m
+		}
+		m.sandboxProgress = nil
+		m.ensureViewportLayout()
+		return m
+	}
+	title := strings.TrimSpace(msg.Title)
+	if title == "" {
+		title = "Windows sandbox"
+	}
+	message := strings.TrimSpace(msg.Message)
+	if message == "" {
+		message = strings.TrimSpace(msg.Phase)
+	}
+	m.sandboxProgress = &sandboxProgressState{
+		Title:     title,
+		Source:    strings.TrimSpace(msg.Source),
+		Phase:     strings.TrimSpace(msg.Phase),
+		Message:   message,
+		Step:      msg.Step,
+		Total:     msg.Total,
+		Done:      msg.Done,
+		UpdatedAt: time.Now(),
+	}
+	m.ensureViewportLayout()
+	return m
 }
 
 func (m *Model) lastBlockHasParticipantTurnFooter() bool {

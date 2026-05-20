@@ -4,21 +4,50 @@ package windows
 
 import (
 	"context"
+	"errors"
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/runnerruntime"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/netpolicy"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnertrace"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/winexec"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
+
+func enableRunnerTraceE2E(t *testing.T) {
+	t.Helper()
+	var mu sync.Mutex
+	var lines []string
+	restoreEnabled := runnertrace.SetEnabled(true)
+	restoreSink := runnertrace.SetSink(func(line string) {
+		mu.Lock()
+		lines = append(lines, strings.TrimRight(line, "\r\n"))
+		mu.Unlock()
+	})
+	t.Cleanup(func() {
+		restoreSink()
+		restoreEnabled()
+		mu.Lock()
+		defer mu.Unlock()
+		if len(lines) == 0 {
+			return
+		}
+		t.Logf("windows runner trace:\n%s", strings.Join(lines, "\n"))
+	})
+}
 
 func TestWindowsElevatedSandboxE2E(t *testing.T) {
 	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
 		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run the local-machine Windows Elevated sandbox e2e")
 	}
+	enableRunnerTraceE2E(t)
 	helper := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_HELPER"))
 	if helper == "" {
 		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E_HELPER to a caelis.exe with internal helper dispatch")
@@ -27,7 +56,10 @@ func TestWindowsElevatedSandboxE2E(t *testing.T) {
 		t.Fatalf("helper %q unavailable: %v", helper, err)
 	}
 
-	workspace := filepath.Join(t.TempDir(), "workspace")
+	workspace := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_WORKSPACE"))
+	if workspace == "" {
+		workspace = filepath.Join(t.TempDir(), "workspace")
+	}
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatalf("MkdirAll(workspace) error = %v", err)
 	}
@@ -291,6 +323,278 @@ try {
 	verifyCanceledRunTerminatesChildE2E(ctx, t, rt, workspace)
 }
 
+func TestWindowsElevatedSandboxSmokeE2E(t *testing.T) {
+	if os.Getenv("CAELIS_WINDOWS_SANDBOX_SMOKE_E2E") != "1" {
+		t.Skip("set CAELIS_WINDOWS_SANDBOX_SMOKE_E2E=1 to run the local-machine Windows Elevated sandbox smoke e2e")
+	}
+	enableRunnerTraceE2E(t)
+	helper := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_HELPER"))
+	if helper == "" {
+		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E_HELPER to a caelis.exe with internal helper dispatch")
+	}
+	if _, err := os.Stat(helper); err != nil {
+		t.Fatalf("helper %q unavailable: %v", helper, err)
+	}
+	workspace := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_WORKSPACE"))
+	if workspace == "" {
+		workspace = filepath.Join(t.TempDir(), "workspace")
+	}
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("MkdirAll(workspace) error = %v", err)
+	}
+	expectedWorkspace := workspace
+	if resolved, err := filepath.EvalSymlinks(workspace); err == nil && strings.TrimSpace(resolved) != "" {
+		expectedWorkspace = resolved
+	}
+	stateRoot := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_STATE"))
+	if stateRoot == "" {
+		stateRoot = filepath.Join(t.TempDir(), "state")
+	}
+	rt, err := New(sandbox.Config{
+		CWD:              workspace,
+		StateDir:         stateRoot,
+		HelperPath:       helper,
+		RequestedBackend: sandbox.BackendWindowsElevated,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+	defer cancel()
+	preparer, ok := rt.(interface {
+		Prepare(context.Context) error
+	})
+	if !ok {
+		t.Fatalf("runtime does not expose explicit setup")
+	}
+	seedManagedFirewallRulesByInternalNameE2E(ctx, t)
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := netpolicy.ClearContext(cleanupCtx); err != nil {
+			t.Logf("cleanup managed firewall rules: %v", err)
+		}
+	})
+	started := time.Now()
+	if err := preparer.Prepare(ctx); err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	t.Logf("smoke setup completed in %s", time.Since(started))
+
+	started = time.Now()
+	result, err := runE2EListingCommandWithTimings(ctx, t, rt, workspace)
+	t.Logf("smoke listing completed in %s", time.Since(started))
+	if err != nil {
+		t.Fatalf("listing command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(strings.ToLower(result.Stdout), strings.ToLower(expectedWorkspace)) {
+		t.Fatalf("listing stdout = %q, want workspace %q", result.Stdout, expectedWorkspace)
+	}
+	result, err = runE2ECommand(ctx, rt, workspace, "Write-Output 'smoke-ok'", sandbox.NetworkDisabled, nil)
+	if err != nil {
+		t.Fatalf("smoke command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(result.Stdout, "smoke-ok") {
+		t.Fatalf("smoke stdout = %q", result.Stdout)
+	}
+	result, err = runE2ECommand(ctx, rt, workspace, "whoami", sandbox.NetworkDisabled, nil)
+	if err != nil {
+		t.Fatalf("whoami command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(strings.ToLower(result.Stdout), "caelissbxoff") {
+		t.Fatalf("whoami stdout = %q, want offline sandbox user", result.Stdout)
+	}
+	result, err = runE2ECommand(ctx, rt, workspace, `$path = Join-Path $env:TEMP 'caelis-smoke-temp.txt'; Set-Content -LiteralPath $path -Value 'temp-ok' -Force; $value = Get-Content -LiteralPath $path -Raw; Write-Output $value.Trim(); [System.IO.File]::Delete($path); if (Test-Path -LiteralPath $path) { throw 'temp delete failed' }`, sandbox.NetworkDisabled, nil)
+	if err != nil {
+		t.Fatalf("sandbox temp write command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(result.Stdout, "temp-ok") {
+		t.Fatalf("sandbox temp stdout = %q", result.Stdout)
+	}
+	result, err = runE2ECommand(ctx, rt, workspace, `
+$names = @('TEMP', 'GOCACHE', 'GOMODCACHE', 'npm_config_cache')
+foreach ($name in $names) {
+  $dir = [Environment]::GetEnvironmentVariable($name)
+  if ([string]::IsNullOrWhiteSpace($dir)) { throw "$name missing" }
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $path = Join-Path $dir 'caelis-cache-smoke.txt'
+  Set-Content -LiteralPath $path -Value $name -Force
+  $value = (Get-Content -LiteralPath $path -Raw).Trim()
+  if ($value -ne $name) { throw "$name write failed" }
+  Remove-Item -LiteralPath $path -Force
+}
+Write-Output 'cache-env-ok'
+`, sandbox.NetworkDisabled, nil)
+	if err != nil {
+		t.Fatalf("sandbox cache env write command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(result.Stdout, "cache-env-ok") {
+		t.Fatalf("sandbox cache env stdout = %q", result.Stdout)
+	}
+	result, err = runE2ECommand(ctx, rt, workspace, "Write-Error 'raw-powershell-error'; exit 17", sandbox.NetworkDisabled, nil)
+	if err == nil || result.ExitCode != 17 {
+		t.Fatalf("raw PowerShell error command = err %v result %+v, want exit 17 failure", err, result)
+	}
+	if !strings.Contains(result.Stderr, "raw-powershell-error") {
+		t.Fatalf("raw PowerShell stderr = %q, want original error output", result.Stderr)
+	}
+	verifyConcurrentRunsE2E(ctx, t, rt, workspace)
+	resetter, ok := rt.(interface {
+		Reset(context.Context) error
+	})
+	if !ok {
+		t.Fatalf("runtime does not expose reset")
+	}
+	started = time.Now()
+	if err := resetter.Reset(ctx); err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+	t.Logf("smoke reset completed in %s", time.Since(started))
+	assertManagedFirewallRulesAbsentE2E(t)
+	assertLocalAccountMissingE2E(ctx, t, "user", setupOfflineUser(stateRoot))
+	assertLocalAccountMissingE2E(ctx, t, "user", setupOnlineUser(stateRoot))
+	assertLocalAccountMissingE2E(ctx, t, "localgroup", "CaelisSandboxUsers")
+	assertSandboxStateDirsAbsentE2E(t, stateRoot)
+}
+
+func verifyConcurrentRunsE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+	t.Helper()
+	type outcome struct {
+		name     string
+		result   sandbox.CommandResult
+		err      error
+		duration time.Duration
+		startMS  int64
+	}
+	started := time.Now()
+	done := make(chan outcome, 2)
+	for _, name := range []string{"parallel-a", "parallel-b"} {
+		name := name
+		go func() {
+			commandStarted := time.Now()
+			result, err := runE2ECommand(ctx, rt, workspace, "$started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); Write-Output ('"+name+" start=' + $started); Start-Sleep -Seconds 2; Write-Output '"+name+"'", sandbox.NetworkDisabled, nil)
+			done <- outcome{name: name, result: result, err: err, duration: time.Since(commandStarted), startMS: parseE2EStartMillis(result.Stdout, name)}
+		}()
+	}
+	starts := make([]int64, 0, 2)
+	for i := 0; i < 2; i++ {
+		select {
+		case got := <-done:
+			if got.err != nil {
+				t.Fatalf("%s concurrent command error = %v; result=%+v", got.name, got.err, got.result)
+			}
+			if !strings.Contains(got.result.Stdout, got.name) {
+				t.Fatalf("%s stdout = %q", got.name, got.result.Stdout)
+			}
+			if got.startMS == 0 {
+				t.Fatalf("%s stdout = %q, missing command start timestamp", got.name, got.result.Stdout)
+			}
+			starts = append(starts, got.startMS)
+			t.Logf("%s concurrent command completed in %s", got.name, got.duration)
+		case <-ctx.Done():
+			t.Fatalf("concurrent commands timed out: %v", ctx.Err())
+		}
+	}
+	elapsed := time.Since(started)
+	t.Logf("two concurrent sandbox commands completed in %s", elapsed)
+	if len(starts) == 2 && absInt64(starts[0]-starts[1]) > int64(1500*time.Millisecond/time.Millisecond) {
+		t.Fatalf("concurrent command start times were %dms apart, expected overlap", absInt64(starts[0]-starts[1]))
+	}
+	if elapsed > 8*time.Second {
+		t.Fatalf("two 2s sandbox commands took %s, expected overlapping execution", elapsed)
+	}
+}
+
+func parseE2EStartMillis(output string, name string) int64 {
+	prefix := name + " start="
+	for _, line := range strings.Split(output, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		ms, _ := strconv.ParseInt(value, 10, 64)
+		return ms
+	}
+	return 0
+}
+
+func absInt64(value int64) int64 {
+	if value < 0 {
+		return -value
+	}
+	return value
+}
+
+func seedManagedFirewallRulesByInternalNameE2E(ctx context.Context, t *testing.T) {
+	t.Helper()
+	script := strings.Join([]string{
+		"$ErrorActionPreference = 'Stop'",
+		"$ProgressPreference = 'SilentlyContinue'",
+		"$rules = @(",
+		"  @{ Name = 'CaelisSandbox-Offline-Block-NonLoopback'; Protocol = 'Any'; RemoteAddress = '0.0.0.0-126.255.255.255' },",
+		"  @{ Name = 'CaelisSandbox-Offline-Block-Loopback-TCP'; Protocol = 'TCP'; RemoteAddress = '127.0.0.0/8' },",
+		"  @{ Name = 'CaelisSandbox-Offline-Block-Loopback-UDP'; Protocol = 'UDP'; RemoteAddress = '127.0.0.0/8' }",
+		")",
+		"foreach ($rule in $rules) {",
+		"  Get-NetFirewallRule -PolicyStore PersistentStore -Name $rule.Name -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue",
+		"  New-NetFirewallRule -Name $rule.Name -DisplayName ('Caelis e2e stale rule ' + $rule.Name) -Group 'Caelis Sandbox' -Direction Outbound -Action Block -Profile Any -PolicyStore PersistentStore -Enabled True -Protocol $rule.Protocol -RemoteAddress $rule.RemoteAddress | Out-Null",
+		"}",
+	}, "\n")
+	result, err := winexec.Run(ctx, "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script}, winexec.Options{
+		Timeout:        60 * time.Second,
+		TraceComponent: "windows-e2e",
+		TraceName:      "seed_firewall_rules",
+		DisplayArgs:    []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", "<script>"},
+	})
+	if err != nil {
+		t.Fatalf("seed managed firewall rules by internal name: %v: %s", err, strings.TrimSpace(string(result.CombinedOutput())))
+	}
+}
+
+func assertManagedFirewallRulesAbsentE2E(t *testing.T) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	present, err := netpolicy.ManagedRulesPresentContext(ctx)
+	if err != nil {
+		t.Fatalf("ManagedRulesPresentContext() error = %v", err)
+	}
+	if len(present) != 0 {
+		t.Fatalf("managed firewall rules remain after reset: %v", present)
+	}
+}
+
+func assertLocalAccountMissingE2E(ctx context.Context, t *testing.T, kind string, name string) {
+	t.Helper()
+	result, err := winexec.Run(ctx, "net.exe", []string{kind, name}, winexec.Options{
+		Timeout:        10 * time.Second,
+		TraceComponent: "windows-e2e",
+		TraceName:      "account_absent",
+	})
+	if err == nil && result.ExitCode == 0 {
+		t.Fatalf("net %s %s unexpectedly succeeded after reset", kind, name)
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		t.Fatalf("net %s %s did not return: %v", kind, name, err)
+	}
+}
+
+func assertSandboxStateDirsAbsentE2E(t *testing.T, stateRoot string) {
+	t.Helper()
+	for _, dir := range []string{
+		filepath.Join(stateRoot, ".sandbox"),
+		filepath.Join(stateRoot, ".sandbox-bin"),
+		filepath.Join(stateRoot, ".sandbox-secrets"),
+	} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("sandbox state directory %s still exists or stat failed unexpectedly: %v", dir, err)
+		}
+	}
+}
+
 func verifyControlDirsDenyWriteE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
 	t.Helper()
 	for _, name := range []string{".git", ".codex", ".agents"} {
@@ -441,7 +745,7 @@ func runE2EListingCommandWithTimings(ctx context.Context, t *testing.T, rt sandb
 	}
 	t.Logf("workspace listing requireSetupReady completed in %s", time.Since(started))
 	started = time.Now()
-	if err := windowsRT.runner.refreshRequestACLs(req); err != nil {
+	if err := windowsRT.runner.refreshRequestACLs(ctx, req); err != nil {
 		t.Logf("workspace listing refreshRequestACLs failed in %s", time.Since(started))
 		return sandbox.CommandResult{}, err
 	}

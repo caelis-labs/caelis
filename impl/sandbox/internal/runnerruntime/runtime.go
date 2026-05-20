@@ -188,6 +188,9 @@ func (s *session) Wait(ctx context.Context, timeout time.Duration) (sandbox.Sess
 		if errors.Is(err, context.DeadlineExceeded) {
 			return s.Status(ctx)
 		}
+		if plainCommandExitError(err) {
+			return s.Status(ctx)
+		}
 		return sandbox.SessionStatus{}, err
 	}
 	return s.Status(ctx)
@@ -202,6 +205,16 @@ func (s *session) Result(ctx context.Context) (sandbox.CommandResult, error) {
 		result.Backend = s.backend
 	}
 	return sandbox.NormalizeSandboxPermissionFailure(result, err)
+}
+
+func plainCommandExitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.TrimSpace(err.Error())
+	return strings.HasPrefix(text, "exit status ") ||
+		strings.HasPrefix(text, "signal: ") ||
+		strings.HasPrefix(text, "process exited with code ")
 }
 
 func (s *session) Terminate(_ context.Context) error {

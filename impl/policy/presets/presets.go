@@ -278,7 +278,9 @@ func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
 		rules = append(rules, sandbox.PathRule{Path: path, Access: access})
 	}
 	appendRule(opts.WorkspaceRoot, sandbox.PathAccessReadWrite)
-	appendRule(opts.TempRoot, sandbox.PathAccessReadWrite)
+	if runtime.GOOS != "windows" {
+		appendRule(opts.TempRoot, sandbox.PathAccessReadWrite)
+	}
 	for _, path := range devWriteRoots {
 		appendRule(path, sandbox.PathAccessReadWrite)
 	}

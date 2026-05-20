@@ -63,6 +63,7 @@ func Build(input Input) Policy {
 	var denyRead []string
 	var denyWrite []string
 	var materializeDenyWrite []string
+	var hiddenPaths []string
 	for _, rule := range constraints.PathRules {
 		path := pathutil.Normalize(rule.Path)
 		if path == "" {
@@ -75,9 +76,7 @@ func Build(input Input) Policy {
 			writeRoots = append(writeRoots, path)
 			readRoots = append(readRoots, path)
 		case sandbox.PathAccessHidden:
-			denyRead = append(denyRead, path)
-			denyWrite = append(denyWrite, path)
-			materializeDenyWrite = append(materializeDenyWrite, path)
+			hiddenPaths = append(hiddenPaths, path)
 		}
 	}
 	for _, root := range writeRoots {
@@ -95,8 +94,23 @@ func Build(input Input) Policy {
 			materializeDenyWrite = append(materializeDenyWrite, path)
 		}
 	}
-	denyRead = append(denyRead, protectedUserSecretRoots()...)
-	denyWrite = append(denyWrite, protectedUserSecretRoots()...)
+	allowedRoots := append([]string{}, readRoots...)
+	allowedRoots = append(allowedRoots, writeRoots...)
+	for _, path := range hiddenPaths {
+		if !coveredByAnyRoot(path, allowedRoots) {
+			continue
+		}
+		denyRead = append(denyRead, path)
+		denyWrite = append(denyWrite, path)
+		materializeDenyWrite = append(materializeDenyWrite, path)
+	}
+	for _, path := range protectedUserSecretRoots() {
+		if !coveredByAnyRoot(path, allowedRoots) {
+			continue
+		}
+		denyRead = append(denyRead, path)
+		denyWrite = append(denyWrite, path)
+	}
 
 	return Policy{
 		ReadRoots:                 pathutil.Dedupe(readRoots),
@@ -105,6 +119,15 @@ func Build(input Input) Policy {
 		DenyWritePaths:            pathutil.Dedupe(denyWrite),
 		MaterializeDenyWritePaths: pathutil.Dedupe(materializeDenyWrite),
 		Network:                   networkIdentity(constraints.Network),
+	}
+}
+
+func CommonGlobalPolicy(writeRoots []string) Policy {
+	writeRoots = pathutil.CompactCovered(writeRoots)
+	return Policy{
+		ReadRoots:  pathutil.Dedupe(defaultReadRoots()),
+		WriteRoots: writeRoots,
+		Network:    NetworkOffline,
 	}
 }
 
@@ -151,6 +174,15 @@ func existingControlDirs(root string) []string {
 		}
 	}
 	return paths
+}
+
+func coveredByAnyRoot(path string, roots []string) bool {
+	for _, root := range roots {
+		if pathutil.IsUnder(path, root) {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

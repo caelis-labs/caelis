@@ -7,25 +7,30 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/netpolicy"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnertrace"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/winexec"
 	"golang.org/x/sys/windows/registry"
 )
 
 func Execute(payload Payload) error {
 	return ExecuteWithProgress(payload, nil)
 }
+
+const setupMaintenanceLockTimeout = 30 * time.Second
 
 func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 	payload = payload.Normalize()
@@ -35,9 +40,25 @@ func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 	if payload.Version != PayloadVersion {
 		return fmt.Errorf("windows setup: unsupported payload version %d", payload.Version)
 	}
+	if !payload.ExpiresAt.IsZero() && time.Now().After(payload.ExpiresAt) {
+		return fmt.Errorf("windows setup: operation %s expired before execution", strings.TrimSpace(payload.OperationID))
+	}
+	return win32.WithNamedMutex(context.Background(), setupMaintenanceMutexName(payload.StateRoot), setupMaintenanceLockTimeout, func() error {
+		if !payload.ExpiresAt.IsZero() && time.Now().After(payload.ExpiresAt) {
+			return fmt.Errorf("windows setup: operation %s expired before execution", strings.TrimSpace(payload.OperationID))
+		}
+		return executeWithProgressLocked(payload, progress)
+	})
+}
+
+func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 	switch payload.Kind {
 	case SetupKindReset:
-		return executeReset(payload, progress)
+		err := executeReset(payload, progress)
+		if err != nil {
+			writeResetError(payload, err)
+		}
+		return err
 	case SetupKindRuntimeRefresh:
 		return executeRuntimeRefresh(payload, progress)
 	case SetupKindWorkspaceOnly:
@@ -54,26 +75,27 @@ func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 		return fmt.Errorf("windows setup: administrator elevation is required")
 	}
 
+	const totalSteps = 13
 	dirs := setupstate.NewDirs(payload.StateRoot)
-	reportProgress(payload, progress, Progress{Phase: "state", Message: "preparing sandbox state directories", Step: 1, Total: 11})
+	reportProgress(payload, progress, Progress{Phase: "state", Message: "preparing sandbox state directories", Step: 1, Total: totalSteps})
 	if err := setupstate.EnsureDirs(dirs); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring sandbox local group", Step: 2, Total: 11})
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring sandbox local group", Step: 2, Total: totalSteps})
 	if err := ensureLocalGroup(GroupName); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring offline sandbox user", Step: 3, Total: 11})
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring offline sandbox user", Step: 3, Total: totalSteps})
 	offlinePassword, err := ensureLocalUser(payload.OfflineUsername)
 	if err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring online sandbox user", Step: 4, Total: 11})
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring online sandbox user", Step: 4, Total: totalSteps})
 	onlinePassword, err := ensureLocalUser(payload.OnlineUsername)
 	if err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "updating sandbox group membership", Step: 5, Total: 11})
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "updating sandbox group membership", Step: 5, Total: totalSteps})
 	if err := addUserToGroup(payload.OfflineUsername, GroupName); err != nil {
 		return err
 	}
@@ -86,31 +108,52 @@ func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 	if err := removeUserFromGroup(payload.OnlineUsername, "Administrators"); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "hiding sandbox users from Windows sign-in", Step: 6, Total: 12})
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "hiding sandbox users from Windows sign-in", Step: 6, Total: totalSteps})
 	hideSandboxUsers(payload.OfflineUsername, payload.OnlineUsername)
-	reportProgress(payload, progress, Progress{Phase: "state", Message: "protecting sandbox state directories", Step: 7, Total: 12})
+	reportProgress(payload, progress, Progress{Phase: "state", Message: "protecting sandbox state directories", Step: 7, Total: totalSteps})
 	if err := protectStateDirectories(dirs, payload.OwnerUsername); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing current workspace ACL policy", Step: 8, Total: 12})
-	if err := ApplyMissingPolicyACLs(payload.Policy, payload.OfflineUsername, payload.OnlineUsername); err != nil {
+	if policyHasACLTargets(payload.GlobalPolicy) {
+		reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing global sandbox ACL policy", Step: 8, Total: totalSteps})
+		if err := ApplyMissingPolicyACLsWithOptions(payload.GlobalPolicy, ApplyPolicyACLOptions{
+			StateRoot:                         payload.StateRoot,
+			Users:                             []string{payload.OfflineUsername, payload.OnlineUsername},
+			CleanupLegacyAncestorCapabilities: true,
+		}); err != nil {
+			return err
+		}
+	}
+	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing current workspace ACL policy", Step: 9, Total: totalSteps})
+	if err := ApplyMissingPolicyACLsWithOptions(payload.Policy, ApplyPolicyACLOptions{
+		StateRoot:                         payload.StateRoot,
+		Users:                             []string{payload.OfflineUsername, payload.OnlineUsername},
+		CleanupLegacyAncestorCapabilities: true,
+	}); err != nil {
+		return err
+	}
+	if err := prepareRunnerEnvironmentDirs(dirs, []string{payload.OfflineUsername, payload.OnlineUsername}, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
 		return err
 	}
 	if err := writeWorkspaceState(payload); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "firewall", Message: "refreshing Windows Firewall rules; this can take a while", Step: 9, Total: 12})
-	if err := netpolicy.Refresh(netpolicy.Config{
+	reportProgress(payload, progress, Progress{Phase: "firewall", Message: "refreshing Windows Firewall rules", Step: 10, Total: totalSteps})
+	if err := netpolicy.RefreshWithOptions(context.Background(), netpolicy.Config{
 		OfflineUsername: payload.OfflineUsername,
 		OnlineUsername:  payload.OnlineUsername,
+	}, netpolicy.ClearOptions{
+		Debugf: func(format string, args ...any) {
+			reportDebugProgress(payload, progress, fmt.Sprintf(format, args...))
+		},
 	}); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "secrets", Message: "writing sandbox credentials", Step: 10, Total: 12})
+	reportProgress(payload, progress, Progress{Phase: "secrets", Message: "writing sandbox credentials", Step: 11, Total: totalSteps})
 	if err := writeUsersFile(dirs.UsersPath, payload.OfflineUsername, offlinePassword, payload.OnlineUsername, onlinePassword); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "marker", Message: "writing setup marker", Step: 11, Total: 12})
+	reportProgress(payload, progress, Progress{Phase: "marker", Message: "writing setup marker", Step: 12, Total: totalSteps})
 	if err := setupstate.WriteMarker(dirs.MarkerPath, setupstate.Marker{
 		Version:         payload.Version,
 		RunnerHash:      payload.RunnerHash,
@@ -124,8 +167,17 @@ func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 	if err := setupstate.ClearError(dirs.ErrorPath); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "complete", Message: "Windows sandbox setup is ready", Step: 12, Total: 12, Done: true})
+	reportProgress(payload, progress, Progress{Phase: "complete", Message: "Windows sandbox setup is ready", Step: 13, Total: totalSteps, Done: true})
 	return nil
+}
+
+func setupMaintenanceMutexName(stateRoot string) string {
+	normalized := strings.ToLower(filepath.Clean(strings.TrimSpace(stateRoot)))
+	hash, err := setupstate.HashJSON(normalized)
+	if err != nil || len(hash) < 16 {
+		return `Local\CaelisSandboxSetup`
+	}
+	return `Local\CaelisSandboxSetup-` + hash[:16]
 }
 
 func executeReset(payload Payload, progress ProgressFunc) error {
@@ -137,55 +189,198 @@ func executeReset(payload Payload, progress ProgressFunc) error {
 		return fmt.Errorf("windows setup reset: administrator elevation is required")
 	}
 	dirs := setupstate.NewDirs(payload.StateRoot)
-	reportProgress(payload, progress, Progress{Phase: "reset", Message: "collecting sandbox state for cleanup", Step: 1, Total: 5})
-	users := sandboxUsersForCleanup(payload, dirs)
-	if record, err := setupstate.ReadWorkspace(dirs.WorkspacePath); err == nil {
-		cleanupRecordedWorkspaceACLs(record, users)
+	reportProgress(payload, progress, Progress{Phase: "reset", Message: "collecting sandbox state for cleanup", Step: 1, Total: 6})
+	plan := resetCleanupPlanFromState(payload, dirs)
+	reportDebugProgress(payload, progress, fmt.Sprintf("cleanup plan users=%d acl_roots=%d acl_principals=%d state_root=%s", len(plan.Users), len(plan.ACLRoots), len(plan.ACLPrincipals), payload.StateRoot))
+	reportProgress(payload, progress, Progress{Phase: "acl", Message: "removing recorded sandbox ACL grants", Step: 2, Total: 6})
+	cleanupResetPlanACLsWithProgress(payload, progress, plan)
+	reportProgress(payload, progress, Progress{Phase: "firewall", Message: "removing Windows sandbox firewall rules", Step: 3, Total: 6})
+	if err := netpolicy.ClearContextWithOptions(context.Background(), netpolicy.ClearOptions{
+		Debugf: func(format string, args ...any) {
+			reportDebugProgress(payload, progress, fmt.Sprintf(format, args...))
+		},
+	}); err != nil {
+		reportProgress(payload, progress, Progress{
+			Phase:   "firewall",
+			Message: "Windows sandbox firewall cleanup failed; continuing reset: " + err.Error(),
+			Step:    3,
+			Total:   6,
+		})
 	}
-	reportProgress(payload, progress, Progress{Phase: "firewall", Message: "removing Windows sandbox firewall rules", Step: 2, Total: 5})
-	if err := netpolicy.Clear(); err != nil {
-		return err
-	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "removing sandbox local users and group", Step: 3, Total: 5})
-	deleteSandboxUserListValues(users...)
-	for _, username := range users {
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "removing sandbox local users and group", Step: 4, Total: 6})
+	reportDebugProgress(payload, progress, fmt.Sprintf("removing sandbox account artifacts users=%d group=%s", len(plan.Users), plan.GroupName))
+	deleteSandboxUserListValues(plan.Users...)
+	for _, username := range plan.Users {
 		if err := deleteLocalUser(username); err != nil {
 			return err
 		}
 	}
-	if err := deleteLocalGroup(GroupName); err != nil {
+	if err := deleteLocalGroup(plan.GroupName); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "state", Message: "removing sandbox state directories", Step: 4, Total: 5})
-	for _, dir := range []string{dirs.Sandbox, dirs.Bin, dirs.Secrets} {
+	reportProgress(payload, progress, Progress{Phase: "state", Message: "removing sandbox state directories", Step: 5, Total: 6})
+	for _, dir := range plan.StateDirs {
 		if strings.TrimSpace(dir) == "" {
 			continue
 		}
+		reportDebugProgress(payload, progress, "removing sandbox state directory "+dir)
 		if err := os.RemoveAll(dir); err != nil {
 			return fmt.Errorf("remove sandbox state directory %s: %w", dir, err)
 		}
 	}
-	payload.ProgressPath = ""
-	reportProgress(payload, progress, Progress{Phase: "complete", Message: "Windows sandbox state reset complete", Step: 5, Total: 5, Done: true})
+	_ = setupstate.ClearError(dirs.ResetErrorPath)
+	reportProgress(payload, progress, Progress{Phase: "complete", Message: "Windows sandbox state reset complete", Step: 6, Total: 6, Done: true})
 	return nil
 }
 
+type resetCleanupPlan struct {
+	Version       int               `json:"version"`
+	OperationID   string            `json:"operation_id,omitempty"`
+	StateRoot     string            `json:"state_root,omitempty"`
+	GroupName     string            `json:"group_name,omitempty"`
+	Users         []string          `json:"users,omitempty"`
+	ACLRoots      []string          `json:"acl_roots,omitempty"`
+	ACLPrincipals []string          `json:"acl_principals,omitempty"`
+	StateDirs     []string          `json:"state_dirs,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
+func resetCleanupPlanFromState(payload Payload, dirs setupstate.Dirs) resetCleanupPlan {
+	plan := resetCleanupPlan{
+		Version:     1,
+		OperationID: strings.TrimSpace(payload.OperationID),
+		StateRoot:   strings.TrimSpace(payload.StateRoot),
+		GroupName:   GroupName,
+	}
+	plan.Users = append(plan.Users, sandboxUsersForCleanup(payload, dirs)...)
+	plan.StateDirs = append(plan.StateDirs, dirs.Sandbox, dirs.Bin, dirs.Secrets)
+	if record, err := setupstate.ReadWorkspace(dirs.WorkspacePath); err == nil {
+		plan.ACLRoots = append(plan.ACLRoots, recordedWorkspaceACLCleanupRoots(record)...)
+		targets := append([]string{GroupName, record.OfflineUsername, record.OnlineUsername}, plan.Users...)
+		targets = append(targets, record.CapabilitySIDs...)
+		for _, sid := range record.WriteRootCapabilitySIDs {
+			targets = append(targets, sid)
+		}
+		plan.ACLPrincipals = append(plan.ACLPrincipals, targets...)
+	}
+	if capStore, err := readCapabilityStore(dirs.CapPath); err == nil {
+		capRoots, capSIDs := capabilityStoreRootsAndSIDs(capStore)
+		plan.ACLRoots = append(plan.ACLRoots, capRoots...)
+		for _, root := range capRoots {
+			plan.ACLRoots = append(plan.ACLRoots, ancestorPaths(root)...)
+		}
+		plan.ACLPrincipals = append(plan.ACLPrincipals, capSIDs...)
+	}
+	plan.Users = dedupeStrings(plan.Users...)
+	plan.ACLRoots = pathutil.Dedupe(plan.ACLRoots)
+	plan.ACLPrincipals = dedupeStrings(plan.ACLPrincipals...)
+	plan.StateDirs = pathutil.Dedupe(plan.StateDirs)
+	return plan
+}
+
+func cleanupResetPlanACLs(plan resetCleanupPlan) {
+	cleanupResetPlanACLsWithProgress(Payload{}, nil, plan)
+}
+
+func cleanupResetPlanACLsWithProgress(payload Payload, progress ProgressFunc, plan resetCleanupPlan) {
+	roots := pathutil.Dedupe(plan.ACLRoots)
+	principals := dedupeStrings(plan.ACLPrincipals...)
+	runnertrace.Printf("windows-setup", "cleanup_reset_plan_acls roots=%d targets=%d", len(roots), len(principals))
+	if len(roots) == 0 || len(principals) == 0 {
+		return
+	}
+	existing := make([]string, 0, len(roots))
+	for _, root := range roots {
+		if pathExists(root) {
+			existing = append(existing, root)
+		}
+	}
+	if len(existing) == 0 {
+		return
+	}
+	type task struct {
+		index int
+		root  string
+	}
+	workers := 4
+	if len(existing) < workers {
+		workers = len(existing)
+	}
+	tasks := make(chan task)
+	var progressMu sync.Mutex
+	report := func(index int, root string) {
+		progressMu.Lock()
+		defer progressMu.Unlock()
+		reportProgress(payload, progress, Progress{
+			Phase:   "acl",
+			Message: fmt.Sprintf("removing recorded sandbox ACL grants (%d/%d): %s", index, len(existing), root),
+			Step:    2,
+			Total:   6,
+		})
+	}
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range tasks {
+				report(task.index, task.root)
+				removeACLPrincipals(task.root, principals)
+			}
+		}()
+	}
+	for i, root := range existing {
+		tasks <- task{index: i + 1, root: root}
+	}
+	close(tasks)
+	wg.Wait()
+}
+
+func writeResetError(payload Payload, err error) {
+	if err == nil {
+		return
+	}
+	dirs := setupstate.NewDirs(payload.StateRoot)
+	_ = setupstate.WriteError(dirs.ResetErrorPath, setupstate.ErrorReport{
+		Phase:   "reset",
+		Code:    "reset_failed",
+		Message: err.Error(),
+	})
+}
+
 func executeRuntimeRefresh(payload Payload, progress ProgressFunc) error {
+	done := runnertrace.Span("windows-setup", "runtime_refresh")
+	defer done()
 	dirs := setupstate.NewDirs(payload.StateRoot)
 	reportProgress(payload, progress, Progress{Phase: "refresh", Message: "validating existing sandbox setup", Step: 1, Total: 3})
+	validateDone := runnertrace.Span("windows-setup", "runtime_refresh.validate_global_setup")
 	if err := validateGlobalSetup(payload, dirs); err != nil {
+		validateDone()
 		return err
 	}
+	validateDone()
+	dirsDone := runnertrace.Span("windows-setup", "runtime_refresh.ensure_dirs")
 	if err := setupstate.EnsureDirs(dirs); err != nil {
+		dirsDone()
 		return err
 	}
+	dirsDone()
 	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing request ACL policy", Step: 2, Total: 3})
-	if err := ApplyMissingPolicyACLs(payload.Policy, payload.OfflineUsername, payload.OnlineUsername); err != nil {
+	if err := ApplyRuntimePolicyACLsWithOptions(payload.Policy, ApplyPolicyACLOptions{
+		StateRoot: payload.StateRoot,
+		Users:     []string{payload.OfflineUsername, payload.OnlineUsername},
+	}); err != nil {
 		return err
 	}
+	if err := prepareRunnerEnvironmentDirs(dirs, []string{payload.OfflineUsername, payload.OnlineUsername}, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
+		return err
+	}
+	clearDone := runnertrace.Span("windows-setup", "runtime_refresh.clear_error")
 	if err := setupstate.ClearError(dirs.ErrorPath); err != nil {
+		clearDone()
 		return err
 	}
+	clearDone()
 	reportProgress(payload, progress, Progress{Phase: "complete", Message: "request ACL policy is ready", Step: 3, Total: 3, Done: true})
 	return nil
 }
@@ -200,7 +395,14 @@ func executeWorkspaceOnly(payload Payload, progress ProgressFunc) error {
 		return err
 	}
 	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing current workspace ACL policy", Step: 2, Total: 3})
-	if err := ApplyMissingPolicyACLs(payload.Policy, payload.OfflineUsername, payload.OnlineUsername); err != nil {
+	if err := ApplyMissingPolicyACLsWithOptions(payload.Policy, ApplyPolicyACLOptions{
+		StateRoot:                         payload.StateRoot,
+		Users:                             []string{payload.OfflineUsername, payload.OnlineUsername},
+		CleanupLegacyAncestorCapabilities: true,
+	}); err != nil {
+		return err
+	}
+	if err := prepareRunnerEnvironmentDirs(dirs, []string{payload.OfflineUsername, payload.OnlineUsername}, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
 		return err
 	}
 	if err := writeWorkspaceState(payload); err != nil {
@@ -243,11 +445,23 @@ func reportProgress(payload Payload, progress ProgressFunc, update Progress) {
 			Step:    update.Step,
 			Total:   update.Total,
 			Done:    update.Done,
+			Debug:   update.Debug,
 		})
 	}
 	if progress != nil {
 		progress(update)
 	}
+}
+
+func reportDebugProgress(payload Payload, progress ProgressFunc, message string) {
+	if !payload.Debug {
+		return
+	}
+	reportProgress(payload, progress, Progress{
+		Phase:   "debug",
+		Message: strings.TrimSpace(message),
+		Debug:   true,
+	})
 }
 
 func ensureLocalGroup(group string) error {
@@ -272,14 +486,22 @@ func ensureLocalUser(username string) (string, error) {
 }
 
 func addUserToGroup(username string, group string) error {
-	if userInGroup(username, group) {
+	inGroup, err := userInGroup(username, group)
+	if err != nil {
+		return err
+	}
+	if inGroup {
 		return nil
 	}
 	return runNet("localgroup", group, username, "/add")
 }
 
 func removeUserFromGroup(username string, group string) error {
-	if !userInGroup(username, group) {
+	inGroup, err := userInGroup(username, group)
+	if err != nil {
+		return err
+	}
+	if !inGroup {
 		return nil
 	}
 	return runNet("localgroup", group, username, "/delete")
@@ -315,36 +537,63 @@ func deleteSandboxUserListValues(usernames ...string) {
 	}
 }
 
-func userInGroup(username string, group string) bool {
-	cmd := exec.Command("net.exe", "localgroup", group)
-	output, err := cmd.CombinedOutput()
+func userInGroup(username string, group string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := winexec.Run(ctx, "net.exe", []string{"localgroup", group}, winexec.Options{
+		Timeout:        5 * time.Second,
+		TraceComponent: "windows-setup",
+		TraceName:      "setup_command",
+	})
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false, fmt.Errorf("net.exe localgroup %s: %w", group, err)
+	}
 	if err != nil {
-		return false
+		return false, nil
 	}
 	username = strings.TrimSpace(username)
-	for _, line := range strings.Split(string(output), "\n") {
+	for _, line := range strings.Split(string(result.CombinedOutput()), "\n") {
 		member := strings.TrimSpace(strings.Trim(line, "\r"))
 		if strings.EqualFold(member, username) {
-			return true
+			return true, nil
 		}
 		if _, short, ok := strings.Cut(member, `\`); ok && strings.EqualFold(short, username) {
-			return true
+			return true, nil
 		}
 	}
-	return false
+	return false, nil
 }
 
 func localUserExists(username string) bool {
+	exists, _ := localUserExistsWithError(username)
+	return exists
+}
+
+func localUserExistsWithError(username string) (bool, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return false
+		return false, nil
 	}
-	return runNet("user", username) == nil
+	err := runNet("user", username)
+	if err == nil {
+		return true, nil
+	}
+	if isCommandContextError(err) {
+		return false, err
+	}
+	return false, nil
 }
 
 func deleteLocalUser(username string) error {
 	username = strings.TrimSpace(username)
-	if username == "" || !localUserExists(username) {
+	if username == "" {
+		return nil
+	}
+	exists, err := localUserExistsWithError(username)
+	if err != nil {
+		return err
+	}
+	if !exists {
 		return nil
 	}
 	return runNet("user", username, "/delete")
@@ -392,6 +641,80 @@ func protectStateDirectories(dirs setupstate.Dirs, ownerUser string) error {
 	return nil
 }
 
+func prepareRunnerEnvironmentDirs(dirs setupstate.Dirs, users []string, capabilitySIDs []string) error {
+	done := runnertrace.Span("windows-setup", "runtime_refresh.prepare_runner_environment_dirs")
+	defer done()
+	users = appendPrincipal(users...)
+	capabilitySIDs = appendPrincipal(capabilitySIDs...)
+	runnertrace.Printf("windows-setup", "runtime_refresh.prepare_runner_environment_dirs users=%d capabilities=%d", len(users), len(capabilitySIDs))
+	if strings.TrimSpace(dirs.Sandbox) == "" || len(users) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(dirs.Sandbox, 0o700); err != nil {
+		return err
+	}
+	traversePrincipals, err := sandboxAncestorPrincipalSIDs(users...)
+	if err != nil {
+		return err
+	}
+	traversePrincipals = append(traversePrincipals, capabilitySIDs...)
+	if err := grantPathWithInherit(dirs.Sandbox, traversePrincipals, "X", false); err != nil {
+		return fmt.Errorf("prepare runner sandbox state root: %w", err)
+	}
+
+	homeRoot := filepath.Join(dirs.Sandbox, "runner-home")
+	tmpRoot := filepath.Join(dirs.Sandbox, "runner-tmp")
+	for _, root := range []string{homeRoot, tmpRoot} {
+		if err := os.MkdirAll(root, 0o700); err != nil {
+			return err
+		}
+		if err := grantPathWithInherit(root, traversePrincipals, "X", false); err != nil {
+			return fmt.Errorf("prepare runner env root %s: %w", root, err)
+		}
+	}
+
+	for _, username := range users {
+		name := sandboxEnvName(username)
+		home := filepath.Join(homeRoot, name)
+		tmp := filepath.Join(tmpRoot, name)
+		localAppData := filepath.Join(home, "AppData", "Local")
+		roamingAppData := filepath.Join(home, "AppData", "Roaming")
+		envDirs := []string{home, tmp, localAppData, roamingAppData}
+		for _, dir := range envDirs {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return err
+			}
+		}
+		modifyPrincipals, err := sandboxPrincipalSIDs(username)
+		if err != nil {
+			return err
+		}
+		modifyPrincipals = append(modifyPrincipals, capabilitySIDs...)
+		for _, dir := range envDirs {
+			if err := grantPathWithInherit(dir, modifyPrincipals, "F", true); err != nil {
+				return fmt.Errorf("prepare runner env dir %s: %w", dir, err)
+			}
+		}
+	}
+	return nil
+}
+
+func sandboxEnvName(username string) string {
+	name := strings.TrimSpace(username)
+	if name == "" {
+		return "current"
+	}
+	return strings.NewReplacer(`\`, "_", `/`, "_", ":", "_").Replace(name)
+}
+
+func runnerEnvironmentCapabilitySIDs(policy winpolicy.Policy) []string {
+	values := append([]string{}, policy.CapabilitySIDs...)
+	for _, sid := range policy.WriteRootCapabilitySIDs {
+		values = append(values, sid)
+	}
+	return dedupeStrings(values...)
+}
+
 func writeWorkspaceState(payload Payload) error {
 	if payload.Kind == SetupKindRuntimeRefresh {
 		return nil
@@ -407,7 +730,7 @@ func writeWorkspaceState(payload Payload) error {
 	return setupstate.WriteWorkspace(path, setupstate.WorkspaceRecord{
 		Version:                 1,
 		WorkspaceRoot:           pathutil.Normalize(payload.WorkspaceRoot),
-		ReadRoots:               pathutil.Dedupe(payload.Policy.ReadRoots),
+		ReadRoots:               cleanupRecordReadRoots(payload.Policy.ReadRoots),
 		WriteRoots:              pathutil.Dedupe(payload.Policy.WriteRoots),
 		TraverseRoots:           policyTraverseRoots(payload.Policy),
 		DenyReadPaths:           pathutil.Dedupe(payload.Policy.DenyReadPaths),
@@ -420,6 +743,18 @@ func writeWorkspaceState(payload Payload) error {
 		OwnerUsername:           strings.TrimSpace(payload.OwnerUsername),
 		SetupVersion:            payload.Version,
 	})
+}
+
+func cleanupRecordReadRoots(readRoots []string) []string {
+	var out []string
+	for _, root := range readRoots {
+		root = pathutil.Normalize(root)
+		if root == "" || isDefaultReadRoot(root) {
+			continue
+		}
+		out = append(out, root)
+	}
+	return pathutil.Dedupe(out)
 }
 
 func cloneStringMap(in map[string]string) map[string]string {
@@ -456,13 +791,18 @@ func sandboxUsersForCleanup(payload Payload, dirs setupstate.Dirs) []string {
 }
 
 func listCaelisSandboxUsers() []string {
-	cmd := exec.Command("net.exe", "user")
-	output, err := cmd.CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	result, err := winexec.Run(ctx, "net.exe", []string{"user"}, winexec.Options{
+		Timeout:        3 * time.Second,
+		TraceComponent: "windows-setup",
+		TraceName:      "setup_command",
+	})
 	if err != nil {
 		return nil
 	}
 	var out []string
-	for _, token := range strings.Fields(string(output)) {
+	for _, token := range strings.Fields(string(result.CombinedOutput())) {
 		token = strings.TrimSpace(token)
 		if strings.HasPrefix(token, "CaelisSbxOff") || strings.HasPrefix(token, "CaelisSbxOn") || strings.EqualFold(token, OfflineUser) || strings.EqualFold(token, OnlineUser) {
 			out = append(out, token)
@@ -472,43 +812,141 @@ func listCaelisSandboxUsers() []string {
 }
 
 func cleanupRecordedWorkspaceACLs(record setupstate.WorkspaceRecord, users []string) {
-	roots := append([]string{record.WorkspaceRoot}, record.ReadRoots...)
-	roots = append(roots, record.WriteRoots...)
-	roots = append(roots, record.TraverseRoots...)
-	for _, root := range append(append([]string{}, record.ReadRoots...), record.WriteRoots...) {
-		roots = append(roots, ancestorPaths(root)...)
-	}
-	roots = append(roots, record.DenyReadPaths...)
-	roots = append(roots, record.DenyWritePaths...)
+	roots := recordedWorkspaceACLCleanupRoots(record)
 	targets := append([]string{GroupName, record.OfflineUsername, record.OnlineUsername}, users...)
 	targets = append(targets, record.CapabilitySIDs...)
 	for _, sid := range record.WriteRootCapabilitySIDs {
 		targets = append(targets, sid)
 	}
 	targets = dedupeStrings(targets...)
+	runnertrace.Printf("windows-setup", "cleanup_recorded_workspace_acls roots=%d targets=%d", len(roots), len(targets))
 	for _, root := range pathutil.Dedupe(roots) {
 		if !pathExists(root) {
 			continue
 		}
-		for _, target := range targets {
-			removeACLPrincipal(root, target)
+		removeACLPrincipals(root, targets)
+	}
+}
+
+func recordedWorkspaceACLCleanupRoots(record setupstate.WorkspaceRecord) []string {
+	readRoots := cleanupRecordReadRoots(record.ReadRoots)
+	roots := append([]string{record.WorkspaceRoot}, readRoots...)
+	roots = append(roots, record.WriteRoots...)
+	roots = append(roots, record.TraverseRoots...)
+	for _, root := range append(append([]string{}, readRoots...), record.WriteRoots...) {
+		roots = append(roots, ancestorPaths(root)...)
+	}
+	roots = append(roots, record.DenyReadPaths...)
+	roots = append(roots, record.DenyWritePaths...)
+	return pathutil.Dedupe(roots)
+}
+
+func cleanupCapabilityStoreACLs(store capabilityStoreSnapshot) {
+	roots, sids := capabilityStoreRootsAndSIDs(store)
+	runnertrace.Printf("windows-setup", "cleanup_capability_store_acls roots=%d sids=%d", len(roots), len(sids))
+	cleanupCapabilityAncestorACLs(roots, sids)
+	for _, root := range pathutil.Dedupe(roots) {
+		if pathExists(root) {
+			removeACLPrincipals(root, sids)
 		}
 	}
 }
 
-func removeACLPrincipal(path string, principal string) {
-	principal = icaclsPrincipal(principal)
-	if strings.TrimSpace(path) == "" || principal == "" {
-		return
-	}
-	runICACLSRemove(path, "/remove:g", principal)
-	runICACLSRemove(path, "/remove:d", principal)
+type capabilityStoreSnapshot struct {
+	WorkspaceByCWD     map[string]string `json:"workspace_by_cwd,omitempty"`
+	WritableRootByPath map[string]string `json:"writable_root_by_path,omitempty"`
 }
 
-func runICACLSRemove(path string, mode string, principal string) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_ = exec.CommandContext(ctx, "icacls.exe", path, mode, principal).Run()
+func readCapabilityStore(path string) (capabilityStoreSnapshot, error) {
+	if strings.TrimSpace(path) == "" {
+		return capabilityStoreSnapshot{}, fmt.Errorf("capability store path is required")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return capabilityStoreSnapshot{}, err
+	}
+	var store capabilityStoreSnapshot
+	if err := json.Unmarshal(data, &store); err != nil {
+		return capabilityStoreSnapshot{}, err
+	}
+	return store, nil
+}
+
+func capabilityStoreRootsAndSIDs(store capabilityStoreSnapshot) ([]string, []string) {
+	var roots []string
+	var sids []string
+	for root, sid := range store.WorkspaceByCWD {
+		roots = append(roots, pathutil.Normalize(root))
+		sids = append(sids, sid)
+	}
+	for root, sid := range store.WritableRootByPath {
+		roots = append(roots, pathutil.Normalize(root))
+		sids = append(sids, sid)
+	}
+	return pathutil.Dedupe(roots), dedupeStrings(sids...)
+}
+
+func cleanupLegacyCapabilityAncestorACLs(stateRoot string, policy winpolicy.Policy) error {
+	roots := append([]string{}, policy.ReadRoots...)
+	roots = append(roots, policy.WriteRoots...)
+	sids := append([]string{}, policy.CapabilitySIDs...)
+	if strings.TrimSpace(stateRoot) != "" {
+		if store, err := readCapabilityStore(setupstate.NewDirs(stateRoot).CapPath); err == nil {
+			storeRoots, storeSIDs := capabilityStoreRootsAndSIDs(store)
+			roots = append(roots, storeRoots...)
+			sids = append(sids, storeSIDs...)
+		}
+	}
+	cleanupCapabilityAncestorACLs(roots, sids)
+	return nil
+}
+
+func cleanupCapabilityAncestorACLs(roots []string, sids []string) {
+	sids = dedupeStrings(sids...)
+	if len(sids) == 0 {
+		return
+	}
+	var ancestors []string
+	for _, root := range roots {
+		ancestors = append(ancestors, ancestorPaths(root)...)
+	}
+	for _, ancestor := range pathutil.Dedupe(ancestors) {
+		if pathExists(ancestor) {
+			removeACLPrincipals(ancestor, sids)
+		}
+	}
+}
+
+func removeACLPrincipals(path string, principals []string) {
+	principals = dedupeStrings(principals...)
+	if strings.TrimSpace(path) == "" || len(principals) == 0 {
+		return
+	}
+	runICACLSRemove(path, "/remove:g", principals)
+	runICACLSRemove(path, "/remove:d", principals)
+}
+
+func runICACLSRemove(path string, mode string, principals []string) {
+	const chunkSize = 32
+	var normalized []string
+	for _, principal := range principals {
+		principal = icaclsPrincipal(principal)
+		if principal != "" {
+			normalized = append(normalized, principal)
+		}
+	}
+	for start := 0; start < len(normalized); start += chunkSize {
+		end := start + chunkSize
+		if end > len(normalized) {
+			end = len(normalized)
+		}
+		args := append([]string{path, mode}, normalized[start:end]...)
+		_, _ = winexec.Run(context.Background(), "icacls.exe", args, winexec.Options{
+			Timeout:        10 * time.Second,
+			TraceComponent: "windows-setup",
+			TraceName:      "icacls_remove",
+		})
+	}
 }
 
 func icaclsPrincipal(principal string) string {
@@ -538,6 +976,15 @@ func dedupeStrings(values ...string) []string {
 		out = append(out, value)
 	}
 	return out
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 type RequiredACE struct {
@@ -585,9 +1032,60 @@ func CheckPolicyACLs(policy winpolicy.Policy, users ...string) ([]ACLCheckResult
 	return out, nil
 }
 
+type ApplyPolicyACLOptions struct {
+	StateRoot                         string
+	Users                             []string
+	CleanupLegacyAncestorCapabilities bool
+}
+
+func policyHasACLTargets(policy winpolicy.Policy) bool {
+	return len(policy.ReadRoots) > 0 ||
+		len(policy.WriteRoots) > 0 ||
+		len(policy.DenyReadPaths) > 0 ||
+		len(policy.DenyWritePaths) > 0
+}
+
 func ApplyMissingPolicyACLs(policy winpolicy.Policy, users ...string) error {
-	principals := appendPrincipal(append([]string{GroupName}, users...)...)
+	return ApplyMissingPolicyACLsWithOptions(policy, ApplyPolicyACLOptions{Users: users})
+}
+
+func ApplyRuntimePolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOptions) error {
+	return applyPolicyACLsWithOptions(policy, opts)
+}
+
+func ApplyMissingPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOptions) error {
+	if opts.CleanupLegacyAncestorCapabilities {
+		if err := cleanupLegacyCapabilityAncestorACLs(opts.StateRoot, policy); err != nil {
+			return err
+		}
+	}
+	return applyPolicyACLsWithOptions(policy, opts)
+}
+
+func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOptions) error {
+	done := runnertrace.Span("windows-setup", "apply_policy_acls")
+	defer done()
+	users := appendPrincipal(opts.Users...)
+	principals, err := sandboxPrincipalSIDs(users...)
+	if err != nil {
+		return err
+	}
+	ancestorPrincipals, err := sandboxAncestorPrincipalSIDs(users...)
+	if err != nil {
+		return err
+	}
 	capabilities := appendPrincipal(policy.CapabilitySIDs...)
+	runnertrace.Printf(
+		"windows-setup",
+		"apply_policy_acls roots read=%d write=%d deny_write=%d deny_read=%d users=%d principals=%d capabilities=%d",
+		len(policy.ReadRoots),
+		len(policy.WriteRoots),
+		len(policy.DenyWritePaths),
+		len(policy.DenyReadPaths),
+		len(users),
+		len(principals),
+		len(capabilities),
+	)
 	writeRootKeys := map[string]struct{}{}
 	for _, root := range policy.WriteRoots {
 		key := pathutil.Key(root)
@@ -602,6 +1100,9 @@ func ApplyMissingPolicyACLs(policy winpolicy.Policy, users ...string) error {
 			materializeDenyWriteKeys[key] = struct{}{}
 		}
 	}
+	ancestorTasksSeen := map[string]struct{}{}
+	var ancestorTasks []aclTask
+	var tasks []aclTask
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
@@ -611,12 +1112,14 @@ func ApplyMissingPolicyACLs(policy winpolicy.Policy, users ...string) error {
 		}
 		targets := append([]string{}, principals...)
 		targets = append(targets, capabilities...)
-		if err := grantAncestorTraverse(root, targets); err != nil {
-			return err
-		}
-		if err := grantPath(root, targets, "RX"); err != nil {
-			return err
-		}
+		ancestorTasks = appendAncestorACLTasks(ancestorTasks, root, ancestorPrincipals, ancestorTasksSeen)
+		root := root
+		tasks = append(tasks, aclTask{
+			key: pathutil.Key(root),
+			run: func() error {
+				return grantPath(root, targets, "RX")
+			},
+		})
 	}
 	for _, root := range policy.WriteRoots {
 		sid := writeRootCapabilitySID(policy, root)
@@ -624,12 +1127,14 @@ func ApplyMissingPolicyACLs(policy winpolicy.Policy, users ...string) error {
 		if sid != "" {
 			targets = append(targets, sid)
 		}
-		if err := grantAncestorTraverse(root, targets); err != nil {
-			return err
-		}
-		if err := grantPath(root, targets, "M"); err != nil {
-			return err
-		}
+		ancestorTasks = appendAncestorACLTasks(ancestorTasks, root, ancestorPrincipals, ancestorTasksSeen)
+		root := root
+		tasks = append(tasks, aclTask{
+			key: pathutil.Key(root),
+			run: func() error {
+				return grantPath(root, targets, "M")
+			},
+		})
 	}
 	for _, root := range policy.DenyWritePaths {
 		targets := append([]string{}, principals...)
@@ -643,20 +1148,137 @@ func ApplyMissingPolicyACLs(policy winpolicy.Policy, users ...string) error {
 				return fmt.Errorf("materialize deny-write path %s: %w", root, err)
 			}
 		}
-		if err := denyPath(root, targets, "W"); err != nil {
-			return err
-		}
+		root := root
+		tasks = append(tasks, aclTask{
+			key: pathutil.Key(root),
+			run: func() error {
+				return denyPath(root, targets, "W")
+			},
+		})
 	}
 	for _, root := range policy.DenyReadPaths {
-		if err := denyPath(root, principals, "RX"); err != nil {
+		root := root
+		tasks = append(tasks, aclTask{
+			key: pathutil.Key(root),
+			run: func() error {
+				return denyPath(root, principals, "RX")
+			},
+		})
+	}
+	if err := runACLTasksSerial("ancestor_acl_tasks", ancestorTasks); err != nil {
+		return err
+	}
+	return runACLTasks(tasks)
+}
+
+type aclTask struct {
+	key string
+	run func() error
+}
+
+func appendAncestorACLTasks(tasks []aclTask, root string, principals []string, seen map[string]struct{}) []aclTask {
+	ancestors := ancestorPaths(root)
+	for i := len(ancestors) - 1; i >= 0; i-- {
+		ancestor := ancestors[i]
+		key := pathutil.Key(ancestor)
+		if key == "" {
+			continue
+		}
+		if seen != nil {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		ancestorPath := ancestor
+		targets := append([]string(nil), principals...)
+		tasks = append(tasks, aclTask{
+			key: key,
+			run: func() error {
+				return grantPathWithInherit(ancestorPath, targets, "X", false)
+			},
+		})
+	}
+	return tasks
+}
+
+func runACLTasksSerial(name string, tasks []aclTask) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	done := runnertrace.Span("windows-setup", name)
+	defer done()
+	runnertrace.Printf("windows-setup", "%s count=%d", name, len(tasks))
+	for _, task := range tasks {
+		if task.run == nil {
+			continue
+		}
+		if err := task.run(); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
+func runACLTasks(tasks []aclTask) error {
+	if len(tasks) == 0 {
+		return nil
+	}
+	done := runnertrace.Span("windows-setup", "acl_tasks")
+	defer done()
+	runnertrace.Printf("windows-setup", "acl_tasks count=%d", len(tasks))
+	groups := make(map[string][]func() error)
+	order := make([]string, 0, len(tasks))
+	for i, task := range tasks {
+		if task.run == nil {
+			continue
+		}
+		key := strings.TrimSpace(task.key)
+		if key == "" {
+			key = fmt.Sprintf("__task_%d", i)
+		}
+		if _, ok := groups[key]; !ok {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], task.run)
+	}
+	const maxConcurrent = 8
+	sem := make(chan struct{}, maxConcurrent)
+	errs := make(chan error, len(tasks))
+	var wg sync.WaitGroup
+	for _, key := range order {
+		group := append([]func() error(nil), groups[key]...)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			for _, task := range group {
+				if err := task(); err != nil {
+					errs <- err
+					return
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	var messages []string
+	for err := range errs {
+		if err != nil {
+			messages = append(messages, err.Error())
+		}
+	}
+	if len(messages) > 0 {
+		return fmt.Errorf("%s", strings.Join(messages, "; "))
+	}
+	return nil
+}
+
 func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policyACLTarget {
-	principals := appendPrincipal(append([]string{GroupName}, users...)...)
+	users = appendPrincipal(users...)
+	principals := sandboxPrincipals(users...)
+	ancestorPrincipals := sandboxAncestorPrincipals(users...)
 	capabilities := appendPrincipal(policy.CapabilitySIDs...)
 	writeRootKeys := map[string]struct{}{}
 	for _, root := range policy.WriteRoots {
@@ -666,6 +1288,7 @@ func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policy
 		}
 	}
 	var out []policyACLTarget
+	ancestorTargetsSeen := map[string]struct{}{}
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
@@ -678,7 +1301,7 @@ func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policy
 		}
 		targets := append([]string{}, principals...)
 		targets = append(targets, capabilities...)
-		out = appendAncestorACLTargets(out, root, targets)
+		out = appendAncestorACLTargets(out, root, ancestorPrincipals, ancestorTargetsSeen)
 		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "RX", acl.Grant)})
 	}
 	for _, root := range policy.WriteRoots {
@@ -690,7 +1313,7 @@ func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policy
 		if sid != "" {
 			targets = append(targets, sid)
 		}
-		out = appendAncestorACLTargets(out, root, targets)
+		out = appendAncestorACLTargets(out, root, ancestorPrincipals, ancestorTargetsSeen)
 		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "M", acl.Grant)})
 	}
 	for _, root := range policy.DenyWritePaths {
@@ -733,10 +1356,17 @@ func policyTraverseRoots(policy winpolicy.Policy) []string {
 	return pathutil.Dedupe(roots)
 }
 
-func appendAncestorACLTargets(out []policyACLTarget, root string, principals []string) []policyACLTarget {
+func appendAncestorACLTargets(out []policyACLTarget, root string, principals []string, seen map[string]struct{}) []policyACLTarget {
 	for _, ancestor := range ancestorPaths(root) {
 		if !pathExists(ancestor) {
 			continue
+		}
+		key := pathutil.Key(ancestor)
+		if seen != nil {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
 		}
 		out = append(out, policyACLTarget{Path: ancestor, Entries: aclEntries(principals, "X", acl.Grant, false)})
 	}
@@ -782,6 +1412,58 @@ func appendPrincipal(values ...string) []string {
 	return out
 }
 
+func sandboxPrincipals(users ...string) []string {
+	return appendPrincipal(append([]string{GroupName}, users...)...)
+}
+
+func sandboxPrincipalSIDs(users ...string) ([]string, error) {
+	return resolvePrincipalSIDs(sandboxPrincipals(users...)...)
+}
+
+func sandboxAncestorPrincipals(users ...string) []string {
+	targets := appendPrincipal(append([]string{GroupName}, users...)...)
+	if len(targets) > 0 {
+		return targets
+	}
+	return []string{GroupName}
+}
+
+func sandboxAncestorPrincipalSIDs(users ...string) ([]string, error) {
+	return resolvePrincipalSIDs(sandboxAncestorPrincipals(users...)...)
+}
+
+func resolvePrincipalSIDs(principals ...string) ([]string, error) {
+	values := appendPrincipal(principals...)
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		resolved := strings.TrimSpace(value)
+		if resolved == "" {
+			continue
+		}
+		if !looksLikeSID(resolved) {
+			lookupStarted := time.Now()
+			sid, err := win32.LookupAccountSIDString(resolved)
+			if err != nil {
+				return nil, fmt.Errorf("resolve principal %s SID: %w", resolved, err)
+			}
+			runnertrace.Printf("windows-setup", "resolve_principal_sid principal=%q duration=%s", resolved, time.Since(lookupStarted).Round(time.Millisecond))
+			resolved = sid
+		}
+		key := strings.ToUpper(strings.TrimSpace(resolved))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, strings.TrimSpace(resolved))
+	}
+	return out, nil
+}
+
+func looksLikeSID(value string) bool {
+	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(value)), "S-1-")
+}
+
 func writeRootCapabilitySID(policy winpolicy.Policy, root string) string {
 	if len(policy.WriteRootCapabilitySIDs) == 0 {
 		return ""
@@ -809,7 +1491,18 @@ func isDefaultReadRoot(path string) bool {
 }
 
 func grantAncestorTraverse(path string, principals []string) error {
+	return grantAncestorTraverseOnce(path, principals, nil)
+}
+
+func grantAncestorTraverseOnce(path string, principals []string, seen map[string]struct{}) error {
 	for _, ancestor := range ancestorPaths(path) {
+		key := pathutil.Key(ancestor)
+		if seen != nil {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
 		if err := grantPathWithInherit(ancestor, principals, "X", false); err != nil {
 			return err
 		}
@@ -828,11 +1521,11 @@ func ancestorPaths(path string) []string {
 		return nil
 	}
 	var ancestors []string
-	for {
-		if parent == "" {
+	for parent != "" {
+		if isVolumeRoot(parent) {
 			break
 		}
-		if isVolumeRoot(parent) {
+		if isUserProfileRootOrAbove(parent) {
 			break
 		}
 		ancestors = append(ancestors, parent)
@@ -843,6 +1536,23 @@ func ancestorPaths(path string) []string {
 		parent = next
 	}
 	return pathutil.Dedupe(ancestors)
+}
+
+func isUserProfileRootOrAbove(path string) bool {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return false
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || strings.TrimSpace(home) == "" {
+		return false
+	}
+	pathKey := pathutil.Key(path)
+	homeKey := pathutil.Key(home)
+	if pathKey == "" || homeKey == "" {
+		return false
+	}
+	return pathKey == homeKey || pathutil.IsUnder(home, path)
 }
 
 func isVolumeRoot(path string) bool {
@@ -864,6 +1574,8 @@ func grantPathWithInherit(path string, principals []string, rights string, inher
 	if path == "" {
 		return nil
 	}
+	done := traceACLPath("grant", path, principals, rights, inherit)
+	defer done()
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -891,6 +1603,8 @@ func denyPath(path string, principals []string, rights string) error {
 	if path == "" {
 		return nil
 	}
+	done := traceACLPath("deny", path, principals, rights, true)
+	defer done()
 	if _, err := os.Stat(path); err != nil {
 		if os.IsNotExist(err) {
 			return nil
@@ -913,8 +1627,21 @@ func denyPath(path string, principals []string, rights string) error {
 	return acl.ModifyFileDACL(path, entries...)
 }
 
+func traceACLPath(action string, path string, principals []string, rights string, inherit bool) func() {
+	if !runnertrace.Enabled() {
+		return func() {}
+	}
+	started := time.Now()
+	runnertrace.Printf("windows-setup", "acl.%s path=%q principals=%d rights=%s inherit=%t start", action, path, len(appendPrincipal(principals...)), rights, inherit)
+	return func() {
+		runnertrace.Printf("windows-setup", "acl.%s path=%q done duration=%s", action, path, time.Since(started).Round(time.Millisecond))
+	}
+}
+
 func aclRights(rights string) acl.Rights {
 	switch strings.ToUpper(strings.TrimSpace(rights)) {
+	case "F":
+		return acl.FullControl
 	case "M":
 		return acl.Modify
 	case "W":
@@ -971,13 +1698,44 @@ func runCommand(name string, args ...string) error {
 }
 
 func runCommandWithInput(name string, input string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	if strings.TrimSpace(input) != "" {
-		cmd.Stdin = strings.NewReader(input)
+	displayArgs := redactedCommandArgs(name, args)
+	result, err := winexec.Run(context.Background(), name, args, winexec.Options{
+		Timeout:        30 * time.Second,
+		Stdin:          []byte(input),
+		TraceComponent: "windows-setup",
+		TraceName:      "setup_command",
+		DisplayArgs:    displayArgs,
+	})
+	display := strings.Join(displayArgs, " ")
+	if isCommandContextError(err) {
+		return fmt.Errorf("%s %s: %w", name, display, err)
 	}
-	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
+		return fmt.Errorf("%s %s: %w: %s", name, display, err, strings.TrimSpace(string(result.CombinedOutput())))
 	}
 	return nil
+}
+
+func redactedCommandArgs(name string, args []string) []string {
+	out := append([]string(nil), args...)
+	if !strings.EqualFold(strings.TrimSpace(name), "net.exe") {
+		return out
+	}
+	if len(out) >= 3 && strings.EqualFold(out[0], "user") {
+		operation := ""
+		for _, arg := range out[2:] {
+			if strings.EqualFold(arg, "/add") || strings.EqualFold(arg, "/delete") {
+				operation = strings.ToLower(arg)
+				break
+			}
+		}
+		if operation != "/delete" {
+			out[2] = "<redacted>"
+		}
+	}
+	return out
+}
+
+func isCommandContextError(err error) bool {
+	return errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
 }

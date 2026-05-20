@@ -275,6 +275,7 @@ func (s *Stack) installBuiltinACPAgent(ctx context.Context, name string, base as
 		return assembly.AgentConfig{}, err
 	}
 	cmd := exec.CommandContext(ctx, npm, "install", "--prefix", root, npmInstallSpecForExec(npm, installSpec))
+	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "npm_config_cache="+filepath.Join(root, "npm-cache"))
 	output, err := cmd.CombinedOutput()
 	if err != nil {

@@ -33,6 +33,27 @@ func TestProgramSenderDropsAfterClose(t *testing.T) {
 	}
 }
 
+func TestProgramSenderCancelActiveRunsCancelsRunContext(t *testing.T) {
+	sender := &ProgramSender{}
+	ctx, finish := sender.beginRunContext(context.Background())
+	defer finish()
+
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("run context error before cancel = %v", err)
+	}
+	if !sender.CancelActiveRuns() {
+		t.Fatal("CancelActiveRuns() = false, want true")
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("run context was not canceled")
+	}
+	if sender.CancelActiveRuns() {
+		t.Fatal("CancelActiveRuns() = true after clearing active runs, want false")
+	}
+}
+
 func TestDiagnosticsReportsProgramSenderDropsAfterClose(t *testing.T) {
 	sender := &ProgramSender{}
 	sender.Close()
@@ -1640,8 +1661,11 @@ func TestSlashSandboxSetupCallsDriver(t *testing.T) {
 	if !noticeMessagesContain(msgs, "sandbox setup complete") {
 		t.Fatalf("slashSandbox(setup) messages = %#v, want completion notice", msgs)
 	}
-	if !noticeMessagesContain(msgs, "sandbox setup [1/2]: refreshing Windows Firewall rules") {
-		t.Fatalf("slashSandbox(setup) messages = %#v, want setup progress notice", msgs)
+	if !sandboxProgressMessagesContain(msgs, "refreshing Windows Firewall rules") {
+		t.Fatalf("slashSandbox(setup) messages = %#v, want setup progress message", msgs)
+	}
+	if noticeMessagesContain(msgs, "refreshing Windows Firewall rules") {
+		t.Fatalf("slashSandbox(setup) messages = %#v, want progress outside transcript notices", msgs)
 	}
 }
 
@@ -1705,6 +1729,16 @@ func noticeMessagesContain(messages []tea.Msg, text string) bool {
 	return false
 }
 
+func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
+	for _, msg := range messages {
+		progress, ok := msg.(SandboxProgressMsg)
+		if ok && strings.Contains(progress.Message, text) {
+			return true
+		}
+	}
+	return false
+}
+
 type bridgeTestDriver struct {
 	status              tuidriver.StatusSnapshot
 	connectStatus       tuidriver.StatusSnapshot
@@ -1721,6 +1755,7 @@ type bridgeTestDriver struct {
 	removeAgentCalls    int
 	handoffAgentCalls   int
 	prepareSandboxCalls int
+	resetSandboxCalls   int
 	compactCalls        int
 	lastConnect         tuidriver.ConnectConfig
 	lastModelAlias      string
@@ -1950,6 +1985,23 @@ func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.Status
 		Message: "refreshing Windows Firewall rules",
 		Step:    1,
 		Total:   2,
+	})
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Message: "debug-only setup detail",
+		Debug:   true,
+	})
+	return d.status, nil
+}
+func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+	d.resetSandboxCalls++
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Message: "removing Windows sandbox firewall rules",
+		Step:    3,
+		Total:   6,
+	})
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Message: "debug-only reset detail",
+		Debug:   true,
 	})
 	return d.status, nil
 }

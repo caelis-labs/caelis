@@ -127,6 +127,63 @@ func TestBuildFullAccessSkipsRoots(t *testing.T) {
 	}
 }
 
+func TestCommonGlobalPolicyIncludesCommonWriteRootsWithoutSecretDenies(t *testing.T) {
+	commonRoot := filepath.Join(t.TempDir(), "cache")
+	p := CommonGlobalPolicy([]string{commonRoot})
+
+	if !containsPath(p.WriteRoots, commonRoot) {
+		t.Fatalf("WriteRoots = %#v, want %q", p.WriteRoots, commonRoot)
+	}
+	if len(p.DenyReadPaths) != 0 || len(p.DenyWritePaths) != 0 {
+		t.Fatalf("secret deny paths = read %#v write %#v, want no global host profile ACL targets", p.DenyReadPaths, p.DenyWritePaths)
+	}
+	if p.Network != NetworkOffline {
+		t.Fatalf("Network = %q, want offline", p.Network)
+	}
+}
+
+func TestCommonGlobalPolicyCompactsCoveredWriteRoots(t *testing.T) {
+	commonRoot := filepath.Join(t.TempDir(), "cache")
+	childRoot := filepath.Join(commonRoot, "go-build")
+	p := CommonGlobalPolicy([]string{childRoot, commonRoot})
+
+	if !containsPath(p.WriteRoots, commonRoot) {
+		t.Fatalf("WriteRoots = %#v, want parent %q", p.WriteRoots, commonRoot)
+	}
+	if containsPath(p.WriteRoots, childRoot) {
+		t.Fatalf("WriteRoots = %#v, want covered child removed", p.WriteRoots)
+	}
+}
+
+func TestBuildSkipsProtectedUserSecretRootsOutsideAllowedRoots(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+
+	p := Build(Input{Config: sandbox.Config{CWD: workspace}})
+	for _, root := range protectedUserSecretRoots() {
+		if containsPath(p.DenyReadPaths, root) || containsPath(p.DenyWritePaths, root) {
+			t.Fatalf("policy denies = read %#v write %#v, did not expect host profile root %q outside allowed roots", p.DenyReadPaths, p.DenyWritePaths, root)
+		}
+	}
+}
+
+func TestBuildKeepsProtectedUserSecretRootsUnderAllowedRoot(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	p := Build(Input{Config: sandbox.Config{CWD: home}})
+	want := filepath.Join(home, ".ssh")
+	if !containsPath(p.DenyReadPaths, want) || !containsPath(p.DenyWritePaths, want) {
+		t.Fatalf("policy denies = read %#v write %#v, want protected root %q under allowed workspace", p.DenyReadPaths, p.DenyWritePaths, want)
+	}
+	if containsPath(p.MaterializeDenyWritePaths, want) {
+		t.Fatalf("MaterializeDenyWritePaths = %#v, did not expect protected root %q to be created", p.MaterializeDenyWritePaths, want)
+	}
+}
+
 func TestBuildNetworkModes(t *testing.T) {
 	disabled := Build(Input{Config: sandbox.Config{CWD: t.TempDir()}, Constraints: sandbox.Constraints{
 		Network: sandbox.NetworkDisabled,

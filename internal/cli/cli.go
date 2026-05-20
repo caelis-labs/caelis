@@ -54,7 +54,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
 		}
 		switch subcommand := strings.ToLower(strings.TrimSpace(args[1])); subcommand {
-		case "setup", "reset", "clean":
+		case "setup", "reset":
 			sandboxSubcommand = subcommand
 		default:
 			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
@@ -159,7 +159,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		switch sandboxSubcommand {
 		case "setup":
 			return runSandboxSetup(ctx, stack, outFmt, stdout)
-		case "reset", "clean":
+		case "reset":
 			return runSandboxReset(ctx, stack, outFmt, stdout)
 		}
 	}

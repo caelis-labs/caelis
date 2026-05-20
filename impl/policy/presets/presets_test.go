@@ -189,7 +189,7 @@ func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
 	if decision.Action != policy.ActionAllow {
 		t.Fatalf("Action = %q, want allow", decision.Action)
 	}
-	for _, root := range []string{
+	roots := []string{
 		filepath.Join(home, ".xdg-cache"),
 		filepath.Join(home, "custom-go-build"),
 		filepath.Join(home, "custom-go-mod"),
@@ -200,10 +200,40 @@ func TestDefaultModeAddsDeveloperCacheWriteRoots(t *testing.T) {
 		filepath.Join(home, ".custom-cargo", "git"),
 		filepath.Join(home, ".custom-gradle", "caches"),
 		filepath.Join(home, ".m2", "repository"),
-	} {
+	}
+	if runtime.GOOS == "windows" {
+		for _, root := range roots {
+			if hasPathRule(decision.Constraints.PathRules, root, sandbox.PathAccessReadWrite) {
+				t.Fatalf("PathRules = %#v, did not expect Windows host developer cache write root %q", decision.Constraints.PathRules, root)
+			}
+		}
+		return
+	}
+	for _, root := range roots {
 		if !hasPathRule(decision.Constraints.PathRules, root, sandbox.PathAccessReadWrite) {
 			t.Fatalf("PathRules = %#v, want default developer cache write root %q", decision.Constraints.PathRules, root)
 		}
+	}
+}
+
+func TestDefaultModeSkipsDefaultTempWriteRootOnWindows(t *testing.T) {
+	t.Parallel()
+
+	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("go test ./...", false))
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("Action = %q, want allow", decision.Action)
+	}
+	if runtime.GOOS == "windows" {
+		if hasPathRule(decision.Constraints.PathRules, testTempRoot(), sandbox.PathAccessReadWrite) {
+			t.Fatalf("PathRules = %#v, did not expect Windows host temp write root %q", decision.Constraints.PathRules, testTempRoot())
+		}
+		return
+	}
+	if !hasPathRule(decision.Constraints.PathRules, testTempRoot(), sandbox.PathAccessReadWrite) {
+		t.Fatalf("PathRules = %#v, want default temp write root %q", decision.Constraints.PathRules, testTempRoot())
 	}
 }
 

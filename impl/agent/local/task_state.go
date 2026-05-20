@@ -176,5 +176,7 @@ func plainTerminalExitError(err error) bool {
 		return false
 	}
 	text := strings.TrimSpace(err.Error())
-	return strings.HasPrefix(text, "exit status ") || strings.HasPrefix(text, "signal: ")
+	return strings.HasPrefix(text, "exit status ") ||
+		strings.HasPrefix(text, "signal: ") ||
+		strings.HasPrefix(text, "process exited with code ")
 }

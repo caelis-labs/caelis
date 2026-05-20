@@ -119,6 +119,13 @@ func (tm *taskRuntime) waitCommand(ctx context.Context, task *commandTask, yield
 	if err != nil {
 		return taskapi.Snapshot{}, err
 	}
+	return tm.completeCommandTaskWithStatus(ctx, task, status)
+}
+
+func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *commandTask, status sandbox.SessionStatus) (taskapi.Snapshot, error) {
+	if task == nil {
+		return taskapi.Snapshot{}, fmt.Errorf("impl/agent/local: task is required")
+	}
 	stdout, stderr, nextStdout, nextStderr, err := task.session.ReadOutput(ctx, task.stdoutCursor, task.stderrCursor)
 	if err != nil {
 		return taskapi.Snapshot{}, err
@@ -183,7 +190,7 @@ func (tm *taskRuntime) waitCommand(ctx context.Context, task *commandTask, yield
 	if detail, ok := sandbox.SandboxPermissionDetail(result, resultErr); ok {
 		task.result["error"] = detail
 		task.result["error_code"] = string(tool.ErrorCodeSandboxDenied)
-	} else if resultErr != nil && strings.TrimSpace(finalText) == "(no output)" {
+	} else if resultErr != nil && strings.TrimSpace(finalText) == "(no output)" && !plainTerminalExitError(resultErr) {
 		task.result["error"] = strings.TrimSpace(resultErr.Error())
 		if code, _ := tool.ErrorPayload(resultErr)["error_code"].(string); code != "" {
 			task.result["error_code"] = code
@@ -211,6 +218,13 @@ func (tm *taskRuntime) failCommandTaskIfStopped(ctx context.Context, task *comma
 	status, statusErr := task.session.Status(context.WithoutCancel(ctx))
 	if statusErr == nil && status.Running {
 		return taskapi.Snapshot{}, cause
+	}
+	if statusErr == nil && plainTerminalExitError(cause) {
+		snapshot, err := tm.completeCommandTaskWithStatus(context.WithoutCancel(ctx), task, status)
+		if err == nil {
+			return snapshot, nil
+		}
+		return tm.failCommandTask(ctx, task, err)
 	}
 	return tm.failCommandTask(ctx, task, cause)
 }

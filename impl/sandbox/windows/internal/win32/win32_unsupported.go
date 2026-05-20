@@ -3,15 +3,22 @@
 package win32
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"runtime"
+	"time"
 )
 
 type LogonCredentials struct {
 	Username string
 	Domain   string
 	Password string
+}
+
+type LogonProcessOptions struct {
+	LoadProfile bool
+	Env         []string
 }
 
 type CapabilitySIDs struct {
@@ -48,11 +55,19 @@ func IsElevated() (bool, error) {
 	return false, fmt.Errorf("win32: unsupported on %s", runtime.GOOS)
 }
 
+func WithNamedMutex(context.Context, string, time.Duration, func() error) error {
+	return fmt.Errorf("win32: named mutex unsupported on %s", runtime.GOOS)
+}
+
 func ShellExecuteRunAs(string, string, string) error {
 	return fmt.Errorf("win32: ShellExecute runas unsupported on %s", runtime.GOOS)
 }
 
 func RunElevatedAndWait(string, []string, string) error {
+	return fmt.Errorf("win32: elevated process launch unsupported on %s", runtime.GOOS)
+}
+
+func RunElevatedAndWaitContext(context.Context, string, []string, string) error {
 	return fmt.Errorf("win32: elevated process launch unsupported on %s", runtime.GOOS)
 }
 
@@ -84,12 +99,16 @@ func ValidateCredentials(LogonCredentials) error {
 	return fmt.Errorf("win32: credential validation unsupported on %s", runtime.GOOS)
 }
 
-func StartProcessWithLogon(LogonCredentials, string, []string, string) (*Process, error) {
+func StartProcessWithLogon(LogonCredentials, string, []string, string, ...LogonProcessOptions) (*Process, error) {
 	return nil, fmt.Errorf("win32: CreateProcessWithLogon unsupported on %s", runtime.GOOS)
 }
 
 func StartProcessAsUser(Token, string, []string, string, []string) (*Process, error) {
 	return nil, fmt.Errorf("win32: CreateProcessAsUser unsupported on %s", runtime.GOOS)
+}
+
+func DecodeConsoleOutputToUTF8(data []byte) ([]byte, error) {
+	return append([]byte(nil), data...), nil
 }
 
 func (p *Process) PID() int {

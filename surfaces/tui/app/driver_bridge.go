@@ -26,10 +26,19 @@ type ProgramSender struct {
 	mu                sync.Mutex
 	ctx               context.Context
 	cancel            context.CancelFunc
+	nextRunID         uint64
+	runCancels        []activeRunCancel
 	forwarders        sync.WaitGroup
 	closed            atomic.Bool
 	droppedAfterClose atomic.Uint64
 }
+
+type activeRunCancel struct {
+	id     uint64
+	cancel context.CancelFunc
+}
+
+type programSenderBoundContextKey struct{}
 
 const programSenderCloseTimeout = 250 * time.Millisecond
 
@@ -64,7 +73,14 @@ func (s *ProgramSender) Close() {
 	}
 	s.mu.Lock()
 	cancel := s.cancel
+	runCancels := append([]activeRunCancel(nil), s.runCancels...)
+	s.runCancels = nil
 	s.mu.Unlock()
+	for _, run := range runCancels {
+		if run.cancel != nil {
+			run.cancel()
+		}
+	}
 	if cancel != nil {
 		cancel()
 	}
@@ -83,6 +99,9 @@ func (s *ProgramSender) bindContext(parent context.Context) context.Context {
 	if s == nil {
 		return parent
 	}
+	if bound, ok := parent.Value(programSenderBoundContextKey{}).(*ProgramSender); ok && bound == s {
+		return parent
+	}
 	if s.closed.Load() {
 		ctx, cancel := context.WithCancel(parent)
 		cancel()
@@ -92,8 +111,55 @@ func (s *ProgramSender) bindContext(parent context.Context) context.Context {
 	defer s.mu.Unlock()
 	if s.ctx == nil {
 		s.ctx, s.cancel = context.WithCancel(parent)
+		s.ctx = context.WithValue(s.ctx, programSenderBoundContextKey{}, s)
 	}
 	return s.ctx
+}
+
+func (s *ProgramSender) beginRunContext(parent context.Context) (context.Context, func()) {
+	parent = contextOrBackground(parent)
+	if s == nil {
+		return parent, func() {}
+	}
+	base := s.bindContext(parent)
+	ctx, cancel := context.WithCancel(base)
+	s.mu.Lock()
+	if s.closed.Load() {
+		s.mu.Unlock()
+		cancel()
+		return ctx, func() {}
+	}
+	s.nextRunID++
+	id := s.nextRunID
+	s.runCancels = append(s.runCancels, activeRunCancel{id: id, cancel: cancel})
+	s.mu.Unlock()
+	return ctx, func() {
+		s.mu.Lock()
+		for i, run := range s.runCancels {
+			if run.id == id {
+				s.runCancels = append(s.runCancels[:i], s.runCancels[i+1:]...)
+				break
+			}
+		}
+		s.mu.Unlock()
+		cancel()
+	}
+}
+
+func (s *ProgramSender) CancelActiveRuns() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	runCancels := append([]activeRunCancel(nil), s.runCancels...)
+	s.runCancels = nil
+	s.mu.Unlock()
+	for _, run := range runCancels {
+		if run.cancel != nil {
+			run.cancel()
+		}
+	}
+	return len(runCancels) > 0
 }
 
 func (s *ProgramSender) startForwarder(fn func()) bool {
@@ -156,10 +222,17 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 	base.Commands = appendAgentSlashCommandsWithContext(ctx, driver, base.Commands)
 	var cachedModeLabel string
 	var cachedStatusView StatusViewModel
+	var statusCacheMu sync.Mutex
 
 	if base.ExecuteLine == nil {
 		base.ExecuteLine = func(sub Submission) TaskResultMsg {
-			return executeLineViaDriverWithContext(ctx, driver, sender, sub)
+			runCtx := ctx
+			finish := func() {}
+			if sender != nil {
+				runCtx, finish = sender.beginRunContext(ctx)
+			}
+			defer finish()
+			return executeLineViaDriverWithContext(runCtx, driver, sender, sub)
 		}
 	}
 	if base.CanSubmitRunningPrompt == nil {
@@ -172,22 +245,30 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 		base.RefreshStatus = func() (string, string) {
 			status, err := driver.Status(ctx)
 			if err != nil {
+				statusCacheMu.Lock()
 				cachedModeLabel = ""
 				cachedStatusView = StatusViewModel{}
+				statusCacheMu.Unlock()
 				return "not configured", ""
 			}
+			statusCacheMu.Lock()
 			cachedModeLabel = strings.TrimSpace(status.ModeLabel)
 			cachedStatusView = statusViewModelFromSnapshot(status)
+			statusCacheMu.Unlock()
 			return statusModelDisplay(status.Model), formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens)
 		}
 	}
 	if base.RefreshStatusView == nil {
 		base.RefreshStatusView = func() StatusViewModel {
+			statusCacheMu.Lock()
+			defer statusCacheMu.Unlock()
 			return cachedStatusView
 		}
 	}
 	if base.ModeLabel == nil {
 		base.ModeLabel = func() string {
+			statusCacheMu.Lock()
+			defer statusCacheMu.Unlock()
 			return cachedModeLabel
 		}
 	}
@@ -298,8 +379,9 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 
 	if base.CancelRunning == nil {
 		base.CancelRunning = func() bool {
+			requested := sender != nil && sender.CancelActiveRuns()
 			err := driver.Interrupt(ctx)
-			return err == nil
+			return requested || err == nil
 		}
 	}
 

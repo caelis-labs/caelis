@@ -47,6 +47,25 @@ func TestIsUnderHandlesEqualAndNestedPaths(t *testing.T) {
 	}
 }
 
+func TestCompactCoveredDropsNestedPaths(t *testing.T) {
+	root := filepath.Join(string(filepath.Separator), "tmp", "cache")
+	child := filepath.Join(root, "go-build")
+	sibling := filepath.Join(string(filepath.Separator), "tmp", "cache-other")
+	got := CompactCovered([]string{child, sibling, root, child})
+	if len(got) != 2 {
+		t.Fatalf("CompactCovered() = %#v, want two roots", got)
+	}
+	if !containsPathKey(got, root) {
+		t.Fatalf("CompactCovered() = %#v, want parent root %q", got, root)
+	}
+	if containsPathKey(got, child) {
+		t.Fatalf("CompactCovered() = %#v, want child root removed", got)
+	}
+	if !containsPathKey(got, sibling) {
+		t.Fatalf("CompactCovered() = %#v, want sibling root %q", got, sibling)
+	}
+}
+
 func TestKeyFoldsCaseOnWindows(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows path semantics")
@@ -60,6 +79,9 @@ func TestKeyFoldsCaseOnWindows(t *testing.T) {
 func TestNormalizeStripsWindowsLongPathPrefixes(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows path semantics")
+	}
+	if got, want := stripWindowsExtendedPrefix(`\\?\UNC\server\share\file.txt`), `\\server\share\file.txt`; !strings.EqualFold(got, want) {
+		t.Fatalf("stripWindowsExtendedPrefix(UNC) = %q, want %q", got, want)
 	}
 	tests := []struct {
 		name string
@@ -134,4 +156,14 @@ func windowsShortPath(t *testing.T, path string) (string, bool) {
 		t.Skipf("short path %q is not stat-able: %v", shortPath, err)
 	}
 	return shortPath, true
+}
+
+func containsPathKey(paths []string, want string) bool {
+	wantKey := Key(want)
+	for _, path := range paths {
+		if Key(path) == wantKey {
+			return true
+		}
+	}
+	return false
 }

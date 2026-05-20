@@ -134,7 +134,6 @@ func SandboxCandidates() []driver.SlashArgCandidate {
 	return []driver.SlashArgCandidate{
 		{Value: "setup", Display: "setup", Detail: "Initialize Windows Elevated sandbox with UAC"},
 		{Value: "reset", Display: "reset", Detail: "Remove Windows Elevated sandbox users, ACL state, and firewall rules"},
-		{Value: "clean", Display: "clean", Detail: "Alias for reset"},
 	}
 }
 

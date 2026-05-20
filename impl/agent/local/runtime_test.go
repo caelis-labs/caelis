@@ -2731,6 +2731,8 @@ func TestCompactLatestOutputKeepsTailOnly(t *testing.T) {
 }
 
 func TestRuntimeTerminalSubscribeStreamsRunningTask(t *testing.T) {
+	t.Parallel()
+
 	sessions, activeSession := newTestSessionService(t, "sess-terminal-subscribe")
 	runtime, err := New(Config{
 		Sessions: sessions,
@@ -2911,6 +2913,49 @@ func TestStartCommandMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
 	}
 	if entry == nil || entry.Running || entry.State != taskapi.StateFailed {
 		t.Fatalf("persisted entry = %#v, want failed non-running task", entry)
+	}
+}
+
+func TestStartCommandDoesNotExposePlainExitSummaryAsError(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	completed := false
+	fakeSession := &yieldProbeSandboxSession{
+		statusRunning: &completed,
+		waitErr:       errors.New("process exited with code 1"),
+		result:        sandbox.CommandResult{ExitCode: 1},
+		resultErr:     errors.New("process exited with code 1"),
+	}
+	fake := &yieldProbeSandboxRuntime{session: fakeSession}
+	taskStore := taskfile.NewStore(taskfile.Config{RootDir: t.TempDir()})
+	runtime.tasks.store = taskStore
+
+	snapshot, err := runtime.tasks.StartCommand(context.Background(), activeSession, activeSession.SessionRef, fake, taskapi.CommandStartRequest{
+		Command: "Get-Command py -ErrorAction SilentlyContinue",
+		Workdir: activeSession.CWD,
+		Yield:   0,
+	})
+	if err != nil {
+		t.Fatalf("StartCommand() error = %v", err)
+	}
+	if snapshot.Running {
+		t.Fatalf("snapshot.Running = true, want false")
+	}
+	if snapshot.State != taskapi.StateFailed {
+		t.Fatalf("snapshot.State = %q, want failed", snapshot.State)
+	}
+	if got, _ := snapshot.Result["result"].(string); got != "(no output)" {
+		t.Fatalf("snapshot.Result[result] = %q, want no-output placeholder", got)
+	}
+	if got, _ := snapshot.Result["exit_code"].(int); got != 1 {
+		t.Fatalf("snapshot.Result[exit_code] = %v, want 1", snapshot.Result["exit_code"])
+	}
+	if _, exists := snapshot.Result["error"]; exists {
+		t.Fatalf("snapshot.Result[error] = %#v, want omitted for plain exit summary", snapshot.Result["error"])
+	}
+	if fakeSession.terminated {
+		t.Fatal("session.terminated = true, want ordinary command exit to remain result-only")
 	}
 }
 

@@ -3,7 +3,9 @@
 package win32
 
 import (
+	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -11,7 +13,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 	"unicode/utf16"
+	"unicode/utf8"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -26,6 +30,7 @@ const (
 	disableMaxPrivilege     = 0x00000001
 	luaToken                = 0x00000004
 	writeRestricted         = 0x00000008
+	codePageUTF8            = 65001
 )
 
 type tokenDefaultDACL struct {
@@ -46,6 +51,11 @@ type LogonCredentials struct {
 	Username string
 	Domain   string
 	Password string
+}
+
+type LogonProcessOptions struct {
+	LoadProfile bool
+	Env         []string
 }
 
 type CapabilitySIDs struct {
@@ -107,12 +117,66 @@ func (e ElevatedLaunchCanceledError) Unwrap() error {
 }
 
 func IsElevated() (bool, error) {
-	token, err := windows.OpenCurrentProcessToken()
-	if err != nil {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
 		return false, err
 	}
 	defer token.Close()
 	return token.IsElevated(), nil
+}
+
+func WithNamedMutex(ctx context.Context, name string, timeout time.Duration, fn func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("win32: mutex name is required")
+	}
+	if timeout > 0 {
+		if _, ok := ctx.Deadline(); !ok {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
+	}
+	namePtr, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return err
+	}
+	handle, err := windows.CreateMutex(nil, false, namePtr)
+	if handle == 0 {
+		return fmt.Errorf("create mutex %s: %w", name, err)
+	}
+	if err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
+		closeHandle(handle)
+		return fmt.Errorf("create mutex %s: %w", name, err)
+	}
+	defer closeHandle(handle)
+	for {
+		waitResult, err := windows.WaitForSingleObject(handle, 250)
+		if err != nil {
+			return fmt.Errorf("wait mutex %s: %w", name, err)
+		}
+		switch waitResult {
+		case windows.WAIT_OBJECT_0, windows.WAIT_ABANDONED:
+			defer func() {
+				_ = windows.ReleaseMutex(handle)
+			}()
+			if fn == nil {
+				return nil
+			}
+			return fn()
+		case uint32(windows.WAIT_TIMEOUT):
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("wait mutex %s: %w", name, ctx.Err())
+			default:
+			}
+		default:
+			return fmt.Errorf("wait mutex %s: unexpected wait result %d", name, waitResult)
+		}
+	}
 }
 
 func ShellExecuteRunAs(file string, args string, cwd string) error {
@@ -139,6 +203,16 @@ func ShellExecuteRunAs(file string, args string, cwd string) error {
 }
 
 func RunElevatedAndWait(file string, args []string, cwd string) error {
+	return RunElevatedAndWaitContext(context.Background(), file, args, cwd)
+}
+
+func RunElevatedAndWaitContext(ctx context.Context, file string, args []string, cwd string) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	file = strings.TrimSpace(file)
 	if file == "" {
 		return fmt.Errorf("run elevated: file is required")
@@ -171,32 +245,82 @@ func RunElevatedAndWait(file string, args []string, cwd string) error {
 		Directory:  cwdPtr,
 		Show:       SWNormal,
 	}
-	r1, _, callErr := syscall.SyscallN(procShellExecuteExW.Addr(), uintptr(unsafe.Pointer(&info)))
-	if r1 == 0 {
-		if callErr == windows.ERROR_CANCELLED {
-			return ElevatedLaunchCanceledError{File: file, Err: callErr}
-		}
-		return fmt.Errorf("ShellExecuteExW runas %s: %w", file, callErr)
-	}
-	if info.Process == 0 {
-		return fmt.Errorf("ShellExecuteExW runas %s did not return a process handle", file)
-	}
-	defer closeHandle(info.Process)
-	waitResult, err := windows.WaitForSingleObject(info.Process, windows.INFINITE)
+	process, err := shellExecuteRunAsContext(ctx, file, &info)
 	if err != nil {
-		return fmt.Errorf("wait elevated %s: %w", file, err)
+		return err
 	}
-	if waitResult == uint32(windows.WAIT_TIMEOUT) {
-		return fmt.Errorf("wait elevated %s: timed out waiting for setup helper", file)
+	defer closeHandle(process)
+	for {
+		waitResult, err := windows.WaitForSingleObject(process, 250)
+		if err != nil {
+			return fmt.Errorf("wait elevated %s: %w", file, err)
+		}
+		if waitResult == windows.WAIT_OBJECT_0 {
+			break
+		}
+		if waitResult != uint32(windows.WAIT_TIMEOUT) {
+			return fmt.Errorf("wait elevated %s: unexpected wait result %d", file, waitResult)
+		}
+		select {
+		case <-ctx.Done():
+			_ = windows.TerminateProcess(process, 1)
+			return ctx.Err()
+		default:
+		}
 	}
 	var exitCode uint32
-	if err := windows.GetExitCodeProcess(info.Process, &exitCode); err != nil {
+	if err := windows.GetExitCodeProcess(process, &exitCode); err != nil {
 		return fmt.Errorf("read elevated exit code %s: %w", file, err)
 	}
 	if exitCode != 0 {
 		return fmt.Errorf("elevated setup exited with code %d", exitCode)
 	}
 	return nil
+}
+
+func shellExecuteRunAsContext(ctx context.Context, file string, info *shellExecuteInfo) (windows.Handle, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if info == nil {
+		return 0, fmt.Errorf("ShellExecuteExW runas %s: missing launch info", file)
+	}
+	type launchResult struct {
+		process windows.Handle
+		err     error
+	}
+	launchDone := make(chan launchResult, 1)
+	abandoned := make(chan struct{})
+	go func() {
+		r1, _, callErr := syscall.SyscallN(procShellExecuteExW.Addr(), uintptr(unsafe.Pointer(info)))
+		result := launchResult{}
+		if r1 == 0 {
+			if callErr == windows.ERROR_CANCELLED {
+				result.err = ElevatedLaunchCanceledError{File: file, Err: callErr}
+			} else {
+				result.err = fmt.Errorf("ShellExecuteExW runas %s: %w", file, callErr)
+			}
+		} else if info.Process == 0 {
+			result.err = fmt.Errorf("ShellExecuteExW runas %s did not return a process handle", file)
+		} else {
+			result.process = info.Process
+		}
+		select {
+		case <-abandoned:
+			if result.process != 0 {
+				_ = windows.TerminateProcess(result.process, 1)
+				closeHandle(result.process)
+			}
+		case launchDone <- result:
+		}
+	}()
+	select {
+	case result := <-launchDone:
+		return result.process, result.err
+	case <-ctx.Done():
+		close(abandoned)
+		return 0, ctx.Err()
+	}
 }
 
 func LookupAccountSIDString(account string) (string, error) {
@@ -425,7 +549,11 @@ func ValidateCredentials(creds LogonCredentials) error {
 	return nil
 }
 
-func StartProcessWithLogon(creds LogonCredentials, executable string, args []string, cwd string) (*Process, error) {
+func StartProcessWithLogon(creds LogonCredentials, executable string, args []string, cwd string, options ...LogonProcessOptions) (*Process, error) {
+	opt := LogonProcessOptions{}
+	if len(options) > 0 {
+		opt = options[0]
+	}
 	username, domain := splitDomainUser(creds.Username, creds.Domain)
 	if strings.TrimSpace(username) == "" {
 		return nil, fmt.Errorf("win32: logon username is required")
@@ -469,6 +597,14 @@ func StartProcessWithLogon(creds LogonCredentials, executable string, args []str
 			return nil, err
 		}
 	}
+	envBlock, err := environmentBlock(opt.Env)
+	if err != nil {
+		return nil, err
+	}
+	var envPtr *uint16
+	if len(envBlock) > 0 {
+		envPtr = &envBlock[0]
+	}
 
 	stdinRead, stdinWrite, err := createChildPipe(parentWrites)
 	if err != nil {
@@ -492,20 +628,22 @@ func StartProcessWithLogon(creds LogonCredentials, executable string, args []str
 	startupInfo := logonStartupInfo(stdinRead, stdoutWrite, stderrWrite)
 	var processInfo windows.ProcessInformation
 	flags := logonCreationFlags()
+	logonFlags := logonFlagsForOptions(opt)
 	r1, _, callErr := syscall.SyscallN(
 		procCreateProcessWithLogonW.Addr(),
 		ptr(userPtr),
 		ptr(domainPtr),
 		ptr(passwordPtr),
-		uintptr(logonWithProfile),
+		logonFlags,
 		ptr(executablePtr),
 		ptr(commandLinePtr),
 		uintptr(flags),
-		0,
+		ptr(envPtr),
 		ptr(cwdPtr),
 		uintptr(unsafe.Pointer(startupInfo)),
 		uintptr(unsafe.Pointer(&processInfo)),
 	)
+	runtime.KeepAlive(envBlock)
 	if r1 == 0 {
 		closeHandle(stdinRead)
 		closeHandle(stdinWrite)
@@ -595,7 +733,7 @@ func StartProcessAsUser(token Token, executable string, args []string, cwd strin
 	var processInfo windows.ProcessInformation
 	flags := uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW | windows.EXTENDED_STARTUPINFO_PRESENT)
 	err = windows.CreateProcessAsUser(
-		windows.Token(token),
+		token,
 		executablePtr,
 		commandLinePtr,
 		nil,
@@ -724,7 +862,7 @@ func protectData(data []byte, name string, flags uint32) ([]byte, error) {
 	if err := windows.CryptProtectData(&in, namePtr, nil, 0, nil, flags, &out); err != nil {
 		return nil, err
 	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
+	defer localFree(windows.Handle(unsafe.Pointer(out.Data)))
 	return blobBytes(out), nil
 }
 
@@ -734,7 +872,7 @@ func UnprotectData(data []byte) ([]byte, error) {
 	if err := windows.CryptUnprotectData(&in, nil, nil, 0, nil, 0, &out); err != nil {
 		return nil, err
 	}
-	defer windows.LocalFree(windows.Handle(unsafe.Pointer(out.Data)))
+	defer localFree(windows.Handle(unsafe.Pointer(out.Data)))
 	return blobBytes(out), nil
 }
 
@@ -794,6 +932,50 @@ func environmentBlock(env []string) ([]uint16, error) {
 	}
 	builder.WriteByte(0)
 	return utf16.Encode([]rune(builder.String())), nil
+}
+
+func DecodeConsoleOutputToUTF8(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if utf8.Valid(data) {
+		return append([]byte(nil), data...), nil
+	}
+	codePage, err := windows.GetConsoleOutputCP()
+	if err != nil || codePage == 0 || codePage == codePageUTF8 {
+		codePage = windows.GetACP()
+	}
+	decoded, err := decodeCodePageToUTF8(codePage, data)
+	if err == nil {
+		return decoded, nil
+	}
+	ansiCodePage := windows.GetACP()
+	if ansiCodePage != 0 && ansiCodePage != codePage {
+		return decodeCodePageToUTF8(ansiCodePage, data)
+	}
+	return nil, err
+}
+
+func decodeCodePageToUTF8(codePage uint32, data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if codePage == 0 {
+		codePage = windows.GetACP()
+	}
+	n, err := windows.MultiByteToWideChar(codePage, 0, &data[0], int32(len(data)), nil, 0)
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	wide := make([]uint16, n)
+	n, err = windows.MultiByteToWideChar(codePage, 0, &data[0], int32(len(data)), &wide[0], n)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(string(utf16.Decode(wide[:n]))), nil
 }
 
 func restrictingSIDAttributes(token windows.Token, values []string) ([]windows.SIDAndAttributes, []*windows.SID, []*windows.SID, error) {
@@ -1007,6 +1189,13 @@ func logonCreationFlags() uint32 {
 	return uint32(windows.CREATE_UNICODE_ENVIRONMENT | windows.CREATE_NO_WINDOW)
 }
 
+func logonFlagsForOptions(opt LogonProcessOptions) uintptr {
+	if opt.LoadProfile {
+		return uintptr(logonWithProfile)
+	}
+	return 0
+}
+
 func logonStartupInfo(stdinRead, stdoutWrite, stderrWrite windows.Handle) *windows.StartupInfo {
 	return &windows.StartupInfo{
 		Cb:        uint32(unsafe.Sizeof(windows.StartupInfo{})),
@@ -1073,5 +1262,11 @@ func ptr(value *uint16) uintptr {
 func closeHandle(handle windows.Handle) {
 	if handle != 0 {
 		_ = windows.CloseHandle(handle)
+	}
+}
+
+func localFree(handle windows.Handle) {
+	if handle != 0 {
+		_, _ = windows.LocalFree(handle)
 	}
 }

@@ -94,10 +94,73 @@ func (m *Model) primaryDrawerHeight() int {
 }
 
 func (m *Model) renderPrimaryDrawer() string {
+	if drawer := m.renderSandboxProgressDrawer(); drawer != "" {
+		return drawer
+	}
 	if drawer := m.renderBTWDrawer(); drawer != "" {
 		return drawer
 	}
 	return m.renderPlanDrawer()
+}
+
+func (m *Model) renderSandboxProgressDrawer() string {
+	if m == nil || m.sandboxProgress == nil || m.width <= 0 {
+		return ""
+	}
+	state := *m.sandboxProgress
+	contentWidth := maxInt(1, m.mainColumnWidth()-(inputHorizontalInset*2))
+	pct := sandboxProgressPercent(state.Step, state.Total, state.Done)
+	barWidth := contentWidth - 18
+	if barWidth < 12 {
+		barWidth = 12
+	}
+	if barWidth > 42 {
+		barWidth = 42
+	}
+	bar := sandboxProgressBar(pct, barWidth)
+	percent := fmt.Sprintf("%3.0f%%", pct*100)
+	stepText := ""
+	if state.Step > 0 && state.Total > 0 {
+		stepText = fmt.Sprintf(" (%d/%d)", state.Step, state.Total)
+	}
+	title := strings.TrimSpace(state.Title)
+	if title == "" {
+		title = "Windows sandbox"
+	}
+	phase := strings.TrimSpace(state.Phase)
+	if phase != "" {
+		title += " - " + phase
+	}
+	message := strings.TrimSpace(state.Message)
+	if message == "" {
+		message = title
+	}
+	lines := []string{m.theme.SeparatorStyle().Render(strings.Repeat("-", contentWidth))}
+	lines = append(lines, m.theme.HelpHintTextStyle().Render(title))
+	lines = append(lines, bar+" "+m.theme.TextStyle().Render(percent+stepText))
+	for _, line := range strings.Split(hardWrapDisplayLine(message, contentWidth), "\n") {
+		if strings.TrimSpace(line) != "" {
+			lines = append(lines, m.theme.TextStyle().Render(line))
+		}
+	}
+	return insetRenderedBlock(strings.Join(lines, "\n"), inputHorizontalInset)
+}
+
+func sandboxProgressPercent(step int, total int, done bool) float64 {
+	if done {
+		return 1
+	}
+	if step <= 0 || total <= 0 {
+		return 0
+	}
+	pct := float64(step) / float64(total)
+	if pct < 0 {
+		return 0
+	}
+	if pct > 1 {
+		return 1
+	}
+	return pct
 }
 
 func (m *Model) renderPlanDrawer() string {

@@ -2,6 +2,7 @@ package local
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -158,6 +159,17 @@ func TestTerminalFinalTextPreservesWhitespace(t *testing.T) {
 	}
 	if got := terminalFinalText("", "  stdout\n", "", nil); got != "  stdout\n" {
 		t.Fatalf("terminalFinalText(stdout) = %q, want exact stdout", got)
+	}
+}
+
+func TestTerminalFinalTextSuppressesSyntheticWindowsExitSummary(t *testing.T) {
+	t.Parallel()
+
+	if got := terminalFinalText("", "", "", errors.New("process exited with code 1")); got != "(no output)" {
+		t.Fatalf("terminalFinalText(process exited) = %q, want no-output placeholder", got)
+	}
+	if got := terminalFinalText("", "", "Write-Error: raw failure\n", errors.New("process exited with code 1")); got != "Write-Error: raw failure\n" {
+		t.Fatalf("terminalFinalText(stderr) = %q, want raw stderr", got)
 	}
 }
 

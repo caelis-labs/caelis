@@ -39,7 +39,9 @@ func (j *Object) AssignPID(pid int) error {
 	if err != nil {
 		return err
 	}
-	defer windows.CloseHandle(process)
+	defer func() {
+		_ = windows.CloseHandle(process)
+	}()
 	return windows.AssignProcessToJobObject(j.handle, process)
 }
 

@@ -119,6 +119,7 @@ type Config struct {
 	Wizards                []WizardDef
 	Driver                 tuidriver.Driver
 	ProgramSender          *ProgramSender
+	OnStart                func()
 	ExecuteLine            func(Submission) TaskResultMsg
 	CanSubmitRunningPrompt func() bool
 	CancelRunning          func() bool
@@ -283,6 +284,17 @@ type btwOverlayState struct {
 	Scroll   int
 }
 
+type sandboxProgressState struct {
+	Title     string
+	Source    string
+	Phase     string
+	Message   string
+	Step      int
+	Total     int
+	Done      bool
+	UpdatedAt time.Time
+}
+
 // toolAnchor is a pending, unclaimed tool-style TranscriptBlock.
 type toolAnchor struct {
 	blockID  string
@@ -388,19 +400,22 @@ type Model struct {
 	spinner spinner.Model
 	quit    bool
 
-	runningTick           uint64
-	runningTip            int
-	runningTickerStyles   []lipgloss.Style
-	runningTickerThemeKey string
+	runningInterruptRequested bool
+	runningTick               uint64
+	runningTip                int
+	runningTickerStyles       []lipgloss.Style
+	runningTickerThemeKey     string
 
-	statusModel        string
-	statusContext      string
-	statusModeLabel    string
-	statusView         StatusViewModel
-	approvalReviewHint string
-	hint               string
-	hintEntries        []hintEntry
-	nextHintID         uint64
+	statusModel           string
+	statusContext         string
+	statusModeLabel       string
+	statusView            StatusViewModel
+	statusRefreshInFlight bool
+	sandboxProgress       *sandboxProgressState
+	approvalReviewHint    string
+	hint                  string
+	hintEntries           []hintEntry
+	nextHintID            uint64
 
 	pendingInputAt            time.Time
 	inputLatencyWindow        []time.Duration

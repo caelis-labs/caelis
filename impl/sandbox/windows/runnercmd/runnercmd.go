@@ -360,42 +360,155 @@ func (r *runner) writeFrame(typ string, payload any) error {
 
 func mergeEnv(extra map[string]string, network string, cwd string) ([]string, error) {
 	env := os.Environ()
-	if strings.TrimSpace(cwd) != "" {
-		home := filepath.Join(strings.TrimSpace(cwd), ".caelis-sandbox", "home")
-		tmp := filepath.Join(strings.TrimSpace(cwd), ".caelis-sandbox", "tmp")
-		localAppData := filepath.Join(home, "AppData", "Local")
-		roamingAppData := filepath.Join(home, "AppData", "Roaming")
+	home := strings.TrimSpace(envValue(env, "CAELIS_SANDBOX_HOME"))
+	tmp := firstEnvValue(env, "TEMP", "TMP")
+	localAppData := strings.TrimSpace(envValue(env, "LOCALAPPDATA"))
+	roamingAppData := strings.TrimSpace(envValue(env, "APPDATA"))
+	if home == "" && strings.TrimSpace(cwd) != "" {
+		home = filepath.Join(strings.TrimSpace(cwd), ".caelis-sandbox", "home")
+		tmp = filepath.Join(strings.TrimSpace(cwd), ".caelis-sandbox", "tmp")
+		localAppData = filepath.Join(home, "AppData", "Local")
+		roamingAppData = filepath.Join(home, "AppData", "Roaming")
+	}
+	if home != "" {
+		if tmp == "" {
+			tmp = filepath.Join(home, "tmp")
+		}
+		if localAppData == "" {
+			localAppData = filepath.Join(home, "AppData", "Local")
+		}
+		if roamingAppData == "" {
+			roamingAppData = filepath.Join(home, "AppData", "Roaming")
+		}
 		for _, dir := range []string{home, tmp, localAppData, roamingAppData} {
 			if err := os.MkdirAll(dir, 0o700); err != nil {
 				return nil, err
 			}
 		}
-		env = append(env,
-			"CAELIS_SANDBOX_HOME="+home,
-			"USERPROFILE="+home,
-			"HOME="+home,
-			"TEMP="+tmp,
-			"TMP="+tmp,
-			"LOCALAPPDATA="+localAppData,
-			"APPDATA="+roamingAppData,
-		)
+		setEnvValue(&env, "CAELIS_SANDBOX_HOME", home)
+		setEnvValue(&env, "USERPROFILE", home)
+		setEnvValue(&env, "HOME", home)
+		setEnvValue(&env, "TEMP", tmp)
+		setEnvValue(&env, "TMP", tmp)
+		setEnvValue(&env, "LOCALAPPDATA", localAppData)
+		setEnvValue(&env, "APPDATA", roamingAppData)
+		for key, value := range sandboxLocalCacheEnv(home, tmp, localAppData) {
+			setEnvValue(&env, key, value)
+		}
+		for _, dir := range sandboxLocalCacheDirs(env) {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if strings.EqualFold(strings.TrimSpace(network), "offline") {
-		env = append(env,
-			"CAELIS_SANDBOX_NETWORK=disabled",
-			"HTTP_PROXY=http://127.0.0.1:9",
-			"HTTPS_PROXY=http://127.0.0.1:9",
-			"ALL_PROXY=http://127.0.0.1:9",
-			"NO_PROXY=localhost,127.0.0.1,::1",
-		)
+		setEnvValue(&env, "CAELIS_SANDBOX_NETWORK", "disabled")
+		setEnvValue(&env, "HTTP_PROXY", "http://127.0.0.1:9")
+		setEnvValue(&env, "HTTPS_PROXY", "http://127.0.0.1:9")
+		setEnvValue(&env, "ALL_PROXY", "http://127.0.0.1:9")
+		setEnvValue(&env, "NO_PROXY", "localhost,127.0.0.1,::1")
 	}
 	for key, value := range extra {
 		if strings.TrimSpace(key) == "" {
 			continue
 		}
-		env = append(env, key+"="+value)
+		setEnvValue(&env, key, value)
 	}
 	return env, nil
+}
+
+func setEnvValue(env *[]string, key string, value string) {
+	key = strings.TrimSpace(key)
+	if env == nil || key == "" {
+		return
+	}
+	item := key + "=" + value
+	next := (*env)[:0]
+	for _, current := range *env {
+		name, _, ok := strings.Cut(current, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(name), key) {
+			continue
+		}
+		next = append(next, current)
+	}
+	*env = append(next, item)
+}
+
+func envValue(env []string, key string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		name, value, ok := strings.Cut(env[i], "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(name), key) {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstEnvValue(env []string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(envValue(env, key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func sandboxLocalCacheEnv(home string, tmp string, localAppData string) map[string]string {
+	goPath := filepath.Join(home, "go")
+	bunInstall := filepath.Join(home, ".bun")
+	return map[string]string{
+		"GOCACHE":               filepath.Join(localAppData, "go-build"),
+		"GOPATH":                goPath,
+		"GOMODCACHE":            filepath.Join(goPath, "pkg", "mod"),
+		"npm_config_cache":      filepath.Join(localAppData, "npm-cache"),
+		"YARN_CACHE_FOLDER":     filepath.Join(localAppData, "yarn-cache"),
+		"PIP_CACHE_DIR":         filepath.Join(localAppData, "pip-cache"),
+		"UV_CACHE_DIR":          filepath.Join(localAppData, "uv-cache"),
+		"CARGO_HOME":            filepath.Join(home, ".cargo"),
+		"GRADLE_USER_HOME":      filepath.Join(home, ".gradle"),
+		"NUGET_PACKAGES":        filepath.Join(home, ".nuget", "packages"),
+		"npm_config_store_dir":  filepath.Join(localAppData, "pnpm-store"),
+		"PNPM_HOME":             filepath.Join(localAppData, "pnpm-home"),
+		"BUN_INSTALL":           bunInstall,
+		"BUN_INSTALL_CACHE_DIR": filepath.Join(bunInstall, "cache"),
+		"XDG_CACHE_HOME":        filepath.Join(localAppData, "xdg-cache"),
+		"XDG_DATA_HOME":         filepath.Join(localAppData, "xdg-data"),
+		"XDG_CONFIG_HOME":       filepath.Join(home, ".config"),
+		"TMPDIR":                tmp,
+	}
+}
+
+func sandboxLocalCacheDirs(env []string) []string {
+	keys := []string{
+		"GOCACHE",
+		"GOPATH",
+		"GOMODCACHE",
+		"npm_config_cache",
+		"YARN_CACHE_FOLDER",
+		"PIP_CACHE_DIR",
+		"UV_CACHE_DIR",
+		"CARGO_HOME",
+		"GRADLE_USER_HOME",
+		"NUGET_PACKAGES",
+		"npm_config_store_dir",
+		"PNPM_HOME",
+		"BUN_INSTALL",
+		"BUN_INSTALL_CACHE_DIR",
+		"XDG_CACHE_HOME",
+		"XDG_DATA_HOME",
+		"XDG_CONFIG_HOME",
+		"TMPDIR",
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if value := strings.TrimSpace(envValue(env, key)); value != "" {
+			out = append(out, value)
+		}
+	}
+	return out
 }
 
 func powershellArgs(command string, tty bool, interactive bool) []string {

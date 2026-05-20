@@ -24,11 +24,17 @@ func Run(args []string, stderr io.Writer) int {
 	}
 	if err := setup.Execute(payload); err != nil {
 		dirs := setupstate.NewDirs(payload.StateRoot)
-		_ = setupstate.WriteError(dirs.ErrorPath, setupstate.ErrorReport{
-			Phase:   "setup",
-			Code:    "setup_failed",
-			Message: err.Error(),
-		})
+		errorPath := dirs.ErrorPath
+		if payload.Kind == setup.SetupKindReset {
+			errorPath = dirs.ResetErrorPath
+		}
+		if _, readErr := setupstate.ReadError(errorPath); readErr != nil {
+			_ = setupstate.WriteError(errorPath, setupstate.ErrorReport{
+				Phase:   "setup",
+				Code:    "setup_failed",
+				Message: err.Error(),
+			})
+		}
 		fmt.Fprintln(stderr, err)
 		return 1
 	}

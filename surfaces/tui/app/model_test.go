@@ -206,6 +206,64 @@ func TestStatusTickNoChangeDoesNotFullSyncViewport(t *testing.T) {
 	}
 }
 
+func TestStatusTickSchedulesRefreshWithoutCallingDriverInUpdate(t *testing.T) {
+	model := NewModel(Config{})
+	called := false
+	model.cfg.RefreshStatus = func() (string, string) {
+		called = true
+		return "gpt-4o", ""
+	}
+
+	_, cmd := model.handleStatusTickMsg()
+	if called {
+		t.Fatal("RefreshStatus called synchronously from status tick")
+	}
+	if cmd == nil {
+		t.Fatal("handleStatusTickMsg() command = nil, want async refresh command")
+	}
+	if !model.statusRefreshInFlight {
+		t.Fatal("statusRefreshInFlight = false, want true until async refresh returns")
+	}
+}
+
+func TestRunningInterruptSchedulesCancelWithoutCallingDriverInUpdate(t *testing.T) {
+	model := NewModel(Config{})
+	model.running = true
+	called := false
+	model.cfg.CancelRunning = func() bool {
+		called = true
+		return true
+	}
+
+	_, cmd := model.requestRunningInterrupt()
+	if called {
+		t.Fatal("CancelRunning called synchronously from interrupt key handling")
+	}
+	if cmd == nil {
+		t.Fatal("requestRunningInterrupt() command = nil, want async cancel command")
+	}
+	if !model.runningInterruptRequested {
+		t.Fatal("runningInterruptRequested = false, want true while cancel command is pending")
+	}
+}
+
+func TestSandboxProgressClearRespectsSource(t *testing.T) {
+	model := NewModel(Config{})
+	model.handleSandboxProgressMsg(SandboxProgressMsg{
+		Title:   "Windows sandbox setup",
+		Source:  "setup",
+		Message: "running setup",
+	})
+	model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "workspace", Clear: true})
+	if model.sandboxProgress == nil {
+		t.Fatal("sandboxProgress cleared by different source")
+	}
+	model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "setup", Clear: true})
+	if model.sandboxProgress != nil {
+		t.Fatal("sandboxProgress still set after matching source clear")
+	}
+}
+
 func TestMainColumnUsesFullTerminalWidth(t *testing.T) {
 	model := NewModel(Config{})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 200, Height: 40})

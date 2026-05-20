@@ -4,6 +4,7 @@ package runnercmd
 
 import (
 	"bytes"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 )
 
 func TestRunnerCommandEmitsOutputAndExit(t *testing.T) {
+	t.Parallel()
+
 	var input bytes.Buffer
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
 		Command:       "Write-Output runner-ok",
@@ -78,6 +81,8 @@ func TestRunnerCommandEmitsOutputAndExit(t *testing.T) {
 }
 
 func TestRunnerCommandUsesUTF8AndReadHostStdin(t *testing.T) {
+	t.Parallel()
+
 	var input bytes.Buffer
 	writer := runnerproto.NewWriter(&input)
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
@@ -125,8 +130,45 @@ func TestRunnerCommandUsesUTF8AndReadHostStdin(t *testing.T) {
 	}
 }
 
+func TestRunnerCommandCapturesPowerShellErrorStream(t *testing.T) {
+	t.Parallel()
+
+	var input bytes.Buffer
+	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
+		Command:       "Write-Error 'raw-powershell-error'; exit 17",
+		Timeout:       10 * time.Second,
+		CapabilitySID: testCapabilitySIDs(t),
+	})
+	if err != nil {
+		t.Fatalf("NewFrame() error = %v", err)
+	}
+	if err := runnerproto.NewWriter(&input).WriteFrame(spawn); err != nil {
+		t.Fatalf("WriteFrame(spawn) error = %v", err)
+	}
+
+	var output bytes.Buffer
+	var runnerStderr bytes.Buffer
+	if code := Run(&input, &output, &runnerStderr); code != 0 {
+		t.Fatalf("Run() code = %d stderr=%s", code, runnerStderr.String())
+	}
+	_, stderrText, exit := readRunnerOutputForTest(t, &output)
+	if exit.ExitCode != 17 {
+		t.Fatalf("exit = %+v stderr=%q, want exit 17", exit, stderrText)
+	}
+	if !strings.Contains(stderrText, "raw-powershell-error") {
+		t.Fatalf("stderr = %q, want raw PowerShell error", stderrText)
+	}
+}
+
 func TestMergeEnvNetworkModes(t *testing.T) {
-	env, err := mergeEnv(map[string]string{"EXTRA": "1"}, "offline", t.TempDir())
+	hostCache := filepath.Join(t.TempDir(), "host-go-cache")
+	t.Setenv("GOCACHE", hostCache)
+	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "host-go-mod-cache"))
+	t.Setenv("npm_config_cache", filepath.Join(t.TempDir(), "host-npm-cache"))
+	t.Setenv("YARN_CACHE_FOLDER", filepath.Join(t.TempDir(), "host-yarn-cache"))
+
+	cwd := t.TempDir()
+	env, err := mergeEnv(map[string]string{"EXTRA": "1"}, "offline", cwd)
 	if err != nil {
 		t.Fatalf("mergeEnv(offline) error = %v", err)
 	}
@@ -145,6 +187,47 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 		if !strings.Contains(offline, want) {
 			t.Fatalf("offline env missing %q in %q", want, offline)
 		}
+	}
+
+	home := envValue(env, "CAELIS_SANDBOX_HOME")
+	localAppData := envValue(env, "LOCALAPPDATA")
+	if home == "" || !testPathIsUnder(home, cwd) {
+		t.Fatalf("CAELIS_SANDBOX_HOME = %q, want under cwd %q", home, cwd)
+	}
+	for _, tc := range []struct {
+		key  string
+		root string
+	}{
+		{"GOCACHE", localAppData},
+		{"GOMODCACHE", home},
+		{"npm_config_cache", localAppData},
+		{"YARN_CACHE_FOLDER", localAppData},
+		{"PIP_CACHE_DIR", localAppData},
+		{"UV_CACHE_DIR", localAppData},
+		{"CARGO_HOME", home},
+		{"GRADLE_USER_HOME", home},
+		{"NUGET_PACKAGES", home},
+		{"npm_config_store_dir", localAppData},
+		{"PNPM_HOME", localAppData},
+		{"BUN_INSTALL", home},
+		{"BUN_INSTALL_CACHE_DIR", home},
+	} {
+		got := envValue(env, tc.key)
+		if got == "" || !testPathIsUnder(got, tc.root) {
+			t.Fatalf("%s = %q, want under %q", tc.key, got, tc.root)
+		}
+		if strings.EqualFold(got, hostCache) {
+			t.Fatalf("%s = %q, did not expect host cache", tc.key, got)
+		}
+	}
+
+	override := filepath.Join(t.TempDir(), "override-go-cache")
+	env, err = mergeEnv(map[string]string{"GOCACHE": override}, "offline", cwd)
+	if err != nil {
+		t.Fatalf("mergeEnv(override) error = %v", err)
+	}
+	if got := envValue(env, "GOCACHE"); !strings.EqualFold(got, override) {
+		t.Fatalf("GOCACHE override = %q, want %q", got, override)
 	}
 
 	env, err = mergeEnv(nil, "online", "")
@@ -198,7 +281,15 @@ func readRunnerOutputForTest(t *testing.T, output *bytes.Buffer) (string, string
 	}
 }
 
+func testPathIsUnder(path string, root string) bool {
+	path = strings.ToLower(filepath.Clean(path))
+	root = strings.ToLower(filepath.Clean(root))
+	return path == root || strings.HasPrefix(path, root+string(filepath.Separator))
+}
+
 func TestRunnerTTYCommandUsesConPTY(t *testing.T) {
+	t.Parallel()
+
 	var input bytes.Buffer
 	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
 		Command:       "Write-Output tty-ok",

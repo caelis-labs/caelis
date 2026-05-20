@@ -434,15 +434,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleBTWOverlayKey(msg)
 	}
 	if m.running && key.Matches(msg, m.keys.Interrupt) {
-		m.clearInputOverlays()
-		if m.cfg.CancelRunning != nil && m.cfg.CancelRunning() {
-			return m, m.showHint("interrupt requested", hintOptions{
-				priority:       HintPriorityCritical,
-				clearOnMessage: true,
-				clearAfter:     systemHintDuration,
-			})
-		}
-		return m, nil
+		return m.requestRunningInterrupt()
 	}
 	// Command palette overlay.
 	if m.showPalette {
@@ -621,15 +613,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case key.Matches(msg, m.keys.Back):
 		if m.running {
-			m.clearInputOverlays()
-			if m.cfg.CancelRunning != nil && m.cfg.CancelRunning() {
-				return m, m.showHint("interrupt requested", hintOptions{
-					priority:       HintPriorityCritical,
-					clearOnMessage: true,
-					clearAfter:     systemHintDuration,
-				})
-			}
-			return m, nil
+			return m.requestRunningInterrupt()
 		}
 		m.clearInputOverlays()
 		return m, nil
@@ -854,6 +838,32 @@ func (m *Model) insertComposerText(text string) {
 
 func (m *Model) submitLine(line string) (tea.Model, tea.Cmd) {
 	return m.submitLineWithDisplayAndAttachments(line, m.displayLineWithAttachments(line), inputAttachmentsToSubmission(m.inputAttachments))
+}
+
+func (m *Model) requestRunningInterrupt() (tea.Model, tea.Cmd) {
+	m.clearInputOverlays()
+	if m.cfg.CancelRunning == nil {
+		return m, nil
+	}
+	if m.runningInterruptRequested {
+		return m, m.showHint("interrupt already requested", hintOptions{
+			priority:       HintPriorityHigh,
+			clearOnMessage: true,
+			clearAfter:     copyHintDuration,
+		})
+	}
+	cancel := m.cfg.CancelRunning
+	m.runningInterruptRequested = true
+	return m, tea.Batch(
+		m.showHint("interrupt requested", hintOptions{
+			priority:       HintPriorityCritical,
+			clearOnMessage: true,
+			clearAfter:     systemHintDuration,
+		}),
+		func() tea.Msg {
+			return RunningInterruptResultMsg{Accepted: cancel()}
+		},
+	)
 }
 
 func (m *Model) submitLineWithDisplay(execLine string, displayLine string) (tea.Model, tea.Cmd) {

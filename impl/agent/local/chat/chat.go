@@ -6,6 +6,7 @@ import (
 	"iter"
 	"maps"
 	"strings"
+	"sync"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -120,24 +121,164 @@ func (a *Agent) Run(ctx agent.Context) iter.Seq2[*session.Event, error] {
 				}
 			}
 			messages = append(messages, assistantMessage)
-			for _, call := range calls {
-				toolMessage, toolEvent, err := a.executeToolCallWithProgress(ctx, call, func(event *session.Event) bool {
-					return yield(event, nil)
-				})
-				if err != nil {
-					yield(nil, err)
-					return
-				}
+			toolMessages, toolEvents, ok, err := a.executeStepToolCalls(ctx, calls, func(event *session.Event) bool {
+				return yield(event, nil)
+			})
+			if !ok {
+				return
+			}
+			if err != nil {
+				yield(nil, err)
+				return
+			}
+			for _, toolEvent := range toolEvents {
 				if !yield(toolEvent, nil) {
 					return
 				}
-				messages = append(messages, toolMessage)
 			}
+			messages = append(messages, toolMessages...)
 			a.drainPendingSubmissions(ctx, &messages, func(event *session.Event) bool {
 				return yield(event, nil)
 			})
 		}
 	}
+}
+
+type stepToolCallResult struct {
+	index   int
+	message model.Message
+	event   *session.Event
+	err     error
+}
+
+func (a *Agent) executeStepToolCalls(
+	ctx context.Context,
+	calls []model.ToolCall,
+	yieldProgress func(*session.Event) bool,
+) ([]model.Message, []*session.Event, bool, error) {
+	if len(calls) == 0 {
+		return nil, nil, true, nil
+	}
+	if len(calls) == 1 {
+		toolMessage, toolEvent, err := a.executeToolCallWithProgress(ctx, calls[0], yieldProgress)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return []model.Message{toolMessage}, []*session.Event{toolEvent}, true, nil
+	}
+	if !canExecuteStepToolCallsConcurrently(calls) {
+		return a.executeStepToolCallsSerial(ctx, calls, yieldProgress)
+	}
+
+	callCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	progressCh := make(chan *session.Event, len(calls)*16)
+	doneCh := make(chan stepToolCallResult, len(calls))
+	var wg sync.WaitGroup
+	for i, call := range calls {
+		i, call := i, call
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			toolMessage, toolEvent, err := a.executeToolCallWithProgress(callCtx, call, func(event *session.Event) bool {
+				if event == nil {
+					return true
+				}
+				select {
+				case progressCh <- event:
+					return true
+				case <-callCtx.Done():
+					return false
+				}
+			})
+			doneCh <- stepToolCallResult{index: i, message: toolMessage, event: toolEvent, err: err}
+		}()
+	}
+	go func() {
+		wg.Wait()
+		close(doneCh)
+		close(progressCh)
+	}()
+
+	results := make([]stepToolCallResult, len(calls))
+	remaining := len(calls)
+	var firstErr error
+	for remaining > 0 {
+		select {
+		case progress, ok := <-progressCh:
+			if !ok {
+				progressCh = nil
+				continue
+			}
+			if progress != nil && yieldProgress != nil && !yieldProgress(progress) {
+				cancel()
+				return nil, nil, false, nil
+			}
+		case result, ok := <-doneCh:
+			if !ok {
+				doneCh = nil
+				continue
+			}
+			results[result.index] = result
+			remaining--
+			if result.err != nil && firstErr == nil {
+				firstErr = result.err
+				cancel()
+			}
+		case <-ctx.Done():
+			cancel()
+			return nil, nil, true, ctx.Err()
+		}
+	}
+	if progressCh != nil {
+		for progress := range progressCh {
+			if progress != nil && yieldProgress != nil && !yieldProgress(progress) {
+				cancel()
+				return nil, nil, false, nil
+			}
+		}
+	}
+	if firstErr != nil {
+		return nil, nil, true, firstErr
+	}
+
+	messages := make([]model.Message, 0, len(results))
+	events := make([]*session.Event, 0, len(results))
+	for _, result := range results {
+		messages = append(messages, result.message)
+		events = append(events, result.event)
+	}
+	return messages, events, true, nil
+}
+
+func (a *Agent) executeStepToolCallsSerial(
+	ctx context.Context,
+	calls []model.ToolCall,
+	yieldProgress func(*session.Event) bool,
+) ([]model.Message, []*session.Event, bool, error) {
+	messages := make([]model.Message, 0, len(calls))
+	events := make([]*session.Event, 0, len(calls))
+	for _, call := range calls {
+		toolMessage, toolEvent, err := a.executeToolCallWithProgress(ctx, call, yieldProgress)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		messages = append(messages, toolMessage)
+		events = append(events, toolEvent)
+	}
+	return messages, events, true, nil
+}
+
+func canExecuteStepToolCallsConcurrently(calls []model.ToolCall) bool {
+	if len(calls) < 2 {
+		return false
+	}
+	for _, call := range calls {
+		if !strings.EqualFold(strings.TrimSpace(call.Name), "RUN_COMMAND") {
+			return false
+		}
+	}
+	return true
 }
 
 func (a *Agent) drainPendingSubmissions(ctx agent.Context, messages *[]model.Message, yield func(*session.Event) bool) bool {

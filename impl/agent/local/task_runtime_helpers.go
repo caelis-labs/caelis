@@ -292,7 +292,7 @@ func terminalFinalText(output string, stdout string, stderr string, resultErr er
 	}
 	if resultErr != nil {
 		if text := strings.TrimSpace(resultErr.Error()); text != "" {
-			if !strings.HasPrefix(text, "exit status ") && !strings.HasPrefix(text, "signal: ") {
+			if !plainTerminalExitError(resultErr) {
 				return text
 			}
 		}
