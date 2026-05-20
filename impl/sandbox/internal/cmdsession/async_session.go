@@ -193,26 +193,39 @@ func (s *AsyncSession) Start() error {
 	}
 	s.stdinWriter = stdin
 
-	stdout, err := cmd.StdoutPipe()
+	stdoutReader, stdoutWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
 		return fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	stderr, err := cmd.StderrPipe()
+	stderrReader, stderrWriter, err := os.Pipe()
 	if err != nil {
+		_ = stdin.Close()
+		_ = stdoutReader.Close()
+		_ = stdoutWriter.Close()
 		return fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdoutReader.Close()
+		_ = stdoutWriter.Close()
+		_ = stderrReader.Close()
+		_ = stderrWriter.Close()
 		return fmt.Errorf("failed to start command: %w", err)
 	}
 	s.cmd = cmd
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
 
 	// Start output readers
 	s.readersWg.Add(2)
-	go s.readOutput(stdout, "stdout", s.stdoutBuffer)
-	go s.readOutput(stderr, "stderr", s.stderrBuffer)
+	go s.readOutput(stdoutReader, "stdout", s.stdoutBuffer)
+	go s.readOutput(stderrReader, "stderr", s.stderrBuffer)
 
 	// Start wait goroutine
 	go s.waitForExit()
@@ -227,6 +240,9 @@ func (s *AsyncSession) Start() error {
 
 func (s *AsyncSession) readOutput(reader io.Reader, stream string, buffer *RingBuffer) {
 	defer s.readersWg.Done()
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
+	}
 	buf := make([]byte, 8192)
 	for {
 		n, err := reader.Read(buf)
