@@ -16,9 +16,6 @@ import (
 )
 
 func TestWaitSessionTimeoutDoesNotConsumeExitForLaterResultWait(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("test uses a POSIX shell")
-	}
 	dir := t.TempDir()
 	runner := &seatbeltRunner{
 		execCommand: func(ctx context.Context, _ string, args ...string) *exec.Cmd {

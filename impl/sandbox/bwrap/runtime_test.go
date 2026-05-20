@@ -5,7 +5,6 @@ package bwrap
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -52,9 +51,6 @@ func assertBwrapManagedMountsNotReadOnly(t *testing.T, args []string) {
 }
 
 func TestBwrapMissingMountDiagnosticForHostExistingPath(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("bwrap diagnostics parse POSIX paths and stderr")
-	}
 	base := t.TempDir()
 	workDir := filepath.Join(base, "workspace")
 	target := "/home/caelis-host-existing/outside/message"
