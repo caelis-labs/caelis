@@ -214,6 +214,9 @@ func executeReset(payload Payload, progress ProgressFunc) error {
 		if err := deleteLocalUser(username); err != nil {
 			return err
 		}
+		cleanupSandboxUserProfiles(username, func(message string) {
+			reportDebugProgress(payload, progress, message)
+		})
 	}
 	if err := deleteLocalGroup(plan.GroupName); err != nil {
 		return err
@@ -597,6 +600,57 @@ func deleteLocalUser(username string) error {
 		return nil
 	}
 	return runNet("user", username, "/delete")
+}
+
+func cleanupSandboxUserProfiles(username string, debugf func(string)) {
+	username = strings.TrimSpace(username)
+	if !isSandboxUsername(username) {
+		return
+	}
+	for _, dir := range sandboxUserProfileDirs(username) {
+		if debugf != nil {
+			debugf("removing sandbox user profile " + dir)
+		}
+		if err := os.RemoveAll(dir); err != nil && debugf != nil {
+			debugf(fmt.Sprintf("sandbox user profile cleanup failed for %s: %v", dir, err))
+		}
+	}
+}
+
+func sandboxUserProfileDirs(username string) []string {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return nil
+	}
+	systemDrive := strings.TrimRight(strings.TrimSpace(os.Getenv("SystemDrive")), `\/`)
+	if systemDrive == "" {
+		systemDrive = `C:`
+	}
+	usersRoot := filepath.Join(systemDrive+`\`, "Users")
+	matches, err := filepath.Glob(filepath.Join(usersRoot, username+"*"))
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, match := range matches {
+		info, err := os.Stat(match)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		name := filepath.Base(match)
+		if strings.EqualFold(name, username) || strings.HasPrefix(strings.ToLower(name), strings.ToLower(username)+".") {
+			out = append(out, match)
+		}
+	}
+	return out
+}
+
+func isSandboxUsername(username string) bool {
+	username = strings.TrimSpace(username)
+	return strings.HasPrefix(username, "CaelisSbxOff") ||
+		strings.HasPrefix(username, "CaelisSbxOn") ||
+		strings.EqualFold(username, OfflineUser) ||
+		strings.EqualFold(username, OnlineUser)
 }
 
 func deleteLocalGroup(group string) error {
@@ -1070,11 +1124,8 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 	if err != nil {
 		return err
 	}
-	ancestorPrincipals, err := sandboxAncestorPrincipalSIDs(users...)
-	if err != nil {
-		return err
-	}
-	capabilities := appendPrincipal(policy.CapabilitySIDs...)
+	aclPlan := newPolicyACLPlan(policy)
+	capabilities := aclPlan.allCapabilitySIDs
 	runnertrace.Printf(
 		"windows-setup",
 		"apply_policy_acls roots read=%d write=%d deny_write=%d deny_read=%d users=%d principals=%d capabilities=%d",
@@ -1086,33 +1137,22 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 		len(principals),
 		len(capabilities),
 	)
-	writeRootKeys := map[string]struct{}{}
-	for _, root := range policy.WriteRoots {
-		key := pathutil.Key(root)
-		if key != "" {
-			writeRootKeys[key] = struct{}{}
-		}
-	}
 	materializeDenyWriteKeys := map[string]struct{}{}
 	for _, root := range policy.MaterializeDenyWritePaths {
-		key := pathutil.Key(root)
+		key := aclPathKey(root)
 		if key != "" {
 			materializeDenyWriteKeys[key] = struct{}{}
 		}
 	}
-	ancestorTasksSeen := map[string]struct{}{}
-	var ancestorTasks []aclTask
 	var tasks []aclTask
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
 		}
-		if _, writable := writeRootKeys[pathutil.Key(root)]; writable {
+		if _, writable := aclPlan.writeRootKeys[aclPathKey(root)]; writable {
 			continue
 		}
-		targets := append([]string{}, principals...)
-		targets = append(targets, capabilities...)
-		ancestorTasks = appendAncestorACLTasks(ancestorTasks, root, ancestorPrincipals, ancestorTasksSeen)
+		targets := joinPrincipals(principals, capabilities)
 		root := root
 		tasks = append(tasks, aclTask{
 			key: pathutil.Key(root),
@@ -1122,12 +1162,8 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 		})
 	}
 	for _, root := range policy.WriteRoots {
-		sid := writeRootCapabilitySID(policy, root)
-		targets := append([]string{}, principals...)
-		if sid != "" {
-			targets = append(targets, sid)
-		}
-		ancestorTasks = appendAncestorACLTasks(ancestorTasks, root, ancestorPrincipals, ancestorTasksSeen)
+		sid := aclPlan.writeRootCapabilitySID(root)
+		targets := joinPrincipals(principals, []string{sid})
 		root := root
 		tasks = append(tasks, aclTask{
 			key: pathutil.Key(root),
@@ -1137,13 +1173,8 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 		})
 	}
 	for _, root := range policy.DenyWritePaths {
-		targets := append([]string{}, principals...)
-		for _, sid := range policy.CapabilitySIDs {
-			if strings.TrimSpace(sid) != "" {
-				targets = append(targets, sid)
-			}
-		}
-		if _, shouldMaterialize := materializeDenyWriteKeys[pathutil.Key(root)]; shouldMaterialize {
+		targets := aclPlan.writeRootCapabilitySIDsForPath(root)
+		if _, shouldMaterialize := materializeDenyWriteKeys[aclPathKey(root)]; shouldMaterialize {
 			if err := os.MkdirAll(root, 0o700); err != nil {
 				return fmt.Errorf("materialize deny-write path %s: %w", root, err)
 			}
@@ -1165,9 +1196,6 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 			},
 		})
 	}
-	if err := runACLTasksSerial("ancestor_acl_tasks", ancestorTasks); err != nil {
-		return err
-	}
 	return runACLTasks(tasks)
 }
 
@@ -1180,7 +1208,7 @@ func appendAncestorACLTasks(tasks []aclTask, root string, principals []string, s
 	ancestors := ancestorPaths(root)
 	for i := len(ancestors) - 1; i >= 0; i-- {
 		ancestor := ancestors[i]
-		key := pathutil.Key(ancestor)
+		key := aclPathKey(ancestor)
 		if key == "" {
 			continue
 		}
@@ -1227,6 +1255,21 @@ func runACLTasks(tasks []aclTask) error {
 	done := runnertrace.Span("windows-setup", "acl_tasks")
 	defer done()
 	runnertrace.Printf("windows-setup", "acl_tasks count=%d", len(tasks))
+	batches := batchACLTasks(tasks)
+	for i, batch := range batches {
+		if err := runACLTaskBatch(i+1, len(batches), batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type aclTaskGroup struct {
+	key   string
+	tasks []func() error
+}
+
+func batchACLTasks(tasks []aclTask) [][]aclTaskGroup {
 	groups := make(map[string][]func() error)
 	order := make([]string, 0, len(tasks))
 	for i, task := range tasks {
@@ -1242,18 +1285,76 @@ func runACLTasks(tasks []aclTask) error {
 		}
 		groups[key] = append(groups[key], task.run)
 	}
+	var batches [][]aclTaskGroup
+	for _, key := range order {
+		group := aclTaskGroup{key: key, tasks: append([]func() error(nil), groups[key]...)}
+		placed := false
+		for i := range batches {
+			if aclTaskGroupOverlapsBatch(group.key, batches[i]) {
+				continue
+			}
+			batches[i] = append(batches[i], group)
+			placed = true
+			break
+		}
+		if !placed {
+			batches = append(batches, []aclTaskGroup{group})
+		}
+	}
+	return batches
+}
+
+func aclTaskGroupOverlapsBatch(key string, batch []aclTaskGroup) bool {
+	for _, existing := range batch {
+		if aclTaskKeysOverlap(key, existing.key) {
+			return true
+		}
+	}
+	return false
+}
+
+func aclTaskKeysOverlap(a string, b string) bool {
+	return pathKeysOverlap(a, b)
+}
+
+func pathKeysOverlap(a string, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	if a == "" || b == "" {
+		return false
+	}
+	return pathKeyIsUnder(a, b) || pathKeyIsUnder(b, a)
+}
+
+func pathKeyIsUnder(target string, root string) bool {
+	target = strings.TrimRight(strings.TrimSpace(target), `\/`)
+	root = strings.TrimRight(strings.TrimSpace(root), `\/`)
+	if target == "" || root == "" {
+		return false
+	}
+	if target == root {
+		return true
+	}
+	return strings.HasPrefix(target, root+string(filepath.Separator))
+}
+
+func runACLTaskBatch(index int, total int, batch []aclTaskGroup) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	runnertrace.Printf("windows-setup", "acl_tasks batch=%d/%d groups=%d", index, total, len(batch))
 	const maxConcurrent = 8
 	sem := make(chan struct{}, maxConcurrent)
-	errs := make(chan error, len(tasks))
+	errs := make(chan error, len(batch))
 	var wg sync.WaitGroup
-	for _, key := range order {
-		group := append([]func() error(nil), groups[key]...)
+	for _, group := range batch {
+		group := group
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			for _, task := range group {
+			for _, task := range group.tasks {
 				if err := task(); err != nil {
 					errs <- err
 					return
@@ -1275,57 +1376,120 @@ func runACLTasks(tasks []aclTask) error {
 	return nil
 }
 
+type policyACLPlan struct {
+	writeRootKeys              map[string]struct{}
+	writeRootKeyOrder          []string
+	writeRootCapabilityByKey   map[string]string
+	allWriteRootCapabilitySIDs []string
+	allCapabilitySIDs          []string
+}
+
+func newPolicyACLPlan(policy winpolicy.Policy) policyACLPlan {
+	plan := policyACLPlan{
+		writeRootKeys:            map[string]struct{}{},
+		writeRootCapabilityByKey: map[string]string{},
+		allCapabilitySIDs:        appendPrincipal(policy.CapabilitySIDs...),
+	}
+	for root, sid := range policy.WriteRootCapabilitySIDs {
+		sid = strings.TrimSpace(sid)
+		if sid == "" {
+			continue
+		}
+		if key := aclPathKey(root); key != "" {
+			plan.writeRootCapabilityByKey[key] = sid
+		}
+	}
+	var rootCaps []string
+	for _, root := range policy.WriteRoots {
+		key := aclPathKey(root)
+		if key == "" {
+			continue
+		}
+		if _, ok := plan.writeRootKeys[key]; !ok {
+			plan.writeRootKeys[key] = struct{}{}
+			plan.writeRootKeyOrder = append(plan.writeRootKeyOrder, key)
+		}
+		sid := strings.TrimSpace(plan.writeRootCapabilityByKey[key])
+		if sid == "" {
+			resolvedKey := pathutil.Key(root)
+			sid = strings.TrimSpace(plan.writeRootCapabilityByKey[resolvedKey])
+			if sid != "" {
+				plan.writeRootCapabilityByKey[key] = sid
+			} else if resolvedKey != "" {
+				for candidate, candidateSID := range policy.WriteRootCapabilitySIDs {
+					if pathutil.Key(candidate) != resolvedKey {
+						continue
+					}
+					sid = strings.TrimSpace(candidateSID)
+					if sid != "" {
+						plan.writeRootCapabilityByKey[key] = sid
+						break
+					}
+				}
+			}
+		}
+		if sid != "" {
+			rootCaps = append(rootCaps, sid)
+		}
+	}
+	plan.allWriteRootCapabilitySIDs = dedupeStrings(rootCaps...)
+	return plan
+}
+
+func (p policyACLPlan) writeRootCapabilitySID(root string) string {
+	return strings.TrimSpace(p.writeRootCapabilityByKey[aclPathKey(root)])
+}
+
+func (p policyACLPlan) writeRootCapabilitySIDsForPath(path string) []string {
+	pathKey := aclPathKey(path)
+	var out []string
+	for _, rootKey := range p.writeRootKeyOrder {
+		if pathKey != "" && !pathKeysOverlap(rootKey, pathKey) {
+			continue
+		}
+		out = append(out, p.writeRootCapabilityByKey[rootKey])
+	}
+	if len(appendPrincipal(out...)) > 0 {
+		return dedupeStrings(out...)
+	}
+	if len(p.allWriteRootCapabilitySIDs) > 0 {
+		return append([]string(nil), p.allWriteRootCapabilitySIDs...)
+	}
+	return append([]string(nil), p.allCapabilitySIDs...)
+}
+
 func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policyACLTarget {
 	users = appendPrincipal(users...)
 	principals := sandboxPrincipals(users...)
-	ancestorPrincipals := sandboxAncestorPrincipals(users...)
-	capabilities := appendPrincipal(policy.CapabilitySIDs...)
-	writeRootKeys := map[string]struct{}{}
-	for _, root := range policy.WriteRoots {
-		key := pathutil.Key(root)
-		if key != "" {
-			writeRootKeys[key] = struct{}{}
-		}
-	}
+	aclPlan := newPolicyACLPlan(policy)
+	capabilities := aclPlan.allCapabilitySIDs
 	var out []policyACLTarget
-	ancestorTargetsSeen := map[string]struct{}{}
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
 		}
-		if _, writable := writeRootKeys[pathutil.Key(root)]; writable {
+		if _, writable := aclPlan.writeRootKeys[aclPathKey(root)]; writable {
 			continue
 		}
 		if !pathExists(root) {
 			continue
 		}
-		targets := append([]string{}, principals...)
-		targets = append(targets, capabilities...)
-		out = appendAncestorACLTargets(out, root, ancestorPrincipals, ancestorTargetsSeen)
+		targets := joinPrincipals(principals, capabilities)
 		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "RX", acl.Grant)})
 	}
 	for _, root := range policy.WriteRoots {
 		if !pathExists(root) {
 			continue
 		}
-		sid := writeRootCapabilitySID(policy, root)
-		targets := append([]string{}, principals...)
-		if sid != "" {
-			targets = append(targets, sid)
-		}
-		out = appendAncestorACLTargets(out, root, ancestorPrincipals, ancestorTargetsSeen)
+		sid := aclPlan.writeRootCapabilitySID(root)
+		targets := joinPrincipals(principals, []string{sid})
 		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "M", acl.Grant)})
 	}
 	for _, root := range policy.DenyWritePaths {
 		if !pathExists(root) {
 			continue
 		}
-		targets := append([]string{}, principals...)
-		for _, sid := range policy.CapabilitySIDs {
-			if strings.TrimSpace(sid) != "" {
-				targets = append(targets, sid)
-			}
-		}
+		targets := aclPlan.writeRootCapabilitySIDsForPath(root)
 		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "W", acl.Deny)})
 	}
 	for _, root := range policy.DenyReadPaths {
@@ -1343,30 +1507,20 @@ type policyACLTarget struct {
 }
 
 func policyTraverseRoots(policy winpolicy.Policy) []string {
-	var roots []string
-	for _, root := range policy.ReadRoots {
-		if isDefaultReadRoot(root) {
-			continue
-		}
-		roots = append(roots, ancestorPaths(root)...)
-	}
-	for _, root := range policy.WriteRoots {
-		roots = append(roots, ancestorPaths(root)...)
-	}
-	return pathutil.Dedupe(roots)
+	return nil
 }
 
 func appendAncestorACLTargets(out []policyACLTarget, root string, principals []string, seen map[string]struct{}) []policyACLTarget {
 	for _, ancestor := range ancestorPaths(root) {
-		if !pathExists(ancestor) {
-			continue
-		}
-		key := pathutil.Key(ancestor)
+		key := aclPathKey(ancestor)
 		if seen != nil {
 			if _, ok := seen[key]; ok {
 				continue
 			}
 			seen[key] = struct{}{}
+		}
+		if !pathExists(ancestor) {
+			continue
 		}
 		out = append(out, policyACLTarget{Path: ancestor, Entries: aclEntries(principals, "X", acl.Grant, false)})
 	}
@@ -1412,12 +1566,40 @@ func appendPrincipal(values ...string) []string {
 	return out
 }
 
+func aclPathKey(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	return strings.ToLower(filepath.Clean(path))
+}
+
+func joinPrincipals(groups ...[]string) []string {
+	var values []string
+	for _, group := range groups {
+		values = append(values, group...)
+	}
+	return dedupeStrings(values...)
+}
+
 func sandboxPrincipals(users ...string) []string {
-	return appendPrincipal(append([]string{GroupName}, users...)...)
+	return []string{GroupName}
 }
 
 func sandboxPrincipalSIDs(users ...string) ([]string, error) {
 	return resolvePrincipalSIDs(sandboxPrincipals(users...)...)
+}
+
+func sandboxTraversePrincipals(users ...string) []string {
+	targets := appendPrincipal(users...)
+	if len(targets) > 0 {
+		return targets
+	}
+	return []string{GroupName}
+}
+
+func sandboxTraversePrincipalSIDs(users ...string) ([]string, error) {
+	return resolvePrincipalSIDs(sandboxTraversePrincipals(users...)...)
 }
 
 func sandboxAncestorPrincipals(users ...string) []string {
@@ -1465,19 +1647,15 @@ func looksLikeSID(value string) bool {
 }
 
 func writeRootCapabilitySID(policy winpolicy.Policy, root string) string {
-	if len(policy.WriteRootCapabilitySIDs) == 0 {
-		return ""
-	}
-	if sid := strings.TrimSpace(policy.WriteRootCapabilitySIDs[pathutil.Normalize(root)]); sid != "" {
-		return sid
-	}
-	rootKey := pathutil.Key(root)
-	for candidate, sid := range policy.WriteRootCapabilitySIDs {
-		if pathutil.Key(candidate) == rootKey {
-			return strings.TrimSpace(sid)
-		}
-	}
-	return ""
+	return newPolicyACLPlan(policy).writeRootCapabilitySID(root)
+}
+
+func writeRootCapabilitySIDsForPath(policy winpolicy.Policy, path string) []string {
+	return newPolicyACLPlan(policy).writeRootCapabilitySIDsForPath(path)
+}
+
+func writeRootOverlapsPath(root string, path string) bool {
+	return pathKeysOverlap(aclPathKey(root), aclPathKey(path))
 }
 
 func isDefaultReadRoot(path string) bool {
@@ -1490,26 +1668,6 @@ func isDefaultReadRoot(path string) bool {
 	}
 }
 
-func grantAncestorTraverse(path string, principals []string) error {
-	return grantAncestorTraverseOnce(path, principals, nil)
-}
-
-func grantAncestorTraverseOnce(path string, principals []string, seen map[string]struct{}) error {
-	for _, ancestor := range ancestorPaths(path) {
-		key := pathutil.Key(ancestor)
-		if seen != nil {
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-		}
-		if err := grantPathWithInherit(ancestor, principals, "X", false); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func ancestorPaths(path string) []string {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -1520,39 +1678,47 @@ func ancestorPaths(path string) []string {
 	if parent == "" || strings.EqualFold(parent, clean) {
 		return nil
 	}
+	homeKey := userHomePathKey()
 	var ancestors []string
+	seen := map[string]struct{}{}
 	for parent != "" {
 		if isVolumeRoot(parent) {
 			break
 		}
-		if isUserProfileRootOrAbove(parent) {
+		parentKey := aclPathKey(parent)
+		if isUserProfileRootOrAboveKey(parentKey, homeKey) {
 			break
 		}
-		ancestors = append(ancestors, parent)
+		if _, ok := seen[parentKey]; !ok {
+			seen[parentKey] = struct{}{}
+			ancestors = append(ancestors, parent)
+		}
 		next := filepath.Dir(parent)
 		if next == "" || strings.EqualFold(next, parent) {
 			break
 		}
 		parent = next
 	}
-	return pathutil.Dedupe(ancestors)
+	return ancestors
 }
 
 func isUserProfileRootOrAbove(path string) bool {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return false
-	}
+	return isUserProfileRootOrAboveKey(aclPathKey(path), userHomePathKey())
+}
+
+func userHomePathKey() string {
 	home, err := os.UserHomeDir()
 	if err != nil || strings.TrimSpace(home) == "" {
-		return false
+		return ""
 	}
-	pathKey := pathutil.Key(path)
-	homeKey := pathutil.Key(home)
+	return aclPathKey(home)
+}
+
+func isUserProfileRootOrAboveKey(pathKey string, homeKey string) bool {
 	if pathKey == "" || homeKey == "" {
 		return false
 	}
-	return pathKey == homeKey || pathutil.IsUnder(home, path)
+	return pathKey == homeKey || pathKeyIsUnder(homeKey, pathKey)
 }
 
 func isVolumeRoot(path string) bool {

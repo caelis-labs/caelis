@@ -443,6 +443,29 @@ func TestMaterializeHelperFromSourceConcurrentReusesHashedTarget(t *testing.T) {
 	}
 }
 
+func TestMaterializeHelperFromSourceUsesInMemoryCache(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "source.exe")
+	if err := os.WriteFile(source, []byte("runner-helper"), 0o600); err != nil {
+		t.Fatalf("WriteFile(source) error = %v", err)
+	}
+	r := &setupRunner{stateRoot: t.TempDir()}
+	path, hash, err := r.materializeHelperFromSource(source, "caelis-command-runner-")
+	if err != nil {
+		t.Fatalf("materializeHelperFromSource() error = %v", err)
+	}
+	if err := os.Remove(source); err != nil {
+		t.Fatalf("Remove(source) error = %v", err)
+	}
+	cachedPath, cachedHash, err := r.materializeHelperFromSource(source, "caelis-command-runner-")
+	if err != nil {
+		t.Fatalf("cached materializeHelperFromSource() error = %v", err)
+	}
+	if !strings.EqualFold(cachedPath, path) || cachedHash != hash {
+		t.Fatalf("cached helper = (%q,%q), want (%q,%q)", cachedPath, cachedHash, path, hash)
+	}
+}
+
 func TestRefreshPolicyCacheTracksPolicyAliases(t *testing.T) {
 	r := &setupRunner{}
 	if r.refreshAlreadyApplied("abc") {

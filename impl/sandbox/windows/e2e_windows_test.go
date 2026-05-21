@@ -63,6 +63,10 @@ func TestWindowsElevatedSandboxE2E(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatalf("MkdirAll(workspace) error = %v", err)
 	}
+	listingSentinel := "caelis-e2e-listing.txt"
+	if err := os.WriteFile(filepath.Join(workspace, listingSentinel), []byte("listing-ok"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", listingSentinel, err)
+	}
 	for _, name := range []string{".git", ".codex", ".agents"} {
 		if err := os.MkdirAll(filepath.Join(workspace, name), 0o755); err != nil {
 			t.Fatalf("MkdirAll(%s) error = %v", name, err)
@@ -102,18 +106,14 @@ func TestWindowsElevatedSandboxE2E(t *testing.T) {
 		t.Fatalf("Prepare() error = %v", err)
 	}
 
-	expectedWorkspace := workspace
-	if resolved, err := filepath.EvalSymlinks(workspace); err == nil && strings.TrimSpace(resolved) != "" {
-		expectedWorkspace = resolved
-	}
 	started := time.Now()
 	result, err := runE2EListingCommandWithTimings(ctx, t, rt, workspace)
 	t.Logf("workspace listing command completed in %s", time.Since(started))
 	if err != nil {
 		t.Fatalf("workspace listing command error = %v; result=%+v", err, result)
 	}
-	if !strings.Contains(result.Stdout, expectedWorkspace) {
-		t.Fatalf("workspace listing stdout = %q, want current location %q", result.Stdout, expectedWorkspace)
+	if !strings.Contains(result.Stdout, listingSentinel) {
+		t.Fatalf("workspace listing stdout = %q stderr = %q, want sentinel %q from workspace", result.Stdout, result.Stderr, listingSentinel)
 	}
 	started = time.Now()
 	result, err = runE2EListingCommandWithTimings(ctx, t, rt, workspace)
@@ -342,9 +342,9 @@ func TestWindowsElevatedSandboxSmokeE2E(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o755); err != nil {
 		t.Fatalf("MkdirAll(workspace) error = %v", err)
 	}
-	expectedWorkspace := workspace
-	if resolved, err := filepath.EvalSymlinks(workspace); err == nil && strings.TrimSpace(resolved) != "" {
-		expectedWorkspace = resolved
+	listingSentinel := "caelis-smoke-listing.txt"
+	if err := os.WriteFile(filepath.Join(workspace, listingSentinel), []byte("listing-ok"), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", listingSentinel, err)
 	}
 	stateRoot := strings.TrimSpace(os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_STATE"))
 	if stateRoot == "" {
@@ -389,8 +389,8 @@ func TestWindowsElevatedSandboxSmokeE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("listing command error = %v; result=%+v", err, result)
 	}
-	if !strings.Contains(strings.ToLower(result.Stdout), strings.ToLower(expectedWorkspace)) {
-		t.Fatalf("listing stdout = %q, want workspace %q", result.Stdout, expectedWorkspace)
+	if !strings.Contains(result.Stdout, listingSentinel) {
+		t.Fatalf("listing stdout = %q stderr = %q, want sentinel %q from workspace", result.Stdout, result.Stderr, listingSentinel)
 	}
 	result, err = runE2ECommand(ctx, rt, workspace, "Write-Output 'smoke-ok'", sandbox.NetworkDisabled, nil)
 	if err != nil {
@@ -456,6 +456,7 @@ Write-Output 'cache-env-ok'
 	assertLocalAccountMissingE2E(ctx, t, "user", setupOfflineUser(stateRoot))
 	assertLocalAccountMissingE2E(ctx, t, "user", setupOnlineUser(stateRoot))
 	assertLocalAccountMissingE2E(ctx, t, "localgroup", "CaelisSandboxUsers")
+	assertSandboxUserProfilesAbsentE2E(t, setupOfflineUser(stateRoot), setupOnlineUser(stateRoot))
 	assertSandboxStateDirsAbsentE2E(t, stateRoot)
 }
 
@@ -579,6 +580,31 @@ func assertLocalAccountMissingE2E(ctx context.Context, t *testing.T, kind string
 	}
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		t.Fatalf("net %s %s did not return: %v", kind, name, err)
+	}
+}
+
+func assertSandboxUserProfilesAbsentE2E(t *testing.T, usernames ...string) {
+	t.Helper()
+	systemDrive := strings.TrimRight(strings.TrimSpace(os.Getenv("SystemDrive")), `\/`)
+	if systemDrive == "" {
+		systemDrive = `C:`
+	}
+	usersRoot := filepath.Join(systemDrive+`\`, "Users")
+	for _, username := range usernames {
+		username = strings.TrimSpace(username)
+		if username == "" {
+			continue
+		}
+		matches, err := filepath.Glob(filepath.Join(usersRoot, username+"*"))
+		if err != nil {
+			t.Fatalf("Glob sandbox user profiles for %s: %v", username, err)
+		}
+		for _, match := range matches {
+			name := filepath.Base(match)
+			if strings.EqualFold(name, username) || strings.HasPrefix(strings.ToLower(name), strings.ToLower(username)+".") {
+				t.Fatalf("sandbox user profile %s still exists after reset", match)
+			}
+		}
 	}
 }
 

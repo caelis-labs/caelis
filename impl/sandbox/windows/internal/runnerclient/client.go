@@ -21,6 +21,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/textstream"
 	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerproto"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnertrace"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
@@ -184,11 +185,15 @@ func (c *Client) closeSessions() error {
 }
 
 func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen bool) (*session, error) {
+	done := runnertrace.Span("windows-runner", "client.start")
+	defer done()
 	id, err := newID("win")
 	if err != nil {
 		return nil, err
 	}
+	launchDone := runnertrace.Span("windows-runner", "client.launch")
 	proc, err := c.launch(ctx, req)
+	launchDone()
 	if err != nil {
 		return nil, err
 	}
@@ -215,7 +220,9 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 	}
 	go s.captureRunnerStderr(stderr)
 
+	handshakeDone := runnertrace.Span("windows-runner", "client.handshake")
 	hello, err := s.reader.ReadFrame()
+	handshakeDone()
 	if err != nil {
 		_ = s.TerminateSession()
 		return nil, fmt.Errorf("windows runner: handshake failed: %w", err)
@@ -227,7 +234,9 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 
 	p := winpolicy.Policy{}
 	if c.policy != nil {
+		policyDone := runnertrace.Span("windows-runner", "client.policy")
 		p, err = c.policy(req)
+		policyDone()
 		if err != nil {
 			_ = s.TerminateSession()
 			return nil, err
@@ -255,45 +264,62 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 		_ = s.TerminateSession()
 		return nil, err
 	}
+	spawnDone := runnertrace.Span("windows-runner", "client.spawn_write")
 	if err := s.write(spawn); err != nil {
+		spawnDone()
 		_ = s.TerminateSession()
 		return nil, err
 	}
+	spawnDone()
 	go s.readLoop()
 	return s, nil
 }
 
 func (c *Client) launch(ctx context.Context, req runnerruntime.Request) (process, error) {
+	resolveDone := runnertrace.Span("windows-runner", "launch.resolve_executable")
 	executable, err := c.resolveExecutable(req)
+	resolveDone()
 	if err != nil {
 		return nil, err
 	}
 	creds := Credentials{}
 	if c.credentials != nil {
+		credsDone := runnertrace.Span("windows-runner", "launch.credentials")
 		creds, err = c.credentials(req)
+		credsDone()
 		if err != nil {
 			return nil, err
 		}
 	}
 	if strings.TrimSpace(creds.Username) != "" {
+		envDone := runnertrace.Span("windows-runner", "launch.runner_environment")
 		env, err := c.runnerEnvironment(creds)
+		envDone()
 		if err != nil {
 			return nil, err
 		}
-		return win32.StartProcessWithLogon(win32.LogonCredentials{
+		logonDone := runnertrace.Span("windows-runner", "launch.create_process_with_logon")
+		proc, err := win32.StartProcessWithLogon(win32.LogonCredentials{
 			Username: creds.Username,
 			Domain:   creds.Domain,
 			Password: creds.Password,
 		}, executable, c.args, c.dir, win32.LogonProcessOptions{
-			LoadProfile: false,
+			LoadProfile: true,
 			Env:         env,
 		})
+		logonDone()
+		return proc, err
 	}
+	envDone := runnertrace.Span("windows-runner", "launch.runner_environment")
 	env, err := c.runnerEnvironment(creds)
+	envDone()
 	if err != nil {
 		return nil, err
 	}
-	return startExecProcess(context.WithoutCancel(ctx), executable, c.args, c.dir, env)
+	execDone := runnertrace.Span("windows-runner", "launch.exec_process")
+	proc, err := startExecProcess(context.WithoutCancel(ctx), executable, c.args, c.dir, env)
+	execDone()
+	return proc, err
 }
 
 func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
@@ -338,6 +364,10 @@ func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
 	}
 	name = strings.NewReplacer(`\`, "_", `/`, "_", ":", "_").Replace(name)
 	home := filepath.Join(root, ".sandbox", "runner-home", name)
+	userProfile := home
+	if strings.TrimSpace(creds.Username) != "" {
+		userProfile = sandboxUserProfileHome(creds)
+	}
 	tmp := filepath.Join(root, ".sandbox", "runner-tmp", name)
 	localAppData := filepath.Join(home, "AppData", "Local")
 	roamingAppData := filepath.Join(home, "AppData", "Roaming")
@@ -346,7 +376,7 @@ func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
 			return nil, err
 		}
 	}
-	env["USERPROFILE"] = home
+	env["USERPROFILE"] = userProfile
 	env["HOME"] = home
 	env["CAELIS_SANDBOX_HOME"] = home
 	env["TEMP"] = tmp
@@ -375,6 +405,21 @@ func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
 		out = append(out, key+"="+env[key])
 	}
 	return out, nil
+}
+
+func sandboxUserProfileHome(creds Credentials) string {
+	username := strings.TrimSpace(creds.Username)
+	if _, user, ok := strings.Cut(username, `\`); ok {
+		username = strings.TrimSpace(user)
+	}
+	if username == "" {
+		username = "current"
+	}
+	systemDrive := strings.TrimRight(strings.TrimSpace(os.Getenv("SystemDrive")), `\/`)
+	if systemDrive == "" {
+		systemDrive = `C:`
+	}
+	return filepath.Join(systemDrive+`\`, "Users", username)
 }
 
 func sandboxLocalCacheEnv(home string, tmp string, localAppData string) map[string]string {
@@ -576,13 +621,8 @@ func (s *session) readLoop() {
 				s.finish(-1, err)
 				return
 			}
-			var waitErr error
-			reason := strings.TrimSpace(payload.Reason)
-			if reason != "" && payload.ExitCode != 0 && !plainCommandExitReason(reason) {
-				waitErr = errors.New(reason)
-			}
 			s.flushOutputText()
-			s.finish(payload.ExitCode, waitErr)
+			s.finish(payload.ExitCode, commandExitError(payload.ExitCode, payload.Reason))
 			return
 		case runnerproto.TypeError:
 			var payload runnerproto.Error
@@ -598,11 +638,15 @@ func (s *session) readLoop() {
 	}
 }
 
-func plainCommandExitReason(reason string) bool {
+func commandExitError(exitCode int, reason string) error {
+	if exitCode == 0 {
+		return nil
+	}
 	reason = strings.TrimSpace(reason)
-	return strings.HasPrefix(reason, "exit status ") ||
-		strings.HasPrefix(reason, "signal: ") ||
-		strings.HasPrefix(reason, "process exited with code ")
+	if reason != "" {
+		return errors.New(reason)
+	}
+	return fmt.Errorf("windows runner: command exited with code %d", exitCode)
 }
 
 func (s *session) captureRunnerStderr(reader io.Reader) {

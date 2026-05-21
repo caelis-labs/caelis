@@ -141,6 +141,7 @@ type setupRunner struct {
 	policyMu            sync.Mutex
 	policyCache         map[string]cachedWindowsPolicy
 	helperMu            sync.Mutex
+	helperPathCache     map[string]cachedHelperPath
 	executableHashMu    sync.Mutex
 	executableHash      string
 }
@@ -190,6 +191,11 @@ var errSandboxUsersFileMissing = errors.New("sandbox users file missing")
 type cachedWindowsPolicy struct {
 	policy winpolicy.Policy
 	hash   string
+}
+
+type cachedHelperPath struct {
+	path string
+	hash string
 }
 
 func (r *setupRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
@@ -272,6 +278,9 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 		workspace = r.workspaceSetupSnapshot()
 	}
 	if globalFreshness.Current && workspace.Current {
+		if err := r.prepareCommandRunnerHelper(ctx); err != nil {
+			return err
+		}
 		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "complete", Message: "Windows sandbox setup is already current", Done: true})
 		r.markBaseRefreshApplied()
 		return nil
@@ -357,6 +366,9 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 	}
 	if freshness := r.workspaceSetupSnapshot(); !freshness.Current {
 		return fmt.Errorf("impl/sandbox/windows: workspace setup did not become current: %s", freshness.Reason)
+	}
+	if err := r.prepareCommandRunnerHelper(ctx); err != nil {
+		return err
 	}
 	r.clearRefreshCache()
 	r.clearPolicyCache()
@@ -1258,6 +1270,15 @@ func (r *setupRunner) helperExecutablePath(runnerruntime.Request) (string, error
 	return path, err
 }
 
+func (r *setupRunner) prepareCommandRunnerHelper(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "helper", Message: "materializing command runner helper executable"})
+	_, _, err := r.materializeRunnerHelper()
+	return err
+}
+
 func (r *setupRunner) materializeHelper() (string, string, error) {
 	source := strings.TrimSpace(r.executable)
 	if dedicated := siblingSetupHelper(source); dedicated != "" {
@@ -1279,7 +1300,11 @@ func (r *setupRunner) materializeHelperFromSource(source string, prefix string) 
 	if source == "" {
 		return "", "", fmt.Errorf("impl/sandbox/windows: helper executable path is required")
 	}
-	hash, err := fileHash(source)
+	cacheKey := helperPathCacheKey(source, prefix)
+	if cached, ok := r.cachedHelperPath(cacheKey); ok {
+		return cached.path, cached.hash, nil
+	}
+	hash, err := r.helperSourceHash(source)
 	if err != nil {
 		return "", "", err
 	}
@@ -1290,14 +1315,20 @@ func (r *setupRunner) materializeHelperFromSource(source string, prefix string) 
 	dirs := setupstate.NewDirs(r.stateRoot)
 	target := filepath.Join(dirs.Bin, prefix+shortHash+".exe")
 	if strings.EqualFold(source, target) {
+		r.markHelperPathCached(cacheKey, source, hash)
 		return source, hash, nil
 	}
-	if helperFileHashMatches(target, hash) {
+	if helperFileFresh(source, target) {
+		r.markHelperPathCached(cacheKey, target, hash)
 		return target, hash, nil
 	}
 	r.helperMu.Lock()
 	defer r.helperMu.Unlock()
-	if helperFileHashMatches(target, hash) {
+	if cached, ok := r.cachedHelperPathLocked(cacheKey); ok {
+		return cached.path, cached.hash, nil
+	}
+	if helperFileFresh(source, target) {
+		r.markHelperPathCachedLocked(cacheKey, target, hash)
 		return target, hash, nil
 	}
 	if err := os.MkdirAll(dirs.Bin, 0o700); err != nil {
@@ -1340,12 +1371,77 @@ func (r *setupRunner) materializeHelperFromSource(source string, prefix string) 
 		return "", "", err
 	}
 	committed = true
+	r.markHelperPathCachedLocked(cacheKey, committedPath, hash)
 	return committedPath, hash, nil
+}
+
+func (r *setupRunner) helperSourceHash(source string) (string, error) {
+	if strings.EqualFold(strings.TrimSpace(source), strings.TrimSpace(r.executable)) {
+		return r.cachedExecutableHash()
+	}
+	return fileHash(source)
+}
+
+func helperPathCacheKey(source string, prefix string) string {
+	return strings.ToLower(filepath.Clean(strings.TrimSpace(source))) + "\x00" + strings.TrimSpace(prefix)
+}
+
+func (r *setupRunner) cachedHelperPath(key string) (cachedHelperPath, bool) {
+	r.helperMu.Lock()
+	defer r.helperMu.Unlock()
+	if r.helperPathCache == nil {
+		return cachedHelperPath{}, false
+	}
+	return r.cachedHelperPathLocked(key)
+}
+
+func (r *setupRunner) cachedHelperPathLocked(key string) (cachedHelperPath, bool) {
+	if r.helperPathCache == nil {
+		return cachedHelperPath{}, false
+	}
+	cached, ok := r.helperPathCache[key]
+	return cached, ok && strings.TrimSpace(cached.path) != "" && strings.TrimSpace(cached.hash) != ""
+}
+
+func (r *setupRunner) markHelperPathCached(key string, path string, hash string) {
+	r.helperMu.Lock()
+	defer r.helperMu.Unlock()
+	r.markHelperPathCachedLocked(key, path, hash)
+}
+
+func (r *setupRunner) markHelperPathCachedLocked(key string, path string, hash string) {
+	key = strings.TrimSpace(key)
+	path = strings.TrimSpace(path)
+	hash = strings.TrimSpace(hash)
+	if key == "" || path == "" || hash == "" {
+		return
+	}
+	if r.helperPathCache == nil {
+		r.helperPathCache = map[string]cachedHelperPath{}
+	}
+	r.helperPathCache[key] = cachedHelperPath{path: path, hash: hash}
 }
 
 func helperFileHashMatches(path string, hash string) bool {
 	existingHash, err := fileHash(path)
 	return err == nil && existingHash == hash
+}
+
+func helperFileFresh(source string, target string) bool {
+	sourceInfo, err := os.Stat(source)
+	if err != nil || sourceInfo.IsDir() {
+		return false
+	}
+	targetInfo, err := os.Stat(target)
+	if err != nil || targetInfo.IsDir() {
+		return false
+	}
+	if sourceInfo.Size() != targetInfo.Size() {
+		return false
+	}
+	sourceMod := sourceInfo.ModTime()
+	targetMod := targetInfo.ModTime()
+	return targetMod.Equal(sourceMod) || targetMod.After(sourceMod)
 }
 
 func commitHelperTemp(tmpPath string, target string, hash string) (string, error) {

@@ -4,6 +4,7 @@ package runnercmd
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -238,6 +239,38 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 	if strings.Contains(online, "CAELIS_SANDBOX_NETWORK=disabled") ||
 		strings.Contains(online, "HTTP_PROXY=http://127.0.0.1:9") {
 		t.Fatalf("online env = %q, want no offline proxy hardening", online)
+	}
+}
+
+func TestEffectiveWorkingDirectoryUsesSandboxHomeJunction(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	env := []string{"USERPROFILE=" + home}
+
+	got := effectiveWorkingDirectory(cwd, env)
+	if strings.EqualFold(got, cwd) {
+		t.Skip("directory junction creation unavailable in this Windows environment")
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(got)
+	})
+	if !isReparsePoint(got) {
+		t.Fatalf("effectiveWorkingDirectory() = %q, want reparse-point junction", got)
+	}
+	if !testPathIsUnder(got, filepath.Join(home, ".caelis", ".sandbox", "cwd")) {
+		t.Fatalf("effectiveWorkingDirectory() = %q, want under sandbox home %q", got, home)
+	}
+	again := effectiveWorkingDirectory(cwd, env)
+	if !strings.EqualFold(got, again) {
+		t.Fatalf("effectiveWorkingDirectory() reuse = %q, want %q", again, got)
+	}
+}
+
+func TestCWDJunctionNameIsStableForCleanedCaseInsensitivePath(t *testing.T) {
+	left := cwdJunctionName(`C:\Users\Admin\WorkDir\Repo\.`)
+	right := cwdJunctionName(`c:\users\admin\workdir\repo`)
+	if left == "" || left != right {
+		t.Fatalf("cwdJunctionName() = %q and %q, want same non-empty name", left, right)
 	}
 }
 

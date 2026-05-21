@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
@@ -33,7 +35,7 @@ func TestAncestorPathsStopBeforeUserProfileRoot(t *testing.T) {
 	}
 }
 
-func TestRequiredPolicyACLTargetsKeepsCapabilitiesOffAncestors(t *testing.T) {
+func TestRequiredPolicyACLTargetsSkipsAncestorACLTargets(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "workspace", "storage")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("MkdirAll(root) error = %v", err)
@@ -47,30 +49,110 @@ func TestRequiredPolicyACLTargetsKeepsCapabilitiesOffAncestors(t *testing.T) {
 		CapabilitySIDs: []string{capabilitySID},
 	}, "CaelisSbxOffTest", "CaelisSbxOnTest")
 
-	var foundAncestor bool
 	var foundRootCapability bool
 	rootKey := pathutil.Key(root)
 	for _, target := range targets {
 		isRoot := pathutil.Key(target.Path) == rootKey
-		for _, entry := range target.Entries {
-			if entry.Principal != capabilitySID {
-				continue
-			}
-			if isRoot {
-				foundRootCapability = true
-			} else {
-				t.Fatalf("capability SID was granted on ancestor target %q", target.Path)
-			}
-		}
 		if !isRoot {
-			foundAncestor = true
+			t.Fatalf("requiredPolicyACLTargets(%q) included ancestor/non-root target %q", root, target.Path)
 		}
-	}
-	if !foundAncestor {
-		t.Fatalf("requiredPolicyACLTargets(%q) did not include any ancestor targets", root)
+		for _, entry := range target.Entries {
+			if isRoot && entry.Principal == capabilitySID {
+				foundRootCapability = true
+			}
+		}
 	}
 	if !foundRootCapability {
 		t.Fatalf("requiredPolicyACLTargets(%q) did not grant capability SID on the write root", root)
+	}
+}
+
+func TestRequiredPolicyACLTargetsUsesGroupAndRootCapabilityForWriteRoot(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "workspace")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	rootCapabilitySID := "S-1-5-21-1-2-3-4"
+	otherCapabilitySID := "S-1-5-21-5-6-7-8"
+	targets := requiredPolicyACLTargets(winpolicy.Policy{
+		WriteRoots:     []string{root},
+		CapabilitySIDs: []string{rootCapabilitySID, otherCapabilitySID},
+		WriteRootCapabilitySIDs: map[string]string{
+			pathutil.Normalize(root): rootCapabilitySID,
+		},
+	}, "CaelisSbxOffTest", "CaelisSbxOnTest")
+
+	entries := entriesForPath(t, targets, root, acl.Grant)
+	principals := entryPrincipals(entries)
+	if len(principals) != 2 {
+		t.Fatalf("write root principals = %#v, want sandbox group and root capability only", principals)
+	}
+	for _, want := range []string{GroupName, rootCapabilitySID} {
+		if !containsFold(principals, want) {
+			t.Fatalf("write root principals = %#v, want %q", principals, want)
+		}
+	}
+	for _, unwanted := range []string{"CaelisSbxOffTest", "CaelisSbxOnTest", otherCapabilitySID} {
+		if containsFold(principals, unwanted) {
+			t.Fatalf("write root principals = %#v, did not want %q", principals, unwanted)
+		}
+	}
+}
+
+func TestRequiredPolicyACLTargetsDenyWriteUsesOverlappingRootCapability(t *testing.T) {
+	base := t.TempDir()
+	workspace := filepath.Join(base, "workspace")
+	extra := filepath.Join(base, "extra")
+	gitDir := filepath.Join(workspace, ".git")
+	for _, path := range []string{workspace, extra, gitDir} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", path, err)
+		}
+	}
+	workspaceCapabilitySID := "S-1-5-21-11-12-13-14"
+	extraCapabilitySID := "S-1-5-21-21-22-23-24"
+	targets := requiredPolicyACLTargets(winpolicy.Policy{
+		WriteRoots:     []string{workspace, extra},
+		DenyWritePaths: []string{gitDir},
+		CapabilitySIDs: []string{workspaceCapabilitySID, extraCapabilitySID},
+		WriteRootCapabilitySIDs: map[string]string{
+			pathutil.Normalize(workspace): workspaceCapabilitySID,
+			pathutil.Normalize(extra):     extraCapabilitySID,
+		},
+	}, "CaelisSbxOffTest", "CaelisSbxOnTest")
+
+	entries := entriesForPath(t, targets, gitDir, acl.Deny)
+	principals := entryPrincipals(entries)
+	if len(principals) != 1 {
+		t.Fatalf("deny-write principals = %#v, want only overlapping root capability", principals)
+	}
+	if principals[0] != workspaceCapabilitySID {
+		t.Fatalf("deny-write principals = %#v, want %q", principals, workspaceCapabilitySID)
+	}
+	for _, unwanted := range []string{GroupName, "CaelisSbxOffTest", "CaelisSbxOnTest", extraCapabilitySID} {
+		if containsFold(principals, unwanted) {
+			t.Fatalf("deny-write principals = %#v, did not want %q", principals, unwanted)
+		}
+	}
+}
+
+func TestWriteRootCapabilitySIDsForPathFallsBackToAllWriteRoots(t *testing.T) {
+	base := t.TempDir()
+	left := filepath.Join(base, "left")
+	right := filepath.Join(base, "right")
+	unrelated := filepath.Join(base, "unrelated")
+	leftCapabilitySID := "S-1-5-21-31-32-33-34"
+	rightCapabilitySID := "S-1-5-21-41-42-43-44"
+
+	got := writeRootCapabilitySIDsForPath(winpolicy.Policy{
+		WriteRoots: []string{left, right},
+		WriteRootCapabilitySIDs: map[string]string{
+			pathutil.Normalize(left):  leftCapabilitySID,
+			pathutil.Normalize(right): rightCapabilitySID,
+		},
+	}, unrelated)
+	if len(got) != 2 || !containsFold(got, leftCapabilitySID) || !containsFold(got, rightCapabilitySID) {
+		t.Fatalf("writeRootCapabilitySIDsForPath() = %#v, want all write-root capabilities", got)
 	}
 }
 
@@ -86,6 +168,34 @@ func TestResolvePrincipalSIDsKeepsSIDStringsAndDedupes(t *testing.T) {
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("resolvePrincipalSIDs()[%d] = %q, want %q (all=%#v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+func TestSandboxUserProfileDirsOnlyMatchesExactUserProfiles(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SystemDrive", root)
+	usersRoot := filepath.Join(root, "Users")
+	for _, name := range []string{
+		"CaelisSbxOffabcd1234",
+		"CaelisSbxOffabcd1234.HOST",
+		"CaelisSbxOffabcd12345",
+		"OtherUser",
+	} {
+		if err := os.MkdirAll(filepath.Join(usersRoot, name), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", name, err)
+		}
+	}
+	got := sandboxUserProfileDirs("CaelisSbxOffabcd1234")
+	if len(got) != 2 {
+		t.Fatalf("sandboxUserProfileDirs() = %#v, want exact profile and suffixed profile", got)
+	}
+	for _, unwanted := range []string{
+		filepath.Join(usersRoot, "CaelisSbxOffabcd12345"),
+		filepath.Join(usersRoot, "OtherUser"),
+	} {
+		if containsPathKey(got, unwanted) {
+			t.Fatalf("sandboxUserProfileDirs() = %#v, did not want %q", got, unwanted)
 		}
 	}
 }
@@ -112,23 +222,46 @@ func TestRunACLTasksSerializesSamePathKey(t *testing.T) {
 	}
 }
 
-func TestAppendAncestorACLTasksOrdersParentsBeforeChildren(t *testing.T) {
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		t.Skipf("user home unavailable: %v", err)
+func TestRunACLTasksSerializesOverlappingPathKeys(t *testing.T) {
+	parent := t.TempDir()
+	child := filepath.Join(parent, "repo", ".git")
+	if err := os.MkdirAll(child, 0o755); err != nil {
+		t.Fatalf("MkdirAll(child) error = %v", err)
 	}
-	parent := filepath.Join(home, "WorkDir")
-	child := filepath.Join(parent, "demo")
-	root := filepath.Join(child, "workspace")
-	tasks := appendAncestorACLTasks(nil, root, []string{"S-1-1-0"}, map[string]struct{}{})
-	if len(tasks) < 2 {
-		t.Fatalf("appendAncestorACLTasks(%q) produced %d tasks, want at least 2", root, len(tasks))
+	var active int32
+	var overlapped atomic.Bool
+	task := func() error {
+		if atomic.AddInt32(&active, 1) != 1 {
+			overlapped.Store(true)
+		}
+		time.Sleep(10 * time.Millisecond)
+		atomic.AddInt32(&active, -1)
+		return nil
 	}
-	if tasks[0].key != pathutil.Key(parent) {
-		t.Fatalf("first ancestor task key = %q, want parent %q (all=%#v)", tasks[0].key, pathutil.Key(parent), tasks)
+	if err := runACLTasks([]aclTask{
+		{key: pathutil.Key(parent), run: task},
+		{key: pathutil.Key(child), run: task},
+	}); err != nil {
+		t.Fatalf("runACLTasks() error = %v", err)
 	}
-	if tasks[1].key != pathutil.Key(child) {
-		t.Fatalf("second ancestor task key = %q, want child %q (all=%#v)", tasks[1].key, pathutil.Key(child), tasks)
+	if overlapped.Load() {
+		t.Fatal("runACLTasks ran ancestor/descendant ACL updates concurrently")
+	}
+}
+
+func TestBatchACLTasksKeepsIndependentPathKeysTogether(t *testing.T) {
+	root := t.TempDir()
+	left := filepath.Join(root, "left")
+	right := filepath.Join(root, "right")
+	batches := batchACLTasks([]aclTask{
+		{key: pathutil.Key(left), run: func() error { return nil }},
+		{key: pathutil.Key(right), run: func() error { return nil }},
+	})
+	if len(batches) != 1 {
+		t.Fatalf("batchACLTasks() produced %d batches, want 1", len(batches))
+	}
+	if len(batches[0]) != 2 {
+		t.Fatalf("batchACLTasks()[0] has %d groups, want 2", len(batches[0]))
 	}
 }
 
@@ -245,6 +378,64 @@ func TestExecuteRejectsExpiredResetPayloadBeforeElevation(t *testing.T) {
 	if err == nil {
 		t.Fatal("ExecuteWithProgress() error = nil, want expired operation")
 	}
+}
+
+func BenchmarkRequiredPolicyACLTargetsWorkspaceCarveouts(b *testing.B) {
+	base := b.TempDir()
+	const roots = 48
+	policy := winpolicy.Policy{
+		WriteRootCapabilitySIDs: map[string]string{},
+	}
+	for i := 0; i < roots; i++ {
+		rawRoot := filepath.Join(base, "repo-"+string(rune('a'+i%26)), "workspace-"+string(rune('a'+(i/26))))
+		rawGitDir := filepath.Join(rawRoot, ".git")
+		if err := os.MkdirAll(rawGitDir, 0o755); err != nil {
+			b.Fatalf("MkdirAll(%q) error = %v", rawGitDir, err)
+		}
+		root := pathutil.Normalize(rawRoot)
+		gitDir := pathutil.Normalize(rawGitDir)
+		sid := "S-1-5-21-100-200-300-" + strconv.Itoa(1000+i)
+		policy.WriteRoots = append(policy.WriteRoots, root)
+		policy.DenyWritePaths = append(policy.DenyWritePaths, gitDir)
+		policy.CapabilitySIDs = append(policy.CapabilitySIDs, sid)
+		policy.WriteRootCapabilitySIDs[root] = sid
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		targets := requiredPolicyACLTargets(policy, "CaelisSbxOffTest", "CaelisSbxOnTest")
+		if len(targets) == 0 {
+			b.Fatal("requiredPolicyACLTargets() returned no targets")
+		}
+	}
+}
+
+func entriesForPath(t *testing.T, targets []policyACLTarget, path string, mode acl.Mode) []acl.Entry {
+	t.Helper()
+	key := pathutil.Key(path)
+	for _, target := range targets {
+		if pathutil.Key(target.Path) != key {
+			continue
+		}
+		var out []acl.Entry
+		for _, entry := range target.Entries {
+			if entry.Mode == mode {
+				out = append(out, entry)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	t.Fatalf("target path %q with mode %q not found in %#v", path, mode, targets)
+	return nil
+}
+
+func entryPrincipals(entries []acl.Entry) []string {
+	out := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, entry.Principal)
+	}
+	return out
 }
 
 func containsPathKey(paths []string, want string) bool {

@@ -36,9 +36,13 @@ func TestRunnerEnvironmentUsesSandboxLocalCaches(t *testing.T) {
 		t.Fatalf("runnerEnvironment() error = %v", err)
 	}
 	home := testEnvValue(env, "CAELIS_SANDBOX_HOME")
+	userProfile := testEnvValue(env, "USERPROFILE")
 	localAppData := testEnvValue(env, "LOCALAPPDATA")
 	if home == "" || !pathIsUnder(home, stateRoot) {
 		t.Fatalf("CAELIS_SANDBOX_HOME = %q, want under state root %q", home, stateRoot)
+	}
+	if userProfile == "" || pathIsUnder(userProfile, stateRoot) || !strings.Contains(strings.ToLower(userProfile), "caelissbxofftest") {
+		t.Fatalf("USERPROFILE = %q, want sandbox user profile outside state root %q", userProfile, stateRoot)
 	}
 	for _, tc := range []struct {
 		key  string
@@ -68,18 +72,15 @@ func TestRunnerEnvironmentUsesSandboxLocalCaches(t *testing.T) {
 	}
 }
 
-func TestPlainCommandExitReason(t *testing.T) {
-	for _, reason := range []string{
-		"exit status 1",
-		"signal: killed",
-		"process exited with code 1",
-	} {
-		if !plainCommandExitReason(reason) {
-			t.Fatalf("plainCommandExitReason(%q) = false, want true", reason)
-		}
+func TestCommandExitError(t *testing.T) {
+	if err := commandExitError(0, ""); err != nil {
+		t.Fatalf("commandExitError(0) = %v, want nil", err)
 	}
-	if plainCommandExitReason("runner protocol error") {
-		t.Fatal("plainCommandExitReason(runner protocol error) = true, want false")
+	if err := commandExitError(17, "process exited with code 17"); err == nil || !strings.Contains(err.Error(), "17") {
+		t.Fatalf("commandExitError(17) = %v, want exit failure", err)
+	}
+	if err := commandExitError(3, ""); err == nil || !strings.Contains(err.Error(), "3") {
+		t.Fatalf("commandExitError(3, empty reason) = %v, want synthesized exit failure", err)
 	}
 }
 

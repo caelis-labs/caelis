@@ -2,6 +2,8 @@ package runnercmd
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
@@ -18,6 +21,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/job"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerproto"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
+	"golang.org/x/sys/windows"
 )
 
 func Run(stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
@@ -78,6 +82,7 @@ func (r *runner) runSpawn(spawn runnerproto.Spawn) error {
 	if err != nil {
 		return err
 	}
+	effectiveCWD := effectiveWorkingDirectory(spawn.CWD, env)
 	token, releaseToken, err := restrictedToken(spawn.CapabilitySID)
 	if err != nil {
 		return fmt.Errorf("command runner: restricted token: %w", err)
@@ -87,7 +92,7 @@ func (r *runner) runSpawn(spawn runnerproto.Spawn) error {
 	if err != nil {
 		return err
 	}
-	process, err := win32.StartProcessAsUser(token, powershell, powershellArgs(commandWithLocation(spawn.Command, spawn.CWD), false, spawn.StdinOpen), "", env)
+	process, err := win32.StartProcessAsUser(token, powershell, powershellArgs(commandWithLocation(spawn.Command, effectiveCWD), false, spawn.StdinOpen), effectiveCWD, env)
 	if err != nil {
 		return err
 	}
@@ -151,7 +156,9 @@ func (r *runner) runSpawnAsCurrentUser(spawn runnerproto.Spawn, env []string) er
 	}
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "powershell.exe", powershellArgs(commandWithLocation(spawn.Command, spawn.CWD), false, spawn.StdinOpen)...)
+	effectiveCWD := effectiveWorkingDirectory(spawn.CWD, env)
+	cmd := exec.CommandContext(ctx, "powershell.exe", powershellArgs(commandWithLocation(spawn.Command, effectiveCWD), false, spawn.StdinOpen)...)
+	cmd.Dir = effectiveCWD
 	cmd.Env = env
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -214,9 +221,11 @@ func (r *runner) runTTY(spawn runnerproto.Spawn) error {
 	if err != nil {
 		return err
 	}
+	effectiveCWD := effectiveWorkingDirectory(spawn.CWD, env)
 	pty, err := conpty.Start(conpty.Config{
 		Command: "powershell.exe",
-		Args:    powershellArgs(commandWithLocation(spawn.Command, spawn.CWD), true, true),
+		Args:    powershellArgs(commandWithLocation(spawn.Command, effectiveCWD), true, true),
+		Dir:     effectiveCWD,
 		Env:     env,
 		Rows:    spawn.Rows,
 		Cols:    spawn.Cols,
@@ -360,6 +369,7 @@ func (r *runner) writeFrame(typ string, payload any) error {
 
 func mergeEnv(extra map[string]string, network string, cwd string) ([]string, error) {
 	env := os.Environ()
+	userProfile := strings.TrimSpace(envValue(env, "USERPROFILE"))
 	home := strings.TrimSpace(envValue(env, "CAELIS_SANDBOX_HOME"))
 	tmp := firstEnvValue(env, "TEMP", "TMP")
 	localAppData := strings.TrimSpace(envValue(env, "LOCALAPPDATA"))
@@ -371,6 +381,9 @@ func mergeEnv(extra map[string]string, network string, cwd string) ([]string, er
 		roamingAppData = filepath.Join(home, "AppData", "Roaming")
 	}
 	if home != "" {
+		if userProfile == "" {
+			userProfile = home
+		}
 		if tmp == "" {
 			tmp = filepath.Join(home, "tmp")
 		}
@@ -386,7 +399,7 @@ func mergeEnv(extra map[string]string, network string, cwd string) ([]string, er
 			}
 		}
 		setEnvValue(&env, "CAELIS_SANDBOX_HOME", home)
-		setEnvValue(&env, "USERPROFILE", home)
+		setEnvValue(&env, "USERPROFILE", userProfile)
 		setEnvValue(&env, "HOME", home)
 		setEnvValue(&env, "TEMP", tmp)
 		setEnvValue(&env, "TMP", tmp)
@@ -513,6 +526,74 @@ func sandboxLocalCacheDirs(env []string) []string {
 
 func powershellArgs(command string, tty bool, interactive bool) []string {
 	return winps.Args(command, winps.Options{TTY: tty, Interactive: interactive})
+}
+
+func effectiveWorkingDirectory(requestedCWD string, env []string) string {
+	requestedCWD = strings.TrimSpace(requestedCWD)
+	if requestedCWD == "" {
+		return ""
+	}
+	if junction, ok := createCWDJunction(requestedCWD, env); ok {
+		return junction
+	}
+	return requestedCWD
+}
+
+func createCWDJunction(requestedCWD string, env []string) (string, bool) {
+	home := strings.TrimSpace(firstEnvValue(env, "USERPROFILE", "CAELIS_SANDBOX_HOME", "HOME"))
+	if home == "" {
+		return "", false
+	}
+	root := filepath.Join(home, ".caelis", ".sandbox", "cwd")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", false
+	}
+	junction := filepath.Join(root, cwdJunctionName(requestedCWD))
+	if isReparsePoint(junction) {
+		return junction, true
+	}
+	if _, err := os.Lstat(junction); err == nil {
+		if err := os.Remove(junction); err != nil {
+			return "", false
+		}
+	} else if !os.IsNotExist(err) {
+		return "", false
+	}
+	if err := makeDirectoryJunction(junction, requestedCWD); err != nil {
+		return "", false
+	}
+	if !isReparsePoint(junction) {
+		return "", false
+	}
+	return junction, true
+}
+
+func cwdJunctionName(path string) string {
+	cleaned := strings.ToLower(filepath.Clean(strings.TrimSpace(path)))
+	sum := sha256.Sum256([]byte(cleaned))
+	return hex.EncodeToString(sum[:8])
+}
+
+func isReparsePoint(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	data, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	return ok && data.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+func makeDirectoryJunction(link string, target string) error {
+	cmd := exec.Command("cmd.exe")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+		CmdLine:    fmt.Sprintf(`/d /s /c mklink /J "%s" "%s"`, link, target),
+	}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("mklink /J failed: %w: %s", err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func commandWithLocation(command string, cwd string) string {
