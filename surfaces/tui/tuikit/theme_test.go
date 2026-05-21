@@ -67,8 +67,50 @@ func TestResolveThemeForBackground_SelectsLightTheme(t *testing.T) {
 	if got := stringifyColor(theme.Focus); got != "#2f8faf" {
 		t.Fatalf("expected light-theme focus accent, got %q", got)
 	}
-	if got := stringifyColor(theme.PanelBorder); got != "#d6dde7" {
+	if got := stringifyColor(theme.PanelBorder); got != "#c4ccd8" {
 		t.Fatalf("expected light-theme border, got %q", got)
+	}
+}
+
+func TestResolveThemeFromOptionsUsesCOLORFGBGForAutoBackground(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CAELIS_THEME", "auto")
+	t.Setenv("COLORTERM", "truecolor")
+	t.Setenv("COLORFGBG", "0;15")
+
+	light := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	if light.IsDark {
+		t.Fatal("expected COLORFGBG white background to select light theme")
+	}
+
+	t.Setenv("COLORFGBG", "15;0")
+	dark := ResolveThemeFromOptions(false, colorprofile.TrueColor)
+	if !dark.IsDark {
+		t.Fatal("expected COLORFGBG black background to select dark theme")
+	}
+}
+
+func TestTerminalColorIndexIsDarkCoversANSI256(t *testing.T) {
+	tests := []struct {
+		name  string
+		index int
+		want  bool
+	}{
+		{name: "black", index: 0, want: true},
+		{name: "white", index: 15, want: false},
+		{name: "dark gray ramp", index: 235, want: true},
+		{name: "light gray ramp", index: 255, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := terminalColorIndexIsDark(tt.index)
+			if !ok {
+				t.Fatalf("terminalColorIndexIsDark(%d) ok = false", tt.index)
+			}
+			if got != tt.want {
+				t.Fatalf("terminalColorIndexIsDark(%d) = %v, want %v", tt.index, got, tt.want)
+			}
+		})
 	}
 }
 

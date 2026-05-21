@@ -11,16 +11,10 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 
 	msg := approvalToPromptRequest(&kernel.ApprovalPayload{
 		ToolName:           "RUN_COMMAND",
-		RawInput:           map[string]any{"command": "make generate"},
-		Reason:             "additional sandbox permissions require user approval",
-		Justification:      "Do you want to grant a cache path?",
-		SandboxPermissions: "with_additional_permissions",
-		AdditionalPermissions: map[string]any{
-			"network": map[string]any{"enabled": true},
-			"file_system": map[string]any{
-				"write": []any{"/tmp/cache"},
-			},
-		},
+		RawInput:           map[string]any{"command": "git fetch"},
+		Reason:             "host execution requires user approval",
+		Justification:      "Do you want to run git fetch on the host?",
+		SandboxPermissions: "require_escalated",
 		Options: []kernel.ApprovalOption{
 			{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		},
@@ -28,12 +22,10 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 
 	for _, want := range []PromptDetail{
 		{Label: "Action", Value: "execute"},
-		{Label: "Command", Value: "command: make generate", Emphasis: true},
-		{Label: "Risk", Value: "network: enabled; write: /tmp/cache", Emphasis: true},
-		{Label: "Reason", Value: "additional sandbox permissions require user approval"},
-		{Label: "Justification", Value: "Do you want to grant a cache path?"},
-		{Label: "Sandbox", Value: "with_additional_permissions"},
-		{Label: "Permissions", Value: "network: enabled; write: /tmp/cache"},
+		{Label: "Command", Value: "command: git fetch", Emphasis: true},
+		{Label: "Reason", Value: "host execution requires user approval"},
+		{Label: "Justification", Value: "Do you want to run git fetch on the host?"},
+		{Label: "Sandbox", Value: "require_escalated"},
 		{Label: "Default", Value: "Allow once"},
 	} {
 		if !hasPromptDetail(msg.Details, want) {

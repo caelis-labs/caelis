@@ -106,8 +106,8 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		"Start platform shell commands with default sandbox permissions",
 		"use RUN_COMMAND for shell work",
 		"workspace-local reads, builds, tests, and temp writes should stay default",
-		"Use `sandbox_permissions=with_additional_permissions`",
-		"Use `sandbox_permissions=require_escalated` only when host execution is required",
+		"Use request_permissions for extra read/write paths",
+		"Use `sandbox_permissions=require_escalated` only when host execution or host network access is required",
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("prompt missing %q:\n%s", required, prompt)
@@ -125,6 +125,8 @@ func TestBuildSystemPromptPermissionBoundariesAreRuntimeAgnostic(t *testing.T) {
 		"Configured read-only subpaths:",
 		"Base instructions are stable",
 		"Active permissions are runtime policy state",
+		"with_additional_permissions",
+		"network grant",
 	} {
 		if strings.Contains(prompt, forbidden) {
 			t.Fatalf("prompt should not contain runtime-specific %q:\n%s", forbidden, prompt)

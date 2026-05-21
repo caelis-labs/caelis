@@ -85,7 +85,7 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 			},
 		},
 		{
-			name: "permission metadata",
+			name: "escalation metadata",
 			req: &agent.ApprovalRequest{
 				Tool: tool.Definition{Name: "RUN_COMMAND"},
 				Call: tool.Call{
@@ -93,12 +93,9 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 					Input: json.RawMessage(`{"command":"make generate"}`),
 				},
 				Metadata: map[string]any{
-					"approval_reason":     "additional sandbox permissions require user approval",
-					"sandbox_permissions": "with_additional_permissions",
-					"justification":       "Do you want to grant a cache path?",
-					"additional_permissions": map[string]any{
-						"network": map[string]any{"enabled": true},
-					},
+					"approval_reason":     "host execution requires user approval",
+					"sandbox_permissions": "require_escalated",
+					"justification":       "Do you want to run this command on the host?",
 				},
 			},
 			want: func(t *testing.T, payload *ApprovalPayload) {
@@ -106,17 +103,14 @@ func TestCanonicalApprovalPayloadTableDriven(t *testing.T) {
 				if payload == nil {
 					t.Fatal("canonicalApprovalPayload() = nil, want payload")
 				}
-				if payload.Reason != "additional sandbox permissions require user approval" {
+				if payload.Reason != "host execution requires user approval" {
 					t.Fatalf("payload.Reason = %q", payload.Reason)
 				}
-				if payload.Justification != "Do you want to grant a cache path?" {
+				if payload.Justification != "Do you want to run this command on the host?" {
 					t.Fatalf("payload.Justification = %q", payload.Justification)
 				}
-				if payload.SandboxPermissions != "with_additional_permissions" {
+				if payload.SandboxPermissions != "require_escalated" {
 					t.Fatalf("payload.SandboxPermissions = %q", payload.SandboxPermissions)
-				}
-				if payload.AdditionalPermissions["network"] == nil {
-					t.Fatalf("payload.AdditionalPermissions = %#v, want network grant", payload.AdditionalPermissions)
 				}
 			},
 		},

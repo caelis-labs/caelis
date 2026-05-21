@@ -64,31 +64,7 @@ func (t *RunCommandTool) Definition() tool.Definition {
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
 					"description": "Sandbox mode for this command.",
-					"enum":        []string{"use_default", "with_additional_permissions", "require_escalated"},
-				},
-				"additional_permissions": map[string]any{
-					"type":        "object",
-					"description": "Extra sandbox grants for with_additional_permissions.",
-					"properties": map[string]any{
-						"network": map[string]any{
-							"type":        "object",
-							"description": "Network grant.",
-							"properties": map[string]any{
-								"enabled": map[string]any{"type": "boolean", "description": "Allow network."},
-							},
-							"additionalProperties": false,
-						},
-						"file_system": map[string]any{
-							"type":        "object",
-							"description": "Filesystem grants.",
-							"properties": map[string]any{
-								"read":  map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Readable paths."},
-								"write": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Writable paths."},
-							},
-							"additionalProperties": false,
-						},
-					},
-					"additionalProperties": false,
+					"enum":        []string{"use_default", "require_escalated"},
 				},
 				"justification": map[string]any{
 					"type":        "string",

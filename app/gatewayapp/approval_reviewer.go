@@ -497,9 +497,6 @@ func guardianPlannedActionJSON(req kernel.ApprovalReviewRequest) (string, bool, 
 		if req.Approval.SandboxPermissions != "" {
 			action["sandbox_permissions"] = req.Approval.SandboxPermissions
 		}
-		if len(req.Approval.AdditionalPermissions) > 0 {
-			action["additional_permissions"] = req.Approval.AdditionalPermissions
-		}
 		if len(req.Approval.RawInput) > 0 {
 			action["arguments"] = req.Approval.RawInput
 		}

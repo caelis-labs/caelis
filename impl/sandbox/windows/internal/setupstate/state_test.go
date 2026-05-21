@@ -26,13 +26,11 @@ func TestMarkerFreshnessDetectsHashChanges(t *testing.T) {
 		RunnerHash:      "runner-a",
 		PolicyHash:      "policy-a",
 		OfflineUsername: "CaelisSandboxOffline",
-		OnlineUsername:  "CaelisSandboxOnline",
 	}
 	if freshness := CheckFreshness(marker, Expectation{
 		RunnerHash:      "runner-a",
 		PolicyHash:      "policy-a",
 		OfflineUsername: "caelissandboxoffline",
-		OnlineUsername:  "caelissandboxonline",
 	}); !freshness.Current {
 		t.Fatalf("Freshness = %+v, want current", freshness)
 	}

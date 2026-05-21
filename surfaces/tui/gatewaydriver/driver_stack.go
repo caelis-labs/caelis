@@ -149,7 +149,6 @@ type DoctorReport struct {
 	HostExecution                   bool
 	FullAccessMode                  bool
 	PermissionGrantCount            int
-	PermissionGrantNetwork          bool
 	PermissionReadRootCount         int
 	PermissionWriteRootCount        int
 	ConfigPermissionsSecure         bool

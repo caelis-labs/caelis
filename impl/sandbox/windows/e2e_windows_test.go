@@ -181,36 +181,12 @@ Write-Output "proxy=$env:HTTP_PROXY"
 		t.Fatalf("offline network stdout = %q", result.Stdout)
 	}
 
-	result, err = runE2ECommand(ctx, rt, workspace, `
-Write-Output "net=$env:CAELIS_SANDBOX_NETWORK"
-Write-Output "proxy=$env:HTTP_PROXY"
-`, sandbox.NetworkEnabled, nil)
-	if err != nil {
-		t.Fatalf("online network env command error = %v; result=%+v", err, result)
-	}
-	if strings.Contains(result.Stdout, "net=disabled") || strings.Contains(result.Stdout, "proxy=http://127.0.0.1:9") {
-		t.Fatalf("online network stdout = %q, want no offline proxy hardening", result.Stdout)
-	}
-
 	if endpoint := reachableExternalE2EEndpoint(t); endpoint != "" {
 		host, port, err := net.SplitHostPort(endpoint)
 		if err != nil {
 			t.Fatalf("SplitHostPort(%q) error = %v", endpoint, err)
 		}
 		escapedHost := strings.ReplaceAll(host, "'", "''")
-		result, err = runE2ECommand(ctx, rt, workspace, `
-$client = [System.Net.Sockets.TcpClient]::new()
-$client.Connect('`+escapedHost+`', `+port+`)
-$client.Close()
-Write-Output 'online-connected'
-`, sandbox.NetworkEnabled, nil)
-		if err != nil {
-			t.Fatalf("online socket command error = %v; result=%+v", err, result)
-		}
-		if !strings.Contains(result.Stdout, "online-connected") {
-			t.Fatalf("online socket stdout = %q", result.Stdout)
-		}
-
 		result, err = runE2ECommand(ctx, rt, workspace, `
 $client = [System.Net.Sockets.TcpClient]::new()
 try {

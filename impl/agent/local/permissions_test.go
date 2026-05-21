@@ -18,12 +18,11 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
-func TestPermissionGrantStoreAppliesPathRulesAndNetwork(t *testing.T) {
+func TestPermissionGrantStoreAppliesPathRules(t *testing.T) {
 	store := newPermissionGrantStore()
 	store.add(permissionGrantRequest{
-		ReadRoots:      []string{"/readonly", "/upgrade"},
-		WriteRoots:     []string{"/writable", "/upgrade"},
-		NetworkEnabled: true,
+		ReadRoots:  []string{"/readonly", "/upgrade"},
+		WriteRoots: []string{"/writable", "/upgrade"},
 	}, permissionGrantMetadata{
 		Mode:      "manual",
 		RunID:     "run-1",
@@ -41,8 +40,8 @@ func TestPermissionGrantStoreAppliesPathRulesAndNetwork(t *testing.T) {
 			{Path: "/readonly", Access: sandbox.PathAccessReadOnly},
 		},
 	})
-	if got.Network != sandbox.NetworkEnabled {
-		t.Fatalf("Network = %q, want enabled", got.Network)
+	if got.Network != sandbox.NetworkDisabled {
+		t.Fatalf("Network = %q, want unchanged disabled", got.Network)
 	}
 	want := map[string]sandbox.PathAccess{
 		permissionPathKeyForTest("/workspace"): sandbox.PathAccessReadWrite,
@@ -63,8 +62,8 @@ func TestPermissionGrantStoreAppliesPathRulesAndNetwork(t *testing.T) {
 		}
 	}
 	snapshot := store.snapshot()
-	if snapshot.Count != 2 || !snapshot.NetworkGranted || snapshot.ReadRootCount != 2 || snapshot.WriteRootCount != 2 {
-		t.Fatalf("snapshot = %+v, want two grants with deduped read/write roots and network", snapshot)
+	if snapshot.Count != 2 || snapshot.ReadRootCount != 2 || snapshot.WriteRootCount != 2 {
+		t.Fatalf("snapshot = %+v, want two grants with deduped read/write roots", snapshot)
 	}
 }
 
@@ -72,8 +71,22 @@ func TestRequestPermissionsSchemaDisallowsUnknownRootProperties(t *testing.T) {
 	t.Parallel()
 
 	def := (requestPermissionsTool{}).Definition()
+	if !strings.Contains(def.Description, "local filesystem paths") {
+		t.Fatalf("description = %q, want local filesystem path scope", def.Description)
+	}
 	if got := def.InputSchema["additionalProperties"]; got != false {
 		t.Fatalf("additionalProperties = %#v, want false", got)
+	}
+	properties, _ := def.InputSchema["properties"].(map[string]any)
+	if _, ok := properties["network"]; ok {
+		t.Fatal("network property unexpectedly exposed")
+	}
+	for _, key := range []string{"read", "write"} {
+		property, _ := properties[key].(map[string]any)
+		description, _ := property["description"].(string)
+		if !strings.Contains(description, "local filesystem") {
+			t.Fatalf("%s description = %q, want local filesystem path scope", key, description)
+		}
 	}
 }
 
@@ -127,8 +140,32 @@ func TestRequestPermissionsToolReturnsStandardGrantPayload(t *testing.T) {
 			t.Fatalf("grant[%s] = %q, want %q", key, got, want)
 		}
 	}
-	if snapshot := store.snapshot(); snapshot.Count != 1 || !snapshot.NetworkGranted || snapshot.ReadRootCount != 1 || snapshot.WriteRootCount != 1 {
+	if snapshot := store.snapshot(); snapshot.Count != 1 || snapshot.ReadRootCount != 1 || snapshot.WriteRootCount != 1 {
 		t.Fatalf("snapshot = %+v, want recorded grant", snapshot)
+	}
+}
+
+func TestRequestPermissionsToolIgnoresNetworkGrant(t *testing.T) {
+	workspace := t.TempDir()
+	permissionsTool := requestPermissionsTool{
+		session:    session.Session{CWD: workspace},
+		sessionRef: session.SessionRef{SessionID: "sess-1"},
+		approval: approvalRequesterFunc(func(context.Context, agent.ApprovalRequest) (agent.ApprovalResponse, error) {
+			t.Fatal("approval requester should not be called for network-only requests")
+			return agent.ApprovalResponse{}, nil
+		}),
+		grants: newPermissionGrantStore(),
+	}
+	result, err := permissionsTool.Call(context.Background(), tool.Call{
+		ID:    "perm-1",
+		Name:  requestPermissionsToolName,
+		Input: []byte(`{"reason":"need network","network":true}`),
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires at least one non-empty read/write path") {
+		t.Fatalf("Call() error = %v, want missing read/write path error", err)
+	}
+	if result.ID != "" || result.Name != "" || len(result.Content) != 0 || len(result.Meta) != 0 || result.IsError {
+		t.Fatalf("result = %#v, want zero result on parse error", result)
 	}
 }
 
@@ -295,11 +332,11 @@ func TestRuntimePermissionGrantsAreSessionScoped(t *testing.T) {
 	if first == other {
 		t.Fatal("permissionGrantStoreForSession reused a store across sessions")
 	}
-	first.add(permissionGrantRequest{NetworkEnabled: true, Reason: "network"}, permissionGrantMetadata{})
-	if got := runtime.PermissionGrantSnapshot(session.SessionRef{SessionID: "sess-1"}); got.Count != 1 || !got.NetworkGranted {
-		t.Fatalf("sess-1 snapshot = %+v, want one network grant", got)
+	first.add(permissionGrantRequest{ReadRoots: []string{"/tmp/read"}, Reason: "read"}, permissionGrantMetadata{})
+	if got := runtime.PermissionGrantSnapshot(session.SessionRef{SessionID: "sess-1"}); got.Count != 1 || got.ReadRootCount != 1 {
+		t.Fatalf("sess-1 snapshot = %+v, want one read grant", got)
 	}
-	if got := runtime.PermissionGrantSnapshot(session.SessionRef{SessionID: "sess-2"}); got.Count != 0 || got.NetworkGranted {
+	if got := runtime.PermissionGrantSnapshot(session.SessionRef{SessionID: "sess-2"}); got.Count != 0 || got.ReadRootCount != 0 {
 		t.Fatalf("sess-2 snapshot = %+v, want no grants", got)
 	}
 }

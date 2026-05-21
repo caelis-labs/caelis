@@ -75,7 +75,6 @@ type DoctorReport struct {
 	HostExecution                   bool                     `json:"host_execution,omitempty"`
 	FullAccessMode                  bool                     `json:"full_access_mode,omitempty"`
 	PermissionGrantCount            int                      `json:"permission_grant_count,omitempty"`
-	PermissionGrantNetwork          bool                     `json:"permission_grant_network,omitempty"`
 	PermissionReadRootCount         int                      `json:"permission_read_root_count,omitempty"`
 	PermissionWriteRootCount        int                      `json:"permission_write_root_count,omitempty"`
 	HasActiveTurn                   bool                     `json:"has_active_turn,omitempty"`
@@ -189,7 +188,6 @@ func (s *Stack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, er
 	if s.engine != nil && strings.TrimSpace(ref.SessionID) != "" {
 		grants := s.engine.PermissionGrantSnapshot(ref)
 		report.PermissionGrantCount = grants.Count
-		report.PermissionGrantNetwork = grants.NetworkGranted
 		report.PermissionReadRootCount = grants.ReadRootCount
 		report.PermissionWriteRootCount = grants.WriteRootCount
 	}
@@ -267,7 +265,6 @@ func FormatDoctorText(report DoctorReport) string {
 		fmt.Sprintf("host_execution: %t", report.HostExecution),
 		fmt.Sprintf("full_access_mode: %t", report.FullAccessMode),
 		fmt.Sprintf("permission_grant_count: %d", report.PermissionGrantCount),
-		fmt.Sprintf("permission_grant_network: %t", report.PermissionGrantNetwork),
 		fmt.Sprintf("permission_read_root_count: %d", report.PermissionReadRootCount),
 		fmt.Sprintf("permission_write_root_count: %d", report.PermissionWriteRootCount),
 		fmt.Sprintf("has_active_turn: %t", report.HasActiveTurn),

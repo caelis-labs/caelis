@@ -55,8 +55,8 @@ type UserSecret struct {
 }
 
 type UsersFile struct {
-	Offline UserSecret `json:"offline"`
-	Online  UserSecret `json:"online"`
+	Offline UserSecret  `json:"offline"`
+	Online  *UserSecret `json:"online,omitempty"`
 }
 
 type Progress struct {
@@ -95,9 +95,6 @@ func (p Payload) Normalize() Payload {
 	}
 	if p.OfflineUsername == "" {
 		p.OfflineUsername = OfflineUser
-	}
-	if p.OnlineUsername == "" {
-		p.OnlineUsername = OnlineUser
 	}
 	return p
 }

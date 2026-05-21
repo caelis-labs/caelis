@@ -21,9 +21,6 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 					"command":             "git restore hello.py",
 					"approval_reason":     "destructive edit",
 					"sandbox_permissions": "workspace_write",
-					"additional_permissions": map[string]any{
-						"write": "/tmp/cache",
-					},
 				},
 			},
 			Options: []session.ProtocolApprovalOption{
@@ -45,9 +42,6 @@ func TestPayloadFromRuntimeRequestUsesProtocolApprovalFirst(t *testing.T) {
 	}
 	if payload.Reason != "destructive edit" || payload.SandboxPermissions != "workspace_write" {
 		t.Fatalf("payload policy fields = %#v", payload)
-	}
-	if payload.AdditionalPermissions["write"] != "/tmp/cache" {
-		t.Fatalf("payload additional permissions = %#v", payload.AdditionalPermissions)
 	}
 	if len(payload.Options) != 2 || payload.Options[0].ID != "allow_once" {
 		t.Fatalf("payload options = %#v, want protocol options", payload.Options)

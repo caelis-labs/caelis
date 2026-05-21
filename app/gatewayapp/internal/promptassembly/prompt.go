@@ -148,7 +148,7 @@ func builtInCapabilityGuidancePrompt(agents []delegation.Agent) string {
 		"## Capability Guidance",
 		"",
 		"- Inspect with READ, SEARCH, GLOB, and LIST; edit with WRITE or PATCH; use RUN_COMMAND for shell work and TASK for yielded async work.",
-		"- Use request_permissions for the smallest read/write path or network grant needed before retrying denied work.",
+		"- Use request_permissions for the smallest read/write path grant needed before retrying denied work.",
 		"- Load a skill only when its description clearly matches the task; read only the needed parts of its `SKILL.md`.",
 		"- Obey the active approval mode; treat auto-review denials as concrete feedback to narrow or adjust the next step.",
 	}
@@ -165,8 +165,8 @@ func builtInPermissionBoundariesPrompt() string {
 		"## Shell Tool Permissions",
 		"",
 		"- Start platform shell commands with default sandbox permissions; workspace-local reads, builds, tests, and temp writes should stay default.",
-		"- Use `sandbox_permissions=with_additional_permissions` for the smallest extra read/write path or network grant.",
-		"- Use `sandbox_permissions=require_escalated` only when host execution is required; include a short `justification`.",
+		"- Use request_permissions for extra read/write paths, then retry the default sandbox command.",
+		"- Use `sandbox_permissions=require_escalated` only when host execution or host network access is required; include a short `justification`.",
 		"- If policy denies a command or file tool, narrow the scope or request the missing permission with request_permissions.",
 	}, "\n")
 }

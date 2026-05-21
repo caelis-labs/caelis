@@ -5,6 +5,7 @@ package win32
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -57,7 +58,10 @@ func TestDeriveCapabilitySIDs(t *testing.T) {
 	}
 }
 
-func TestRestrictedCurrentProcessTokenWithCapabilitySIDs(t *testing.T) {
+func TestRestrictedCurrentProcessTokenWithCapabilitySIDsE2E(t *testing.T) {
+	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
+		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run restricted token e2e")
+	}
 	sids, err := DeriveCapabilitySIDs("internetClient")
 	if err != nil {
 		t.Fatalf("DeriveCapabilitySIDs() error = %v", err)

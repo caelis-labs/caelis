@@ -2264,7 +2264,7 @@ func TestRuntimeReservesRequestPermissionsToolName(t *testing.T) {
 	if _, ok := wrapped[0].(requestPermissionsTool); !ok {
 		t.Fatalf("wrapped request_permissions tool = %T, want built-in requestPermissionsTool", wrapped[0])
 	}
-	raw := []byte(`{"reason":"need network","network":true}`)
+	raw := []byte(`{"reason":"need docs","read":["."]}`)
 	result, err := wrapped[0].Call(context.Background(), tool.Call{ID: "perm-1", Name: "request_permissions", Input: raw})
 	if err != nil {
 		t.Fatalf("request_permissions Call() error = %v", err)
@@ -2313,7 +2313,7 @@ func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
 	result, err := permissionsTool.Call(context.Background(), tool.Call{
 		ID:    "perm-1",
 		Name:  requestPermissionsToolName,
-		Input: []byte(`{"reason":"need network","network":true}`),
+		Input: []byte(`{"reason":"need workspace read","read":["."]}`),
 	})
 	if err != nil {
 		t.Fatalf("request_permissions Call() error = %v", err)
@@ -2323,7 +2323,7 @@ func TestRuntimeRequestPermissionsSuccessIncludesGrantPayload(t *testing.T) {
 	if !ok {
 		t.Fatalf("grant metadata = %#v, want map", toolMeta["grant"])
 	}
-	if grant["reason"] != "need network" || grant["mode"] != "manual" || grant["run_id"] != "run-1" || grant["turn_id"] != "turn-1" {
+	if grant["reason"] != "need workspace read" || grant["mode"] != "manual" || grant["run_id"] != "run-1" || grant["turn_id"] != "turn-1" {
 		t.Fatalf("grant payload = %#v, want reason/mode/run/turn metadata", grant)
 	}
 	if store.snapshot().Count != 1 {

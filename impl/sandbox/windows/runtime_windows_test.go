@@ -186,7 +186,6 @@ func TestSetupFreshnessIgnoresRunnerHashButDetectsPolicyHashChanges(t *testing.T
 		RunnerHash:      "old-runner-hash",
 		PolicyHash:      payload.GlobalPolicyHash,
 		OfflineUsername: payload.OfflineUsername,
-		OnlineUsername:  payload.OnlineUsername,
 		OwnerUsername:   payload.OwnerUsername,
 	}); err != nil {
 		t.Fatalf("WriteMarker() error = %v", err)
@@ -227,7 +226,6 @@ func TestSetupReadyFreshnessDetectsStaleSandboxCredentials(t *testing.T) {
 		Version:         setup.PayloadVersion,
 		PolicyHash:      payload.GlobalPolicyHash,
 		OfflineUsername: payload.OfflineUsername,
-		OnlineUsername:  payload.OnlineUsername,
 		OwnerUsername:   payload.OwnerUsername,
 	}); err != nil {
 		t.Fatalf("WriteMarker() error = %v", err)
@@ -238,7 +236,6 @@ func TestSetupReadyFreshnessDetectsStaleSandboxCredentials(t *testing.T) {
 	}
 	data, err := json.Marshal(setup.UsersFile{
 		Offline: setup.UserSecret{Username: payload.OfflineUsername, PasswordProtected: bogus},
-		Online:  setup.UserSecret{Username: payload.OnlineUsername, PasswordProtected: bogus},
 	})
 	if err != nil {
 		t.Fatalf("Marshal users file error = %v", err)
@@ -276,7 +273,6 @@ func TestStatusSeparatesGlobalAndWorkspaceSetup(t *testing.T) {
 		Version:         setup.PayloadVersion,
 		PolicyHash:      payload.GlobalPolicyHash,
 		OfflineUsername: payload.OfflineUsername,
-		OnlineUsername:  payload.OnlineUsername,
 		OwnerUsername:   payload.OwnerUsername,
 	}); err != nil {
 		t.Fatalf("WriteMarker() error = %v", err)
@@ -325,8 +321,43 @@ func TestSetupUsernamesAreStateScoped(t *testing.T) {
 	if first == second {
 		t.Fatalf("state-scoped usernames are equal: %q", first)
 	}
-	if len(first) > 20 || len(setupOnlineUser(`C:\Users\Administrator\.caelis`)) > 20 {
-		t.Fatalf("state-scoped usernames exceed Windows local user length: offline=%q online=%q", first, setupOnlineUser(`C:\Users\Administrator\.caelis`))
+	if len(first) > 20 {
+		t.Fatalf("state-scoped username exceeds Windows local user length: offline=%q", first)
+	}
+}
+
+func TestCredentialsForRequestAlwaysUsesOfflineUser(t *testing.T) {
+	stateDir := t.TempDir()
+	dirs := setupstate.NewDirs(stateDir)
+	offlinePassword, err := win32.ProtectMachineString("offline-password", "caelis test offline")
+	if err != nil {
+		t.Fatalf("ProtectMachineString(offline) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dirs.UsersPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(users dir) error = %v", err)
+	}
+	data, err := json.Marshal(setup.UsersFile{
+		Offline: setup.UserSecret{Username: "CaelisOfflineTest", PasswordProtected: offlinePassword},
+	})
+	if err != nil {
+		t.Fatalf("Marshal users file error = %v", err)
+	}
+	if err := os.WriteFile(dirs.UsersPath, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(users) error = %v", err)
+	}
+
+	r := &setupRunner{stateRoot: stateDir}
+	creds, err := r.credentialsForRequest(runnerruntime.Request{
+		Constraints: sandbox.Constraints{
+			Permission: sandbox.PermissionFullAccess,
+			Network:    sandbox.NetworkEnabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("credentialsForRequest() error = %v", err)
+	}
+	if creds.Username != "CaelisOfflineTest" || creds.Password != "offline-password" {
+		t.Fatalf("credentials = %+v, want offline user/password", creds)
 	}
 }
 

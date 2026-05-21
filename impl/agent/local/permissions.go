@@ -27,7 +27,6 @@ type permissionGrantStore struct {
 	extraReadRoots  []string
 	extraWriteRoots []string
 	shellWriteRoots []string
-	networkEnabled  bool
 	records         []permissionGrantRecord
 	recordKeys      map[string]struct{}
 }
@@ -37,7 +36,6 @@ type permissionGrantRequest struct {
 	ReadRoots       []string
 	WriteRoots      []string
 	ShellWriteRoots []string
-	NetworkEnabled  bool
 }
 
 type permissionGrantMetadata struct {
@@ -52,7 +50,6 @@ type permissionGrantRecord struct {
 	ReadRoots       []string  `json:"read_roots,omitempty"`
 	WriteRoots      []string  `json:"write_roots,omitempty"`
 	ShellWriteRoots []string  `json:"shell_write_roots,omitempty"`
-	NetworkEnabled  bool      `json:"network_enabled,omitempty"`
 	Mode            string    `json:"mode,omitempty"`
 	RunID           string    `json:"run_id,omitempty"`
 	TurnID          string    `json:"turn_id,omitempty"`
@@ -61,7 +58,6 @@ type permissionGrantRecord struct {
 
 type PermissionGrantSnapshot struct {
 	Count          int
-	NetworkGranted bool
 	ReadRootCount  int
 	WriteRootCount int
 }
@@ -79,7 +75,6 @@ func (s *permissionGrantStore) add(req permissionGrantRequest, meta permissionGr
 		ReadRoots:       appendUniqueStrings(nil, req.ReadRoots...),
 		WriteRoots:      appendUniqueStrings(nil, req.WriteRoots...),
 		ShellWriteRoots: appendUniqueStrings(nil, req.ShellWriteRoots...),
-		NetworkEnabled:  req.NetworkEnabled,
 		Mode:            strings.TrimSpace(meta.Mode),
 		RunID:           strings.TrimSpace(meta.RunID),
 		TurnID:          strings.TrimSpace(meta.TurnID),
@@ -110,7 +105,7 @@ func (s *permissionGrantStore) addRecordLocked(record permissionGrantRecord) {
 		return
 	}
 	record = normalizePermissionGrantRecord(record)
-	if len(record.ReadRoots) == 0 && len(record.WriteRoots) == 0 && len(record.ShellWriteRoots) == 0 && !record.NetworkEnabled {
+	if len(record.ReadRoots) == 0 && len(record.WriteRoots) == 0 && len(record.ShellWriteRoots) == 0 {
 		return
 	}
 	if s.recordKeys == nil {
@@ -124,7 +119,6 @@ func (s *permissionGrantStore) addRecordLocked(record permissionGrantRecord) {
 	s.extraReadRoots = appendUniqueStrings(s.extraReadRoots, record.ReadRoots...)
 	s.extraWriteRoots = appendUniqueStrings(s.extraWriteRoots, record.WriteRoots...)
 	s.shellWriteRoots = appendUniqueStrings(s.shellWriteRoots, record.ShellWriteRoots...)
-	s.networkEnabled = s.networkEnabled || record.NetworkEnabled
 	s.records = append(s.records, record)
 }
 
@@ -136,7 +130,6 @@ func (s *permissionGrantStore) snapshot() PermissionGrantSnapshot {
 	defer s.mu.RUnlock()
 	return PermissionGrantSnapshot{
 		Count:          len(s.records),
-		NetworkGranted: s.networkEnabled,
 		ReadRootCount:  len(s.extraReadRoots),
 		WriteRootCount: len(s.extraWriteRoots),
 	}
@@ -161,9 +154,6 @@ func (s *permissionGrantStore) applyToConstraints(constraints sandbox.Constraint
 	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if s.networkEnabled {
-		out.Network = sandbox.NetworkEnabled
-	}
 	grants := make([]sandbox.PathRule, 0, len(s.extraReadRoots)+len(s.shellWriteRoots))
 	for _, path := range s.extraReadRoots {
 		grants = append(grants, sandbox.PathRule{Path: path, Access: sandbox.PathAccessReadOnly})
@@ -232,7 +222,7 @@ func permissionGrantRecordKey(record permissionGrantRecord) string {
 	record = normalizePermissionGrantRecord(record)
 	payload, err := json.Marshal(record)
 	if err != nil {
-		return fmt.Sprintf("%s|%v|%v|%v|%t", record.Reason, record.ReadRoots, record.WriteRoots, record.ShellWriteRoots, record.NetworkEnabled)
+		return fmt.Sprintf("%s|%v|%v|%v", record.Reason, record.ReadRoots, record.WriteRoots, record.ShellWriteRoots)
 	}
 	return string(payload)
 }
@@ -274,7 +264,7 @@ type requestPermissionsTool struct {
 func (t requestPermissionsTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        requestPermissionsToolName,
-		Description: "Request a narrow sandbox grant.",
+		Description: "Request a narrow sandbox grant for local filesystem paths.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -284,17 +274,13 @@ func (t requestPermissionsTool) Definition() tool.Definition {
 				},
 				"read": map[string]any{
 					"type":        "array",
-					"description": "Readable files or directories.",
+					"description": "Readable local filesystem paths (files or directories).",
 					"items":       map[string]any{"type": "string"},
 				},
 				"write": map[string]any{
 					"type":        "array",
-					"description": "Writable files or directories.",
+					"description": "Writable local filesystem paths (files or directories).",
 					"items":       map[string]any{"type": "string"},
-				},
-				"network": map[string]any{
-					"type":        "boolean",
-					"description": "Allow network access.",
 				},
 			},
 			"required":             []string{"reason"},
@@ -346,10 +332,9 @@ func (t requestPermissionsTool) Call(ctx context.Context, call tool.Call) (tool.
 			},
 		},
 		Metadata: map[string]any{
-			"approval_reason":        req.Reason,
-			"justification":          req.Reason,
-			"sandbox_permissions":    "with_additional_permissions",
-			"additional_permissions": permissionGrantAdditionalPermissions(req),
+			"approval_reason":   req.Reason,
+			"justification":     req.Reason,
+			"permission_grants": permissionGrantModelPayload(req),
 		},
 	})
 	if err != nil {
@@ -399,6 +384,13 @@ func decodeToolArgs(call tool.Call) (map[string]any, error) {
 }
 
 func parsePermissionGrantRequest(args map[string]any, cwd string) (permissionGrantRequest, error) {
+	for key := range args {
+		switch key {
+		case "reason", "read", "write", "network":
+		default:
+			return permissionGrantRequest{}, fmt.Errorf("request_permissions.%s is not supported; only reason, read, and write are accepted", key)
+		}
+	}
 	reason, _ := args["reason"].(string)
 	req := permissionGrantRequest{Reason: strings.TrimSpace(reason)}
 	if req.Reason == "" {
@@ -423,11 +415,8 @@ func parsePermissionGrantRequest(args map[string]any, cwd string) (permissionGra
 			}
 		}
 	}
-	if enabled, _ := args["network"].(bool); enabled {
-		req.NetworkEnabled = true
-	}
-	if len(req.ReadRoots) == 0 && len(req.WriteRoots) == 0 && !req.NetworkEnabled {
-		return req, fmt.Errorf("request_permissions requires at least one non-empty read/write path or network=true")
+	if len(req.ReadRoots) == 0 && len(req.WriteRoots) == 0 {
+		return req, fmt.Errorf("request_permissions requires at least one non-empty read/write path")
 	}
 	return req, nil
 }
@@ -515,31 +504,10 @@ func requestPermissionTitle(req permissionGrantRequest) string {
 	if len(req.ReadRoots) > 0 {
 		parts = append(parts, "read "+strings.Join(req.ReadRoots, ", "))
 	}
-	if req.NetworkEnabled {
-		parts = append(parts, "network")
-	}
 	if len(parts) == 0 {
 		return "request_permissions"
 	}
 	return "request_permissions " + strings.Join(parts, "; ")
-}
-
-func permissionGrantAdditionalPermissions(req permissionGrantRequest) map[string]any {
-	out := map[string]any{}
-	fileSystem := map[string]any{}
-	if len(req.ReadRoots) > 0 {
-		fileSystem["read"] = append([]string(nil), req.ReadRoots...)
-	}
-	if len(req.WriteRoots) > 0 {
-		fileSystem["write"] = append([]string(nil), req.WriteRoots...)
-	}
-	if len(fileSystem) > 0 {
-		out["file_system"] = fileSystem
-	}
-	if req.NetworkEnabled {
-		out["network"] = map[string]any{"enabled": true}
-	}
-	return out
 }
 
 func permissionGrantModelPayload(req permissionGrantRequest) map[string]any {
@@ -550,17 +518,14 @@ func permissionGrantModelPayload(req permissionGrantRequest) map[string]any {
 	if len(req.WriteRoots) > 0 {
 		out["write"] = append([]string(nil), req.WriteRoots...)
 	}
-	if req.NetworkEnabled {
-		out["network"] = true
-	}
 	return out
 }
 
 func permissionGrantPayload(record permissionGrantRecord) map[string]any {
 	record = normalizePermissionGrantRecord(record)
 	payload := map[string]any{
-		"reason":                 strings.TrimSpace(record.Reason),
-		"additional_permissions": permissionGrantAdditionalPermissions(permissionGrantRequest{ReadRoots: record.ReadRoots, WriteRoots: record.WriteRoots, NetworkEnabled: record.NetworkEnabled}),
+		"reason":            strings.TrimSpace(record.Reason),
+		"permission_grants": permissionGrantModelPayload(permissionGrantRequest{ReadRoots: record.ReadRoots, WriteRoots: record.WriteRoots}),
 	}
 	if len(record.ShellWriteRoots) > 0 {
 		payload["sandbox_write_roots"] = append([]string(nil), record.ShellWriteRoots...)
@@ -585,7 +550,7 @@ func persistPermissionGrant(ctx context.Context, sessions session.Service, ref s
 		return nil
 	}
 	record = normalizePermissionGrantRecord(record)
-	if len(record.ReadRoots) == 0 && len(record.WriteRoots) == 0 && len(record.ShellWriteRoots) == 0 && !record.NetworkEnabled {
+	if len(record.ReadRoots) == 0 && len(record.WriteRoots) == 0 && len(record.ShellWriteRoots) == 0 {
 		return nil
 	}
 	return sessions.UpdateState(ctx, ref, func(state map[string]any) (map[string]any, error) {
@@ -636,7 +601,7 @@ func normalizePermissionGrantRecords(records []permissionGrantRecord) []permissi
 	seen := map[string]struct{}{}
 	for _, record := range records {
 		record = normalizePermissionGrantRecord(record)
-		if len(record.ReadRoots) == 0 && len(record.WriteRoots) == 0 && len(record.ShellWriteRoots) == 0 && !record.NetworkEnabled {
+		if len(record.ReadRoots) == 0 && len(record.WriteRoots) == 0 && len(record.ShellWriteRoots) == 0 {
 			continue
 		}
 		key := permissionGrantRecordKey(record)

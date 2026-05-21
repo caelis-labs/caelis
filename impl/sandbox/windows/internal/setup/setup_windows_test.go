@@ -47,7 +47,7 @@ func TestRequiredPolicyACLTargetsSkipsAncestorACLTargets(t *testing.T) {
 			pathutil.Key(root): capabilitySID,
 		},
 		CapabilitySIDs: []string{capabilitySID},
-	}, "CaelisSbxOffTest", "CaelisSbxOnTest")
+	}, "CaelisSbxOffTest")
 
 	var foundRootCapability bool
 	rootKey := pathutil.Key(root)
@@ -80,7 +80,7 @@ func TestRequiredPolicyACLTargetsUsesGroupAndRootCapabilityForWriteRoot(t *testi
 		WriteRootCapabilitySIDs: map[string]string{
 			pathutil.Normalize(root): rootCapabilitySID,
 		},
-	}, "CaelisSbxOffTest", "CaelisSbxOnTest")
+	}, "CaelisSbxOffTest")
 
 	entries := entriesForPath(t, targets, root, acl.Grant)
 	principals := entryPrincipals(entries)
@@ -92,7 +92,7 @@ func TestRequiredPolicyACLTargetsUsesGroupAndRootCapabilityForWriteRoot(t *testi
 			t.Fatalf("write root principals = %#v, want %q", principals, want)
 		}
 	}
-	for _, unwanted := range []string{"CaelisSbxOffTest", "CaelisSbxOnTest", otherCapabilitySID} {
+	for _, unwanted := range []string{"CaelisSbxOffTest", otherCapabilitySID} {
 		if containsFold(principals, unwanted) {
 			t.Fatalf("write root principals = %#v, did not want %q", principals, unwanted)
 		}
@@ -119,7 +119,7 @@ func TestRequiredPolicyACLTargetsDenyWriteUsesOverlappingRootCapability(t *testi
 			pathutil.Normalize(workspace): workspaceCapabilitySID,
 			pathutil.Normalize(extra):     extraCapabilitySID,
 		},
-	}, "CaelisSbxOffTest", "CaelisSbxOnTest")
+	}, "CaelisSbxOffTest")
 
 	entries := entriesForPath(t, targets, gitDir, acl.Deny)
 	principals := entryPrincipals(entries)
@@ -129,7 +129,7 @@ func TestRequiredPolicyACLTargetsDenyWriteUsesOverlappingRootCapability(t *testi
 	if principals[0] != workspaceCapabilitySID {
 		t.Fatalf("deny-write principals = %#v, want %q", principals, workspaceCapabilitySID)
 	}
-	for _, unwanted := range []string{GroupName, "CaelisSbxOffTest", "CaelisSbxOnTest", extraCapabilitySID} {
+	for _, unwanted := range []string{GroupName, "CaelisSbxOffTest", extraCapabilitySID} {
 		if containsFold(principals, unwanted) {
 			t.Fatalf("deny-write principals = %#v, did not want %q", principals, unwanted)
 		}
@@ -346,9 +346,8 @@ func TestResetCleanupPlanUsesCurrentState(t *testing.T) {
 		OperationID:     "new-op",
 		StateRoot:       stateRoot,
 		OfflineUsername: "CaelisSbxOffNew",
-		OnlineUsername:  "CaelisSbxOnNew",
 	}, dirs)
-	for _, want := range []string{"CaelisSbxOffNew", "CaelisSbxOnNew"} {
+	for _, want := range []string{"CaelisSbxOffNew", legacyOnlineUsername(Payload{StateRoot: stateRoot})} {
 		if !containsFold(plan.Users, want) {
 			t.Fatalf("plan.Users = %#v, want %q", plan.Users, want)
 		}
@@ -402,7 +401,7 @@ func BenchmarkRequiredPolicyACLTargetsWorkspaceCarveouts(b *testing.B) {
 	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		targets := requiredPolicyACLTargets(policy, "CaelisSbxOffTest", "CaelisSbxOnTest")
+		targets := requiredPolicyACLTargets(policy, "CaelisSbxOffTest")
 		if len(targets) == 0 {
 			b.Fatal("requiredPolicyACLTargets() returned no targets")
 		}

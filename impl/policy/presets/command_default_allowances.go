@@ -11,9 +11,6 @@ import (
 
 func applyDefaultCommandAllowances(base sandbox.Constraints, input policy.ToolContext, command string) sandbox.Constraints {
 	out := sandbox.NormalizeConstraints(base)
-	if defaultNetworkCommand(command) {
-		out.Network = sandbox.NetworkEnabled
-	}
 	if defaultGitMetadataWriteCommand(command) {
 		if root := strings.TrimSpace(input.Options.WorkspaceRoot); root != "" {
 			out.PathRules = mergePathRules(out.PathRules, []sandbox.PathRule{
@@ -22,64 +19,6 @@ func applyDefaultCommandAllowances(base sandbox.Constraints, input policy.ToolCo
 		}
 	}
 	return out
-}
-
-func defaultNetworkCommand(command string) bool {
-	fields, ok := singleSimpleCommandFields(command)
-	if !ok || len(fields) == 0 {
-		return false
-	}
-	exe, ok := trustedBareExecutableName(fields[0], "go", "cargo", "npm", "pnpm", "yarn", "yarnpkg", "pip", "pip3", "uv")
-	if !ok {
-		return false
-	}
-	args := fields[1:]
-	switch exe {
-	case "go":
-		return goDependencyNetworkCommand(args)
-	case "cargo":
-		return firstArgIn(args, "fetch", "update")
-	case "npm":
-		return npmDependencyNetworkCommand(args)
-	case "pnpm":
-		return firstArgIn(args, "fetch") ||
-			(firstArgIn(args, "install", "i", "add") && hasFlag(args, "--ignore-scripts"))
-	case "yarn", "yarnpkg":
-		return firstArgIn(args, "install", "add") &&
-			(hasFlag(args, "--ignore-scripts") || hasFlagValue(args, "--mode", "skip-builds"))
-	case "pip", "pip3":
-		return firstArgIn(args, "download")
-	case "uv":
-		return len(args) >= 2 && args[0] == "pip" && args[1] == "download"
-	default:
-		return false
-	}
-}
-
-func goDependencyNetworkCommand(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	if args[0] == "get" {
-		return true
-	}
-	return len(args) >= 2 && args[0] == "mod" && (args[1] == "download" || args[1] == "tidy")
-}
-
-func npmDependencyNetworkCommand(args []string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	switch args[0] {
-	case "ci":
-		return hasFlag(args, "--ignore-scripts")
-	case "install", "i", "add":
-		return hasFlag(args, "--ignore-scripts") || hasFlag(args, "--package-lock-only")
-	case "update":
-		return hasFlag(args, "--package-lock-only")
-	default:
-		return false
-	}
 }
 
 func defaultGitMetadataWriteCommand(command string) bool {
@@ -127,19 +66,6 @@ func gitSubcommand(args []string) string {
 		return arg
 	}
 	return ""
-}
-
-func singleSimpleCommandFields(command string) ([]string, bool) {
-	segments, ok := simpleCommandSegments(command, false)
-	if !ok || len(segments) != 1 {
-		return nil, false
-	}
-	fields := segments[0]
-	fields = trimLeadingEnvAssignments(fields)
-	if len(fields) == 0 {
-		return nil, false
-	}
-	return fields, true
 }
 
 func simpleCommandSegments(command string, allowSequential bool) ([][]string, bool) {
@@ -230,39 +156,6 @@ func hasUnsupportedAmpersand(command string) bool {
 			continue
 		}
 		return true
-	}
-	return false
-}
-
-func firstArgIn(args []string, values ...string) bool {
-	if len(args) == 0 {
-		return false
-	}
-	for _, value := range values {
-		if args[0] == value {
-			return true
-		}
-	}
-	return false
-}
-
-func hasFlag(args []string, flag string) bool {
-	for _, arg := range args {
-		if arg == flag {
-			return true
-		}
-	}
-	return false
-}
-
-func hasFlagValue(args []string, flag string, value string) bool {
-	for i, arg := range args {
-		if arg == flag && i+1 < len(args) && args[i+1] == value {
-			return true
-		}
-		if strings.HasPrefix(arg, flag+"=") && strings.TrimPrefix(arg, flag+"=") == value {
-			return true
-		}
 	}
 	return false
 }

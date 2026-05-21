@@ -37,7 +37,7 @@ Codex source anchors used for this direction:
 - `codex-rs/core/src/unified_exec/process_manager.rs`: dispatches Elevated to
   the elevated runner backend and legacy/disabled to the legacy backend.
 - `codex-rs/windows-sandbox-rs/src/setup.rs`: creates setup payloads, launches
-  the elevated helper with `runas`, manages sandbox users and marker files.
+  the elevated helper with `runas`, manages sandbox identities and marker files.
 - `codex-rs/windows-sandbox-rs/src/unified_exec/backends/elevated.rs`: prepares
   elevated spawn context and talks to the command runner.
 - `codex-rs/windows-sandbox-rs/src/spawn_prep.rs`: maps sandbox policy to ACLs,
@@ -64,12 +64,12 @@ enforced:
 
 The default Windows Elevated enforcement path is:
 
-- local sandbox users and the `CaelisSandboxUsers` group;
+- an offline local sandbox user and the `CaelisSandboxUsers` group;
 - idempotent elevated setup with marker/error state and DPAPI-protected
   credentials;
 - ACL grants/denies on read, write, hidden, and protected roots;
-- offline/online sandbox identities with Windows Firewall outbound block rules
-  for the offline identity, scoped by `LocalUser` and split across non-loopback,
+- offline sandbox identity with Windows Firewall outbound block rules scoped by
+  `LocalUser` and split across non-loopback,
   loopback TCP, and loopback UDP traffic;
 - workspace-scoped `USERPROFILE`, `HOME`, `TEMP`, `TMP`, `LOCALAPPDATA`, and
   `APPDATA` values;
@@ -90,8 +90,8 @@ exposes a process-startup incompatibility that needs investigation.
 - Provide real Windows process isolation for default sandboxed tool execution.
 - Support `sandbox.Constraints` with workspace write, full access, path rules,
   TTY, stdin, stdout/stderr streaming, timeouts, and termination.
-- Support both offline and online sandbox identities so network policy is not an
-  environment-variable convention only.
+- Use the offline sandbox identity for sandboxed commands; host networking is
+  handled by approved host execution.
 - Preserve Caelis event semantics and terminal/session references.
 - Keep Windows-only details out of `ports/*`, `kernel/*`, and generic ACP
   adapters.
@@ -150,7 +150,7 @@ Suggested responsibilities:
 - `internal/conpty`: TTY support, resize, and stream fan-out.
 - `internal/pathutil`: Windows path canonicalization, drive handling, UNC paths,
   case folding, and short-name normalization.
-- `internal/netpolicy`: online/offline identity selection and firewall refresh.
+- `internal/netpolicy`: offline identity firewall refresh.
 
 ## On-Disk State
 
@@ -195,7 +195,6 @@ Target local accounts and group:
 
 - `CaelisSandboxUsers`: shared local group for sandbox identities.
 - `CaelisSbxOff<hash>`: no direct outbound network by default.
-- `CaelisSbxOn<hash>`: network allowed when policy asks for it.
 
 The `<hash>` suffix is derived from the Caelis sandbox state root. This keeps
 normal user state and development/E2E state from rotating the same global
@@ -203,10 +202,10 @@ Windows account passwords.
 
 The elevated setup helper is responsible for:
 
-- Creating or updating local users.
+- Creating or updating the offline local sandbox user.
 - Rotating passwords when required.
 - Storing credentials with DPAPI protection.
-- Ensuring sandbox users are not Administrators.
+- Ensuring sandbox identities are not Administrators.
 - Ensuring the real user can launch the runner but cannot read sandbox secrets.
 - Refreshing account rights and profile directories.
 
@@ -263,8 +262,7 @@ Elevated helper flow:
 4. Apply allow ACLs for read roots and write roots.
 5. Apply deny-write ACLs for hidden or protected write paths.
 6. Apply deny-read ACLs for hidden paths.
-7. Refresh Windows Firewall rules for the offline identity and validate the
-   online identity exists.
+7. Refresh Windows Firewall rules for the offline identity.
 8. Write setup marker atomically.
 
 Full setup must be idempotent. Per-command ACL refresh should be the normal
@@ -336,9 +334,8 @@ Mapping rules:
 - `ReadOnlySubpaths` under writable roots become deny-write paths.
 - `NetworkDisabled` chooses offline identity and applies no-network env
   hardening.
-- `NetworkEnabled` chooses online identity.
-- `NetworkInherit` should default to disabled for sandbox route unless product
-  policy explicitly grants network.
+- `NetworkEnabled` and `NetworkInherit` resolve to the offline identity on
+  Windows; sandbox route does not offer per-command network enablement.
 
 Offline network enforcement currently uses persistent Windows Firewall rules
 modeled after the relevant Codex firewall setup shape:
@@ -486,9 +483,9 @@ sibling command runner from that install directory.
 
 The current E2E covers workspace file write/read, PowerShell command execution,
 execution of real Windows developer tools (`go.exe`, `git.exe`, `npm.cmd`, and
-nested `powershell.exe`) when standard installs are present, offline and online
-network environment behavior, a real external TCP probe where the online
-identity connects and the offline identity is denied, hidden path denial,
+nested `powershell.exe`) when standard installs are present, default offline
+network environment behavior, a real external TCP probe where the offline
+identity is denied, hidden path denial,
 capability SID restricted-token attachment, explicit setup, and async session
 wait/result. It passed on the local Windows development machine on 2026-05-18
 using a helper built from this worktree.
@@ -520,7 +517,6 @@ Integration tests on Windows:
 - read of hidden path is denied
 - write of read-only subpath is denied
 - network disabled cannot reach external endpoints
-- network enabled can reach external endpoints when allowed
 - stdin works
 - stdout and stderr stream independently without TTY
 - TTY session uses ConPTY and receives resize events
@@ -583,7 +579,7 @@ Cross-platform tests:
 - [x] Materialize helper binary into `.sandbox-bin`.
 - [x] Implement UAC launch from parent runtime.
 - [x] Create `CaelisSandboxUsers`.
-- [x] Create or update offline and online users.
+- [x] Create or update the offline sandbox user.
 - [x] Store credentials with DPAPI.
 - [x] ACL `.sandbox`, `.sandbox-bin`, and `.sandbox-secrets`.
 - [x] Apply read/write/hidden root ACL refresh.
@@ -642,16 +638,16 @@ Cross-platform tests:
 - [x] Add tests for drive roots, UNC roots, and long path prefixes.
 - [x] Add tests for short 8.3 paths where the filesystem exposes them.
 
-### Phase 7: Network Control
+### Phase 7: Offline Network Control
 
-- [x] Define online/offline identity semantics.
+- [x] Define offline identity semantics.
 - [x] Implement Windows Firewall setup for the offline identity, including
   non-loopback and loopback rule scopes.
 - [x] Add no-network environment hardening.
 - [x] Add local proxy compatibility if needed.
-- [x] Add integration tests for disabled and enabled network environment modes.
-- [x] Add a real socket E2E that proves offline identity outbound denial and
-  online identity allowance on a reachable external TCP endpoint.
+- [x] Add integration tests for disabled network environment mode.
+- [x] Add a real socket E2E that proves offline identity outbound denial on a
+  reachable external TCP endpoint.
 
 ### Phase 8: Diagnostics and UX
 
@@ -698,8 +694,7 @@ The current locally validated subset includes:
 - real developer tool execution with `go.exe`, `git.exe`, `npm.cmd`, and nested
   `powershell.exe` when they are installed in standard Windows locations;
 - capability SID restricted-token attachment on the default non-TTY path;
-- offline and online network environment selection plus external socket
-  denial/allowance;
+- offline network environment selection plus external socket denial;
 - hidden path denial through ACL refresh;
 - async session start, wait, and result collection.
 

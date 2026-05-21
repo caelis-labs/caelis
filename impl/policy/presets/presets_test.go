@@ -237,32 +237,31 @@ func TestDefaultModeSkipsDefaultTempWriteRootOnWindows(t *testing.T) {
 	}
 }
 
-func TestDefaultModeEnablesNetworkOnlyForSafeDependencyCommands(t *testing.T) {
+func TestDefaultModeKeepsCommandNetworkDisabled(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		command string
-		want    sandbox.Network
 	}{
-		{command: "go mod download", want: sandbox.NetworkEnabled},
-		{command: "GOPROXY=https://proxy.golang.org go mod tidy", want: sandbox.NetworkEnabled},
-		{command: "go get ./...", want: sandbox.NetworkEnabled},
-		{command: "cargo fetch", want: sandbox.NetworkEnabled},
-		{command: "npm ci --ignore-scripts", want: sandbox.NetworkEnabled},
-		{command: "pnpm fetch", want: sandbox.NetworkEnabled},
-		{command: "pip download -r requirements.txt", want: sandbox.NetworkEnabled},
-		{command: "uv pip download flask", want: sandbox.NetworkEnabled},
-		{command: "go test ./...", want: sandbox.NetworkDisabled},
-		{command: "npm ci", want: sandbox.NetworkDisabled},
-		{command: "go mod download && curl https://example.com", want: sandbox.NetworkDisabled},
-		{command: "go mod download & curl https://example.com", want: sandbox.NetworkDisabled},
-		{command: "go mod download | cat", want: sandbox.NetworkDisabled},
-		{command: "go mod download > deps.log", want: sandbox.NetworkDisabled},
-		{command: "go mod download $(cat args)", want: sandbox.NetworkDisabled},
-		{command: "./go mod download", want: sandbox.NetworkDisabled},
-		{command: "/usr/bin/go mod download", want: sandbox.NetworkDisabled},
-		{command: "PATH=.:$PATH go mod download", want: sandbox.NetworkDisabled},
-		{command: "env PATH=.:$PATH go mod download", want: sandbox.NetworkDisabled},
+		{command: "go mod download"},
+		{command: "GOPROXY=https://proxy.golang.org go mod tidy"},
+		{command: "go get ./..."},
+		{command: "cargo fetch"},
+		{command: "npm ci --ignore-scripts"},
+		{command: "pnpm fetch"},
+		{command: "pip download -r requirements.txt"},
+		{command: "uv pip download flask"},
+		{command: "go test ./..."},
+		{command: "npm ci"},
+		{command: "go mod download && curl https://example.com"},
+		{command: "go mod download & curl https://example.com"},
+		{command: "go mod download | cat"},
+		{command: "go mod download > deps.log"},
+		{command: "go mod download $(cat args)"},
+		{command: "./go mod download"},
+		{command: "/usr/bin/go mod download"},
+		{command: "PATH=.:$PATH go mod download"},
+		{command: "env PATH=.:$PATH go mod download"},
 	}
 	for _, tt := range tests {
 		tt := tt
@@ -276,8 +275,8 @@ func TestDefaultModeEnablesNetworkOnlyForSafeDependencyCommands(t *testing.T) {
 			if decision.Action != policy.ActionAllow {
 				t.Fatalf("Action = %q, want allow", decision.Action)
 			}
-			if decision.Constraints.Network != tt.want {
-				t.Fatalf("Network = %q, want %q", decision.Constraints.Network, tt.want)
+			if decision.Constraints.Network != sandbox.NetworkDisabled {
+				t.Fatalf("Network = %q, want disabled", decision.Constraints.Network)
 			}
 		})
 	}
@@ -359,7 +358,7 @@ func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
 	}
 }
 
-func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
+func TestDefaultModeExplicitEscalationCanOmitJustification(t *testing.T) {
 	t.Parallel()
 
 	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
@@ -369,11 +368,14 @@ func TestDefaultModeExplicitEscalationRequiresJustification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DecideTool() error = %v", err)
 	}
-	if decision.Action != policy.ActionDeny {
-		t.Fatalf("Action = %q, want deny", decision.Action)
+	if decision.Action != policy.ActionAskApproval {
+		t.Fatalf("Action = %q, want ask_approval", decision.Action)
 	}
-	if !strings.Contains(decision.Reason, "justification") {
-		t.Fatalf("Reason = %q, want justification denial", decision.Reason)
+	if decision.Constraints.Route != sandbox.RouteHost {
+		t.Fatalf("Constraints.Route = %q, want host", decision.Constraints.Route)
+	}
+	if _, ok := decision.Metadata["justification"]; ok {
+		t.Fatalf("Metadata[justification] = %#v, want omitted", decision.Metadata["justification"])
 	}
 }
 
@@ -402,68 +404,12 @@ func TestDefaultModeEscalationApprovalCarriesPromptMetadata(t *testing.T) {
 	}
 }
 
-func TestDefaultModeAdditionalSandboxPermissionsStaySandboxed(t *testing.T) {
-	t.Parallel()
-
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtxWithArgs(map[string]any{
-		"command":             "make generate",
-		"workdir":             "subdir",
-		"sandbox_permissions": "with_additional_permissions",
-		"additional_permissions": map[string]any{
-			"network": map[string]any{"enabled": true},
-			"file_system": map[string]any{
-				"read":  []string{testExtraReadRoot()},
-				"write": []string{"./generated"},
-			},
-		},
-	}))
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionAskApproval {
-		t.Fatalf("Action = %q, want ask_approval", decision.Action)
-	}
-	if decision.Constraints.Route != sandbox.RouteSandbox || decision.Constraints.Permission != sandbox.PermissionWorkspaceWrite {
-		t.Fatalf("Constraints = %#v, want sandbox workspace_write", decision.Constraints)
-	}
-	if decision.Constraints.Network != sandbox.NetworkEnabled {
-		t.Fatalf("Network = %q, want enabled", decision.Constraints.Network)
-	}
-	extraReadRoot := testExtraReadRoot()
-	if !hasPathRule(decision.Constraints.PathRules, extraReadRoot, sandbox.PathAccessReadOnly) {
-		t.Fatalf("PathRules = %#v, want read-only %s", decision.Constraints.PathRules, extraReadRoot)
-	}
-	wantWriteRoot := filepath.Join(testWorkspaceRoot(), "subdir")
-	if !hasPathRule(decision.Constraints.PathRules, wantWriteRoot, sandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, want read-write %s shell write root", decision.Constraints.PathRules, wantWriteRoot)
-	}
-	if decision.Approval == nil {
-		t.Fatal("Approval = nil, want protocol approval payload")
-	}
-	if got := decision.Metadata["sandbox_permissions"]; got != "with_additional_permissions" {
-		t.Fatalf("Metadata[sandbox_permissions] = %#v", got)
-	}
-	additional, ok := decision.Metadata["additional_permissions"].(map[string]any)
-	if !ok {
-		t.Fatalf("Metadata[additional_permissions] = %#v, want normalized map", decision.Metadata["additional_permissions"])
-	}
-	fileSystem, ok := additional["file_system"].(map[string]any)
-	if !ok {
-		t.Fatalf("additional_permissions.file_system = %#v, want map", additional["file_system"])
-	}
-	writePaths, ok := fileSystem["write"].([]string)
-	if !ok || len(writePaths) != 1 || !samePolicyPathForTest(writePaths[0], wantWriteRoot) {
-		t.Fatalf("additional_permissions.file_system.write = %#v, want shell write root", fileSystem["write"])
-	}
-}
-
-func TestDefaultModeRejectsMisScopedSandboxPermissionFields(t *testing.T) {
+func TestDefaultModeIgnoresRemovedSandboxPermissionFields(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name string
 		args map[string]any
-		want string
 	}{
 		{
 			name: "additional without mode",
@@ -473,15 +419,13 @@ func TestDefaultModeRejectsMisScopedSandboxPermissionFields(t *testing.T) {
 					"network": map[string]any{"enabled": true},
 				},
 			},
-			want: "additional_permissions requires",
 		},
 		{
-			name: "additional mode without grant",
+			name: "legacy additional mode",
 			args: map[string]any{
 				"command":             "go test ./...",
 				"sandbox_permissions": "with_additional_permissions",
 			},
-			want: "requires non-empty additional_permissions",
 		},
 	}
 	for _, tt := range tests {
@@ -493,11 +437,11 @@ func TestDefaultModeRejectsMisScopedSandboxPermissionFields(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionDeny {
-				t.Fatalf("Action = %q, want deny", decision.Action)
+			if decision.Action != policy.ActionAllow {
+				t.Fatalf("Action = %q, want allow", decision.Action)
 			}
-			if !strings.Contains(decision.Reason, tt.want) {
-				t.Fatalf("Reason = %q, want substring %q", decision.Reason, tt.want)
+			if decision.Constraints.Route == sandbox.RouteHost {
+				t.Fatalf("Constraints = %#v, want default sandbox route", decision.Constraints)
 			}
 		})
 	}

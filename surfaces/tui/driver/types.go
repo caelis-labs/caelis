@@ -64,7 +64,6 @@ type StatusSnapshot struct {
 	HostExecution                   bool
 	FullAccessMode                  bool
 	PermissionGrantCount            int
-	PermissionGrantNetwork          bool
 	PermissionReadRootCount         int
 	PermissionWriteRootCount        int
 	Surface                         string

@@ -310,7 +310,6 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 		HostExecution:                   report.HostExecution,
 		FullAccessMode:                  report.FullAccessMode,
 		PermissionGrantCount:            report.PermissionGrantCount,
-		PermissionGrantNetwork:          report.PermissionGrantNetwork,
 		PermissionReadRootCount:         report.PermissionReadRootCount,
 		PermissionWriteRootCount:        report.PermissionWriteRootCount,
 		ConfigPermissionsSecure:         report.ConfigPermissionsSecure,

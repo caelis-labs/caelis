@@ -37,7 +37,6 @@ var managedRuleNames = []string{
 
 type Config struct {
 	OfflineUsername string
-	OnlineUsername  string
 }
 
 type ClearOptions struct {
@@ -59,11 +58,6 @@ func RefreshWithOptions(ctx context.Context, cfg Config, opts ClearOptions) erro
 	offlineSID, err := win32.LookupAccountSIDString(offlineUser)
 	if err != nil {
 		return fmt.Errorf("netpolicy: lookup offline sandbox SID: %w", err)
-	}
-	if onlineUser := strings.TrimSpace(cfg.OnlineUsername); onlineUser != "" {
-		if _, err := win32.LookupAccountSIDString(onlineUser); err != nil {
-			return fmt.Errorf("netpolicy: lookup online sandbox SID: %w", err)
-		}
 	}
 	debugf(opts, "refreshing managed Windows Firewall rules")
 	if err := ClearContextWithOptions(ctx, opts); err != nil {

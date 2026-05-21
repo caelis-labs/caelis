@@ -303,7 +303,6 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 			status.HostExecution = report.HostExecution
 			status.FullAccessMode = report.FullAccessMode
 			status.PermissionGrantCount = report.PermissionGrantCount
-			status.PermissionGrantNetwork = report.PermissionGrantNetwork
 			status.PermissionReadRootCount = report.PermissionReadRootCount
 			status.PermissionWriteRootCount = report.PermissionWriteRootCount
 			status.SandboxRequestedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxRequestedBackend), status.SandboxRequestedBackend)

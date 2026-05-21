@@ -132,9 +132,7 @@ func CommonGlobalPolicy(writeRoots []string) Policy {
 }
 
 func networkIdentity(network sandbox.Network) NetworkIdentity {
-	if network == sandbox.NetworkEnabled {
-		return NetworkOnline
-	}
+	_ = network
 	return NetworkOffline
 }
 

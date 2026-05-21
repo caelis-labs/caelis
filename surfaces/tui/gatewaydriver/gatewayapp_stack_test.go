@@ -244,7 +244,6 @@ func testRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorR
 		HostExecution:             report.HostExecution,
 		FullAccessMode:            report.FullAccessMode,
 		PermissionGrantCount:      report.PermissionGrantCount,
-		PermissionGrantNetwork:    report.PermissionGrantNetwork,
 		PermissionReadRootCount:   report.PermissionReadRootCount,
 		PermissionWriteRootCount:  report.PermissionWriteRootCount,
 		ConfigPermissionsSecure:   report.ConfigPermissionsSecure,

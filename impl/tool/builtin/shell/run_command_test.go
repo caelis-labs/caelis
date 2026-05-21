@@ -33,13 +33,15 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	}
 	properties, _ := definition.InputSchema["properties"].(map[string]any)
 	wantDescriptions := map[string]string{
-		"command":                "Command to execute.",
-		"workdir":                "Working directory.",
-		"yield_time_ms":          "Wait before yielding async control.",
-		"timeout_ms":             "Maximum runtime in milliseconds.",
-		"sandbox_permissions":    "Sandbox mode for this command.",
-		"additional_permissions": "Extra sandbox grants for with_additional_permissions.",
-		"justification":          "Short approval question for require_escalated.",
+		"command":             "Command to execute.",
+		"workdir":             "Working directory.",
+		"yield_time_ms":       "Wait before yielding async control.",
+		"timeout_ms":          "Maximum runtime in milliseconds.",
+		"sandbox_permissions": "Sandbox mode for this command.",
+		"justification":       "Short approval question for require_escalated.",
+	}
+	if len(properties) != len(wantDescriptions) {
+		t.Fatalf("properties = %#v, want only %v", properties, sortedRunCommandPropertyKeys(wantDescriptions))
 	}
 	for key, want := range wantDescriptions {
 		property, ok := properties[key].(map[string]any)
@@ -50,6 +52,14 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 			t.Fatalf("%s description = %q, want %q", key, got, want)
 		}
 	}
+	sandboxProperty, _ := properties["sandbox_permissions"].(map[string]any)
+	enumValues, _ := sandboxProperty["enum"].([]string)
+	if strings.Join(enumValues, ",") != "use_default,require_escalated" {
+		t.Fatalf("sandbox_permissions enum = %#v, want use_default/require_escalated", sandboxProperty["enum"])
+	}
+	if _, ok := properties["additional_permissions"]; ok {
+		t.Fatal("additional_permissions property unexpectedly exposed")
+	}
 	if _, ok := properties["tty"]; ok {
 		t.Fatal("tty property unexpectedly exposed")
 	}
@@ -59,6 +69,70 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	if _, ok := properties["dir"]; ok {
 		t.Fatal("dir alias unexpectedly exposed")
 	}
+}
+
+func TestRunCommandCallIgnoresRemovedSandboxPermissionFields(t *testing.T) {
+	t.Parallel()
+
+	rt := sandboxPermissionRuntime{result: sandbox.CommandResult{Stdout: "ok", ExitCode: 0}}
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewRunCommand() error = %v", err)
+	}
+	tests := []struct {
+		name string
+		args map[string]any
+	}{
+		{
+			name: "legacy sandbox permission",
+			args: map[string]any{
+				"command":             "go test ./...",
+				"sandbox_permissions": "with_additional_permissions",
+			},
+		},
+		{
+			name: "additional permissions",
+			args: map[string]any{
+				"command": "go test ./...",
+				"additional_permissions": map[string]any{
+					"network": map[string]any{"enabled": true},
+				},
+			},
+		},
+		{
+			name: "require escalated without justification",
+			args: map[string]any{
+				"command":             "curl https://example.com",
+				"sandbox_permissions": "require_escalated",
+			},
+		},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			raw, err := json.Marshal(tt.args)
+			if err != nil {
+				t.Fatalf("json.Marshal() error = %v", err)
+			}
+			result, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw})
+			if err != nil {
+				t.Fatalf("Call() error = %v, want nil", err)
+			}
+			if len(result.Content) == 0 {
+				t.Fatal("result.Content = empty, want json payload")
+			}
+		})
+	}
+}
+
+func sortedRunCommandPropertyKeys(values map[string]string) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func TestRunCommandCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {

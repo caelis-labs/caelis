@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -261,8 +262,17 @@ func resolvedDarkBackground(opts themeResolveOptions) bool {
 	if opts.backgroundKnown {
 		return opts.backgroundDark
 	}
-	if opts.noColor || runningUnderGoTest() {
+	if opts.noColor {
 		return true
+	}
+	if dark, ok := darkBackgroundFromEnv(); ok {
+		return dark
+	}
+	if runningUnderGoTest() {
+		return true
+	}
+	if dark, ok := darkBackgroundFromPlatform(); ok {
+		return dark
 	}
 	return lipgloss.HasDarkBackground(os.Stdin, os.Stdout)
 }
@@ -272,6 +282,72 @@ func resolvedBackgroundColor(opts themeResolveOptions) color.Color {
 		return opts.backgroundColor
 	}
 	return nil
+}
+
+func darkBackgroundFromEnv() (bool, bool) {
+	colorfgbg := strings.TrimSpace(os.Getenv("COLORFGBG"))
+	if colorfgbg == "" {
+		return false, false
+	}
+	parts := strings.FieldsFunc(colorfgbg, func(r rune) bool {
+		return r == ';' || r == ':'
+	})
+	for i := len(parts) - 1; i >= 0; i-- {
+		part := strings.TrimSpace(parts[i])
+		if part == "" {
+			continue
+		}
+		index, err := strconv.Atoi(part)
+		if err != nil {
+			return false, false
+		}
+		return terminalColorIndexIsDark(index)
+	}
+	return false, false
+}
+
+func terminalColorIndexIsDark(index int) (bool, bool) {
+	r, g, b, ok := terminalColorIndexRGB(index)
+	if !ok {
+		return false, false
+	}
+	luma := (0.2126 * float64(r)) + (0.7152 * float64(g)) + (0.0722 * float64(b))
+	return luma < 140, true
+}
+
+func terminalColorIndexRGB(index int) (uint8, uint8, uint8, bool) {
+	if index < 0 || index > 255 {
+		return 0, 0, 0, false
+	}
+	if index < 16 {
+		colors := [16][3]uint8{
+			{0x00, 0x00, 0x00},
+			{0x80, 0x00, 0x00},
+			{0x00, 0x80, 0x00},
+			{0x80, 0x80, 0x00},
+			{0x00, 0x00, 0x80},
+			{0x80, 0x00, 0x80},
+			{0x00, 0x80, 0x80},
+			{0xc0, 0xc0, 0xc0},
+			{0x80, 0x80, 0x80},
+			{0xff, 0x00, 0x00},
+			{0x00, 0xff, 0x00},
+			{0xff, 0xff, 0x00},
+			{0x00, 0x00, 0xff},
+			{0xff, 0x00, 0xff},
+			{0x00, 0xff, 0xff},
+			{0xff, 0xff, 0xff},
+		}
+		rgb := colors[index]
+		return rgb[0], rgb[1], rgb[2], true
+	}
+	if index < 232 {
+		levels := [6]uint8{0, 95, 135, 175, 215, 255}
+		offset := index - 16
+		return levels[offset/36], levels[(offset/6)%6], levels[offset%6], true
+	}
+	gray := uint8(8 + ((index - 232) * 10))
+	return gray, gray, gray, true
 }
 
 func supportsTrueColor() bool {
@@ -686,12 +762,12 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		Name:           "light",
 		IsDark:         false,
 		AppBg:          nil,
-		PanelBorder:    profileColor(profile, "#d6dde7", "252", "8"),
+		PanelBorder:    profileColor(profile, "#c4ccd8", "252", "8"),
 		PanelTitle:     profileColor(profile, "#111827", "235", "0"),
 		TextPrimary:    profileColor(profile, "#172033", "235", "0"),
 		TextSecondary:  profileColor(profile, "#4f5b6b", "240", "0"),
 		SecondaryText:  profileColor(profile, "#4f5b6b", "240", "0"),
-		MutedText:      profileColor(profile, "#737d8c", "243", "8"),
+		MutedText:      profileColor(profile, "#5f6b7a", "242", "8"),
 		Info:           profileColor(profile, "#2f8faf", "32", "6"),
 		Success:        profileColor(profile, "#16894a", "28", "2"),
 		Warning:        profileColor(profile, "#b7791f", "172", "3"),
@@ -704,12 +780,12 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		CommandBg:      nil,
 		CommandActive:  selection,
 		CommandText:    profileColor(profile, "#172033", "235", "0"),
-		CommandSubText: profileColor(profile, "#737d8c", "243", "8"),
+		CommandSubText: profileColor(profile, "#5f6b7a", "242", "8"),
 		SelectionFg:    profileColor(profile, "#172033", "235", "0"),
 		SelectionBg:    selection,
 
 		AssistantFg:        profileColor(profile, "#172033", "235", "0"),
-		ReasoningFg:        profileColor(profile, "#687386", "243", "8"),
+		ReasoningFg:        profileColor(profile, "#586577", "242", "8"),
 		UserFg:             profileColor(profile, "#172033", "235", "0"),
 		UserBg:             surface1,
 		UserPrefixFg:       profileColor(profile, "#2f8faf", "32", "6"),
@@ -723,12 +799,12 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		DiffAddStrongBg:    addStrongBg,
 		DiffRemoveBg:       delBg,
 		DiffRemoveStrongBg: delStrongBg,
-		DiffLineNoFg:       profileColor(profile, "#737d8c", "243", "8"),
-		DiffGutterFg:       profileColor(profile, "#687386", "243", "8"),
-		DiffPanelBorder:    profileColor(profile, "#d6dde7", "252", "8"),
+		DiffLineNoFg:       profileColor(profile, "#5f6b7a", "242", "8"),
+		DiffGutterFg:       profileColor(profile, "#586577", "242", "8"),
+		DiffPanelBorder:    profileColor(profile, "#c4ccd8", "252", "8"),
 		SectionFg:          profileColor(profile, "#111827", "235", "0"),
 		KeyLabelFg:         profileColor(profile, "#4f5b6b", "240", "0"),
-		NoteFg:             profileColor(profile, "#687386", "243", "8"),
+		NoteFg:             profileColor(profile, "#586577", "242", "8"),
 		PromptFg:           profileColor(profile, "#2f8faf", "32", "6"),
 		CursorFg:           profileColor(profile, "#111827", "235", "0"),
 		ScrollHintFg:       profileColor(profile, "#b7791f", "172", "3"),
@@ -736,26 +812,26 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		InputBarBg:          nil,
 		InputBarFg:          profileColor(profile, "#172033", "235", "0"),
 		ToolOutputBg:        nil,
-		HelpHintFg:          profileColor(profile, "#737d8c", "243", "8"),
+		HelpHintFg:          profileColor(profile, "#5f6b7a", "242", "8"),
 		SpinnerFg:           profileColor(profile, "#2f8faf", "32", "6"),
-		SeparatorFg:         profileColor(profile, "#d6dde7", "252", "8"),
-		RoleBorderFg:        profileColor(profile, "#d6dde7", "252", "8"),
+		SeparatorFg:         profileColor(profile, "#c4ccd8", "252", "8"),
+		RoleBorderFg:        profileColor(profile, "#c4ccd8", "252", "8"),
 		NewMsgBg:            selection,
-		ComposerBorder:      profileColor(profile, "#d6dde7", "252", "8"),
+		ComposerBorder:      profileColor(profile, "#c4ccd8", "252", "8"),
 		ComposerBorderFocus: profileColor(profile, "#2f8faf", "32", "6"),
-		ScrollbarTrack:      profileColor(profile, "#e7ebf1", "254", "8"),
-		ScrollbarThumb:      profileColor(profile, "#98a4b3", "247", "7"),
+		ScrollbarTrack:      profileColor(profile, "#dce2ea", "254", "8"),
+		ScrollbarThumb:      profileColor(profile, "#748194", "246", "7"),
 		LinkFg:              profileColor(profile, "#2f8faf", "32", "6"),
 		CodeFg:              profileColor(profile, "#5f4aa2", "93", "5"),
 		CodeBg:              surface2,
 		CodeBlockFg:         profileColor(profile, "#172033", "235", "0"),
 		CodeBlockBg:         surface1,
-		TranscriptRail:      profileColor(profile, "#d6dde7", "252", "8"),
-		TranscriptShell:     profileColor(profile, "#a8b3c2", "247", "8"),
+		TranscriptRail:      profileColor(profile, "#c4ccd8", "252", "8"),
+		TranscriptShell:     profileColor(profile, "#6f7b8c", "246", "8"),
 		TranscriptPillBg:    nil,
 		CodeSurface:         surface1,
 		TableHeaderBg:       surface1,
-		TableBorder:         profileColor(profile, "#9aa7b6", "247", "8"),
+		TableBorder:         profileColor(profile, "#7a8798", "246", "8"),
 	}
 }
 

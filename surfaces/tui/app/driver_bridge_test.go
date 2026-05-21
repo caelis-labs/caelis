@@ -1222,7 +1222,6 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		SessionReasoningTokens:   50,
 		SessionTotalTokens:       12800,
 		PermissionGrantCount:     2,
-		PermissionGrantNetwork:   true,
 		PermissionReadRootCount:  3,
 		PermissionWriteRootCount: 1,
 	})
@@ -1231,7 +1230,7 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"Session", "  Model", "  Mode", "  Token usage", "    Scope", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Grants     2 approved, read roots 3, write roots 1, network yes", "warn: API key is missing", "/tmp/store"} {
+	for _, want := range []string{"Session", "  Model", "  Mode", "  Token usage", "    Scope", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Grants     2 approved, read roots 3, write roots 1", "warn: API key is missing", "/tmp/store"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}

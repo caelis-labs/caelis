@@ -38,11 +38,7 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		}
 	}
 	if status.PermissionGrantCount > 0 {
-		network := "no"
-		if status.PermissionGrantNetwork {
-			network = "yes"
-		}
-		lines = append(lines, fmt.Sprintf("  Grants     %d approved, read roots %d, write roots %d, network %s", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount, network))
+		lines = append(lines, fmt.Sprintf("  Grants     %d approved, read roots %d, write roots %d", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount))
 	}
 	if status.FallbackReason != "" {
 		lines = append(lines, "  Fallback   "+strings.TrimSpace(status.FallbackReason))

@@ -121,14 +121,6 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName s
 	switch req.SandboxPermissions {
 	case commandSandboxPermissionRequireEscalated:
 		return askEscalationApproval(input, req)
-	case commandSandboxPermissionWithAdditionalPermissions:
-		reason := "additional sandbox permissions require user approval"
-		decision, err := askApproval(reason, applyCommandAdditionalPermissions(def, req), input)
-		if err != nil {
-			return policy.Decision{}, err
-		}
-		decision.Metadata = req.approvalMetadata(reason)
-		return decision, nil
 	}
 	return allow(def), nil
 }
@@ -201,10 +193,6 @@ func askDestructiveCommandApproval(input policy.ToolContext, def sandbox.Constra
 	case commandSandboxPermissionRequireEscalated:
 		reason = "destructive host command requires user approval"
 		constraints = hostExecutionConstraints()
-		metadata = req.approvalMetadata(reason)
-		metadata["destructive_command"] = true
-	case commandSandboxPermissionWithAdditionalPermissions:
-		constraints = applyCommandAdditionalPermissions(def, req)
 		metadata = req.approvalMetadata(reason)
 		metadata["destructive_command"] = true
 	}

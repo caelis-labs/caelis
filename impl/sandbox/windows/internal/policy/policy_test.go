@@ -122,8 +122,8 @@ func TestBuildFullAccessSkipsRoots(t *testing.T) {
 	if len(p.ReadRoots) != 0 || len(p.WriteRoots) != 0 {
 		t.Fatalf("roots = read %#v write %#v, want unrestricted nil roots", p.ReadRoots, p.WriteRoots)
 	}
-	if p.Network != NetworkOnline {
-		t.Fatalf("Network = %q, want online", p.Network)
+	if p.Network != NetworkOffline {
+		t.Fatalf("Network = %q, want offline", p.Network)
 	}
 }
 
@@ -195,8 +195,8 @@ func TestBuildNetworkModes(t *testing.T) {
 	enabled := Build(Input{Config: sandbox.Config{CWD: t.TempDir()}, Constraints: sandbox.Constraints{
 		Network: sandbox.NetworkEnabled,
 	}})
-	if enabled.Network != NetworkOnline {
-		t.Fatalf("enabled Network = %q, want online", enabled.Network)
+	if enabled.Network != NetworkOffline {
+		t.Fatalf("enabled Network = %q, want offline", enabled.Network)
 	}
 }
 

@@ -59,21 +59,20 @@ type Option struct {
 }
 
 type Payload struct {
-	ToolCallID            string         `json:"tool_call_id,omitempty"`
-	ToolName              string         `json:"tool_name,omitempty"`
-	RawInput              map[string]any `json:"raw_input,omitempty"`
-	Reason                string         `json:"reason,omitempty"`
-	Justification         string         `json:"justification,omitempty"`
-	SandboxPermissions    string         `json:"sandbox_permissions,omitempty"`
-	AdditionalPermissions map[string]any `json:"additional_permissions,omitempty"`
-	Status                Status         `json:"status,omitempty"`
-	Options               []Option       `json:"options,omitempty"`
-	ReviewID              string         `json:"review_id,omitempty"`
-	ReviewStatus          ReviewStatus   `json:"review_status,omitempty"`
-	ReviewText            string         `json:"review_text,omitempty"`
-	Risk                  string         `json:"risk,omitempty"`
-	Authorization         string         `json:"authorization,omitempty"`
-	DecisionSource        string         `json:"decision_source,omitempty"`
+	ToolCallID         string         `json:"tool_call_id,omitempty"`
+	ToolName           string         `json:"tool_name,omitempty"`
+	RawInput           map[string]any `json:"raw_input,omitempty"`
+	Reason             string         `json:"reason,omitempty"`
+	Justification      string         `json:"justification,omitempty"`
+	SandboxPermissions string         `json:"sandbox_permissions,omitempty"`
+	Status             Status         `json:"status,omitempty"`
+	Options            []Option       `json:"options,omitempty"`
+	ReviewID           string         `json:"review_id,omitempty"`
+	ReviewStatus       ReviewStatus   `json:"review_status,omitempty"`
+	ReviewText         string         `json:"review_text,omitempty"`
+	Risk               string         `json:"risk,omitempty"`
+	Authorization      string         `json:"authorization,omitempty"`
+	DecisionSource     string         `json:"decision_source,omitempty"`
 }
 
 type UsageSnapshot struct {
@@ -149,7 +148,6 @@ func PayloadFromRuntimeRequest(req agent.ApprovalRequest) *Payload {
 	payload.Reason = firstNonEmpty(metadataString(req.Metadata, "approval_reason"), rawString(payload.RawInput, "approval_reason"))
 	payload.Justification = firstNonEmpty(metadataString(req.Metadata, "justification"), rawString(payload.RawInput, "justification"))
 	payload.SandboxPermissions = firstNonEmpty(metadataString(req.Metadata, "sandbox_permissions"), rawString(payload.RawInput, "sandbox_permissions"))
-	payload.AdditionalPermissions = firstNonEmptyMap(metadataMap(req.Metadata, "additional_permissions"), rawMap(payload.RawInput, "additional_permissions"))
 	if payload.ToolName == "" && len(payload.RawInput) == 0 && len(payload.Options) == 0 && payload.Reason == "" {
 		return nil
 	}
@@ -200,7 +198,6 @@ func ClonePayload(in *Payload) *Payload {
 	}
 	out := *in
 	out.RawInput = maps.Clone(in.RawInput)
-	out.AdditionalPermissions = maps.Clone(in.AdditionalPermissions)
 	if len(in.Options) > 0 {
 		out.Options = append([]Option(nil), in.Options...)
 	}

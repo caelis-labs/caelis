@@ -15,6 +15,7 @@ import (
 )
 
 func TestRunnerCommandEmitsOutputAndExit(t *testing.T) {
+	requireRunnerCommandE2E(t)
 	t.Parallel()
 
 	var input bytes.Buffer
@@ -82,6 +83,7 @@ func TestRunnerCommandEmitsOutputAndExit(t *testing.T) {
 }
 
 func TestRunnerCommandUsesUTF8AndReadHostStdin(t *testing.T) {
+	requireRunnerCommandE2E(t)
 	t.Parallel()
 
 	var input bytes.Buffer
@@ -132,6 +134,7 @@ func TestRunnerCommandUsesUTF8AndReadHostStdin(t *testing.T) {
 }
 
 func TestRunnerCommandCapturesPowerShellErrorStream(t *testing.T) {
+	requireRunnerCommandE2E(t)
 	t.Parallel()
 
 	var input bytes.Buffer
@@ -321,6 +324,7 @@ func testPathIsUnder(path string, root string) bool {
 }
 
 func TestRunnerTTYCommandUsesConPTY(t *testing.T) {
+	requireRunnerCommandE2E(t)
 	t.Parallel()
 
 	var input bytes.Buffer
@@ -415,4 +419,11 @@ func testCapabilitySIDs(t *testing.T) []string {
 		t.Fatalf("DeriveCapabilitySIDs() = %#v, want capability group SID", sids)
 	}
 	return sids.Group
+}
+
+func requireRunnerCommandE2E(t *testing.T) {
+	t.Helper()
+	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
+		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run Windows runner command e2e")
+	}
 }

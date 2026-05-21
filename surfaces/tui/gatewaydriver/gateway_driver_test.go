@@ -2989,7 +2989,6 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 				return DoctorReport{
 					SessionID:                "grant-session",
 					PermissionGrantCount:     2,
-					PermissionGrantNetwork:   true,
 					PermissionReadRootCount:  3,
 					PermissionWriteRootCount: 1,
 				}, nil
@@ -3002,8 +3001,8 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if status.PermissionGrantCount != 2 || !status.PermissionGrantNetwork || status.PermissionReadRootCount != 3 || status.PermissionWriteRootCount != 1 {
-		t.Fatalf("permission grant summary = count:%d network:%v read:%d write:%d, want 2/true/3/1", status.PermissionGrantCount, status.PermissionGrantNetwork, status.PermissionReadRootCount, status.PermissionWriteRootCount)
+	if status.PermissionGrantCount != 2 || status.PermissionReadRootCount != 3 || status.PermissionWriteRootCount != 1 {
+		t.Fatalf("permission grant summary = count:%d read:%d write:%d, want 2/3/1", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount)
 	}
 }
 
