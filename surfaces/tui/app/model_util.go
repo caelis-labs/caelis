@@ -11,6 +11,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // ---------------------------------------------------------------------------
@@ -601,6 +602,82 @@ func overlayAboveBottomAreaLeft(base string, overlay string, screenWidth int, st
 		baseLines[row] = overlayLineAt(baseLines[row], line, startX, screenWidth)
 	}
 	return strings.Join(baseLines, "\n")
+}
+
+func overlayTopRight(base string, overlay string, screenWidth int, top int, rightInset int) string {
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+	if len(baseLines) == 0 || len(overlayLines) == 0 || screenWidth <= 0 {
+		return base
+	}
+	if top < 0 {
+		top = 0
+	}
+	if rightInset < 0 {
+		rightInset = 0
+	}
+	overlayWidth := 0
+	for _, line := range overlayLines {
+		overlayWidth = maxInt(overlayWidth, lipgloss.Width(line))
+	}
+	if overlayWidth <= 0 {
+		return base
+	}
+	startX := maxInt(0, screenWidth-rightInset-overlayWidth)
+	startRow := topRightOverlayRow(baseLines, overlayLines, startX, top)
+	for i, line := range overlayLines {
+		row := startRow + i
+		if row < 0 || row >= len(baseLines) {
+			continue
+		}
+		baseLines[row] = overlayLineAtPreservingPrefix(baseLines[row], line, startX, screenWidth)
+	}
+	return strings.Join(baseLines, "\n")
+}
+
+func topRightOverlayRow(baseLines []string, overlayLines []string, startX int, top int) int {
+	if len(baseLines) == 0 {
+		return 0
+	}
+	maxStart := maxInt(0, len(baseLines)-len(overlayLines))
+	if top > maxStart {
+		top = maxStart
+	}
+	end := minInt(maxStart, top+8)
+	for row := top; row <= end; row++ {
+		clear := true
+		for i := range overlayLines {
+			if rightTrimmedDisplayWidth(baseLines[row+i]) > startX {
+				clear = false
+				break
+			}
+		}
+		if clear {
+			return row
+		}
+	}
+	return top
+}
+
+func rightTrimmedDisplayWidth(line string) int {
+	return displayColumns(strings.TrimRight(ansi.Strip(line), " \t"))
+}
+
+func overlayLineAtPreservingPrefix(baseLine string, overlayLine string, startX int, screenWidth int) string {
+	if startX < 0 {
+		startX = 0
+	}
+	overlayWidth := lipgloss.Width(overlayLine)
+	prefix := ansi.Truncate(baseLine, startX, "")
+	if prefixWidth := lipgloss.Width(prefix); prefixWidth < startX {
+		prefix += strings.Repeat(" ", startX-prefixWidth)
+	}
+	remaining := screenWidth - startX - overlayWidth
+	suffix := ""
+	if remaining > 0 {
+		suffix = strings.Repeat(" ", remaining)
+	}
+	return prefix + overlayLine + suffix
 }
 
 func overlayLineAt(_ string, overlayLine string, startX int, screenWidth int) string {

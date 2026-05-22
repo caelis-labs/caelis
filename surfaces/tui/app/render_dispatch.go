@@ -252,7 +252,8 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		model, cmd := m.handleRunningInterruptResultMsg(typed)
 		return model, tea.Batch(policyCmd, cmd), true
 	case SandboxProgressMsg:
-		return m.handleSandboxProgressMsg(typed), policyCmd, true
+		model, cmd := m.handleSandboxProgressMsg(typed)
+		return model, tea.Batch(policyCmd, cmd), true
 
 	case ClearHistoryMsg:
 		m.resetConversationView()
@@ -633,15 +634,15 @@ func (m *Model) handleRunningInterruptResultMsg(msg RunningInterruptResultMsg) (
 	})
 }
 
-func (m *Model) handleSandboxProgressMsg(msg SandboxProgressMsg) tea.Model {
+func (m *Model) handleSandboxProgressMsg(msg SandboxProgressMsg) (tea.Model, tea.Cmd) {
 	if msg.Clear {
 		source := strings.TrimSpace(msg.Source)
 		if source != "" && (m.sandboxProgress == nil || m.sandboxProgress.Source != source) {
-			return m
+			return m, nil
 		}
 		m.sandboxProgress = nil
 		m.ensureViewportLayout()
-		return m
+		return m, nil
 	}
 	title := strings.TrimSpace(msg.Title)
 	if title == "" {
@@ -662,7 +663,7 @@ func (m *Model) handleSandboxProgressMsg(msg SandboxProgressMsg) tea.Model {
 		UpdatedAt: time.Now(),
 	}
 	m.ensureViewportLayout()
-	return m
+	return m, nil
 }
 
 func (m *Model) lastBlockHasParticipantTurnFooter() bool {

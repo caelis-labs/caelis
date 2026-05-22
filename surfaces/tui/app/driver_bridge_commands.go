@@ -797,8 +797,6 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-const sandboxProgressBarWidth = 18
-
 func sendSandboxProgress(send func(tea.Msg), title string, progress sandbox.PrepareProgress) {
 	if send == nil || progress.Debug {
 		return
@@ -819,51 +817,6 @@ func sendSandboxProgress(send func(tea.Msg), title string, progress sandbox.Prep
 		Total:   progress.Total,
 		Done:    progress.Done,
 	})
-}
-
-func formatSandboxProgress(_ string, progress sandbox.PrepareProgress) string {
-	message := strings.TrimSpace(progress.Message)
-	if message == "" {
-		message = strings.TrimSpace(progress.Phase)
-	}
-	if message == "" {
-		return ""
-	}
-	if progress.Debug {
-		return message
-	}
-	if progress.Step <= 0 || progress.Total <= 0 {
-		return message
-	}
-	pct := float64(progress.Step) / float64(progress.Total)
-	if progress.Done {
-		pct = 1
-	}
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 1 {
-		pct = 1
-	}
-	bar := sandboxProgressBar(pct, sandboxProgressBarWidth)
-	return fmt.Sprintf("%s %3.0f%% (%d/%d): %s", bar, pct*100, progress.Step, progress.Total, message)
-}
-
-func sandboxProgressBar(pct float64, width int) string {
-	if width <= 0 {
-		width = sandboxProgressBarWidth
-	}
-	if pct < 0 {
-		pct = 0
-	}
-	if pct > 1 {
-		pct = 1
-	}
-	filled := int(pct*float64(width) + 0.5)
-	if filled > width {
-		filled = width
-	}
-	return "[" + strings.Repeat("=", filled) + strings.Repeat("-", width-filled) + "]"
 }
 
 func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

@@ -47,6 +47,14 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 }
 
 func (s *Stack) SandboxStatus() SandboxStatus {
+	return s.sandboxStatus(false)
+}
+
+func (s *Stack) SandboxStartupStatus() SandboxStatus {
+	return s.sandboxStatus(true)
+}
+
+func (s *Stack) sandboxStatus(startup bool) SandboxStatus {
 	if s == nil {
 		return SandboxStatus{}
 	}
@@ -66,7 +74,12 @@ func (s *Stack) SandboxStatus() SandboxStatus {
 		status.ResolvedBackend = status.RequestedBackend
 		return status
 	}
-	rtStatus := exec.Status()
+	var rtStatus sandbox.Status
+	if startup {
+		rtStatus = sandbox.SelectionStatus(exec)
+	} else {
+		rtStatus = exec.Status()
+	}
 	if strings.TrimSpace(string(rtStatus.RequestedBackend)) != "" {
 		status.RequestedBackend = string(rtStatus.RequestedBackend)
 	}

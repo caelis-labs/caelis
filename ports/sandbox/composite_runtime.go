@@ -98,6 +98,13 @@ func (r *compositeRuntime) Status() Status {
 	return backendStatus
 }
 
+func (r *compositeRuntime) SelectionStatus() Status {
+	if r == nil {
+		return Status{}
+	}
+	return CloneStatus(r.status)
+}
+
 func (r *compositeRuntime) Prepare(ctx context.Context) error {
 	if r == nil || r.sandbox == nil {
 		return nil

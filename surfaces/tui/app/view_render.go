@@ -94,56 +94,31 @@ func (m *Model) primaryDrawerHeight() int {
 }
 
 func (m *Model) renderPrimaryDrawer() string {
-	if drawer := m.renderSandboxProgressDrawer(); drawer != "" {
-		return drawer
-	}
 	if drawer := m.renderBTWDrawer(); drawer != "" {
 		return drawer
 	}
 	return m.renderPlanDrawer()
 }
 
-func (m *Model) renderSandboxProgressDrawer() string {
+func (m *Model) renderSandboxProgressOverlay() string {
 	if m == nil || m.sandboxProgress == nil || m.width <= 0 {
 		return ""
 	}
 	state := *m.sandboxProgress
-	contentWidth := maxInt(1, m.mainColumnWidth()-(inputHorizontalInset*2))
 	pct := sandboxProgressPercent(state.Step, state.Total, state.Done)
-	barWidth := contentWidth - 18
-	if barWidth < 12 {
-		barWidth = 12
+	width := sandboxProgressOverlayWidth
+	if available := m.width - inputHorizontalInset*2; available < width {
+		width = available
 	}
-	if barWidth > 42 {
-		barWidth = 42
+	if width < sandboxProgressOverlayMinWidth {
+		return ""
 	}
-	bar := sandboxProgressBar(pct, barWidth)
-	percent := fmt.Sprintf("%3.0f%%", pct*100)
-	stepText := ""
-	if state.Step > 0 && state.Total > 0 {
-		stepText = fmt.Sprintf(" (%d/%d)", state.Step, state.Total)
+	bar := m.sandboxProgressBar
+	if bar.Width() <= 0 {
+		bar = newSandboxProgressBar(m.theme)
 	}
-	title := strings.TrimSpace(state.Title)
-	if title == "" {
-		title = "Windows sandbox"
-	}
-	phase := strings.TrimSpace(state.Phase)
-	if phase != "" {
-		title += " - " + phase
-	}
-	message := strings.TrimSpace(state.Message)
-	if message == "" {
-		message = title
-	}
-	lines := []string{m.theme.SeparatorStyle().Render(strings.Repeat("-", contentWidth))}
-	lines = append(lines, m.theme.HelpHintTextStyle().Render(title))
-	lines = append(lines, bar+" "+m.theme.TextStyle().Render(percent+stepText))
-	for _, line := range strings.Split(hardWrapDisplayLine(message, contentWidth), "\n") {
-		if strings.TrimSpace(line) != "" {
-			lines = append(lines, m.theme.TextStyle().Render(line))
-		}
-	}
-	return insetRenderedBlock(strings.Join(lines, "\n"), inputHorizontalInset)
+	bar.SetWidth(width)
+	return bar.ViewAs(pct)
 }
 
 func sandboxProgressPercent(step int, total int, done bool) float64 {

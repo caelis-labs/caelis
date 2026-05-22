@@ -81,7 +81,7 @@ func (s *Stack) rebuildGateway() error {
 	}
 	effectivePolicyMode := policyMode(runtimeCfg.PermissionMode)
 	effectiveBaseMetadata := cloneMap(runtimeCfg.BaseMetadata)
-	sandboxStatus := sandboxRuntime.Status()
+	sandboxStatus := sandbox.SelectionStatus(sandboxRuntime)
 	if sandboxStatus.FallbackToHost {
 		if effectiveBaseMetadata == nil {
 			effectiveBaseMetadata = map[string]any{}

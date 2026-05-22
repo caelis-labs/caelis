@@ -319,6 +319,22 @@ type Runtime interface {
 	Close() error
 }
 
+// SelectionStatusRuntime can report backend selection without performing
+// backend-specific readiness checks.
+type SelectionStatusRuntime interface {
+	SelectionStatus() Status
+}
+
+func SelectionStatus(runtime Runtime) Status {
+	if runtime == nil {
+		return Status{}
+	}
+	if provider, ok := runtime.(SelectionStatusRuntime); ok {
+		return CloneStatus(provider.SelectionStatus())
+	}
+	return CloneStatus(runtime.Status())
+}
+
 // PreparableRuntime is implemented by backends that need an explicit
 // user-triggered setup step before normal sandboxed execution can run.
 type PreparableRuntime interface {

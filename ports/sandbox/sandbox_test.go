@@ -43,6 +43,30 @@ func TestCloneRequestIsolatesMutableFields(t *testing.T) {
 	}
 }
 
+func TestSelectionStatusUsesLightweightProvider(t *testing.T) {
+	runtime := &countingSelectionRuntime{
+		fakeRuntime: fakeRuntime{
+			backend: BackendCustom,
+			status: Status{
+				RequestedBackend: BackendCustom,
+				ResolvedBackend:  BackendCustom,
+			},
+		},
+		selection: Status{
+			RequestedBackend: "",
+			ResolvedBackend:  BackendWindowsElevated,
+		},
+	}
+
+	got := SelectionStatus(runtime)
+	if runtime.statusCalls != 0 {
+		t.Fatalf("Status() calls = %d, want 0", runtime.statusCalls)
+	}
+	if got.ResolvedBackend != BackendWindowsElevated {
+		t.Fatalf("SelectionStatus().ResolvedBackend = %q, want %q", got.ResolvedBackend, BackendWindowsElevated)
+	}
+}
+
 func TestFuncRunnerClonesRequestBeforeInvoke(t *testing.T) {
 	t.Parallel()
 
@@ -479,6 +503,21 @@ func (r fakeRuntime) Status() Status {
 	return Status{RequestedBackend: r.backend, ResolvedBackend: r.backend}
 }
 func (r fakeRuntime) Close() error { return nil }
+
+type countingSelectionRuntime struct {
+	fakeRuntime
+	selection   Status
+	statusCalls int
+}
+
+func (r *countingSelectionRuntime) Status() Status {
+	r.statusCalls++
+	return r.fakeRuntime.Status()
+}
+
+func (r *countingSelectionRuntime) SelectionStatus() Status {
+	return r.selection
+}
 
 type sentinelFileSystem struct {
 	name string

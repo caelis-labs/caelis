@@ -277,6 +277,36 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
+	ctx := context.Background()
+	statusCalls := 0
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "user-1", SessionID: "startup-session", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		SandboxStatusFn: func() SandboxStatus {
+			statusCalls++
+			return SandboxStatus{RequestedBackend: "windows-elevated", ResolvedBackend: "windows-elevated"}
+		},
+		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
+			return activeSession, nil
+		},
+	}, activeSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+	if driver.sandboxType != "auto" {
+		t.Fatalf("startup sandbox type = %q, want lightweight default", driver.sandboxType)
+	}
+	if statusCalls != 0 {
+		t.Fatalf("SandboxStatus() calls during startup = %d, want 0", statusCalls)
+	}
+}
+
 func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *testing.T) {
 	ctx := context.Background()
 	activeSession := session.Session{

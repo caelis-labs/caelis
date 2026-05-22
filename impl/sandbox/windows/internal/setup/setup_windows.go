@@ -49,12 +49,20 @@ func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 	if payload.Kind == SetupKindReadACLRefresh {
 		return executeReadACLRefresh(payload, progress)
 	}
-	return win32.WithNamedMutex(context.Background(), setupMaintenanceMutexName(payload.StateRoot), setupMaintenanceLockTimeout, func() error {
+	return WithMaintenanceLock(context.Background(), payload.StateRoot, setupMaintenanceLockTimeout, func() error {
 		if !payload.ExpiresAt.IsZero() && time.Now().After(payload.ExpiresAt) {
 			return fmt.Errorf("windows setup: operation %s expired before execution", strings.TrimSpace(payload.OperationID))
 		}
 		return executeWithProgressLocked(payload, progress)
 	})
+}
+
+func WithMaintenanceLock(ctx context.Context, stateRoot string, timeout time.Duration, fn func() error) error {
+	stateRoot = strings.TrimSpace(stateRoot)
+	if stateRoot == "" {
+		return fmt.Errorf("windows setup: state root is required")
+	}
+	return win32.WithNamedMutex(ctx, setupMaintenanceMutexName(stateRoot), timeout, fn)
 }
 
 func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
@@ -94,7 +102,11 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 		return err
 	}
 	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring offline sandbox user", Step: 3, Total: totalSteps})
-	offlinePassword, err := ensureLocalUser(payload.OfflineUsername)
+	reusableOfflinePassword, reusableErr := reusableOfflineUserPassword(dirs.UsersPath, payload.OfflineUsername)
+	if reusableErr != nil {
+		reportDebugProgress(payload, progress, "existing offline sandbox credentials will be rotated: "+reusableErr.Error())
+	}
+	offlinePassword, err := ensureLocalUser(payload.OfflineUsername, reusableOfflinePassword)
 	if err != nil {
 		return err
 	}
@@ -492,16 +504,53 @@ func ensureLocalGroup(group string) error {
 	return runNet("localgroup", group, "/add")
 }
 
-func ensureLocalUser(username string) (string, error) {
+func ensureLocalUser(username string, reusablePassword ...string) (string, error) {
+	existingPassword := firstNonEmptyString(reusablePassword...)
+	if err := runNet("user", username); err == nil {
+		if existingPassword != "" {
+			return existingPassword, runNet("user", username, "/active:yes", "/expires:never", "/passwordchg:no")
+		}
+		password, err := randomPassword()
+		if err != nil {
+			return "", err
+		}
+		return password, runNetWithInput("Y\r\n", "user", username, password, "/active:yes", "/expires:never", "/Y")
+	}
 	password, err := randomPassword()
 	if err != nil {
 		return "", err
 	}
-	if err := runNet("user", username); err == nil {
-		return password, runNetWithInput("Y\r\n", "user", username, password, "/active:yes", "/expires:never", "/Y")
-	}
 	if err := runNetWithInput("Y\r\n", "user", username, password, "/add", "/active:yes", "/expires:never", "/passwordchg:no", "/Y"); err != nil {
 		return "", err
+	}
+	return password, nil
+}
+
+func reusableOfflineUserPassword(path string, username string) (string, error) {
+	username = strings.TrimSpace(username)
+	if username == "" {
+		return "", fmt.Errorf("offline sandbox username is required")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	var users UsersFile
+	if err := json.Unmarshal(data, &users); err != nil {
+		return "", fmt.Errorf("decode sandbox users file: %w", err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(users.Offline.Username), username) {
+		return "", fmt.Errorf("sandbox users file does not match expected offline account")
+	}
+	password, err := win32.UnprotectString(users.Offline.PasswordProtected)
+	if err != nil {
+		return "", fmt.Errorf("unprotect offline sandbox password: %w", err)
+	}
+	if err := win32.ValidateCredentials(win32.LogonCredentials{
+		Username: username,
+		Password: password,
+	}); err != nil {
+		return "", fmt.Errorf("validate offline sandbox credentials: %w", err)
 	}
 	return password, nil
 }

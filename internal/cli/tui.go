@@ -17,7 +17,7 @@ import (
 )
 
 func runTUI(ctx context.Context, stack *gatewayapp.Stack, sessionID string, modelText string, stdin io.Reader, stdout io.Writer) error {
-	initialSandboxStatus := stack.SandboxStatus()
+	initialSandboxStatus := stack.SandboxStartupStatus()
 	driver, err := local.NewLocalDriver(ctx, stack, strings.TrimSpace(sessionID), "cli-tui", strings.TrimSpace(modelText))
 	if err != nil {
 		return err
@@ -56,16 +56,11 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 	if !strings.EqualFold(backend, string(sandbox.BackendWindowsElevated)) {
 		return
 	}
-	globalSetup, _ := initial.Setup.Check("global")
-	workspaceSetup, _ := initial.Setup.Check("workspace")
-	workspaceRequired := initial.WorkspaceSetupRequired || workspaceSetup.Required
-	globalRequired := initial.GlobalSetupRequired || globalSetup.Required
-	if !workspaceRequired || globalRequired {
-		return
-	}
 	go func() {
 		title := "Windows sandbox workspace"
+		progressVisible := false
 		sendWorkspaceProgress := func(progress sandbox.PrepareProgress) {
+			progressVisible = true
 			sender.SendMsg(tuiapp.SandboxProgressMsg{
 				Title:   title,
 				Source:  title,
@@ -76,25 +71,47 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 				Done:    progress.Done,
 			})
 		}
-		sendWorkspaceProgress(sandbox.PrepareProgress{
-			Phase:   "workspace",
-			Message: "preparing sandbox ACLs for this workspace in the background",
-		})
 		progressCtx := sandbox.ContextWithPrepareProgress(ctx, sendWorkspaceProgress)
 		status, err := stack.PreflightSandbox(progressCtx, true)
+		nextGlobalSetup, _ := status.Setup.Check("global")
 		nextWorkspaceSetup, _ := status.Setup.Check("workspace")
-		workspaceCurrent := status.WorkspaceSetupCurrent || nextWorkspaceSetup.Current
+		globalRequired := status.GlobalSetupRequired || nextGlobalSetup.Required
 		workspaceRequired := status.WorkspaceSetupRequired || nextWorkspaceSetup.Required
+		workspaceCurrent := status.WorkspaceSetupCurrent || nextWorkspaceSetup.Current
 		if err != nil {
 			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox workspace setup failed: " + err.Error() + "\n"})
-			sendWorkspaceProgress(sandbox.PrepareProgress{
+			progressVisible = true
+			sender.SendMsg(tuiapp.SandboxProgressMsg{
+				Title:   title,
+				Source:  title,
 				Phase:   "workspace",
 				Message: "workspace sandbox setup failed",
 				Done:    true,
 			})
-		} else if workspaceCurrent || !workspaceRequired {
-			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox workspace setup complete.\n"})
-			sendWorkspaceProgress(sandbox.PrepareProgress{
+		} else if globalRequired {
+			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Windows sandbox setup is not ready. Run /sandbox setup once and approve the UAC prompt before using sandboxed commands.\n"})
+			progressVisible = true
+			sender.SendMsg(tuiapp.SandboxProgressMsg{
+				Title:   title,
+				Source:  title,
+				Phase:   "setup",
+				Message: "global Windows sandbox setup requires /sandbox setup",
+				Done:    true,
+			})
+		} else if workspaceRequired && !workspaceCurrent {
+			sender.SendMsg(tuiapp.LogChunkMsg{Chunk: "Current workspace still needs Windows sandbox ACL setup. Run /sandbox setup if commands cannot start in the sandbox.\n"})
+			progressVisible = true
+			sender.SendMsg(tuiapp.SandboxProgressMsg{
+				Title:   title,
+				Source:  title,
+				Phase:   "workspace",
+				Message: "workspace sandbox ACL setup is still required",
+				Done:    true,
+			})
+		} else if progressVisible {
+			sender.SendMsg(tuiapp.SandboxProgressMsg{
+				Title:   title,
+				Source:  title,
 				Phase:   "complete",
 				Message: "workspace sandbox ACLs are ready",
 				Step:    3,
@@ -102,8 +119,10 @@ func startWorkspaceSandboxPreflight(ctx context.Context, stack *gatewayapp.Stack
 				Done:    true,
 			})
 		}
-		time.Sleep(1600 * time.Millisecond)
-		sender.SendMsg(tuiapp.SandboxProgressMsg{Source: title, Clear: true})
+		if progressVisible {
+			time.Sleep(1600 * time.Millisecond)
+			sender.SendMsg(tuiapp.SandboxProgressMsg{Source: title, Clear: true})
+		}
 	}()
 }
 

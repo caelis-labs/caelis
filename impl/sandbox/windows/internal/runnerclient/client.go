@@ -69,14 +69,34 @@ func New(cfg Config) *Client {
 }
 
 func (c *Client) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
-	s, err := c.start(ctx, req, false)
+	sessionID, err := c.StartRun(ctx, req)
 	if err != nil {
 		return sandbox.CommandResult{}, err
 	}
+	return c.WaitRun(ctx, sessionID)
+}
+
+func (c *Client) StartRun(ctx context.Context, req runnerruntime.Request) (string, error) {
+	s, err := c.start(ctx, req, false)
+	if err != nil {
+		return "", err
+	}
 	if err := s.sendInitialStdin(req.Stdin); err != nil {
 		_ = s.TerminateSession()
+		return "", err
+	}
+	c.mu.Lock()
+	c.sessions[s.id] = s
+	c.mu.Unlock()
+	return s.id, nil
+}
+
+func (c *Client) WaitRun(ctx context.Context, sessionID string) (sandbox.CommandResult, error) {
+	s, err := c.get(sessionID)
+	if err != nil {
 		return sandbox.CommandResult{}, err
 	}
+	defer c.removeSession(s.id)
 	result, err := s.WaitResult(ctx, 0)
 	if err != nil && ctx.Err() != nil {
 		_ = s.TerminateSession()
@@ -86,7 +106,6 @@ func (c *Client) Run(ctx context.Context, req runnerruntime.Request) (sandbox.Co
 			result = cleanupResult
 		}
 	}
-	c.removeSession(s.id)
 	return result, err
 }
 

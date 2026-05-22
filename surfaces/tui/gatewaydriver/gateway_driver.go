@@ -50,8 +50,8 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 		modelText:           strings.TrimSpace(modelText),
 		defaultSessionMode:  "auto-review",
 		sessionMode:         "auto-review",
-		defaultSandboxType:  firstNonEmpty(stack.SandboxStatus().ResolvedBackend, stack.SandboxStatus().RequestedBackend, "auto"),
-		sandboxType:         firstNonEmpty(stack.SandboxStatus().ResolvedBackend, stack.SandboxStatus().RequestedBackend, "auto"),
+		defaultSandboxType:  "auto",
+		sandboxType:         "auto",
 		streamSubscriptions: map[string]struct{}{},
 	}
 	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
@@ -1144,8 +1144,6 @@ func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession
 			sessionMode = strings.TrimSpace(state.SessionMode)
 		}
 	}
-	sandbox := d.stack.SandboxStatus()
-	sandboxType = firstNonEmpty(sandbox.ResolvedBackend, sandbox.RequestedBackend, sandboxType)
 	d.mu.Lock()
 	d.modelText = modelText
 	d.sessionMode = sessionMode

@@ -84,7 +84,10 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 				Network:    sandbox.NetworkDisabled,
 			},
 		},
-		Status: runner.status(),
+		Status: sandbox.Status{
+			RequestedBackend: sandbox.BackendWindowsElevated,
+			ResolvedBackend:  sandbox.BackendWindowsElevated,
+		},
 		BaseFS: hostRuntime.FileSystem(),
 		Policy: func(constraints sandbox.Constraints) corepolicy.Policy {
 			return corepolicy.Default(cfg, constraints)
@@ -104,6 +107,13 @@ func (r *runtime) Status() sandbox.Status {
 		return sandbox.Status{}
 	}
 	return sandbox.CloneStatus(r.runner.status())
+}
+
+func (r *runtime) SelectionStatus() sandbox.Status {
+	return sandbox.Status{
+		RequestedBackend: sandbox.BackendWindowsElevated,
+		ResolvedBackend:  sandbox.BackendWindowsElevated,
+	}
 }
 
 func (r *runtime) Prepare(ctx context.Context) error {
@@ -201,23 +211,24 @@ type cachedHelperPath struct {
 }
 
 func (r *setupRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
-	if err := r.requireSetupReady(); err != nil {
+	sessionID, err := r.startRunWithStableSetup(ctx, req)
+	if err != nil {
 		return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindowsElevated}, err
 	}
-	if err := r.refreshRequestACLs(ctx, req); err != nil {
-		return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindowsElevated}, err
-	}
-	return r.client.Run(ctx, req)
+	return r.client.WaitRun(ctx, sessionID)
 }
 
 func (r *setupRunner) StartAsync(ctx context.Context, req runnerruntime.Request) (string, error) {
-	if err := r.requireSetupReady(); err != nil {
-		return "", err
-	}
-	if err := r.refreshRequestACLs(ctx, req); err != nil {
-		return "", err
-	}
-	return r.client.StartAsync(ctx, req)
+	var sessionID string
+	err := r.withStableSetupLaunch(ctx, req, func() error {
+		id, launchErr := r.client.StartAsync(ctx, req)
+		if launchErr != nil {
+			return launchErr
+		}
+		sessionID = id
+		return nil
+	})
+	return sessionID, err
 }
 
 func (r *setupRunner) WriteInput(sessionID string, input []byte) error {
@@ -604,13 +615,93 @@ func forwardSetupProgressFile(ctx context.Context, path string) func() {
 
 func (r *setupRunner) requireSetupReady() error {
 	if freshness := r.setupReadyFreshness(); !freshness.Current {
-		reason := strings.TrimSpace(freshness.Reason)
-		if reason == "" {
-			reason = "setup marker missing"
-		}
-		return fmt.Errorf("impl/sandbox/windows: Windows Elevated sandbox global setup is required (%s)", reason)
+		return setupRequiredError(freshness)
 	}
 	return nil
+}
+
+func (r *setupRunner) requireSetupReadyFresh() error {
+	if freshness := r.setupReadyFreshnessFresh(); !freshness.Current {
+		return setupRequiredError(freshness)
+	}
+	return nil
+}
+
+func setupRequiredError(freshness setupstate.Freshness) error {
+	reason := strings.TrimSpace(freshness.Reason)
+	if reason == "" {
+		reason = "setup marker missing"
+	}
+	return fmt.Errorf("impl/sandbox/windows: Windows Elevated sandbox global setup is required (%s)", reason)
+}
+
+func (r *setupRunner) startRunWithStableSetup(ctx context.Context, req runnerruntime.Request) (string, error) {
+	var sessionID string
+	err := r.withStableSetupLaunch(ctx, req, func() error {
+		id, launchErr := r.client.StartRun(ctx, req)
+		if launchErr != nil {
+			return launchErr
+		}
+		sessionID = id
+		return nil
+	})
+	return sessionID, err
+}
+
+func (r *setupRunner) withStableSetupLaunch(ctx context.Context, req runnerruntime.Request, launch func() error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := r.maintenanceMu.Lock(ctx); err != nil {
+		return fmt.Errorf("impl/sandbox/windows: start sandbox command: %w", err)
+	}
+	defer r.maintenanceMu.Unlock()
+	if err := setup.WithMaintenanceLock(ctx, r.stateRoot, 30*time.Second, func() error {
+		r.clearUsersReadyCache()
+		return r.requireSetupReadyFresh()
+	}); err != nil {
+		return err
+	}
+	requestKey, keyErr := r.policyRequestKey(req)
+	if err := r.refreshRequestACLsLocked(ctx, req, requestKey, keyErr); err != nil {
+		return err
+	}
+	return setup.WithMaintenanceLock(ctx, r.stateRoot, 30*time.Second, func() error {
+		r.clearUsersReadyCache()
+		if err := r.requireSetupReadyFresh(); err != nil {
+			return err
+		}
+		return r.launchWithCredentialRetry(launch)
+	})
+}
+
+func (r *setupRunner) launchWithCredentialRetry(launch func() error) error {
+	if launch == nil {
+		return nil
+	}
+	err := launch()
+	if err == nil || !isRunnerLogonLaunchError(err) {
+		return err
+	}
+	r.clearUsersReadyCache()
+	if readyErr := r.requireSetupReadyFresh(); readyErr != nil {
+		return readyErr
+	}
+	if retryErr := launch(); retryErr != nil {
+		if isRunnerLogonLaunchError(retryErr) {
+			return fmt.Errorf("impl/sandbox/windows: command runner logon failed after refreshing sandbox credentials; rerun Windows sandbox setup to repair credentials: %w", retryErr)
+		}
+		return retryErr
+	}
+	return nil
+}
+
+func isRunnerLogonLaunchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	text := strings.ToLower(err.Error())
+	return strings.Contains(text, "createprocesswithlogonw")
 }
 
 func (r *setupRunner) refreshRequestACLs(ctx context.Context, req runnerruntime.Request) error {
@@ -625,6 +716,10 @@ func (r *setupRunner) refreshRequestACLs(ctx context.Context, req runnerruntime.
 		return fmt.Errorf("impl/sandbox/windows: refresh sandbox ACLs without elevation: %w", err)
 	}
 	defer r.maintenanceMu.Unlock()
+	return r.refreshRequestACLsLocked(ctx, req, requestKey, keyErr)
+}
+
+func (r *setupRunner) refreshRequestACLsLocked(ctx context.Context, req runnerruntime.Request, requestKey string, keyErr error) error {
 	if keyErr == nil && r.refreshAlreadyApplied(requestKey) {
 		return nil
 	}
@@ -683,6 +778,21 @@ func (r *setupRunner) setupReadyFreshness() setupstate.Freshness {
 		return freshness
 	}
 	if err := r.usersFileReady(); err != nil {
+		return setupstate.Freshness{Reason: err.Error()}
+	}
+	return freshness
+}
+
+func (r *setupRunner) setupReadyFreshnessFresh() setupstate.Freshness {
+	payload, err := r.globalSetupPayload()
+	if err != nil {
+		return setupstate.Freshness{Reason: err.Error()}
+	}
+	freshness := r.freshnessForPayload(payload)
+	if !freshness.Current {
+		return freshness
+	}
+	if err := r.checkUsersFileReady(); err != nil {
 		return setupstate.Freshness{Reason: err.Error()}
 	}
 	return freshness

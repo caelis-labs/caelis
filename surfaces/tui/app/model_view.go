@@ -105,6 +105,11 @@ func (m *Model) View() tea.View {
 			view = overlayAboveBottomAreaLeft(view, paletteView, m.width, m.mainColumnX()+inputHorizontalInset, bottomHeight, 0)
 		}
 	}
+	if m.width > 0 && m.height > 0 {
+		if progressView := m.renderSandboxProgressOverlay(); progressView != "" {
+			view = overlayTopRight(view, progressView, m.width, 0, inputHorizontalInset)
+		}
+	}
 	secondTrim := 0
 	view, secondTrim = normalizeFullscreenFrameWithTopTrim(view, m.width, m.height)
 	topTrim += secondTrim

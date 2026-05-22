@@ -250,6 +250,14 @@ func TestSetupReadyFreshnessDetectsStaleSandboxCredentials(t *testing.T) {
 	if freshness.Current || !strings.Contains(freshness.Reason, "credentials are stale") {
 		t.Fatalf("setupReadyFreshness() = %+v, want stale credentials", freshness)
 	}
+	windowsRT.runner.usersReadyMu.Lock()
+	windowsRT.runner.usersReadyCheckedAt = time.Now()
+	windowsRT.runner.usersReadyErr = ""
+	windowsRT.runner.usersReadyMu.Unlock()
+	freshness = windowsRT.runner.setupReadyFreshnessFresh()
+	if freshness.Current || !strings.Contains(freshness.Reason, "credentials are stale") {
+		t.Fatalf("setupReadyFreshnessFresh() = %+v, want stale credentials despite cached ready state", freshness)
+	}
 }
 
 func TestStatusSeparatesGlobalAndWorkspaceSetup(t *testing.T) {

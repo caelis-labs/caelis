@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/help"
+	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/viewport"
 	"charm.land/lipgloss/v2"
@@ -41,6 +42,8 @@ const scrollbarVisibleDuration = 900 * time.Millisecond
 const offscreenViewportSyncIntervalFloor = 80 * time.Millisecond
 const offscreenViewportSyncIntervalMax = 160 * time.Millisecond
 const completionRefreshDebounce = 100 * time.Millisecond
+const sandboxProgressOverlayWidth = 24
+const sandboxProgressOverlayMinWidth = 10
 
 type hintEntry struct {
 	id             uint64
@@ -412,6 +415,7 @@ type Model struct {
 	statusView            StatusViewModel
 	statusRefreshInFlight bool
 	sandboxProgress       *sandboxProgressState
+	sandboxProgressBar    progress.Model
 	approvalReviewHint    string
 	hint                  string
 	hintEntries           []hintEntry

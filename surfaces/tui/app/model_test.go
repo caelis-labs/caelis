@@ -249,18 +249,57 @@ func TestRunningInterruptSchedulesCancelWithoutCallingDriverInUpdate(t *testing.
 
 func TestSandboxProgressClearRespectsSource(t *testing.T) {
 	model := NewModel(Config{})
-	model.handleSandboxProgressMsg(SandboxProgressMsg{
+	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{
 		Title:   "Windows sandbox setup",
 		Source:  "setup",
 		Message: "running setup",
 	})
-	model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "workspace", Clear: true})
+	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "workspace", Clear: true})
 	if model.sandboxProgress == nil {
 		t.Fatal("sandboxProgress cleared by different source")
 	}
-	model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "setup", Clear: true})
+	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "setup", Clear: true})
 	if model.sandboxProgress != nil {
 		t.Fatal("sandboxProgress still set after matching source clear")
+	}
+}
+
+func TestSandboxProgressDoesNotScheduleSpinnerTick(t *testing.T) {
+	model := NewModel(Config{})
+	_, cmd := model.handleSandboxProgressMsg(SandboxProgressMsg{
+		Title:   "Windows sandbox workspace",
+		Message: "checking setup",
+	})
+	if cmd != nil {
+		t.Fatal("sandbox progress should not schedule a spinner tick")
+	}
+	if model.spinnerTickScheduled {
+		t.Fatal("spinnerTickScheduled = true, want false for sandbox progress")
+	}
+}
+
+func TestSandboxProgressRendersTopRightOverlayOnly(t *testing.T) {
+	model := NewModel(Config{NoColor: true})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 100, Height: 28})
+	model = updated.(*Model)
+	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{
+		Title:   "Windows sandbox workspace",
+		Phase:   "acl",
+		Message: "refreshing current workspace ACL policy",
+		Step:    1,
+		Total:   3,
+	})
+
+	overlay := ansi.Strip(model.renderSandboxProgressOverlay())
+	if strings.TrimSpace(overlay) == "" {
+		t.Fatal("sandbox progress overlay is empty")
+	}
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, overlay) {
+		t.Fatalf("view is missing sandbox progress overlay %q", overlay)
+	}
+	if strings.Contains(view, "Windows sandbox workspace") || strings.Contains(view, "refreshing current workspace ACL policy") {
+		t.Fatalf("view includes verbose sandbox progress text: %q", view)
 	}
 }
 

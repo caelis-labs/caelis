@@ -7,6 +7,7 @@ import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/list"
+	"charm.land/bubbles/v2/progress"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	"charm.land/bubbles/v2/viewport"
@@ -349,7 +350,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if cmd != nil {
 				m.spinnerTickScheduled = true
 			}
-			if m.activePrompt == nil {
+			if m.running && m.activePrompt == nil {
 				m.advanceRunningAnimation()
 			}
 			return m, cmd
@@ -384,9 +385,25 @@ func (m *Model) applyTheme(theme tuikit.Theme) {
 	m.applyPaletteTheme(theme)
 	m.applyTextareaStyles(theme)
 	m.spinner.Style = theme.SpinnerStyle()
+	m.sandboxProgressBar = newSandboxProgressBar(theme)
 	m.rethemeHistory()
 	m.syncTextareaChrome()
 	m.syncViewportContent()
+}
+
+func newSandboxProgressBar(theme tuikit.Theme) progress.Model {
+	opts := []progress.Option{
+		progress.WithoutPercentage(),
+		progress.WithWidth(sandboxProgressOverlayWidth),
+	}
+	if theme.Focus != nil {
+		opts = append(opts, progress.WithColors(theme.Focus))
+	}
+	bar := progress.New(opts...)
+	if theme.ScrollbarTrack != nil {
+		bar.EmptyColor = theme.ScrollbarTrack
+	}
+	return bar
 }
 
 func (m *Model) requestBackgroundColorIfAutoCmd() tea.Cmd {
