@@ -23,6 +23,10 @@ func Run(args []string, stderr io.Writer) int {
 		return 2
 	}
 	if err := setup.Execute(payload); err != nil {
+		if payload.Kind == setup.SetupKindReadACLRefresh {
+			fmt.Fprintln(stderr, err)
+			return 1
+		}
 		dirs := setupstate.NewDirs(payload.StateRoot)
 		errorPath := dirs.ErrorPath
 		if payload.Kind == setup.SetupKindReset {

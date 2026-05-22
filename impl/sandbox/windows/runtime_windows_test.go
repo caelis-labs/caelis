@@ -523,6 +523,24 @@ func TestRefreshPolicyCacheTracksPolicyAliases(t *testing.T) {
 	if r.refreshAlreadyApplied("abc") {
 		t.Fatal("refreshAlreadyApplied after clear = true, want false")
 	}
+	r.markRefreshScheduled("abc", "def")
+	if !r.refreshAnyScheduled("abc") || !r.refreshAnyScheduled("missing", "def") {
+		t.Fatal("scheduled refresh cache did not track aliases")
+	}
+	if r.refreshAnyApplied("abc", "def") {
+		t.Fatal("scheduled refresh cache should not mark policies applied")
+	}
+	r.markRefreshApplied("abc")
+	if r.refreshAnyScheduled("abc") {
+		t.Fatal("markRefreshApplied did not clear scheduled alias")
+	}
+	if !r.refreshAnyScheduled("def") {
+		t.Fatal("unapplied scheduled alias was unexpectedly cleared")
+	}
+	r.clearRefreshCache()
+	if r.refreshAnyScheduled("def") {
+		t.Fatal("scheduled refresh cache survived clear")
+	}
 }
 
 func TestMarkRefreshAppliedForRequestTracksRequestAndWorkspacePolicy(t *testing.T) {

@@ -111,6 +111,26 @@ func TestBuildProtectsExistingControlDirsUnderWritableRoots(t *testing.T) {
 	}
 }
 
+func TestDefaultReadRootsIncludeProfileTopLevelNonSensitiveRoots(t *testing.T) {
+	home := t.TempDir()
+	goRoot := filepath.Join(home, "go")
+	docRoot := filepath.Join(home, "Documents")
+	sshRoot := filepath.Join(home, ".ssh")
+	npmRoot := filepath.Join(home, ".npm")
+	for _, dir := range []string{goRoot, docRoot, sshRoot, npmRoot} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
+	}
+	roots := profileReadRoots(home)
+	if !containsPath(roots, goRoot) || !containsPath(roots, docRoot) {
+		t.Fatalf("profileReadRoots = %#v, want non-sensitive top-level roots", roots)
+	}
+	if containsPath(roots, sshRoot) || containsPath(roots, npmRoot) {
+		t.Fatalf("profileReadRoots = %#v, did not expect sensitive roots", roots)
+	}
+}
+
 func TestBuildFullAccessSkipsRoots(t *testing.T) {
 	p := Build(Input{Constraints: sandbox.Constraints{
 		Permission: sandbox.PermissionFullAccess,

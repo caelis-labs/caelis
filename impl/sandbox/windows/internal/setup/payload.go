@@ -23,6 +23,7 @@ const (
 	SetupKindFull           SetupKind = "full"
 	SetupKindWorkspaceOnly  SetupKind = "workspace_only"
 	SetupKindRuntimeRefresh SetupKind = "runtime_refresh"
+	SetupKindReadACLRefresh SetupKind = "read_acl_refresh"
 	SetupKindReset          SetupKind = "reset"
 )
 
@@ -81,13 +82,13 @@ func (p Payload) Normalize() Payload {
 			p.Kind = SetupKindFull
 		}
 	}
-	if p.Kind == SetupKindRuntimeRefresh {
+	if p.Kind == SetupKindRuntimeRefresh || p.Kind == SetupKindReadACLRefresh {
 		p.RefreshOnly = true
 	}
 	if p.GlobalPolicyHash == "" {
 		p.GlobalPolicyHash = p.PolicyHash
 	}
-	if p.WorkspacePolicyHash == "" && p.Kind != SetupKindRuntimeRefresh && p.Kind != SetupKindReset {
+	if p.WorkspacePolicyHash == "" && p.Kind != SetupKindRuntimeRefresh && p.Kind != SetupKindReadACLRefresh && p.Kind != SetupKindReset {
 		p.WorkspacePolicyHash = p.PolicyHash
 	}
 	if p.PolicyHash == "" {

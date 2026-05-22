@@ -11,9 +11,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
@@ -44,6 +46,9 @@ func ExecuteWithProgress(payload Payload, progress ProgressFunc) error {
 	if !payload.ExpiresAt.IsZero() && time.Now().After(payload.ExpiresAt) {
 		return fmt.Errorf("windows setup: operation %s expired before execution", strings.TrimSpace(payload.OperationID))
 	}
+	if payload.Kind == SetupKindReadACLRefresh {
+		return executeReadACLRefresh(payload, progress)
+	}
 	return win32.WithNamedMutex(context.Background(), setupMaintenanceMutexName(payload.StateRoot), setupMaintenanceLockTimeout, func() error {
 		if !payload.ExpiresAt.IsZero() && time.Now().After(payload.ExpiresAt) {
 			return fmt.Errorf("windows setup: operation %s expired before execution", strings.TrimSpace(payload.OperationID))
@@ -62,6 +67,8 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 		return err
 	case SetupKindRuntimeRefresh:
 		return executeRuntimeRefresh(payload, progress)
+	case SetupKindReadACLRefresh:
+		return executeReadACLRefresh(payload, progress)
 	case SetupKindWorkspaceOnly:
 		return executeWorkspaceOnly(payload, progress)
 	case SetupKindFull:
@@ -155,17 +162,22 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 	if err := setupstate.ClearError(dirs.ErrorPath); err != nil {
 		return err
 	}
+	startReadACLQueueHelperBestEffort(payload)
 	reportProgress(payload, progress, Progress{Phase: "complete", Message: "Windows sandbox setup is ready", Step: 12, Total: totalSteps, Done: true})
 	return nil
 }
 
 func setupMaintenanceMutexName(stateRoot string) string {
+	return stateMutexName(`Local\CaelisSandboxSetup-`, stateRoot)
+}
+
+func stateMutexName(prefix string, stateRoot string) string {
 	normalized := strings.ToLower(filepath.Clean(strings.TrimSpace(stateRoot)))
 	hash, err := setupstate.HashJSON(normalized)
 	if err != nil || len(hash) < 16 {
-		return `Local\CaelisSandboxSetup`
+		return strings.TrimRight(prefix, "-")
 	}
-	return `Local\CaelisSandboxSetup-` + hash[:16]
+	return prefix + hash[:16]
 }
 
 func executeReset(payload Payload, progress ProgressFunc) error {
@@ -372,7 +384,24 @@ func executeRuntimeRefresh(payload Payload, progress ProgressFunc) error {
 		return err
 	}
 	clearDone()
-	reportProgress(payload, progress, Progress{Phase: "complete", Message: "request ACL policy is ready", Step: 3, Total: 3, Done: true})
+	startReadACLQueueHelperBestEffort(payload)
+	reportProgress(payload, progress, Progress{Phase: "complete", Message: "required request ACL policy is ready", Step: 3, Total: 3, Done: true})
+	return nil
+}
+
+func executeReadACLRefresh(payload Payload, progress ProgressFunc) error {
+	done := runnertrace.Span("windows-setup", "read_acl_refresh")
+	defer done()
+	dirs := setupstate.NewDirs(payload.StateRoot)
+	reportProgress(payload, progress, Progress{Phase: "read-acl", Message: "validating existing sandbox setup", Step: 1, Total: 2})
+	if err := validateGlobalSetup(payload, dirs); err != nil {
+		return err
+	}
+	reportProgress(payload, progress, Progress{Phase: "read-acl", Message: "draining queued read ACL grants", Step: 2, Total: 2})
+	if err := drainReadACLQueue(payload.StateRoot); err != nil {
+		return err
+	}
+	reportProgress(payload, progress, Progress{Phase: "complete", Message: "queued read ACL grants are ready", Step: 2, Total: 2, Done: true})
 	return nil
 }
 
@@ -402,7 +431,8 @@ func executeWorkspaceOnly(payload Payload, progress ProgressFunc) error {
 	if err := setupstate.ClearError(dirs.ErrorPath); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "complete", Message: "current workspace ACL policy is ready", Step: 3, Total: 3, Done: true})
+	startReadACLQueueHelperBestEffort(payload)
+	reportProgress(payload, progress, Progress{Phase: "complete", Message: "required workspace ACL policy is ready", Step: 3, Total: 3, Done: true})
 	return nil
 }
 
@@ -1048,8 +1078,16 @@ type ACLCheckResult struct {
 }
 
 func CheckPolicyACLs(policy winpolicy.Policy, users ...string) ([]ACLCheckResult, error) {
+	return checkPolicyACLs(policy, false, users...)
+}
+
+func CheckSynchronousPolicyACLs(policy winpolicy.Policy, users ...string) ([]ACLCheckResult, error) {
+	return checkPolicyACLs(policy, true, users...)
+}
+
+func checkPolicyACLs(policy winpolicy.Policy, synchronousOnly bool, users ...string) ([]ACLCheckResult, error) {
 	var out []ACLCheckResult
-	for _, target := range requiredPolicyACLTargets(policy, users...) {
+	for _, target := range requiredPolicyACLTargetsWithOptions(policy, synchronousOnly, users...) {
 		missing, err := acl.MissingFileDACLEntries(target.Path, target.Entries...)
 		result := ACLCheckResult{Path: target.Path}
 		if err != nil {
@@ -1135,7 +1173,9 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 			materializeDenyWriteKeys[key] = struct{}{}
 		}
 	}
-	var tasks []aclTask
+	var readSpecs []readACLSpec
+	var readTasks []aclTask
+	var syncTasks []aclTask
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
@@ -1145,7 +1185,12 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 		}
 		targets := joinPrincipals(principals, capabilities)
 		root := root
-		tasks = append(tasks, aclTask{
+		readSpecs = append(readSpecs, readACLSpec{
+			Path:       root,
+			Principals: targets,
+			Rights:     "RX",
+		})
+		readTasks = append(readTasks, aclTask{
 			key: pathutil.Key(root),
 			run: func() error {
 				return grantPath(root, targets, "RX")
@@ -1156,7 +1201,7 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 		sid := aclPlan.writeRootCapabilitySID(root)
 		targets := joinPrincipals(principals, []string{sid})
 		root := root
-		tasks = append(tasks, aclTask{
+		syncTasks = append(syncTasks, aclTask{
 			key: pathutil.Key(root),
 			run: func() error {
 				return grantPath(root, targets, "M")
@@ -1171,7 +1216,7 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 			}
 		}
 		root := root
-		tasks = append(tasks, aclTask{
+		syncTasks = append(syncTasks, aclTask{
 			key: pathutil.Key(root),
 			run: func() error {
 				return denyPath(root, targets, "W")
@@ -1180,19 +1225,885 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 	}
 	for _, root := range policy.DenyReadPaths {
 		root := root
-		tasks = append(tasks, aclTask{
+		syncTasks = append(syncTasks, aclTask{
 			key: pathutil.Key(root),
 			run: func() error {
 				return denyPath(root, principals, "RX")
 			},
 		})
 	}
-	return runACLTasks(tasks)
+	if len(readSpecs) > 0 {
+		if strings.TrimSpace(opts.StateRoot) == "" {
+			syncTasks = append(syncTasks, readTasks...)
+		} else {
+			enqueueReadACLsBestEffort(opts.StateRoot, readSpecs)
+		}
+	}
+	return runACLTasks(syncTasks)
 }
 
 type aclTask struct {
 	key string
 	run func() error
+}
+
+const (
+	readACLQueueVersion     = 1
+	readACLQueueLockTimeout = 5 * time.Second
+	readACLDrainLockTimeout = 5 * time.Second
+	readACLClaimLease       = 2 * time.Minute
+	readACLDrainBudget      = 30 * time.Second
+	readACLDrainBatchSize   = 32
+	readACLHelperStartGap   = 5 * time.Second
+	readACLLogSegmentBytes  = 256 * 1024
+	readACLLogMaxBytes      = 1024 * 1024
+	readACLLogSegments      = 4
+
+	// Keep in sync with impl/sandbox/windows/helper.go and setupcmd.
+	internalSetupHelperCommand = "__caelis_windows_sandbox_setup__"
+)
+
+type readACLSpec struct {
+	Path       string   `json:"path"`
+	Principals []string `json:"principals"`
+	Rights     string   `json:"rights"`
+}
+
+type readACLQueueItem struct {
+	Path            string    `json:"path"`
+	Principals      []string  `json:"principals"`
+	Rights          string    `json:"rights"`
+	Attempts        int       `json:"attempts,omitempty"`
+	LastError       string    `json:"last_error,omitempty"`
+	LastAttemptAt   time.Time `json:"last_attempt_at,omitempty"`
+	NextAttemptAt   time.Time `json:"next_attempt_at,omitempty"`
+	ProcessingUntil time.Time `json:"processing_until,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+}
+
+type readACLQueueFile struct {
+	Version     int                `json:"version"`
+	Items       []readACLQueueItem `json:"items,omitempty"`
+	UpdatedAt   time.Time          `json:"updated_at,omitempty"`
+	LastStartAt time.Time          `json:"last_start_at,omitempty"`
+}
+
+func enqueueReadACLs(stateRoot string, specs []readACLSpec) error {
+	stateRoot = strings.TrimSpace(stateRoot)
+	if stateRoot == "" {
+		return fmt.Errorf("windows setup: state root is required for read ACL queue")
+	}
+	specs = normalizeReadACLSpecs(specs)
+	if len(specs) == 0 {
+		return nil
+	}
+	dirs := setupstate.NewDirs(stateRoot)
+	if err := setupstate.EnsureDirs(dirs); err != nil {
+		return err
+	}
+	return win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		now := time.Now().UTC()
+		queue, err := readReadACLQueue(readACLQueuePath(stateRoot))
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		queue.Items = mergeReadACLQueueItems(queue.Items, readACLQueueItemsFromSpecs(specs, now))
+		queue.Version = readACLQueueVersion
+		queue.UpdatedAt = now
+		appendReadACLLog(stateRoot, "enqueue", fmt.Sprintf("queued read ACL grants count=%d pending=%d", len(specs), len(queue.Items)))
+		return writeReadACLQueue(readACLQueuePath(stateRoot), queue)
+	})
+}
+
+func enqueueReadACLsBestEffort(stateRoot string, specs []readACLSpec) {
+	if err := enqueueReadACLs(stateRoot, specs); err != nil {
+		logReadACLBackgroundError(stateRoot, "enqueue_failed", err)
+	}
+}
+
+func startReadACLQueueHelper(payload Payload) error {
+	stateRoot := strings.TrimSpace(payload.StateRoot)
+	if stateRoot == "" {
+		return nil
+	}
+	shouldStart, err := claimReadACLHelperStart(stateRoot)
+	if err != nil {
+		return err
+	}
+	if !shouldStart {
+		return nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("windows setup: resolve read ACL helper executable: %w", err)
+	}
+	helperPayload := Payload{
+		Version:         payload.Version,
+		Kind:            SetupKindReadACLRefresh,
+		StateRoot:       stateRoot,
+		OfflineUsername: payload.OfflineUsername,
+		OwnerUsername:   payload.OwnerUsername,
+	}
+	encoded, err := EncodePayload(helperPayload)
+	if err != nil {
+		return err
+	}
+	cmd := exec.Command(executable, internalSetupHelperCommand, encoded)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	if err := cmd.Start(); err != nil {
+		appendReadACLLog(stateRoot, "helper_start_failed", err.Error())
+		return fmt.Errorf("windows setup: start read ACL helper: %w", err)
+	}
+	if cmd.Process != nil {
+		_ = cmd.Process.Release()
+	}
+	appendReadACLLog(stateRoot, "helper_start", "started read ACL queue helper")
+	return nil
+}
+
+func startReadACLQueueHelperBestEffort(payload Payload) {
+	if err := startReadACLQueueHelper(payload); err != nil {
+		logReadACLBackgroundError(payload.StateRoot, "helper_start_best_effort_failed", err)
+	}
+}
+
+func KickReadACLQueue(payload Payload) error {
+	payload = payload.Normalize()
+	if err := startReadACLQueueHelper(payload); err != nil {
+		logReadACLBackgroundError(payload.StateRoot, "helper_kick_failed", err)
+	}
+	return nil
+}
+
+func ReadACLQueuePending(stateRoot string) (int, string, error) {
+	stateRoot = strings.TrimSpace(stateRoot)
+	if stateRoot == "" {
+		return 0, "", nil
+	}
+	pending := 0
+	lastError := ""
+	err := win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		queue, err := readReadACLQueue(readACLQueuePath(stateRoot))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		for _, item := range queue.Items {
+			if len(appendPrincipal(item.Principals...)) == 0 {
+				continue
+			}
+			pending++
+			if strings.TrimSpace(item.LastError) != "" {
+				lastError = strings.TrimSpace(item.LastError)
+			}
+		}
+		return nil
+	})
+	return pending, lastError, err
+}
+
+func drainReadACLQueue(stateRoot string) error {
+	stateRoot = strings.TrimSpace(stateRoot)
+	if stateRoot == "" {
+		return fmt.Errorf("windows setup: state root is required for read ACL queue")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), readACLDrainLockTimeout)
+	defer cancel()
+	startedAt := time.Now()
+	err := win32.WithNamedMutex(ctx, readACLDrainMutexName(stateRoot), 0, func() error {
+		appendReadACLLog(stateRoot, "drain_start", "draining read ACL queue")
+		for {
+			if time.Since(startedAt) >= readACLDrainBudget {
+				pending, _, _ := ReadACLQueuePending(stateRoot)
+				appendReadACLLog(stateRoot, "drain_budget_exhausted", fmt.Sprintf("read ACL drain budget exhausted pending=%d", pending))
+				return nil
+			}
+			items, err := claimReadACLQueueBatch(stateRoot, time.Now().UTC(), readACLDrainBatchSize)
+			if err != nil {
+				return err
+			}
+			if len(items) == 0 {
+				pending, _, _ := ReadACLQueuePending(stateRoot)
+				appendReadACLLog(stateRoot, "drain_complete", fmt.Sprintf("read ACL drain complete pending=%d", pending))
+				return nil
+			}
+			processReadACLQueueItems(stateRoot, items)
+		}
+	})
+	return err
+}
+
+func processReadACLQueueItems(stateRoot string, items []readACLQueueItem) {
+	specs := readACLSpecsFromItems(items)
+	if len(specs) == 0 {
+		return
+	}
+	if err := runACLTasks(readACLTasksFromSpecs(specs)); err == nil {
+		_ = completeReadACLQueueItems(stateRoot, specs)
+		appendReadACLLog(stateRoot, "batch_success", fmt.Sprintf("applied read ACL batch count=%d", len(specs)))
+		return
+	}
+	appendReadACLLog(stateRoot, "batch_retry", fmt.Sprintf("read ACL batch failed; retrying items individually count=%d", len(specs)))
+	for _, spec := range specs {
+		if err := runACLTasks(readACLTasksFromSpecs([]readACLSpec{spec})); err != nil {
+			_ = failReadACLQueueItems(stateRoot, []readACLSpec{spec}, err)
+			appendReadACLLog(stateRoot, "item_failed", fmt.Sprintf("read ACL grant failed path=%s error=%s", spec.Path, err.Error()))
+			continue
+		}
+		_ = completeReadACLQueueItems(stateRoot, []readACLSpec{spec})
+		appendReadACLLog(stateRoot, "item_success", fmt.Sprintf("applied read ACL grant path=%s", spec.Path))
+	}
+}
+
+func readACLTasksFromSpecs(specs []readACLSpec) []aclTask {
+	specs = normalizeReadACLSpecs(specs)
+	tasks := make([]aclTask, 0, len(specs))
+	for _, spec := range specs {
+		spec := spec
+		tasks = append(tasks, aclTask{
+			key: pathutil.Key(spec.Path),
+			run: func() error {
+				return grantPath(spec.Path, spec.Principals, spec.Rights)
+			},
+		})
+	}
+	return tasks
+}
+
+func takeReadACLQueue(stateRoot string) ([]readACLSpec, error) {
+	var items []readACLQueueItem
+	now := time.Now().UTC()
+	err := win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		path := readACLQueuePath(stateRoot)
+		queue, err := readReadACLQueue(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		items = append([]readACLQueueItem(nil), queue.Items...)
+		queue.Items = nil
+		queue.UpdatedAt = now
+		if err := writeReadACLQueue(path, queue); err != nil {
+			return err
+		}
+		return nil
+	})
+	return readACLSpecsFromItems(items), err
+}
+
+func readACLQueueHasItems(stateRoot string) (bool, error) {
+	pending, _, err := ReadACLQueuePending(stateRoot)
+	return pending > 0, err
+}
+
+func claimReadACLHelperStart(stateRoot string) (bool, error) {
+	stateRoot = strings.TrimSpace(stateRoot)
+	if stateRoot == "" {
+		return false, nil
+	}
+	shouldStart := false
+	err := win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		now := time.Now().UTC()
+		path := readACLQueuePath(stateRoot)
+		queue, err := readReadACLQueue(readACLQueuePath(stateRoot))
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !readACLQueueHasReadyItems(queue, now) {
+			return nil
+		}
+		if !queue.LastStartAt.IsZero() && now.Sub(queue.LastStartAt) < readACLHelperStartGap {
+			return nil
+		}
+		queue.LastStartAt = now
+		queue.UpdatedAt = now
+		if err := writeReadACLQueue(path, queue); err != nil {
+			return err
+		}
+		shouldStart = true
+		return nil
+	})
+	return shouldStart, err
+}
+
+func readACLQueueHasReadyItems(queue readACLQueueFile, now time.Time) bool {
+	for _, item := range queue.Items {
+		if len(appendPrincipal(item.Principals...)) == 0 {
+			continue
+		}
+		if !item.ProcessingUntil.IsZero() && item.ProcessingUntil.After(now) {
+			continue
+		}
+		if !item.NextAttemptAt.IsZero() && item.NextAttemptAt.After(now) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func claimReadACLQueueBatch(stateRoot string, now time.Time, limit int) ([]readACLQueueItem, error) {
+	if limit <= 0 {
+		limit = readACLDrainBatchSize
+	}
+	var claimed []readACLQueueItem
+	err := win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		path := readACLQueuePath(stateRoot)
+		queue, err := readReadACLQueue(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		changed := false
+		for i := range queue.Items {
+			if len(claimed) >= limit {
+				break
+			}
+			item := queue.Items[i]
+			if len(appendPrincipal(item.Principals...)) == 0 {
+				continue
+			}
+			if !item.ProcessingUntil.IsZero() && item.ProcessingUntil.After(now) {
+				continue
+			}
+			if !item.NextAttemptAt.IsZero() && item.NextAttemptAt.After(now) {
+				continue
+			}
+			item.Attempts++
+			item.LastAttemptAt = now
+			item.ProcessingUntil = now.Add(readACLClaimLease)
+			item.UpdatedAt = now
+			queue.Items[i] = item
+			claimed = append(claimed, item)
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		queue.UpdatedAt = now
+		return writeReadACLQueue(path, queue)
+	})
+	return claimed, err
+}
+
+func completeReadACLQueueItems(stateRoot string, specs []readACLSpec) error {
+	specs = normalizeReadACLSpecs(specs)
+	if len(specs) == 0 {
+		return nil
+	}
+	return win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		path := readACLQueuePath(stateRoot)
+		queue, err := readReadACLQueue(path)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		queue.Items = removeReadACLSpecsFromItems(queue.Items, specs)
+		queue.UpdatedAt = time.Now().UTC()
+		return writeReadACLQueue(path, queue)
+	})
+}
+
+func failReadACLQueueItems(stateRoot string, specs []readACLSpec, cause error) error {
+	specs = normalizeReadACLSpecs(specs)
+	if len(specs) == 0 {
+		return nil
+	}
+	message := ""
+	if cause != nil {
+		message = strings.TrimSpace(cause.Error())
+	}
+	now := time.Now().UTC()
+	return win32.WithNamedMutex(context.Background(), readACLQueueMutexName(stateRoot), readACLQueueLockTimeout, func() error {
+		path := readACLQueuePath(stateRoot)
+		queue, err := readReadACLQueue(path)
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		failed := readACLQueueItemsFromSpecs(specs, now)
+		for i := range failed {
+			failed[i].LastError = message
+			failed[i].NextAttemptAt = now.Add(readACLRetryDelay(failed[i].Attempts))
+		}
+		queue.Items = mergeReadACLQueueItems(queue.Items, failed)
+		for i := range queue.Items {
+			for _, spec := range specs {
+				if readACLItemMatchesSpec(queue.Items[i], spec) {
+					queue.Items[i].ProcessingUntil = time.Time{}
+					if queue.Items[i].LastError == "" {
+						queue.Items[i].LastError = message
+					}
+					queue.Items[i].NextAttemptAt = now.Add(readACLRetryDelay(queue.Items[i].Attempts))
+					queue.Items[i].UpdatedAt = now
+				}
+			}
+		}
+		queue.UpdatedAt = now
+		return writeReadACLQueue(path, queue)
+	})
+}
+
+func readReadACLQueue(path string) (readACLQueueFile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return readACLQueueFile{}, err
+	}
+	var queue readACLQueueFile
+	if err := json.Unmarshal(data, &queue); err != nil {
+		return readACLQueueFile{}, fmt.Errorf("decode read ACL queue: %w", err)
+	}
+	queue.Items = normalizeReadACLQueueItems(queue.Items)
+	return queue, nil
+}
+
+func writeReadACLQueue(path string, queue readACLQueueFile) error {
+	queue.Items = normalizeReadACLQueueItems(queue.Items)
+	if len(queue.Items) == 0 {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	if queue.Version == 0 {
+		queue.Version = readACLQueueVersion
+	}
+	if queue.UpdatedAt.IsZero() {
+		queue.UpdatedAt = time.Now().UTC()
+	}
+	data, err := json.MarshalIndent(queue, "", "  ")
+	if err != nil {
+		return err
+	}
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".read_acl_queue.*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		if !committed {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	_ = os.Remove(path)
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func readACLQueueItemsFromSpecs(specs []readACLSpec, now time.Time) []readACLQueueItem {
+	specs = normalizeReadACLSpecs(specs)
+	items := make([]readACLQueueItem, 0, len(specs))
+	for _, spec := range specs {
+		item := readACLQueueItem{
+			Path:       spec.Path,
+			Principals: append([]string(nil), spec.Principals...),
+			Rights:     spec.Rights,
+			UpdatedAt:  now,
+		}
+		items = append(items, item)
+	}
+	return normalizeReadACLQueueItems(items)
+}
+
+func readACLSpecsFromItems(items []readACLQueueItem) []readACLSpec {
+	specs := make([]readACLSpec, 0, len(items))
+	for _, item := range normalizeReadACLQueueItems(items) {
+		specs = append(specs, readACLSpec{
+			Path:       item.Path,
+			Principals: append([]string(nil), item.Principals...),
+			Rights:     item.Rights,
+		})
+	}
+	return normalizeReadACLSpecs(specs)
+}
+
+func normalizeReadACLQueueItems(items []readACLQueueItem) []readACLQueueItem {
+	merged := mergeReadACLQueueItems(nil, items)
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func mergeReadACLQueueItems(base []readACLQueueItem, extra []readACLQueueItem) []readACLQueueItem {
+	type item struct {
+		value readACLQueueItem
+		seen  map[string]struct{}
+	}
+	items := map[string]*item{}
+	order := make([]string, 0, len(base)+len(extra))
+	add := func(next readACLQueueItem) {
+		path := pathutil.Normalize(next.Path)
+		if path == "" {
+			return
+		}
+		rights := strings.ToUpper(strings.TrimSpace(next.Rights))
+		if rights == "" {
+			rights = "RX"
+		}
+		principals := appendPrincipal(next.Principals...)
+		if len(principals) == 0 {
+			return
+		}
+		key := pathutil.Key(path) + "\x00" + rights
+		current := items[key]
+		if current == nil {
+			next.Path = path
+			next.Rights = rights
+			next.Principals = nil
+			current = &item{value: next, seen: map[string]struct{}{}}
+			items[key] = current
+			order = append(order, key)
+		}
+		for _, principal := range principals {
+			principalKey := strings.ToLower(principal)
+			if _, ok := current.seen[principalKey]; ok {
+				continue
+			}
+			current.seen[principalKey] = struct{}{}
+			current.value.Principals = append(current.value.Principals, principal)
+		}
+		if next.Attempts > current.value.Attempts {
+			current.value.Attempts = next.Attempts
+		}
+		if strings.TrimSpace(next.LastError) != "" {
+			current.value.LastError = strings.TrimSpace(next.LastError)
+		}
+		if next.LastAttemptAt.After(current.value.LastAttemptAt) {
+			current.value.LastAttemptAt = next.LastAttemptAt
+		}
+		if current.value.NextAttemptAt.IsZero() || next.NextAttemptAt.IsZero() || next.NextAttemptAt.Before(current.value.NextAttemptAt) {
+			current.value.NextAttemptAt = next.NextAttemptAt
+		}
+		if next.ProcessingUntil.After(current.value.ProcessingUntil) {
+			current.value.ProcessingUntil = next.ProcessingUntil
+		}
+		if next.UpdatedAt.After(current.value.UpdatedAt) {
+			current.value.UpdatedAt = next.UpdatedAt
+		}
+	}
+	for _, item := range base {
+		add(item)
+	}
+	for _, item := range extra {
+		add(item)
+	}
+	out := make([]readACLQueueItem, 0, len(order))
+	for _, key := range order {
+		current := items[key]
+		if current == nil || len(current.value.Principals) == 0 {
+			continue
+		}
+		out = append(out, current.value)
+	}
+	return out
+}
+
+func removeReadACLSpecsFromItems(items []readACLQueueItem, specs []readACLSpec) []readACLQueueItem {
+	specs = normalizeReadACLSpecs(specs)
+	if len(specs) == 0 {
+		return normalizeReadACLQueueItems(items)
+	}
+	var out []readACLQueueItem
+	for _, item := range normalizeReadACLQueueItems(items) {
+		remaining := append([]string(nil), item.Principals...)
+		for _, spec := range specs {
+			if !readACLItemMatchesSpec(item, spec) {
+				continue
+			}
+			remaining = subtractPrincipals(remaining, spec.Principals)
+		}
+		item.Principals = appendPrincipal(remaining...)
+		if len(item.Principals) == 0 {
+			continue
+		}
+		item.ProcessingUntil = time.Time{}
+		out = append(out, item)
+	}
+	return normalizeReadACLQueueItems(out)
+}
+
+func subtractPrincipals(base []string, remove []string) []string {
+	removeSet := map[string]struct{}{}
+	for _, principal := range appendPrincipal(remove...) {
+		removeSet[strings.ToLower(principal)] = struct{}{}
+	}
+	var out []string
+	for _, principal := range appendPrincipal(base...) {
+		if _, ok := removeSet[strings.ToLower(principal)]; ok {
+			continue
+		}
+		out = append(out, principal)
+	}
+	return out
+}
+
+func readACLItemMatchesSpec(item readACLQueueItem, spec readACLSpec) bool {
+	itemPath := pathutil.Key(item.Path)
+	specPath := pathutil.Key(spec.Path)
+	if itemPath == "" || specPath == "" || itemPath != specPath {
+		return false
+	}
+	itemRights := strings.ToUpper(strings.TrimSpace(item.Rights))
+	if itemRights == "" {
+		itemRights = "RX"
+	}
+	specRights := strings.ToUpper(strings.TrimSpace(spec.Rights))
+	if specRights == "" {
+		specRights = "RX"
+	}
+	return itemRights == specRights
+}
+
+func readACLRetryDelay(attempts int) time.Duration {
+	switch {
+	case attempts <= 1:
+		return 2 * time.Second
+	case attempts == 2:
+		return 5 * time.Second
+	case attempts == 3:
+		return 15 * time.Second
+	default:
+		return time.Minute
+	}
+}
+
+func appendReadACLLog(stateRoot string, event string, message string) {
+	event = strings.TrimSpace(event)
+	message = strings.TrimSpace(message)
+	if event == "" && message == "" {
+		return
+	}
+	_ = win32.WithNamedMutex(context.Background(), readACLLogMutexName(), time.Second, func() error {
+		path, err := readACLLogPath()
+		if err != nil {
+			return nil
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil
+		}
+		if err := rotateReadACLLogIfNeeded(path); err != nil {
+			return nil
+		}
+		stateHash := ""
+		if hash, err := setupstate.HashJSON(strings.ToLower(filepath.Clean(strings.TrimSpace(stateRoot)))); err == nil && len(hash) >= 12 {
+			stateHash = hash[:12]
+		}
+		record := map[string]any{
+			"time":    time.Now().UTC().Format(time.RFC3339Nano),
+			"event":   event,
+			"message": message,
+		}
+		if stateHash != "" {
+			record["state"] = stateHash
+		}
+		data, err := json.Marshal(record)
+		if err != nil {
+			return nil
+		}
+		data = append(data, '\n')
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if err != nil {
+			return nil
+		}
+		defer file.Close()
+		_, _ = file.Write(data)
+		return nil
+	})
+}
+
+func logReadACLBackgroundError(stateRoot string, event string, err error) {
+	if err == nil {
+		return
+	}
+	message := strings.TrimSpace(err.Error())
+	appendReadACLLog(stateRoot, event, message)
+	runnertrace.Printf("windows-setup", "read_acl_background.%s err=%v", strings.TrimSpace(event), err)
+}
+
+func rotateReadACLLogIfNeeded(path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return enforceReadACLLogTotal(path)
+		}
+		return err
+	}
+	if info.Size() < readACLLogSegmentBytes {
+		return enforceReadACLLogTotal(path)
+	}
+	maxIndex := readACLLogSegments - 1
+	if maxIndex < 1 {
+		maxIndex = 1
+	}
+	_ = os.Remove(readACLLogSegmentPath(path, maxIndex))
+	for i := maxIndex - 1; i >= 1; i-- {
+		from := readACLLogSegmentPath(path, i)
+		to := readACLLogSegmentPath(path, i+1)
+		if _, err := os.Stat(from); err == nil {
+			_ = os.Remove(to)
+			_ = os.Rename(from, to)
+		}
+	}
+	if _, err := os.Stat(path); err == nil {
+		_ = os.Remove(readACLLogSegmentPath(path, 1))
+		_ = os.Rename(path, readACLLogSegmentPath(path, 1))
+	}
+	return enforceReadACLLogTotal(path)
+}
+
+func enforceReadACLLogTotal(path string) error {
+	total := int64(0)
+	paths := []string{path}
+	for i := 1; i < readACLLogSegments; i++ {
+		paths = append(paths, readACLLogSegmentPath(path, i))
+	}
+	for _, candidate := range paths {
+		if info, err := os.Stat(candidate); err == nil {
+			total += info.Size()
+		}
+	}
+	for i := len(paths) - 1; total > readACLLogMaxBytes && i >= 1; i-- {
+		info, err := os.Stat(paths[i])
+		if err != nil {
+			continue
+		}
+		if err := os.Remove(paths[i]); err != nil {
+			return err
+		}
+		total -= info.Size()
+	}
+	return nil
+}
+
+func readACLLogSegmentPath(path string, index int) string {
+	if index <= 0 {
+		return path
+	}
+	return fmt.Sprintf("%s.%d", path, index)
+}
+
+func readACLLogPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(home) == "" {
+		return "", fmt.Errorf("user home directory is unavailable")
+	}
+	return filepath.Join(home, ".caelis", "logs", "windows-read-acl.log"), nil
+}
+
+func readACLLogMutexName() string {
+	return `Local\CaelisSandboxReadACLLog`
+}
+
+func normalizeReadACLSpecs(specs []readACLSpec) []readACLSpec {
+	merged := mergeReadACLSpecs(nil, specs)
+	if len(merged) == 0 {
+		return nil
+	}
+	return merged
+}
+
+func mergeReadACLSpecs(base []readACLSpec, extra []readACLSpec) []readACLSpec {
+	type item struct {
+		path       string
+		rights     string
+		principals []string
+		seen       map[string]struct{}
+	}
+	items := map[string]*item{}
+	order := make([]string, 0, len(base)+len(extra))
+	add := func(spec readACLSpec) {
+		path := pathutil.Normalize(spec.Path)
+		if path == "" {
+			return
+		}
+		rights := strings.ToUpper(strings.TrimSpace(spec.Rights))
+		if rights == "" {
+			rights = "RX"
+		}
+		key := pathutil.Key(path) + "\x00" + rights
+		current := items[key]
+		if current == nil {
+			current = &item{
+				path:   path,
+				rights: rights,
+				seen:   map[string]struct{}{},
+			}
+			items[key] = current
+			order = append(order, key)
+		}
+		for _, principal := range appendPrincipal(spec.Principals...) {
+			principalKey := strings.ToLower(principal)
+			if _, ok := current.seen[principalKey]; ok {
+				continue
+			}
+			current.seen[principalKey] = struct{}{}
+			current.principals = append(current.principals, principal)
+		}
+	}
+	for _, spec := range base {
+		add(spec)
+	}
+	for _, spec := range extra {
+		add(spec)
+	}
+	out := make([]readACLSpec, 0, len(order))
+	for _, key := range order {
+		current := items[key]
+		if current == nil || len(current.principals) == 0 {
+			continue
+		}
+		out = append(out, readACLSpec{
+			Path:       current.path,
+			Principals: current.principals,
+			Rights:     current.rights,
+		})
+	}
+	return out
+}
+
+func readACLQueuePath(stateRoot string) string {
+	return filepath.Join(setupstate.NewDirs(stateRoot).Sandbox, "read_acl_queue.json")
+}
+
+func readACLQueueMutexName(stateRoot string) string {
+	return stateMutexName(`Local\CaelisSandboxReadACLQueue-`, stateRoot)
+}
+
+func readACLDrainMutexName(stateRoot string) string {
+	return stateMutexName(`Local\CaelisSandboxReadACLDrain-`, stateRoot)
 }
 
 func appendAncestorACLTasks(tasks []aclTask, root string, principals []string, seen map[string]struct{}) []aclTask {
@@ -1450,23 +2361,29 @@ func (p policyACLPlan) writeRootCapabilitySIDsForPath(path string) []string {
 }
 
 func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policyACLTarget {
+	return requiredPolicyACLTargetsWithOptions(policy, false, users...)
+}
+
+func requiredPolicyACLTargetsWithOptions(policy winpolicy.Policy, synchronousOnly bool, users ...string) []policyACLTarget {
 	users = appendPrincipal(users...)
 	principals := sandboxPrincipals(users...)
 	aclPlan := newPolicyACLPlan(policy)
 	capabilities := aclPlan.allCapabilitySIDs
 	var out []policyACLTarget
-	for _, root := range policy.ReadRoots {
-		if isDefaultReadRoot(root) {
-			continue
+	if !synchronousOnly {
+		for _, root := range policy.ReadRoots {
+			if isDefaultReadRoot(root) {
+				continue
+			}
+			if _, writable := aclPlan.writeRootKeys[aclPathKey(root)]; writable {
+				continue
+			}
+			if !pathExists(root) {
+				continue
+			}
+			targets := joinPrincipals(principals, capabilities)
+			out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "RX", acl.Grant)})
 		}
-		if _, writable := aclPlan.writeRootKeys[aclPathKey(root)]; writable {
-			continue
-		}
-		if !pathExists(root) {
-			continue
-		}
-		targets := joinPrincipals(principals, capabilities)
-		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "RX", acl.Grant)})
 	}
 	for _, root := range policy.WriteRoots {
 		if !pathExists(root) {

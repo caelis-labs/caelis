@@ -407,14 +407,6 @@ func mergeEnv(extra map[string]string, network string, cwd string) ([]string, er
 		setEnvValue(&env, "TMP", tmp)
 		setEnvValue(&env, "LOCALAPPDATA", localAppData)
 		setEnvValue(&env, "APPDATA", roamingAppData)
-		for key, value := range sandboxLocalCacheEnv(home, tmp, localAppData) {
-			setEnvValue(&env, key, value)
-		}
-		for _, dir := range sandboxLocalCacheDirs(env) {
-			if err := os.MkdirAll(dir, 0o700); err != nil {
-				return nil, err
-			}
-		}
 	}
 	if strings.EqualFold(strings.TrimSpace(network), "offline") {
 		setEnvValue(&env, "CAELIS_SANDBOX_NETWORK", "disabled")
@@ -471,61 +463,6 @@ func firstEnvValue(env []string, keys ...string) string {
 	return ""
 }
 
-func sandboxLocalCacheEnv(home string, tmp string, localAppData string) map[string]string {
-	goPath := filepath.Join(home, "go")
-	bunInstall := filepath.Join(home, ".bun")
-	return map[string]string{
-		"GOCACHE":               filepath.Join(localAppData, "go-build"),
-		"GOPATH":                goPath,
-		"GOMODCACHE":            filepath.Join(goPath, "pkg", "mod"),
-		"npm_config_cache":      filepath.Join(localAppData, "npm-cache"),
-		"YARN_CACHE_FOLDER":     filepath.Join(localAppData, "yarn-cache"),
-		"PIP_CACHE_DIR":         filepath.Join(localAppData, "pip-cache"),
-		"UV_CACHE_DIR":          filepath.Join(localAppData, "uv-cache"),
-		"CARGO_HOME":            filepath.Join(home, ".cargo"),
-		"GRADLE_USER_HOME":      filepath.Join(home, ".gradle"),
-		"NUGET_PACKAGES":        filepath.Join(home, ".nuget", "packages"),
-		"npm_config_store_dir":  filepath.Join(localAppData, "pnpm-store"),
-		"PNPM_HOME":             filepath.Join(localAppData, "pnpm-home"),
-		"BUN_INSTALL":           bunInstall,
-		"BUN_INSTALL_CACHE_DIR": filepath.Join(bunInstall, "cache"),
-		"XDG_CACHE_HOME":        filepath.Join(localAppData, "xdg-cache"),
-		"XDG_DATA_HOME":         filepath.Join(localAppData, "xdg-data"),
-		"XDG_CONFIG_HOME":       filepath.Join(home, ".config"),
-		"TMPDIR":                tmp,
-	}
-}
-
-func sandboxLocalCacheDirs(env []string) []string {
-	keys := []string{
-		"GOCACHE",
-		"GOPATH",
-		"GOMODCACHE",
-		"npm_config_cache",
-		"YARN_CACHE_FOLDER",
-		"PIP_CACHE_DIR",
-		"UV_CACHE_DIR",
-		"CARGO_HOME",
-		"GRADLE_USER_HOME",
-		"NUGET_PACKAGES",
-		"npm_config_store_dir",
-		"PNPM_HOME",
-		"BUN_INSTALL",
-		"BUN_INSTALL_CACHE_DIR",
-		"XDG_CACHE_HOME",
-		"XDG_DATA_HOME",
-		"XDG_CONFIG_HOME",
-		"TMPDIR",
-	}
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		if value := strings.TrimSpace(envValue(env, key)); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
 func powershellArgs(command string, tty bool, interactive bool) []string {
 	return winps.Args(command, winps.Options{TTY: tty, Interactive: interactive})
 }
@@ -542,7 +479,7 @@ func effectiveWorkingDirectory(requestedCWD string, env []string) string {
 }
 
 func createCWDJunction(requestedCWD string, env []string) (string, bool) {
-	home := strings.TrimSpace(firstEnvValue(env, "USERPROFILE", "CAELIS_SANDBOX_HOME", "HOME"))
+	home := strings.TrimSpace(firstEnvValue(env, "CAELIS_SANDBOX_HOME", "HOME", "USERPROFILE"))
 	if home == "" {
 		return "", false
 	}

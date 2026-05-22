@@ -137,12 +137,57 @@ func networkIdentity(network sandbox.Network) NetworkIdentity {
 }
 
 func defaultReadRoots() []string {
-	return []string{
+	roots := []string{
 		`C:\Windows`,
 		`C:\Program Files`,
 		`C:\Program Files (x86)`,
 		`C:\ProgramData`,
 	}
+	roots = append(roots, profileReadRoots(hostUserProfileRoot())...)
+	return pathutil.Dedupe(roots)
+}
+
+func hostUserProfileRoot() string {
+	if profile := strings.TrimSpace(os.Getenv("USERPROFILE")); profile != "" {
+		return profile
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		return strings.TrimSpace(home)
+	}
+	return ""
+}
+
+func profileReadRoots(profile string) []string {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return nil
+	}
+	entries, err := os.ReadDir(profile)
+	if err != nil {
+		return nil
+	}
+	roots := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if isProfileReadRootExcluded(name) {
+			continue
+		}
+		roots = append(roots, filepath.Join(profile, name))
+	}
+	return roots
+}
+
+func isProfileReadRootExcluded(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return true
+	}
+	for _, excluded := range []string{".ssh", ".aws", ".azure", ".kube", ".docker", ".gnupg", ".npm", ".config"} {
+		if strings.EqualFold(name, excluded) {
+			return true
+		}
+	}
+	return false
 }
 
 func protectedUserSecretRoots() []string {

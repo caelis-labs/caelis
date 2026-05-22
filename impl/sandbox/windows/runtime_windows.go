@@ -25,6 +25,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerclient"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnertrace"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setup"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
@@ -138,6 +139,7 @@ type setupRunner struct {
 	usersReadyErr       string
 	refreshMu           sync.Mutex
 	refreshedPolicies   map[string]struct{}
+	scheduledPolicies   map[string]struct{}
 	policyMu            sync.Mutex
 	policyCache         map[string]cachedWindowsPolicy
 	helperMu            sync.Mutex
@@ -638,10 +640,36 @@ func (r *setupRunner) refreshRequestACLs(ctx context.Context, req runnerruntime.
 		r.markRefreshApplied(cacheKeys...)
 		return nil
 	}
+	if r.refreshAnyScheduled(cacheKeys...) {
+		pending, _, pendingErr := setup.ReadACLQueuePending(r.stateRoot)
+		if pendingErr != nil {
+			runnertrace.Printf("windows-runtime", "read_acl_refresh.pending_inspect_failed err=%v", pendingErr)
+			_ = setup.KickReadACLQueue(payload)
+			r.markRefreshScheduled(cacheKeys...)
+			return nil
+		}
+		if pending == 0 {
+			r.markRefreshApplied(cacheKeys...)
+			return nil
+		}
+		_ = setup.KickReadACLQueue(payload)
+		r.markRefreshScheduled(cacheKeys...)
+		return nil
+	}
 	if err := setup.Execute(payload); err != nil {
 		return fmt.Errorf("impl/sandbox/windows: refresh sandbox ACLs without elevation: %w", err)
 	}
-	r.markRefreshApplied(cacheKeys...)
+	pending, _, pendingErr := setup.ReadACLQueuePending(r.stateRoot)
+	if pendingErr != nil {
+		runnertrace.Printf("windows-runtime", "read_acl_refresh.pending_inspect_failed err=%v", pendingErr)
+		r.markRefreshScheduled(cacheKeys...)
+		return nil
+	}
+	if pending > 0 {
+		r.markRefreshScheduled(cacheKeys...)
+	} else {
+		r.markRefreshApplied(cacheKeys...)
+	}
 	return nil
 }
 
@@ -721,6 +749,26 @@ func (r *setupRunner) refreshAnyApplied(policyHashes ...string) bool {
 	return false
 }
 
+func (r *setupRunner) refreshAlreadyScheduled(policyHash string) bool {
+	policyHash = strings.TrimSpace(policyHash)
+	if policyHash == "" {
+		return false
+	}
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	_, ok := r.scheduledPolicies[policyHash]
+	return ok
+}
+
+func (r *setupRunner) refreshAnyScheduled(policyHashes ...string) bool {
+	for _, policyHash := range policyHashes {
+		if r.refreshAlreadyScheduled(policyHash) {
+			return true
+		}
+	}
+	return false
+}
+
 func (r *setupRunner) markRefreshApplied(policyHashes ...string) {
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
@@ -733,6 +781,25 @@ func (r *setupRunner) markRefreshApplied(policyHashes ...string) {
 			continue
 		}
 		r.refreshedPolicies[policyHash] = struct{}{}
+		delete(r.scheduledPolicies, policyHash)
+	}
+}
+
+func (r *setupRunner) markRefreshScheduled(policyHashes ...string) {
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+	if r.scheduledPolicies == nil {
+		r.scheduledPolicies = map[string]struct{}{}
+	}
+	for _, policyHash := range policyHashes {
+		policyHash = strings.TrimSpace(policyHash)
+		if policyHash == "" {
+			continue
+		}
+		if _, applied := r.refreshedPolicies[policyHash]; applied {
+			continue
+		}
+		r.scheduledPolicies[policyHash] = struct{}{}
 	}
 }
 
@@ -740,7 +807,23 @@ func (r *setupRunner) markBaseRefreshApplied() {
 	if r == nil {
 		return
 	}
-	r.markRefreshAppliedForRequest(r.baseSetupRequest())
+	req := r.baseSetupRequest()
+	requestKey, _ := r.policyRequestKey(req)
+	payload, _, err := r.setupPayload(req, setup.SetupKindRuntimeRefresh)
+	if err != nil {
+		return
+	}
+	cacheKeys := refreshCacheKeys(requestKey, payload.WorkspacePolicyHash)
+	pending, _, pendingErr := setup.ReadACLQueuePending(r.stateRoot)
+	if pendingErr != nil {
+		return
+	}
+	if pending > 0 {
+		_ = setup.KickReadACLQueue(payload)
+		r.markRefreshScheduled(cacheKeys...)
+		return
+	}
+	r.markRefreshApplied(cacheKeys...)
 }
 
 func (r *setupRunner) markRefreshAppliedForRequest(req runnerruntime.Request) {
@@ -756,6 +839,7 @@ func (r *setupRunner) clearRefreshCache() {
 	r.refreshMu.Lock()
 	defer r.refreshMu.Unlock()
 	r.refreshedPolicies = nil
+	r.scheduledPolicies = nil
 }
 
 func refreshCacheKeys(keys ...string) []string {
@@ -1000,7 +1084,7 @@ func (r *setupRunner) workspaceSetupSnapshot() workspaceSetupSnapshot {
 		out.Reason = "offline sandbox user changed"
 		return out
 	}
-	results, err := setup.CheckPolicyACLs(policy, setupOfflineUser(r.stateRoot))
+	results, err := setup.CheckSynchronousPolicyACLs(policy, setupOfflineUser(r.stateRoot))
 	if err != nil {
 		out.Reason = err.Error()
 		return out

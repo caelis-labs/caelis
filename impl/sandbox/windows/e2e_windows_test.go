@@ -390,16 +390,21 @@ func TestWindowsElevatedSandboxSmokeE2E(t *testing.T) {
 		t.Fatalf("sandbox temp stdout = %q", result.Stdout)
 	}
 	result, err = runE2ECommand(ctx, rt, workspace, `
-$names = @('TEMP', 'GOCACHE', 'GOMODCACHE', 'npm_config_cache')
-foreach ($name in $names) {
-  $dir = [Environment]::GetEnvironmentVariable($name)
-  if ([string]::IsNullOrWhiteSpace($dir)) { throw "$name missing" }
-  New-Item -ItemType Directory -Force -Path $dir | Out-Null
-  $path = Join-Path $dir 'caelis-cache-smoke.txt'
-  Set-Content -LiteralPath $path -Value $name -Force
-  $value = (Get-Content -LiteralPath $path -Raw).Trim()
-  if ($value -ne $name) { throw "$name write failed" }
-  Remove-Item -LiteralPath $path -Force
+$temp = [Environment]::GetEnvironmentVariable('TEMP')
+if ([string]::IsNullOrWhiteSpace($temp)) { throw 'TEMP missing' }
+$path = Join-Path $temp 'caelis-cache-smoke.txt'
+Set-Content -LiteralPath $path -Value 'temp' -Force
+Remove-Item -LiteralPath $path -Force
+$home = [Environment]::GetEnvironmentVariable('CAELIS_SANDBOX_HOME')
+$profile = [Environment]::GetEnvironmentVariable('USERPROFILE')
+if (-not [string]::IsNullOrWhiteSpace($profile) -and -not [string]::IsNullOrWhiteSpace($home) -and $profile.StartsWith($home, [System.StringComparison]::OrdinalIgnoreCase)) {
+  throw "USERPROFILE was redirected under sandbox home: $profile"
+}
+foreach ($name in @('GOCACHE', 'GOPATH', 'GOMODCACHE', 'npm_config_cache')) {
+  $value = [Environment]::GetEnvironmentVariable($name)
+  if (-not [string]::IsNullOrWhiteSpace($value) -and -not [string]::IsNullOrWhiteSpace($home) -and $value.StartsWith($home, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "$name was redirected under sandbox home: $value"
+  }
 }
 Write-Output 'cache-env-ok'
 `, sandbox.NetworkDisabled, nil)

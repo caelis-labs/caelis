@@ -4,6 +4,7 @@ package setup
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -265,6 +266,216 @@ func TestBatchACLTasksKeepsIndependentPathKeysTogether(t *testing.T) {
 	}
 }
 
+func TestReadACLQueueBestEffortDoesNotReturnQueueErrors(t *testing.T) {
+	t.Setenv("USERPROFILE", t.TempDir())
+	spec := readACLSpec{Path: filepath.Join(t.TempDir(), "readonly"), Principals: []string{"S-1-5-32-545"}, Rights: "RX"}
+	invalidStateRoot := "\x00"
+	if err := enqueueReadACLs(invalidStateRoot, []readACLSpec{spec}); err == nil {
+		t.Fatal("enqueueReadACLs() error = nil, want invalid state root error")
+	}
+	enqueueReadACLsBestEffort(invalidStateRoot, []readACLSpec{spec})
+	if err := KickReadACLQueue(Payload{
+		Version:   PayloadVersion,
+		Kind:      SetupKindRuntimeRefresh,
+		StateRoot: invalidStateRoot,
+	}); err != nil {
+		t.Fatalf("KickReadACLQueue() error = %v, want nil for best-effort background ACLs", err)
+	}
+}
+
+func TestReadACLQueueMergesDuplicateRootsAndKeepsAppends(t *testing.T) {
+	t.Setenv("USERPROFILE", t.TempDir())
+	stateRoot := t.TempDir()
+	root := t.TempDir()
+	left := filepath.Join(root, "left")
+	right := filepath.Join(root, "right")
+	if err := enqueueReadACLs(stateRoot, []readACLSpec{
+		{Path: left, Principals: []string{"S-1-5-32-545"}, Rights: "RX"},
+		{Path: left, Principals: []string{"S-1-5-32-545", "S-1-15-3-1"}, Rights: "RX"},
+	}); err != nil {
+		t.Fatalf("enqueueReadACLs(first) error = %v", err)
+	}
+	if err := enqueueReadACLs(stateRoot, []readACLSpec{
+		{Path: right, Principals: []string{"S-1-5-32-545"}, Rights: "RX"},
+	}); err != nil {
+		t.Fatalf("enqueueReadACLs(second) error = %v", err)
+	}
+
+	specs, err := takeReadACLQueue(stateRoot)
+	if err != nil {
+		t.Fatalf("takeReadACLQueue() error = %v", err)
+	}
+	if len(specs) != 2 {
+		t.Fatalf("queued read ACL specs = %#v, want two merged roots", specs)
+	}
+	leftSpec := readACLSpecForPath(specs, left)
+	if len(leftSpec.Principals) != 2 || !containsFold(leftSpec.Principals, "S-1-5-32-545") || !containsFold(leftSpec.Principals, "S-1-15-3-1") {
+		t.Fatalf("left queued principals = %#v, want merged principals", leftSpec.Principals)
+	}
+	if readACLSpecForPath(specs, right).Path == "" {
+		t.Fatalf("queued read ACL specs = %#v, want right root", specs)
+	}
+}
+
+func TestReadACLQueueClaimKeepsPendingUntilComplete(t *testing.T) {
+	t.Setenv("USERPROFILE", t.TempDir())
+	stateRoot := t.TempDir()
+	root := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	spec := readACLSpec{Path: root, Principals: []string{"S-1-5-32-545"}, Rights: "RX"}
+	if err := enqueueReadACLs(stateRoot, []readACLSpec{spec}); err != nil {
+		t.Fatalf("enqueueReadACLs() error = %v", err)
+	}
+	if pending, _, err := ReadACLQueuePending(stateRoot); err != nil || pending != 1 {
+		t.Fatalf("ReadACLQueuePending() = %d, %v; want one pending", pending, err)
+	}
+	now := time.Now().UTC()
+	claimed, err := claimReadACLQueueBatch(stateRoot, now, 1)
+	if err != nil {
+		t.Fatalf("claimReadACLQueueBatch() error = %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("claimed = %#v, want one item", claimed)
+	}
+	if pending, _, err := ReadACLQueuePending(stateRoot); err != nil || pending != 1 {
+		t.Fatalf("pending while leased = %d, %v; want one pending", pending, err)
+	}
+	claimed, err = claimReadACLQueueBatch(stateRoot, now.Add(time.Second), 1)
+	if err != nil {
+		t.Fatalf("second claimReadACLQueueBatch() error = %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("second claimed = %#v, want no leased item", claimed)
+	}
+	if err := completeReadACLQueueItems(stateRoot, []readACLSpec{spec}); err != nil {
+		t.Fatalf("completeReadACLQueueItems() error = %v", err)
+	}
+	if pending, _, err := ReadACLQueuePending(stateRoot); err != nil || pending != 0 {
+		t.Fatalf("pending after complete = %d, %v; want zero", pending, err)
+	}
+}
+
+func TestReadACLQueueFailureBackoffAndReclaim(t *testing.T) {
+	t.Setenv("USERPROFILE", t.TempDir())
+	stateRoot := t.TempDir()
+	root := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	spec := readACLSpec{Path: root, Principals: []string{"S-1-5-32-545"}, Rights: "RX"}
+	if err := enqueueReadACLs(stateRoot, []readACLSpec{spec}); err != nil {
+		t.Fatalf("enqueueReadACLs() error = %v", err)
+	}
+	now := time.Now().UTC()
+	claimed, err := claimReadACLQueueBatch(stateRoot, now, 1)
+	if err != nil {
+		t.Fatalf("claimReadACLQueueBatch() error = %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("claimed = %#v, want one item", claimed)
+	}
+	if err := failReadACLQueueItems(stateRoot, []readACLSpec{spec}, errors.New("boom")); err != nil {
+		t.Fatalf("failReadACLQueueItems() error = %v", err)
+	}
+	pending, lastError, err := ReadACLQueuePending(stateRoot)
+	if err != nil {
+		t.Fatalf("ReadACLQueuePending() error = %v", err)
+	}
+	if pending != 1 || !strings.Contains(lastError, "boom") {
+		t.Fatalf("pending=%d lastError=%q, want one pending with error", pending, lastError)
+	}
+	claimed, err = claimReadACLQueueBatch(stateRoot, now.Add(time.Second), 1)
+	if err != nil {
+		t.Fatalf("claim during backoff error = %v", err)
+	}
+	if len(claimed) != 0 {
+		t.Fatalf("claimed during backoff = %#v, want none", claimed)
+	}
+	claimed, err = claimReadACLQueueBatch(stateRoot, now.Add(3*time.Second), 1)
+	if err != nil {
+		t.Fatalf("claim after backoff error = %v", err)
+	}
+	if len(claimed) != 1 || claimed[0].Attempts != 2 {
+		t.Fatalf("claimed after backoff = %#v, want retry with incremented attempt", claimed)
+	}
+}
+
+func TestReadACLHelperStartOnlyClaimsReadyQueue(t *testing.T) {
+	t.Setenv("USERPROFILE", t.TempDir())
+	stateRoot := t.TempDir()
+	root := filepath.Join(t.TempDir(), "readonly")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	spec := readACLSpec{Path: root, Principals: []string{"S-1-5-32-545"}, Rights: "RX"}
+	if err := enqueueReadACLs(stateRoot, []readACLSpec{spec}); err != nil {
+		t.Fatalf("enqueueReadACLs() error = %v", err)
+	}
+	start, err := claimReadACLHelperStart(stateRoot)
+	if err != nil {
+		t.Fatalf("claimReadACLHelperStart() error = %v", err)
+	}
+	if !start {
+		t.Fatal("claimReadACLHelperStart() = false, want true for ready queue")
+	}
+	start, err = claimReadACLHelperStart(stateRoot)
+	if err != nil {
+		t.Fatalf("second claimReadACLHelperStart() error = %v", err)
+	}
+	if start {
+		t.Fatal("second claimReadACLHelperStart() = true, want throttle to suppress duplicate start")
+	}
+	claimed, err := claimReadACLQueueBatch(stateRoot, time.Now().UTC().Add(readACLHelperStartGap), 1)
+	if err != nil {
+		t.Fatalf("claimReadACLQueueBatch() error = %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("claimed = %#v, want one item", claimed)
+	}
+	queue, err := readReadACLQueue(readACLQueuePath(stateRoot))
+	if err != nil {
+		t.Fatalf("readReadACLQueue() error = %v", err)
+	}
+	queue.LastStartAt = time.Time{}
+	if err := writeReadACLQueue(readACLQueuePath(stateRoot), queue); err != nil {
+		t.Fatalf("writeReadACLQueue() error = %v", err)
+	}
+	start, err = claimReadACLHelperStart(stateRoot)
+	if err != nil {
+		t.Fatalf("claimReadACLHelperStart(processing) error = %v", err)
+	}
+	if start {
+		t.Fatal("claimReadACLHelperStart() = true for leased queue item, want false")
+	}
+}
+
+func TestReadACLLogRotationCapsSegments(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "windows-read-acl.log")
+	if err := os.WriteFile(path, []byte(strings.Repeat("x", readACLLogSegmentBytes+1)), 0o600); err != nil {
+		t.Fatalf("WriteFile(log) error = %v", err)
+	}
+	if err := rotateReadACLLogIfNeeded(path); err != nil {
+		t.Fatalf("rotateReadACLLogIfNeeded() error = %v", err)
+	}
+	if _, err := os.Stat(readACLLogSegmentPath(path, 1)); err != nil {
+		t.Fatalf("rotated segment missing: %v", err)
+	}
+	for i := 0; i < readACLLogSegments+3; i++ {
+		if err := os.WriteFile(path, []byte(strings.Repeat("y", readACLLogSegmentBytes+1)), 0o600); err != nil {
+			t.Fatalf("WriteFile(log %d) error = %v", i, err)
+		}
+		if err := rotateReadACLLogIfNeeded(path); err != nil {
+			t.Fatalf("rotateReadACLLogIfNeeded(%d) error = %v", i, err)
+		}
+	}
+	if _, err := os.Stat(readACLLogSegmentPath(path, readACLLogSegments)); !os.IsNotExist(err) {
+		t.Fatalf("unexpected segment beyond cap: %v", err)
+	}
+}
+
 func TestRecordedWorkspaceACLCleanupRootsSkipsDefaultReadRoots(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -445,6 +656,16 @@ func containsPathKey(paths []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func readACLSpecForPath(specs []readACLSpec, want string) readACLSpec {
+	wantKey := pathutil.Key(want)
+	for _, spec := range specs {
+		if pathutil.Key(spec.Path) == wantKey {
+			return spec
+		}
+	}
+	return readACLSpec{}
 }
 
 func containsFold(values []string, want string) bool {

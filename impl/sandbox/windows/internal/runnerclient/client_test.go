@@ -23,9 +23,11 @@ func TestRunnerEnvironmentProvidesPathExt(t *testing.T) {
 	}
 }
 
-func TestRunnerEnvironmentUsesSandboxLocalCaches(t *testing.T) {
+func TestRunnerEnvironmentUsesSandboxPrivateDirsWithoutCacheRedirects(t *testing.T) {
 	stateRoot := t.TempDir()
+	hostProfile := filepath.Join(t.TempDir(), "host-profile")
 	hostCache := filepath.Join(t.TempDir(), "host-go-cache")
+	t.Setenv("USERPROFILE", hostProfile)
 	t.Setenv("GOCACHE", hostCache)
 	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "host-go-mod-cache"))
 	t.Setenv("npm_config_cache", filepath.Join(t.TempDir(), "host-npm-cache"))
@@ -41,33 +43,30 @@ func TestRunnerEnvironmentUsesSandboxLocalCaches(t *testing.T) {
 	if home == "" || !pathIsUnder(home, stateRoot) {
 		t.Fatalf("CAELIS_SANDBOX_HOME = %q, want under state root %q", home, stateRoot)
 	}
-	if userProfile == "" || pathIsUnder(userProfile, stateRoot) || !strings.Contains(strings.ToLower(userProfile), "caelissbxofftest") {
-		t.Fatalf("USERPROFILE = %q, want sandbox user profile outside state root %q", userProfile, stateRoot)
+	if !strings.EqualFold(userProfile, hostProfile) {
+		t.Fatalf("USERPROFILE = %q, want inherited host profile %q", userProfile, hostProfile)
 	}
-	for _, tc := range []struct {
-		key  string
-		root string
-	}{
-		{"GOCACHE", localAppData},
-		{"GOMODCACHE", home},
-		{"npm_config_cache", localAppData},
-		{"YARN_CACHE_FOLDER", localAppData},
-		{"PIP_CACHE_DIR", localAppData},
-		{"UV_CACHE_DIR", localAppData},
-		{"CARGO_HOME", home},
-		{"GRADLE_USER_HOME", home},
-		{"NUGET_PACKAGES", home},
-		{"npm_config_store_dir", localAppData},
-		{"PNPM_HOME", localAppData},
-		{"BUN_INSTALL", home},
-		{"BUN_INSTALL_CACHE_DIR", home},
+	if localAppData == "" || !pathIsUnder(localAppData, home) {
+		t.Fatalf("LOCALAPPDATA = %q, want under sandbox home %q", localAppData, home)
+	}
+	for _, key := range []string{
+		"GOCACHE",
+		"GOPATH",
+		"GOMODCACHE",
+		"npm_config_cache",
+		"YARN_CACHE_FOLDER",
+		"PIP_CACHE_DIR",
+		"UV_CACHE_DIR",
+		"CARGO_HOME",
+		"GRADLE_USER_HOME",
+		"NUGET_PACKAGES",
+		"npm_config_store_dir",
+		"PNPM_HOME",
+		"BUN_INSTALL",
+		"BUN_INSTALL_CACHE_DIR",
 	} {
-		got := testEnvValue(env, tc.key)
-		if got == "" || !pathIsUnder(got, tc.root) {
-			t.Fatalf("%s = %q, want under %q", tc.key, got, tc.root)
-		}
-		if strings.EqualFold(got, hostCache) {
-			t.Fatalf("%s = %q, did not expect host cache", tc.key, got)
+		if got := testEnvValue(env, key); got != "" {
+			t.Fatalf("%s = %q, did not expect sandbox-local cache redirect", key, got)
 		}
 	}
 }

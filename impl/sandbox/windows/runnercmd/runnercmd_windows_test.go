@@ -165,7 +165,9 @@ func TestRunnerCommandCapturesPowerShellErrorStream(t *testing.T) {
 }
 
 func TestMergeEnvNetworkModes(t *testing.T) {
+	hostProfile := filepath.Join(t.TempDir(), "host-profile")
 	hostCache := filepath.Join(t.TempDir(), "host-go-cache")
+	t.Setenv("USERPROFILE", hostProfile)
 	t.Setenv("GOCACHE", hostCache)
 	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "host-go-mod-cache"))
 	t.Setenv("npm_config_cache", filepath.Join(t.TempDir(), "host-npm-cache"))
@@ -194,34 +196,36 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 	}
 
 	home := envValue(env, "CAELIS_SANDBOX_HOME")
-	localAppData := envValue(env, "LOCALAPPDATA")
 	if home == "" || !testPathIsUnder(home, cwd) {
 		t.Fatalf("CAELIS_SANDBOX_HOME = %q, want under cwd %q", home, cwd)
 	}
-	for _, tc := range []struct {
-		key  string
-		root string
-	}{
-		{"GOCACHE", localAppData},
-		{"GOMODCACHE", home},
-		{"npm_config_cache", localAppData},
-		{"YARN_CACHE_FOLDER", localAppData},
-		{"PIP_CACHE_DIR", localAppData},
-		{"UV_CACHE_DIR", localAppData},
-		{"CARGO_HOME", home},
-		{"GRADLE_USER_HOME", home},
-		{"NUGET_PACKAGES", home},
-		{"npm_config_store_dir", localAppData},
-		{"PNPM_HOME", localAppData},
-		{"BUN_INSTALL", home},
-		{"BUN_INSTALL_CACHE_DIR", home},
+	if got := envValue(env, "USERPROFILE"); !strings.EqualFold(got, hostProfile) {
+		t.Fatalf("USERPROFILE = %q, want inherited host profile %q", got, hostProfile)
+	}
+	if got := envValue(env, "GOCACHE"); !strings.EqualFold(got, hostCache) {
+		t.Fatalf("GOCACHE = %q, want inherited host value %q", got, hostCache)
+	}
+	if got := envValue(env, "GOMODCACHE"); got == "" || testPathIsUnder(got, home) {
+		t.Fatalf("GOMODCACHE = %q, want inherited host value outside sandbox home %q", got, home)
+	}
+	if got := envValue(env, "npm_config_cache"); got == "" || testPathIsUnder(got, home) {
+		t.Fatalf("npm_config_cache = %q, want inherited host value outside sandbox home %q", got, home)
+	}
+	for _, key := range []string{
+		"GOPATH",
+		"YARN_CACHE_FOLDER",
+		"PIP_CACHE_DIR",
+		"UV_CACHE_DIR",
+		"CARGO_HOME",
+		"GRADLE_USER_HOME",
+		"NUGET_PACKAGES",
+		"npm_config_store_dir",
+		"PNPM_HOME",
+		"BUN_INSTALL",
+		"BUN_INSTALL_CACHE_DIR",
 	} {
-		got := envValue(env, tc.key)
-		if got == "" || !testPathIsUnder(got, tc.root) {
-			t.Fatalf("%s = %q, want under %q", tc.key, got, tc.root)
-		}
-		if strings.EqualFold(got, hostCache) {
-			t.Fatalf("%s = %q, did not expect host cache", tc.key, got)
+		if got := envValue(env, key); got != "" && testPathIsUnder(got, home) {
+			t.Fatalf("%s = %q, did not expect sandbox-local cache redirect under %q", key, got, home)
 		}
 	}
 
@@ -247,8 +251,9 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 
 func TestEffectiveWorkingDirectoryUsesSandboxHomeJunction(t *testing.T) {
 	home := t.TempDir()
+	hostProfile := t.TempDir()
 	cwd := t.TempDir()
-	env := []string{"USERPROFILE=" + home}
+	env := []string{"CAELIS_SANDBOX_HOME=" + home, "USERPROFILE=" + hostProfile}
 
 	got := effectiveWorkingDirectory(cwd, env)
 	if strings.EqualFold(got, cwd) {
