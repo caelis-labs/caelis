@@ -298,6 +298,9 @@ func TestSandboxProgressRendersTopRightOverlayOnly(t *testing.T) {
 	if !strings.Contains(view, overlay) {
 		t.Fatalf("view is missing sandbox progress overlay %q", overlay)
 	}
+	if firstLine, _, ok := strings.Cut(view, "\n"); ok && strings.Contains(firstLine, overlay) {
+		t.Fatalf("sandbox progress overlay rendered without top inset: %q", firstLine)
+	}
 	if strings.Contains(view, "Windows sandbox workspace") || strings.Contains(view, "refreshing current workspace ACL policy") {
 		t.Fatalf("view includes verbose sandbox progress text: %q", view)
 	}

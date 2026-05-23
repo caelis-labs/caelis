@@ -197,6 +197,21 @@ const (
 	defaultPrepareTimeout = 10 * time.Minute
 	defaultResetTimeout   = 5 * time.Minute
 )
+const (
+	prepareProgressTotal                  = 20
+	prepareProgressInspect                = 1
+	prepareProgressCollectPolicy          = 2
+	prepareProgressBindCapabilities       = 3
+	prepareProgressPayloadReady           = 4
+	prepareProgressEncodePayload          = 5
+	prepareProgressMaterializeSetupHelper = 6
+	prepareProgressAwaitElevation         = 7
+	prepareProgressHelperStart            = 8
+	prepareProgressHelperEnd              = 17
+	prepareProgressVerify                 = 18
+	prepareProgressCommandRunnerHelper    = 19
+	prepareProgressComplete               = 20
+)
 
 var errSandboxUsersFileMissing = errors.New("sandbox users file missing")
 
@@ -262,6 +277,7 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	restoreCurrentUserProfileVisibilityBestEffort()
 	var cancel context.CancelFunc
 	ctx, cancel = withDefaultOperationTimeout(ctx, defaultPrepareTimeout)
 	defer cancel()
@@ -272,8 +288,9 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "inspect", Message: "checking Windows sandbox setup state"})
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "payload", Message: "collecting global sandbox policy"})
+	progress := prepareProgressReporter{ctx: ctx}
+	progress.report("inspect", "checking Windows sandbox setup state", prepareProgressInspect, false)
+	progress.report("payload", "collecting global sandbox policy", prepareProgressCollectPolicy, false)
 	globalPayload, err := r.globalSetupPayload()
 	if err != nil {
 		return err
@@ -291,10 +308,10 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 		workspace = r.workspaceSetupSnapshot()
 	}
 	if globalFreshness.Current && workspace.Current {
-		if err := r.prepareCommandRunnerHelper(ctx); err != nil {
+		if err := r.prepareCommandRunnerHelper(ctx, progress.update("helper", "materializing command runner helper executable", prepareProgressCommandRunnerHelper, false)); err != nil {
 			return err
 		}
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "complete", Message: "Windows sandbox setup is already current", Done: true})
+		progress.report("complete", "Windows sandbox setup is already current", prepareProgressComplete, true)
 		r.markBaseRefreshApplied()
 		return nil
 	}
@@ -308,47 +325,41 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 	if kind == setup.SetupKindFull && r.client != nil {
 		_ = r.client.Invalidate()
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "payload", Message: "binding sandbox policy capabilities"})
+	progress.report("payload", "binding sandbox policy capabilities", prepareProgressBindCapabilities, false)
 	payload, _, err := r.setupPayload(r.baseSetupRequest(), kind)
 	if err != nil {
 		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "payload", Message: "setup payload is ready"})
+	progress.report("payload", "setup payload is ready", prepareProgressPayloadReady, false)
 	payload.OperationID = setupOperationID("setup")
 	payload.StartedAt = time.Now().UTC()
 	payload.ExpiresAt = time.Now().Add(defaultPrepareTimeout).UTC()
 	payload.ProgressPath = dirs.ProgressPath
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "payload", Message: "encoding setup payload"})
+	progress.report("payload", "encoding setup payload", prepareProgressEncodePayload, false)
 	encoded, err := setup.EncodePayload(payload)
 	if err != nil {
 		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "helper", Message: "materializing sandbox helper executable"})
+	progress.report("helper", "materializing sandbox helper executable", prepareProgressMaterializeSetupHelper, false)
 	helperPath, _, err := r.materializeHelper()
 	if err != nil {
 		return err
 	}
 	var setupErr error
 	if elevated, err := win32.IsElevated(); err == nil && elevated {
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "elevation", Message: "current process is elevated; running setup without a UAC prompt"})
-		setupErr = setup.ExecuteWithProgress(payload, func(progress setup.Progress) {
-			sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-				Phase:   progress.Phase,
-				Message: progress.Message,
-				Step:    progress.Step,
-				Total:   progress.Total,
-				Done:    progress.Done,
-				Debug:   progress.Debug,
-			})
+		progress.report("elevation", "current process is elevated; running setup without a UAC prompt", prepareProgressAwaitElevation, false)
+		setupErr = setup.ExecuteWithProgress(payload, func(setupProgress setup.Progress) {
+			progress.reportSetup(setupProgress)
 		})
 	} else {
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "elevation", Message: "waiting for elevated setup helper; approve the UAC prompt if Windows asks"})
-		stopProgress := forwardSetupProgressFile(ctx, dirs.ProgressPath)
+		progress.report("elevation", "waiting for elevated setup helper; approve the UAC prompt if Windows asks", prepareProgressAwaitElevation, false)
+		stopProgress := forwardSetupProgressFile(ctx, dirs.ProgressPath, mapPrepareSetupProgressReport)
 		setupErr = win32.RunElevatedAndWaitContext(ctx, helperPath, []string{setupHelperCommand, encoded}, r.cfg.CWD)
 		stopProgress()
 	}
 	if err := setupErr; err != nil {
 		if r.prepareTargetCurrent(kind) {
+			progress.report("complete", "Windows sandbox setup is ready", prepareProgressComplete, true)
 			return nil
 		}
 		code := "elevated_setup_failed"
@@ -373,20 +384,20 @@ func (r *setupRunner) Prepare(ctx context.Context) error {
 		return fmt.Errorf("impl/sandbox/windows: %s: %w", message, err)
 	}
 	r.clearUsersReadyCache()
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "verify", Message: "verifying setup marker"})
+	progress.report("verify", "verifying setup marker", prepareProgressVerify, false)
 	if freshness := r.setupReadyFreshness(); !freshness.Current {
 		return fmt.Errorf("impl/sandbox/windows: elevated setup did not become current: %s", freshness.Reason)
 	}
 	if freshness := r.workspaceSetupSnapshot(); !freshness.Current {
 		return fmt.Errorf("impl/sandbox/windows: workspace setup did not become current: %s", freshness.Reason)
 	}
-	if err := r.prepareCommandRunnerHelper(ctx); err != nil {
+	if err := r.prepareCommandRunnerHelper(ctx, progress.update("helper", "materializing command runner helper executable", prepareProgressCommandRunnerHelper, false)); err != nil {
 		return err
 	}
 	r.clearRefreshCache()
 	r.clearPolicyCache()
 	r.markBaseRefreshApplied()
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "complete", Message: "Windows sandbox setup is ready", Done: true})
+	progress.report("complete", "Windows sandbox setup is ready", prepareProgressComplete, true)
 	return nil
 }
 
@@ -548,6 +559,81 @@ func withDefaultOperationTimeout(ctx context.Context, timeout time.Duration) (co
 	return context.WithTimeout(ctx, timeout)
 }
 
+type prepareProgressReporter struct {
+	ctx context.Context
+}
+
+func (r prepareProgressReporter) update(phase string, message string, step int, done bool) sandbox.PrepareProgress {
+	return sandbox.PrepareProgress{
+		Phase:   strings.TrimSpace(phase),
+		Message: strings.TrimSpace(message),
+		Step:    clampPrepareProgressStep(step),
+		Total:   prepareProgressTotal,
+		Done:    done,
+	}
+}
+
+func (r prepareProgressReporter) report(phase string, message string, step int, done bool) {
+	sandbox.ReportPrepareProgress(r.ctx, r.update(phase, message, step, done))
+}
+
+func (r prepareProgressReporter) reportSetup(progress setup.Progress) {
+	sandbox.ReportPrepareProgress(r.ctx, sandbox.PrepareProgress{
+		Phase:   progress.Phase,
+		Message: progress.Message,
+		Step:    setupProgressOuterStep(progress.Step, progress.Total, progress.Done),
+		Total:   prepareProgressTotal,
+		Done:    false,
+		Debug:   progress.Debug,
+	})
+}
+
+func mapPrepareSetupProgressReport(report setupstate.ProgressReport) sandbox.PrepareProgress {
+	return sandbox.PrepareProgress{
+		Phase:   report.Phase,
+		Message: report.Message,
+		Step:    setupProgressOuterStep(report.Step, report.Total, report.Done),
+		Total:   prepareProgressTotal,
+		Done:    false,
+		Debug:   report.Debug,
+	}
+}
+
+func setupProgressOuterStep(step int, total int, done bool) int {
+	return scaleProgressStep(step, total, prepareProgressHelperStart, prepareProgressHelperEnd, done)
+}
+
+func scaleProgressStep(step int, total int, start int, end int, done bool) int {
+	if start > end {
+		start, end = end, start
+	}
+	if done && (step <= 0 || total <= 0) {
+		return clampPrepareProgressStep(end)
+	}
+	if step <= 0 || total <= 0 {
+		return clampPrepareProgressStep(start)
+	}
+	if step > total {
+		step = total
+	}
+	span := end - start + 1
+	offset := (step*span + total - 1) / total
+	if offset <= 0 {
+		offset = 1
+	}
+	return clampPrepareProgressStep(start + offset - 1)
+}
+
+func clampPrepareProgressStep(step int) int {
+	if step < 0 {
+		return 0
+	}
+	if step > prepareProgressTotal {
+		return prepareProgressTotal
+	}
+	return step
+}
+
 func setupOperationID(prefix string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
@@ -564,7 +650,7 @@ func (r *setupRunner) resetHelperPath() string {
 	return source
 }
 
-func forwardSetupProgressFile(ctx context.Context, path string) func() {
+func forwardSetupProgressFile(ctx context.Context, path string, mapReport ...func(setupstate.ProgressReport) sandbox.PrepareProgress) func() {
 	path = strings.TrimSpace(path)
 	if path == "" {
 		return func() {}
@@ -582,14 +668,18 @@ func forwardSetupProgressFile(ctx context.Context, path string) func() {
 			return
 		}
 		last = key
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		progress := sandbox.PrepareProgress{
 			Phase:   report.Phase,
 			Message: report.Message,
 			Step:    report.Step,
 			Total:   report.Total,
 			Done:    report.Done,
 			Debug:   report.Debug,
-		})
+		}
+		if len(mapReport) > 0 && mapReport[0] != nil {
+			progress = mapReport[0](report)
+		}
+		sandbox.ReportPrepareProgress(ctx, progress)
 	}
 	go func() {
 		defer close(stopped)
@@ -1452,11 +1542,14 @@ func (r *setupRunner) helperExecutablePath(runnerruntime.Request) (string, error
 	return path, err
 }
 
-func (r *setupRunner) prepareCommandRunnerHelper(ctx context.Context) error {
+func (r *setupRunner) prepareCommandRunnerHelper(ctx context.Context, progress sandbox.PrepareProgress) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Phase: "helper", Message: "materializing command runner helper executable"})
+	if strings.TrimSpace(progress.Message) == "" {
+		progress = sandbox.PrepareProgress{Phase: "helper", Message: "materializing command runner helper executable"}
+	}
+	sandbox.ReportPrepareProgress(ctx, progress)
 	_, _, err := r.materializeRunnerHelper()
 	return err
 }

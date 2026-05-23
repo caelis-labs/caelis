@@ -107,7 +107,7 @@ func (m *Model) renderSandboxProgressOverlay() string {
 	state := *m.sandboxProgress
 	pct := sandboxProgressPercent(state.Step, state.Total, state.Done)
 	width := sandboxProgressOverlayWidth
-	if available := m.width - inputHorizontalInset*2; available < width {
+	if available := m.width - sandboxProgressOverlayRightInset - inputHorizontalInset; available < width {
 		width = available
 	}
 	if width < sandboxProgressOverlayMinWidth {

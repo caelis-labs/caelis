@@ -107,7 +107,7 @@ func (m *Model) View() tea.View {
 	}
 	if m.width > 0 && m.height > 0 {
 		if progressView := m.renderSandboxProgressOverlay(); progressView != "" {
-			view = overlayTopRight(view, progressView, m.width, 0, inputHorizontalInset)
+			view = overlayTopRight(view, progressView, m.width, sandboxProgressOverlayTopInset, sandboxProgressOverlayRightInset)
 		}
 	}
 	secondTrim := 0

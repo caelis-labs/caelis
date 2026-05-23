@@ -4,6 +4,7 @@ package runnercmd
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
@@ -13,7 +14,7 @@ import (
 
 func hideCurrentUserProfileDir() {
 	profile := strings.TrimSpace(os.Getenv("USERPROFILE"))
-	if profile == "" {
+	if !shouldHideCurrentUserProfileDir(profile) {
 		return
 	}
 	ptr, err := windows.UTF16PtrFromString(profile)
@@ -33,4 +34,16 @@ func hideCurrentUserProfileDir() {
 		uintptr(unsafe.Pointer(ptr)),
 		uintptr(next),
 	)
+}
+
+func shouldHideCurrentUserProfileDir(profile string) bool {
+	profile = strings.TrimSpace(profile)
+	if profile == "" {
+		return false
+	}
+	name := strings.ToLower(strings.TrimSpace(filepath.Base(profile)))
+	return strings.HasPrefix(name, "caelissbxoff") ||
+		strings.HasPrefix(name, "caelissbxon") ||
+		strings.HasPrefix(name, "caelissandboxoffline") ||
+		strings.HasPrefix(name, "caelissandboxonline")
 }

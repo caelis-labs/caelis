@@ -249,6 +249,29 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 	}
 }
 
+func TestShouldHideCurrentUserProfileDirOnlySandboxProfiles(t *testing.T) {
+	for _, profile := range []string{
+		`C:\Users\CaelisSbxOffabcd1234`,
+		`C:\Users\CaelisSbxOnabcd1234.DESKTOP`,
+		`C:\Users\CaelisSandboxOffline`,
+		`C:\Users\CaelisSandboxOnline.DESKTOP`,
+	} {
+		if !shouldHideCurrentUserProfileDir(profile) {
+			t.Fatalf("shouldHideCurrentUserProfileDir(%q) = false, want true", profile)
+		}
+	}
+	for _, profile := range []string{
+		`C:\Users\15528`,
+		`C:\Users\Administrator`,
+		`C:\Users\Default`,
+		``,
+	} {
+		if shouldHideCurrentUserProfileDir(profile) {
+			t.Fatalf("shouldHideCurrentUserProfileDir(%q) = true, want false", profile)
+		}
+	}
+}
+
 func TestEffectiveWorkingDirectoryUsesSandboxHomeJunction(t *testing.T) {
 	home := t.TempDir()
 	hostProfile := t.TempDir()

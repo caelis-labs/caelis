@@ -22,6 +22,7 @@ import (
 )
 
 const (
+	SWHide                  = 0
 	SWNormal                = 1
 	logonWithProfile        = 0x00000001
 	logon32LogonInteractive = 2
@@ -243,7 +244,7 @@ func RunElevatedAndWaitContext(ctx context.Context, file string, args []string, 
 		File:       filePtr,
 		Parameters: argsPtr,
 		Directory:  cwdPtr,
-		Show:       SWNormal,
+		Show:       SWHide,
 	}
 	process, err := shellExecuteRunAsContext(ctx, file, &info)
 	if err != nil {

@@ -44,6 +44,8 @@ const offscreenViewportSyncIntervalMax = 160 * time.Millisecond
 const completionRefreshDebounce = 100 * time.Millisecond
 const sandboxProgressOverlayWidth = 24
 const sandboxProgressOverlayMinWidth = 10
+const sandboxProgressOverlayTopInset = 1
+const sandboxProgressOverlayRightInset = inputHorizontalInset * 2
 
 type hintEntry struct {
 	id             uint64

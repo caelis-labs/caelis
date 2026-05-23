@@ -40,6 +40,56 @@ func TestRuntimeDescribeReportsWindowsElevatedCapabilities(t *testing.T) {
 	}
 }
 
+func TestShouldRestoreCurrentUserProfileVisibilitySkipsSandboxProfiles(t *testing.T) {
+	if !shouldRestoreCurrentUserProfileVisibility(`C:\Users\15528`) {
+		t.Fatal("shouldRestoreCurrentUserProfileVisibility(host profile) = false, want true")
+	}
+	for _, profile := range []string{
+		`C:\Users\CaelisSbxOffabcd1234`,
+		`C:\Users\CaelisSbxOnabcd1234.DESKTOP`,
+		`C:\Work\profile`,
+		``,
+	} {
+		if shouldRestoreCurrentUserProfileVisibility(profile) {
+			t.Fatalf("shouldRestoreCurrentUserProfileVisibility(%q) = true, want false", profile)
+		}
+	}
+}
+
+func TestPrepareSetupProgressMapsHelperIntoOuterProgress(t *testing.T) {
+	cases := []struct {
+		step  int
+		total int
+		done  bool
+		want  int
+	}{
+		{step: 0, total: 0, want: prepareProgressHelperStart},
+		{step: 1, total: 12, want: prepareProgressHelperStart},
+		{step: 6, total: 12, want: 12},
+		{step: 12, total: 12, done: true, want: prepareProgressHelperEnd},
+		{step: 0, total: 0, done: true, want: prepareProgressHelperEnd},
+	}
+	for _, tc := range cases {
+		got := setupProgressOuterStep(tc.step, tc.total, tc.done)
+		if got != tc.want {
+			t.Fatalf("setupProgressOuterStep(%d, %d, %t) = %d, want %d", tc.step, tc.total, tc.done, got, tc.want)
+		}
+	}
+	report := mapPrepareSetupProgressReport(setupstate.ProgressReport{
+		Phase:   "complete",
+		Message: "Windows sandbox setup is ready",
+		Step:    12,
+		Total:   12,
+		Done:    true,
+	})
+	if report.Done {
+		t.Fatal("mapped helper progress Done = true, want outer operation to own completion")
+	}
+	if report.Step != prepareProgressHelperEnd || report.Total != prepareProgressTotal {
+		t.Fatalf("mapped helper progress = %+v, want step %d/%d", report, prepareProgressHelperEnd, prepareProgressTotal)
+	}
+}
+
 func TestRuntimeDoesNotAutoElevateWhenSetupIsMissing(t *testing.T) {
 	rt, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: t.TempDir()})
 	if err != nil {
