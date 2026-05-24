@@ -38,7 +38,32 @@ func modeOptionsFromSession(activeSession session.Session, spec agent.AgentSpec)
 	if values, ok := stringSliceMetadata(spec.Metadata, "policy_extra_write_roots"); ok {
 		opts.ExtraWriteRoots = values
 	}
+	if value, ok := boolMetadata(spec.Metadata, "policy_network_enabled"); ok {
+		opts.NetworkEnabled = &value
+	}
 	return opts
+}
+
+func boolMetadata(meta map[string]any, key string) (bool, bool) {
+	raw, ok := meta[key]
+	if !ok || raw == nil {
+		return false, false
+	}
+	switch typed := raw.(type) {
+	case bool:
+		return typed, true
+	case string:
+		switch strings.ToLower(strings.TrimSpace(typed)) {
+		case "true", "1", "yes", "on", "enabled":
+			return true, true
+		case "false", "0", "no", "off", "disabled":
+			return false, true
+		default:
+			return false, false
+		}
+	default:
+		return false, false
+	}
 }
 
 func stringSliceMetadata(meta map[string]any, key string) ([]string, bool) {

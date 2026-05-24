@@ -261,7 +261,7 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 			return nil, err
 		}
 	}
-	if !p.FullAccess && len(p.CapabilitySIDs) == 0 {
+	if !p.FullAccess && p.Network != winpolicy.NetworkOnline && len(p.CapabilitySIDs) == 0 {
 		_ = s.TerminateSession()
 		return nil, fmt.Errorf("windows runner: capability SIDs are required")
 	}
@@ -277,6 +277,7 @@ func (c *Client) start(ctx context.Context, req runnerruntime.Request, stdinOpen
 		DenyRead:      p.DenyReadPaths,
 		DenyWrite:     p.DenyWritePaths,
 		Network:       string(p.Network),
+		FullAccess:    p.FullAccess,
 		CapabilitySID: p.CapabilitySIDs,
 	})
 	if err != nil {
@@ -384,11 +385,11 @@ func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
 	name = strings.NewReplacer(`\`, "_", `/`, "_", ":", "_").Replace(name)
 	home := filepath.Join(root, ".sandbox", "runner-home", name)
 	userProfile := strings.TrimSpace(os.Getenv("USERPROFILE"))
+	if strings.TrimSpace(creds.Username) != "" {
+		userProfile = sandboxUserProfileHome(creds)
+	}
 	if userProfile == "" {
 		userProfile = home
-		if strings.TrimSpace(creds.Username) != "" {
-			userProfile = sandboxUserProfileHome(creds)
-		}
 	}
 	tmp := filepath.Join(root, ".sandbox", "runner-tmp", name)
 	localAppData := filepath.Join(home, "AppData", "Local")
@@ -405,6 +406,27 @@ func (c *Client) runnerEnvironment(creds Credentials) ([]string, error) {
 	env["TMP"] = tmp
 	env["LOCALAPPDATA"] = localAppData
 	env["APPDATA"] = roamingAppData
+	if strings.TrimSpace(creds.Username) != "" {
+		username, domain := splitRunnerDomainUser(creds.Username, creds.Domain)
+		if username != "" {
+			env["USERNAME"] = username
+		}
+		if domain != "" && domain != "." {
+			env["USERDOMAIN"] = domain
+			env["USERDOMAIN_ROAMINGPROFILE"] = domain
+		} else if computer := strings.TrimSpace(os.Getenv("COMPUTERNAME")); computer != "" {
+			env["USERDOMAIN"] = computer
+			env["USERDOMAIN_ROAMINGPROFILE"] = computer
+		}
+		volume := filepath.VolumeName(userProfile)
+		if volume != "" {
+			env["HOMEDRIVE"] = volume
+			env["HOMEPATH"] = strings.TrimPrefix(strings.TrimPrefix(userProfile, volume), string(filepath.Separator))
+			if env["HOMEPATH"] != "" {
+				env["HOMEPATH"] = string(filepath.Separator) + env["HOMEPATH"]
+			}
+		}
+	}
 	if strings.TrimSpace(c.stateRoot) != "" {
 		env["CAELIS_SANDBOX_STATE"] = c.stateRoot
 	}
@@ -434,6 +456,21 @@ func sandboxUserProfileHome(creds Credentials) string {
 		systemDrive = `C:`
 	}
 	return filepath.Join(systemDrive+`\`, "Users", username)
+}
+
+func splitRunnerDomainUser(username string, explicitDomain string) (string, string) {
+	username = strings.TrimSpace(username)
+	domain := strings.TrimSpace(explicitDomain)
+	if before, after, ok := strings.Cut(username, `\`); ok {
+		if domain == "" {
+			domain = before
+		}
+		username = after
+	}
+	if domain == "" && !strings.Contains(username, "@") {
+		domain = "."
+	}
+	return username, domain
 }
 
 func minimalWindowsPath(systemRoot string) string {

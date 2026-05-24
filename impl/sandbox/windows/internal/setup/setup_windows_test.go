@@ -124,13 +124,15 @@ func TestRequiredPolicyACLTargetsDenyWriteUsesOverlappingRootCapability(t *testi
 
 	entries := entriesForPath(t, targets, gitDir, acl.Deny)
 	principals := entryPrincipals(entries)
-	if len(principals) != 1 {
-		t.Fatalf("deny-write principals = %#v, want only overlapping root capability", principals)
+	if len(principals) != 2 {
+		t.Fatalf("deny-write principals = %#v, want sandbox group and overlapping root capability", principals)
 	}
-	if principals[0] != workspaceCapabilitySID {
-		t.Fatalf("deny-write principals = %#v, want %q", principals, workspaceCapabilitySID)
+	for _, want := range []string{GroupName, workspaceCapabilitySID} {
+		if !containsFold(principals, want) {
+			t.Fatalf("deny-write principals = %#v, want %q", principals, want)
+		}
 	}
-	for _, unwanted := range []string{GroupName, "CaelisSbxOffTest", extraCapabilitySID} {
+	for _, unwanted := range []string{"CaelisSbxOffTest", extraCapabilitySID} {
 		if containsFold(principals, unwanted) {
 			t.Fatalf("deny-write principals = %#v, did not want %q", principals, unwanted)
 		}
@@ -557,8 +559,9 @@ func TestResetCleanupPlanUsesCurrentState(t *testing.T) {
 		OperationID:     "new-op",
 		StateRoot:       stateRoot,
 		OfflineUsername: "CaelisSbxOffNew",
+		OnlineUsername:  "CaelisSbxOnNew",
 	}, dirs)
-	for _, want := range []string{"CaelisSbxOffNew", legacyOnlineUsername(Payload{StateRoot: stateRoot})} {
+	for _, want := range []string{"CaelisSbxOffNew", "CaelisSbxOnNew", legacyOnlineUsername(Payload{StateRoot: stateRoot})} {
 		if !containsFold(plan.Users, want) {
 			t.Fatalf("plan.Users = %#v, want %q", plan.Users, want)
 		}
@@ -575,6 +578,34 @@ func TestResetCleanupPlanUsesCurrentState(t *testing.T) {
 	}
 	if !containsPathKey(plan.StateDirs, dirs.Sandbox) || !containsPathKey(plan.StateDirs, dirs.Bin) || !containsPathKey(plan.StateDirs, dirs.Secrets) {
 		t.Fatalf("plan.StateDirs = %#v, want sandbox/bin/secrets", plan.StateDirs)
+	}
+}
+
+func TestValidateGlobalSetupDetectsOnlineUserChange(t *testing.T) {
+	stateRoot := t.TempDir()
+	dirs := setupstate.NewDirs(stateRoot)
+	if err := setupstate.WriteMarker(dirs.MarkerPath, setupstate.Marker{
+		Version:         PayloadVersion,
+		OfflineUsername: "CaelisSbxOffTest",
+		OnlineUsername:  "CaelisSbxOnOld",
+	}); err != nil {
+		t.Fatalf("WriteMarker() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(dirs.UsersPath), 0o700); err != nil {
+		t.Fatalf("MkdirAll(users dir) error = %v", err)
+	}
+	if err := os.WriteFile(dirs.UsersPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("WriteFile(users) error = %v", err)
+	}
+
+	err := validateGlobalSetup(Payload{
+		Version:         PayloadVersion,
+		StateRoot:       stateRoot,
+		OfflineUsername: "CaelisSbxOffTest",
+		OnlineUsername:  "CaelisSbxOnNew",
+	}, dirs)
+	if err == nil || !strings.Contains(err.Error(), "online sandbox user changed") {
+		t.Fatalf("validateGlobalSetup() error = %v, want online user changed", err)
 	}
 }
 

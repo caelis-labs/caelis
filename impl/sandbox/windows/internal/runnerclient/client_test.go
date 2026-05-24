@@ -43,8 +43,8 @@ func TestRunnerEnvironmentUsesSandboxPrivateDirsWithoutCacheRedirects(t *testing
 	if home == "" || !pathIsUnder(home, stateRoot) {
 		t.Fatalf("CAELIS_SANDBOX_HOME = %q, want under state root %q", home, stateRoot)
 	}
-	if !strings.EqualFold(userProfile, hostProfile) {
-		t.Fatalf("USERPROFILE = %q, want inherited host profile %q", userProfile, hostProfile)
+	if want := sandboxUserProfileHome(Credentials{Username: "CaelisSbxOffTest"}); !strings.EqualFold(userProfile, want) {
+		t.Fatalf("USERPROFILE = %q, want sandbox user profile", userProfile)
 	}
 	if localAppData == "" || !pathIsUnder(localAppData, home) {
 		t.Fatalf("LOCALAPPDATA = %q, want under sandbox home %q", localAppData, home)

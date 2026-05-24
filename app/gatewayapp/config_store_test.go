@@ -172,6 +172,57 @@ func TestAppConfigStoreDoesNotPersistEnvHydratedToken(t *testing.T) {
 	}
 }
 
+func TestAppConfigStorePersistsSandboxNetworkEnabledDefault(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := newAppConfigStore(root)
+	if err := store.Save(AppConfig{}); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if doc.Sandbox.NetworkEnabled == nil || !*doc.Sandbox.NetworkEnabled {
+		t.Fatalf("Sandbox.NetworkEnabled = %#v, want persisted true default", doc.Sandbox.NetworkEnabled)
+	}
+	raw := readConfigFileForTest(t, root)
+	if !strings.Contains(raw, `"network_enabled": true`) {
+		t.Fatalf("config = %s, want sandbox network_enabled default", raw)
+	}
+}
+
+func TestAppConfigStoreLoadsManualSandboxNetworkDisabled(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(root) error = %v", err)
+	}
+	raw := `{"sandbox":{"network_enabled":false}}`
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(raw), 0o600); err != nil {
+		t.Fatalf("WriteFile(config.json) error = %v", err)
+	}
+
+	store := newAppConfigStore(root)
+	doc, err := store.Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if doc.Sandbox.NetworkEnabled == nil || *doc.Sandbox.NetworkEnabled {
+		t.Fatalf("Sandbox.NetworkEnabled = %#v, want manual false", doc.Sandbox.NetworkEnabled)
+	}
+	if err := store.Save(doc); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+	persisted := readConfigFileForTest(t, root)
+	if !strings.Contains(persisted, `"network_enabled": false`) {
+		t.Fatalf("config = %s, want manual false retained", persisted)
+	}
+}
+
 func TestAppConfigStoreIgnoresIntermediateConnectionsConfig(t *testing.T) {
 	t.Parallel()
 

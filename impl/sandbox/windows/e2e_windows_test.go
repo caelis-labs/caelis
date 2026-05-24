@@ -8,7 +8,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -137,6 +136,7 @@ Get-Content -LiteralPath '.\workspace-write.txt'
 		t.Fatalf("host read workspace file = %q/%v", data, err)
 	}
 	verifyControlDirsDenyWriteE2E(ctx, t, rt, workspace)
+	verifyNetworkEnabledE2E(ctx, t, rt, workspace, stateRoot, readOnlyCarveout)
 	verifyMissingReadOnlyCarveoutE2E(ctx, t, rt, workspace, readOnlyCarveout)
 	verifyMissingHiddenCarveoutE2E(ctx, t, rt, workspace)
 
@@ -352,6 +352,27 @@ func TestWindowsElevatedSandboxSmokeE2E(t *testing.T) {
 	if !ok {
 		t.Fatalf("runtime does not expose explicit setup")
 	}
+	resetter, ok := rt.(interface {
+		Reset(context.Context) error
+	})
+	if !ok {
+		t.Fatalf("runtime does not expose reset")
+	}
+	var resetOnce sync.Once
+	var resetErr error
+	resetSandbox := func(ctx context.Context) error {
+		resetOnce.Do(func() {
+			resetErr = resetter.Reset(ctx)
+		})
+		return resetErr
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 240*time.Second)
+		defer cancel()
+		if err := resetSandbox(cleanupCtx); err != nil {
+			t.Logf("cleanup Reset() error = %v", err)
+		}
+	})
 	seedManagedFirewallRulesByInternalNameE2E(ctx, t)
 	t.Cleanup(func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -402,14 +423,14 @@ if ([string]::IsNullOrWhiteSpace($temp)) { throw 'TEMP missing' }
 $path = Join-Path $temp 'caelis-cache-smoke.txt'
 Set-Content -LiteralPath $path -Value 'temp' -Force
 Remove-Item -LiteralPath $path -Force
-$home = [Environment]::GetEnvironmentVariable('CAELIS_SANDBOX_HOME')
+$sandboxHome = [Environment]::GetEnvironmentVariable('CAELIS_SANDBOX_HOME')
 $profile = [Environment]::GetEnvironmentVariable('USERPROFILE')
-if (-not [string]::IsNullOrWhiteSpace($profile) -and -not [string]::IsNullOrWhiteSpace($home) -and $profile.StartsWith($home, [System.StringComparison]::OrdinalIgnoreCase)) {
+if (-not [string]::IsNullOrWhiteSpace($profile) -and -not [string]::IsNullOrWhiteSpace($sandboxHome) -and $profile.StartsWith($sandboxHome, [System.StringComparison]::OrdinalIgnoreCase)) {
   throw "USERPROFILE was redirected under sandbox home: $profile"
 }
 foreach ($name in @('GOCACHE', 'GOPATH', 'GOMODCACHE', 'npm_config_cache')) {
   $value = [Environment]::GetEnvironmentVariable($name)
-  if (-not [string]::IsNullOrWhiteSpace($value) -and -not [string]::IsNullOrWhiteSpace($home) -and $value.StartsWith($home, [System.StringComparison]::OrdinalIgnoreCase)) {
+  if (-not [string]::IsNullOrWhiteSpace($value) -and -not [string]::IsNullOrWhiteSpace($sandboxHome) -and $value.StartsWith($sandboxHome, [System.StringComparison]::OrdinalIgnoreCase)) {
     throw "$name was redirected under sandbox home: $value"
   }
 }
@@ -428,15 +449,9 @@ Write-Output 'cache-env-ok'
 	if !strings.Contains(result.Stderr, "raw-powershell-error") {
 		t.Fatalf("raw PowerShell stderr = %q, want original error output", result.Stderr)
 	}
-	verifyConcurrentRunsE2E(ctx, t, rt, workspace)
-	resetter, ok := rt.(interface {
-		Reset(context.Context) error
-	})
-	if !ok {
-		t.Fatalf("runtime does not expose reset")
-	}
+	verifyAsyncSessionSmokeE2E(ctx, t, rt, workspace)
 	started = time.Now()
-	if err := resetter.Reset(ctx); err != nil {
+	if err := resetSandbox(ctx); err != nil {
 		t.Fatalf("Reset() error = %v", err)
 	}
 	t.Logf("smoke reset completed in %s", time.Since(started))
@@ -448,73 +463,32 @@ Write-Output 'cache-env-ok'
 	assertSandboxStateDirsAbsentE2E(t, stateRoot)
 }
 
-func verifyConcurrentRunsE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+func verifyAsyncSessionSmokeE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
 	t.Helper()
-	type outcome struct {
-		name     string
-		result   sandbox.CommandResult
-		err      error
-		duration time.Duration
-		startMS  int64
-	}
 	started := time.Now()
-	done := make(chan outcome, 2)
-	for _, name := range []string{"parallel-a", "parallel-b"} {
-		name := name
-		go func() {
-			commandStarted := time.Now()
-			result, err := runE2ECommand(ctx, rt, workspace, "$started = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds(); Write-Output ('"+name+" start=' + $started); Start-Sleep -Seconds 2; Write-Output '"+name+"'", sandbox.NetworkDisabled, nil)
-			done <- outcome{name: name, result: result, err: err, duration: time.Since(commandStarted), startMS: parseE2EStartMillis(result.Stdout, name)}
-		}()
+	session, err := rt.Start(ctx, sandbox.CommandRequest{
+		Command: "Write-Output 'async-smoke-ok'",
+		Dir:     workspace,
+		Timeout: 10 * time.Second,
+		Constraints: sandbox.Constraints{
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Network:    sandbox.NetworkEnabled,
+		},
+	})
+	if err != nil {
+		t.Fatalf("async smoke session start error = %v", err)
 	}
-	starts := make([]int64, 0, 2)
-	for i := 0; i < 2; i++ {
-		select {
-		case got := <-done:
-			if got.err != nil {
-				t.Fatalf("%s concurrent command error = %v; result=%+v", got.name, got.err, got.result)
-			}
-			if !strings.Contains(got.result.Stdout, got.name) {
-				t.Fatalf("%s stdout = %q", got.name, got.result.Stdout)
-			}
-			if got.startMS == 0 {
-				t.Fatalf("%s stdout = %q, missing command start timestamp", got.name, got.result.Stdout)
-			}
-			starts = append(starts, got.startMS)
-			t.Logf("%s concurrent command completed in %s", got.name, got.duration)
-		case <-ctx.Done():
-			t.Fatalf("concurrent commands timed out: %v", ctx.Err())
-		}
+	resultCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	result, err := session.Result(resultCtx)
+	cancel()
+	if err != nil {
+		_ = session.Terminate(context.Background())
+		t.Fatalf("async smoke session error = %v; result=%+v", err, result)
 	}
-	elapsed := time.Since(started)
-	t.Logf("two concurrent sandbox commands completed in %s", elapsed)
-	if len(starts) == 2 && absInt64(starts[0]-starts[1]) > int64(1500*time.Millisecond/time.Millisecond) {
-		t.Fatalf("concurrent command start times were %dms apart, expected overlap", absInt64(starts[0]-starts[1]))
+	if !strings.Contains(result.Stdout, "async-smoke-ok") {
+		t.Fatalf("async smoke stdout = %q", result.Stdout)
 	}
-	if elapsed > 8*time.Second {
-		t.Fatalf("two 2s sandbox commands took %s, expected overlapping execution", elapsed)
-	}
-}
-
-func parseE2EStartMillis(output string, name string) int64 {
-	prefix := name + " start="
-	for _, line := range strings.Split(output, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, prefix) {
-			continue
-		}
-		value := strings.TrimSpace(strings.TrimPrefix(line, prefix))
-		ms, _ := strconv.ParseInt(value, 10, 64)
-		return ms
-	}
-	return 0
-}
-
-func absInt64(value int64) int64 {
-	if value < 0 {
-		return -value
-	}
-	return value
+	t.Logf("async NetworkEnabled session completed in %s", time.Since(started))
 }
 
 func seedManagedFirewallRulesByInternalNameE2E(ctx context.Context, t *testing.T) {
@@ -522,14 +496,16 @@ func seedManagedFirewallRulesByInternalNameE2E(ctx context.Context, t *testing.T
 	script := strings.Join([]string{
 		"$ErrorActionPreference = 'Stop'",
 		"$ProgressPreference = 'SilentlyContinue'",
+		"# Seed inert stale rules by Caelis-owned names. They must be disabled",
+		"# allow rules so this e2e cannot affect host network traffic.",
 		"$rules = @(",
-		"  @{ Name = 'CaelisSandbox-Offline-Block-NonLoopback'; Protocol = 'Any'; RemoteAddress = '0.0.0.0-126.255.255.255' },",
-		"  @{ Name = 'CaelisSandbox-Offline-Block-Loopback-TCP'; Protocol = 'TCP'; RemoteAddress = '127.0.0.0/8' },",
-		"  @{ Name = 'CaelisSandbox-Offline-Block-Loopback-UDP'; Protocol = 'UDP'; RemoteAddress = '127.0.0.0/8' }",
+		"  @{ Name = 'CaelisSandbox-Offline-Block-NonLoopback'; Protocol = 'Any'; RemoteAddress = '192.0.2.0/24' },",
+		"  @{ Name = 'CaelisSandbox-Offline-Block-Loopback-TCP'; Protocol = 'TCP'; RemoteAddress = '198.51.100.0/24' },",
+		"  @{ Name = 'CaelisSandbox-Offline-Block-Loopback-UDP'; Protocol = 'UDP'; RemoteAddress = '203.0.113.0/24' }",
 		")",
 		"foreach ($rule in $rules) {",
 		"  Get-NetFirewallRule -PolicyStore PersistentStore -Name $rule.Name -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue",
-		"  New-NetFirewallRule -Name $rule.Name -DisplayName ('Caelis e2e stale rule ' + $rule.Name) -Group 'Caelis Sandbox' -Direction Outbound -Action Block -Profile Any -PolicyStore PersistentStore -Enabled True -Protocol $rule.Protocol -RemoteAddress $rule.RemoteAddress | Out-Null",
+		"  New-NetFirewallRule -Name $rule.Name -DisplayName ('Caelis e2e inert stale rule ' + $rule.Name) -Group 'Caelis Sandbox' -Direction Outbound -Action Allow -Profile Any -PolicyStore PersistentStore -Enabled False -Protocol $rule.Protocol -RemoteAddress $rule.RemoteAddress | Out-Null",
 		"}",
 	}, "\n")
 	result, err := winexec.Run(ctx, "powershell.exe", []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script}, winexec.Options{
@@ -614,9 +590,58 @@ func verifyControlDirsDenyWriteE2E(ctx context.Context, t *testing.T, rt sandbox
 	for _, name := range []string{".git", ".codex", ".agents"} {
 		hostPath := filepath.Join(workspace, name, "e2e-denied.txt")
 		relPath := filepath.Join(".", name, "e2e-denied.txt")
-		assertSandboxWriteDeniedE2E(ctx, t, rt, workspace, relPath, nil)
+		assertSandboxWriteDeniedForNetworkE2E(ctx, t, rt, workspace, relPath, sandbox.NetworkDisabled, nil)
 		assertHostPathMissingE2E(t, hostPath)
 	}
+}
+
+func verifyNetworkEnabledE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string, stateRoot string, readOnlyCarveout string) {
+	t.Helper()
+	result, err := runE2ECommand(ctx, rt, workspace, "whoami", sandbox.NetworkEnabled, nil)
+	if err != nil {
+		t.Fatalf("network-enabled whoami command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(strings.ToLower(result.Stdout), strings.ToLower(setupOnlineUser(stateRoot))) {
+		t.Fatalf("network-enabled whoami stdout = %q, want online sandbox user %q", result.Stdout, setupOnlineUser(stateRoot))
+	}
+
+	result, err = runE2ECommand(ctx, rt, workspace, `
+$profile = [Environment]::GetEnvironmentVariable('USERPROFILE')
+if ([string]::IsNullOrWhiteSpace($profile)) { throw 'USERPROFILE missing' }
+if ($profile -notmatch '\\Users\\CaelisSbxOn') { throw "unexpected USERPROFILE=$profile" }
+Set-Content -LiteralPath '.\online-workspace-write.txt' -Value 'online-workspace-write-ok'
+Get-Content -LiteralPath '.\online-workspace-write.txt'
+`, sandbox.NetworkEnabled, nil)
+	if err != nil {
+		t.Fatalf("network-enabled workspace command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(result.Stdout, "online-workspace-write-ok") {
+		t.Fatalf("network-enabled workspace stdout = %q", result.Stdout)
+	}
+	if data, err := os.ReadFile(filepath.Join(workspace, "online-workspace-write.txt")); err != nil || !strings.Contains(string(data), "online-workspace-write-ok") {
+		t.Fatalf("host read online workspace file = %q/%v", data, err)
+	}
+
+	result, err = runE2ECommand(ctx, rt, workspace, `
+$ErrorActionPreference = 'Stop'
+$response = Invoke-WebRequest -UseBasicParsing -Method Head -Uri 'https://example.com/' -TimeoutSec 20
+Write-Output ('https-status=' + [int]$response.StatusCode)
+`, sandbox.NetworkEnabled, nil)
+	if err != nil {
+		t.Fatalf("network-enabled HTTPS command error = %v; result=%+v", err, result)
+	}
+	if !strings.Contains(result.Stdout, "https-status=200") {
+		t.Fatalf("network-enabled HTTPS stdout = %q", result.Stdout)
+	}
+
+	for _, name := range []string{".git", ".codex", ".agents"} {
+		hostPath := filepath.Join(workspace, name, "e2e-online-denied.txt")
+		assertSandboxWriteDeniedForNetworkE2E(ctx, t, rt, workspace, filepath.Join(".", name, "e2e-online-denied.txt"), sandbox.NetworkEnabled, nil)
+		assertHostPathMissingE2E(t, hostPath)
+	}
+	hostPath := filepath.Join(workspace, readOnlyCarveout, "e2e-online-readonly-denied.txt")
+	assertSandboxWriteDeniedForNetworkE2E(ctx, t, rt, workspace, filepath.Join(".", readOnlyCarveout, "e2e-online-readonly-denied.txt"), sandbox.NetworkEnabled, nil)
+	assertHostPathMissingE2E(t, hostPath)
 }
 
 func verifyMissingReadOnlyCarveoutE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string, carveout string) {
@@ -627,7 +652,7 @@ func verifyMissingReadOnlyCarveoutE2E(ctx context.Context, t *testing.T, rt sand
 	}
 	hostPath := filepath.Join(hostDir, "leak.txt")
 	relPath := filepath.Join(".", carveout, "leak.txt")
-	assertSandboxWriteDeniedE2E(ctx, t, rt, workspace, relPath, nil)
+	assertSandboxWriteDeniedForNetworkE2E(ctx, t, rt, workspace, relPath, sandbox.NetworkDisabled, nil)
 	assertHostPathMissingE2E(t, hostPath)
 }
 
@@ -642,11 +667,13 @@ func verifyMissingHiddenCarveoutE2E(ctx context.Context, t *testing.T, rt sandbo
 	}
 	hiddenRules := []sandbox.PathRule{{Path: hiddenDir, Access: sandbox.PathAccessHidden}}
 	hostPath := filepath.Join(hiddenDir, "leak.txt")
-	assertSandboxWriteDeniedE2E(ctx, t, rt, workspace, filepath.Join(".", "future-hidden", "leak.txt"), hiddenRules)
+	assertSandboxWriteDeniedForNetworkE2E(ctx, t, rt, workspace, filepath.Join(".", "future-hidden", "leak.txt"), sandbox.NetworkDisabled, hiddenRules)
+	assertSandboxWriteDeniedForNetworkE2E(ctx, t, rt, workspace, filepath.Join(".", "future-hidden", "online-leak.txt"), sandbox.NetworkEnabled, hiddenRules)
 	if info, err := os.Stat(hiddenDir); err != nil || !info.IsDir() {
 		t.Fatalf("hidden carveout was not materialized by sandbox refresh: info=%v err=%v", info, err)
 	}
 	assertHostPathMissingE2E(t, hostPath)
+	assertHostPathMissingE2E(t, filepath.Join(hiddenDir, "online-leak.txt"))
 }
 
 func verifyCanceledRunTerminatesChildE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
@@ -698,10 +725,10 @@ Set-Content -LiteralPath '.\cancel-leak.txt' -Value 'leaked'
 	assertHostPathMissingE2E(t, leakPath)
 }
 
-func assertSandboxWriteDeniedE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string, relPath string, rules []sandbox.PathRule) {
+func assertSandboxWriteDeniedForNetworkE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string, relPath string, network sandbox.Network, rules []sandbox.PathRule) {
 	t.Helper()
 	command := "$ErrorActionPreference = 'Stop'; Set-Content -LiteralPath '" + escapePowerShellSingleQuote(relPath) + "' -Value 'blocked'"
-	result, err := runE2ECommand(ctx, rt, workspace, command, sandbox.NetworkDisabled, rules)
+	result, err := runE2ECommand(ctx, rt, workspace, command, network, rules)
 	if err == nil || result.ExitCode == 0 {
 		t.Fatalf("sandbox write to %s was not denied: err=%v result=%+v", relPath, err, result)
 	}

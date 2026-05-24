@@ -3,6 +3,7 @@ package win32
 import (
 	"encoding/binary"
 	"encoding/xml"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -239,7 +240,7 @@ func parsePowerShellCLIXML(text string) (string, bool) {
 	var out strings.Builder
 	for {
 		token, err := decoder.Token()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

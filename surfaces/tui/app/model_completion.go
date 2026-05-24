@@ -512,6 +512,10 @@ func (m *Model) renderResumeList() string {
 // ---------------------------------------------------------------------------
 
 func (m *Model) refreshSlashCommands() {
+	selected := ""
+	if m.slashIndex >= 0 && m.slashIndex < len(m.slashCandidates) {
+		selected = strings.TrimSpace(m.slashCandidates[m.slashIndex])
+	}
 	m.clearSlashCompletion()
 	if m.running {
 		return
@@ -540,6 +544,14 @@ func (m *Model) refreshSlashCommands() {
 	}
 	m.slashCandidates = candidates
 	m.slashIndex = 0
+	if selected != "" {
+		for i, candidate := range candidates {
+			if candidate == selected {
+				m.slashIndex = i
+				break
+			}
+		}
+	}
 	m.slashPrefix = "/" + query
 }
 

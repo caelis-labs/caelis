@@ -1,6 +1,10 @@
 package sandboxpolicy
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
+)
 
 func TestNormalizeBackendAcceptsWindowsElevatedAliases(t *testing.T) {
 	t.Parallel()
@@ -25,5 +29,35 @@ func TestNormalizeBackendAcceptsHost(t *testing.T) {
 	}
 	if got != "host" {
 		t.Fatalf("NormalizeBackend(host) = %q, want host", got)
+	}
+}
+
+func TestMergeConfigDefaultsSandboxNetworkEnabled(t *testing.T) {
+	t.Parallel()
+
+	got := MergeConfig(configstore.SandboxConfig{}, configstore.SandboxConfig{})
+	if got.NetworkEnabled == nil || !*got.NetworkEnabled {
+		t.Fatalf("NetworkEnabled = %#v, want true default", got.NetworkEnabled)
+	}
+}
+
+func TestMergeConfigPreservesStoredSandboxNetworkDisabled(t *testing.T) {
+	t.Parallel()
+
+	disabled := false
+	got := MergeConfig(configstore.SandboxConfig{NetworkEnabled: &disabled}, configstore.SandboxConfig{})
+	if got.NetworkEnabled == nil || *got.NetworkEnabled {
+		t.Fatalf("NetworkEnabled = %#v, want stored false", got.NetworkEnabled)
+	}
+}
+
+func TestMergeConfigAllowsSandboxNetworkOverride(t *testing.T) {
+	t.Parallel()
+
+	disabled := false
+	enabled := true
+	got := MergeConfig(configstore.SandboxConfig{NetworkEnabled: &disabled}, configstore.SandboxConfig{NetworkEnabled: &enabled})
+	if got.NetworkEnabled == nil || !*got.NetworkEnabled {
+		t.Fatalf("NetworkEnabled = %#v, want override true", got.NetworkEnabled)
 	}
 }

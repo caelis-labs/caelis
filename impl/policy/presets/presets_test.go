@@ -237,7 +237,7 @@ func TestDefaultModeSkipsDefaultTempWriteRootOnWindows(t *testing.T) {
 	}
 }
 
-func TestDefaultModeKeepsCommandNetworkDisabled(t *testing.T) {
+func TestDefaultModeKeepsCommandNetworkEnabled(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -275,10 +275,28 @@ func TestDefaultModeKeepsCommandNetworkDisabled(t *testing.T) {
 			if decision.Action != policy.ActionAllow {
 				t.Fatalf("Action = %q, want allow", decision.Action)
 			}
-			if decision.Constraints.Network != sandbox.NetworkDisabled {
-				t.Fatalf("Network = %q, want disabled", decision.Constraints.Network)
+			if decision.Constraints.Network != sandbox.NetworkEnabled {
+				t.Fatalf("Network = %q, want enabled", decision.Constraints.Network)
 			}
 		})
+	}
+}
+
+func TestDefaultModeAllowsConfigToDisableSandboxNetwork(t *testing.T) {
+	t.Parallel()
+
+	disabled := false
+	input := commandCtx("go test ./...", false)
+	input.Options.NetworkEnabled = &disabled
+	decision, err := AutoReviewMode().DecideTool(context.Background(), input)
+	if err != nil {
+		t.Fatalf("DecideTool() error = %v", err)
+	}
+	if decision.Action != policy.ActionAllow {
+		t.Fatalf("Action = %q, want allow", decision.Action)
+	}
+	if decision.Constraints.Network != sandbox.NetworkDisabled {
+		t.Fatalf("Network = %q, want disabled", decision.Constraints.Network)
 	}
 }
 
@@ -296,8 +314,8 @@ func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
 	if !hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
 		t.Fatalf("PathRules = %#v, want .git write grant for git add", decision.Constraints.PathRules)
 	}
-	if decision.Constraints.Network != sandbox.NetworkDisabled {
-		t.Fatalf("Network = %q, want disabled for local git metadata command", decision.Constraints.Network)
+	if decision.Constraints.Network != sandbox.NetworkEnabled {
+		t.Fatalf("Network = %q, want enabled for local git metadata command", decision.Constraints.Network)
 	}
 
 	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git add . && git commit -m update", false))

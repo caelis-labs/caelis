@@ -282,9 +282,16 @@ func baseStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {
 		Route:      sandbox.RouteSandbox,
 		Permission: sandbox.PermissionWorkspaceWrite,
 		Isolation:  sandbox.IsolationContainer,
-		Network:    sandbox.NetworkDisabled,
+		Network:    defaultNetworkPolicy(opts),
 		PathRules:  rules,
 	}
+}
+
+func defaultNetworkPolicy(opts policy.ModeOptions) sandbox.Network {
+	if opts.NetworkEnabled != nil && !*opts.NetworkEnabled {
+		return sandbox.NetworkDisabled
+	}
+	return sandbox.NetworkEnabled
 }
 
 func readStrictConstraints(opts policy.ModeOptions) sandbox.Constraints {

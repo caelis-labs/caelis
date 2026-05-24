@@ -74,15 +74,18 @@ func (r *runner) runSpawn(spawn runnerproto.Spawn) error {
 	if strings.TrimSpace(spawn.Command) == "" {
 		return fmt.Errorf("command runner: command is required")
 	}
-	if len(spawn.CapabilitySID) == 0 {
-		return fmt.Errorf("command runner: capability SIDs are required")
-	}
 	if spawn.TTY {
 		return r.runTTY(spawn)
 	}
 	env, err := mergeEnv(spawn.Env, spawn.Network, spawn.CWD)
 	if err != nil {
 		return err
+	}
+	if spawnRunsAsCurrentUser(spawn) {
+		return r.runSpawnAsCurrentUser(spawn, env)
+	}
+	if len(spawn.CapabilitySID) == 0 {
+		return fmt.Errorf("command runner: capability SIDs are required")
 	}
 	effectiveCWD := effectiveWorkingDirectory(spawn.CWD, env)
 	token, releaseToken, err := restrictedToken(spawn.CapabilitySID)
@@ -214,15 +217,23 @@ func (r *runner) runSpawnAsCurrentUser(spawn runnerproto.Spawn, env []string) er
 }
 
 func (r *runner) runTTY(spawn runnerproto.Spawn) error {
-	token, releaseToken, err := restrictedToken(spawn.CapabilitySID)
-	if err != nil {
-		return fmt.Errorf("command runner: restricted token: %w", err)
-	}
-	defer releaseToken()
 	env, err := mergeEnv(spawn.Env, spawn.Network, spawn.CWD)
 	if err != nil {
 		return err
 	}
+	var token win32.Token
+	releaseToken := func() {}
+	if !spawnRunsAsCurrentUser(spawn) {
+		if len(spawn.CapabilitySID) == 0 {
+			return fmt.Errorf("command runner: capability SIDs are required")
+		}
+		var err error
+		token, releaseToken, err = restrictedToken(spawn.CapabilitySID)
+		if err != nil {
+			return fmt.Errorf("command runner: restricted token: %w", err)
+		}
+	}
+	defer releaseToken()
 	effectiveCWD := effectiveWorkingDirectory(spawn.CWD, env)
 	pty, err := conpty.Start(conpty.Config{
 		Command: "powershell.exe",
@@ -276,6 +287,14 @@ func (r *runner) runTTY(spawn runnerproto.Spawn) error {
 		reason = waitErr.Error()
 	}
 	return r.writeFrame(runnerproto.TypeExit, runnerproto.Exit{ExitCode: exitCode, Reason: reason})
+}
+
+func networkIsOnline(network string) bool {
+	return strings.EqualFold(strings.TrimSpace(network), "online")
+}
+
+func spawnRunsAsCurrentUser(spawn runnerproto.Spawn) bool {
+	return spawn.FullAccess || networkIsOnline(spawn.Network)
 }
 
 func (r *runner) copyOutput(wg *sync.WaitGroup, typ string, reader io.Reader) {
@@ -414,13 +433,42 @@ func mergeEnv(extra map[string]string, _ string, cwd string) ([]string, error) {
 		setEnvValue(&env, "LOCALAPPDATA", localAppData)
 		setEnvValue(&env, "APPDATA", roamingAppData)
 	}
+	protected := protectedSandboxEnvKeys(env)
 	for key, value := range extra {
 		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		if _, ok := protected[normalizedEnvKey(key)]; ok {
 			continue
 		}
 		setEnvValue(&env, key, value)
 	}
 	return env, nil
+}
+
+func protectedSandboxEnvKeys(env []string) map[string]struct{} {
+	keys := []string{
+		"APPDATA",
+		"CAELIS_SANDBOX_HOME",
+		"CAELIS_SANDBOX_STATE",
+		"HOMEDRIVE",
+		"HOMEPATH",
+		"HOME",
+		"LOCALAPPDATA",
+		"TEMP",
+		"TMP",
+		"USERDOMAIN",
+		"USERDOMAIN_ROAMINGPROFILE",
+		"USERNAME",
+		"USERPROFILE",
+	}
+	out := map[string]struct{}{}
+	for _, key := range keys {
+		if strings.TrimSpace(envValue(env, key)) != "" {
+			out[normalizedEnvKey(key)] = struct{}{}
+		}
+	}
+	return out
 }
 
 func setEnvValue(env *[]string, key string, value string) {
@@ -438,6 +486,10 @@ func setEnvValue(env *[]string, key string, value string) {
 		next = append(next, current)
 	}
 	*env = append(next, item)
+}
+
+func normalizedEnvKey(key string) string {
+	return strings.ToUpper(strings.TrimSpace(key))
 }
 
 func envValue(env []string, key string) string {

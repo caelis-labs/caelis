@@ -54,6 +54,7 @@ type Spawn struct {
 	DenyRead      []string          `json:"deny_read,omitempty"`
 	DenyWrite     []string          `json:"deny_write,omitempty"`
 	Network       string            `json:"network,omitempty"`
+	FullAccess    bool              `json:"full_access,omitempty"`
 	CapabilitySID []string          `json:"capability_sids,omitempty"`
 }
 

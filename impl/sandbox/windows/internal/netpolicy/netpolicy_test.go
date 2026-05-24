@@ -33,6 +33,19 @@ func TestRefreshScriptIsScopedToCaelisGroupAndOfflineUser(t *testing.T) {
 			t.Fatalf("refreshScript() = %q, want %q", script, want)
 		}
 	}
+	rules := 0
+	for _, line := range strings.Split(script, "\n") {
+		if !strings.Contains(line, "New-NetFirewallRule") {
+			continue
+		}
+		rules++
+		if !strings.Contains(line, "-LocalUser $localUser") {
+			t.Fatalf("refreshScript() rule line = %q, want -LocalUser $localUser", line)
+		}
+	}
+	if rules != len(managedRuleNames) {
+		t.Fatalf("refreshScript() created %d rules, want %d", rules, len(managedRuleNames))
+	}
 }
 
 func TestManagedRuleNamesCoverCreatedRules(t *testing.T) {

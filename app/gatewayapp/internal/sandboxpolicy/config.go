@@ -28,6 +28,7 @@ func NormalizeBackend(backend string) (string, error) {
 }
 
 func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxConfig) configstore.SandboxConfig {
+	overrideNetworkSet := override.NetworkEnabled != nil
 	stored = configstore.NormalizeSandboxConfig(stored)
 	override = configstore.NormalizeSandboxConfig(override)
 	if override.RequestedType != "" {
@@ -45,14 +46,18 @@ func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxC
 	if len(override.ReadOnlySubpaths) > 0 {
 		stored.ReadOnlySubpaths = append([]string(nil), override.ReadOnlySubpaths...)
 	}
+	if overrideNetworkSet {
+		value := *override.NetworkEnabled
+		stored.NetworkEnabled = &value
+	}
 	if stored.RequestedType == "" {
 		stored.RequestedType = "auto"
 	}
-	return stored
+	return configstore.DefaultSandboxConfig(stored)
 }
 
 func EffectiveConfig(cfg configstore.SandboxConfig, workspaceDir string) configstore.SandboxConfig {
-	cfg = configstore.NormalizeSandboxConfig(cfg)
+	cfg = configstore.DefaultSandboxConfig(cfg)
 	cfg.WritableRoots = configstore.DedupeStrings(append(cfg.WritableRoots, DefaultSkillRoots(workspaceDir)...))
 	return cfg
 }
@@ -69,6 +74,7 @@ func WithPolicyRootMetadata(metadata map[string]any, cfg configstore.SandboxConf
 	if len(effective.WritableRoots) > 0 {
 		out["policy_extra_write_roots"] = mergePolicyRootMetadata(out["policy_extra_write_roots"], effective.WritableRoots)
 	}
+	out["policy_network_enabled"] = configstore.SandboxNetworkEnabled(effective)
 	return out
 }
 

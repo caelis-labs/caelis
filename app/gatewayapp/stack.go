@@ -122,6 +122,13 @@ func NewLocalStack(cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	if doc.Sandbox.NetworkEnabled == nil {
+		networkEnabled := true
+		doc.Sandbox.NetworkEnabled = &networkEnabled
+		if err := configStore.Save(doc); err != nil {
+			return nil, err
+		}
+	}
 	baseAssembly := assembly.CloneResolvedAssembly(cfg.Assembly)
 	cfg.Assembly = withConfiguredACPAgents(cfg.Assembly, doc.Agents, defaultSelfACPAgent(defaultSelfACPAgentConfig{
 		Config:       cfg,

@@ -72,7 +72,7 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 				CommandExec:    true,
 				AsyncSessions:  true,
 				TTY:            true,
-				NetworkControl: false,
+				NetworkControl: true,
 				PathPolicy:     true,
 				EnvPolicy:      true,
 			},
@@ -81,7 +81,7 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 				Backend:    sandbox.BackendWindowsElevated,
 				Permission: sandbox.PermissionWorkspaceWrite,
 				Isolation:  sandbox.IsolationProcess,
-				Network:    sandbox.NetworkDisabled,
+				Network:    sandbox.NetworkEnabled,
 			},
 		},
 		Status: sandbox.Status{
@@ -1112,6 +1112,16 @@ func (r *setupRunner) checkUsersFileReady() error {
 	if err := validateUserSecret(users.Offline); err != nil {
 		return fmt.Errorf("offline sandbox credentials are stale: %w", err)
 	}
+	expectedOnline := setupOnlineUser(r.stateRoot)
+	if users.Online == nil || strings.TrimSpace(users.Online.Username) == "" {
+		return fmt.Errorf("sandbox users file is missing expected online sandbox account")
+	}
+	if !strings.EqualFold(strings.TrimSpace(users.Online.Username), expectedOnline) {
+		return fmt.Errorf("sandbox users file does not match expected online sandbox account")
+	}
+	if err := validateUserSecret(*users.Online); err != nil {
+		return fmt.Errorf("online sandbox credentials are stale: %w", err)
+	}
 	return nil
 }
 
@@ -1142,6 +1152,7 @@ func (r *setupRunner) status() sandbox.Status {
 			"runner_hash":  payload.RunnerHash,
 			"policy_hash":  payload.GlobalPolicyHash,
 			"offline_user": payload.OfflineUsername,
+			"online_user":  payload.OnlineUsername,
 			"owner_user":   payload.OwnerUsername,
 		}
 	}
@@ -1280,11 +1291,23 @@ func (r *setupRunner) workspaceSetupSnapshot() workspaceSetupSnapshot {
 		out.Reason = "workspace setup version changed"
 		return out
 	}
-	if strings.TrimSpace(record.OfflineUsername) != "" && !strings.EqualFold(record.OfflineUsername, setupOfflineUser(r.stateRoot)) {
+	if strings.TrimSpace(record.OfflineUsername) == "" {
+		out.Reason = "offline sandbox user missing"
+		return out
+	}
+	if !strings.EqualFold(record.OfflineUsername, setupOfflineUser(r.stateRoot)) {
 		out.Reason = "offline sandbox user changed"
 		return out
 	}
-	results, err := setup.CheckSynchronousPolicyACLs(policy, setupOfflineUser(r.stateRoot))
+	if strings.TrimSpace(record.OnlineUsername) == "" {
+		out.Reason = "online sandbox user missing"
+		return out
+	}
+	if !strings.EqualFold(record.OnlineUsername, setupOnlineUser(r.stateRoot)) {
+		out.Reason = "online sandbox user changed"
+		return out
+	}
+	results, err := setup.CheckSynchronousPolicyACLs(policy, setupOfflineUser(r.stateRoot), setupOnlineUser(r.stateRoot))
 	if err != nil {
 		out.Reason = err.Error()
 		return out
@@ -1319,6 +1342,7 @@ func (r *setupRunner) freshnessForPayload(payload setup.Payload) setupstate.Fres
 		Version:         payload.Version,
 		PolicyHash:      payload.GlobalPolicyHash,
 		OfflineUsername: payload.OfflineUsername,
+		OnlineUsername:  payload.OnlineUsername,
 		OwnerUsername:   payload.OwnerUsername,
 	})
 	if !freshness.Current {
@@ -1353,6 +1377,7 @@ func (r *setupRunner) globalSetupPayload() (setup.Payload, error) {
 		GlobalPolicy:     policy,
 		Policy:           policy,
 		OfflineUsername:  setupOfflineUser(r.stateRoot),
+		OnlineUsername:   setupOnlineUser(r.stateRoot),
 		OwnerUsername:    currentWindowsUser(),
 	}.Normalize()
 	return payload, nil
@@ -1392,6 +1417,7 @@ func (r *setupRunner) setupPayload(req runnerruntime.Request, kind setup.SetupKi
 		GlobalPolicy:        globalPolicy,
 		Policy:              policy,
 		OfflineUsername:     globalPayload.OfflineUsername,
+		OnlineUsername:      globalPayload.OnlineUsername,
 		OwnerUsername:       globalPayload.OwnerUsername,
 		WorkspaceRoot:       firstNonEmpty(req.Dir, r.cfg.CWD),
 		WorkspaceStatePath:  dirs.WorkspacePath,
@@ -1776,7 +1802,8 @@ func siblingSetupHelper(executable string) string {
 }
 
 func (r *setupRunner) credentialsForRequest(req runnerruntime.Request) (runnerclient.Credentials, error) {
-	if _, err := r.policyForRequest(req); err != nil {
+	policy, err := r.policyForRequest(req)
+	if err != nil {
 		return runnerclient.Credentials{}, err
 	}
 	dirs := setupstate.NewDirs(r.stateRoot)
@@ -1789,6 +1816,12 @@ func (r *setupRunner) credentialsForRequest(req runnerruntime.Request) (runnercl
 		return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: decode sandbox credentials: %w", err)
 	}
 	secret := users.Offline
+	if policy.Network == winpolicy.NetworkOnline {
+		if users.Online == nil {
+			return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: sandbox online credentials are unavailable")
+		}
+		secret = *users.Online
+	}
 	password, err := win32.UnprotectString(secret.PasswordProtected)
 	if err != nil {
 		return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: unprotect sandbox credentials: %w", err)

@@ -82,6 +82,59 @@ func TestRunnerCommandEmitsOutputAndExit(t *testing.T) {
 	}
 }
 
+func TestRunnerCommandNetworkOnlineUsesCurrentTokenWithoutCapabilitySIDs(t *testing.T) {
+	requireRunnerCommandE2E(t)
+	t.Parallel()
+
+	var input bytes.Buffer
+	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
+		Command: "Write-Output online-current-token-ok",
+		Network: "online",
+	})
+	if err != nil {
+		t.Fatalf("NewFrame() error = %v", err)
+	}
+	if err := runnerproto.NewWriter(&input).WriteFrame(spawn); err != nil {
+		t.Fatalf("WriteFrame(spawn) error = %v", err)
+	}
+
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Run(&input, &output, &stderr); code != 0 {
+		t.Fatalf("Run() code = %d stderr=%s", code, stderr.String())
+	}
+	stdout, stderrText, exit := readRunnerOutputForTest(t, &output)
+	if exit.ExitCode != 0 {
+		t.Fatalf("exit = %+v stdout=%q stderr=%q", exit, stdout, stderrText)
+	}
+	if !strings.Contains(stdout, "online-current-token-ok") {
+		t.Fatalf("stdout = %q, want online-current-token-ok", stdout)
+	}
+}
+
+func TestRunnerCommandOfflineRequiresCapabilitySIDs(t *testing.T) {
+	var input bytes.Buffer
+	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
+		Command: "Write-Output should-not-run",
+		Network: "offline",
+	})
+	if err != nil {
+		t.Fatalf("NewFrame() error = %v", err)
+	}
+	if err := runnerproto.NewWriter(&input).WriteFrame(spawn); err != nil {
+		t.Fatalf("WriteFrame(spawn) error = %v", err)
+	}
+
+	var output bytes.Buffer
+	var stderr bytes.Buffer
+	if code := Run(&input, &output, &stderr); code == 0 {
+		t.Fatalf("Run() code = 0, want capability error; stderr=%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "capability SIDs are required") {
+		t.Fatalf("stderr = %q, want capability SID error", stderr.String())
+	}
+}
+
 func TestRunnerCommandUsesUTF8AndReadHostStdin(t *testing.T) {
 	requireRunnerCommandE2E(t)
 	t.Parallel()
@@ -319,6 +372,41 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 	online := strings.Join(env, "\n")
 	if strings.Contains(online, "http://127.0.0.1:9") {
 		t.Fatalf("online env = %q, want no blackhole proxy hardening", online)
+	}
+}
+
+func TestMergeEnvPreservesSandboxBoundaryEnvOverrides(t *testing.T) {
+	sandboxHome := filepath.Join(t.TempDir(), "sandbox-home")
+	sandboxProfile := `C:\Users\CaelisSbxOnTest`
+	sandboxTemp := filepath.Join(t.TempDir(), "sandbox-temp")
+	hostProfile := filepath.Join(t.TempDir(), "host-profile")
+	t.Setenv("CAELIS_SANDBOX_HOME", sandboxHome)
+	t.Setenv("USERPROFILE", sandboxProfile)
+	t.Setenv("TEMP", sandboxTemp)
+	t.Setenv("TMP", sandboxTemp)
+
+	env, err := mergeEnv(map[string]string{
+		"CAELIS_SANDBOX_HOME": filepath.Join(t.TempDir(), "override-home"),
+		"USERPROFILE":         hostProfile,
+		"TEMP":                filepath.Join(t.TempDir(), "override-temp"),
+		"TMP":                 filepath.Join(t.TempDir(), "override-tmp"),
+		"EXTRA":               "1",
+	}, "online", "")
+	if err != nil {
+		t.Fatalf("mergeEnv() error = %v", err)
+	}
+	for key, want := range map[string]string{
+		"CAELIS_SANDBOX_HOME": sandboxHome,
+		"USERPROFILE":         sandboxProfile,
+		"TEMP":                sandboxTemp,
+		"TMP":                 sandboxTemp,
+	} {
+		if got := envValue(env, key); !strings.EqualFold(got, want) {
+			t.Fatalf("%s = %q, want protected sandbox value %q", key, got, want)
+		}
+	}
+	if got := envValue(env, "EXTRA"); got != "1" {
+		t.Fatalf("EXTRA = %q, want caller override preserved", got)
 	}
 }
 

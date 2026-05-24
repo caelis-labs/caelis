@@ -101,7 +101,7 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 	if err := ensureLocalGroup(GroupName); err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring offline sandbox user", Step: 3, Total: totalSteps})
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "ensuring sandbox local users", Step: 3, Total: totalSteps})
 	reusableOfflinePassword, reusableErr := reusableOfflineUserPassword(dirs.UsersPath, payload.OfflineUsername)
 	if reusableErr != nil {
 		reportDebugProgress(payload, progress, "existing offline sandbox credentials will be rotated: "+reusableErr.Error())
@@ -110,15 +110,29 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 	if err != nil {
 		return err
 	}
-	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "updating sandbox group membership", Step: 4, Total: totalSteps})
-	if err := addUserToGroup(payload.OfflineUsername, GroupName); err != nil {
-		return err
+	onlinePassword := ""
+	if strings.TrimSpace(payload.OnlineUsername) != "" {
+		reusableOnlinePassword, reusableErr := reusableOnlineUserPassword(dirs.UsersPath, payload.OnlineUsername)
+		if reusableErr != nil {
+			reportDebugProgress(payload, progress, "existing online sandbox credentials will be rotated: "+reusableErr.Error())
+		}
+		onlinePassword, err = ensureLocalUser(payload.OnlineUsername, reusableOnlinePassword)
+		if err != nil {
+			return err
+		}
 	}
-	if err := removeUserFromGroup(payload.OfflineUsername, "Administrators"); err != nil {
-		return err
+	sandboxUsers := payloadSandboxUsers(payload)
+	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "updating sandbox group membership", Step: 4, Total: totalSteps})
+	for _, username := range sandboxUsers {
+		if err := addUserToGroup(username, GroupName); err != nil {
+			return err
+		}
+		if err := removeUserFromGroup(username, "Administrators"); err != nil {
+			return err
+		}
 	}
 	reportProgress(payload, progress, Progress{Phase: "accounts", Message: "hiding sandbox users from Windows sign-in", Step: 5, Total: totalSteps})
-	hideSandboxUsers(payload.OfflineUsername)
+	hideSandboxUsers(sandboxUsers...)
 	reportProgress(payload, progress, Progress{Phase: "state", Message: "protecting sandbox state directories", Step: 6, Total: totalSteps})
 	if err := protectStateDirectories(dirs, payload.OwnerUsername); err != nil {
 		return err
@@ -127,7 +141,7 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 		reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing global sandbox ACL policy", Step: 7, Total: totalSteps})
 		if err := ApplyMissingPolicyACLsWithOptions(payload.GlobalPolicy, ApplyPolicyACLOptions{
 			StateRoot:                         payload.StateRoot,
-			Users:                             []string{payload.OfflineUsername},
+			Users:                             sandboxUsers,
 			CleanupLegacyAncestorCapabilities: true,
 		}); err != nil {
 			return err
@@ -136,12 +150,12 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing current workspace ACL policy", Step: 8, Total: totalSteps})
 	if err := ApplyMissingPolicyACLsWithOptions(payload.Policy, ApplyPolicyACLOptions{
 		StateRoot:                         payload.StateRoot,
-		Users:                             []string{payload.OfflineUsername},
+		Users:                             sandboxUsers,
 		CleanupLegacyAncestorCapabilities: true,
 	}); err != nil {
 		return err
 	}
-	if err := prepareRunnerEnvironmentDirs(dirs, []string{payload.OfflineUsername}, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
+	if err := prepareRunnerEnvironmentDirs(dirs, sandboxUsers, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
 		return err
 	}
 	if err := writeWorkspaceState(payload); err != nil {
@@ -158,7 +172,7 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 		return err
 	}
 	reportProgress(payload, progress, Progress{Phase: "secrets", Message: "writing sandbox credentials", Step: 10, Total: totalSteps})
-	if err := writeUsersFile(dirs.UsersPath, payload.OfflineUsername, offlinePassword); err != nil {
+	if err := writeUsersFile(dirs.UsersPath, payload.OfflineUsername, offlinePassword, payload.OnlineUsername, onlinePassword); err != nil {
 		return err
 	}
 	reportProgress(payload, progress, Progress{Phase: "marker", Message: "writing setup marker", Step: 11, Total: totalSteps})
@@ -167,6 +181,7 @@ func executeWithProgressLocked(payload Payload, progress ProgressFunc) error {
 		RunnerHash:      payload.RunnerHash,
 		PolicyHash:      payload.GlobalPolicyHash,
 		OfflineUsername: payload.OfflineUsername,
+		OnlineUsername:  payload.OnlineUsername,
 		OwnerUsername:   payload.OwnerUsername,
 	}); err != nil {
 		return err
@@ -383,11 +398,11 @@ func executeRuntimeRefresh(payload Payload, progress ProgressFunc) error {
 	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing request ACL policy", Step: 2, Total: 3})
 	if err := ApplyRuntimePolicyACLsWithOptions(payload.Policy, ApplyPolicyACLOptions{
 		StateRoot: payload.StateRoot,
-		Users:     []string{payload.OfflineUsername},
+		Users:     payloadSandboxUsers(payload),
 	}); err != nil {
 		return err
 	}
-	if err := prepareRunnerEnvironmentDirs(dirs, []string{payload.OfflineUsername}, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
+	if err := prepareRunnerEnvironmentDirs(dirs, payloadSandboxUsers(payload), runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
 		return err
 	}
 	clearDone := runnertrace.Span("windows-setup", "runtime_refresh.clear_error")
@@ -429,12 +444,12 @@ func executeWorkspaceOnly(payload Payload, progress ProgressFunc) error {
 	reportProgress(payload, progress, Progress{Phase: "acl", Message: "refreshing current workspace ACL policy", Step: 2, Total: 3})
 	if err := ApplyMissingPolicyACLsWithOptions(payload.Policy, ApplyPolicyACLOptions{
 		StateRoot:                         payload.StateRoot,
-		Users:                             []string{payload.OfflineUsername},
+		Users:                             payloadSandboxUsers(payload),
 		CleanupLegacyAncestorCapabilities: true,
 	}); err != nil {
 		return err
 	}
-	if err := prepareRunnerEnvironmentDirs(dirs, []string{payload.OfflineUsername}, runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
+	if err := prepareRunnerEnvironmentDirs(dirs, payloadSandboxUsers(payload), runnerEnvironmentCapabilitySIDs(payload.Policy)); err != nil {
 		return err
 	}
 	if err := writeWorkspaceState(payload); err != nil {
@@ -458,6 +473,12 @@ func validateGlobalSetup(payload Payload, dirs setupstate.Dirs) error {
 	}
 	if marker.Version != payload.Version {
 		return fmt.Errorf("windows setup: setup version changed; run full setup")
+	}
+	if strings.TrimSpace(payload.OfflineUsername) != "" && !strings.EqualFold(marker.OfflineUsername, payload.OfflineUsername) {
+		return fmt.Errorf("windows setup: offline sandbox user changed; run full setup")
+	}
+	if strings.TrimSpace(payload.OnlineUsername) != "" && !strings.EqualFold(marker.OnlineUsername, payload.OnlineUsername) {
+		return fmt.Errorf("windows setup: online sandbox user changed; run full setup")
 	}
 	if _, err := os.Stat(dirs.UsersPath); err != nil {
 		if os.IsNotExist(err) {
@@ -527,9 +548,17 @@ func ensureLocalUser(username string, reusablePassword ...string) (string, error
 }
 
 func reusableOfflineUserPassword(path string, username string) (string, error) {
+	return reusableSandboxUserPassword(path, username, "offline")
+}
+
+func reusableOnlineUserPassword(path string, username string) (string, error) {
+	return reusableSandboxUserPassword(path, username, "online")
+}
+
+func reusableSandboxUserPassword(path string, username string, kind string) (string, error) {
 	username = strings.TrimSpace(username)
 	if username == "" {
-		return "", fmt.Errorf("offline sandbox username is required")
+		return "", fmt.Errorf("%s sandbox username is required", kind)
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -539,20 +568,42 @@ func reusableOfflineUserPassword(path string, username string) (string, error) {
 	if err := json.Unmarshal(data, &users); err != nil {
 		return "", fmt.Errorf("decode sandbox users file: %w", err)
 	}
-	if !strings.EqualFold(strings.TrimSpace(users.Offline.Username), username) {
-		return "", fmt.Errorf("sandbox users file does not match expected offline account")
+	secret, ok := users.secret(kind)
+	if !ok {
+		return "", fmt.Errorf("sandbox users file is missing %s account", kind)
 	}
-	password, err := win32.UnprotectString(users.Offline.PasswordProtected)
+	if !strings.EqualFold(strings.TrimSpace(secret.Username), username) {
+		return "", fmt.Errorf("sandbox users file does not match expected %s account", kind)
+	}
+	password, err := win32.UnprotectString(secret.PasswordProtected)
 	if err != nil {
-		return "", fmt.Errorf("unprotect offline sandbox password: %w", err)
+		return "", fmt.Errorf("unprotect %s sandbox password: %w", kind, err)
 	}
 	if err := win32.ValidateCredentials(win32.LogonCredentials{
 		Username: username,
 		Password: password,
 	}); err != nil {
-		return "", fmt.Errorf("validate offline sandbox credentials: %w", err)
+		return "", fmt.Errorf("validate %s sandbox credentials: %w", kind, err)
 	}
 	return password, nil
+}
+
+func (u UsersFile) secret(kind string) (UserSecret, bool) {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "offline":
+		return u.Offline, strings.TrimSpace(u.Offline.Username) != ""
+	case "online":
+		if u.Online == nil {
+			return UserSecret{}, false
+		}
+		return *u.Online, strings.TrimSpace(u.Online.Username) != ""
+	default:
+		return UserSecret{}, false
+	}
+}
+
+func payloadSandboxUsers(payload Payload) []string {
+	return appendPrincipal(payload.OfflineUsername, payload.OnlineUsername)
 }
 
 func addUserToGroup(username string, group string) error {
@@ -860,6 +911,7 @@ func writeWorkspaceState(payload Payload) error {
 		CapabilitySIDs:          append([]string(nil), payload.Policy.CapabilitySIDs...),
 		WriteRootCapabilitySIDs: cloneStringMap(payload.Policy.WriteRootCapabilitySIDs),
 		OfflineUsername:         strings.TrimSpace(payload.OfflineUsername),
+		OnlineUsername:          strings.TrimSpace(payload.OnlineUsername),
 		OwnerUsername:           strings.TrimSpace(payload.OwnerUsername),
 		SetupVersion:            payload.Version,
 	})
@@ -1258,7 +1310,7 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 		})
 	}
 	for _, root := range policy.DenyWritePaths {
-		targets := aclPlan.writeRootCapabilitySIDsForPath(root)
+		targets := joinPrincipals(principals, aclPlan.writeRootCapabilitySIDsForPath(root))
 		if _, shouldMaterialize := materializeDenyWriteKeys[aclPathKey(root)]; shouldMaterialize {
 			if err := os.MkdirAll(root, 0o700); err != nil {
 				return fmt.Errorf("materialize deny-write path %s: %w", root, err)
@@ -1391,6 +1443,7 @@ func startReadACLQueueHelper(payload Payload) error {
 		Kind:            SetupKindReadACLRefresh,
 		StateRoot:       stateRoot,
 		OfflineUsername: payload.OfflineUsername,
+		OnlineUsername:  payload.OnlineUsername,
 		OwnerUsername:   payload.OwnerUsername,
 	}
 	encoded, err := EncodePayload(helperPayload)
@@ -2446,7 +2499,7 @@ func requiredPolicyACLTargetsWithOptions(policy winpolicy.Policy, synchronousOnl
 		if !pathExists(root) {
 			continue
 		}
-		targets := aclPlan.writeRootCapabilitySIDsForPath(root)
+		targets := joinPrincipals(principals, aclPlan.writeRootCapabilitySIDsForPath(root))
 		out = append(out, policyACLTarget{Path: root, Entries: aclEntries(targets, "W", acl.Deny)})
 	}
 	for _, root := range policy.DenyReadPaths {
@@ -2778,14 +2831,22 @@ func aclRights(rights string) acl.Rights {
 	}
 }
 
-func writeUsersFile(path string, offlineUser string, offlinePassword string) error {
+func writeUsersFile(path string, offlineUser string, offlinePassword string, onlineUser string, onlinePassword string) error {
 	offlineProtected, err := win32.ProtectMachineString(offlinePassword, "caelis sandbox offline password")
 	if err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(UsersFile{
+	users := UsersFile{
 		Offline: UserSecret{Username: offlineUser, PasswordProtected: offlineProtected},
-	}, "", "  ")
+	}
+	if strings.TrimSpace(onlineUser) != "" {
+		onlineProtected, err := win32.ProtectMachineString(onlinePassword, "caelis sandbox online password")
+		if err != nil {
+			return err
+		}
+		users.Online = &UserSecret{Username: onlineUser, PasswordProtected: onlineProtected}
+	}
+	data, err := json.MarshalIndent(users, "", "  ")
 	if err != nil {
 		return err
 	}

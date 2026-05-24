@@ -332,10 +332,16 @@ Mapping rules:
 - `PathAccessReadWrite` contributes a write root.
 - `PathAccessHidden` contributes a deny-read path and deny-write path.
 - `ReadOnlySubpaths` under writable roots become deny-write paths.
+- The default sandbox network mode is enabled and uses the online sandbox
+  identity. Users can persistently opt out with
+  `"sandbox": {"network_enabled": false}` in `config.json`, which maps normal
+  sandbox commands back to `NetworkDisabled`.
 - `NetworkDisabled` chooses offline identity; network blocking is enforced by
   Windows Firewall policy instead of proxy environment mutation.
-- `NetworkEnabled` and `NetworkInherit` resolve to the offline identity on
-  Windows; sandbox route does not offer per-command network enablement.
+- `NetworkEnabled` resolves to a separate online sandbox identity. This is a
+  relaxed network sandbox mode: it keeps account/ACL isolation but runs without
+  the restricted child token so system Schannel/SSPI TLS works.
+- `NetworkInherit` resolves to enabled/online on Windows.
 
 Offline network enforcement currently uses persistent Windows Firewall rules
 modeled after the relevant Codex firewall setup shape:
@@ -349,8 +355,10 @@ modeled after the relevant Codex firewall setup shape:
 
 Codex also adds WFP filters for DNS, DNS-over-TLS, SMB, and ICMP as
 defense-in-depth. Caelis can add that later if a target Windows fleet shows
-firewall policy drift, but the first implementation relies on broad
+firewall policy drift, but the disabled-network implementation relies on broad
 per-identity Windows Firewall blocks plus the real external socket E2E below.
+The relaxed `NetworkEnabled` path uses the online sandbox identity described
+above and is covered by the real external socket E2E.
 
 Default read roots on Windows should include only what is required:
 
@@ -483,9 +491,9 @@ sibling command runner from that install directory.
 
 The current E2E covers workspace file write/read, PowerShell command execution,
 execution of real Windows developer tools (`go.exe`, `git.exe`, `npm.cmd`, and
-nested `powershell.exe`) when standard installs are present, default offline
-network environment behavior, a real external TCP probe where the offline
-identity is denied, hidden path denial,
+nested `powershell.exe`) when standard installs are present, default online
+network behavior, explicit offline network selection, a real external TCP probe
+where the offline identity is denied, hidden path denial,
 capability SID restricted-token attachment, explicit setup, and async session
 wait/result. It passed on the local Windows development machine on 2026-05-18
 using a helper built from this worktree.
@@ -693,7 +701,8 @@ The current locally validated subset includes:
 - real developer tool execution with `go.exe`, `git.exe`, `npm.cmd`, and nested
   `powershell.exe` when they are installed in standard Windows locations;
 - capability SID restricted-token attachment on the default non-TTY path;
-- offline network environment selection plus external socket denial;
+- default online network behavior plus explicit offline network selection and
+  external socket denial;
 - hidden path denial through ACL refresh;
 - async session start, wait, and result collection.
 

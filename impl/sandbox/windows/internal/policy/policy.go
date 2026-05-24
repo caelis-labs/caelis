@@ -43,7 +43,7 @@ func Build(input Input) Policy {
 		constraints.Permission = sandbox.PermissionWorkspaceWrite
 	}
 	if constraints.Network == "" || constraints.Network == sandbox.NetworkInherit {
-		constraints.Network = sandbox.NetworkDisabled
+		constraints.Network = sandbox.NetworkEnabled
 	}
 	if constraints.Permission == sandbox.PermissionFullAccess {
 		return Policy{
@@ -132,7 +132,9 @@ func CommonGlobalPolicy(writeRoots []string) Policy {
 }
 
 func networkIdentity(network sandbox.Network) NetworkIdentity {
-	_ = network
+	if network == sandbox.NetworkEnabled {
+		return NetworkOnline
+	}
 	return NetworkOffline
 }
 

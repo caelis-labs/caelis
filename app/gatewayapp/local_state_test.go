@@ -536,10 +536,11 @@ func TestLocalStackPersistsMultipleProviderModelsAcrossRestart(t *testing.T) {
 }
 
 func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
+	root := t.TempDir()
 	stack, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
 		UserID:         "empty-model-test",
-		StoreDir:       t.TempDir(),
+		StoreDir:       root,
 		WorkspaceKey:   t.TempDir(),
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "auto-review",
@@ -550,6 +551,13 @@ func TestNewLocalStackAllowsEmptyInitialModelConfig(t *testing.T) {
 	}
 	if got := stack.DefaultModelAlias(); got != "" {
 		t.Fatalf("DefaultModelAlias() = %q, want empty", got)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "config.json"))
+	if err != nil {
+		t.Fatalf("ReadFile(config.json) error = %v", err)
+	}
+	if !strings.Contains(string(raw), `"network_enabled": true`) {
+		t.Fatalf("config.json = %s, want persisted sandbox network default", raw)
 	}
 }
 

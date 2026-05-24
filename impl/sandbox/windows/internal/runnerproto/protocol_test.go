@@ -18,6 +18,7 @@ func TestFrameRoundTrip(t *testing.T) {
 		ReadRoots:     []string{`C:\Windows`},
 		CapabilitySID: []string{"S-1-5-32-1"},
 		Network:       "offline",
+		FullAccess:    true,
 	})
 	if err != nil {
 		t.Fatalf("NewFrame() error = %v", err)
@@ -41,6 +42,9 @@ func TestFrameRoundTrip(t *testing.T) {
 	}
 	if len(spawn.CapabilitySID) != 1 || spawn.CapabilitySID[0] != "S-1-5-32-1" {
 		t.Fatalf("CapabilitySID = %#v", spawn.CapabilitySID)
+	}
+	if !spawn.FullAccess {
+		t.Fatal("FullAccess = false, want true")
 	}
 }
 

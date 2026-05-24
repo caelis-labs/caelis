@@ -2,9 +2,11 @@ package configstore
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -34,6 +36,7 @@ type SandboxConfig struct {
 	ReadableRoots    []string `json:"readable_roots,omitempty"`
 	WritableRoots    []string `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths []string `json:"read_only_subpaths,omitempty"`
+	NetworkEnabled   *bool    `json:"network_enabled,omitempty"`
 }
 
 type AgentProviderConfig struct {
@@ -127,7 +130,7 @@ func (s *Store) Save(doc AppConfig) error {
 	doc.Models.Configs = dedupeModelConfigsForSave(doc.Models.Configs)
 	doc.Models.Profiles = dedupeModelProfilesForSave(doc.Models.Profiles)
 	doc.Agents = DedupeAgentConfigs(doc.Agents)
-	doc.Sandbox = NormalizeSandboxConfig(doc.Sandbox)
+	doc.Sandbox = DefaultSandboxConfig(doc.Sandbox)
 	dir := filepath.Dir(s.path)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return err
@@ -159,6 +162,7 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 	if ops.CreateTemp == nil {
 		ops.CreateTemp = os.CreateTemp
 	}
+	renameProvided := ops.Rename != nil
 	if ops.Rename == nil {
 		ops.Rename = os.Rename
 	}
@@ -199,6 +203,16 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 		return err
 	}
 	if err := ops.Rename(tmpPath, path); err != nil {
+		if !renameProvided && runtime.GOOS == "windows" {
+			if fallbackErr := writeFileInPlace(path, data, perm, ops.Chmod); fallbackErr == nil {
+				if fsyncErr := ops.FsyncDir(dir); fsyncErr != nil {
+					return fsyncErr
+				}
+				return nil
+			} else {
+				return errors.Join(err, fallbackErr)
+			}
+		}
 		return err
 	}
 	committed = true
@@ -206,6 +220,30 @@ func AtomicWriteFile(path string, data []byte, perm os.FileMode, ops AtomicWrite
 		return err
 	}
 	return ops.FsyncDir(dir)
+}
+
+func writeFileInPlace(path string, data []byte, perm os.FileMode, chmod func(string, os.FileMode) error) error {
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, perm)
+	if err != nil {
+		return err
+	}
+	writeErr := func() error {
+		if _, err := file.Write(data); err != nil {
+			return err
+		}
+		return file.Sync()
+	}()
+	closeErr := file.Close()
+	if writeErr != nil {
+		return writeErr
+	}
+	if closeErr != nil {
+		return closeErr
+	}
+	if chmod != nil {
+		return chmod(path, perm)
+	}
+	return nil
 }
 
 func DedupeAgentConfigs(configs []AgentConfig) []AgentConfig {
@@ -356,7 +394,31 @@ func NormalizeSandboxConfig(cfg SandboxConfig) SandboxConfig {
 	cfg.ReadableRoots = DedupeStrings(cfg.ReadableRoots)
 	cfg.WritableRoots = DedupeStrings(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = DedupeStrings(cfg.ReadOnlySubpaths)
+	if cfg.NetworkEnabled != nil {
+		value := *cfg.NetworkEnabled
+		cfg.NetworkEnabled = &value
+	}
 	return cfg
+}
+
+func DefaultSandboxConfig(cfg SandboxConfig) SandboxConfig {
+	cfg = NormalizeSandboxConfig(cfg)
+	if cfg.NetworkEnabled == nil {
+		cfg.NetworkEnabled = boolPtr(true)
+	}
+	return cfg
+}
+
+func SandboxNetworkEnabled(cfg SandboxConfig) bool {
+	cfg = NormalizeSandboxConfig(cfg)
+	if cfg.NetworkEnabled == nil {
+		return true
+	}
+	return *cfg.NetworkEnabled
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func DedupeStrings(values []string) []string {

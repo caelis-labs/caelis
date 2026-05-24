@@ -157,6 +157,32 @@ func TestSlashCommandCompletionRefreshesBeforeAcceptingStaleCandidates(t *testin
 	}
 }
 
+func TestSlashCommandTabKeepsArrowSelectedCandidateAcrossRefresh(t *testing.T) {
+	model := NewModel(Config{
+		Commands: []string{"agent", "doctor"},
+	})
+	model.setInputText("/")
+	model.syncTextareaFromInput()
+	model.refreshSlashCommands()
+	if got := model.slashCandidates; len(got) != 2 || got[0] != "/agent" || got[1] != "/doctor" {
+		t.Fatalf("slashCandidates = %#v, want /agent then /doctor", got)
+	}
+
+	handled, _ := model.handleSlashCommandKey(keyPress("down"))
+	if !handled {
+		t.Fatal("handleSlashCommandKey(down) = false, want true")
+	}
+	if model.slashIndex != 1 {
+		t.Fatalf("slashIndex after down = %d, want 1", model.slashIndex)
+	}
+
+	_, cmd := model.handleKey(keyPress("tab"))
+	runCompletionCmd(t, model, cmd)
+	if got := string(model.input); got != "/doctor " {
+		t.Fatalf("input after selecting /doctor then <Tab> = %q, want /doctor ", got)
+	}
+}
+
 func TestModelActionPrefixTypingOpensMatchingAliasPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),

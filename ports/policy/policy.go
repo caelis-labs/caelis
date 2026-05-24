@@ -27,6 +27,7 @@ type ModeOptions struct {
 	TempRoot        string   `json:"temp_root,omitempty"`
 	ExtraReadRoots  []string `json:"extra_read_roots,omitempty"`
 	ExtraWriteRoots []string `json:"extra_write_roots,omitempty"`
+	NetworkEnabled  *bool    `json:"network_enabled,omitempty"`
 }
 
 // ToolContext is the stable tool-authorization input consumed by runtime-local
@@ -122,6 +123,10 @@ func CloneModeOptions(in ModeOptions) ModeOptions {
 	out.TempRoot = strings.TrimSpace(in.TempRoot)
 	out.ExtraReadRoots = cloneStringSlice(in.ExtraReadRoots)
 	out.ExtraWriteRoots = cloneStringSlice(in.ExtraWriteRoots)
+	if in.NetworkEnabled != nil {
+		value := *in.NetworkEnabled
+		out.NetworkEnabled = &value
+	}
 	return out
 }
 
