@@ -748,15 +748,26 @@ func hasStandardTerminalContent(content []session.ProtocolToolCallContent) bool 
 }
 
 func terminalContentText(content []session.ProtocolToolCallContent) string {
+	var out strings.Builder
 	for _, item := range content {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
 			continue
 		}
 		if text := protocolTextContent(item.Content); text != "" {
-			return text
+			appendTerminalContentText(&out, text)
 		}
 	}
-	return ""
+	return out.String()
+}
+
+func appendTerminalContentText(out *strings.Builder, text string) {
+	if out == nil || text == "" {
+		return
+	}
+	if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") && !strings.HasPrefix(text, "\n") {
+		out.WriteByte('\n')
+	}
+	out.WriteString(text)
 }
 
 func terminalOutputMetaText(meta map[string]any) string {

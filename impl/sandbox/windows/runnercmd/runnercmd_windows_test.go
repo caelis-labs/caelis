@@ -164,6 +164,77 @@ func TestRunnerCommandCapturesPowerShellErrorStream(t *testing.T) {
 	}
 }
 
+func TestRunnerCommandCapturesUnicodePowerShellErrorStream(t *testing.T) {
+	requireRunnerCommandE2E(t)
+	t.Parallel()
+
+	message := "\u5b57\u7b26\u4e32\u7f3a\u5c11\u7ec8\u6b62\u7b26"
+	var input bytes.Buffer
+	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
+		Command:       "Write-Error '" + message + "'; exit 17",
+		Timeout:       10 * time.Second,
+		CapabilitySID: testCapabilitySIDs(t),
+	})
+	if err != nil {
+		t.Fatalf("NewFrame() error = %v", err)
+	}
+	if err := runnerproto.NewWriter(&input).WriteFrame(spawn); err != nil {
+		t.Fatalf("WriteFrame(spawn) error = %v", err)
+	}
+
+	var output bytes.Buffer
+	var runnerStderr bytes.Buffer
+	if code := Run(&input, &output, &runnerStderr); code != 0 {
+		t.Fatalf("Run() code = %d stderr=%s", code, runnerStderr.String())
+	}
+	_, stderrText, exit := readRunnerOutputForTest(t, &output)
+	if exit.ExitCode != 17 {
+		t.Fatalf("exit = %+v stderr=%q, want exit 17", exit, stderrText)
+	}
+	if !strings.Contains(stderrText, message) {
+		t.Fatalf("stderr = %q, want Unicode PowerShell error %q", stderrText, message)
+	}
+	if strings.Contains(stderrText, "\ufffd") {
+		t.Fatalf("stderr = %q, want no replacement characters", stderrText)
+	}
+}
+
+func TestRunnerCommandPreservesObjectOutputLineBreaks(t *testing.T) {
+	requireRunnerCommandE2E(t)
+	t.Parallel()
+
+	want := []string{"calculator", "demo-caelis.exe", "go.mod", "main.go"}
+	var input bytes.Buffer
+	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
+		Command:       "@('calculator','demo-caelis.exe','go.mod','main.go')",
+		Timeout:       10 * time.Second,
+		CapabilitySID: testCapabilitySIDs(t),
+	})
+	if err != nil {
+		t.Fatalf("NewFrame() error = %v", err)
+	}
+	if err := runnerproto.NewWriter(&input).WriteFrame(spawn); err != nil {
+		t.Fatalf("WriteFrame(spawn) error = %v", err)
+	}
+
+	var output bytes.Buffer
+	var runnerStderr bytes.Buffer
+	if code := Run(&input, &output, &runnerStderr); code != 0 {
+		t.Fatalf("Run() code = %d stderr=%s", code, runnerStderr.String())
+	}
+	stdout, stderrText, exit := readRunnerOutputForTest(t, &output)
+	if exit.ExitCode != 0 {
+		t.Fatalf("exit = %+v stdout=%q stderr=%q", exit, stdout, stderrText)
+	}
+	got := strings.Split(strings.ReplaceAll(strings.TrimSpace(stdout), "\r\n", "\n"), "\n")
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("stdout lines = %#v, want %#v; raw stdout=%q", got, want, stdout)
+	}
+	if strings.Contains(stdout, "calculatordemo-caelis.exego.modmain.go") {
+		t.Fatalf("stdout lost line breaks: %q", stdout)
+	}
+}
+
 func TestMergeEnvNetworkModes(t *testing.T) {
 	hostProfile := filepath.Join(t.TempDir(), "host-profile")
 	hostCache := filepath.Join(t.TempDir(), "host-go-cache")

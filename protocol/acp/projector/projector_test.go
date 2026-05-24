@@ -88,6 +88,43 @@ func TestEventProjectorRemapsBuiltinTerminalContentToDisplayID(t *testing.T) {
 	}
 }
 
+func TestEventProjectorSeparatesMultipleTerminalContentItems(t *testing.T) {
+	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
+		SessionID: "session-1",
+		Type:      session.EventTypeToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: UpdateToolCallInfo,
+			ToolCall: &session.ProtocolToolCall{
+				ID:     "call-1",
+				Name:   "RUN_COMMAND",
+				Status: "completed",
+				Content: []session.ProtocolToolCallContent{
+					{Type: "terminal", TerminalID: "call-1", Content: session.ProtocolTextContent("caelis")},
+					{Type: "terminal", TerminalID: "call-1", Content: session.ProtocolTextContent("codex")},
+					{Type: "terminal", TerminalID: "call-1", Content: session.ProtocolTextContent("demo")},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ProjectEvent() error = %v", err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("ProjectEvent() produced %d updates, want 1", len(updates))
+	}
+	update, ok := updates[0].(ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want ToolCallUpdate", updates[0])
+	}
+	output, ok := update.Meta["terminal_output"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, want terminal_output", update.Meta)
+	}
+	if got := output["data"]; got != "caelis\ncodex\ndemo" {
+		t.Fatalf("terminal_output data = %#v, want separated terminal records", got)
+	}
+}
+
 func TestEventProjectorUsesDurableProtocolUpdateForTerminalToolCall(t *testing.T) {
 	updates, err := (EventProjector{}).ProjectEvent(&session.Event{
 		SessionID: "session-1",

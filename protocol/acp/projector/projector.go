@@ -668,7 +668,7 @@ func terminalOutputMetaFromEventToolContent(content []session.EventToolContent, 
 			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
 		}
 		if item.Text != "" {
-			text.WriteString(item.Text)
+			appendTerminalTextPart(&text, item.Text)
 		}
 	}
 	if terminalID == "" || text.Len() == 0 {
@@ -694,7 +694,7 @@ func terminalOutputMetaFromProtocolContent(content []session.ProtocolToolCallCon
 			terminalID = firstNonEmpty(displayTerminalID, strings.TrimSpace(item.TerminalID))
 		}
 		if part := terminalTextContent(item.Content); part != "" {
-			text.WriteString(part)
+			appendTerminalTextPart(&text, part)
 		}
 	}
 	if terminalID == "" || text.Len() == 0 {
@@ -706,6 +706,16 @@ func terminalOutputMetaFromProtocolContent(content []session.ProtocolToolCallCon
 			"data":        text.String(),
 		},
 	}
+}
+
+func appendTerminalTextPart(dst *strings.Builder, part string) {
+	if dst == nil || part == "" {
+		return
+	}
+	if dst.Len() > 0 && !strings.HasSuffix(dst.String(), "\n") && !strings.HasPrefix(part, "\n") {
+		dst.WriteByte('\n')
+	}
+	dst.WriteString(part)
 }
 
 func terminalTextContent(content any) string {

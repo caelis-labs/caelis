@@ -524,6 +524,8 @@ type session struct {
 	stdoutTotal  int64
 	stderrTotal  int64
 	runnerStderr bytes.Buffer
+	stdoutOutput win32.ConsoleOutputDecoder
+	stderrOutput win32.ConsoleOutputDecoder
 	stdoutText   textstream.UTF8Decoder
 	stderrText   textstream.UTF8Decoder
 	running      bool
@@ -621,9 +623,19 @@ func (s *session) appendOutput(typ string, data []byte) {
 	switch typ {
 	case runnerproto.TypeStderr:
 		stream = "stderr"
+		data = s.stderrOutput.Decode(data)
+		if len(data) == 0 {
+			s.mu.Unlock()
+			return
+		}
 		s.stderr = append(s.stderr, data...)
 		s.stderrTotal += int64(len(data))
 	default:
+		data = s.stdoutOutput.Decode(data)
+		if len(data) == 0 {
+			s.mu.Unlock()
+			return
+		}
 		s.stdout = append(s.stdout, data...)
 		s.stdoutTotal += int64(len(data))
 	}
@@ -643,6 +655,7 @@ func (s *session) appendOutput(typ string, data []byte) {
 }
 
 func (s *session) flushOutputText() {
+	s.flushConsoleOutput()
 	if s.onOutput == nil {
 		return
 	}
@@ -655,6 +668,34 @@ func (s *session) flushOutputText() {
 	}
 	if stderr != "" {
 		s.onOutput(runnerruntime.OutputChunk{Stream: "stderr", Text: stderr})
+	}
+}
+
+func (s *session) flushConsoleOutput() {
+	var stdoutText string
+	var stderrText string
+	s.mu.Lock()
+	if stdout := s.stdoutOutput.Flush(); len(stdout) > 0 {
+		s.stdout = append(s.stdout, stdout...)
+		s.stdoutTotal += int64(len(stdout))
+		stdoutText = s.stdoutText.Decode(stdout)
+	}
+	if stderr := s.stderrOutput.Flush(); len(stderr) > 0 {
+		s.stderr = append(s.stderr, stderr...)
+		s.stderrTotal += int64(len(stderr))
+		stderrText = s.stderrText.Decode(stderr)
+	}
+	if stdoutText != "" || stderrText != "" {
+		s.updatedAt = time.Now()
+	}
+	s.mu.Unlock()
+	if s.onOutput != nil {
+		if stdoutText != "" {
+			s.onOutput(runnerruntime.OutputChunk{Stream: "stdout", Text: stdoutText})
+		}
+		if stderrText != "" {
+			s.onOutput(runnerruntime.OutputChunk{Stream: "stderr", Text: stderrText})
+		}
 	}
 }
 

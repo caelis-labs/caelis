@@ -280,13 +280,19 @@ func (r *runner) runTTY(spawn runnerproto.Spawn) error {
 
 func (r *runner) copyOutput(wg *sync.WaitGroup, typ string, reader io.Reader) {
 	defer wg.Done()
+	var decoder win32.ConsoleOutputDecoder
 	buf := make([]byte, 8192)
 	for {
 		n, err := reader.Read(buf)
 		if n > 0 {
-			_ = r.writeFrame(typ, runnerproto.Bytes{Data: append([]byte(nil), buf[:n]...)})
+			if data := decoder.Decode(buf[:n]); len(data) > 0 {
+				_ = r.writeFrame(typ, runnerproto.Bytes{Data: data})
+			}
 		}
 		if err != nil {
+			if data := decoder.Flush(); len(data) > 0 {
+				_ = r.writeFrame(typ, runnerproto.Bytes{Data: data})
+			}
 			return
 		}
 	}

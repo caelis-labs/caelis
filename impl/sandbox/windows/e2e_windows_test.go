@@ -140,6 +140,24 @@ Get-Content -LiteralPath '.\workspace-write.txt'
 	verifyMissingReadOnlyCarveoutE2E(ctx, t, rt, workspace, readOnlyCarveout)
 	verifyMissingHiddenCarveoutE2E(ctx, t, rt, workspace)
 
+	linebreakNames := []string{"caelis-linebreak-a", "caelis-linebreak-b", "caelis-linebreak-c"}
+	for _, name := range linebreakNames {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(name), 0o600); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+	result, err = runE2ECommand(ctx, rt, workspace, `Get-ChildItem -LiteralPath . -Name -Force | Where-Object { $_ -like 'caelis-linebreak-*' } | Sort-Object`, sandbox.NetworkDisabled, nil)
+	if err != nil {
+		t.Fatalf("Get-ChildItem -Name linebreak command error = %v; result=%+v", err, result)
+	}
+	gotLinebreakNames := nonEmptyE2EOutputLines(result.Stdout)
+	if strings.Join(gotLinebreakNames, "|") != strings.Join(linebreakNames, "|") {
+		t.Fatalf("Get-ChildItem -Name stdout lines = %#v, want %#v; raw stdout=%q stderr=%q", gotLinebreakNames, linebreakNames, result.Stdout, result.Stderr)
+	}
+	if strings.Contains(result.Stdout, strings.Join(linebreakNames, "")) {
+		t.Fatalf("Get-ChildItem -Name stdout lost line breaks: %q", result.Stdout)
+	}
+
 	result, err = runE2ECommand(ctx, rt, workspace, `Write-Output '中文输出正常'`, sandbox.NetworkDisabled, nil)
 	if err != nil {
 		t.Fatalf("unicode command error = %v; result=%+v", err, result)
@@ -725,6 +743,19 @@ func assertHostPathMissingE2E(t *testing.T, path string) {
 
 func escapePowerShellSingleQuote(value string) string {
 	return strings.ReplaceAll(value, "'", "''")
+}
+
+func nonEmptyE2EOutputLines(text string) []string {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	raw := strings.Split(text, "\n")
+	out := make([]string, 0, len(raw))
+	for _, line := range raw {
+		line = strings.TrimSpace(line)
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func runE2EListingCommandWithTimings(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) (sandbox.CommandResult, error) {

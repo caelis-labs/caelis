@@ -97,6 +97,30 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 	}
 }
 
+func TestTerminalToolPanelPreservesLineBreaks(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme}
+	block := NewMainACPTurnBlock("session-1")
+	output := strings.Join([]string{"calculator", "demo-caelis.exe", "go.mod", "main.go"}, "\n")
+
+	block.UpdateTool("command-1", "RUN_COMMAND", "Get-ChildItem -Name", output, true, false)
+
+	rows := block.Render(ctx)
+	plain := renderedPlainRows(rows)
+	joined := strings.Join(plain, "\n")
+	if strings.Contains(joined, "calculatordemo-caelis.exego.modmain.go") {
+		t.Fatalf("terminal panel collapsed line breaks, got\n%s", joined)
+	}
+	for _, name := range []string{"calculator", "demo-caelis.exe", "go.mod", "main.go"} {
+		if indexOfRowContaining(plain, name) < 0 {
+			t.Fatalf("terminal panel missing %q in rows %#v", name, plain)
+		}
+	}
+	if indexOfRowContaining(plain, "calculator") == indexOfRowContaining(plain, "demo-caelis.exe") {
+		t.Fatalf("terminal panel rendered separate filenames on the same row: %#v", plain)
+	}
+}
+
 func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}

@@ -1153,6 +1153,31 @@ func TestProjectGatewayEventToolResultDiscardsUnsupportedACPContent(t *testing.T
 	}
 }
 
+func TestProjectGatewayEventToolResultSeparatesTerminalContentItems(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:   "command-lines",
+			ToolName: "RUN_COMMAND",
+			Status:   kernel.ToolStatusCompleted,
+			RawInput: map[string]any{"command": "Get-ChildItem -Name"},
+			Content: []session.ProtocolToolCallContent{
+				{Type: "terminal", TerminalID: "command-lines", Content: session.ProtocolTextContent("caelis")},
+				{Type: "terminal", TerminalID: "command-lines", Content: session.ProtocolTextContent("codex")},
+				{Type: "terminal", TerminalID: "command-lines", Content: session.ProtocolTextContent("demo")},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "caelis\ncodex\ndemo" {
+		t.Fatalf("ToolOutput = %q, want terminal content items separated by newlines", got)
+	}
+}
+
 func snapshotTranscriptModel(m *Model) string {
 	lines := make([]string, 0, len(m.doc.Blocks())*2)
 	for _, block := range m.doc.Blocks() {
