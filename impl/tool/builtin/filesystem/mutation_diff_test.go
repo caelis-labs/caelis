@@ -110,10 +110,15 @@ func TestPatchToolAddsStructuredDiffHunksOnlyToMeta(t *testing.T) {
 		t.Fatalf("NewPatch() error = %v", err)
 	}
 	input, err := json.Marshal(map[string]any{
-		"path":        "repo.go",
-		"old":         "entity.GMLicense",
-		"new":         "entity.GmLicense",
-		"replace_all": true,
+		"path": "repo.go",
+		"edits": []map[string]any{
+			{
+				"old":                   "entity.GMLicense",
+				"new":                   "entity.GmLicense",
+				"replace_all":           true,
+				"expected_replacements": 2,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatalf("Marshal() error = %v", err)

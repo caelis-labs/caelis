@@ -25,24 +25,36 @@ func NewPatch(runtime sandbox.Runtime) (*PatchTool, error) {
 func (t *PatchTool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        PatchToolName,
-		Description: "Replace exact text in one file.",
+		Description: "Apply exact text replacements in one file.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"path":        map[string]any{"type": "string", "description": "Target file."},
-				"old":         map[string]any{"type": "string", "description": "Exact text to replace."},
-				"new":         map[string]any{"type": "string", "description": "Replacement text."},
-				"replace_all": map[string]any{"type": "boolean", "description": "Replace all matches."},
-				"expected_replacements": map[string]any{
-					"type":        "integer",
-					"description": "Required replacement count.",
+				"path": map[string]any{"type": "string", "description": "Target file."},
+				"edits": map[string]any{
+					"type":        "array",
+					"description": "Exact replacements to apply atomically.",
+					"minItems":    1,
+					"items": map[string]any{
+						"type": "object",
+						"properties": map[string]any{
+							"old":         map[string]any{"type": "string", "description": "Exact text to replace."},
+							"new":         map[string]any{"type": "string", "description": "Replacement text."},
+							"replace_all": map[string]any{"type": "boolean", "description": "Replace all matches."},
+							"expected_replacements": map[string]any{
+								"type":        "integer",
+								"description": "Required replacement count. Required when replace_all is true.",
+							},
+						},
+						"required":             []string{"old", "new"},
+						"additionalProperties": false,
+					},
 				},
 				"if_revision": map[string]any{
 					"type":        "string",
 					"description": "Revision guard from READ.",
 				},
 			},
-			"required":             []string{"path", "old", "new"},
+			"required":             []string{"path", "edits"},
 			"additionalProperties": false,
 		},
 	}
@@ -68,6 +80,7 @@ func (t *PatchTool) Call(ctx context.Context, call tool.Call) (tool.Result, erro
 	payload := map[string]any{
 		"path":         plan.path,
 		"replacements": plan.replaced,
+		"edit_count":   plan.editCount,
 		"changed":      plan.before != plan.after || plan.created,
 		"summary":      mutationSummary(plan.created, diffStats.Added, diffStats.Removed),
 	}

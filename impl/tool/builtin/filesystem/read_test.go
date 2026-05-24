@@ -58,11 +58,15 @@ func TestReadToolDoesNotScanOversizedTailPastLimit(t *testing.T) {
 		t.Fatalf("NewPatch() error = %v", err)
 	}
 	patchInput, err := json.Marshal(map[string]any{
-		"path":                  "generated.txt",
-		"old":                   "first",
-		"new":                   "updated",
-		"if_revision":           payload["revision"],
-		"expected_replacements": 1,
+		"path": "generated.txt",
+		"edits": []map[string]any{
+			{
+				"old":                   "first",
+				"new":                   "updated",
+				"expected_replacements": 1,
+			},
+		},
+		"if_revision": payload["revision"],
 	})
 	if err != nil {
 		t.Fatalf("Marshal(patch) error = %v", err)

@@ -3,7 +3,6 @@ package argparse
 import (
 	"fmt"
 	"math"
-	"strings"
 )
 
 // Bool reads one boolean arg by key.
@@ -32,7 +31,6 @@ func String(args map[string]any, key string, required bool) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("tool: arg %q must be string", key)
 	}
-	value = strings.TrimSpace(value)
 	if required && value == "" {
 		return "", fmt.Errorf("tool: arg %q must be non-empty", key)
 	}

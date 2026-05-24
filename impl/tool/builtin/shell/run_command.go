@@ -93,7 +93,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if err != nil {
 		return tool.Result{}, err
 	}
-	if strings.TrimSpace(workingDir) == "" && t.runtime != nil && t.runtime.FileSystem() != nil {
+	if workingDir == "" && t.runtime != nil && t.runtime.FileSystem() != nil {
 		workingDir, _ = t.runtime.FileSystem().Getwd()
 	}
 	if _, err := argparse.Int(args, "yield_time_ms", 0); err != nil {

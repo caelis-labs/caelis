@@ -9,16 +9,17 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeNotFound           ErrorCode = "not_found"
-	ErrorCodePermissionDenied   ErrorCode = "permission_denied"
-	ErrorCodeSandboxDenied      ErrorCode = "sandbox_denied"
-	ErrorCodeSandboxUnavailable ErrorCode = "sandbox_unavailable"
-	ErrorCodeOldTextNotFound    ErrorCode = "old_text_not_found"
-	ErrorCodeTooManyMatches     ErrorCode = "too_many_matches"
-	ErrorCodeStaleRevision      ErrorCode = "stale_revision"
-	ErrorCodeTimeout            ErrorCode = "timeout"
-	ErrorCodeOutputTruncated    ErrorCode = "output_truncated"
-	ErrorCodeInvalidInput       ErrorCode = "invalid_input"
+	ErrorCodeNotFound             ErrorCode = "not_found"
+	ErrorCodePermissionDenied     ErrorCode = "permission_denied"
+	ErrorCodeSandboxDenied        ErrorCode = "sandbox_denied"
+	ErrorCodeSandboxUnavailable   ErrorCode = "sandbox_unavailable"
+	ErrorCodeOldTextNotFound      ErrorCode = "old_text_not_found"
+	ErrorCodeTooManyMatches       ErrorCode = "too_many_matches"
+	ErrorCodeUnexpectedMatchCount ErrorCode = "unexpected_match_count"
+	ErrorCodeStaleRevision        ErrorCode = "stale_revision"
+	ErrorCodeTimeout              ErrorCode = "timeout"
+	ErrorCodeOutputTruncated      ErrorCode = "output_truncated"
+	ErrorCodeInvalidInput         ErrorCode = "invalid_input"
 )
 
 type ToolError struct {

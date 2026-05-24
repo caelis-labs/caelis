@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"hash"
 	"os"
-	"strings"
 
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -39,12 +38,10 @@ func statRevision(info os.FileInfo) string {
 }
 
 func isStatRevision(revision string) bool {
-	return strings.HasPrefix(strings.TrimSpace(strings.ToLower(revision)), "stat:")
+	return len(revision) >= len("stat:") && revision[:len("stat:")] == "stat:"
 }
 
 func revisionsMatch(expected string, actual string) bool {
-	expected = strings.TrimSpace(strings.ToLower(expected))
-	actual = strings.TrimSpace(strings.ToLower(actual))
 	if expected == "" {
 		return true
 	}
@@ -52,12 +49,11 @@ func revisionsMatch(expected string, actual string) bool {
 }
 
 func revisionsMatchFile(expected string, actualContent string, info os.FileInfo) bool {
-	expected = strings.TrimSpace(strings.ToLower(expected))
 	if expected == "" {
 		return true
 	}
 	if isStatRevision(expected) {
-		return expected == strings.TrimSpace(strings.ToLower(statRevision(info)))
+		return expected == statRevision(info)
 	}
 	return revisionsMatch(expected, textRevision(actualContent))
 }

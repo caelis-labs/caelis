@@ -61,7 +61,6 @@ func normalizePathWithFS(fsys sandbox.FileSystem, value string) (string, error) 
 	if fsys == nil {
 		return "", fmt.Errorf("tool: filesystem is required")
 	}
-	value = strings.TrimSpace(value)
 	if value == "" {
 		return "", fmt.Errorf("tool: empty path")
 	}
@@ -101,7 +100,7 @@ func parseStringSliceArg(args map[string]any, key string) ([]string, error) {
 	case []string:
 		out := make([]string, 0, len(typed))
 		for _, item := range typed {
-			if item = strings.TrimSpace(item); item != "" {
+			if item != "" {
 				out = append(out, item)
 			}
 		}
@@ -113,7 +112,7 @@ func parseStringSliceArg(args map[string]any, key string) ([]string, error) {
 			if !ok {
 				return nil, fmt.Errorf("tool: arg %q must be an array of strings", key)
 			}
-			if text = strings.TrimSpace(text); text != "" {
+			if text != "" {
 				out = append(out, text)
 			}
 		}
