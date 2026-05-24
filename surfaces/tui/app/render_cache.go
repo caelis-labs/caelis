@@ -469,21 +469,46 @@ func (m *Model) renderStreamViewportLines(ctx BlockRenderContext) ([]string, []s
 		var plainParts []string
 		switch style {
 		case tuikit.LineStyleReasoning:
-			wrappedStyled = hardWrapDisplayLine(tuikit.ColorizeLogLine(sl, style, m.theme), wrapWidth)
-			plainParts = normalizeWrappedPlainSegments(graphemeHardWrap(sl, wrapWidth))
-		case tuikit.LineStyleAssistant:
-			segments := graphemeWordWrap(sl, wrapWidth)
-			if len(segments) == 0 {
+			rows := RenderTextWithContext(ctx, TextRenderRequest{
+				Kind:           TextReasoning,
+				Mode:           RenderPlain,
+				MarkdownPolicy: MarkdownNone,
+				Raw:            sl,
+				Width:          wrapWidth,
+				LineStyle:      style,
+			}).Rows
+			if len(rows) == 0 {
 				wrappedStyled = ""
 				plainParts = []string{""}
 			} else {
-				baseStyle := narrativeBodyStyle(style, m.theme)
-				styledSegs := make([]string, len(segments))
-				for j, seg := range segments {
-					styledSegs[j] = m.renderInlineMarkdown(seg, baseStyle)
+				styledParts := make([]string, 0, len(rows))
+				plainParts = make([]string, 0, len(rows))
+				for _, row := range rows {
+					styledParts = append(styledParts, row.Styled)
+					plainParts = append(plainParts, row.Plain)
 				}
-				wrappedStyled = strings.Join(styledSegs, "\n")
-				plainParts = normalizeWrappedPlainSegments(segments)
+				wrappedStyled = strings.Join(styledParts, "\n")
+			}
+		case tuikit.LineStyleAssistant:
+			rows := RenderTextWithContext(ctx, TextRenderRequest{
+				Kind:           TextAssistant,
+				Mode:           RenderInlineOnly,
+				MarkdownPolicy: MarkdownInline,
+				Raw:            sl,
+				Width:          wrapWidth,
+				LineStyle:      style,
+			}).Rows
+			if len(rows) == 0 {
+				wrappedStyled = ""
+				plainParts = []string{""}
+			} else {
+				styledParts := make([]string, 0, len(rows))
+				plainParts = make([]string, 0, len(rows))
+				for _, row := range rows {
+					styledParts = append(styledParts, row.Styled)
+					plainParts = append(plainParts, row.Plain)
+				}
+				wrappedStyled = strings.Join(styledParts, "\n")
 			}
 		default:
 			colored := tuikit.ColorizeLogLine(sl, style, m.theme)

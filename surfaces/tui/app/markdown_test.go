@@ -1,8 +1,11 @@
 package tuiapp
 
 import (
+	"fmt"
+	"image/color"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
@@ -44,6 +47,61 @@ func TestGlamourNarrativeRendererCacheUsesFullThemeKey(t *testing.T) {
 	if ansi.Strip(darkRendered) != ansi.Strip(lightRendered) {
 		t.Fatalf("theme should not change rendered markdown text\n dark=%q\nlight=%q", ansi.Strip(darkRendered), ansi.Strip(lightRendered))
 	}
+}
+
+func TestNarrativeInlineCodeStyleScopesAfterCJKText(t *testing.T) {
+	raw := "- **事实优先**：比起猜测，我更倾向于读取仓库中的真实代码。在编辑之前先读或搜索，用 `shell` 验证结果。"
+	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
+	inlineBG := sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())
+
+	t.Run("glamour finalized", func(t *testing.T) {
+		rendered := glamourRenderNarrative(raw, 180, theme, tuikit.LineStyleAssistant)
+		assertInlineCodeBackgroundScope(t, rendered, inlineBG, "shell")
+	})
+
+	t.Run("streaming tail", func(t *testing.T) {
+		rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 180, theme)
+		assertInlineCodeBackgroundScope(t, joinRenderedStyled(rows), inlineBG, "shell")
+	})
+
+	t.Run("main transcript active stream", func(t *testing.T) {
+		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+		m.viewport.SetWidth(180)
+		m.viewport.SetHeight(20)
+		_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
+			Kind:          TranscriptEventNarrative,
+			NarrativeKind: TranscriptNarrativeAssistant,
+			Scope:         ACPProjectionMain,
+			ScopeID:       "session-1",
+			Actor:         "assistant",
+			Text:          raw,
+			Final:         false,
+		}}})
+		m.syncViewportContent()
+		assertInlineCodeBackgroundScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()), "shell")
+	})
+
+	t.Run("legacy stream line", func(t *testing.T) {
+		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+		m.viewport.SetWidth(180)
+		m.viewport.SetHeight(20)
+		m.streamLine = raw
+		m.lastCommittedStyle = tuikit.LineStyleAssistant
+		ctx := m.blockRenderContext(180)
+		styled, _, _ := m.renderStreamViewportLines(ctx)
+		assertInlineCodeBackgroundScope(t, strings.Join(styled, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()), "shell")
+	})
+
+	t.Run("legacy stream line wrapped inline code", func(t *testing.T) {
+		m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+		m.viewport.SetWidth(24)
+		m.viewport.SetHeight(20)
+		m.streamLine = "前缀前缀前缀前缀前缀前缀，用 `shell command` 验证结果。"
+		m.lastCommittedStyle = tuikit.LineStyleAssistant
+		ctx := m.blockRenderContext(24)
+		styled, _, _ := m.renderStreamViewportLines(ctx)
+		assertInlineCodeBackgroundScope(t, strings.Join(styled, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()), "shell command")
+	})
 }
 
 func TestGlamourNarrativeRendererCacheKeepsRecentKeys(t *testing.T) {
@@ -303,4 +361,72 @@ func firstStyledRowContaining(rows []RenderedRow, needle string) string {
 		}
 	}
 	return ""
+}
+
+func sgrBackgroundCode(t *testing.T, c color.Color) string {
+	t.Helper()
+	if c == nil {
+		t.Fatal("expected inline code style to have a background color")
+	}
+	r, g, b, _ := c.RGBA()
+	return fmt.Sprintf("48;2;%d;%d;%d", r>>8, g>>8, b>>8)
+}
+
+func assertInlineCodeBackgroundScope(t *testing.T, styled, inlineBG, want string) {
+	t.Helper()
+	plain := ansi.Strip(styled)
+	bgText := textWithSGRBackground(styled, inlineBG)
+	if !strings.Contains(plain, want) {
+		t.Fatalf("rendered text missing %q\nplain=%q\nstyled=%q", want, plain, styled)
+	}
+	if normalizeInlineStyleText(bgText) != want {
+		t.Fatalf("inline code background covered %q, want only %q\nplain=%q\nstyled=%q", bgText, want, plain, styled)
+	}
+}
+
+func normalizeInlineStyleText(text string) string {
+	return strings.Join(strings.Fields(text), " ")
+}
+
+func textWithSGRBackground(styled, inlineBG string) string {
+	var out strings.Builder
+	active := false
+	for i := 0; i < len(styled); {
+		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
+			end := i + 2
+			for end < len(styled) && styled[end] != 'm' {
+				end++
+			}
+			if end < len(styled) {
+				params := styled[i+2 : end]
+				if resetsSGRBackground(params) {
+					active = false
+				}
+				if strings.Contains(params, inlineBG) {
+					active = true
+				}
+				i = end + 1
+				continue
+			}
+		}
+		r, size := utf8.DecodeRuneInString(styled[i:])
+		if active {
+			out.WriteRune(r)
+		}
+		i += size
+	}
+	return out.String()
+}
+
+func resetsSGRBackground(params string) bool {
+	if params == "" {
+		return true
+	}
+	for _, part := range strings.Split(params, ";") {
+		switch part {
+		case "0", "49":
+			return true
+		}
+	}
+	return false
 }

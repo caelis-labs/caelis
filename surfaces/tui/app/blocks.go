@@ -63,7 +63,15 @@ func NewUserNarrativeBlock(text string) *UserNarrativeBlock {
 func (b *UserNarrativeBlock) BlockID() string { return b.id }
 func (b *UserNarrativeBlock) Kind() BlockKind { return BlockTranscript }
 func (b *UserNarrativeBlock) Render(ctx BlockRenderContext) []RenderedRow {
-	return renderPlainUserRows(b.id, b.Raw, "▌ ", ctx.Width, ctx.Theme)
+	return RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           TextUser,
+		Mode:           RenderPlain,
+		MarkdownPolicy: MarkdownNone,
+		Raw:            b.Raw,
+		Prefix:         "▌ ",
+		BlockID:        b.id,
+		LineStyle:      tuikit.LineStyleUser,
+	}).Rows
 }
 
 type narrativeBlockRenderCache struct {
@@ -75,13 +83,29 @@ type narrativeBlockRenderCache struct {
 	rows       []RenderedRow
 }
 
-func (c *narrativeBlockRenderCache) renderNarrativeRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, ctx BlockRenderContext, streaming bool) []RenderedRow {
+func (c *narrativeBlockRenderCache) renderTextRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, ctx BlockRenderContext, streaming bool) []RenderedRow {
 	themeKey := ctx.renderThemeKey()
 	if cached := c.cachedRows(raw, rolePrefix, ctx.Width, themeKey, streaming); cached != nil {
 		return cached
 	}
-	ctx.observeGlamourRender()
-	rows := renderNarrativeRows(blockID, raw, rolePrefix, lineStyle, ctx.Width, ctx.Theme, streaming)
+	mode := RenderFinal
+	policy := MarkdownFull
+	if streaming {
+		mode = RenderStream
+		policy = MarkdownStableTail
+	}
+	if lineStyle == tuikit.LineStyleReasoning {
+		policy = MarkdownNone
+	}
+	rows := RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           textKindForLineStyle(lineStyle),
+		Mode:           mode,
+		MarkdownPolicy: policy,
+		Raw:            raw,
+		Prefix:         rolePrefix,
+		BlockID:        blockID,
+		LineStyle:      lineStyle,
+	}).Rows
 	c.width = ctx.Width
 	c.themeKey = themeKey
 	c.raw = raw
@@ -133,7 +157,7 @@ func (b *AssistantBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
 		return b.activeBuffer.RenderRows(b.id, rolePrefix, tuikit.LineStyleAssistant, ctx)
 	}
-	return b.renderCache.renderNarrativeRows(
+	return b.renderCache.renderTextRows(
 		b.id,
 		b.Raw,
 		rolePrefix,
@@ -181,7 +205,7 @@ func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	if b.Streaming && b.activeBuffer != nil && !b.activeBuffer.Empty() {
 		return b.activeBuffer.RenderRows(b.id, prefix, tuikit.LineStyleReasoning, ctx)
 	}
-	return b.renderCache.renderNarrativeRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx, b.Streaming)
+	return b.renderCache.renderTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx, b.Streaming)
 }
 
 // renderNarrativeFallbackRows preserves multi-line structure when glamour
@@ -208,26 +232,8 @@ func renderNarrativeFallbackRows(blockID, raw, rolePrefix, continuationPrefix st
 	return rows
 }
 
-func renderNarrativeRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, width int, theme tuikit.Theme, streaming bool) []RenderedRow {
-	if lineStyle == tuikit.LineStyleReasoning {
-		return renderPlainReasoningRows(blockID, raw, rolePrefix, width, theme)
-	}
-	if rows := renderNarrativeGlamourRows(blockID, raw, rolePrefix, lineStyle, width, theme, streaming); len(rows) > 0 {
-		return rows
-	}
-	_, continuationPrefix := narrativeLinePrefixes(lineStyle)
-	return renderNarrativeFallbackRows(blockID, raw, rolePrefix, continuationPrefix, lineStyle, theme)
-}
-
-func renderNarrativeGlamourRows(blockID, raw, rolePrefix string, lineStyle tuikit.LineStyle, width int, theme tuikit.Theme, streaming bool) []RenderedRow {
-	if streaming {
-		return glamourStreamingNarrativeRows(blockID, raw, rolePrefix, lineStyle, width, theme)
-	}
-	return glamourNarrativeRows(blockID, raw, rolePrefix, lineStyle, width, theme)
-}
-
 // ---------------------------------------------------------------------------
-// MainACPTurnBlock — root ACP-controlled turn in the main transcript.
+// MainACPTurnBlock – root ACP-controlled turn in the main transcript.
 // ---------------------------------------------------------------------------
 
 type MainACPTurnBlock struct {

@@ -157,6 +157,42 @@ func BenchmarkAssistantActiveBufferLongStream(b *testing.B) {
 	}
 }
 
+func BenchmarkAssistantStablePrefixTailMarkdownStream(b *testing.B) {
+	m := newPerfTestModel()
+	seedLongTranscript(m, 2000)
+	_, _ = m.handleStreamBlock("answer", "assistant", stablePrefixTailBenchmarkInitialText(), false)
+	_, _ = m.Update(perfTickAt(frameTickViewportSync, time.Now()))
+
+	if got := m.diag.GlamourRenderCalls; got != 1 {
+		b.Fatalf("stable prefix Glamour renders = %d, want 1", got)
+	}
+	beforeGlamour := m.diag.GlamourRenderCalls
+	beforeTranscriptRenders := m.diag.BlockRenderCallsByKind[BlockTranscript]
+	beforeFullSyncs := m.diag.ViewportFullSyncs
+	beforeIncrementalSyncs := m.diag.ViewportIncrementalSyncs
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = m.handleStreamBlock("answer", "assistant", " tail-token", false)
+		_, _ = m.Update(perfTickAt(frameTickViewportSync, time.Now()))
+	}
+	b.StopTimer()
+
+	if m.diag.GlamourRenderCalls != beforeGlamour {
+		b.Fatalf("tail chunks re-rendered stable prefix with Glamour: got %d, want %d", m.diag.GlamourRenderCalls, beforeGlamour)
+	}
+	if m.diag.BlockRenderCallsByKind[BlockTranscript] != beforeTranscriptRenders {
+		b.Fatalf("tail chunks re-rendered completed transcript blocks: got %d, want %d", m.diag.BlockRenderCallsByKind[BlockTranscript], beforeTranscriptRenders)
+	}
+	if m.diag.ViewportFullSyncs != beforeFullSyncs {
+		b.Fatalf("tail chunks used full viewport syncs: got %d, want %d", m.diag.ViewportFullSyncs, beforeFullSyncs)
+	}
+	if m.diag.ViewportIncrementalSyncs == beforeIncrementalSyncs {
+		b.Fatal("tail chunks did not use incremental viewport sync")
+	}
+}
+
 func BenchmarkToolOutputStream10kChunks(b *testing.B) {
 	m := newPerfTestModel()
 	block := m.ensureMainACPTurnBlock("session-1")
@@ -262,6 +298,23 @@ func seedLongTranscript(m *Model, lines int) {
 		m.doc.Append(NewTranscriptBlock(fmt.Sprintf("* history-%04d with enough text to wrap occasionally", i), tuikit.LineStyleAssistant))
 	}
 	m.syncViewportContent()
+}
+
+func stablePrefixTailBenchmarkInitialText() string {
+	stableIntro := strings.Repeat("Stable intro paragraph for markdown promotion. ", 5)
+	stableList := strings.Join([]string{
+		"- first completed list item with enough text to render through Glamour",
+		"- second completed list item with enough text to render through Glamour",
+	}, "\n")
+	stableCode := strings.Join([]string{
+		"```go",
+		"func stablePrefixTailBenchmark() string {",
+		"    return \"stable\"",
+		"}",
+		"```",
+	}, "\n")
+	tail := strings.Repeat("Unstable tail text remains lightweight and should not promote during appends. ", 3)
+	return strings.Join([]string{stableIntro, "", stableList, "", stableCode, "", tail}, "\n")
 }
 
 func perfTickAt(kind frameTickKind, at time.Time) tea.Msg {

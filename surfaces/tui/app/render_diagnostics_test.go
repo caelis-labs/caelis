@@ -91,6 +91,7 @@ func TestRenderDiagnosticsCountsMarkdownGlamourAndStatusCallbacks(t *testing.T) 
 
 	block := NewAssistantBlock("assistant")
 	block.Raw = "**bold** answer"
+	block.Streaming = false
 	m.doc.Append(block)
 	m.markViewportStructureDirty()
 	m.syncViewportContent()

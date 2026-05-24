@@ -76,7 +76,7 @@ func (b *activeNarrativeBuffer) RenderRows(blockID, rolePrefix string, roleStyle
 		return b.cachedRows
 	}
 
-	rows := b.renderRows(blockID, rolePrefix, roleStyle, width, ctx.Theme)
+	rows := b.renderRows(blockID, rolePrefix, roleStyle, width, ctx)
 	b.cachedVersion = b.version
 	b.cachedWidth = width
 	b.cachedThemeKey = themeKey
@@ -86,41 +86,40 @@ func (b *activeNarrativeBuffer) RenderRows(blockID, rolePrefix string, roleStyle
 	return rows
 }
 
-func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
+func (b *activeNarrativeBuffer) renderRows(blockID, rolePrefix string, roleStyle tuikit.LineStyle, width int, ctx BlockRenderContext) []RenderedRow {
 	raw := b.Text()
+	kind := TextAssistant
+	policy := MarkdownStableTail
 	if roleStyle == tuikit.LineStyleReasoning {
-		return renderPlainReasoningRows(blockID, raw, rolePrefix, width, theme)
+		kind = TextReasoning
+		policy = MarkdownNone
 	}
-	if strings.TrimSpace(b.stablePrefixRaw) == "" {
-		return renderActiveNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, width, theme)
-	}
-	prefixRows := cachedStreamingNarrativePrefixRows(blockID, b.stablePrefixRaw, rolePrefix, roleStyle, width, theme)
-	if len(prefixRows) == 0 {
-		return glamourStreamingNarrativeRows(blockID, raw, rolePrefix, roleStyle, width, theme)
-	}
-	prefixWidth := maxInt(graphemeWidth(rolePrefix), 0)
-	tailWidth := maxInt(1, width-prefixWidth)
-	tailRows := renderStreamingNarrativeTailRows(blockID, b.tailRaw, "", roleStyle, tailWidth, theme)
-	if len(tailRows) == 0 {
-		return prefixRows
-	}
-	separatorRows := 0
-	if hasStreamingParagraphBoundary(b.stablePrefixRaw) {
-		separatorRows = 1
-	}
-	rows := make([]RenderedRow, 0, len(prefixRows)+separatorRows+len(tailRows))
-	rows = append(rows, prefixRows...)
-	if separatorRows > 0 {
-		separator := strings.Repeat(" ", tailWidth)
-		rows = append(rows, RenderedRow{Styled: separator, Plain: separator, BlockID: blockID, PreWrapped: true})
-	}
-	rows = append(rows, tailRows...)
-	return rows
+	return RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:            kind,
+		Mode:            RenderStream,
+		MarkdownPolicy:  policy,
+		Raw:             raw,
+		Prefix:          rolePrefix,
+		Width:           width,
+		BlockID:         blockID,
+		LineStyle:       roleStyle,
+		StablePrefixRaw: b.stablePrefixRaw,
+		TailRaw:         b.tailRaw,
+	}).Rows
 }
 
 func renderActiveNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme) []RenderedRow {
-	prefixWidth := maxInt(graphemeWidth(rolePrefix), 0)
-	return renderStreamingNarrativeTailRows(blockID, raw, rolePrefix, roleStyle, maxInt(1, width-prefixWidth), theme)
+	return RenderText(TextRenderRequest{
+		Kind:           textKindForLineStyle(roleStyle),
+		Mode:           RenderStream,
+		MarkdownPolicy: MarkdownStableTail,
+		Raw:            raw,
+		Prefix:         rolePrefix,
+		Width:          width,
+		BlockID:        blockID,
+		Theme:          theme,
+		LineStyle:      roleStyle,
+	}).Rows
 }
 
 func (b *AssistantBlock) appendActiveDelta(text string) {

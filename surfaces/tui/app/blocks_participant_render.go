@@ -56,7 +56,25 @@ func participantNarrativeEventActive(events []SubagentEvent, idx int, status str
 
 func renderParticipantTurnNarrativeRows(blockID string, raw string, lineStyle tuikit.LineStyle, width int, ctx BlockRenderContext, active bool) []RenderedRow {
 	rolePrefix, _ := narrativeLinePrefixes(lineStyle)
-	return renderNarrativeRows(blockID, raw, rolePrefix, lineStyle, width, ctx.Theme, active)
+	mode := RenderFinal
+	policy := MarkdownFull
+	if active {
+		mode = RenderStream
+		policy = MarkdownStableTail
+	}
+	if lineStyle == tuikit.LineStyleReasoning {
+		policy = MarkdownNone
+	}
+	return RenderTextWithContext(ctx, TextRenderRequest{
+		Kind:           textKindForLineStyle(lineStyle),
+		Mode:           mode,
+		MarkdownPolicy: policy,
+		Raw:            raw,
+		Prefix:         rolePrefix,
+		Width:          width,
+		BlockID:        blockID,
+		LineStyle:      lineStyle,
+	}).Rows
 }
 
 func renderParticipantTurnToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {
