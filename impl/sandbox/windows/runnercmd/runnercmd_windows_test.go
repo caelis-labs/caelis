@@ -243,6 +243,9 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 	t.Setenv("GOMODCACHE", filepath.Join(t.TempDir(), "host-go-mod-cache"))
 	t.Setenv("npm_config_cache", filepath.Join(t.TempDir(), "host-npm-cache"))
 	t.Setenv("YARN_CACHE_FOLDER", filepath.Join(t.TempDir(), "host-yarn-cache"))
+	for _, key := range []string{"CAELIS_SANDBOX_NETWORK", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"} {
+		t.Setenv(key, "")
+	}
 
 	cwd := t.TempDir()
 	env, err := mergeEnv(map[string]string{"EXTRA": "1"}, "offline", cwd)
@@ -254,15 +257,15 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 		"CAELIS_SANDBOX_HOME=",
 		"USERPROFILE=",
 		"TEMP=",
-		"CAELIS_SANDBOX_NETWORK=disabled",
-		"HTTP_PROXY=http://127.0.0.1:9",
-		"HTTPS_PROXY=http://127.0.0.1:9",
-		"ALL_PROXY=http://127.0.0.1:9",
-		"NO_PROXY=localhost,127.0.0.1,::1",
 		"EXTRA=1",
 	} {
 		if !strings.Contains(offline, want) {
 			t.Fatalf("offline env missing %q in %q", want, offline)
+		}
+	}
+	for _, key := range []string{"CAELIS_SANDBOX_NETWORK", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"} {
+		if got := envValue(env, key); got != "" {
+			t.Fatalf("%s = %q, want no offline network env override", key, got)
 		}
 	}
 
@@ -314,9 +317,8 @@ func TestMergeEnvNetworkModes(t *testing.T) {
 		t.Fatalf("mergeEnv(online) error = %v", err)
 	}
 	online := strings.Join(env, "\n")
-	if strings.Contains(online, "CAELIS_SANDBOX_NETWORK=disabled") ||
-		strings.Contains(online, "HTTP_PROXY=http://127.0.0.1:9") {
-		t.Fatalf("online env = %q, want no offline proxy hardening", online)
+	if strings.Contains(online, "http://127.0.0.1:9") {
+		t.Fatalf("online env = %q, want no blackhole proxy hardening", online)
 	}
 }
 

@@ -375,7 +375,7 @@ func (r *runner) writeFrame(typ string, payload any) error {
 	return r.writer.WriteFrame(frame)
 }
 
-func mergeEnv(extra map[string]string, network string, cwd string) ([]string, error) {
+func mergeEnv(extra map[string]string, _ string, cwd string) ([]string, error) {
 	env := os.Environ()
 	userProfile := strings.TrimSpace(envValue(env, "USERPROFILE"))
 	home := strings.TrimSpace(envValue(env, "CAELIS_SANDBOX_HOME"))
@@ -413,13 +413,6 @@ func mergeEnv(extra map[string]string, network string, cwd string) ([]string, er
 		setEnvValue(&env, "TMP", tmp)
 		setEnvValue(&env, "LOCALAPPDATA", localAppData)
 		setEnvValue(&env, "APPDATA", roamingAppData)
-	}
-	if strings.EqualFold(strings.TrimSpace(network), "offline") {
-		setEnvValue(&env, "CAELIS_SANDBOX_NETWORK", "disabled")
-		setEnvValue(&env, "HTTP_PROXY", "http://127.0.0.1:9")
-		setEnvValue(&env, "HTTPS_PROXY", "http://127.0.0.1:9")
-		setEnvValue(&env, "ALL_PROXY", "http://127.0.0.1:9")
-		setEnvValue(&env, "NO_PROXY", "localhost,127.0.0.1,::1")
 	}
 	for key, value := range extra {
 		if strings.TrimSpace(key) == "" {

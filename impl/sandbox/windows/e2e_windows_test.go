@@ -188,17 +188,6 @@ Get-Content -LiteralPath '.\`+outputFile+`'
 		}
 	}
 
-	result, err = runE2ECommand(ctx, rt, workspace, `
-Write-Output "net=$env:CAELIS_SANDBOX_NETWORK"
-Write-Output "proxy=$env:HTTP_PROXY"
-`, sandbox.NetworkDisabled, nil)
-	if err != nil {
-		t.Fatalf("offline network env command error = %v; result=%+v", err, result)
-	}
-	if !strings.Contains(result.Stdout, "net=disabled") || !strings.Contains(result.Stdout, "proxy=http://127.0.0.1:9") {
-		t.Fatalf("offline network stdout = %q", result.Stdout)
-	}
-
 	if endpoint := reachableExternalE2EEndpoint(t); endpoint != "" {
 		host, port, err := net.SplitHostPort(endpoint)
 		if err != nil {

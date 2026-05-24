@@ -332,8 +332,8 @@ Mapping rules:
 - `PathAccessReadWrite` contributes a write root.
 - `PathAccessHidden` contributes a deny-read path and deny-write path.
 - `ReadOnlySubpaths` under writable roots become deny-write paths.
-- `NetworkDisabled` chooses offline identity and applies no-network env
-  hardening.
+- `NetworkDisabled` chooses offline identity; network blocking is enforced by
+  Windows Firewall policy instead of proxy environment mutation.
 - `NetworkEnabled` and `NetworkInherit` resolve to the offline identity on
   Windows; sandbox route does not offer per-command network enablement.
 
@@ -344,8 +344,8 @@ modeled after the relevant Codex firewall setup shape:
 - Non-loopback outbound traffic is blocked for all protocols.
 - Loopback TCP and loopback UDP are blocked separately so local services are not
   accidentally reachable in no-network mode.
-- The sandbox environment also points common proxy variables at
-  `http://127.0.0.1:9` and sets `CAELIS_SANDBOX_NETWORK=disabled`.
+- The sandbox environment does not inject blackhole proxy variables or a
+  network-disabled marker; the offline identity is the network boundary.
 
 Codex also adds WFP filters for DNS, DNS-over-TLS, SMB, and ICMP as
 defense-in-depth. Caelis can add that later if a target Windows fleet shows
@@ -643,9 +643,8 @@ Cross-platform tests:
 - [x] Define offline identity semantics.
 - [x] Implement Windows Firewall setup for the offline identity, including
   non-loopback and loopback rule scopes.
-- [x] Add no-network environment hardening.
-- [x] Add local proxy compatibility if needed.
-- [x] Add integration tests for disabled network environment mode.
+- [x] Keep offline network control in per-identity Windows Firewall policy.
+- [x] Add integration tests for disabled network enforcement.
 - [x] Add a real socket E2E that proves offline identity outbound denial on a
   reachable external TCP endpoint.
 
