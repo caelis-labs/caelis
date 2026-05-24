@@ -140,10 +140,11 @@ func renderAssistantText(req TextRenderRequest, policy MarkdownPolicy) TextRende
 		if len(rows) > 0 {
 			return TextRenderResult{Rows: rows, GlamourCalls: glamourCalls, CacheHit: cacheHit}
 		}
-		_, continuationPrefix := narrativeLinePrefixes(req.LineStyle)
+		fallbackRows, inlineCalls := renderInlineMarkdownTextRows(req)
 		return TextRenderResult{
-			Rows:         renderNarrativeFallbackRows(req.BlockID, req.Raw, req.Prefix, continuationPrefix, req.LineStyle, req.Theme),
+			Rows:         fallbackRows,
 			GlamourCalls: glamourCalls,
+			InlineCalls:  inlineCalls,
 			CacheHit:     cacheHit,
 		}
 	default:
@@ -154,10 +155,11 @@ func renderAssistantText(req TextRenderRequest, policy MarkdownPolicy) TextRende
 		if len(rows) > 0 {
 			return TextRenderResult{Rows: rows, GlamourCalls: 1}
 		}
-		_, continuationPrefix := narrativeLinePrefixes(req.LineStyle)
+		fallbackRows, inlineCalls := renderInlineMarkdownTextRows(req)
 		return TextRenderResult{
-			Rows:         renderNarrativeFallbackRows(req.BlockID, req.Raw, req.Prefix, continuationPrefix, req.LineStyle, req.Theme),
+			Rows:         fallbackRows,
 			GlamourCalls: 1,
+			InlineCalls:  inlineCalls,
 		}
 	}
 }

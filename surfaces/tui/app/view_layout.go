@@ -174,17 +174,6 @@ func (m *Model) endDeferredViewportSync() {
 	}
 }
 
-func (m *Model) renderedRowWrapMode(blockID string) BlockKind {
-	if blockID == "" {
-		return ""
-	}
-	block := m.doc.Find(blockID)
-	if block == nil {
-		return ""
-	}
-	return block.Kind()
-}
-
 func (m *Model) wrapNarrativeRowStyled(row RenderedRow, width int) string {
 	if width <= 0 {
 		return row.Styled
@@ -195,32 +184,7 @@ func (m *Model) wrapNarrativeRowStyled(row RenderedRow, width int) string {
 	if graphemeWidth(plain) <= width {
 		return row.Styled
 	}
-	// Word-wrap plain text, then re-apply inline styling per segment.
-	segments := graphemeWordWrap(plain, width)
-	if len(segments) == 0 {
-		return ""
-	}
-	roleStyle := tuikit.LineStyleAssistant
-	if m.renderedRowWrapMode(row.BlockID) == BlockReasoning {
-		roleStyle = tuikit.LineStyleReasoning
-	}
-	kind := textKindForLineStyle(roleStyle)
-	styled := make([]string, 0, len(segments))
-	for _, segment := range segments {
-		result := m.renderText(TextRenderRequest{
-			Kind:           kind,
-			Mode:           RenderInlineOnly,
-			MarkdownPolicy: MarkdownInline,
-			Raw:            segment,
-			Width:          width,
-			BlockID:        row.BlockID,
-			LineStyle:      roleStyle,
-		})
-		for _, rendered := range result.Rows {
-			styled = append(styled, rendered.Styled)
-		}
-	}
-	return strings.Join(styled, "\n")
+	return ansi.Wrap(row.Styled, width, " ")
 }
 
 func (m *Model) wrapNarrativeRowPlain(row RenderedRow, width int) []string {
@@ -239,25 +203,6 @@ func (m *Model) wrapNarrativeRowPlain(row RenderedRow, width int) []string {
 		return []string{""}
 	}
 	return normalizeWrappedPlainSegments(segments)
-}
-
-func (m *Model) renderWrappedInlineMarkdownLine(text string, baseStyle lipgloss.Style, width int) (string, []string) {
-	_ = baseStyle
-	result := m.renderText(TextRenderRequest{
-		Kind:           TextAssistant,
-		Mode:           RenderInlineOnly,
-		MarkdownPolicy: MarkdownInline,
-		Raw:            text,
-		Width:          width,
-		LineStyle:      tuikit.LineStyleAssistant,
-	})
-	styledParts := make([]string, 0, len(result.Rows))
-	plainParts := make([]string, 0, len(result.Rows))
-	for _, row := range result.Rows {
-		styledParts = append(styledParts, row.Styled)
-		plainParts = append(plainParts, row.Plain)
-	}
-	return strings.Join(styledParts, "\n"), plainParts
 }
 
 func normalizeWrappedPlainSegments(segments []string) []string {

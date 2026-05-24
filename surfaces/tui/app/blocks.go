@@ -208,30 +208,6 @@ func (b *ReasoningBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	return b.renderCache.renderTextRows(b.id, b.Raw, prefix, tuikit.LineStyleReasoning, ctx, b.Streaming)
 }
 
-// renderNarrativeFallbackRows preserves multi-line structure when glamour
-// cannot produce usable output. This is intentionally minimal and should only
-// be exercised for empty or degenerate markdown.
-func renderNarrativeFallbackRows(blockID, raw, rolePrefix, continuationPrefix string, lineStyle tuikit.LineStyle, theme tuikit.Theme) []RenderedRow {
-	normalized := strings.ReplaceAll(strings.ReplaceAll(raw, "\r\n", "\n"), "\r", "\n")
-	if strings.TrimSpace(normalized) == "" {
-		styled := tuikit.ColorizeLogLine(rolePrefix, lineStyle, theme)
-		return []RenderedRow{StyledPlainRow(blockID, rolePrefix, styled)}
-	}
-	normalized = strings.TrimRight(normalized, "\n")
-	lines := strings.Split(normalized, "\n")
-	rows := make([]RenderedRow, 0, len(lines))
-	for i, line := range lines {
-		prefix := continuationPrefix
-		if i == 0 {
-			prefix = rolePrefix
-		}
-		plain := prefix + line
-		styled := tuikit.ColorizeLogLine(plain, lineStyle, theme)
-		rows = append(rows, StyledPlainRow(blockID, plain, styled))
-	}
-	return rows
-}
-
 // ---------------------------------------------------------------------------
 // MainACPTurnBlock – root ACP-controlled turn in the main transcript.
 // ---------------------------------------------------------------------------

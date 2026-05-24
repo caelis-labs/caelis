@@ -262,8 +262,11 @@ func narrativeStyleConfig(theme tuikit.Theme, roleStyle tuikit.LineStyle) gansi.
 	// ---------------------------------------------------------------
 	// Strong / Emphasis / Strikethrough
 	// ---------------------------------------------------------------
+	style.Strong.Color = bodyHex
 	style.Strong.Bold = boolPtr(true)
+	style.Emph.Color = bodyHex
 	style.Emph.Italic = boolPtr(true)
+	style.Strikethrough.Color = bodyHex
 	style.Strikethrough.CrossedOut = boolPtr(true)
 
 	// ---------------------------------------------------------------
@@ -703,7 +706,7 @@ func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle
 	for idx, line := range streamLines {
 		lineStyle := streamingNarrativeTailLineStyle(line.Kind, baseStyle, roleStyle, theme)
 		styledLine := renderStreamingNarrativeTailSegment(line.Raw, lineStyle, line.Kind, theme)
-		styledSegments, plainSegments := wrapStyledStreamingTailLine(styledLine, line.Plain, width)
+		styledSegments, plainSegments := wrapStyledStreamingTailLine(styledLine, width)
 		for segIdx, styled := range styledSegments {
 			plain := plainSegments[segIdx]
 			if idx == 0 && rolePrefix != "" && segIdx == 0 {
@@ -774,20 +777,21 @@ func streamingNarrativeTailLineTexts(line NarrativeLine) (streamingNarrativeTail
 	}
 }
 
-func wrapStyledStreamingTailLine(styled, plain string, width int) ([]string, []string) {
+func wrapStyledStreamingTailLine(styled string, width int) ([]string, []string) {
 	if styled == "" {
 		return []string{""}, []string{""}
 	}
 	if width <= 0 {
 		width = 1
 	}
+	plain := strings.TrimRight(xansi.Strip(styled), " ")
 	if strings.TrimRight(plain, " ") == "" || graphemeWidth(plain) <= width {
-		return []string{styled}, []string{strings.TrimRight(xansi.Strip(styled), " ")}
+		return []string{styled}, []string{plain}
 	}
 	wrapped := xansi.Wrap(styled, width, " ")
 	styledSegments := strings.Split(wrapped, "\n")
 	if len(styledSegments) == 0 {
-		return []string{styled}, []string{strings.TrimRight(xansi.Strip(styled), " ")}
+		return []string{styled}, []string{plain}
 	}
 	return styledSegments, deriveViewportPlainLines(nil, styledSegments)
 }
