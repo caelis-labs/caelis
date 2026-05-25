@@ -307,6 +307,42 @@ func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	sandboxCalls := 0
+	doctorCalls := 0
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+		DefaultModelAliasFn: func() string {
+			return "gpt-light"
+		},
+		SandboxStatusFn: func() SandboxStatus {
+			sandboxCalls++
+			return SandboxStatus{RequestedBackend: "windows-elevated", ResolvedBackend: "windows-elevated"}
+		},
+		DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
+			doctorCalls++
+			return DoctorReport{ActiveModelAlias: "doctor-model"}, nil
+		},
+	}, "", "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+	status, err := driver.LightweightStatus(ctx)
+	if err != nil {
+		t.Fatalf("LightweightStatus() error = %v", err)
+	}
+	if status.Model != "gpt-light" {
+		t.Fatalf("LightweightStatus().Model = %q, want default alias", status.Model)
+	}
+	if sandboxCalls != 0 {
+		t.Fatalf("SandboxStatus() calls = %d, want 0", sandboxCalls)
+	}
+	if doctorCalls != 0 {
+		t.Fatalf("Doctor() calls = %d, want 0", doctorCalls)
+	}
+}
+
 func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t *testing.T) {
 	ctx := context.Background()
 	activeSession := session.Session{

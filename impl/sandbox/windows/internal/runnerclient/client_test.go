@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -74,6 +75,37 @@ func TestRunnerEnvironmentUsesSandboxPrivateDirsWithoutCacheRedirects(t *testing
 		if got := testEnvValue(env, key); got != "" {
 			t.Fatalf("%s = %q, did not expect sandbox-local cache redirect", key, got)
 		}
+	}
+}
+
+func TestEnsureRunnerCWDJunctionReplacesMismatchedLink(t *testing.T) {
+	home := t.TempDir()
+	cwd := t.TempDir()
+	other := t.TempDir()
+	root := filepath.Join(home, ".caelis", ".sandbox", "cwd")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", root, err)
+	}
+	link := filepath.Join(root, runnerCWDJunctionName(cwd))
+	if output, err := createDirectoryLink(link, other, "/J"); err != nil {
+		t.Skipf("directory junction creation unavailable in this Windows environment: %v output=%s", err, strings.TrimSpace(string(output)))
+	}
+	t.Cleanup(func() {
+		_ = os.Remove(link)
+	})
+
+	got, err := ensureRunnerCWDJunction([]string{"CAELIS_SANDBOX_HOME=" + home}, cwd)
+	if err != nil {
+		t.Fatalf("ensureRunnerCWDJunction() error = %v", err)
+	}
+	resolved, err := filepath.EvalSymlinks(got)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%s) error = %v", got, err)
+	}
+	resolvedInfo, resolvedErr := os.Stat(resolved)
+	cwdInfo, cwdErr := os.Stat(cwd)
+	if resolvedErr != nil || cwdErr != nil || !os.SameFile(resolvedInfo, cwdInfo) {
+		t.Fatalf("ensureRunnerCWDJunction() reused mismatched junction target %q, want %q", resolved, cwd)
 	}
 }
 

@@ -159,6 +159,7 @@ func (t runtimeCommandTool) Call(ctx context.Context, call tool.Call) (tool.Resu
 	req := taskapi.CommandStartRequest{
 		Command:     strings.TrimSpace(command),
 		Workdir:     strings.TrimSpace(workdir),
+		Timeout:     commandTimeoutFromTool(t.base),
 		Yield:       time.Duration(yieldMS) * time.Millisecond,
 		ParentCall:  strings.TrimSpace(call.ID),
 		ParentTool:  strings.TrimSpace(call.Name),

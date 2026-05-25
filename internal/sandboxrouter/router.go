@@ -26,6 +26,9 @@ func ForGOOS(goos string, requested sandbox.Backend) (Route, error) {
 	case "linux":
 		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendBwrap, sandbox.BackendLandlock}, linuxInstallHint())
 	case "windows":
+		if requested == "" || requested == sandbox.BackendHost {
+			return Route{}, nil
+		}
 		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendWindowsElevated}, windowsInstallHint())
 	default:
 		if requested == "" || requested == sandbox.BackendHost {

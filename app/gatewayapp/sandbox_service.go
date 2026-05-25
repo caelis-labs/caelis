@@ -47,14 +47,6 @@ func (s *Stack) SetSandboxBackend(_ context.Context, backend string) (SandboxSta
 }
 
 func (s *Stack) SandboxStatus() SandboxStatus {
-	return s.sandboxStatus(false)
-}
-
-func (s *Stack) SandboxStartupStatus() SandboxStatus {
-	return s.sandboxStatus(true)
-}
-
-func (s *Stack) sandboxStatus(startup bool) SandboxStatus {
 	if s == nil {
 		return SandboxStatus{}
 	}
@@ -62,6 +54,10 @@ func (s *Stack) sandboxStatus(startup bool) SandboxStatus {
 	cfg := s.sandbox
 	exec := s.exec
 	s.mu.RUnlock()
+	return sandboxStatusFromRuntime(cfg, exec)
+}
+
+func sandboxStatusFromRuntime(cfg SandboxConfig, exec sandbox.Runtime) SandboxStatus {
 	status := SandboxStatus{
 		RequestedBackend: cfg.RequestedType,
 		Route:            string(sandbox.RouteSandbox),
@@ -70,16 +66,15 @@ func (s *Stack) sandboxStatus(startup bool) SandboxStatus {
 	if status.RequestedBackend == "" {
 		status.RequestedBackend = "auto"
 	}
+	if strings.EqualFold(status.RequestedBackend, string(sandbox.BackendHost)) {
+		status.Route = string(sandbox.RouteHost)
+		status.SecuritySummary = "host"
+	}
 	if exec == nil {
 		status.ResolvedBackend = status.RequestedBackend
 		return status
 	}
-	var rtStatus sandbox.Status
-	if startup {
-		rtStatus = sandbox.SelectionStatus(exec)
-	} else {
-		rtStatus = exec.Status()
-	}
+	rtStatus := exec.Status()
 	if strings.TrimSpace(string(rtStatus.RequestedBackend)) != "" {
 		status.RequestedBackend = string(rtStatus.RequestedBackend)
 	}
@@ -90,12 +85,16 @@ func (s *Stack) sandboxStatus(startup bool) SandboxStatus {
 	status.InstallHint = strings.TrimSpace(rtStatus.FallbackInstallHint)
 	status.Setup = sandbox.CloneSetupStatus(rtStatus.Setup)
 	applySandboxSetupProjection(&status, status.Setup)
+	resolvedHost := strings.EqualFold(status.ResolvedBackend, string(sandbox.BackendHost))
 	if rtStatus.FallbackToHost {
 		status.Route = string(sandbox.RouteHost)
 		status.SecuritySummary = "host fallback"
 		if status.ResolvedBackend == "" {
 			status.ResolvedBackend = string(sandbox.BackendHost)
 		}
+	} else if resolvedHost {
+		status.Route = string(sandbox.RouteHost)
+		status.SecuritySummary = "host"
 	} else if status.ResolvedBackend != "" {
 		status.SecuritySummary = status.ResolvedBackend
 	}
@@ -154,16 +153,38 @@ func (s *Stack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
 	}
 	s.mu.RLock()
 	exec := s.exec
+	cfg := s.sandbox
+	workspaceCWD := s.Workspace.CWD
+	storeDir := s.storeDir
 	s.mu.RUnlock()
 	if exec == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
 	}
-	preparer, ok := exec.(sandbox.PreparableRuntime)
+	if shouldUseCurrentSandboxLifecycle(exec) {
+		preparer, ok := exec.(sandbox.PreparableRuntime)
+		if !ok {
+			return s.SandboxStatus(), nil
+		}
+		err := preparer.Prepare(ctx)
+		return s.SandboxStatus(), err
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), string(sandbox.BackendHost)) {
+		return s.SandboxStatus(), nil
+	}
+	runtime, runtimeCfg, ok, err := experimentalWindowsSandboxRuntime(cfg, workspaceCWD, storeDir)
+	if err != nil {
+		return SandboxStatus{}, err
+	}
 	if !ok {
 		return s.SandboxStatus(), nil
 	}
-	err := preparer.Prepare(ctx)
-	return s.SandboxStatus(), err
+	defer runtime.Close()
+	preparer, ok := runtime.(sandbox.PreparableRuntime)
+	if !ok {
+		return sandboxStatusFromRuntime(runtimeCfg, runtime), nil
+	}
+	err = preparer.Prepare(ctx)
+	return sandboxStatusFromRuntime(runtimeCfg, runtime), err
 }
 
 func (s *Stack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
@@ -190,16 +211,47 @@ func (s *Stack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
 	}
 	s.mu.RLock()
 	exec := s.exec
+	cfg := s.sandbox
+	workspaceCWD := s.Workspace.CWD
+	storeDir := s.storeDir
 	s.mu.RUnlock()
 	if exec == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
 	}
-	resetter, ok := exec.(sandbox.ResettableRuntime)
+	if shouldUseCurrentSandboxLifecycle(exec) {
+		resetter, ok := exec.(sandbox.ResettableRuntime)
+		if !ok {
+			return s.SandboxStatus(), nil
+		}
+		err := resetter.Reset(ctx)
+		return s.SandboxStatus(), err
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), string(sandbox.BackendHost)) {
+		return s.SandboxStatus(), nil
+	}
+	runtime, runtimeCfg, ok, err := experimentalWindowsSandboxRuntime(cfg, workspaceCWD, storeDir)
+	if err != nil {
+		return SandboxStatus{}, err
+	}
 	if !ok {
 		return s.SandboxStatus(), nil
 	}
-	err := resetter.Reset(ctx)
-	return s.SandboxStatus(), err
+	defer runtime.Close()
+	resetter, ok := runtime.(sandbox.ResettableRuntime)
+	if !ok {
+		return sandboxStatusFromRuntime(runtimeCfg, runtime), nil
+	}
+	err = resetter.Reset(ctx)
+	return sandboxStatusFromRuntime(runtimeCfg, runtime), err
+}
+
+func shouldUseCurrentSandboxLifecycle(exec sandbox.Runtime) bool {
+	if exec == nil {
+		return false
+	}
+	status := sandbox.SelectionStatus(exec)
+	return status.ResolvedBackend == sandbox.BackendWindowsElevated ||
+		status.RequestedBackend == sandbox.BackendWindowsElevated
 }
 
 func normalizeSandboxBackend(backend string) (string, error) {

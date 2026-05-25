@@ -1472,6 +1472,7 @@ func (r *yieldProbeSandboxRuntime) Start(_ context.Context, req sandbox.CommandR
 	}
 	r.session.command = req.Command
 	r.session.workdir = req.Dir
+	r.session.timeout = req.Timeout
 	r.session.onOutput = req.OnOutput
 	return r.session, nil
 }
@@ -1503,6 +1504,7 @@ func (r *yieldProbeSandboxRuntime) Close() error { return nil }
 type yieldProbeSandboxSession struct {
 	command       string
 	workdir       string
+	timeout       time.Duration
 	lastWait      time.Duration
 	waitErr       error
 	statusRunning *bool

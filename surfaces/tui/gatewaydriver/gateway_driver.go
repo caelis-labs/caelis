@@ -199,7 +199,15 @@ func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (controll
 	return status, true, nil
 }
 
+func (d *GatewayDriver) LightweightStatus(ctx context.Context) (StatusSnapshot, error) {
+	return d.status(ctx, false)
+}
+
 func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
+	return d.status(ctx, true)
+}
+
+func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (StatusSnapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -211,7 +219,7 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		}
 	}
 	sandboxStatus := SandboxStatus{}
-	if d.stack != nil {
+	if includeDiagnostics && d.stack != nil {
 		sandboxStatus = d.stack.SandboxStatus()
 	}
 	activeSession, ok := d.currentSession()
@@ -296,53 +304,55 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 		if ok {
 			req.SessionRef = activeSession.SessionRef
 		}
-		if report, err := d.stack.Doctor(context.Background(), req); err == nil {
-			status.StoreDir = strings.TrimSpace(report.StoreDir)
-			status.Provider = strings.TrimSpace(report.ActiveProvider)
-			status.ModelName = strings.TrimSpace(report.ActiveModel)
-			status.MissingAPIKey = report.MissingAPIKey
-			status.HostExecution = report.HostExecution
-			status.FullAccessMode = report.FullAccessMode
-			status.PermissionGrantCount = report.PermissionGrantCount
-			status.PermissionReadRootCount = report.PermissionReadRootCount
-			status.PermissionWriteRootCount = report.PermissionWriteRootCount
-			status.SandboxRequestedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxRequestedBackend), status.SandboxRequestedBackend)
-			status.SandboxResolvedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), status.SandboxResolvedBackend)
-			status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)
-			status.FallbackReason = firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), status.FallbackReason)
-			status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxInstallHint)
-			if report.SandboxSetup != nil {
-				status.SandboxSetup = sandbox.CloneSetupStatus(*report.SandboxSetup)
-			}
-			status.SandboxSetupRequired = report.SandboxSetupRequired || status.SandboxSetupRequired
-			status.SandboxSetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxSetupError)
-			status.SandboxSetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxSetupMarkerCurrent
-			status.SandboxSetupMarkerReason = firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), status.SandboxSetupMarkerReason)
-			status.SandboxGlobalSetupCurrent = report.SandboxGlobalSetupCurrent || status.SandboxGlobalSetupCurrent
-			status.SandboxGlobalSetupRequired = report.SandboxGlobalSetupRequired || status.SandboxGlobalSetupRequired
-			status.SandboxGlobalSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxGlobalSetupReason), status.SandboxGlobalSetupReason)
-			status.SandboxWorkspaceSetupCurrent = report.SandboxWorkspaceSetupCurrent || status.SandboxWorkspaceSetupCurrent
-			status.SandboxWorkspaceSetupRequired = report.SandboxWorkspaceSetupRequired || status.SandboxWorkspaceSetupRequired
-			status.SandboxWorkspaceSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupReason), status.SandboxWorkspaceSetupReason)
-			status.SandboxWorkspaceSetupRoot = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupRoot), status.SandboxWorkspaceSetupRoot)
-			if report.SandboxWorkspaceSetupWriteRoots > 0 {
-				status.SandboxWorkspaceSetupWriteRoots = report.SandboxWorkspaceSetupWriteRoots
-			}
-			status.SandboxWorkspaceSetupPolicyHash = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupPolicyHash), status.SandboxWorkspaceSetupPolicyHash)
-			if !report.SandboxWorkspaceSetupUpdatedAt.IsZero() {
-				status.SandboxWorkspaceSetupUpdatedAt = report.SandboxWorkspaceSetupUpdatedAt
-			}
-			status.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SecuritySummary)
-			if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
-				rawModelText = alias
-				status.Model = formatReasoningModelDisplay(alias, status.ReasoningEffort)
-			}
-			if mode := strings.TrimSpace(report.SessionMode); mode != "" {
-				status.ModeLabel = mode
-				status.SessionMode = mode
-			}
-			if id := strings.TrimSpace(report.SessionID); id != "" {
-				status.SessionID = id
+		if includeDiagnostics {
+			if report, err := d.stack.Doctor(context.Background(), req); err == nil {
+				status.StoreDir = strings.TrimSpace(report.StoreDir)
+				status.Provider = strings.TrimSpace(report.ActiveProvider)
+				status.ModelName = strings.TrimSpace(report.ActiveModel)
+				status.MissingAPIKey = report.MissingAPIKey
+				status.HostExecution = report.HostExecution
+				status.FullAccessMode = report.FullAccessMode
+				status.PermissionGrantCount = report.PermissionGrantCount
+				status.PermissionReadRootCount = report.PermissionReadRootCount
+				status.PermissionWriteRootCount = report.PermissionWriteRootCount
+				status.SandboxRequestedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxRequestedBackend), status.SandboxRequestedBackend)
+				status.SandboxResolvedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), status.SandboxResolvedBackend)
+				status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)
+				status.FallbackReason = firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), status.FallbackReason)
+				status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxInstallHint)
+				if report.SandboxSetup != nil {
+					status.SandboxSetup = sandbox.CloneSetupStatus(*report.SandboxSetup)
+				}
+				status.SandboxSetupRequired = report.SandboxSetupRequired || status.SandboxSetupRequired
+				status.SandboxSetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxSetupError)
+				status.SandboxSetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxSetupMarkerCurrent
+				status.SandboxSetupMarkerReason = firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), status.SandboxSetupMarkerReason)
+				status.SandboxGlobalSetupCurrent = report.SandboxGlobalSetupCurrent || status.SandboxGlobalSetupCurrent
+				status.SandboxGlobalSetupRequired = report.SandboxGlobalSetupRequired || status.SandboxGlobalSetupRequired
+				status.SandboxGlobalSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxGlobalSetupReason), status.SandboxGlobalSetupReason)
+				status.SandboxWorkspaceSetupCurrent = report.SandboxWorkspaceSetupCurrent || status.SandboxWorkspaceSetupCurrent
+				status.SandboxWorkspaceSetupRequired = report.SandboxWorkspaceSetupRequired || status.SandboxWorkspaceSetupRequired
+				status.SandboxWorkspaceSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupReason), status.SandboxWorkspaceSetupReason)
+				status.SandboxWorkspaceSetupRoot = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupRoot), status.SandboxWorkspaceSetupRoot)
+				if report.SandboxWorkspaceSetupWriteRoots > 0 {
+					status.SandboxWorkspaceSetupWriteRoots = report.SandboxWorkspaceSetupWriteRoots
+				}
+				status.SandboxWorkspaceSetupPolicyHash = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupPolicyHash), status.SandboxWorkspaceSetupPolicyHash)
+				if !report.SandboxWorkspaceSetupUpdatedAt.IsZero() {
+					status.SandboxWorkspaceSetupUpdatedAt = report.SandboxWorkspaceSetupUpdatedAt
+				}
+				status.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SecuritySummary)
+				if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
+					rawModelText = alias
+					status.Model = formatReasoningModelDisplay(alias, status.ReasoningEffort)
+				}
+				if mode := strings.TrimSpace(report.SessionMode); mode != "" {
+					status.ModeLabel = mode
+					status.SessionMode = mode
+				}
+				if id := strings.TrimSpace(report.SessionID); id != "" {
+					status.SessionID = id
+				}
 			}
 		}
 		if status.ReasoningEffort == "" {

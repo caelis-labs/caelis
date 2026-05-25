@@ -37,8 +37,34 @@ func NormalizeWithBase(base string, path string) (string, error) {
 	value = filepath.Clean(value)
 	if resolved, err := filepath.EvalSymlinks(value); err == nil && strings.TrimSpace(resolved) != "" {
 		value = filepath.Clean(resolved)
+	} else if resolved := resolveExistingAncestor(value); resolved != "" {
+		value = resolved
 	}
 	return value, nil
+}
+
+func resolveExistingAncestor(path string) string {
+	path = filepath.Clean(path)
+	if path == "" {
+		return ""
+	}
+	current := path
+	var missing []string
+	for {
+		if resolved, err := filepath.EvalSymlinks(current); err == nil && strings.TrimSpace(resolved) != "" {
+			out := filepath.Clean(resolved)
+			for i := len(missing) - 1; i >= 0; i-- {
+				out = filepath.Join(out, missing[i])
+			}
+			return filepath.Clean(out)
+		}
+		parent := filepath.Dir(current)
+		if parent == current || current == "." || current == "" {
+			return path
+		}
+		missing = append(missing, filepath.Base(current))
+		current = parent
+	}
 }
 
 // Key returns the comparison key used by Windows path policy maps.

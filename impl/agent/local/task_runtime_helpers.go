@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -142,6 +143,22 @@ func sandboxRuntimeFromTool(tool tool.Tool) (sandbox.Runtime, bool) {
 	return runtime, true
 }
 
+type commandTimeoutProvider interface {
+	CommandTimeout() time.Duration
+}
+
+func commandTimeoutFromTool(tool tool.Tool) time.Duration {
+	provider, ok := tool.(commandTimeoutProvider)
+	if !ok || provider == nil {
+		return 0
+	}
+	timeout := provider.CommandTimeout()
+	if timeout < 0 {
+		return 0
+	}
+	return timeout
+}
+
 func constraintsFromMetadata(meta map[string]any) sandbox.Constraints {
 	if meta == nil {
 		return sandbox.Constraints{}
@@ -232,6 +249,12 @@ func parseIntArgValue(raw any) (int, bool) {
 		return typed, true
 	case int64:
 		return int(typed), true
+	case json.Number:
+		value, err := typed.Int64()
+		return int(value), err == nil
+	case string:
+		value, err := strconv.Atoi(strings.TrimSpace(typed))
+		return value, err == nil
 	default:
 		return 0, false
 	}

@@ -5,6 +5,8 @@ package acl
 import (
 	"os"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 func TestReadAndModifyFileDACL(t *testing.T) {
@@ -84,5 +86,24 @@ func TestReplaceAndWriteFileDACL(t *testing.T) {
 	}
 	if err := WriteFileDACL(dir, descriptor, false); err != nil {
 		t.Fatalf("WriteFileDACL() error = %v", err)
+	}
+}
+
+func TestWriteDenyMaskDoesNotDenySynchronize(t *testing.T) {
+	mask := rightsMask(Write)
+	if mask&windows.SYNCHRONIZE != 0 {
+		t.Fatalf("rightsMask(Write) = %#x, must not deny SYNCHRONIZE needed by read-only opens", mask)
+	}
+	for _, want := range []windows.ACCESS_MASK{
+		windows.FILE_WRITE_DATA,
+		windows.FILE_APPEND_DATA,
+		windows.FILE_WRITE_EA,
+		windows.FILE_WRITE_ATTRIBUTES,
+		windows.DELETE,
+		fileDeleteChild,
+	} {
+		if mask&want == 0 {
+			t.Fatalf("rightsMask(Write) = %#x, missing write/delete bit %#x", mask, want)
+		}
 	}
 }

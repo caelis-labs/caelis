@@ -205,6 +205,10 @@ type streamDriver interface {
 	SubscribeStream(context.Context, kernel.EventEnvelope) (<-chan kernel.EventEnvelope, bool)
 }
 
+type lightweightStatusDriver interface {
+	LightweightStatus(context.Context) (tuidriver.StatusSnapshot, error)
+}
+
 // ConfigFromDriver populates legacy Config callbacks from a TUI driver.
 // sender must be non-nil; its Send field is populated after Program creation
 // but before the user can trigger ExecuteLine.
@@ -243,7 +247,7 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 
 	if base.RefreshStatus == nil {
 		base.RefreshStatus = func() (string, string) {
-			status, err := driver.Status(ctx)
+			status, err := refreshStatusSnapshot(ctx, driver)
 			if err != nil {
 				statusCacheMu.Lock()
 				cachedModeLabel = ""
@@ -404,6 +408,13 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 	}
 
 	return base
+}
+
+func refreshStatusSnapshot(ctx context.Context, driver tuidriver.Driver) (tuidriver.StatusSnapshot, error) {
+	if lightweight, ok := driver.(lightweightStatusDriver); ok {
+		return lightweight.LightweightStatus(ctx)
+	}
+	return driver.Status(ctx)
 }
 
 // ---------------------------------------------------------------------------

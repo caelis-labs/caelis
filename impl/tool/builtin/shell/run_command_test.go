@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
@@ -36,7 +37,6 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 		"command":             "Command to execute.",
 		"workdir":             "Working directory.",
 		"yield_time_ms":       "Wait before yielding async control.",
-		"timeout_ms":          "Maximum runtime in milliseconds.",
 		"sandbox_permissions": "Sandbox mode for this command.",
 		"justification":       "Short approval question for require_escalated.",
 	}
@@ -68,6 +68,9 @@ func TestRunCommandDefinitionExposesMinimalArguments(t *testing.T) {
 	}
 	if _, ok := properties["dir"]; ok {
 		t.Fatal("dir alias unexpectedly exposed")
+	}
+	if _, ok := properties["timeout_ms"]; ok {
+		t.Fatal("timeout_ms property unexpectedly exposed")
 	}
 }
 
@@ -158,6 +161,33 @@ func TestRunCommandCallAcceptsYieldTimeWithoutChangingSyncResult(t *testing.T) {
 	}
 	if len(result.Content) == 0 {
 		t.Fatal("result.Content = empty, want json payload")
+	}
+}
+
+func TestRunCommandCallUsesConfiguredHardTimeoutOnly(t *testing.T) {
+	t.Parallel()
+
+	var last sandbox.CommandRequest
+	rt := sandboxPermissionRuntime{
+		result: sandbox.CommandResult{Stdout: "ok", ExitCode: 0},
+		last:   &last,
+	}
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt, Timeout: 45 * time.Second})
+	if err != nil {
+		t.Fatalf("NewRunCommand() error = %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"command":    "printf 'ok'",
+		"timeout_ms": 1,
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw}); err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if got := last.Timeout; got != 45*time.Second {
+		t.Fatalf("command timeout = %v, want configured hard timeout", got)
 	}
 }
 
@@ -384,6 +414,7 @@ func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
 type sandboxPermissionRuntime struct {
 	result sandbox.CommandResult
 	err    error
+	last   *sandbox.CommandRequest
 }
 
 func (r sandboxPermissionRuntime) Describe() sandbox.Descriptor {
@@ -396,7 +427,10 @@ func (r sandboxPermissionRuntime) FileSystemFor(sandbox.Constraints) sandbox.Fil
 	return nil
 }
 
-func (r sandboxPermissionRuntime) Run(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+func (r sandboxPermissionRuntime) Run(_ context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	if r.last != nil {
+		*r.last = sandbox.CloneRequest(req)
+	}
 	return r.result, r.err
 }
 

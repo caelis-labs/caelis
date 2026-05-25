@@ -111,7 +111,7 @@ func TestBuildProtectsExistingControlDirsUnderWritableRoots(t *testing.T) {
 	}
 }
 
-func TestDefaultReadRootsIncludeProfileTopLevelNonSensitiveRoots(t *testing.T) {
+func TestProfileReadRootsFiltersSensitiveRoots(t *testing.T) {
 	home := t.TempDir()
 	goRoot := filepath.Join(home, "go")
 	docRoot := filepath.Join(home, "Documents")
@@ -128,6 +128,19 @@ func TestDefaultReadRootsIncludeProfileTopLevelNonSensitiveRoots(t *testing.T) {
 	}
 	if containsPath(roots, sshRoot) || containsPath(roots, npmRoot) {
 		t.Fatalf("profileReadRoots = %#v, did not expect sensitive roots", roots)
+	}
+}
+
+func TestDefaultReadRootsExcludeHostProfileRoots(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("USERPROFILE", home)
+	if err := os.MkdirAll(filepath.Join(home, "Documents"), 0o700); err != nil {
+		t.Fatalf("MkdirAll(Documents) error = %v", err)
+	}
+
+	roots := defaultReadRoots()
+	if containsPath(roots, filepath.Join(home, "Documents")) {
+		t.Fatalf("defaultReadRoots = %#v, did not expect host profile roots", roots)
 	}
 }
 

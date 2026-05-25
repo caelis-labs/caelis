@@ -115,6 +115,34 @@ func TestModeToggleHintUsesRemoteACPModeLabel(t *testing.T) {
 	}
 }
 
+func TestConfigFromDriverRefreshStatusUsesLightweightStatus(t *testing.T) {
+	driver := &bridgeLightweightStatusDriver{
+		bridgeTestDriver: bridgeTestDriver{
+			status: tuidriver.StatusSnapshot{Model: "full-model", ModeLabel: "full-mode"},
+		},
+		lightweightStatus: tuidriver.StatusSnapshot{
+			Model:               "light-model",
+			ModeLabel:           "light-mode",
+			TotalTokens:         12,
+			ContextWindowTokens: 100,
+		},
+	}
+	cfg := ConfigFromDriver(driver, nil, Config{})
+	model, contextText := cfg.RefreshStatus()
+	if model != "light-model" {
+		t.Fatalf("RefreshStatus model = %q, want lightweight model", model)
+	}
+	if !strings.Contains(contextText, "12") {
+		t.Fatalf("RefreshStatus context = %q, want lightweight token usage", contextText)
+	}
+	if driver.statusCalls != 0 {
+		t.Fatalf("Status calls = %d, want 0", driver.statusCalls)
+	}
+	if driver.lightweightStatusCalls != 1 {
+		t.Fatalf("LightweightStatus calls = %d, want 1", driver.lightweightStatusCalls)
+	}
+}
+
 func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
 	var sent []tea.Msg
 	send := func(msg tea.Msg) {
@@ -1775,6 +1803,13 @@ type bridgeTestDriver struct {
 	slashArgCandidates  map[string][]tuidriver.SlashArgCandidate
 }
 
+type bridgeLightweightStatusDriver struct {
+	bridgeTestDriver
+	lightweightStatus      tuidriver.StatusSnapshot
+	statusCalls            int
+	lightweightStatusCalls int
+}
+
 type bridgeTestTurn struct {
 	events chan kernel.EventEnvelope
 }
@@ -1927,6 +1962,17 @@ var _ = time.Time{}
 func (d *bridgeTestDriver) Status(context.Context) (tuidriver.StatusSnapshot, error) {
 	return d.status, nil
 }
+
+func (d *bridgeLightweightStatusDriver) Status(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+	d.statusCalls++
+	return d.bridgeTestDriver.Status(ctx)
+}
+
+func (d *bridgeLightweightStatusDriver) LightweightStatus(context.Context) (tuidriver.StatusSnapshot, error) {
+	d.lightweightStatusCalls++
+	return d.lightweightStatus, nil
+}
+
 func (d *bridgeTestDriver) WorkspaceDir() string { return "" }
 func (d *bridgeTestDriver) Submit(context.Context, tuidriver.Submission) (tuidriver.Turn, error) {
 	return nil, nil

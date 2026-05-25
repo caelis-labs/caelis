@@ -57,10 +57,6 @@ func (t *RunCommandTool) Definition() tool.Definition {
 					"type":        "integer",
 					"description": "Wait before yielding async control.",
 				},
-				"timeout_ms": map[string]any{
-					"type":        "integer",
-					"description": "Maximum runtime in milliseconds.",
-				},
 				"sandbox_permissions": map[string]any{
 					"type":        "string",
 					"description": "Sandbox mode for this command.",
@@ -105,11 +101,6 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if _, err := argparse.String(args, "justification", false); err != nil {
 		return tool.Result{}, err
 	}
-	timeoutMS, err := argparse.Int(args, "timeout_ms", int(t.cfg.Timeout/time.Millisecond))
-	if err != nil {
-		return tool.Result{}, err
-	}
-
 	var (
 		result sandbox.CommandResult
 	)
@@ -117,7 +108,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		req := sandbox.CommandRequest{
 			Command:     command,
 			Dir:         workingDir,
-			Timeout:     time.Duration(timeoutMS) * time.Millisecond,
+			Timeout:     t.cfg.Timeout,
 			RouteHint:   constraints.Route,
 			Backend:     constraints.Backend,
 			Permission:  constraints.Permission,
@@ -128,7 +119,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		result, err = t.runtime.Run(ctx, sandbox.CommandRequest{
 			Command:   command,
 			Dir:       workingDir,
-			Timeout:   time.Duration(timeoutMS) * time.Millisecond,
+			Timeout:   t.cfg.Timeout,
 			RouteHint: sandbox.RouteSandbox,
 			Constraints: sandbox.Constraints{
 				Route:      sandbox.RouteSandbox,
@@ -181,6 +172,13 @@ func runCommandToolMetadata(meta map[string]any) map[string]any {
 
 func (t *RunCommandTool) SandboxRuntime() sandbox.Runtime {
 	return t.runtime
+}
+
+func (t *RunCommandTool) CommandTimeout() time.Duration {
+	if t == nil {
+		return 0
+	}
+	return t.cfg.Timeout
 }
 
 func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {

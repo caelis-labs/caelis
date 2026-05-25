@@ -123,6 +123,35 @@ func TestNormalizeResolvesWindowsShortNamesWhenExposed(t *testing.T) {
 	}
 }
 
+func TestNormalizeResolvesExistingAncestorForMissingShortPathChild(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows short-name semantics")
+	}
+	shortTemp := os.Getenv("TEMP")
+	if !strings.Contains(shortTemp, "~") {
+		t.Skip("TEMP does not expose a short-name path")
+	}
+	base := filepath.Join(shortTemp, "caelis-pathutil-"+strings.ReplaceAll(t.Name(), "/", "-"))
+	if err := os.RemoveAll(base); err != nil {
+		t.Fatalf("RemoveAll(base) error = %v", err)
+	}
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		t.Fatalf("MkdirAll(base) error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(base) })
+
+	root := Normalize(base)
+	missing := filepath.Join(base, "missing-dir", "child.txt")
+	got := Normalize(missing)
+	want := filepath.Join(root, "missing-dir", "child.txt")
+	if !strings.EqualFold(got, want) {
+		t.Fatalf("Normalize(missing short path child) = %q, want %q", got, want)
+	}
+	if !IsUnder(got, root) {
+		t.Fatalf("Normalize(missing short path child) = %q, root %q; IsUnder = false", got, root)
+	}
+}
+
 func TestIsUnderHonorsWindowsDriveAndUNCBoundaries(t *testing.T) {
 	if runtime.GOOS != "windows" {
 		t.Skip("Windows path semantics")

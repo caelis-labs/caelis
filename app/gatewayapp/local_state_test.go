@@ -175,6 +175,9 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if status.RequestedBackend != "host" {
 		t.Fatalf("requested backend = %q, want host", status.RequestedBackend)
 	}
+	if status.Route != "host" {
+		t.Fatalf("sandbox route = %q, want host", status.Route)
+	}
 
 	reloaded, err := newGatewayAppTestStack(t, Config{
 		AppName:        "caelis",
@@ -188,8 +191,12 @@ func TestStackSandboxBackendPersistsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	if got := reloaded.SandboxStatus().RequestedBackend; got != "host" {
+	reloadedStatus := reloaded.SandboxStatus()
+	if got := reloadedStatus.RequestedBackend; got != "host" {
 		t.Fatalf("SandboxStatus().RequestedBackend = %q, want host", got)
+	}
+	if got := reloadedStatus.Route; got != "host" {
+		t.Fatalf("SandboxStatus().Route = %q, want host", got)
 	}
 	doc, err := LoadAppConfig(root)
 	if err != nil {

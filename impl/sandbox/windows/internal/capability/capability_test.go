@@ -4,6 +4,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 )
 
 func TestBindWriteRootsPersistsStableRootSIDs(t *testing.T) {
@@ -18,7 +20,7 @@ func TestBindWriteRootsPersistsStableRootSIDs(t *testing.T) {
 	if len(first.AllSIDs) != 2 {
 		t.Fatalf("AllSIDs = %#v, want two SIDs", first.AllSIDs)
 	}
-	if first.WriteRootTo[filepath.Clean(workspace)] == "" || first.WriteRootTo[filepath.Clean(extra)] == "" {
+	if first.WriteRootTo[pathutil.Normalize(workspace)] == "" || first.WriteRootTo[pathutil.Normalize(extra)] == "" {
 		t.Fatalf("WriteRootTo = %#v, want workspace and extra mappings", first.WriteRootTo)
 	}
 	for _, sid := range first.AllSIDs {
@@ -31,10 +33,10 @@ func TestBindWriteRootsPersistsStableRootSIDs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second BindWriteRoots() error = %v", err)
 	}
-	if first.WriteRootTo[filepath.Clean(workspace)] != second.WriteRootTo[filepath.Clean(workspace)] {
-		t.Fatalf("workspace SID changed: %q -> %q", first.WriteRootTo[filepath.Clean(workspace)], second.WriteRootTo[filepath.Clean(workspace)])
+	if first.WriteRootTo[pathutil.Normalize(workspace)] != second.WriteRootTo[pathutil.Normalize(workspace)] {
+		t.Fatalf("workspace SID changed: %q -> %q", first.WriteRootTo[pathutil.Normalize(workspace)], second.WriteRootTo[pathutil.Normalize(workspace)])
 	}
-	if first.WriteRootTo[filepath.Clean(extra)] != second.WriteRootTo[filepath.Clean(extra)] {
-		t.Fatalf("extra SID changed: %q -> %q", first.WriteRootTo[filepath.Clean(extra)], second.WriteRootTo[filepath.Clean(extra)])
+	if first.WriteRootTo[pathutil.Normalize(extra)] != second.WriteRootTo[pathutil.Normalize(extra)] {
+		t.Fatalf("extra SID changed: %q -> %q", first.WriteRootTo[pathutil.Normalize(extra)], second.WriteRootTo[pathutil.Normalize(extra)])
 	}
 }

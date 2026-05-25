@@ -1254,6 +1254,10 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 	if err != nil {
 		return err
 	}
+	traversePrincipals, err := sandboxTraversePrincipalSIDs(users...)
+	if err != nil {
+		return err
+	}
 	aclPlan := newPolicyACLPlan(policy)
 	capabilities := aclPlan.allCapabilitySIDs
 	runnertrace.Printf(
@@ -1277,6 +1281,10 @@ func applyPolicyACLsWithOptions(policy winpolicy.Policy, opts ApplyPolicyACLOpti
 	var readSpecs []readACLSpec
 	var readTasks []aclTask
 	var syncTasks []aclTask
+	traverseSeen := map[string]struct{}{}
+	for _, root := range policy.WriteRoots {
+		syncTasks = appendAncestorACLTasks(syncTasks, root, traversePrincipals, traverseSeen)
+	}
 	for _, root := range policy.ReadRoots {
 		if isDefaultReadRoot(root) {
 			continue
@@ -2469,9 +2477,14 @@ func requiredPolicyACLTargets(policy winpolicy.Policy, users ...string) []policy
 func requiredPolicyACLTargetsWithOptions(policy winpolicy.Policy, synchronousOnly bool, users ...string) []policyACLTarget {
 	users = appendPrincipal(users...)
 	principals := sandboxPrincipals(users...)
+	traversePrincipals := sandboxTraversePrincipals(users...)
 	aclPlan := newPolicyACLPlan(policy)
 	capabilities := aclPlan.allCapabilitySIDs
 	var out []policyACLTarget
+	traverseSeen := map[string]struct{}{}
+	for _, root := range policy.WriteRoots {
+		out = appendAncestorACLTargets(out, root, traversePrincipals, traverseSeen)
+	}
 	if !synchronousOnly {
 		for _, root := range policy.ReadRoots {
 			if isDefaultReadRoot(root) {
@@ -2517,7 +2530,22 @@ type policyACLTarget struct {
 }
 
 func policyTraverseRoots(policy winpolicy.Policy) []string {
-	return nil
+	seen := map[string]struct{}{}
+	var out []string
+	for _, root := range policy.WriteRoots {
+		for _, ancestor := range ancestorPaths(root) {
+			key := aclPathKey(ancestor)
+			if key == "" {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, ancestor)
+		}
+	}
+	return out
 }
 
 func appendAncestorACLTargets(out []policyACLTarget, root string, principals []string, seen map[string]struct{}) []policyACLTarget {
@@ -2696,12 +2724,14 @@ func ancestorPaths(path string) []string {
 			break
 		}
 		parentKey := aclPathKey(parent)
-		if isUserProfileRootOrAboveKey(parentKey, homeKey) {
-			break
-		}
 		if _, ok := seen[parentKey]; !ok {
 			seen[parentKey] = struct{}{}
 			ancestors = append(ancestors, parent)
+		}
+		if homeKey != "" && pathKeyIsUnder(homeKey, parentKey) {
+			if parentKey != homeKey {
+				break
+			}
 		}
 		next := filepath.Dir(parent)
 		if next == "" || strings.EqualFold(next, parent) {

@@ -19,16 +19,25 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
 )
 
-func TestAncestorPathsStopBeforeUserProfileRoot(t *testing.T) {
+func TestAncestorPathsIncludeUserProfileRootButStopBeforeUsersDir(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		t.Skipf("user home unavailable: %v", err)
 	}
 	root := filepath.Join(home, "WorkDir", "demo", "storage")
 	ancestors := ancestorPaths(root)
+	if !containsPathKey(ancestors, home) {
+		t.Fatalf("ancestorPaths(%q) = %#v, want profile root %q", root, ancestors, home)
+	}
+	usersDir := filepath.Dir(home)
+	if !containsPathKey(ancestors, usersDir) {
+		t.Fatalf("ancestorPaths(%q) = %#v, want Users dir %q", root, ancestors, usersDir)
+	}
 	for _, ancestor := range ancestors {
-		if isUserProfileRootOrAbove(ancestor) {
-			t.Fatalf("ancestorPaths(%q) included profile root or above: %q", root, ancestor)
+		ancestorKey := pathutil.Key(ancestor)
+		usersKey := pathutil.Key(usersDir)
+		if ancestorKey != usersKey && pathKeyIsUnder(usersKey, ancestorKey) {
+			t.Fatalf("ancestorPaths(%q) included path above Users dir: %q", root, ancestor)
 		}
 	}
 	if !containsPathKey(ancestors, filepath.Join(home, "WorkDir", "demo")) {
@@ -36,7 +45,7 @@ func TestAncestorPathsStopBeforeUserProfileRoot(t *testing.T) {
 	}
 }
 
-func TestRequiredPolicyACLTargetsSkipsAncestorACLTargets(t *testing.T) {
+func TestRequiredPolicyACLTargetsAddsTraverseOnlyWriteRootAncestors(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "workspace", "storage")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatalf("MkdirAll(root) error = %v", err)
@@ -51,20 +60,30 @@ func TestRequiredPolicyACLTargetsSkipsAncestorACLTargets(t *testing.T) {
 	}, "CaelisSbxOffTest")
 
 	var foundRootCapability bool
+	var foundAncestor bool
 	rootKey := pathutil.Key(root)
 	for _, target := range targets {
 		isRoot := pathutil.Key(target.Path) == rootKey
-		if !isRoot {
-			t.Fatalf("requiredPolicyACLTargets(%q) included ancestor/non-root target %q", root, target.Path)
-		}
 		for _, entry := range target.Entries {
 			if isRoot && entry.Principal == capabilitySID {
 				foundRootCapability = true
+			}
+			if !isRoot {
+				foundAncestor = true
+				if entry.Principal != "CaelisSbxOffTest" || entry.Rights != acl.Traverse || entry.Mode != acl.Grant || entry.Inherit {
+					t.Fatalf("ancestor entry for %q = %+v, want non-inherited traverse grant for sandbox user only", target.Path, entry)
+				}
+				if entry.Principal == capabilitySID || entry.Principal == GroupName {
+					t.Fatalf("ancestor entry for %q used broad principal %+v", target.Path, entry)
+				}
 			}
 		}
 	}
 	if !foundRootCapability {
 		t.Fatalf("requiredPolicyACLTargets(%q) did not grant capability SID on the write root", root)
+	}
+	if !foundAncestor {
+		t.Fatalf("requiredPolicyACLTargets(%q) did not include traverse ancestors", root)
 	}
 }
 
@@ -125,7 +144,7 @@ func TestRequiredPolicyACLTargetsDenyWriteUsesOverlappingRootCapability(t *testi
 	entries := entriesForPath(t, targets, gitDir, acl.Deny)
 	principals := entryPrincipals(entries)
 	if len(principals) != 2 {
-		t.Fatalf("deny-write principals = %#v, want sandbox group and overlapping root capability", principals)
+		t.Fatalf("deny-write principals = %#v, want sandbox group and overlapping root capability only", principals)
 	}
 	for _, want := range []string{GroupName, workspaceCapabilitySID} {
 		if !containsFold(principals, want) {

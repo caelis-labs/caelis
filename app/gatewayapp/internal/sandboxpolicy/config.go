@@ -2,6 +2,7 @@ package sandboxpolicy
 
 import (
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
@@ -57,7 +58,17 @@ func MergeConfig(stored configstore.SandboxConfig, override configstore.SandboxC
 }
 
 func EffectiveConfig(cfg configstore.SandboxConfig, workspaceDir string) configstore.SandboxConfig {
+	return EffectiveConfigForGOOS(cfg, workspaceDir, runtime.GOOS)
+}
+
+func EffectiveConfigForGOOS(cfg configstore.SandboxConfig, workspaceDir string, goos string) configstore.SandboxConfig {
 	cfg = configstore.DefaultSandboxConfig(cfg)
+	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		switch strings.ToLower(strings.TrimSpace(cfg.RequestedType)) {
+		case "", "auto", "default":
+			cfg.RequestedType = "host"
+		}
+	}
 	cfg.WritableRoots = configstore.DedupeStrings(append(cfg.WritableRoots, DefaultSkillRoots(workspaceDir)...))
 	return cfg
 }

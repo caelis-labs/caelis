@@ -217,6 +217,37 @@ func TestRunnerCommandCapturesPowerShellErrorStream(t *testing.T) {
 	}
 }
 
+func TestRunnerCommandPropagatesNativeExitCode(t *testing.T) {
+	requireRunnerCommandE2E(t)
+	t.Parallel()
+
+	var input bytes.Buffer
+	spawn, err := runnerproto.NewFrame(runnerproto.TypeSpawn, runnerproto.Spawn{
+		Command:       "cmd.exe /d /c \"echo native-ok && exit /b 7\"",
+		Timeout:       10 * time.Second,
+		CapabilitySID: testCapabilitySIDs(t),
+	})
+	if err != nil {
+		t.Fatalf("NewFrame() error = %v", err)
+	}
+	if err := runnerproto.NewWriter(&input).WriteFrame(spawn); err != nil {
+		t.Fatalf("WriteFrame(spawn) error = %v", err)
+	}
+
+	var output bytes.Buffer
+	var runnerStderr bytes.Buffer
+	if code := Run(&input, &output, &runnerStderr); code != 0 {
+		t.Fatalf("Run() code = %d stderr=%s", code, runnerStderr.String())
+	}
+	stdout, stderrText, exit := readRunnerOutputForTest(t, &output)
+	if exit.ExitCode != 7 {
+		t.Fatalf("exit = %+v stdout=%q stderr=%q, want exit 7", exit, stdout, stderrText)
+	}
+	if !strings.Contains(stdout, "native-ok") {
+		t.Fatalf("stdout = %q, want native command output", stdout)
+	}
+}
+
 func TestRunnerCommandCapturesUnicodePowerShellErrorStream(t *testing.T) {
 	requireRunnerCommandE2E(t)
 	t.Parallel()
@@ -430,6 +461,26 @@ func TestMergeEnvDefaultsGitOptionalLocksOff(t *testing.T) {
 	}
 }
 
+func TestMergeEnvAddsGitSafeDirectoryCommandConfig(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.autocrlf")
+	t.Setenv("GIT_CONFIG_VALUE_0", "false")
+
+	env, err := mergeEnv(nil, "offline", t.TempDir())
+	if err != nil {
+		t.Fatalf("mergeEnv() error = %v", err)
+	}
+	if got := envValue(env, "GIT_CONFIG_COUNT"); got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := envValue(env, "GIT_CONFIG_KEY_1"); got != "safe.directory" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want safe.directory", got)
+	}
+	if got := envValue(env, "GIT_CONFIG_VALUE_1"); got != "*" {
+		t.Fatalf("GIT_CONFIG_VALUE_1 = %q, want *", got)
+	}
+}
+
 func TestShouldHideCurrentUserProfileDirOnlySandboxProfiles(t *testing.T) {
 	for _, profile := range []string{
 		`C:\Users\CaelisSbxOffabcd1234`,
@@ -453,36 +504,20 @@ func TestShouldHideCurrentUserProfileDirOnlySandboxProfiles(t *testing.T) {
 	}
 }
 
-func TestEffectiveWorkingDirectoryUsesSandboxHomeJunction(t *testing.T) {
-	home := t.TempDir()
-	hostProfile := t.TempDir()
+func TestEffectiveWorkingDirectoryUsesClientProvidedCWDLink(t *testing.T) {
 	cwd := t.TempDir()
-	env := []string{"CAELIS_SANDBOX_HOME=" + home, "USERPROFILE=" + hostProfile}
-
-	got := effectiveWorkingDirectory(cwd, env)
-	if strings.EqualFold(got, cwd) {
-		t.Skip("directory junction creation unavailable in this Windows environment")
-	}
-	t.Cleanup(func() {
-		_ = os.Remove(got)
-	})
-	if !isReparsePoint(got) {
-		t.Fatalf("effectiveWorkingDirectory() = %q, want reparse-point junction", got)
-	}
-	if !testPathIsUnder(got, filepath.Join(home, ".caelis", ".sandbox", "cwd")) {
-		t.Fatalf("effectiveWorkingDirectory() = %q, want under sandbox home %q", got, home)
-	}
-	again := effectiveWorkingDirectory(cwd, env)
-	if !strings.EqualFold(got, again) {
-		t.Fatalf("effectiveWorkingDirectory() reuse = %q, want %q", again, got)
+	link := filepath.Join(t.TempDir(), "cwd-link")
+	got := effectiveWorkingDirectory(cwd, []string{"CAELIS_SANDBOX_CWD_LINK=" + link})
+	if got != link {
+		t.Fatalf("effectiveWorkingDirectory() = %q, want client-provided link %q", got, link)
 	}
 }
 
-func TestCWDJunctionNameIsStableForCleanedCaseInsensitivePath(t *testing.T) {
-	left := cwdJunctionName(`C:\Users\Admin\WorkDir\Repo\.`)
-	right := cwdJunctionName(`c:\users\admin\workdir\repo`)
-	if left == "" || left != right {
-		t.Fatalf("cwdJunctionName() = %q and %q, want same non-empty name", left, right)
+func TestEffectiveWorkingDirectoryFallsBackToRequestedCWD(t *testing.T) {
+	cwd := t.TempDir()
+	got := effectiveWorkingDirectory(cwd, []string{"CAELIS_SANDBOX_HOME=" + t.TempDir()})
+	if got != cwd {
+		t.Fatalf("effectiveWorkingDirectory() = %q, want requested cwd %q", got, cwd)
 	}
 }
 

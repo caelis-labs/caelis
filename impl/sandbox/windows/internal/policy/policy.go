@@ -139,14 +139,12 @@ func networkIdentity(network sandbox.Network) NetworkIdentity {
 }
 
 func defaultReadRoots() []string {
-	roots := []string{
+	return pathutil.Dedupe([]string{
 		`C:\Windows`,
 		`C:\Program Files`,
 		`C:\Program Files (x86)`,
 		`C:\ProgramData`,
-	}
-	roots = append(roots, profileReadRoots(hostUserProfileRoot())...)
-	return pathutil.Dedupe(roots)
+	})
 }
 
 func hostUserProfileRoot() string {

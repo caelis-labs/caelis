@@ -752,7 +752,7 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 	if action == "" {
-		sendNotice(send, "usage: /sandbox setup | reset\nuse /status to inspect sandbox readiness")
+		sendNotice(send, "usage: /sandbox setup | clean\nuse /status to inspect sandbox readiness")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 	if strings.EqualFold(action, "setup") {
@@ -771,29 +771,29 @@ func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send 
 		sendStatusUpdate(send, status)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	if strings.EqualFold(action, "reset") {
+	if strings.EqualFold(action, "clean") || strings.EqualFold(action, "reset") {
 		resetter, ok := driver.(interface {
 			ResetSandbox(context.Context) (tuidriver.StatusSnapshot, error)
 		})
 		if !ok {
-			return TaskResultMsg{Err: friendlyCommandError("sandbox reset", fmt.Errorf("sandbox reset is unavailable for this driver"))}
+			return TaskResultMsg{Err: friendlyCommandError("sandbox clean", fmt.Errorf("sandbox clean is unavailable for this driver"))}
 		}
-		sendSandboxProgress(send, "Windows sandbox reset", sandbox.PrepareProgress{
+		sendSandboxProgress(send, "Windows sandbox clean", sandbox.PrepareProgress{
 			Phase:   "start",
 			Message: "resetting Windows sandbox state; this removes Caelis sandbox users, ACL records, firewall rules, and local sandbox state",
 		})
 		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
-			sendSandboxProgress(send, "Windows sandbox reset", progress)
+			sendSandboxProgress(send, "Windows sandbox clean", progress)
 		})
 		status, err := resetter.ResetSandbox(progressCtx)
 		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("sandbox reset", err)}
+			return TaskResultMsg{Err: friendlyCommandError("sandbox clean", err)}
 		}
-		sendNotice(send, "sandbox reset complete")
+		sendNotice(send, "sandbox clean complete")
 		sendStatusUpdate(send, status)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	sendNotice(send, "usage: /sandbox setup | reset\nuse -sandbox-backend or CAELIS_SANDBOX_BACKEND for advanced backend overrides")
+	sendNotice(send, "usage: /sandbox setup | clean\nuse -sandbox-backend or CAELIS_SANDBOX_BACKEND=windows-elevated for the experimental sandbox backend")
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 

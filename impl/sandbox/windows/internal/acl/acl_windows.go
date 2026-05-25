@@ -286,7 +286,12 @@ func rightsMask(rights Rights) windows.ACCESS_MASK {
 	case Modify:
 		return windows.FILE_GENERIC_READ | windows.FILE_GENERIC_WRITE | windows.FILE_GENERIC_EXECUTE | windows.DELETE | fileDeleteChild
 	case Write:
-		return windows.FILE_GENERIC_WRITE | windows.DELETE | fileDeleteChild
+		return windows.FILE_WRITE_DATA |
+			windows.FILE_APPEND_DATA |
+			windows.FILE_WRITE_EA |
+			windows.FILE_WRITE_ATTRIBUTES |
+			windows.DELETE |
+			fileDeleteChild
 	case Traverse:
 		return windows.FILE_GENERIC_EXECUTE
 	case ReadExecute:

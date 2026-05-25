@@ -90,7 +90,6 @@ func (r *Runtime) Describe() sandbox.Descriptor {
 
 func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	req = sandbox.CloneRequest(req)
-	constraints := sandbox.EffectiveConstraints(req)
 	dir := req.Dir
 	if dir == "" {
 		dir = r.fs.cwd
@@ -117,8 +116,8 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	result := sandbox.CommandResult{
 		Stdout:  stdout.String(),
 		Stderr:  stderr.String(),
-		Route:   firstNonEmptyRoute(constraints.Route, sandbox.RouteHost),
-		Backend: firstNonEmptyBackend(constraints.Backend, sandbox.BackendHost),
+		Route:   sandbox.RouteHost,
+		Backend: sandbox.BackendHost,
 	}
 	if cmd.ProcessState != nil {
 		result.ExitCode = cmd.ProcessState.ExitCode()
@@ -139,7 +138,6 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 		return nil, err
 	}
 	req = sandbox.CloneRequest(req)
-	constraints := sandbox.EffectiveConstraints(req)
 	dir := strings.TrimSpace(req.Dir)
 	if dir == "" {
 		dir = r.fs.cwd
@@ -198,11 +196,11 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	now := time.Now()
 	session := &hostSession{
 		ref: sandbox.SessionRef{
-			Backend:   firstNonEmptyBackend(constraints.Backend, sandbox.BackendHost),
+			Backend:   sandbox.BackendHost,
 			SessionID: sessionID,
 		},
 		terminal: sandbox.TerminalRef{
-			Backend:    firstNonEmptyBackend(constraints.Backend, sandbox.BackendHost),
+			Backend:    sandbox.BackendHost,
 			SessionID:  sessionID,
 			TerminalID: terminalID,
 		},
@@ -576,24 +574,6 @@ func (factory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
 
 func init() {
 	sandbox.RegisterBuiltInBackendFactory(factory{})
-}
-
-func firstNonEmptyRoute(values ...sandbox.Route) sandbox.Route {
-	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func firstNonEmptyBackend(values ...sandbox.Backend) sandbox.Backend {
-	for _, value := range values {
-		if strings.TrimSpace(string(value)) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func newID(prefix string) (string, error) {

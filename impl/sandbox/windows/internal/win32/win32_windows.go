@@ -329,18 +329,64 @@ func LookupAccountSIDString(account string) (string, error) {
 	if account == "" {
 		return "", fmt.Errorf("win32: account name is required")
 	}
-	sid, _, _, err := windows.LookupSID("", account)
-	if err != nil {
-		return "", err
+	var lastErr error
+	delay := 50 * time.Millisecond
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		for _, candidate := range lookupAccountCandidates(account) {
+			sid, _, _, err := windows.LookupSID("", candidate)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if sid == nil {
+				lastErr = fmt.Errorf("win32: account %q has no SID", candidate)
+				continue
+			}
+			value := sid.String()
+			if strings.TrimSpace(value) == "" {
+				lastErr = fmt.Errorf("win32: account %q has empty SID", candidate)
+				continue
+			}
+			return value, nil
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(delay)
+		if delay < 500*time.Millisecond {
+			delay *= 2
+		}
 	}
-	if sid == nil {
-		return "", fmt.Errorf("win32: account %q has no SID", account)
+	if lastErr != nil {
+		return "", lastErr
 	}
-	value := sid.String()
-	if strings.TrimSpace(value) == "" {
-		return "", fmt.Errorf("win32: account %q has empty SID", account)
+	return "", fmt.Errorf("win32: account %q SID not found", account)
+}
+
+func lookupAccountCandidates(account string) []string {
+	values := []string{account}
+	if !strings.ContainsAny(account, `\/@`) {
+		values = append(values, `.\`+account)
+		if computer := strings.TrimSpace(os.Getenv("COMPUTERNAME")); computer != "" {
+			values = append(values, computer+`\`+account)
+		}
 	}
-	return value, nil
+	out := values[:0]
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func RestrictedCurrentProcessToken() (Token, error) {

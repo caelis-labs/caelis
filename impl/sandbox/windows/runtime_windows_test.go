@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/runnerruntime"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setup"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
@@ -729,6 +730,47 @@ func TestBaseRefreshCacheCoversDefaultCommandWorkspacePolicy(t *testing.T) {
 	}
 }
 
+func TestBaseRefreshCacheDoesNotCoverHiddenCarveoutPolicy(t *testing.T) {
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	hidden := filepath.Join(workspace, "future-hidden")
+	r := &setupRunner{
+		cfg:        sandbox.Config{CWD: workspace},
+		stateRoot:  stateDir,
+		executable: os.Args[0],
+	}
+	r.markBaseRefreshApplied()
+	req := runnerruntime.Request{
+		Dir: workspace,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindowsElevated,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Network:    sandbox.NetworkDisabled,
+			PathRules: []sandbox.PathRule{
+				{Path: hidden, Access: sandbox.PathAccessHidden},
+			},
+		},
+	}
+	payload, _, err := r.setupPayload(req, setup.SetupKindRuntimeRefresh)
+	if err != nil {
+		t.Fatalf("setupPayload(runtime_refresh) error = %v", err)
+	}
+	if !containsPath(payload.Policy.DenyReadPaths, hidden) || !containsPath(payload.Policy.DenyWritePaths, hidden) {
+		t.Fatalf("runtime refresh policy deny paths = read %#v write %#v, want hidden path %q", payload.Policy.DenyReadPaths, payload.Policy.DenyWritePaths, hidden)
+	}
+	if !containsPath(payload.Policy.MaterializeDenyWritePaths, hidden) {
+		t.Fatalf("runtime refresh MaterializeDenyWritePaths = %#v, want hidden path %q", payload.Policy.MaterializeDenyWritePaths, hidden)
+	}
+	requestKey, err := r.policyRequestKey(req)
+	if err != nil {
+		t.Fatalf("policyRequestKey() error = %v", err)
+	}
+	if r.refreshAnyApplied(requestKey, payload.WorkspacePolicyHash) {
+		t.Fatalf("base refresh cache incorrectly covers hidden carveout policy; workspace hash %q", payload.WorkspacePolicyHash)
+	}
+}
+
 func TestContextMutexLockHonorsContextCancellation(t *testing.T) {
 	var mu contextMutex
 	if err := mu.Lock(context.Background()); err != nil {
@@ -755,12 +797,9 @@ func runnerruntimeRequest(dir string) runnerruntime.Request {
 }
 
 func containsPath(paths []string, want string) bool {
-	wantInfo, wantErr := os.Stat(want)
+	wantKey := pathutil.Key(want)
 	for _, path := range paths {
-		if info, err := os.Stat(path); err == nil && wantErr == nil && os.SameFile(info, wantInfo) {
-			return true
-		}
-		if strings.EqualFold(filepath.Clean(path), filepath.Clean(want)) {
+		if pathutil.Key(path) == wantKey {
 			return true
 		}
 	}

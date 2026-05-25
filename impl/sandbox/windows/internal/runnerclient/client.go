@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/cmdsession"
@@ -24,6 +26,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnertrace"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"golang.org/x/sys/windows"
 )
 
 type Config struct {
@@ -318,6 +321,11 @@ func (c *Client) launch(ctx context.Context, req runnerruntime.Request) (process
 		if err != nil {
 			return nil, err
 		}
+		if junction, err := ensureRunnerCWDJunction(env, req.Dir); err != nil {
+			return nil, err
+		} else if junction != "" {
+			setEnvValue(&env, "CAELIS_SANDBOX_CWD_LINK", junction)
+		}
 		logonDone := runnertrace.Span("windows-runner", "launch.create_process_with_logon")
 		proc, err := win32.StartProcessWithLogon(win32.LogonCredentials{
 			Username: creds.Username,
@@ -335,6 +343,11 @@ func (c *Client) launch(ctx context.Context, req runnerruntime.Request) (process
 	envDone()
 	if err != nil {
 		return nil, err
+	}
+	if junction, err := ensureRunnerCWDJunction(env, req.Dir); err != nil {
+		return nil, err
+	} else if junction != "" {
+		setEnvValue(&env, "CAELIS_SANDBOX_CWD_LINK", junction)
 	}
 	execDone := runnertrace.Span("windows-runner", "launch.exec_process")
 	proc, err := startExecProcess(context.WithoutCancel(ctx), executable, c.args, c.dir, env)
@@ -491,6 +504,115 @@ func minimalWindowsPath(systemRoot string) string {
 		parts = append(parts, path)
 	}
 	return strings.Join(dedupePathParts(parts...), string(os.PathListSeparator))
+}
+
+func ensureRunnerCWDJunction(env []string, requestedCWD string) (string, error) {
+	requestedCWD = strings.TrimSpace(requestedCWD)
+	if requestedCWD == "" {
+		return "", nil
+	}
+	home := strings.TrimSpace(envValue(env, "CAELIS_SANDBOX_HOME"))
+	if home == "" {
+		home = strings.TrimSpace(envValue(env, "HOME"))
+	}
+	if home == "" {
+		home = strings.TrimSpace(envValue(env, "USERPROFILE"))
+	}
+	if home == "" {
+		return "", nil
+	}
+	root := filepath.Join(home, ".caelis", ".sandbox", "cwd")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("windows runner: create cwd junction root: %w", err)
+	}
+	junction := filepath.Join(root, runnerCWDJunctionName(requestedCWD))
+	if runnerCWDJunctionMatches(junction, requestedCWD) {
+		return junction, nil
+	}
+	if _, err := os.Lstat(junction); err == nil {
+		if err := os.Remove(junction); err != nil {
+			return "", fmt.Errorf("windows runner: replace stale cwd junction %s: %w", junction, err)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", fmt.Errorf("windows runner: inspect cwd junction %s: %w", junction, err)
+	}
+	if output, err := createDirectoryLink(junction, requestedCWD, "/D"); err != nil {
+		if fallbackOutput, fallbackErr := createDirectoryLink(junction, requestedCWD, "/J"); fallbackErr != nil {
+			return "", fmt.Errorf("windows runner: create cwd link: symlink=%v: %s; junction=%v: %s", err, strings.TrimSpace(string(output)), fallbackErr, strings.TrimSpace(string(fallbackOutput)))
+		}
+	}
+	if !isRunnerReparsePoint(junction) {
+		return "", fmt.Errorf("windows runner: cwd junction %s was not created as a reparse point", junction)
+	}
+	return junction, nil
+}
+
+func runnerCWDJunctionMatches(link string, target string) bool {
+	if !isRunnerReparsePoint(link) {
+		return false
+	}
+	resolvedLink, err := filepath.EvalSymlinks(link)
+	if err != nil || strings.TrimSpace(resolvedLink) == "" {
+		return false
+	}
+	resolvedTarget, err := filepath.EvalSymlinks(target)
+	if err != nil || strings.TrimSpace(resolvedTarget) == "" {
+		resolvedTarget = target
+	}
+	return strings.EqualFold(filepath.Clean(resolvedLink), filepath.Clean(resolvedTarget))
+}
+
+func createDirectoryLink(link string, target string, mode string) ([]byte, error) {
+	cmd := exec.Command("cmd.exe")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+		CmdLine:    fmt.Sprintf(`/d /s /c mklink %s "%s" "%s"`, mode, link, target),
+	}
+	return cmd.CombinedOutput()
+}
+
+func runnerCWDJunctionName(path string) string {
+	cleaned := strings.ToLower(filepath.Clean(strings.TrimSpace(path)))
+	sum := sha256.Sum256([]byte(cleaned))
+	return hex.EncodeToString(sum[:8])
+}
+
+func isRunnerReparsePoint(path string) bool {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return false
+	}
+	data, ok := info.Sys().(*syscall.Win32FileAttributeData)
+	return ok && data.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0
+}
+
+func envValue(env []string, key string) string {
+	for i := len(env) - 1; i >= 0; i-- {
+		name, value, ok := strings.Cut(env[i], "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(name), key) {
+			return value
+		}
+	}
+	return ""
+}
+
+func setEnvValue(env *[]string, key string, value string) {
+	key = strings.TrimSpace(key)
+	if env == nil || key == "" {
+		return
+	}
+	next := (*env)[:0]
+	for _, current := range *env {
+		name, _, ok := strings.Cut(current, "=")
+		if ok && strings.EqualFold(strings.TrimSpace(name), key) {
+			continue
+		}
+		next = append(next, current)
+	}
+	*env = append(next, key+"="+value)
 }
 
 func dedupePathParts(values ...string) []string {

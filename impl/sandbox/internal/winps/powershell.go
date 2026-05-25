@@ -27,10 +27,29 @@ func Command(command string) string {
 	}
 	encoded := base64.StdEncoding.EncodeToString([]byte(command))
 	return utf8Prelude +
+		"$global:LASTEXITCODE = $null; " +
 		"$__caelisUserCommand = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('" + encoded + "')); " +
 		"try { $__caelisScriptBlock = [ScriptBlock]::Create($__caelisUserCommand); } " +
 		"catch { $__caelisParseError = $_.Exception; if ($__caelisParseError.InnerException -ne $null) { $__caelisParseError = $__caelisParseError.InnerException; }; [Console]::Error.WriteLine($__caelisParseError.Message); exit 1; }; " +
-		"& $__caelisScriptBlock"
+		"$__caelisPropagateNativeExit = $false; " +
+		"try { " +
+		"$__caelisStatements = @(); " +
+		"if ($__caelisScriptBlock.Ast.EndBlock -ne $null) { $__caelisStatements = @($__caelisScriptBlock.Ast.EndBlock.Statements); }; " +
+		"if ($__caelisStatements.Count -gt 0) { " +
+		"$__caelisLastStatement = $__caelisStatements[$__caelisStatements.Count - 1]; " +
+		"if ($__caelisLastStatement -is [System.Management.Automation.Language.PipelineAst] -and $__caelisLastStatement.PipelineElements.Count -gt 0) { " +
+		"$__caelisLastElement = $__caelisLastStatement.PipelineElements[$__caelisLastStatement.PipelineElements.Count - 1]; " +
+		"if ($__caelisLastElement -is [System.Management.Automation.Language.CommandAst]) { " +
+		"$__caelisLastCommandName = $__caelisLastElement.GetCommandName(); " +
+		"if (-not [string]::IsNullOrWhiteSpace($__caelisLastCommandName)) { " +
+		"$__caelisLastCommand = Get-Command -Name $__caelisLastCommandName -ErrorAction SilentlyContinue; " +
+		"if ($__caelisLastCommand -ne $null -and $__caelisLastCommand.CommandType -eq [System.Management.Automation.CommandTypes]::Application) { $__caelisPropagateNativeExit = $true; }; " +
+		"}; }; }; }; " +
+		"} catch { $__caelisPropagateNativeExit = $false; }; " +
+		"if ($__caelisPropagateNativeExit) { $__caelisScriptBlock = [ScriptBlock]::Create($__caelisUserCommand + \"`r`nif (`$global:LASTEXITCODE -is [int]) { exit `$global:LASTEXITCODE }\"); }; " +
+		"& $__caelisScriptBlock; " +
+		"$__caelisCommandSuccess = $?; " +
+		"if (-not $__caelisCommandSuccess) { exit 1; }"
 }
 
 func EncodedCommand(command string) string {

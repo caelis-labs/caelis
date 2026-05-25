@@ -94,7 +94,7 @@ func TestWindowsElevatedSandboxE2E(t *testing.T) {
 	}
 	defer rt.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
 
 	preparer, ok := rt.(interface {
@@ -306,6 +306,7 @@ try {
 	if !strings.Contains(result.Stdout, "async-e2e-ok") {
 		t.Fatalf("async stdout = %q", result.Stdout)
 	}
+	verifyRunTimeoutE2E(ctx, t, rt, workspace)
 	verifyCanceledRunTerminatesChildE2E(ctx, t, rt, workspace)
 }
 
@@ -687,37 +688,126 @@ func verifyGitAndGoCommandOutputE2E(ctx context.Context, t *testing.T, rt sandbo
 		return
 	}
 	repo := prepareGitGoRepoE2E(t, workspace, gitPath)
+	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E_GIT_DIAG") == "1" {
+		diag := `
+Write-Output ('cwd=' + (Get-Location).Path)
+Write-Output ('PATH=' + $env:PATH)
+Write-Output ('GIT_OPTIONAL_LOCKS=' + $env:GIT_OPTIONAL_LOCKS)
+Write-Output ('GIT_CONFIG_COUNT=' + $env:GIT_CONFIG_COUNT)
+Write-Output ('GIT_CONFIG_KEY_0=' + $env:GIT_CONFIG_KEY_0)
+Write-Output ('GIT_CONFIG_VALUE_0=' + $env:GIT_CONFIG_VALUE_0)
+Write-Output ('GIT_CONFIG_KEY_1=' + $env:GIT_CONFIG_KEY_1)
+Write-Output ('GIT_CONFIG_VALUE_1=' + $env:GIT_CONFIG_VALUE_1)
+Get-Command git | Format-List CommandType,Source,Definition
+where.exe git
+git --version
+Write-Output ('last-version=' + $LASTEXITCODE)
+git config --get-all safe.directory
+Write-Output ('last-safe-directory=' + $LASTEXITCODE)
+git status
+Write-Output ('last-status=' + $LASTEXITCODE)
+git status 2>&1 | ForEach-Object { Write-Output ('merged-status=' + $_) }
+Write-Output ('last-merged-status=' + $LASTEXITCODE)
+cmd.exe /d /c git status
+Write-Output ('last-cmd-status=' + $LASTEXITCODE)
+`
+		result, runErr := runE2ECommandInDirWithTimeout(ctx, rt, repo, diag, sandbox.NetworkDisabled, nil, time.Minute)
+		t.Logf("sandbox git diagnostic err=%v %s", runErr, e2eCommandDiagnostics(result))
+	}
 	for _, tc := range []struct {
 		name    string
 		command string
+		args    []string
 		want    []string
 	}{
-		{name: "git status", command: "git status", want: []string{"On branch", "working tree clean"}},
-		{name: "git log", command: "git --no-pager log --oneline -1", want: []string{"initial e2e"}},
-		{name: "git show", command: "git --no-pager show HEAD:calc.go", want: []string{"func Add"}},
+		{name: "git status", command: "git status", args: []string{"status"}, want: []string{"On branch", "working tree clean"}},
+		{name: "git log", command: "git --no-pager log --oneline -1", args: []string{"--no-pager", "log", "--oneline", "-1"}, want: []string{"initial e2e"}},
+		{name: "git show", command: "git --no-pager show HEAD:calc.go", args: []string{"--no-pager", "show", "HEAD:calc.go"}, want: []string{"func Add"}},
 	} {
+		hostOutput := runHostCommandE2E(t, repo, 30*time.Second, gitPath, tc.args...)
+		for _, want := range tc.want {
+			if !strings.Contains(hostOutput, want) {
+				t.Fatalf("host %s missing %q; output=%q", tc.name, want, hostOutput)
+			}
+		}
 		result, runErr := runE2ECommandInDir(ctx, rt, repo, tc.command, sandbox.NetworkDisabled, nil)
 		requireE2ECommandOutput(t, "sync "+tc.name, result, runErr, tc.want...)
 		result, runErr = runE2EAsyncCommand(ctx, t, rt, repo, tc.command, sandbox.NetworkDisabled)
 		requireE2ECommandOutput(t, "async "+tc.name, result, runErr, tc.want...)
 	}
 
-	if _, err := exec.LookPath("go"); err != nil {
+	goPath, err := exec.LookPath("go")
+	if err != nil {
 		t.Logf("skipping go output e2e: host go is unavailable: %v", err)
 		return
 	}
+	hostGoTest := runHostCommandE2E(t, repo, 2*time.Minute, goPath, "test", "./...")
+	if !strings.Contains(hostGoTest, "ok") || !strings.Contains(hostGoTest, "example.com/caelis-e2e") {
+		t.Fatalf("host go test output = %q", hostGoTest)
+	}
+	_ = runHostCommandE2E(t, repo, 2*time.Minute, goPath, "build", "./...")
+	hostBuildOutput := filepath.Join(repo, "bin", "host-caelis-e2e-build.exe")
+	if err := os.MkdirAll(filepath.Dir(hostBuildOutput), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", filepath.Dir(hostBuildOutput), err)
+	}
+	_ = runHostCommandE2E(t, repo, 2*time.Minute, goPath, "build", "-o", hostBuildOutput, "./cmd/app")
+	hostAppOutput := runHostCommandE2E(t, repo, 30*time.Second, hostBuildOutput)
+	if !strings.Contains(hostAppOutput, "caelis-e2e-build-ok") {
+		t.Fatalf("host built app output = %q", hostAppOutput)
+	}
+
 	for _, tc := range []struct {
 		name    string
 		command string
 		want    []string
 	}{
+		{name: "go env", command: "go env GOMOD GOCACHE GOMODCACHE", want: []string{"go.mod"}},
 		{name: "go test", command: "go test ./...", want: []string{"ok", "example.com/caelis-e2e"}},
 	} {
-		result, runErr := runE2ECommandInDir(ctx, rt, repo, tc.command, sandbox.NetworkDisabled, nil)
+		result, runErr := runE2ECommandInDirWithTimeout(ctx, rt, repo, tc.command, sandbox.NetworkDisabled, nil, 2*time.Minute)
 		requireE2ECommandOutput(t, "sync "+tc.name, result, runErr, tc.want...)
-		result, runErr = runE2EAsyncCommand(ctx, t, rt, repo, tc.command, sandbox.NetworkDisabled)
+		result, runErr = runE2EAsyncCommandWithTimeout(ctx, t, rt, repo, tc.command, sandbox.NetworkDisabled, 2*time.Minute)
 		requireE2ECommandOutput(t, "async "+tc.name, result, runErr, tc.want...)
 	}
+
+	for _, tc := range []struct {
+		name    string
+		command string
+	}{
+		{name: "go build all", command: "go build ./..."},
+	} {
+		result, runErr := runE2ECommandInDirWithTimeout(ctx, rt, repo, tc.command, sandbox.NetworkDisabled, nil, 2*time.Minute)
+		requireE2ECommandSuccess(t, "sync "+tc.name, result, runErr)
+		result, runErr = runE2EAsyncCommandWithTimeout(ctx, t, rt, repo, tc.command, sandbox.NetworkDisabled, 2*time.Minute)
+		requireE2ECommandSuccess(t, "async "+tc.name, result, runErr)
+	}
+
+	buildAndRun := `
+$ErrorActionPreference = 'Stop'
+New-Item -ItemType Directory -Force -Path '.\bin' | Out-Null
+go build -o '.\bin\sandbox-caelis-e2e-build.exe' '.\cmd\app'
+& '.\bin\sandbox-caelis-e2e-build.exe'
+`
+	result, runErr := runE2ECommandInDirWithTimeout(ctx, rt, repo, buildAndRun, sandbox.NetworkDisabled, nil, 2*time.Minute)
+	requireE2ECommandOutput(t, "sync go build artifact", result, runErr, "caelis-e2e-build-ok")
+	result, runErr = runE2EAsyncCommandWithTimeout(ctx, t, rt, repo, buildAndRun, sandbox.NetworkDisabled, 2*time.Minute)
+	requireE2ECommandOutput(t, "async go build artifact", result, runErr, "caelis-e2e-build-ok")
+
+	cacheProbe := `
+$ErrorActionPreference = 'Stop'
+$cache = (& go env GOCACHE).Trim()
+if ([string]::IsNullOrWhiteSpace($cache)) { throw 'GOCACHE missing' }
+New-Item -ItemType Directory -Force -Path $cache | Out-Null
+$probe = Join-Path $cache 'caelis-e2e-cache-probe.txt'
+Set-Content -LiteralPath $probe -Value 'cache-ok' -Force
+Get-Content -LiteralPath $probe
+Remove-Item -LiteralPath $probe -Force
+Write-Output ('gocache=' + $cache)
+`
+	result, runErr = runE2ECommandInDirWithTimeout(ctx, rt, repo, cacheProbe, sandbox.NetworkDisabled, nil, 2*time.Minute)
+	requireE2ECommandOutput(t, "sync go cache probe", result, runErr, "cache-ok", "gocache=")
+	result, runErr = runE2EAsyncCommandWithTimeout(ctx, t, rt, repo, cacheProbe, sandbox.NetworkDisabled, 2*time.Minute)
+	requireE2ECommandOutput(t, "async go cache probe", result, runErr, "cache-ok", "gocache=")
 }
 
 func prepareGitGoRepoE2E(t *testing.T, workspace string, gitPath string) string {
@@ -730,11 +820,15 @@ func prepareGitGoRepoE2E(t *testing.T, workspace string, gitPath string) string 
 		t.Fatalf("MkdirAll(%s) error = %v", repo, err)
 	}
 	files := map[string]string{
-		"go.mod":       "module example.com/caelis-e2e\n\ngo 1.21\n",
-		"calc.go":      "package calc\n\nfunc Add(a, b int) int { return a + b }\n",
-		"calc_test.go": "package calc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Fatal(\"bad add\")\n\t}\n}\n",
+		"go.mod":                               "module example.com/caelis-e2e\n\ngo 1.21\n",
+		"calc.go":                              "package calc\n\nfunc Add(a, b int) int { return a + b }\n",
+		"calc_test.go":                         "package calc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Fatal(\"bad add\")\n\t}\n}\n",
+		filepath.Join("cmd", "app", "main.go"): "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"caelis-e2e-build-ok\")\n}\n",
 	}
 	for name, content := range files {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(repo, name)), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", filepath.Dir(filepath.Join(repo, name)), err)
+		}
 		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
 			t.Fatalf("WriteFile(%s) error = %v", name, err)
 		}
@@ -758,11 +852,18 @@ func runHostGitE2E(t *testing.T, gitPath string, dir string, args ...string) {
 }
 
 func runE2EAsyncCommand(ctx context.Context, t *testing.T, rt sandbox.Runtime, dir string, command string, network sandbox.Network) (sandbox.CommandResult, error) {
+	return runE2EAsyncCommandWithTimeout(ctx, t, rt, dir, command, network, 45*time.Second)
+}
+
+func runE2EAsyncCommandWithTimeout(ctx context.Context, t *testing.T, rt sandbox.Runtime, dir string, command string, network sandbox.Network, timeout time.Duration) (sandbox.CommandResult, error) {
 	t.Helper()
+	if timeout <= 0 {
+		timeout = 45 * time.Second
+	}
 	session, err := rt.Start(ctx, sandbox.CommandRequest{
 		Command: strings.TrimSpace(command),
 		Dir:     dir,
-		Timeout: 45 * time.Second,
+		Timeout: timeout,
 		Constraints: sandbox.Constraints{
 			Route:      sandbox.RouteSandbox,
 			Backend:    sandbox.BackendWindowsElevated,
@@ -773,7 +874,7 @@ func runE2EAsyncCommand(ctx context.Context, t *testing.T, rt sandbox.Runtime, d
 	if err != nil {
 		return sandbox.CommandResult{}, err
 	}
-	status, err := session.Wait(ctx, 45*time.Second)
+	status, err := session.Wait(ctx, timeout)
 	if err != nil {
 		_ = session.Terminate(context.Background())
 		return sandbox.CommandResult{}, fmt.Errorf("wait: %w", err)
@@ -796,6 +897,35 @@ func runE2EAsyncCommand(ctx context.Context, t *testing.T, rt sandbox.Runtime, d
 	return result, nil
 }
 
+func runHostCommandE2E(t *testing.T, dir string, timeout time.Duration, exe string, args ...string) string {
+	t.Helper()
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	commandCtx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(commandCtx, exe, args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if commandCtx.Err() != nil {
+		t.Fatalf("host command %s timed out after %s output=%q", strings.Join(append([]string{exe}, args...), " "), timeout, string(output))
+	}
+	if err != nil {
+		t.Fatalf("host command %s error = %v output=%q", strings.Join(append([]string{exe}, args...), " "), err, string(output))
+	}
+	return string(output)
+}
+
+func requireE2ECommandSuccess(t *testing.T, label string, result sandbox.CommandResult, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s error = %v; %s", label, err, e2eCommandDiagnostics(result))
+	}
+	if result.ExitCode != 0 {
+		t.Fatalf("%s exit code = %d; %s", label, result.ExitCode, e2eCommandDiagnostics(result))
+	}
+}
+
 func requireE2ECommandOutput(t *testing.T, label string, result sandbox.CommandResult, err error, want ...string) {
 	t.Helper()
 	if err != nil {
@@ -813,6 +943,23 @@ func requireE2ECommandOutput(t *testing.T, label string, result sandbox.CommandR
 
 func e2eCommandDiagnostics(result sandbox.CommandResult) string {
 	return fmt.Sprintf("exit=%d stdout_bytes=%d stderr_bytes=%d stdout=%q stderr=%q", result.ExitCode, len(result.Stdout), len(result.Stderr), result.Stdout, result.Stderr)
+}
+
+func verifyRunTimeoutE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+	t.Helper()
+	started := time.Now()
+	result, err := runE2ECommandInDirWithTimeout(ctx, rt, workspace, `
+Set-Content -LiteralPath '.\timeout-started.txt' -Value 'started'
+Start-Sleep -Seconds 20
+Write-Output 'timeout-leak'
+`, sandbox.NetworkDisabled, nil, time.Second)
+	t.Logf("timeout command returned in %s", time.Since(started))
+	if err == nil && result.ExitCode == 0 {
+		t.Fatalf("timeout command unexpectedly succeeded; %s", e2eCommandDiagnostics(result))
+	}
+	if strings.Contains(result.Stdout, "timeout-leak") || strings.Contains(result.Stderr, "timeout-leak") {
+		t.Fatalf("timeout command continued past deadline; %s", e2eCommandDiagnostics(result))
+	}
 }
 
 func verifyCanceledRunTerminatesChildE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
@@ -868,7 +1015,10 @@ func assertSandboxWriteDeniedForNetworkE2E(ctx context.Context, t *testing.T, rt
 	t.Helper()
 	command := "$ErrorActionPreference = 'Stop'; Set-Content -LiteralPath '" + escapePowerShellSingleQuote(relPath) + "' -Value 'blocked'"
 	result, err := runE2ECommand(ctx, rt, workspace, command, network, rules)
-	if err == nil || result.ExitCode == 0 {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("sandbox write to %s did not complete before context ended: err=%v %s", relPath, err, e2eCommandDiagnostics(result))
+	}
+	if err == nil || result.ExitCode <= 0 {
 		t.Fatalf("sandbox write to %s was not denied: err=%v result=%+v", relPath, err, result)
 	}
 }
@@ -954,10 +1104,17 @@ func runE2ECommand(ctx context.Context, rt sandbox.Runtime, workspace string, co
 }
 
 func runE2ECommandInDir(ctx context.Context, rt sandbox.Runtime, dir string, command string, network sandbox.Network, rules []sandbox.PathRule) (sandbox.CommandResult, error) {
+	return runE2ECommandInDirWithTimeout(ctx, rt, dir, command, network, rules, 30*time.Second)
+}
+
+func runE2ECommandInDirWithTimeout(ctx context.Context, rt sandbox.Runtime, dir string, command string, network sandbox.Network, rules []sandbox.PathRule, timeout time.Duration) (sandbox.CommandResult, error) {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
 	return rt.Run(ctx, sandbox.CommandRequest{
 		Command: strings.TrimSpace(command),
 		Dir:     dir,
-		Timeout: 30 * time.Second,
+		Timeout: timeout,
 		Constraints: sandbox.Constraints{
 			Route:      sandbox.RouteSandbox,
 			Backend:    sandbox.BackendWindowsElevated,

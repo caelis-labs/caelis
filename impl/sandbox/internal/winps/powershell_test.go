@@ -1,8 +1,11 @@
 package winps
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf16"
@@ -52,6 +55,52 @@ func TestArgsUseEncodedCommand(t *testing.T) {
 		!strings.Contains(decoded, "$OutputEncoding = $__caelisUtf8Encoding") {
 		t.Fatalf("encoded command = %q, want UTF-8 wrapper script", decoded)
 	}
+	if !strings.Contains(decoded, "$global:LASTEXITCODE = $null") ||
+		!strings.Contains(decoded, "$__caelisPropagateNativeExit") ||
+		!strings.Contains(decoded, "exit `$global:LASTEXITCODE") {
+		t.Fatalf("encoded command = %q, want native exit-code propagation", decoded)
+	}
+}
+
+func TestCommandPropagatesFinalNativeExitCode(t *testing.T) {
+	exitCode, stdout, stderr := runEncodedPowerShellCommand(t, "cmd.exe /d /c exit /b 7")
+	if exitCode != 7 {
+		t.Fatalf("exit code = %d stdout=%q stderr=%q, want 7", exitCode, stdout, stderr)
+	}
+}
+
+func TestCommandDoesNotPropagateStaleNativeExitCode(t *testing.T) {
+	exitCode, stdout, stderr := runEncodedPowerShellCommand(t, "cmd.exe /d /c exit /b 7; Write-Output ok")
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d stdout=%q stderr=%q, want 0", exitCode, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "ok") {
+		t.Fatalf("stdout = %q, want ok", stdout)
+	}
+}
+
+func runEncodedPowerShellCommand(t *testing.T, command string) (int, string, string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		t.Skip("PowerShell exit-code behavior is Windows-specific")
+	}
+	exe, err := exec.LookPath("powershell.exe")
+	if err != nil {
+		t.Skipf("powershell.exe unavailable: %v", err)
+	}
+	cmd := exec.Command(exe, Args(command, Options{})...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err = cmd.Run()
+	if err == nil {
+		return 0, stdout.String(), stderr.String()
+	}
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		return exitErr.ExitCode(), stdout.String(), stderr.String()
+	}
+	t.Fatalf("powershell.exe failed: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())
+	return 0, "", ""
 }
 
 func decodeUTF16LEBase64(raw string) (string, error) {

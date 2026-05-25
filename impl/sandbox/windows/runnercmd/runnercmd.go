@@ -4,18 +4,16 @@ package runnercmd
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
@@ -23,7 +21,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/job"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerproto"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
-	"golang.org/x/sys/windows"
 )
 
 func Run(stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
@@ -450,12 +447,29 @@ func mergeEnv(extra map[string]string, _ string, cwd string) ([]string, error) {
 	if !gitOptionalLocksProvided {
 		setEnvValue(&env, "GIT_OPTIONAL_LOCKS", "0")
 	}
+	appendGitSafeDirectoryConfig(&env)
 	return env, nil
+}
+
+func appendGitSafeDirectoryConfig(env *[]string) {
+	if env == nil {
+		return
+	}
+	count := 0
+	if raw := strings.TrimSpace(envValue(*env, "GIT_CONFIG_COUNT")); raw != "" {
+		if parsed, err := strconv.Atoi(raw); err == nil && parsed >= 0 {
+			count = parsed
+		}
+	}
+	setEnvValue(env, "GIT_CONFIG_KEY_"+strconv.Itoa(count), "safe.directory")
+	setEnvValue(env, "GIT_CONFIG_VALUE_"+strconv.Itoa(count), "*")
+	setEnvValue(env, "GIT_CONFIG_COUNT", strconv.Itoa(count+1))
 }
 
 func protectedSandboxEnvKeys(env []string) map[string]struct{} {
 	keys := []string{
 		"APPDATA",
+		"CAELIS_SANDBOX_CWD_LINK",
 		"CAELIS_SANDBOX_HOME",
 		"CAELIS_SANDBOX_STATE",
 		"HOMEDRIVE",
@@ -530,67 +544,10 @@ func effectiveWorkingDirectory(requestedCWD string, env []string) string {
 	if requestedCWD == "" {
 		return ""
 	}
-	if junction, ok := createCWDJunction(requestedCWD, env); ok {
+	if junction := strings.TrimSpace(envValue(env, "CAELIS_SANDBOX_CWD_LINK")); junction != "" {
 		return junction
 	}
 	return requestedCWD
-}
-
-func createCWDJunction(requestedCWD string, env []string) (string, bool) {
-	home := strings.TrimSpace(firstEnvValue(env, "CAELIS_SANDBOX_HOME", "HOME", "USERPROFILE"))
-	if home == "" {
-		return "", false
-	}
-	root := filepath.Join(home, ".caelis", ".sandbox", "cwd")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", false
-	}
-	junction := filepath.Join(root, cwdJunctionName(requestedCWD))
-	if isReparsePoint(junction) {
-		return junction, true
-	}
-	if _, err := os.Lstat(junction); err == nil {
-		if err := os.Remove(junction); err != nil {
-			return "", false
-		}
-	} else if !os.IsNotExist(err) {
-		return "", false
-	}
-	if err := makeDirectoryJunction(junction, requestedCWD); err != nil {
-		return "", false
-	}
-	if !isReparsePoint(junction) {
-		return "", false
-	}
-	return junction, true
-}
-
-func cwdJunctionName(path string) string {
-	cleaned := strings.ToLower(filepath.Clean(strings.TrimSpace(path)))
-	sum := sha256.Sum256([]byte(cleaned))
-	return hex.EncodeToString(sum[:8])
-}
-
-func isReparsePoint(path string) bool {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return false
-	}
-	data, ok := info.Sys().(*syscall.Win32FileAttributeData)
-	return ok && data.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0
-}
-
-func makeDirectoryJunction(link string, target string) error {
-	cmd := exec.Command("cmd.exe")
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow: true,
-		CmdLine:    fmt.Sprintf(`/d /s /c mklink /J "%s" "%s"`, link, target),
-	}
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("mklink /J failed: %w: %s", err, strings.TrimSpace(string(output)))
-	}
-	return nil
 }
 
 func commandWithLocation(command string, cwd string) string {

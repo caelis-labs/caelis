@@ -2872,6 +2872,35 @@ func TestRuntimeRunCommandToolPassesExplicitYieldThrough(t *testing.T) {
 	assertRunningTaskSnapshot(t, result)
 }
 
+func TestRuntimeRunCommandToolPassesConfiguredTimeoutThrough(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	base, err := shell.NewRunCommand(shell.RunCommandConfig{Runtime: fake, Timeout: 60 * time.Second})
+	if err != nil {
+		t.Fatalf("shell.NewRunCommand() error = %v", err)
+	}
+	targetTool := runtimeCommandTool{
+		base:       base,
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+
+	result := callRuntimeRunCommandTool(t, targetTool, map[string]any{
+		"command":       "printf 'ok'",
+		"workdir":       activeSession.CWD,
+		"yield_time_ms": 0,
+		"timeout_ms":    1,
+	})
+
+	if got := fake.session.timeout; got != 60*time.Second {
+		t.Fatalf("command timeout = %v, want %v", got, 60*time.Second)
+	}
+	assertRunningTaskSnapshot(t, result)
+}
+
 func TestStartCommandMarksTaskFailedWhenInitialWaitErrors(t *testing.T) {
 	t.Parallel()
 
@@ -3095,6 +3124,49 @@ func TestRuntimeTaskWaitKeepsExplicitZeroYield(t *testing.T) {
 	}
 	if got := toolMeta["yield_time_ms_defaulted"]; got != nil {
 		t.Fatalf("yield_time_ms_defaulted = %#v, want omitted", got)
+	}
+}
+
+func TestRuntimeTaskWaitIgnoresTimeoutMSAlias(t *testing.T) {
+	t.Parallel()
+
+	_, activeSession, runtime := newRuntimeRunCommandToolTestHarness(t)
+	fake := &yieldProbeSandboxRuntime{session: newYieldProbeSandboxSession()}
+	runCommandTool := runtimeCommandTool{
+		base:       mustRuntimeRunCommandTool(t, fake),
+		session:    session.CloneSession(activeSession),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}
+	runCommandResult := callRuntimeRunCommandTool(t, runCommandTool, map[string]any{
+		"command":       "printf 'ok'",
+		"workdir":       activeSession.CWD,
+		"yield_time_ms": 0,
+	})
+	taskID, _ := testToolResultRuntimeMeta(t, runCommandResult, "task")["task_id"].(string)
+	if strings.TrimSpace(taskID) == "" {
+		t.Fatalf("command result metadata = %#v, want task_id", runCommandResult.Metadata)
+	}
+
+	taskResult := callRuntimeTaskTool(t, runtimeTaskTool{
+		base:       tasktool.New(),
+		sessionRef: activeSession.SessionRef,
+		tasks:      runtime.tasks,
+	}, map[string]any{
+		"action":     "wait",
+		"task_id":    taskID,
+		"timeout_ms": "45000",
+	})
+
+	if got := fake.session.lastWait; got != defaultCommandYield {
+		t.Fatalf("TASK wait with timeout_ms lastWait = %v, want default yield %v", got, defaultCommandYield)
+	}
+	toolMeta := testToolResultRuntimeMeta(t, taskResult, "tool")
+	if got := toolMeta["effective_yield_time_ms"]; got != float64(7000) && got != 7000 {
+		t.Fatalf("effective_yield_time_ms = %#v, want 7000", got)
+	}
+	if got := toolMeta["yield_time_ms_defaulted"]; got != true {
+		t.Fatalf("yield_time_ms_defaulted = %#v, want true", got)
 	}
 }
 

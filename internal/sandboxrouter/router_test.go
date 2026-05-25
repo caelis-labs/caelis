@@ -7,10 +7,23 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
-func TestForGOOSWindowsDefaultsToElevated(t *testing.T) {
+func TestForGOOSWindowsDefaultsToHost(t *testing.T) {
 	route, err := ForGOOS("windows", "")
 	if err != nil {
 		t.Fatalf("ForGOOS(windows, auto) error = %v", err)
+	}
+	if len(route.BackendCandidates) != 0 {
+		t.Fatalf("BackendCandidates = %v, want none for default host execution", route.BackendCandidates)
+	}
+	if strings.TrimSpace(route.FallbackInstallHint) != "" {
+		t.Fatalf("FallbackInstallHint = %q, want empty default host hint", route.FallbackInstallHint)
+	}
+}
+
+func TestForGOOSWindowsElevatedIsExplicit(t *testing.T) {
+	route, err := ForGOOS("windows", sandbox.BackendWindowsElevated)
+	if err != nil {
+		t.Fatalf("ForGOOS(windows, windows-elevated) error = %v", err)
 	}
 	if len(route.BackendCandidates) != 1 || route.BackendCandidates[0] != sandbox.BackendWindowsElevated {
 		t.Fatalf("BackendCandidates = %v, want [%s]", route.BackendCandidates, sandbox.BackendWindowsElevated)

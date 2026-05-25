@@ -31,6 +31,7 @@ func (tm *taskRuntime) StartCommand(
 	sandboxReq := sandbox.CommandRequest{
 		Command: req.Command,
 		Dir:     req.Workdir,
+		Timeout: req.Timeout,
 		OnOutput: func(chunk sandbox.OutputChunk) {
 			if chunk.Text == "" {
 				return
