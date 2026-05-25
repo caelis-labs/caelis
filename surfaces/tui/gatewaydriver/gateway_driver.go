@@ -256,10 +256,11 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	bindingKey := d.bindingKey
 	d.mu.Unlock()
 	rawModelText := firstNonEmpty(modelText, liveModelText)
+	workspaceCWD := strings.TrimSpace(d.stack.Workspace.CWD)
 
 	status := StatusSnapshot{
 		SessionID:                       sessionID,
-		Workspace:                       strings.TrimSpace(d.stack.Workspace.CWD),
+		Workspace:                       workspaceStatusDisplay(ctx, workspaceCWD),
 		Model:                           formatReasoningModelDisplay(rawModelText, reasoningEffort),
 		ReasoningEffort:                 reasoningEffort,
 		ModeLabel:                       firstNonEmpty(sessionMode, liveSessionMode),

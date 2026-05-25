@@ -2,11 +2,60 @@ package tuiapp
 
 import "testing"
 
+func TestCompactPathDisplayWithBaseHandlesWindowsPaths(t *testing.T) {
+	t.Parallel()
+
+	base := `D:\xue\code\storage`
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "workspace root",
+			path: base,
+			want: "storage",
+		},
+		{
+			name: "nested file",
+			path: `D:\xue\code\storage\internal\handler\oss_bucket.go`,
+			want: `internal\handler\oss_bucket.go`,
+		},
+		{
+			name: "outside workspace",
+			path: `D:\xue\code\other\oss_bucket.go`,
+			want: "oss_bucket.go",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compactPathDisplayWithBase(tt.path, base); got != tt.want {
+				t.Fatalf("compactPathDisplayWithBase() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestToolDisplayArgsHidesMetadataOnlyListArgs(t *testing.T) {
 	t.Parallel()
 
 	if got := toolDisplayArgs("LIST", map[string]any{"metadata": true}); got != "" {
 		t.Fatalf("toolDisplayArgs(LIST metadata) = %q, want empty", got)
+	}
+}
+
+func TestToolDisplayResultHeaderCompactsWindowsReadPath(t *testing.T) {
+	t.Parallel()
+
+	base := `D:\xue\code\storage`
+	header := `D:\xue\code\storage\internal\handler\oss_bucket.go 1~100`
+	pathPart, rest, ok := splitLeadingPathHeader(header)
+	if !ok {
+		t.Fatalf("splitLeadingPathHeader() ok = false")
+	}
+	compact := compactPathDisplayWithBase(pathPart, base)
+	if got := compact + rest; got != `internal\handler\oss_bucket.go 1~100` {
+		t.Fatalf("compacted header = %q, want relative Windows header", got)
 	}
 }
 

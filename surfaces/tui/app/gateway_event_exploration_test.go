@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -181,6 +182,64 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
 		t.Fatalf("expanded rows = %q, should show compact calls rather than raw outputs", joined)
+	}
+}
+
+func TestGatewayCompletedExplorationSummaryCompactsAbsoluteWorkspacePaths(t *testing.T) {
+	root := t.TempDir()
+	t.Chdir(root)
+
+	model := newGatewayEventTestModel()
+	sendTool := func(id string, name string, rawInput map[string]any) {
+		updated, _ := model.Update(kernel.EventEnvelope{
+			Event: kernel.Event{
+				Kind:       kernel.EventKindToolCall,
+				SessionRef: session.SessionRef{SessionID: "root-session"},
+				ToolCall: &kernel.ToolCallPayload{
+					CallID:   id,
+					ToolName: name,
+					RawInput: rawInput,
+					Status:   kernel.ToolStatusRunning,
+					Scope:    kernel.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+		updated, _ = model.Update(kernel.EventEnvelope{
+			Event: kernel.Event{
+				Kind:       kernel.EventKindToolResult,
+				SessionRef: session.SessionRef{SessionID: "root-session"},
+				ToolResult: &kernel.ToolResultPayload{
+					CallID:   id,
+					ToolName: name,
+					RawInput: rawInput,
+					Content:  testToolContent(rawInput["path"].(string)),
+					Status:   kernel.ToolStatusCompleted,
+					Scope:    kernel.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+
+	readPath := filepath.Join(root, "internal", "handler", "oss_bucket.go")
+	listPath := filepath.Join(root, "internal")
+	sendTool("read-abs", "READ", map[string]any{"path": readPath})
+	sendTool("list-abs", "LIST", map[string]any{"path": listPath})
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	block.SetStatus("completed", "", "", time.Now())
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "• Explored") ||
+		!strings.Contains(joined, "Read "+filepath.Join("internal", "handler", "oss_bucket.go")) ||
+		!strings.Contains(joined, "List internal") {
+		t.Fatalf("rendered rows = %q, want compact relative exploration paths", joined)
+	}
+	if strings.Contains(joined, root) {
+		t.Fatalf("rendered rows = %q, should not contain absolute workspace root %q", joined, root)
 	}
 }
 

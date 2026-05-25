@@ -3,6 +3,8 @@ package tuiapp
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	pathpkg "path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -15,15 +17,15 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 	switch name {
 	case "READ":
 		if path := toolPath(raw); path != "" {
-			return compactPathDisplay(path)
+			return path
 		}
 	case "LIST":
 		if path := toolPath(raw); path != "" {
-			return compactPathDisplay(path)
+			return path
 		}
 		if strings.EqualFold(parsedCommandType(raw), "list_files") {
 			if cwd := strings.TrimSpace(asString(raw["cwd"])); cwd != "" {
-				return compactPathDisplay(cwd)
+				return cwd
 			}
 		}
 		if metadataOnlyToolArgs(raw) {
@@ -38,11 +40,11 @@ func toolDisplayArgs(name string, raw map[string]any, fallback ...string) string
 		path := toolPath(raw)
 		switch {
 		case query != "" && path != "":
-			return fmt.Sprintf("%q in %s", query, filepath.Base(path))
+			return fmt.Sprintf("%q in %s", query, compactPathDisplay(path))
 		case query != "":
 			return fmt.Sprintf("%q", query)
 		case path != "":
-			return filepath.Base(path)
+			return compactPathDisplay(path)
 		}
 	case "WRITE", "PATCH":
 		if path := toolPath(raw); path != "" {
@@ -92,11 +94,114 @@ func metadataOnlyToolArgs(raw map[string]any) bool {
 }
 
 func compactPathDisplay(path string) string {
-	path = strings.TrimSpace(path)
-	if path == "" {
+	return compactPathDisplayWithBase(path, currentWorkingDirectory())
+}
+
+func compactPathDisplayWithBase(target string, base string) string {
+	target = strings.TrimSpace(target)
+	if target == "" {
 		return ""
 	}
-	return path
+	if rel, ok := compactPathRelativeToBase(target, base); ok {
+		return rel
+	}
+	if baseName := displayPathBase(target); baseName != "" {
+		return baseName
+	}
+	return target
+}
+
+func currentWorkingDirectory() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return cwd
+}
+
+func compactPathRelativeToBase(target string, base string) (string, bool) {
+	target = strings.TrimSpace(target)
+	base = strings.TrimSpace(base)
+	if target == "" || base == "" || !isAbsoluteDisplayPath(target) {
+		return "", false
+	}
+	targetClean := cleanDisplayPathForCompare(target)
+	baseClean := cleanDisplayPathForCompare(base)
+	if targetClean == "" || baseClean == "" {
+		return "", false
+	}
+	targetCmp := targetClean
+	baseCmp := baseClean
+	if displayPathLooksWindows(target) || displayPathLooksWindows(base) {
+		targetCmp = strings.ToLower(targetCmp)
+		baseCmp = strings.ToLower(baseCmp)
+	}
+	if targetCmp == baseCmp {
+		return displayPathBase(base), true
+	}
+	prefix := baseCmp
+	if !strings.HasSuffix(prefix, "/") {
+		prefix += "/"
+	}
+	if !strings.HasPrefix(targetCmp, prefix) {
+		return "", false
+	}
+	rel := strings.TrimPrefix(targetClean[len(baseClean):], "/")
+	rel = strings.TrimSpace(rel)
+	if rel == "" || rel == "." {
+		return displayPathBase(base), true
+	}
+	if strings.Contains(target, `\`) || strings.Contains(base, `\`) {
+		rel = strings.ReplaceAll(rel, "/", `\`)
+	}
+	return rel, true
+}
+
+func isAbsoluteDisplayPath(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	if strings.HasPrefix(value, "/") || strings.HasPrefix(value, `\\`) {
+		return true
+	}
+	return len(value) >= 3 &&
+		isASCIILetter(value[0]) &&
+		value[1] == ':' &&
+		(value[2] == '\\' || value[2] == '/')
+}
+
+func displayPathLooksWindows(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.Contains(value, `\`) ||
+		(len(value) >= 2 && isASCIILetter(value[0]) && value[1] == ':')
+}
+
+func cleanDisplayPathForCompare(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, `\`, "/"))
+	if value == "" {
+		return ""
+	}
+	return pathpkg.Clean(value)
+}
+
+func displayPathBase(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	trimmed := strings.TrimRight(value, `/\`)
+	if trimmed == "" {
+		return value
+	}
+	if idx := strings.LastIndexAny(trimmed, `/\`); idx >= 0 && idx+1 < len(trimmed) {
+		return trimmed[idx+1:]
+	}
+	return trimmed
+}
+
+func isASCIILetter(ch byte) bool {
+	return ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
 }
 
 func toolDisplayFullArgs(name string, raw map[string]any) string {
@@ -348,7 +453,7 @@ func genericToolArgs(raw map[string]any) string {
 	case url != "":
 		return truncateTailDisplay(url, 120)
 	case toolPath(raw) != "":
-		return filepath.Base(toolPath(raw))
+		return compactPathDisplay(toolPath(raw))
 	default:
 		return ""
 	}
@@ -712,10 +817,56 @@ func toolDisplayResultHeader(name string, output string) string {
 			continue
 		}
 		if trimmed != "" {
-			return trimmed
+			return compactToolResultHeaderPath(name, trimmed)
 		}
 	}
 	return ""
+}
+
+func compactToolResultHeaderPath(name string, header string) string {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "READ", "LIST":
+	default:
+		return header
+	}
+	pathPart, rest, ok := splitLeadingPathHeader(header)
+	if !ok || !isAbsoluteDisplayPath(pathPart) {
+		return header
+	}
+	compact := compactPathDisplay(pathPart)
+	if compact == "" || compact == pathPart {
+		return header
+	}
+	return compact + rest
+}
+
+func splitLeadingPathHeader(header string) (pathPart string, rest string, ok bool) {
+	header = strings.TrimSpace(header)
+	if header == "" {
+		return "", "", false
+	}
+	fields := strings.Fields(header)
+	if len(fields) == 0 {
+		return "", "", false
+	}
+	pathPart = strings.TrimRight(fields[0], ",")
+	if !isLikelyDisplayPath(pathPart) {
+		return "", "", false
+	}
+	idx := strings.Index(header, fields[0])
+	if idx < 0 {
+		return "", "", false
+	}
+	rest = header[idx+len(fields[0]):]
+	if strings.HasSuffix(fields[0], ",") {
+		rest = "," + rest
+	}
+	return pathPart, rest, true
+}
+
+func isLikelyDisplayPath(value string) bool {
+	value = strings.TrimSpace(value)
+	return isAbsoluteDisplayPath(value) || strings.ContainsAny(value, `/\`)
 }
 
 func toolOutputLooksLikeMutationDiff(output string) bool {
@@ -781,9 +932,9 @@ func readDisplaySummary(input map[string]any, output map[string]any) string {
 		}
 	}
 	if start > 0 && end > 0 {
-		return filepath.Base(path) + " " + strconv.Itoa(start) + "~" + strconv.Itoa(end)
+		return compactPathDisplay(path) + " " + strconv.Itoa(start) + "~" + strconv.Itoa(end)
 	}
-	return filepath.Base(path)
+	return compactPathDisplay(path)
 }
 
 func listDisplaySummary(input map[string]any, output map[string]any) string {
@@ -793,9 +944,9 @@ func listDisplaySummary(input map[string]any, output map[string]any) string {
 		return ""
 	}
 	if count > 0 {
-		return strings.TrimSpace(filepath.Base(path) + " " + pluralizeUnit(count, "entry"))
+		return strings.TrimSpace(compactPathDisplay(path) + " " + pluralizeUnit(count, "entry"))
 	}
-	return filepath.Base(path)
+	return compactPathDisplay(path)
 }
 
 func globDisplaySummary(input map[string]any, output map[string]any) string {

@@ -348,10 +348,55 @@ func explorationToolDetail(ev SubagentEvent) string {
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
 	item = normalizeExplorationFailedDetail(item)
+	item = compactExplorationToolDetail(ev, item)
 	if ev.Err && item != "" && !fromOutput && !hasExplorationFailedStatus(item) {
 		item = strings.TrimSpace(item + " failed")
 	}
 	return item
+}
+
+func compactExplorationToolDetail(ev SubagentEvent, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	switch explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind)) {
+	case "Read", "List":
+		return compactExplorationPathDetail(detail)
+	default:
+		return detail
+	}
+}
+
+func compactExplorationPathDetail(detail string) string {
+	parts := strings.Split(detail, ",")
+	if len(parts) > 1 {
+		out := make([]string, 0, len(parts))
+		changed := false
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			compacted := compactExplorationPathDetail(trimmed)
+			if compacted != trimmed {
+				changed = true
+			}
+			if compacted != "" {
+				out = append(out, compacted)
+			}
+		}
+		if changed && len(out) > 0 {
+			return strings.Join(out, ", ")
+		}
+		return detail
+	}
+	pathPart, rest, ok := splitLeadingPathHeader(detail)
+	if !ok || !isAbsoluteDisplayPath(pathPart) {
+		return detail
+	}
+	compact := compactPathDisplay(pathPart)
+	if compact == "" || compact == pathPart {
+		return detail
+	}
+	return compact + rest
 }
 
 func normalizeExplorationFailedDetail(detail string) string {
