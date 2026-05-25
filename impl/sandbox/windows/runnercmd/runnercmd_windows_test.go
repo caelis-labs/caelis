@@ -410,6 +410,26 @@ func TestMergeEnvPreservesSandboxBoundaryEnvOverrides(t *testing.T) {
 	}
 }
 
+func TestMergeEnvDefaultsGitOptionalLocksOff(t *testing.T) {
+	t.Setenv("GIT_OPTIONAL_LOCKS", "1")
+
+	env, err := mergeEnv(nil, "offline", t.TempDir())
+	if err != nil {
+		t.Fatalf("mergeEnv() error = %v", err)
+	}
+	if got := envValue(env, "GIT_OPTIONAL_LOCKS"); got != "0" {
+		t.Fatalf("GIT_OPTIONAL_LOCKS = %q, want 0", got)
+	}
+
+	env, err = mergeEnv(map[string]string{"GIT_OPTIONAL_LOCKS": "1"}, "offline", t.TempDir())
+	if err != nil {
+		t.Fatalf("mergeEnv(override) error = %v", err)
+	}
+	if got := envValue(env, "GIT_OPTIONAL_LOCKS"); got != "1" {
+		t.Fatalf("GIT_OPTIONAL_LOCKS override = %q, want 1", got)
+	}
+}
+
 func TestShouldHideCurrentUserProfileDirOnlySandboxProfiles(t *testing.T) {
 	for _, profile := range []string{
 		`C:\Users\CaelisSbxOffabcd1234`,

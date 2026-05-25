@@ -434,14 +434,21 @@ func mergeEnv(extra map[string]string, _ string, cwd string) ([]string, error) {
 		setEnvValue(&env, "APPDATA", roamingAppData)
 	}
 	protected := protectedSandboxEnvKeys(env)
+	gitOptionalLocksProvided := false
 	for key, value := range extra {
 		if strings.TrimSpace(key) == "" {
 			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(key), "GIT_OPTIONAL_LOCKS") {
+			gitOptionalLocksProvided = true
 		}
 		if _, ok := protected[normalizedEnvKey(key)]; ok {
 			continue
 		}
 		setEnvValue(&env, key, value)
+	}
+	if !gitOptionalLocksProvided {
+		setEnvValue(&env, "GIT_OPTIONAL_LOCKS", "0")
 	}
 	return env, nil
 }

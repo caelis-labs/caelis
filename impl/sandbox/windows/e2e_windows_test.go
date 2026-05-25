@@ -5,8 +5,10 @@ package windows
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -187,6 +189,7 @@ Get-Content -LiteralPath '.\`+outputFile+`'
 			t.Fatalf("host read %s version file = %q/%v", check.name, data, err)
 		}
 	}
+	verifyGitAndGoCommandOutputE2E(ctx, t, rt, workspace)
 
 	if endpoint := reachableExternalE2EEndpoint(t); endpoint != "" {
 		host, port, err := net.SplitHostPort(endpoint)
@@ -676,6 +679,142 @@ func verifyMissingHiddenCarveoutE2E(ctx context.Context, t *testing.T, rt sandbo
 	assertHostPathMissingE2E(t, filepath.Join(hiddenDir, "online-leak.txt"))
 }
 
+func verifyGitAndGoCommandOutputE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Logf("skipping git/go output e2e: host git is unavailable: %v", err)
+		return
+	}
+	repo := prepareGitGoRepoE2E(t, workspace, gitPath)
+	for _, tc := range []struct {
+		name    string
+		command string
+		want    []string
+	}{
+		{name: "git status", command: "git status", want: []string{"On branch", "working tree clean"}},
+		{name: "git log", command: "git --no-pager log --oneline -1", want: []string{"initial e2e"}},
+		{name: "git show", command: "git --no-pager show HEAD:calc.go", want: []string{"func Add"}},
+	} {
+		result, runErr := runE2ECommandInDir(ctx, rt, repo, tc.command, sandbox.NetworkDisabled, nil)
+		requireE2ECommandOutput(t, "sync "+tc.name, result, runErr, tc.want...)
+		result, runErr = runE2EAsyncCommand(ctx, t, rt, repo, tc.command, sandbox.NetworkDisabled)
+		requireE2ECommandOutput(t, "async "+tc.name, result, runErr, tc.want...)
+	}
+
+	if _, err := exec.LookPath("go"); err != nil {
+		t.Logf("skipping go output e2e: host go is unavailable: %v", err)
+		return
+	}
+	for _, tc := range []struct {
+		name    string
+		command string
+		want    []string
+	}{
+		{name: "go test", command: "go test ./...", want: []string{"ok", "example.com/caelis-e2e"}},
+	} {
+		result, runErr := runE2ECommandInDir(ctx, rt, repo, tc.command, sandbox.NetworkDisabled, nil)
+		requireE2ECommandOutput(t, "sync "+tc.name, result, runErr, tc.want...)
+		result, runErr = runE2EAsyncCommand(ctx, t, rt, repo, tc.command, sandbox.NetworkDisabled)
+		requireE2ECommandOutput(t, "async "+tc.name, result, runErr, tc.want...)
+	}
+}
+
+func prepareGitGoRepoE2E(t *testing.T, workspace string, gitPath string) string {
+	t.Helper()
+	repo := filepath.Join(workspace, "git-go-output-repo")
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatalf("RemoveAll(%s) error = %v", repo, err)
+	}
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", repo, err)
+	}
+	files := map[string]string{
+		"go.mod":       "module example.com/caelis-e2e\n\ngo 1.21\n",
+		"calc.go":      "package calc\n\nfunc Add(a, b int) int { return a + b }\n",
+		"calc_test.go": "package calc\n\nimport \"testing\"\n\nfunc TestAdd(t *testing.T) {\n\tif Add(2, 3) != 5 {\n\t\tt.Fatal(\"bad add\")\n\t}\n}\n",
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("WriteFile(%s) error = %v", name, err)
+		}
+	}
+	runHostGitE2E(t, gitPath, repo, "init")
+	runHostGitE2E(t, gitPath, repo, "config", "user.name", "Caelis E2E")
+	runHostGitE2E(t, gitPath, repo, "config", "user.email", "caelis-e2e@example.invalid")
+	runHostGitE2E(t, gitPath, repo, "add", ".")
+	runHostGitE2E(t, gitPath, repo, "-c", "commit.gpgsign=false", "commit", "-m", "initial e2e")
+	return repo
+}
+
+func runHostGitE2E(t *testing.T, gitPath string, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command(gitPath, args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("host git %s error = %v output=%q", strings.Join(args, " "), err, string(output))
+	}
+}
+
+func runE2EAsyncCommand(ctx context.Context, t *testing.T, rt sandbox.Runtime, dir string, command string, network sandbox.Network) (sandbox.CommandResult, error) {
+	t.Helper()
+	session, err := rt.Start(ctx, sandbox.CommandRequest{
+		Command: strings.TrimSpace(command),
+		Dir:     dir,
+		Timeout: 45 * time.Second,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindowsElevated,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Network:    network,
+		},
+	})
+	if err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	status, err := session.Wait(ctx, 45*time.Second)
+	if err != nil {
+		_ = session.Terminate(context.Background())
+		return sandbox.CommandResult{}, fmt.Errorf("wait: %w", err)
+	}
+	if status.Running {
+		stdout, stderr, _, _, _ := session.ReadOutput(context.Background(), 0, 0)
+		_ = session.Terminate(context.Background())
+		return sandbox.CommandResult{
+			Stdout:   string(stdout),
+			Stderr:   string(stderr),
+			ExitCode: status.ExitCode,
+		}, fmt.Errorf("async command still running after wait: status=%+v stdout_bytes=%d stderr_bytes=%d", status, len(stdout), len(stderr))
+	}
+	resultCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	result, err := session.Result(resultCtx)
+	if err != nil {
+		return result, fmt.Errorf("result after status=%+v: %w", status, err)
+	}
+	return result, nil
+}
+
+func requireE2ECommandOutput(t *testing.T, label string, result sandbox.CommandResult, err error, want ...string) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("%s error = %v; %s", label, err, e2eCommandDiagnostics(result))
+	}
+	for _, one := range want {
+		if !strings.Contains(result.Stdout, one) && !strings.Contains(result.Stderr, one) {
+			t.Fatalf("%s missing %q; %s", label, one, e2eCommandDiagnostics(result))
+		}
+	}
+	if strings.TrimSpace(result.Stdout) == "" && strings.TrimSpace(result.Stderr) == "" {
+		t.Fatalf("%s produced no output; %s", label, e2eCommandDiagnostics(result))
+	}
+}
+
+func e2eCommandDiagnostics(result sandbox.CommandResult) string {
+	return fmt.Sprintf("exit=%d stdout_bytes=%d stderr_bytes=%d stdout=%q stderr=%q", result.ExitCode, len(result.Stdout), len(result.Stderr), result.Stdout, result.Stderr)
+}
+
 func verifyCanceledRunTerminatesChildE2E(ctx context.Context, t *testing.T, rt sandbox.Runtime, workspace string) {
 	t.Helper()
 	startedPath := filepath.Join(workspace, "cancel-started.txt")
@@ -811,9 +950,13 @@ func runE2EListingCommandWithTimings(ctx context.Context, t *testing.T, rt sandb
 }
 
 func runE2ECommand(ctx context.Context, rt sandbox.Runtime, workspace string, command string, network sandbox.Network, rules []sandbox.PathRule) (sandbox.CommandResult, error) {
+	return runE2ECommandInDir(ctx, rt, workspace, command, network, rules)
+}
+
+func runE2ECommandInDir(ctx context.Context, rt sandbox.Runtime, dir string, command string, network sandbox.Network, rules []sandbox.PathRule) (sandbox.CommandResult, error) {
 	return rt.Run(ctx, sandbox.CommandRequest{
 		Command: strings.TrimSpace(command),
-		Dir:     workspace,
+		Dir:     dir,
 		Timeout: 30 * time.Second,
 		Constraints: sandbox.Constraints{
 			Route:      sandbox.RouteSandbox,

@@ -1,9 +1,15 @@
 package runnerclient
 
 import (
+	"bytes"
+	"context"
+	"io"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerproto"
 )
 
 func TestRunnerEnvironmentProvidesPathExt(t *testing.T) {
@@ -82,6 +88,89 @@ func TestCommandExitError(t *testing.T) {
 		t.Fatalf("commandExitError(3, empty reason) = %v, want synthesized exit failure", err)
 	}
 }
+
+func TestTerminateSessionMarksCancelledBeforeReaderEOF(t *testing.T) {
+	var frames bytes.Buffer
+	fake := &fakeProcess{}
+	s := &session{
+		process:  fake,
+		writer:   runnerproto.NewWriter(&frames),
+		stdin:    nopWriteCloser{},
+		running:  true,
+		exitCode: -1,
+		done:     make(chan struct{}),
+	}
+
+	if err := s.TerminateSession(); err != nil {
+		t.Fatalf("TerminateSession() error = %v", err)
+	}
+	frame, err := runnerproto.NewReader(&frames).ReadFrame()
+	if err != nil {
+		t.Fatalf("ReadFrame(kill) error = %v", err)
+	}
+	if frame.Type != runnerproto.TypeKill {
+		t.Fatalf("TerminateSession() frame type = %q, want %q", frame.Type, runnerproto.TypeKill)
+	}
+	if !fake.killed {
+		t.Fatal("TerminateSession() did not kill process")
+	}
+	status := s.status()
+	if string(status.State) != "completed" || status.ExitCode != -1 {
+		t.Fatalf("status after terminate = %+v, want completed exit -1", status)
+	}
+	result, err := s.WaitResult(context.Background(), time.Millisecond)
+	if err != nil {
+		t.Fatalf("WaitResult(timeout) error = %v", err)
+	}
+	if result.ExitCode != -1 {
+		t.Fatalf("WaitResult(timeout).ExitCode = %d, want -1", result.ExitCode)
+	}
+}
+
+func TestReadLoopMapsTerminatedEOFToCancelledResult(t *testing.T) {
+	s := &session{
+		process:    &fakeProcess{},
+		stdin:      nopWriteCloser{},
+		reader:     runnerproto.NewReader(bytes.NewReader(nil)),
+		running:    true,
+		terminated: true,
+		exitCode:   -1,
+		done:       make(chan struct{}),
+	}
+
+	s.readLoop()
+
+	select {
+	case <-s.done:
+	default:
+		t.Fatal("readLoop did not close done")
+	}
+	result, err := s.resultAndErr()
+	if err != nil {
+		t.Fatalf("resultAndErr() error = %v, want nil after terminated EOF", err)
+	}
+	if result.ExitCode != -1 {
+		t.Fatalf("result.ExitCode = %d, want -1", result.ExitCode)
+	}
+}
+
+type fakeProcess struct {
+	killed bool
+}
+
+func (p *fakeProcess) Stdin() io.WriteCloser { return nopWriteCloser{} }
+func (p *fakeProcess) Stdout() io.Reader     { return bytes.NewReader(nil) }
+func (p *fakeProcess) Stderr() io.Reader     { return bytes.NewReader(nil) }
+func (p *fakeProcess) Wait() error           { return nil }
+func (p *fakeProcess) Kill() error {
+	p.killed = true
+	return nil
+}
+
+type nopWriteCloser struct{}
+
+func (nopWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (nopWriteCloser) Close() error                { return nil }
 
 func testEnvValue(env []string, key string) string {
 	for _, item := range env {

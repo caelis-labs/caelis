@@ -265,10 +265,14 @@ func collectPatchReplacements(path string, content string, edits []patchEdit) ([
 			return nil, err
 		}
 		for _, match := range matches {
+			newValue := edit.new
+			if match.normalizedLineEndings {
+				newValue = normalizePatchReplacementLineEndings(edit.new, content[match.start:match.end])
+			}
 			replacements = append(replacements, patchReplacement{
 				start:     match.start,
 				end:       match.end,
-				new:       edit.new,
+				new:       newValue,
 				editIndex: idx,
 			})
 			if !edit.replaceAll {
@@ -283,11 +287,41 @@ func collectPatchReplacements(path string, content string, edits []patchEdit) ([
 }
 
 type patchMatchRange struct {
-	start int
-	end   int
+	start                 int
+	end                   int
+	normalizedLineEndings bool
 }
 
 func patchMatchRanges(content string, oldValue string) []patchMatchRange {
+	if matches := exactPatchMatchRanges(content, oldValue); len(matches) > 0 {
+		return matches
+	}
+	normalizedContent, offsets := normalizePatchLineEndingsWithOffsets(content)
+	normalizedOld := normalizePatchLineEndings(oldValue)
+	if normalizedContent == content && normalizedOld == oldValue {
+		return nil
+	}
+	normalizedMatches := exactPatchMatchRanges(normalizedContent, normalizedOld)
+	if len(normalizedMatches) == 0 {
+		return nil
+	}
+	ranges := make([]patchMatchRange, 0, len(normalizedMatches))
+	for _, match := range normalizedMatches {
+		if match.start < 0 || match.start >= len(offsets) || match.end < 0 || match.end >= len(offsets) {
+			continue
+		}
+		start := offsets[match.start]
+		end := offsets[match.end]
+		ranges = append(ranges, patchMatchRange{
+			start:                 start,
+			end:                   end,
+			normalizedLineEndings: true,
+		})
+	}
+	return ranges
+}
+
+func exactPatchMatchRanges(content string, oldValue string) []patchMatchRange {
 	var ranges []patchMatchRange
 	offset := 0
 	for offset <= len(content) {
@@ -297,10 +331,88 @@ func patchMatchRanges(content string, oldValue string) []patchMatchRange {
 		}
 		start := offset + index
 		end := start + len(oldValue)
+		if patchRangeSplitsCRLF(content, start, end) {
+			offset = start + 1
+			continue
+		}
 		ranges = append(ranges, patchMatchRange{start: start, end: end})
 		offset = end
 	}
 	return ranges
+}
+
+func patchRangeSplitsCRLF(content string, start int, end int) bool {
+	if start > 0 && start < len(content) && content[start-1] == '\r' && content[start] == '\n' {
+		return true
+	}
+	if end > 0 && end < len(content) && content[end-1] == '\r' && content[end] == '\n' {
+		return true
+	}
+	return false
+}
+
+func normalizePatchLineEndingsWithOffsets(text string) (string, []int) {
+	var out strings.Builder
+	offsets := []int{0}
+	for i := 0; i < len(text); {
+		switch text[i] {
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				i += 2
+			} else {
+				i++
+			}
+			out.WriteByte('\n')
+			offsets = append(offsets, i)
+		default:
+			out.WriteByte(text[i])
+			i++
+			offsets = append(offsets, i)
+		}
+	}
+	return out.String(), offsets
+}
+
+func normalizePatchLineEndings(text string) string {
+	normalized, _ := normalizePatchLineEndingsWithOffsets(text)
+	return normalized
+}
+
+func normalizePatchReplacementLineEndings(value string, matchedContent string) string {
+	eol := dominantPatchLineEnding(matchedContent)
+	if eol == "" || eol == "\n" {
+		return normalizePatchLineEndings(value)
+	}
+	return strings.ReplaceAll(normalizePatchLineEndings(value), "\n", eol)
+}
+
+func dominantPatchLineEnding(text string) string {
+	crlf := 0
+	lf := 0
+	cr := 0
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '\r':
+			if i+1 < len(text) && text[i+1] == '\n' {
+				crlf++
+				i++
+			} else {
+				cr++
+			}
+		case '\n':
+			lf++
+		}
+	}
+	if crlf == 0 && lf == 0 && cr == 0 {
+		return ""
+	}
+	if crlf >= lf && crlf >= cr {
+		return "\r\n"
+	}
+	if lf >= cr {
+		return "\n"
+	}
+	return "\r"
 }
 
 func validatePatchReplacementRanges(path string, replacements []patchReplacement) error {

@@ -132,6 +132,133 @@ func TestPatchToolReplaceAllWithExpectedCount(t *testing.T) {
 	}
 }
 
+func TestPatchToolMatchesLFEditAgainstCRLFFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "windows.txt")
+	before := "alpha\r\nbeta\r\ngamma\r\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	runPatch(t, patchTool, map[string]any{
+		"path": "windows.txt",
+		"edits": []map[string]any{
+			{
+				"old": "alpha\nbeta\n",
+				"new": "one\ntwo\n",
+			},
+		},
+	})
+
+	if got, want := readTestFile(t, path), "one\r\ntwo\r\ngamma\r\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
+func TestPatchToolMatchesCRLFEditAgainstLFFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "unix.txt")
+	before := "alpha\nbeta\ngamma\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	runPatch(t, patchTool, map[string]any{
+		"path": "unix.txt",
+		"edits": []map[string]any{
+			{
+				"old": "alpha\r\nbeta\r\n",
+				"new": "one\r\ntwo\r\n",
+			},
+		},
+	})
+
+	if got, want := readTestFile(t, path), "one\ntwo\ngamma\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
+func TestPatchToolLineEndingFallbackPreservesReplaceAllCount(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "repeated.txt")
+	before := "alpha\r\nbeta\r\nalpha\r\nbeta\r\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	payload := runPatch(t, patchTool, map[string]any{
+		"path": "repeated.txt",
+		"edits": []map[string]any{
+			{
+				"old":                   "alpha\nbeta\n",
+				"new":                   "one\ntwo\n",
+				"replace_all":           true,
+				"expected_replacements": 2,
+			},
+		},
+	})
+
+	if got := payload["replacements"]; got != float64(2) {
+		t.Fatalf("replacements = %v, want 2", got)
+	}
+	if got, want := readTestFile(t, path), "one\r\ntwo\r\none\r\ntwo\r\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
+func TestPatchToolUsesExactMatchBeforeLineEndingFallback(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "mixed.txt")
+	before := "alpha\nbeta\nalpha\r\nbeta\r\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	runPatch(t, patchTool, map[string]any{
+		"path": "mixed.txt",
+		"edits": []map[string]any{
+			{
+				"old":                   "alpha\nbeta\n",
+				"new":                   "one\ntwo\n",
+				"replace_all":           true,
+				"expected_replacements": 1,
+			},
+		},
+	})
+
+	if got, want := readTestFile(t, path), "one\ntwo\nalpha\r\nbeta\r\n"; got != want {
+		t.Fatalf("patched content = %q, want exact match only: %q", got, want)
+	}
+}
+
+func TestPatchToolDoesNotExactMatchInsideCRLFPair(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "boundary.txt")
+	before := "alpha\r\nbeta\r\ngamma\r\n"
+	if err := os.WriteFile(path, []byte(before), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	patchTool := newTestPatchTool(t, dir)
+
+	runPatch(t, patchTool, map[string]any{
+		"path": "boundary.txt",
+		"edits": []map[string]any{
+			{
+				"old": "\nbeta\r",
+				"new": "\r\nBETA\r\n",
+			},
+		},
+	})
+
+	if got, want := readTestFile(t, path), "alpha\r\nBETA\r\ngamma\r\n"; got != want {
+		t.Fatalf("patched content = %q, want %q", got, want)
+	}
+}
+
 func TestPatchToolRejectsDuplicateMatchesWithoutReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "duplicates.txt")

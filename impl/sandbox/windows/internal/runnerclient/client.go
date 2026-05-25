@@ -566,6 +566,7 @@ type session struct {
 	stdoutText   textstream.UTF8Decoder
 	stderrText   textstream.UTF8Decoder
 	running      bool
+	terminated   bool
 	exitCode     int
 	waitErr      error
 	startedAt    time.Time
@@ -602,6 +603,11 @@ func (s *session) readLoop() {
 	for {
 		frame, err := s.reader.ReadFrame()
 		if err != nil {
+			if s.wasTerminated() {
+				s.flushOutputText()
+				s.finish(-1, nil)
+				return
+			}
 			s.finish(-1, err)
 			return
 		}
@@ -749,6 +755,12 @@ func (s *session) finish(exitCode int, err error) {
 	_ = s.stdin.Close()
 }
 
+func (s *session) wasTerminated() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.terminated
+}
+
 func (s *session) readOutput(stdoutMarker, stderrMarker int64) ([]byte, []byte, int64, int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -823,8 +835,20 @@ func (s *session) resultLocked() sandbox.CommandResult {
 }
 
 func (s *session) TerminateSession() error {
+	s.mu.Lock()
+	s.terminated = true
+	if s.running {
+		s.running = false
+		s.exitCode = -1
+		s.waitErr = nil
+		s.updatedAt = time.Now()
+	}
+	s.mu.Unlock()
 	killFrame, _ := runnerproto.NewFrame(runnerproto.TypeKill, nil)
 	_ = s.write(killFrame)
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+	}
 	if s.process != nil {
 		_ = s.process.Kill()
 	}
