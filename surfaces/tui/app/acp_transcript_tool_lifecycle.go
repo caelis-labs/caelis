@@ -456,6 +456,12 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
 		return rows
 	}
+	if strings.EqualFold(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)), "SPAWN") {
+		text = summarizeSubagentTerminalPanelText(text, final)
+		if !renderableTextHasContent(text) && !final {
+			text = "(wait subagent output)"
+		}
+	}
 	text = summarizeACPToolPanelText(text, final)
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, toolSemanticName(ev.Name, ev.ToolKind), text, width, ctx, err, opts)...)
 	return rows

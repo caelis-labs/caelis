@@ -121,6 +121,75 @@ func TestTerminalToolPanelPreservesLineBreaks(t *testing.T) {
 	}
 }
 
+func TestSpawnTerminalPanelCleansMessySubagentPreview(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}
+
+	t.Run("running filters protocol noise and duplicate progress", func(t *testing.T) {
+		block := NewMainACPTurnBlock("session-1")
+		output := strings.Join([]string{
+			`{"type":"session/update","running":true,"terminal_id":"spawn-1"}`,
+			"progress: scanning",
+			"progress: scanning",
+			"ran go test ./surfaces/tui/app",
+			"error: retrying failed package",
+			"latest status: waiting for file scan",
+		}, "\n")
+		block.UpdateTool("spawn-noisy", "SPAWN", "helper: inspect", output, false, false)
+
+		plain := renderedPlainRows(block.Render(ctx))
+		joined := strings.Join(plain, "\n")
+		for _, forbidden := range []string{"session/update", "terminal_id", `{"type"`} {
+			if strings.Contains(joined, forbidden) {
+				t.Fatalf("running SPAWN preview leaked noise %q:\n%s", forbidden, joined)
+			}
+		}
+		if got := countRowsContaining(plain, "progress: scanning"); got != 1 {
+			t.Fatalf("running SPAWN preview progress rows = %d, want 1\n%s", got, joined)
+		}
+		for _, want := range []string{"ran go test ./surfaces/tui/app", "error: retrying failed package", "latest status"} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("running SPAWN preview missing %q:\n%s", want, joined)
+			}
+		}
+		if got := len(plain); got > 1+acpTerminalPanelMaxLines {
+			t.Fatalf("running SPAWN preview rows = %d, want capped at header + %d\n%s", got, acpTerminalPanelMaxLines, joined)
+		}
+	})
+
+	t.Run("final cleans markdown table and fences", func(t *testing.T) {
+		block := NewMainACPTurnBlock("session-1")
+		output := strings.Join([]string{
+			`{"type":"event","task_id":"spawn-1"}`,
+			"```markdown",
+			"### Done",
+			"- `hello.txt` **created**",
+			"| File | State |",
+			"| --- | --- |",
+			"| `hello.txt` | **ok** |",
+			"```",
+		}, "\n")
+		block.UpdateTool("spawn-messy", "SPAWN", "helper: write", output, false, false)
+		block.UpdateTool("spawn-messy", "SPAWN", "helper: write", output, true, false)
+
+		plain := renderedPlainRows(block.Render(ctx))
+		joined := strings.Join(plain, "\n")
+		for _, want := range []string{"Done", "hello.txt created", "File  State", "hello.txt  ok"} {
+			if !strings.Contains(joined, want) {
+				t.Fatalf("final SPAWN preview missing %q:\n%s", want, joined)
+			}
+		}
+		for _, forbidden := range []string{`{"type"`, "```", "| --- |", "**", "`hello.txt`"} {
+			if strings.Contains(joined, forbidden) {
+				t.Fatalf("final SPAWN preview leaked %q:\n%s", forbidden, joined)
+			}
+		}
+		if got := len(plain); got > 1+acpTerminalPanelMaxLines {
+			t.Fatalf("final SPAWN preview rows = %d, want capped at header + %d\n%s", got, acpTerminalPanelMaxLines, joined)
+		}
+	})
+}
+
 func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}

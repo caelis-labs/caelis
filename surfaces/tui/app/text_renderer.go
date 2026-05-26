@@ -234,8 +234,7 @@ func renderInlineMarkdownTextRows(req TextRenderRequest) ([]RenderedRow, int) {
 			req.ObserveInlineMarkdown()
 		}
 		inlineCalls++
-		styledLine := renderInlineMarkdown(rawLine, baseStyle, req.Theme)
-		styledSegments, plainSegments := wrapStyledANSIText(styledLine, bodyWidth)
+		styledSegments, plainSegments := renderInlineMarkdownWrappedSegments(rawLine, baseStyle, req.Theme, bodyWidth)
 		for i, styled := range styledSegments {
 			plain := plainSegments[i]
 			if prefixWidth > 0 {

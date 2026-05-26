@@ -705,8 +705,7 @@ func renderStreamingNarrativeTailRows(blockID, raw, rolePrefix string, roleStyle
 	rows := make([]RenderedRow, 0, len(streamLines)+4)
 	for idx, line := range streamLines {
 		lineStyle := streamingNarrativeTailLineStyle(line.Kind, baseStyle, roleStyle, theme)
-		styledLine := renderStreamingNarrativeTailSegment(line.Raw, lineStyle, line.Kind, theme)
-		styledSegments, plainSegments := wrapStyledStreamingTailLine(styledLine, width)
+		styledSegments, plainSegments := renderStreamingNarrativeTailSegments(line.Raw, lineStyle, line.Kind, theme, width)
 		for segIdx, styled := range styledSegments {
 			plain := plainSegments[segIdx]
 			if idx == 0 && rolePrefix != "" && segIdx == 0 {
@@ -827,6 +826,16 @@ func renderStreamingNarrativeTailSegment(segment string, style lipgloss.Style, k
 		return style.Render(segment)
 	}
 	return renderInlineMarkdown(segment, style, theme)
+}
+
+func renderStreamingNarrativeTailSegments(segment string, style lipgloss.Style, kind NarrativeBlockKind, theme tuikit.Theme, width int) ([]string, []string) {
+	if segment == "" {
+		return []string{""}, []string{""}
+	}
+	if kind == NarrativeCodeFence || kind == NarrativeTableRule {
+		return wrapStyledStreamingTailLine(style.Render(segment), width)
+	}
+	return renderInlineMarkdownWrappedSegments(segment, style, theme, width)
 }
 
 func cachedStreamingNarrativePrefixRows(blockID, stableRaw, rolePrefix string, roleStyle tuikit.LineStyle, width int, theme tuikit.Theme, observeGlamour func()) ([]RenderedRow, int, bool) {

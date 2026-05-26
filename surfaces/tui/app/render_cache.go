@@ -358,7 +358,7 @@ func (m *Model) syncDirtyViewportRenderEntries(ctx BlockRenderContext) bool {
 }
 
 func viewportRenderContextKey(ctx BlockRenderContext) string {
-	return strconv.Itoa(ctx.Width) + "|" + strconv.Itoa(ctx.TermWidth) + "|" + ctx.renderThemeKey()
+	return strconv.Itoa(ctx.Width) + "|" + strconv.Itoa(ctx.TermWidth) + "|" + ctx.renderThemeKey() + "|" + strings.TrimSpace(ctx.Workspace)
 }
 
 func (m *Model) viewportRenderEntryIndex(blockID string) int {
@@ -549,6 +549,7 @@ func newBlockKeyBuilder(kind BlockKind, ctx BlockRenderContext) *blockKeyBuilder
 	b.addInt(ctx.Width)
 	b.addInt(ctx.TermWidth)
 	b.addString(ctx.renderThemeKey())
+	b.addString(strings.TrimSpace(ctx.Workspace))
 	return b
 }
 

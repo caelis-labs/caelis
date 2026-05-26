@@ -825,7 +825,7 @@ func toolDisplayResultHeader(name string, output string) string {
 
 func compactToolResultHeaderPath(name string, header string) string {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "LIST":
+	case "READ", "LIST", "GLOB":
 	default:
 		return header
 	}

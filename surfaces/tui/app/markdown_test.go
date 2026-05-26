@@ -206,6 +206,84 @@ func TestNarrativeViewportWrapPreservesRenderedInlineCodeANSI(t *testing.T) {
 		"Shell")
 }
 
+func TestInlineMarkdownSpanWrappingInvariants(t *testing.T) {
+	theme := tuikit.ResolveThemeWithState(false, false, colorprofile.TrueColor)
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "cjk around inline code",
+			raw:  "前缀 `shell` 后缀",
+			want: "前缀 shell 后缀",
+		},
+		{
+			name: "emoji and combining mark",
+			raw:  "Fix e\u0301moji 👩‍💻 with `go test`",
+			want: "Fix e\u0301moji 👩‍💻 with go test",
+		},
+		{
+			name: "escaped markers",
+			raw:  "\\*literal\\* and \\`tick\\`",
+			want: "*literal* and `tick`",
+		},
+		{
+			name: "windows glob keeps path separator",
+			raw:  `Path D:\repo\*.go`,
+			want: `Path D:\repo\*.go`,
+		},
+		{
+			name: "windows path keeps punctuation separators",
+			raw:  `Path D:\repo\.config\[cache]\#index.go`,
+			want: `Path D:\repo\.config\[cache]\#index.go`,
+		},
+		{
+			name: "multi backtick code span",
+			raw:  "Use ``a ` b`` now",
+			want: "Use a ` b now",
+		},
+		{
+			name: "nested strong with code",
+			raw:  "**bold `code`** done",
+			want: "bold code done",
+		},
+		{
+			name: "unclosed streaming marker stays literal",
+			raw:  "**partial `code",
+			want: "**partial `code",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			styled, plain := renderInlineMarkdownWrappedSegments(tt.raw, theme.TextStyle(), theme, 80)
+			if got := strings.Join(plain, ""); got != tt.want {
+				t.Fatalf("plain = %q, want %q", got, tt.want)
+			}
+			if len(styled) != len(plain) {
+				t.Fatalf("styled/plain segment count mismatch: %d/%d", len(styled), len(plain))
+			}
+			for i := range styled {
+				if got := ansi.Strip(styled[i]); got != plain[i] {
+					t.Fatalf("segment %d strip(styled) = %q, plain = %q\nstyled=%q", i, got, plain[i], styled[i])
+				}
+			}
+			wrappedStyled, wrappedPlain := renderInlineMarkdownWrappedSegments(tt.raw, theme.TextStyle(), theme, 12)
+			if len(wrappedStyled) != len(wrappedPlain) {
+				t.Fatalf("wrapped styled/plain segment count mismatch: %d/%d", len(wrappedStyled), len(wrappedPlain))
+			}
+			for i := range wrappedStyled {
+				if got := ansi.Strip(wrappedStyled[i]); got != wrappedPlain[i] {
+					t.Fatalf("wrapped segment %d strip(styled) = %q, plain = %q\nstyled=%q", i, got, wrappedPlain[i], wrappedStyled[i])
+				}
+				if width := graphemeWidth(wrappedPlain[i]); width > 12 {
+					t.Fatalf("wrapped segment %d width = %d, want <= 12: %q", i, width, wrappedPlain[i])
+				}
+			}
+		})
+	}
+}
+
 func TestGlamourNarrativeRendererCacheKeepsRecentKeys(t *testing.T) {
 	clearGlamourCache()
 	theme := tuikit.ResolveThemeWithState(true, false, colorprofile.TrueColor)

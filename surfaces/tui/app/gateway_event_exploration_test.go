@@ -543,6 +543,97 @@ func TestExplorationToolDetailDoesNotDuplicateFailedStatus(t *testing.T) {
 	}
 }
 
+func TestExplorationToolDetailCompactsWindowsWorkspacePaths(t *testing.T) {
+	workspace := `D:\repo`
+	tests := []struct {
+		name string
+		ev   SubagentEvent
+		want string
+	}{
+		{
+			name: "read header",
+			ev:   SubagentEvent{Name: "READ", Args: `D:\repo\internal\foo_test.go 1~40`},
+			want: `internal\foo_test.go 1~40`,
+		},
+		{
+			name: "list directory",
+			ev:   SubagentEvent{Name: "LIST", Args: `D:\repo\internal`},
+			want: `internal`,
+		},
+		{
+			name: "glob pattern",
+			ev:   SubagentEvent{Name: "GLOB", Args: `D:\repo\*.go`},
+			want: `*.go`,
+		},
+		{
+			name: "glob output list",
+			ev:   SubagentEvent{Name: "GLOB", Output: `D:\repo\internal\foo_test.go, D:\repo\cmd\main.go`},
+			want: `internal\foo_test.go, cmd\main.go`,
+		},
+		{
+			name: "search query in path",
+			ev:   SubagentEvent{Name: "SEARCH", Args: `"needle" in D:\repo\src`},
+			want: `"needle" in src`,
+		},
+		{
+			name: "workspace outside path falls back to basename",
+			ev:   SubagentEvent{Name: "READ", Args: `D:\other\foo_test.go 1~12`},
+			want: `foo_test.go 1~12`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := explorationToolDetailWithWorkspace(tt.ev, workspace); got != tt.want {
+				t.Fatalf("explorationToolDetailWithWorkspace() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGatewayExploredGroupCompactsWindowsPathsWithWorkspace(t *testing.T) {
+	model := newGatewayEventTestModel()
+	workspace := `D:\repo`
+	block := NewMainACPTurnBlock("root-session")
+	for _, item := range []struct {
+		callID string
+		name   string
+		args   string
+		output string
+	}{
+		{callID: "read-1", name: "READ", args: `D:\repo\internal\foo_test.go`, output: `D:\repo\internal\foo_test.go 1~40`},
+		{callID: "glob-1", name: "GLOB", args: `D:\repo\*.go`, output: `D:\repo\internal\foo_test.go, D:\repo\cmd\main.go`},
+		{callID: "search-1", name: "SEARCH", args: `"needle" in D:\repo\src`, output: "2 matches"},
+	} {
+		block.UpdateTool(item.callID, item.name, item.args, item.output, false, false)
+		block.UpdateTool(item.callID, item.name, item.args, item.output, true, false)
+	}
+	block.SetStatus("completed", "", "", time.Now())
+
+	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme, Workspace: workspace}
+	joined := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	for _, want := range []string{`internal\foo_test.go`, `*.go`, `"needle" in src`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("collapsed Explored rows missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, `D:\repo`) {
+		t.Fatalf("collapsed Explored rows leaked workspace path:\n%s", joined)
+	}
+
+	if !block.toggleExplorationExpanded(explorationStageKey(block.Events)) {
+		t.Fatal("expected exploration group to expand")
+	}
+	joined = strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	for _, want := range []string{`internal\foo_test.go`, `*.go`, `"needle" in src`} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expanded Explored rows missing %q:\n%s", want, joined)
+		}
+	}
+	if strings.Contains(joined, `D:\repo`) {
+		t.Fatalf("expanded Explored rows leaked workspace path:\n%s", joined)
+	}
+}
+
 func TestGatewayCompletedExplorationSummaryWrapsAndAlignsDetails(t *testing.T) {
 	model := newGatewayEventTestModel()
 	block := NewMainACPTurnBlock("root-session")

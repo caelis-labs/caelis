@@ -26,7 +26,7 @@ func renderACPExplorationStageRows(blockID string, events []SubagentEvent, idx i
 		return rows, end, true
 	}
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-	for _, detail := range explorationGroupDetailRows(explorationToolEvents(stage), width) {
+	for _, detail := range explorationGroupDetailRowsWithWorkspace(explorationToolEvents(stage), width, ctx.Workspace) {
 		rows = append(rows, StyledPlainClickableRow(blockID, detail, styleExplorationSummaryRow(detail, ctx), token))
 	}
 	return rows, end, true
@@ -210,7 +210,7 @@ func renderExplorationToolRow(blockID string, ev SubagentEvent, width int, ctx B
 	if verb == "" {
 		verb = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
-	detail := explorationToolDetail(ev)
+	detail := explorationToolDetailWithWorkspace(ev, ctx.Workspace)
 	prefix := explorationChildPrefix(first)
 	detail = truncateTailDisplay(detail, maxInt(16, width-displayColumns(prefix)-displayColumns(verb)-1))
 	plain := prefix + strings.TrimSpace(verb+" "+detail)
@@ -261,7 +261,7 @@ func renderACPExplorationGroupRows(blockID string, events []SubagentEvent, idx i
 	summary := "• Explored"
 	token := explorationGroupClickToken(group)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, summary, width, ctx, token)}
-	for _, detail := range explorationGroupDetailRows(group, width) {
+	for _, detail := range explorationGroupDetailRowsWithWorkspace(group, width, ctx.Workspace) {
 		rows = append(rows, StyledPlainClickableRow(blockID, detail, styleExplorationSummaryRow(detail, ctx), token))
 	}
 	return rows, end, true
@@ -299,6 +299,10 @@ func isCompactExplorationTool(ev SubagentEvent) bool {
 }
 
 func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
+	return explorationGroupDetailRowsWithWorkspace(events, width, "")
+}
+
+func explorationGroupDetailRowsWithWorkspace(events []SubagentEvent, width int, workspace string) []string {
 	grouped := map[string][]string{}
 	order := make([]string, 0, 4)
 	for _, ev := range events {
@@ -309,7 +313,7 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 		if _, ok := grouped[verb]; !ok {
 			order = append(order, verb)
 		}
-		item := explorationToolDetail(ev)
+		item := explorationToolDetailWithWorkspace(ev, workspace)
 		if item != "" {
 			grouped[verb] = append(grouped[verb], item)
 		}
@@ -335,6 +339,10 @@ func explorationGroupDetailRows(events []SubagentEvent, width int) []string {
 }
 
 func explorationToolDetail(ev SubagentEvent) string {
+	return explorationToolDetailWithWorkspace(ev, "")
+}
+
+func explorationToolDetailWithWorkspace(ev SubagentEvent, workspace string) string {
 	item := sanitizeRenderableText(ev.Args)
 	fromArgs := item != ""
 	if item == "" {
@@ -348,7 +356,7 @@ func explorationToolDetail(ev SubagentEvent) string {
 		item = strings.ToUpper(strings.TrimSpace(ev.Name))
 	}
 	item = normalizeExplorationFailedDetail(item)
-	item = compactExplorationToolDetail(ev, item)
+	item = compactExplorationToolDetailWithWorkspace(ev, item, workspace)
 	if ev.Err && item != "" && !fromOutput && !hasExplorationFailedStatus(item) {
 		item = strings.TrimSpace(item + " failed")
 	}
@@ -356,26 +364,35 @@ func explorationToolDetail(ev SubagentEvent) string {
 }
 
 func compactExplorationToolDetail(ev SubagentEvent, detail string) string {
+	return compactExplorationToolDetailWithWorkspace(ev, detail, "")
+}
+
+func compactExplorationToolDetailWithWorkspace(ev SubagentEvent, detail string, workspace string) string {
 	detail = strings.TrimSpace(detail)
 	if detail == "" {
 		return ""
 	}
 	switch explorationToolVerb(toolSemanticName(ev.Name, ev.ToolKind)) {
-	case "Read", "List":
-		return compactExplorationPathDetail(detail)
+	case "Read", "List", "Glob", "Search":
+		return compactExplorationPathDetailWithBase(detail, workspace)
 	default:
 		return detail
 	}
 }
 
 func compactExplorationPathDetail(detail string) string {
+	return compactExplorationPathDetailWithBase(detail, "")
+}
+
+func compactExplorationPathDetailWithBase(detail string, workspace string) string {
+	workspace = strings.TrimSpace(workspace)
 	parts := strings.Split(detail, ",")
 	if len(parts) > 1 {
 		out := make([]string, 0, len(parts))
 		changed := false
 		for _, part := range parts {
 			trimmed := strings.TrimSpace(part)
-			compacted := compactExplorationPathDetail(trimmed)
+			compacted := compactExplorationPathDetailWithBase(trimmed, workspace)
 			if compacted != trimmed {
 				changed = true
 			}
@@ -388,15 +405,48 @@ func compactExplorationPathDetail(detail string) string {
 		}
 		return detail
 	}
+	if query, path, ok := splitExplorationQueryInPath(detail); ok {
+		compacted := compactExplorationPathDetailWithBase(path, workspace)
+		if compacted != "" && compacted != path {
+			return query + " in " + compacted
+		}
+		return detail
+	}
 	pathPart, rest, ok := splitLeadingPathHeader(detail)
 	if !ok || !isAbsoluteDisplayPath(pathPart) {
 		return detail
 	}
-	compact := compactPathDisplay(pathPart)
+	compact := ""
+	if workspace != "" {
+		compact = compactPathDisplayWithBase(pathPart, workspace)
+	} else {
+		compact = compactPathDisplay(pathPart)
+	}
 	if compact == "" || compact == pathPart {
 		return detail
 	}
 	return compact + rest
+}
+
+func splitExplorationQueryInPath(detail string) (query string, path string, ok bool) {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return "", "", false
+	}
+	idx := strings.LastIndex(strings.ToLower(detail), " in ")
+	if idx < 0 {
+		return "", "", false
+	}
+	before := strings.TrimSpace(detail[:idx])
+	after := strings.TrimSpace(detail[idx+len(" in "):])
+	if before == "" || after == "" || !strings.HasPrefix(before, `"`) {
+		return "", "", false
+	}
+	pathPart, rest, pathOK := splitLeadingPathHeader(after)
+	if !pathOK || !isAbsoluteDisplayPath(pathPart) || strings.TrimSpace(rest) != "" {
+		return "", "", false
+	}
+	return before, pathPart, true
 }
 
 func normalizeExplorationFailedDetail(detail string) string {

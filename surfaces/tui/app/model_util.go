@@ -248,10 +248,24 @@ func (m *Model) blockRenderContext(width int) BlockRenderContext {
 		TermWidth:             m.width,
 		Theme:                 m.theme,
 		ThemeKey:              m.cachedThemeRenderKey(),
+		Workspace:             m.renderWorkspacePath(),
 		SpinnerView:           m.spinner.View(),
 		ObserveGlamourRender:  m.observeGlamourRender,
 		ObserveInlineMarkdown: m.observeInlineMarkdownRender,
 	}
+}
+
+func (m *Model) renderWorkspacePath() string {
+	if m == nil {
+		return ""
+	}
+	if workspace := strings.TrimSpace(m.statusView.Workspace); workspace != "" {
+		if path, _, _, ok := parseWorkspaceStatusDisplay(workspace); ok {
+			return path
+		}
+		return workspace
+	}
+	return strings.TrimSpace(m.cfg.Workspace)
 }
 
 func (m *Model) renderInlineMarkdown(text string, base lipgloss.Style) string {
