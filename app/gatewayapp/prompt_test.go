@@ -32,6 +32,10 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillsRoot, "SKILL.md"), []byte("---\nname: echo\ndescription: Echo skill.\n---\n# Echo\n\nEcho skill body.\n"), 0o600); err != nil {
 		t.Fatalf("write SKILL.md: %v", err)
 	}
+	resolvedWorkspace, err := resolvePromptPath(workspace)
+	if err != nil {
+		t.Fatalf("resolve workspace: %v", err)
+	}
 
 	prompt, err := buildSystemPrompt(promptConfig{
 		AppName:      "CAELIS",
@@ -51,7 +55,7 @@ func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
 		"Workspace rule.",
 		"Global rule.",
 		"<environment_context>",
-		"<cwd>" + workspace + "</cwd>",
+		"<cwd>" + resolvedWorkspace + "</cwd>",
 		"### Available skills",
 		"echo",
 	} {

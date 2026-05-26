@@ -1354,7 +1354,7 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 	}
 }
 
-func TestToolResultEventUsesNoOutputPlaceholderForSilentCommandFailure(t *testing.T) {
+func TestToolResultEventUsesStatusForSilentCommandFailure(t *testing.T) {
 	t.Parallel()
 
 	event := toolResultEvent(model.ToolCall{
@@ -1380,8 +1380,35 @@ func TestToolResultEventUsesNoOutputPlaceholderForSilentCommandFailure(t *testin
 		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
 	got := content[0].Text
-	if got != "(no output)" {
-		t.Fatalf("content text = %q, want no-output placeholder", got)
+	if got != "failed" {
+		t.Fatalf("content text = %q, want failed status", got)
+	}
+}
+
+func TestToolResultEventOmitsContentForSuccessfulSilentCommand(t *testing.T) {
+	t.Parallel()
+
+	event := toolResultEvent(model.ToolCall{
+		ID:   "command-silent-success-1",
+		Name: "RUN_COMMAND",
+		Args: `{"command":"true"}`,
+	}, tool.Result{
+		ID:   "command-silent-success-1",
+		Name: "RUN_COMMAND",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"state":     "completed",
+			"exit_code": 0,
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	if got := event.Tool.Status; got != "completed" {
+		t.Fatalf("status = %q, want completed", got)
+	}
+	if len(event.Tool.Content) != 0 {
+		t.Fatalf("content = %#v, want no canonical terminal placeholder", event.Tool.Content)
 	}
 }
 

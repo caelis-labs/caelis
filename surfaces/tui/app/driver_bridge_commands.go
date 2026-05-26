@@ -366,9 +366,6 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 		}
 	}
 	contentText := output
-	if !renderableTextHasContent(contentText) && status == kernel.ToolStatusCompleted {
-		contentText = "(no output)"
-	}
 	content := []session.ProtocolToolCallContent{}
 	if renderableTextHasContent(contentText) {
 		content = []session.ProtocolToolCallContent{{

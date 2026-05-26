@@ -1451,9 +1451,8 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 			rawOutput: map[string]any{
 				"exit_code": 0,
 			},
-			content: "(no output)",
-			want:    []string{"  └ (no output)"},
-			forbid:  []string{"exit 0", "completed"},
+			want:   []string{"  └ (no output)"},
+			forbid: []string{"exit 0", "completed"},
 		},
 		{
 			name:   "successful stdout stderr",
@@ -1488,6 +1487,10 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 				},
 			})
 			model = updated.(*Model)
+			var content []session.ProtocolToolCallContent
+			if tt.content != "" {
+				content = testTerminalContent(tt.content)
+			}
 			updated, _ = model.Update(kernel.EventEnvelope{
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolResult,
@@ -1500,7 +1503,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 						Scope:     kernel.EventScopeMain,
 						RawInput:  map[string]any{"command": "for i in 1 2; do echo $i; done"},
 						RawOutput: tt.rawOutput,
-						Content:   testTerminalContent(tt.content),
+						Content:   content,
 					},
 				},
 			})
@@ -1530,7 +1533,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 	}
 }
 
-func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
+func TestGatewayBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T) {
 	model := newGatewayEventTestModel()
 	callID := "command-stream-final-empty"
 	for _, env := range []kernel.EventEnvelope{
@@ -1572,7 +1575,6 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 				Scope:     kernel.EventScopeMain,
 				RawInput:  map[string]any{"command": "git log --oneline -6"},
 				RawOutput: map[string]any{"exit_code": 0},
-				Content:   testTerminalContent("(no output)"),
 			},
 		}},
 	} {
@@ -1586,11 +1588,11 @@ func TestGatewayBASHFinalEmptyOutputReplacesStreamedPreview(t *testing.T) {
 	}
 	block.setToolPanelExpanded(callID, true)
 	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})), "\n")
-	if !strings.Contains(joined, "(no output)") {
-		t.Fatalf("rendered rows = %q, want final empty output marker", joined)
+	if !strings.Contains(joined, "stale streamed preview") {
+		t.Fatalf("rendered rows = %q, want accumulated terminal output preserved", joined)
 	}
-	if strings.Contains(joined, "stale streamed preview") {
-		t.Fatalf("rendered rows = %q, should replace streamed preview with final output", joined)
+	if strings.Contains(joined, "(no output)") {
+		t.Fatalf("rendered rows = %q, should not replace accumulated terminal output with placeholder", joined)
 	}
 }
 

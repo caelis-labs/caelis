@@ -437,6 +437,41 @@ func TestTranscriptSnapshots(t *testing.T) {
 			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,done,args=printf hi,output=hi)",
 		},
 		{
+			name: "terminal contentless final with no prior output shows placeholder",
+			run: func(m *Model) *Model {
+				updated, _ := m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolCall,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						ToolCall: &kernel.ToolCallPayload{
+							CallID:   "call-1",
+							ToolName: "RUN_COMMAND",
+							RawInput: map[string]any{"command": `true`},
+							Status:   kernel.ToolStatusRunning,
+						},
+					},
+				})
+				m = updated.(*Model)
+				updated, _ = m.Update(kernel.EventEnvelope{
+					Event: kernel.Event{
+						Kind:       kernel.EventKindToolResult,
+						SessionRef: session.SessionRef{SessionID: "root-session"},
+						Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
+						ToolResult: &kernel.ToolResultPayload{
+							CallID:    "call-1",
+							ToolName:  "RUN_COMMAND",
+							RawInput:  map[string]any{"command": `true`},
+							RawOutput: map[string]any{"state": "completed", "exit_code": 0},
+							Status:    kernel.ToolStatusCompleted,
+						},
+					},
+				})
+				return updated.(*Model)
+			},
+			want: "Main(session=root-session,status=running)\n  tool(call-1,RUN_COMMAND,done,args=true,output=(no output))",
+		},
+		{
 			name: "terminal contentless failed final shows failure",
 			run: func(m *Model) *Model {
 				updated, _ := m.Update(kernel.EventEnvelope{
@@ -1127,6 +1162,87 @@ func TestProjectGatewayEventToolResultDoesNotDisplayRawOutputOnly(t *testing.T) 
 	}
 	if strings.Contains(events[0].ToolOutput, "network error") {
 		t.Fatalf("ToolOutput = %q, must not display rawOutput-only text", events[0].ToolOutput)
+	}
+}
+
+func TestProjectGatewayEventTerminalFinalDisplaysNoOutputPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:    "command-empty",
+			ToolName:  "RUN_COMMAND",
+			Status:    kernel.ToolStatusCompleted,
+			RawInput:  map[string]any{"command": "true"},
+			RawOutput: map[string]any{"state": "completed", "exit_code": 0},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "(no output)" {
+		t.Fatalf("ToolOutput = %q, want no-output placeholder", got)
+	}
+	if !events[0].ToolOutputSynthetic {
+		t.Fatalf("ToolOutputSynthetic = false, want synthetic placeholder")
+	}
+}
+
+func TestProjectGatewayEventACPExecuteFinalDisplaysNoOutputPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Protocol: &session.EventProtocol{
+			UpdateType: string(session.ProtocolUpdateTypeToolUpdate),
+			Update: &session.ProtocolUpdate{
+				SessionUpdate: string(session.ProtocolUpdateTypeToolUpdate),
+				ToolCallID:    "acp-empty",
+				Kind:          "execute",
+				Title:         "Terminal",
+				Status:        "completed",
+				RawInput:      map[string]any{"command": "true"},
+				RawOutput:     map[string]any{"exit_code": 0},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one protocol tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "(no output)" {
+		t.Fatalf("ToolOutput = %q, want no-output placeholder", got)
+	}
+	if !events[0].ToolOutputSynthetic {
+		t.Fatalf("ToolOutputSynthetic = false, want synthetic placeholder")
+	}
+}
+
+func TestProjectGatewayEventTerminalReferenceFinalDisplaysNoOutputPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:    "terminal-ref-empty",
+			ToolName:  "RUN_COMMAND",
+			Status:    kernel.ToolStatusCompleted,
+			RawInput:  map[string]any{"command": "true"},
+			RawOutput: map[string]any{"exit_code": 0},
+			Content: []session.ProtocolToolCallContent{{
+				Type:       "terminal",
+				TerminalID: "term-empty",
+			}},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	if got := events[0].ToolOutput; got != "(no output)" {
+		t.Fatalf("ToolOutput = %q, want no-output placeholder", got)
+	}
+	if !events[0].ToolOutputSynthetic {
+		t.Fatalf("ToolOutputSynthetic = false, want synthetic placeholder")
 	}
 }
 

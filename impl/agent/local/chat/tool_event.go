@@ -64,6 +64,9 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 		return nil
 	}
 	text := toolResultDisplayText(name, input, displayOutput, meta, status, isErr)
+	if strings.TrimSpace(text) == "" && successfulEmptyTerminalResult(name, status, isErr) {
+		return nil
+	}
 	if strings.TrimSpace(text) == "" {
 		text = toolResultStatusText(status, isErr)
 	}
@@ -80,6 +83,21 @@ func toolResultContent(call model.ToolCall, input map[string]any, output map[str
 		item.TerminalID = toolResultTerminalID(call, displayOutput, meta)
 	}
 	return []session.EventToolContent{item}
+}
+
+func successfulEmptyTerminalResult(name string, status string, isErr bool) bool {
+	if isErr || strings.EqualFold(strings.TrimSpace(status), "failed") {
+		return false
+	}
+	if !toolStatusFinal(status, isErr) {
+		return false
+	}
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "RUN_COMMAND", "SPAWN":
+		return true
+	default:
+		return false
+	}
 }
 
 func toolKindForName(name string) string {

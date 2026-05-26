@@ -667,6 +667,31 @@ func terminalFinalWithoutContent(toolName string, toolKind string, status string
 	return isTerminalPanelToolKind(toolName, toolKind)
 }
 
+func terminalNoOutputPlaceholder(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []session.ProtocolToolCallContent, status string, isErr bool) bool {
+	if !terminalFinalWithoutContent(toolName, toolKind, status, isErr) {
+		return false
+	}
+	if terminalContentText(content) != "" {
+		return false
+	}
+	if terminalRawOutputHasText(rawOutput) {
+		return false
+	}
+	if terminalRuntimeOutputText(meta) != "" || terminalOutputMetaText(meta) != "" {
+		return false
+	}
+	return len(content) == 0 || hasStandardTerminalContent(content)
+}
+
+func terminalRawOutputHasText(rawOutput map[string]any) bool {
+	for _, key := range []string{"result", "output", "stdout", "stderr", "error", "latest_output", "output_preview", "final_message", "finalMessage", "text"} {
+		if text := asString(rawOutput[key]); strings.TrimSpace(text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func terminalToolOutputText(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []session.ProtocolToolCallContent, status string, isErr bool) string {
 	if !isTerminalPanelToolKind(toolName, toolKind) && !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
 		return ""
@@ -701,9 +726,6 @@ func terminalToolOutputText(toolName string, toolKind string, rawOutput map[stri
 	}
 	if text := firstNonEmpty(asString(rawOutput["result"]), asString(rawOutput["output"]), asString(rawOutput["stdout"]), asString(rawOutput["stderr"]), asString(rawOutput["error"])); text != "" {
 		return text
-	}
-	if isTerminalPanelToolKind(toolName, toolKind) || strings.EqualFold(name, "TASK") {
-		return "(no output)"
 	}
 	return ""
 }

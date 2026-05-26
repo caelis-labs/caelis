@@ -553,13 +553,7 @@ func (a *RuntimeAgent) streamTerminalToACP(ctx context.Context, cb acp.PromptCal
 			continue
 		}
 		if frame.Text != "" && !emittedOutput {
-			emittedOutput = true
 			if err := cb.SessionUpdate(ctx, terminalOutputNotification(sessionID, displayTerminalID, frame.Text)); err != nil {
-				return
-			}
-		}
-		if !emittedOutput {
-			if err := cb.SessionUpdate(ctx, terminalOutputNotification(sessionID, displayTerminalID, "(no output)")); err != nil {
 				return
 			}
 		}

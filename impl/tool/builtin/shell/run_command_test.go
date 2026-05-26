@@ -411,6 +411,21 @@ func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
 	}
 }
 
+func TestRunCommandPayloadDoesNotSynthesizeNoOutputPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	payload := runCommandPayload(sandbox.CommandResult{ExitCode: 0}, nil)
+	if got, ok := payload["result"]; ok {
+		t.Fatalf("result = %#v, want no UI placeholder in tool payload", got)
+	}
+	if got, _ := payload["state"].(string); got != "completed" {
+		t.Fatalf("state = %q, want completed", got)
+	}
+	if got, _ := payload["exit_code"].(int); got != 0 {
+		t.Fatalf("exit_code = %#v, want 0", payload["exit_code"])
+	}
+}
+
 func TestRunCommandPayloadPreservesInternalStdoutNewlines(t *testing.T) {
 	t.Parallel()
 

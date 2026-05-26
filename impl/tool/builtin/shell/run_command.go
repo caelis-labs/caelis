@@ -199,8 +199,6 @@ func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
 	}
 	if commandOutputHasNonBlankLine(merged) {
 		payload["result"] = merged
-	} else if err == nil {
-		payload["result"] = "(no output)"
 	}
 	if commandExitCodeAvailable(result.ExitCode, err) {
 		payload["exit_code"] = result.ExitCode

@@ -218,7 +218,7 @@ func terminalResultText(output map[string]any, status string, isErr bool) string
 	if errText := toolRawString(output["error"]); toolOutputHasNonBlankLine(errText) {
 		return errText
 	}
-	return "(no output)"
+	return ""
 }
 
 func spawnResultText(output map[string]any, status string, isErr bool) string {

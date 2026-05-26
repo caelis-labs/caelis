@@ -358,6 +358,51 @@ func TestRuntimeAgentDoesNotRepeatTerminalFinalTextAfterStreamOutput(t *testing.
 	}
 }
 
+func TestRuntimeAgentDoesNotEmitNoOutputTerminalPlaceholder(t *testing.T) {
+	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
+	runtime := terminalBridgeRuntime{omitStreamedOutput: true}
+	agent, err := runtimeacp.New(runtimeacp.Config{
+		Runtime:  runtime,
+		Sessions: sessions,
+		BuildAgentSpec: func(context.Context, session.Session, acp.PromptRequest) (agent.AgentSpec, error) {
+			return agent.AgentSpec{Name: "fake"}, nil
+		},
+		AppName: "caelis",
+		UserID:  "user-1",
+		AgentInfo: &acp.Implementation{
+			Name:    "caelis-sdk",
+			Version: "0.1.0",
+		},
+	})
+	if err != nil {
+		t.Fatalf("runtimeacp.New() error = %v", err)
+	}
+	activeSession, err := agent.NewSession(context.Background(), acp.NewSessionRequest{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewSession() error = %v", err)
+	}
+	cb := &terminalBridgeCallbacks{}
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{SessionID: activeSession.SessionID}, cb); err != nil {
+		t.Fatalf("Prompt() error = %v", err)
+	}
+
+	deadline := time.After(2 * time.Second)
+	for {
+		notes := cb.snapshot()
+		if hasCompletedTerminalExit(notes, "call-1", 0) {
+			if hasAnyTerminalOutput(notes, "call-1") {
+				t.Fatalf("notifications = %#v, terminal bridge must not synthesize terminal output", notes)
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("notifications = %#v, want completed terminal status without synthetic output", notes)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
 func TestRuntimeAgentMapsCancelledTerminalCloseToFailed(t *testing.T) {
 	sessions := inmemory.NewService(inmemory.NewStore(inmemory.Config{}))
 	runtime := terminalBridgeRuntime{closedState: "cancelled"}
@@ -761,11 +806,12 @@ func (r staticApprovalModelResolver) ResolveApprovalModel(context.Context, sessi
 }
 
 type terminalBridgeRuntime struct {
-	closedState string
-	closedText  string
-	toolName    string
-	taskID      string
-	terminalID  string
+	closedState        string
+	closedText         string
+	toolName           string
+	taskID             string
+	terminalID         string
+	omitStreamedOutput bool
 }
 
 func (r terminalBridgeRuntime) Run(_ context.Context, req agent.RunRequest) (agent.RunResult, error) {
@@ -836,8 +882,9 @@ func (terminalBridgeRuntime) RunState(context.Context, session.SessionRef) (agen
 
 func (r terminalBridgeRuntime) Streams() stream.Service {
 	return terminalBridgeStream{
-		closedState: r.closedState,
-		closedText:  r.closedText,
+		closedState:        r.closedState,
+		closedText:         r.closedText,
+		omitStreamedOutput: r.omitStreamedOutput,
 	}
 }
 
@@ -958,8 +1005,9 @@ func (terminalBridgeRun) Cancel() agent.CancelResult {
 func (terminalBridgeRun) Close() error { return nil }
 
 type terminalBridgeStream struct {
-	closedState string
-	closedText  string
+	closedState        string
+	closedText         string
+	omitStreamedOutput bool
 }
 
 func (terminalBridgeStream) Read(context.Context, stream.ReadRequest) (stream.Snapshot, error) {
@@ -968,8 +1016,10 @@ func (terminalBridgeStream) Read(context.Context, stream.ReadRequest) (stream.Sn
 
 func (s terminalBridgeStream) Subscribe(context.Context, stream.SubscribeRequest) iter.Seq2[*stream.Frame, error] {
 	return func(yield func(*stream.Frame, error) bool) {
-		if !yield(&stream.Frame{Text: "streamed output\n"}, nil) {
-			return
+		if !s.omitStreamedOutput {
+			if !yield(&stream.Frame{Text: "streamed output\n"}, nil) {
+				return
+			}
 		}
 		state := strings.TrimSpace(s.closedState)
 		if state == "" {
@@ -1022,6 +1072,20 @@ func hasTerminalOutput(notifications []acp.SessionNotification, terminalID strin
 			continue
 		}
 		if terminalOutputData(update.Meta, terminalID) == data {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAnyTerminalOutput(notifications []acp.SessionNotification, terminalID string) bool {
+	for _, notification := range notifications {
+		update, ok := notification.Update.(acp.ToolCallUpdate)
+		if !ok {
+			continue
+		}
+		output, _ := update.Meta["terminal_output"].(map[string]any)
+		if output != nil && output["terminal_id"] == terminalID {
 			return true
 		}
 	}
