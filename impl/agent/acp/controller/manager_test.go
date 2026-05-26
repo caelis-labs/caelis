@@ -555,6 +555,153 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	}
 }
 
+func TestManagerAttachRehydratesPersistedParticipant(t *testing.T) {
+	t.Parallel()
+
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "tova",
+		Command: "tova-acp",
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	starts := 0
+	var resumed string
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		cfg acp.AgentConfig,
+		resumeRemoteSessionID string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		resumed = resumeRemoteSessionID
+		if cfg.Name != "tova" {
+			t.Fatalf("startClient cfg = %q, want tova", cfg.Name)
+		}
+		return nil, resumeRemoteSessionID, controllerClientState{}, nil
+	}
+
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: "/workspace",
+		Controller: session.ControllerBinding{
+			Kind:    session.ControllerKindKernel,
+			EpochID: "epoch-1",
+		},
+	}
+	persisted := session.ParticipantBinding{
+		ID:             "codex-3",
+		Kind:           session.ParticipantKindACP,
+		Role:           session.ParticipantRoleSidecar,
+		AgentName:      "tova",
+		Label:          "@tova",
+		SessionID:      "remote-tova",
+		Source:         "tui_agent_add",
+		ContextSyncSeq: 7,
+		AttachedAt:     time.Unix(50, 0),
+		ControllerRef:  "epoch-1",
+	}
+	binding, err := manager.Attach(context.Background(), controller.AttachRequest{
+		Session: parentSession,
+		Agent:   "tova",
+		Binding: persisted,
+	})
+	if err != nil {
+		t.Fatalf("Attach(rehydrate) error = %v", err)
+	}
+	if resumed != "remote-tova" {
+		t.Fatalf("resumeRemoteSessionID = %q, want remote-tova", resumed)
+	}
+	if binding.ID != "codex-3" || binding.SessionID != "remote-tova" || binding.ContextSyncSeq != 7 || binding.Label != "@tova" {
+		t.Fatalf("binding = %#v, want persisted participant binding", binding)
+	}
+
+	updated := persisted
+	updated.ContextSyncSeq = 9
+	binding, err = manager.Attach(context.Background(), controller.AttachRequest{
+		Session: parentSession,
+		Agent:   "tova",
+		Binding: updated,
+	})
+	if err != nil {
+		t.Fatalf("Attach(existing) error = %v", err)
+	}
+	if starts != 1 {
+		t.Fatalf("client starts = %d, want one rehydration", starts)
+	}
+	if binding.ContextSyncSeq != 9 {
+		t.Fatalf("ContextSyncSeq = %d, want refreshed checkpoint 9", binding.ContextSyncSeq)
+	}
+}
+
+func TestManagerAttachResetsParticipantCheckpointForFreshRemoteSession(t *testing.T) {
+	t.Parallel()
+
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "tova",
+		Command: "tova-acp",
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		_ acp.AgentConfig,
+		resumeRemoteSessionID string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		if resumeRemoteSessionID != "stale-remote" {
+			t.Fatalf("resumeRemoteSessionID = %q, want stale-remote", resumeRemoteSessionID)
+		}
+		return nil, "fresh-remote", controllerClientState{}, nil
+	}
+
+	binding, err := manager.Attach(context.Background(), controller.AttachRequest{
+		Session: session.Session{
+			SessionRef: session.SessionRef{
+				AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+			},
+			CWD: "/workspace",
+		},
+		Agent: "tova",
+		Binding: session.ParticipantBinding{
+			ID:             "codex-3",
+			Kind:           session.ParticipantKindACP,
+			Role:           session.ParticipantRoleSidecar,
+			AgentName:      "tova",
+			Label:          "@tova",
+			SessionID:      "stale-remote",
+			ContextSyncSeq: 42,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Attach(rehydrate fallback) error = %v", err)
+	}
+	if binding.SessionID != "fresh-remote" {
+		t.Fatalf("SessionID = %q, want fresh-remote", binding.SessionID)
+	}
+	if binding.ContextSyncSeq != 0 {
+		t.Fatalf("ContextSyncSeq = %d, want reset for fresh remote session", binding.ContextSyncSeq)
+	}
+}
+
 func TestManagerStartACPClientFallsBackToNewSessionWhenResumeFails(t *testing.T) {
 	t.Parallel()
 

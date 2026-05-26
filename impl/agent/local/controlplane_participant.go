@@ -105,7 +105,14 @@ func (r *Runtime) PromptACPParticipant(ctx context.Context, req agent.PromptACPP
 	if err != nil {
 		return agent.RunResult{}, err
 	}
-	binding, _ := participantBinding(activeSession, strings.TrimSpace(req.ParticipantID))
+	binding, ok := participantBinding(activeSession, strings.TrimSpace(req.ParticipantID))
+	if !ok {
+		return agent.RunResult{}, fmt.Errorf("impl/agent/local: ACP participant %q not found", strings.TrimSpace(req.ParticipantID))
+	}
+	activeSession, binding, err = r.ensureACPParticipantRun(ctx, activeSession, ref, binding)
+	if err != nil {
+		return agent.RunResult{}, err
+	}
 	contextPrelude := r.buildParticipantPromptContext(ctx, activeSession, ref, binding)
 	turnID := r.nextID("participant-turn", nil)
 	runID := r.nextID("participant-run", nil)
@@ -229,6 +236,93 @@ func (r *Runtime) executeACPParticipantTurn(
 		handle.publishError(err)
 		return
 	}
+}
+
+func (r *Runtime) ensureACPParticipantRun(
+	ctx context.Context,
+	activeSession session.Session,
+	ref session.SessionRef,
+	binding session.ParticipantBinding,
+) (session.Session, session.ParticipantBinding, error) {
+	binding = session.CloneParticipantBinding(binding)
+	if binding.Kind == "" {
+		binding.Kind = session.ParticipantKindACP
+	}
+	if binding.Kind != session.ParticipantKindACP {
+		return session.Session{}, session.ParticipantBinding{}, fmt.Errorf("impl/agent/local: participant %q is not ACP-backed", strings.TrimSpace(binding.ID))
+	}
+	agentName := acpParticipantAgentName(binding)
+	if agentName == "" {
+		return session.Session{}, session.ParticipantBinding{}, fmt.Errorf("impl/agent/local: ACP participant %q has no agent name", strings.TrimSpace(binding.ID))
+	}
+	attached, err := r.controllers.Attach(ctx, controller.AttachRequest{
+		SessionRef: ref,
+		Session:    activeSession,
+		Binding:    binding,
+		Agent:      agentName,
+		Role:       binding.Role,
+		Label:      binding.Label,
+	})
+	if err != nil {
+		return session.Session{}, session.ParticipantBinding{}, err
+	}
+	attached = normalizeRehydratedACPParticipantBinding(binding, attached)
+	if attached == binding {
+		return activeSession, attached, nil
+	}
+	updated, err := r.sessions.PutParticipant(ctx, session.PutParticipantRequest{
+		SessionRef: ref,
+		Binding:    attached,
+	})
+	if err != nil {
+		return session.Session{}, session.ParticipantBinding{}, err
+	}
+	return updated, attached, nil
+}
+
+func acpParticipantAgentName(binding session.ParticipantBinding) string {
+	if agentName := strings.TrimSpace(binding.AgentName); agentName != "" {
+		return agentName
+	}
+	return strings.TrimPrefix(strings.TrimSpace(binding.Label), "@")
+}
+
+func normalizeRehydratedACPParticipantBinding(original session.ParticipantBinding, attached session.ParticipantBinding) session.ParticipantBinding {
+	out := session.CloneParticipantBinding(attached)
+	if out.ID == "" {
+		out.ID = strings.TrimSpace(original.ID)
+	}
+	if out.Kind == "" {
+		out.Kind = session.ParticipantKindACP
+	}
+	if out.Role == "" {
+		out.Role = original.Role
+	}
+	if out.Role == "" {
+		out.Role = session.ParticipantRoleSidecar
+	}
+	if out.AgentName == "" {
+		out.AgentName = acpParticipantAgentName(original)
+	}
+	if out.Label == "" {
+		out.Label = firstNonEmpty(strings.TrimSpace(original.Label), strings.TrimSpace(out.AgentName), strings.TrimSpace(out.ID))
+	}
+	if out.Source == "" {
+		out.Source = strings.TrimSpace(original.Source)
+	}
+	if out.ParentTurnID == "" {
+		out.ParentTurnID = strings.TrimSpace(original.ParentTurnID)
+	}
+	if out.DelegationID == "" {
+		out.DelegationID = strings.TrimSpace(original.DelegationID)
+	}
+	if out.AttachedAt.IsZero() {
+		out.AttachedAt = original.AttachedAt
+	}
+	if out.ControllerRef == "" {
+		out.ControllerRef = strings.TrimSpace(original.ControllerRef)
+	}
+	return out
 }
 
 func participantPromptUserEvent(

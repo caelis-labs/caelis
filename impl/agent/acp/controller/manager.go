@@ -312,6 +312,14 @@ func (m *Manager) Attach(ctx context.Context, req controller.AttachRequest) (ses
 	if strings.TrimSpace(req.Session.SessionID) == "" {
 		return session.ParticipantBinding{}, fmt.Errorf("impl/agent/acp/controller: session id is required")
 	}
+	if id := strings.TrimSpace(req.Binding.ID); id != "" {
+		m.mu.RLock()
+		run := m.participants[id]
+		m.mu.RUnlock()
+		if run != nil {
+			return run.refreshBinding(req.Binding), nil
+		}
+	}
 	cfg, err := m.registry.Resolve(req.Agent)
 	if err != nil {
 		return session.ParticipantBinding{}, err
@@ -381,7 +389,9 @@ func (m *Manager) startParticipant(
 	req controller.AttachRequest,
 ) (*participantRun, error) {
 	var run *participantRun
-	client, remoteSessionID, _, err := m.startClient(ctx, parentSession.CWD, cfg, "", func(env client.UpdateEnvelope) {
+	existing := session.CloneParticipantBinding(req.Binding)
+	resumeRemoteSessionID := strings.TrimSpace(existing.SessionID)
+	client, remoteSessionID, _, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
 		if run != nil {
 			run.handleUpdate(m.clock, env)
 		}
@@ -396,31 +406,52 @@ func (m *Manager) startParticipant(
 	if err != nil {
 		return nil, err
 	}
-	id := m.nextID(firstNonEmpty(req.Agent, "participant"))
+	id := strings.TrimSpace(existing.ID)
+	if id == "" {
+		id = m.nextID(firstNonEmpty(req.Agent, existing.AgentName, "participant"))
+	}
 	role := req.Role
+	if role == "" {
+		role = existing.Role
+	}
 	if role == "" {
 		role = session.ParticipantRoleSidecar
 	}
 	label := strings.TrimSpace(req.Label)
 	if label == "" {
+		label = strings.TrimSpace(existing.Label)
+	}
+	if label == "" {
 		label = strings.TrimSpace(req.Agent)
+	}
+	agentName := firstNonEmpty(strings.TrimSpace(req.Agent), strings.TrimSpace(existing.AgentName), strings.TrimSpace(cfg.Name))
+	attachedAt := existing.AttachedAt
+	if attachedAt.IsZero() {
+		attachedAt = m.clock()
+	}
+	contextSyncSeq := existing.ContextSyncSeq
+	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
+		contextSyncSeq = 0
 	}
 	run = &participantRun{
 		id:              id,
 		parentSessionID: strings.TrimSpace(parentSession.SessionID),
-		agent:           strings.TrimSpace(req.Agent),
+		agent:           agentName,
 		client:          client,
 		remoteSessionID: remoteSessionID,
 		binding: session.ParticipantBinding{
-			ID:            id,
-			Kind:          session.ParticipantKindACP,
-			Role:          role,
-			AgentName:     strings.TrimSpace(req.Agent),
-			Label:         label,
-			SessionID:     remoteSessionID,
-			Source:        firstNonEmpty(req.Source, "user_attach"),
-			AttachedAt:    m.clock(),
-			ControllerRef: strings.TrimSpace(parentSession.Controller.EpochID),
+			ID:             id,
+			Kind:           session.ParticipantKindACP,
+			Role:           role,
+			AgentName:      agentName,
+			Label:          label,
+			SessionID:      remoteSessionID,
+			Source:         firstNonEmpty(req.Source, existing.Source, "user_attach"),
+			ParentTurnID:   strings.TrimSpace(existing.ParentTurnID),
+			DelegationID:   strings.TrimSpace(existing.DelegationID),
+			ContextSyncSeq: contextSyncSeq,
+			AttachedAt:     attachedAt,
+			ControllerRef:  firstNonEmpty(strings.TrimSpace(existing.ControllerRef), strings.TrimSpace(parentSession.Controller.EpochID)),
 		},
 	}
 	m.mu.Lock()
@@ -926,6 +957,31 @@ func (r *participantRun) finishPrompt() ([]*session.Event, bool) {
 	r.handle = nil
 	r.events = nil
 	return buffered, stream
+}
+
+func (r *participantRun) refreshBinding(binding session.ParticipantBinding) session.ParticipantBinding {
+	if r == nil {
+		return session.ParticipantBinding{}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if binding.ContextSyncSeq > r.binding.ContextSyncSeq {
+		r.binding.ContextSyncSeq = binding.ContextSyncSeq
+	}
+	if label := strings.TrimSpace(binding.Label); label != "" {
+		r.binding.Label = label
+	}
+	if agentName := strings.TrimSpace(binding.AgentName); agentName != "" {
+		r.binding.AgentName = agentName
+		r.agent = agentName
+	}
+	if source := strings.TrimSpace(binding.Source); source != "" {
+		r.binding.Source = source
+	}
+	if controllerRef := strings.TrimSpace(binding.ControllerRef); controllerRef != "" {
+		r.binding.ControllerRef = controllerRef
+	}
+	return session.CloneParticipantBinding(r.binding)
 }
 
 func (r *participantRun) permissionHandler(ctx context.Context, req client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {

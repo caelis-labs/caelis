@@ -952,6 +952,99 @@ func TestRuntimePromptACPParticipantPersistsPublicDialogue(t *testing.T) {
 	}
 }
 
+func TestRuntimePromptACPParticipantRehydratesPersistedBinding(t *testing.T) {
+	t.Parallel()
+
+	sessions, activeSession := newTestSessionService(t, "sess-acp-side-rehydrate")
+	activeSession, err := sessions.PutParticipant(context.Background(), session.PutParticipantRequest{
+		SessionRef: activeSession.SessionRef,
+		Binding: session.ParticipantBinding{
+			ID:             "codex-3",
+			Kind:           session.ParticipantKindACP,
+			Role:           session.ParticipantRoleSidecar,
+			Label:          "@tova",
+			AgentName:      "tova",
+			SessionID:      "remote-old",
+			Source:         "tui_agent_add",
+			ContextSyncSeq: 4,
+		},
+	})
+	if err != nil {
+		t.Fatalf("PutParticipant() error = %v", err)
+	}
+	attachReqCh := make(chan controller.AttachRequest, 1)
+	promptReqCh := make(chan controller.ParticipantPromptRequest, 1)
+	testController := stubACPController{
+		attach: func(ctx context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {
+			_ = ctx
+			attachReqCh <- req
+			binding := session.CloneParticipantBinding(req.Binding)
+			binding.SessionID = "remote-new"
+			binding.ContextSyncSeq = 0
+			return binding, nil
+		},
+		promptParticipant: func(ctx context.Context, req controller.ParticipantPromptRequest) (controller.TurnResult, error) {
+			_ = ctx
+			promptReqCh <- req
+			handle := newTestControllerTurnHandle(nil)
+			handle.finish()
+			return controller.TurnResult{Handle: handle}, nil
+		},
+	}
+	runtime, err := New(Config{
+		Sessions:     sessions,
+		AgentFactory: chat.Factory{SystemPrompt: "Be terse."},
+		Controllers:  testController,
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	result, err := runtime.PromptACPParticipant(context.Background(), agent.PromptACPParticipantRequest{
+		SessionRef:    activeSession.SessionRef,
+		ParticipantID: "codex-3",
+		Input:         "please inspect the local diff",
+		Source:        "tui_agent_ask",
+	})
+	if err != nil {
+		t.Fatalf("PromptACPParticipant() error = %v", err)
+	}
+	select {
+	case req := <-attachReqCh:
+		if req.Binding.ID != "codex-3" || req.Binding.SessionID != "remote-old" || req.Agent != "tova" {
+			t.Fatalf("Attach request = %#v, want persisted @tova binding", req)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant rehydrate attach request was not sent")
+	}
+	select {
+	case req := <-promptReqCh:
+		if req.ParticipantID != "codex-3" {
+			t.Fatalf("ParticipantID = %q, want codex-3", req.ParticipantID)
+		}
+		if got := req.Session.Participants[0].SessionID; got != "remote-new" {
+			t.Fatalf("prompt session participant remote = %q, want remote-new", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("participant prompt request was not sent")
+	}
+	if result.Handle != nil {
+		for range result.Handle.Events() {
+		}
+	}
+	updated, err := sessions.Session(context.Background(), activeSession.SessionRef)
+	if err != nil {
+		t.Fatalf("Session() error = %v", err)
+	}
+	binding, ok := participantBinding(updated, "codex-3")
+	if !ok {
+		t.Fatal("participant codex-3 missing after prompt")
+	}
+	if binding.SessionID != "remote-new" {
+		t.Fatalf("persisted participant remote = %q, want remote-new", binding.SessionID)
+	}
+}
+
 func TestRuntimePromptACPParticipantCancelCancelsControllerTurn(t *testing.T) {
 	t.Parallel()
 

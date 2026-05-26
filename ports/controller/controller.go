@@ -54,12 +54,13 @@ type ApprovalRequester interface {
 
 // AttachRequest creates one ACP-backed participant attachment.
 type AttachRequest struct {
-	SessionRef session.SessionRef      `json:"session_ref,omitempty"`
-	Session    session.Session         `json:"session,omitempty"`
-	Agent      string                  `json:"agent,omitempty"`
-	Role       session.ParticipantRole `json:"role,omitempty"`
-	Source     string                  `json:"source,omitempty"`
-	Label      string                  `json:"label,omitempty"`
+	SessionRef session.SessionRef         `json:"session_ref,omitempty"`
+	Session    session.Session            `json:"session,omitempty"`
+	Binding    session.ParticipantBinding `json:"binding,omitempty"`
+	Agent      string                     `json:"agent,omitempty"`
+	Role       session.ParticipantRole    `json:"role,omitempty"`
+	Source     string                     `json:"source,omitempty"`
+	Label      string                     `json:"label,omitempty"`
 }
 
 // DetachRequest removes one ACP-backed participant attachment.
@@ -236,6 +237,7 @@ func NormalizeAttachRequest(in AttachRequest) AttachRequest {
 	out := in
 	out.SessionRef = session.NormalizeSessionRef(in.SessionRef)
 	out.Session = session.CloneSession(in.Session)
+	out.Binding = session.CloneParticipantBinding(in.Binding)
 	out.Agent = strings.TrimSpace(in.Agent)
 	out.Source = strings.TrimSpace(in.Source)
 	out.Label = strings.TrimSpace(in.Label)
