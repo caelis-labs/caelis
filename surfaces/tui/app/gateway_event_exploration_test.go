@@ -577,7 +577,7 @@ func TestExplorationToolDetailCompactsWindowsWorkspacePaths(t *testing.T) {
 		},
 		{
 			name: "workspace outside path falls back to basename",
-			ev:   SubagentEvent{Name: "READ", Args: `D:\other\foo_test.go 1~12`},
+			ev:   SubagentEvent{Name: "READ", Args: `D:\external\foo_test.go 1~12`},
 			want: `foo_test.go 1~12`,
 		},
 	}

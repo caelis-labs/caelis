@@ -169,6 +169,8 @@ func BuiltInAgents() []assembly.AgentConfig {
 	return []assembly.AgentConfig{
 		npxAgentConfig("codex", "OpenAI Codex ACP agent", "@zed-industries/codex-acp"),
 		npxAgentConfig("claude", "Claude Code ACP agent", "@agentclientprotocol/claude-agent-acp@"+claudeACPAdapterVersion),
+		nativeACPAgentConfig("opencode", "OpenCode ACP agent", "opencode", "acp"),
+		nativeACPAgentConfig("codefree-o", "CodeFree-O ACP agent", "codefree-o", "acp"),
 		{
 			Name:        "copilot",
 			Description: "GitHub Copilot ACP agent",
@@ -181,6 +183,15 @@ func BuiltInAgents() []assembly.AgentConfig {
 			Command:     "gemini",
 			Args:        []string{"--acp"},
 		},
+	}
+}
+
+func nativeACPAgentConfig(name string, description string, command string, args ...string) assembly.AgentConfig {
+	return assembly.AgentConfig{
+		Name:        strings.TrimSpace(name),
+		Description: strings.TrimSpace(description),
+		Command:     strings.TrimSpace(command),
+		Args:        append([]string(nil), args...),
 	}
 }
 

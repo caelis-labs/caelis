@@ -50,7 +50,7 @@ func FromSnapshot(status tuidriver.StatusSnapshot) ViewModel {
 func (s ViewModel) HeaderModelText(fallback string) string {
 	model := firstNonEmpty(strings.TrimSpace(s.Model), strings.TrimSpace(fallback), "not configured")
 	provider := strings.TrimSpace(s.Provider)
-	if provider != "" && provider != "not configured" && !strings.Contains(strings.ToLower(model), strings.ToLower(provider)+"/") {
+	if provider != "" && provider != "not configured" && !strings.EqualFold(provider, "acp") && !strings.Contains(strings.ToLower(model), strings.ToLower(provider)+"/") {
 		model = provider + "/" + model
 	}
 	if effort := strings.TrimSpace(s.ReasoningEffort); effort != "" && !strings.Contains(model, "["+effort+"]") {

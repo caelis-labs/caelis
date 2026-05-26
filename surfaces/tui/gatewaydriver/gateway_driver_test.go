@@ -1440,7 +1440,7 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(agent add) error = %v", err)
 	}
-	for _, want := range []string{"claude", "codex", "copilot", "gemini"} {
+	for _, want := range []string{"claude", "codex", "opencode", "codefree-o", "copilot", "gemini"} {
 		if !slashCandidatesHaveValue(addCandidates, want) {
 			t.Fatalf("agent add candidates = %#v, want %q", addCandidates, want)
 		}
@@ -1457,7 +1457,7 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 			t.Fatalf("agent install candidates = %#v, want %q", installCandidates, want)
 		}
 	}
-	for _, notInstallable := range []string{"copilot", "gemini"} {
+	for _, notInstallable := range []string{"opencode", "codefree-o", "copilot", "gemini"} {
 		if slashCandidatesHaveValue(installCandidates, notInstallable) {
 			t.Fatalf("agent install candidates = %#v, want no %q", installCandidates, notInstallable)
 		}
@@ -1965,6 +1965,59 @@ func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
 	status.ModeOptions = nil
 	if got := acpControllerModeDisplay(status); got != "review" {
 		t.Fatalf("acpControllerModeDisplay() fallback = %q, want review", got)
+	}
+}
+
+func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.T) {
+	ctx := context.Background()
+	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
+	activeSession := session.Session{
+		SessionRef: ref,
+		CWD:        t.TempDir(),
+		Controller: session.ControllerBinding{
+			Kind:            session.ControllerKindACP,
+			AgentName:       "opencode",
+			RemoteSessionID: "remote-1",
+		},
+	}
+	driver := &GatewayDriver{
+		stack: &DriverStack{
+			Workspace: session.WorkspaceRef{CWD: activeSession.CWD},
+			GatewayFn: func() GatewayService {
+				return &activeSubmitGatewayService{}
+			},
+			DefaultModelAliasFn: func() string { return "local/model" },
+			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
+			},
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
+				return gatewayapp.ACPControllerStatus{
+					Model: "remote-model",
+					Mode:  "code",
+					ModeOptions: []gatewayapp.ACPControllerMode{
+						{ID: "code", Name: "Code"},
+					},
+				}, true, nil
+			},
+		},
+		session:             activeSession,
+		hasSession:          true,
+		defaultSessionMode:  "local-default",
+		sessionMode:         "local-default",
+		defaultSandboxType:  "host",
+		sandboxType:         "host",
+		streamSubscriptions: map[string]struct{}{},
+	}
+
+	status, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.SessionMode != "code" || status.ModeLabel != "Code" {
+		t.Fatalf("status mode/label = %q/%q, want remote code/Code", status.SessionMode, status.ModeLabel)
+	}
+	if status.Provider != "acp" || status.Model != "remote-model" {
+		t.Fatalf("status provider/model = %q/%q, want acp/remote-model", status.Provider, status.Model)
 	}
 }
 

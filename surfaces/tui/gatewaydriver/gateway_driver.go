@@ -388,10 +388,10 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
 		status.Model = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
 		status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-		if strings.TrimSpace(status.SessionMode) == "" {
+		if acpModeID != "" {
 			status.SessionMode = acpModeID
 		}
-		if strings.TrimSpace(status.ModeLabel) == "" {
+		if acpModeLabel != "" || acpModeID != "" {
 			status.ModeLabel = firstNonEmpty(acpModeLabel, acpModeID)
 		}
 		status.Provider = "acp"

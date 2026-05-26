@@ -203,7 +203,8 @@ type SetControllerModelRequest struct {
 }
 
 // SetControllerModeRequest changes the active remote ACP controller mode using
-// the server-declared session/set_mode surface.
+// the server-declared config option surface when available, with session/set_mode
+// retained as the compatibility fallback.
 type SetControllerModeRequest struct {
 	SessionRef session.SessionRef `json:"session_ref,omitempty"`
 	Mode       string             `json:"mode,omitempty"`

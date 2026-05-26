@@ -540,39 +540,105 @@ func controllerModesFromACP(modes *client.SessionModeState) []controller.Control
 	return out
 }
 
+func controllerModesFromConfigOptions(options []controller.ControllerConfigOption) []controller.ControllerMode {
+	option, ok := pickModeConfigOption(options)
+	if !ok || option == nil || len(option.Options) == 0 {
+		return nil
+	}
+	out := make([]controller.ControllerMode, 0, len(option.Options))
+	for _, choice := range option.Options {
+		id := strings.TrimSpace(choice.Value)
+		if id == "" {
+			continue
+		}
+		out = append(out, controller.ControllerMode{
+			ID:          id,
+			Name:        strings.TrimSpace(choice.Name),
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
+}
+
 func pickModelConfigOption(options []controller.ControllerConfigOption) (*controller.ControllerConfigOption, bool) {
 	return pickControllerConfigOption(options, matchModelConfigOption)
+}
+
+func pickModeConfigOption(options []controller.ControllerConfigOption) (*controller.ControllerConfigOption, bool) {
+	return pickControllerConfigOption(options, matchModeConfigOption)
 }
 
 func pickEffortConfigOption(options []controller.ControllerConfigOption) (*controller.ControllerConfigOption, bool) {
 	return pickControllerConfigOption(options, func(option controller.ControllerConfigOption) (bool, int) {
 		id := strings.ToLower(strings.TrimSpace(option.ID))
+		category := strings.ToLower(strings.TrimSpace(option.Category))
 		haystack := controllerConfigOptionHaystack(option)
 		switch id {
-		case "effort", "reasoning", "reasoning_effort", "reasoningeffort":
+		case "effort", "reasoning", "reasoning_effort", "reasoningeffort", "thought", "thought_level", "thoughtlevel", "thinking", "thinking_level", "thinkinglevel":
+			return true, 0
+		}
+		switch category {
+		case "thought_level", "reasoning", "reasoning_effort":
 			return true, 0
 		}
 		if strings.Contains(haystack, "effort") || strings.Contains(haystack, "reasoning") {
 			return true, 1
 		}
+		if strings.Contains(haystack, "thought") || strings.Contains(haystack, "thinking") {
+			return true, 2
+		}
 		return false, 0
 	})
 }
 
-func matchModelConfigOption(option controller.ControllerConfigOption) (bool, int) {
+func matchModeConfigOption(option controller.ControllerConfigOption) (bool, int) {
 	id := strings.ToLower(strings.TrimSpace(option.ID))
+	category := strings.ToLower(strings.TrimSpace(option.Category))
 	haystack := controllerConfigOptionHaystack(option)
-	if id == "model" || id == "model_id" || id == "modelid" {
+	switch id {
+	case "mode", "session_mode", "sessionmode":
 		return true, 0
 	}
-	if strings.Contains(haystack, "model") && !strings.Contains(haystack, "reason") && !strings.Contains(haystack, "effort") {
+	if category == "mode" {
+		return true, 0
+	}
+	if strings.Contains(haystack, "mode") && !strings.Contains(haystack, "model") {
 		return true, 1
+	}
+	return false, 0
+}
+
+func matchModelConfigOption(option controller.ControllerConfigOption) (bool, int) {
+	id := strings.ToLower(strings.TrimSpace(option.ID))
+	category := strings.ToLower(strings.TrimSpace(option.Category))
+	haystack := controllerConfigOptionHaystack(option)
+	if id == "model" || id == "models" || id == "model_id" || id == "modelid" {
+		return true, 0
+	}
+	if strings.Contains(haystack, "reason") ||
+		strings.Contains(haystack, "effort") ||
+		strings.Contains(haystack, "thought") ||
+		strings.Contains(haystack, "thinking") {
+		return false, 0
+	}
+	if category == "model" {
+		return true, 1
+	}
+	if strings.Contains(haystack, "model") {
+		return true, 2
 	}
 	return false, 0
 }
 
 func currentModelFromConfigOptions(options []controller.ControllerConfigOption) string {
 	if option, ok := pickModelConfigOption(options); ok && option != nil {
+		return strings.TrimSpace(option.CurrentValue)
+	}
+	return ""
+}
+
+func currentModeFromConfigOptions(options []controller.ControllerConfigOption) string {
+	if option, ok := pickModeConfigOption(options); ok && option != nil {
 		return strings.TrimSpace(option.CurrentValue)
 	}
 	return ""

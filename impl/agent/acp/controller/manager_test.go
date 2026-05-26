@@ -281,6 +281,89 @@ func TestControllerRunStatusUsesConfigOptionsForModelAndEffort(t *testing.T) {
 	}
 }
 
+func TestControllerRunStatusUsesConfigCategoriesForModeAndThoughtLevel(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []controller.ControllerConfigOption{
+			{
+				ID:           "session-mode",
+				Name:         "Session Mode",
+				Category:     "mode",
+				CurrentValue: "code",
+				Options: []controller.ControllerConfigChoice{
+					{Value: "ask", Name: "Ask"},
+					{Value: "code", Name: "Code"},
+				},
+			},
+			{
+				ID:           "thinking",
+				Name:         "Thinking",
+				Category:     "thought_level",
+				CurrentValue: "high",
+				Options: []controller.ControllerConfigChoice{
+					{Value: "low", Name: "Low"},
+					{Value: "high", Name: "High"},
+				},
+			},
+		},
+		mode: "ask",
+		modeOptions: []controller.ControllerMode{
+			{ID: "ask", Name: "Ask"},
+		},
+	}, 0)
+
+	status := run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
+	if status.Mode != "code" || status.ReasoningEffort != "high" {
+		t.Fatalf("status mode/effort = %q/%q, want code/high", status.Mode, status.ReasoningEffort)
+	}
+	if got := controllerModeIDs(status.ModeOptions); !equalStrings(got, []string{"ask", "code"}) {
+		t.Fatalf("mode options = %#v, want config mode options", got)
+	}
+	if got := controllerChoiceValues(status.EffortOptions); !equalStrings(got, []string{"low", "high"}) {
+		t.Fatalf("effort options = %#v, want thought_level options", got)
+	}
+}
+
+func TestControllerRunStatusDoesNotTreatModelCategoryEffortAsModel(t *testing.T) {
+	t.Parallel()
+
+	run := &controllerRun{}
+	run.applyStartupStateLocked(nil, "remote-1", controllerClientState{
+		configOptions: []controller.ControllerConfigOption{
+			{
+				ID:           "effort",
+				Name:         "Effort",
+				Category:     "model",
+				CurrentValue: "high",
+				Options: []controller.ControllerConfigChoice{
+					{Value: "low", Name: "Low"},
+					{Value: "high", Name: "High"},
+				},
+			},
+			{
+				ID:           "model",
+				Name:         "Model",
+				Category:     "model",
+				CurrentValue: "gpt-next",
+				Options: []controller.ControllerConfigChoice{
+					{Value: "gpt-old", Name: "GPT Old"},
+					{Value: "gpt-next", Name: "GPT Next"},
+				},
+			},
+		},
+	}, 0)
+
+	status := run.controllerStatusLocked(session.SessionRef{SessionID: "parent"})
+	if status.Model != "gpt-next" || status.ReasoningEffort != "high" {
+		t.Fatalf("status model/effort = %q/%q, want gpt-next/high", status.Model, status.ReasoningEffort)
+	}
+	if got := controllerChoiceValues(status.ModelOptions); !equalStrings(got, []string{"gpt-old", "gpt-next"}) {
+		t.Fatalf("model options = %#v, want actual model options", got)
+	}
+}
+
 func TestControllerRunApplyStartupStateFillsPartialPreSessionConfigOptions(t *testing.T) {
 	t.Parallel()
 
@@ -489,7 +572,7 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 		SessionRef: session.SessionRef{
 			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
 		},
-		CWD: "/workspace",
+		CWD: t.TempDir(),
 	}
 	binding, err := manager.Activate(context.Background(), controller.HandoffRequest{
 		Session: parentSession,
@@ -552,6 +635,382 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	}
 	if starts != 2 {
 		t.Fatalf("client starts = %d, want 2 (controller + participant)", starts)
+	}
+}
+
+func TestManagerSetControllerModelReconnectsAfterBrokenPipe(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerACPControllerReconnectHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER": "controller-reconnect",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	baseStart := manager.startClient
+	starts := 0
+	manager.startClient = func(
+		ctx context.Context,
+		cwd string,
+		cfg acp.AgentConfig,
+		resumeRemoteSessionID string,
+		onUpdate func(client.UpdateEnvelope),
+		onPermission func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		return baseStart(ctx, cwd, cfg, resumeRemoteSessionID, onUpdate, onPermission)
+	}
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	if _, err := manager.Activate(ctx, controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	status, err := manager.SetControllerModel(ctx, controller.SetControllerModelRequest{
+		SessionRef: parentSession.SessionRef,
+		Model:      "gpt-next",
+	})
+	if err != nil {
+		t.Fatalf("SetControllerModel() error = %v", err)
+	}
+	if starts != 2 {
+		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
+	}
+	if status.Model != "gpt-next" {
+		t.Fatalf("status.Model = %q, want gpt-next", status.Model)
+	}
+}
+
+func TestManagerRunTurnReconnectsAfterBrokenPipe(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerACPControllerReconnectHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER": "controller-reconnect",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	baseStart := manager.startClient
+	starts := 0
+	manager.startClient = func(
+		ctx context.Context,
+		cwd string,
+		cfg acp.AgentConfig,
+		resumeRemoteSessionID string,
+		onUpdate func(client.UpdateEnvelope),
+		onPermission func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		return baseStart(ctx, cwd, cfg, resumeRemoteSessionID, onUpdate, onPermission)
+	}
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	if _, err := manager.Activate(ctx, controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-prompt",
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn() error = %v", err)
+	}
+	for _, eventErr := range turn.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("turn event error = %v", eventErr)
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
+	}
+}
+
+func TestManagerActivateKeepsControllerProcessAfterHandoffContextCancel(t *testing.T) {
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerACPDurableHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER": "controller-durable",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	handoffCtx, cancelHandoff := context.WithCancel(context.Background())
+	if _, err := manager.Activate(handoffCtx, controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	cancelHandoff()
+
+	turnCtx, cancelTurn := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancelTurn()
+	turn, err := manager.RunTurn(turnCtx, controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-after-cancel",
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn() error = %v", err)
+	}
+	for _, eventErr := range turn.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("turn event error = %v", eventErr)
+		}
+	}
+	if err := manager.Deactivate(context.Background(), parentSession.SessionRef); err != nil {
+		t.Fatalf("Deactivate() error = %v", err)
+	}
+}
+
+func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerACPControllerReapplyHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER": "controller-reapply",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	baseStart := manager.startClient
+	starts := 0
+	manager.startClient = func(
+		ctx context.Context,
+		cwd string,
+		cfg acp.AgentConfig,
+		resumeRemoteSessionID string,
+		onUpdate func(client.UpdateEnvelope),
+		onPermission func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		return baseStart(ctx, cwd, cfg, resumeRemoteSessionID, onUpdate, onPermission)
+	}
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	if _, err := manager.Activate(ctx, controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	status, err := manager.SetControllerModel(ctx, controller.SetControllerModelRequest{
+		SessionRef:      parentSession.SessionRef,
+		Model:           "gpt-next",
+		ReasoningEffort: "high",
+	})
+	if err != nil {
+		t.Fatalf("SetControllerModel() error = %v", err)
+	}
+	if status.Model != "gpt-next" || status.ReasoningEffort != "high" {
+		t.Fatalf("status model/effort = %q/%q, want gpt-next/high", status.Model, status.ReasoningEffort)
+	}
+	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-reapply",
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn() error = %v", err)
+	}
+	for _, eventErr := range turn.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("turn event error = %v", eventErr)
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
+	}
+}
+
+func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestManagerACPControllerModeReapplyHelperProcess", "--"},
+		Env: map[string]string{
+			"CAELIS_ACP_HELPER": "controller-mode-reapply",
+		},
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{
+		Registry: registry,
+		Clock:    func() time.Time { return time.Unix(100, 0) },
+	})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	baseStart := manager.startClient
+	starts := 0
+	manager.startClient = func(
+		ctx context.Context,
+		cwd string,
+		cfg acp.AgentConfig,
+		resumeRemoteSessionID string,
+		onUpdate func(client.UpdateEnvelope),
+		onPermission func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		return baseStart(ctx, cwd, cfg, resumeRemoteSessionID, onUpdate, onPermission)
+	}
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	if _, err := manager.Activate(ctx, controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	status, err := manager.SetControllerMode(ctx, controller.SetControllerModeRequest{
+		SessionRef: parentSession.SessionRef,
+		Mode:       "code",
+	})
+	if err != nil {
+		t.Fatalf("SetControllerMode() error = %v", err)
+	}
+	if status.Mode != "code" {
+		t.Fatalf("status.Mode = %q, want code", status.Mode)
+	}
+	turn, err := manager.RunTurn(ctx, controller.TurnRequest{
+		SessionRef: parentSession.SessionRef,
+		Session:    parentSession,
+		TurnID:     "turn-mode-reapply",
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatalf("RunTurn() error = %v", err)
+	}
+	for _, eventErr := range turn.Handle.Events() {
+		if eventErr != nil {
+			t.Fatalf("turn event error = %v", eventErr)
+		}
+	}
+	if starts != 2 {
+		t.Fatalf("client starts = %d, want activate plus reconnect", starts)
+	}
+}
+
+func TestManagerReconnectDoesNotRestartInactiveControllerRun(t *testing.T) {
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: "helper-acp",
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	starts := 0
+	manager.startClient = func(
+		context.Context,
+		string,
+		acp.AgentConfig,
+		string,
+		func(client.UpdateEnvelope),
+		func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		starts++
+		return nil, "", controllerClientState{}, nil
+	}
+	run := &controllerRun{
+		parentSessionID: "parent",
+		cfg:             acp.AgentConfig{Name: "helper", Command: "helper-acp"},
+		cwd:             t.TempDir(),
+	}
+
+	err = manager.reconnectControllerRun(context.Background(), run)
+	if err == nil || !strings.Contains(err.Error(), "no longer active") {
+		t.Fatalf("reconnectControllerRun() error = %v, want inactive run error", err)
+	}
+	if starts != 0 {
+		t.Fatalf("client starts = %d, want no restart for inactive run", starts)
 	}
 }
 
@@ -830,6 +1289,333 @@ func TestManagerACPResumeFallbackHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
+func TestManagerACPControllerReconnectHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_ACP_HELPER") != "controller-reconnect" {
+		return
+	}
+	modelConfig := func(current string) []client.SessionConfigOption {
+		return []client.SessionConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			Category:     "model",
+			Type:         "select",
+			CurrentValue: current,
+			Options: []client.SessionConfigSelectOption{
+				{Value: "gpt-old", Name: "GPT Old"},
+				{Value: "gpt-next", Name: "GPT Next"},
+			},
+		}}
+	}
+	var sawResume bool
+	conn := jsonrpc.New(os.Stdin, os.Stdout)
+	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		switch msg.Method {
+		case client.MethodInitialize:
+			return client.InitializeResponse{
+				ProtocolVersion: 1,
+				AgentCapabilities: schema.AgentCapabilities{
+					SessionCapabilities: map[string]json.RawMessage{
+						"resume": json.RawMessage("{}"),
+					},
+				},
+			}, nil
+		case client.MethodSessionNew:
+			return client.NewSessionResponse{
+				SessionID:     "remote-reconnect",
+				ConfigOptions: modelConfig("gpt-old"),
+			}, nil
+		case client.MethodSessionResume:
+			var req client.ResumeSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "remote-reconnect" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
+			}
+			sawResume = true
+			return client.ResumeSessionResponse{ConfigOptions: modelConfig("gpt-old")}, nil
+		case client.MethodSessionSetConfig:
+			var req client.SetSessionConfigOptionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if !sawResume {
+				os.Exit(0)
+			}
+			if req.SessionID != "remote-reconnect" || req.ConfigID != "model" || fmt.Sprint(req.Value) != "gpt-next" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option request"}
+			}
+			return client.SetSessionConfigOptionResponse{ConfigOptions: modelConfig("gpt-next")}, nil
+		case client.MethodSessionPrompt:
+			var req client.PromptRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if !sawResume {
+				os.Exit(0)
+			}
+			if req.SessionID != "remote-reconnect" || len(req.Prompt) == 0 {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/prompt request"}
+			}
+			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+		default:
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper Serve() error = %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestManagerACPDurableHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_ACP_HELPER") != "controller-durable" {
+		return
+	}
+	modelConfig := func(current string) []client.SessionConfigOption {
+		return []client.SessionConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			Category:     "model",
+			Type:         "select",
+			CurrentValue: current,
+			Options: []client.SessionConfigSelectOption{
+				{Value: "gpt-old", Name: "GPT Old"},
+			},
+		}}
+	}
+	conn := jsonrpc.New(os.Stdin, os.Stdout)
+	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		switch msg.Method {
+		case client.MethodInitialize:
+			return client.InitializeResponse{ProtocolVersion: 1}, nil
+		case client.MethodSessionNew:
+			return client.NewSessionResponse{
+				SessionID:     "remote-durable",
+				ConfigOptions: modelConfig("gpt-old"),
+			}, nil
+		case client.MethodSessionPrompt:
+			var req client.PromptRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "remote-durable" || len(req.Prompt) == 0 {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/prompt request"}
+			}
+			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+		default:
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper Serve() error = %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestManagerACPControllerReapplyHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_ACP_HELPER") != "controller-reapply" {
+		return
+	}
+	modelConfig := func(current string) []client.SessionConfigOption {
+		return []client.SessionConfigOption{{
+			ID:           "model",
+			Name:         "Model",
+			Category:     "model",
+			Type:         "select",
+			CurrentValue: current,
+			Options: []client.SessionConfigSelectOption{
+				{Value: "gpt-old", Name: "GPT Old"},
+				{Value: "gpt-next", Name: "GPT Next"},
+			},
+		}}
+	}
+	configWithEffort := func(model string, effort string) []client.SessionConfigOption {
+		return append(modelConfig(model), client.SessionConfigOption{
+			ID:           "effort",
+			Name:         "Effort",
+			Category:     "model",
+			Type:         "select",
+			CurrentValue: effort,
+			Options: []client.SessionConfigSelectOption{
+				{Value: "low", Name: "Low"},
+				{Value: "high", Name: "High"},
+			},
+		})
+	}
+	var sawResume bool
+	var modelApplied bool
+	var effortApplied bool
+	conn := jsonrpc.New(os.Stdin, os.Stdout)
+	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		switch msg.Method {
+		case client.MethodInitialize:
+			return client.InitializeResponse{
+				ProtocolVersion: 1,
+				AgentCapabilities: schema.AgentCapabilities{
+					SessionCapabilities: map[string]json.RawMessage{
+						"resume": json.RawMessage("{}"),
+					},
+				},
+			}, nil
+		case client.MethodSessionNew:
+			return client.NewSessionResponse{
+				SessionID:     "remote-reapply",
+				ConfigOptions: modelConfig("gpt-old"),
+			}, nil
+		case client.MethodSessionResume:
+			var req client.ResumeSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "remote-reapply" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
+			}
+			sawResume = true
+			return client.ResumeSessionResponse{ConfigOptions: modelConfig("gpt-old")}, nil
+		case client.MethodSessionSetConfig:
+			var req client.SetSessionConfigOptionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "remote-reapply" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option session"}
+			}
+			switch req.ConfigID {
+			case "model":
+				if fmt.Sprint(req.Value) != "gpt-next" {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected model value"}
+				}
+				modelApplied = true
+				return client.SetSessionConfigOptionResponse{ConfigOptions: configWithEffort("gpt-next", "low")}, nil
+			case "effort":
+				if fmt.Sprint(req.Value) != "high" || !modelApplied {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected effort value"}
+				}
+				effortApplied = true
+				return client.SetSessionConfigOptionResponse{ConfigOptions: configWithEffort("gpt-next", "high")}, nil
+			default:
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected config id"}
+			}
+		case client.MethodSessionPrompt:
+			var req client.PromptRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if !sawResume {
+				os.Exit(0)
+			}
+			if req.SessionID != "remote-reapply" || len(req.Prompt) == 0 || !modelApplied || !effortApplied {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "prompt before reapplying model/effort"}
+			}
+			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+		default:
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper Serve() error = %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
+func TestManagerACPControllerModeReapplyHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_ACP_HELPER") != "controller-mode-reapply" {
+		return
+	}
+	modeConfig := func(current string) []client.SessionConfigOption {
+		return []client.SessionConfigOption{{
+			ID:           "mode",
+			Name:         "Mode",
+			Category:     "mode",
+			Type:         "select",
+			CurrentValue: current,
+			Options: []client.SessionConfigSelectOption{
+				{Value: "ask", Name: "Ask"},
+				{Value: "code", Name: "Code"},
+			},
+		}}
+	}
+	modeState := func(current string) *client.SessionModeState {
+		return &client.SessionModeState{
+			CurrentModeID: current,
+			AvailableModes: []client.SessionMode{
+				{ID: "ask", Name: "Ask"},
+				{ID: "code", Name: "Code"},
+			},
+		}
+	}
+	var sawResume bool
+	var modeApplied bool
+	conn := jsonrpc.New(os.Stdin, os.Stdout)
+	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		switch msg.Method {
+		case client.MethodInitialize:
+			return client.InitializeResponse{
+				ProtocolVersion: 1,
+				AgentCapabilities: schema.AgentCapabilities{
+					SessionCapabilities: map[string]json.RawMessage{
+						"resume": json.RawMessage("{}"),
+					},
+				},
+			}, nil
+		case client.MethodSessionNew:
+			return client.NewSessionResponse{
+				SessionID:     "remote-mode-reapply",
+				ConfigOptions: modeConfig("ask"),
+				Modes:         modeState("ask"),
+			}, nil
+		case client.MethodSessionResume:
+			var req client.ResumeSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "remote-mode-reapply" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/resume id"}
+			}
+			sawResume = true
+			return client.ResumeSessionResponse{
+				ConfigOptions: modeConfig(""),
+				Modes:         modeState(""),
+			}, nil
+		case client.MethodSessionSetConfig:
+			var req client.SetSessionConfigOptionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if req.SessionID != "remote-mode-reapply" || req.ConfigID != "mode" || fmt.Sprint(req.Value) != "code" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected session/set_config_option request"}
+			}
+			modeApplied = true
+			return client.SetSessionConfigOptionResponse{ConfigOptions: modeConfig("code")}, nil
+		case client.MethodSessionSetMode:
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "unexpected legacy session/set_mode request"}
+		case client.MethodSessionPrompt:
+			var req client.PromptRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if !sawResume {
+				os.Exit(0)
+			}
+			if req.SessionID != "remote-mode-reapply" || len(req.Prompt) == 0 || !sawResume || !modeApplied {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "prompt before reapplying mode"}
+			}
+			return client.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+		default:
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+	}, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "helper Serve() error = %v\n", err)
+		os.Exit(1)
+	}
+	os.Exit(0)
+}
+
 func TestTurnHandlePublishDoesNotBlockAfterBufferFillsOrFinishes(t *testing.T) {
 	t.Parallel()
 
@@ -859,6 +1645,17 @@ func controllerChoiceValues(in []controller.ControllerConfigChoice) []string {
 	out := make([]string, 0, len(in))
 	for _, item := range in {
 		out = append(out, item.Value)
+	}
+	return out
+}
+
+func controllerModeIDs(in []controller.ControllerMode) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, item := range in {
+		out = append(out, item.ID)
 	}
 	return out
 }

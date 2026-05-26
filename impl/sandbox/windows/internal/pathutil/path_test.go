@@ -29,6 +29,9 @@ func TestNormalizeWithBaseResolvesRelativePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Abs() error = %v", err)
 	}
+	if resolved := resolveExistingAncestor(want); resolved != "" {
+		want = resolved
+	}
 	if got != want {
 		t.Fatalf("NormalizeWithBase() = %q, want %q", got, want)
 	}

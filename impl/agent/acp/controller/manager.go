@@ -3,7 +3,9 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"strings"
 	"sync"
@@ -48,6 +50,8 @@ type clientStarter func(
 type controllerRun struct {
 	parentSessionID       string
 	agent                 string
+	cfg                   acp.AgentConfig
+	cwd                   string
 	client                *client.Client
 	remoteSessionID       string
 	supportsClose         bool
@@ -70,6 +74,7 @@ type controllerRun struct {
 	handle            *turnHandle
 	events            []*session.Event
 	updatedAt         time.Time
+	reconnectMu       sync.Mutex
 }
 
 type controllerClientState struct {
@@ -134,6 +139,8 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	run := &controllerRun{
 		parentSessionID:       parentSessionID,
 		agent:                 strings.TrimSpace(cfg.Name),
+		cfg:                   cfg,
+		cwd:                   strings.TrimSpace(req.Session.CWD),
 		binding:               controllerBinding(cfg.Name, req.Source, m.nextID("controller"), m.clock()),
 		contextPrelude:        strings.TrimSpace(req.ContextPrelude),
 		contextPreludePending: strings.TrimSpace(req.ContextPrelude) != "",
@@ -160,11 +167,12 @@ func (m *Manager) Activate(ctx context.Context, req controller.HandoffRequest) (
 	run.applyStartupStateLocked(client, remoteSessionID, state, contextSyncSeq)
 
 	m.mu.Lock()
-	if old := m.controllers[parentSessionID]; old != nil && old.client != nil {
-		_ = old.client.Close(ctx)
-	}
+	old := m.controllers[parentSessionID]
 	m.controllers[parentSessionID] = run
 	m.mu.Unlock()
+	if old != nil {
+		m.shutdownControllerRun(context.WithoutCancel(ctx), old, false)
+	}
 	return session.CloneControllerBinding(run.binding), nil
 }
 
@@ -180,30 +188,17 @@ func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSes
 	r.commands = mergeControllerCommands(r.commands, state.commands)
 	r.configOptions = fillControllerConfigOptions(r.configOptions, state.configOptions)
 	r.models = cloneACPSessionModelState(state.models)
-	if strings.TrimSpace(r.mode) == "" {
+	if mode := currentModeFromConfigOptions(r.configOptions); mode != "" {
+		r.mode = mode
+	} else if strings.TrimSpace(r.mode) == "" {
 		r.mode = strings.TrimSpace(state.mode)
 	}
-	r.modeOptions = mergeControllerModes(r.modeOptions, state.modeOptions)
+	r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), mergeControllerModes(r.modeOptions, state.modeOptions))
 	r.binding.RemoteSessionID = strings.TrimSpace(remoteSessionID)
 	r.binding.ContextSyncSeq = contextSyncSeq
 	if label := strings.TrimSpace(state.agentLabel); label != "" {
 		r.binding.Label = label
 	}
-}
-
-func (r *controllerRun) closeRemoteSession(ctx context.Context) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	client := r.client
-	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
-	supportsClose := r.supportsClose
-	r.mu.Unlock()
-	if client == nil || remoteSessionID == "" || !supportsClose {
-		return
-	}
-	_ = client.CloseSession(ctx, remoteSessionID)
 }
 
 func (m *Manager) Deactivate(ctx context.Context, ref session.SessionRef) error {
@@ -215,9 +210,8 @@ func (m *Manager) Deactivate(ctx context.Context, ref session.SessionRef) error 
 	run := m.controllers[ref.SessionID]
 	delete(m.controllers, ref.SessionID)
 	m.mu.Unlock()
-	if run != nil && run.client != nil {
-		run.closeRemoteSession(context.WithoutCancel(ctx))
-		_ = run.client.Close(context.WithoutCancel(ctx))
+	if run != nil {
+		m.shutdownControllerRun(context.WithoutCancel(ctx), run, true)
 	}
 	return nil
 }
@@ -248,7 +242,7 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	}
 	go func() {
 		defer handle.finish()
-		if _, err := run.client.PromptParts(turnCtx, run.remoteSessionID, prompt, nil); err != nil {
+		if err := m.promptControllerRun(turnCtx, run, prompt); err != nil {
 			run.finishTurn()
 			handle.publishError(err)
 			return
@@ -261,6 +255,20 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 		}
 	}()
 	return controller.TurnResult{Handle: handle, UpdatedAt: m.clock()}, nil
+}
+
+func (m *Manager) promptControllerRun(ctx context.Context, run *controllerRun, prompt []json.RawMessage) error {
+	if _, err := run.promptParts(ctx, prompt); err != nil {
+		if !isACPClientConnectionError(err) {
+			return err
+		}
+		if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
+			return fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
+		}
+		_, err = run.promptParts(ctx, prompt)
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) ControllerStatus(_ context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
@@ -290,6 +298,13 @@ func (m *Manager) SetControllerModel(ctx context.Context, req controller.SetCont
 	if run == nil {
 		return controller.ControllerStatus{}, fmt.Errorf("impl/agent/acp/controller: no active ACP controller for session %q", req.SessionRef.SessionID)
 	}
+	status, err := run.setControllerModel(ctx, req, m.clock)
+	if err == nil || !isACPClientConnectionError(err) {
+		return status, err
+	}
+	if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
+		return controller.ControllerStatus{}, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
+	}
 	return run.setControllerModel(ctx, req, m.clock)
 }
 
@@ -304,7 +319,210 @@ func (m *Manager) SetControllerMode(ctx context.Context, req controller.SetContr
 	if run == nil {
 		return controller.ControllerStatus{}, fmt.Errorf("impl/agent/acp/controller: no active ACP controller for session %q", req.SessionRef.SessionID)
 	}
+	status, err := run.setControllerMode(ctx, req, m.clock)
+	if err == nil || !isACPClientConnectionError(err) {
+		return status, err
+	}
+	if reconnectErr := m.reconnectControllerRun(ctx, run); reconnectErr != nil {
+		return controller.ControllerStatus{}, fmt.Errorf("%w; reconnect failed: %w", err, reconnectErr)
+	}
 	return run.setControllerMode(ctx, req, m.clock)
+}
+
+func (m *Manager) reconnectControllerRun(ctx context.Context, run *controllerRun) error {
+	if m == nil || run == nil {
+		return fmt.Errorf("impl/agent/acp/controller: controller run is unavailable")
+	}
+	run.reconnectMu.Lock()
+	defer run.reconnectMu.Unlock()
+	if !m.isActiveControllerRun(run) {
+		return fmt.Errorf("impl/agent/acp/controller: controller run is no longer active")
+	}
+	run.mu.Lock()
+	cfg := run.cfg
+	cwd := strings.TrimSpace(run.cwd)
+	resumeRemoteSessionID := strings.TrimSpace(run.remoteSessionID)
+	contextSyncSeq := run.binding.ContextSyncSeq
+	desired := controllerReconnectConfigFromState(run.configOptions, run.models, run.mode, run.modeOptions)
+	oldClient := run.client
+	run.mu.Unlock()
+	if strings.TrimSpace(cfg.Command) == "" {
+		return fmt.Errorf("impl/agent/acp/controller: controller agent config is unavailable")
+	}
+	if oldClient != nil {
+		_ = oldClient.Close(context.WithoutCancel(ctx))
+	}
+	if !m.isActiveControllerRun(run) {
+		return fmt.Errorf("impl/agent/acp/controller: controller run is no longer active")
+	}
+	acpClient, remoteSessionID, state, err := m.startClient(ctx, cwd, cfg, resumeRemoteSessionID,
+		func(env client.UpdateEnvelope) {
+			run.handleUpdate(m.clock, env)
+		},
+		func(ctx context.Context, in client.RequestPermissionRequest) (client.RequestPermissionResponse, error) {
+			return run.permissionHandler(ctx, in)
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if !m.isActiveControllerRun(run) {
+		_ = acpClient.Close(context.WithoutCancel(ctx))
+		return fmt.Errorf("impl/agent/acp/controller: controller run is no longer active")
+	}
+	remote := controllerReconnectConfigFromState(state.configOptions, state.models, state.mode, state.modeOptions)
+	if resumeRemoteSessionID != "" && !strings.EqualFold(strings.TrimSpace(remoteSessionID), resumeRemoteSessionID) {
+		contextSyncSeq = 0
+		run.mu.Lock()
+		run.contextPrelude = ""
+		run.contextPreludePending = false
+		run.mu.Unlock()
+	}
+	run.applyStartupStateLocked(acpClient, remoteSessionID, state, contextSyncSeq)
+	if desired.needsRemoteReapply(remote) {
+		if err := run.reapplyControllerRemoteConfig(ctx, desired, m.clock); err != nil {
+			return fmt.Errorf("reapply controller config: %w", err)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) isActiveControllerRun(run *controllerRun) bool {
+	if m == nil || run == nil {
+		return false
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.controllers[strings.TrimSpace(run.parentSessionID)] == run
+}
+
+func (m *Manager) shutdownControllerRun(ctx context.Context, run *controllerRun, closeRemote bool) {
+	if run == nil {
+		return
+	}
+	run.reconnectMu.Lock()
+	defer run.reconnectMu.Unlock()
+	m.shutdownControllerRunLocked(ctx, run, closeRemote)
+}
+
+func (m *Manager) shutdownControllerRunLocked(ctx context.Context, run *controllerRun, closeRemote bool) {
+	if run == nil {
+		return
+	}
+	run.mu.Lock()
+	acpClient := run.client
+	remoteSessionID := strings.TrimSpace(run.remoteSessionID)
+	supportsClose := run.supportsClose
+	run.client = nil
+	run.mu.Unlock()
+	if acpClient == nil {
+		return
+	}
+	if closeRemote && remoteSessionID != "" && supportsClose {
+		_ = acpClient.CloseSession(ctx, remoteSessionID)
+	}
+	_ = acpClient.Close(ctx)
+}
+
+type controllerReconnectConfig struct {
+	model            string
+	reasoningEffort  string
+	mode             string
+	modeConfigurable bool
+}
+
+func (c controllerReconnectConfig) needsRemoteReapply(remote controllerReconnectConfig) bool {
+	if c.model != "" && !strings.EqualFold(c.model, remote.model) {
+		return true
+	}
+	if c.reasoningEffort != "" && !strings.EqualFold(c.reasoningEffort, remote.reasoningEffort) {
+		return true
+	}
+	if c.mode != "" && !strings.EqualFold(c.mode, remote.mode) && remote.modeConfigurable {
+		return true
+	}
+	return false
+}
+
+func controllerReconnectConfigFromState(options []controller.ControllerConfigOption, models *client.SessionModelState, mode string, modeOptions []controller.ControllerMode) controllerReconnectConfig {
+	model := currentModelFromConfigOptions(options)
+	var effort string
+	if effortOption, ok := pickEffortConfigOption(options); ok && effortOption != nil {
+		effort = strings.TrimSpace(effortOption.CurrentValue)
+	}
+	if modelFromState, effortFromState, ok := splitACPCurrentModelEffort(models); ok {
+		if strings.TrimSpace(model) == "" {
+			model = modelFromState
+		}
+		if strings.TrimSpace(effort) == "" {
+			effort = effortFromState
+		}
+	}
+	modeFromConfig := currentModeFromConfigOptions(options)
+	if modeFromConfig != "" {
+		mode = modeFromConfig
+	}
+	return controllerReconnectConfig{
+		model:            strings.TrimSpace(model),
+		reasoningEffort:  strings.TrimSpace(effort),
+		mode:             strings.TrimSpace(mode),
+		modeConfigurable: len(controllerModesFromConfigOptions(options)) > 0 || len(modeOptions) > 0,
+	}
+}
+
+func (r *controllerRun) reapplyControllerRemoteConfig(ctx context.Context, desired controllerReconnectConfig, clock func() time.Time) error {
+	if r == nil {
+		return nil
+	}
+	if desired.model != "" || desired.reasoningEffort != "" {
+		if _, err := r.setControllerModel(ctx, controller.SetControllerModelRequest{
+			SessionRef:      session.SessionRef{SessionID: strings.TrimSpace(r.parentSessionID)},
+			Model:           desired.model,
+			ReasoningEffort: desired.reasoningEffort,
+		}, clock); err != nil {
+			return err
+		}
+	}
+	if desired.mode != "" {
+		if _, err := r.setControllerMode(ctx, controller.SetControllerModeRequest{
+			SessionRef: session.SessionRef{SessionID: strings.TrimSpace(r.parentSessionID)},
+			Mode:       desired.mode,
+		}, clock); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *controllerRun) promptParts(ctx context.Context, prompt []json.RawMessage) (client.PromptResponse, error) {
+	if r == nil {
+		return client.PromptResponse{}, fmt.Errorf("impl/agent/acp/controller: controller run is unavailable")
+	}
+	r.mu.Lock()
+	acpClient := r.client
+	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
+	r.mu.Unlock()
+	if acpClient == nil {
+		return client.PromptResponse{}, fmt.Errorf("impl/agent/acp/controller: controller client is unavailable")
+	}
+	if remoteSessionID == "" {
+		return client.PromptResponse{}, fmt.Errorf("impl/agent/acp/controller: remote session id is unavailable")
+	}
+	return acpClient.PromptParts(ctx, remoteSessionID, prompt, nil)
+}
+
+func isACPClientConnectionError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrClosedPipe) {
+		return true
+	}
+	text := strings.ToLower(strings.TrimSpace(err.Error()))
+	return strings.Contains(text, "broken pipe") ||
+		strings.Contains(text, "connection closed before response") ||
+		strings.Contains(text, "file already closed") ||
+		strings.Contains(text, "use of closed file")
 }
 
 func (m *Manager) Attach(ctx context.Context, req controller.AttachRequest) (session.ParticipantBinding, error) {
@@ -468,7 +686,10 @@ func (m *Manager) startACPClient(
 	onUpdate func(client.UpdateEnvelope),
 	onPermission func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
 ) (*client.Client, string, controllerClientState, error) {
-	client, err := client.Start(ctx, client.Config{
+	if err := ctx.Err(); err != nil {
+		return nil, "", controllerClientState{}, err
+	}
+	client, err := client.Start(context.WithoutCancel(ctx), client.Config{
 		Command:    cfg.Command,
 		Args:       append([]string(nil), cfg.Args...),
 		Env:        maps.Clone(cfg.Env),
@@ -747,6 +968,10 @@ func (r *controllerRun) applySessionUpdateLocked(clock func() time.Time, update 
 		r.commands = controllerCommandsFromACP(typed.AvailableCommands)
 	case client.ConfigOptionUpdate:
 		r.configOptions = mergeControllerConfigOptions(r.configOptions, controllerConfigOptionsFromACP(typed.ConfigOptions))
+		if mode := currentModeFromConfigOptions(r.configOptions); mode != "" {
+			r.mode = mode
+		}
+		r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), r.modeOptions)
 	case client.CurrentModeUpdate:
 		r.mode = strings.TrimSpace(typed.CurrentModeID)
 	case client.SessionInfoUpdate:
@@ -896,10 +1121,34 @@ func (r *controllerRun) setControllerMode(ctx context.Context, req controller.Se
 	r.mu.Lock()
 	client := r.client
 	remoteSessionID := strings.TrimSpace(r.remoteSessionID)
+	configOptions := cloneControllerConfigOptions(r.configOptions)
 	modeOptions := cloneControllerModes(r.modeOptions)
 	r.mu.Unlock()
 	if client == nil || remoteSessionID == "" {
 		return controller.ControllerStatus{}, fmt.Errorf("impl/agent/acp/controller: active controller client is unavailable")
+	}
+	if modeOption, hasModeOption := pickModeConfigOption(configOptions); hasModeOption && modeOption != nil && len(modeOption.Options) > 0 {
+		choice, ok := matchControllerConfigChoice(modeOption.Options, requested)
+		if !ok {
+			return controller.ControllerStatus{}, fmt.Errorf("impl/agent/acp/controller: mode %q is not declared by the controller", requested)
+		}
+		resp, err := client.SetConfigOption(ctx, remoteSessionID, modeOption.ID, choice.Value)
+		if err != nil {
+			return controller.ControllerStatus{}, err
+		}
+		configOptions = mergeControllerConfigOptions(configOptions, controllerConfigOptionsFromACP(resp.ConfigOptions))
+		modeOptions = mergeControllerModes(controllerModesFromConfigOptions(configOptions), modeOptions)
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		r.configOptions = cloneControllerConfigOptions(configOptions)
+		r.modeOptions = cloneControllerModes(modeOptions)
+		r.mode = firstNonEmpty(currentModeFromConfigOptions(configOptions), strings.TrimSpace(choice.Value), strings.TrimSpace(choice.Name))
+		if clock != nil {
+			r.updatedAt = clock()
+		} else {
+			r.updatedAt = time.Now()
+		}
+		return r.controllerStatusLocked(req.SessionRef), nil
 	}
 	if len(modeOptions) == 0 {
 		return controller.ControllerStatus{}, fmt.Errorf("impl/agent/acp/controller: controller does not declare session modes")

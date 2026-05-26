@@ -42,3 +42,16 @@ func TestStatusViewModelFooterModeOmitsSandboxRuntimeDetails(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusViewModelHeaderDoesNotPrefixACPControllerProvider(t *testing.T) {
+	vm := statusViewModelFromSnapshot(tuidriver.StatusSnapshot{
+		Model:           "opencode/deepseek-v4-flash-free [low]",
+		Provider:        "acp",
+		ReasoningEffort: "low",
+	})
+
+	got := vm.HeaderModelText("")
+	if got != "opencode/deepseek-v4-flash-free [low]" {
+		t.Fatalf("HeaderModelText() = %q, want remote ACP model without acp/ prefix", got)
+	}
+}
