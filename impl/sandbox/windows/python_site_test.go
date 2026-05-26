@@ -1,14 +1,16 @@
 package windows
 
 import (
+	"context"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestSandboxPythonSiteCustomizePython37Syntax(t *testing.T) {
 	python := requirePythonForSiteCustomizeTest(t)
-	cmd := exec.Command(python, "-c", `
+	cmd := python.command("-c", `
 import ast
 import sys
 
@@ -27,7 +29,7 @@ except TypeError:
 
 func TestSandboxPythonSiteCustomizeSkipsPatchBeforePython313(t *testing.T) {
 	python := requirePythonForSiteCustomizeTest(t)
-	cmd := exec.Command(python, "-c", `
+	cmd := python.command("-c", `
 import os
 import sys
 import tempfile
@@ -64,7 +66,7 @@ finally:
 
 func TestSandboxPythonSiteCustomizeMkdtempToleratesMissingAudit(t *testing.T) {
 	python := requirePythonForSiteCustomizeTest(t)
-	cmd := exec.Command(python, "-c", `
+	cmd := python.command("-c", `
 import os
 import sys
 import tempfile
@@ -107,14 +109,56 @@ finally:
 	}
 }
 
-func requirePythonForSiteCustomizeTest(t *testing.T) string {
+type pythonTestCommand struct {
+	name string
+	args []string
+}
+
+func (c pythonTestCommand) command(args ...string) *exec.Cmd {
+	all := append([]string(nil), c.args...)
+	all = append(all, args...)
+	return exec.Command(c.name, all...)
+}
+
+func (c pythonTestCommand) shellPrefix() string {
+	parts := append([]string{c.name}, c.args...)
+	return strings.Join(parts, " ")
+}
+
+func requirePythonForSiteCustomizeTest(t *testing.T) pythonTestCommand {
 	t.Helper()
-	for _, name := range []string{"python3", "python"} {
-		python, err := exec.LookPath(name)
-		if err == nil {
-			return python
-		}
+	if candidate, ok := availablePythonForSiteCustomize(); ok {
+		return candidate
 	}
 	t.Skip("python is not available")
-	return ""
+	return pythonTestCommand{}
+}
+
+func availablePythonForSiteCustomize() (pythonTestCommand, bool) {
+	for _, candidate := range []pythonTestCommand{
+		{name: "python3"},
+		{name: "python"},
+		{name: "py", args: []string{"-3"}},
+		{name: "py"},
+	} {
+		if usablePythonForSiteCustomize(candidate) {
+			return candidate, true
+		}
+	}
+	return pythonTestCommand{}, false
+}
+
+func usablePythonForSiteCustomize(candidate pythonTestCommand) bool {
+	if strings.TrimSpace(candidate.name) == "" {
+		return false
+	}
+	if _, err := exec.LookPath(candidate.name); err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	args := append([]string(nil), candidate.args...)
+	args = append(args, "-c", "import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)")
+	cmd := exec.CommandContext(ctx, candidate.name, args...)
+	return cmd.Run() == nil
 }

@@ -116,16 +116,15 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		}
 		result, err = t.runtime.Run(ctx, req)
 	} else {
+		constraints := defaultRunCommandConstraints(t.runtime)
 		result, err = t.runtime.Run(ctx, sandbox.CommandRequest{
-			Command:   command,
-			Dir:       workingDir,
-			Timeout:   t.cfg.Timeout,
-			RouteHint: sandbox.RouteSandbox,
-			Constraints: sandbox.Constraints{
-				Route:      sandbox.RouteSandbox,
-				Permission: sandbox.PermissionWorkspaceWrite,
-				Network:    sandbox.NetworkDisabled,
-			},
+			Command:     command,
+			Dir:         workingDir,
+			Timeout:     t.cfg.Timeout,
+			RouteHint:   constraints.Route,
+			Backend:     constraints.Backend,
+			Permission:  constraints.Permission,
+			Constraints: constraints,
 		})
 	}
 	payload := runCommandPayload(result, err)
@@ -179,6 +178,45 @@ func (t *RunCommandTool) CommandTimeout() time.Duration {
 		return 0
 	}
 	return t.cfg.Timeout
+}
+
+func defaultRunCommandConstraints(runtime sandbox.Runtime) sandbox.Constraints {
+	constraints := sandbox.Constraints{
+		Route:      sandbox.RouteSandbox,
+		Permission: sandbox.PermissionWorkspaceWrite,
+		Network:    sandbox.NetworkEnabled,
+	}
+	if runtime != nil {
+		defaults := sandbox.NormalizeConstraints(runtime.Describe().DefaultConstraints)
+		if defaults.Route != "" {
+			constraints.Route = defaults.Route
+		}
+		if defaults.Backend != "" {
+			constraints.Backend = defaults.Backend
+		}
+		if defaults.Permission != "" {
+			constraints.Permission = defaults.Permission
+		}
+		if defaults.Isolation != "" {
+			constraints.Isolation = defaults.Isolation
+		}
+		if defaults.Network != "" {
+			constraints.Network = defaults.Network
+		}
+		if len(defaults.PathRules) > 0 {
+			constraints.PathRules = defaults.PathRules
+		}
+	}
+	if constraints.Route == "" {
+		constraints.Route = sandbox.RouteSandbox
+	}
+	if constraints.Permission == "" {
+		constraints.Permission = sandbox.PermissionWorkspaceWrite
+	}
+	if constraints.Network == "" {
+		constraints.Network = sandbox.NetworkEnabled
+	}
+	return constraints
 }
 
 func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {

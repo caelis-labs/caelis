@@ -4,6 +4,7 @@ package windows
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,71 @@ func TestRuntimeDescribeReportsRestrictedTokenCapabilities(t *testing.T) {
 	}
 	if desc.Capabilities.TTY {
 		t.Fatalf("TTY = true, want false until ConPTY is supported on restricted token path")
+	}
+}
+
+func TestEffectiveWindowsSandboxNetworkFallsBackOnline(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []sandbox.Network{
+		"",
+		sandbox.NetworkInherit,
+		sandbox.NetworkEnabled,
+		sandbox.NetworkDisabled,
+	} {
+		if got := effectiveWindowsSandboxNetwork(network); got != sandbox.NetworkEnabled {
+			t.Fatalf("effectiveWindowsSandboxNetwork(%q) = %q, want enabled", network, got)
+		}
+	}
+}
+
+func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
+	t.Parallel()
+
+	waitErr := errors.New("forced termination")
+	session := &windowsSession{
+		ref: sandbox.SessionRef{
+			Backend:   sandbox.BackendWindows,
+			SessionID: "exec-test",
+		},
+		terminal: sandbox.TerminalRef{
+			Backend:    sandbox.BackendWindows,
+			SessionID:  "exec-test",
+			TerminalID: "term-test",
+		},
+		running:   true,
+		exitCode:  0,
+		startedAt: time.Now(),
+		updatedAt: time.Now(),
+		done:      make(chan struct{}),
+	}
+
+	session.forceTerminated(waitErr)
+	status, err := session.Wait(context.Background(), time.Second)
+	if err != nil {
+		t.Fatalf("Wait() error = %v", err)
+	}
+	if status.Running {
+		t.Fatalf("status.Running = true, want false")
+	}
+	if status.ExitCode != -1 {
+		t.Fatalf("status.ExitCode = %d, want -1", status.ExitCode)
+	}
+	result, err := session.Result(context.Background())
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("Result() error = %v, want forced termination", err)
+	}
+	if result.ExitCode != -1 {
+		t.Fatalf("result.ExitCode = %d, want -1", result.ExitCode)
+	}
+
+	session.forceTerminated(errors.New("second force should be ignored"))
+	result, err = session.Result(context.Background())
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("second Result() error = %v, want first forced termination", err)
+	}
+	if result.ExitCode != -1 {
+		t.Fatalf("second result.ExitCode = %d, want -1", result.ExitCode)
 	}
 }
 
@@ -409,9 +475,10 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 		t.Fatalf("sandbox TEMP write smoke err=%v result=%+v", err, result)
 	}
 
-	if _, pythonErr := exec.LookPath("python"); pythonErr == nil {
+	if python, ok := availablePythonForSiteCustomize(); ok {
+		pythonCommand := python.shellPrefix()
 		result, err = rt.Run(ctx, sandbox.CommandRequest{
-			Command: `python -c "import tempfile,pathlib; d=tempfile.mkdtemp(prefix='pip-unpack-'); p=pathlib.Path(d)/'ok.txt'; p.write_text('ok', encoding='utf-8'); print(p.read_text(encoding='utf-8'))"`,
+			Command: pythonCommand + ` -c "import tempfile,pathlib; d=tempfile.mkdtemp(prefix='pip-unpack-'); p=pathlib.Path(d)/'ok.txt'; p.write_text('ok', encoding='utf-8'); print(p.read_text(encoding='utf-8'))"`,
 			Dir:     workspace,
 			Constraints: sandbox.Constraints{
 				Route:      sandbox.RouteSandbox,
@@ -425,7 +492,7 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 		}
 
 		result, err = rt.Run(ctx, sandbox.CommandRequest{
-			Command: `python -c "print('requests 2.34.2'); print('HTTP 200')" 2>&1`,
+			Command: pythonCommand + ` -c "print('requests 2.34.2'); print('HTTP 200')" 2>&1`,
 			Dir:     workspace,
 			Constraints: sandbox.Constraints{
 				Route:      sandbox.RouteSandbox,
@@ -443,7 +510,7 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 
 		var streamed strings.Builder
 		session, err := rt.Start(ctx, sandbox.CommandRequest{
-			Command: `python -c "print('requests 2.34.2'); print('HTTP 200')" 2>&1`,
+			Command: pythonCommand + ` -c "print('requests 2.34.2'); print('HTTP 200')" 2>&1`,
 			Dir:     workspace,
 			OnOutput: func(chunk sandbox.OutputChunk) {
 				if chunk.Stream == "stdout" {

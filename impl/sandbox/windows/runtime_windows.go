@@ -37,6 +37,7 @@ import (
 const (
 	workspaceManifestVersion = 1
 	windowsOutputCap         = 1024 * 1024
+	windowsTerminateDrain    = 500 * time.Millisecond
 )
 
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
@@ -458,16 +459,36 @@ func runCommandWithJob(ctx context.Context, cmd *exec.Cmd) error {
 		}
 		return err
 	case <-ctx.Done():
-		if jobObject != nil {
-			_ = jobObject.Terminate(1)
-			_ = jobObject.Close()
+		terminateErr := terminateWindowsCommand(cmd, jobObject)
+		select {
+		case <-waitCh:
+			return errors.Join(ctx.Err(), terminateErr)
+		case <-time.After(windowsTerminateDrain):
+			return errors.Join(
+				ctx.Err(),
+				fmt.Errorf("impl/sandbox/windows: command terminated before process wait completed"),
+				terminateErr,
+			)
 		}
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
-		<-waitCh
-		return ctx.Err()
 	}
+}
+
+func terminateWindowsCommand(cmd *exec.Cmd, jobObject *job.Object) error {
+	var errs []error
+	if jobObject != nil {
+		if err := jobObject.Terminate(1); err != nil {
+			errs = append(errs, fmt.Errorf("terminate job object: %w", err))
+		}
+		if err := jobObject.Close(); err != nil {
+			errs = append(errs, fmt.Errorf("close job object: %w", err))
+		}
+	}
+	if cmd != nil && cmd.Process != nil {
+		if err := cmd.Process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			errs = append(errs, fmt.Errorf("kill process: %w", err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func assignCommandJob(cmd *exec.Cmd) (*job.Object, error) {
@@ -562,6 +583,7 @@ func (r *runtime) inspectPolicyForRequest(req sandbox.CommandRequest) (workspace
 
 func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, createSIDs bool) (workspacePolicy, error) {
 	constraints := sandbox.EffectiveConstraints(req)
+	constraints.Network = effectiveWindowsSandboxNetwork(constraints.Network)
 	if constraints.Permission == "" || constraints.Permission == sandbox.PermissionDefault {
 		constraints.Permission = sandbox.PermissionWorkspaceWrite
 	}
@@ -666,6 +688,13 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 		CapabilitySIDs:          append([]string(nil), binding.AllSIDs...),
 		WriteRootCapabilitySIDs: cloneStringMap(binding.WriteRootTo),
 	}, nil
+}
+
+func effectiveWindowsSandboxNetwork(_ sandbox.Network) sandbox.Network {
+	// The restricted-token backend currently has one network implementation.
+	// Disabled/offline network intent is recorded by higher layers, but Windows
+	// enforcement is not implemented yet, so execution stays on the online path.
+	return sandbox.NetworkEnabled
 }
 
 func existingWritableRoots(roots []string) ([]string, error) {
@@ -1218,6 +1247,7 @@ type windowsSession struct {
 	supportsInput bool
 	exitCode      int
 	waitErr       error
+	doneClosed    bool
 	startedAt     time.Time
 	updatedAt     time.Time
 }
@@ -1305,24 +1335,38 @@ func (s *windowsSession) Result(_ context.Context) (sandbox.CommandResult, error
 	return result, s.waitErr
 }
 
-func (s *windowsSession) Terminate(_ context.Context) error {
+func (s *windowsSession) Terminate(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	s.mu.RLock()
 	cmd := s.cmd
-	jobObject := s.job
 	running := s.running
 	s.mu.RUnlock()
 	if !running {
 		return nil
 	}
 	s.cancel()
-	if jobObject != nil {
-		_ = jobObject.Terminate(1)
-		_ = jobObject.Close()
+	terminateErr := terminateWindowsCommand(cmd, s.takeJob())
+	timer := time.NewTimer(windowsTerminateDrain)
+	defer timer.Stop()
+	select {
+	case <-s.done:
+		return terminateErr
+	case <-ctx.Done():
+		s.forceTerminated(errors.Join(
+			fmt.Errorf("impl/sandbox/windows: session %q terminated before process wait completed", s.ref.SessionID),
+			ctx.Err(),
+			terminateErr,
+		))
+		return terminateErr
+	case <-timer.C:
+		s.forceTerminated(errors.Join(
+			fmt.Errorf("impl/sandbox/windows: session %q terminated before process wait completed", s.ref.SessionID),
+			terminateErr,
+		))
+		return terminateErr
 	}
-	if cmd != nil && cmd.Process != nil {
-		return cmd.Process.Kill()
-	}
-	return nil
 }
 
 func (s *windowsSession) readStream(reader io.Reader, stream string) {
@@ -1361,8 +1405,8 @@ func (s *windowsSession) readStream(reader io.Reader, stream string) {
 
 func (s *windowsSession) waitForExit() {
 	err := s.cmd.Wait()
-	if s.job != nil {
-		_ = s.job.Close()
+	if jobObject := s.takeJob(); jobObject != nil {
+		_ = jobObject.Close()
 	}
 	s.wg.Wait()
 	s.mu.Lock()
@@ -1380,12 +1424,26 @@ func (s *windowsSession) waitForExit() {
 		_ = s.stdin.Close()
 		s.stdin = nil
 	}
+	if s.doneClosed {
+		s.updatedAt = time.Now()
+		s.mu.Unlock()
+		if s.onOutput != nil {
+			if len(stdoutTail) > 0 {
+				s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail)})
+			}
+			if len(stderrTail) > 0 {
+				s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail)})
+			}
+		}
+		return
+	}
 	if s.cmd.ProcessState != nil {
 		s.exitCode = s.cmd.ProcessState.ExitCode()
 	}
 	s.running = false
 	s.updatedAt = time.Now()
 	s.waitErr = err
+	s.doneClosed = true
 	close(s.done)
 	s.mu.Unlock()
 	if s.onOutput != nil {
@@ -1396,6 +1454,32 @@ func (s *windowsSession) waitForExit() {
 			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail)})
 		}
 	}
+}
+
+func (s *windowsSession) takeJob() *job.Object {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	jobObject := s.job
+	s.job = nil
+	return jobObject
+}
+
+func (s *windowsSession) forceTerminated(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.doneClosed {
+		return
+	}
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+		s.stdin = nil
+	}
+	s.running = false
+	s.exitCode = -1
+	s.updatedAt = time.Now()
+	s.waitErr = err
+	s.doneClosed = true
+	close(s.done)
 }
 
 type cappedOutputBuffer struct {

@@ -125,10 +125,12 @@ The backend must not claim support for:
 - hidden path read denial;
 - network disabled mode.
 
-Default Windows policy normalization should not manufacture hard read or network
-requirements. If future callers require hard read isolation or network isolation,
-that request should fail as unsupported for this backend rather than being
-reported as enforced.
+Default Windows policy normalization should not manufacture hard read
+requirements. Network-disabled intent is currently normalized to the online
+restricted-token implementation because no offline Windows path exists yet. If
+future callers require hard read isolation or enforced network isolation, that
+request should fail as unsupported for this backend rather than being reported
+as enforced.
 
 ## Backend Contract
 
@@ -322,7 +324,8 @@ Windows integration tests:
 - A sandboxed command cannot write to configured deny-write carveouts such as
   `.git`, `.codex`, `.agents`, or configured read-only subpaths.
 - Network is not blocked or modified by the sandbox path. At minimum, no proxy
-  variables or firewall setup are injected by the backend.
+  variables or firewall setup are injected by the backend. Requests for
+  `NetworkDisabled` currently run through the same online implementation.
 - PowerShell and cmd both work.
 - stdout, stderr, non-ASCII output, stdin, timeout, and cancellation match host
   semantics.

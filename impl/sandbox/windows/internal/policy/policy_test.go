@@ -93,6 +93,21 @@ func TestCommonGlobalPolicyDoesNotAddReadOrNetworkControls(t *testing.T) {
 	}
 }
 
+func TestEffectiveWindowsNetworkFallsBackOnline(t *testing.T) {
+	t.Parallel()
+
+	for _, network := range []sandbox.Network{
+		"",
+		sandbox.NetworkInherit,
+		sandbox.NetworkEnabled,
+		sandbox.NetworkDisabled,
+	} {
+		if got := effectiveWindowsNetwork(network); got != NetworkOnline {
+			t.Fatalf("effectiveWindowsNetwork(%q) = %q, want online", network, got)
+		}
+	}
+}
+
 func TestCommonGlobalPolicyCompactsCoveredWriteRoots(t *testing.T) {
 	commonRoot := filepath.Join(t.TempDir(), "cache")
 	childRoot := filepath.Join(commonRoot, "go-build")

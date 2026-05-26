@@ -191,6 +191,43 @@ func TestRunCommandCallUsesConfiguredHardTimeoutOnly(t *testing.T) {
 	}
 }
 
+func TestRunCommandCallDefaultsNetworkToRuntimeDefault(t *testing.T) {
+	t.Parallel()
+
+	var last sandbox.CommandRequest
+	rt := sandboxPermissionRuntime{
+		result: sandbox.CommandResult{Stdout: "ok", ExitCode: 0},
+		last:   &last,
+		descriptor: sandbox.Descriptor{
+			Backend: sandbox.BackendWindows,
+			DefaultConstraints: sandbox.Constraints{
+				Route:      sandbox.RouteSandbox,
+				Backend:    sandbox.BackendWindows,
+				Permission: sandbox.PermissionWorkspaceWrite,
+				Isolation:  sandbox.IsolationProcess,
+				Network:    sandbox.NetworkEnabled,
+			},
+		},
+	}
+	runCommandTool, err := NewRunCommand(RunCommandConfig{Runtime: rt})
+	if err != nil {
+		t.Fatalf("NewRunCommand() error = %v", err)
+	}
+	raw, err := json.Marshal(map[string]any{"command": "printf 'ok'"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if _, err := runCommandTool.Call(context.Background(), tool.Call{Name: RunCommandToolName, Input: raw}); err != nil {
+		t.Fatalf("Call() error = %v", err)
+	}
+	if got := last.Constraints.Network; got != sandbox.NetworkEnabled {
+		t.Fatalf("default network = %q, want enabled", got)
+	}
+	if got := last.Backend; got != sandbox.BackendWindows {
+		t.Fatalf("backend = %q, want windows default", got)
+	}
+}
+
 func TestRunCommandCallReturnsTerminalLikeCommandFailurePayload(t *testing.T) {
 	t.Parallel()
 
@@ -452,12 +489,23 @@ func TestRunCommandPayloadSeparatesStdoutAndStderrWithoutTrimming(t *testing.T) 
 }
 
 type sandboxPermissionRuntime struct {
-	result sandbox.CommandResult
-	err    error
-	last   *sandbox.CommandRequest
+	result     sandbox.CommandResult
+	err        error
+	last       *sandbox.CommandRequest
+	descriptor sandbox.Descriptor
 }
 
 func (r sandboxPermissionRuntime) Describe() sandbox.Descriptor {
+	if r.descriptor.Backend != "" ||
+		r.descriptor.Isolation != "" ||
+		r.descriptor.DefaultConstraints.Route != "" ||
+		r.descriptor.DefaultConstraints.Backend != "" ||
+		r.descriptor.DefaultConstraints.Permission != "" ||
+		r.descriptor.DefaultConstraints.Isolation != "" ||
+		r.descriptor.DefaultConstraints.Network != "" ||
+		len(r.descriptor.DefaultConstraints.PathRules) > 0 {
+		return sandbox.CloneDescriptor(r.descriptor)
+	}
 	return sandbox.Descriptor{Backend: sandbox.BackendBwrap}
 }
 

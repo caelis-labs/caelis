@@ -42,7 +42,7 @@ func Build(input Input) Policy {
 		constraints.Permission = sandbox.PermissionWorkspaceWrite
 	}
 	if constraints.Permission == sandbox.PermissionFullAccess {
-		return Policy{Network: NetworkOnline, FullAccess: true}
+		return Policy{Network: effectiveWindowsNetwork(constraints.Network), FullAccess: true}
 	}
 
 	cwd := firstNonEmpty(input.CommandDir, cfg.CWD)
@@ -80,15 +80,22 @@ func Build(input Input) Policy {
 	return Policy{
 		WriteRoots:     writeRoots,
 		DenyWritePaths: pathutil.Dedupe(denyWrite),
-		Network:        NetworkOnline,
+		Network:        effectiveWindowsNetwork(constraints.Network),
 	}
 }
 
 func CommonGlobalPolicy(writeRoots []string) Policy {
 	return Policy{
 		WriteRoots: pathutil.CompactCovered(writeRoots),
-		Network:    NetworkOnline,
+		Network:    effectiveWindowsNetwork(""),
 	}
+}
+
+func effectiveWindowsNetwork(_ sandbox.Network) NetworkIdentity {
+	// Windows restricted-token sandboxing is online-only today. NetworkDisabled
+	// records caller intent, but offline enforcement is not implemented and
+	// therefore falls back to the same online execution path.
+	return NetworkOnline
 }
 
 func existingControlDirs(root string) []string {
