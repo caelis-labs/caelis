@@ -11,5 +11,5 @@ import (
 
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	_ = cfg
-	return nil, fmt.Errorf("impl/sandbox/windows: elevated Windows sandbox backend is only supported on windows (current=%s)", runtime.GOOS)
+	return nil, fmt.Errorf("impl/sandbox/windows: Windows restricted-token sandbox backend is only supported on windows (current=%s)", runtime.GOOS)
 }

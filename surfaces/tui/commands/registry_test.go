@@ -2,7 +2,6 @@ package commands
 
 import (
 	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -23,9 +22,6 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"exit",
 		"quit",
 	}
-	if runtime.GOOS == "windows" {
-		want = append(want[:5], append([]string{"sandbox"}, want[5:]...)...)
-	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultNames() = %#v, want %#v", got, want)
 	}
@@ -42,18 +38,12 @@ func TestHelpTextUsesRegistrySpecs(t *testing.T) {
 
 func TestLocalDuringACPMatchesLegacyLocalCommands(t *testing.T) {
 	local := []string{"help", "agent", "status", "doctor", "resume", "model", "approval", "exit", "quit"}
-	if runtime.GOOS == "windows" {
-		local = append(local, "sandbox")
-	}
 	for _, name := range local {
 		if !IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = false, want true", name)
 		}
 	}
-	remote := []string{"connect", "new", "compact"}
-	if runtime.GOOS != "windows" {
-		remote = append(remote, "sandbox")
-	}
+	remote := []string{"connect", "new", "compact", "sandbox"}
 	for _, name := range remote {
 		if IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = true, want false", name)

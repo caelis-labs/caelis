@@ -61,6 +61,16 @@ func TestStyleTerminalOutputLineSanitizesANSI(t *testing.T) {
 	}
 }
 
+func TestTerminalOutputKeepsNonBlankLineWhitespaceOnlyDropsBlankLines(t *testing.T) {
+	t.Parallel()
+
+	segments := tailWrappedTerminalSegments("  first line  \r\n   \r\nsecond line  \r\n", 80, 10)
+	want := []string{"  first line  ", "second line  "}
+	if strings.Join(segments, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("segments = %#v, want %#v", segments, want)
+	}
+}
+
 func TestACPHeaderAndToolLineSanitizeSourceANSI(t *testing.T) {
 	model := NewModel(Config{ColorProfile: colorprofile.TrueColor})
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme}

@@ -290,7 +290,7 @@ func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus {
 			statusCalls++
-			return SandboxStatus{RequestedBackend: "windows-elevated", ResolvedBackend: "windows-elevated"}
+			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
 		},
 		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
 			return activeSession, nil
@@ -318,7 +318,7 @@ func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 		},
 		SandboxStatusFn: func() SandboxStatus {
 			sandboxCalls++
-			return SandboxStatus{RequestedBackend: "windows-elevated", ResolvedBackend: "windows-elevated"}
+			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
 		},
 		DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
 			doctorCalls++

@@ -339,7 +339,7 @@ func (s *DriverStack) SetSandboxBackend(ctx context.Context, backend string) (Sa
 
 func (s *DriverStack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
 	if s == nil || s.PrepareSandboxFn == nil {
-		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox setup dependency is unavailable")
+		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox repair dependency is unavailable")
 	}
 	return s.PrepareSandboxFn(ctx)
 }

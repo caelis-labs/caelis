@@ -113,7 +113,7 @@ func commandTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 	if snapshot.Running {
 		payload["task_id"] = visibleTaskID
 		payload["state"] = string(snapshot.State)
-		if latestOutput, _ := snapshot.Result["latest_output"].(string); strings.TrimSpace(latestOutput) != "" {
+		if latestOutput, _ := snapshot.Result["latest_output"].(string); taskOutputHasNonBlankLine(latestOutput) {
 			payload["latest_output"] = latestOutput
 		}
 		return payload
@@ -137,16 +137,16 @@ func subagentTaskToolPayload(snapshot taskapi.Snapshot) map[string]any {
 		"state":   string(snapshot.State),
 	}
 	if snapshot.Running {
-		if preview := strings.TrimSpace(taskStringValue(snapshot.Result["output_preview"])); preview != "" {
+		if preview := taskRawStringValue(snapshot.Result["output_preview"]); taskOutputHasNonBlankLine(preview) {
 			payload["text"] = preview
 		}
 		return payload
 	}
-	finalMessage := firstNonEmpty(taskStringValue(snapshot.Result["final_message"]), taskStringValue(snapshot.Result["result"]))
-	if strings.TrimSpace(finalMessage) != "" {
-		payload["final_message"] = strings.TrimSpace(finalMessage)
+	finalMessage := firstNonBlankTaskOutput(taskRawStringValue(snapshot.Result["final_message"]), taskRawStringValue(snapshot.Result["result"]))
+	if taskOutputHasNonBlankLine(finalMessage) {
+		payload["final_message"] = finalMessage
 	}
-	if errText := strings.TrimSpace(taskStringValue(snapshot.Result["error"])); errText != "" {
+	if errText := taskRawStringValue(snapshot.Result["error"]); taskOutputHasNonBlankLine(errText) {
 		payload["error"] = errText
 	}
 	return payload
@@ -218,4 +218,28 @@ func taskSpecString(values map[string]any, key string) string {
 func taskStringValue(raw any) string {
 	text, _ := raw.(string)
 	return strings.TrimSpace(text)
+}
+
+func taskRawStringValue(raw any) string {
+	text, _ := raw.(string)
+	return text
+}
+
+func firstNonBlankTaskOutput(values ...string) string {
+	for _, value := range values {
+		if taskOutputHasNonBlankLine(value) {
+			return value
+		}
+	}
+	return ""
+}
+
+func taskOutputHasNonBlankLine(text string) bool {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
 }

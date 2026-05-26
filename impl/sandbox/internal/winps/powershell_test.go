@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -21,6 +22,9 @@ func TestCommandGuardsConsoleEncodingInConstrainedLanguage(t *testing.T) {
 	}
 	if !strings.Contains(got, "$OutputEncoding = $__caelisUtf8Encoding") {
 		t.Fatalf("Command() = %q, want PowerShell output encoding assignment", got)
+	}
+	if !strings.Contains(got, "$ProgressPreference = 'SilentlyContinue'") {
+		t.Fatalf("Command() = %q, want PowerShell progress stream silenced", got)
 	}
 	if !strings.Contains(got, "[Console]::SetError($__caelisUtf8ErrorWriter)") {
 		t.Fatalf("Command() = %q, want PowerShell error stream UTF-8 assignment", got)
@@ -79,6 +83,20 @@ func TestCommandDoesNotPropagateStaleNativeExitCode(t *testing.T) {
 	}
 }
 
+func TestCommandPreservesNativeStdoutNewlinesWithRedirect(t *testing.T) {
+	exitCode, stdout, stderr := runEncodedPowerShellCommand(t, "python -c \"print('a'); print('b')\" 2>&1")
+	if exitCode != 0 {
+		t.Fatalf("exit code = %d stdout=%q stderr=%q, want 0", exitCode, stdout, stderr)
+	}
+	normalized := strings.ReplaceAll(stdout, "\r\n", "\n")
+	if normalized != "a\nb\n" {
+		t.Fatalf("stdout = %q, want native stdout line breaks preserved", stdout)
+	}
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
+	}
+}
+
 func runEncodedPowerShellCommand(t *testing.T, command string) (int, string, string) {
 	t.Helper()
 	if runtime.GOOS != "windows" {
@@ -96,7 +114,8 @@ func runEncodedPowerShellCommand(t *testing.T, command string) (int, string, str
 	if err == nil {
 		return 0, stdout.String(), stderr.String()
 	}
-	if exitErr, ok := err.(*exec.ExitError); ok {
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
 		return exitErr.ExitCode(), stdout.String(), stderr.String()
 	}
 	t.Fatalf("powershell.exe failed: %v stdout=%q stderr=%q", err, stdout.String(), stderr.String())

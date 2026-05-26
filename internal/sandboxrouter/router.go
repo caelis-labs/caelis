@@ -26,10 +26,7 @@ func ForGOOS(goos string, requested sandbox.Backend) (Route, error) {
 	case "linux":
 		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendBwrap, sandbox.BackendLandlock}, linuxInstallHint())
 	case "windows":
-		if requested == "" || requested == sandbox.BackendHost {
-			return Route{}, nil
-		}
-		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendWindowsElevated}, windowsInstallHint())
+		return routeForPlatform(goos, requested, []sandbox.Backend{sandbox.BackendWindows}, windowsInstallHint())
 	default:
 		if requested == "" || requested == sandbox.BackendHost {
 			return Route{FallbackInstallHint: genericInstallHint(goos)}, nil
@@ -58,6 +55,8 @@ func normalizeRequestedBackend(value sandbox.Backend) sandbox.Backend {
 	switch text {
 	case "", "auto", "default":
 		return ""
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		return sandbox.BackendWindows
 	default:
 		return sandbox.Backend(text)
 	}
@@ -120,7 +119,7 @@ func darwinInstallHint() string {
 }
 
 func windowsInstallHint() string {
-	return "Run `caelis sandbox setup` or TUI `/sandbox setup` once to initialize Windows Elevated sandbox."
+	return "Windows sandboxing uses a current-user restricted token and workspace ACLs; ACL state is repaired lazily before sandboxed commands run, and `caelis sandbox reset`/`caelis sandbox clean` can remove local sandbox state."
 }
 
 func genericInstallHint(goos string) string {

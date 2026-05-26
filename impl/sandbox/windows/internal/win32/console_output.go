@@ -87,7 +87,7 @@ func (d *ConsoleOutputDecoder) decodeConsoleText(text string, final bool) string
 	}
 	decoded, pending := decodePowerShellCLIXML(text, final)
 	d.clixml = pending
-	return decoded
+	return normalizePowerShellNativeCommandErrors(decoded)
 }
 
 func decodeUTF16ConsoleOutput(data []byte) (string, []byte, binary.ByteOrder, bool) {
@@ -309,6 +309,82 @@ func decodePowerShellEscapes(text string) string {
 		i += size
 	}
 	return out.String()
+}
+
+func normalizePowerShellNativeCommandErrors(text string) string {
+	if !strings.Contains(text, "NativeCommandError") || !strings.Contains(text, "FullyQualifiedErrorId") {
+		return text
+	}
+	lines := splitConsoleLines(text)
+	var out strings.Builder
+	for i := 0; i < len(lines); {
+		if end, ok := nativeCommandErrorBlockEnd(lines, i+1); ok {
+			body, ending := trimConsoleLineEnding(lines[i])
+			if command, message, found := strings.Cut(body, " : "); found && strings.TrimSpace(command) != "" {
+				out.WriteString(message)
+				out.WriteString(ending)
+				i = end
+				continue
+			}
+		}
+		if isNativeCommandErrorMetadataLine(lines[i]) {
+			i++
+			continue
+		}
+		out.WriteString(lines[i])
+		i++
+	}
+	return out.String()
+}
+
+func nativeCommandErrorBlockEnd(lines []string, start int) (int, bool) {
+	limit := start + 8
+	if limit > len(lines) {
+		limit = len(lines)
+	}
+	for i := start; i < limit; i++ {
+		line := lines[i]
+		if strings.Contains(line, "FullyQualifiedErrorId") && strings.Contains(line, "NativeCommandError") {
+			return i + 1, true
+		}
+	}
+	return 0, false
+}
+
+func isNativeCommandErrorMetadataLine(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	return strings.HasPrefix(trimmed, "+ CategoryInfo") ||
+		strings.Contains(trimmed, "FullyQualifiedErrorId") && strings.Contains(trimmed, "NativeCommandError")
+}
+
+func splitConsoleLines(text string) []string {
+	if text == "" {
+		return nil
+	}
+	var lines []string
+	for text != "" {
+		index := strings.IndexByte(text, '\n')
+		if index < 0 {
+			lines = append(lines, text)
+			break
+		}
+		lines = append(lines, text[:index+1])
+		text = text[index+1:]
+	}
+	return lines
+}
+
+func trimConsoleLineEnding(line string) (string, string) {
+	switch {
+	case strings.HasSuffix(line, "\r\n"):
+		return line[:len(line)-2], "\r\n"
+	case strings.HasSuffix(line, "\n"):
+		return line[:len(line)-1], "\n"
+	case strings.HasSuffix(line, "\r"):
+		return line[:len(line)-1], "\r"
+	default:
+		return line, ""
+	}
 }
 
 func splitValidUTF8PrefixWithPendingSuffix(data []byte) ([]byte, []byte, bool) {

@@ -43,20 +43,20 @@ func (t *subagentTask) seedStreamFromResult(result delegation.Result) {
 	if t == nil {
 		return
 	}
-	if strings.TrimSpace(t.stdout) != "" || strings.TrimSpace(t.stderr) != "" {
+	if taskOutputHasNonBlankLine(t.stdout) || taskOutputHasNonBlankLine(t.stderr) {
 		return
 	}
-	text := strings.TrimSpace(result.Result)
-	if text != "" && subagentFramesContainAssistantText(t.streamFrames) {
+	text := result.Result
+	if taskOutputHasNonBlankLine(text) && subagentFramesContainAssistantText(t.streamFrames) {
 		return
 	}
-	if text == "" {
+	if !taskOutputHasNonBlankLine(text) {
 		if len(t.streamFrames) > 0 {
 			return
 		}
-		text = strings.TrimSpace(result.OutputPreview)
+		text = result.OutputPreview
 	}
-	if text == "" {
+	if !taskOutputHasNonBlankLine(text) {
 		return
 	}
 	t.appendStreamLocked(text)

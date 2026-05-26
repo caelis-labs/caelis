@@ -1217,7 +1217,7 @@ func TestToolResultEventPreservesTaskWriteACPContent(t *testing.T) {
 	if content[0].Type != "terminal" {
 		t.Fatalf("content type = %q, want terminal", content[0].Type)
 	}
-	if got := content[0].Text; got != "input accepted" {
+	if got := content[0].Text; got != "input accepted\n" {
 		t.Fatalf("content text = %q, want TASK write result", got)
 	}
 }
@@ -1253,7 +1253,7 @@ func TestToolResultEventPreservesFailedTaskResultBeforeError(t *testing.T) {
 	if content[0].Type != "terminal" {
 		t.Fatalf("content type = %q, want terminal", content[0].Type)
 	}
-	if got := content[0].Text; got != "go: module internal registry: network unreachable" {
+	if got := content[0].Text; got != "go: module internal registry: network unreachable\n" {
 		t.Fatalf("content text = %q, want failed task result", got)
 	}
 	if got, _ := event.Tool.Output["error"].(string); got == "" {
@@ -1288,8 +1288,37 @@ func TestToolResultEventPreservesCommandResultFieldAsACPContent(t *testing.T) {
 		t.Fatalf("content type = %q, want terminal", content[0].Type)
 	}
 	got := content[0].Text
-	if got != "On branch dev\nYour branch is behind 'origin/dev' by 3 commits." {
+	if got != "On branch dev\nYour branch is behind 'origin/dev' by 3 commits.\n" {
 		t.Fatalf("content text = %q, want result field", got)
+	}
+}
+
+func TestToolResultEventPreservesRawCommandOutputWhitespace(t *testing.T) {
+	t.Parallel()
+
+	raw := "  first line  \r\n   \r\nsecond line  \r\n"
+	event := toolResultEvent(model.ToolCall{
+		ID:   "command-output-1",
+		Name: "RUN_COMMAND",
+		Args: `{"command":"python test.py"}`,
+	}, tool.Result{
+		ID:   "command-output-1",
+		Name: "RUN_COMMAND",
+		Content: []model.Part{model.NewJSONPart(mustJSON(map[string]any{
+			"result":    raw,
+			"exit_code": 0,
+		}))},
+	}, nil)
+
+	if event.Tool == nil {
+		t.Fatalf("event tool = nil, want tool update")
+	}
+	content := event.Tool.Content
+	if len(content) != 1 {
+		t.Fatalf("content = %#v, want one terminal content item", content)
+	}
+	if got := content[0].Text; got != raw {
+		t.Fatalf("content text = %q, want raw command output %q", got, raw)
 	}
 }
 
@@ -1320,7 +1349,7 @@ func TestToolResultEventPreservesFailedCommandOutputBeforeExitSummary(t *testing
 		t.Fatalf("content = %#v, want one terminal content item", content)
 	}
 	got := content[0].Text
-	if got != "go: module internal registry: network unreachable" {
+	if got != "go: module internal registry: network unreachable\n" {
 		t.Fatalf("content text = %q, want failed result field", got)
 	}
 }

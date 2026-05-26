@@ -54,7 +54,7 @@ func TestSelectionStatusUsesLightweightProvider(t *testing.T) {
 		},
 		selection: Status{
 			RequestedBackend: "",
-			ResolvedBackend:  BackendWindowsElevated,
+			ResolvedBackend:  BackendWindows,
 		},
 	}
 
@@ -62,8 +62,8 @@ func TestSelectionStatusUsesLightweightProvider(t *testing.T) {
 	if runtime.statusCalls != 0 {
 		t.Fatalf("Status() calls = %d, want 0", runtime.statusCalls)
 	}
-	if got.ResolvedBackend != BackendWindowsElevated {
-		t.Fatalf("SelectionStatus().ResolvedBackend = %q, want %q", got.ResolvedBackend, BackendWindowsElevated)
+	if got.ResolvedBackend != BackendWindows {
+		t.Fatalf("SelectionStatus().ResolvedBackend = %q, want %q", got.ResolvedBackend, BackendWindows)
 	}
 }
 
@@ -408,26 +408,22 @@ func TestCompositeRuntimeStatusForwardsBackendSetupDetails(t *testing.T) {
 	rt := &compositeRuntime{
 		host: fakeRuntime{backend: BackendHost},
 		sandbox: fakeRuntime{
-			backend: BackendWindowsElevated,
+			backend: BackendWindows,
 			status: Status{
-				ResolvedBackend: BackendWindowsElevated,
+				ResolvedBackend: BackendWindows,
 				Setup: SetupStatus{
 					Required: true,
 					Checks: []SetupCheck{
 						{
-							Name:     "global",
-							Scope:    SetupScopeGlobal,
+							Name:     "workspace",
+							Scope:    SetupScopeWorkspace,
 							Required: true,
-							Reason:   "setup marker missing",
+							Reason:   "acl manifest stale",
 							Details: map[string]string{
-								"offline_user": "CaelisSandboxOffline",
+								"workspace": "C:\\ws",
 							},
-						},
-						{
-							Name:  "workspace",
-							Scope: SetupScopeWorkspace,
 							Counts: map[string]int{
-								"read_roots": 5,
+								"write_roots": 2,
 							},
 						},
 					},
@@ -435,17 +431,16 @@ func TestCompositeRuntimeStatusForwardsBackendSetupDetails(t *testing.T) {
 			},
 		},
 		status: Status{
-			RequestedBackend: BackendWindowsElevated,
-			ResolvedBackend:  BackendWindowsElevated,
+			RequestedBackend: BackendWindows,
+			ResolvedBackend:  BackendWindows,
 		},
 	}
 	status := rt.Status()
-	if status.RequestedBackend != BackendWindowsElevated || status.ResolvedBackend != BackendWindowsElevated {
-		t.Fatalf("Status backend = %q/%q, want windows-elevated", status.RequestedBackend, status.ResolvedBackend)
+	if status.RequestedBackend != BackendWindows || status.ResolvedBackend != BackendWindows {
+		t.Fatalf("Status backend = %q/%q, want windows", status.RequestedBackend, status.ResolvedBackend)
 	}
-	global, globalOK := status.Setup.Check("global")
 	workspace, workspaceOK := status.Setup.Check("workspace")
-	if !status.Setup.Required || !globalOK || global.Reason != "setup marker missing" || global.Details["offline_user"] != "CaelisSandboxOffline" || !workspaceOK || workspace.Counts["read_roots"] != 5 {
+	if !status.Setup.Required || !workspaceOK || workspace.Reason != "acl manifest stale" || workspace.Details["workspace"] != "C:\\ws" || workspace.Counts["write_roots"] != 2 {
 		t.Fatalf("Status() = %+v, want forwarded setup diagnostics", status)
 	}
 }

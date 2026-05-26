@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 func TestBuildSystemPromptIncludesPromptAssets(t *testing.T) {
@@ -88,6 +90,55 @@ func TestBuildSystemPromptOmitsDynamicTimeContext(t *testing.T) {
 		if strings.Contains(first, forbidden) {
 			t.Fatalf("prompt contains dynamic context %q:\n%s", forbidden, first)
 		}
+	}
+}
+
+func TestWindowsSandboxTLSNoteInjectsIntoEnvironmentContext(t *testing.T) {
+	base := "stable prefix\n\n<environment_context>\n  <cwd>C:\\work</cwd>\n  <shell>powershell</shell>\n</environment_context>"
+
+	got := systemPromptWithWindowsSandboxTLSNote(base, true)
+	stablePrefix := strings.TrimSuffix(base, "</environment_context>")
+	if !strings.HasPrefix(got, stablePrefix) {
+		t.Fatalf("prompt prefix before environment note changed:\n%s", got)
+	}
+	if !strings.Contains(got, "<shell>powershell</shell>\n"+windowsSandboxTLSNoteLine+"\n</environment_context>") {
+		t.Fatalf("prompt missing Windows sandbox TLS note inside environment context:\n%s", got)
+	}
+	if strings.Contains(got, "<windows_sandbox_known_limits>") {
+		t.Fatalf("prompt contains obsolete top-level known limits tag:\n%s", got)
+	}
+	if strings.Count(got, "<sandbox_tls>") != 1 {
+		t.Fatalf("sandbox_tls tag count = %d, want 1", strings.Count(got, "<sandbox_tls>"))
+	}
+	if again := systemPromptWithWindowsSandboxTLSNote(got, true); again != got {
+		t.Fatalf("Windows sandbox TLS note was appended more than once:\n%s", again)
+	}
+	if disabled := systemPromptWithWindowsSandboxTLSNote(base, false); disabled != base {
+		t.Fatalf("disabled prompt = %q, want unchanged base", disabled)
+	}
+}
+
+func TestWindowsSandboxTLSNoteEnabledOnlyForActiveWindowsSandbox(t *testing.T) {
+	active := sandbox.Status{ResolvedBackend: sandbox.BackendWindows}
+	if !windowsSandboxTLSNoteEnabledForGOOS(active, "windows") {
+		t.Fatal("windowsSandboxTLSNoteEnabledForGOOS(active windows) = false, want true")
+	}
+
+	for _, tt := range []struct {
+		name   string
+		goos   string
+		status sandbox.Status
+	}{
+		{name: "linux sandbox", goos: "linux", status: active},
+		{name: "darwin sandbox", goos: "darwin", status: active},
+		{name: "windows host", goos: "windows", status: sandbox.Status{ResolvedBackend: sandbox.BackendHost}},
+		{name: "windows fallback", goos: "windows", status: sandbox.Status{ResolvedBackend: sandbox.BackendHost, FallbackToHost: true}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if windowsSandboxTLSNoteEnabledForGOOS(tt.status, tt.goos) {
+				t.Fatal("windowsSandboxTLSNoteEnabledForGOOS() = true, want false")
+			}
+		})
 	}
 }
 

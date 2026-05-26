@@ -21,8 +21,8 @@ func NormalizeBackend(backend string) (string, error) {
 		return "bwrap", nil
 	case "landlock":
 		return "landlock", nil
-	case "windows", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
-		return "windows-elevated", nil
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		return "windows", nil
 	default:
 		return "", fmt.Errorf("gatewayapp: unknown sandbox backend %q", backend)
 	}
@@ -63,12 +63,6 @@ func EffectiveConfig(cfg configstore.SandboxConfig, workspaceDir string) configs
 
 func EffectiveConfigForGOOS(cfg configstore.SandboxConfig, workspaceDir string, goos string) configstore.SandboxConfig {
 	cfg = configstore.DefaultSandboxConfig(cfg)
-	if strings.EqualFold(strings.TrimSpace(goos), "windows") {
-		switch strings.ToLower(strings.TrimSpace(cfg.RequestedType)) {
-		case "", "auto", "default":
-			cfg.RequestedType = "host"
-		}
-	}
 	cfg.WritableRoots = configstore.DedupeStrings(append(cfg.WritableRoots, DefaultSkillRoots(workspaceDir)...))
 	return cfg
 }

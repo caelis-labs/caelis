@@ -93,6 +93,9 @@ func (s *Stack) rebuildGateway() error {
 			effectiveBaseMetadata["sandbox_fallback_reason"] = reason
 		}
 	}
+	if systemPrompt := stringFromMap(effectiveBaseMetadata, "system_prompt"); systemPrompt != "" {
+		effectiveBaseMetadata["system_prompt"] = systemPromptWithWindowsSandboxTLSNote(systemPrompt, windowsSandboxTLSNoteEnabled(sandboxStatus))
+	}
 	tools, err := builtin.BuildCoreTools(builtin.CoreToolsConfig{Runtime: sandboxRuntime})
 	if err != nil {
 		_ = sandboxRuntime.Close()

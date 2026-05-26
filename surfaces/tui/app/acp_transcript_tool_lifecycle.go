@@ -53,8 +53,8 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 	hasFinal := false
 	for _, item := range group {
 		if !item.Done {
-			if text := strings.TrimSpace(item.Output); text != "" {
-				preview = text
+			if renderableTextHasContent(item.Output) {
+				preview = item.Output
 			}
 			continue
 		}
@@ -131,10 +131,10 @@ func renderACPToolLifecycleRows(blockID string, events []SubagentEvent, idx int,
 			style = ctx.Theme.ToolErrorStyle()
 		}
 		text := sanitizeRenderableText(final.Output)
-		if text == "" && !final.Err {
+		if !renderableTextHasContent(text) && !final.Err {
 			text = "completed"
 		}
-		if text != "" {
+		if renderableTextHasContent(text) {
 			rows = append(rows, renderACPToolDetailRows(blockID, prefix, text, width, ctx, style)...)
 		}
 	}
@@ -170,7 +170,7 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 		}
 		return renderACPStandardToolLifecycleRows(blockID, ev, ev.CallID, output, width, ctx, ev.Err, true, fullOutput)
 	}
-	if output == "" || (!strings.Contains(output, "\n") && displayColumns(output) <= maxInt(24, width/2)) {
+	if !renderableTextHasContent(output) || (!strings.Contains(output, "\n") && displayColumns(output) <= maxInt(24, width/2)) {
 		return renderParticipantTurnToolRows(blockID, ev, width, ctx)
 	}
 	header := SubagentEvent{
@@ -196,7 +196,7 @@ func acpToolPanelText(preview string, final SubagentEvent, hasFinal bool) (strin
 	if hasFinal {
 		panelText = sanitizeRenderableText(final.Output)
 		panelErr = final.Err
-		if panelText == "" && !panelErr {
+		if !renderableTextHasContent(panelText) && !panelErr {
 			panelText = "completed"
 		}
 	}
@@ -236,11 +236,10 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 }
 
 func shouldRenderACPToolPanel(text string, err bool) bool {
-	text = strings.TrimSpace(text)
-	if text == "" {
+	if !renderableTextHasContent(text) {
 		return err
 	}
-	if !err && strings.EqualFold(text, "completed") {
+	if !err && strings.EqualFold(strings.TrimSpace(text), "completed") {
 		return false
 	}
 	return true
@@ -260,7 +259,7 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 	if !final || !fullOutput {
 		text = summarizeACPToolPanelText(text, final)
 	}
-	if strings.TrimSpace(text) == "" {
+	if !renderableTextHasContent(text) {
 		if !final || err {
 			return rows
 		}
@@ -447,7 +446,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	header := terminalLifecycleHeader(headerEvent)
 	token := acpToolPanelClickToken(callID)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
-	if strings.TrimSpace(text) == "" && !final && strings.EqualFold(strings.TrimSpace(ev.Name), "SPAWN") {
+	if !renderableTextHasContent(text) && !final && strings.EqualFold(strings.TrimSpace(ev.Name), "SPAWN") {
 		text = "(wait subagent output)"
 	}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
@@ -542,7 +541,7 @@ func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID str
 	token := acpToolPanelClickToken(callID)
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if err {
-		if msg := sanitizeRenderableText(text); msg != "" && msg != sanitizeRenderableText(ev.Args) {
+		if msg := sanitizeRenderableText(text); renderableTextHasContent(msg) && msg != sanitizeRenderableText(ev.Args) {
 			rows = append(rows, renderACPToolDetailRows(blockID, "  └ ", msg, width, ctx, ctx.Theme.ToolErrorStyle())...)
 		}
 		return rows

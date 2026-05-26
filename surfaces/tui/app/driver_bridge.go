@@ -1055,8 +1055,8 @@ func friendlyCommandError(action string, err error) error {
 		return fmt.Errorf("%s: ACP control plane is not configured for this stack. Check app assembly agent config before using /agent", action)
 	case strings.Contains(lower, "unknown sandbox backend"), strings.Contains(lower, "unsupported by"):
 		return fmt.Errorf("%s: sandbox backend is unavailable on this machine. Run /status to inspect sandbox readiness", action)
-	case strings.Contains(lower, "windows elevated sandbox setup is required"), strings.Contains(lower, "windows sandbox setup is required"):
-		return fmt.Errorf("%s: Windows sandbox setup is required. Run /sandbox setup once and approve the UAC prompt, then retry", action)
+	case strings.Contains(lower, "windows sandbox setup is required"):
+		return fmt.Errorf("%s: Windows sandbox repair is pending. Retry the command to let the sandbox repair workspace ACL state lazily", action)
 	case strings.Contains(lower, "session not found"):
 		return fmt.Errorf("%s: session could not be loaded. Run /resume to inspect available sessions", action)
 	case strings.Contains(lower, "active turn"):

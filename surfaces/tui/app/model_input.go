@@ -460,7 +460,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
-	// Generic slash-arg overlay (e.g. /model, /sandbox, /connect).
+	// Generic slash-arg overlay (e.g. /model, /connect).
 	if m.slashArgActive {
 		if handled, cmd := m.handleSlashArgKey(msg); handled {
 			return m, cmd

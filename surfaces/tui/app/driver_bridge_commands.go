@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -12,7 +11,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
@@ -49,8 +47,6 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 		return slashModelWithContext(ctx, driver, send, args)
 	case "approval":
 		return slashApprovalWithContext(ctx, driver, send, args)
-	case "sandbox":
-		return slashSandboxWithContext(ctx, driver, send, args)
 	case "compact":
 		return slashCompactWithContext(ctx, driver, send, args)
 	case "exit", "quit":
@@ -362,8 +358,7 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 		"running": false,
 		"state":   string(status),
 	}
-	output = strings.TrimSpace(output)
-	if output != "" {
+	if renderableTextHasContent(output) {
 		if isErr {
 			rawOutput["stderr"] = output
 		} else {
@@ -371,11 +366,11 @@ func sendAgentInstallToolResult(send func(tea.Msg), callID string, command strin
 		}
 	}
 	contentText := output
-	if contentText == "" && status == kernel.ToolStatusCompleted {
+	if !renderableTextHasContent(contentText) && status == kernel.ToolStatusCompleted {
 		contentText = "(no output)"
 	}
 	content := []session.ProtocolToolCallContent{}
-	if contentText != "" {
+	if renderableTextHasContent(contentText) {
 		content = []session.ProtocolToolCallContent{{
 			Type:    "terminal",
 			Content: session.ProtocolTextContent(contentText),
@@ -640,10 +635,10 @@ func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
 		lines = append(lines, "  warn sandbox: "+detail)
 	case globalSetupRequired:
 		detail := strings.TrimSpace(firstNonEmpty(globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
-		lines = append(lines, "  warn sandbox global setup: "+detail+" - run /sandbox setup")
+		lines = append(lines, "  warn sandbox global repair pending: "+detail)
 	case workspaceSetupRequired:
 		detail := strings.TrimSpace(firstNonEmpty(workspaceSetup.Reason, status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
-		lines = append(lines, "  warn sandbox workspace setup: "+detail+" - run /sandbox setup")
+		lines = append(lines, "  warn sandbox workspace repair pending: "+detail)
 	case sandbox != "":
 		lines = append(lines, "  ok sandbox: "+sandbox)
 	default:
@@ -738,85 +733,6 @@ func slashModelWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 func parseModelUseArgs(args string) (alias string, reasoning string) {
 	alias, rest := splitFirst(strings.TrimSpace(args))
 	return strings.TrimSpace(alias), strings.TrimSpace(rest)
-}
-
-func slashSandbox(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
-	return slashSandboxWithContext(context.Background(), driver, send, args)
-}
-
-func slashSandboxWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
-	ctx = contextOrBackground(ctx)
-	action := strings.TrimSpace(args)
-	if runtime.GOOS != "windows" {
-		sendNotice(send, "sandbox setup is only available on Windows; use /status to inspect sandbox readiness")
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	if action == "" {
-		sendNotice(send, "usage: /sandbox setup | clean\nuse /status to inspect sandbox readiness")
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	if strings.EqualFold(action, "setup") {
-		sendSandboxProgress(send, "Windows sandbox setup", sandbox.PrepareProgress{
-			Phase:   "start",
-			Message: "starting Windows sandbox setup; this may take a minute while Windows accounts, ACLs, and firewall rules are refreshed",
-		})
-		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
-			sendSandboxProgress(send, "Windows sandbox setup", progress)
-		})
-		status, err := driver.PrepareSandbox(progressCtx)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("sandbox setup", err)}
-		}
-		sendNotice(send, "sandbox setup complete")
-		sendStatusUpdate(send, status)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	if strings.EqualFold(action, "clean") || strings.EqualFold(action, "reset") {
-		resetter, ok := driver.(interface {
-			ResetSandbox(context.Context) (tuidriver.StatusSnapshot, error)
-		})
-		if !ok {
-			return TaskResultMsg{Err: friendlyCommandError("sandbox clean", fmt.Errorf("sandbox clean is unavailable for this driver"))}
-		}
-		sendSandboxProgress(send, "Windows sandbox clean", sandbox.PrepareProgress{
-			Phase:   "start",
-			Message: "resetting Windows sandbox state; this removes Caelis sandbox users, ACL records, firewall rules, and local sandbox state",
-		})
-		progressCtx := sandbox.ContextWithPrepareProgress(ctx, func(progress sandbox.PrepareProgress) {
-			sendSandboxProgress(send, "Windows sandbox clean", progress)
-		})
-		status, err := resetter.ResetSandbox(progressCtx)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("sandbox clean", err)}
-		}
-		sendNotice(send, "sandbox clean complete")
-		sendStatusUpdate(send, status)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	sendNotice(send, "usage: /sandbox setup | clean\nuse -sandbox-backend or CAELIS_SANDBOX_BACKEND=windows-elevated for the experimental sandbox backend")
-	return TaskResultMsg{SuppressTurnDivider: true}
-}
-
-func sendSandboxProgress(send func(tea.Msg), title string, progress sandbox.PrepareProgress) {
-	if send == nil || progress.Debug {
-		return
-	}
-	message := strings.TrimSpace(progress.Message)
-	if message == "" {
-		message = strings.TrimSpace(progress.Phase)
-	}
-	if message == "" {
-		return
-	}
-	send(SandboxProgressMsg{
-		Title:   title,
-		Source:  title,
-		Phase:   strings.TrimSpace(progress.Phase),
-		Message: message,
-		Step:    progress.Step,
-		Total:   progress.Total,
-		Done:    progress.Done,
-	})
 }
 
 func slashApprovalWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

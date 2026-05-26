@@ -3,70 +3,18 @@
 package win32
 
 import (
-	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
-	"time"
-	"unicode/utf16"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-func TestProtectStringRoundTrip(t *testing.T) {
-	protected, err := ProtectString("sandbox-secret", "caelis-test")
-	if err != nil {
-		t.Fatalf("ProtectString() error = %v", err)
-	}
-	got, err := UnprotectString(protected)
-	if err != nil {
-		t.Fatalf("UnprotectString() error = %v", err)
-	}
-	if got != "sandbox-secret" {
-		t.Fatalf("UnprotectString() = %q", got)
-	}
-}
-
-func TestIsElevatedReturnsValue(t *testing.T) {
-	if _, err := IsElevated(); err != nil {
-		t.Fatalf("IsElevated() error = %v", err)
-	}
-}
-
-func TestDeriveCapabilitySIDs(t *testing.T) {
-	sids, err := DeriveCapabilitySIDs("internetClient")
-	if err != nil {
-		t.Fatalf("DeriveCapabilitySIDs() error = %v", err)
-	}
-	if len(sids.Capability) == 0 {
-		t.Fatalf("DeriveCapabilitySIDs() = %#v, want capability SID", sids)
-	}
-	if len(sids.Group) == 0 {
-		t.Fatalf("DeriveCapabilitySIDs() = %#v, want capability group SID", sids)
-	}
-	for _, sid := range sids.Group {
-		if !strings.HasPrefix(sid, "S-1-5-32-") {
-			t.Fatalf("capability group SID = %q, want S-1-5-32-*", sid)
-		}
-	}
-	for _, sid := range sids.Capability {
-		if !strings.HasPrefix(sid, "S-1-15-3-") {
-			t.Fatalf("capability SID = %q, want S-1-15-3-*", sid)
-		}
-	}
-}
-
-func TestRestrictedCurrentProcessTokenWithCapabilitySIDsE2E(t *testing.T) {
+func TestRestrictedCurrentProcessTokenWithSIDsE2E(t *testing.T) {
 	if os.Getenv("CAELIS_WINDOWS_SANDBOX_E2E") != "1" {
 		t.Skip("set CAELIS_WINDOWS_SANDBOX_E2E=1 to run restricted token e2e")
 	}
-	sids, err := DeriveCapabilitySIDs("internetClient")
-	if err != nil {
-		t.Fatalf("DeriveCapabilitySIDs() error = %v", err)
-	}
-	token, err := RestrictedCurrentProcessTokenWithSIDs(sids.Group)
+	token, err := RestrictedCurrentProcessTokenWithSIDs([]string{"S-1-5-21-1-2-3-4"})
 	if err != nil {
 		t.Fatalf("RestrictedCurrentProcessTokenWithSIDs() error = %v", err)
 	}
@@ -78,37 +26,51 @@ func TestRestrictedCurrentProcessTokenWithCapabilitySIDsE2E(t *testing.T) {
 	}
 }
 
-func TestLogonProcessCreationUsesPlainStartupInfo(t *testing.T) {
-	if flags := logonCreationFlags(); flags&windows.EXTENDED_STARTUPINFO_PRESENT != 0 {
-		t.Fatalf("logonCreationFlags() = %#x, must not include EXTENDED_STARTUPINFO_PRESENT", flags)
+func TestRestrictingSIDAttributesIncludePowerShellCompatibilitySIDs(t *testing.T) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		t.Fatalf("OpenProcessToken() error = %v", err)
 	}
-	startupInfo := logonStartupInfo(1, 2, 3)
-	wantSize := uint32(unsafe.Sizeof(windows.StartupInfo{}))
-	if startupInfo.Cb != wantSize {
-		t.Fatalf("StartupInfo.Cb = %d, want %d", startupInfo.Cb, wantSize)
-	}
-	if startupInfo.Flags&windows.STARTF_USESTDHANDLES == 0 {
-		t.Fatalf("StartupInfo.Flags = %#x, want STARTF_USESTDHANDLES", startupInfo.Flags)
-	}
-	if startupInfo.StdInput != 1 || startupInfo.StdOutput != 2 || startupInfo.StdErr != 3 {
-		t.Fatalf("StartupInfo std handles = %d/%d/%d", startupInfo.StdInput, startupInfo.StdOutput, startupInfo.StdErr)
-	}
-}
-
-func TestLogonOptionsDefaultToNoProfileAndExplicitEnvironment(t *testing.T) {
-	if flags := logonFlagsForOptions(LogonProcessOptions{}); flags != 0 {
-		t.Fatalf("default logon flags = %#x, want no profile", flags)
-	}
-	if flags := logonFlagsForOptions(LogonProcessOptions{LoadProfile: true}); flags&logonWithProfile == 0 {
-		t.Fatalf("profile logon flags = %#x, want LOGON_WITH_PROFILE", flags)
-	}
-	block, err := environmentBlock([]string{`SystemRoot=C:\Windows`, `TEMP=C:\Temp`})
+	defer token.Close()
+	requested, err := windows.StringToSid("S-1-5-21-1-2-3-4")
 	if err != nil {
-		t.Fatalf("environmentBlock() error = %v", err)
+		t.Fatalf("StringToSid(requested) error = %v", err)
 	}
-	got := string(utf16.Decode(block))
-	if !strings.Contains(got, "SystemRoot=C:\\Windows\x00") || !strings.HasSuffix(got, "\x00\x00") {
-		t.Fatalf("environment block = %q, want double-NUL terminated Unicode environment", got)
+	userSID, err := tokenUserSID(token)
+	if err != nil {
+		t.Fatalf("tokenUserSID() error = %v", err)
+	}
+	logonSID, err := tokenLogonSID(token)
+	if err != nil {
+		t.Fatalf("tokenLogonSID() error = %v", err)
+	}
+	everyoneSID, err := windows.CreateWellKnownSid(windows.WinWorldSid)
+	if err != nil {
+		t.Fatalf("CreateWellKnownSid(world) error = %v", err)
+	}
+	usersSID, err := windows.CreateWellKnownSid(windows.WinBuiltinUsersSid)
+	if err != nil {
+		t.Fatalf("CreateWellKnownSid(users) error = %v", err)
+	}
+	interactiveSID, err := windows.CreateWellKnownSid(windows.WinInteractiveSid)
+	if err != nil {
+		t.Fatalf("CreateWellKnownSid(interactive) error = %v", err)
+	}
+
+	attrs, _, err := restrictingSIDAttributes(token, []string{requested.String()})
+	if err != nil {
+		t.Fatalf("restrictingSIDAttributes() error = %v", err)
+	}
+	if !sidAttrsContain(attrs, requested) {
+		t.Fatalf("restricting SIDs = %v, want requested %s", sidAttrsStrings(attrs), requested.String())
+	}
+	if !sidAttrsContain(attrs, logonSID) || !sidAttrsContain(attrs, everyoneSID) {
+		t.Fatalf("restricting SIDs = %v, want logon and world compatibility SIDs", sidAttrsStrings(attrs))
+	}
+	for _, forbidden := range []*windows.SID{userSID, usersSID, interactiveSID} {
+		if sidAttrsContain(attrs, forbidden) {
+			t.Fatalf("restricting SID unexpectedly includes broad/user SID %s", forbidden.String())
+		}
 	}
 }
 
@@ -124,26 +86,43 @@ func TestDecodeCodePageToUTF8(t *testing.T) {
 	}
 }
 
-func TestWithNamedMutexAllowsExistingMutex(t *testing.T) {
-	name := fmt.Sprintf(`Local\CaelisTestMutex-%d`, time.Now().UnixNano())
-	namePtr, err := windows.UTF16PtrFromString(name)
-	if err != nil {
-		t.Fatalf("UTF16PtrFromString() error = %v", err)
+func sidAttrsContain(attrs []windows.SIDAndAttributes, want *windows.SID) bool {
+	for _, attr := range attrs {
+		if attr.Sid != nil && windows.EqualSid(attr.Sid, want) {
+			return true
+		}
 	}
-	handle, err := windows.CreateMutex(nil, false, namePtr)
-	if handle == 0 {
-		t.Fatalf("CreateMutex() handle = 0, err = %v", err)
-	}
-	defer closeHandle(handle)
+	return false
+}
 
-	called := false
-	if err := WithNamedMutex(context.Background(), name, time.Second, func() error {
-		called = true
-		return nil
-	}); err != nil {
-		t.Fatalf("WithNamedMutex() error = %v", err)
+func sidAttrsStrings(attrs []windows.SIDAndAttributes) []string {
+	out := make([]string, 0, len(attrs))
+	for _, attr := range attrs {
+		if attr.Sid != nil {
+			out = append(out, attr.Sid.String())
+		}
 	}
-	if !called {
-		t.Fatal("WithNamedMutex() did not run callback")
+	return out
+}
+
+func TestRestrictingSIDAttributesDedupesInput(t *testing.T) {
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY, &token); err != nil {
+		t.Fatalf("OpenProcessToken() error = %v", err)
+	}
+	defer token.Close()
+	requested := "S-1-5-21-1-2-3-4"
+	attrs, _, err := restrictingSIDAttributes(token, []string{requested, requested})
+	if err != nil {
+		t.Fatalf("restrictingSIDAttributes() error = %v", err)
+	}
+	count := 0
+	for _, sid := range sidAttrsStrings(attrs) {
+		if strings.EqualFold(sid, requested) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("requested SID count = %d in %v, want 1", count, sidAttrsStrings(attrs))
 	}
 }

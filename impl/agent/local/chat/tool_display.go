@@ -204,18 +204,18 @@ func mutationDiffLines(output map[string]any) []string {
 
 func terminalResultText(output map[string]any, status string, isErr bool) string {
 	if !toolStatusFinal(status, isErr) {
-		if text := firstNonEmpty(
-			toolString(output["latest_output"]),
-			toolString(output["output_preview"]),
+		if text := firstNonBlankRaw(
+			toolRawString(output["latest_output"]),
+			toolRawString(output["output_preview"]),
 		); text != "" {
 			return text
 		}
 		return ""
 	}
-	if text := toolString(output["result"]); text != "" {
+	if text := toolRawString(output["result"]); toolOutputHasNonBlankLine(text) {
 		return text
 	}
-	if errText := toolString(output["error"]); errText != "" {
+	if errText := toolRawString(output["error"]); toolOutputHasNonBlankLine(errText) {
 		return errText
 	}
 	return "(no output)"
@@ -223,10 +223,10 @@ func terminalResultText(output map[string]any, status string, isErr bool) string
 
 func spawnResultText(output map[string]any, status string, isErr bool) string {
 	if isErr || strings.EqualFold(status, "failed") {
-		if stderr := strings.TrimSpace(toolString(output["stderr"])); stderr != "" {
+		if stderr := toolRawString(output["stderr"]); toolOutputHasNonBlankLine(stderr) {
 			return stderr
 		}
-		if errText := strings.TrimSpace(toolString(output["error"])); errText != "" {
+		if errText := toolRawString(output["error"]); toolOutputHasNonBlankLine(errText) {
 			return errText
 		}
 	}
@@ -239,11 +239,11 @@ func spawnResultText(output map[string]any, status string, isErr bool) string {
 			spawnDisplayText(toolString(output["text"])),
 		))
 	}
-	return firstNonEmpty(
-		spawnStreamText(toolString(output["text"])),
-		spawnStreamText(toolString(output["stdout"])),
-		spawnStreamText(toolString(output["output_preview"])),
-		spawnStreamText(toolString(output["stderr"])),
+	return firstNonBlankRaw(
+		spawnStreamText(toolRawString(output["text"])),
+		spawnStreamText(toolRawString(output["stdout"])),
+		spawnStreamText(toolRawString(output["output_preview"])),
+		spawnStreamText(toolRawString(output["stderr"])),
 	)
 }
 
@@ -323,6 +323,30 @@ func toolPath(values map[string]any) string {
 func toolString(value any) string {
 	text, _ := value.(string)
 	return strings.TrimSpace(text)
+}
+
+func toolRawString(value any) string {
+	text, _ := value.(string)
+	return text
+}
+
+func firstNonBlankRaw(values ...string) string {
+	for _, value := range values {
+		if toolOutputHasNonBlankLine(value) {
+			return value
+		}
+	}
+	return ""
+}
+
+func toolOutputHasNonBlankLine(text string) bool {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func toolInt(value any) int {

@@ -10,9 +10,10 @@ import (
 type Mode string
 
 const (
-	Grant Mode = "grant"
-	Deny  Mode = "deny"
-	Set   Mode = "set"
+	Grant  Mode = "grant"
+	Deny   Mode = "deny"
+	Set    Mode = "set"
+	Revoke Mode = "revoke"
 )
 
 type Rights string
@@ -43,6 +44,10 @@ func (Descriptor) HasDACL() bool {
 }
 
 func ModifyFileDACL(string, ...Entry) error {
+	return fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
+}
+
+func RemoveFileDACLPrincipals(string, ...string) error {
 	return fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
 }
 

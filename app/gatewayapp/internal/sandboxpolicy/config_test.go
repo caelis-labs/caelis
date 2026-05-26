@@ -6,16 +6,16 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
 )
 
-func TestNormalizeBackendAcceptsWindowsElevatedAliases(t *testing.T) {
+func TestNormalizeBackendAcceptsWindowsAliases(t *testing.T) {
 	t.Parallel()
 
-	for _, input := range []string{"windows", "windows-elevated", "windows_elevated", "windows elevated", "elevated"} {
+	for _, input := range []string{"windows", "windows-restricted-token", "windows-elevated", "windows_elevated", "windows elevated", "elevated"} {
 		got, err := NormalizeBackend(input)
 		if err != nil {
 			t.Fatalf("NormalizeBackend(%q) error = %v", input, err)
 		}
-		if got != "windows-elevated" {
-			t.Fatalf("NormalizeBackend(%q) = %q, want windows-elevated", input, got)
+		if got != "windows" {
+			t.Fatalf("NormalizeBackend(%q) = %q, want windows", input, got)
 		}
 	}
 }
@@ -62,21 +62,21 @@ func TestMergeConfigAllowsSandboxNetworkOverride(t *testing.T) {
 	}
 }
 
-func TestEffectiveConfigWindowsDefaultsAutoToHost(t *testing.T) {
+func TestEffectiveConfigWindowsKeepsAutoForDefaultSandbox(t *testing.T) {
 	t.Parallel()
 
 	got := EffectiveConfigForGOOS(configstore.SandboxConfig{RequestedType: "auto"}, t.TempDir(), "windows")
-	if got.RequestedType != "host" {
-		t.Fatalf("RequestedType = %q, want host", got.RequestedType)
+	if got.RequestedType != "auto" {
+		t.Fatalf("RequestedType = %q, want auto", got.RequestedType)
 	}
 }
 
-func TestEffectiveConfigWindowsPreservesExplicitElevatedSandbox(t *testing.T) {
+func TestEffectiveConfigWindowsPreservesExplicitSandbox(t *testing.T) {
 	t.Parallel()
 
-	got := EffectiveConfigForGOOS(configstore.SandboxConfig{RequestedType: "windows-elevated"}, t.TempDir(), "windows")
-	if got.RequestedType != "windows-elevated" {
-		t.Fatalf("RequestedType = %q, want windows-elevated", got.RequestedType)
+	got := EffectiveConfigForGOOS(configstore.SandboxConfig{RequestedType: "windows"}, t.TempDir(), "windows")
+	if got.RequestedType != "windows" {
+		t.Fatalf("RequestedType = %q, want windows", got.RequestedType)
 	}
 }
 

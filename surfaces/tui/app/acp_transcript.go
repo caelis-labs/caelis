@@ -471,11 +471,10 @@ func summarizeACPToolPanelText(text string, final bool) string {
 
 func nonEmptyToolOutputLines(text string) []string {
 	text = sanitizeRenderableText(text)
-	parts := strings.Split(text, "\n")
+	parts := splitRenderableLines(text)
 	lines := make([]string, 0, len(parts))
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
+		if !renderableLineHasContent(part) {
 			continue
 		}
 		lines = append(lines, part)
@@ -492,18 +491,18 @@ func tailWrappedTerminalSegmentsFromEnd(text string, width int, limit int) []str
 		return nil
 	}
 	text = sanitizeRenderableText(text)
-	parts := strings.Split(text, "\n")
+	parts := splitRenderableLines(text)
 	reversed := make([]string, 0, minInt(len(parts), limit))
 	bodyWidth := maxInt(1, width-displayColumns("  └ "))
 	for i := len(parts) - 1; i >= 0 && len(reversed) < limit; i-- {
 		part := parts[i]
-		if strings.TrimSpace(part) == "" {
+		if !renderableLineHasContent(part) {
 			continue
 		}
 		wrapped := strings.Split(hardWrapDisplayLine(part, bodyWidth), "\n")
 		for j := len(wrapped) - 1; j >= 0 && len(reversed) < limit; j-- {
 			segment := wrapped[j]
-			if strings.TrimSpace(segment) == "" {
+			if !renderableLineHasContent(segment) {
 				continue
 			}
 			reversed = append(reversed, segment)
@@ -605,7 +604,7 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 				start = item
 				hasStart = true
 			}
-			if out := strings.TrimSpace(item.Output); out != "" {
+			if out := item.Output; renderableTextHasContent(out) {
 				preview = out
 			}
 			continue
@@ -623,12 +622,12 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 		return "", "", false, false
 	}
 	toolName = toolSemanticName(finalPanelToolName(start, final, hasFinal), firstNonEmpty(final.ToolKind, start.ToolKind))
-	text = strings.TrimSpace(preview)
+	text = preview
 	err = false
 	if hasFinal {
-		text = strings.TrimSpace(final.Output)
+		text = final.Output
 		err = final.Err
-		if text == "" && !err {
+		if !renderableTextHasContent(text) && !err {
 			text = "completed"
 		}
 	}
@@ -638,15 +637,14 @@ func terminalToolPanelPayload(events []SubagentEvent, callID string) (toolName s
 func renderACPToolPanelBody(text string, width int, ctx BlockRenderContext, err bool) []string {
 	prefix := "  "
 	lines := make([]string, 0, 8)
-	for _, raw := range strings.Split(sanitizeRenderableText(text), "\n") {
+	for _, raw := range splitRenderableLines(sanitizeRenderableText(text)) {
+		if !renderableLineHasContent(raw) {
+			continue
+		}
 		style := toolPanelLineStyle(raw, ctx, err)
 		linePrefix := prefix
 		if err {
 			linePrefix = "! "
-		}
-		if raw == "" {
-			lines = append(lines, style.Width(width).Render(linePrefix))
-			continue
 		}
 		wrapped := strings.Split(hardWrapDisplayLine(raw, maxInt(1, width-displayColumns(linePrefix))), "\n")
 		for i, segment := range wrapped {
@@ -687,7 +685,7 @@ func renderACPToolDetailRows(blockID string, prefix string, text string, width i
 
 func renderACPToolDetailRowsWithToken(blockID string, prefix string, text string, width int, ctx BlockRenderContext, style lipgloss.Style, token string) []RenderedRow {
 	text = sanitizeRenderableText(text)
-	if text == "" {
+	if !renderableTextHasContent(text) {
 		return nil
 	}
 	prefix = strings.TrimRight(prefix, " ") + " "
@@ -708,16 +706,15 @@ func renderACPToolDetailRowsWithToken(blockID string, prefix string, text string
 
 func renderACPToolOutputRowsWithToken(blockID string, prefix string, text string, width int, ctx BlockRenderContext, style lipgloss.Style, token string) []RenderedRow {
 	text = sanitizeRenderableText(text)
-	if text == "" {
+	if !renderableTextHasContent(text) {
 		return nil
 	}
 	prefix = strings.TrimRight(prefix, " ") + " "
 	available := maxInt(1, width-displayColumns(prefix))
-	rawLines := strings.Split(strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n"), "\n")
+	rawLines := splitRenderableLines(text)
 	segments := make([]string, 0, len(rawLines))
 	for _, raw := range rawLines {
-		raw = strings.TrimSpace(raw)
-		if raw == "" {
+		if !renderableLineHasContent(raw) {
 			continue
 		}
 		wrapped := wrapToolOutputText(raw, available)
@@ -740,7 +737,25 @@ func renderACPToolOutputRowsWithToken(blockID string, prefix string, text string
 }
 
 func sanitizeRenderableText(text string) string {
-	return strings.TrimSpace(tuikit.SanitizeLogText(text))
+	return tuikit.SanitizeLogText(text)
+}
+
+func splitRenderableLines(text string) []string {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	return strings.Split(text, "\n")
+}
+
+func renderableTextHasContent(text string) bool {
+	for _, line := range splitRenderableLines(sanitizeRenderableText(text)) {
+		if renderableLineHasContent(line) {
+			return true
+		}
+	}
+	return false
+}
+
+func renderableLineHasContent(line string) bool {
+	return strings.TrimSpace(line) != ""
 }
 
 func stylePrefixedContentLine(ctx BlockRenderContext, prefix string, segment string, width int, contentStyle lipgloss.Style) string {
@@ -785,11 +800,10 @@ func wrapACPToolDetailText(text string, width int) []string {
 	if width <= 0 {
 		return []string{text}
 	}
-	lines := strings.Split(text, "\n")
+	lines := splitRenderableLines(text)
 	segments := make([]string, 0, len(lines))
 	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
+		if !renderableLineHasContent(line) {
 			continue
 		}
 		wrapped := wrapToolOutputText(line, width)

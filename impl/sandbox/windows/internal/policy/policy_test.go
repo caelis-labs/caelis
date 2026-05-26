@@ -3,28 +3,32 @@ package policy
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
-func TestBuildMapsPathRulesAndReadOnlySubpaths(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows policy roots")
+func TestBuildUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
+	workspace := pathutil.Normalize(t.TempDir())
+	commandDir := filepath.Join(workspace, "cmd")
+	extraWrite := pathutil.Normalize(filepath.Join(t.TempDir(), "write"))
+	extraRead := pathutil.Normalize(filepath.Join(t.TempDir(), "read"))
+	hidden := pathutil.Normalize(filepath.Join(workspace, "secret"))
+	for _, dir := range []string{commandDir, extraWrite, extraRead, hidden, filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
 	}
-	workspace := filepath.Join(t.TempDir(), "workspace")
-	readonly := filepath.Join(workspace, "vendor")
-	hidden := filepath.Join(workspace, "secret")
-	extraRead := filepath.Join(t.TempDir(), "read")
-	extraWrite := filepath.Join(t.TempDir(), "write")
 
 	p := Build(Input{
 		Config: sandbox.Config{
 			CWD:              workspace,
+			WritableRoots:    []string{extraWrite},
+			ReadableRoots:    []string{extraRead},
 			ReadOnlySubpaths: []string{"vendor"},
 		},
+		CommandDir: commandDir,
 		Constraints: sandbox.Constraints{
 			Network: sandbox.NetworkDisabled,
 			PathRules: []sandbox.PathRule{
@@ -35,143 +39,57 @@ func TestBuildMapsPathRulesAndReadOnlySubpaths(t *testing.T) {
 		},
 	})
 
-	if p.Network != NetworkOffline {
-		t.Fatalf("Network = %q, want offline", p.Network)
+	if p.Network != NetworkOnline {
+		t.Fatalf("Network = %q, want online/non-enforced", p.Network)
 	}
-	if len(p.CapabilitySIDs) != 0 {
-		t.Fatalf("CapabilitySIDs = %#v, want no capabilities before runtime binding", p.CapabilitySIDs)
+	if len(p.ReadRoots) != 0 || len(p.DenyReadPaths) != 0 {
+		t.Fatalf("read policy = read %#v deny %#v, want no read boundary", p.ReadRoots, p.DenyReadPaths)
 	}
-	if len(p.WriteRootCapabilitySIDs) != 0 {
-		t.Fatalf("WriteRootCapabilitySIDs = %#v, want no capabilities before runtime binding", p.WriteRootCapabilitySIDs)
-	}
-	if !containsPath(p.ReadRoots, extraRead) || !containsPath(p.ReadRoots, extraWrite) {
-		t.Fatalf("ReadRoots = %#v, want rule roots", p.ReadRoots)
-	}
-	if !containsPath(p.WriteRoots, workspace) || !containsPath(p.WriteRoots, extraWrite) {
-		t.Fatalf("WriteRoots = %#v, want workspace and write rule", p.WriteRoots)
-	}
-	if !containsPath(p.DenyReadPaths, hidden) {
-		t.Fatalf("DenyReadPaths = %#v, want hidden path", p.DenyReadPaths)
-	}
-	if !containsPath(p.DenyWritePaths, hidden) || !containsPath(p.DenyWritePaths, readonly) {
-		t.Fatalf("DenyWritePaths = %#v, want hidden and read-only subpath", p.DenyWritePaths)
-	}
-	if !containsPath(p.MaterializeDenyWritePaths, hidden) || !containsPath(p.MaterializeDenyWritePaths, readonly) {
-		t.Fatalf("MaterializeDenyWritePaths = %#v, want hidden and read-only subpath", p.MaterializeDenyWritePaths)
-	}
-}
-
-func TestBuildMaterializesExplicitWritableCarveouts(t *testing.T) {
-	workspace := pathutil.Normalize(t.TempDir())
-	readonly := filepath.Join(workspace, "vendor")
-	hidden := filepath.Join(workspace, "secret")
-
-	p := Build(Input{
-		Config: sandbox.Config{
-			CWD:              workspace,
-			ReadOnlySubpaths: []string{"vendor"},
-		},
-		Constraints: sandbox.Constraints{
-			PathRules: []sandbox.PathRule{
-				{Path: hidden, Access: sandbox.PathAccessHidden},
-			},
-		},
-	})
-
-	if !containsPath(p.DenyWritePaths, hidden) || !containsPath(p.DenyWritePaths, readonly) {
-		t.Fatalf("DenyWritePaths = %#v, want hidden and read-only carveouts", p.DenyWritePaths)
-	}
-	if !containsPath(p.MaterializeDenyWritePaths, hidden) || !containsPath(p.MaterializeDenyWritePaths, readonly) {
-		t.Fatalf("MaterializeDenyWritePaths = %#v, want hidden and read-only carveouts", p.MaterializeDenyWritePaths)
-	}
-}
-
-func TestBuildProtectsExistingControlDirsUnderWritableRoots(t *testing.T) {
-	workspace := pathutil.Normalize(t.TempDir())
-	gitDir := filepath.Join(workspace, ".git")
-	codexDir := filepath.Join(workspace, ".codex")
-	agentsDir := filepath.Join(workspace, ".agents")
-	if err := os.MkdirAll(gitDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll(.git) error = %v", err)
-	}
-	if err := os.MkdirAll(codexDir, 0o700); err != nil {
-		t.Fatalf("MkdirAll(.codex) error = %v", err)
-	}
-
-	p := Build(Input{Config: sandbox.Config{CWD: workspace}})
-
-	if !containsPath(p.DenyWritePaths, gitDir) || !containsPath(p.DenyWritePaths, codexDir) {
-		t.Fatalf("DenyWritePaths = %#v, want existing control dirs", p.DenyWritePaths)
-	}
-	if containsPath(p.DenyWritePaths, agentsDir) {
-		t.Fatalf("DenyWritePaths = %#v, want missing .agents skipped", p.DenyWritePaths)
-	}
-	if containsPath(p.MaterializeDenyWritePaths, gitDir) || containsPath(p.MaterializeDenyWritePaths, codexDir) {
-		t.Fatalf("MaterializeDenyWritePaths = %#v, want control dirs not materialized", p.MaterializeDenyWritePaths)
-	}
-}
-
-func TestProfileReadRootsFiltersSensitiveRoots(t *testing.T) {
-	home := t.TempDir()
-	goRoot := filepath.Join(home, "go")
-	docRoot := filepath.Join(home, "Documents")
-	sshRoot := filepath.Join(home, ".ssh")
-	npmRoot := filepath.Join(home, ".npm")
-	for _, dir := range []string{goRoot, docRoot, sshRoot, npmRoot} {
-		if err := os.MkdirAll(dir, 0o700); err != nil {
-			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+	for _, want := range []string{workspace, commandDir, extraWrite} {
+		if !containsPath(p.WriteRoots, want) {
+			t.Fatalf("WriteRoots = %#v, want %q", p.WriteRoots, want)
 		}
 	}
-	roots := profileReadRoots(home)
-	if !containsPath(roots, goRoot) || !containsPath(roots, docRoot) {
-		t.Fatalf("profileReadRoots = %#v, want non-sensitive top-level roots", roots)
+	for _, unexpected := range []string{extraRead, hidden} {
+		if containsPath(p.WriteRoots, unexpected) || containsPath(p.DenyWritePaths, unexpected) {
+			t.Fatalf("policy unexpectedly consumed non-write path %q: %+v", unexpected, p)
+		}
 	}
-	if containsPath(roots, sshRoot) || containsPath(roots, npmRoot) {
-		t.Fatalf("profileReadRoots = %#v, did not expect sensitive roots", roots)
-	}
-}
-
-func TestDefaultReadRootsExcludeHostProfileRoots(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("USERPROFILE", home)
-	if err := os.MkdirAll(filepath.Join(home, "Documents"), 0o700); err != nil {
-		t.Fatalf("MkdirAll(Documents) error = %v", err)
-	}
-
-	roots := defaultReadRoots()
-	if containsPath(roots, filepath.Join(home, "Documents")) {
-		t.Fatalf("defaultReadRoots = %#v, did not expect host profile roots", roots)
+	for _, want := range []string{filepath.Join(workspace, ".git"), filepath.Join(workspace, "vendor")} {
+		if !containsPath(p.DenyWritePaths, want) {
+			t.Fatalf("DenyWritePaths = %#v, want %q", p.DenyWritePaths, want)
+		}
 	}
 }
 
 func TestBuildFullAccessSkipsRoots(t *testing.T) {
 	p := Build(Input{Constraints: sandbox.Constraints{
 		Permission: sandbox.PermissionFullAccess,
-		Network:    sandbox.NetworkEnabled,
+		Network:    sandbox.NetworkDisabled,
 	}})
 	if !p.FullAccess {
 		t.Fatal("FullAccess = false, want true")
 	}
-	if len(p.ReadRoots) != 0 || len(p.WriteRoots) != 0 {
-		t.Fatalf("roots = read %#v write %#v, want unrestricted nil roots", p.ReadRoots, p.WriteRoots)
+	if len(p.ReadRoots) != 0 || len(p.WriteRoots) != 0 || len(p.DenyWritePaths) != 0 {
+		t.Fatalf("policy roots = %+v, want unrestricted nil roots", p)
 	}
 	if p.Network != NetworkOnline {
-		t.Fatalf("Network = %q, want online", p.Network)
+		t.Fatalf("Network = %q, want online/non-enforced", p.Network)
 	}
 }
 
-func TestCommonGlobalPolicyIncludesCommonWriteRootsWithoutSecretDenies(t *testing.T) {
+func TestCommonGlobalPolicyDoesNotAddReadOrNetworkControls(t *testing.T) {
 	commonRoot := filepath.Join(t.TempDir(), "cache")
 	p := CommonGlobalPolicy([]string{commonRoot})
 
 	if !containsPath(p.WriteRoots, commonRoot) {
 		t.Fatalf("WriteRoots = %#v, want %q", p.WriteRoots, commonRoot)
 	}
-	if len(p.DenyReadPaths) != 0 || len(p.DenyWritePaths) != 0 {
-		t.Fatalf("secret deny paths = read %#v write %#v, want no global host profile ACL targets", p.DenyReadPaths, p.DenyWritePaths)
+	if len(p.ReadRoots) != 0 || len(p.DenyReadPaths) != 0 || len(p.DenyWritePaths) != 0 {
+		t.Fatalf("policy = %+v, want no read/deny controls", p)
 	}
-	if p.Network != NetworkOffline {
-		t.Fatalf("Network = %q, want offline", p.Network)
+	if p.Network != NetworkOnline {
+		t.Fatalf("Network = %q, want online/non-enforced", p.Network)
 	}
 }
 
@@ -185,56 +103,6 @@ func TestCommonGlobalPolicyCompactsCoveredWriteRoots(t *testing.T) {
 	}
 	if containsPath(p.WriteRoots, childRoot) {
 		t.Fatalf("WriteRoots = %#v, want covered child removed", p.WriteRoots)
-	}
-}
-
-func TestBuildSkipsProtectedUserSecretRootsOutsideAllowedRoots(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	workspace := filepath.Join(t.TempDir(), "workspace")
-
-	p := Build(Input{Config: sandbox.Config{CWD: workspace}})
-	for _, root := range protectedUserSecretRoots() {
-		if containsPath(p.DenyReadPaths, root) || containsPath(p.DenyWritePaths, root) {
-			t.Fatalf("policy denies = read %#v write %#v, did not expect host profile root %q outside allowed roots", p.DenyReadPaths, p.DenyWritePaths, root)
-		}
-	}
-}
-
-func TestBuildKeepsProtectedUserSecretRootsUnderAllowedRoot(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "home")
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-
-	p := Build(Input{Config: sandbox.Config{CWD: home}})
-	want := filepath.Join(home, ".ssh")
-	if !containsPath(p.DenyReadPaths, want) || !containsPath(p.DenyWritePaths, want) {
-		t.Fatalf("policy denies = read %#v write %#v, want protected root %q under allowed workspace", p.DenyReadPaths, p.DenyWritePaths, want)
-	}
-	if containsPath(p.MaterializeDenyWritePaths, want) {
-		t.Fatalf("MaterializeDenyWritePaths = %#v, did not expect protected root %q to be created", p.MaterializeDenyWritePaths, want)
-	}
-}
-
-func TestBuildNetworkModes(t *testing.T) {
-	defaulted := Build(Input{Config: sandbox.Config{CWD: t.TempDir()}})
-	if defaulted.Network != NetworkOnline {
-		t.Fatalf("default Network = %q, want online", defaulted.Network)
-	}
-
-	disabled := Build(Input{Config: sandbox.Config{CWD: t.TempDir()}, Constraints: sandbox.Constraints{
-		Network: sandbox.NetworkDisabled,
-	}})
-	if disabled.Network != NetworkOffline {
-		t.Fatalf("disabled Network = %q, want offline", disabled.Network)
-	}
-
-	enabled := Build(Input{Config: sandbox.Config{CWD: t.TempDir()}, Constraints: sandbox.Constraints{
-		Network: sandbox.NetworkEnabled,
-	}})
-	if enabled.Network != NetworkOnline {
-		t.Fatalf("enabled Network = %q, want online", enabled.Network)
 	}
 }
 

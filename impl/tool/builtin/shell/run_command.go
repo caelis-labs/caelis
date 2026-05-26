@@ -193,12 +193,12 @@ func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
 		if detail, ok := sandbox.SandboxPermissionDetail(result, err); ok {
 			payload["error"] = detail
 			payload["error_code"] = string(tool.ErrorCodeSandboxDenied)
-		} else if strings.TrimSpace(merged) == "" && !plainCommandExitError(err) {
+		} else if !commandOutputHasNonBlankLine(merged) && !plainCommandExitError(err) {
 			payload["error"] = strings.TrimSpace(err.Error())
 		}
 	}
-	if strings.TrimSpace(merged) != "" {
-		payload["result"] = strings.TrimSpace(merged)
+	if commandOutputHasNonBlankLine(merged) {
+		payload["result"] = merged
 	} else if err == nil {
 		payload["result"] = "(no output)"
 	}
@@ -209,11 +209,9 @@ func runCommandPayload(result sandbox.CommandResult, err error) map[string]any {
 }
 
 func runCommandMergedOutput(stdout string, stderr string) string {
-	stdout = strings.TrimRight(stdout, "\r\n")
-	stderr = strings.TrimRight(stderr, "\r\n")
 	switch {
 	case stdout != "" && stderr != "":
-		return stdout + "\n" + stderr
+		return joinCommandOutputStreams(stdout, stderr)
 	case stdout != "":
 		return stdout
 	case stderr != "":
@@ -221,6 +219,31 @@ func runCommandMergedOutput(stdout string, stderr string) string {
 	default:
 		return ""
 	}
+}
+
+func joinCommandOutputStreams(stdout string, stderr string) string {
+	if stdout == "" || stderr == "" {
+		return stdout + stderr
+	}
+	if strings.HasSuffix(stdout, "\n") || strings.HasSuffix(stdout, "\r") ||
+		strings.HasPrefix(stderr, "\n") || strings.HasPrefix(stderr, "\r") {
+		return stdout + stderr
+	}
+	return stdout + "\n" + stderr
+}
+
+func commandOutputHasNonBlankLine(text string) bool {
+	for _, line := range splitCommandOutputLines(text) {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func splitCommandOutputLines(text string) []string {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	return strings.Split(text, "\n")
 }
 
 func commandExitCodeAvailable(exitCode int, err error) bool {

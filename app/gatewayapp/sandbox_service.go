@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/sandboxpolicy"
@@ -171,7 +172,7 @@ func (s *Stack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
 	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), string(sandbox.BackendHost)) {
 		return s.SandboxStatus(), nil
 	}
-	runtime, runtimeCfg, ok, err := experimentalWindowsSandboxRuntime(cfg, workspaceCWD, storeDir)
+	runtime, runtimeCfg, ok, err := windowsSandboxRuntime(cfg, workspaceCWD, storeDir)
 	if err != nil {
 		return SandboxStatus{}, err
 	}
@@ -229,7 +230,7 @@ func (s *Stack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
 	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), string(sandbox.BackendHost)) {
 		return s.SandboxStatus(), nil
 	}
-	runtime, runtimeCfg, ok, err := experimentalWindowsSandboxRuntime(cfg, workspaceCWD, storeDir)
+	runtime, runtimeCfg, ok, err := windowsSandboxRuntime(cfg, workspaceCWD, storeDir)
 	if err != nil {
 		return SandboxStatus{}, err
 	}
@@ -250,8 +251,31 @@ func shouldUseCurrentSandboxLifecycle(exec sandbox.Runtime) bool {
 		return false
 	}
 	status := sandbox.SelectionStatus(exec)
-	return status.ResolvedBackend == sandbox.BackendWindowsElevated ||
-		status.RequestedBackend == sandbox.BackendWindowsElevated
+	return normalizeWindowsBackend(status.ResolvedBackend) == sandbox.BackendWindows ||
+		normalizeWindowsBackend(status.RequestedBackend) == sandbox.BackendWindows
+}
+
+func windowsSandboxTLSNoteEnabled(status sandbox.Status) bool {
+	return windowsSandboxTLSNoteEnabledForGOOS(status, runtime.GOOS)
+}
+
+func windowsSandboxTLSNoteEnabledForGOOS(status sandbox.Status, goos string) bool {
+	if !strings.EqualFold(strings.TrimSpace(goos), "windows") {
+		return false
+	}
+	if status.FallbackToHost {
+		return false
+	}
+	return normalizeWindowsBackend(status.ResolvedBackend) == sandbox.BackendWindows
+}
+
+func normalizeWindowsBackend(backend sandbox.Backend) sandbox.Backend {
+	switch strings.ToLower(strings.TrimSpace(string(backend))) {
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "elevated":
+		return sandbox.BackendWindows
+	default:
+		return backend
+	}
 }
 
 func normalizeSandboxBackend(backend string) (string, error) {

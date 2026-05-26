@@ -54,9 +54,9 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	workspaceSetupReason := firstNonEmpty(workspaceSetup.Reason, status.SandboxWorkspaceSetupReason)
 	setupError := firstNonEmpty(status.SandboxSetup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxSetupError)
 	if globalSetupRequired {
-		lines = append(lines, "  Setup      Windows sandbox infrastructure required; run /sandbox setup")
+		lines = append(lines, "  Setup      Windows sandbox infrastructure repair is pending")
 	} else if workspaceSetupRequired {
-		lines = append(lines, "  Setup      current workspace ACL required; run /sandbox setup")
+		lines = append(lines, "  Setup      current workspace ACL repair is pending")
 	}
 	if globalSetupReason != "" {
 		lines = append(lines, "  Reason     "+strings.TrimSpace(globalSetupReason))
@@ -77,9 +77,9 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		lines = append(lines, "warn: Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work")
 	}
 	if globalSetupRequired {
-		lines = append(lines, "warn: Windows sandbox infrastructure setup is required before sandboxed commands can run")
+		lines = append(lines, "warn: Windows sandbox infrastructure will be repaired lazily before sandboxed commands run")
 	} else if workspaceSetupRequired {
-		lines = append(lines, "warn: Current workspace needs Windows sandbox ACL setup before sandboxed commands can run")
+		lines = append(lines, "warn: Current workspace ACLs will be repaired lazily before sandboxed commands run")
 	}
 	if strings.TrimSpace(status.FallbackReason) != "" {
 		lines = append(lines, "warn: Requested sandbox backend is unavailable and a fallback is in effect")

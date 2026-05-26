@@ -14,9 +14,10 @@ import (
 type Mode string
 
 const (
-	Grant Mode = "grant"
-	Deny  Mode = "deny"
-	Set   Mode = "set"
+	Grant  Mode = "grant"
+	Deny   Mode = "deny"
+	Set    Mode = "set"
+	Revoke Mode = "revoke"
 )
 
 type Rights string
@@ -75,6 +76,28 @@ func ModifyFileDACL(path string, entries ...Entry) error {
 		return nil
 	}
 	return writeBuiltFileDACL(path, current.sd, false, missing...)
+}
+
+func RemoveFileDACLPrincipals(path string, principals ...string) error {
+	if len(principals) == 0 {
+		return nil
+	}
+	entries := make([]Entry, 0, len(principals))
+	for _, principal := range principals {
+		principal = strings.TrimSpace(principal)
+		if principal == "" {
+			continue
+		}
+		entries = append(entries, Entry{Principal: principal, Mode: Revoke})
+	}
+	if len(entries) == 0 {
+		return nil
+	}
+	current, err := ReadFileDACL(path)
+	if err != nil {
+		return err
+	}
+	return writeBuiltFileDACL(path, current.sd, false, entries...)
 }
 
 func MissingFileDACLEntries(path string, entries ...Entry) ([]Entry, error) {
@@ -280,6 +303,9 @@ func trustee(principal string) (windows.TRUSTEE, *windows.SID, error) {
 }
 
 func rightsMask(rights Rights) windows.ACCESS_MASK {
+	if rights == "" {
+		return 0
+	}
 	switch rights {
 	case FullControl:
 		return windows.GENERIC_ALL
@@ -307,6 +333,8 @@ func accessMode(mode Mode) windows.ACCESS_MODE {
 		return windows.DENY_ACCESS
 	case Set:
 		return windows.SET_ACCESS
+	case Revoke:
+		return windows.REVOKE_ACCESS
 	case Grant:
 		fallthrough
 	default:

@@ -23,7 +23,7 @@ func TestCompactPathDisplayWithBaseHandlesWindowsPaths(t *testing.T) {
 		},
 		{
 			name: "outside workspace",
-			path: `D:\xue\code\other\oss_bucket.go`,
+			path: `D:\xue\code\external\oss_bucket.go`,
 			want: "oss_bucket.go",
 		},
 	}

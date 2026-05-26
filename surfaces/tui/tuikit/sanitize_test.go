@@ -18,6 +18,13 @@ func TestSanitizeLogTextPreservesNewlines(t *testing.T) {
 	}
 }
 
+func TestSanitizeLogTextNormalizesCRLFToNewlines(t *testing.T) {
+	got := SanitizeLogText("line1\r\nline2\rline3")
+	if got != "line1\nline2\nline3" {
+		t.Errorf("expected normalized CRLF/CR newlines, got %q", got)
+	}
+}
+
 func TestSanitizeLogTextExpandsTab(t *testing.T) {
 	got := SanitizeLogText("a\tb")
 	if got != "a    b" {

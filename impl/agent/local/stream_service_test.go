@@ -148,17 +148,20 @@ func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	task.mu.Unlock()
 }
 
-func TestTerminalFinalTextPreservesWhitespace(t *testing.T) {
+func TestTerminalFinalTextPreservesNonBlankWhitespaceAndDropsBlankOnlyOutput(t *testing.T) {
 	t.Parallel()
 
 	if got := terminalFinalText("  x\n", "", "", nil); got != "  x\n" {
 		t.Fatalf("terminalFinalText(live output) = %q, want exact whitespace", got)
 	}
-	if got := terminalFinalText("   ", "", "", nil); got != "   " {
-		t.Fatalf("terminalFinalText(whitespace output) = %q, want exact whitespace", got)
+	if got := terminalFinalText("   ", "", "", nil); got != "(no output)" {
+		t.Fatalf("terminalFinalText(whitespace output) = %q, want no-output placeholder", got)
 	}
 	if got := terminalFinalText("", "  stdout\n", "", nil); got != "  stdout\n" {
 		t.Fatalf("terminalFinalText(stdout) = %q, want exact stdout", got)
+	}
+	if got := terminalFinalText("", "stdout", "stderr\n", errors.New("exit status 1")); got != "stdout\nstderr\n" {
+		t.Fatalf("terminalFinalText(stdout+stderr) = %q, want separated streams without trimming", got)
 	}
 }
 

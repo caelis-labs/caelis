@@ -2724,7 +2724,7 @@ func TestTaskToolPayloadReturnsCompletedCommandTerminalStreams(t *testing.T) {
 
 func TestCompactLatestOutputKeepsTailOnly(t *testing.T) {
 	got := compactLatestOutput("line 1\nline 2\nline 3\nline 4\nline 5\nline 6\nline 7\n")
-	want := "...2 lines hidden...\nline 3\nline 4\nline 5\nline 6\nline 7"
+	want := "...2 lines hidden...\nline 3\nline 4\nline 5\nline 6\nline 7\n"
 	if got != want {
 		t.Fatalf("compactLatestOutput() = %q, want %q", got, want)
 	}
@@ -3208,7 +3208,7 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 		"yield_time_ms": 100,
 	})
 	runningPayload := testToolResultPayload(t, runningResult)
-	wantTail := "...3 lines hidden...\nline 4\nline 5\nline 6\nline 7\nline 8"
+	wantTail := "...3 lines hidden...\nline 4\nline 5\nline 6\nline 7\nline 8\n"
 	if got, _ := runningPayload["latest_output"].(string); got != wantTail {
 		t.Fatalf("running latest_output = %q, want %q", got, wantTail)
 	}
@@ -3230,6 +3230,17 @@ func TestRuntimeTaskWaitReturnsTailWhileRunningAndFullWhenCompleted(t *testing.T
 	}
 	if _, exists := completedPayload["latest_output"]; exists {
 		t.Fatalf("completed payload[latest_output] = %#v, want omitted", completedPayload["latest_output"])
+	}
+}
+
+func TestCompactLatestOutputPreservesTrailingNewlineForDeltaBoundaries(t *testing.T) {
+	t.Parallel()
+
+	first := compactLatestOutput("requests 2.34.2\r\n")
+	second := compactLatestOutput("HTTP 200\r\n")
+	got := first + second
+	if got != "requests 2.34.2\nHTTP 200\n" {
+		t.Fatalf("combined compact latest output = %q, want line boundary preserved", got)
 	}
 }
 

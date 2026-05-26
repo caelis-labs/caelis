@@ -277,26 +277,38 @@ func taskInt64Value(raw any) (int64, bool) {
 }
 
 func compactLatestOutput(delta string) string {
-	delta = strings.TrimRight(strings.ReplaceAll(delta, "\r\n", "\n"), "\r\n")
+	delta = strings.ReplaceAll(strings.ReplaceAll(delta, "\r\n", "\n"), "\r", "\n")
 	if strings.TrimSpace(delta) == "" {
 		return ""
 	}
-	lines := strings.Split(delta, "\n")
-	for i := range lines {
-		lines[i] = compactLine(lines[i])
+	trailingNewline := strings.HasSuffix(delta, "\n")
+	rawLines := strings.Split(strings.TrimRight(delta, "\n"), "\n")
+	lines := make([]string, 0, len(rawLines))
+	for _, line := range rawLines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		lines = append(lines, compactLine(line))
+	}
+	if len(lines) == 0 {
+		return ""
 	}
 	const keepLines = 5
 	if len(lines) > keepLines {
 		hidden := len(lines) - keepLines
 		lines = append([]string{fmt.Sprintf("...%d lines hidden...", hidden)}, lines[len(lines)-keepLines:]...)
 	}
-	return strings.Join(lines, "\n")
+	out := strings.Join(lines, "\n")
+	if trailingNewline {
+		out += "\n"
+	}
+	return out
 }
 
 func terminalDeltaText(stdout string, stderr string) string {
 	switch {
 	case stdout != "" && stderr != "":
-		return stdout + stderr
+		return joinTerminalStreams(stdout, stderr)
 	case stdout != "":
 		return stdout
 	case stderr != "":
@@ -307,10 +319,10 @@ func terminalDeltaText(stdout string, stderr string) string {
 }
 
 func terminalFinalText(output string, stdout string, stderr string, resultErr error) string {
-	if text := terminalDeltaText(stdout, stderr); text != "" {
+	if text := terminalDeltaText(stdout, stderr); taskOutputHasNonBlankLine(text) {
 		return text
 	}
-	if output != "" {
+	if taskOutputHasNonBlankLine(output) {
 		return output
 	}
 	if resultErr != nil {
@@ -324,23 +336,31 @@ func terminalFinalText(output string, stdout string, stderr string, resultErr er
 }
 
 func compactFinalOutput(stdout, stderr string) string {
-	stdout = strings.TrimSpace(stdout)
-	stderr = strings.TrimSpace(stderr)
 	switch {
-	case stdout != "" && stderr != "":
-		return compactBlock(stdout+"\nstderr:\n"+stderr, 1600)
-	case stdout != "":
+	case taskOutputHasNonBlankLine(stdout) && taskOutputHasNonBlankLine(stderr):
+		return compactBlock(joinTerminalStreams(stdout, stderr), 1600)
+	case taskOutputHasNonBlankLine(stdout):
 		return compactBlock(stdout, 1600)
-	case stderr != "":
-		return compactBlock("stderr:\n"+stderr, 1600)
+	case taskOutputHasNonBlankLine(stderr):
+		return compactBlock(stderr, 1600)
 	default:
 		return ""
 	}
 }
 
+func joinTerminalStreams(stdout string, stderr string) string {
+	if stdout == "" || stderr == "" {
+		return stdout + stderr
+	}
+	if strings.HasSuffix(stdout, "\n") || strings.HasSuffix(stdout, "\r") ||
+		strings.HasPrefix(stderr, "\n") || strings.HasPrefix(stderr, "\r") {
+		return stdout + stderr
+	}
+	return stdout + "\n" + stderr
+}
+
 func compactBlock(text string, limit int) string {
-	text = strings.TrimSpace(text)
-	if text == "" || limit <= 0 || len(text) <= limit {
+	if !taskOutputHasNonBlankLine(text) || limit <= 0 || len(text) <= limit {
 		return text
 	}
 	const marker = "\n...[truncated]...\n"
@@ -353,8 +373,7 @@ func compactBlock(text string, limit int) string {
 }
 
 func compactLine(text string) string {
-	text = strings.TrimSpace(text)
-	if text == "" {
+	if strings.TrimSpace(text) == "" {
 		return ""
 	}
 	const limit = 160

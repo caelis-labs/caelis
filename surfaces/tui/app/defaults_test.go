@@ -2,7 +2,6 @@ package tuiapp
 
 import (
 	"reflect"
-	"runtime"
 	"testing"
 )
 
@@ -21,9 +20,6 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"compact",
 		"exit",
 		"quit",
-	}
-	if runtime.GOOS == "windows" {
-		want = append(want[:5], append([]string{"sandbox"}, want[5:]...)...)
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("DefaultCommands() = %#v, want %#v", got, want)

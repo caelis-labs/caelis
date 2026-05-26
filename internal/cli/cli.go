@@ -90,7 +90,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		tokenEnv         = fs.String("token-env", envOr("CAELIS_TOKEN_ENV", ""), "Environment variable for provider token")
 		authType         = fs.String("auth-type", envOr("CAELIS_AUTH_TYPE", ""), "Auth type")
 		headerKey        = fs.String("header-key", envOr("CAELIS_HEADER_KEY", ""), "Optional auth header key")
-		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend: auto|host|bwrap|landlock|seatbelt|windows-elevated")
+		sandboxBackend   = fs.String("sandbox-backend", envOr("CAELIS_SANDBOX_BACKEND", ""), "Sandbox backend: auto|host|bwrap|landlock|seatbelt|windows")
 		sandboxHelper    = fs.String("sandbox-helper-path", envOr("CAELIS_SANDBOX_HELPER_PATH", ""), "Sandbox helper executable path")
 		contextWindow    = fs.Int("context-window", envInt("CAELIS_CONTEXT_WINDOW", 0), "Context window override")
 		maxOutputTokens  = fs.Int("max-output-tokens", envInt("CAELIS_MAX_OUTPUT_TOKENS", 4096), "Max output tokens")

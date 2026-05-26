@@ -297,7 +297,7 @@ func (b *MainACPTurnBlock) UpdateToolWithMeta(callID, name, args, output string,
 	if b == nil {
 		return
 	}
-	if !isTerminalPanelToolKind(name, meta.ToolKind) || final {
+	if !isTerminalPanelToolKind(name, meta.ToolKind) {
 		output = strings.TrimSpace(output)
 	}
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
@@ -592,7 +592,7 @@ func (b *ParticipantTurnBlock) UpdateToolWithMeta(callID, name, args, output str
 	if b == nil {
 		return
 	}
-	if !isTerminalPanelToolKind(name, meta.ToolKind) || final {
+	if !isTerminalPanelToolKind(name, meta.ToolKind) {
 		output = strings.TrimSpace(output)
 	}
 	events, _, collapse := applyToolEventUpdate(b.Events, toolEventUpdate{
@@ -764,8 +764,7 @@ func shouldRenderToolEvent(ev SubagentEvent) bool {
 	if !ev.Done || ev.Err {
 		return true
 	}
-	output := strings.TrimSpace(ev.Output)
-	if output == "" || strings.EqualFold(output, "completed") {
+	if !renderableTextHasContent(ev.Output) || strings.EqualFold(strings.TrimSpace(ev.Output), "completed") {
 		return false
 	}
 	return true
@@ -803,7 +802,7 @@ func updateLinkedTerminalEvent(events []SubagentEvent, callID string, toolName s
 
 func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string, output string, final bool, err bool) bool {
 	taskID = strings.TrimSpace(taskID)
-	if taskID == "" || (output == "" && !final) {
+	if taskID == "" || (!renderableTextHasContent(output) && !final) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
@@ -817,9 +816,9 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 		if strings.TrimSpace(ev.CallID) == callID {
 			return false
 		}
-		if output != "" {
+		if renderableTextHasContent(output) {
 			if final || ev.Done {
-				ev.Output = strings.TrimSpace(output)
+				ev.Output = output
 			} else {
 				ev.Output = mergeSubagentStreamChunk(ev.Output, output)
 			}
@@ -828,7 +827,7 @@ func updateLinkedSpawnEvent(events []SubagentEvent, callID string, taskID string
 		if final {
 			ev.Done = true
 			ev.Err = err
-		} else if output != "" {
+		} else if renderableTextHasContent(output) {
 			ev.Done = false
 			ev.Err = false
 		}
@@ -874,7 +873,7 @@ func linkedTerminalCommandForTask(events []SubagentEvent, taskID string) string 
 
 func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output string, final bool, err bool) bool {
 	taskID = strings.TrimSpace(taskID)
-	if taskID == "" || (output == "" && !final) {
+	if taskID == "" || (!renderableTextHasContent(output) && !final) {
 		return false
 	}
 	for i := len(events) - 1; i >= 0; i-- {
@@ -891,9 +890,9 @@ func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output st
 		if !strings.EqualFold(strings.TrimSpace(ev.Name), "TASK") || taskEventAction(*ev) != "write" {
 			continue
 		}
-		if output != "" {
+		if renderableTextHasContent(output) {
 			if final || ev.Done {
-				ev.Output = strings.TrimSpace(output)
+				ev.Output = output
 			} else {
 				ev.Output = mergeSubagentStreamChunk(ev.Output, output)
 			}
@@ -902,7 +901,7 @@ func updateLinkedTaskWriteEvent(events []SubagentEvent, taskID string, output st
 		if final {
 			ev.Done = true
 			ev.Err = err
-		} else if output != "" {
+		} else if renderableTextHasContent(output) {
 			ev.Done = false
 			ev.Err = false
 		}

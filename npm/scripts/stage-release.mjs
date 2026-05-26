@@ -19,13 +19,13 @@ const targets = [
     os: 'windows',
     arch: 'arm64',
     dir: 'caelis-windows-arm64',
-    runtimeFiles: ['caelis.exe', 'caelis-command-runner.exe', 'caelis-windows-sandbox-setup.exe'],
+    runtimeFiles: ['caelis.exe'],
   },
   {
     os: 'windows',
     arch: 'amd64',
     dir: 'caelis-windows-x64',
-    runtimeFiles: ['caelis.exe', 'caelis-command-runner.exe', 'caelis-windows-sandbox-setup.exe'],
+    runtimeFiles: ['caelis.exe'],
   },
 ];
 

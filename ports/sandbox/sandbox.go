@@ -37,10 +37,12 @@ const (
 type Backend string
 
 const (
-	BackendHost            Backend = "host"
-	BackendSeatbelt        Backend = "seatbelt"
-	BackendBwrap           Backend = "bwrap"
-	BackendLandlock        Backend = "landlock"
+	BackendHost     Backend = "host"
+	BackendSeatbelt Backend = "seatbelt"
+	BackendBwrap    Backend = "bwrap"
+	BackendLandlock Backend = "landlock"
+	BackendWindows  Backend = "windows"
+	// BackendWindowsElevated is a legacy alias normalized to BackendWindows.
 	BackendWindowsElevated Backend = "windows-elevated"
 	BackendCustom          Backend = "custom"
 )

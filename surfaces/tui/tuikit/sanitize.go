@@ -28,10 +28,11 @@ func SanitizeLogText(input string) string {
 			if b == '\r' {
 				// Convert \r\n to single \n; convert standalone \r to \n.
 				if i+1 < len(input) && input[i+1] == '\n' {
-					i++ // skip \r, let the next iteration handle \n
-				} else {
 					out.WriteByte('\n')
+					i += 2
+					continue
 				}
+				out.WriteByte('\n')
 				i++
 				continue
 			}

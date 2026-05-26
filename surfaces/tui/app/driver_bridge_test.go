@@ -3,7 +3,6 @@ package tuiapp
 import (
 	"context"
 	"fmt"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -1666,51 +1665,6 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	}
 }
 
-func TestSlashSandboxSetupCallsDriver(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-only slash command")
-	}
-	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
-			SandboxRequestedBackend:   "windows-elevated",
-			SandboxResolvedBackend:    "windows-elevated",
-			SandboxSetupMarkerCurrent: true,
-		},
-	}
-	var msgs []tea.Msg
-	result := slashSandboxWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "setup")
-	if result.Err != nil {
-		t.Fatalf("slashSandbox(setup) error = %v", result.Err)
-	}
-	if driver.prepareSandboxCalls != 1 {
-		t.Fatalf("prepareSandboxCalls = %d, want 1", driver.prepareSandboxCalls)
-	}
-	if !noticeMessagesContain(msgs, "sandbox setup complete") {
-		t.Fatalf("slashSandbox(setup) messages = %#v, want completion notice", msgs)
-	}
-	if !sandboxProgressMessagesContain(msgs, "refreshing Windows Firewall rules") {
-		t.Fatalf("slashSandbox(setup) messages = %#v, want setup progress message", msgs)
-	}
-	if noticeMessagesContain(msgs, "refreshing Windows Firewall rules") {
-		t.Fatalf("slashSandbox(setup) messages = %#v, want progress outside transcript notices", msgs)
-	}
-}
-
-func TestSlashSandboxWithoutArgsPointsToStatus(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("Windows-only slash command")
-	}
-	driver := &bridgeTestDriver{}
-	var msgs []tea.Msg
-	result := slashSandboxWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
-	if result.Err != nil {
-		t.Fatalf("slashSandbox() error = %v", result.Err)
-	}
-	if !noticeMessagesContain(msgs, "usage: /sandbox setup") || !noticeMessagesContain(msgs, "/status") {
-		t.Fatalf("slashSandbox() messages = %#v, want setup usage and status guidance", msgs)
-	}
-}
-
 func TestFriendlyCommandErrorMakesResumeActionable(t *testing.T) {
 	err := friendlyCommandError("resume session", fmt.Errorf("gateway: session not found"))
 	if !strings.Contains(err.Error(), "/resume") {
@@ -2027,7 +1981,7 @@ func (d *bridgeTestDriver) SetSandboxBackend(context.Context, string) (tuidriver
 func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
 	d.prepareSandboxCalls++
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "refreshing Windows Firewall rules",
+		Message: "preparing current workspace ACL policy",
 		Step:    1,
 		Total:   2,
 	})
@@ -2040,7 +1994,7 @@ func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.Status
 func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
 	d.resetSandboxCalls++
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "removing Windows sandbox firewall rules",
+		Message: "removing Windows sandbox ACL state",
 		Step:    3,
 		Total:   6,
 	})

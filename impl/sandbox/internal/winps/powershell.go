@@ -68,6 +68,7 @@ func utf16LEBytes(text string) []byte {
 const utf8Prelude = "" +
 	"$__caelisUtf8Encoding = [System.Text.Encoding]::UTF8; " +
 	"$OutputEncoding = $__caelisUtf8Encoding; " +
+	"$ProgressPreference = 'SilentlyContinue'; " +
 	"if ($ExecutionContext.SessionState.LanguageMode -ne 'ConstrainedLanguage') { " +
 	"[Console]::InputEncoding = $__caelisUtf8Encoding; " +
 	"[Console]::OutputEncoding = $__caelisUtf8Encoding; " +

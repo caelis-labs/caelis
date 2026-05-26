@@ -7,29 +7,39 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
-func TestForGOOSWindowsDefaultsToHost(t *testing.T) {
+func TestForGOOSWindowsDefaultsToSandbox(t *testing.T) {
 	route, err := ForGOOS("windows", "")
 	if err != nil {
 		t.Fatalf("ForGOOS(windows, auto) error = %v", err)
 	}
-	if len(route.BackendCandidates) != 0 {
-		t.Fatalf("BackendCandidates = %v, want none for default host execution", route.BackendCandidates)
-	}
-	if strings.TrimSpace(route.FallbackInstallHint) != "" {
-		t.Fatalf("FallbackInstallHint = %q, want empty default host hint", route.FallbackInstallHint)
-	}
-}
-
-func TestForGOOSWindowsElevatedIsExplicit(t *testing.T) {
-	route, err := ForGOOS("windows", sandbox.BackendWindowsElevated)
-	if err != nil {
-		t.Fatalf("ForGOOS(windows, windows-elevated) error = %v", err)
-	}
-	if len(route.BackendCandidates) != 1 || route.BackendCandidates[0] != sandbox.BackendWindowsElevated {
-		t.Fatalf("BackendCandidates = %v, want [%s]", route.BackendCandidates, sandbox.BackendWindowsElevated)
+	if len(route.BackendCandidates) != 1 || route.BackendCandidates[0] != sandbox.BackendWindows {
+		t.Fatalf("BackendCandidates = %v, want [%s]", route.BackendCandidates, sandbox.BackendWindows)
 	}
 	if strings.TrimSpace(route.FallbackInstallHint) == "" {
 		t.Fatal("FallbackInstallHint is empty")
+	}
+}
+
+func TestForGOOSWindowsElevatedAliasResolvesToWindows(t *testing.T) {
+	route, err := ForGOOS("windows", sandbox.BackendWindowsElevated)
+	if err != nil {
+		t.Fatalf("ForGOOS(windows, legacy alias) error = %v", err)
+	}
+	if len(route.BackendCandidates) != 1 || route.BackendCandidates[0] != sandbox.BackendWindows {
+		t.Fatalf("BackendCandidates = %v, want [%s]", route.BackendCandidates, sandbox.BackendWindows)
+	}
+	if strings.TrimSpace(route.FallbackInstallHint) == "" {
+		t.Fatal("FallbackInstallHint is empty")
+	}
+}
+
+func TestForGOOSWindowsHostIsExplicit(t *testing.T) {
+	route, err := ForGOOS("windows", sandbox.BackendHost)
+	if err != nil {
+		t.Fatalf("ForGOOS(windows, host) error = %v", err)
+	}
+	if len(route.BackendCandidates) != 0 {
+		t.Fatalf("BackendCandidates = %v, want none for explicit host execution", route.BackendCandidates)
 	}
 }
 

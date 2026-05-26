@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"runtime"
 	"strings"
 
 	driver "github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
@@ -33,9 +32,6 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
 		{Name: "exit", Usage: "/exit", Description: "Exit the TUI", LocalDuringACP: true},
 		{Name: "quit", Usage: "/quit", Description: "Exit the TUI", LocalDuringACP: true},
-	}
-	if runtime.GOOS == "windows" {
-		specs = append(specs[:5], append([]CommandSpec{{Name: "sandbox", Usage: "/sandbox setup | clean", Description: "Initialize or clean experimental Windows Elevated sandbox", LocalDuringACP: true, ArgCandidates: SandboxCandidates()}}, specs[5:]...)...)
 	}
 	return specs
 }
@@ -124,17 +120,6 @@ func RootArgCandidates(command string) []driver.SlashArgCandidate {
 	out := make([]driver.SlashArgCandidate, len(spec.ArgCandidates))
 	copy(out, spec.ArgCandidates)
 	return out
-}
-
-// SandboxCandidates returns lifecycle actions for the Windows sandbox command.
-func SandboxCandidates() []driver.SlashArgCandidate {
-	if runtime.GOOS != "windows" {
-		return nil
-	}
-	return []driver.SlashArgCandidate{
-		{Value: "setup", Display: "setup", Detail: "Initialize Windows Elevated sandbox with UAC"},
-		{Value: "clean", Display: "clean", Detail: "Remove Windows Elevated sandbox users, ACL state, and firewall rules"},
-	}
 }
 
 func agentRootCandidates() []driver.SlashArgCandidate {

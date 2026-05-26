@@ -359,7 +359,7 @@ func subagentFinalToolStatus(frame stream.Frame) (ToolStatus, bool) {
 }
 
 func terminalACPContent(text string, terminalID string) []session.ProtocolToolCallContent {
-	if text == "" {
+	if !terminalStreamTextHasContent(text) {
 		return nil
 	}
 	item := session.ProtocolToolCallContent{
@@ -381,13 +381,23 @@ func textACPContent(text string) []session.ProtocolToolCallContent {
 }
 
 func streamFinalTerminalText(text string, cursor stream.Cursor, status ToolStatus) string {
-	if text := strings.TrimSpace(text); text != "" {
+	if terminalStreamTextHasContent(text) {
 		return text
 	}
 	if cursor.Output == 0 && (status == ToolStatusCompleted || status == ToolStatusFailed) {
 		return "(no output)"
 	}
 	return ""
+}
+
+func terminalStreamTextHasContent(text string) bool {
+	text = strings.ReplaceAll(strings.ReplaceAll(text, "\r\n", "\n"), "\r", "\n")
+	for _, line := range strings.Split(text, "\n") {
+		if strings.TrimSpace(line) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func streamFrameToolMeta(meta map[string]any, input map[string]any, output map[string]any, action string, taskID string) map[string]any {

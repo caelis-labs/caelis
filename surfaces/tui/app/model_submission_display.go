@@ -138,7 +138,7 @@ func (m *Model) tryOpenSlashArgPicker(line string) bool {
 			return m.slashArgActive
 		}
 		switch text {
-		case "/agent", "/model", "/sandbox":
+		case "/agent", "/model":
 			m.openSlashArgPicker(cmd)
 			return len(m.slashArgCandidates) > 0
 		}

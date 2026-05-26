@@ -3,7 +3,9 @@
 package windows
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,25 +13,30 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/user"
+	"os/exec"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/host"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/cmdsession"
-	corepolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policy"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/runnerruntime"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policy"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/policyfs"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/internal/winps"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/capability"
+	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/job"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
-	winpolicy "github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/policy"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnerclient"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/runnertrace"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setup"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/setupstate"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+)
+
+const (
+	workspaceManifestVersion = 1
+	windowsOutputCap         = 1024 * 1024
 )
 
 func newRuntime(cfg Config) (sandbox.Runtime, error) {
@@ -38,1606 +45,882 @@ func newRuntime(cfg Config) (sandbox.Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	executable := strings.TrimSpace(cfg.HelperPath)
-	if executable == "" {
-		executable, err = os.Executable()
-		if err != nil {
-			return nil, fmt.Errorf("impl/sandbox/windows: resolve helper executable: %w", err)
-		}
-	}
 	hostRuntime, err := host.New(host.Config{CWD: cfg.CWD})
 	if err != nil {
 		return nil, err
 	}
-	runner := &setupRunner{
-		cfg:        cfg,
-		stateRoot:  stateRoot,
-		executable: executable,
-	}
-	runner.client = runnerclient.New(runnerclient.Config{
-		Executable:     executable,
-		ExecutablePath: runner.helperExecutablePath,
-		Args:           []string{runnerHelperCommand},
-		StateRoot:      stateRoot,
-		Policy:         runner.policyForRequest,
-		Credentials:    runner.credentialsForRequest,
-	})
-	base := runnerruntime.New(runnerruntime.Config{
-		Backend: sandbox.BackendWindowsElevated,
-		Descriptor: sandbox.Descriptor{
-			Backend:   sandbox.BackendWindowsElevated,
-			Isolation: sandbox.IsolationProcess,
-			Capabilities: sandbox.CapabilitySet{
-				FileSystem:     true,
-				CommandExec:    true,
-				AsyncSessions:  true,
-				TTY:            true,
-				NetworkControl: true,
-				PathPolicy:     true,
-				EnvPolicy:      true,
-			},
-			DefaultConstraints: sandbox.Constraints{
-				Route:      sandbox.RouteSandbox,
-				Backend:    sandbox.BackendWindowsElevated,
-				Permission: sandbox.PermissionWorkspaceWrite,
-				Isolation:  sandbox.IsolationProcess,
-				Network:    sandbox.NetworkEnabled,
-			},
-		},
-		Status: sandbox.Status{
-			RequestedBackend: sandbox.BackendWindowsElevated,
-			ResolvedBackend:  sandbox.BackendWindowsElevated,
-		},
-		BaseFS: hostRuntime.FileSystem(),
-		Policy: func(constraints sandbox.Constraints) corepolicy.Policy {
-			return corepolicy.Default(cfg, constraints)
-		},
-		Runner: runner,
-	})
-	return &runtime{Runtime: base, runner: runner}, nil
+	return &runtime{
+		cfg:       cfg,
+		stateRoot: stateRoot,
+		fs:        hostRuntime.FileSystem(),
+		sessions:  map[string]*windowsSession{},
+	}, nil
 }
 
 type runtime struct {
-	*runnerruntime.Runtime
-	runner *setupRunner
+	cfg       sandbox.Config
+	stateRoot string
+	fs        sandbox.FileSystem
+
+	ensureMu sync.Mutex
+	mu       sync.RWMutex
+	sessions map[string]*windowsSession
+}
+
+func (r *runtime) Describe() sandbox.Descriptor {
+	return sandbox.Descriptor{
+		Backend:   sandbox.BackendWindows,
+		Isolation: sandbox.IsolationProcess,
+		Capabilities: sandbox.CapabilitySet{
+			FileSystem:     true,
+			CommandExec:    true,
+			AsyncSessions:  true,
+			TTY:            false,
+			NetworkControl: false,
+			PathPolicy:     true,
+			EnvPolicy:      true,
+		},
+		DefaultConstraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindows,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Isolation:  sandbox.IsolationProcess,
+			Network:    sandbox.NetworkEnabled,
+		},
+	}
+}
+
+func (r *runtime) FileSystem() sandbox.FileSystem {
+	return r.FileSystemFor(sandbox.Constraints{})
+}
+
+func (r *runtime) FileSystemFor(constraints sandbox.Constraints) sandbox.FileSystem {
+	if r == nil || r.fs == nil {
+		return nil
+	}
+	return policyfs.New(r.fs, func() policy.Policy {
+		return policy.Default(r.cfg, sandbox.NormalizeConstraints(constraints))
+	})
+}
+
+func (r *runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req = sandbox.CloneRequest(req)
+	result := sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindows, ExitCode: -1}
+	policy, err := r.ensureForRequest(ctx, req)
+	if err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+	runCtx := ctx
+	cancel := func() {}
+	if req.Timeout > 0 {
+		runCtx, cancel = context.WithTimeout(ctx, req.Timeout)
+	}
+	defer cancel()
+	cmd, token, err := r.restrictedShellCommand(runCtx, req, len(req.Stdin) > 0, policy)
+	if err != nil {
+		result.Error = err.Error()
+		return result, err
+	}
+	defer token.Close()
+	if len(req.Stdin) > 0 {
+		cmd.Stdin = bytes.NewReader(req.Stdin)
+	}
+	stdout := &cappedOutputBuffer{max: windowsOutputCap}
+	stderr := &cappedOutputBuffer{max: windowsOutputCap}
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	err = runCommandWithJob(runCtx, cmd)
+	result.Stdout = stdout.String()
+	result.Stderr = stderr.String()
+	if cmd.ProcessState != nil {
+		result.ExitCode = cmd.ProcessState.ExitCode()
+	}
+	if err != nil {
+		result.Error = err.Error()
+	}
+	if req.OnOutput != nil {
+		if result.Stdout != "" {
+			req.OnOutput(sandbox.OutputChunk{Stream: "stdout", Text: result.Stdout})
+		}
+		if result.Stderr != "" {
+			req.OnOutput(sandbox.OutputChunk{Stream: "stderr", Text: result.Stderr})
+		}
+	}
+	return result, err
+}
+
+func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	req = sandbox.CloneRequest(req)
+	policy, err := r.ensureForRequest(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	sessionID, err := newID("exec")
+	if err != nil {
+		return nil, err
+	}
+	terminalID, err := newID("term")
+	if err != nil {
+		return nil, err
+	}
+	cmdCtx := context.WithoutCancel(ctx)
+	cancel := func() {}
+	if req.Timeout > 0 {
+		cmdCtx, cancel = context.WithTimeout(cmdCtx, req.Timeout)
+	}
+	cmd, token, err := r.restrictedShellCommand(cmdCtx, req, true, policy)
+	if err != nil {
+		cancel()
+		return nil, err
+	}
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		_ = token.Close()
+		cancel()
+		return nil, fmt.Errorf("impl/sandbox/windows: create stdin pipe: %w", err)
+	}
+	stdout, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		_ = stdin.Close()
+		_ = token.Close()
+		cancel()
+		return nil, fmt.Errorf("impl/sandbox/windows: create stdout pipe: %w", err)
+	}
+	stderr, stderrWriter, err := os.Pipe()
+	if err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		_ = token.Close()
+		cancel()
+		return nil, fmt.Errorf("impl/sandbox/windows: create stderr pipe: %w", err)
+	}
+	cmd.Stdout = stdoutWriter
+	cmd.Stderr = stderrWriter
+	if err := cmd.Start(); err != nil {
+		_ = stdin.Close()
+		_ = stdout.Close()
+		_ = stdoutWriter.Close()
+		_ = stderr.Close()
+		_ = stderrWriter.Close()
+		_ = token.Close()
+		cancel()
+		return nil, err
+	}
+	_ = token.Close()
+	_ = stdoutWriter.Close()
+	_ = stderrWriter.Close()
+	jobObject, _ := assignCommandJob(cmd)
+
+	now := time.Now()
+	session := &windowsSession{
+		ref: sandbox.SessionRef{
+			Backend:   sandbox.BackendWindows,
+			SessionID: sessionID,
+		},
+		terminal: sandbox.TerminalRef{
+			Backend:    sandbox.BackendWindows,
+			SessionID:  sessionID,
+			TerminalID: terminalID,
+		},
+		cmd:           cmd,
+		job:           jobObject,
+		stdin:         stdin,
+		cancel:        cancel,
+		running:       true,
+		supportsInput: true,
+		startedAt:     now,
+		updatedAt:     now,
+		done:          make(chan struct{}),
+		onOutput:      req.OnOutput,
+	}
+	r.mu.Lock()
+	r.sessions[sessionID] = session
+	r.mu.Unlock()
+
+	session.wg.Add(2)
+	go session.readStream(stdout, "stdout")
+	go session.readStream(stderr, "stderr")
+	go session.waitForExit()
+	return session, nil
+}
+
+func (r *runtime) OpenSession(id string) (sandbox.Session, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.sessions[strings.TrimSpace(id)]
+	if !ok {
+		return nil, fmt.Errorf("impl/sandbox/windows: session %q not found", id)
+	}
+	return session, nil
+}
+
+func (r *runtime) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Session, error) {
+	ref = sandbox.CloneSessionRef(ref)
+	backend := normalizeBackendAlias(ref.Backend)
+	if backend != "" && backend != sandbox.BackendWindows {
+		return nil, fmt.Errorf("impl/sandbox/windows: backend %q is unsupported", ref.Backend)
+	}
+	return r.OpenSession(ref.SessionID)
+}
+
+func (r *runtime) SupportedBackends() []sandbox.Backend {
+	return []sandbox.Backend{sandbox.BackendWindows}
 }
 
 func (r *runtime) Status() sandbox.Status {
-	if r == nil || r.runner == nil {
-		return sandbox.Status{}
+	status := sandbox.Status{
+		RequestedBackend: sandbox.BackendWindows,
+		ResolvedBackend:  sandbox.BackendWindows,
 	}
-	return sandbox.CloneStatus(r.runner.status())
+	check := r.workspaceSetupCheck()
+	status.Setup.Checks = []sandbox.SetupCheck{check}
+	status.Setup.Details = map[string]string{
+		"backend": "windows-restricted-token",
+	}
+	return sandbox.CloneStatus(status)
 }
 
 func (r *runtime) SelectionStatus() sandbox.Status {
 	return sandbox.Status{
-		RequestedBackend: sandbox.BackendWindowsElevated,
-		ResolvedBackend:  sandbox.BackendWindowsElevated,
+		RequestedBackend: sandbox.BackendWindows,
+		ResolvedBackend:  sandbox.BackendWindows,
 	}
 }
 
 func (r *runtime) Prepare(ctx context.Context) error {
-	if r == nil || r.runner == nil {
-		return fmt.Errorf("impl/sandbox/windows: runtime is unavailable")
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	return r.runner.Prepare(ctx)
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "acl",
+		Message: "preparing current workspace ACL policy",
+		Step:    1,
+		Total:   2,
+	})
+	_, err := r.ensureForRequest(ctx, sandbox.CommandRequest{
+		Dir: r.cfg.CWD,
+		Constraints: sandbox.Constraints{
+			Route:      sandbox.RouteSandbox,
+			Backend:    sandbox.BackendWindows,
+			Permission: sandbox.PermissionWorkspaceWrite,
+			Network:    sandbox.NetworkEnabled,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "complete",
+		Message: "Windows workspace-write sandbox ACL policy is ready",
+		Step:    2,
+		Total:   2,
+		Done:    true,
+	})
+	return nil
 }
 
 func (r *runtime) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
-	if r == nil || r.runner == nil {
-		return fmt.Errorf("impl/sandbox/windows: runtime is unavailable")
-	}
-	return r.runner.Preflight(ctx, opts)
-}
-
-func (r *runtime) Reset(ctx context.Context) error {
-	if r == nil || r.runner == nil {
-		return fmt.Errorf("impl/sandbox/windows: runtime is unavailable")
-	}
-	return r.runner.Reset(ctx)
-}
-
-type setupRunner struct {
-	cfg        sandbox.Config
-	stateRoot  string
-	executable string
-	client     *runnerclient.Client
-
-	maintenanceMu       contextMutex
-	usersReadyMu        sync.Mutex
-	usersReadyCheckedAt time.Time
-	usersReadyErr       string
-	refreshMu           sync.Mutex
-	refreshedPolicies   map[string]struct{}
-	scheduledPolicies   map[string]struct{}
-	policyMu            sync.Mutex
-	policyCache         map[string]cachedWindowsPolicy
-	helperMu            sync.Mutex
-	helperPathCache     map[string]cachedHelperPath
-	executableHashMu    sync.Mutex
-	executableHash      string
-}
-
-type contextMutex struct {
-	once sync.Once
-	ch   chan struct{}
-}
-
-func (m *contextMutex) Lock(ctx context.Context) error {
-	m.init()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-m.ch:
-		return nil
-	}
-}
-
-func (m *contextMutex) Unlock() {
-	m.init()
-	select {
-	case m.ch <- struct{}{}:
-	default:
-		panic("impl/sandbox/windows: unlock of unlocked context mutex")
-	}
-}
-
-func (m *contextMutex) init() {
-	m.once.Do(func() {
-		m.ch = make(chan struct{}, 1)
-		m.ch <- struct{}{}
-	})
-}
-
-const usersReadyCacheTTL = time.Minute
-const (
-	defaultPrepareTimeout = 10 * time.Minute
-	defaultResetTimeout   = 5 * time.Minute
-)
-const (
-	prepareProgressTotal                  = 20
-	prepareProgressInspect                = 1
-	prepareProgressCollectPolicy          = 2
-	prepareProgressBindCapabilities       = 3
-	prepareProgressPayloadReady           = 4
-	prepareProgressEncodePayload          = 5
-	prepareProgressMaterializeSetupHelper = 6
-	prepareProgressAwaitElevation         = 7
-	prepareProgressHelperStart            = 8
-	prepareProgressHelperEnd              = 17
-	prepareProgressVerify                 = 18
-	prepareProgressCommandRunnerHelper    = 19
-	prepareProgressComplete               = 20
-)
-
-var errSandboxUsersFileMissing = errors.New("sandbox users file missing")
-
-type cachedWindowsPolicy struct {
-	policy winpolicy.Policy
-	hash   string
-}
-
-type cachedHelperPath struct {
-	path string
-	hash string
-}
-
-func (r *setupRunner) Run(ctx context.Context, req runnerruntime.Request) (sandbox.CommandResult, error) {
-	sessionID, err := r.startRunWithStableSetup(ctx, req)
-	if err != nil {
-		return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: sandbox.BackendWindowsElevated}, err
-	}
-	return r.client.WaitRun(ctx, sessionID)
-}
-
-func (r *setupRunner) StartAsync(ctx context.Context, req runnerruntime.Request) (string, error) {
-	var sessionID string
-	err := r.withStableSetupLaunch(ctx, req, func() error {
-		id, launchErr := r.client.StartAsync(ctx, req)
-		if launchErr != nil {
-			return launchErr
-		}
-		sessionID = id
-		return nil
-	})
-	return sessionID, err
-}
-
-func (r *setupRunner) WriteInput(sessionID string, input []byte) error {
-	return r.client.WriteInput(sessionID, input)
-}
-
-func (r *setupRunner) ReadOutput(sessionID string, stdoutMarker, stderrMarker int64) ([]byte, []byte, int64, int64, error) {
-	return r.client.ReadOutput(sessionID, stdoutMarker, stderrMarker)
-}
-
-func (r *setupRunner) GetSessionStatus(sessionID string) (cmdsession.SessionStatus, error) {
-	return r.client.GetSessionStatus(sessionID)
-}
-
-func (r *setupRunner) WaitSession(ctx context.Context, sessionID string, timeout time.Duration) (sandbox.CommandResult, error) {
-	return r.client.WaitSession(ctx, sessionID, timeout)
-}
-
-func (r *setupRunner) TerminateSession(sessionID string) error {
-	return r.client.TerminateSession(sessionID)
-}
-
-func (r *setupRunner) Close() error {
-	if r.client == nil {
-		return nil
-	}
-	return r.client.Close()
-}
-
-func (r *setupRunner) Prepare(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	restoreCurrentUserProfileVisibilityBestEffort()
-	var cancel context.CancelFunc
-	ctx, cancel = withDefaultOperationTimeout(ctx, defaultPrepareTimeout)
-	defer cancel()
-	if err := r.maintenanceMu.Lock(ctx); err != nil {
-		return err
-	}
-	defer r.maintenanceMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	progress := prepareProgressReporter{ctx: ctx}
-	progress.report("inspect", "checking Windows sandbox setup state", prepareProgressInspect, false)
-	progress.report("payload", "collecting global sandbox policy", prepareProgressCollectPolicy, false)
-	globalPayload, err := r.globalSetupPayload()
-	if err != nil {
-		return err
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	_ = setupstate.ClearProgress(dirs.ProgressPath)
-	globalFreshness := r.freshnessForPayload(globalPayload)
-	if globalFreshness.Current {
-		if usersReadyErr := r.usersFileReady(); usersReadyErr != nil {
-			globalFreshness = setupstate.Freshness{Reason: usersReadyErr.Error()}
-		}
-	}
-	workspace := workspaceSetupSnapshot{}
-	if globalFreshness.Current {
-		workspace = r.workspaceSetupSnapshot()
-	}
-	if globalFreshness.Current && workspace.Current {
-		if err := r.prepareCommandRunnerHelper(ctx, progress.update("helper", "materializing command runner helper executable", prepareProgressCommandRunnerHelper, false)); err != nil {
-			return err
-		}
-		progress.report("complete", "Windows sandbox setup is already current", prepareProgressComplete, true)
-		r.markBaseRefreshApplied()
-		return nil
-	}
-	r.clearUsersReadyCache()
-	r.clearRefreshCache()
-	r.clearPolicyCache()
-	kind := setup.SetupKindFull
-	if globalFreshness.Current {
-		kind = setup.SetupKindWorkspaceOnly
-	}
-	if kind == setup.SetupKindFull && r.client != nil {
-		_ = r.client.Invalidate()
-	}
-	progress.report("payload", "binding sandbox policy capabilities", prepareProgressBindCapabilities, false)
-	payload, _, err := r.setupPayload(r.baseSetupRequest(), kind)
-	if err != nil {
-		return err
-	}
-	progress.report("payload", "setup payload is ready", prepareProgressPayloadReady, false)
-	payload.OperationID = setupOperationID("setup")
-	payload.StartedAt = time.Now().UTC()
-	payload.ExpiresAt = time.Now().Add(defaultPrepareTimeout).UTC()
-	payload.ProgressPath = dirs.ProgressPath
-	progress.report("payload", "encoding setup payload", prepareProgressEncodePayload, false)
-	encoded, err := setup.EncodePayload(payload)
-	if err != nil {
-		return err
-	}
-	progress.report("helper", "materializing sandbox helper executable", prepareProgressMaterializeSetupHelper, false)
-	helperPath, _, err := r.materializeHelper()
-	if err != nil {
-		return err
-	}
-	var setupErr error
-	if elevated, err := win32.IsElevated(); err == nil && elevated {
-		progress.report("elevation", "current process is elevated; running setup without a UAC prompt", prepareProgressAwaitElevation, false)
-		setupErr = setup.ExecuteWithProgress(payload, func(setupProgress setup.Progress) {
-			progress.reportSetup(setupProgress)
-		})
-	} else {
-		progress.report("elevation", "waiting for elevated setup helper; approve the UAC prompt if Windows asks", prepareProgressAwaitElevation, false)
-		stopProgress := forwardSetupProgressFile(ctx, dirs.ProgressPath, mapPrepareSetupProgressReport)
-		setupErr = win32.RunElevatedAndWaitContext(ctx, helperPath, []string{setupHelperCommand, encoded}, r.cfg.CWD)
-		stopProgress()
-	}
-	if err := setupErr; err != nil {
-		if r.prepareTargetCurrent(kind) {
-			progress.report("complete", "Windows sandbox setup is ready", prepareProgressComplete, true)
-			return nil
-		}
-		code := "elevated_setup_failed"
-		message := err.Error()
-		dirs := setupstate.NewDirs(r.stateRoot)
-		if report, readErr := setupstate.ReadError(dirs.ErrorPath); readErr == nil && strings.TrimSpace(report.Message) != "" {
-			if strings.TrimSpace(report.Code) != "" {
-				code = strings.TrimSpace(report.Code)
-			}
-			message = strings.TrimSpace(report.Message)
-		}
-		var canceled win32.ElevatedLaunchCanceledError
-		if errors.As(err, &canceled) {
-			code = "uac_canceled"
-			message = "Windows sandbox setup was canceled. Approve the UAC prompt to finish Elevated sandbox setup, or run without sandbox isolation."
-		}
-		_ = setupstate.WriteError(dirs.ErrorPath, setupstate.ErrorReport{
-			Phase:   "orchestrator",
-			Code:    code,
-			Message: message,
-		})
-		return fmt.Errorf("impl/sandbox/windows: %s: %w", message, err)
-	}
-	r.clearUsersReadyCache()
-	progress.report("verify", "verifying setup marker", prepareProgressVerify, false)
-	if freshness := r.setupReadyFreshness(); !freshness.Current {
-		return fmt.Errorf("impl/sandbox/windows: elevated setup did not become current: %s", freshness.Reason)
-	}
-	if freshness := r.workspaceSetupSnapshot(); !freshness.Current {
-		return fmt.Errorf("impl/sandbox/windows: workspace setup did not become current: %s", freshness.Reason)
-	}
-	if err := r.prepareCommandRunnerHelper(ctx, progress.update("helper", "materializing command runner helper executable", prepareProgressCommandRunnerHelper, false)); err != nil {
-		return err
-	}
-	r.clearRefreshCache()
-	r.clearPolicyCache()
-	r.markBaseRefreshApplied()
-	progress.report("complete", "Windows sandbox setup is ready", prepareProgressComplete, true)
-	return nil
-}
-
-func (r *setupRunner) prepareTargetCurrent(kind setup.SetupKind) bool {
-	switch kind {
-	case setup.SetupKindWorkspaceOnly:
-		return r.workspaceSetupSnapshot().Current
-	case setup.SetupKindFull:
-		return r.setupReadyFreshness().Current && r.workspaceSetupSnapshot().Current
-	default:
-		return false
-	}
-}
-
-func (r *setupRunner) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := r.maintenanceMu.Lock(ctx); err != nil {
-		return err
-	}
-	defer r.maintenanceMu.Unlock()
-	if freshness := r.setupReadyFreshness(); !freshness.Current {
-		return nil
-	}
-	workspace := r.workspaceSetupSnapshot()
-	if workspace.Current {
-		r.markBaseRefreshApplied()
-		return nil
-	}
 	if !opts.AllowNonElevatedRepair {
 		return nil
 	}
-	payload, _, err := r.setupPayload(r.baseSetupRequest(), setup.SetupKindWorkspaceOnly)
-	if err != nil {
-		return err
+	return r.Prepare(ctx)
+}
+
+func (r *runtime) Reset(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if err := setup.ExecuteWithProgress(payload, func(progress setup.Progress) {
+	plan := r.cleanupPlan()
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "clean",
+		Message: fmt.Sprintf("cleaning Windows sandbox state: %d ACL paths, %d legacy paths", len(plan.ACLPaths), len(plan.LegacyPaths)),
+		Step:    1,
+		Total:   3,
+	})
+	var errs []error
+	for _, path := range plan.ACLPaths {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if _, err := os.Stat(path); err != nil {
+			if !os.IsNotExist(err) {
+				errs = append(errs, fmt.Errorf("inspect ACL cleanup path %s: %w", path, err))
+			}
+			continue
+		}
+		if err := acl.RemoveFileDACLPrincipals(path, plan.Principals...); err != nil {
+			errs = append(errs, fmt.Errorf("remove sandbox ACL principals from %s: %w", path, err))
+		}
+	}
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "state",
+		Message: "removing Windows sandbox state files",
+		Step:    2,
+		Total:   3,
+	})
+	for _, path := range plan.LegacyPaths {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := os.RemoveAll(path); err != nil {
+			errs = append(errs, fmt.Errorf("remove sandbox state path %s: %w", path, err))
+		}
+	}
+	for _, leftover := range plan.LegacyProtected {
 		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-			Phase:   progress.Phase,
-			Message: progress.Message,
-			Step:    progress.Step,
-			Total:   progress.Total,
-			Done:    progress.Done,
-			Debug:   progress.Debug,
+			Phase:   "legacy",
+			Message: "legacy Windows sandbox artifact may require elevated cleanup: " + leftover,
+			Step:    2,
+			Total:   3,
 		})
-	}); err != nil {
-		dirs := setupstate.NewDirs(r.stateRoot)
-		_ = setupstate.WriteError(dirs.ErrorPath, setupstate.ErrorReport{
-			Phase:   "workspace_preflight",
-			Code:    "workspace_acl_refresh_failed",
-			Message: err.Error(),
+	}
+	if len(errs) > 0 {
+		joined := errors.Join(errs...)
+		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+			Phase:   "error",
+			Message: "Windows sandbox cleanup finished with errors: " + joined.Error(),
+			Step:    3,
+			Total:   3,
 		})
-		return err
+		return fmt.Errorf("impl/sandbox/windows: clean sandbox state: %w", joined)
 	}
-	r.clearRefreshCache()
-	r.clearPolicyCache()
-	r.markBaseRefreshApplied()
-	return nil
-}
-
-func (r *setupRunner) Reset(ctx context.Context) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	var cancel context.CancelFunc
-	ctx, cancel = withDefaultOperationTimeout(ctx, defaultResetTimeout)
-	defer cancel()
-	if err := r.maintenanceMu.Lock(ctx); err != nil {
-		return err
-	}
-	defer r.maintenanceMu.Unlock()
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	r.clearUsersReadyCache()
-	r.clearRefreshCache()
-	r.clearPolicyCache()
-	if r.client != nil {
-		_ = r.client.Invalidate()
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	now := time.Now().UTC()
-	payload := setup.Payload{
-		Version:         setup.PayloadVersion,
-		Kind:            setup.SetupKindReset,
-		OperationID:     setupOperationID("reset"),
-		StartedAt:       now,
-		ExpiresAt:       now.Add(defaultResetTimeout),
-		StateRoot:       r.stateRoot,
-		OfflineUsername: setupOfflineUser(r.stateRoot),
-		OnlineUsername:  setupOnlineUser(r.stateRoot),
-		OwnerUsername:   currentWindowsUser(),
-		ProgressPath:    dirs.ResetProgressPath,
-	}.Normalize()
-	_ = setupstate.ClearProgress(dirs.ResetProgressPath)
-	_ = setupstate.ClearError(dirs.ResetErrorPath)
-	if elevated, err := win32.IsElevated(); err == nil && elevated {
-		err := setup.ExecuteWithProgress(payload, func(progress setup.Progress) {
-			sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-				Phase:   progress.Phase,
-				Message: progress.Message,
-				Step:    progress.Step,
-				Total:   progress.Total,
-				Done:    progress.Done,
-				Debug:   progress.Debug,
-			})
-		})
-		if err == nil {
-			_ = os.RemoveAll(dirs.Reset)
-		} else if _, readErr := setupstate.ReadError(dirs.ResetErrorPath); readErr != nil {
-			_ = setupstate.WriteError(dirs.ResetErrorPath, setupstate.ErrorReport{
-				Phase:   "orchestrator",
-				Code:    "reset_failed",
-				Message: err.Error(),
-			})
-		}
-		return err
-	}
-	encoded, err := setup.EncodePayload(payload)
-	if err != nil {
-		return err
-	}
-	helperPath := r.resetHelperPath()
-	if helperPath == "" {
-		return fmt.Errorf("impl/sandbox/windows: reset helper executable path is required")
-	}
-	stopProgress := forwardSetupProgressFile(ctx, dirs.ResetProgressPath)
-	err = win32.RunElevatedAndWaitContext(ctx, helperPath, []string{setupHelperCommand, encoded}, r.cfg.CWD)
-	stopProgress()
-	r.clearUsersReadyCache()
-	r.clearRefreshCache()
-	r.clearPolicyCache()
-	if err != nil {
-		_ = setupstate.WriteError(dirs.ResetErrorPath, setupstate.ErrorReport{
-			Phase:   "orchestrator",
-			Code:    "reset_failed",
-			Message: err.Error(),
-		})
-		return err
-	}
-	_ = os.RemoveAll(dirs.Reset)
-	return nil
-}
-
-func withDefaultOperationTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if timeout <= 0 {
-		return ctx, func() {}
-	}
-	if _, ok := ctx.Deadline(); ok {
-		return ctx, func() {}
-	}
-	return context.WithTimeout(ctx, timeout)
-}
-
-type prepareProgressReporter struct {
-	ctx context.Context
-}
-
-func (r prepareProgressReporter) update(phase string, message string, step int, done bool) sandbox.PrepareProgress {
-	return sandbox.PrepareProgress{
-		Phase:   strings.TrimSpace(phase),
-		Message: strings.TrimSpace(message),
-		Step:    clampPrepareProgressStep(step),
-		Total:   prepareProgressTotal,
-		Done:    done,
-	}
-}
-
-func (r prepareProgressReporter) report(phase string, message string, step int, done bool) {
-	sandbox.ReportPrepareProgress(r.ctx, r.update(phase, message, step, done))
-}
-
-func (r prepareProgressReporter) reportSetup(progress setup.Progress) {
-	sandbox.ReportPrepareProgress(r.ctx, sandbox.PrepareProgress{
-		Phase:   progress.Phase,
-		Message: progress.Message,
-		Step:    setupProgressOuterStep(progress.Step, progress.Total, progress.Done),
-		Total:   prepareProgressTotal,
-		Done:    false,
-		Debug:   progress.Debug,
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "complete",
+		Message: "Windows sandbox cleanup complete",
+		Step:    3,
+		Total:   3,
+		Done:    true,
 	})
+	return nil
 }
 
-func mapPrepareSetupProgressReport(report setupstate.ProgressReport) sandbox.PrepareProgress {
-	return sandbox.PrepareProgress{
-		Phase:   report.Phase,
-		Message: report.Message,
-		Step:    setupProgressOuterStep(report.Step, report.Total, report.Done),
-		Total:   prepareProgressTotal,
-		Done:    false,
-		Debug:   report.Debug,
+func (r *runtime) Close() error {
+	r.mu.RLock()
+	sessions := make([]*windowsSession, 0, len(r.sessions))
+	for _, session := range r.sessions {
+		sessions = append(sessions, session)
 	}
+	r.mu.RUnlock()
+	for _, session := range sessions {
+		_ = session.Terminate(context.Background())
+	}
+	return nil
 }
 
-func setupProgressOuterStep(step int, total int, done bool) int {
-	return scaleProgressStep(step, total, prepareProgressHelperStart, prepareProgressHelperEnd, done)
+func (r *runtime) restrictedShellCommand(ctx context.Context, req sandbox.CommandRequest, interactive bool, policy workspacePolicy) (*exec.Cmd, win32.Token, error) {
+	token, err := win32.RestrictedCurrentProcessTokenWithSIDs(policy.CapabilitySIDs)
+	if err != nil {
+		return nil, 0, fmt.Errorf("impl/sandbox/windows: create restricted token: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, "powershell.exe", winps.Args(req.Command, winps.Options{Interactive: interactive})...)
+	dir := strings.TrimSpace(req.Dir)
+	if dir == "" {
+		dir = r.cfg.CWD
+	}
+	cmd.Dir = dir
+	env, err := sandboxEnvironment(policy, req.Env)
+	if err != nil {
+		_ = token.Close()
+		return nil, 0, err
+	}
+	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(token)}
+	return cmd, token, nil
 }
 
-func scaleProgressStep(step int, total int, start int, end int, done bool) int {
-	if start > end {
-		start, end = end, start
+func runCommandWithJob(ctx context.Context, cmd *exec.Cmd) error {
+	if cmd == nil {
+		return fmt.Errorf("impl/sandbox/windows: command is required")
 	}
-	if done && (step <= 0 || total <= 0) {
-		return clampPrepareProgressStep(end)
+	if err := cmd.Start(); err != nil {
+		return err
 	}
-	if step <= 0 || total <= 0 {
-		return clampPrepareProgressStep(start)
-	}
-	if step > total {
-		step = total
-	}
-	span := end - start + 1
-	offset := (step*span + total - 1) / total
-	if offset <= 0 {
-		offset = 1
-	}
-	return clampPrepareProgressStep(start + offset - 1)
-}
-
-func clampPrepareProgressStep(step int) int {
-	if step < 0 {
-		return 0
-	}
-	if step > prepareProgressTotal {
-		return prepareProgressTotal
-	}
-	return step
-}
-
-func setupOperationID(prefix string) string {
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" {
-		prefix = "op"
-	}
-	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
-}
-
-func (r *setupRunner) resetHelperPath() string {
-	source := strings.TrimSpace(r.executable)
-	if dedicated := siblingSetupHelper(source); dedicated != "" {
-		return dedicated
-	}
-	return source
-}
-
-func forwardSetupProgressFile(ctx context.Context, path string, mapReport ...func(setupstate.ProgressReport) sandbox.PrepareProgress) func() {
-	path = strings.TrimSpace(path)
-	if path == "" {
-		return func() {}
-	}
-	done := make(chan struct{})
-	stopped := make(chan struct{})
-	var last string
-	emit := func() {
-		report, err := setupstate.ReadProgress(path)
-		if err != nil {
-			return
-		}
-		key := fmt.Sprintf("%s\x00%s\x00%d\x00%d\x00%t\x00%t", report.Phase, report.Message, report.Step, report.Total, report.Done, report.Debug)
-		if key == last {
-			return
-		}
-		last = key
-		progress := sandbox.PrepareProgress{
-			Phase:   report.Phase,
-			Message: report.Message,
-			Step:    report.Step,
-			Total:   report.Total,
-			Done:    report.Done,
-			Debug:   report.Debug,
-		}
-		if len(mapReport) > 0 && mapReport[0] != nil {
-			progress = mapReport[0](report)
-		}
-		sandbox.ReportPrepareProgress(ctx, progress)
-	}
+	jobObject, _ := assignCommandJob(cmd)
+	waitCh := make(chan error, 1)
 	go func() {
-		defer close(stopped)
-		ticker := time.NewTicker(350 * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-done:
-				emit()
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				emit()
-			}
-		}
+		waitCh <- cmd.Wait()
 	}()
-	return func() {
-		close(done)
-		<-stopped
-	}
-}
-
-func (r *setupRunner) requireSetupReady() error {
-	if freshness := r.setupReadyFreshness(); !freshness.Current {
-		return setupRequiredError(freshness)
-	}
-	return nil
-}
-
-func (r *setupRunner) requireSetupReadyFresh() error {
-	if freshness := r.setupReadyFreshnessFresh(); !freshness.Current {
-		return setupRequiredError(freshness)
-	}
-	return nil
-}
-
-func setupRequiredError(freshness setupstate.Freshness) error {
-	reason := strings.TrimSpace(freshness.Reason)
-	if reason == "" {
-		reason = "setup marker missing"
-	}
-	return fmt.Errorf("impl/sandbox/windows: Windows Elevated sandbox global setup is required (%s)", reason)
-}
-
-func (r *setupRunner) startRunWithStableSetup(ctx context.Context, req runnerruntime.Request) (string, error) {
-	var sessionID string
-	err := r.withStableSetupLaunch(ctx, req, func() error {
-		id, launchErr := r.client.StartRun(ctx, req)
-		if launchErr != nil {
-			return launchErr
+	select {
+	case err := <-waitCh:
+		if jobObject != nil {
+			_ = jobObject.Close()
 		}
-		sessionID = id
-		return nil
-	})
-	return sessionID, err
-}
-
-func (r *setupRunner) withStableSetupLaunch(ctx context.Context, req runnerruntime.Request, launch func() error) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := r.maintenanceMu.Lock(ctx); err != nil {
-		return fmt.Errorf("impl/sandbox/windows: start sandbox command: %w", err)
-	}
-	defer r.maintenanceMu.Unlock()
-	if err := setup.WithMaintenanceLock(ctx, r.stateRoot, 30*time.Second, func() error {
-		r.clearUsersReadyCache()
-		return r.requireSetupReadyFresh()
-	}); err != nil {
 		return err
-	}
-	requestKey, keyErr := r.policyRequestKey(req)
-	if err := r.refreshRequestACLsLocked(ctx, req, requestKey, keyErr); err != nil {
-		return err
-	}
-	return setup.WithMaintenanceLock(ctx, r.stateRoot, 30*time.Second, func() error {
-		r.clearUsersReadyCache()
-		if err := r.requireSetupReadyFresh(); err != nil {
-			return err
+	case <-ctx.Done():
+		if jobObject != nil {
+			_ = jobObject.Terminate(1)
+			_ = jobObject.Close()
 		}
-		return r.launchWithCredentialRetry(launch)
-	})
-}
-
-func (r *setupRunner) launchWithCredentialRetry(launch func() error) error {
-	if launch == nil {
-		return nil
-	}
-	err := launch()
-	if err == nil || !isRunnerLogonLaunchError(err) {
-		return err
-	}
-	r.clearUsersReadyCache()
-	if readyErr := r.requireSetupReadyFresh(); readyErr != nil {
-		return readyErr
-	}
-	if retryErr := launch(); retryErr != nil {
-		if isRunnerLogonLaunchError(retryErr) {
-			return fmt.Errorf("impl/sandbox/windows: command runner logon failed after refreshing sandbox credentials; rerun Windows sandbox setup to repair credentials: %w", retryErr)
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
 		}
-		return retryErr
+		<-waitCh
+		return ctx.Err()
 	}
-	return nil
 }
 
-func isRunnerLogonLaunchError(err error) bool {
-	if err == nil {
-		return false
+func assignCommandJob(cmd *exec.Cmd) (*job.Object, error) {
+	if cmd == nil || cmd.Process == nil {
+		return nil, nil
 	}
-	text := strings.ToLower(err.Error())
-	return strings.Contains(text, "createprocesswithlogonw")
-}
-
-func (r *setupRunner) refreshRequestACLs(ctx context.Context, req runnerruntime.Request) error {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	requestKey, keyErr := r.policyRequestKey(req)
-	if keyErr == nil && r.refreshAlreadyApplied(requestKey) {
-		return nil
-	}
-	if err := r.maintenanceMu.Lock(ctx); err != nil {
-		return fmt.Errorf("impl/sandbox/windows: refresh sandbox ACLs without elevation: %w", err)
-	}
-	defer r.maintenanceMu.Unlock()
-	return r.refreshRequestACLsLocked(ctx, req, requestKey, keyErr)
-}
-
-func (r *setupRunner) refreshRequestACLsLocked(ctx context.Context, req runnerruntime.Request, requestKey string, keyErr error) error {
-	if keyErr == nil && r.refreshAlreadyApplied(requestKey) {
-		return nil
-	}
-	payload, _, err := r.setupPayload(req, setup.SetupKindRuntimeRefresh)
+	jobObject, err := job.New()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if payload.Policy.FullAccess || !runtimePolicyHasACLTargets(payload.Policy) {
-		return nil
+	if err := jobObject.AssignPID(cmd.Process.Pid); err != nil {
+		_ = jobObject.Close()
+		return nil, err
 	}
-	cacheKeys := refreshCacheKeys(requestKey, payload.WorkspacePolicyHash)
-	if r.refreshAnyApplied(cacheKeys...) {
-		r.markRefreshApplied(cacheKeys...)
-		return nil
-	}
-	if r.refreshAnyScheduled(cacheKeys...) {
-		pending, _, pendingErr := setup.ReadACLQueuePending(r.stateRoot)
-		if pendingErr != nil {
-			runnertrace.Printf("windows-runtime", "read_acl_refresh.pending_inspect_failed err=%v", pendingErr)
-			_ = setup.KickReadACLQueue(payload)
-			r.markRefreshScheduled(cacheKeys...)
-			return nil
-		}
-		if pending == 0 {
-			r.markRefreshApplied(cacheKeys...)
-			return nil
-		}
-		_ = setup.KickReadACLQueue(payload)
-		r.markRefreshScheduled(cacheKeys...)
-		return nil
-	}
-	if err := setup.Execute(payload); err != nil {
-		return fmt.Errorf("impl/sandbox/windows: refresh sandbox ACLs without elevation: %w", err)
-	}
-	pending, _, pendingErr := setup.ReadACLQueuePending(r.stateRoot)
-	if pendingErr != nil {
-		runnertrace.Printf("windows-runtime", "read_acl_refresh.pending_inspect_failed err=%v", pendingErr)
-		r.markRefreshScheduled(cacheKeys...)
-		return nil
-	}
-	if pending > 0 {
-		r.markRefreshScheduled(cacheKeys...)
-	} else {
-		r.markRefreshApplied(cacheKeys...)
-	}
-	return nil
+	return jobObject, nil
 }
 
-func (r *setupRunner) setupReadyFreshness() setupstate.Freshness {
-	payload, err := r.globalSetupPayload()
+type workspacePolicy struct {
+	WorkspaceRoot           string            `json:"workspace_root,omitempty"`
+	CommandDir              string            `json:"command_dir,omitempty"`
+	SandboxEnvRoot          string            `json:"sandbox_env_root,omitempty"`
+	WriteRoots              []string          `json:"write_roots,omitempty"`
+	DenyWritePaths          []string          `json:"deny_write_paths,omitempty"`
+	PolicyHash              string            `json:"policy_hash,omitempty"`
+	CapabilitySIDs          []string          `json:"capability_sids,omitempty"`
+	WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids,omitempty"`
+}
+
+type workspaceManifest struct {
+	Version                 int               `json:"version"`
+	WorkspaceRoot           string            `json:"workspace_root,omitempty"`
+	SandboxEnvRoot          string            `json:"sandbox_env_root,omitempty"`
+	PolicyHash              string            `json:"policy_hash,omitempty"`
+	CapabilitySIDs          []string          `json:"capability_sids,omitempty"`
+	WriteRoots              []string          `json:"write_roots,omitempty"`
+	DenyWritePaths          []string          `json:"deny_write_paths,omitempty"`
+	WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids,omitempty"`
+	ACEs                    []manifestACE     `json:"aces,omitempty"`
+	UpdatedAt               time.Time         `json:"updated_at,omitempty"`
+}
+
+type manifestACE struct {
+	Path      string `json:"path,omitempty"`
+	Principal string `json:"principal,omitempty"`
+	Mode      string `json:"mode,omitempty"`
+	Rights    string `json:"rights,omitempty"`
+	Inherit   bool   `json:"inherit,omitempty"`
+}
+
+func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandRequest) (workspacePolicy, error) {
+	if err := ctx.Err(); err != nil {
+		return workspacePolicy{}, err
+	}
+	policy, err := r.policyForRequest(req)
 	if err != nil {
-		return setupstate.Freshness{Reason: err.Error()}
-	}
-	freshness := r.freshnessForPayload(payload)
-	if !freshness.Current {
-		return freshness
-	}
-	if err := r.usersFileReady(); err != nil {
-		return setupstate.Freshness{Reason: err.Error()}
-	}
-	return freshness
-}
-
-func (r *setupRunner) setupReadyFreshnessFresh() setupstate.Freshness {
-	payload, err := r.globalSetupPayload()
-	if err != nil {
-		return setupstate.Freshness{Reason: err.Error()}
-	}
-	freshness := r.freshnessForPayload(payload)
-	if !freshness.Current {
-		return freshness
-	}
-	if err := r.checkUsersFileReady(); err != nil {
-		return setupstate.Freshness{Reason: err.Error()}
-	}
-	return freshness
-}
-
-func (r *setupRunner) usersFileReady() error {
-	if err := r.cachedUsersFileReady(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (r *setupRunner) cachedUsersFileReady() error {
-	r.usersReadyMu.Lock()
-	if !r.usersReadyCheckedAt.IsZero() && time.Since(r.usersReadyCheckedAt) < usersReadyCacheTTL {
-		errText := r.usersReadyErr
-		r.usersReadyMu.Unlock()
-		if errText != "" {
-			return errors.New(errText)
-		}
-		return nil
-	}
-	r.usersReadyMu.Unlock()
-
-	err := r.checkUsersFileReady()
-	if errors.Is(err, errSandboxUsersFileMissing) {
-		return err
-	}
-	errText := ""
-	if err != nil {
-		errText = err.Error()
-	}
-	r.usersReadyMu.Lock()
-	r.usersReadyCheckedAt = time.Now()
-	r.usersReadyErr = errText
-	r.usersReadyMu.Unlock()
-	return err
-}
-
-func (r *setupRunner) clearUsersReadyCache() {
-	r.usersReadyMu.Lock()
-	defer r.usersReadyMu.Unlock()
-	r.usersReadyCheckedAt = time.Time{}
-	r.usersReadyErr = ""
-}
-
-func (r *setupRunner) refreshAlreadyApplied(policyHash string) bool {
-	policyHash = strings.TrimSpace(policyHash)
-	if policyHash == "" {
-		return false
-	}
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	_, ok := r.refreshedPolicies[policyHash]
-	return ok
-}
-
-func (r *setupRunner) refreshAnyApplied(policyHashes ...string) bool {
-	for _, policyHash := range policyHashes {
-		if r.refreshAlreadyApplied(policyHash) {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *setupRunner) refreshAlreadyScheduled(policyHash string) bool {
-	policyHash = strings.TrimSpace(policyHash)
-	if policyHash == "" {
-		return false
-	}
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	_, ok := r.scheduledPolicies[policyHash]
-	return ok
-}
-
-func (r *setupRunner) refreshAnyScheduled(policyHashes ...string) bool {
-	for _, policyHash := range policyHashes {
-		if r.refreshAlreadyScheduled(policyHash) {
-			return true
-		}
-	}
-	return false
-}
-
-func (r *setupRunner) markRefreshApplied(policyHashes ...string) {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	if r.refreshedPolicies == nil {
-		r.refreshedPolicies = map[string]struct{}{}
-	}
-	for _, policyHash := range policyHashes {
-		policyHash = strings.TrimSpace(policyHash)
-		if policyHash == "" {
-			continue
-		}
-		r.refreshedPolicies[policyHash] = struct{}{}
-		delete(r.scheduledPolicies, policyHash)
-	}
-}
-
-func (r *setupRunner) markRefreshScheduled(policyHashes ...string) {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	if r.scheduledPolicies == nil {
-		r.scheduledPolicies = map[string]struct{}{}
-	}
-	for _, policyHash := range policyHashes {
-		policyHash = strings.TrimSpace(policyHash)
-		if policyHash == "" {
-			continue
-		}
-		if _, applied := r.refreshedPolicies[policyHash]; applied {
-			continue
-		}
-		r.scheduledPolicies[policyHash] = struct{}{}
-	}
-}
-
-func (r *setupRunner) markBaseRefreshApplied() {
-	if r == nil {
-		return
-	}
-	req := r.baseSetupRequest()
-	requestKey, _ := r.policyRequestKey(req)
-	payload, _, err := r.setupPayload(req, setup.SetupKindRuntimeRefresh)
-	if err != nil {
-		return
-	}
-	cacheKeys := refreshCacheKeys(requestKey, payload.WorkspacePolicyHash)
-	pending, _, pendingErr := setup.ReadACLQueuePending(r.stateRoot)
-	if pendingErr != nil {
-		return
-	}
-	if pending > 0 {
-		_ = setup.KickReadACLQueue(payload)
-		r.markRefreshScheduled(cacheKeys...)
-		return
-	}
-	r.markRefreshApplied(cacheKeys...)
-}
-
-func (r *setupRunner) markRefreshAppliedForRequest(req runnerruntime.Request) {
-	requestKey, _ := r.policyRequestKey(req)
-	payload, _, err := r.setupPayload(req, setup.SetupKindRuntimeRefresh)
-	if err != nil {
-		return
-	}
-	r.markRefreshApplied(refreshCacheKeys(requestKey, payload.WorkspacePolicyHash)...)
-}
-
-func (r *setupRunner) clearRefreshCache() {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	r.refreshedPolicies = nil
-	r.scheduledPolicies = nil
-}
-
-func refreshCacheKeys(keys ...string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		key = strings.TrimSpace(key)
-		if key == "" {
-			continue
-		}
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, key)
-	}
-	return out
-}
-
-func (r *setupRunner) cachedPolicy(cacheKey string) (winpolicy.Policy, string, bool) {
-	cacheKey = strings.TrimSpace(cacheKey)
-	if cacheKey == "" {
-		return winpolicy.Policy{}, "", false
-	}
-	r.policyMu.Lock()
-	defer r.policyMu.Unlock()
-	cached, ok := r.policyCache[cacheKey]
-	return cached.policy, cached.hash, ok
-}
-
-func (r *setupRunner) markPolicyCached(cacheKey string, policy winpolicy.Policy, policyHash string) {
-	cacheKey = strings.TrimSpace(cacheKey)
-	if cacheKey == "" {
-		return
-	}
-	r.policyMu.Lock()
-	defer r.policyMu.Unlock()
-	if r.policyCache == nil {
-		r.policyCache = map[string]cachedWindowsPolicy{}
-	}
-	r.policyCache[cacheKey] = cachedWindowsPolicy{policy: policy, hash: policyHash}
-}
-
-func (r *setupRunner) clearPolicyCache() {
-	r.policyMu.Lock()
-	defer r.policyMu.Unlock()
-	r.policyCache = nil
-}
-
-func (r *setupRunner) checkUsersFileReady() error {
-	dirs := setupstate.NewDirs(r.stateRoot)
-	data, err := os.ReadFile(dirs.UsersPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return errSandboxUsersFileMissing
-		}
-		return fmt.Errorf("read sandbox users file: %w", err)
-	}
-	var users setup.UsersFile
-	if err := json.Unmarshal(data, &users); err != nil {
-		return fmt.Errorf("decode sandbox users file: %w", err)
-	}
-	if strings.TrimSpace(users.Offline.Username) == "" {
-		return fmt.Errorf("sandbox users file is incomplete")
-	}
-	expectedOffline := setupOfflineUser(r.stateRoot)
-	if !strings.EqualFold(strings.TrimSpace(users.Offline.Username), expectedOffline) {
-		return fmt.Errorf("sandbox users file does not match expected sandbox account")
-	}
-	if err := validateUserSecret(users.Offline); err != nil {
-		return fmt.Errorf("offline sandbox credentials are stale: %w", err)
-	}
-	expectedOnline := setupOnlineUser(r.stateRoot)
-	if users.Online == nil || strings.TrimSpace(users.Online.Username) == "" {
-		return fmt.Errorf("sandbox users file is missing expected online sandbox account")
-	}
-	if !strings.EqualFold(strings.TrimSpace(users.Online.Username), expectedOnline) {
-		return fmt.Errorf("sandbox users file does not match expected online sandbox account")
-	}
-	if err := validateUserSecret(*users.Online); err != nil {
-		return fmt.Errorf("online sandbox credentials are stale: %w", err)
-	}
-	return nil
-}
-
-func validateUserSecret(secret setup.UserSecret) error {
-	password, err := win32.UnprotectString(secret.PasswordProtected)
-	if err != nil {
-		return fmt.Errorf("unprotect sandbox credentials: %w", err)
-	}
-	return win32.ValidateCredentials(win32.LogonCredentials{
-		Username: secret.Username,
-		Password: password,
-	})
-}
-
-func (r *setupRunner) status() sandbox.Status {
-	status := sandbox.Status{
-		RequestedBackend: sandbox.BackendWindowsElevated,
-		ResolvedBackend:  sandbox.BackendWindowsElevated,
-	}
-	globalCheck := sandbox.SetupCheck{
-		Name:  "global",
-		Scope: sandbox.SetupScopeGlobal,
-	}
-	payload, err := r.globalSetupPayload()
-	if err == nil {
-		globalCheck.Version = payload.Version
-		globalCheck.Details = map[string]string{
-			"runner_hash":  payload.RunnerHash,
-			"policy_hash":  payload.GlobalPolicyHash,
-			"offline_user": payload.OfflineUsername,
-			"online_user":  payload.OnlineUsername,
-			"owner_user":   payload.OwnerUsername,
-		}
-	}
-	freshness := setupstate.Freshness{Reason: strings.TrimSpace(errString(err))}
-	if err == nil {
-		freshness = r.freshnessForPayload(payload)
-		if freshness.Current {
-			if readyErr := r.usersFileReady(); readyErr != nil {
-				freshness = setupstate.Freshness{Reason: readyErr.Error()}
-			}
-		}
-	}
-	globalCheck.Current = freshness.Current
-	globalCheck.Required = !freshness.Current
-	globalCheck.Reason = strings.TrimSpace(freshness.Reason)
-	if !freshness.Current {
-		status.Setup.Required = true
-		status.FallbackReason = globalCheck.Reason
-		status.FallbackInstallHint = "Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal to initialize Windows Elevated sandbox with one UAC prompt."
-		if report, err := readLatestSetupError(setupstate.NewDirs(r.stateRoot)); err == nil {
-			status.Setup.Error = strings.TrimSpace(report.Message)
-			globalCheck.Error = status.Setup.Error
-		}
-		status.Setup.Checks = []sandbox.SetupCheck{globalCheck}
-		return status
-	}
-	workspace := r.workspaceSetupSnapshot()
-	workspaceCheck := sandbox.SetupCheck{
-		Name:      "workspace",
-		Scope:     sandbox.SetupScopeWorkspace,
-		Current:   workspace.Current,
-		Required:  !workspace.Current,
-		Reason:    strings.TrimSpace(workspace.Reason),
-		Root:      strings.TrimSpace(workspace.Root),
-		UpdatedAt: workspace.UpdatedAt,
-		Details: map[string]string{
-			"policy_hash": strings.TrimSpace(workspace.PolicyHash),
-		},
-		Counts: map[string]int{
-			"read_roots":  workspace.ReadRoots,
-			"write_roots": workspace.WriteRoots,
-			"deny_read":   workspace.DenyRead,
-			"deny_write":  workspace.DenyWrite,
-		},
-	}
-	if !workspace.Current {
-		status.Setup.Required = true
-		status.FallbackReason = workspace.Reason
-		status.FallbackInstallHint = "Run /sandbox setup in the TUI or `caelis sandbox setup` in a terminal to authorize this Windows sandbox workspace."
-		if report, err := readLatestSetupError(setupstate.NewDirs(r.stateRoot)); err == nil {
-			status.Setup.Error = strings.TrimSpace(report.Message)
-			workspaceCheck.Error = status.Setup.Error
-		}
-	}
-	status.Setup.Checks = []sandbox.SetupCheck{globalCheck, workspaceCheck}
-	return status
-}
-
-func readLatestSetupError(dirs setupstate.Dirs) (setupstate.ErrorReport, error) {
-	setupReport, setupErr := setupstate.ReadError(dirs.ErrorPath)
-	resetReport, resetErr := setupstate.ReadError(dirs.ResetErrorPath)
-	if setupErr != nil && resetErr != nil {
-		return setupstate.ErrorReport{}, setupErr
-	}
-	if setupErr != nil {
-		return resetReport, nil
-	}
-	if resetErr != nil {
-		return setupReport, nil
-	}
-	if resetReport.Time.After(setupReport.Time) {
-		return resetReport, nil
-	}
-	return setupReport, nil
-}
-
-type workspaceSetupSnapshot struct {
-	Current    bool
-	Reason     string
-	Root       string
-	PolicyHash string
-	UpdatedAt  time.Time
-	ReadRoots  int
-	WriteRoots int
-	DenyRead   int
-	DenyWrite  int
-}
-
-func (r *setupRunner) workspaceSetupSnapshot() workspaceSetupSnapshot {
-	req := r.baseSetupRequest()
-	root := firstNonEmpty(req.Dir, r.cfg.CWD)
-	policy, policyHash, missingCaps, err := r.policyForRequestWithHashReadOnly(req)
-	out := workspaceSetupSnapshot{
-		Root:       root,
-		PolicyHash: policyHash,
-		ReadRoots:  len(policy.ReadRoots),
-		WriteRoots: len(policy.WriteRoots),
-		DenyRead:   len(policy.DenyReadPaths),
-		DenyWrite:  len(policy.DenyWritePaths),
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	if record, readErr := setupstate.ReadWorkspace(dirs.WorkspacePath); readErr == nil {
-		out.UpdatedAt = record.UpdatedAt
-	}
-	if err != nil {
-		out.Reason = err.Error()
-		return out
-	}
-	if policy.FullAccess || len(policy.WriteRoots) == 0 {
-		out.Current = true
-		return out
-	}
-	if len(missingCaps) > 0 {
-		out.Reason = "workspace capability SIDs are missing"
-		return out
-	}
-	record, readErr := setupstate.ReadWorkspace(dirs.WorkspacePath)
-	if readErr != nil {
-		if os.IsNotExist(readErr) {
-			out.Reason = "workspace setup state missing"
-		} else {
-			out.Reason = readErr.Error()
-		}
-		return out
-	}
-	out.UpdatedAt = record.UpdatedAt
-	if strings.TrimSpace(record.PolicyHash) != strings.TrimSpace(policyHash) {
-		out.Reason = "workspace policy changed"
-		return out
-	}
-	if pathutil.Key(record.WorkspaceRoot) != "" && pathutil.Key(root) != "" && pathutil.Key(record.WorkspaceRoot) != pathutil.Key(root) {
-		out.Reason = "workspace root changed"
-		return out
-	}
-	if record.SetupVersion != 0 && record.SetupVersion != setup.PayloadVersion {
-		out.Reason = "workspace setup version changed"
-		return out
-	}
-	if strings.TrimSpace(record.OfflineUsername) == "" {
-		out.Reason = "offline sandbox user missing"
-		return out
-	}
-	if !strings.EqualFold(record.OfflineUsername, setupOfflineUser(r.stateRoot)) {
-		out.Reason = "offline sandbox user changed"
-		return out
-	}
-	if strings.TrimSpace(record.OnlineUsername) == "" {
-		out.Reason = "online sandbox user missing"
-		return out
-	}
-	if !strings.EqualFold(record.OnlineUsername, setupOnlineUser(r.stateRoot)) {
-		out.Reason = "online sandbox user changed"
-		return out
-	}
-	results, err := setup.CheckSynchronousPolicyACLs(policy, setupOfflineUser(r.stateRoot), setupOnlineUser(r.stateRoot))
-	if err != nil {
-		out.Reason = err.Error()
-		return out
-	}
-	for _, result := range results {
-		if result.Current {
-			continue
-		}
-		reason := strings.TrimSpace(result.Reason)
-		if reason == "" {
-			reason = "ACL entries missing"
-		}
-		if path := strings.TrimSpace(result.Path); path != "" {
-			reason = path + ": " + reason
-		}
-		out.Reason = reason
-		return out
-	}
-	out.Current = true
-	return out
-}
-
-func (r *setupRunner) freshnessForPayload(payload setup.Payload) setupstate.Freshness {
-	marker, err := setupstate.ReadMarker(setupstate.NewDirs(r.stateRoot).MarkerPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return setupstate.Freshness{Reason: "setup marker missing"}
-		}
-		return setupstate.Freshness{Reason: err.Error()}
-	}
-	freshness := setupstate.CheckFreshness(marker, setupstate.Expectation{
-		Version:         payload.Version,
-		PolicyHash:      payload.GlobalPolicyHash,
-		OfflineUsername: payload.OfflineUsername,
-		OnlineUsername:  payload.OnlineUsername,
-		OwnerUsername:   payload.OwnerUsername,
-	})
-	if !freshness.Current {
-		return freshness
-	}
-	if !policyWriteRootCapabilitiesCurrent(payload.GlobalPolicy) {
-		return setupstate.Freshness{Reason: "global capability SIDs are missing"}
-	}
-	return freshness
-}
-
-func (r *setupRunner) globalSetupPayload() (setup.Payload, error) {
-	policy, err := r.globalSetupPolicy(false)
-	if err != nil {
-		return setup.Payload{}, err
-	}
-	policyHash, err := stablePolicyHash(policy)
-	if err != nil {
-		return setup.Payload{}, err
-	}
-	runnerHash, err := r.cachedExecutableHash()
-	if err != nil {
-		return setup.Payload{}, err
-	}
-	payload := setup.Payload{
-		Version:          setup.PayloadVersion,
-		Kind:             setup.SetupKindFull,
-		StateRoot:        r.stateRoot,
-		RunnerHash:       runnerHash,
-		PolicyHash:       policyHash,
-		GlobalPolicyHash: policyHash,
-		GlobalPolicy:     policy,
-		Policy:           policy,
-		OfflineUsername:  setupOfflineUser(r.stateRoot),
-		OnlineUsername:   setupOnlineUser(r.stateRoot),
-		OwnerUsername:    currentWindowsUser(),
-	}.Normalize()
-	return payload, nil
-}
-
-func (r *setupRunner) setupPayload(req runnerruntime.Request, kind setup.SetupKind) (setup.Payload, setupstate.Freshness, error) {
-	if kind == "" {
-		kind = setup.SetupKindFull
-	}
-	globalPayload, err := r.globalSetupPayload()
-	if err != nil {
-		return setup.Payload{}, setupstate.Freshness{}, err
-	}
-	globalPolicy := globalPayload.GlobalPolicy
-	if kind == setup.SetupKindFull {
-		globalPolicy, err = r.globalSetupPolicy(true)
+		return workspacePolicy{}, err
+	}
+	r.ensureMu.Lock()
+	defer r.ensureMu.Unlock()
+	if err := os.MkdirAll(r.sandboxStateDir(), 0o700); err != nil {
+		return workspacePolicy{}, err
+	}
+	manifest, manifestErr := r.readManifest()
+	if manifestErr == nil && manifestFresh(manifest, policy) {
+		missing, err := r.missingACLEntries(policy)
 		if err != nil {
-			return setup.Payload{}, setupstate.Freshness{}, err
+			return workspacePolicy{}, err
+		}
+		if len(missing) == 0 {
+			return policy, nil
 		}
 	}
-	policy, workspacePolicyHash, err := r.policyForRequestWithHash(req)
-	if err != nil {
-		return setup.Payload{}, setupstate.Freshness{}, err
+	if manifestErr == nil {
+		r.cleanupStaleManifestACLs(manifest, policy)
 	}
-	if kind == setup.SetupKindRuntimeRefresh {
-		policy = runtimeRefreshDeltaPolicy(policy, globalPolicy)
+	if err := r.applyPolicyACLs(policy); err != nil {
+		return workspacePolicy{}, err
 	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	payload := setup.Payload{
-		Version:             setup.PayloadVersion,
-		Kind:                kind,
-		StateRoot:           r.stateRoot,
-		RunnerHash:          globalPayload.RunnerHash,
-		PolicyHash:          globalPayload.GlobalPolicyHash,
-		GlobalPolicyHash:    globalPayload.GlobalPolicyHash,
-		WorkspacePolicyHash: workspacePolicyHash,
-		GlobalPolicy:        globalPolicy,
-		Policy:              policy,
-		OfflineUsername:     globalPayload.OfflineUsername,
-		OnlineUsername:      globalPayload.OnlineUsername,
-		OwnerUsername:       globalPayload.OwnerUsername,
-		WorkspaceRoot:       firstNonEmpty(req.Dir, r.cfg.CWD),
-		WorkspaceStatePath:  dirs.WorkspacePath,
-		RefreshOnly:         kind == setup.SetupKindRuntimeRefresh,
-	}.Normalize()
-	return payload, setupstate.Freshness{}, nil
-}
-
-func (r *setupRunner) globalSetupPolicy(bindCapabilities bool) (winpolicy.Policy, error) {
-	policy := winpolicy.CommonGlobalPolicy(globalSetupWriteRoots())
-	if len(policy.WriteRoots) == 0 {
-		return policy, nil
+	if err := r.writeManifest(policy); err != nil {
+		return workspacePolicy{}, err
 	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	var (
-		binding capability.Binding
-		err     error
-	)
-	if bindCapabilities {
-		binding, err = capability.BindWriteRoots(dirs.CapPath, "", policy.WriteRoots)
-	} else {
-		binding, err = capability.LookupWriteRoots(dirs.CapPath, "", policy.WriteRoots)
-	}
-	if err != nil {
-		return winpolicy.Policy{}, fmt.Errorf("impl/sandbox/windows: bind global capability SIDs: %w", err)
-	}
-	policy.CapabilitySIDs = binding.AllSIDs
-	policy.WriteRootCapabilitySIDs = binding.WriteRootTo
 	return policy, nil
 }
 
-func globalSetupWriteRoots() []string {
+func (r *runtime) policyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
+	return r.policyForRequestWithBinding(req, true)
+}
+
+func (r *runtime) inspectPolicyForRequest(req sandbox.CommandRequest) (workspacePolicy, error) {
+	return r.policyForRequestWithBinding(req, false)
+}
+
+func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, createSIDs bool) (workspacePolicy, error) {
+	constraints := sandbox.EffectiveConstraints(req)
+	if constraints.Permission == "" || constraints.Permission == sandbox.PermissionDefault {
+		constraints.Permission = sandbox.PermissionWorkspaceWrite
+	}
+	if constraints.Permission != sandbox.PermissionWorkspaceWrite {
+		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: permission mode %q is unsupported by the Windows workspace-write sandbox", constraints.Permission)
+	}
+	base := firstNonEmpty(req.Dir, r.cfg.CWD)
+	workspaceRoot, err := pathutil.NormalizeWithBase("", r.cfg.CWD)
+	if err != nil {
+		return workspacePolicy{}, err
+	}
+	commandDir, err := pathutil.NormalizeWithBase(workspaceRoot, base)
+	if err != nil {
+		return workspacePolicy{}, err
+	}
+	userWriteRoots := []string{workspaceRoot, commandDir}
+	for _, root := range r.cfg.WritableRoots {
+		if normalized, err := pathutil.NormalizeWithBase(workspaceRoot, root); err == nil && normalized != "" {
+			userWriteRoots = append(userWriteRoots, normalized)
+		}
+	}
+	for _, rule := range constraints.PathRules {
+		if rule.Access != sandbox.PathAccessReadWrite {
+			continue
+		}
+		if normalized, err := pathutil.NormalizeWithBase(commandDir, rule.Path); err == nil && normalized != "" {
+			userWriteRoots = append(userWriteRoots, normalized)
+		}
+	}
+	userWriteRoots = pathutil.Dedupe(userWriteRoots)
+	envRoot, err := r.prepareSandboxEnvRoot(workspaceRoot, createSIDs)
+	if err != nil {
+		return workspacePolicy{}, err
+	}
+	writeRoots := append([]string(nil), userWriteRoots...)
+	if envRoot != "" {
+		writeRoots = append(writeRoots, envRoot)
+	}
+	writeRoots = pathutil.Dedupe(writeRoots)
+	writeRoots, err = existingWritableRoots(writeRoots)
+	if err != nil {
+		return workspacePolicy{}, err
+	}
+	if len(writeRoots) == 0 {
+		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: at least one writable root is required")
+	}
+	userWriteRoots, err = existingWritableRoots(userWriteRoots)
+	if err != nil {
+		return workspacePolicy{}, err
+	}
+	var denyWrite []string
+	for _, root := range userWriteRoots {
+		denyWrite = append(denyWrite, existingControlDirs(root)...)
+		for _, subpath := range r.cfg.ReadOnlySubpaths {
+			subpath = strings.TrimSpace(subpath)
+			if subpath == "" {
+				continue
+			}
+			path := filepath.Join(root, subpath)
+			if _, err := os.Stat(path); err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
+			}
+			denyWrite = append(denyWrite, path)
+		}
+	}
+	denyWrite = pathutil.Dedupe(denyWrite)
+	hash, err := hashJSON(struct {
+		WorkspaceRoot  string   `json:"workspace_root,omitempty"`
+		CommandDir     string   `json:"command_dir,omitempty"`
+		SandboxEnvRoot string   `json:"sandbox_env_root,omitempty"`
+		WriteRoots     []string `json:"write_roots,omitempty"`
+		DenyWritePaths []string `json:"deny_write_paths,omitempty"`
+	}{
+		WorkspaceRoot:  workspaceRoot,
+		CommandDir:     commandDir,
+		SandboxEnvRoot: envRoot,
+		WriteRoots:     writeRoots,
+		DenyWritePaths: denyWrite,
+	})
+	if err != nil {
+		return workspacePolicy{}, err
+	}
+	var binding capability.Binding
+	if createSIDs {
+		binding, err = capability.BindWriteRoots(r.capabilityStorePath(), workspaceRoot, writeRoots)
+	} else {
+		binding, err = capability.LookupWriteRoots(r.capabilityStorePath(), workspaceRoot, writeRoots)
+	}
+	if err != nil {
+		return workspacePolicy{}, fmt.Errorf("impl/sandbox/windows: bind write capability SIDs: %w", err)
+	}
+	return workspacePolicy{
+		WorkspaceRoot:           workspaceRoot,
+		CommandDir:              commandDir,
+		SandboxEnvRoot:          envRoot,
+		WriteRoots:              writeRoots,
+		DenyWritePaths:          denyWrite,
+		PolicyHash:              hash,
+		CapabilitySIDs:          append([]string(nil), binding.AllSIDs...),
+		WriteRootCapabilitySIDs: cloneStringMap(binding.WriteRootTo),
+	}, nil
+}
+
+func existingWritableRoots(roots []string) ([]string, error) {
+	out := make([]string, 0, len(roots))
+	for _, root := range roots {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			continue
+		}
+		info, err := os.Stat(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
+		}
+		out = append(out, root)
+	}
+	return pathutil.Dedupe(out), nil
+}
+
+func (r *runtime) prepareSandboxEnvRoot(workspaceRoot string, create bool) (string, error) {
+	root := r.sandboxEnvRoot(workspaceRoot)
+	if root == "" {
+		return "", nil
+	}
+	if create {
+		for _, dir := range sandboxEnvDirs(root) {
+			if err := os.MkdirAll(dir, 0o700); err != nil {
+				return "", fmt.Errorf("impl/sandbox/windows: prepare sandbox environment directory %s: %w", dir, err)
+			}
+		}
+	}
+	return root, nil
+}
+
+func sandboxEnvDirs(envRoot string) []string {
+	envRoot = pathutil.Normalize(envRoot)
+	if envRoot == "" {
+		return nil
+	}
+	homeRoot := filepath.Join(envRoot, "home")
+	localAppData := filepath.Join(homeRoot, "AppData", "Local")
+	roamingAppData := filepath.Join(homeRoot, "AppData", "Roaming")
+	psCacheDir := filepath.Join(localAppData, "Microsoft", "Windows", "PowerShell", "CommandAnalysis")
+	return pathutil.Dedupe([]string{
+		envRoot,
+		filepath.Join(envRoot, "tmp"),
+		homeRoot,
+		localAppData,
+		roamingAppData,
+		psCacheDir,
+		sandboxPythonSiteDir(envRoot),
+	})
+}
+
+func sandboxPythonSiteDir(envRoot string) string {
+	envRoot = pathutil.Normalize(envRoot)
+	if envRoot == "" {
+		return ""
+	}
+	return filepath.Join(envRoot, "python-site")
+}
+
+func (r *runtime) missingACLEntries(policy workspacePolicy) ([]acl.Entry, error) {
+	var missing []acl.Entry
+	for _, root := range policy.WriteRoots {
+		entries := allowEntries(policy.sidForWriteRoot(root))
+		info, err := os.Stat(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		if !info.IsDir() {
+			return nil, fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
+		}
+		rootMissing, err := acl.MissingFileDACLEntries(root, entries...)
+		if err != nil {
+			return nil, err
+		}
+		missing = append(missing, rootMissing...)
+	}
+	envSID := policy.sidForWriteRoot(policy.SandboxEnvRoot)
+	if envSID != "" {
+		for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
+			if pathListContains(policy.WriteRoots, path) {
+				continue
+			}
+			entries := allowEntries(envSID)
+			info, err := os.Stat(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return nil, err
+			}
+			if !info.IsDir() {
+				return nil, fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
+			}
+			pathMissing, err := acl.MissingFileDACLEntries(path, entries...)
+			if err != nil {
+				return nil, err
+			}
+			missing = append(missing, pathMissing...)
+		}
+	}
+	for _, path := range policy.DenyWritePaths {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		entries := denyEntries(policy.CapabilitySIDs)
+		pathMissing, err := acl.MissingFileDACLEntries(path, entries...)
+		if err != nil {
+			return nil, err
+		}
+		missing = append(missing, pathMissing...)
+	}
+	return missing, nil
+}
+
+func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
+	for _, root := range policy.WriteRoots {
+		info, err := os.Stat(root)
+		if err != nil {
+			if !os.IsNotExist(err) {
+				return fmt.Errorf("impl/sandbox/windows: inspect writable root %s: %w", root, err)
+			}
+			continue
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
+		}
+		if err := acl.ModifyFileDACL(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
+			return fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, err)
+		}
+	}
+	envSID := policy.sidForWriteRoot(policy.SandboxEnvRoot)
+	if envSID != "" {
+		for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
+			if pathListContains(policy.WriteRoots, path) {
+				continue
+			}
+			info, err := os.Stat(path)
+			if err != nil {
+				if os.IsNotExist(err) {
+					continue
+				}
+				return fmt.Errorf("impl/sandbox/windows: inspect sandbox environment path %s: %w", path, err)
+			}
+			if !info.IsDir() {
+				return fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
+			}
+			if err := acl.ModifyFileDACL(path, allowEntries(envSID)...); err != nil {
+				return fmt.Errorf("impl/sandbox/windows: apply sandbox environment ACL %s: %w", path, err)
+			}
+		}
+	}
+	for _, path := range policy.DenyWritePaths {
+		if _, err := os.Stat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
+		}
+		if err := acl.ModifyFileDACL(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
+			return fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, err)
+		}
+	}
 	return nil
 }
 
-func runtimeRefreshDeltaPolicy(policy winpolicy.Policy, global winpolicy.Policy) winpolicy.Policy {
-	out := policy
-	globalReadCoverage := append([]string{}, global.ReadRoots...)
-	globalReadCoverage = append(globalReadCoverage, global.WriteRoots...)
-	out.ReadRoots = filterPolicyPathsOutsideRoots(policy.ReadRoots, globalReadCoverage)
-	out.WriteRoots = filterPolicyPathsOutsideRoots(policy.WriteRoots, global.WriteRoots)
-	out.DenyReadPaths = filterPolicyPathsOutsideRoots(policy.DenyReadPaths, global.DenyReadPaths)
-	out.DenyWritePaths = filterPolicyPathsOutsideRoots(policy.DenyWritePaths, global.DenyWritePaths)
-	out.MaterializeDenyWritePaths = filterPolicyPathsOutsideRoots(policy.MaterializeDenyWritePaths, global.DenyWritePaths)
-	if len(policy.WriteRootCapabilitySIDs) > 0 {
-		remaining := map[string]struct{}{}
-		for _, root := range out.WriteRoots {
-			if key := pathutil.Key(root); key != "" {
-				remaining[key] = struct{}{}
-			}
-		}
-		out.WriteRootCapabilitySIDs = map[string]string{}
-		for root, sid := range policy.WriteRootCapabilitySIDs {
-			if _, ok := remaining[pathutil.Key(root)]; ok {
-				out.WriteRootCapabilitySIDs[root] = sid
-			}
-		}
-		if len(out.WriteRootCapabilitySIDs) == 0 {
-			out.WriteRootCapabilitySIDs = nil
-		}
-	}
-	return out
-}
-
-func filterPolicyPathsOutsideRoots(paths []string, roots []string) []string {
-	paths = pathutil.Dedupe(paths)
-	if len(paths) == 0 || len(roots) == 0 {
-		return paths
-	}
-	var out []string
-	for _, path := range paths {
-		if !pathCoveredByAnyRoot(path, roots) {
-			out = append(out, path)
-		}
-	}
-	return out
-}
-
-func pathCoveredByAnyRoot(path string, roots []string) bool {
-	for _, root := range roots {
-		if pathutil.IsUnder(path, root) {
-			return true
-		}
-	}
-	return false
-}
-
-func runtimePolicyHasACLTargets(policy winpolicy.Policy) bool {
-	return len(policy.ReadRoots) > 0 ||
-		len(policy.WriteRoots) > 0 ||
-		len(policy.DenyReadPaths) > 0 ||
-		len(policy.DenyWritePaths) > 0
-}
-
-func policyWriteRootCapabilitiesCurrent(policy winpolicy.Policy) bool {
-	for _, root := range policy.WriteRoots {
-		if strings.TrimSpace(policyWriteRootCapabilitySID(policy, root)) == "" {
-			return false
-		}
-	}
-	return true
-}
-
-func policyWriteRootCapabilitySID(policy winpolicy.Policy, root string) string {
-	if len(policy.WriteRootCapabilitySIDs) == 0 {
-		return ""
-	}
-	if sid := strings.TrimSpace(policy.WriteRootCapabilitySIDs[pathutil.Normalize(root)]); sid != "" {
-		return sid
-	}
-	rootKey := pathutil.Key(root)
-	for candidate, sid := range policy.WriteRootCapabilitySIDs {
-		if pathutil.Key(candidate) == rootKey {
+func (p workspacePolicy) sidForWriteRoot(root string) string {
+	key := pathutil.Key(root)
+	for candidate, sid := range p.WriteRootCapabilitySIDs {
+		if pathutil.Key(candidate) == key {
 			return strings.TrimSpace(sid)
 		}
 	}
 	return ""
 }
 
-func setupOfflineUser(stateRoot string) string {
-	return "CaelisSbxOff" + stateRootHash(stateRoot)
-}
-
-func setupOnlineUser(stateRoot string) string {
-	return "CaelisSbxOn" + stateRootHash(stateRoot)
-}
-
-func stateRootHash(stateRoot string) string {
-	normalized := strings.ToLower(strings.TrimSpace(filepath.Clean(stateRoot)))
-	sum := sha256.Sum256([]byte(normalized))
-	return hex.EncodeToString(sum[:])[:8]
-}
-
-func (r *setupRunner) baseSetupRequest() runnerruntime.Request {
-	return runnerruntime.Request{
-		Dir: r.cfg.CWD,
-		Constraints: sandbox.Constraints{
-			Route:      sandbox.RouteSandbox,
-			Backend:    sandbox.BackendWindowsElevated,
-			Permission: sandbox.PermissionWorkspaceWrite,
-			Network:    sandbox.NetworkDisabled,
-		},
+func allowEntries(sid string) []acl.Entry {
+	sid = strings.TrimSpace(sid)
+	if sid == "" {
+		return nil
 	}
+	return []acl.Entry{{
+		Principal: sid,
+		Rights:    acl.Modify,
+		Mode:      acl.Grant,
+		Inherit:   true,
+	}}
 }
 
-func (r *setupRunner) helperExecutablePath(runnerruntime.Request) (string, error) {
-	path, _, err := r.materializeRunnerHelper()
-	return path, err
+func denyEntries(sids []string) []acl.Entry {
+	entries := make([]acl.Entry, 0, len(sids))
+	for _, sid := range sids {
+		sid = strings.TrimSpace(sid)
+		if sid == "" {
+			continue
+		}
+		entries = append(entries, acl.Entry{
+			Principal: sid,
+			Rights:    acl.Write,
+			Mode:      acl.Deny,
+			Inherit:   true,
+		})
+	}
+	return entries
 }
 
-func (r *setupRunner) prepareCommandRunnerHelper(ctx context.Context, progress sandbox.PrepareProgress) error {
-	if err := ctx.Err(); err != nil {
+func (r *runtime) readManifest() (workspaceManifest, error) {
+	data, err := os.ReadFile(r.manifestPath())
+	if err != nil {
+		return workspaceManifest{}, err
+	}
+	var manifest workspaceManifest
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		return workspaceManifest{}, err
+	}
+	return normalizeManifest(manifest), nil
+}
+
+func (r *runtime) writeManifest(policy workspacePolicy) error {
+	manifest := workspaceManifest{
+		Version:                 workspaceManifestVersion,
+		WorkspaceRoot:           policy.WorkspaceRoot,
+		SandboxEnvRoot:          policy.SandboxEnvRoot,
+		PolicyHash:              policy.PolicyHash,
+		CapabilitySIDs:          append([]string(nil), policy.CapabilitySIDs...),
+		WriteRoots:              append([]string(nil), policy.WriteRoots...),
+		DenyWritePaths:          append([]string(nil), policy.DenyWritePaths...),
+		WriteRootCapabilitySIDs: cloneStringMap(policy.WriteRootCapabilitySIDs),
+		ACEs:                    manifestACEs(policy),
+		UpdatedAt:               time.Now().UTC(),
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
 		return err
 	}
-	if strings.TrimSpace(progress.Message) == "" {
-		progress = sandbox.PrepareProgress{Phase: "helper", Message: "materializing command runner helper executable"}
+	path := r.manifestPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
 	}
-	sandbox.ReportPrepareProgress(ctx, progress)
-	_, _, err := r.materializeRunnerHelper()
-	return err
-}
-
-func (r *setupRunner) materializeHelper() (string, string, error) {
-	source := strings.TrimSpace(r.executable)
-	if dedicated := siblingSetupHelper(source); dedicated != "" {
-		source = dedicated
-	}
-	return r.materializeHelperFromSource(source, "caelis-windows-sandbox-")
-}
-
-func (r *setupRunner) materializeRunnerHelper() (string, string, error) {
-	source := strings.TrimSpace(r.executable)
-	if dedicated := siblingRunnerHelper(source); dedicated != "" {
-		source = dedicated
-	}
-	return r.materializeHelperFromSource(source, "caelis-command-runner-")
-}
-
-func (r *setupRunner) materializeHelperFromSource(source string, prefix string) (string, string, error) {
-	source = strings.TrimSpace(source)
-	if source == "" {
-		return "", "", fmt.Errorf("impl/sandbox/windows: helper executable path is required")
-	}
-	cacheKey := helperPathCacheKey(source, prefix)
-	if cached, ok := r.cachedHelperPath(cacheKey); ok {
-		return cached.path, cached.hash, nil
-	}
-	hash, err := r.helperSourceHash(source)
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".workspace_write.*.tmp")
 	if err != nil {
-		return "", "", err
-	}
-	shortHash := hash
-	if len(shortHash) > 16 {
-		shortHash = shortHash[:16]
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	target := filepath.Join(dirs.Bin, prefix+shortHash+".exe")
-	if strings.EqualFold(source, target) {
-		r.markHelperPathCached(cacheKey, source, hash)
-		return source, hash, nil
-	}
-	if helperFileFresh(source, target) {
-		r.markHelperPathCached(cacheKey, target, hash)
-		return target, hash, nil
-	}
-	r.helperMu.Lock()
-	defer r.helperMu.Unlock()
-	if cached, ok := r.cachedHelperPathLocked(cacheKey); ok {
-		return cached.path, cached.hash, nil
-	}
-	if helperFileFresh(source, target) {
-		r.markHelperPathCachedLocked(cacheKey, target, hash)
-		return target, hash, nil
-	}
-	if err := os.MkdirAll(dirs.Bin, 0o700); err != nil {
-		return "", "", err
-	}
-	tmp, err := os.CreateTemp(dirs.Bin, ".caelis-helper-*.tmp")
-	if err != nil {
-		return "", "", err
+		return err
 	}
 	tmpPath := tmp.Name()
 	committed := false
@@ -1646,321 +929,752 @@ func (r *setupRunner) materializeHelperFromSource(source string, prefix string) 
 			_ = os.Remove(tmpPath)
 		}
 	}()
-	src, err := os.Open(source)
-	if err != nil {
+	if _, err := tmp.Write(data); err != nil {
 		_ = tmp.Close()
-		return "", "", err
-	}
-	if _, err := io.Copy(tmp, src); err != nil {
-		_ = src.Close()
-		_ = tmp.Close()
-		return "", "", err
-	}
-	if err := src.Close(); err != nil {
-		_ = tmp.Close()
-		return "", "", err
+		return err
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return "", "", err
+		return err
 	}
 	if err := tmp.Close(); err != nil {
-		return "", "", err
+		return err
 	}
-	committedPath, err := commitHelperTemp(tmpPath, target, hash)
-	if err != nil {
-		return "", "", err
+	if err := os.Rename(tmpPath, path); err != nil {
+		return err
 	}
 	committed = true
-	r.markHelperPathCachedLocked(cacheKey, committedPath, hash)
-	return committedPath, hash, nil
+	return nil
 }
 
-func (r *setupRunner) helperSourceHash(source string) (string, error) {
-	if strings.EqualFold(strings.TrimSpace(source), strings.TrimSpace(r.executable)) {
-		return r.cachedExecutableHash()
+func normalizeManifest(in workspaceManifest) workspaceManifest {
+	in.WorkspaceRoot = pathutil.Normalize(in.WorkspaceRoot)
+	in.SandboxEnvRoot = pathutil.Normalize(in.SandboxEnvRoot)
+	in.WriteRoots = pathutil.Dedupe(in.WriteRoots)
+	in.DenyWritePaths = pathutil.Dedupe(in.DenyWritePaths)
+	in.CapabilitySIDs = dedupeStrings(in.CapabilitySIDs)
+	if len(in.WriteRootCapabilitySIDs) > 0 {
+		out := map[string]string{}
+		for root, sid := range in.WriteRootCapabilitySIDs {
+			root = pathutil.Normalize(root)
+			sid = strings.TrimSpace(sid)
+			if root != "" && sid != "" {
+				out[root] = sid
+			}
+		}
+		in.WriteRootCapabilitySIDs = out
 	}
-	return fileHash(source)
+	return in
 }
 
-func helperPathCacheKey(source string, prefix string) string {
-	return strings.ToLower(filepath.Clean(strings.TrimSpace(source))) + "\x00" + strings.TrimSpace(prefix)
-}
-
-func (r *setupRunner) cachedHelperPath(key string) (cachedHelperPath, bool) {
-	r.helperMu.Lock()
-	defer r.helperMu.Unlock()
-	if r.helperPathCache == nil {
-		return cachedHelperPath{}, false
+func manifestFresh(manifest workspaceManifest, policy workspacePolicy) bool {
+	if manifest.Version != workspaceManifestVersion {
+		return false
 	}
-	return r.cachedHelperPathLocked(key)
-}
-
-func (r *setupRunner) cachedHelperPathLocked(key string) (cachedHelperPath, bool) {
-	if r.helperPathCache == nil {
-		return cachedHelperPath{}, false
+	if manifest.PolicyHash != policy.PolicyHash {
+		return false
 	}
-	cached, ok := r.helperPathCache[key]
-	return cached, ok && strings.TrimSpace(cached.path) != "" && strings.TrimSpace(cached.hash) != ""
+	if pathutil.Key(manifest.WorkspaceRoot) != pathutil.Key(policy.WorkspaceRoot) {
+		return false
+	}
+	if pathutil.Key(manifest.SandboxEnvRoot) != pathutil.Key(policy.SandboxEnvRoot) {
+		return false
+	}
+	if !sameStringSet(manifest.CapabilitySIDs, policy.CapabilitySIDs) {
+		return false
+	}
+	if !samePathSet(manifest.WriteRoots, policy.WriteRoots) || !samePathSet(manifest.DenyWritePaths, policy.DenyWritePaths) {
+		return false
+	}
+	return sameRootSIDMap(manifest.WriteRootCapabilitySIDs, policy.WriteRootCapabilitySIDs)
 }
 
-func (r *setupRunner) markHelperPathCached(key string, path string, hash string) {
-	r.helperMu.Lock()
-	defer r.helperMu.Unlock()
-	r.markHelperPathCachedLocked(key, path, hash)
+func manifestACEs(policy workspacePolicy) []manifestACE {
+	var out []manifestACE
+	for _, root := range policy.WriteRoots {
+		if sid := policy.sidForWriteRoot(root); sid != "" {
+			out = append(out, manifestACE{Path: root, Principal: sid, Mode: string(acl.Grant), Rights: string(acl.Modify), Inherit: true})
+		}
+	}
+	if envSID := policy.sidForWriteRoot(policy.SandboxEnvRoot); envSID != "" {
+		for _, path := range sandboxEnvDirs(policy.SandboxEnvRoot) {
+			if pathListContains(policy.WriteRoots, path) {
+				continue
+			}
+			out = append(out, manifestACE{Path: path, Principal: envSID, Mode: string(acl.Grant), Rights: string(acl.Modify), Inherit: true})
+		}
+	}
+	for _, path := range policy.DenyWritePaths {
+		for _, sid := range policy.CapabilitySIDs {
+			if strings.TrimSpace(sid) != "" {
+				out = append(out, manifestACE{Path: path, Principal: sid, Mode: string(acl.Deny), Rights: string(acl.Write), Inherit: true})
+			}
+		}
+	}
+	return out
 }
 
-func (r *setupRunner) markHelperPathCachedLocked(key string, path string, hash string) {
+func (r *runtime) cleanupStaleManifestACLs(manifest workspaceManifest, policy workspacePolicy) {
+	currentPaths := map[string]struct{}{}
+	grantPaths := append([]string{}, policy.WriteRoots...)
+	grantPaths = append(grantPaths, sandboxEnvDirs(policy.SandboxEnvRoot)...)
+	for _, path := range append(grantPaths, policy.DenyWritePaths...) {
+		if key := pathutil.Key(path); key != "" {
+			currentPaths[key] = struct{}{}
+		}
+	}
+	currentSIDs := map[string]struct{}{}
+	for _, sid := range policy.CapabilitySIDs {
+		currentSIDs[strings.ToUpper(strings.TrimSpace(sid))] = struct{}{}
+	}
+	for _, ace := range manifest.ACEs {
+		path := strings.TrimSpace(ace.Path)
+		sid := strings.TrimSpace(ace.Principal)
+		if path == "" || sid == "" {
+			continue
+		}
+		if _, pathCurrent := currentPaths[pathutil.Key(path)]; pathCurrent {
+			if _, sidCurrent := currentSIDs[strings.ToUpper(sid)]; sidCurrent {
+				continue
+			}
+		}
+		if _, err := os.Stat(path); err == nil {
+			_ = acl.RemoveFileDACLPrincipals(path, sid)
+		}
+	}
+}
+
+func (r *runtime) workspaceSetupCheck() sandbox.SetupCheck {
+	check := sandbox.SetupCheck{
+		Name:     "workspace",
+		Scope:    sandbox.SetupScopeWorkspace,
+		Required: false,
+	}
+	policy, err := r.inspectPolicyForRequest(sandbox.CommandRequest{Dir: r.cfg.CWD, Constraints: r.Describe().DefaultConstraints})
+	if err != nil {
+		check.Reason = err.Error()
+		return check
+	}
+	check.Root = policy.WorkspaceRoot
+	check.Details = map[string]string{"policy_hash": policy.PolicyHash}
+	check.Counts = map[string]int{
+		"write_roots": len(policy.WriteRoots),
+		"deny_write":  len(policy.DenyWritePaths),
+	}
+	manifest, err := r.readManifest()
+	if err != nil {
+		check.Reason = "workspace ACL manifest will be prepared lazily"
+		return check
+	}
+	check.Current = manifestFresh(manifest, policy)
+	check.UpdatedAt = manifest.UpdatedAt
+	if !check.Current {
+		check.Reason = "workspace ACL manifest is stale and will be repaired lazily"
+	}
+	return check
+}
+
+type cleanupPlan struct {
+	ACLPaths        []string
+	Principals      []string
+	LegacyPaths     []string
+	LegacyProtected []string
+}
+
+func (r *runtime) cleanupPlan() cleanupPlan {
+	var plan cleanupPlan
+	if manifest, err := r.readManifest(); err == nil {
+		for _, ace := range manifest.ACEs {
+			plan.ACLPaths = append(plan.ACLPaths, ace.Path)
+			plan.Principals = append(plan.Principals, ace.Principal)
+		}
+	}
+	legacyRoots, legacyPrincipals := r.legacyACLArtifacts()
+	plan.ACLPaths = append(plan.ACLPaths, legacyRoots...)
+	plan.Principals = append(plan.Principals, legacyPrincipals...)
+	plan.ACLPaths = pathutil.Dedupe(plan.ACLPaths)
+	plan.Principals = dedupeStrings(plan.Principals)
+	plan.LegacyPaths = pathutil.Dedupe([]string{
+		r.manifestPath(),
+		r.capabilityStorePath(),
+		r.sandboxEnvBase(),
+		r.legacyWorkspaceSandboxEnvRoot(),
+		filepath.Join(r.sandboxStateDir(), "workspace_setup.json"),
+		filepath.Join(r.sandboxStateDir(), "setup_marker.json"),
+		filepath.Join(r.sandboxStateDir(), "setup_error.json"),
+		filepath.Join(r.sandboxStateDir(), "setup_progress.json"),
+		filepath.Join(r.stateRoot, ".sandbox-bin"),
+		filepath.Join(r.stateRoot, ".sandbox-secrets"),
+		filepath.Join(r.stateRoot, ".sandbox-reset"),
+	})
+	hash := stateRootHash(r.stateRoot)
+	plan.LegacyProtected = dedupeStrings(
+		[]string{
+			"local user CaelisSbxOff" + hash,
+			"local user CaelisSbxOn" + hash,
+			"local group CaelisSandboxUsers",
+			"Windows Firewall rules CaelisSandbox-*",
+		},
+	)
+	return plan
+}
+
+func (r *runtime) legacyACLArtifacts() ([]string, []string) {
+	var roots []string
+	var principals []string
+	type oldWorkspace struct {
+		WriteRoots              []string          `json:"write_roots"`
+		DenyWritePaths          []string          `json:"deny_write_paths"`
+		CapabilitySIDs          []string          `json:"capability_sids"`
+		WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids"`
+		OfflineUsername         string            `json:"offline_username"`
+		OnlineUsername          string            `json:"online_username"`
+	}
+	if data, err := os.ReadFile(filepath.Join(r.sandboxStateDir(), "workspace_setup.json")); err == nil {
+		var record oldWorkspace
+		if json.Unmarshal(data, &record) == nil {
+			roots = append(roots, record.WriteRoots...)
+			roots = append(roots, record.DenyWritePaths...)
+			principals = append(principals, record.CapabilitySIDs...)
+			for _, sid := range record.WriteRootCapabilitySIDs {
+				principals = append(principals, sid)
+			}
+			principals = append(principals, record.OfflineUsername, record.OnlineUsername, "CaelisSandboxUsers")
+		}
+	}
+	if data, err := os.ReadFile(r.capabilityStorePath()); err == nil {
+		var store capability.Store
+		if json.Unmarshal(data, &store) == nil {
+			for root, sid := range store.WorkspaceByCWD {
+				roots = append(roots, root)
+				principals = append(principals, sid)
+			}
+			for root, sid := range store.WritableRootByPath {
+				roots = append(roots, root)
+				principals = append(principals, sid)
+			}
+		}
+	}
+	return pathutil.Dedupe(roots), dedupeStrings(principals)
+}
+
+func (r *runtime) sandboxStateDir() string {
+	return filepath.Join(r.stateRoot, ".sandbox")
+}
+
+func (r *runtime) capabilityStorePath() string {
+	return filepath.Join(r.sandboxStateDir(), "cap_sids.json")
+}
+
+func (r *runtime) manifestPath() string {
+	return filepath.Join(r.sandboxStateDir(), "workspace_write_manifest.json")
+}
+
+func (r *runtime) sandboxEnvBase() string {
+	return filepath.Join(r.sandboxStateDir(), "env")
+}
+
+func (r *runtime) sandboxEnvRoot(workspaceRoot string) string {
+	workspace := pathutil.Normalize(workspaceRoot)
+	if workspace == "" {
+		workspace = pathutil.Normalize(r.cfg.CWD)
+	}
+	if workspace == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(pathutil.Key(workspace)))
+	return filepath.Join(r.sandboxEnvBase(), hex.EncodeToString(sum[:])[:16])
+}
+
+func (r *runtime) legacyWorkspaceSandboxEnvRoot() string {
+	workspace := pathutil.Normalize(r.cfg.CWD)
+	if workspace == "" {
+		return ""
+	}
+	return filepath.Join(workspace, ".caelis-sandbox")
+}
+
+type windowsSession struct {
+	ref      sandbox.SessionRef
+	terminal sandbox.TerminalRef
+
+	cmd    *exec.Cmd
+	job    *job.Object
+	stdin  io.WriteCloser
+	cancel context.CancelFunc
+	done   chan struct{}
+	wg     sync.WaitGroup
+
+	onOutput func(sandbox.OutputChunk)
+
+	mu            sync.RWMutex
+	stdout        []byte
+	stderr        []byte
+	stdoutTotal   int64
+	stderrTotal   int64
+	stdoutText    win32.ConsoleOutputDecoder
+	stderrText    win32.ConsoleOutputDecoder
+	running       bool
+	supportsInput bool
+	exitCode      int
+	waitErr       error
+	startedAt     time.Time
+	updatedAt     time.Time
+}
+
+func (s *windowsSession) Ref() sandbox.SessionRef {
+	return sandbox.CloneSessionRef(s.ref)
+}
+
+func (s *windowsSession) Terminal() sandbox.TerminalRef {
+	return sandbox.CloneTerminalRef(s.terminal)
+}
+
+func (s *windowsSession) WriteInput(_ context.Context, input []byte) error {
+	s.mu.RLock()
+	writer := s.stdin
+	running := s.running
+	s.mu.RUnlock()
+	if !running {
+		return fmt.Errorf("impl/sandbox/windows: session %q is not running", s.ref.SessionID)
+	}
+	if writer == nil {
+		return fmt.Errorf("impl/sandbox/windows: session %q does not accept stdin", s.ref.SessionID)
+	}
+	if len(input) == 0 {
+		return nil
+	}
+	_, err := writer.Write(input)
+	return err
+}
+
+func (s *windowsSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	stdout, newStdoutMarker = cappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
+	stderr, newStderrMarker = cappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
+	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
+}
+
+func (s *windowsSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return sandbox.CloneSessionStatus(sandbox.SessionStatus{
+		SessionRef:    s.ref,
+		Terminal:      s.terminal,
+		Running:       s.running,
+		SupportsInput: s.supportsInput,
+		ExitCode:      s.exitCode,
+		StartedAt:     s.startedAt,
+		UpdatedAt:     s.updatedAt,
+	}), nil
+}
+
+func (s *windowsSession) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
+	if timeout <= 0 {
+		return s.Status(ctx)
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return sandbox.SessionStatus{}, ctx.Err()
+	case <-s.done:
+		return s.Status(ctx)
+	case <-timer.C:
+		return s.Status(ctx)
+	}
+}
+
+func (s *windowsSession) Result(_ context.Context) (sandbox.CommandResult, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := sandbox.CommandResult{
+		Stdout:   string(s.stdout),
+		Stderr:   string(s.stderr),
+		ExitCode: s.exitCode,
+		Route:    sandbox.RouteSandbox,
+		Backend:  sandbox.BackendWindows,
+	}
+	if s.running {
+		return result, fmt.Errorf("impl/sandbox/windows: session %q is still running", s.ref.SessionID)
+	}
+	if s.waitErr != nil {
+		result.Error = s.waitErr.Error()
+	}
+	return result, s.waitErr
+}
+
+func (s *windowsSession) Terminate(_ context.Context) error {
+	s.mu.RLock()
+	cmd := s.cmd
+	jobObject := s.job
+	running := s.running
+	s.mu.RUnlock()
+	if !running {
+		return nil
+	}
+	s.cancel()
+	if jobObject != nil {
+		_ = jobObject.Terminate(1)
+		_ = jobObject.Close()
+	}
+	if cmd != nil && cmd.Process != nil {
+		return cmd.Process.Kill()
+	}
+	return nil
+}
+
+func (s *windowsSession) readStream(reader io.Reader, stream string) {
+	defer s.wg.Done()
+	if closer, ok := reader.(io.Closer); ok {
+		defer closer.Close()
+	}
+	buf := make([]byte, 8192)
+	for {
+		n, err := reader.Read(buf)
+		if n > 0 {
+			chunk := append([]byte(nil), buf[:n]...)
+			s.mu.Lock()
+			var decoded []byte
+			switch stream {
+			case "stderr":
+				decoded = s.stderrText.Decode(chunk)
+				s.stderr = appendCappedBytes(s.stderr, decoded, windowsOutputCap)
+				s.stderrTotal += int64(len(decoded))
+			default:
+				decoded = s.stdoutText.Decode(chunk)
+				s.stdout = appendCappedBytes(s.stdout, decoded, windowsOutputCap)
+				s.stdoutTotal += int64(len(decoded))
+			}
+			s.updatedAt = time.Now()
+			s.mu.Unlock()
+			if s.onOutput != nil && len(decoded) > 0 {
+				s.onOutput(sandbox.OutputChunk{Stream: stream, Text: string(decoded)})
+			}
+		}
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (s *windowsSession) waitForExit() {
+	err := s.cmd.Wait()
+	if s.job != nil {
+		_ = s.job.Close()
+	}
+	s.wg.Wait()
+	s.mu.Lock()
+	stdoutTail := s.stdoutText.Flush()
+	stderrTail := s.stderrText.Flush()
+	if len(stdoutTail) > 0 {
+		s.stdout = appendCappedBytes(s.stdout, stdoutTail, windowsOutputCap)
+		s.stdoutTotal += int64(len(stdoutTail))
+	}
+	if len(stderrTail) > 0 {
+		s.stderr = appendCappedBytes(s.stderr, stderrTail, windowsOutputCap)
+		s.stderrTotal += int64(len(stderrTail))
+	}
+	if s.stdin != nil {
+		_ = s.stdin.Close()
+		s.stdin = nil
+	}
+	if s.cmd.ProcessState != nil {
+		s.exitCode = s.cmd.ProcessState.ExitCode()
+	}
+	s.running = false
+	s.updatedAt = time.Now()
+	s.waitErr = err
+	close(s.done)
+	s.mu.Unlock()
+	if s.onOutput != nil {
+		if len(stdoutTail) > 0 {
+			s.onOutput(sandbox.OutputChunk{Stream: "stdout", Text: string(stdoutTail)})
+		}
+		if len(stderrTail) > 0 {
+			s.onOutput(sandbox.OutputChunk{Stream: "stderr", Text: string(stderrTail)})
+		}
+	}
+}
+
+type cappedOutputBuffer struct {
+	mu      sync.Mutex
+	max     int
+	buf     []byte
+	decoder win32.ConsoleOutputDecoder
+	flushed bool
+}
+
+func (b *cappedOutputBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	decoded := b.decoder.Decode(p)
+	if len(decoded) > 0 {
+		b.buf = appendCappedBytes(b.buf, decoded, b.max)
+	}
+	return len(p), nil
+}
+
+func (b *cappedOutputBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.flushed {
+		if tail := b.decoder.Flush(); len(tail) > 0 {
+			b.buf = appendCappedBytes(b.buf, tail, b.max)
+		}
+		b.flushed = true
+	}
+	return string(b.buf)
+}
+
+func appendCappedBytes(dst []byte, src []byte, max int) []byte {
+	if max <= 0 {
+		return append(dst, src...)
+	}
+	if len(src) >= max {
+		return append([]byte(nil), src[len(src)-max:]...)
+	}
+	keep := max - len(src)
+	if len(dst) > keep {
+		dst = dst[len(dst)-keep:]
+	}
+	out := append([]byte(nil), dst...)
+	return append(out, src...)
+}
+
+func cappedOutputSince(buf []byte, total int64, marker int64) ([]byte, int64) {
+	if total < 0 {
+		total = 0
+	}
+	base := total - int64(len(buf))
+	if base < 0 {
+		base = 0
+	}
+	if marker < base {
+		marker = base
+	}
+	if marker > total {
+		marker = total
+	}
+	start := marker - base
+	if start < 0 {
+		start = 0
+	}
+	if start > int64(len(buf)) {
+		start = int64(len(buf))
+	}
+	return append([]byte(nil), buf[start:]...), total
+}
+
+func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]string, error) {
+	envRoot := strings.TrimSpace(policy.SandboxEnvRoot)
+	if envRoot == "" {
+		return nil, fmt.Errorf("impl/sandbox/windows: sandbox environment root is required")
+	}
+	tempRoot := filepath.Join(envRoot, "tmp")
+	homeRoot := filepath.Join(envRoot, "home")
+	localAppData := filepath.Join(homeRoot, "AppData", "Local")
+	roamingAppData := filepath.Join(homeRoot, "AppData", "Roaming")
+	psCacheDir := filepath.Join(localAppData, "Microsoft", "Windows", "PowerShell", "CommandAnalysis")
+	pythonSiteDir := sandboxPythonSiteDir(envRoot)
+	for _, dir := range sandboxEnvDirs(envRoot) {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("impl/sandbox/windows: prepare sandbox environment directory %s: %w", dir, err)
+		}
+	}
+	if err := writeSandboxPythonSiteCustomize(pythonSiteDir); err != nil {
+		return nil, err
+	}
+	forced := map[string]string{
+		"TEMP":                        tempRoot,
+		"TMP":                         tempRoot,
+		"HOME":                        homeRoot,
+		"USERPROFILE":                 homeRoot,
+		"HOMEDRIVE":                   filepath.VolumeName(homeRoot),
+		"HOMEPATH":                    strings.TrimPrefix(strings.TrimPrefix(homeRoot, filepath.VolumeName(homeRoot)), string(filepath.Separator)),
+		"CAELIS_SANDBOX_HOME":         homeRoot,
+		"CAELIS_SANDBOX_TEMP":         tempRoot,
+		"LOCALAPPDATA":                localAppData,
+		"APPDATA":                     roamingAppData,
+		"PYTHONPATH":                  prependEnvPath(pythonSiteDir, commandEnvValue(extra, "PYTHONPATH")),
+		"PSModuleAnalysisCachePath":   filepath.Join(psCacheDir, "PowerShell_AnalysisCache"),
+		"POWERSHELL_TELEMETRY_OPTOUT": "1",
+	}
+	if forced["HOMEPATH"] != "" {
+		forced["HOMEPATH"] = string(filepath.Separator) + forced["HOMEPATH"]
+	}
+	if strings.TrimSpace(forced["SystemRoot"]) == "" {
+		if systemRoot := strings.TrimSpace(os.Getenv("SystemRoot")); systemRoot != "" {
+			forced["SystemRoot"] = systemRoot
+		} else if windir := strings.TrimSpace(os.Getenv("WINDIR")); windir != "" {
+			forced["SystemRoot"] = windir
+		} else {
+			forced["SystemRoot"] = `C:\Windows`
+		}
+	}
+	if strings.TrimSpace(os.Getenv("WINDIR")) == "" {
+		forced["WINDIR"] = forced["SystemRoot"]
+	}
+	if strings.TrimSpace(os.Getenv("ComSpec")) == "" {
+		forced["ComSpec"] = filepath.Join(forced["SystemRoot"], "System32", "cmd.exe")
+	}
+	if strings.TrimSpace(os.Getenv("PATHEXT")) == "" {
+		forced["PATHEXT"] = `.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`
+	}
+	return mergeEnv(extra, forced), nil
+}
+
+func mergeEnv(extra map[string]string, forced map[string]string) []string {
+	values := map[string]string{}
+	names := map[string]string{}
+	set := func(key string, value string) {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			return
+		}
+		canonical := strings.ToUpper(key)
+		if existing := names[canonical]; existing != "" && existing != key {
+			delete(values, existing)
+		}
+		names[canonical] = key
+		values[key] = value
+	}
+	for _, item := range os.Environ() {
+		key, value, ok := strings.Cut(item, "=")
+		if !ok {
+			continue
+		}
+		set(key, value)
+	}
+	for key, value := range extra {
+		set(key, value)
+	}
+	for key, value := range forced {
+		set(key, value)
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	env := make([]string, 0, len(keys))
+	for _, key := range keys {
+		env = append(env, key+"="+values[key])
+	}
+	return env
+}
+
+func commandEnvValue(extra map[string]string, key string) string {
 	key = strings.TrimSpace(key)
-	path = strings.TrimSpace(path)
-	hash = strings.TrimSpace(hash)
-	if key == "" || path == "" || hash == "" {
-		return
-	}
-	if r.helperPathCache == nil {
-		r.helperPathCache = map[string]cachedHelperPath{}
-	}
-	r.helperPathCache[key] = cachedHelperPath{path: path, hash: hash}
-}
-
-func helperFileHashMatches(path string, hash string) bool {
-	existingHash, err := fileHash(path)
-	return err == nil && existingHash == hash
-}
-
-func helperFileFresh(source string, target string) bool {
-	sourceInfo, err := os.Stat(source)
-	if err != nil || sourceInfo.IsDir() {
-		return false
-	}
-	targetInfo, err := os.Stat(target)
-	if err != nil || targetInfo.IsDir() {
-		return false
-	}
-	if sourceInfo.Size() != targetInfo.Size() {
-		return false
-	}
-	sourceMod := sourceInfo.ModTime()
-	targetMod := targetInfo.ModTime()
-	return targetMod.Equal(sourceMod) || targetMod.After(sourceMod)
-}
-
-func commitHelperTemp(tmpPath string, target string, hash string) (string, error) {
-	if helperFileHashMatches(target, hash) {
-		_ = os.Remove(tmpPath)
-		return target, nil
-	}
-	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
-		if helperFileHashMatches(target, hash) {
-			_ = os.Remove(tmpPath)
-			return target, nil
-		}
-		return "", fmt.Errorf("replace helper %s: %w", target, err)
-	}
-	if err := os.Rename(tmpPath, target); err != nil {
-		if helperFileHashMatches(target, hash) {
-			_ = os.Remove(tmpPath)
-			return target, nil
-		}
-		return "", err
-	}
-	return target, nil
-}
-
-func siblingRunnerHelper(executable string) string {
-	executable = strings.TrimSpace(executable)
-	if executable == "" {
+	if key == "" {
 		return ""
 	}
-	dir := filepath.Dir(executable)
-	for _, candidate := range []string{
-		filepath.Join(dir, "caelis-command-runner.exe"),
-		filepath.Join(dir, "caelis-resources", "caelis-command-runner.exe"),
-	} {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
+	for name, value := range extra {
+		if strings.EqualFold(strings.TrimSpace(name), key) {
+			return value
+		}
+	}
+	prefix := strings.ToUpper(key) + "="
+	for _, item := range os.Environ() {
+		if strings.HasPrefix(strings.ToUpper(item), prefix) {
+			return item[len(prefix):]
 		}
 	}
 	return ""
 }
 
-func siblingSetupHelper(executable string) string {
-	executable = strings.TrimSpace(executable)
-	if executable == "" {
-		return ""
+func prependEnvPath(first string, rest string) string {
+	first = strings.TrimSpace(first)
+	if first == "" {
+		return rest
 	}
-	dir := filepath.Dir(executable)
-	for _, candidate := range []string{
-		filepath.Join(dir, "caelis-windows-sandbox-setup.exe"),
-		filepath.Join(dir, "caelis-resources", "caelis-windows-sandbox-setup.exe"),
-	} {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
+	if strings.TrimSpace(rest) == "" {
+		return first
+	}
+	return first + string(os.PathListSeparator) + rest
+}
+
+func writeSandboxPythonSiteCustomize(siteDir string) error {
+	siteDir = strings.TrimSpace(siteDir)
+	if siteDir == "" {
+		return nil
+	}
+	if err := os.MkdirAll(siteDir, 0o700); err != nil {
+		return fmt.Errorf("impl/sandbox/windows: prepare Python sandbox site directory %s: %w", siteDir, err)
+	}
+	path := filepath.Join(siteDir, "sitecustomize.py")
+	if err := os.WriteFile(path, []byte(sandboxPythonSiteCustomize), 0o600); err != nil {
+		return fmt.Errorf("impl/sandbox/windows: write Python sandbox sitecustomize %s: %w", path, err)
+	}
+	return nil
+}
+
+const sandboxPythonSiteCustomize = `# Generated by Caelis Windows sandbox.
+# Python 3.13 creates tempfile.mkdtemp directories with a private Windows DACL
+# for mode 0700. That private DACL is not compatible with WRITE_RESTRICTED
+# tokens, so sandbox-local temp directories need normal inherited ACLs.
+import errno as _errno
+import os as _os
+import sys as _sys
+import tempfile as _tempfile
+
+_caelis_orig_mkdtemp = _tempfile.mkdtemp
+_caelis_sandbox_temp = _os.environ.get("CAELIS_SANDBOX_TEMP", "")
+
+def _caelis_norm(path):
+    if path is None:
+        return ""
+    try:
+        return _os.path.normcase(_os.path.abspath(_os.fsdecode(path)))
+    except Exception:
+        return ""
+
+def _caelis_under_sandbox_temp(path):
+    root = _caelis_norm(_caelis_sandbox_temp)
+    value = _caelis_norm(path)
+    return bool(root and (value == root or value.startswith(root + _os.sep)))
+
+def _caelis_mkdtemp(suffix=None, prefix=None, dir=None):
+    if _os.name != "nt" or not _caelis_sandbox_temp:
+        return _caelis_orig_mkdtemp(suffix=suffix, prefix=prefix, dir=dir)
+    prefix, suffix, dir, output_type = _tempfile._sanitize_params(prefix, suffix, dir)
+    if not _caelis_under_sandbox_temp(dir):
+        return _caelis_orig_mkdtemp(suffix=suffix, prefix=prefix, dir=dir)
+    names = _tempfile._get_candidate_names()
+    if output_type is bytes:
+        names = map(_os.fsencode, names)
+    for seq in range(_tempfile.TMP_MAX):
+        name = next(names)
+        file = _os.path.join(dir, prefix + name + suffix)
+        try:
+            _sys.audit("tempfile.mkdtemp", file)
+            _os.mkdir(file)
+        except FileExistsError:
+            continue
+        except PermissionError:
+            if _os.path.isdir(dir) and _os.access(dir, _os.W_OK):
+                continue
+            raise
+        return _os.path.abspath(file)
+    raise FileExistsError(_errno.EEXIST, "No usable temporary directory name found")
+
+_tempfile.mkdtemp = _caelis_mkdtemp
+`
+
+func existingControlDirs(root string) []string {
+	root = pathutil.Normalize(root)
+	if root == "" {
+		return nil
+	}
+	var paths []string
+	for _, name := range []string{".git", ".codex", ".agents"} {
+		path := filepath.Join(root, name)
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			paths = append(paths, path)
 		}
 	}
-	return ""
-}
-
-func (r *setupRunner) credentialsForRequest(req runnerruntime.Request) (runnerclient.Credentials, error) {
-	policy, err := r.policyForRequest(req)
-	if err != nil {
-		return runnerclient.Credentials{}, err
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	data, err := os.ReadFile(dirs.UsersPath)
-	if err != nil {
-		return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: read sandbox credentials: %w", err)
-	}
-	var users setup.UsersFile
-	if err := json.Unmarshal(data, &users); err != nil {
-		return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: decode sandbox credentials: %w", err)
-	}
-	secret := users.Offline
-	if policy.Network == winpolicy.NetworkOnline {
-		if users.Online == nil {
-			return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: sandbox online credentials are unavailable")
-		}
-		secret = *users.Online
-	}
-	password, err := win32.UnprotectString(secret.PasswordProtected)
-	if err != nil {
-		return runnerclient.Credentials{}, fmt.Errorf("impl/sandbox/windows: unprotect sandbox credentials: %w", err)
-	}
-	return runnerclient.Credentials{Username: secret.Username, Password: password}, nil
-}
-
-func (r *setupRunner) policyForRequest(req runnerruntime.Request) (winpolicy.Policy, error) {
-	policy, _, err := r.policyForRequestWithHash(req)
-	return policy, err
-}
-
-func (r *setupRunner) policyForRequestWithHash(req runnerruntime.Request) (winpolicy.Policy, string, error) {
-	cacheKey, err := r.policyRequestKey(req)
-	if err != nil {
-		return winpolicy.Policy{}, "", err
-	}
-	if cached, hash, ok := r.cachedPolicy(cacheKey); ok {
-		return cached, hash, nil
-	}
-	policy := windowsPolicyForRequest(r.cfg, req)
-	policyHash, err := stablePolicyHash(policy)
-	if err != nil {
-		return winpolicy.Policy{}, "", err
-	}
-	if policy.FullAccess || len(policy.WriteRoots) == 0 {
-		r.markPolicyCached(cacheKey, policy, policyHash)
-		return policy, policyHash, nil
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	binding, err := capability.BindWriteRoots(dirs.CapPath, firstNonEmpty(req.Dir, r.cfg.CWD), policy.WriteRoots)
-	if err != nil {
-		return winpolicy.Policy{}, "", fmt.Errorf("impl/sandbox/windows: bind capability SIDs: %w", err)
-	}
-	policy.CapabilitySIDs = binding.AllSIDs
-	policy.WriteRootCapabilitySIDs = binding.WriteRootTo
-	r.markPolicyCached(cacheKey, policy, policyHash)
-	return policy, policyHash, nil
-}
-
-func (r *setupRunner) policyForRequestWithHashReadOnly(req runnerruntime.Request) (winpolicy.Policy, string, []string, error) {
-	policy := windowsPolicyForRequest(r.cfg, req)
-	policyHash, err := stablePolicyHash(policy)
-	if err != nil {
-		return winpolicy.Policy{}, "", nil, err
-	}
-	if policy.FullAccess || len(policy.WriteRoots) == 0 {
-		return policy, policyHash, nil, nil
-	}
-	dirs := setupstate.NewDirs(r.stateRoot)
-	binding, err := capability.LookupWriteRoots(dirs.CapPath, firstNonEmpty(req.Dir, r.cfg.CWD), policy.WriteRoots)
-	if err != nil {
-		return winpolicy.Policy{}, "", nil, fmt.Errorf("impl/sandbox/windows: inspect capability SIDs: %w", err)
-	}
-	policy.CapabilitySIDs = binding.AllSIDs
-	policy.WriteRootCapabilitySIDs = binding.WriteRootTo
-	return policy, policyHash, append([]string(nil), binding.Missing...), nil
-}
-
-func (r *setupRunner) policyRequestKey(req runnerruntime.Request) (string, error) {
-	return setupstate.HashJSON(struct {
-		CWD              string              `json:"cwd,omitempty"`
-		ReadableRoots    []string            `json:"readable_roots,omitempty"`
-		WritableRoots    []string            `json:"writable_roots,omitempty"`
-		ReadOnlySubpaths []string            `json:"read_only_subpaths,omitempty"`
-		Dir              string              `json:"dir,omitempty"`
-		Constraints      sandbox.Constraints `json:"constraints,omitempty"`
-	}{
-		CWD:              strings.TrimSpace(r.cfg.CWD),
-		ReadableRoots:    append([]string(nil), r.cfg.ReadableRoots...),
-		WritableRoots:    append([]string(nil), r.cfg.WritableRoots...),
-		ReadOnlySubpaths: append([]string(nil), r.cfg.ReadOnlySubpaths...),
-		Dir:              strings.TrimSpace(req.Dir),
-		Constraints:      sandbox.NormalizeConstraints(req.Constraints),
-	})
-}
-
-func (r *setupRunner) cachedExecutableHash() (string, error) {
-	r.executableHashMu.Lock()
-	if r.executableHash != "" {
-		hash := r.executableHash
-		r.executableHashMu.Unlock()
-		return hash, nil
-	}
-	r.executableHashMu.Unlock()
-
-	hash, err := fileHash(r.executable)
-	if err != nil {
-		return "", err
-	}
-	r.executableHashMu.Lock()
-	if r.executableHash == "" {
-		r.executableHash = hash
-	}
-	hash = r.executableHash
-	r.executableHashMu.Unlock()
-	return hash, nil
-}
-
-func stablePolicyHash(policy winpolicy.Policy) (string, error) {
-	policy.CapabilitySIDs = nil
-	policy.WriteRootCapabilitySIDs = nil
-	return setupstate.HashJSON(policy)
-}
-
-func errString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
-}
-
-func windowsPolicyForRequest(cfg sandbox.Config, req runnerruntime.Request) winpolicy.Policy {
-	return winpolicy.Build(winpolicy.Input{
-		Config:      cfg,
-		Constraints: req.Constraints,
-		CommandDir:  req.Dir,
-	})
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func currentWindowsUser() string {
-	if u, err := user.Current(); err == nil && strings.TrimSpace(u.Username) != "" {
-		return strings.TrimSpace(u.Username)
-	}
-	domain := strings.TrimSpace(os.Getenv("USERDOMAIN"))
-	name := strings.TrimSpace(os.Getenv("USERNAME"))
-	if domain != "" && name != "" {
-		return domain + `\` + name
-	}
-	return name
+	return paths
 }
 
 func resolveStateRoot(raw string) (string, error) {
@@ -1974,11 +1688,125 @@ func resolveStateRoot(raw string) (string, error) {
 	return filepath.Join(home, ".caelis"), nil
 }
 
-func fileHash(path string) (string, error) {
-	data, err := os.ReadFile(path)
+func normalizeBackendAlias(backend sandbox.Backend) sandbox.Backend {
+	switch strings.ToLower(strings.TrimSpace(string(backend))) {
+	case "", "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "elevated":
+		if strings.TrimSpace(string(backend)) == "" {
+			return ""
+		}
+		return sandbox.BackendWindows
+	default:
+		return backend
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func samePathSet(a, b []string) bool {
+	return slices.Equal(pathutil.Dedupe(a), pathutil.Dedupe(b))
+}
+
+func pathListContains(paths []string, want string) bool {
+	wantKey := pathutil.Key(want)
+	if wantKey == "" {
+		return false
+	}
+	for _, path := range paths {
+		if pathutil.Key(path) == wantKey {
+			return true
+		}
+	}
+	return false
+}
+
+func sameStringSet(a, b []string) bool {
+	return slices.Equal(dedupeStrings(a), dedupeStrings(b))
+}
+
+func sameRootSIDMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for root, sid := range a {
+		found := false
+		for candidate, candidateSID := range b {
+			if pathutil.Key(root) == pathutil.Key(candidate) && strings.TrimSpace(sid) == strings.TrimSpace(candidateSID) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToUpper(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func hashJSON(value any) (string, error) {
+	data, err := json.Marshal(value)
 	if err != nil {
 		return "", err
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
 }
+
+func stateRootHash(stateRoot string) string {
+	normalized := strings.ToLower(strings.TrimSpace(filepath.Clean(stateRoot)))
+	sum := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+func newID(prefix string) (string, error) {
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return prefix + "-" + hex.EncodeToString(raw[:]), nil
+}
+
+var _ sandbox.Runtime = (*runtime)(nil)
+var _ sandbox.Session = (*windowsSession)(nil)

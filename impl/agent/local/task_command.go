@@ -163,7 +163,7 @@ func (tm *taskRuntime) completeCommandTaskWithStatus(ctx context.Context, task *
 			"task_id": task.ref.TaskID,
 			"state":   string(state),
 		}
-		if latestOutput != "" {
+		if taskOutputHasNonBlankLine(latestOutput) {
 			task.result["latest_output"] = latestOutput
 		}
 		snapshot := task.snapshotLocked(status)
@@ -367,7 +367,7 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 		running:      entry.Running,
 		stdoutCursor: entry.StdoutCursor,
 		stderrCursor: entry.StderrCursor,
-		output:       taskStringValue(entry.Result["result"]),
+		output:       taskRawStringValue(entry.Result["result"]),
 		result:       maps.Clone(entry.Result),
 		metadata:     maps.Clone(entry.Metadata),
 	}

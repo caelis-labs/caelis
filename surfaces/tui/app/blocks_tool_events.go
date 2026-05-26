@@ -204,7 +204,7 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = taskTargetKind
 	}
-	if output != "" {
+	if renderableTextHasContent(output) {
 		ev.Output = mergeSubagentStreamChunk(ev.Output, output)
 		ev.OutputSynthetic = false
 	}
@@ -285,10 +285,10 @@ func finalToolOutputShouldReplace(existing SubagentEvent, finalEvent SubagentEve
 	if !isTerminalPanelToolEvent(existing) {
 		return true
 	}
-	if finalEvent.OutputSynthetic && strings.TrimSpace(existing.Output) != "" {
+	if finalEvent.OutputSynthetic && renderableTextHasContent(existing.Output) {
 		return false
 	}
-	return strings.TrimSpace(finalEvent.Output) != ""
+	return renderableTextHasContent(finalEvent.Output)
 }
 
 func preferredDisplayTaskID(current string, candidate string) string {

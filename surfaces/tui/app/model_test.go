@@ -44,7 +44,7 @@ func TestInitialLogsRenderAfterWelcomeCard(t *testing.T) {
 		Workspace:       "/tmp/workspace",
 		ModelAlias:      "minimax/MiniMax-M1",
 		ShowWelcomeCard: true,
-		InitialLogs:     []string{"Windows sandbox setup is not ready."},
+		InitialLogs:     []string{"Windows sandbox repair is not ready."},
 		Commands:        DefaultCommands(),
 		Wizards:         DefaultWizards(),
 	})
@@ -53,7 +53,7 @@ func TestInitialLogsRenderAfterWelcomeCard(t *testing.T) {
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m := updated.(*Model)
 	welcomeIdx := indexPlainLineContaining(m.viewportPlainLines, "CAELIS")
-	logIdx := indexPlainLineContaining(m.viewportPlainLines, "Windows sandbox setup is not ready.")
+	logIdx := indexPlainLineContaining(m.viewportPlainLines, "Windows sandbox repair is not ready.")
 	if welcomeIdx < 0 || logIdx < 0 {
 		t.Fatalf("viewport lines = %#v, want welcome card and initial log", m.viewportPlainLines)
 	}
@@ -250,15 +250,15 @@ func TestRunningInterruptSchedulesCancelWithoutCallingDriverInUpdate(t *testing.
 func TestSandboxProgressClearRespectsSource(t *testing.T) {
 	model := NewModel(Config{})
 	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{
-		Title:   "Windows sandbox setup",
-		Source:  "setup",
-		Message: "running setup",
+		Title:   "Windows sandbox repair",
+		Source:  "repair",
+		Message: "running repair",
 	})
 	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "workspace", Clear: true})
 	if model.sandboxProgress == nil {
 		t.Fatal("sandboxProgress cleared by different source")
 	}
-	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "setup", Clear: true})
+	_, _ = model.handleSandboxProgressMsg(SandboxProgressMsg{Source: "repair", Clear: true})
 	if model.sandboxProgress != nil {
 		t.Fatal("sandboxProgress still set after matching source clear")
 	}

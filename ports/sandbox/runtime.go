@@ -125,6 +125,8 @@ func NormalizeConfig(cfg Config) Config {
 	switch strings.ToLower(strings.TrimSpace(string(cfg.RequestedBackend))) {
 	case "", "auto", "default":
 		cfg.RequestedBackend = ""
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		cfg.RequestedBackend = BackendWindows
 	default:
 		cfg.RequestedBackend = Backend(strings.TrimSpace(string(cfg.RequestedBackend)))
 	}

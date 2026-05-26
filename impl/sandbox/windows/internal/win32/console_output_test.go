@@ -118,6 +118,35 @@ func TestConsoleOutputDecoderKeepsSplitPowerShellCLIXMLPending(t *testing.T) {
 	}
 }
 
+func TestConsoleOutputDecoderNormalizesNativeCommandErrorFormatting(t *testing.T) {
+	t.Parallel()
+
+	raw := "cmd.exe : ERR  \r\n" +
+		"At line:1 char:1\r\n" +
+		"+ cmd.exe /c 'echo ERR 1>&2 & exit /b 1' 2>&1\r\n" +
+		"+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n" +
+		"    + CategoryInfo          : NotSpecified: (ERR  :String) [], RemoteException\r\n" +
+		"    + FullyQualifiedErrorId : NativeCommandError\r\n" +
+		" \r\n"
+	var decoder ConsoleOutputDecoder
+	got := string(decoder.Decode([]byte(raw)))
+	if got != "ERR  \r\n \r\n" {
+		t.Fatalf("Decode(NativeCommandError) = %q, want raw native stderr", got)
+	}
+}
+
+func TestConsoleOutputDecoderKeepsNonNativePowerShellErrors(t *testing.T) {
+	t.Parallel()
+
+	raw := "Get-Item : Cannot find path.\r\n" +
+		"    + FullyQualifiedErrorId : PathNotFound,Microsoft.PowerShell.Commands.GetItemCommand\r\n"
+	var decoder ConsoleOutputDecoder
+	got := string(decoder.Decode([]byte(raw)))
+	if got != raw {
+		t.Fatalf("Decode(non-native error) = %q, want unchanged", got)
+	}
+}
+
 func utf16LEBytes(text string) []byte {
 	words := utf16.Encode([]rune(text))
 	out := make([]byte, len(words)*2)

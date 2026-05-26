@@ -780,7 +780,7 @@ func (tm *taskRuntime) updateSubagentParticipant(ctx context.Context, task *suba
 				"mention":        "@" + strings.TrimPrefix(task.handle, "@"),
 				"session_id":     task.anchor.SessionID,
 				"state":          string(task.state),
-				"output_preview": strings.TrimSpace(taskStringValue(task.result["output_preview"])),
+				"output_preview": taskRawStringValue(task.result["output_preview"]),
 			},
 		},
 	})
@@ -838,14 +838,14 @@ func (tm *taskRuntime) appendSideSubagentFinalEvent(ctx context.Context, task *s
 		task.mu.Unlock()
 		return nil
 	}
-	text := strings.TrimSpace(taskStringValue(task.result["result"]))
-	if text == "" {
+	text := taskRawStringValue(task.result["result"])
+	if !taskOutputHasNonBlankLine(text) {
 		text = compactFinalOutput(task.stdout, task.stderr)
 	}
-	if text == "" {
-		text = strings.TrimSpace(taskStringValue(task.result["output_preview"]))
+	if !taskOutputHasNonBlankLine(text) {
+		text = taskRawStringValue(task.result["output_preview"])
 	}
-	if text == "" {
+	if !taskOutputHasNonBlankLine(text) {
 		task.mu.Unlock()
 		return nil
 	}
@@ -992,20 +992,20 @@ func (t *subagentTask) applyResult(result delegation.Result) {
 	t.metadata["session_id"] = t.anchor.SessionID
 	t.metadata["terminal_id"] = t.ref.TerminalID
 	t.metadata["state"] = string(t.state)
-	if preview := strings.TrimSpace(result.OutputPreview); preview != "" {
-		t.result["output_preview"] = preview
+	if taskOutputHasNonBlankLine(result.OutputPreview) {
+		t.result["output_preview"] = result.OutputPreview
 	} else if t.result != nil {
 		delete(t.result, "output_preview")
 	}
-	if text := strings.TrimSpace(result.Result); text != "" {
-		t.result["result"] = text
+	if taskOutputHasNonBlankLine(result.Result) {
+		t.result["result"] = result.Result
 		if !t.running {
-			t.result["final_message"] = text
+			t.result["final_message"] = result.Result
 		}
 	} else if !t.running {
-		if preview := strings.TrimSpace(result.OutputPreview); preview != "" {
-			t.result["result"] = preview
-			t.result["final_message"] = preview
+		if taskOutputHasNonBlankLine(result.OutputPreview) {
+			t.result["result"] = result.OutputPreview
+			t.result["final_message"] = result.OutputPreview
 		} else {
 			delete(t.result, "result")
 			delete(t.result, "final_message")

@@ -158,7 +158,6 @@ Current built-in slash commands:
 - `/connect`
 - `/model use <alias>` or `/model del <alias>`
 - `/approval [auto-review|manual]`
-- `/sandbox setup` on Windows to initialize Windows Elevated sandbox
 - `/status`
 - `/doctor`
 - `/new`
@@ -194,10 +193,12 @@ Notes:
 
 Sandbox backend selection is resolved by the local runtime: macOS uses seatbelt,
 Linux prefers bubblewrap and falls back to Landlock when available, and Windows
-uses Windows Elevated sandbox after explicit setup. The TUI reports sandbox
-readiness in `/status`; Windows setup is started with `/sandbox setup`. Sandbox
-permission failures are surfaced with backend-neutral denial metadata and the raw
-path-bearing error needed for recovery.
+uses the current-user workspace-write sandbox by default. The TUI reports
+sandbox readiness in `/status`; Windows workspace ACL state is repaired lazily
+before sandboxed commands run. The CLI keeps `caelis sandbox reset` and
+`caelis sandbox clean` for sandbox state cleanup. Sandbox permission failures
+are surfaced with backend-neutral denial metadata and the raw path-bearing error
+needed for recovery.
 
 ## Sessions
 

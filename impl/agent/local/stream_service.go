@@ -154,11 +154,11 @@ func (s *streamService) readSubagent(ctx context.Context, sub *subagentTask, cur
 		UpdatedAt:     time.Now(),
 	}
 	if !sub.running {
-		snap.FinalText = firstNonEmpty(
-			taskStringValue(sub.result["final_message"]),
-			taskStringValue(sub.result["result"]),
-			strings.TrimSpace(output),
-			taskStringValue(sub.result["error"]),
+		snap.FinalText = firstNonBlankTaskOutput(
+			taskRawStringValue(sub.result["final_message"]),
+			taskRawStringValue(sub.result["result"]),
+			output,
+			taskRawStringValue(sub.result["error"]),
 			"(no output)",
 		)
 	}

@@ -14,8 +14,6 @@
   },
   "files": [
     "runtime/caelis.exe",
-    "runtime/caelis-command-runner.exe",
-    "runtime/caelis-windows-sandbox-setup.exe",
     "README.md"
   ],
   "os": [

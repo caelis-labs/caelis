@@ -411,6 +411,31 @@ func TestRunCommandPayloadTreatsWindowsExitSummaryAsPlainExit(t *testing.T) {
 	}
 }
 
+func TestRunCommandPayloadPreservesInternalStdoutNewlines(t *testing.T) {
+	t.Parallel()
+
+	payload := runCommandPayload(sandbox.CommandResult{
+		Stdout:   "requests 2.34.2\r\nHTTP 200\r\n",
+		ExitCode: 0,
+	}, nil)
+	if got, _ := payload["result"].(string); got != "requests 2.34.2\r\nHTTP 200\r\n" {
+		t.Fatalf("result = %q, want raw stdout newlines preserved", got)
+	}
+}
+
+func TestRunCommandPayloadSeparatesStdoutAndStderrWithoutTrimming(t *testing.T) {
+	t.Parallel()
+
+	payload := runCommandPayload(sandbox.CommandResult{
+		Stdout:   "ok",
+		Stderr:   "warning\n",
+		ExitCode: 1,
+	}, fmt.Errorf("exit status 1"))
+	if got, _ := payload["result"].(string); got != "ok\nwarning\n" {
+		t.Fatalf("result = %q, want stdout/stderr separated without trimming", got)
+	}
+}
+
 type sandboxPermissionRuntime struct {
 	result sandbox.CommandResult
 	err    error

@@ -144,31 +144,20 @@ func collapseSubagentInlineSpaces(text string) string {
 }
 
 func wrapToolOutputText(text string, width int) []string {
-	text = strings.TrimSpace(text)
-	if text == "" {
+	if !renderableTextHasContent(text) {
 		return nil
 	}
 	width = maxInt(1, width)
-	parts := strings.Split(text, "\n")
+	parts := splitRenderableLines(text)
 	out := make([]string, 0, len(parts))
 	for _, part := range parts {
-		part = strings.TrimSpace(part)
-		if part == "" {
+		if !renderableLineHasContent(part) {
 			continue
 		}
-		for displayColumns(part) > width {
-			cut := width
-			slice := sliceByDisplayColumns(part, 0, cut)
-			lastSpace := strings.LastIndex(slice, " ")
-			if lastSpace > 8 {
-				cut = displayColumns(slice[:lastSpace])
-				slice = sliceByDisplayColumns(part, 0, cut)
+		for _, segment := range strings.Split(hardWrapDisplayLine(part, width), "\n") {
+			if renderableLineHasContent(segment) {
+				out = append(out, segment)
 			}
-			out = append(out, strings.TrimSpace(slice))
-			part = strings.TrimSpace(sliceByDisplayColumns(part, cut, displayColumns(part)))
-		}
-		if part != "" {
-			out = append(out, part)
 		}
 	}
 	if len(out) == 0 {

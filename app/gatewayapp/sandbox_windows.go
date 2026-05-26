@@ -7,16 +7,16 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
-func experimentalWindowsSandboxRuntime(cfg SandboxConfig, workspaceCWD string, storeDir string) (sandbox.Runtime, SandboxConfig, bool, error) {
+func windowsSandboxRuntime(cfg SandboxConfig, workspaceCWD string, storeDir string) (sandbox.Runtime, SandboxConfig, bool, error) {
 	cfg = effectiveSandboxConfig(cfg, workspaceCWD)
-	cfg.RequestedType = string(sandbox.BackendWindowsElevated)
-	route, err := sandboxrouter.ForGOOS("windows", sandbox.BackendWindowsElevated)
+	cfg.RequestedType = string(sandbox.BackendWindows)
+	route, err := sandboxrouter.ForGOOS("windows", sandbox.BackendWindows)
 	if err != nil {
 		return nil, cfg, false, err
 	}
 	runtime, err := sandbox.New(sandbox.Config{
 		CWD:                 workspaceCWD,
-		RequestedBackend:    sandbox.BackendWindowsElevated,
+		RequestedBackend:    sandbox.BackendWindows,
 		BackendCandidates:   route.BackendCandidates,
 		FallbackInstallHint: route.FallbackInstallHint,
 		HelperPath:          cfg.HelperPath,
