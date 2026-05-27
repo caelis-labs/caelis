@@ -532,9 +532,6 @@ func (s *Stack) SetACPControllerMode(ctx context.Context, ref session.SessionRef
 	if s == nil || s.engine == nil {
 		return controller.ControllerStatus{}, fmt.Errorf("gatewayapp: runtime engine unavailable")
 	}
-	if err := s.rejectReconfigureWhileActive("switch ACP mode"); err != nil {
-		return controller.ControllerStatus{}, err
-	}
 	return s.engine.SetACPControllerMode(ctx, controller.SetControllerModeRequest{
 		SessionRef: session.NormalizeSessionRef(ref),
 		Mode:       strings.TrimSpace(mode),

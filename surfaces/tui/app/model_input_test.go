@@ -100,3 +100,26 @@ func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
 		t.Fatalf("model hint = %q, want image/running feedback", m.hint)
 	}
 }
+
+func TestModeToggleRunsWhileRunning(t *testing.T) {
+	called := false
+	model := NewModel(Config{
+		ToggleMode: func() (string, error) {
+			called = true
+			return "mode updated", nil
+		},
+	})
+	model.running = true
+
+	updated, cmd := model.handleKey(keyPress("shift+tab"))
+	m := updated.(*Model)
+	if !called {
+		t.Fatal("ToggleMode was not called while running")
+	}
+	if cmd == nil {
+		t.Fatal("mode toggle should schedule hint cleanup")
+	}
+	if !strings.Contains(m.hint, "mode updated") {
+		t.Fatalf("model hint = %q, want mode update feedback", m.hint)
+	}
+}

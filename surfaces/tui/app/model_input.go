@@ -477,7 +477,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ctrlCArmed = false
 		m.lastCtrlCAt = time.Time{}
 	}
-	if matchesModeKey(msg, m.keys.Mode) && !m.running && m.cfg.ToggleMode != nil {
+	if matchesModeKey(msg, m.keys.Mode) && m.cfg.ToggleMode != nil {
 		hint, err := m.cfg.ToggleMode()
 		if err != nil {
 			return m, m.showHint(err.Error(), hintOptions{

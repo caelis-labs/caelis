@@ -207,6 +207,18 @@ func (d *GatewayDriver) CycleSessionMode(ctx context.Context) (StatusSnapshot, e
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
+	if controllerStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
+		return StatusSnapshot{}, err
+	} else if activeACP {
+		next, err := nextACPControllerMode(controllerStatus)
+		if err != nil {
+			return StatusSnapshot{}, err
+		}
+		if _, err := d.stack.SetACPControllerMode(ctx, activeSession.SessionRef, next.ID); err != nil {
+			return StatusSnapshot{}, err
+		}
+		return d.Status(ctx)
+	}
 	normalized, err := d.stack.CycleSessionMode(ctx, activeSession.SessionRef)
 	if err != nil {
 		return StatusSnapshot{}, err
