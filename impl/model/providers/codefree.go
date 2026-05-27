@@ -212,7 +212,7 @@ func (l *codeFreeLLM) generateOnce(
 	finishReason := model.FinishReasonUnknown
 	emitted := false
 	stopped := false
-	if err := readSSEWithInactivity(bodyReader, defaultStreamInactivityTimeout, func(data []byte) error {
+	if err := readSSEWithFirstEventTimeout(bodyReader, defaultStreamFirstEventTimeout, func(data []byte) error {
 		if err := codeFreeResponseError(data, resp.Header.Get("Content-Type")); err != nil {
 			return err
 		}
