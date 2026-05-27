@@ -151,6 +151,19 @@ func TestCoreCodingToolsE2E(t *testing.T) {
 	if got := searchResult["count"]; got != float64(1) {
 		t.Fatalf("regex search count = %v, want 1", got)
 	}
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("MkdirAll(.git) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".git", "index"), []byte("caelis\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile(.git/index) error = %v", err)
+	}
+	searchResult = runToolJSON(t, searchTool, map[string]any{
+		"path":  dir,
+		"query": "caelis",
+	})
+	if got := searchResult["count"]; got != float64(1) {
+		t.Fatalf("search count with .git index = %v, want 1", got)
+	}
 
 	globTool := mustLookupTool(t, reg, filesystem.GlobToolName)
 	globResult := runToolJSON(t, globTool, map[string]any{

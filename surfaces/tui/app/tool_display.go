@@ -782,6 +782,63 @@ func toolDisplayTaskTargetKind(input map[string]any, output map[string]any, meta
 	return displaypolicy.ToolTaskTargetKind(input, output, meta)
 }
 
+func toolDisplaySummaryOutput(name string, output map[string]any, meta map[string]any) map[string]any {
+	out := cloneAnyMap(output)
+	if out == nil {
+		out = map[string]any{}
+	}
+	toolMeta := eventRuntimeToolMeta(meta)
+	if len(toolMeta) == 0 {
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	var keys []string
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "READ":
+		keys = []string{"path", "file_path", "start_line", "end_line", "next_offset", "has_more"}
+	case "LIST":
+		keys = []string{"path", "count", "total_count"}
+	case "GLOB":
+		keys = []string{"pattern", "count", "total_count"}
+	case "SEARCH", "RG", "FIND":
+		keys = []string{"query", "pattern", "count", "file_count"}
+	default:
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	for _, key := range keys {
+		if _, exists := out[key]; exists {
+			continue
+		}
+		if value, ok := toolMeta[key]; ok {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func toolDisplayStructuredSummary(name string, input map[string]any, output map[string]any, meta map[string]any) string {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "READ":
+		return readDisplaySummary(input, output)
+	case "LIST":
+		return listDisplaySummary(input, output)
+	case "GLOB":
+		return globDisplaySummary(input, output)
+	case "SEARCH", "RG", "FIND":
+		return searchDisplaySummary(input, output)
+	default:
+		return ""
+	}
+}
+
 func taskHandleDisplay(value string) string {
 	value = strings.TrimPrefix(strings.TrimSpace(value), "@")
 	if value == "" {
@@ -825,42 +882,89 @@ func toolDisplayResultHeader(name string, output string) string {
 
 func compactToolResultHeaderPath(name string, header string) string {
 	switch strings.ToUpper(strings.TrimSpace(name)) {
-	case "READ", "LIST", "GLOB":
+	case "READ", "LIST":
+		pathPart, rest, ok, tagged := splitLeadingPathHeaderParts(header)
+		if !ok {
+			return header
+		}
+		compact := displayPathBase(pathPart)
+		if compact == "" || compact == pathPart {
+			if tagged {
+				return pathPart + rest
+			}
+			return header
+		}
+		return compact + rest
+	case "GLOB":
 	default:
 		return header
 	}
-	pathPart, rest, ok := splitLeadingPathHeader(header)
+	pathPart, rest, ok, tagged := splitLeadingPathHeaderParts(header)
 	if !ok || !isAbsoluteDisplayPath(pathPart) {
+		if tagged {
+			return pathPart + rest
+		}
 		return header
 	}
 	compact := compactPathDisplay(pathPart)
 	if compact == "" || compact == pathPart {
+		if tagged {
+			return pathPart + rest
+		}
 		return header
 	}
 	return compact + rest
 }
 
 func splitLeadingPathHeader(header string) (pathPart string, rest string, ok bool) {
+	pathPart, rest, ok, _ = splitLeadingPathHeaderParts(header)
+	return pathPart, rest, ok
+}
+
+func splitLeadingPathHeaderParts(header string) (pathPart string, rest string, ok bool, tagged bool) {
 	header = strings.TrimSpace(header)
 	if header == "" {
-		return "", "", false
+		return "", "", false, false
+	}
+	if pathPart, rest, ok := splitLeadingPathTagHeader(header); ok {
+		return pathPart, rest, true, true
 	}
 	fields := strings.Fields(header)
 	if len(fields) == 0 {
-		return "", "", false
+		return "", "", false, false
 	}
 	pathPart = strings.TrimRight(fields[0], ",")
 	if !isLikelyDisplayPath(pathPart) {
-		return "", "", false
+		return "", "", false, false
 	}
 	idx := strings.Index(header, fields[0])
 	if idx < 0 {
-		return "", "", false
+		return "", "", false, false
 	}
 	rest = header[idx+len(fields[0]):]
 	if strings.HasSuffix(fields[0], ",") {
 		rest = "," + rest
 	}
+	return pathPart, rest, true, false
+}
+
+func splitLeadingPathTagHeader(header string) (pathPart string, rest string, ok bool) {
+	const openTag = "<path>"
+	const closeTag = "</path>"
+	lower := strings.ToLower(strings.TrimSpace(header))
+	if !strings.HasPrefix(lower, openTag) {
+		return "", "", false
+	}
+	closeOffset := strings.Index(lower[len(openTag):], closeTag)
+	if closeOffset < 0 {
+		return "", "", false
+	}
+	closeStart := len(openTag) + closeOffset
+	pathPart = strings.TrimSpace(header[len(openTag):closeStart])
+	if pathPart == "" {
+		return "", "", false
+	}
+	rest = header[closeStart+len(closeTag):]
 	return pathPart, rest, true
 }
 
@@ -932,9 +1036,9 @@ func readDisplaySummary(input map[string]any, output map[string]any) string {
 		}
 	}
 	if start > 0 && end > 0 {
-		return compactPathDisplay(path) + " " + strconv.Itoa(start) + "~" + strconv.Itoa(end)
+		return displayPathBase(path) + " " + strconv.Itoa(start) + "~" + strconv.Itoa(end)
 	}
-	return compactPathDisplay(path)
+	return displayPathBase(path)
 }
 
 func listDisplaySummary(input map[string]any, output map[string]any) string {
@@ -944,9 +1048,9 @@ func listDisplaySummary(input map[string]any, output map[string]any) string {
 		return ""
 	}
 	if count > 0 {
-		return strings.TrimSpace(compactPathDisplay(path) + " " + pluralizeUnit(count, "entry"))
+		return strings.TrimSpace(displayPathBase(path) + " " + pluralizeUnit(count, "entry"))
 	}
-	return compactPathDisplay(path)
+	return displayPathBase(path)
 }
 
 func globDisplaySummary(input map[string]any, output map[string]any) string {

@@ -59,6 +59,18 @@ func TestToolDisplayResultHeaderCompactsWindowsReadPath(t *testing.T) {
 	}
 }
 
+func TestSplitLeadingPathHeaderHandlesTaggedPath(t *testing.T) {
+	t.Parallel()
+
+	pathPart, rest, ok := splitLeadingPathHeader(`<path>D:\repo\internal\foo.sql</path> 10~20`)
+	if !ok {
+		t.Fatalf("splitLeadingPathHeader() ok = false")
+	}
+	if pathPart != `D:\repo\internal\foo.sql` || rest != " 10~20" {
+		t.Fatalf("splitLeadingPathHeader() = %q, %q, want tagged path and range rest", pathPart, rest)
+	}
+}
+
 func TestToolDisplayResultHeaderPreservesSignedNonDiffLine(t *testing.T) {
 	t.Parallel()
 

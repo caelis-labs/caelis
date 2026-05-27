@@ -145,7 +145,7 @@ func (t *SearchTool) Call(ctx context.Context, call tool.Call) (tool.Result, err
 	if !info.IsDir() {
 		root = filepath.Dir(target)
 	}
-	excludeRules := append(gitignoreExcludePatterns(fsys, root), excludeRulesFromPatterns(exclude)...)
+	excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
 	if info.IsDir() {
 		walkErr := walkDir(fsys, target, func(path string, d fs.DirEntry, walkErr error) error {
 			if walkErr != nil {

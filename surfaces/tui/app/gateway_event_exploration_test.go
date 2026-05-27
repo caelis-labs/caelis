@@ -234,12 +234,70 @@ func TestGatewayCompletedExplorationSummaryCompactsAbsoluteWorkspacePaths(t *tes
 	block.SetStatus("completed", "", "", time.Now())
 	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})), "\n")
 	if !strings.Contains(joined, "• Explored") ||
-		!strings.Contains(joined, "Read "+filepath.Join("internal", "handler", "oss_bucket.go")) ||
+		!strings.Contains(joined, "Read oss_bucket.go") ||
 		!strings.Contains(joined, "List internal") {
 		t.Fatalf("rendered rows = %q, want compact relative exploration paths", joined)
 	}
 	if strings.Contains(joined, root) {
 		t.Fatalf("rendered rows = %q, should not contain absolute workspace root %q", joined, root)
+	}
+}
+
+func TestGatewayCompletedExplorationSummaryUsesReadRangesAndBasenames(t *testing.T) {
+	model := newGatewayEventTestModel()
+	path := filepath.Join("internal", "task", "cluster", "sync_cluster.go")
+	sendRead := func(id string, offset int, start int, end int) {
+		rawInput := map[string]any{"path": path, "offset": offset, "limit": 50}
+		updated, _ := model.Update(kernel.EventEnvelope{
+			Event: kernel.Event{
+				Kind:       kernel.EventKindToolCall,
+				SessionRef: session.SessionRef{SessionID: "root-session"},
+				ToolCall: &kernel.ToolCallPayload{
+					CallID:   id,
+					ToolName: "READ",
+					RawInput: rawInput,
+					Status:   kernel.ToolStatusRunning,
+					Scope:    kernel.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+		updated, _ = model.Update(kernel.EventEnvelope{
+			Event: kernel.Event{
+				Kind:       kernel.EventKindToolResult,
+				SessionRef: session.SessionRef{SessionID: "root-session"},
+				ToolResult: &kernel.ToolResultPayload{
+					CallID:   id,
+					ToolName: "READ",
+					RawInput: rawInput,
+					RawOutput: map[string]any{
+						"path":       path,
+						"start_line": start,
+						"end_line":   end,
+					},
+					Status: kernel.ToolStatusCompleted,
+					Scope:  kernel.EventScopeMain,
+				},
+			},
+		})
+		model = updated.(*Model)
+	}
+
+	sendRead("read-1", 0, 1, 50)
+	sendRead("read-2", 50, 51, 100)
+
+	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
+	if !ok {
+		t.Fatalf("first block = %#v, want MainACPTurnBlock", model.doc.Blocks()[0])
+	}
+	block.SetStatus("completed", "", "", time.Now())
+	joined := strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme})), "\n")
+	if !strings.Contains(joined, "Explored") ||
+		!strings.Contains(joined, "Read sync_cluster.go 1~50, sync_cluster.go 51~100") {
+		t.Fatalf("rendered rows = %q, want compact read ranges with basenames", joined)
+	}
+	if strings.Contains(joined, filepath.Join("internal", "task", "cluster")) || strings.Contains(joined, `internal\task\cluster`) {
+		t.Fatalf("rendered rows = %q, should not contain workspace-relative path prefixes", joined)
 	}
 }
 
@@ -345,7 +403,7 @@ func TestGatewayAssistantExplorationStepSettlesOnlyAtStepBoundary(t *testing.T) 
 		SubagentEvent{Kind: SEToolCall, CallID: "command-build", Name: "RUN_COMMAND", Args: "bash scripts/build.sh debug ./bin/storage"},
 	)
 	settled := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
-	if !strings.Contains(settled, "• Explored") || !strings.Contains(settled, "Read scripts/build.sh") {
+	if !strings.Contains(settled, "• Explored") || !strings.Contains(settled, "Read build.sh") {
 		t.Fatalf("settled rows = %q, want completed exploration step folded after next step arrives", settled)
 	}
 	if strings.Contains(settled, "I will inspect the build script next.") {
@@ -553,7 +611,7 @@ func TestExplorationToolDetailCompactsWindowsWorkspacePaths(t *testing.T) {
 		{
 			name: "read header",
 			ev:   SubagentEvent{Name: "READ", Args: `D:\repo\internal\foo_test.go 1~40`},
-			want: `internal\foo_test.go 1~40`,
+			want: `foo_test.go 1~40`,
 		},
 		{
 			name: "list directory",
@@ -568,7 +626,7 @@ func TestExplorationToolDetailCompactsWindowsWorkspacePaths(t *testing.T) {
 		{
 			name: "glob output list",
 			ev:   SubagentEvent{Name: "GLOB", Output: `D:\repo\internal\foo_test.go, D:\repo\cmd\main.go`},
-			want: `internal\foo_test.go, cmd\main.go`,
+			want: `foo_test.go, main.go`,
 		},
 		{
 			name: "search query in path",
@@ -579,6 +637,21 @@ func TestExplorationToolDetailCompactsWindowsWorkspacePaths(t *testing.T) {
 			name: "workspace outside path falls back to basename",
 			ev:   SubagentEvent{Name: "READ", Args: `D:\external\foo_test.go 1~12`},
 			want: `foo_test.go 1~12`,
+		},
+		{
+			name: "tagged absolute read path",
+			ev:   SubagentEvent{Name: "READ", Args: `<path>D:\xue\code\system\docs\260430\002_gm_license_switch.dml.sql</path>`},
+			want: `002_gm_license_switch.dml.sql`,
+		},
+		{
+			name: "tagged relative read path strips tags",
+			ev:   SubagentEvent{Name: "READ", Args: `<path>README.md</path> 1~2`},
+			want: `README.md 1~2`,
+		},
+		{
+			name: "tagged search query path",
+			ev:   SubagentEvent{Name: "SEARCH", Args: `"needle" in <path>D:\repo\src</path>`},
+			want: `"needle" in src`,
 		},
 	}
 	for _, tt := range tests {
@@ -611,7 +684,7 @@ func TestGatewayExploredGroupCompactsWindowsPathsWithWorkspace(t *testing.T) {
 
 	ctx := BlockRenderContext{Width: 120, TermWidth: 120, Theme: model.theme, Workspace: workspace}
 	joined := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
-	for _, want := range []string{`internal\foo_test.go`, `*.go`, `"needle" in src`} {
+	for _, want := range []string{`foo_test.go`, `*.go`, `"needle" in src`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("collapsed Explored rows missing %q:\n%s", want, joined)
 		}
@@ -624,7 +697,7 @@ func TestGatewayExploredGroupCompactsWindowsPathsWithWorkspace(t *testing.T) {
 		t.Fatal("expected exploration group to expand")
 	}
 	joined = strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
-	for _, want := range []string{`internal\foo_test.go`, `*.go`, `"needle" in src`} {
+	for _, want := range []string{`foo_test.go`, `*.go`, `"needle" in src`} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("expanded Explored rows missing %q:\n%s", want, joined)
 		}

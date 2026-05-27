@@ -93,7 +93,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if !hasPathGlobMeta(filepath.ToSlash(pattern)) {
 		if info, err := fsys.Stat(pattern); err == nil {
 			root := filepath.Dir(pattern)
-			excludeRules := append(gitignoreExcludePatterns(fsys, root), excludeRulesFromPatterns(exclude)...)
+			excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
 			if !shouldExcludePath(root, pattern, info.IsDir(), excludeRules) {
 				matches = append(matches, pattern)
 			}
@@ -108,7 +108,7 @@ func (t *GlobTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if relPattern == "" {
 		relPattern = filepath.Base(pattern)
 	}
-	excludeRules := append(gitignoreExcludePatterns(fsys, root), excludeRulesFromPatterns(exclude)...)
+	excludeRules := append(workspaceExcludeRules(fsys, root), excludeRulesFromPatterns(exclude)...)
 	if _, err := fsys.Stat(root); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return globResult(pattern, matches, limit)

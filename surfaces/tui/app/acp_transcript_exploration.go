@@ -405,48 +405,66 @@ func compactExplorationPathDetailWithBase(detail string, workspace string) strin
 		}
 		return detail
 	}
-	if query, path, ok := splitExplorationQueryInPath(detail); ok {
+	if query, path, tagged, ok := splitExplorationQueryInPath(detail); ok {
 		compacted := compactExplorationPathDetailWithBase(path, workspace)
-		if compacted != "" && compacted != path {
+		if compacted != "" && (compacted != path || tagged) {
 			return query + " in " + compacted
 		}
 		return detail
 	}
-	pathPart, rest, ok := splitLeadingPathHeader(detail)
-	if !ok || !isAbsoluteDisplayPath(pathPart) {
+	pathPart, rest, ok, tagged := splitLeadingPathHeaderParts(detail)
+	if !ok {
 		return detail
 	}
-	compact := ""
-	if workspace != "" {
-		compact = compactPathDisplayWithBase(pathPart, workspace)
-	} else {
-		compact = compactPathDisplay(pathPart)
+	if !isAbsoluteDisplayPath(pathPart) {
+		if displayPathHasGlobMeta(pathPart) {
+			if tagged {
+				return pathPart + rest
+			}
+			return detail
+		}
+		compact := displayPathBase(pathPart)
+		if compact == "" || compact == pathPart {
+			if tagged {
+				return pathPart + rest
+			}
+			return detail
+		}
+		return compact + rest
 	}
+	compact := displayPathBase(pathPart)
 	if compact == "" || compact == pathPart {
+		if tagged {
+			return pathPart + rest
+		}
 		return detail
 	}
 	return compact + rest
 }
 
-func splitExplorationQueryInPath(detail string) (query string, path string, ok bool) {
+func splitExplorationQueryInPath(detail string) (query string, path string, tagged bool, ok bool) {
 	detail = strings.TrimSpace(detail)
 	if detail == "" {
-		return "", "", false
+		return "", "", false, false
 	}
 	idx := strings.LastIndex(strings.ToLower(detail), " in ")
 	if idx < 0 {
-		return "", "", false
+		return "", "", false, false
 	}
 	before := strings.TrimSpace(detail[:idx])
 	after := strings.TrimSpace(detail[idx+len(" in "):])
 	if before == "" || after == "" || !strings.HasPrefix(before, `"`) {
-		return "", "", false
+		return "", "", false, false
 	}
-	pathPart, rest, pathOK := splitLeadingPathHeader(after)
-	if !pathOK || !isAbsoluteDisplayPath(pathPart) || strings.TrimSpace(rest) != "" {
-		return "", "", false
+	pathPart, rest, pathOK, pathTagged := splitLeadingPathHeaderParts(after)
+	if !pathOK || (!pathTagged && !isLikelyDisplayPath(pathPart)) || strings.TrimSpace(rest) != "" {
+		return "", "", false, false
 	}
-	return before, pathPart, true
+	return before, pathPart, pathTagged, true
+}
+
+func displayPathHasGlobMeta(path string) bool {
+	return strings.ContainsAny(path, "*?[")
 }
 
 func normalizeExplorationFailedDetail(detail string) string {

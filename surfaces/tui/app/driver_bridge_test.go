@@ -1252,18 +1252,40 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		PermissionReadRootCount:  3,
 		PermissionWriteRootCount: 1,
 	})
-	for _, forbidden := range []string{"status:", "provider:", "model:", "alias:"} {
+	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "status:", "provider:", "model:", "alias:", "Provider:", "Store:", "\n  Reason:", "Session"} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("formatStatusSnapshot() = %q, should not contain log-style label %q", got, forbidden)
 		}
 	}
-	for _, want := range []string{"Session", "  Model", "  Mode", "  Token usage", "    Scope", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Grants     2 approved, read roots 3, write roots 1", "warn: API key is missing", "/tmp/store"} {
+	for _, want := range []string{"  Model:", "  Mode:", "  Sandbox:", "  Workspace:", "  Scope", "-----", "total", "12,800", "main", "10,150", "sub-agent", "2,040", "auto-review", "610", "Grants:", "2 approved, read roots 3, write roots 1", "Warning:", "API key is missing"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("formatStatusSnapshot() = %q, want substring %q", got, want)
 		}
 	}
-	if strings.Contains(got, "Token usage:") || strings.Contains(got, "main usage:") {
+	if strings.Contains(got, "Token usage:") || strings.Contains(got, "main usage:") || strings.Contains(got, "warn:") {
 		t.Fatalf("formatStatusSnapshot() = %q, should use table-style token usage", got)
+	}
+}
+
+func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
+	got := formatStatusSnapshot(tuidriver.StatusSnapshot{
+		Model:                       "mimo-v2.5-pro [high]",
+		ModeLabel:                   "auto-review",
+		SandboxResolvedBackend:      "windows",
+		Route:                       "sandbox",
+		Workspace:                   "D:\\xue\\code\\storage",
+		SandboxWorkspaceSetupReason: "workspace ACL manifest is stale and will be repaired lazily",
+		SandboxSetupMarkerReason:    "stale sandbox setup marker",
+	})
+	for _, forbidden := range []string{"Status", "Tokens", "\n  Reason:", "workspace ACL manifest", "stale sandbox setup marker", "Store:", "Provider:", "Session"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("formatStatusSnapshot() = %q, should omit %q", got, forbidden)
+		}
+	}
+	for _, want := range []string{"  Model:", "mimo-v2.5-pro [high]", "windows sandbox", "D:\\xue\\code\\storage"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatStatusSnapshot() = %q, want %q", got, want)
+		}
 	}
 }
 
@@ -1625,9 +1647,14 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	if !ok {
 		t.Fatalf("slashStatus() msg = %#v, want LogChunkMsg", msgs[0])
 	}
-	for _, want := range []string{"/connect", "warn: API key is missing", "warn: Commands may run on the host", "Auto-Review remains enabled", "/tmp/.caelis"} {
+	for _, want := range []string{"  Model:", "/connect", "Warning:", "API key is missing", "Commands may run on the host", "Auto-Review remains enabled"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashStatus() chunk = %q, want substring %q", log.Chunk, want)
+		}
+	}
+	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "warn:", "/tmp/.caelis", "Store:", "Provider:", "Session", "\n  Reason:"} {
+		if strings.Contains(log.Chunk, forbidden) {
+			t.Fatalf("slashStatus() chunk = %q, should omit %q", log.Chunk, forbidden)
 		}
 	}
 }

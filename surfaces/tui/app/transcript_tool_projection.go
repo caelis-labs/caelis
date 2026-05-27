@@ -91,6 +91,7 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 		toolName = refinedName
 		semanticName = refinedName
 	}
+	summaryOutput := toolDisplaySummaryOutput(semanticName, rawOutput, input.Event.Meta)
 	displayOutput := toolDisplayMetaOutput(semanticName, input.Event.Meta)
 	displayInput := rawInput
 	if strings.EqualFold(semanticName, "SPAWN") {
@@ -125,9 +126,15 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 	if strings.EqualFold(semanticName, "TASK") {
 		toolArgs = taskDisplayArgsWithTaskID(toolArgs, toolTaskID)
 	}
-	if !toolErr && (len(rawInput) > 0 || strings.TrimSpace(toolOutput) != "") {
-		if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
-			toolArgs = header
+	if !toolErr {
+		if summary := toolDisplayStructuredSummary(semanticName, rawInput, summaryOutput, input.Event.Meta); summary != "" {
+			if transcriptToolStatusFinal(status, toolErr) {
+				toolArgs = summary
+			}
+		} else if len(rawInput) > 0 || strings.TrimSpace(toolOutput) != "" {
+			if header := toolDisplayResultHeader(semanticName, toolOutput); header != "" {
+				toolArgs = header
+			}
 		}
 	}
 	toolOutput = toolDisplayPanelOutput(semanticName, toolOutput)

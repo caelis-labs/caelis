@@ -144,6 +144,18 @@ func excludeRulesFromPatterns(patterns []string) []pathExcludeRule {
 	return rules
 }
 
+func defaultWorkspaceExcludeRules() []pathExcludeRule {
+	return []pathExcludeRule{
+		{pattern: ".git", recursive: true, dirOnly: true},
+	}
+}
+
+func workspaceExcludeRules(fsys sandbox.FileSystem, root string) []pathExcludeRule {
+	rules := gitignoreExcludePatterns(fsys, root)
+	rules = append(rules, defaultWorkspaceExcludeRules()...)
+	return rules
+}
+
 func shouldExcludePath(root, candidate string, isDir bool, rules []pathExcludeRule) bool {
 	if len(rules) == 0 {
 		return false

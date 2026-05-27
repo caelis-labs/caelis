@@ -10,81 +10,109 @@ import (
 )
 
 func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
-	model := firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), deriveModelNameFromAlias(status.Model), "not configured")
-	provider := firstNonEmpty(strings.TrimSpace(status.Provider), deriveProviderFromAlias(status.Model), "not configured")
-	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), "auto")
-	route := strings.TrimSpace(status.Route)
-	if route != "" && route != "-" {
-		sandbox += " via " + route
-	}
-	lines := []string{"Session"}
-	lines = append(lines, fmt.Sprintf("  Session    %s", firstNonEmpty(strings.TrimSpace(status.SessionID), "-")))
-	lines = append(lines, fmt.Sprintf("  Provider   %s", provider))
-	lines = append(lines, fmt.Sprintf("  Model      %s", model))
-	lines = append(lines, fmt.Sprintf("  Mode       %s", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "auto-review")))
-	lines = append(lines, fmt.Sprintf("  Sandbox    %s", sandbox))
-	lines = append(lines, fmt.Sprintf("  Workspace  %s", firstNonEmpty(strings.TrimSpace(status.Workspace), "-")))
-	lines = append(lines, fmt.Sprintf("  Store      %s", firstNonEmpty(strings.TrimSpace(status.StoreDir), "-")))
+	model := statusViewModelFromSnapshot(status).HeaderModelText(firstNonEmpty(strings.TrimSpace(status.Model), strings.TrimSpace(status.ModelName), deriveModelNameFromAlias(status.Model), "not configured"))
+	lines := []string{}
+	appendStatusField(&lines, "Model", model)
+	appendStatusField(&lines, "Mode", firstNonEmpty(strings.TrimSpace(status.ModeLabel), "auto-review"))
+	appendStatusField(&lines, "Sandbox", formatStatusSandbox(status))
+	appendStatusField(&lines, "Workspace", firstNonEmpty(strings.TrimSpace(status.Workspace), "-"))
 	if usage := formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens); usage != "" {
-		lines = append(lines, fmt.Sprintf("  Context    %s", usage))
+		appendStatusField(&lines, "Context", usage)
 	}
 	if usage := formatSessionTokenUsageStatus(status); usage != "" {
-		lines = append(lines, "  Token usage")
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
 		for _, line := range strings.Split(usage, "\n") {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			lines = append(lines, "    "+line)
+			lines = append(lines, "  "+line)
 		}
 	}
 	if status.PermissionGrantCount > 0 {
-		lines = append(lines, fmt.Sprintf("  Grants     %d approved, read roots %d, write roots %d", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount))
+		appendStatusField(&lines, "Grants", fmt.Sprintf("%d approved, read roots %d, write roots %d", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount))
 	}
 	if status.FallbackReason != "" {
-		lines = append(lines, "  Fallback   "+strings.TrimSpace(status.FallbackReason))
+		appendStatusField(&lines, "Fallback", strings.TrimSpace(status.FallbackReason))
 	}
 	if status.SandboxInstallHint != "" {
-		lines = append(lines, "  Install    "+strings.TrimSpace(status.SandboxInstallHint))
+		appendStatusField(&lines, "Install", strings.TrimSpace(status.SandboxInstallHint))
 	}
 	globalSetup, hasGlobalSetup := status.SandboxSetup.Check("global")
 	workspaceSetup, hasWorkspaceSetup := status.SandboxSetup.Check("workspace")
 	globalSetupRequired := status.SandboxGlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
 	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
-	globalSetupReason := firstNonEmpty(globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason)
-	workspaceSetupReason := firstNonEmpty(workspaceSetup.Reason, status.SandboxWorkspaceSetupReason)
 	setupError := firstNonEmpty(status.SandboxSetup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxSetupError)
 	if globalSetupRequired {
-		lines = append(lines, "  Setup      Windows sandbox infrastructure repair is pending")
+		appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair is pending")
 	} else if workspaceSetupRequired {
-		lines = append(lines, "  Setup      current workspace ACL repair is pending")
-	}
-	if globalSetupReason != "" {
-		lines = append(lines, "  Reason     "+strings.TrimSpace(globalSetupReason))
-	} else if workspaceSetupReason != "" {
-		lines = append(lines, "  Reason     "+strings.TrimSpace(workspaceSetupReason))
+		appendStatusField(&lines, "Setup", "current workspace ACL repair is pending")
 	}
 	if setupError != "" {
-		lines = append(lines, "  Error      "+strings.TrimSpace(setupError))
+		appendStatusField(&lines, "Error", strings.TrimSpace(setupError))
 	}
+	warnings := make([]string, 0, 6)
 	if strings.TrimSpace(status.Model) == "" && strings.TrimSpace(status.Provider) == "" && strings.TrimSpace(status.ModelName) == "" {
-		lines = append(lines, "note: Run /connect to configure a provider and model")
+		warnings = append(warnings, "Run /connect to configure a provider and model")
 	}
 	if status.MissingAPIKey {
-		lines = append(lines, "warn: API key is missing; reconnect with a key or use env:YOUR_API_KEY")
+		warnings = append(warnings, "API key is missing; reconnect with a key or use env:YOUR_API_KEY")
 	}
 	if status.HostExecution || status.FullAccessMode {
-		lines = append(lines, "warn: Commands may run on the host with reduced sandbox isolation")
-		lines = append(lines, "warn: Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work")
+		warnings = append(warnings, "Commands may run on the host with reduced sandbox isolation")
+		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work")
 	}
 	if globalSetupRequired {
-		lines = append(lines, "warn: Windows sandbox infrastructure will be repaired lazily before sandboxed commands run")
+		warnings = append(warnings, "Windows sandbox infrastructure will be repaired lazily before sandboxed commands run")
 	} else if workspaceSetupRequired {
-		lines = append(lines, "warn: Current workspace ACLs will be repaired lazily before sandboxed commands run")
+		warnings = append(warnings, "Current workspace ACLs will be repaired lazily before sandboxed commands run")
 	}
 	if strings.TrimSpace(status.FallbackReason) != "" {
-		lines = append(lines, "warn: Requested sandbox backend is unavailable and a fallback is in effect")
+		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
+	}
+	if len(warnings) > 0 {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		for _, warning := range warnings {
+			appendStatusField(&lines, "Warning", warning)
+		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func appendStatusField(lines *[]string, label string, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return
+	}
+	*lines = append(*lines, fmt.Sprintf("  %-10s %s", label+":", value))
+}
+
+func formatStatusSandbox(status tuidriver.StatusSnapshot) string {
+	sandbox := firstNonEmpty(strings.TrimSpace(status.SandboxResolvedBackend), strings.TrimSpace(status.SandboxType), strings.TrimSpace(status.SandboxRequestedBackend), "auto")
+	security := strings.TrimSpace(status.SecuritySummary)
+	switch {
+	case status.FullAccessMode:
+		return firstNonEmpty(security, "full access")
+	case status.HostExecution:
+		return firstNonEmpty(security, "host execution")
+	}
+	route := strings.ToLower(strings.TrimSpace(status.Route))
+	switch route {
+	case "", "-":
+		return sandbox
+	case "sandbox":
+		if strings.Contains(strings.ToLower(sandbox), "sandbox") {
+			return sandbox
+		}
+		return sandbox + " sandbox"
+	case "host":
+		return "host execution"
+	default:
+		return sandbox + " (" + strings.TrimSpace(status.Route) + ")"
+	}
 }
 
 func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
@@ -126,7 +154,7 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 	if len(rows) == 0 {
 		return ""
 	}
-	table := make([][]string, 0, len(rows)+1)
+	table := make([][]string, 0, len(rows)+2)
 	table = append(table, []string{"Scope", "Total", "Input", "Cached", "Output", "Reasoning"})
 	for _, row := range rows {
 		usage := normalizedUsageSnapshot(row.usage)
@@ -150,6 +178,15 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 	var b strings.Builder
 	for rowIndex, cols := range table {
 		if rowIndex > 0 {
+			b.WriteByte('\n')
+		}
+		if rowIndex == 1 {
+			for colIndex, width := range widths {
+				if colIndex > 0 {
+					b.WriteString("  ")
+				}
+				b.WriteString(strings.Repeat("-", width))
+			}
 			b.WriteByte('\n')
 		}
 		for colIndex, col := range cols {

@@ -928,6 +928,45 @@ func TestProjectGatewayEventACPToolArgsUseKindAndDoNotLeakTransportSource(t *tes
 	}
 }
 
+func TestProjectGatewayEventRefinedListSummaryUsesRuntimeMeta(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectGatewayEventToTranscriptEvents(kernel.Event{
+		Kind: kernel.EventKindToolResult,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"tool": map[string]any{
+						"path":  "docs",
+						"count": 3,
+					},
+				},
+			},
+		},
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:    "list-files",
+			ToolKind:  "search",
+			ToolTitle: "Search files",
+			Status:    kernel.ToolStatusCompleted,
+			RawInput: map[string]any{
+				"parsed_cmd": []any{map[string]any{
+					"type": "list_files",
+				}},
+			},
+		},
+	})
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool event", events)
+	}
+	got := events[0]
+	if got.ToolName != "LIST" {
+		t.Fatalf("ToolName = %q, want LIST", got.ToolName)
+	}
+	if got.ToolArgs != "docs 3 entries" {
+		t.Fatalf("ToolArgs = %q, want runtime meta list summary", got.ToolArgs)
+	}
+}
+
 func TestProjectGatewayEventTaskArgsUseProtocolRawInput(t *testing.T) {
 	t.Parallel()
 

@@ -88,7 +88,7 @@ func (t *ListTool) Call(ctx context.Context, call tool.Call) (tool.Result, error
 	if err != nil {
 		return tool.Result{}, err
 	}
-	excludeRules := gitignoreExcludePatterns(fsys, target)
+	excludeRules := workspaceExcludeRules(fsys, target)
 	out := make([]map[string]any, 0, len(items))
 	full := make([]map[string]any, 0, len(items))
 	for _, item := range items {
