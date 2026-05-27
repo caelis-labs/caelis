@@ -150,6 +150,7 @@ func (l *openAICompatLLM) Generate(ctx context.Context, req *model.Request) iter
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		applyDefaultAttributionHeaders(httpReq, APIOpenAICompatible)
 		applyDefaultAuthHeader(httpReq, Config{API: APIOpenAICompatible, Provider: l.provider}, l.token, false)
 		applyConfiguredHeaders(httpReq, l.headers)
 

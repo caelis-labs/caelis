@@ -184,6 +184,7 @@ func (l *codeFreeLLM) generateOnce(
 	} else {
 		httpReq.Header.Set("Accept", "application/json")
 	}
+	applyDefaultAttributionHeaders(httpReq, APICodeFree)
 	applyCodeFreeHeaders(httpReq, creds, l.name)
 
 	resp, err := l.client.Do(httpReq)

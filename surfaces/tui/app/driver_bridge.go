@@ -772,7 +772,7 @@ func splitFirst(text string) (first, rest string) {
 }
 
 func splitFirstWithPromptSpan(text string) (first, rest string, restStart int) {
-	first, rest, _ = strings.Cut(strings.TrimSpace(text), " ")
+	first, _, _ = strings.Cut(strings.TrimSpace(text), " ")
 	first = strings.TrimSpace(first)
 	textRunes := []rune(strings.TrimSpace(text))
 	idx := 0

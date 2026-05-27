@@ -200,6 +200,7 @@ func (l *openRouterLLM) Generate(ctx context.Context, req *model.Request) iter.S
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		applyDefaultAttributionHeaders(httpReq, APIOpenRouter)
 		applyDefaultAuthHeader(httpReq, Config{API: APIOpenRouter, Provider: l.provider}, l.token, false)
 		applyConfiguredHeaders(httpReq, l.headers)
 

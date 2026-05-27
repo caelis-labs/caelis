@@ -65,6 +65,7 @@ func discoverOpenAIModels(ctx context.Context, client *http.Client, cfg Config, 
 	if err != nil {
 		return nil, err
 	}
+	applyDefaultAttributionHeaders(req, cfg.API)
 	applyDefaultAuthHeader(req, cfg, token, false)
 	applyConfiguredHeaders(req, cfg.Headers)
 	resp, err := client.Do(req)
@@ -159,11 +160,13 @@ func discoverGeminiModels(ctx context.Context, client *http.Client, cfg Config, 
 		if err != nil {
 			return nil, err
 		}
+		applyDefaultAttributionHeaders(req, APIGemini)
 		if cfg.Auth.Type == AuthAPIKey || cfg.Auth.Type == "" {
 			req.Header.Set("x-goog-api-key", token)
 		} else if cfg.Auth.Type != "" {
 			applyDefaultAuthHeader(req, cfg, token, true)
 		}
+		applyConfiguredHeaders(req, cfg.Headers)
 		resp, err := client.Do(req)
 		if err != nil {
 			return nil, err
@@ -212,6 +215,7 @@ func discoverAnthropicModels(ctx context.Context, client *http.Client, cfg Confi
 	if err != nil {
 		return nil, err
 	}
+	applyDefaultAttributionHeaders(req, cfg.API)
 	applyDefaultAuthHeader(req, cfg, token, false)
 	applyConfiguredHeaders(req, cfg.Headers)
 	req.Header.Set("anthropic-version", "2023-06-01")
@@ -262,6 +266,7 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 	if err != nil {
 		return nil, err
 	}
+	applyDefaultAttributionHeaders(req, APICodeFree)
 	applyCodeFreeHeaders(req, creds, strings.TrimSpace(cfg.Model))
 	resp, err := client.Do(req)
 	if err != nil {
@@ -318,6 +323,7 @@ func discoverOllamaModels(ctx context.Context, client *http.Client, cfg Config) 
 	if err != nil {
 		return nil, err
 	}
+	applyDefaultAttributionHeaders(req, APIOllama)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

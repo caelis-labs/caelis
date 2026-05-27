@@ -403,6 +403,7 @@ func TestOpenAICompatRequest_IncludesMaxTokens(t *testing.T) {
 func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 	var gotReferer string
 	var gotTitle string
+	var gotUserAgent string
 	var gotModel string
 	var gotModels []any
 	var gotRoute string
@@ -416,6 +417,7 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 		}
 		gotReferer = r.Header.Get("HTTP-Referer")
 		gotTitle = r.Header.Get("X-Title")
+		gotUserAgent = r.Header.Get("User-Agent")
 		var payload map[string]any
 		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 			t.Fatalf("decode request payload: %v", err)
@@ -440,6 +442,7 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 		Headers: map[string]string{
 			"HTTP-Referer": "https://example.com/app",
 			"X-Title":      "caelis",
+			"User-Agent":   "custom-client/9.9.9",
 		},
 		OpenRouter: OpenRouterConfig{
 			Models:     []string{"openrouter/openai/gpt-4o-mini", "openrouter/anthropic/claude-sonnet-4"},
@@ -469,6 +472,9 @@ func TestOpenRouterRequest_AppliesConfiguredHeaders(t *testing.T) {
 	}
 	if gotReferer != "https://example.com/app" || gotTitle != "caelis" {
 		t.Fatalf("expected configured headers, got referer=%q title=%q", gotReferer, gotTitle)
+	}
+	if gotUserAgent != "custom-client/9.9.9" {
+		t.Fatalf("expected configured User-Agent, got %q", gotUserAgent)
 	}
 	if gotModel != "openrouter/healer-alpha" {
 		t.Fatalf("expected native openrouter model id preserved, got %q", gotModel)

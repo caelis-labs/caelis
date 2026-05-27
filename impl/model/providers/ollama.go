@@ -137,6 +137,7 @@ func (l *ollamaLLM) Generate(ctx context.Context, req *model.Request) iter.Seq2[
 			return
 		}
 		httpReq.Header.Set("Content-Type", "application/json")
+		applyDefaultAttributionHeaders(httpReq, APIOllama)
 
 		resp, err := l.client.Do(httpReq)
 		if err != nil {
