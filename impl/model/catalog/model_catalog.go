@@ -438,7 +438,7 @@ var builtinCatalog = []catalogEntry{
 		provider: "codefree",
 		pattern:  "GLM-4.7",
 		caps: ModelCapabilities{
-			ContextWindowTokens:    88000,
+			ContextWindowTokens:    128000,
 			MaxOutputTokens:        8000,
 			DefaultMaxOutputTokens: 8000,
 			SupportsToolCalls:      true,
@@ -451,7 +451,7 @@ var builtinCatalog = []catalogEntry{
 		provider: "codefree",
 		pattern:  "DeepSeek-V3.1-Terminus",
 		caps: ModelCapabilities{
-			ContextWindowTokens:    88000,
+			ContextWindowTokens:    128000,
 			MaxOutputTokens:        8000,
 			DefaultMaxOutputTokens: 8000,
 			SupportsToolCalls:      true,
@@ -464,7 +464,7 @@ var builtinCatalog = []catalogEntry{
 		provider: "codefree",
 		pattern:  "Qwen3.5-122B-A10B",
 		caps: ModelCapabilities{
-			ContextWindowTokens:    88000,
+			ContextWindowTokens:    128000,
 			MaxOutputTokens:        8000,
 			DefaultMaxOutputTokens: 8000,
 			SupportsToolCalls:      true,

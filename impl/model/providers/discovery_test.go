@@ -87,3 +87,11 @@ func TestDiscoverOpenRouterModels_ParsesOpenRouterShapeAndConfiguredHeaders(t *t
 		t.Fatalf("expected capabilities parsed, got %+v", got[0])
 	}
 }
+
+func TestCodeFreeContextWindowTokensAreUnifiedAt128K(t *testing.T) {
+	for _, model := range []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1", "custom-codefree-model"} {
+		if got := codeFreeContextWindowTokens(model); got != 128000 {
+			t.Fatalf("codeFreeContextWindowTokens(%q) = %d, want 128000", model, got)
+		}
+	}
+}

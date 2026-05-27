@@ -302,11 +302,8 @@ func discoverCodeFreeModels(ctx context.Context, client *http.Client, cfg Config
 	return normalizeRemoteModels(models), nil
 }
 
-func codeFreeContextWindowTokens(modelName string) int {
-	if strings.EqualFold(strings.TrimSpace(modelName), "GLM-5.1") {
-		return 128000
-	}
-	return 88000
+func codeFreeContextWindowTokens(_ string) int {
+	return 128000
 }
 
 // discoverOllamaModels queries the Ollama /api/tags endpoint to list locally

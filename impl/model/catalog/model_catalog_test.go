@@ -97,6 +97,9 @@ func TestCodeFreeStaticModelsDoNotExposeReasoning(t *testing.T) {
 		if caps.SupportsReasoning || caps.ReasoningMode != ReasoningModeNone {
 			t.Fatalf("LookupModelCapabilities(codefree, %q) = %#v, want no reasoning", model, caps)
 		}
+		if caps.ContextWindowTokens != 128000 {
+			t.Fatalf("LookupModelCapabilities(codefree, %q).ContextWindowTokens = %d, want 128000", model, caps.ContextWindowTokens)
+		}
 		if len(caps.ReasoningEfforts) != 0 || caps.DefaultReasoningEffort != "" {
 			t.Fatalf("LookupModelCapabilities(codefree, %q) efforts = %#v/%q, want none", model, caps.ReasoningEfforts, caps.DefaultReasoningEffort)
 		}
