@@ -563,6 +563,23 @@ func acpToolPanelClickToken(callID string) string {
 	return "acp_tool_panel:" + callID
 }
 
+func acpToolPanelClickTokenIf(callID string, enabled bool) string {
+	if !enabled {
+		return ""
+	}
+	return acpToolPanelClickToken(callID)
+}
+
+func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final bool, fullOutput bool) bool {
+	if fullOutput {
+		return false
+	}
+	if toolPanelEventHasHiddenToolArgs(ev) {
+		return true
+	}
+	return final && finalToolOutputSummaryHidesLines(outputText)
+}
+
 func acpReasoningClickToken(key string) string {
 	key = strings.TrimSpace(key)
 	if key == "" {

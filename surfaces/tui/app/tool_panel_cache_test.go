@@ -70,7 +70,7 @@ func TestParticipantToolPanelRenderCachePreservesHeaderToken(t *testing.T) {
 	ctx := BlockRenderContext{Width: 96, TermWidth: 96, Theme: m.theme}
 	block := NewParticipantTurnBlock("session-1", "worker")
 
-	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", "first\n", false, false, ToolUpdateMeta{TaskID: "task-1"})
+	block.UpdateToolWithMeta("call-1", "RUN_COMMAND", "go test", strings.Join(numberedToolLines(6), "\n"), true, false, ToolUpdateMeta{TaskID: "task-1"})
 	rows := block.Render(ctx)
 	if !rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
 		t.Fatalf("initial rows missing panel click token: %#v", renderedPlainRows(rows))

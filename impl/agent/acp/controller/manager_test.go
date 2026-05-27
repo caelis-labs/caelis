@@ -678,6 +678,9 @@ func TestManagerSetControllerModelReconnectsAfterBrokenPipe(t *testing.T) {
 		},
 		CWD: t.TempDir(),
 	}
+	t.Cleanup(func() {
+		_ = manager.Deactivate(context.Background(), parentSession.SessionRef)
+	})
 	if _, err := manager.Activate(ctx, controller.HandoffRequest{
 		Session: parentSession,
 		Agent:   "helper",
@@ -740,6 +743,9 @@ func TestManagerRunTurnReconnectsAfterBrokenPipe(t *testing.T) {
 		},
 		CWD: t.TempDir(),
 	}
+	t.Cleanup(func() {
+		_ = manager.Deactivate(context.Background(), parentSession.SessionRef)
+	})
 	if _, err := manager.Activate(ctx, controller.HandoffRequest{
 		Session: parentSession,
 		Agent:   "helper",
@@ -862,6 +868,9 @@ func TestManagerRunTurnReconnectReappliesSelectedModelAndEffort(t *testing.T) {
 		},
 		CWD: t.TempDir(),
 	}
+	t.Cleanup(func() {
+		_ = manager.Deactivate(context.Background(), parentSession.SessionRef)
+	})
 	if _, err := manager.Activate(ctx, controller.HandoffRequest{
 		Session: parentSession,
 		Agent:   "helper",
@@ -939,6 +948,9 @@ func TestManagerRunTurnReconnectReappliesModeWhenResumeReportsEmptyCurrentMode(t
 		},
 		CWD: t.TempDir(),
 	}
+	t.Cleanup(func() {
+		_ = manager.Deactivate(context.Background(), parentSession.SessionRef)
+	})
 	if _, err := manager.Activate(ctx, controller.HandoffRequest{
 		Session: parentSession,
 		Agent:   "helper",

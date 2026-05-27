@@ -44,30 +44,22 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 		return false
 	}
 	if !toolPanelExpanded(mapValue(expandedState), callID) {
-		setToolPanelExpandedState(expandedState, callID, true)
-		return true
+		return false
 	}
-	if toolPanelHasHiddenToolArgs(events, callID) {
-		if fullOutputState == nil {
-			return false
-		}
-		if *fullOutputState == nil {
-			*fullOutputState = map[string]bool{}
-		}
-		(*fullOutputState)[callID] = !(*fullOutputState)[callID]
-		return true
+	if toolPanelFullOutput(mapValue(fullOutputState), callID) {
+		return false
 	}
-	if toolPanelHasHiddenSummary(events, callID) {
-		if fullOutputState == nil {
-			return false
-		}
-		if *fullOutputState == nil {
-			*fullOutputState = map[string]bool{}
-		}
-		(*fullOutputState)[callID] = !(*fullOutputState)[callID]
-		return true
+	if !toolPanelHasHiddenToolArgs(events, callID) && !toolPanelHasHiddenSummary(events, callID) {
+		return false
 	}
-	return toggleToolPanelExpanded(expandedState, callID)
+	if fullOutputState == nil {
+		return false
+	}
+	if *fullOutputState == nil {
+		*fullOutputState = map[string]bool{}
+	}
+	(*fullOutputState)[callID] = true
+	return true
 }
 
 func mapValue(ptr *map[string]bool) map[string]bool {
@@ -379,7 +371,7 @@ func toolPanelHasHiddenSummary(events []SubagentEvent, callID string) bool {
 	if !ok {
 		return false
 	}
-	return len(nonEmptyToolOutputLines(final.Output)) > acpTerminalPanelMaxLines
+	return toolPanelEventHasHiddenOutputSummary(final)
 }
 
 func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {
@@ -387,11 +379,30 @@ func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {
 	if !ok {
 		return false
 	}
+	return toolPanelEventHasHiddenToolArgs(ev)
+}
+
+func toolPanelEventHasHiddenToolArgs(ev SubagentEvent) bool {
 	fullArgs := strings.TrimSpace(ev.FullArgs)
 	if fullArgs == "" {
 		return false
 	}
 	return fullArgs != strings.TrimSpace(ev.Args)
+}
+
+func toolPanelEventHasHiddenOutputSummary(ev SubagentEvent) bool {
+	if ev.Kind != SEToolCall || !ev.Done || !shouldRenderToolEvent(ev) || isMutationPanelToolEvent(ev) {
+		return false
+	}
+	text := ev.Output
+	if strings.EqualFold(toolSemanticName(ev.Name, ev.ToolKind), "SPAWN") {
+		text = summarizeSubagentTerminalPanelText(text, true)
+	}
+	return finalToolOutputSummaryHidesLines(text)
+}
+
+func finalToolOutputSummaryHidesLines(text string) bool {
+	return len(nonEmptyToolOutputLines(text)) > acpTerminalPanelMaxLines
 }
 
 func latestToolEventForCallID(events []SubagentEvent, callID string) (SubagentEvent, bool) {

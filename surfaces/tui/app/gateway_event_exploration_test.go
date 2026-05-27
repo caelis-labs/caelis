@@ -11,7 +11,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func TestGatewayCompletedExplorationToolDefaultsCollapsed(t *testing.T) {
+func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *testing.T) {
 	model := newGatewayEventTestModel()
 
 	updated, _ := model.Update(kernel.EventEnvelope{
@@ -52,11 +52,15 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsed(t *testing.T) {
 	if block.toolPanelExpanded("call-1") {
 		t.Fatalf("READ tool panel should default collapsed after completion; expanded map = %#v", block.ExpandedTools)
 	}
-	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:call-1") {
-		t.Fatal("expected READ tool panel toggle token to expand collapsed panel")
+	rows := block.Render(BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme})
+	if rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
+		t.Fatalf("collapsed READ tool panel should not expose a header-only click token: %#v", renderedPlainRows(rows))
 	}
-	if !block.toolPanelExpanded("call-1") {
-		t.Fatalf("READ tool panel should expand after click; expanded map = %#v", block.ExpandedTools)
+	if model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:call-1") {
+		t.Fatal("collapsed READ tool panel should not expand from a header-only click")
+	}
+	if block.toolPanelExpanded("call-1") {
+		t.Fatalf("READ tool panel should stay collapsed after ignored click; expanded map = %#v", block.ExpandedTools)
 	}
 }
 

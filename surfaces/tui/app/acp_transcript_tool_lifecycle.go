@@ -254,7 +254,7 @@ func finalPanelToolName(start SubagentEvent, final SubagentEvent, hasFinal bool)
 
 func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, final bool, fullOutput bool) []RenderedRow {
 	header := standardToolLifecycleHeader(ev, err)
-	token := acpToolPanelClickToken(callID)
+	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, text, final, fullOutput))
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if !final || !fullOutput {
 		text = summarizeACPToolPanelText(text, final)
@@ -275,7 +275,7 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 
 func renderACPStandardToolCollapsedRows(blockID string, ev SubagentEvent, callID string, width int, ctx BlockRenderContext, err bool) []RenderedRow {
 	header := standardToolLifecycleHeader(ev, err)
-	return []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, acpToolPanelClickToken(callID))}
+	return []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, "")}
 }
 
 func standardToolLifecycleHeader(ev SubagentEvent, err bool) string {
@@ -443,8 +443,12 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 			headerEvent.Args = fullArgs
 		}
 	}
+	displayText := text
+	if strings.EqualFold(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)), "SPAWN") {
+		displayText = summarizeSubagentTerminalPanelText(displayText, final)
+	}
 	header := terminalLifecycleHeader(headerEvent)
-	token := acpToolPanelClickToken(callID)
+	token := acpToolPanelClickTokenIf(callID, toolPanelCanExpandHiddenDetails(ev, displayText, final, fullOutput))
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if !renderableTextHasContent(text) && !final && strings.EqualFold(strings.TrimSpace(ev.Name), "SPAWN") {
 		text = "(wait subagent output)"
@@ -453,11 +457,11 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		return rows
 	}
 	if final && fullOutput {
-		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
+		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, "")...)
 		return rows
 	}
 	if strings.EqualFold(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)), "SPAWN") {
-		text = summarizeSubagentTerminalPanelText(text, final)
+		text = displayText
 		if !renderableTextHasContent(text) && !final {
 			text = "(wait subagent output)"
 		}
@@ -544,7 +548,7 @@ func firstShellExecutableToken(command string) string {
 
 func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID string, text string, width int, ctx BlockRenderContext, err bool, expanded bool, opts acpTranscriptRenderOptions) []RenderedRow {
 	header := mutationLifecycleHeader(ev, err)
-	token := acpToolPanelClickToken(callID)
+	token := ""
 	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
 	if err {
 		if msg := sanitizeRenderableText(text); renderableTextHasContent(msg) && msg != sanitizeRenderableText(ev.Args) {

@@ -203,31 +203,22 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 		"result 06",
 	}, "\n")
 
-	block.UpdateToolWithMeta("ws-1", "fetch", `"weather: Shanghai, China"`, output, true, false, ToolUpdateMeta{
-		ToolKind: "fetch",
+	block.UpdateToolWithMeta("ws-1", "lookup_weather", `"weather: Shanghai, China"`, output, true, false, ToolUpdateMeta{
+		ToolKind: "other",
 	})
 
 	rows := block.Render(ctx)
 	plain := renderedPlainRows(rows)
 	joined := strings.Join(plain, "\n")
-	if !strings.Contains(joined, `• Search "weather: Shanghai, China"`) {
+	if !rowsContainClickToken(rows, acpToolPanelClickToken("ws-1")) {
+		t.Fatalf("summarized generic ACP tool should expose expand click token: %#v", plain)
+	}
+	if !strings.Contains(joined, `lookup_weather "weather: Shanghai, China"`) {
 		t.Fatalf("generic ACP tool should use standard header, got\n%s", joined)
 	}
 	if strings.Contains(joined, "▾ Searching the Web") || strings.Contains(joined, "{") {
 		t.Fatalf("generic ACP tool leaked old expandable/raw-json header, got\n%s", joined)
 	}
-	for _, hidden := range []string{"result 01", "result 06", "╭", "│"} {
-		if strings.Contains(joined, hidden) {
-			t.Fatalf("collapsed generic ACP tool should not show old/raw output %q\n%s", hidden, joined)
-		}
-	}
-
-	if !block.toggleToolPanelClick("ws-1") {
-		t.Fatal("expected generic ACP summary click to expand summarized output")
-	}
-	rows = block.Render(ctx)
-	plain = renderedPlainRows(rows)
-	joined = strings.Join(plain, "\n")
 	for _, want := range []string{"result 01", "result 02", "... +2 lines", "result 05", "result 06"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("generic ACP tool output missing %q\n%s", want, joined)
@@ -249,9 +240,15 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	if strings.Contains(joined, "... +") || !strings.Contains(joined, "result 03") || !strings.Contains(joined, "result 04") {
 		t.Fatalf("expanded generic ACP tool output should show hidden lines, got\n%s", joined)
 	}
+	if rowsContainClickToken(rows, acpToolPanelClickToken("ws-1")) {
+		t.Fatalf("expanded generic ACP tool should not expose a collapse click token: %#v", plain)
+	}
+	if block.toggleToolPanelClick("ws-1") {
+		t.Fatal("expanded generic ACP tool output should not collapse on a second click")
+	}
 }
 
-func TestStandardCustomToolCollapseHidesOutputRows(t *testing.T) {
+func TestShortToolOutputDoesNotCollapseOnClick(t *testing.T) {
 	model := newGatewayEventTestModel()
 	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
 	block := NewParticipantTurnBlock("codex-001", "codex-001")
@@ -259,22 +256,40 @@ func TestStandardCustomToolCollapseHidesOutputRows(t *testing.T) {
 		ToolKind: "other",
 	})
 
-	joined := strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
+	rows := block.Render(ctx)
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if rowsContainClickToken(rows, acpToolPanelClickToken("custom-1")) {
+		t.Fatalf("short custom tool output should not expose a click token: %#v", renderedPlainRows(rows))
+	}
 	if !strings.Contains(joined, `• lookup_weather "Shanghai"`) ||
 		!strings.Contains(joined, "sunny") ||
 		!strings.Contains(joined, "24C") {
 		t.Fatalf("expanded custom tool should show standard header and output, got\n%s", joined)
 	}
 
-	if !block.toggleToolPanelClick("custom-1") {
-		t.Fatal("expected custom tool click to collapse panel")
+	if block.toggleToolPanelClick("custom-1") {
+		t.Fatal("short custom tool output should not be clickable")
 	}
 	joined = strings.Join(renderedPlainRows(block.Render(ctx)), "\n")
 	if !strings.Contains(joined, `• lookup_weather "Shanghai"`) {
-		t.Fatalf("collapsed custom tool should keep header, got\n%s", joined)
+		t.Fatalf("custom tool should keep header, got\n%s", joined)
 	}
-	if strings.Contains(joined, "sunny") || strings.Contains(joined, "24C") || strings.Contains(joined, "╭") || strings.Contains(joined, "│") {
-		t.Fatalf("collapsed custom tool should hide output and old panel UI, got\n%s", joined)
+	if !strings.Contains(joined, "sunny") || !strings.Contains(joined, "24C") {
+		t.Fatalf("short custom tool output should stay visible, got\n%s", joined)
+	}
+
+	terminal := NewMainACPTurnBlock("session-1")
+	terminal.UpdateTool("command-1", "RUN_COMMAND", "create table", "CREATE TABLE", true, false)
+	if terminal.toggleToolPanelClick("command-1") {
+		t.Fatal("single-line terminal output should not be clickable")
+	}
+	rows = terminal.Render(ctx)
+	if rowsContainClickToken(rows, acpToolPanelClickToken("command-1")) {
+		t.Fatalf("single-line terminal output should not expose a click token: %#v", renderedPlainRows(rows))
+	}
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "CREATE TABLE") {
+		t.Fatalf("single-line terminal output should stay visible, got\n%s", joined)
 	}
 }
 
