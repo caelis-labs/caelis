@@ -207,8 +207,8 @@ type Driver interface {
 	AddAgentWithOptions(context.Context, string, AgentAddOptions) (AgentStatusSnapshot, error)
 	RemoveAgent(context.Context, string) (AgentStatusSnapshot, error)
 	HandoffAgent(context.Context, string) (AgentStatusSnapshot, error)
-	StartAgentSubagent(context.Context, string, string) (Turn, error)
-	ContinueSubagent(context.Context, string, string) (Turn, error)
+	StartAgentSubagent(context.Context, string, string, []Attachment) (Turn, error)
+	ContinueSubagent(context.Context, string, string, []Attachment) (Turn, error)
 
 	CompleteMention(context.Context, string, int) ([]CompletionCandidate, error)
 	CompleteFile(context.Context, string, int) ([]CompletionCandidate, error)

@@ -405,7 +405,7 @@ func (m *Model) handleClipboardCopyResult(msg clipboardCopyResultMsg) tea.Cmd {
 }
 
 func (m *Model) reportClipboardError(action string, err error) tea.Cmd {
-	errLine := strings.TrimSpace(action + ": " + err.Error())
+	errLine := compactString(strings.TrimSpace(action+": "+err.Error()), 180)
 	if errLine == "" {
 		errLine = "clipboard operation failed"
 	}
@@ -745,10 +745,7 @@ func (m *Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cfg.PasteClipboardImage != nil {
 			names, _, err := m.cfg.PasteClipboardImage()
 			if err != nil {
-				errLine := "paste: " + err.Error()
-				m.commitLine(errLine)
-				m.syncViewportContent()
-				return m, nil
+				return m, m.reportClipboardError("paste image", err)
 			}
 			if len(names) > 0 {
 				added := names

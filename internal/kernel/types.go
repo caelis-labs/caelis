@@ -514,18 +514,20 @@ type ApprovalDecision struct {
 }
 
 type SubmitRequest struct {
-	Kind     SubmissionKind
-	Text     string
-	Metadata map[string]any
-	Approval *ApprovalDecision
+	Kind         SubmissionKind
+	Text         string
+	ContentParts []model.ContentPart
+	Metadata     map[string]any
+	Approval     *ApprovalDecision
 }
 
 type SubmitActiveTurnRequest struct {
-	SessionRef session.SessionRef
-	Kind       SubmissionKind
-	Text       string
-	Metadata   map[string]any
-	Approval   *ApprovalDecision
+	SessionRef   session.SessionRef
+	Kind         SubmissionKind
+	Text         string
+	ContentParts []model.ContentPart
+	Metadata     map[string]any
+	Approval     *ApprovalDecision
 }
 
 type BeginTurnResult struct {

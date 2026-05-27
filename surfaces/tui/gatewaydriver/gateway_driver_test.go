@@ -1572,8 +1572,15 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if err != nil {
 		t.Fatalf("NewGatewayDriver() error = %v", err)
 	}
+	imageRaw, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeSession.CWD, "side.png"), imageRaw, 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	_, err = driver.StartAgentSubagent(ctx, "copilot", "  second prompt  ")
+	_, err = driver.StartAgentSubagent(ctx, "copilot", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
 	if err == nil {
 		t.Fatal("StartAgentSubagent() error = nil, want active run conflict")
 	}
@@ -1586,6 +1593,12 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	}
 	if len(gw.promptReqs) != 1 || gw.promptReqs[0].Input != "second prompt" {
 		t.Fatalf("PromptParticipant requests = %#v, want trimmed prompt", gw.promptReqs)
+	}
+	if parts := gw.promptReqs[0].ContentParts; len(parts) != 3 ||
+		parts[0].Type != model.ContentPartText || parts[0].Text != "second " ||
+		parts[1].Type != model.ContentPartImage || parts[1].FileName != "side.png" ||
+		parts[2].Type != model.ContentPartText || parts[2].Text != "prompt" {
+		t.Fatalf("PromptParticipant content parts = %#v, want text/image/text", parts)
 	}
 	if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-new" {
 		t.Fatalf("DetachParticipant requests = %#v, want rollback of new sidecar", gw.detachReqs)

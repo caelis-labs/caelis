@@ -29,7 +29,7 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 
 func TestHelpTextUsesRegistrySpecs(t *testing.T) {
 	got := HelpText([]string{"help", "agent", "custom"})
-	for _, want := range []string{"/help  Show available slash commands", "/agent list", "/custom"} {
+	for _, want := range []string{"/help", "Show commands and shortcuts", "/agent <action>", "actions: list", "/custom <prompt>"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("HelpText() = %q, want %q", got, want)
 		}

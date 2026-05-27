@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -143,7 +144,7 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 	textPos := 0
 	cursorAssigned := false
 
-	for _, item := range items {
+	for i, item := range items {
 		offset := min(max(item.Offset, 0), len(valueRunes))
 		if offset > textPos {
 			segment := valueRunes[textPos:offset]
@@ -155,7 +156,7 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 			}
 			textPos = offset
 		}
-		token := "[" + item.Name + "] "
+		token := imageAttachmentToken(i + 1)
 		out.WriteString(token)
 		displayCount += len([]rune(token))
 		if cursor == offset {
@@ -178,18 +179,25 @@ func composeInputDisplay(value string, cursor int, attachments []inputAttachment
 	return out.String(), displayCursor
 }
 
-func composeDisplayWithToken(value string, attachments []inputAttachment, token func(string) string) string {
+func imageAttachmentToken(index int) string {
+	if index < 1 {
+		index = 1
+	}
+	return "[image #" + strconv.Itoa(index) + "] "
+}
+
+func composeDisplayWithToken(value string, attachments []inputAttachment, token func(int, string) string) string {
 	valueRunes := []rune(value)
 	items := cloneInputAttachments(attachments)
 	var out strings.Builder
 	textPos := 0
-	for _, item := range items {
+	for i, item := range items {
 		offset := min(max(item.Offset, 0), len(valueRunes))
 		if offset > textPos {
 			appendDisplaySegment(&out, string(valueRunes[textPos:offset]))
 			textPos = offset
 		}
-		appendDisplaySegment(&out, token(item.Name))
+		appendDisplaySegment(&out, token(i+1, item.Name))
 	}
 	if textPos < len(valueRunes) {
 		appendDisplaySegment(&out, string(valueRunes[textPos:]))

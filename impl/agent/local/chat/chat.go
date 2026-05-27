@@ -292,10 +292,10 @@ func (a *Agent) drainPendingSubmissions(ctx agent.Context, messages *[]model.Mes
 			continue
 		}
 		text := strings.TrimSpace(submission.Text)
-		if text == "" {
+		if text == "" && len(submission.ContentParts) == 0 {
 			continue
 		}
-		message := model.NewTextMessage(model.RoleUser, text)
+		message := model.MessageFromTextAndContentParts(model.RoleUser, text, submission.ContentParts)
 		event := &session.Event{
 			Type:       session.EventTypeUser,
 			Visibility: session.VisibilityCanonical,

@@ -100,7 +100,7 @@ func TestSlashHelpListsMinimalCoreCommands(t *testing.T) {
 	if !ok {
 		t.Fatalf("slashHelp() msg = %#v, want LogChunkMsg", msgs[0])
 	}
-	for _, want := range []string{"/agent list | /agent add <builtin> | /agent install <adapter> | /agent use <agent|local> | /agent remove <agent>", "/connect", "/model use <alias> | /model del <alias>", "/compact", "/resume [session-id]"} {
+	for _, want := range []string{"/agent <action>", "actions: list, add <builtin>", "/connect", "/model <action>", "actions: use <alias>, del <alias>", "/compact", "/resume [session-id]", "Shortcuts", "Paste clipboard image"} {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashHelp() chunk = %q, want substring %q", log.Chunk, want)
 		}
@@ -1329,6 +1329,26 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	if driver.lastContinuedHandle != "jeff" || driver.lastContinuedPrompt != "continue" {
 		t.Fatalf("continued handle=%q prompt=%q", driver.lastContinuedHandle, driver.lastContinuedPrompt)
 	}
+	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
+		Text:        "/copilot see this",
+		Attachments: []Attachment{{Name: "shot.png", Offset: len([]rune("/copilot see "))}},
+	})
+	if result.Err != nil {
+		t.Fatalf("dynamic slash with attachment error = %v", result.Err)
+	}
+	if len(driver.lastStartedAttachments) != 1 || driver.lastStartedAttachments[0].Name != "shot.png" || driver.lastStartedAttachments[0].Offset != len([]rune("see ")) {
+		t.Fatalf("started attachments = %#v, want prompt-relative image attachment", driver.lastStartedAttachments)
+	}
+	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
+		Text:        "@jeff continue",
+		Attachments: []Attachment{{Name: "follow.png", Offset: len([]rune("@jeff continue"))}},
+	})
+	if result.Err != nil {
+		t.Fatalf("handle continuation with attachment error = %v", result.Err)
+	}
+	if len(driver.lastContinuedAttachments) != 1 || driver.lastContinuedAttachments[0].Name != "follow.png" || driver.lastContinuedAttachments[0].Offset != len([]rune("continue")) {
+		t.Fatalf("continued attachments = %#v, want prompt-relative image attachment", driver.lastContinuedAttachments)
+	}
 	if len(msgs) == 0 {
 		t.Fatal("dynamic slash emitted no messages")
 	}
@@ -1748,40 +1768,42 @@ func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
 }
 
 type bridgeTestDriver struct {
-	status              tuidriver.StatusSnapshot
-	connectStatus       tuidriver.StatusSnapshot
-	useModelStatus      tuidriver.StatusSnapshot
-	newSession          session.Session
-	resumedSession      session.Session
-	replay              []kernel.EventEnvelope
-	connectCalls        int
-	useModelCalls       int
-	deleteModelCalls    int
-	listAgentCalls      int
-	agentStatusCalls    int
-	addAgentCalls       int
-	removeAgentCalls    int
-	handoffAgentCalls   int
-	prepareSandboxCalls int
-	resetSandboxCalls   int
-	compactCalls        int
-	lastConnect         tuidriver.ConnectConfig
-	lastModelAlias      string
-	lastReasoningEffort string
-	lastDeletedAlias    string
-	lastAddedAgent      string
-	lastAddOptions      tuidriver.AgentAddOptions
-	lastRemovedAgent    string
-	lastHandoffAgent    string
-	lastStartedAgent    string
-	lastStartedPrompt   string
-	lastContinuedHandle string
-	lastContinuedPrompt string
-	subagentTurn        tuidriver.Turn
-	agentList           []tuidriver.AgentCandidate
-	agentStatus         tuidriver.AgentStatusSnapshot
-	addAgentErr         error
-	slashArgCandidates  map[string][]tuidriver.SlashArgCandidate
+	status                   tuidriver.StatusSnapshot
+	connectStatus            tuidriver.StatusSnapshot
+	useModelStatus           tuidriver.StatusSnapshot
+	newSession               session.Session
+	resumedSession           session.Session
+	replay                   []kernel.EventEnvelope
+	connectCalls             int
+	useModelCalls            int
+	deleteModelCalls         int
+	listAgentCalls           int
+	agentStatusCalls         int
+	addAgentCalls            int
+	removeAgentCalls         int
+	handoffAgentCalls        int
+	prepareSandboxCalls      int
+	resetSandboxCalls        int
+	compactCalls             int
+	lastConnect              tuidriver.ConnectConfig
+	lastModelAlias           string
+	lastReasoningEffort      string
+	lastDeletedAlias         string
+	lastAddedAgent           string
+	lastAddOptions           tuidriver.AgentAddOptions
+	lastRemovedAgent         string
+	lastHandoffAgent         string
+	lastStartedAgent         string
+	lastStartedPrompt        string
+	lastStartedAttachments   []tuidriver.Attachment
+	lastContinuedHandle      string
+	lastContinuedPrompt      string
+	lastContinuedAttachments []tuidriver.Attachment
+	subagentTurn             tuidriver.Turn
+	agentList                []tuidriver.AgentCandidate
+	agentStatus              tuidriver.AgentStatusSnapshot
+	addAgentErr              error
+	slashArgCandidates       map[string][]tuidriver.SlashArgCandidate
 }
 
 type bridgeLightweightStatusDriver struct {
@@ -1817,6 +1839,13 @@ func bridgeTurnWithEvents(envs ...kernel.EventEnvelope) tuidriver.Turn {
 	}
 	close(events)
 	return &bridgeTestTurn{events: events}
+}
+
+func cloneTUIDriverAttachments(items []tuidriver.Attachment) []tuidriver.Attachment {
+	if len(items) == 0 {
+		return nil
+	}
+	return append([]tuidriver.Attachment(nil), items...)
 }
 
 func participantAssistantEnvelope(scopeID string, actor string, text string) kernel.EventEnvelope {
@@ -1913,10 +1942,10 @@ func (d *bridgeSubmitDriver) RemoveAgent(context.Context, string) (tuidriver.Age
 func (d *bridgeSubmitDriver) HandoffAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
 	return tuidriver.AgentStatusSnapshot{}, nil
 }
-func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string) (tuidriver.Turn, error) {
+func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string, []tuidriver.Attachment) (tuidriver.Turn, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string) (tuidriver.Turn, error) {
+func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string, []tuidriver.Attachment) (tuidriver.Turn, error) {
 	return nil, nil
 }
 func (d *bridgeSubmitDriver) CompleteMention(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
@@ -2064,17 +2093,19 @@ func (d *bridgeTestDriver) HandoffAgent(_ context.Context, target string) (tuidr
 	d.lastHandoffAgent = target
 	return d.agentStatus, nil
 }
-func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string) (tuidriver.Turn, error) {
+func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string, attachments []tuidriver.Attachment) (tuidriver.Turn, error) {
 	d.lastStartedAgent = agent
 	d.lastStartedPrompt = prompt
+	d.lastStartedAttachments = cloneTUIDriverAttachments(attachments)
 	if d.subagentTurn != nil {
 		return d.subagentTurn, nil
 	}
 	return bridgeTurnWithEvents(), nil
 }
-func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string) (tuidriver.Turn, error) {
+func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string, attachments []tuidriver.Attachment) (tuidriver.Turn, error) {
 	d.lastContinuedHandle = handle
 	d.lastContinuedPrompt = prompt
+	d.lastContinuedAttachments = cloneTUIDriverAttachments(attachments)
 	if d.subagentTurn != nil {
 		return d.subagentTurn, nil
 	}

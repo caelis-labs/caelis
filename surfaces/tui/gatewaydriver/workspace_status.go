@@ -5,6 +5,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/internal/winproc"
 )
 
 const gitWorkspaceStatusTimeout = 500 * time.Millisecond
@@ -53,6 +55,7 @@ func readGitWorkspaceStatus(ctx context.Context, cwd string) (gitWorkspaceStatus
 	statusCtx, cancel := context.WithTimeout(ctx, gitWorkspaceStatusTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(statusCtx, "git", "-C", cwd, "status", "--short", "--branch", "--porcelain=v1", "--untracked-files=no")
+	winproc.ConfigureHiddenConsole(cmd)
 	output, err := cmd.Output()
 	if err != nil {
 		return gitWorkspaceStatus{}, false

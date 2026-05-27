@@ -73,6 +73,37 @@ func TestCommittedUserDisplayLineUsesPlainUserSurface(t *testing.T) {
 	}
 }
 
+func TestCommittedUserDisplayLineDedupsGatewayEchoAfterImageDisplay(t *testing.T) {
+	m := NewModel(Config{})
+
+	m.commitUserDisplayLine("[image #1] describe this")
+	m.handleUserMessageMsg(UserMessageMsg{Text: "describe this"})
+
+	if m.doc.Len() != 1 {
+		t.Fatalf("document length = %d, want gateway echo deduped", m.doc.Len())
+	}
+	block, ok := m.doc.Blocks()[0].(*UserNarrativeBlock)
+	if !ok || block.Raw != "[image #1] describe this" {
+		t.Fatalf("user block = %#v, want original image display line", m.doc.Blocks()[0])
+	}
+}
+
+func TestImageAttachmentDisplayUsesShortOrdinalLabels(t *testing.T) {
+	m := NewModel(Config{})
+	attachments := []inputAttachment{
+		{Name: "clipboard-20260527-172440-5239-17272.png", Offset: 0},
+		{Name: "another-very-long-file-name.png", Offset: len([]rune("look "))},
+	}
+
+	if got := m.displayLineWithInputAttachments("look here", attachments); got != "[image #1] look [image #2] here" {
+		t.Fatalf("display line = %q, want short ordinal image labels", got)
+	}
+	display, _ := composeInputDisplay("look here", len([]rune("look here")), attachments)
+	if got := strings.TrimSpace(display); got != "[image #1] look [image #2] here" {
+		t.Fatalf("input display = %q, want short ordinal image labels", got)
+	}
+}
+
 func TestReasoningColorizeUsesMutedNonItalicBody(t *testing.T) {
 	theme := tuikit.DefaultTheme()
 	line := "› **Canvas-based** reasoning"

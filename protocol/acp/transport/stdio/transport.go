@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/OnslaughtSnail/caelis/internal/winproc"
 )
 
 type Config struct {
@@ -46,6 +48,7 @@ func Start(ctx context.Context, cfg Config) (*Process, error) {
 		workDir = abs
 	}
 	cmd := exec.CommandContext(ctx, command, cfg.Args...)
+	winproc.ConfigureHiddenConsole(cmd)
 	cmd.Dir = workDir
 	cmd.Env = mergedEnv(cfg.Env)
 	stdin, err := cmd.StdinPipe()

@@ -31,6 +31,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/job"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/win32"
+	"github.com/OnslaughtSnail/caelis/internal/winproc"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
@@ -437,6 +438,7 @@ func (r *runtime) restrictedShellCommand(ctx context.Context, req sandbox.Comman
 	}
 	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Token: syscall.Token(token)}
+	winproc.ConfigureHiddenConsole(cmd)
 	return cmd, token, nil
 }
 

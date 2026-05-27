@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -91,7 +92,7 @@ func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
 	})
 	model.running = true
 
-	updated, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Text: "ctrl+v"}))
+	updated, cmd := model.handleKey(tea.KeyPressMsg(tea.Key{Text: imagePasteKeysForPlatform(runtime.GOOS, isWSL())[0]}))
 	m := updated.(*Model)
 	if cmd == nil {
 		t.Fatal("running image paste should schedule hint cleanup")

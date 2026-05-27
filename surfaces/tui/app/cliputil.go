@@ -15,12 +15,15 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/internal/winproc"
 	"github.com/aymanbagabas/go-osc52/v2"
 )
 
 type clipboardCommand struct {
-	name string
-	args []string
+	name    string
+	args    []string
+	label   string
+	timeout time.Duration
 }
 
 var (
@@ -73,7 +76,7 @@ func nativeReadText() (string, error) {
 	for _, spec := range cmds {
 		out, err := runClipboardOutputCommand(spec)
 		if err == nil {
-			return strings.TrimRight(string(out), "\n"), nil
+			return strings.TrimRight(string(out), "\r\n"), nil
 		}
 		errs = append(errs, err)
 	}
@@ -105,6 +108,8 @@ func readClipboardCommands() []clipboardCommand {
 	switch clipboardGOOS {
 	case "darwin":
 		return []clipboardCommand{{name: "pbpaste"}}
+	case "windows":
+		return []clipboardCommand{{name: "powershell.exe", args: []string{"-NoProfile", "-NonInteractive", "-Command", "Get-Clipboard -Raw"}}}
 	case "linux":
 		cmds := make([]clipboardCommand, 0, 3)
 		if clipboardGetenv("WAYLAND_DISPLAY") != "" {
@@ -124,6 +129,8 @@ func writeClipboardCommands() []clipboardCommand {
 	switch clipboardGOOS {
 	case "darwin":
 		return []clipboardCommand{{name: "pbcopy"}}
+	case "windows":
+		return []clipboardCommand{{name: "clip.exe"}}
 	case "linux":
 		cmds := make([]clipboardCommand, 0, 3)
 		if clipboardGetenv("WAYLAND_DISPLAY") != "" {
@@ -140,16 +147,18 @@ func writeClipboardCommands() []clipboardCommand {
 }
 
 func runClipboardCommand(spec clipboardCommand, input string) error {
-	ctx, cancel := clipboardCommandContext()
+	timeout := clipboardCommandTimeoutFor(spec)
+	ctx, cancel := clipboardCommandContext(timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, spec.name, spec.args...)
+	winproc.ConfigureHiddenConsole(cmd)
 	cmd.Stdin = strings.NewReader(input)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return formatClipboardCommandError(spec, stderr.String(), fmt.Errorf("timed out after %s", clipboardCommandTimeout))
+			return formatClipboardCommandError(spec, stderr.String(), fmt.Errorf("timed out after %s", timeout))
 		}
 		return formatClipboardCommandError(spec, stderr.String(), err)
 	}
@@ -157,27 +166,36 @@ func runClipboardCommand(spec clipboardCommand, input string) error {
 }
 
 func runClipboardOutputCommand(spec clipboardCommand) ([]byte, error) {
-	ctx, cancel := clipboardCommandContext()
+	timeout := clipboardCommandTimeoutFor(spec)
+	ctx, cancel := clipboardCommandContext(timeout)
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, spec.name, spec.args...)
+	winproc.ConfigureHiddenConsole(cmd)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, formatClipboardCommandError(spec, stderr.String(), fmt.Errorf("timed out after %s", clipboardCommandTimeout))
+			return nil, formatClipboardCommandError(spec, stderr.String(), fmt.Errorf("timed out after %s", timeout))
 		}
 		return nil, formatClipboardCommandError(spec, stderr.String(), err)
 	}
 	return out, nil
 }
 
-func clipboardCommandContext() (context.Context, context.CancelFunc) {
-	if clipboardCommandTimeout <= 0 {
+func clipboardCommandTimeoutFor(spec clipboardCommand) time.Duration {
+	if spec.timeout > 0 {
+		return spec.timeout
+	}
+	return clipboardCommandTimeout
+}
+
+func clipboardCommandContext(timeout time.Duration) (context.Context, context.CancelFunc) {
+	if timeout <= 0 {
 		return context.WithCancel(context.Background())
 	}
-	return context.WithTimeout(context.Background(), clipboardCommandTimeout)
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 func formatClipboardCommandError(spec clipboardCommand, stderr string, err error) error {
@@ -189,6 +207,9 @@ func formatClipboardCommandError(spec clipboardCommand, stderr string, err error
 }
 
 func (c clipboardCommand) String() string {
+	if strings.TrimSpace(c.label) != "" {
+		return strings.TrimSpace(c.label)
+	}
 	if len(c.args) == 0 {
 		return c.name
 	}
@@ -233,6 +254,7 @@ func writeOSC52ClipboardText(text string) error {
 
 func wslReadText() (string, error) {
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-Command", "Get-Clipboard")
+	winproc.ConfigureHiddenConsole(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return "", err
@@ -242,6 +264,7 @@ func wslReadText() (string, error) {
 
 func wslWriteText(text string) error {
 	cmd := exec.Command("clip.exe")
+	winproc.ConfigureHiddenConsole(cmd)
 	cmd.Stdin = strings.NewReader(text)
 	return cmd.Run()
 }

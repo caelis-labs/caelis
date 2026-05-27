@@ -11,6 +11,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/subagent"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
@@ -31,6 +32,34 @@ func TestContentChunkTextPreservesStreamWhitespace(t *testing.T) {
 	})
 	if got != "hello " {
 		t.Fatalf("contentChunkText() = %q, want trailing space preserved", got)
+	}
+}
+
+func TestBuildPromptPartsPreservesContentPartWhitespace(t *testing.T) {
+	t.Parallel()
+
+	parts := buildPromptParts("ignored fallback", []model.ContentPart{
+		{Type: model.ContentPartText, Text: "first "},
+		{Type: model.ContentPartImage, MimeType: "image/png", Data: "iVBORw0KGgo=", FileName: "shot.png"},
+		{Type: model.ContentPartText, Text: " second"},
+	})
+	if len(parts) != 3 {
+		t.Fatalf("len(parts) = %d, want 3", len(parts))
+	}
+	var first client.TextContent
+	if err := json.Unmarshal(parts[0], &first); err != nil {
+		t.Fatal(err)
+	}
+	var image client.ImageContent
+	if err := json.Unmarshal(parts[1], &image); err != nil {
+		t.Fatal(err)
+	}
+	var second client.TextContent
+	if err := json.Unmarshal(parts[2], &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.Text != "first " || image.Type != "image" || image.Name != "shot.png" || second.Text != " second" {
+		t.Fatalf("prompt parts = %#v %#v %#v, want whitespace-preserving text/image/text", first, image, second)
 	}
 }
 
@@ -635,6 +664,76 @@ func TestManagerLifecycleUsesSingleClientStarterSeam(t *testing.T) {
 	}
 	if starts != 2 {
 		t.Fatalf("client starts = %d, want 2 (controller + participant)", starts)
+	}
+}
+
+func TestManagerRejectsImagePromptWithoutACPImageCapability(t *testing.T) {
+	registry, err := acp.NewRegistry([]acp.AgentConfig{{
+		Name:    "helper",
+		Command: "helper-acp",
+	}})
+	if err != nil {
+		t.Fatalf("NewRegistry() error = %v", err)
+	}
+	manager, err := NewManager(Config{Registry: registry})
+	if err != nil {
+		t.Fatalf("NewManager() error = %v", err)
+	}
+	manager.startClient = func(
+		_ context.Context,
+		_ string,
+		_ acp.AgentConfig,
+		_ string,
+		_ func(client.UpdateEnvelope),
+		_ func(context.Context, client.RequestPermissionRequest) (client.RequestPermissionResponse, error),
+	) (*client.Client, string, controllerClientState, error) {
+		return nil, "remote-session", controllerClientState{}, nil
+	}
+
+	parentSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws",
+		},
+		CWD: t.TempDir(),
+	}
+	if _, err := manager.Activate(context.Background(), controller.HandoffRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Source:  "test",
+	}); err != nil {
+		t.Fatalf("Activate() error = %v", err)
+	}
+	image := []model.ContentPart{{
+		Type:     model.ContentPartImage,
+		MimeType: "image/png",
+		Data:     "iVBORw0KGgo=",
+		FileName: "shot.png",
+	}}
+	if _, err := manager.RunTurn(context.Background(), controller.TurnRequest{
+		SessionRef:   parentSession.SessionRef,
+		Session:      parentSession,
+		TurnID:       "turn-image",
+		Input:        "look",
+		ContentParts: image,
+	}); err == nil || !strings.Contains(err.Error(), "does not support image prompts") {
+		t.Fatalf("RunTurn(image) error = %v, want unsupported image prompt", err)
+	}
+
+	participant, err := manager.Attach(context.Background(), controller.AttachRequest{
+		Session: parentSession,
+		Agent:   "helper",
+		Label:   "helper",
+	})
+	if err != nil {
+		t.Fatalf("Attach() error = %v", err)
+	}
+	if _, err := manager.PromptParticipant(context.Background(), controller.ParticipantPromptRequest{
+		SessionRef:    parentSession.SessionRef,
+		ParticipantID: participant.ID,
+		Input:         "look",
+		ContentParts:  image,
+	}); err == nil || !strings.Contains(err.Error(), "does not support image prompts") {
+		t.Fatalf("PromptParticipant(image) error = %v, want unsupported image prompt", err)
 	}
 }
 

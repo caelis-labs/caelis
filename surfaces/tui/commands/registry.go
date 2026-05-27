@@ -11,6 +11,7 @@ type CommandSpec struct {
 	Name             string
 	Usage            string
 	Description      string
+	Details          []string
 	Hidden           bool
 	LocalDuringACP   bool
 	ArgCandidates    []driver.SlashArgCandidate
@@ -20,11 +21,11 @@ type CommandSpec struct {
 // DefaultSpecs returns the canonical core slash command specs in display order.
 func DefaultSpecs() []CommandSpec {
 	specs := []CommandSpec{
-		{Name: "help", Usage: "/help", Description: "Show available slash commands", LocalDuringACP: true},
-		{Name: "agent", Usage: "/agent list | /agent add <builtin> | /agent install <adapter> | /agent use <agent|local> | /agent remove <agent>", Description: "Manage registered ACP agents and main-controller switching", LocalDuringACP: true, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
+		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
+		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
-		{Name: "model", Usage: "/model use <alias> | /model del <alias>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
-		{Name: "approval", Usage: "/approval [auto-review|manual]", Description: "Inspect or change approval review mode", LocalDuringACP: true, ArgCandidates: approvalCandidates()},
+		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
+		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
 		{Name: "doctor", Usage: "/doctor", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
@@ -79,7 +80,12 @@ func HelpText(names []string) string {
 	if len(names) == 0 {
 		names = DefaultNames()
 	}
-	lines := []string{"available commands:"}
+	type row struct {
+		usage       string
+		description string
+		details     []string
+	}
+	rows := make([]row, 0, len(names))
 	seen := map[string]struct{}{}
 	for _, command := range names {
 		name := normalizeName(command)
@@ -92,21 +98,63 @@ func HelpText(names []string) string {
 		seen[name] = struct{}{}
 		spec, known := Lookup(name)
 		if !known {
-			lines = append(lines, "  /"+name)
+			rows = append(rows, row{
+				usage:       "/" + name + " <prompt>",
+				description: "Send a prompt to the registered ACP agent",
+			})
 			continue
 		}
 		usage := strings.TrimSpace(spec.Usage)
 		description := strings.TrimSpace(spec.Description)
 		switch {
 		case usage == "":
-			lines = append(lines, "  /"+spec.Name)
+			rows = append(rows, row{usage: "/" + spec.Name})
 		case description == "":
-			lines = append(lines, "  "+usage)
+			rows = append(rows, row{usage: usage})
 		default:
-			lines = append(lines, "  "+usage+"  "+description)
+			rows = append(rows, row{usage: usage, description: description, details: spec.Details})
+		}
+	}
+	width := 0
+	for _, row := range rows {
+		if n := len([]rune(row.usage)); n > width {
+			width = n
+		}
+	}
+	if width < 12 {
+		width = 12
+	}
+	if width > 24 {
+		width = 24
+	}
+	lines := []string{"Commands:"}
+	for _, row := range rows {
+		usage := strings.TrimSpace(row.usage)
+		description := strings.TrimSpace(row.description)
+		if description == "" {
+			lines = append(lines, "  "+usage)
+		} else {
+			lines = append(lines, "  "+padRight(usage, width)+"  "+description)
+		}
+		for _, detail := range row.details {
+			detail = strings.TrimSpace(detail)
+			if detail != "" {
+				lines = append(lines, "  "+strings.Repeat(" ", width)+"  "+detail)
+			}
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func padRight(value string, width int) string {
+	if width <= 0 {
+		return value
+	}
+	count := len([]rune(value))
+	if count >= width {
+		return value
+	}
+	return value + strings.Repeat(" ", width-count)
 }
 
 // RootArgCandidates returns static first-level argument candidates for command.

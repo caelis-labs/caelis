@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/ports/agent"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -222,9 +223,10 @@ func (h *turnHandle) setRunner(runner agent.Runner) {
 
 func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 	out := SubmitRequest{
-		Kind:     req.Kind,
-		Text:     req.Text,
-		Metadata: cloneMap(req.Metadata),
+		Kind:         req.Kind,
+		Text:         req.Text,
+		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+		Metadata:     cloneMap(req.Metadata),
 	}
 	if req.Approval != nil {
 		approval := *req.Approval
@@ -235,9 +237,10 @@ func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 
 func runnerSubmissionFromSubmitRequest(req SubmitRequest) agent.Submission {
 	return agent.Submission{
-		Kind:     req.Kind,
-		Text:     req.Text,
-		Metadata: cloneMap(req.Metadata),
+		Kind:         req.Kind,
+		Text:         req.Text,
+		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+		Metadata:     cloneMap(req.Metadata),
 	}
 }
 

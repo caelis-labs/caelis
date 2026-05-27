@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -102,10 +103,11 @@ func (g *Gateway) SubmitActiveTurn(ctx context.Context, req SubmitActiveTurnRequ
 		}
 	}
 	return handle.Submit(ctx, SubmitRequest{
-		Kind:     req.Kind,
-		Text:     req.Text,
-		Metadata: cloneMap(req.Metadata),
-		Approval: req.Approval,
+		Kind:         req.Kind,
+		Text:         req.Text,
+		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+		Metadata:     cloneMap(req.Metadata),
+		Approval:     req.Approval,
 	})
 }
 

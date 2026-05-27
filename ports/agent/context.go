@@ -35,9 +35,10 @@ const (
 
 // Submission is one runtime continuation submission.
 type Submission struct {
-	Kind     SubmissionKind `json:"kind,omitempty"`
-	Text     string         `json:"text,omitempty"`
-	Metadata map[string]any `json:"metadata,omitempty"`
+	Kind         SubmissionKind      `json:"kind,omitempty"`
+	Text         string              `json:"text,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
+	Metadata     map[string]any      `json:"metadata,omitempty"`
 }
 
 // CancelStatus identifies the outcome of one cancellation request.
@@ -318,9 +319,10 @@ func (c *contextSnapshot) Overlay() bool {
 
 func CloneSubmission(sub Submission) Submission {
 	return Submission{
-		Kind:     sub.Kind,
-		Text:     sub.Text,
-		Metadata: maps.Clone(sub.Metadata),
+		Kind:         sub.Kind,
+		Text:         sub.Text,
+		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
+		Metadata:     maps.Clone(sub.Metadata),
 	}
 }
 

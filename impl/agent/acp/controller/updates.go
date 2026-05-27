@@ -1120,7 +1120,7 @@ func buildPromptParts(input string, parts []model.ContentPart) []json.RawMessage
 			})
 			out = append(out, raw)
 		default:
-			text := strings.TrimSpace(part.Text)
+			text := part.Text
 			if text == "" {
 				continue
 			}

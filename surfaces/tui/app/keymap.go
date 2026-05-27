@@ -1,6 +1,7 @@
 package tuiapp
 
 import (
+	"runtime"
 	"strings"
 
 	"charm.land/bubbles/v2/help"
@@ -48,15 +49,16 @@ func (h helpBindings) FullHelp() [][]key.Binding {
 }
 
 func defaultKeyMap(isWSL bool) appKeyMap {
-	imagePasteKeys := []string{"ctrl+v"}
-	imagePasteHelp := "ctrl+v"
-	textPasteKeys := []string{"super+v", "cmd+v", "ctrl+shift+v", "shift+insert"}
+	return defaultKeyMapForPlatform(runtime.GOOS, isWSL)
+}
+
+func defaultKeyMapForPlatform(goos string, isWSL bool) appKeyMap {
+	imagePasteKeys := imagePasteKeysForPlatform(goos, isWSL)
+	imagePasteHelp := imagePasteKeys[0]
+	textPasteKeys := textPasteKeysForPlatform(goos, isWSL)
 	textPasteHelp := "paste"
-	if isWSL {
-		imagePasteKeys = []string{"ctrl+alt+v"}
-		imagePasteHelp = "ctrl+alt+v"
-		textPasteKeys = []string{"ctrl+v", "ctrl+shift+v", "shift+insert"}
-		textPasteHelp = "ctrl+v"
+	if len(textPasteKeys) > 0 {
+		textPasteHelp = textPasteKeys[0]
 	}
 	return appKeyMap{
 		Send:          key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "send")),
@@ -81,6 +83,32 @@ func defaultKeyMap(isWSL bool) appKeyMap {
 		HalfPageUp:    key.NewBinding(key.WithKeys("shift+pgup"), key.WithHelp("shift+pgup", "½ scroll")),
 		HalfPageDown:  key.NewBinding(key.WithKeys("shift+pgdown"), key.WithHelp("shift+pgdn", "½ scroll")),
 		Quit:          key.NewBinding(key.WithKeys("ctrl+c"), key.WithHelp("ctrl+c", "quit")),
+	}
+}
+
+func imagePasteKeysForPlatform(goos string, isWSL bool) []string {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "windows":
+		return []string{"ctrl+alt+v"}
+	default:
+		if isWSL {
+			return []string{"ctrl+alt+v"}
+		}
+		return []string{"ctrl+v"}
+	}
+}
+
+func textPasteKeysForPlatform(goos string, isWSL bool) []string {
+	switch strings.ToLower(strings.TrimSpace(goos)) {
+	case "windows":
+		return []string{"ctrl+v", "ctrl+shift+v", "shift+insert"}
+	case "darwin":
+		return []string{"cmd+v", "super+v", "ctrl+shift+v", "shift+insert"}
+	default:
+		if isWSL {
+			return []string{"ctrl+v", "ctrl+shift+v", "shift+insert"}
+		}
+		return []string{"ctrl+shift+v", "shift+insert", "super+v", "cmd+v"}
 	}
 }
 

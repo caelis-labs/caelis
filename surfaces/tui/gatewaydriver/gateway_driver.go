@@ -429,15 +429,21 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	if err != nil {
 		return nil, err
 	}
+	input := strings.TrimSpace(submission.Text)
+	contentParts, err := contentPartsFromSubmission(input, submission.Attachments, d.WorkspaceDir())
+	if err != nil {
+		return nil, err
+	}
 	gw, err := d.gateway()
 	if err != nil {
 		return nil, err
 	}
 	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
 		err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
-			SessionRef: activeSession.SessionRef,
-			Kind:       kernel.SubmissionKindConversation,
-			Text:       strings.TrimSpace(submission.Text),
+			SessionRef:   activeSession.SessionRef,
+			Kind:         kernel.SubmissionKindConversation,
+			Text:         input,
+			ContentParts: contentParts,
 			Metadata: map[string]any{
 				"submission_mode": string(submission.Mode),
 				"display_text":    strings.TrimSpace(submission.DisplayText),
@@ -451,9 +457,10 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 		}
 	}
 	result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
-		SessionRef: activeSession.SessionRef,
-		Input:      strings.TrimSpace(submission.Text),
-		Surface:    d.bindingKey,
+		SessionRef:   activeSession.SessionRef,
+		Input:        input,
+		ContentParts: contentParts,
+		Surface:      d.bindingKey,
 		Metadata: map[string]any{
 			"submission_mode": string(submission.Mode),
 			"display_text":    strings.TrimSpace(submission.DisplayText),
@@ -807,8 +814,13 @@ func (d *GatewayDriver) HandoffAgent(ctx context.Context, target string) (AgentS
 	return d.AgentStatus(ctx)
 }
 
-func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, prompt string) (Turn, error) {
+func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, prompt string, attachments []Attachment) (Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prompt = strings.TrimSpace(prompt)
+	contentParts, err := contentPartsFromSubmission(prompt, attachments, d.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -847,7 +859,8 @@ func (d *GatewayDriver) StartAgentSubagent(ctx context.Context, target string, p
 		SessionRef:    updated.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
-		Input:         strings.TrimSpace(prompt),
+		Input:         prompt,
+		ContentParts:  contentParts,
 		Source:        "slash_" + agent,
 	})
 	if err != nil {
@@ -927,8 +940,13 @@ func sideAgentParticipantID(activeSession session.Session, agent string, label s
 	return "", fmt.Errorf("surfaces/tui/gatewaydriver: side ACP participant %q was not attached", agent)
 }
 
-func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, prompt string) (Turn, error) {
+func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, prompt string, attachments []Attachment) (Turn, error) {
 	activeSession, err := d.ensureSession(ctx)
+	if err != nil {
+		return nil, err
+	}
+	prompt = strings.TrimSpace(prompt)
+	contentParts, err := contentPartsFromSubmission(prompt, attachments, d.WorkspaceDir())
 	if err != nil {
 		return nil, err
 	}
@@ -944,7 +962,8 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 		SessionRef:    activeSession.SessionRef,
 		BindingKey:    d.bindingKey,
 		ParticipantID: participantID,
-		Input:         strings.TrimSpace(prompt),
+		Input:         prompt,
+		ContentParts:  contentParts,
 		Source:        "user_side_agent",
 	})
 	if err != nil {

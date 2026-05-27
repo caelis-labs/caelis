@@ -17,15 +17,15 @@ import (
 )
 
 func dispatchSlashCommand(driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
-	return dispatchSlashCommandWithContext(context.Background(), driver, sender, text)
+	return dispatchSlashCommandWithContext(context.Background(), driver, sender, text, nil)
 }
 
-func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
+func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
-	cmd, args := splitSlash(text)
+	cmd, args, argsStart := splitSlashWithPromptSpan(text)
 	send := sender.sendFunc()
 
 	switch cmd {
@@ -52,7 +52,7 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 	case "exit", "quit":
 		return TaskResultMsg{ExitNow: true}
 	default:
-		return slashDynamicAgentWithContext(ctx, driver, sender, cmd, args)
+		return slashDynamicAgentWithContext(ctx, driver, sender, cmd, args, attachmentsForPromptRange(attachments, argsStart, len([]rune(strings.TrimSpace(text)))))
 	}
 }
 
@@ -117,10 +117,10 @@ func slashHelpWithContext(ctx context.Context, driver tuidriver.Driver, send fun
 }
 
 func slashDynamicAgent(driver tuidriver.Driver, send func(tea.Msg), agent string, prompt string) TaskResultMsg {
-	return slashDynamicAgentWithContext(context.Background(), driver, &ProgramSender{Send: send}, agent, prompt)
+	return slashDynamicAgentWithContext(context.Background(), driver, &ProgramSender{Send: send}, agent, prompt, nil)
 }
 
-func slashDynamicAgentWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, agent string, prompt string) TaskResultMsg {
+func slashDynamicAgentWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, agent string, prompt string, attachments []Attachment) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
@@ -128,7 +128,7 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuidriver.Driver, 
 	send := sender.sendFunc()
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	prompt = strings.TrimSpace(prompt)
-	if prompt == "" {
+	if prompt == "" && len(attachments) == 0 {
 		if isRegisteredAgentCommand(driver, agent) {
 			sendNotice(send, fmt.Sprintf("usage: /%s <prompt>", agent))
 		} else {
@@ -136,7 +136,7 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuidriver.Driver, 
 		}
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	turn, err := driver.StartAgentSubagent(ctx, agent, prompt)
+	turn, err := driver.StartAgentSubagent(ctx, agent, prompt, convertAttachments(attachments))
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}
 	}
@@ -176,22 +176,23 @@ func isRegisteredAgentCommandWithContext(ctx context.Context, driver tuidriver.D
 }
 
 func dispatchMentionCommand(driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
-	return dispatchMentionCommandWithContext(context.Background(), driver, sender, text)
+	return dispatchMentionCommandWithContext(context.Background(), driver, sender, text, nil)
 }
 
-func dispatchMentionCommandWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
+func dispatchMentionCommandWithContext(ctx context.Context, driver tuidriver.Driver, sender *ProgramSender, text string, attachments []Attachment) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
 		ctx = sender.bindContext(ctx)
 	}
 	send := sender.sendFunc()
-	handle, prompt := splitFirst(strings.TrimSpace(text))
+	handle, prompt, promptStart := splitFirstWithPromptSpan(strings.TrimSpace(text))
 	handle = strings.TrimPrefix(strings.TrimSpace(handle), "@")
-	if handle == "" || strings.TrimSpace(prompt) == "" {
+	attachments = attachmentsForPromptRange(attachments, promptStart, len([]rune(strings.TrimSpace(text))))
+	if handle == "" || (strings.TrimSpace(prompt) == "" && len(attachments) == 0) {
 		sendNotice(send, "usage: @handle <prompt>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	turn, err := driver.ContinueSubagent(ctx, handle, prompt)
+	turn, err := driver.ContinueSubagent(ctx, handle, prompt, convertAttachments(attachments))
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("@"+handle, err)}
 	}

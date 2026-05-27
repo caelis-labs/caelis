@@ -144,6 +144,17 @@ func TestRunClipboardCommandTimesOut(t *testing.T) {
 	}
 }
 
+func TestClipboardCommandLabelRedactsArguments(t *testing.T) {
+	err := formatClipboardCommandError(clipboardCommand{
+		name:  "powershell.exe",
+		args:  []string{"-Command", "very long script body"},
+		label: "Windows clipboard image reader",
+	}, "", errors.New("timed out after 8s"))
+	if got := err.Error(); got != "Windows clipboard image reader: timed out after 8s" {
+		t.Fatalf("formatted error = %q", got)
+	}
+}
+
 func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 	t.Helper()
 

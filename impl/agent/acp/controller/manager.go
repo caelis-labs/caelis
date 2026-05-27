@@ -15,8 +15,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/internal/acputil"
 	"github.com/OnslaughtSnail/caelis/impl/agent/acp/subagent"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
+	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/client"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type Config struct {
@@ -55,6 +57,7 @@ type controllerRun struct {
 	client                *client.Client
 	remoteSessionID       string
 	supportsClose         bool
+	promptCapabilities    schema.PromptCapabilities
 	binding               session.ControllerBinding
 	contextPrelude        string
 	contextPreludePending bool
@@ -78,22 +81,24 @@ type controllerRun struct {
 }
 
 type controllerClientState struct {
-	commands      []controller.ControllerCommand
-	configOptions []controller.ControllerConfigOption
-	models        *client.SessionModelState
-	mode          string
-	modeOptions   []controller.ControllerMode
-	agentLabel    string
-	supportsClose bool
+	commands           []controller.ControllerCommand
+	configOptions      []controller.ControllerConfigOption
+	models             *client.SessionModelState
+	mode               string
+	modeOptions        []controller.ControllerMode
+	agentLabel         string
+	supportsClose      bool
+	promptCapabilities schema.PromptCapabilities
 }
 
 type participantRun struct {
-	id              string
-	parentSessionID string
-	agent           string
-	client          *client.Client
-	remoteSessionID string
-	binding         session.ParticipantBinding
+	id                 string
+	parentSessionID    string
+	agent              string
+	client             *client.Client
+	remoteSessionID    string
+	binding            session.ParticipantBinding
+	promptCapabilities schema.PromptCapabilities
 
 	mu                sync.Mutex
 	turnID            string
@@ -196,6 +201,7 @@ func (r *controllerRun) applyStartupStateLocked(client *client.Client, remoteSes
 	r.modeOptions = mergeControllerModes(controllerModesFromConfigOptions(r.configOptions), mergeControllerModes(r.modeOptions, state.modeOptions))
 	r.binding.RemoteSessionID = strings.TrimSpace(remoteSessionID)
 	r.binding.ContextSyncSeq = contextSyncSeq
+	r.promptCapabilities = state.promptCapabilities
 	if label := strings.TrimSpace(state.agentLabel); label != "" {
 		r.binding.Label = label
 	}
@@ -227,6 +233,9 @@ func (m *Manager) RunTurn(ctx context.Context, req controller.TurnRequest) (cont
 	m.mu.RUnlock()
 	if run == nil {
 		return controller.TurnResult{}, fmt.Errorf("impl/agent/acp/controller: no active ACP controller for session %q", sessionID)
+	}
+	if contentPartsContainImage(req.ContentParts) && !run.supportsPromptImages() {
+		return controller.TurnResult{}, fmt.Errorf("impl/agent/acp/controller: agent %q does not support image prompts", run.agent)
 	}
 
 	prompt := buildPromptParts(req.Input, req.ContentParts)
@@ -269,6 +278,33 @@ func (m *Manager) promptControllerRun(ctx context.Context, run *controllerRun, p
 		return err
 	}
 	return nil
+}
+
+func contentPartsContainImage(parts []model.ContentPart) bool {
+	for _, part := range parts {
+		if part.Type == model.ContentPartImage {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *controllerRun) supportsPromptImages() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.promptCapabilities.Image
+}
+
+func (r *participantRun) supportsPromptImages() bool {
+	if r == nil {
+		return false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.promptCapabilities.Image
 }
 
 func (m *Manager) ControllerStatus(_ context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
@@ -560,6 +596,9 @@ func (m *Manager) PromptParticipant(ctx context.Context, req controller.Particip
 	if run == nil {
 		return controller.TurnResult{}, fmt.Errorf("impl/agent/acp/controller: participant %q not found", req.ParticipantID)
 	}
+	if contentPartsContainImage(req.ContentParts) && !run.supportsPromptImages() {
+		return controller.TurnResult{}, fmt.Errorf("impl/agent/acp/controller: participant %q does not support image prompts", req.ParticipantID)
+	}
 	prompt := buildPromptParts(req.Input, req.ContentParts)
 	prompt = prependACPContextPrelude(prompt, req.ContextPrelude)
 	if len(prompt) == 0 {
@@ -609,7 +648,7 @@ func (m *Manager) startParticipant(
 	var run *participantRun
 	existing := session.CloneParticipantBinding(req.Binding)
 	resumeRemoteSessionID := strings.TrimSpace(existing.SessionID)
-	client, remoteSessionID, _, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
+	client, remoteSessionID, state, err := m.startClient(ctx, parentSession.CWD, cfg, resumeRemoteSessionID, func(env client.UpdateEnvelope) {
 		if run != nil {
 			run.handleUpdate(m.clock, env)
 		}
@@ -652,11 +691,12 @@ func (m *Manager) startParticipant(
 		contextSyncSeq = 0
 	}
 	run = &participantRun{
-		id:              id,
-		parentSessionID: strings.TrimSpace(parentSession.SessionID),
-		agent:           agentName,
-		client:          client,
-		remoteSessionID: remoteSessionID,
+		id:                 id,
+		parentSessionID:    strings.TrimSpace(parentSession.SessionID),
+		agent:              agentName,
+		client:             client,
+		remoteSessionID:    remoteSessionID,
+		promptCapabilities: state.promptCapabilities,
 		binding: session.ParticipantBinding{
 			ID:             id,
 			Kind:           session.ParticipantKindACP,
@@ -713,11 +753,12 @@ func (m *Manager) startACPClient(
 		resp, err := client.ResumeSession(ctx, remoteSessionID, strings.TrimSpace(cwd), nil)
 		if err == nil {
 			state := controllerClientState{
-				configOptions: controllerConfigOptionsFromACP(resp.ConfigOptions),
-				models:        cloneACPSessionModelState(resp.Models),
-				mode:          currentModeID(resp.Modes),
-				modeOptions:   controllerModesFromACP(resp.Modes),
-				supportsClose: acpSessionCapability(initResp, "close"),
+				configOptions:      controllerConfigOptionsFromACP(resp.ConfigOptions),
+				models:             cloneACPSessionModelState(resp.Models),
+				mode:               currentModeID(resp.Modes),
+				modeOptions:        controllerModesFromACP(resp.Modes),
+				supportsClose:      acpSessionCapability(initResp, "close"),
+				promptCapabilities: initResp.AgentCapabilities.PromptCapabilities,
 			}
 			if initResp.AgentInfo != nil {
 				state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))
@@ -735,11 +776,12 @@ func (m *Manager) startACPClient(
 		return nil, "", controllerClientState{}, err
 	}
 	state := controllerClientState{
-		configOptions: controllerConfigOptionsFromACP(resp.ConfigOptions),
-		models:        cloneACPSessionModelState(resp.Models),
-		mode:          currentModeID(resp.Modes),
-		modeOptions:   controllerModesFromACP(resp.Modes),
-		supportsClose: acpSessionCapability(initResp, "close"),
+		configOptions:      controllerConfigOptionsFromACP(resp.ConfigOptions),
+		models:             cloneACPSessionModelState(resp.Models),
+		mode:               currentModeID(resp.Modes),
+		modeOptions:        controllerModesFromACP(resp.Modes),
+		supportsClose:      acpSessionCapability(initResp, "close"),
+		promptCapabilities: initResp.AgentCapabilities.PromptCapabilities,
 	}
 	if initResp.AgentInfo != nil {
 		state.agentLabel = strings.TrimSpace(firstNonEmpty(initResp.AgentInfo.Title, initResp.AgentInfo.Name, initResp.AgentInfo.Version))

@@ -16,8 +16,14 @@ func (m *Model) commitUserDisplayLine(displayLine string) {
 		return
 	}
 	normalized := normalizeUserDisplayLine(displayLine)
-	if m.userDisplayDedupOK && normalized != "" && normalizeUserDisplayLine(m.lastUserDisplayLine) == normalized {
-		return
+	if m.userDisplayDedupOK && normalized != "" {
+		lastNormalized := normalizeUserDisplayLine(m.lastUserDisplayLine)
+		if lastNormalized == normalized {
+			return
+		}
+		if !hasImageDisplayToken(displayLine) && normalizeUserDisplayLine(stripImageDisplayTokens(m.lastUserDisplayLine)) == normalized {
+			return
+		}
 	}
 	userLine := "▌ " + displayLine
 	if m.hasCommittedLine {
@@ -36,17 +42,72 @@ func normalizeUserDisplayLine(text string) string {
 	return strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 }
 
+func stripImageDisplayTokens(text string) string {
+	if text == "" {
+		return ""
+	}
+	var out strings.Builder
+	cursor := 0
+	for cursor < len(text) {
+		idx := strings.Index(text[cursor:], "[image")
+		if idx < 0 {
+			out.WriteString(text[cursor:])
+			break
+		}
+		idx += cursor
+		out.WriteString(text[cursor:idx])
+		end := strings.Index(text[idx:], "]")
+		if end < 0 {
+			out.WriteString(text[idx:])
+			break
+		}
+		tokenEnd := idx + end + 1
+		token := text[idx:tokenEnd]
+		if isImageDisplayToken(token) {
+			out.WriteByte(' ')
+			cursor = tokenEnd
+			continue
+		}
+		out.WriteString(text[idx : idx+1])
+		cursor = idx + 1
+	}
+	return out.String()
+}
+
+func hasImageDisplayToken(text string) bool {
+	for {
+		idx := strings.Index(text, "[image")
+		if idx < 0 {
+			return false
+		}
+		end := strings.Index(text[idx:], "]")
+		if end < 0 {
+			return false
+		}
+		if isImageDisplayToken(text[idx : idx+end+1]) {
+			return true
+		}
+		text = text[idx+1:]
+	}
+}
+
+func isImageDisplayToken(token string) bool {
+	token = strings.ToLower(strings.TrimSpace(token))
+	return strings.HasPrefix(token, "[image #") && strings.HasSuffix(token, "]") ||
+		strings.HasPrefix(token, "[image:") && strings.HasSuffix(token, "]")
+}
+
 func (m *Model) displayLineWithAttachments(line string) string {
 	return m.displayLineWithInputAttachments(line, m.inputAttachments)
 }
 
 func (m *Model) displayLineWithInputAttachments(line string, attachments []inputAttachment) string {
-	return composeDisplayWithToken(line, attachments, func(name string) string {
+	return composeDisplayWithToken(line, attachments, func(index int, name string) string {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			return ""
 		}
-		return "[image: " + name + "] "
+		return imageAttachmentToken(index)
 	})
 }
 
