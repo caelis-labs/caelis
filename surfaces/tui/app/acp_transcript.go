@@ -296,10 +296,12 @@ func renderACPPlanRows(blockID string, ev SubagentEvent, width int, ctx BlockRen
 func renderACPTranscriptHeaderRow(blockID string, plain string, width int, ctx BlockRenderContext, token string) RenderedRow {
 	plain = sanitizeRenderableText(plain)
 	styled := styleACPTranscriptHeader(ctx, plain)
+	row := StyledPlainRow(blockID, plain, styled)
 	if token != "" {
-		return StyledPlainClickableRow(blockID, plain, styled, token)
+		row.ClickToken = token
 	}
-	return StyledPlainRow(blockID, plain, styled)
+	row.ACPHeader = true
+	return row
 }
 
 func styleACPTranscriptHeader(ctx BlockRenderContext, plain string) string {

@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"fmt"
 	"image/color"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -151,6 +152,120 @@ func TestNarrativeInlineCodeStyleScopesToolNamesInCJKLists(t *testing.T) {
 		m.syncViewportContent()
 		assertToolCodeScopes(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
 	})
+}
+
+func TestNarrativeInlineCodeStyleScopesShortCJKListAcronym(t *testing.T) {
+	raws := []string{
+		"- 无新增 `API` 依赖",
+		"- 无新增`API`依赖",
+		"• 无新增 `API` 依赖",
+		"• 无新增`API`依赖",
+	}
+	for _, tt := range []struct {
+		name string
+		dark bool
+	}{
+		{name: "light", dark: false},
+		{name: "dark", dark: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			theme := tuikit.ResolveThemeWithState(tt.dark, false, colorprofile.TrueColor)
+			inlineBG := sgrBackgroundCode(t, theme.MarkdownInlineCodeStyle().GetBackground())
+
+			assertAPICodeScope := func(t *testing.T, styled string, bg string) {
+				t.Helper()
+				assertInlineCodeBackgroundScope(t, firstStyledLineContaining(styled, "API"), bg, "API")
+			}
+
+			for _, raw := range raws {
+				t.Run("raw="+raw, func(t *testing.T) {
+					t.Run("glamour finalized", func(t *testing.T) {
+						rendered := glamourRenderNarrative(raw, 80, theme, tuikit.LineStyleAssistant)
+						assertAPICodeScope(t, rendered, inlineBG)
+					})
+
+					t.Run("glamour finalized with heading context", func(t *testing.T) {
+						text := strings.Join([]string{"无问题点", "", raw}, "\n")
+						rendered := glamourRenderNarrative(text, 80, theme, tuikit.LineStyleAssistant)
+						assertAPICodeScope(t, rendered, inlineBG)
+					})
+
+					t.Run("render text stream with heading context", func(t *testing.T) {
+						ctx := BlockRenderContext{Width: 80, Theme: theme, ThemeKey: themeRenderCacheKey(theme)}
+						text := strings.Join([]string{"无问题点", "", raw}, "\n")
+						rows := RenderTextWithContext(ctx, TextRenderRequest{
+							Kind:           TextAssistant,
+							Mode:           RenderStream,
+							MarkdownPolicy: MarkdownStableTail,
+							Raw:            text,
+							Prefix:         "· ",
+							BlockID:        "block-1",
+							LineStyle:      tuikit.LineStyleAssistant,
+						}).Rows
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+					})
+
+					t.Run("streaming tail", func(t *testing.T) {
+						rows := renderStreamingNarrativeTailRows("block-1", raw, "", tuikit.LineStyleAssistant, 80, theme)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+					})
+
+					t.Run("streaming tail with heading context", func(t *testing.T) {
+						text := strings.Join([]string{"无问题点", "", raw}, "\n")
+						rows := renderStreamingNarrativeTailRows("block-1", text, "", tuikit.LineStyleAssistant, 80, theme)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+					})
+
+					t.Run("streaming tail with role prefix", func(t *testing.T) {
+						text := strings.Join([]string{"无问题点", "", raw}, "\n")
+						rows := renderStreamingNarrativeTailRows("block-1", text, "· ", tuikit.LineStyleAssistant, 80, theme)
+						assertAPICodeScope(t, joinRenderedStyled(rows), inlineBG)
+					})
+
+					t.Run("main transcript finalized", func(t *testing.T) {
+						m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+						m.applyTheme(theme)
+						m.viewport.SetWidth(80)
+						m.viewport.SetHeight(20)
+						_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
+							Kind:          TranscriptEventNarrative,
+							NarrativeKind: TranscriptNarrativeAssistant,
+							Scope:         ACPProjectionMain,
+							ScopeID:       "session-1",
+							Actor:         "assistant",
+							Text:          strings.Join([]string{"无问题点", "", raw}, "\n"),
+							Final:         true,
+						}}})
+						block, _ := m.doc.Find(strings.TrimSpace(m.activeMainACPTurnID)).(*MainACPTurnBlock)
+						if block == nil {
+							t.Fatal("expected main ACP turn block")
+						}
+						assertAPICodeScope(t, joinRenderedStyled(block.Render(m.blockRenderContext(80))), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+						m.syncViewportContent()
+						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+					})
+
+					t.Run("main transcript active stream", func(t *testing.T) {
+						m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+						m.applyTheme(theme)
+						m.viewport.SetWidth(80)
+						m.viewport.SetHeight(20)
+						_, _ = m.handleTranscriptEventsMsg(TranscriptEventsMsg{Events: []TranscriptEvent{{
+							Kind:          TranscriptEventNarrative,
+							NarrativeKind: TranscriptNarrativeAssistant,
+							Scope:         ACPProjectionMain,
+							ScopeID:       "session-1",
+							Actor:         "assistant",
+							Text:          raw,
+							Final:         false,
+						}}})
+						m.syncViewportContent()
+						assertAPICodeScope(t, strings.Join(m.viewportStyledLines, "\n"), sgrBackgroundCode(t, m.theme.MarkdownInlineCodeStyle().GetBackground()))
+					})
+				})
+			}
+		})
+	}
 }
 
 func TestGlamourListStrongDoesNotStealToolCodeColor(t *testing.T) {
@@ -589,6 +704,7 @@ func normalizeInlineStyleText(text string) string {
 func textWithSGRBackground(styled, inlineBG string) string {
 	var out strings.Builder
 	active := false
+	target, targetOK := parseSGRColorCode(inlineBG, "48")
 	for i := 0; i < len(styled); {
 		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
 			end := i + 2
@@ -600,7 +716,7 @@ func textWithSGRBackground(styled, inlineBG string) string {
 				if resetsSGRBackground(params) {
 					active = false
 				}
-				if strings.Contains(params, inlineBG) {
+				if strings.Contains(params, inlineBG) || (targetOK && sgrParamsContainColor(params, "48", target, 1)) {
 					active = true
 				}
 				i = end + 1
@@ -619,6 +735,7 @@ func textWithSGRBackground(styled, inlineBG string) string {
 func textWithSGRForeground(styled, foreground string) string {
 	var out strings.Builder
 	active := false
+	target, targetOK := parseSGRColorCode(foreground, "38")
 	for i := 0; i < len(styled); {
 		if styled[i] == '\x1b' && i+1 < len(styled) && styled[i+1] == '[' {
 			end := i + 2
@@ -630,10 +747,11 @@ func textWithSGRForeground(styled, foreground string) string {
 				if resetsSGRForeground(params) {
 					active = false
 				}
-				if sgrSetsForeground(params) && !strings.Contains(params, foreground) {
+				matchesTarget := strings.Contains(params, foreground) || (targetOK && sgrParamsContainColor(params, "38", target, 1))
+				if sgrSetsForeground(params) && !matchesTarget {
 					active = false
 				}
-				if strings.Contains(params, foreground) {
+				if matchesTarget {
 					active = true
 				}
 				i = end + 1
@@ -647,6 +765,52 @@ func textWithSGRForeground(styled, foreground string) string {
 		i += size
 	}
 	return out.String()
+}
+
+type sgrRGB struct {
+	r int
+	g int
+	b int
+}
+
+func parseSGRColorCode(code, kind string) (sgrRGB, bool) {
+	parts := strings.Split(code, ";")
+	if len(parts) != 5 || parts[0] != kind || parts[1] != "2" {
+		return sgrRGB{}, false
+	}
+	r, errR := strconv.Atoi(parts[2])
+	g, errG := strconv.Atoi(parts[3])
+	b, errB := strconv.Atoi(parts[4])
+	if errR != nil || errG != nil || errB != nil {
+		return sgrRGB{}, false
+	}
+	return sgrRGB{r: r, g: g, b: b}, true
+}
+
+func sgrParamsContainColor(params, kind string, target sgrRGB, tolerance int) bool {
+	parts := strings.Split(params, ";")
+	for i := 0; i+4 < len(parts); i++ {
+		if parts[i] != kind || parts[i+1] != "2" {
+			continue
+		}
+		r, errR := strconv.Atoi(parts[i+2])
+		g, errG := strconv.Atoi(parts[i+3])
+		b, errB := strconv.Atoi(parts[i+4])
+		if errR != nil || errG != nil || errB != nil {
+			continue
+		}
+		if absInt(r-target.r) <= tolerance && absInt(g-target.g) <= tolerance && absInt(b-target.b) <= tolerance {
+			return true
+		}
+	}
+	return false
+}
+
+func absInt(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func resetsSGRBackground(params string) bool {

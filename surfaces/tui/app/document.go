@@ -19,6 +19,7 @@ type RenderedRow struct {
 	BlockID    string // originating block ID
 	ClickToken string // optional interaction token for row-level hit testing
 	PreWrapped bool   // if true, already wrapped to viewport width — skip re-wrapping
+	ACPHeader  bool   // if true, wrap as an ACP transcript header row
 }
 
 // StyledRow creates a RenderedRow from a styled line, deriving Plain automatically.

@@ -100,7 +100,7 @@ func (m *Model) wrapRenderedRowsForViewport(block Block, rawRows []RenderedRow, 
 	for _, row := range rawRows {
 		styledLine := m.adaptHistoryLineForViewport(row.Styled, wrapWidth)
 		plainLine := strings.TrimRight(ansi.Strip(styledLine), " ")
-		if isACPTranscriptBlockKind(block.Kind()) {
+		if isACPTranscriptBlockKind(block.Kind()) && row.ACPHeader {
 			sourcePlain := strings.TrimRight(row.Plain, " ")
 			if strings.TrimSpace(sourcePlain) == "" {
 				sourcePlain = plainLine

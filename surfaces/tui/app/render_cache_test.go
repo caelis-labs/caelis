@@ -81,6 +81,30 @@ func TestViewportCacheKeepsClickTokenLengthForStreamingLines(t *testing.T) {
 	}
 }
 
+func TestACPHeaderViewportWrapSupportsDynamicToolNames(t *testing.T) {
+	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	block := NewMainACPTurnBlock("session-1")
+	width := 32
+	ctx := m.blockRenderContext(width)
+	plain := `• lookup_weather "Shanghai" --units metric --include-hourly forecast`
+	row := renderACPTranscriptHeaderRow(block.BlockID(), plain, width, ctx, "tool:weather")
+
+	_, plainLines, clickTokens := m.wrapRenderedRowsForViewport(block, []RenderedRow{row}, width, ctx)
+
+	if len(plainLines) < 2 {
+		t.Fatalf("dynamic ACP header did not wrap as a header: %#v", plainLines)
+	}
+	continuationPrefix := strings.Repeat(" ", displayColumns(`• lookup_weather `))
+	if !strings.HasPrefix(plainLines[1], continuationPrefix) {
+		t.Fatalf("dynamic ACP header continuation = %q, want prefix %q\nall lines=%#v", plainLines[1], continuationPrefix, plainLines)
+	}
+	for i, token := range clickTokens {
+		if token != "tool:weather" {
+			t.Fatalf("click token %d = %q, want propagated header token", i, token)
+		}
+	}
+}
+
 func TestViewportHeightChangeDoesNotInvalidateGenericBlockCache(t *testing.T) {
 	m := NewModel(Config{NoColor: true})
 	m.theme = tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY)
