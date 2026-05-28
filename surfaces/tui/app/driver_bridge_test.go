@@ -1268,7 +1268,7 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 	grantsIdx := strings.Index(got, "Grants:")
 	warningIdx := strings.Index(got, "Warning:")
 	usageIdx := strings.Index(got, "  Scope")
-	if grantsIdx < 0 || warningIdx < 0 || usageIdx < 0 || !(grantsIdx < warningIdx && warningIdx < usageIdx) {
+	if grantsIdx < 0 || warningIdx < 0 || usageIdx < 0 || grantsIdx >= warningIdx || warningIdx >= usageIdx {
 		t.Fatalf("formatStatusSnapshot() = %q, want grants and warnings before token usage table", got)
 	}
 	if tail := got[usageIdx:]; strings.Contains(tail, "Grants:") || strings.Contains(tail, "Warning:") {

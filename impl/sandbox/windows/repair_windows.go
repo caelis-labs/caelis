@@ -459,7 +459,7 @@ func launchElevatedRepairProcessDefault(ctx context.Context, exe string, args []
 	}
 	r1, _, callErr := procShellExecuteExW.Call(uintptr(unsafe.Pointer(&info)))
 	if r1 == 0 {
-		if callErr != syscall.Errno(0) {
+		if !errors.Is(callErr, syscall.Errno(0)) {
 			if errors.Is(callErr, windows.ERROR_CANCELLED) {
 				return 0, fmt.Errorf("UAC prompt was cancelled")
 			}
@@ -470,7 +470,9 @@ func launchElevatedRepairProcessDefault(ctx context.Context, exe string, args []
 	if info.hProcess == 0 {
 		return 0, nil
 	}
-	defer windows.CloseHandle(info.hProcess)
+	defer func() {
+		_ = windows.CloseHandle(info.hProcess)
+	}()
 	for {
 		if err := ctx.Err(); err != nil {
 			return 0, err

@@ -31,6 +31,7 @@ var (
 	windowsGlobalLockProc     = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalLock")
 	windowsGlobalUnlockProc   = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalUnlock")
 	windowsGlobalFreeProc     = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalFree")
+	windowsRtlMoveMemoryProc  = windows.NewLazySystemDLL("kernel32.dll").NewProc("RtlMoveMemory")
 )
 
 func writeWindowsClipboardText(text string) error {
@@ -70,19 +71,20 @@ func writeWindowsClipboardTextOnce(text string) error {
 	if ptr == 0 {
 		return windowsClipboardCallError("GlobalLock", err)
 	}
-	target := unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), len(data))
-	copy(target, data)
+	_, _, _ = windowsRtlMoveMemoryProc.Call(ptr, uintptr(unsafe.Pointer(&data[0])), byteLen)
 	runtime.KeepAlive(data)
 	if ok, _, err := windowsGlobalUnlockProc.Call(handle); ok == 0 {
-		if errno, ok := err.(syscall.Errno); ok && errno != 0 {
+		if !windowsClipboardErrnoIs(err, 0) {
 			return windowsClipboardCallError("GlobalUnlock", err)
 		}
 	}
 
 	if ok, _, err := windowsClipboardOpenProc.Call(0); ok == 0 {
-		return fmt.Errorf("%w: %v", errWindowsClipboardBusy, windowsClipboardCallError("OpenClipboard", err))
+		return fmt.Errorf("%w: %w", errWindowsClipboardBusy, windowsClipboardCallError("OpenClipboard", err))
 	}
-	defer windowsClipboardCloseProc.Call()
+	defer func() {
+		_, _, _ = windowsClipboardCloseProc.Call()
+	}()
 
 	if ok, _, err := windowsClipboardEmptyProc.Call(); ok == 0 {
 		return windowsClipboardCallError("EmptyClipboard", err)
@@ -100,8 +102,13 @@ func windowsClipboardUTF16(text string) []uint16 {
 }
 
 func windowsClipboardCallError(name string, err error) error {
-	if errno, ok := err.(syscall.Errno); ok && errno == 0 {
+	if windowsClipboardErrnoIs(err, 0) {
 		return fmt.Errorf("%s failed", name)
 	}
 	return fmt.Errorf("%s: %w", name, err)
+}
+
+func windowsClipboardErrnoIs(err error, errno syscall.Errno) bool {
+	var got syscall.Errno
+	return errors.As(err, &got) && uintptr(got) == uintptr(errno)
 }
