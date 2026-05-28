@@ -19,17 +19,6 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	if usage := formatContextUsageStatus(status.TotalTokens, status.ContextWindowTokens); usage != "" {
 		appendStatusField(&lines, "Context", usage)
 	}
-	if usage := formatSessionTokenUsageStatus(status); usage != "" {
-		if len(lines) > 0 {
-			lines = append(lines, "")
-		}
-		for _, line := range strings.Split(usage, "\n") {
-			if strings.TrimSpace(line) == "" {
-				continue
-			}
-			lines = append(lines, "  "+line)
-		}
-	}
 	if status.PermissionGrantCount > 0 {
 		appendStatusField(&lines, "Grants", fmt.Sprintf("%d approved, read roots %d, write roots %d", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount))
 	}
@@ -93,6 +82,17 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		}
 		for _, warning := range warnings {
 			appendStatusField(&lines, "Warning", warning)
+		}
+	}
+	if usage := formatSessionTokenUsageStatus(status); usage != "" {
+		if len(lines) > 0 {
+			lines = append(lines, "")
+		}
+		for _, line := range strings.Split(usage, "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			lines = append(lines, "  "+line)
 		}
 	}
 	return strings.Join(lines, "\n")

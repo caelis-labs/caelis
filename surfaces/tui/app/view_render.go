@@ -1204,7 +1204,11 @@ func formatFooterBindingKeys(bindings []key.Binding) string {
 }
 
 func formatStatusContextDisplay(text string) string {
-	return strings.TrimSpace(text)
+	text = strings.TrimSpace(text)
+	if strings.HasPrefix(strings.ToLower(text), "ctx ") {
+		return strings.TrimSpace(text[4:])
+	}
+	return text
 }
 
 func (m *Model) adjustTextareaHeight() {

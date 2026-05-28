@@ -17,42 +17,43 @@ func renderPlainUserRows(blockID, raw, rolePrefix string, width int, theme tuiki
 	}
 	prefixWidth := displayColumns(rolePrefix)
 	bodyWidth := maxInt(1, width-prefixWidth)
-	style := theme.UserStyle().Width(width)
 	rows := make([]RenderedRow, 0, strings.Count(raw, "\n")+3)
-	rows = append(rows, RenderedRow{
-		Styled:     style.Render(""),
-		Plain:      "",
-		BlockID:    blockID,
-		PreWrapped: true,
-	})
-	first := true
+	rows = append(rows, userSurfaceRow(blockID, userRailOnlyPrefix(rolePrefix), "", width, theme))
 	for _, line := range strings.Split(raw, "\n") {
 		segments := strings.Split(hardWrapDisplayLine(line, bodyWidth), "\n")
 		if len(segments) == 0 {
 			segments = []string{line}
 		}
 		for _, segment := range segments {
-			prefix := strings.Repeat(" ", prefixWidth)
-			if first {
-				prefix = rolePrefix
-				first = false
-			}
-			plain := prefix + segment
-			rows = append(rows, RenderedRow{
-				Styled:     style.Render(plain),
-				Plain:      plain,
-				BlockID:    blockID,
-				PreWrapped: true,
-			})
+			rows = append(rows, userSurfaceRow(blockID, rolePrefix, segment, width, theme))
 		}
 	}
-	rows = append(rows, RenderedRow{
-		Styled:     style.Render(""),
-		Plain:      "",
+	rows = append(rows, userSurfaceRow(blockID, userRailOnlyPrefix(rolePrefix), "", width, theme))
+	return rows
+}
+
+func userRailOnlyPrefix(rolePrefix string) string {
+	if trimmed := strings.TrimRight(rolePrefix, " "); trimmed != "" {
+		return trimmed
+	}
+	return rolePrefix
+}
+
+func userSurfaceRow(blockID, prefix, segment string, width int, theme tuikit.Theme) RenderedRow {
+	if width <= 0 {
+		width = 1
+	}
+	prefixWidth := displayColumns(prefix)
+	bodyWidth := maxInt(1, width-prefixWidth)
+	plain := prefix + segment
+	styled := theme.UserPrefixStyle().Background(theme.UserBg).Render(prefix) +
+		theme.UserStyle().Width(bodyWidth).Render(segment)
+	return RenderedRow{
+		Styled:     styled,
+		Plain:      plain,
 		BlockID:    blockID,
 		PreWrapped: true,
-	})
-	return rows
+	}
 }
 
 func renderPlainReasoningRows(blockID, raw, rolePrefix string, width int, theme tuikit.Theme) []RenderedRow {

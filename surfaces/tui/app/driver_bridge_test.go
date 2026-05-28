@@ -947,11 +947,11 @@ func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 }
 
 func TestFormatContextUsageStatus(t *testing.T) {
-	if got := formatContextUsageStatus(12600, 88000); got != "ctx 12.6k / 88k · 14%" {
-		t.Fatalf("formatContextUsageStatus() = %q, want %q", got, "ctx 12.6k / 88k · 14%")
+	if got := formatContextUsageStatus(12600, 88000); got != "12.6k / 88k · 14%" {
+		t.Fatalf("formatContextUsageStatus() = %q, want %q", got, "12.6k / 88k · 14%")
 	}
-	if got := formatContextUsageStatus(0, 88000); got != "ctx 0 / 88k · 0%" {
-		t.Fatalf("formatContextUsageStatus() zero = %q, want %q", got, "ctx 0 / 88k · 0%")
+	if got := formatContextUsageStatus(0, 88000); got != "0 / 88k · 0%" {
+		t.Fatalf("formatContextUsageStatus() zero = %q, want %q", got, "0 / 88k · 0%")
 	}
 }
 
@@ -1264,6 +1264,18 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 	}
 	if strings.Contains(got, "Token usage:") || strings.Contains(got, "main usage:") || strings.Contains(got, "warn:") {
 		t.Fatalf("formatStatusSnapshot() = %q, should use table-style token usage", got)
+	}
+	grantsIdx := strings.Index(got, "Grants:")
+	warningIdx := strings.Index(got, "Warning:")
+	usageIdx := strings.Index(got, "  Scope")
+	if grantsIdx < 0 || warningIdx < 0 || usageIdx < 0 || !(grantsIdx < warningIdx && warningIdx < usageIdx) {
+		t.Fatalf("formatStatusSnapshot() = %q, want grants and warnings before token usage table", got)
+	}
+	if tail := got[usageIdx:]; strings.Contains(tail, "Grants:") || strings.Contains(tail, "Warning:") {
+		t.Fatalf("formatStatusSnapshot() = %q, token usage table should be the final section", got)
+	}
+	if !strings.Contains(got, "\n\n  Scope") {
+		t.Fatalf("formatStatusSnapshot() = %q, want blank line before token usage table", got)
 	}
 }
 

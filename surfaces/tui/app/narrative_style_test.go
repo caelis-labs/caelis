@@ -15,16 +15,19 @@ func TestNarrativePrefixesUseUserReasoningAssistantMarkers(t *testing.T) {
 	ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: m.theme}
 
 	userRows := NewUserNarrativeBlock("please inspect git@github.com:OnslaughtSnail/knowledge.git").Render(ctx)
-	if len(userRows) < 3 || userRows[0].Plain != "" || userRows[len(userRows)-1].Plain != "" {
+	if len(userRows) < 3 || userRows[0].Plain != "▌" || userRows[len(userRows)-1].Plain != "▌" {
 		t.Fatalf("user rows = %#v, want padded user block", renderedPlainRows(userRows))
 	}
 	userContentRow := userRows[1]
 	if !strings.HasPrefix(userContentRow.Plain, "▌ please inspect git@github.com") {
 		t.Fatalf("user rows = %#v, want user block marker", renderedPlainRows(userRows))
 	}
-	expectedUserStyled := ctx.Theme.UserStyle().Width(ctx.Width).Render(userContentRow.Plain)
+	expectedUserStyled := expectedUserSurfaceStyled(ctx, "▌ ", strings.TrimPrefix(userContentRow.Plain, "▌ "))
 	if userContentRow.Styled != expectedUserStyled {
-		t.Fatalf("user row styled with extra token coloring:\n got: %q\nwant: %q", userContentRow.Styled, expectedUserStyled)
+		t.Fatalf("user row should style rail separately from body:\n got: %q\nwant: %q", userContentRow.Styled, expectedUserStyled)
+	}
+	if userRows[0].Styled != expectedUserSurfaceStyled(ctx, "▌", "") {
+		t.Fatalf("user padding row should keep full-height rail:\n got: %q\nwant: %q", userRows[0].Styled, expectedUserSurfaceStyled(ctx, "▌", ""))
 	}
 	if !strings.Contains(userContentRow.Styled, "\x1b[48;") || !strings.Contains(userRows[0].Styled, "\x1b[48;") {
 		t.Fatalf("user rows missing background contrast: %#v", userRows)
@@ -65,7 +68,7 @@ func TestCommittedUserDisplayLineUsesPlainUserSurface(t *testing.T) {
 		t.Fatal("committed user line rendered no rows")
 	}
 	wantPlain := "▌ " + text
-	if len(rows) < 3 || rows[0].Plain != "" || rows[len(rows)-1].Plain != "" {
+	if len(rows) < 3 || rows[0].Plain != "▌" || rows[len(rows)-1].Plain != "▌" {
 		t.Fatalf("committed user rows = %#v, want padded user block", renderedPlainRows(rows))
 	}
 	contentRow := rows[1]
@@ -75,9 +78,30 @@ func TestCommittedUserDisplayLineUsesPlainUserSurface(t *testing.T) {
 	if got := strings.TrimRight(ansi.Strip(contentRow.Styled), " "); got != wantPlain {
 		t.Fatalf("committed user styled strips to %q, want %q", got, wantPlain)
 	}
-	expectedStyled := ctx.Theme.UserStyle().Width(ctx.Width).Render(wantPlain)
+	expectedStyled := expectedUserSurfaceStyled(ctx, "▌ ", text)
 	if contentRow.Styled != expectedStyled {
-		t.Fatalf("committed user line should be one plain user surface:\n got: %q\nwant: %q", rows[0].Styled, expectedStyled)
+		t.Fatalf("committed user line should split rail and body styling:\n got: %q\nwant: %q", contentRow.Styled, expectedStyled)
+	}
+}
+
+func TestUserSurfaceRailCoversPaddingExplicitAndWrappedLines(t *testing.T) {
+	m := NewModel(Config{ColorProfile: colorprofile.TrueColor})
+	ctx := BlockRenderContext{Width: 10, TermWidth: 10, Theme: m.theme}
+
+	rows := NewUserNarrativeBlock("abcdefghijklmnop\nsecond").Render(ctx)
+	plain := renderedPlainRows(rows)
+	want := []string{"▌", "▌ abcdefgh", "▌ ijklmnop", "▌ second", "▌"}
+	if strings.Join(plain, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("user rows = %#v, want continuous rail across padding and wrapped lines", plain)
+	}
+	for i, row := range rows {
+		if got := strings.TrimRight(ansi.Strip(row.Styled), " "); got != want[i] {
+			t.Fatalf("row %d styled strips to %q, want %q", i, got, want[i])
+		}
+	}
+	if rows[1].Styled != expectedUserSurfaceStyled(ctx, "▌ ", "abcdefgh") ||
+		rows[2].Styled != expectedUserSurfaceStyled(ctx, "▌ ", "ijklmnop") {
+		t.Fatalf("wrapped user rows should keep rail styling on every visual line: %#v", rows)
 	}
 }
 
@@ -125,4 +149,10 @@ func TestReasoningColorizeUsesMutedNonItalicBody(t *testing.T) {
 	if !strings.Contains(styled, theme.ReasoningStyle().Render("**Canvas-based** reasoning")) {
 		t.Fatalf("styled reasoning = %q, want muted reasoning body styling", styled)
 	}
+}
+
+func expectedUserSurfaceStyled(ctx BlockRenderContext, prefix string, body string) string {
+	bodyWidth := maxInt(1, ctx.Width-displayColumns(prefix))
+	return ctx.Theme.UserPrefixStyle().Background(ctx.Theme.UserBg).Render(prefix) +
+		ctx.Theme.UserStyle().Width(bodyWidth).Render(body)
 }

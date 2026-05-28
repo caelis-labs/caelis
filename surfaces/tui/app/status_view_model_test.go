@@ -16,11 +16,21 @@ func TestStatusViewModelFooterOmitsActiveJobs(t *testing.T) {
 	})
 
 	got := vm.FooterContextText("")
-	if !strings.Contains(got, "ctx 42k / 128k · 32%") {
+	if !strings.Contains(got, "42k / 128k · 32%") {
 		t.Fatalf("footerContextText() = %q, want token usage", got)
+	}
+	if strings.Contains(got, "ctx ") {
+		t.Fatalf("footerContextText() = %q, should omit ctx prefix", got)
 	}
 	if strings.Contains(got, "job") {
 		t.Fatalf("footerContextText() = %q, should omit active job count", got)
+	}
+}
+
+func TestFormatStatusContextDisplayStripsLegacyCtxPrefix(t *testing.T) {
+	got := formatStatusContextDisplay("ctx 4.9k / 1.0m · 0%")
+	if got != "4.9k / 1.0m · 0%" {
+		t.Fatalf("formatStatusContextDisplay() = %q, want legacy ctx prefix stripped", got)
 	}
 }
 

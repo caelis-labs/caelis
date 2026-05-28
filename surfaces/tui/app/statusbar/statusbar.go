@@ -85,7 +85,7 @@ func formatContextUsageStatus(totalTokens, contextWindowTokens int) string {
 		totalTokens = 0
 	}
 	percent := totalTokens * 100 / contextWindowTokens
-	return fmt.Sprintf("ctx %s / %s · %d%%", compactTokenCount(totalTokens), compactTokenCount(contextWindowTokens), percent)
+	return fmt.Sprintf("%s / %s · %d%%", compactTokenCount(totalTokens), compactTokenCount(contextWindowTokens), percent)
 }
 
 func compactTokenCount(tokens int) string {
