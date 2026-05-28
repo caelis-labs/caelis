@@ -61,11 +61,17 @@ func TestApprovalReviewerUsesRequestModelAndSessionContext(t *testing.T) {
 	if req.Output == nil || req.Output.Mode != model.OutputModeSchema {
 		t.Fatalf("Output = %#v, want schema output", req.Output)
 	}
+	if req.Output.MaxOutputTokens != guardianMaxOutputTokens {
+		t.Fatalf("Output.MaxOutputTokens = %d, want %d", req.Output.MaxOutputTokens, guardianMaxOutputTokens)
+	}
 	if got := len(req.Instructions); got != 1 {
 		t.Fatalf("len(Instructions) = %d, want guardian policy", got)
 	}
 	if !strings.Contains(req.Instructions[0].Text.Text, "You are judging one planned coding-agent action") {
 		t.Fatalf("instruction text = %q, want guardian policy", req.Instructions[0].Text.Text)
+	}
+	if !strings.Contains(req.Instructions[0].Text.Text, `return exactly {"outcome":"allow"}`) {
+		t.Fatalf("instruction text = %q, want low-risk compact output contract", req.Instructions[0].Text.Text)
 	}
 	prompt := req.Messages[0].TextContent()
 	for _, want := range []string{
@@ -246,6 +252,9 @@ func TestApprovalReviewerProviderE2EReportsCachedPromptHit(t *testing.T) {
 		if _, exists := payload["tools"]; exists {
 			t.Fatalf("provider payload unexpectedly contains tools: %#v", payload["tools"])
 		}
+		if got, ok := payload["max_tokens"].(float64); !ok || int(got) != guardianMaxOutputTokens {
+			t.Fatalf("max_tokens = %#v, want %d", payload["max_tokens"], guardianMaxOutputTokens)
+		}
 
 		serverMu.Lock()
 		calls++
@@ -339,6 +348,41 @@ func TestParseGuardianAssessmentAcceptsJSONEmbeddedInText(t *testing.T) {
 		if strings.TrimSpace(parsed.Outcome) == "" {
 			t.Fatalf("parseGuardianAssessment(%q) returned no outcome", input)
 		}
+	}
+}
+
+func TestParseGuardianAssessmentDefaultsCompactAllowAndDeny(t *testing.T) {
+	allow, err := parseGuardianAssessment(`{"outcome":"allow"}`)
+	if err != nil {
+		t.Fatalf("parseGuardianAssessment(allow) error = %v", err)
+	}
+	if allow.Outcome != "allow" || allow.RiskLevel != "low" || allow.UserAuthorization != "unknown" {
+		t.Fatalf("allow assessment = %#v, want low-risk unknown-authorization allow", allow)
+	}
+	if !strings.Contains(allow.Rationale, "low-risk allow") {
+		t.Fatalf("allow rationale = %q, want compact default rationale", allow.Rationale)
+	}
+
+	mediumAllow, err := parseGuardianAssessment(`{"outcome":"allow","risk_level":"medium"}`)
+	if err != nil {
+		t.Fatalf("parseGuardianAssessment(medium allow) error = %v", err)
+	}
+	if mediumAllow.Outcome != "allow" || mediumAllow.RiskLevel != "medium" || mediumAllow.UserAuthorization != "unknown" {
+		t.Fatalf("medium allow assessment = %#v, want medium-risk unknown-authorization allow", mediumAllow)
+	}
+	if strings.Contains(mediumAllow.Rationale, "low-risk") {
+		t.Fatalf("medium allow rationale = %q, must not claim low risk", mediumAllow.Rationale)
+	}
+
+	deny, err := parseGuardianAssessment(`{"outcome":"deny"}`)
+	if err != nil {
+		t.Fatalf("parseGuardianAssessment(deny) error = %v", err)
+	}
+	if deny.Outcome != "deny" || deny.RiskLevel != "high" || deny.UserAuthorization != "unknown" {
+		t.Fatalf("deny assessment = %#v, want high-risk unknown-authorization deny", deny)
+	}
+	if !strings.Contains(deny.Rationale, "deny decision") {
+		t.Fatalf("deny rationale = %q, want compact default rationale", deny.Rationale)
 	}
 }
 
