@@ -82,6 +82,30 @@ func TestNativeWriteTextUsesWaylandBeforeX11(t *testing.T) {
 	}
 }
 
+func TestNativeWriteTextUsesWindowsUnicodeClipboard(t *testing.T) {
+	restore := stubClipboardEnv(t, nil)
+	defer restore()
+	clipboardGOOS = "windows"
+
+	var copied string
+	clipboardWriteWindows = func(text string) error {
+		copied = text
+		return nil
+	}
+	clipboardRunCommand = func(spec clipboardCommand, input string) error {
+		t.Fatalf("did not expect code-page clipboard command %s", spec)
+		return nil
+	}
+
+	const text = "原始的错误出来了"
+	if err := nativeWriteText(text); err != nil {
+		t.Fatalf("nativeWriteText returned error: %v", err)
+	}
+	if copied != text {
+		t.Fatalf("windows clipboard text = %q, want %q", copied, text)
+	}
+}
+
 func TestNativeWriteTextFallsBackToOSC52WithCommandDiagnostics(t *testing.T) {
 	restore := stubClipboardEnv(t, nil)
 	defer restore()
@@ -162,6 +186,7 @@ func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 	oldGetenv := clipboardGetenv
 	oldReadFile := clipboardReadFile
 	oldRunCommand := clipboardRunCommand
+	oldWriteWindows := clipboardWriteWindows
 	oldWriter := clipboardOSC52Writer
 	oldOpenTerminal := clipboardOpenTerminal
 	oldTimeout := clipboardCommandTimeout
@@ -177,6 +202,10 @@ func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 		t.Fatalf("unexpected clipboard command %s", spec)
 		return nil
 	}
+	clipboardWriteWindows = func(text string) error {
+		t.Fatalf("unexpected windows clipboard write")
+		return nil
+	}
 	clipboardOSC52Writer = nil
 	clipboardOpenTerminal = func() (io.WriteCloser, error) {
 		return nil, errors.New("no tty")
@@ -187,6 +216,7 @@ func stubClipboardEnv(t *testing.T, env map[string]string) func() {
 		clipboardGetenv = oldGetenv
 		clipboardReadFile = oldReadFile
 		clipboardRunCommand = oldRunCommand
+		clipboardWriteWindows = oldWriteWindows
 		clipboardOSC52Writer = oldWriter
 		clipboardOpenTerminal = oldOpenTerminal
 		clipboardCommandTimeout = oldTimeout

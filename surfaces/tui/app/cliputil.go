@@ -31,6 +31,7 @@ var (
 	clipboardGetenv         = os.Getenv
 	clipboardReadFile       = os.ReadFile
 	clipboardRunCommand     = runClipboardCommand
+	clipboardWriteWindows   = writeWindowsClipboardText
 	clipboardOSC52Writer    io.Writer
 	clipboardCommandTimeout = 2 * time.Second
 	clipboardOpenTerminal   = func() (io.WriteCloser, error) {
@@ -86,6 +87,10 @@ func nativeReadText() (string, error) {
 func nativeWriteText(text string) error {
 	if shouldPreferTerminalClipboard() {
 		return writeOSC52ClipboardText(text)
+	}
+	if clipboardGOOS == "windows" {
+		// clip.exe decodes stdin through the active code page; use CF_UNICODETEXT.
+		return clipboardWriteWindows(text)
 	}
 
 	var errs []error
