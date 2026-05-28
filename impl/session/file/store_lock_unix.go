@@ -8,12 +8,16 @@ import (
 	"syscall"
 )
 
-func lockSessionStoreRoot(root string) (*os.File, error) {
+func lockSessionStoreRoot(root string, mode storeRootLockMode) (*os.File, error) {
 	file, err := os.OpenFile(filepath.Join(root, lockFilename), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	flag := syscall.LOCK_SH
+	if mode == storeRootLockExclusive {
+		flag = syscall.LOCK_EX
+	}
+	if err := syscall.Flock(int(file.Fd()), flag); err != nil {
 		file.Close()
 		return nil, err
 	}

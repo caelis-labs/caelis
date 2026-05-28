@@ -38,14 +38,27 @@ func NewService(store *Store) *Service {
 }
 
 func (s *Store) withRootWriteLock(fn func() error) error {
+	return s.withRootLock(storeRootLockExclusive, fn)
+}
+
+func (s *Store) withRootReadLock(fn func() error) error {
+	return s.withRootLock(storeRootLockShared, fn)
+}
+
+func (s *Store) withRootLock(mode storeRootLockMode, fn func() error) error {
 	if s == nil || fn == nil {
 		return nil
 	}
 	root := s.normalizedRootDir()
 	lockValue, _ := storeRootLocks.LoadOrStore(root, &storeRootLock{})
 	rootLock := lockValue.(*storeRootLock)
-	rootLock.mu.Lock()
-	defer rootLock.mu.Unlock()
+	if mode == storeRootLockShared {
+		rootLock.mu.RLock()
+		defer rootLock.mu.RUnlock()
+	} else {
+		rootLock.mu.Lock()
+		defer rootLock.mu.Unlock()
+	}
 
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return err
@@ -53,7 +66,7 @@ func (s *Store) withRootWriteLock(fn func() error) error {
 	if err := os.Chmod(root, 0o700); err != nil {
 		return err
 	}
-	file, err := lockSessionStoreRoot(root)
+	file, err := lockSessionStoreRoot(root, mode)
 	if err != nil {
 		return err
 	}
@@ -142,11 +155,18 @@ func (s *Store) Get(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
+	var out session.Session
+	if err := s.withRootReadLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		out = session.CloneSession(doc.Session)
+		return nil
+	}); err != nil {
 		return session.Session{}, err
 	}
-	return session.CloneSession(doc.Session), nil
+	return out, nil
 }
 
 func (s *Store) List(
@@ -156,12 +176,18 @@ func (s *Store) List(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	index, err := s.readSessionIndex()
-	if err == nil {
-		return s.listFromSessionIndex(index, req), nil
+	var out session.SessionList
+	if err := s.withRootReadLock(func() error {
+		index, err := s.readSessionIndex()
+		if err != nil {
+			return err
+		}
+		out = s.listFromSessionIndex(index, req)
+		return nil
+	}); err == nil {
+		return out, nil
 	}
 
-	var out session.SessionList
 	if err := s.withRootWriteLock(func() error {
 		index, err := s.readSessionIndex()
 		if err == nil {
@@ -254,15 +280,22 @@ func (s *Store) Events(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(req.SessionRef)
-	if err != nil {
+	var out []*session.Event
+	if err := s.withRootReadLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		events, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		out = session.FilterEvents(events, req.Limit, req.IncludeTransient)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	events, err := s.eventsForDocument(doc)
-	if err != nil {
-		return nil, err
-	}
-	return session.FilterEvents(events, req.Limit, req.IncludeTransient), nil
+	return out, nil
 }
 
 func (s *Store) BindController(
@@ -377,11 +410,18 @@ func (s *Store) SnapshotState(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(ref)
-	if err != nil {
+	var out map[string]any
+	if err := s.withRootReadLock(func() error {
+		doc, err := s.readDocumentForRef(ref)
+		if err != nil {
+			return err
+		}
+		out = cloneState(doc.State)
+		return nil
+	}); err != nil {
 		return nil, err
 	}
-	return cloneState(doc.State), nil
+	return out, nil
 }
 
 func (s *Store) ReplaceState(
@@ -437,17 +477,24 @@ func (s *Store) LoadDocument(
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	doc, err := s.readDocumentForRef(req.SessionRef)
-	if err != nil {
+	var out session.LoadedSession
+	if err := s.withRootReadLock(func() error {
+		doc, err := s.readDocumentForRef(req.SessionRef)
+		if err != nil {
+			return err
+		}
+		events, err := s.eventsForDocument(doc)
+		if err != nil {
+			return err
+		}
+		out = session.LoadedSession{
+			Session: session.CloneSession(doc.Session),
+			Events:  session.FilterEvents(events, req.Limit, req.IncludeTransient),
+			State:   cloneState(doc.State),
+		}
+		return nil
+	}); err != nil {
 		return session.LoadedSession{}, err
 	}
-	events, err := s.eventsForDocument(doc)
-	if err != nil {
-		return session.LoadedSession{}, err
-	}
-	return session.LoadedSession{
-		Session: session.CloneSession(doc.Session),
-		Events:  session.FilterEvents(events, req.Limit, req.IncludeTransient),
-		State:   cloneState(doc.State),
-	}, nil
+	return out, nil
 }

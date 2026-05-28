@@ -241,6 +241,28 @@ func TestStoreListRebuildsFromDocumentsWhenSessionIndexIsCorrupt(t *testing.T) {
 	}
 }
 
+func TestStoreListSurfacesIndexRenameError(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	ctx := context.Background()
+	indexPath := filepath.Join(root, indexFilename)
+	if err := os.Mkdir(indexPath, 0o700); err != nil {
+		t.Fatalf("Mkdir(index path) error = %v", err)
+	}
+
+	_, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+	})
+	if err == nil {
+		t.Fatal("List() error = nil, want rename failure")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "rename") {
+		t.Fatalf("List() error = %v, want rename failure to be surfaced", err)
+	}
+}
+
 func TestStoreWriteRebuildsCorruptSessionIndexBeforeUpsert(t *testing.T) {
 	t.Parallel()
 
@@ -471,6 +493,86 @@ func TestStoreConcurrentWritersPreserveSessionIndexAcrossStoreInstances(t *testi
 	}
 	if got := len(list.Sessions); got != writers {
 		t.Fatalf("len(List().Sessions) = %d, want %d", got, writers)
+	}
+}
+
+func TestStoreConcurrentReadersAndWritersAcrossStoreInstances(t *testing.T) {
+	root := t.TempDir()
+	ctx := context.Background()
+	baseTime := time.Date(2026, time.April, 19, 11, 22, 33, 0, time.UTC)
+	baseStore := NewStore(Config{
+		RootDir: root,
+		Clock:   func() time.Time { return baseTime },
+	})
+	createdSession, err := baseStore.GetOrCreate(ctx, session.StartSessionRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Workspace: session.WorkspaceRef{
+			Key: "ws-1",
+			CWD: "/tmp/ws",
+		},
+		Title: "shared session",
+	})
+	if err != nil {
+		t.Fatalf("GetOrCreate() error = %v", err)
+	}
+
+	const workers = 24
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < workers; i++ {
+		i := i
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			store := NewStore(Config{
+				RootDir: root,
+				Clock: func() time.Time {
+					return baseTime.Add(time.Duration(i+1) * time.Second)
+				},
+			})
+			switch i % 3 {
+			case 0:
+				_, err := store.List(ctx, session.ListSessionsRequest{
+					AppName:      "caelis",
+					UserID:       "user-1",
+					WorkspaceKey: "ws-1",
+				})
+				errs <- err
+			case 1:
+				_, err := store.AppendEvent(ctx, createdSession.SessionRef, &session.Event{
+					Message: ptrMessage(model.NewTextMessage(model.RoleAssistant, fmt.Sprintf("event %02d", i))),
+				})
+				errs <- err
+			default:
+				errs <- store.UpdateState(ctx, createdSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+					state[fmt.Sprintf("worker_%02d", i)] = true
+					return state, nil
+				})
+			}
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent store operation error = %v", err)
+		}
+	}
+
+	list, err := NewStore(Config{RootDir: root}).List(ctx, session.ListSessionsRequest{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		WorkspaceKey: "ws-1",
+	})
+	if err != nil {
+		t.Fatalf("List() after concurrent operations error = %v", err)
+	}
+	if got := len(list.Sessions); got != 1 {
+		t.Fatalf("len(List().Sessions) = %d, want 1", got)
 	}
 }
 

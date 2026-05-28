@@ -300,53 +300,16 @@ func TestDefaultModeAllowsConfigToDisableSandboxNetwork(t *testing.T) {
 	}
 }
 
-func TestDefaultModeAllowsLocalGitMetadataCommands(t *testing.T) {
-	t.Parallel()
-
-	decision, err := AutoReviewMode().DecideTool(context.Background(), commandCtx("git add .", false))
-	if err != nil {
-		t.Fatalf("DecideTool() error = %v", err)
-	}
-	if decision.Action != policy.ActionAllow {
-		t.Fatalf("Action = %q, want allow", decision.Action)
-	}
-	gitMetadataRoot := testWorkspaceGitRoot()
-	if !hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, want .git write grant for git add", decision.Constraints.PathRules)
-	}
-	if decision.Constraints.Network != sandbox.NetworkEnabled {
-		t.Fatalf("Network = %q, want enabled for local git metadata command", decision.Constraints.Network)
-	}
-
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git add . && git commit -m update", false))
-	if err != nil {
-		t.Fatalf("DecideTool() git chain error = %v", err)
-	}
-	if !hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, want .git write grant for git add/commit chain", decision.Constraints.PathRules)
-	}
-
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git push origin main", false))
-	if err != nil {
-		t.Fatalf("DecideTool() push error = %v", err)
-	}
-	if hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, did not expect .git write grant for git push", decision.Constraints.PathRules)
-	}
-
-	decision, err = AutoReviewMode().DecideTool(context.Background(), commandCtx("git add . && git push origin main", false))
-	if err != nil {
-		t.Fatalf("DecideTool() mixed git chain error = %v", err)
-	}
-	if hasPathRule(decision.Constraints.PathRules, gitMetadataRoot, sandbox.PathAccessReadWrite) {
-		t.Fatalf("PathRules = %#v, did not expect .git write grant for mixed git chain", decision.Constraints.PathRules)
-	}
-}
-
-func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
+func TestDefaultModeDoesNotGrantGitMetadataWriteRules(t *testing.T) {
 	t.Parallel()
 
 	tests := []string{
+		"git add .",
+		"git commit -m update",
+		"git tag v1.2.3",
+		"git add . && git commit -m update",
+		"git push origin main",
+		"git add . && git push origin main",
 		"git add . & touch .git/index.lock",
 		"git add . | cat",
 		"git add . > staged.log",
@@ -366,11 +329,43 @@ func TestDefaultModeRejectsAmbiguousGitMetadataCommands(t *testing.T) {
 			if err != nil {
 				t.Fatalf("DecideTool() error = %v", err)
 			}
-			if decision.Action != policy.ActionAllow {
-				t.Fatalf("Action = %q, want allow", decision.Action)
-			}
 			if hasPathRule(decision.Constraints.PathRules, testWorkspaceGitRoot(), sandbox.PathAccessReadWrite) {
-				t.Fatalf("PathRules = %#v, did not expect .git write grant for ambiguous command %q", decision.Constraints.PathRules, command)
+				t.Fatalf("PathRules = %#v, did not expect .git write grant for command %q", decision.Constraints.PathRules, command)
+			}
+		})
+	}
+}
+
+func TestDefaultModeDeniesProtectedControlDirPermissionRequests(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		".git",
+		filepath.Join(".git", "index"),
+		".hg",
+		".svn",
+		".jj",
+		".codex",
+		".agents",
+	}
+	for _, target := range tests {
+		target := target
+		t.Run(target, func(t *testing.T) {
+			t.Parallel()
+
+			decision, err := AutoReviewMode().DecideTool(context.Background(), requestPermissionsCtx(target))
+			if err != nil {
+				t.Fatalf("DecideTool() error = %v", err)
+			}
+			if decision.Action != policy.ActionDeny {
+				t.Fatalf("Action = %q, want deny", decision.Action)
+			}
+			if decision.Approval != nil {
+				t.Fatalf("Approval = %#v, want nil policy denial before approval", decision.Approval)
+			}
+			if !strings.Contains(decision.Reason, "protected control directory") ||
+				!strings.Contains(decision.Reason, "sandbox_permissions=require_escalated") {
+				t.Fatalf("Reason = %q, want protected control directory escalation guidance", decision.Reason)
 			}
 		})
 	}
@@ -604,6 +599,22 @@ func commandCtxWithArgs(args map[string]any) policy.ToolContext {
 	return policy.ToolContext{
 		Tool: tool.Definition{Name: "RUN_COMMAND"},
 		Call: tool.Call{Name: "RUN_COMMAND", Input: raw},
+		Options: policy.ModeOptions{
+			WorkspaceRoot: testWorkspaceRoot(),
+			TempRoot:      testTempRoot(),
+		},
+		Sandbox: sandbox.Descriptor{Backend: sandbox.BackendHost},
+	}
+}
+
+func requestPermissionsCtx(writePath string) policy.ToolContext {
+	raw, _ := json.Marshal(map[string]any{
+		"reason": "update protected control metadata",
+		"write":  []string{writePath},
+	})
+	return policy.ToolContext{
+		Tool: tool.Definition{Name: "REQUEST_PERMISSIONS"},
+		Call: tool.Call{Name: "REQUEST_PERMISSIONS", Input: raw},
 		Options: policy.ModeOptions{
 			WorkspaceRoot: testWorkspaceRoot(),
 			TempRoot:      testTempRoot(),

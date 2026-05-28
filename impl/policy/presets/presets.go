@@ -50,8 +50,10 @@ func AutoReviewMode() policy.Mode {
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := baseStrictConstraints(input.Options)
 			switch toolName(input) {
-			case "PLAN", "SPAWN", "REQUEST_PERMISSIONS":
+			case "PLAN", "SPAWN":
 				return allow(def), nil
+			case "REQUEST_PERMISSIONS":
+				return decidePermissionRequest(input, def)
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -79,8 +81,10 @@ func ManualMode() policy.Mode {
 		Decide: func(_ context.Context, input policy.ToolContext) (policy.Decision, error) {
 			def := baseStrictConstraints(input.Options)
 			switch toolName(input) {
-			case "PLAN", "SPAWN", "REQUEST_PERMISSIONS":
+			case "PLAN", "SPAWN":
 				return allow(def), nil
+			case "REQUEST_PERMISSIONS":
+				return decidePermissionRequest(input, def)
 			case "READ", "SEARCH", "LIST", "GLOB":
 				if err := ensureReadPathsWithinRoots(input); err != nil {
 					return policyErrorOrDeny(err)
@@ -114,13 +118,28 @@ func decideCommand(input policy.ToolContext, def sandbox.Constraints, modeName s
 	if err != nil {
 		return deny(err.Error()), nil
 	}
-	def = applyDefaultCommandAllowances(def, input, command)
 	if commandRequiresDestructiveApproval(command) {
 		return askDestructiveCommandApproval(input, def, req)
 	}
 	switch req.SandboxPermissions {
 	case commandSandboxPermissionRequireEscalated:
 		return askEscalationApproval(input, req)
+	}
+	return allow(def), nil
+}
+
+func decidePermissionRequest(input policy.ToolContext, def sandbox.Constraints) (policy.Decision, error) {
+	paths, err := permissionRequestWritePaths(input)
+	if err != nil {
+		return policy.Decision{}, err
+	}
+	for _, path := range paths {
+		if controlDir, ok := protectedControlDirInPath(path); ok {
+			return deny(fmt.Sprintf(
+				"write permission for protected control directory %q is not allowed; rerun the necessary VCS/control metadata operation with sandbox_permissions=require_escalated",
+				controlDir,
+			)), nil
+		}
 	}
 	return allow(def), nil
 }

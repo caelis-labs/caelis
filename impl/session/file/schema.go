@@ -19,8 +19,15 @@ const (
 
 var storeRootLocks sync.Map
 
+type storeRootLockMode int
+
+const (
+	storeRootLockShared storeRootLockMode = iota
+	storeRootLockExclusive
+)
+
 type storeRootLock struct {
-	mu sync.Mutex
+	mu sync.RWMutex
 }
 
 // Config defines one single-file durable session store instance.
