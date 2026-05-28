@@ -30,10 +30,11 @@ func DefaultDiscoveryDirs(workspaceDir string) []string {
 
 func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 	if len(dirs) == 0 {
-		if _, err := system.Ensure(); err != nil {
-			return nil, err
-		}
+		systemRoot, err := system.Ensure()
 		dirs = DefaultDiscoveryDirs(workspaceDir)
+		if err != nil {
+			dirs = withoutDiscoveryDir(dirs, systemRoot)
+		}
 	}
 	out := make([]Meta, 0)
 	seenPaths := map[string]struct{}{}
@@ -89,6 +90,31 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 		}
 	}
 	return out, nil
+}
+
+func withoutDiscoveryDir(dirs []string, skip string) []string {
+	skip = filepath.Clean(strings.TrimSpace(skip))
+	if skip == "" || skip == "." {
+		return append([]string(nil), dirs...)
+	}
+	out := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		resolved, err := ResolvePath(dir)
+		if err == nil && sameDiscoveryPath(resolved, skip) {
+			continue
+		}
+		out = append(out, dir)
+	}
+	return out
+}
+
+func sameDiscoveryPath(a string, b string) bool {
+	a = filepath.Clean(strings.TrimSpace(a))
+	b = filepath.Clean(strings.TrimSpace(b))
+	if a == b {
+		return true
+	}
+	return strings.EqualFold(a, b)
 }
 
 func ResolvePath(path string) (string, error) {

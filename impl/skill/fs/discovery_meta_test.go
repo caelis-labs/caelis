@@ -76,6 +76,30 @@ func TestDiscoverMetaMaterializesSystemSkillsAndDedupesByPriority(t *testing.T) 
 	}
 }
 
+func TestDiscoverMetaSkipsSystemRootWhenMaterializationFails(t *testing.T) {
+	home := t.TempDir()
+	testenv.SetHome(t, home)
+	if err := os.MkdirAll(filepath.Join(home, ".caelis"), 0o755); err != nil {
+		t.Fatalf("mkdir .caelis: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".caelis", "skills"), []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("write skills placeholder: %v", err)
+	}
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	writeSkillForDiscoveryTest(t, filepath.Join(workspace, "skills", "workspace-skill"), "workspace-skill", "workspace skill")
+
+	metas, err := DiscoverMeta(nil, workspace)
+	if err != nil {
+		t.Fatalf("DiscoverMeta() error = %v, want workspace discovery despite unavailable system root", err)
+	}
+	if got := len(metas); got != 1 {
+		t.Fatalf("len(metas) = %d, want only workspace skill: %#v", got, metas)
+	}
+	if metas[0].Name != "workspace-skill" {
+		t.Fatalf("metas[0] = %#v, want workspace skill", metas[0])
+	}
+}
+
 func writeSkillForDiscoveryTest(t *testing.T, dir string, name string, description string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {

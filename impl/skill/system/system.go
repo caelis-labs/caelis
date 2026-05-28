@@ -47,7 +47,7 @@ func Ensure() (string, error) {
 		return "", err
 	}
 	if err := syncEmbeddedDir(embeddedRoot, root, root); err != nil {
-		return "", err
+		return root, err
 	}
 	return root, nil
 }
@@ -132,7 +132,10 @@ func writeEmbeddedFile(src string, dst string, safeRoot string) error {
 	}
 	mode := fileModeFor(dst)
 	if existing, err := os.ReadFile(dst); err == nil && bytes.Equal(existing, data) {
-		return os.Chmod(dst, mode)
+		// If a previous run already materialized the file, a sandbox/read-only
+		// home should not make startup fail solely because mode repair failed.
+		_ = os.Chmod(dst, mode)
+		return nil
 	}
 	return os.WriteFile(dst, data, mode)
 }
