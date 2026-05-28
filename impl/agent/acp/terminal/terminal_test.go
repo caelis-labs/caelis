@@ -34,6 +34,35 @@ func TestLocalTerminalAdapterOutputUsesCumulativeRead(t *testing.T) {
 	}
 }
 
+func TestLocalTerminalAdapterOutputSuppressesNoOutputPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	adapter := LocalTerminalAdapter{Streams: &recordingTerminalService{
+		snapshot: stream.Snapshot{
+			FinalText: "(no output)",
+			ExitCode:  intPtr(0),
+		},
+	}}
+
+	resp, err := adapter.Output(context.Background(), TerminalOutputRequest{
+		SessionID:  "session-1",
+		TerminalID: "terminal-1",
+	})
+	if err != nil {
+		t.Fatalf("Output() error = %v", err)
+	}
+	if resp.Output != "" {
+		t.Fatalf("Output() = %q, want empty captured terminal output", resp.Output)
+	}
+	if resp.ExitStatus == nil || resp.ExitStatus.ExitCode == nil || *resp.ExitStatus.ExitCode != 0 {
+		t.Fatalf("ExitStatus = %#v, want exit code 0", resp.ExitStatus)
+	}
+}
+
+func intPtr(value int) *int {
+	return &value
+}
+
 type recordingTerminalService struct {
 	readReq  stream.ReadRequest
 	snapshot stream.Snapshot

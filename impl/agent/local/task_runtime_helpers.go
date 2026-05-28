@@ -13,6 +13,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
+const noOutputPlaceholder = "(no output)"
+
 type completedTaskSession struct {
 	entry *taskapi.Entry
 }
@@ -332,7 +334,7 @@ func terminalFinalText(output string, stdout string, stderr string, resultErr er
 			}
 		}
 	}
-	return "(no output)"
+	return noOutputPlaceholder
 }
 
 func compactFinalOutput(stdout, stderr string) string {

@@ -352,24 +352,26 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 	if entry == nil {
 		return nil, fmt.Errorf("impl/agent/local: task entry is required")
 	}
+	seededOutput, seededFromResult := rehydratedCommandOutput(entry)
 	task := &commandTask{
 		ref: taskapi.Ref{
 			TaskID:     strings.TrimSpace(entry.TaskID),
 			SessionID:  strings.TrimSpace(entry.Terminal.SessionID),
 			TerminalID: strings.TrimSpace(entry.Terminal.TerminalID),
 		},
-		sessionRef:   session.NormalizeSessionRef(entry.Session),
-		command:      taskSpecString(entry.Spec, "command"),
-		workdir:      taskSpecString(entry.Spec, "workdir"),
-		title:        strings.TrimSpace(entry.Title),
-		createdAt:    entry.CreatedAt,
-		state:        entry.State,
-		running:      entry.Running,
-		stdoutCursor: entry.StdoutCursor,
-		stderrCursor: entry.StderrCursor,
-		output:       taskRawStringValue(entry.Result["result"]),
-		result:       maps.Clone(entry.Result),
-		metadata:     maps.Clone(entry.Metadata),
+		sessionRef:     session.NormalizeSessionRef(entry.Session),
+		command:        taskSpecString(entry.Spec, "command"),
+		workdir:        taskSpecString(entry.Spec, "workdir"),
+		title:          strings.TrimSpace(entry.Title),
+		createdAt:      entry.CreatedAt,
+		state:          entry.State,
+		running:        entry.Running,
+		stdoutCursor:   entry.StdoutCursor,
+		stderrCursor:   entry.StderrCursor,
+		output:         seededOutput,
+		outputCallback: seededFromResult,
+		result:         maps.Clone(entry.Result),
+		metadata:       maps.Clone(entry.Metadata),
 	}
 	if cursor, ok := taskInt64Value(entry.Metadata["model_output_cursor"]); ok && cursor >= 0 {
 		task.modelCursor = cursor
@@ -424,6 +426,20 @@ func (tm *taskRuntime) rehydrateCommandTask(entry *taskapi.Entry) (*commandTask,
 	}
 	task.session = session
 	return task, nil
+}
+
+func rehydratedCommandOutput(entry *taskapi.Entry) (string, bool) {
+	if entry == nil || entry.Result == nil {
+		return "", false
+	}
+	text := taskRawStringValue(entry.Result["result"])
+	if text == "" {
+		return "", false
+	}
+	if strings.TrimSpace(text) == noOutputPlaceholder && entry.StdoutCursor == 0 && entry.StderrCursor == 0 {
+		return "", true
+	}
+	return text, true
 }
 
 func (t *commandTask) entrySnapshot(now time.Time) *taskapi.Entry {

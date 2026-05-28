@@ -101,6 +101,9 @@ func terminalSnapshotOutput(snap stream.Snapshot) string {
 	if text := out.String(); text != "" {
 		return text
 	}
+	if strings.TrimSpace(snap.FinalText) == "(no output)" {
+		return ""
+	}
 	return snap.FinalText
 }
 

@@ -124,6 +124,100 @@ func TestStreamReadCommandCompletedEmitsUndeliveredTailFrame(t *testing.T) {
 	}
 }
 
+func TestStreamReadRehydratedCompletedResultDoesNotDuplicateOutput(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:    "task-1",
+		State:     taskapi.StateCompleted,
+		Running:   false,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Result: map[string]any{
+			"result":    "done\n",
+			"exit_code": 0,
+		},
+		Terminal: sandbox.TerminalRef{Backend: sandbox.BackendHost, SessionID: "term-session", TerminalID: "term-1"},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if got := streamFrameText(snap.Frames); got != "done\n" {
+		t.Fatalf("stream frame text = %q, want one copy of completed output", got)
+	}
+	task.mu.Lock()
+	stored := task.output
+	task.mu.Unlock()
+	if stored != "done\n" {
+		t.Fatalf("stored output = %q, want one copy of completed output", stored)
+	}
+}
+
+func TestStreamReadRehydratedNoOutputPlaceholderDoesNotBecomeTerminalFrame(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:    "task-1",
+		State:     taskapi.StateCompleted,
+		Running:   false,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Result: map[string]any{
+			"result":    noOutputPlaceholder,
+			"exit_code": 0,
+		},
+		Terminal: sandbox.TerminalRef{Backend: sandbox.BackendHost, SessionID: "term-session", TerminalID: "term-1"},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if got := streamFrameText(snap.Frames); got != "" {
+		t.Fatalf("stream frame text = %q, want no terminal output for placeholder", got)
+	}
+	if snap.FinalText != noOutputPlaceholder {
+		t.Fatalf("FinalText = %q, want display placeholder", snap.FinalText)
+	}
+}
+
+func TestStreamReadRehydratedLiteralNoOutputTextKeepsTerminalFrame(t *testing.T) {
+	t.Parallel()
+
+	entry := &taskapi.Entry{
+		TaskID:       "task-1",
+		State:        taskapi.StateCompleted,
+		Running:      false,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
+		StdoutCursor: int64(len(noOutputPlaceholder)),
+		Result: map[string]any{
+			"result":    noOutputPlaceholder,
+			"exit_code": 0,
+		},
+		Terminal: sandbox.TerminalRef{Backend: sandbox.BackendHost, SessionID: "term-session", TerminalID: "term-1"},
+	}
+	task, err := (&taskRuntime{}).rehydrateCommandTask(entry)
+	if err != nil {
+		t.Fatalf("rehydrateCommandTask() error = %v", err)
+	}
+	snap, err := (&streamService{}).readCommand(context.Background(), task, stream.Cursor{})
+	if err != nil {
+		t.Fatalf("readCommand() error = %v", err)
+	}
+	if got := streamFrameText(snap.Frames); got != noOutputPlaceholder {
+		t.Fatalf("stream frame text = %q, want literal terminal output", got)
+	}
+}
+
 func TestCommandLiveOutputBufferIsBoundedAndCursorStable(t *testing.T) {
 	t.Parallel()
 

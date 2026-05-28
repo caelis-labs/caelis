@@ -401,10 +401,21 @@ func (a *RuntimeAgent) Prompt(ctx context.Context, req acp.PromptRequest, cb acp
 		if event == nil {
 			continue
 		}
-		if err := a.emitEvent(runCtx, cb, event, outboundFilter); err != nil {
+		terminalBridge, hasTerminalBridge := a.terminalBridgePlan(event)
+		if hasTerminalBridge {
+			a.rememberTerminalRef(event.SessionID, terminalBridge.displayTerminalID, terminalBridge.ref)
+			if terminalBridgeFinalStatus(terminalBridge.status) {
+				if _, err := a.emitTerminalBridgeSnapshot(context.WithoutCancel(ctx), cb, terminalBridge, bridgedTerminals); err != nil {
+					return acp.PromptResponse{}, err
+				}
+			}
+		}
+		if err := a.emitEvent(runCtx, cb, event, outboundFilter, hasTerminalBridge); err != nil {
 			return acp.PromptResponse{}, err
 		}
-		a.maybeStartTerminalBridge(context.WithoutCancel(ctx), cb, event, bridgedTerminals)
+		if hasTerminalBridge {
+			a.startTerminalBridge(context.WithoutCancel(ctx), cb, terminalBridge, bridgedTerminals)
+		}
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
@@ -459,7 +470,7 @@ func (a *RuntimeAgent) Release(ctx context.Context, req acp.TerminalReleaseReque
 	return adapter.Release(ctx, req)
 }
 
-func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, event *session.Event, outboundFilter *acpNarrativeFilter) error {
+func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, event *session.Event, outboundFilter *acpNarrativeFilter, stripTerminalOutput bool) error {
 	if cb == nil || event == nil {
 		return nil
 	}
@@ -478,9 +489,12 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 	}
 	for _, notification := range notifications {
 		filtered := notification
+		if stripTerminalOutput {
+			filtered = withoutTerminalOutputMeta(filtered)
+		}
 		if outboundFilter != nil {
 			var ok bool
-			filtered, ok = outboundFilter.FilterNotification(notification)
+			filtered, ok = outboundFilter.FilterNotification(filtered)
 			if !ok {
 				continue
 			}
@@ -492,9 +506,22 @@ func (a *RuntimeAgent) emitEvent(ctx context.Context, cb acp.PromptCallbacks, ev
 	return nil
 }
 
-func (a *RuntimeAgent) maybeStartTerminalBridge(ctx context.Context, cb acp.PromptCallbacks, event *session.Event, active map[string]struct{}) {
-	if cb == nil || event == nil {
-		return
+type terminalBridgePlan struct {
+	sessionID         string
+	displayTerminalID string
+	ref               stream.Ref
+	key               string
+	status            string
+	fallbackOutput    string
+}
+
+func (a *RuntimeAgent) terminalBridgePlan(event *session.Event) (terminalBridgePlan, bool) {
+	if event == nil {
+		return terminalBridgePlan{}, false
+	}
+	provider, ok := a.runtime.(agent.StreamProvider)
+	if !ok || provider.Streams() == nil {
+		return terminalBridgePlan{}, false
 	}
 	name := ""
 	displayTerminalID := ""
@@ -506,22 +533,96 @@ func (a *RuntimeAgent) maybeStartTerminalBridge(ctx context.Context, cb acp.Prom
 		displayTerminalID = strings.TrimSpace(event.Protocol.ToolCall.ID)
 	}
 	if !terminalBridgeEligibleTool(name) {
-		return
+		return terminalBridgePlan{}, false
 	}
 	ref, ok := terminal.RefFromEvent(event)
 	if !ok {
-		return
+		return terminalBridgePlan{}, false
 	}
 	if displayTerminalID == "" {
+		return terminalBridgePlan{}, false
+	}
+	sessionID := strings.TrimSpace(event.SessionID)
+	if sessionID == "" {
+		return terminalBridgePlan{}, false
+	}
+	key := sessionID + "\x00" + displayTerminalID
+	return terminalBridgePlan{
+		sessionID:         sessionID,
+		displayTerminalID: displayTerminalID,
+		ref:               ref,
+		key:               key,
+		status:            terminalBridgeEventStatus(event),
+		fallbackOutput:    terminalBridgeEventOutput(event),
+	}, true
+}
+
+func (a *RuntimeAgent) startTerminalBridge(ctx context.Context, cb acp.PromptCallbacks, plan terminalBridgePlan, active map[string]struct{}) {
+	if cb == nil || plan.sessionID == "" || plan.displayTerminalID == "" || plan.key == "" {
 		return
 	}
-	key := strings.TrimSpace(event.SessionID) + "\x00" + displayTerminalID
-	if _, exists := active[key]; exists {
+	if _, exists := active[plan.key]; exists {
 		return
 	}
-	active[key] = struct{}{}
-	a.rememberTerminalRef(event.SessionID, displayTerminalID, ref)
-	go a.streamTerminalToACP(ctx, cb, strings.TrimSpace(event.SessionID), displayTerminalID, ref)
+	active[plan.key] = struct{}{}
+	go a.streamTerminalToACP(ctx, cb, plan.sessionID, plan.displayTerminalID, plan.ref)
+}
+
+func (a *RuntimeAgent) emitTerminalBridgeSnapshot(ctx context.Context, cb acp.PromptCallbacks, plan terminalBridgePlan, active map[string]struct{}) (bool, error) {
+	if cb == nil || plan.sessionID == "" || plan.displayTerminalID == "" || plan.key == "" {
+		return false, nil
+	}
+	if _, exists := active[plan.key]; exists {
+		return false, nil
+	}
+	provider, ok := a.runtime.(agent.StreamProvider)
+	if !ok || provider.Streams() == nil {
+		return false, nil
+	}
+	snap, err := provider.Streams().Read(ctx, stream.ReadRequest{Ref: stream.NormalizeRef(plan.ref)})
+	if err != nil || snap.Running {
+		if plan.fallbackOutput == "" {
+			return false, nil
+		}
+		if err := cb.SessionUpdate(ctx, terminalOutputNotification(plan.sessionID, plan.displayTerminalID, plan.fallbackOutput)); err != nil {
+			return false, err
+		}
+		status, exitCode := terminalSnapshotExitStatus(stream.Snapshot{}, plan.status)
+		if err := cb.SessionUpdate(ctx, terminalExitNotification(plan.sessionID, plan.displayTerminalID, status, exitCode)); err != nil {
+			return false, err
+		}
+		active[plan.key] = struct{}{}
+		return true, nil
+	}
+	emittedOutput := false
+	for _, frame := range snap.Frames {
+		if frame.Text == "" {
+			continue
+		}
+		emittedOutput = true
+		if err := cb.SessionUpdate(ctx, terminalOutputNotification(plan.sessionID, plan.displayTerminalID, frame.Text)); err != nil {
+			return false, err
+		}
+	}
+	if !emittedOutput {
+		if text := terminalSnapshotFinalOutput(snap); text != "" {
+			emittedOutput = true
+			if err := cb.SessionUpdate(ctx, terminalOutputNotification(plan.sessionID, plan.displayTerminalID, text)); err != nil {
+				return false, err
+			}
+		}
+	}
+	if !emittedOutput && plan.fallbackOutput != "" {
+		if err := cb.SessionUpdate(ctx, terminalOutputNotification(plan.sessionID, plan.displayTerminalID, plan.fallbackOutput)); err != nil {
+			return false, err
+		}
+	}
+	status, exitCode := terminalSnapshotExitStatus(snap, plan.status)
+	if err := cb.SessionUpdate(ctx, terminalExitNotification(plan.sessionID, plan.displayTerminalID, status, exitCode)); err != nil {
+		return false, err
+	}
+	active[plan.key] = struct{}{}
+	return true, nil
 }
 
 func (a *RuntimeAgent) streamTerminalToACP(ctx context.Context, cb acp.PromptCallbacks, sessionID string, displayTerminalID string, ref stream.Ref) {
@@ -600,6 +701,30 @@ func terminalOutputMeta(terminalID string, data string) map[string]any {
 	}
 }
 
+func withoutTerminalOutputMeta(notification acp.SessionNotification) acp.SessionNotification {
+	switch update := notification.Update.(type) {
+	case acp.ToolCall:
+		update.Meta = withoutMetaKey(update.Meta, "terminal_output")
+		notification.Update = update
+	case acp.ToolCallUpdate:
+		update.Meta = withoutMetaKey(update.Meta, "terminal_output")
+		notification.Update = update
+	}
+	return notification
+}
+
+func withoutMetaKey(meta map[string]any, key string) map[string]any {
+	if len(meta) == 0 {
+		return nil
+	}
+	out := maps.Clone(meta)
+	delete(out, key)
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func terminalExitMeta(terminalID string, exitCode int) map[string]any {
 	return map[string]any{
 		"terminal_exit": map[string]any{
@@ -610,9 +735,155 @@ func terminalExitMeta(terminalID string, exitCode int) map[string]any {
 	}
 }
 
+func terminalSnapshotFinalOutput(snap stream.Snapshot) string {
+	if strings.TrimSpace(snap.FinalText) == "" || strings.TrimSpace(snap.FinalText) == "(no output)" {
+		return ""
+	}
+	return snap.FinalText
+}
+
+func terminalSnapshotExitStatus(snap stream.Snapshot, fallbackStatus string) (string, int) {
+	state := strings.TrimSpace(snap.State)
+	if state == "" {
+		state = strings.TrimSpace(fallbackStatus)
+	}
+	exitCode := 0
+	if snap.ExitCode != nil {
+		exitCode = *snap.ExitCode
+	}
+	status := acp.ToolStatusCompleted
+	if terminalFrameFailed(state) || exitCode != 0 {
+		status = acp.ToolStatusFailed
+		if snap.ExitCode == nil && exitCode == 0 {
+			exitCode = 1
+		}
+	}
+	return status, exitCode
+}
+
 func terminalFrameFailed(state string) bool {
 	switch strings.ToLower(strings.TrimSpace(state)) {
 	case "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
+		return true
+	default:
+		return false
+	}
+}
+
+func terminalBridgeEventStatus(event *session.Event) string {
+	if event == nil {
+		return ""
+	}
+	if event.Tool != nil {
+		if status := strings.TrimSpace(event.Tool.Status); status != "" {
+			return status
+		}
+	}
+	if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		if status := strings.TrimSpace(event.Protocol.ToolCall.Status); status != "" {
+			return status
+		}
+	}
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		return strings.TrimSpace(update.Status)
+	}
+	return ""
+}
+
+func terminalBridgeEventOutput(event *session.Event) string {
+	if event == nil {
+		return ""
+	}
+	var out strings.Builder
+	if event.Tool != nil {
+		for _, item := range event.Tool.Content {
+			if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+				continue
+			}
+			appendTerminalBridgeTextPart(&out, item.Text)
+		}
+	}
+	if out.Len() > 0 {
+		return out.String()
+	}
+	if event.Protocol != nil && event.Protocol.ToolCall != nil {
+		appendTerminalBridgeProtocolOutput(&out, event.Protocol.ToolCall.Content)
+	}
+	if out.Len() > 0 {
+		return out.String()
+	}
+	if update := session.ProtocolUpdateOf(event); update != nil {
+		appendTerminalBridgeProtocolOutput(&out, session.ProtocolToolCallContentOf(update))
+	}
+	return out.String()
+}
+
+func appendTerminalBridgeProtocolOutput(out *strings.Builder, content []session.ProtocolToolCallContent) {
+	if out == nil {
+		return
+	}
+	for _, item := range content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			continue
+		}
+		appendTerminalBridgeTextPart(out, terminalBridgeTextContent(item.Content))
+	}
+}
+
+func appendTerminalBridgeTextPart(out *strings.Builder, part string) {
+	if out == nil || part == "" {
+		return
+	}
+	if out.Len() > 0 && !strings.HasSuffix(out.String(), "\n") && !strings.HasPrefix(part, "\n") {
+		out.WriteByte('\n')
+	}
+	out.WriteString(part)
+}
+
+func terminalBridgeTextContent(content any) string {
+	switch typed := content.(type) {
+	case nil:
+		return ""
+	case acp.TextContent:
+		if strings.EqualFold(strings.TrimSpace(typed.Type), "text") {
+			return typed.Text
+		}
+		return ""
+	case map[string]any:
+		if typ, _ := typed["type"].(string); !strings.EqualFold(strings.TrimSpace(typ), "text") {
+			return ""
+		}
+		text, _ := typed["text"].(string)
+		return text
+	case json.RawMessage:
+		if len(typed) == 0 {
+			return ""
+		}
+		var decoded acp.TextContent
+		if err := json.Unmarshal(typed, &decoded); err == nil && strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
+			return decoded.Text
+		}
+		var generic any
+		if err := json.Unmarshal(typed, &generic); err != nil {
+			return ""
+		}
+		return terminalBridgeTextContent(generic)
+	default:
+		raw, err := json.Marshal(typed)
+		if err != nil || len(raw) == 0 {
+			return ""
+		}
+		var decoded acp.TextContent
+		if err := json.Unmarshal(raw, &decoded); err == nil && strings.EqualFold(strings.TrimSpace(decoded.Type), "text") {
+			return decoded.Text
+		}
+		return ""
+	}
+}
+
+func terminalBridgeFinalStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "completed", "failed", "interrupted", "cancelled", "canceled", "terminated", "timed_out", "timeout":
 		return true
 	default:
 		return false
