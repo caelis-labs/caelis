@@ -70,6 +70,9 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		PrepareSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
 			return toRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
 		},
+		RepairSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
+			return toRuntimeSandboxStatusWithError(status.RepairSandbox(ctx))
+		},
 		PreflightSandboxFn: func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
 			return toRuntimeSandboxStatusWithError(status.PreflightSandbox(ctx, allowNonElevatedRepair))
 		},

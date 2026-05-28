@@ -343,6 +343,13 @@ type PreparableRuntime interface {
 	Prepare(context.Context) error
 }
 
+// RepairableRuntime is implemented by backends that can run an explicit
+// user-triggered repair step. Implementations may request elevation only from
+// this path, never from normal command execution or background preflight.
+type RepairableRuntime interface {
+	Repair(context.Context) error
+}
+
 // PreflightOptions controls best-effort setup checks that must not request
 // elevation. Preflight can repair state only when the current user already has
 // enough permissions to do so.

@@ -54,7 +54,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
 		}
 		switch subcommand := strings.ToLower(strings.TrimSpace(args[1])); subcommand {
-		case "setup", "reset", "clean":
+		case "setup", "fix", "reset", "clean":
 			sandboxSubcommand = subcommand
 		default:
 			return fmt.Errorf("unknown sandbox subcommand: %s", strings.Join(args[1:], " "))
@@ -159,6 +159,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		switch sandboxSubcommand {
 		case "setup":
 			return runSandboxSetup(ctx, stack, outFmt, stdout)
+		case "fix":
+			return runSandboxFix(ctx, stack, outFmt, stdout)
 		case "reset", "clean":
 			return runSandboxReset(ctx, stack, outFmt, stdout)
 		}
@@ -246,6 +248,14 @@ func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, f
 
 func runSandboxSetup(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
 	status, err := stack.PrepareSandbox(ctx)
+	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
+		err = writeErr
+	}
+	return err
+}
+
+func runSandboxFix(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
+	status, err := stack.RepairSandbox(ctx)
 	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
 		err = writeErr
 	}

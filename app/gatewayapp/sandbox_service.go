@@ -188,6 +188,54 @@ func (s *Stack) PrepareSandbox(ctx context.Context) (SandboxStatus, error) {
 	return sandboxStatusFromRuntime(runtimeCfg, runtime), err
 }
 
+func (s *Stack) RepairSandbox(ctx context.Context) (SandboxStatus, error) {
+	if s == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")
+	}
+	s.mu.RLock()
+	exec := s.exec
+	cfg := s.sandbox
+	workspaceCWD := s.Workspace.CWD
+	storeDir := s.storeDir
+	s.mu.RUnlock()
+	if exec == nil {
+		return SandboxStatus{}, fmt.Errorf("gatewayapp: sandbox runtime is unavailable")
+	}
+	if shouldUseCurrentSandboxLifecycle(exec) {
+		if repairer, ok := exec.(sandbox.RepairableRuntime); ok {
+			err := repairer.Repair(ctx)
+			return s.SandboxStatus(), err
+		}
+		preparer, ok := exec.(sandbox.PreparableRuntime)
+		if !ok {
+			return s.SandboxStatus(), nil
+		}
+		err := preparer.Prepare(ctx)
+		return s.SandboxStatus(), err
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.RequestedType), string(sandbox.BackendHost)) {
+		return s.SandboxStatus(), nil
+	}
+	runtime, runtimeCfg, ok, err := windowsSandboxRuntime(cfg, workspaceCWD, storeDir)
+	if err != nil {
+		return SandboxStatus{}, err
+	}
+	if !ok {
+		return s.SandboxStatus(), nil
+	}
+	defer runtime.Close()
+	if repairer, ok := runtime.(sandbox.RepairableRuntime); ok {
+		err = repairer.Repair(ctx)
+		return sandboxStatusFromRuntime(runtimeCfg, runtime), err
+	}
+	preparer, ok := runtime.(sandbox.PreparableRuntime)
+	if !ok {
+		return sandboxStatusFromRuntime(runtimeCfg, runtime), nil
+	}
+	err = preparer.Prepare(ctx)
+	return sandboxStatusFromRuntime(runtimeCfg, runtime), err
+}
+
 func (s *Stack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
 	if s == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewayapp: stack is unavailable")

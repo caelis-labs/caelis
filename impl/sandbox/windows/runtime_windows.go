@@ -65,8 +65,11 @@ type runtime struct {
 	fs        sandbox.FileSystem
 
 	ensureMu sync.Mutex
+	setupMu  sync.RWMutex
 	mu       sync.RWMutex
 	sessions map[string]*windowsSession
+
+	lastWorkspaceSetupError string
 }
 
 func (r *runtime) Describe() sandbox.Descriptor {
@@ -281,12 +284,16 @@ func (r *runtime) SupportedBackends() []sandbox.Backend {
 }
 
 func (r *runtime) Status() sandbox.Status {
+	check := r.workspaceSetupCheck()
 	status := sandbox.Status{
 		RequestedBackend: sandbox.BackendWindows,
 		ResolvedBackend:  sandbox.BackendWindows,
+		Setup: sandbox.SetupStatus{
+			Required: check.Required,
+			Error:    strings.TrimSpace(check.Error),
+			Checks:   []sandbox.SetupCheck{check},
+		},
 	}
-	check := r.workspaceSetupCheck()
-	status.Setup.Checks = []sandbox.SetupCheck{check}
 	status.Setup.Details = map[string]string{
 		"backend": "windows-restricted-token",
 	}
@@ -330,6 +337,49 @@ func (r *runtime) Prepare(ctx context.Context) error {
 		Done:    true,
 	})
 	return nil
+}
+
+func (r *runtime) Repair(ctx context.Context) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := r.Prepare(ctx); err == nil {
+		return nil
+	} else if !requiresElevatedACLRepair(err) {
+		return err
+	}
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "elevate",
+		Message: "requesting explicit Windows sandbox ACL repair",
+		Step:    1,
+		Total:   2,
+	})
+	if err := r.runElevatedRepair(ctx); err != nil {
+		r.recordWorkspaceSetupError(err)
+		return err
+	}
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Phase:   "verify",
+		Message: "verifying Windows sandbox ACL repair",
+		Step:    2,
+		Total:   2,
+	})
+	if err := r.Prepare(ctx); err != nil {
+		r.recordWorkspaceSetupError(err)
+		return err
+	}
+	return nil
+}
+
+func requiresElevatedACLRepair(err error) bool {
+	if err == nil {
+		return false
+	}
+	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "acl: write") && strings.Contains(lower, "dacl")
 }
 
 func (r *runtime) Preflight(ctx context.Context, opts sandbox.PreflightOptions) error {
@@ -546,20 +596,24 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 	}
 	policy, err := r.policyForRequest(req)
 	if err != nil {
+		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
 	}
 	r.ensureMu.Lock()
 	defer r.ensureMu.Unlock()
 	if err := os.MkdirAll(r.sandboxStateDir(), 0o700); err != nil {
+		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
 	}
 	manifest, manifestErr := r.readManifest()
 	if manifestErr == nil && manifestFresh(manifest, policy) {
 		missing, err := r.missingACLEntries(policy)
 		if err != nil {
+			r.recordWorkspaceSetupError(err)
 			return workspacePolicy{}, err
 		}
 		if len(missing) == 0 {
+			r.clearWorkspaceSetupError()
 			return policy, nil
 		}
 	}
@@ -567,11 +621,14 @@ func (r *runtime) ensureForRequest(ctx context.Context, req sandbox.CommandReque
 		r.cleanupStaleManifestACLs(manifest, policy)
 	}
 	if err := r.applyPolicyACLs(policy); err != nil {
+		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
 	}
 	if err := r.writeManifest(policy); err != nil {
+		r.recordWorkspaceSetupError(err)
 		return workspacePolicy{}, err
 	}
+	r.clearWorkspaceSetupError()
 	return policy, nil
 }
 
@@ -838,7 +895,7 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 			return fmt.Errorf("impl/sandbox/windows: writable root %s is not a directory", root)
 		}
 		if err := acl.ModifyFileDACL(root, allowEntries(policy.sidForWriteRoot(root))...); err != nil {
-			return fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, err)
+			return fmt.Errorf("impl/sandbox/windows: apply writable root ACL %s: %w", root, diagnoseACLWriteFailure(root, err))
 		}
 	}
 	envSID := policy.sidForWriteRoot(policy.SandboxEnvRoot)
@@ -858,7 +915,7 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 				return fmt.Errorf("impl/sandbox/windows: sandbox environment path %s is not a directory", path)
 			}
 			if err := acl.ModifyFileDACL(path, allowEntries(envSID)...); err != nil {
-				return fmt.Errorf("impl/sandbox/windows: apply sandbox environment ACL %s: %w", path, err)
+				return fmt.Errorf("impl/sandbox/windows: apply sandbox environment ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
 			}
 		}
 	}
@@ -870,10 +927,37 @@ func (r *runtime) applyPolicyACLs(policy workspacePolicy) error {
 			return fmt.Errorf("impl/sandbox/windows: inspect deny-write path %s: %w", path, err)
 		}
 		if err := acl.ModifyFileDACL(path, denyEntries(policy.CapabilitySIDs)...); err != nil {
-			return fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, err)
+			return fmt.Errorf("impl/sandbox/windows: apply deny-write ACL %s: %w", path, diagnoseACLWriteFailure(path, err))
 		}
 	}
 	return nil
+}
+
+func diagnoseACLWriteFailure(path string, err error) error {
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, syscall.ERROR_ACCESS_DENIED) {
+		return err
+	}
+	detail := "current token cannot update the directory DACL; Windows workspace-write sandbox needs WRITE_DAC so it can add the Caelis synthetic write SID"
+	if info, inspectErr := acl.InspectFileDACL(path); inspectErr == nil {
+		parts := []string{detail}
+		if owner := firstNonEmpty(info.Owner, info.OwnerSID); owner != "" {
+			parts = append(parts, "owner="+owner)
+		}
+		parts = append(parts,
+			fmt.Sprintf("protected_dacl=%t", info.Protected),
+			fmt.Sprintf("has_inherited_ace=%t", info.HasInheritedACE),
+			fmt.Sprintf("ace_count=%d", info.ACECount),
+		)
+		parts = append(parts, "file writes may still work through existing Modify rights, but sandbox preparation cannot proceed without DACL write access")
+		parts = append(parts, "manual fix: run `/doctor fix` in TUI or `caelis sandbox fix`")
+		detail = strings.Join(parts, "; ")
+	} else {
+		detail += "; DACL diagnosis failed: " + inspectErr.Error()
+	}
+	return fmt.Errorf("%w; %s", err, detail)
 }
 
 func (p workspacePolicy) sidForWriteRoot(root string) string {
@@ -1075,12 +1159,26 @@ func (r *runtime) cleanupStaleManifestACLs(manifest workspaceManifest, policy wo
 	}
 }
 
-func (r *runtime) workspaceSetupCheck() sandbox.SetupCheck {
-	check := sandbox.SetupCheck{
+func (r *runtime) workspaceSetupCheck() (check sandbox.SetupCheck) {
+	check = sandbox.SetupCheck{
 		Name:     "workspace",
 		Scope:    sandbox.SetupScopeWorkspace,
 		Required: false,
 	}
+	lastErr := r.workspaceSetupError()
+	defer func() {
+		if lastErr == "" {
+			return
+		}
+		check.Current = false
+		check.Required = true
+		check.Error = lastErr
+		check.Reason = "workspace ACL repair failed; explicit user repair is required"
+		if check.Details == nil {
+			check.Details = map[string]string{}
+		}
+		check.Details["manual_fix_hint"] = "run `/doctor fix` in TUI or `caelis sandbox fix`"
+	}()
 	policy, err := r.inspectPolicyForRequest(sandbox.CommandRequest{Dir: r.cfg.CWD, Constraints: r.Describe().DefaultConstraints})
 	if err != nil {
 		check.Reason = err.Error()
@@ -1103,6 +1201,33 @@ func (r *runtime) workspaceSetupCheck() sandbox.SetupCheck {
 		check.Reason = "workspace ACL manifest is stale and will be repaired lazily"
 	}
 	return check
+}
+
+func (r *runtime) recordWorkspaceSetupError(err error) {
+	if r == nil || err == nil {
+		return
+	}
+	r.setupMu.Lock()
+	defer r.setupMu.Unlock()
+	r.lastWorkspaceSetupError = strings.TrimSpace(err.Error())
+}
+
+func (r *runtime) clearWorkspaceSetupError() {
+	if r == nil {
+		return
+	}
+	r.setupMu.Lock()
+	defer r.setupMu.Unlock()
+	r.lastWorkspaceSetupError = ""
+}
+
+func (r *runtime) workspaceSetupError() string {
+	if r == nil {
+		return ""
+	}
+	r.setupMu.RLock()
+	defer r.setupMu.RUnlock()
+	return strings.TrimSpace(r.lastWorkspaceSetupError)
 }
 
 type cleanupPlan struct {

@@ -116,6 +116,21 @@ func (r *compositeRuntime) Prepare(ctx context.Context) error {
 	return preparer.Prepare(ctx)
 }
 
+func (r *compositeRuntime) Repair(ctx context.Context) error {
+	if r == nil || r.sandbox == nil {
+		return nil
+	}
+	repairer, ok := r.sandbox.(RepairableRuntime)
+	if ok {
+		return repairer.Repair(ctx)
+	}
+	preparer, ok := r.sandbox.(PreparableRuntime)
+	if !ok {
+		return nil
+	}
+	return preparer.Prepare(ctx)
+}
+
 func (r *compositeRuntime) Preflight(ctx context.Context, opts PreflightOptions) error {
 	if r == nil || r.sandbox == nil {
 		return nil

@@ -4,6 +4,7 @@ package windows
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -125,6 +126,134 @@ func TestStatusIsCheapAndDoesNotCreateSIDStore(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateDir, ".sandbox", "cap_sids.json")); !os.IsNotExist(err) {
 		t.Fatalf("Status created cap_sids.json or unexpected stat error: %v", err)
 	}
+}
+
+func TestStatusReportsLastWorkspaceSetupError(t *testing.T) {
+	rt, err := New(sandbox.Config{CWD: t.TempDir(), StateDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	windowsRT.recordWorkspaceSetupError(errors.New("acl: write D:\\xue\\code\\cmpctl DACL: Access is denied."))
+	status := rt.Status()
+	if !status.Setup.Required {
+		t.Fatalf("Setup.Required = false, want explicit repair required")
+	}
+	check, ok := status.Setup.Check("workspace")
+	if !ok {
+		t.Fatalf("Setup checks = %#v, want workspace check", status.Setup.Checks)
+	}
+	if !check.Required || check.Current {
+		t.Fatalf("workspace check = %+v, want required and not current", check)
+	}
+	for _, want := range []string{"acl: write", "Access is denied", "caelis sandbox fix"} {
+		if !strings.Contains(status.Setup.Error+check.Error+check.Details["manual_fix_hint"], want) {
+			t.Fatalf("workspace setup status = %+v, want %q", status.Setup, want)
+		}
+	}
+
+	windowsRT.clearWorkspaceSetupError()
+	status = rt.Status()
+	if status.Setup.Required {
+		t.Fatalf("Setup.Required after clear = true, want false")
+	}
+}
+
+func TestRunElevatedRepairUsesInternalHelperRequest(t *testing.T) {
+	workspace := t.TempDir()
+	state := t.TempDir()
+	rt, err := New(sandbox.Config{CWD: workspace, StateDir: state})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	oldLauncher := launchElevatedRepairProcess
+	defer func() { launchElevatedRepairProcess = oldLauncher }()
+	var gotExe string
+	var gotCWD string
+	var gotArgs []string
+	launchElevatedRepairProcess = func(_ context.Context, exe string, args []string, cwd string) (uint32, error) {
+		gotExe = exe
+		gotCWD = cwd
+		gotArgs = append([]string(nil), args...)
+		configFile := flagValue(args, "-config-file")
+		resultFile := flagValue(args, "-result-file")
+		if configFile == "" || resultFile == "" {
+			t.Fatalf("repair helper args = %#v, want config and result files", args)
+		}
+		data, err := os.ReadFile(configFile)
+		if err != nil {
+			t.Fatalf("read repair config: %v", err)
+		}
+		var request elevatedRepairRequest
+		if err := json.Unmarshal(data, &request); err != nil {
+			t.Fatalf("decode repair config: %v", err)
+		}
+		if request.Version != elevatedRepairRequestVersion {
+			t.Fatalf("repair request version = %d, want %d", request.Version, elevatedRepairRequestVersion)
+		}
+		if pathutil.Key(request.Config.CWD) != pathutil.Key(workspace) {
+			t.Fatalf("repair request cwd = %q, want %q", request.Config.CWD, workspace)
+		}
+		if request.Config.RequestedBackend != sandbox.BackendWindows {
+			t.Fatalf("repair request backend = %q, want windows", request.Config.RequestedBackend)
+		}
+		if err := writeElevatedRepairResult(resultFile, nil); err != nil {
+			t.Fatalf("write repair result: %v", err)
+		}
+		return 0, nil
+	}
+
+	if err := windowsRT.runElevatedRepair(context.Background()); err != nil {
+		t.Fatalf("runElevatedRepair() error = %v", err)
+	}
+	if gotExe == "" {
+		t.Fatalf("launcher executable was empty")
+	}
+	if pathutil.Key(gotCWD) != pathutil.Key(workspace) {
+		t.Fatalf("launcher cwd = %q, want %q", gotCWD, workspace)
+	}
+	if len(gotArgs) == 0 || gotArgs[0] != internalRepairHelperCommand {
+		t.Fatalf("launcher args = %#v, want internal helper command", gotArgs)
+	}
+}
+
+func TestValidateElevatedRepairConfigAllowsPolicyWritableRoots(t *testing.T) {
+	workspace := t.TempDir()
+	state := t.TempDir()
+	existingOutsideWorkspace := filepath.Join(t.TempDir(), "global-skills")
+	if err := os.MkdirAll(existingOutsideWorkspace, 0o700); err != nil {
+		t.Fatalf("MkdirAll(existingOutsideWorkspace) error = %v", err)
+	}
+	missingOutsideWorkspace := filepath.Join(t.TempDir(), "missing-global-skills")
+	missingInsideWorkspace := filepath.Join(workspace, ".agents", "skills")
+
+	err := validateElevatedRepairConfig(sandbox.Config{
+		CWD:              workspace,
+		StateDir:         state,
+		RequestedBackend: sandbox.BackendWindows,
+		WritableRoots: []string{
+			existingOutsideWorkspace,
+			missingOutsideWorkspace,
+			missingInsideWorkspace,
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateElevatedRepairConfig() error = %v", err)
+	}
+}
+
+func flagValue(args []string, name string) string {
+	for i, arg := range args {
+		if arg == name && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func TestPolicyForRequestUsesOnlyWritableRootsAndDenyWriteCarveouts(t *testing.T) {
@@ -327,6 +456,55 @@ func TestEnsureSkipsMissingWritableRootsAndRepairsWhenPresent(t *testing.T) {
 	}
 	if missing, err := acl.MissingFileDACLEntries(missingRoot, allowEntries(policy.sidForWriteRoot(missingRoot))...); err != nil || len(missing) != 0 {
 		t.Fatalf("missing writable root ACL entries = %#v/%v, want repaired", missing, err)
+	}
+}
+
+func TestRepairCurrentWorkspaceACLsCleansStaleManifestACLs(t *testing.T) {
+	workspace := t.TempDir()
+	staleRoot := filepath.Join(t.TempDir(), "stale-write")
+	if err := os.MkdirAll(staleRoot, 0o700); err != nil {
+		t.Fatalf("MkdirAll(staleRoot) error = %v", err)
+	}
+	rt, err := New(sandbox.Config{
+		CWD:           workspace,
+		StateDir:      t.TempDir(),
+		WritableRoots: []string{staleRoot},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	defer rt.Close()
+	windowsRT := rt.(*runtime)
+
+	oldPolicy, err := windowsRT.ensureForRequest(context.Background(), sandbox.CommandRequest{Dir: workspace})
+	if err != nil {
+		t.Fatalf("ensureForRequest() error = %v", err)
+	}
+	staleEntries := allowEntries(oldPolicy.sidForWriteRoot(staleRoot))
+	if len(staleEntries) == 0 {
+		t.Fatalf("old policy missing stale root SID: %+v", oldPolicy)
+	}
+	if missing, err := acl.MissingFileDACLEntries(staleRoot, staleEntries...); err != nil || len(missing) != 0 {
+		t.Fatalf("stale root ACL entries before repair = %#v/%v, want present", missing, err)
+	}
+
+	windowsRT.cfg.WritableRoots = nil
+	if err := windowsRT.repairCurrentWorkspaceACLs(context.Background()); err != nil {
+		t.Fatalf("repairCurrentWorkspaceACLs() error = %v", err)
+	}
+	missing, err := acl.MissingFileDACLEntries(staleRoot, staleEntries...)
+	if err != nil {
+		t.Fatalf("MissingFileDACLEntries(after repair) error = %v", err)
+	}
+	if len(missing) == 0 {
+		t.Fatalf("stale root ACL entries remained after repair")
+	}
+	manifest, err := windowsRT.readManifest()
+	if err != nil {
+		t.Fatalf("readManifest() error = %v", err)
+	}
+	if containsPath(manifest.WriteRoots, staleRoot) {
+		t.Fatalf("manifest WriteRoots = %#v, did not expect stale root %q", manifest.WriteRoots, staleRoot)
 	}
 }
 

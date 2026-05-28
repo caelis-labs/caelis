@@ -45,12 +45,20 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
 	setupError := firstNonEmpty(status.SandboxSetup.Error, globalSetup.Error, workspaceSetup.Error, status.SandboxSetupError)
 	if globalSetupRequired {
-		appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair is pending")
+		if setupError != "" {
+			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair failed")
+		} else {
+			appendStatusField(&lines, "Setup", "Windows sandbox infrastructure repair is pending")
+		}
 	} else if workspaceSetupRequired {
-		appendStatusField(&lines, "Setup", "current workspace ACL repair is pending")
+		if setupError != "" {
+			appendStatusField(&lines, "Setup", "current workspace ACL repair failed")
+		} else {
+			appendStatusField(&lines, "Setup", "current workspace ACL repair is pending")
+		}
 	}
 	if setupError != "" {
-		appendStatusField(&lines, "Error", strings.TrimSpace(setupError))
+		appendStatusField(&lines, "Error", compactStatusDetail(setupError, 180))
 	}
 	warnings := make([]string, 0, 6)
 	if strings.TrimSpace(status.Model) == "" && strings.TrimSpace(status.Provider) == "" && strings.TrimSpace(status.ModelName) == "" {
@@ -64,9 +72,17 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		warnings = append(warnings, "Auto-Review remains enabled and can approve host execution; use /approval manual for sensitive work")
 	}
 	if globalSetupRequired {
-		warnings = append(warnings, "Windows sandbox infrastructure will be repaired lazily before sandboxed commands run")
+		if setupError != "" {
+			warnings = append(warnings, "Run /doctor fix to repair Windows sandbox setup")
+		} else {
+			warnings = append(warnings, "Windows sandbox infrastructure will be repaired lazily before sandboxed commands run")
+		}
 	} else if workspaceSetupRequired {
-		warnings = append(warnings, "Current workspace ACLs will be repaired lazily before sandboxed commands run")
+		if setupError != "" {
+			warnings = append(warnings, "Run /doctor fix to repair current workspace ACLs")
+		} else {
+			warnings = append(warnings, "Current workspace ACLs will be repaired lazily before sandboxed commands run")
+		}
 	}
 	if strings.TrimSpace(status.FallbackReason) != "" {
 		warnings = append(warnings, "Requested sandbox backend is unavailable and a fallback is in effect")
@@ -80,6 +96,21 @@ func formatStatusSnapshot(status tuidriver.StatusSnapshot) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func compactStatusDetail(value string, maxRunes int) string {
+	value = strings.Join(strings.Fields(strings.TrimSpace(value)), " ")
+	if maxRunes <= 0 {
+		return value
+	}
+	runes := []rune(value)
+	if len(runes) <= maxRunes {
+		return value
+	}
+	if maxRunes <= 1 {
+		return string(runes[:maxRunes])
+	}
+	return string(runes[:maxRunes-1]) + "..."
 }
 
 func appendStatusField(lines *[]string, label string, value string) {

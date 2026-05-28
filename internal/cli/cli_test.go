@@ -342,6 +342,25 @@ func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
 	}
 }
 
+func TestRunSandboxFixSubcommandTextOutput(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"sandbox", "fix",
+		"-sandbox-backend", "host",
+		"-store-dir", cliTestStoreDir(t),
+		"-workspace-key", "sandbox-ws",
+		"-workspace-cwd", t.TempDir(),
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run(sandbox fix) error = %v; stderr=%q", err, errBuf.String())
+	}
+	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
+		t.Fatalf("sandbox fix output = %q, want requested host backend", out.String())
+	}
+}
+
 func TestRunSandboxResetSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer

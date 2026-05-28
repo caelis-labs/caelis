@@ -200,6 +200,7 @@ type Driver interface {
 	CycleSessionMode(context.Context) (StatusSnapshot, error)
 	SetSandboxBackend(context.Context, string) (StatusSnapshot, error)
 	PrepareSandbox(context.Context) (StatusSnapshot, error)
+	RepairSandbox(context.Context) (StatusSnapshot, error)
 	SetSessionMode(context.Context, string) (StatusSnapshot, error)
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)

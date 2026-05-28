@@ -199,6 +199,7 @@ type DriverStack struct {
 	CycleSessionModeFn                   func(context.Context, session.SessionRef) (string, error)
 	SetSandboxBackendFn                  func(context.Context, string) (SandboxStatus, error)
 	PrepareSandboxFn                     func(context.Context) (SandboxStatus, error)
+	RepairSandboxFn                      func(context.Context) (SandboxStatus, error)
 	PreflightSandboxFn                   func(context.Context, bool) (SandboxStatus, error)
 	ResetSandboxFn                       func(context.Context) (SandboxStatus, error)
 	SetACPControllerModeFn               func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
@@ -342,6 +343,13 @@ func (s *DriverStack) PrepareSandbox(ctx context.Context) (SandboxStatus, error)
 		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox repair dependency is unavailable")
 	}
 	return s.PrepareSandboxFn(ctx)
+}
+
+func (s *DriverStack) RepairSandbox(ctx context.Context) (SandboxStatus, error) {
+	if s == nil || s.RepairSandboxFn == nil {
+		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox repair dependency is unavailable")
+	}
+	return s.RepairSandboxFn(ctx)
 }
 
 func (s *DriverStack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {

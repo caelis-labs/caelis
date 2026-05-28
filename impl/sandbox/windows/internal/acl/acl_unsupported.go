@@ -35,8 +35,21 @@ type Entry struct {
 
 type Descriptor struct{}
 
+type FileDACLInfo struct {
+	Owner           string
+	OwnerSID        string
+	Protected       bool
+	HasDACL         bool
+	ACECount        int
+	HasInheritedACE bool
+}
+
 func ReadFileDACL(string) (Descriptor, error) {
 	return Descriptor{}, fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
+}
+
+func InspectFileDACL(string) (FileDACLInfo, error) {
+	return FileDACLInfo{}, fmt.Errorf("acl: unsupported on %s", runtime.GOOS)
 }
 
 func (Descriptor) HasDACL() bool {

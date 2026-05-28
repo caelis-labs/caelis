@@ -1289,6 +1289,32 @@ func TestFormatStatusSnapshotOmitsSetupReasonDetails(t *testing.T) {
 	}
 }
 
+func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
+	got := formatStatusSnapshot(tuidriver.StatusSnapshot{
+		Model:                  "mimo-v2.5-pro [high]",
+		ModeLabel:              "auto-review",
+		SandboxResolvedBackend: "windows",
+		Route:                  "sandbox",
+		Workspace:              "D:\\xue\\code\\cmpctl",
+		SandboxSetup: sandbox.SetupStatus{Checks: []sandbox.SetupCheck{{
+			Name:     "workspace",
+			Scope:    sandbox.SetupScopeWorkspace,
+			Required: true,
+			Error:    "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
+		}}},
+		SandboxWorkspaceSetupRequired: true,
+		SandboxSetupError:             "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
+	})
+	for _, want := range []string{"Setup:", "current workspace ACL repair failed", "Error:", "Access is denied", "Warning:", "/doctor fix"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("formatStatusSnapshot() = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, "will be repaired lazily") {
+		t.Fatalf("formatStatusSnapshot() = %q, should not suggest lazy repair after explicit failure", got)
+	}
+}
+
 func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 	got := formatSessionTokenUsageStatus(tuidriver.StatusSnapshot{
 		SessionUsageTotal: kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
@@ -1694,7 +1720,7 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 		},
 	}
 	var msgs []tea.Msg
-	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) })
+	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
 	if result.Err != nil {
 		t.Fatalf("slashDoctorWithContext() error = %v", result.Err)
 	}
@@ -1709,6 +1735,27 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 		if !strings.Contains(log.Chunk, want) {
 			t.Fatalf("slashDoctorWithContext() chunk = %q, want substring %q", log.Chunk, want)
 		}
+	}
+}
+
+func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
+	driver := &bridgeTestDriver{
+		status: tuidriver.StatusSnapshot{
+			SandboxRequestedBackend: "windows",
+			SandboxResolvedBackend:  "windows",
+			Route:                   "sandbox",
+		},
+	}
+	var msgs []tea.Msg
+	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "fix")
+	if result.Err != nil {
+		t.Fatalf("slashDoctorWithContext(fix) error = %v", result.Err)
+	}
+	if driver.repairSandboxCalls != 1 {
+		t.Fatalf("repairSandboxCalls = %d, want 1", driver.repairSandboxCalls)
+	}
+	if !noticeMessagesContain(msgs, "Windows sandbox repair started") || !noticeMessagesContain(msgs, "Windows sandbox repair complete") {
+		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want start and complete notices", msgs)
 	}
 }
 
@@ -1783,6 +1830,7 @@ type bridgeTestDriver struct {
 	removeAgentCalls         int
 	handoffAgentCalls        int
 	prepareSandboxCalls      int
+	repairSandboxCalls       int
 	resetSandboxCalls        int
 	compactCalls             int
 	lastConnect              tuidriver.ConnectConfig
@@ -1921,6 +1969,9 @@ func (d *bridgeSubmitDriver) SetSandboxBackend(context.Context, string) (tuidriv
 func (d *bridgeSubmitDriver) PrepareSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
 	return tuidriver.StatusSnapshot{}, nil
 }
+func (d *bridgeSubmitDriver) RepairSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
+	return tuidriver.StatusSnapshot{}, nil
+}
 func (d *bridgeSubmitDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
 	return tuidriver.StatusSnapshot{}, nil
 }
@@ -2044,6 +2095,15 @@ func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.Status
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Message: "debug-only setup detail",
 		Debug:   true,
+	})
+	return d.status, nil
+}
+func (d *bridgeTestDriver) RepairSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
+	d.repairSandboxCalls++
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
+		Message: "repairing current workspace ACL policy",
+		Step:    1,
+		Total:   1,
 	})
 	return d.status, nil
 }

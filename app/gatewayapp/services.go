@@ -218,6 +218,10 @@ func (s StatusService) PrepareSandbox(ctx context.Context) (SandboxStatus, error
 	return s.stack.PrepareSandbox(ctx)
 }
 
+func (s StatusService) RepairSandbox(ctx context.Context) (SandboxStatus, error) {
+	return s.stack.RepairSandbox(ctx)
+}
+
 func (s StatusService) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
 	return s.stack.PreflightSandbox(ctx, allowNonElevatedRepair)
 }

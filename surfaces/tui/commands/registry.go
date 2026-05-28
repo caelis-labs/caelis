@@ -27,7 +27,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
-		{Name: "doctor", Usage: "/doctor", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true},
+		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
 		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", LocalDuringACP: true, DynamicCompleter: true},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
@@ -191,6 +191,12 @@ func approvalCandidates() []driver.SlashArgCandidate {
 	return []driver.SlashArgCandidate{
 		{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
 		{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
+	}
+}
+
+func doctorCandidates() []driver.SlashArgCandidate {
+	return []driver.SlashArgCandidate{
+		{Value: "fix", Display: "fix", Detail: "Repair Windows sandbox ACLs"},
 	}
 }
 

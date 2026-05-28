@@ -43,6 +43,15 @@ type Descriptor struct {
 	sd *windows.SECURITY_DESCRIPTOR
 }
 
+type FileDACLInfo struct {
+	Owner           string
+	OwnerSID        string
+	Protected       bool
+	HasDACL         bool
+	ACECount        int
+	HasInheritedACE bool
+}
+
 func ReadFileDACL(path string) (Descriptor, error) {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -53,6 +62,32 @@ func ReadFileDACL(path string) (Descriptor, error) {
 		return Descriptor{}, fmt.Errorf("acl: read %s DACL: %w", path, err)
 	}
 	return Descriptor{sd: sd}, nil
+}
+
+func InspectFileDACL(path string) (FileDACLInfo, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return FileDACLInfo{}, fmt.Errorf("acl: path is required")
+	}
+	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return FileDACLInfo{}, fmt.Errorf("acl: read %s owner/DACL: %w", path, err)
+	}
+	info := FileDACLInfo{}
+	if owner, _, err := sd.Owner(); err == nil && owner != nil {
+		info.OwnerSID = owner.String()
+		info.Owner = accountName(owner)
+	}
+	if control, _, err := sd.Control(); err == nil {
+		info.Protected = control&windows.SE_DACL_PROTECTED != 0
+	}
+	if dacl, _, err := sd.DACL(); err == nil && dacl != nil {
+		info.HasDACL = true
+		info.ACECount = int(dacl.AceCount)
+		info.HasInheritedACE = daclHasInheritedACE(dacl)
+	}
+	runtime.KeepAlive(sd)
+	return info, nil
 }
 
 func (d Descriptor) HasDACL() bool {
@@ -228,6 +263,23 @@ func daclHasEntry(dacl *windows.ACL, sid *windows.SID, entry Entry) bool {
 	return false
 }
 
+func daclHasInheritedACE(dacl *windows.ACL) bool {
+	if dacl == nil {
+		return false
+	}
+	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
+		var ace *windows.ACCESS_ALLOWED_ACE
+		if err := windows.GetAce(dacl, i, &ace); err != nil || ace == nil {
+			continue
+		}
+		header := (*windows.ACE_HEADER)(unsafe.Pointer(ace))
+		if header.AceFlags&windows.INHERITED_ACE != 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func mappedFileMask(mask windows.ACCESS_MASK) windows.ACCESS_MASK {
 	out := mask
 	if mask&windows.GENERIC_ALL != 0 {
@@ -300,6 +352,26 @@ func trustee(principal string) (windows.TRUSTEE, *windows.SID, error) {
 		TrusteeType:  windows.TRUSTEE_IS_UNKNOWN,
 		TrusteeValue: windows.TrusteeValueFromSID(sid),
 	}, sid, nil
+}
+
+func accountName(sid *windows.SID) string {
+	if sid == nil {
+		return ""
+	}
+	account, domain, _, err := sid.LookupAccount("")
+	if err != nil {
+		return sid.String()
+	}
+	account = strings.TrimSpace(account)
+	domain = strings.TrimSpace(domain)
+	switch {
+	case account == "":
+		return sid.String()
+	case domain == "":
+		return account
+	default:
+		return domain + `\` + account
+	}
 }
 
 func rightsMask(rights Rights) windows.ACCESS_MASK {

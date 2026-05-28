@@ -40,7 +40,7 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 	case "status":
 		return slashStatusWithContext(ctx, driver, send)
 	case "doctor":
-		return slashDoctorWithContext(ctx, driver, send)
+		return slashDoctorWithContext(ctx, driver, send, args)
 	case "connect":
 		return slashConnectWithContext(ctx, driver, send, args)
 	case "model":
@@ -592,14 +592,49 @@ func slashStatusWithContext(ctx context.Context, driver tuidriver.Driver, send f
 	return TaskResultMsg{SuppressTurnDivider: true}
 }
 
-func slashDoctorWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
+func slashDoctorWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
+	switch strings.ToLower(strings.TrimSpace(args)) {
+	case "":
+	case "fix":
+		return slashDoctorFixWithContext(ctx, driver, send)
+	default:
+		sendNotice(send, "usage: /doctor [fix]")
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
 	status, err := driver.Status(ctx)
 	if err != nil {
 		return TaskResultMsg{Err: friendlyCommandError("doctor", err)}
 	}
 	sendNotice(send, formatDoctorSnapshot(status))
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func slashDoctorFixWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
+	if driver == nil {
+		return TaskResultMsg{Err: friendlyCommandError("doctor fix", fmt.Errorf("driver unavailable"))}
+	}
+	sendNotice(send, "Windows sandbox repair started. Approve the UAC prompt if shown.")
+	status, err := driver.RepairSandbox(ctx)
+	if err != nil {
+		return TaskResultMsg{Err: friendlyCommandError("doctor fix", err)}
+	}
+	if sandboxSetupStillRequired(status) {
+		sendNotice(send, "Windows sandbox repair still needs attention. Run /doctor for details.")
+	} else {
+		sendNotice(send, "Windows sandbox repair complete.")
+	}
+	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func sandboxSetupStillRequired(status tuidriver.StatusSnapshot) bool {
+	global, hasGlobal := status.SandboxSetup.Check("global")
+	workspace, hasWorkspace := status.SandboxSetup.Check("workspace")
+	return status.SandboxSetupRequired ||
+		status.SandboxGlobalSetupRequired ||
+		status.SandboxWorkspaceSetupRequired ||
+		(hasGlobal && global.Required) ||
+		(hasWorkspace && workspace.Required)
 }
 
 func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
@@ -632,11 +667,17 @@ func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
 		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
 		lines = append(lines, "  warn sandbox: "+detail)
 	case globalSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
-		lines = append(lines, "  warn sandbox global repair pending: "+detail)
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, globalSetup.Error, globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
+		lines = append(lines, "  warn sandbox global repair pending: "+compactStatusDetail(detail, 180))
+		if strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, globalSetup.Error)) != "" {
+			lines = append(lines, "  info fix: /doctor fix")
+		}
 	case workspaceSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(workspaceSetup.Reason, status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
-		lines = append(lines, "  warn sandbox workspace repair pending: "+detail)
+		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, workspaceSetup.Error, workspaceSetup.Reason, status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
+		lines = append(lines, "  warn sandbox workspace repair pending: "+compactStatusDetail(detail, 180))
+		if strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, workspaceSetup.Error)) != "" {
+			lines = append(lines, "  info fix: /doctor fix")
+		}
 	case sandbox != "":
 		lines = append(lines, "  ok sandbox: "+sandbox)
 	default:
