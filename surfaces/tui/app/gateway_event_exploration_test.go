@@ -53,14 +53,20 @@ func TestGatewayCompletedExplorationToolDefaultsCollapsedWithoutHeaderClick(t *t
 		t.Fatalf("READ tool panel should default collapsed after completion; expanded map = %#v", block.ExpandedTools)
 	}
 	rows := block.Render(BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme})
-	if rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
-		t.Fatalf("collapsed READ tool panel should not expose a header-only click token: %#v", renderedPlainRows(rows))
+	if !rowsContainClickToken(rows, acpToolPanelClickToken("call-1")) {
+		t.Fatalf("collapsed READ tool panel should expose an expand click token: %#v", renderedPlainRows(rows))
 	}
-	if model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:call-1") {
-		t.Fatal("collapsed READ tool panel should not expand from a header-only click")
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:call-1") {
+		t.Fatal("collapsed READ tool panel should expand from a header click")
+	}
+	if !block.toolPanelExpanded("call-1") {
+		t.Fatalf("READ tool panel should expand after click; expanded map = %#v", block.ExpandedTools)
+	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_tool_panel:call-1") {
+		t.Fatal("expanded READ tool panel should collapse on a second click")
 	}
 	if block.toolPanelExpanded("call-1") {
-		t.Fatalf("READ tool panel should stay collapsed after ignored click; expanded map = %#v", block.ExpandedTools)
+		t.Fatalf("READ tool panel should collapse after second click; expanded map = %#v", block.ExpandedTools)
 	}
 }
 
@@ -186,6 +192,14 @@ func TestGatewayCompletedExplorationToolsRenderAsCompactSummary(t *testing.T) {
 	}
 	if strings.Contains(joined, "type Event struct{}") || strings.Contains(joined, "42 matches") {
 		t.Fatalf("expanded rows = %q, should show compact calls rather than raw outputs", joined)
+	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_exploration_stage:"+key) {
+		t.Fatal("expected expanded exploration stage click token to collapse")
+	}
+	rows = block.Render(BlockRenderContext{Width: 96, TermWidth: 96, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if strings.Contains(joined, "Now let me explore more") || !strings.Contains(joined, "Explored") {
+		t.Fatalf("exploration stage should collapse after second click, got %q", joined)
 	}
 }
 

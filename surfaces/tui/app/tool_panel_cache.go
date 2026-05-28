@@ -55,6 +55,8 @@ func toolPanelRenderCacheKey(request toolPanelRenderRequest, scroll toolPanelScr
 	b.WriteByte(0)
 	b.WriteString(strconv.FormatBool(request.Err))
 	b.WriteByte(0)
+	b.WriteString(strings.TrimSpace(request.ClickToken))
+	b.WriteByte(0)
 	b.WriteString(strconv.Itoa(scroll.Offset))
 	b.WriteByte(0)
 	b.WriteString(strconv.FormatBool(scroll.FollowTail))

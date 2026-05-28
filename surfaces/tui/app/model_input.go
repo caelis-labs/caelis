@@ -209,13 +209,18 @@ func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	if ok {
 		m.selectionEnd = point
 	}
+	hadSelectionRange := m.hasSelectionRange()
 	m.selecting = false
-	text := m.selectionText()
-	if text == "" {
-		// No text selected — treat as a click; check for panel header toggle.
+	if !hadSelectionRange {
+		// No text selected — treat as a click; check for panel/header toggles.
 		if m.tryTogglePanelAtClick(mouse) {
 			m.syncViewportContent()
 		}
+		m.clearSelection()
+		return nil
+	}
+	text := m.selectionText()
+	if text == "" {
 		m.clearSelection()
 		return nil
 	}
@@ -240,7 +245,7 @@ func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) bool {
 	}
 	if contentLine >= 0 && contentLine < len(m.viewportClickTokens) {
 		if token := strings.TrimSpace(m.viewportClickTokens[contentLine]); token != "" {
-			if m.tryToggleACPToolPanelToken(bid, token) {
+			if m.tryToggleFoldToken(bid, token) {
 				return true
 			}
 		}
@@ -1012,7 +1017,7 @@ func (m *Model) allowsBTWSubmission() bool {
 	return false
 }
 
-func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
+func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_reasoning:"); ok {
 		return m.tryToggleACPReasoningToken(blockID, key)
 	}
@@ -1037,6 +1042,10 @@ func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
 	default:
 		return false
 	}
+}
+
+func (m *Model) tryToggleACPToolPanelToken(blockID string, token string) bool {
+	return m.tryToggleFoldToken(blockID, token)
 }
 
 func (m *Model) tryToggleACPReasoningToken(blockID string, key string) bool {
@@ -1076,13 +1085,29 @@ func (m *Model) tryToggleACPExplorationGroupToken(blockID string, rawIDs string)
 	}
 	switch blk := m.doc.Find(strings.TrimSpace(blockID)).(type) {
 	case *ParticipantTurnBlock:
+		allExpanded := true
 		for _, callID := range callIDs {
-			blk.setToolPanelExpanded(callID, true)
+			if !blk.toolPanelExpanded(callID) {
+				allExpanded = false
+				break
+			}
+		}
+		next := !allExpanded
+		for _, callID := range callIDs {
+			blk.setToolPanelExpanded(callID, next)
 		}
 		return true
 	case *MainACPTurnBlock:
+		allExpanded := true
 		for _, callID := range callIDs {
-			blk.setToolPanelExpanded(callID, true)
+			if !blk.toolPanelExpanded(callID) {
+				allExpanded = false
+				break
+			}
+		}
+		next := !allExpanded
+		for _, callID := range callIDs {
+			blk.setToolPanelExpanded(callID, next)
 		}
 		return true
 	default:

@@ -30,13 +30,14 @@ type acpTranscriptRenderOptions struct {
 }
 
 type toolPanelRenderRequest struct {
-	BlockID  string
-	CallID   string
-	ToolName string
-	Text     string
-	Width    int
-	Ctx      BlockRenderContext
-	Err      bool
+	BlockID    string
+	CallID     string
+	ToolName   string
+	Text       string
+	Width      int
+	Ctx        BlockRenderContext
+	Err        bool
+	ClickToken string
 }
 
 const (
@@ -570,11 +571,11 @@ func acpToolPanelClickTokenIf(callID string, enabled bool) string {
 	return acpToolPanelClickToken(callID)
 }
 
-func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final bool, fullOutput bool) bool {
-	if fullOutput {
-		return false
-	}
+func toolPanelCanExpandHiddenDetails(ev SubagentEvent, outputText string, final bool, err bool) bool {
 	if toolPanelEventHasHiddenToolArgs(ev) {
+		return true
+	}
+	if final && shouldDefaultCollapseToolEvent(ev) && shouldRenderACPToolPanel(outputText, err) {
 		return true
 	}
 	return final && finalToolOutputSummaryHidesLines(outputText)

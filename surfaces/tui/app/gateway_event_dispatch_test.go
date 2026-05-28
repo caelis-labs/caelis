@@ -368,6 +368,14 @@ func TestGatewayAssistantFinalFoldsReasoningAndTogglesInline(t *testing.T) {
 	if !strings.Contains(joined, "› thinking through the plan") {
 		t.Fatalf("expanded rows = %q, want expanded reasoning preview", joined)
 	}
+	if !m.tryToggleACPToolPanelToken(block.BlockID(), "acp_reasoning:0") {
+		t.Fatal("expected expanded reasoning click token to toggle closed")
+	}
+	rows = block.Render(BlockRenderContext{Width: 80, TermWidth: 80, Theme: m.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if strings.Contains(joined, "  thinking through the plan") {
+		t.Fatalf("reasoning body should collapse after second click, got %q", joined)
+	}
 }
 
 func TestGatewayReasoningFoldsAfterAttentionToolLoopAndTogglesInline(t *testing.T) {

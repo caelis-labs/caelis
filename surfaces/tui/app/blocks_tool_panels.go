@@ -44,22 +44,38 @@ func toggleToolPanelClick(expandedState *map[string]bool, fullOutputState *map[s
 		return false
 	}
 	if !toolPanelExpanded(mapValue(expandedState), callID) {
-		return false
+		if !toolPanelCanExpandCollapsed(events, callID) {
+			return false
+		}
+		setToolPanelExpandedWithOutput(expandedState, fullOutputState, callID, true)
+		return true
 	}
 	if toolPanelFullOutput(mapValue(fullOutputState), callID) {
+		if toolPanelCanCollapseExpanded(events, callID) {
+			setToolPanelExpandedWithOutput(expandedState, fullOutputState, callID, false)
+			return true
+		}
+		if fullOutputState != nil && *fullOutputState != nil {
+			delete(*fullOutputState, callID)
+			return true
+		}
 		return false
 	}
-	if !toolPanelHasHiddenToolArgs(events, callID) && !toolPanelHasHiddenSummary(events, callID) {
-		return false
+	if toolPanelCanCollapseExpanded(events, callID) {
+		setToolPanelExpandedWithOutput(expandedState, fullOutputState, callID, false)
+		return true
 	}
-	if fullOutputState == nil {
-		return false
+	if toolPanelHasHiddenToolArgs(events, callID) || toolPanelHasHiddenSummary(events, callID) {
+		if fullOutputState == nil {
+			return false
+		}
+		if *fullOutputState == nil {
+			*fullOutputState = map[string]bool{}
+		}
+		(*fullOutputState)[callID] = true
+		return true
 	}
-	if *fullOutputState == nil {
-		*fullOutputState = map[string]bool{}
-	}
-	(*fullOutputState)[callID] = true
-	return true
+	return false
 }
 
 func mapValue(ptr *map[string]bool) map[string]bool {
@@ -372,6 +388,38 @@ func toolPanelHasHiddenSummary(events []SubagentEvent, callID string) bool {
 		return false
 	}
 	return toolPanelEventHasHiddenOutputSummary(final)
+}
+
+func toolPanelCanExpandCollapsed(events []SubagentEvent, callID string) bool {
+	ev, ok := finalToolEventForCallID(events, callID)
+	if !ok {
+		ev, ok = latestToolEventForCallID(events, callID)
+		if !ok {
+			return false
+		}
+	}
+	if toolPanelEventHasHiddenToolArgs(ev) {
+		return true
+	}
+	return shouldRenderACPToolPanel(ev.Output, ev.Err)
+}
+
+func toolPanelCanCollapseExpanded(events []SubagentEvent, callID string) bool {
+	ev, ok := finalToolEventForCallID(events, callID)
+	if !ok {
+		return false
+	}
+	if shouldDefaultCollapseToolEvent(ev) {
+		return true
+	}
+	if !isMutationPanelToolEvent(ev) {
+		return false
+	}
+	text := sanitizeRenderableText(ev.Output)
+	if !shouldRenderACPToolPanel(text, ev.Err) || mutationPanelTextIsHeaderOnly(ev, text) {
+		return false
+	}
+	return true
 }
 
 func toolPanelHasHiddenToolArgs(events []SubagentEvent, callID string) bool {

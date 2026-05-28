@@ -95,6 +95,18 @@ func TestCompletedTerminalToolStaysExpandedWhenTurnCompletes(t *testing.T) {
 			t.Fatalf("expanded terminal output missing %q\n%s", want, joined)
 		}
 	}
+	if !rowsContainClickToken(rows, acpToolPanelClickToken("command-1")) {
+		t.Fatalf("expanded terminal output should expose a collapse click token: %#v", plain)
+	}
+	if !block.toggleToolPanelClick("command-1") {
+		t.Fatal("expected expanded terminal output click to collapse back to summary")
+	}
+	rows = block.Render(ctx)
+	plain = renderedPlainRows(rows)
+	joined = strings.Join(plain, "\n")
+	if !strings.Contains(joined, "... +8 lines") || strings.Contains(joined, "line 03") || strings.Contains(joined, "line 10") {
+		t.Fatalf("terminal output should collapse back to summary, got\n%s", joined)
+	}
 }
 
 func TestTerminalToolPanelPreservesLineBreaks(t *testing.T) {
@@ -240,12 +252,102 @@ func TestACPGenericToolUsesStandardPanelTemplateAndSummarizesFinalOutput(t *test
 	if strings.Contains(joined, "... +") || !strings.Contains(joined, "result 03") || !strings.Contains(joined, "result 04") {
 		t.Fatalf("expanded generic ACP tool output should show hidden lines, got\n%s", joined)
 	}
-	if rowsContainClickToken(rows, acpToolPanelClickToken("ws-1")) {
-		t.Fatalf("expanded generic ACP tool should not expose a collapse click token: %#v", plain)
+	if !rowsContainClickToken(rows, acpToolPanelClickToken("ws-1")) {
+		t.Fatalf("expanded generic ACP tool should expose a collapse click token: %#v", plain)
 	}
-	if block.toggleToolPanelClick("ws-1") {
-		t.Fatal("expanded generic ACP tool output should not collapse on a second click")
+	if !block.toggleToolPanelClick("ws-1") {
+		t.Fatal("expanded generic ACP tool output should collapse on a second click")
 	}
+	rows = block.Render(ctx)
+	plain = renderedPlainRows(rows)
+	joined = strings.Join(plain, "\n")
+	if !strings.Contains(joined, "... +2 lines") || strings.Contains(joined, "result 03") || strings.Contains(joined, "result 04") {
+		t.Fatalf("generic ACP tool output should collapse back to summary, got\n%s", joined)
+	}
+}
+
+func TestMutationToolPanelClickTogglesDetails(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
+	block := NewMainACPTurnBlock("session-1")
+	diff := strings.Join([]string{
+		"diff / hunk",
+		"@@ -1,1 +1,1 @@",
+		"-old",
+		"+new",
+	}, "\n")
+	block.UpdateTool("patch-1", "PATCH", "hooks.go", diff, true, false)
+
+	rows := block.Render(ctx)
+	joined := strings.Join(renderedPlainRows(rows), "\n")
+	if !rowsContainClickToken(rows, acpToolPanelClickToken("patch-1")) {
+		t.Fatalf("expanded PATCH panel should expose a collapse click token: %#v", renderedPlainRows(rows))
+	}
+	if !strings.Contains(joined, "-old") || !strings.Contains(joined, "+new") {
+		t.Fatalf("expanded PATCH panel missing diff body:\n%s", joined)
+	}
+
+	if !block.toggleToolPanelClick("patch-1") {
+		t.Fatal("expected PATCH detail click to collapse")
+	}
+	rows = block.Render(ctx)
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if strings.Contains(joined, "-old") || strings.Contains(joined, "+new") {
+		t.Fatalf("collapsed PATCH panel should hide diff body:\n%s", joined)
+	}
+	if !rowsContainClickToken(rows, acpToolPanelClickToken("patch-1")) {
+		t.Fatalf("collapsed PATCH panel should expose an expand click token: %#v", renderedPlainRows(rows))
+	}
+
+	if !block.toggleToolPanelClick("patch-1") {
+		t.Fatal("expected PATCH header click to expand")
+	}
+	rows = block.Render(ctx)
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, "-old") || !strings.Contains(joined, "+new") {
+		t.Fatalf("re-expanded PATCH panel missing diff body:\n%s", joined)
+	}
+}
+
+func TestDefaultCollapsedReadClickTokensMatchDetails(t *testing.T) {
+	model := newGatewayEventTestModel()
+	ctx := BlockRenderContext{Width: 100, TermWidth: 100, Theme: model.theme}
+
+	t.Run("empty output is not clickable", func(t *testing.T) {
+		block := NewParticipantTurnBlock("codex-001", "codex-001")
+		block.UpdateToolWithMeta("read-empty", "READ", "empty.txt", "", true, false, ToolUpdateMeta{ToolKind: "read"})
+
+		rows := block.Render(ctx)
+		if rowsContainClickToken(rows, acpToolPanelClickToken("read-empty")) {
+			t.Fatalf("empty collapsed READ should not expose a click token: %#v", renderedPlainRows(rows))
+		}
+		if block.toggleToolPanelClick("read-empty") {
+			t.Fatal("empty collapsed READ should not expand")
+		}
+	})
+
+	t.Run("short expanded output can collapse", func(t *testing.T) {
+		block := NewParticipantTurnBlock("codex-001", "codex-001")
+		block.UpdateToolWithMeta("read-short", "READ", "file.go", "line one\nline two", true, false, ToolUpdateMeta{ToolKind: "read"})
+
+		rows := block.Render(ctx)
+		if !rowsContainClickToken(rows, acpToolPanelClickToken("read-short")) {
+			t.Fatalf("collapsed READ should expose an expand click token: %#v", renderedPlainRows(rows))
+		}
+		if !block.toggleToolPanelClick("read-short") {
+			t.Fatal("collapsed READ should expand")
+		}
+		rows = block.Render(ctx)
+		if !rowsContainClickToken(rows, acpToolPanelClickToken("read-short")) {
+			t.Fatalf("expanded READ should expose a collapse click token: %#v", renderedPlainRows(rows))
+		}
+		if !block.toggleToolPanelClick("read-short") {
+			t.Fatal("expanded READ should collapse")
+		}
+		if block.toolPanelExpanded("read-short") {
+			t.Fatal("READ should be collapsed after second click")
+		}
+	})
 }
 
 func TestShortToolOutputDoesNotCollapseOnClick(t *testing.T) {

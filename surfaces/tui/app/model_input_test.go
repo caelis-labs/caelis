@@ -83,6 +83,56 @@ func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
 	}
 }
 
+func TestViewportWhitespaceSelectionDoesNotToggleFoldToken(t *testing.T) {
+	model := NewModel(Config{
+		WriteClipboardText: func(text string) error {
+			if text != "  " {
+				t.Errorf("clipboard text = %q, want two spaces", text)
+			}
+			return nil
+		},
+	})
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m := updated.(*Model)
+	m.viewport.SetWidth(40)
+	m.viewport.SetHeight(10)
+
+	block := NewParticipantTurnBlock("codex-001", "codex-001")
+	block.UpdateToolWithMeta("ws-1", "lookup_weather", `"weather"`, strings.Join([]string{
+		"result 01",
+		"result 02",
+		"result 03",
+		"result 04",
+		"result 05",
+		"result 06",
+	}, "\n"), true, false, ToolUpdateMeta{ToolKind: "other"})
+	m.doc.Append(block)
+	m.viewportStyledLines = []string{"   "}
+	m.viewportPlainLines = []string{"   "}
+	m.viewportBlockIDs = []string{block.BlockID()}
+	m.viewportClickTokens = []string{acpToolPanelClickToken("ws-1")}
+	m.selecting = true
+	m.selectionStart = textSelectionPoint{line: 0, col: 0}
+	m.selectionEnd = m.selectionStart
+
+	cmd := m.handleViewportMouseRelease(tea.Mouse{
+		Button: tea.MouseLeft,
+		X:      m.mainColumnX() + tuikit.GutterNarrative + 2,
+		Y:      0,
+	})
+	if cmd == nil {
+		t.Fatal("whitespace selection should still produce a copy command")
+	}
+	if got, ok := cmd().(clipboardCopyResultMsg); !ok {
+		t.Fatalf("copy command returned %T, want clipboardCopyResultMsg", got)
+	} else if got.err != nil {
+		t.Fatalf("copy command returned error: %v", got.err)
+	}
+	if block.toolPanelFullOutput("ws-1") {
+		t.Fatal("drag selection over a clickable row must not toggle the fold state")
+	}
+}
+
 func TestImagePasteWhileRunningShowsFeedback(t *testing.T) {
 	model := NewModel(Config{
 		PasteClipboardImage: func() ([]string, string, error) {

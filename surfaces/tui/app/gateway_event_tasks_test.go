@@ -118,6 +118,16 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 		strings.Contains(joined, `  └ Write "Alice"`) {
 		t.Fatalf("expanded settled rows = %q, want wait controls expanded while Write stays independent", joined)
 	}
+	if !model.tryToggleACPToolPanelToken(block.BlockID(), "acp_task_stage:tasks:task-1,task-2") {
+		t.Fatal("expected expanded task stage click token to collapse grouped TASK controls")
+	}
+	rows = block.Render(BlockRenderContext{Width: 110, TermWidth: 110, Theme: model.theme})
+	joined = strings.Join(renderedPlainRows(rows), "\n")
+	if !strings.Contains(joined, `Tasks`) ||
+		!strings.Contains(joined, `Wait ella 5s, 8s`) ||
+		strings.Contains(joined, `    Wait 8s`) {
+		t.Fatalf("collapsed task rows = %q, want wait controls summarized again", joined)
+	}
 }
 
 func TestGatewayTaskHandoffBudgetKeepsSummaryAndNewStreamVisible(t *testing.T) {
