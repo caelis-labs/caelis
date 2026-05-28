@@ -6,16 +6,18 @@ import (
 	"testing"
 )
 
-func TestDefaultSkillSandboxRootsIncludeGlobalAndWorkspaceSkillDirs(t *testing.T) {
+func TestDefaultSkillSandboxRootsIncludeSystemUserGlobalAndWorkspaceSkillDirs(t *testing.T) {
 	home := t.TempDir()
 	setHomeForGatewayAppTest(t, home)
 	workspace := filepath.Join(t.TempDir(), "workspace")
 
 	got := defaultSkillSandboxRoots(workspace)
 	want := []string{
-		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".caelis", "skills", ".system"),
 		filepath.Join(workspace, ".agents", "skills"),
 		filepath.Join(workspace, "skills"),
+		filepath.Join(home, ".caelis", "skills"),
+		filepath.Join(home, ".agents", "skills"),
 	}
 	for _, root := range want {
 		if !slices.Contains(got, root) {
@@ -51,9 +53,11 @@ func TestSandboxPolicyRootMetadataIncludesConfiguredAndSkillWriteRoots(t *testin
 	for _, root := range []string{
 		"/existing-write",
 		"/configured-write",
+		filepath.Join(home, ".caelis", "skills", ".system"),
 		filepath.Join(home, ".agents", "skills"),
 		filepath.Join(workspace, ".agents", "skills"),
 		filepath.Join(workspace, "skills"),
+		filepath.Join(home, ".caelis", "skills"),
 	} {
 		if !slices.Contains(writeRoots, root) {
 			t.Fatalf("policy_extra_write_roots = %#v, want %q", writeRoots, root)
@@ -73,9 +77,11 @@ func TestEffectiveSandboxConfigAddsSkillWritableRootsWithoutMutatingStoredConfig
 	}
 	for _, root := range []string{
 		"/configured-write",
+		filepath.Join(home, ".caelis", "skills", ".system"),
 		filepath.Join(home, ".agents", "skills"),
 		filepath.Join(workspace, ".agents", "skills"),
 		filepath.Join(workspace, "skills"),
+		filepath.Join(home, ".caelis", "skills"),
 	} {
 		if !slices.Contains(got.WritableRoots, root) {
 			t.Fatalf("effective WritableRoots = %#v, want %q", got.WritableRoots, root)

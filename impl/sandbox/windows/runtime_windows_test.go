@@ -15,6 +15,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/acl"
 	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows/internal/pathutil"
+	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
@@ -410,6 +411,27 @@ func TestEnsureWritesManifestAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestSandboxEnvironmentKeepsHomeSandboxedAndExposesHostSkillRoot(t *testing.T) {
+	hostHome := t.TempDir()
+	testenv.SetHome(t, hostHome)
+	envRoot := filepath.Join(t.TempDir(), "env")
+
+	env, err := sandboxEnvironment(workspacePolicy{SandboxEnvRoot: envRoot}, nil)
+	if err != nil {
+		t.Fatalf("sandboxEnvironment() error = %v", err)
+	}
+	sandboxHome := filepath.Join(envRoot, "home")
+	if got := envValue(env, "HOME"); got != sandboxHome {
+		t.Fatalf("HOME = %q, want sandbox home %q", got, sandboxHome)
+	}
+	if got := envValue(env, "USERPROFILE"); got != sandboxHome {
+		t.Fatalf("USERPROFILE = %q, want sandbox home %q", got, sandboxHome)
+	}
+	if got := envValue(env, "CAELIS_SKILLS_DIR"); got != filepath.Join(hostHome, ".caelis", "skills") {
+		t.Fatalf("CAELIS_SKILLS_DIR = %q, want host skill root", got)
+	}
+}
+
 func TestEnsureSkipsMissingWritableRootsAndRepairsWhenPresent(t *testing.T) {
 	workspace := t.TempDir()
 	stateDir := t.TempDir()
@@ -783,4 +805,14 @@ func containsPath(paths []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func envValue(env []string, name string) string {
+	prefix := strings.ToUpper(name) + "="
+	for _, item := range env {
+		if strings.HasPrefix(strings.ToUpper(item), prefix) {
+			return item[len(prefix):]
+		}
+	}
+	return ""
 }

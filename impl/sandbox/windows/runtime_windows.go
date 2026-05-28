@@ -1712,6 +1712,9 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 		"PSModuleAnalysisCachePath":   filepath.Join(psCacheDir, "PowerShell_AnalysisCache"),
 		"POWERSHELL_TELEMETRY_OPTOUT": "1",
 	}
+	if skillsDir := hostUserSkillsDir(); skillsDir != "" {
+		forced["CAELIS_SKILLS_DIR"] = skillsDir
+	}
 	if forced["HOMEPATH"] != "" {
 		forced["HOMEPATH"] = string(filepath.Separator) + forced["HOMEPATH"]
 	}
@@ -1734,6 +1737,18 @@ func sandboxEnvironment(policy workspacePolicy, extra map[string]string) ([]stri
 		forced["PATHEXT"] = `.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`
 	}
 	return mergeEnv(extra, forced), nil
+}
+
+func hostUserSkillsDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	home = strings.TrimSpace(home)
+	if home == "" {
+		return ""
+	}
+	return filepath.Join(home, ".caelis", "skills")
 }
 
 func mergeEnv(extra map[string]string, forced map[string]string) []string {

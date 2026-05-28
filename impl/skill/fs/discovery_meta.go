@@ -6,30 +6,38 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/impl/skill/system"
 	"github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 type Meta = skill.Meta
 
 func DefaultDiscoveryDirs(workspaceDir string) []string {
-	out := []string{"~/.agents/skills"}
+	out := []string{"~/.caelis/skills/.system"}
 	workspaceDir = strings.TrimSpace(workspaceDir)
-	if workspaceDir == "" {
-		return out
+	if workspaceDir != "" {
+		out = append(out,
+			filepath.Join(workspaceDir, ".agents", "skills"),
+			filepath.Join(workspaceDir, "skills"),
+		)
 	}
 	out = append(out,
-		filepath.Join(workspaceDir, ".agents", "skills"),
-		filepath.Join(workspaceDir, "skills"),
+		"~/.caelis/skills",
+		"~/.agents/skills",
 	)
 	return out
 }
 
 func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 	if len(dirs) == 0 {
+		if _, err := system.Ensure(); err != nil {
+			return nil, err
+		}
 		dirs = DefaultDiscoveryDirs(workspaceDir)
 	}
 	out := make([]Meta, 0)
-	seen := map[string]struct{}{}
+	seenPaths := map[string]struct{}{}
+	seenNames := map[string]struct{}{}
 	for _, dir := range dirs {
 		resolvedDir, err := ResolvePath(dir)
 		if err != nil {
@@ -61,14 +69,22 @@ func DiscoverMeta(dirs []string, workspaceDir string) ([]Meta, error) {
 				return nil, err
 			}
 			skillPath = filepath.Clean(skillPath)
-			if _, ok := seen[skillPath]; ok {
+			if _, ok := seenPaths[skillPath]; ok {
 				continue
 			}
 			meta, err := parseMeta(skillPath)
 			if err != nil {
 				return nil, err
 			}
-			seen[skillPath] = struct{}{}
+			nameKey := strings.ToLower(strings.TrimSpace(meta.Name))
+			if nameKey == "" {
+				continue
+			}
+			seenPaths[skillPath] = struct{}{}
+			if _, ok := seenNames[nameKey]; ok {
+				continue
+			}
+			seenNames[nameKey] = struct{}{}
 			out = append(out, meta)
 		}
 	}
