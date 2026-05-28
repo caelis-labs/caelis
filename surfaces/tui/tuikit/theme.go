@@ -667,6 +667,7 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 	surface1 := adaptiveBackgroundColor(profile, background, true, 0.08, 0, "#12161d", "", "234", "")
 	surface2 := adaptiveBackgroundColor(profile, background, true, 0.12, 0, "#1b222d", "", "236", "")
 	selection := adaptiveTintColor(profile, background, true, [3]uint8{130, 150, 170}, [3]uint8{}, 0.24, 0, "#2a3544", "", "240", "")
+	userBg := adaptiveTintColor(profile, background, true, [3]uint8{91, 184, 215}, [3]uint8{}, 0.20, 0, "#12252b", "", "23", "")
 	addBg := adaptiveTintColor(profile, background, true, [3]uint8{87, 199, 133}, [3]uint8{}, 0.15, 0, "#1d3328", "", "22", "")
 	addStrongBg := adaptiveTintColor(profile, background, true, [3]uint8{87, 199, 133}, [3]uint8{}, 0.24, 0, "#254935", "", "29", "")
 	delBg := adaptiveTintColor(profile, background, true, [3]uint8{255, 107, 99}, [3]uint8{}, 0.16, 0, "#3e2422", "", "52", "")
@@ -701,7 +702,7 @@ func adaptiveDarkThemeVariant(profile colorprofile.Profile, background color.Col
 		AssistantFg:        profileColor(profile, "#e6e8ee", "254", "7"),
 		ReasoningFg:        profileColor(profile, "#96a2b2", "246", "8"),
 		UserFg:             profileColor(profile, "#f5f7fb", "255", "7"),
-		UserBg:             surface2,
+		UserBg:             userBg,
 		UserPrefixFg:       profileColor(profile, "#5bb8d7", "39", "6"),
 		UserMentionFg:      profileColor(profile, "#b59cff", "141", "5"),
 		ToolFg:             profileColor(profile, "#5bb8d7", "39", "6"),
@@ -753,6 +754,7 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 	surface1 := adaptiveBackgroundColor(profile, background, false, 0, 0.035, "", "#f7f8fa", "", "255")
 	surface2 := adaptiveBackgroundColor(profile, background, false, 0, 0.055, "", "#eef1f5", "", "255")
 	selection := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{47, 143, 175}, 0, 0.12, "", "#dceff5", "", "153")
+	userBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{47, 143, 175}, 0, 0.07, "", "#f0f7f9", "", "195")
 	addBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{87, 199, 133}, 0, 0.13, "", "#e2f5e8", "", "194")
 	addStrongBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{87, 199, 133}, 0, 0.22, "", "#c8ecd5", "", "157")
 	delBg := adaptiveTintColor(profile, background, false, [3]uint8{}, [3]uint8{255, 107, 99}, 0, 0.10, "", "#fde9e7", "", "224")
@@ -787,7 +789,7 @@ func adaptiveLightThemeVariant(profile colorprofile.Profile, background color.Co
 		AssistantFg:        profileColor(profile, "#172033", "235", "0"),
 		ReasoningFg:        profileColor(profile, "#586577", "242", "8"),
 		UserFg:             profileColor(profile, "#172033", "235", "0"),
-		UserBg:             surface1,
+		UserBg:             userBg,
 		UserPrefixFg:       profileColor(profile, "#2f8faf", "32", "6"),
 		UserMentionFg:      profileColor(profile, "#6f5db8", "93", "5"),
 		ToolFg:             profileColor(profile, "#2f8faf", "32", "6"),
@@ -865,7 +867,7 @@ func defaultThemeVariant(trueColor bool) Theme {
 		AssistantFg:        themeColor(trueColor, "#9ece6a", "114"),
 		ReasoningFg:        themeColor(trueColor, "#7f8ba3", "245"),
 		UserFg:             themeColor(trueColor, "#f4f7fb", "255"),
-		UserBg:             themeColor(trueColor, "#151922", "234"),
+		UserBg:             themeColor(trueColor, "#1a202b", "236"),
 		UserPrefixFg:       themeColor(trueColor, "#ffffff", "255"),
 		UserMentionFg:      themeColor(trueColor, "#8bd5ff", "117"),
 		ToolFg:             themeColor(trueColor, "#8bd5ff", "117"),
@@ -943,7 +945,7 @@ func defaultLightThemeVariant(trueColor bool) Theme {
 		AssistantFg:        themeColor(trueColor, "#188a42", "28"),
 		ReasoningFg:        themeColor(trueColor, "#6b7280", "242"),
 		UserFg:             themeColor(trueColor, "#111827", "235"),
-		UserBg:             themeColor(trueColor, "#ffffff", "231"),
+		UserBg:             themeColor(trueColor, "#f1f7ff", "195"),
 		UserPrefixFg:       themeColor(trueColor, "#0f172a", "235"),
 		UserMentionFg:      themeColor(trueColor, "#0f766e", "30"),
 		ToolFg:             themeColor(trueColor, "#0f766e", "30"),

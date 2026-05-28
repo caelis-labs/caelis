@@ -18,7 +18,13 @@ func renderPlainUserRows(blockID, raw, rolePrefix string, width int, theme tuiki
 	prefixWidth := displayColumns(rolePrefix)
 	bodyWidth := maxInt(1, width-prefixWidth)
 	style := theme.UserStyle().Width(width)
-	rows := make([]RenderedRow, 0, strings.Count(raw, "\n")+1)
+	rows := make([]RenderedRow, 0, strings.Count(raw, "\n")+3)
+	rows = append(rows, RenderedRow{
+		Styled:     style.Render(""),
+		Plain:      "",
+		BlockID:    blockID,
+		PreWrapped: true,
+	})
 	first := true
 	for _, line := range strings.Split(raw, "\n") {
 		segments := strings.Split(hardWrapDisplayLine(line, bodyWidth), "\n")
@@ -40,6 +46,12 @@ func renderPlainUserRows(blockID, raw, rolePrefix string, width int, theme tuiki
 			})
 		}
 	}
+	rows = append(rows, RenderedRow{
+		Styled:     style.Render(""),
+		Plain:      "",
+		BlockID:    blockID,
+		PreWrapped: true,
+	})
 	return rows
 }
 

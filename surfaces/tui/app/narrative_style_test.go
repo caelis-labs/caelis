@@ -15,15 +15,19 @@ func TestNarrativePrefixesUseUserReasoningAssistantMarkers(t *testing.T) {
 	ctx := BlockRenderContext{Width: 80, TermWidth: 80, Theme: m.theme}
 
 	userRows := NewUserNarrativeBlock("please inspect git@github.com:OnslaughtSnail/knowledge.git").Render(ctx)
-	if len(userRows) == 0 || !strings.HasPrefix(userRows[0].Plain, "▌ please inspect git@github.com") {
+	if len(userRows) < 3 || userRows[0].Plain != "" || userRows[len(userRows)-1].Plain != "" {
+		t.Fatalf("user rows = %#v, want padded user block", renderedPlainRows(userRows))
+	}
+	userContentRow := userRows[1]
+	if !strings.HasPrefix(userContentRow.Plain, "▌ please inspect git@github.com") {
 		t.Fatalf("user rows = %#v, want user block marker", renderedPlainRows(userRows))
 	}
-	expectedUserStyled := ctx.Theme.UserStyle().Width(ctx.Width).Render(userRows[0].Plain)
-	if userRows[0].Styled != expectedUserStyled {
-		t.Fatalf("user row styled with extra token coloring:\n got: %q\nwant: %q", userRows[0].Styled, expectedUserStyled)
+	expectedUserStyled := ctx.Theme.UserStyle().Width(ctx.Width).Render(userContentRow.Plain)
+	if userContentRow.Styled != expectedUserStyled {
+		t.Fatalf("user row styled with extra token coloring:\n got: %q\nwant: %q", userContentRow.Styled, expectedUserStyled)
 	}
-	if !strings.Contains(userRows[0].Styled, "\x1b[48;") {
-		t.Fatalf("user row missing background contrast: %#v", userRows[0])
+	if !strings.Contains(userContentRow.Styled, "\x1b[48;") || !strings.Contains(userRows[0].Styled, "\x1b[48;") {
+		t.Fatalf("user rows missing background contrast: %#v", userRows)
 	}
 
 	assistant := NewAssistantBlock()
@@ -61,14 +65,18 @@ func TestCommittedUserDisplayLineUsesPlainUserSurface(t *testing.T) {
 		t.Fatal("committed user line rendered no rows")
 	}
 	wantPlain := "▌ " + text
-	if rows[0].Plain != wantPlain {
-		t.Fatalf("committed user plain = %q, want %q", rows[0].Plain, wantPlain)
+	if len(rows) < 3 || rows[0].Plain != "" || rows[len(rows)-1].Plain != "" {
+		t.Fatalf("committed user rows = %#v, want padded user block", renderedPlainRows(rows))
 	}
-	if got := strings.TrimRight(ansi.Strip(rows[0].Styled), " "); got != wantPlain {
+	contentRow := rows[1]
+	if contentRow.Plain != wantPlain {
+		t.Fatalf("committed user plain = %q, want %q", contentRow.Plain, wantPlain)
+	}
+	if got := strings.TrimRight(ansi.Strip(contentRow.Styled), " "); got != wantPlain {
 		t.Fatalf("committed user styled strips to %q, want %q", got, wantPlain)
 	}
 	expectedStyled := ctx.Theme.UserStyle().Width(ctx.Width).Render(wantPlain)
-	if rows[0].Styled != expectedStyled {
+	if contentRow.Styled != expectedStyled {
 		t.Fatalf("committed user line should be one plain user surface:\n got: %q\nwant: %q", rows[0].Styled, expectedStyled)
 	}
 }

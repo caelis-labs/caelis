@@ -13,8 +13,14 @@ func (m *Model) renderMentionList() string {
 	var lines []string
 	for i := range maxItems {
 		prefix := "  "
-		display := m.mentionPrefix + completionCandidateDisplay(m.mentionCandidates[i])
+		display := completionCandidateDisplay(m.mentionCandidates[i])
+		if m.mentionPrefix != "#" {
+			display = m.mentionPrefix + display
+		}
 		detail := completionCandidateDetail(m.mentionCandidates[i])
+		if m.mentionPrefix == "#" {
+			detail = ""
+		}
 		if i == m.mentionIndex {
 			prefix = m.theme.PromptStyle().Render("▸ ")
 			line := prefix + m.theme.CommandActiveStyle().Render(display)

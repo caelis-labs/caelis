@@ -262,7 +262,7 @@ func TestResolveThemeWithBackgroundColorBlendsAdaptiveSurfaces(t *testing.T) {
 	if got := stringifyColor(dark.ModalBg); got != "#141414" {
 		t.Fatalf("dark modal bg = %q", got)
 	}
-	if got := stringifyColor(dark.UserBg); got != "#1f1f1f" {
+	if got := stringifyColor(dark.UserBg); got != "#12252b" {
 		t.Fatalf("dark user bg = %q", got)
 	}
 
@@ -270,7 +270,7 @@ func TestResolveThemeWithBackgroundColorBlendsAdaptiveSurfaces(t *testing.T) {
 	if light.IsDark {
 		t.Fatal("expected white terminal background to select light theme")
 	}
-	if got := stringifyColor(light.UserBg); got != "#f6f6f6" {
+	if got := stringifyColor(light.UserBg); got != "#f0f7f9" {
 		t.Fatalf("light user bg = %q", got)
 	}
 	if got := stringifyColor(light.CodeBg); got != "#f1f1f1" {

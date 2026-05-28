@@ -561,6 +561,115 @@ func TestSkillCompletionRendersMetadataAndUsesCandidateValue(t *testing.T) {
 	}
 }
 
+func TestSkillCompletionListKeepsRowsCompact(t *testing.T) {
+	model := NewModel(Config{})
+	longDetail := "This skill should be used when the user asks to generate a very detailed report with many phases and validation requirements. · ~/.agents/skills/report/SKILL.md"
+	model.skillCandidates = []CompletionCandidate{
+		{Value: "story-init", Display: "story-init", Detail: "Start a new story project. · ~/.agents/skills/story-init/SKILL.md"},
+		{Value: "report-builder", Display: "report-builder", Detail: longDetail},
+	}
+	model.skillIndex = 0
+
+	rendered := model.renderSkillList()
+	plain := ansi.Strip(rendered)
+	if strings.Contains(plain, "$report-builder") || strings.Contains(plain, "$story-init") {
+		t.Fatalf("renderSkillList() = %q, should not show $ prefixes in skill rows", plain)
+	}
+	if !strings.Contains(rendered, model.theme.CommandStyle().Render("report-builder")) {
+		t.Fatalf("renderSkillList() = %q, want non-selected skill name rendered with command style", rendered)
+	}
+	if strings.Contains(plain, longDetail) {
+		t.Fatalf("renderSkillList() = %q, non-selected detail should be truncated", plain)
+	}
+	if strings.Contains(plain, "SKILL.md") {
+		t.Fatalf("renderSkillList() = %q, should not show skill file paths in picker rows", plain)
+	}
+}
+
+func TestSkillCompletionListKeepsHeightStableAcrossSelection(t *testing.T) {
+	model := NewModel(Config{})
+	fullDetail := "Assist writers with story planning, character development, plot structuring, chapter writing, timeline tracking, and consistency checking. · ~/.agents/skills/storyboard-manager/SKILL.md"
+	model.skillCandidates = []CompletionCandidate{
+		{Value: "story-init", Display: "story-init", Detail: "Start a new story project."},
+		{Value: "storyboard-manager", Display: "storyboard-manager", Detail: fullDetail},
+	}
+	model.skillIndex = 0
+	first := strings.Count(model.renderSkillList(), "\n")
+	model.skillIndex = 1
+	secondRendered := model.renderSkillList()
+	second := strings.Count(secondRendered, "\n")
+
+	plain := ansi.Strip(secondRendered)
+
+	if first != second {
+		t.Fatalf("renderSkillList() line count changed across selection: %d != %d", first, second)
+	}
+	if !strings.Contains(plain, "Assist writer") {
+		t.Fatalf("renderSkillList() = %q, want selected skill short description", plain)
+	}
+	if strings.Contains(plain, "consistency checking.") {
+		t.Fatalf("renderSkillList() = %q, selected detail should stay truncated", plain)
+	}
+	if strings.Contains(plain, "SKILL.md") {
+		t.Fatalf("renderSkillList() = %q, selected detail should not include path metadata", plain)
+	}
+}
+
+func TestFileCompletionAcceptPreservesSelectedCandidateAcrossRefresh(t *testing.T) {
+	for _, keyName := range []string{"tab", "enter"} {
+		t.Run(keyName, func(t *testing.T) {
+			model := NewModel(Config{
+				MentionComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+					return nil, nil
+				},
+				FileComplete: func(query string, limit int) ([]CompletionCandidate, error) {
+					return []CompletionCandidate{
+						{Value: "docs/", Display: "docs/", Detail: "directory"},
+						{Value: "docs/message.sql", Display: "docs/message.sql", Detail: "file"},
+					}, nil
+				},
+			})
+
+			model.setInputText("#docs/")
+			model.syncTextareaFromInput()
+			model.refreshMention()
+			if len(model.mentionCandidates) != 2 {
+				t.Fatalf("mentionCandidates = %#v, want two file candidates", model.mentionCandidates)
+			}
+			model.mentionIndex = 1
+
+			_, cmd := model.handleKey(keyPress(keyName))
+			runCompletionCmd(t, model, cmd)
+
+			if got := string(model.input); got != "#docs/message.sql " {
+				t.Fatalf("input after %s = %q, want selected file path", keyName, got)
+			}
+		})
+	}
+}
+
+func TestFileCompletionListHidesPrefixAndTypeDetail(t *testing.T) {
+	model := NewModel(Config{})
+	model.mentionPrefix = "#"
+	model.mentionCandidates = []CompletionCandidate{
+		{Value: "docs/", Display: "docs/", Detail: "directory"},
+		{Value: "docs/message.sql", Display: "docs/message.sql", Detail: "file"},
+	}
+
+	rendered := ansi.Strip(model.renderMentionList())
+
+	for _, unwanted := range []string{"#docs/", "#docs/message.sql", "directory", "file"} {
+		if strings.Contains(rendered, unwanted) {
+			t.Fatalf("renderMentionList() = %q, should not contain %q", rendered, unwanted)
+		}
+	}
+	for _, want := range []string{"docs/", "docs/message.sql"} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("renderMentionList() = %q, want %q", rendered, want)
+		}
+	}
+}
+
 func TestRenderResumeListShowsMetadata(t *testing.T) {
 	model := NewModel(Config{Commands: DefaultCommands()})
 	model.resumeCandidates = []ResumeCandidate{

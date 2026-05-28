@@ -135,6 +135,12 @@ func (m *Model) clearMention() {
 }
 
 func (m *Model) refreshMention() {
+	previousQuery := m.mentionQuery
+	previousPrefix := m.mentionPrefix
+	previousSelected := CompletionCandidate{}
+	if m.mentionIndex >= 0 && m.mentionIndex < len(m.mentionCandidates) {
+		previousSelected = m.mentionCandidates[m.mentionIndex]
+	}
 	m.clearMention()
 	if m.cfg.MentionComplete == nil || m.running {
 		return
@@ -167,7 +173,7 @@ func (m *Model) refreshMention() {
 	m.mentionCandidates = append([]CompletionCandidate(nil), candidates...)
 	m.mentionStart = start
 	m.mentionEnd = end
-	m.mentionIndex = 0
+	m.mentionIndex = preservedCompletionIndex(previousQuery, query, previousPrefix, prefix, previousSelected, candidates)
 }
 
 func (m *Model) applyMentionCompletion() {
@@ -229,6 +235,11 @@ func (m *Model) clearSkill() {
 }
 
 func (m *Model) refreshSkill() {
+	previousQuery := m.skillQuery
+	previousSelected := CompletionCandidate{}
+	if m.skillIndex >= 0 && m.skillIndex < len(m.skillCandidates) {
+		previousSelected = m.skillCandidates[m.skillIndex]
+	}
 	m.clearSkill()
 	if m.cfg.SkillComplete == nil || m.running {
 		return
@@ -249,7 +260,7 @@ func (m *Model) refreshSkill() {
 	m.skillCandidates = append([]CompletionCandidate(nil), candidates...)
 	m.skillStart = start
 	m.skillEnd = end
-	m.skillIndex = 0
+	m.skillIndex = preservedCompletionIndex(previousQuery, query, "", "", previousSelected, candidates)
 }
 
 func (m *Model) applySkillCompletion() {
@@ -299,26 +310,12 @@ func (m *Model) renderSkillList() string {
 	if len(m.skillCandidates) == 0 {
 		return ""
 	}
+	contentWidth := maxInt(24, m.promptModalInnerWidth())
 	maxItems := minInt(8, len(m.skillCandidates))
 	var lines []string
 	for i := 0; i < maxItems; i++ {
-		prefix := "  "
-		display := "$" + completionCandidateDisplay(m.skillCandidates[i])
-		detail := completionCandidateDetail(m.skillCandidates[i])
-		if i == m.skillIndex {
-			prefix = m.theme.PromptStyle().Render("▸ ")
-			line := prefix + m.theme.CommandActiveStyle().Render(display)
-			if detail != "" {
-				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
-			}
-			lines = append(lines, line)
-		} else {
-			line := prefix + m.theme.HelpHintTextStyle().Render(display)
-			if detail != "" {
-				line += "  " + m.theme.HelpHintTextStyle().Render(detail)
-			}
-			lines = append(lines, line)
-		}
+		selected := i == m.skillIndex
+		lines = append(lines, m.renderSkillCandidateLine(m.skillCandidates[i], selected, contentWidth))
 	}
 	if len(m.skillCandidates) > maxItems {
 		lines = append(lines, m.theme.HelpHintTextStyle().Render(
@@ -326,6 +323,50 @@ func (m *Model) renderSkillList() string {
 		))
 	}
 	return m.renderCompletionOverlay("Skills", lines)
+}
+
+func (m *Model) renderSkillCandidateLine(candidate CompletionCandidate, selected bool, width int) string {
+	gutter := "  "
+	if selected {
+		gutter = "▸ "
+	}
+	display := completionCandidateDisplay(candidate)
+	nameBudget := maxInt(8, minInt(32, width-displayColumns(gutter)))
+	display = truncateTailDisplay(display, nameBudget)
+	gutterStyle := m.theme.HelpHintTextStyle()
+	nameStyle := m.theme.CommandStyle()
+	if selected {
+		gutterStyle = m.theme.PromptStyle()
+		nameStyle = m.theme.CommandActiveStyle()
+	}
+	line := gutterStyle.Render(gutter) + nameStyle.Render(display)
+	description := truncateSkillListDescription(skillCandidateDescription(candidate), width-displayColumns(gutter)-displayColumns(display)-4)
+	if description != "" {
+		line += "  " + m.theme.HelpHintTextStyle().Render(description)
+	}
+	return line
+}
+
+func truncateSkillListDescription(description string, budget int) string {
+	description = strings.Join(strings.Fields(strings.TrimSpace(description)), " ")
+	if description == "" || budget < 16 {
+		return ""
+	}
+	budget = minInt(budget, 56)
+	return truncateTailDisplay(description, budget)
+}
+
+func skillCandidateDescription(candidate CompletionCandidate) string {
+	detail := completionCandidateDetail(candidate)
+	for _, sep := range []string{" · ", " • ", " 路 "} {
+		if before, _, ok := strings.Cut(detail, sep); ok {
+			return strings.TrimSpace(before)
+		}
+	}
+	if idx := strings.Index(detail, " ~/"); idx > 0 && strings.Contains(detail[idx:], "SKILL.md") {
+		return strings.TrimSpace(detail[:idx])
+	}
+	return detail
 }
 
 // ---------------------------------------------------------------------------
@@ -696,6 +737,40 @@ func completionCandidateDisplay(candidate CompletionCandidate) string {
 
 func completionCandidateDetail(candidate CompletionCandidate) string {
 	return strings.TrimSpace(candidate.Detail)
+}
+
+func preservedCompletionIndex(previousQuery string, query string, previousPrefix string, prefix string, previousSelected CompletionCandidate, candidates []CompletionCandidate) int {
+	if len(candidates) == 0 {
+		return 0
+	}
+	if previousQuery != query || previousPrefix != prefix {
+		return 0
+	}
+	selectedKey := completionCandidateStableKey(previousSelected)
+	if selectedKey == "" {
+		return 0
+	}
+	for i, candidate := range candidates {
+		if completionCandidateStableKey(candidate) == selectedKey {
+			return i
+		}
+	}
+	return 0
+}
+
+func completionCandidateStableKey(candidate CompletionCandidate) string {
+	parts := []string{
+		strings.TrimSpace(candidate.Value),
+		strings.TrimSpace(candidate.Display),
+		strings.TrimSpace(candidate.Path),
+	}
+	if parts[0] == "" && parts[1] == "" && parts[2] == "" {
+		return ""
+	}
+	for i, part := range parts {
+		parts[i] = strings.ToLower(part)
+	}
+	return strings.Join(parts, "\x00")
 }
 
 func shortWorkspaceLabel(workspace string) string {

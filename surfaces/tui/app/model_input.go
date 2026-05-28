@@ -909,9 +909,7 @@ func (m *Model) submitLineWithDisplayAndAttachmentsOptions(execLine string, disp
 			m.commitUserDisplayLine(displayLine)
 		}
 	}
-	if !alreadyRunning && m.shouldAutoFollowSubmittedSideACP(execLine, mode) {
-		m.setViewportFollowState(viewportFollowTail)
-	}
+	m.setViewportFollowState(viewportFollowTail)
 
 	// Push to history.
 	if opts.recordHistory && mode != SubmissionModeOverlay {
@@ -976,17 +974,6 @@ func (m *Model) canSubmitRunningPromptNow() bool {
 
 func (m *Model) submitPendingPrompt(prompt pendingPrompt) (tea.Model, tea.Cmd) {
 	return m.submitLineWithDisplayAndAttachmentsOptions(prompt.execLine, prompt.displayLine, prompt.attachments, submitLineOptions{})
-}
-
-func (m *Model) shouldAutoFollowSubmittedSideACP(line string, mode SubmissionMode) bool {
-	if mode != SubmissionModeDefault || m == nil || m.viewportFollowState == viewportSelecting || m.hasSelectionRange() {
-		return false
-	}
-	trimmed := strings.TrimSpace(line)
-	if strings.HasPrefix(trimmed, "@") {
-		return true
-	}
-	return m.isKnownDynamicAgentSlashLine(trimmed)
 }
 
 func (m *Model) isKnownDynamicAgentSlashLine(line string) bool {

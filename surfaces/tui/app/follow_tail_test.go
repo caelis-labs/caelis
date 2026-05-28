@@ -7,19 +7,26 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestPinnedHistoryDoesNotJumpOnSubmitOrStream(t *testing.T) {
+func TestSubmitFromPinnedHistoryRestoresFollowTail(t *testing.T) {
 	m := newPerfTestModel()
 	seedLongTranscript(m, 100)
 	m.viewport.SetYOffset(20)
 	m.setViewportFollowState(viewportPinnedHistory)
 
-	before := m.viewport.YOffset()
-	_, _ = m.submitLine("follow up")
+	updated, _ := m.submitLine("follow up")
+	m = updated.(*Model)
+
+	if m.viewportFollowState != viewportFollowTail {
+		t.Fatalf("follow state = %v, want follow tail after prompt submission", m.viewportFollowState)
+	}
+	if !m.viewport.AtBottom() {
+		t.Fatalf("viewport y offset = %d, want bottom after prompt submission", m.viewport.YOffset())
+	}
+
 	_, _ = m.handleStreamBlock("answer", "assistant", "new output", false)
 	_, _ = m.Update(frameTickMsg{kind: frameTickViewportSync, at: time.Now()})
-
-	if got := m.viewport.YOffset(); got != before {
-		t.Fatalf("viewport y offset = %d, want pinned offset %d", got, before)
+	if !m.viewport.AtBottom() {
+		t.Fatalf("viewport y offset = %d, want stream to keep following bottom", m.viewport.YOffset())
 	}
 }
 
@@ -41,22 +48,21 @@ func TestSideACPSubmissionRestoresFollowTail(t *testing.T) {
 	}
 }
 
-func TestUnknownSlashSubmissionKeepsPinnedHistory(t *testing.T) {
+func TestUnknownSlashSubmissionRestoresFollowTail(t *testing.T) {
 	m := newPerfTestModel()
 	m.setCommands(DefaultCommands())
 	seedLongTranscript(m, 100)
 	m.viewport.SetYOffset(20)
 	m.setViewportFollowState(viewportPinnedHistory)
-	before := m.viewport.YOffset()
 
 	updated, _ := m.submitLine("/rbac/inner/workflow/switch Query 参数")
 	m = updated.(*Model)
 
-	if m.viewportFollowState != viewportPinnedHistory {
-		t.Fatalf("follow state = %v, want pinned history for unknown slash prompt", m.viewportFollowState)
+	if m.viewportFollowState != viewportFollowTail {
+		t.Fatalf("follow state = %v, want follow tail for unknown slash prompt", m.viewportFollowState)
 	}
-	if got := m.viewport.YOffset(); got != before {
-		t.Fatalf("viewport y offset = %d, want pinned offset %d", got, before)
+	if !m.viewport.AtBottom() {
+		t.Fatalf("viewport y offset = %d, want bottom after unknown slash prompt", m.viewport.YOffset())
 	}
 }
 
