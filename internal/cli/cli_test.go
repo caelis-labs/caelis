@@ -18,6 +18,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
@@ -100,6 +101,103 @@ func TestDefaultStoreDirUsesHomeDirectory(t *testing.T) {
 	want := filepath.Join(home, ".caelis")
 	if got := defaultStoreDir(t.TempDir()); got != want {
 		t.Fatalf("defaultStoreDir() = %q, want %q", got, want)
+	}
+}
+
+func TestNewCoreLocalStackHydratesAndPersistsSettingsFile(t *testing.T) {
+	ctx := context.Background()
+	storeDir := t.TempDir()
+	storedModel := appsettings.NormalizeModelConfig(appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-file",
+		BaseURL:  "https://api.example.test/v1",
+		TokenEnv: "OPENAI_API_KEY",
+	})
+	store := appsettings.NewFileStore(storeDir)
+	if err := store.Save(ctx, appsettings.Document{
+		Models: appsettings.ModelCatalog{
+			DefaultID: storedModel.ID,
+			Configs:   []appsettings.ModelConfig{storedModel},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := newCoreLocalStack(ctx, cliConfig{
+		AppName:        "caelis",
+		UserID:         "tester",
+		StoreDir:       storeDir,
+		WorkspaceKey:   "repo",
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "auto-review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices, err := stack.Services().Models().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(choices) != 1 || choices[0].Model != "gpt-file" || !choices[0].Default {
+		t.Fatalf("model choices = %#v, want model hydrated from settings file", choices)
+	}
+	if _, err := stack.Services().Models().Connect(ctx, appsettings.ModelConfig{
+		Provider:     "minimax",
+		Model:        "MiniMax-M2.7",
+		BaseURL:      "https://api.minimaxi.com/anthropic",
+		Token:        "secret-token",
+		PersistToken: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(storeDir, "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "secret-token") {
+		t.Fatalf("config.json = %s, want transient token redacted", raw)
+	}
+	if !strings.Contains(string(raw), "MiniMax-M2.7") {
+		t.Fatalf("config.json = %s, want connected model persisted", raw)
+	}
+}
+
+func TestCoreSettingsManagerCLIModelOverridesSettingsFile(t *testing.T) {
+	ctx := context.Background()
+	storeDir := t.TempDir()
+	storedModel := appsettings.NormalizeModelConfig(appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-file",
+		BaseURL:  "https://api.example.test/v1",
+	})
+	if err := appsettings.NewFileStore(storeDir).Save(ctx, appsettings.Document{
+		Models: appsettings.ModelCatalog{
+			DefaultID: storedModel.ID,
+			Configs:   []appsettings.ModelConfig{storedModel},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := coreSettingsManager(ctx, cliConfig{
+		AppName:      "caelis",
+		UserID:       "tester",
+		StoreDir:     storeDir,
+		WorkspaceKey: "repo",
+		WorkspaceCWD: t.TempDir(),
+		Model: cliModelConfig{
+			Provider: "minimax",
+			Model:    "MiniMax-M2.7",
+			BaseURL:  "https://api.minimaxi.com/anthropic",
+		},
+	}, "minimax")
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices, err := manager.ListModelChoices()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(choices) != 1 || choices[0].Model != "MiniMax-M2.7" {
+		t.Fatalf("model choices = %#v, want CLI model to override settings file", choices)
 	}
 }
 

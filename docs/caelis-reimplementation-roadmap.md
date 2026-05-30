@@ -1129,14 +1129,19 @@ be migrated before retiring the old stack:
      injecting registry-backed provider factories and the TUI passing the
      current provider/base URL/token candidate as UI data rather than creating
      provider adapters itself.
+   - Migrated baseline: the new CLI/local stack now hydrates models and ACP
+     agents from the default app settings file under the configured store
+     directory, so normal TUI `/connect` changes persist through the shared
+     `app/settings` store. Explicit CLI model flags remain session-local and
+     override the settings file instead of rewriting it.
    - Migrated baseline: standalone CLI doctor and host sandbox lifecycle
      subcommands now use the new local stack and shared app services instead
      of constructing `app/gatewayapp`.
-   - Still pending: default home-dir bootstrapping, full persisted config
-     hydration, connect wizard persistence, remaining TUI command integration,
-     additional non-model ACP config providers, non-host sandbox setup/repair
-     config, and removal of the old `app/gatewayapp` config/model services
-     once compatibility entrypoints are gone.
+   - Still pending: full persisted runtime/sandbox config hydration, remaining
+     TUI command integration, additional non-model ACP config providers,
+     non-host sandbox setup/repair config, and removal of the old
+     `app/gatewayapp` config/model services once compatibility entrypoints are
+     gone.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,

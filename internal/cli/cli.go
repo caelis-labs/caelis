@@ -358,6 +358,7 @@ func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, err
 }
 
 func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*appsettings.Manager, error) {
+	store := appsettings.NewFileStore(cfg.StoreDir)
 	doc := appsettings.Document{
 		Runtime: coreconfig.Runtime{
 			AppName:      cfg.AppName,
@@ -368,7 +369,7 @@ func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*
 		},
 	}
 	if strings.TrimSpace(cfg.Model.Model) == "" && strings.TrimSpace(cfg.Model.Provider) == "" && strings.TrimSpace(cfg.Model.BaseURL) == "" {
-		return appsettings.NewManager(ctx, nil, doc)
+		return appsettings.NewManager(ctx, store, doc)
 	}
 	modelCfg := appsettings.ModelConfig{
 		Alias:                  firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Model)),
@@ -388,7 +389,7 @@ func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*
 	}
 	modelCfg = appsettings.NormalizeModelConfig(modelCfg)
 	if modelCfg.Provider == "" || modelCfg.Model == "" {
-		return appsettings.NewManager(ctx, nil, doc)
+		return appsettings.NewManager(ctx, store, doc)
 	}
 	doc.Models = appsettings.ModelCatalog{
 		DefaultID: modelCfg.ID,
