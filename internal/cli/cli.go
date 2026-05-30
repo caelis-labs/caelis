@@ -286,6 +286,10 @@ func coreModelProvider(provider string, api providers.APIType) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "openai", "openai_compatible", "openai-compatible":
 		return "openai_compatible"
+	case "anthropic", "anthropic-compatible":
+		return "anthropic"
+	case "minimax":
+		return "minimax"
 	case "deepseek":
 		return "deepseek"
 	case "mimo", "xiaomi":
@@ -637,7 +641,7 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "OPENAI_API_KEY"
 		}
-	case "anthropic":
+	case "anthropic", "anthropic-compatible":
 		cfg.Model.Provider = "anthropic"
 		if cfg.Model.API == "" {
 			cfg.Model.API = providers.APIAnthropic

@@ -59,16 +59,17 @@ func (r *Router) Stream(ctx context.Context, req model.Request) (model.Stream, e
 		return nil, errors.New("app/modelrouter: model provider is not registered: " + providerName)
 	}
 	provider, err := factory(ctx, plugin.ModelProviderConfig{
-		ID:        cfg.ID,
-		Profile:   cfg.ProfileID,
-		Provider:  providerName,
-		Endpoint:  cfg.BaseURL,
-		Model:     cfg.Model,
-		Token:     cfg.Token,
-		TokenEnv:  cfg.TokenEnv,
-		AuthType:  cfg.AuthType,
-		HeaderKey: cfg.HeaderKey,
-		Meta:      maps.Clone(cfg.Meta),
+		ID:              cfg.ID,
+		Profile:         cfg.ProfileID,
+		Provider:        providerName,
+		Endpoint:        cfg.BaseURL,
+		Model:           cfg.Model,
+		Token:           cfg.Token,
+		TokenEnv:        cfg.TokenEnv,
+		AuthType:        cfg.AuthType,
+		HeaderKey:       cfg.HeaderKey,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		Meta:            maps.Clone(cfg.Meta),
 	})
 	if err != nil {
 		return nil, err

@@ -366,6 +366,75 @@ func TestRunHeadlessUsesCoreOllamaProvider(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreAnthropicProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var apiKeyHeader string
+	var versionHeader string
+	var captured struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+		Tools []struct {
+			Name string `json:"name"`
+		} `json:"tools"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/messages" {
+			t.Fatalf("path = %q, want /v1/messages", r.URL.Path)
+		}
+		apiKeyHeader = r.Header.Get("x-api-key")
+		versionHeader = r.Header.Get("anthropic-version")
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg_cli",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"stop_reason":"end_turn",
+			"content":[{"type":"text","text":"anthropic pong"}],
+			"usage":{"input_tokens":5,"output_tokens":2}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-anthropic-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "anthropic",
+		"-model", "claude-test",
+		"-base-url", server.URL,
+		"-token", "anthropic-token",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "anthropic pong" || result.PromptTokens != 5 {
+		t.Fatalf("headless result = %#v, want Anthropic output and usage", result)
+	}
+	if apiKeyHeader != "anthropic-token" || versionHeader == "" {
+		t.Fatalf("headers = api-key:%q version:%q", apiKeyHeader, versionHeader)
+	}
+	if captured.Model != "claude-test" || len(captured.Messages) == 0 || captured.Messages[len(captured.Messages)-1].Role != "user" {
+		t.Fatalf("captured request = %#v", captured)
+	}
+	if !capturedAnthropicTool(captured.Tools, "task") || !capturedAnthropicTool(captured.Tools, "write_file") {
+		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
+	}
+}
+
 func TestRunHeadlessUsesCoreDeepSeekProvider(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var authHeader string
@@ -749,6 +818,17 @@ func capturedCLITool(tools []struct {
 }, name string) bool {
 	for _, item := range tools {
 		if item.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+func capturedAnthropicTool(tools []struct {
+	Name string `json:"name"`
+}, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
 			return true
 		}
 	}

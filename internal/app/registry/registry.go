@@ -18,6 +18,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	modelanthropic "github.com/OnslaughtSnail/caelis/internal/adapters/model/anthropic"
 	modelollama "github.com/OnslaughtSnail/caelis/internal/adapters/model/ollama"
 	modelopenai "github.com/OnslaughtSnail/caelis/internal/adapters/model/openai"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
@@ -67,6 +68,14 @@ func RegisterDefaults(r *Registry) error {
 		if err := r.RegisterModelProvider(name, openAIProviderFactory); err != nil {
 			return err
 		}
+	}
+	for _, name := range []string{"anthropic", "anthropic-compatible"} {
+		if err := r.RegisterModelProvider(name, anthropicProviderFactory); err != nil {
+			return err
+		}
+	}
+	if err := r.RegisterModelProvider("minimax", miniMaxProviderFactory); err != nil {
+		return err
 	}
 	if err := r.RegisterModelProvider("deepseek", deepSeekProviderFactory); err != nil {
 		return err
@@ -362,7 +371,9 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 }
 
 const (
+	anthropicDefaultBaseURL            = "https://api.anthropic.com"
 	deepSeekDefaultBaseURL             = "https://api.deepseek.com/v1"
+	miniMaxDefaultBaseURL              = "https://api.minimaxi.com/anthropic"
 	mimoDefaultBaseURL                 = "https://api.xiaomimimo.com/v1"
 	openRouterDefaultBaseURL           = "https://openrouter.ai/api/v1"
 	volcengineDefaultBaseURL           = "https://ark.cn-beijing.volces.com/api/v3"
@@ -378,6 +389,33 @@ func openAIProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (m
 		AuthHeader:      cfg.HeaderKey,
 		Model:           cfg.Model,
 		MaxOutputTokens: cfg.MaxOutputTokens,
+	})
+}
+
+func anthropicProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelanthropic.New(modelanthropic.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "anthropic"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  anthropicDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      firstNonEmpty(cfg.HeaderKey, "x-api-key"),
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+	})
+}
+
+func miniMaxProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelanthropic.New(modelanthropic.Config{
+		ID:                     firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "minimax"),
+		BaseURL:                cfg.Endpoint,
+		DefaultBaseURL:         miniMaxDefaultBaseURL,
+		APIKey:                 token,
+		AuthHeader:             firstNonEmpty(cfg.HeaderKey, "Authorization"),
+		Model:                  cfg.Model,
+		MaxOutputTokens:        firstPositive(cfg.MaxOutputTokens, 4096),
+		DefaultReasoningBudget: 4096,
 	})
 }
 
@@ -548,6 +586,15 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func firstPositive(values ...int) int {
+	for _, value := range values {
+		if value > 0 {
+			return value
+		}
+	}
+	return 0
 }
 
 var _ plugin.Registry = (*Registry)(nil)

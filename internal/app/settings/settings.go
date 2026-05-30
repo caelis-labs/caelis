@@ -867,6 +867,10 @@ func normalizeEndpointID(provider string, endpointID string, baseURL string) str
 		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.anthropic.com" {
 			return "default"
 		}
+	case "minimax":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.minimaxi.com/anthropic" {
+			return "default"
+		}
 	case "deepseek":
 		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.deepseek.com/v1" {
 			return "default"
@@ -913,6 +917,8 @@ func defaultAuthType(provider string, authType string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "ollama", "codefree":
 		return "none"
+	case "minimax":
+		return "bearer_token"
 	default:
 		return "api_key"
 	}
