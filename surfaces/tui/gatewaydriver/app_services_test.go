@@ -35,6 +35,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	engine := &appServiceDriverEngine{}
+	codeFreeAuth := &appServiceDriverCodeFreeAuth{}
 	svc, err := appservices.New(appservices.Config{
 		Runtime: config.Runtime{
 			AppName:      "caelis",
@@ -46,6 +47,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 		},
 		Engine:   engine,
 		Settings: manager,
+		CodeFree: codeFreeAuth,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -90,6 +92,18 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	if connected != "next-model" {
 		t.Fatalf("Connect() = %q, want next-model", connected)
+	}
+	if _, err := driver.Connect(ctx, ConnectConfig{Provider: "codefree", Model: "GLM-4.7"}); err != nil {
+		t.Fatalf("Connect(codefree) error = %v", err)
+	}
+	if !codeFreeAuth.ensure.OpenBrowser || codeFreeAuth.ensure.BaseURL != "https://www.srdcloud.cn" {
+		t.Fatalf("codefree ensure req = %#v, want browser auth through app service", codeFreeAuth.ensure)
+	}
+	if _, err := driver.CompleteSlashArg(ctx, "connect-model:codefree|https%3A%2F%2Fwww.srdcloud.cn|60||", "", 20); err != nil {
+		t.Fatalf("CompleteSlashArg(codefree model) error = %v", err)
+	}
+	if !codeFreeAuth.modelSelection.OpenBrowser || codeFreeAuth.modelSelection.BaseURL != "https://www.srdcloud.cn" {
+		t.Fatalf("codefree model auth req = %#v, want model-selection auth through app service", codeFreeAuth.modelSelection)
 	}
 	if err := stack.DeleteModel(ctx, portsession.SessionRef{SessionID: "sess-app"}, "next-model"); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
@@ -414,6 +428,27 @@ func cloneCoreEvents(in []coresession.Event) []coresession.Event {
 		out = append(out, coresession.CloneEvent(event))
 	}
 	return out
+}
+
+type appServiceDriverCodeFreeAuth struct {
+	ensure         appservices.CodeFreeAuthRequest
+	modelSelection appservices.CodeFreeAuthRequest
+	refresh        appservices.CodeFreeAuthRequest
+}
+
+func (a *appServiceDriverCodeFreeAuth) EnsureAuth(_ context.Context, req appservices.CodeFreeAuthRequest) (appservices.CodeFreeAuthResult, error) {
+	a.ensure = req
+	return appservices.CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1"}, nil
+}
+
+func (a *appServiceDriverCodeFreeAuth) EnsureModelSelectionAuth(_ context.Context, req appservices.CodeFreeAuthRequest) (appservices.CodeFreeAuthResult, error) {
+	a.modelSelection = req
+	return appservices.CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1", LoginStarted: true}, nil
+}
+
+func (a *appServiceDriverCodeFreeAuth) Refresh(_ context.Context, req appservices.CodeFreeAuthRequest) (appservices.CodeFreeAuthResult, error) {
+	a.refresh = req
+	return appservices.CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1"}, nil
 }
 
 func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []kernel.EventEnvelope {

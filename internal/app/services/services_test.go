@@ -550,6 +550,49 @@ func TestModelServiceCatalogSupportsConnectDefaults(t *testing.T) {
 	}
 }
 
+func TestModelServiceCodeFreeAuthDelegatesToConfiguredAuthenticator(t *testing.T) {
+	ctx := context.Background()
+	auth := &recordingCodeFreeAuth{
+		ensureResult: CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1", HasRefreshToken: true},
+		modelResult:  CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1", LoginStarted: true},
+		refreshResult: CodeFreeAuthResult{
+			CredentialPath:  "/tmp/codefree.json",
+			UserID:          "user-2",
+			HasRefreshToken: true,
+		},
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   &recordingEngine{},
+		CodeFree: auth,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := CodeFreeAuthRequest{BaseURL: "https://www.srdcloud.cn", OpenBrowser: true, CallbackTimeout: time.Second}
+	result, err := svc.Models().EnsureCodeFreeAuth(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.UserID != "user-1" || !auth.ensureReq.OpenBrowser {
+		t.Fatalf("ensure result=%#v req=%#v, want delegated auth request", result, auth.ensureReq)
+	}
+	result, err = svc.Models().EnsureCodeFreeModelSelectionAuth(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.LoginStarted || auth.modelReq.BaseURL != req.BaseURL {
+		t.Fatalf("model selection result=%#v req=%#v, want delegated model auth", result, auth.modelReq)
+	}
+	result, err = svc.Models().RefreshCodeFreeAuth(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.UserID != "user-2" || auth.refreshReq.CallbackTimeout != time.Second {
+		t.Fatalf("refresh result=%#v req=%#v, want delegated refresh", result, auth.refreshReq)
+	}
+}
+
 func TestModeServicePersistsSessionModeAndTurnsUseIt(t *testing.T) {
 	engine := &recordingEngine{snapshot: session.Snapshot{
 		Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-1", WorkspaceKey: "repo"}},
@@ -653,6 +696,30 @@ func cloneTestEvents(in []session.Event) []session.Event {
 		out = append(out, session.CloneEvent(event))
 	}
 	return out
+}
+
+type recordingCodeFreeAuth struct {
+	ensureReq     CodeFreeAuthRequest
+	modelReq      CodeFreeAuthRequest
+	refreshReq    CodeFreeAuthRequest
+	ensureResult  CodeFreeAuthResult
+	modelResult   CodeFreeAuthResult
+	refreshResult CodeFreeAuthResult
+}
+
+func (a *recordingCodeFreeAuth) EnsureAuth(_ context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
+	a.ensureReq = req
+	return a.ensureResult, nil
+}
+
+func (a *recordingCodeFreeAuth) EnsureModelSelectionAuth(_ context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
+	a.modelReq = req
+	return a.modelResult, nil
+}
+
+func (a *recordingCodeFreeAuth) Refresh(_ context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
+	a.refreshReq = req
+	return a.refreshResult, nil
 }
 
 func (e *recordingEngine) Interrupt(context.Context, session.Ref) error {

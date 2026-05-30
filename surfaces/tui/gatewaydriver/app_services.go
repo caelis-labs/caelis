@@ -79,6 +79,14 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.ReasoningLevelsForModelFn = func(provider string, modelName string) []string {
 		return svc.Models().ReasoningLevels(provider, modelName)
 	}
+	stack.EnsureCodeFreeAuthFn = func(ctx context.Context, req CodeFreeAuthRequest) error {
+		_, err := svc.Models().EnsureCodeFreeAuth(ctx, codeFreeAuthRequestToApp(req))
+		return err
+	}
+	stack.EnsureCodeFreeModelSelectionAuthFn = func(ctx context.Context, req CodeFreeAuthRequest) error {
+		_, err := svc.Models().EnsureCodeFreeModelSelectionAuth(ctx, codeFreeAuthRequestToApp(req))
+		return err
+	}
 	stack.ConnectFn = func(cfg ModelConfig) (string, error) {
 		connected, err := svc.Models().Connect(context.Background(), modelConfigToApp(cfg))
 		if err != nil {
@@ -307,6 +315,14 @@ func modelCapabilityInfoFromApp(caps appservices.ModelCapabilityInfo) ModelCapab
 		SupportsToolCalls:      caps.SupportsToolCalls,
 		SupportsImages:         caps.SupportsImages,
 		SupportsJSON:           caps.SupportsJSONOutput,
+	}
+}
+
+func codeFreeAuthRequestToApp(req CodeFreeAuthRequest) appservices.CodeFreeAuthRequest {
+	return appservices.CodeFreeAuthRequest{
+		BaseURL:         strings.TrimSpace(req.BaseURL),
+		OpenBrowser:     req.OpenBrowser,
+		CallbackTimeout: req.CallbackTimeout,
 	}
 }
 

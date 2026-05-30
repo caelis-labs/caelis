@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -31,6 +32,7 @@ type Services struct {
 	invokers  map[string]AgentInvoker
 	resources appresources.Catalog
 	settings  *appsettings.Manager
+	codefree  CodeFreeAuthenticator
 }
 
 type Config struct {
@@ -42,6 +44,7 @@ type Config struct {
 	Invokers  map[string]AgentInvoker
 	Resources appresources.Catalog
 	Settings  *appsettings.Manager
+	CodeFree  CodeFreeAuthenticator
 }
 
 func New(cfg Config) (Services, error) {
@@ -58,6 +61,7 @@ func New(cfg Config) (Services, error) {
 		invokers:  maps.Clone(cfg.Invokers),
 		resources: appresources.CloneCatalog(cfg.Resources),
 		settings:  cfg.Settings,
+		codefree:  cfg.CodeFree,
 	}, nil
 }
 
@@ -204,6 +208,28 @@ type ModelService struct {
 	services Services
 }
 
+type CodeFreeAuthRequest struct {
+	BaseURL         string        `json:"base_url,omitempty"`
+	OpenBrowser     bool          `json:"open_browser,omitempty"`
+	CallbackTimeout time.Duration `json:"callback_timeout,omitempty"`
+}
+
+type CodeFreeAuthResult struct {
+	CredentialPath   string    `json:"credential_path,omitempty"`
+	BaseURL          string    `json:"base_url,omitempty"`
+	UserID           string    `json:"user_id,omitempty"`
+	ExpiresAt        time.Time `json:"expires_at,omitempty"`
+	RefreshExpiresAt time.Time `json:"refresh_expires_at,omitempty"`
+	HasRefreshToken  bool      `json:"has_refresh_token,omitempty"`
+	LoginStarted     bool      `json:"login_started,omitempty"`
+}
+
+type CodeFreeAuthenticator interface {
+	EnsureAuth(context.Context, CodeFreeAuthRequest) (CodeFreeAuthResult, error)
+	EnsureModelSelectionAuth(context.Context, CodeFreeAuthRequest) (CodeFreeAuthResult, error)
+	Refresh(context.Context, CodeFreeAuthRequest) (CodeFreeAuthResult, error)
+}
+
 func (s ModelService) Connect(ctx context.Context, cfg appsettings.ModelConfig) (appsettings.ModelConfig, error) {
 	if s.services.settings == nil {
 		return appsettings.ModelConfig{}, errors.New("app/services: settings manager is not configured")
@@ -336,6 +362,27 @@ func (s ModelService) RuntimeProfile(ctx context.Context, ref session.Ref) (conf
 		profile.ReasoningEffort = effort
 	}
 	return profile, true, nil
+}
+
+func (s ModelService) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
+	if s.services.codefree == nil {
+		return CodeFreeAuthResult{}, errors.New("app/services: codefree auth is not configured")
+	}
+	return s.services.codefree.EnsureAuth(ctx, req)
+}
+
+func (s ModelService) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
+	if s.services.codefree == nil {
+		return CodeFreeAuthResult{}, errors.New("app/services: codefree auth is not configured")
+	}
+	return s.services.codefree.EnsureModelSelectionAuth(ctx, req)
+}
+
+func (s ModelService) RefreshCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
+	if s.services.codefree == nil {
+		return CodeFreeAuthResult{}, errors.New("app/services: codefree auth is not configured")
+	}
+	return s.services.codefree.Refresh(ctx, req)
 }
 
 func (s ModelService) withDefaults(ref session.Ref) session.Ref {

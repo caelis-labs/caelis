@@ -589,8 +589,17 @@ func usageFromChat(in chatUsage) model.Usage {
 }
 
 type cachedCredentials struct {
-	UserID string `json:"id_token"`
-	APIKey string `json:"apikey"`
+	UserID                    string `json:"id_token"`
+	APIKey                    string `json:"apikey"`
+	AccessToken               string `json:"access_token,omitempty"`
+	RefreshToken              string `json:"refresh_token,omitempty"`
+	BaseURL                   string `json:"base_url,omitempty"`
+	TokenType                 string `json:"token_type,omitempty"`
+	ExpiresIn                 int64  `json:"expires_in,omitempty"`
+	RefreshTokenExpiresIn     int64  `json:"refresh_token_expires_in,omitempty"`
+	ExpiresAtUnixMilli        int64  `json:"expires_at,omitempty"`
+	RefreshExpiresAtUnixMilli int64  `json:"refresh_expires_at,omitempty"`
+	ObtainedAtUnixMilli       int64  `json:"obtained_at,omitempty"`
 }
 
 type credentials struct {

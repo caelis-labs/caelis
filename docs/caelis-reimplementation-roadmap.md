@@ -616,8 +616,8 @@ alongside the old stack without importing it:
   model-listing mapping.
 - `internal/adapters/model/codefree`: core-native CodeFree chat provider with
   clean Caelis credential loading, CodeFree headers, OpenAI-compatible message
-  and tool mapping, JSON output mode, usage, and version-endpoint model
-  listing.
+  and tool mapping, JSON output mode, usage, version-endpoint model listing,
+  and OAuth credential ensure/refresh helpers.
 - `internal/adapters/model/ollama`: core-native Ollama `/api/chat`
   provider with model listing, tool-call mapping, reasoning text, JSON output
   mode, and usage mapping.
@@ -664,6 +664,8 @@ The current verification path covers:
 - configured local stack -> OpenAI-compatible provider -> JSONL store
 - configured local stack -> Anthropic/MiniMax, Gemini, CodeFree, and
   DeepSeek/OpenRouter/Mimo/Volcengine provider profiles -> JSONL store
+- core-native CodeFree OAuth ensure/model-selection/refresh -> Caelis
+  credential store
 - configured local stack -> native Ollama provider -> JSONL store
 - configured local stack -> SQLite store -> persisted canonical events after
   reload
@@ -794,7 +796,7 @@ The completed work is intentionally limited to the reusable skeleton:
 - CodeFree provider adapter sufficient for non-stream chat completions,
   CodeFree header/auth semantics, clean Caelis credential loading,
   OpenAI-compatible message/tool mapping, JSON output mode, usage, model
-  listing, and headless CLI selection.
+  listing, OAuth credential ensure/refresh, and headless CLI selection.
 - Native Ollama provider adapter sufficient for `/api/chat`, model listing,
   tool calls, reasoning text, JSON output mode, and usage mapping.
 - Host sandbox adapter, core-native async command sessions, core-native
@@ -922,8 +924,8 @@ be migrated before retiring the old stack:
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell and CodeFree OAuth
-     steps, `/agent add/install/use/remove`, and `/doctor fix` still have old
+   - Slash commands such as the `/connect` wizard shell,
+     `/agent add/install/use/remove`, and `/doctor fix` still have old
      driver/app assumptions or missing
      service-native feature parity, so the old TUI stack cannot be removed yet.
 
@@ -975,6 +977,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: shared model catalog data now provides configured
      provider models, built-in provider model presets, capability defaults, and
      reasoning levels to TUI/future APP setup flows through `ModelService`.
+   - Migrated baseline: CodeFree OAuth login/model-selection ensure and refresh
+     are now exposed through a replaceable `ModelService` auth contract, wired
+     by the local app stack to the core-native CodeFree adapter and consumed by
+     the TUI `/connect` binding.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, remaining TUI command integration, remote
      provider model discovery UI data, additional non-model ACP config
@@ -999,8 +1005,9 @@ be migrated before retiring the old stack:
      endpoint normalization.
    - CodeFree now has a core-native chat adapter with default endpoint, clean
      Caelis credential loading, CodeFree request headers, OpenAI-compatible
-     message/tool mapping, JSON output mode, usage mapping, model listing, and
-     production headless CLI routing.
+     message/tool mapping, JSON output mode, usage mapping, model listing,
+     OAuth login/model-selection ensure, credential refresh, and production
+     headless CLI routing.
    - DeepSeek now has a core-native provider profile with default endpoint,
      token lookup, structured JSON output, reasoning content parsing, and
      thinking-mode request defaults for current reasoning models.
@@ -1010,8 +1017,8 @@ be migrated before retiring the old stack:
    - Mimo/Xiaomi and Volcengine now have core-native provider profiles with
      default endpoints, token lookup, structured JSON output, reasoning-content
      parsing, thinking payload mapping, and settings endpoint normalization.
-   - Still pending: broader model discovery, CodeFree OAuth login/refresh as an
-     app service, detailed error mapping, SSE streaming, provider-specific
+   - Still pending: broader model discovery, detailed error mapping, SSE
+     streaming, provider-specific
      tool/argument behavior beyond the migrated profiles, and removal of the
      corresponding old `impl/model/providers` code once no old-stack entrypoint
      requires it.

@@ -15,6 +15,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	modelcodefree "github.com/OnslaughtSnail/caelis/internal/adapters/model/codefree"
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolregistry "github.com/OnslaughtSnail/caelis/internal/adapters/tools/registry"
@@ -178,6 +179,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Invokers:  agentInvokers(store, externalAgents),
 		Resources: resourceCatalog,
 		Settings:  cfg.Settings,
+		CodeFree:  codeFreeAuthAdapter{},
 	})
 	if err != nil {
 		return nil, err
@@ -247,6 +249,56 @@ func agentInvokers(store session.Store, configs []acpexternal.Config) map[string
 
 type externalAgentSession struct {
 	client *acpexternal.Client
+}
+
+type codeFreeAuthAdapter struct{}
+
+func (codeFreeAuthAdapter) EnsureAuth(ctx context.Context, req services.CodeFreeAuthRequest) (services.CodeFreeAuthResult, error) {
+	result, err := modelcodefree.EnsureAuth(ctx, modelcodefree.AuthOptions{
+		BaseURL:         req.BaseURL,
+		OpenBrowser:     req.OpenBrowser,
+		CallbackTimeout: req.CallbackTimeout,
+	})
+	return codeFreeAuthResult(result, false), err
+}
+
+func (codeFreeAuthAdapter) EnsureModelSelectionAuth(ctx context.Context, req services.CodeFreeAuthRequest) (services.CodeFreeAuthResult, error) {
+	started, err := modelcodefree.EnsureModelSelectionAuth(ctx, modelcodefree.AuthOptions{
+		BaseURL:         req.BaseURL,
+		OpenBrowser:     req.OpenBrowser,
+		CallbackTimeout: req.CallbackTimeout,
+	})
+	if err != nil {
+		return services.CodeFreeAuthResult{}, err
+	}
+	result, err := modelcodefree.EnsureAuth(ctx, modelcodefree.AuthOptions{
+		BaseURL:         req.BaseURL,
+		OpenBrowser:     false,
+		CallbackTimeout: req.CallbackTimeout,
+	})
+	if err != nil {
+		return services.CodeFreeAuthResult{}, err
+	}
+	return codeFreeAuthResult(result, started), nil
+}
+
+func (codeFreeAuthAdapter) Refresh(ctx context.Context, req services.CodeFreeAuthRequest) (services.CodeFreeAuthResult, error) {
+	result, err := modelcodefree.Refresh(ctx, modelcodefree.RefreshOptions{
+		BaseURL: req.BaseURL,
+	})
+	return codeFreeAuthResult(result, false), err
+}
+
+func codeFreeAuthResult(in modelcodefree.AuthResult, loginStarted bool) services.CodeFreeAuthResult {
+	return services.CodeFreeAuthResult{
+		CredentialPath:   strings.TrimSpace(in.CredentialPath),
+		BaseURL:          strings.TrimSpace(in.BaseURL),
+		UserID:           strings.TrimSpace(in.UserID),
+		ExpiresAt:        in.ExpiresAt,
+		RefreshExpiresAt: in.RefreshExpiresAt,
+		HasRefreshToken:  in.HasRefreshToken,
+		LoginStarted:     loginStarted,
+	}
 }
 
 func (s externalAgentSession) Initialize(ctx context.Context) error {
