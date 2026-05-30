@@ -602,6 +602,9 @@ alongside the old stack without importing it:
   It also wires plugin-declared ACP agents into the shared `AgentService`.
 - `internal/adapters/model/openai`: core-native OpenAI-compatible Chat
   Completions provider with tool-call and usage mapping.
+- `internal/adapters/model/ollama`: core-native Ollama `/api/chat`
+  provider with model listing, tool-call mapping, reasoning text, JSON output
+  mode, and usage mapping.
 - `internal/adapters/store/memory`, `internal/adapters/store/jsonl`, and
   `internal/adapters/store/sqlite`: swappable `core/session.Store` adapters
   for ephemeral and durable local composition.
@@ -636,6 +639,7 @@ The current verification path covers:
 
 - local stack -> shared services -> engine -> canonical memory store
 - configured local stack -> OpenAI-compatible provider -> JSONL store
+- configured local stack -> native Ollama provider -> JSONL store
 - configured local stack -> SQLite store -> persisted canonical events after
   reload
 - model tool call -> shell tool -> host sandbox -> tool result -> model
@@ -706,10 +710,11 @@ The implemented skeleton is aligned with the target direction:
 
 The important constraint:
 
-> This checkpoint is an architecture baseline, not a product replacement. The
-> active binary, TUI, headless CLI, doctor commands, current ACP stdio entry,
-> model setup, rich tools, sandbox policy, compaction, task runtime, and most
-> agent workflows still run on the old stack.
+> This checkpoint is an architecture baseline, not a product replacement.
+> Single-shot headless CLI and ACP stdio now enter the new stack, but
+> interactive TUI, doctor/config/sandbox commands, rich provider catalog,
+> sandbox policy, compaction, durable task runtime, and most agent workflows
+> still run on the old stack.
 
 ### Target State
 
@@ -742,6 +747,8 @@ The completed work is intentionally limited to the reusable skeleton:
 - Model context reconstruction from canonical events.
 - OpenAI-compatible provider adapter sufficient for Chat Completions and tool
   calls.
+- Native Ollama provider adapter sufficient for `/api/chat`, model listing,
+  tool calls, reasoning text, JSON output mode, and usage mapping.
 - Host sandbox adapter, core-native async command sessions, core-native
   `run_command` tool, core-native `task` wait/write/cancel control, and
   core-native filesystem tools: `read_file`, `list_directory`, `glob_files`,
@@ -826,11 +833,13 @@ be migrated before retiring the old stack:
      once entrypoints move to the new stack.
 
 6. Model providers
-   - The new adapter set only covers OpenAI-compatible Chat Completions.
-   - Anthropic, Gemini, OpenRouter, Ollama, CodeFree, Volcengine, DeepSeek,
-     Mimo, MiniMax, provider attribution, model discovery, usage mapping, error
-     mapping, SSE streaming, and provider-specific tool/argument behavior remain
-     in `impl/model/providers`.
+   - Migrated baseline: OpenAI-compatible Chat Completions and native Ollama
+     `/api/chat` now implement `core/model.Provider` and can be selected by the
+     new local stack and headless CLI.
+   - Still pending: Anthropic, Gemini, OpenRouter, CodeFree, Volcengine,
+     DeepSeek, Mimo, MiniMax, provider attribution, broader model discovery,
+     detailed error mapping, SSE streaming, and provider-specific
+     tool/argument behavior remain in `impl/model/providers`.
 
 7. Sandbox backends and policy
    - The new stack only has a host sandbox adapter.

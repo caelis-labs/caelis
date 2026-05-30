@@ -305,6 +305,67 @@ func TestRunHeadlessUsesCoreLocalStack(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreOllamaProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var captured struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/chat" {
+			t.Fatalf("path = %q, want /api/chat", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"llama3",
+			"message":{"role":"assistant","content":"ollama pong"},
+			"done":true,
+			"prompt_eval_count":4,
+			"eval_count":2
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-ollama-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "ollama",
+		"-model", "llama3",
+		"-base-url", server.URL,
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "ollama pong" || result.PromptTokens != 4 {
+		t.Fatalf("headless result = %#v, want Ollama output and usage", result)
+	}
+	if captured.Model != "llama3" || len(captured.Messages) == 0 || captured.Messages[len(captured.Messages)-1].Role != "user" {
+		t.Fatalf("captured request = %#v", captured)
+	}
+	if !capturedCLITool(captured.Tools, "task") || !capturedCLITool(captured.Tools, "write_file") {
+		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
+	}
+}
+
 func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer

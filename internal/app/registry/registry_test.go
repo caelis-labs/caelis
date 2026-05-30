@@ -78,6 +78,27 @@ func TestRegistryAppliesCatalogAliases(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryCreatesOllamaProvider(t *testing.T) {
+	reg, err := NewDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory, ok := reg.ModelProvider("ollama")
+	if !ok {
+		t.Fatal("ollama model provider not found")
+	}
+	provider, err := factory(context.Background(), plugin.ModelProviderConfig{
+		Model:           "llama3",
+		MaxOutputTokens: 64,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.ID() != "ollama" {
+		t.Fatalf("provider ID = %q, want ollama", provider.ID())
+	}
+}
+
 func TestRegistryRejectsCatalogAliasWithUnknownFactory(t *testing.T) {
 	reg := New()
 	err := reg.ApplyCatalog(appresources.Catalog{

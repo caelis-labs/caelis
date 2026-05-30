@@ -286,6 +286,8 @@ func coreModelProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "openai", "openai_compatible", "openai-compatible":
 		return "openai_compatible"
+	case "ollama":
+		return "ollama"
 	default:
 		return "openai_compatible"
 	}

@@ -28,16 +28,17 @@ type Contribution interface {
 type ModelProviderFactory func(context.Context, ModelProviderConfig) (model.Provider, error)
 
 type ModelProviderConfig struct {
-	ID        string         `json:"id,omitempty"`
-	Profile   string         `json:"profile,omitempty"`
-	Provider  string         `json:"provider,omitempty"`
-	Endpoint  string         `json:"endpoint,omitempty"`
-	Model     string         `json:"model,omitempty"`
-	Token     string         `json:"token,omitempty"`
-	TokenEnv  string         `json:"token_env,omitempty"`
-	AuthType  string         `json:"auth_type,omitempty"`
-	HeaderKey string         `json:"header_key,omitempty"`
-	Meta      map[string]any `json:"meta,omitempty"`
+	ID              string         `json:"id,omitempty"`
+	Profile         string         `json:"profile,omitempty"`
+	Provider        string         `json:"provider,omitempty"`
+	Endpoint        string         `json:"endpoint,omitempty"`
+	Model           string         `json:"model,omitempty"`
+	Token           string         `json:"token,omitempty"`
+	TokenEnv        string         `json:"token_env,omitempty"`
+	AuthType        string         `json:"auth_type,omitempty"`
+	HeaderKey       string         `json:"header_key,omitempty"`
+	MaxOutputTokens int            `json:"max_output_tokens,omitempty"`
+	Meta            map[string]any `json:"meta,omitempty"`
 }
 
 type StoreFactory func(context.Context, StoreConfig) (session.Store, error)

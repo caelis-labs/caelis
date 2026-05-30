@@ -327,16 +327,17 @@ func providerFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeC
 		return nil, fmt.Errorf("app/local: unsupported model provider %q", profile.Provider)
 	}
 	return factory(ctx, plugin.ModelProviderConfig{
-		ID:        profile.ID,
-		Profile:   profile.Provider,
-		Provider:  providerName,
-		Endpoint:  profile.BaseURL,
-		Model:     profile.Model,
-		Token:     profile.Token,
-		TokenEnv:  profile.TokenEnv,
-		AuthType:  profile.AuthType,
-		HeaderKey: profile.HeaderKey,
-		Meta:      maps.Clone(profile.Meta),
+		ID:              profile.ID,
+		Profile:         profile.Provider,
+		Provider:        providerName,
+		Endpoint:        profile.BaseURL,
+		Model:           profile.Model,
+		Token:           profile.Token,
+		TokenEnv:        profile.TokenEnv,
+		AuthType:        profile.AuthType,
+		HeaderKey:       profile.HeaderKey,
+		MaxOutputTokens: profile.MaxOutputTokens,
+		Meta:            maps.Clone(profile.Meta),
 	})
 }
 

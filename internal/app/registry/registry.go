@@ -18,6 +18,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	modelollama "github.com/OnslaughtSnail/caelis/internal/adapters/model/ollama"
 	modelopenai "github.com/OnslaughtSnail/caelis/internal/adapters/model/openai"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
 	storejsonl "github.com/OnslaughtSnail/caelis/internal/adapters/store/jsonl"
@@ -66,6 +67,9 @@ func RegisterDefaults(r *Registry) error {
 		if err := r.RegisterModelProvider(name, openAIProviderFactory); err != nil {
 			return err
 		}
+	}
+	if err := r.RegisterModelProvider("ollama", ollamaProviderFactory); err != nil {
+		return err
 	}
 	if err := r.RegisterStore("memory", memoryStoreFactory); err != nil {
 		return err
@@ -354,6 +358,15 @@ func openAIProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (m
 		APIKey:     token,
 		AuthHeader: cfg.HeaderKey,
 		Model:      cfg.Model,
+	})
+}
+
+func ollamaProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	return modelollama.New(modelollama.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "ollama"),
+		BaseURL:         cfg.Endpoint,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
 	})
 }
 
