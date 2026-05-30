@@ -920,6 +920,7 @@ func agentHelpText() string {
 		"  /agent add NAME      register a built-in ACP agent",
 		"  /agent add custom NAME -- COMMAND [ARGS...]",
 		"  /agent install NAME  install an external ACP adapter and register it",
+		"  /agent update NAME   update an external ACP adapter and register it",
 		"  /agent use NAME      switch the main controller to a registered ACP agent",
 		"  /agent use local     return the main controller to the local kernel",
 		"  /agent remove NAME   unregister an ACP agent",

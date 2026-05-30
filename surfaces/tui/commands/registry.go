@@ -22,7 +22,7 @@ type CommandSpec struct {
 func DefaultSpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
-		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
+		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install/update <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
@@ -175,6 +175,7 @@ func agentRootCandidates() []driver.SlashArgCandidate {
 		{Value: "use", Display: "use", Detail: "Switch the main controller"},
 		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
 		{Value: "install", Display: "install", Detail: "Install and register an external ACP adapter"},
+		{Value: "update", Display: "update", Detail: "Update and register an external ACP adapter"},
 		{Value: "list", Display: "list", Detail: "List registered ACP agents"},
 		{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
 	}

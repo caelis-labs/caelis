@@ -510,6 +510,13 @@ func TestBindAppServicesInstallsBuiltinACPAgent(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].Value != "codex" || candidates[0].Display != "codex (npm install)" {
 		t.Fatalf("agent install candidates = %#v, want codex install option", candidates)
 	}
+	updateCandidates, err := driver.CompleteSlashArg(ctx, "agent update", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(agent update) error = %v", err)
+	}
+	if len(updateCandidates) != 1 || updateCandidates[0].Value != "codex" || updateCandidates[0].Display != "codex (npm install)" {
+		t.Fatalf("agent update candidates = %#v, want codex install option", updateCandidates)
+	}
 	status, err := driver.AddAgentWithOptions(ctx, "codex", AgentAddOptions{Install: true})
 	if err != nil {
 		t.Fatalf("AddAgentWithOptions(codex install) error = %v", err)
@@ -522,6 +529,17 @@ func TestBindAppServicesInstallsBuiltinACPAgent(t *testing.T) {
 	}
 	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "codex" || agents[0].Command != "/installed/codex-acp" {
 		t.Fatalf("settings agents = %#v, want installed codex", agents)
+	}
+	installer.called = false
+	status, err = driver.AddAgentWithOptions(ctx, "codex", AgentAddOptions{Install: true})
+	if err != nil {
+		t.Fatalf("AddAgentWithOptions(codex update) error = %v", err)
+	}
+	if !installer.called || installer.agent.Name != "codex" {
+		t.Fatalf("update installer called=%v agent=%#v, want codex", installer.called, installer.agent)
+	}
+	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "codex" {
+		t.Fatalf("status agents after update = %#v, want codex", status.AvailableAgents)
 	}
 }
 

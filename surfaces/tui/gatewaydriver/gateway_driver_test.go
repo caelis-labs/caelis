@@ -1551,6 +1551,20 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 			t.Fatalf("agent install candidates = %#v, want no %q", installCandidates, notInstallable)
 		}
 	}
+	updateCandidates, err := driver.CompleteSlashArg(ctx, "agent update", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(agent update) error = %v", err)
+	}
+	for _, want := range []string{"claude", "codex"} {
+		if !slashCandidatesHaveValue(updateCandidates, want) {
+			t.Fatalf("agent update candidates = %#v, want %q", updateCandidates, want)
+		}
+	}
+	for _, notInstallable := range []string{"opencode", "codefree-o", "copilot", "gemini"} {
+		if slashCandidatesHaveValue(updateCandidates, notInstallable) {
+			t.Fatalf("agent update candidates = %#v, want no %q", updateCandidates, notInstallable)
+		}
+	}
 
 	status, err := driver.AddAgent(ctx, "copilot")
 	if err != nil {
@@ -2343,7 +2357,7 @@ func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 	for _, candidate := range candidates {
 		got = append(got, candidate.Value)
 	}
-	want := []string{"use", "add", "install", "list", "remove"}
+	want := []string{"use", "add", "install", "update", "list", "remove"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("agent root candidates = %#v, want %#v", got, want)
 	}

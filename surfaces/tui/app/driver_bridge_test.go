@@ -1061,6 +1061,24 @@ func TestSlashAgentInstallPassesOptions(t *testing.T) {
 	}
 }
 
+func TestSlashAgentUpdatePassesInstallOptions(t *testing.T) {
+	driver := &bridgeTestDriver{}
+	var msgs []tea.Msg
+	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "update claude")
+	if result.Err != nil {
+		t.Fatalf("slashAgentWithContext(update) error = %v", result.Err)
+	}
+	if driver.lastAddedAgent != "claude" {
+		t.Fatalf("lastAddedAgent = %q, want claude", driver.lastAddedAgent)
+	}
+	if !driver.lastAddOptions.Install {
+		t.Fatal("AddAgentWithOptions Install = false, want true")
+	}
+	if !noticeMessagesContain(msgs, "agent updated and registered: claude") {
+		t.Fatalf("slashAgentWithContext(update) messages = %#v, want update notice", msgs)
+	}
+}
+
 func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
 	driver := &bridgeTestDriver{}
 	var msgs []tea.Msg
@@ -1130,7 +1148,7 @@ func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
 	}
 }
 
-func TestSlashArgQueryAgentInstall(t *testing.T) {
+func TestSlashArgQueryAgentInstallAndUpdate(t *testing.T) {
 	command, query, ok := slashArgQueryAtEnd([]rune("/agent install c"))
 	if !ok {
 		t.Fatal("slashArgQueryAtEnd(/agent install c) ok = false")
@@ -1145,11 +1163,28 @@ func TestSlashArgQueryAgentInstall(t *testing.T) {
 	if command != "agent install" || query != "" {
 		t.Fatalf("slashArgQueryAtEnd(/agent install ) = command %q query %q, want agent install / empty", command, query)
 	}
+	command, query, ok = slashArgQueryAtEnd([]rune("/agent update c"))
+	if !ok {
+		t.Fatal("slashArgQueryAtEnd(/agent update c) ok = false")
+	}
+	if command != "agent update" || query != "c" {
+		t.Fatalf("slashArgQueryAtEnd(/agent update c) = command %q query %q, want agent update / c", command, query)
+	}
+	command, query, ok = slashArgQueryAtEnd([]rune("/agent update "))
+	if !ok {
+		t.Fatal("slashArgQueryAtEnd(/agent update ) ok = false")
+	}
+	if command != "agent update" || query != "" {
+		t.Fatalf("slashArgQueryAtEnd(/agent update ) = command %q query %q, want agent update / empty", command, query)
+	}
 }
 
 func TestAgentInstallSlashArgFallbackIsExecutable(t *testing.T) {
 	if !isExecutableSlashArgInput("/agent install claude") {
 		t.Fatal("isExecutableSlashArgInput(/agent install claude) = false, want true")
+	}
+	if !isExecutableSlashArgInput("/agent update claude") {
+		t.Fatal("isExecutableSlashArgInput(/agent update claude) = false, want true")
 	}
 }
 

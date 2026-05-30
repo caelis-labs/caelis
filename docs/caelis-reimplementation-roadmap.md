@@ -1013,11 +1013,12 @@ be migrated before retiring the old stack:
      built-in ACP catalog and persists the selected descriptor through
      `AgentService.RegisterBuiltin`, so non-install built-in registration no
      longer requires the old gatewayapp agent registry.
-   - Migrated baseline: `/agent install <builtin>` now uses the same shared
-     `AgentService` contract with a local-stack npm installer for supported
-     built-in adapters such as Codex and Claude. Installable options are exposed
-     through the app-service TUI binding, and successful installs persist the
-     managed adapter binary path in shared settings instead of routing through
+   - Migrated baseline: `/agent install <builtin>` and
+     `/agent update <builtin>` now use the same shared `AgentService` contract
+     with a local-stack npm installer for supported built-in adapters such as
+     Codex and Claude. Installable options are exposed through the app-service
+     TUI binding, and successful installs or updates persist the managed
+     adapter binary path in shared settings instead of routing through
      `gatewayapp`.
    - Migrated baseline: `/agent use <agent|local>` now records canonical
      controller handoff events through the app-service TUI gateway. When an ACP
@@ -1266,14 +1267,20 @@ be migrated before retiring the old stack:
       installer runs npm into the managed Caelis store, verifies the installed
       adapter binary, and persists the installed command through shared
       settings for both TUI and future APP consumers.
+    - Migrated baseline: built-in ACP adapter update now reuses the same
+      shared app-service install contract as registration. The TUI exposes
+      `/agent update <adapter>` with installable adapter completion and routes
+      it through `RegisterBuiltinWithOptions(Install: true)`, so updates refresh
+      the managed adapter command in shared settings without a separate surface
+      or old-stack branch.
     - Migrated baseline: default self-agent spawning now belongs to
       `internal/app/local`. When no explicit `self` descriptor is configured and
       the runtime has a durable store URI, the local stack exposes a service
       native `self` ACP agent that launches the current Caelis executable with
       ACP stdio flags, workspace/store/model settings, and token-env
       indirection.
-    - Still pending: built-in ACP adapter update,
-      durable sidecar continuation across restarts, delegated subagent tasks,
+    - Still pending: durable sidecar continuation across restarts,
+      delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical
       remote session id reuse, plugin/static agent removal, live remote ACP
       controller config RPC/reconnect application, remote-declared controller

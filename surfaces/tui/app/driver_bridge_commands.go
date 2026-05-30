@@ -229,7 +229,7 @@ func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 		sendNotice(send, formatAgentList(agents, status))
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "status":
-		sendNotice(send, "usage: /agent list | add <builtin> | install <adapter> | use <agent|local> | remove <agent>")
+		sendNotice(send, "usage: /agent list | add <builtin> | install/update <adapter> | use <agent|local> | remove <agent>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	case "add":
 		addArgs, ok := parseAgentAddArgs(rest)
@@ -254,13 +254,13 @@ func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 		sendNotice(send, formatAgentStatusSnapshot(status))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
-	case "install":
+	case "install", "update":
 		target := strings.TrimSpace(rest)
 		if target == "" {
-			sendNotice(send, "usage: /agent install <adapter>")
+			sendNotice(send, fmt.Sprintf("usage: /agent %s <adapter>", sub))
 			return TaskResultMsg{SuppressTurnDivider: true}
 		}
-		command := agentInstallCommandForDisplay(ctx, driver, target)
+		command := agentInstallCommandForDisplay(ctx, driver, sub, target)
 		callID := sendAgentInstallToolCall(send, target, command)
 		status, err := driver.AddAgentWithOptions(ctx, target, tuidriver.AgentAddOptions{Install: true})
 		if err != nil {
@@ -269,10 +269,14 @@ func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 				return TaskResultMsg{Interrupted: true, SuppressTurnDivider: true}
 			}
 			sendAgentInstallToolResult(send, callID, command, kernel.ToolStatusFailed, true, agentInstallErrorOutput(err))
-			return TaskResultMsg{Err: friendlyCommandError("agent install", err)}
+			return TaskResultMsg{Err: friendlyCommandError("agent "+sub, err)}
 		}
 		sendAgentInstallToolResult(send, callID, command, kernel.ToolStatusCompleted, false, "")
-		sendNotice(send, fmt.Sprintf("agent installed and registered: %s", target))
+		if sub == "update" {
+			sendNotice(send, fmt.Sprintf("agent updated and registered: %s", target))
+		} else {
+			sendNotice(send, fmt.Sprintf("agent installed and registered: %s", target))
+		}
 		sendNotice(send, formatAgentStatusSnapshot(status))
 		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
@@ -307,15 +311,19 @@ func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send fu
 		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
 		return TaskResultMsg{SuppressTurnDivider: true}
 	default:
-		sendNotice(send, "usage: /agent list | add <builtin> | install <adapter> | use <agent|local> | remove <agent>")
+		sendNotice(send, "usage: /agent list | add <builtin> | install/update <adapter> | use <agent|local> | remove <agent>")
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
 }
 
-func agentInstallCommandForDisplay(ctx context.Context, driver tuidriver.Driver, target string) string {
+func agentInstallCommandForDisplay(ctx context.Context, driver tuidriver.Driver, action string, target string) string {
+	action = strings.TrimSpace(strings.ToLower(action))
+	if action == "" {
+		action = "install"
+	}
 	target = strings.TrimSpace(target)
 	if driver != nil {
-		if candidates, err := driver.CompleteSlashArg(ctx, "agent install", target, 20); err == nil {
+		if candidates, err := driver.CompleteSlashArg(ctx, "agent "+action, target, 20); err == nil {
 			for _, candidate := range candidates {
 				if !strings.EqualFold(strings.TrimSpace(candidate.Value), target) {
 					continue

@@ -136,7 +136,7 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 	switch strings.TrimSpace(strings.ToLower(command)) {
 	case "agent add":
 		return d.completeBuiltInAgentCatalog(query, limit), nil
-	case "agent install":
+	case "agent install", "agent update":
 		return d.completeInstallableBuiltInAgentCatalog(query, limit), nil
 	case "agent add --install":
 		return d.completeInstallableBuiltInAgentCatalog(query, limit), nil

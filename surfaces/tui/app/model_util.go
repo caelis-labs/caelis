@@ -450,7 +450,7 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 		if len(fields) == 2 {
 			if hasTrailingDelimiter {
 				switch action {
-				case "add", "install", "remove", "rm", "use":
+				case "add", "install", "update", "remove", "rm", "use":
 					return "agent " + action, "", true
 				case "list":
 					return "", "", false
@@ -462,14 +462,14 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 				return "", "", false
 			}
 			switch action {
-			case "list", "add", "rm", "use":
+			case "list", "add", "install", "update", "rm", "use":
 			default:
 				return "agent", action, true
 			}
 			return "agent", action, true
 		}
 		switch action {
-		case "add", "install", "remove", "rm", "use":
+		case "add", "install", "update", "remove", "rm", "use":
 		default:
 			return "", "", false
 		}
