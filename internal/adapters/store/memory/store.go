@@ -78,6 +78,40 @@ func (s *Store) Create(ctx context.Context, req session.StartRequest) (session.S
 	return session.CloneSession(next), nil
 }
 
+func (s *Store) List(ctx context.Context, query session.ListQuery) (session.SessionPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return session.SessionPage{}, err
+	}
+	if s == nil {
+		return session.SessionPage{}, session.ErrNotFound
+	}
+	query = session.NormalizeListQuery(query)
+	after, err := session.ParseOffsetCursor(query.After)
+	if err != nil {
+		return session.SessionPage{}, err
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	matches := make([]session.SessionSummary, 0, len(s.sessions))
+	for _, rec := range s.sessions {
+		if !session.SessionMatchesListQuery(rec.session, query) {
+			continue
+		}
+		matches = append(matches, session.SessionSummary{
+			Session:     session.CloneSession(rec.session),
+			EventCount:  len(rec.events),
+			LastEventAt: session.LastEventTime(rec.events),
+		})
+	}
+	session.SortSessionSummaries(matches)
+	return session.PageSessionSummaries(matches, after, query.Limit), nil
+}
+
 func (s *Store) Load(ctx context.Context, ref session.Ref) (session.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -255,3 +289,5 @@ func cloneState(in session.State) session.State {
 	}
 	return session.State(maps.Clone(in))
 }
+
+var _ session.Store = (*Store)(nil)

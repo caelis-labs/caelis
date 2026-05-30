@@ -5,6 +5,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
@@ -135,6 +136,64 @@ func TestStoreEventsUsesRawCursorsWhenSkippingTransient(t *testing.T) {
 	}
 	if len(page.Events) != 0 || page.NextCursor != "3" {
 		t.Fatalf("oversized cursor page = %#v, want empty page clamped to raw cursor 3", page)
+	}
+}
+
+func TestStoreListPersistsSessionSummaries(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sessions.db")
+	store, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := store.Create(ctx, session.StartRequest{
+		AppName:            "caelis",
+		UserID:             "tester",
+		PreferredSessionID: "sess-alpha",
+		Workspace:          session.Workspace{Key: "repo", CWD: "/tmp/repo"},
+		Title:              "Alpha notes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Create(ctx, session.StartRequest{
+		AppName:            "caelis",
+		UserID:             "tester",
+		PreferredSessionID: "sess-other",
+		Workspace:          session.Workspace{Key: "other", CWD: "/tmp/other"},
+		Title:              "Other notes",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	last := time.Unix(200, 0).UTC()
+	if _, err := store.Append(ctx, alpha.Ref, []session.Event{
+		{Type: session.EventUser, Time: time.Unix(100, 0).UTC()},
+		{Type: session.EventAssistant, Time: last},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reloaded, err := New(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reloaded.Close() })
+	page, err := reloaded.List(ctx, session.ListQuery{
+		Ref:          session.Ref{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		WorkspaceCWD: "/tmp/repo",
+		Search:       "alpha",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Sessions) != 1 || page.Sessions[0].Session.SessionID != "sess-alpha" {
+		t.Fatalf("list page = %#v, want sess-alpha", page)
+	}
+	if page.Sessions[0].EventCount != 2 || !page.Sessions[0].LastEventAt.Equal(last) {
+		t.Fatalf("summary = %#v, want two events and last event time", page.Sessions[0])
 	}
 }
 

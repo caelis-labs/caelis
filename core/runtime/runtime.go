@@ -12,6 +12,7 @@ import (
 
 type Engine interface {
 	StartSession(context.Context, session.StartRequest) (session.Session, error)
+	ListSessions(context.Context, session.ListQuery) (session.SessionPage, error)
 	LoadSession(context.Context, session.Ref) (session.Snapshot, error)
 	RecordEvents(context.Context, session.Ref, []session.Event) (session.Cursor, error)
 	UpdateSessionState(context.Context, session.Ref, session.StatePatch) error

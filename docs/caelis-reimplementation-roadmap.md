@@ -758,6 +758,10 @@ The completed work is intentionally limited to the reusable skeleton:
 - Public core contracts: runtime, session, model, tool, sandbox, plugin, and
   typed config.
 - Canonical session stores: memory, JSONL, and SQLite.
+- Core-native session listing contract across `core/session.Store`,
+  `core/runtime.Engine`, memory/JSONL/SQLite stores, and shared app services,
+  with app/user/workspace/CWD/search filters, pagination, event counts, and
+  last-event timestamps for future TUI/APP resume views.
 - Runtime engine skeleton: session start/load/replay, turn execution,
   cancellation, record-events ingress, approval wait/resume, and model/tool
   continuation.
@@ -969,9 +973,15 @@ be migrated before retiring the old stack:
       old-stack work.
 
 15. Session listing and resume workflows
-    - New stores can create/load/append events, but product session list,
-      resume filters, workspace-aware indexes, titles, metadata search, and
-      migration from current on-disk session layout are not implemented.
+    - Migrated baseline: `core/session.Store` and `core/runtime.Engine` now
+      expose session listing as a durable contract, and memory, JSONL, and
+      SQLite stores implement app/user/workspace/CWD/search filters, offset
+      pagination, event counts, and last-event timestamps. `internal/app/services`
+      exposes the same list path with runtime workspace defaults so TUI and
+      future APP surfaces can share the same resume data source.
+    - Still pending: TUI/CLI `/resume` command wiring, richer title generation,
+      metadata search, cross-workspace filters, current on-disk legacy session
+      layout migration, and reload UX are not implemented.
 
 ### Next Migration Milestones
 
@@ -985,8 +995,8 @@ Recommended sequence:
    tools.
 4. Port spawn and durable task runtime behavior behind `core/tool.Registry`
    and `internal/engine/tasks`.
-5. Port TUI driver commands to `internal/app/services`, preserving existing
-   rendering as surface-local code.
+5. Port TUI driver commands, including session list/resume, to
+   `internal/app/services`, preserving existing rendering as surface-local code.
 6. Expand shared APP view models for status, settings, agents, models,
    approvals, tasks, and live transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff

@@ -90,6 +90,53 @@ func TestGatewayBeginTurnPersistsAndReplaysCanonicalEvents(t *testing.T) {
 	}
 }
 
+func TestGatewayListsSessionsThroughStoreContract(t *testing.T) {
+	ctx := context.Background()
+	store := teststore.New()
+	runner, err := loop.New(loop.Config{Provider: &scriptedProvider{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := New(Config{Store: store, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := gateway.StartSession(ctx, session.StartRequest{
+		AppName:            "caelis",
+		UserID:             "tester",
+		PreferredSessionID: "sess-alpha",
+		Workspace:          session.Workspace{Key: "workspace", CWD: "/tmp/workspace"},
+		Title:              "Alpha notes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gateway.StartSession(ctx, session.StartRequest{
+		AppName:            "caelis",
+		UserID:             "tester",
+		PreferredSessionID: "sess-other",
+		Workspace:          session.Workspace{Key: "other", CWD: "/tmp/other"},
+		Title:              "Other notes",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gateway.RecordEvents(ctx, active.Ref, []session.Event{{Type: session.EventUser}}); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := gateway.ListSessions(ctx, session.ListQuery{
+		Ref:          session.Ref{AppName: "caelis", UserID: "tester", WorkspaceKey: "workspace"},
+		WorkspaceCWD: "/tmp/workspace",
+		Search:       "alpha",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Sessions) != 1 || page.Sessions[0].Session.SessionID != "sess-alpha" || page.Sessions[0].EventCount != 1 {
+		t.Fatalf("list page = %#v, want sess-alpha summary", page)
+	}
+}
+
 func TestGatewayToolLoopPersistsToolAnchorsAndFinalAssistant(t *testing.T) {
 	ctx := context.Background()
 	store := teststore.New()

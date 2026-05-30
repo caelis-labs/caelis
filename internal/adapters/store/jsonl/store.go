@@ -103,6 +103,62 @@ func (s *Store) Create(ctx context.Context, req session.StartRequest) (session.S
 	return session.CloneSession(active), nil
 }
 
+func (s *Store) List(ctx context.Context, query session.ListQuery) (session.SessionPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return session.SessionPage{}, err
+	}
+	if s == nil {
+		return session.SessionPage{}, session.ErrNotFound
+	}
+	query = session.NormalizeListQuery(query)
+	after, err := session.ParseOffsetCursor(query.After)
+	if err != nil {
+		return session.SessionPage{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries, err := os.ReadDir(filepath.Join(s.root, "sessions"))
+	if err != nil {
+		return session.SessionPage{}, err
+	}
+	matches := make([]session.SessionSummary, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return session.SessionPage{}, err
+		}
+		if !entry.IsDir() {
+			continue
+		}
+		ref := session.Ref{SessionID: entry.Name()}
+		snapshot, err := s.loadLocked(ref)
+		if errors.Is(err, session.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return session.SessionPage{}, err
+		}
+		if !session.SessionMatchesListQuery(snapshot.Session, query) {
+			continue
+		}
+		events, err := s.loadEventsLocked(ref)
+		if err != nil {
+			return session.SessionPage{}, err
+		}
+		matches = append(matches, session.SessionSummary{
+			Session:     session.CloneSession(snapshot.Session),
+			EventCount:  len(events),
+			LastEventAt: session.LastEventTime(events),
+		})
+	}
+	session.SortSessionSummaries(matches)
+	return session.PageSessionSummaries(matches, after, query.Limit), nil
+}
+
 func (s *Store) Load(ctx context.Context, ref session.Ref) (session.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()

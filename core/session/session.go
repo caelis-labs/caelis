@@ -4,8 +4,11 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -121,10 +124,30 @@ type EventPage struct {
 	NextCursor Cursor  `json:"next_cursor,omitempty"`
 }
 
+type ListQuery struct {
+	Ref          Ref    `json:"ref,omitempty"`
+	WorkspaceCWD string `json:"workspace_cwd,omitempty"`
+	Search       string `json:"search,omitempty"`
+	After        Cursor `json:"after,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
+}
+
+type SessionSummary struct {
+	Session     Session   `json:"session"`
+	EventCount  int       `json:"event_count,omitempty"`
+	LastEventAt time.Time `json:"last_event_at,omitempty"`
+}
+
+type SessionPage struct {
+	Sessions   []SessionSummary `json:"sessions,omitempty"`
+	NextCursor Cursor           `json:"next_cursor,omitempty"`
+}
+
 type StatePatch func(State) (State, error)
 
 type Store interface {
 	Create(context.Context, StartRequest) (Session, error)
+	List(context.Context, ListQuery) (SessionPage, error)
 	Load(context.Context, Ref) (Snapshot, error)
 	Append(context.Context, Ref, []Event) (Cursor, error)
 	Events(context.Context, EventQuery) (EventPage, error)
@@ -300,6 +323,118 @@ func CloneSession(in Session) Session {
 	out.Meta = maps.Clone(in.Meta)
 	out.Participants = slices.Clone(in.Participants)
 	return out
+}
+
+func CloneSessionSummary(in SessionSummary) SessionSummary {
+	out := in
+	out.Session = CloneSession(in.Session)
+	return out
+}
+
+func CloneSessionPage(in SessionPage) SessionPage {
+	out := in
+	if len(in.Sessions) > 0 {
+		out.Sessions = make([]SessionSummary, 0, len(in.Sessions))
+		for _, item := range in.Sessions {
+			out.Sessions = append(out.Sessions, CloneSessionSummary(item))
+		}
+	}
+	return out
+}
+
+func NormalizeListQuery(in ListQuery) ListQuery {
+	out := in
+	out.Ref = NormalizeRef(in.Ref)
+	out.WorkspaceCWD = strings.TrimSpace(in.WorkspaceCWD)
+	out.Search = strings.ToLower(strings.TrimSpace(in.Search))
+	return out
+}
+
+func ParseOffsetCursor(cursor Cursor) (int, error) {
+	raw := strings.TrimSpace(string(cursor))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("%w: invalid cursor", ErrInvalid)
+	}
+	return value, nil
+}
+
+func SessionMatchesListQuery(active Session, query ListQuery) bool {
+	query = NormalizeListQuery(query)
+	active = CloneSession(active)
+	if query.Ref.AppName != "" && active.AppName != query.Ref.AppName {
+		return false
+	}
+	if query.Ref.UserID != "" && active.UserID != query.Ref.UserID {
+		return false
+	}
+	if query.Ref.SessionID != "" && active.SessionID != query.Ref.SessionID {
+		return false
+	}
+	if query.Ref.WorkspaceKey != "" && active.WorkspaceKey != query.Ref.WorkspaceKey {
+		return false
+	}
+	if query.WorkspaceCWD != "" && active.Workspace.CWD != query.WorkspaceCWD {
+		return false
+	}
+	if query.Search != "" && !strings.Contains(strings.ToLower(sessionSearchText(active)), query.Search) {
+		return false
+	}
+	return true
+}
+
+func LastEventTime(events []Event) time.Time {
+	var last time.Time
+	for _, event := range events {
+		if event.Time.After(last) {
+			last = event.Time
+		}
+	}
+	return last
+}
+
+func SortSessionSummaries(summaries []SessionSummary) {
+	sort.Slice(summaries, func(i, j int) bool {
+		a := summaries[i]
+		b := summaries[j]
+		if !a.Session.UpdatedAt.Equal(b.Session.UpdatedAt) {
+			return a.Session.UpdatedAt.After(b.Session.UpdatedAt)
+		}
+		if !a.Session.CreatedAt.Equal(b.Session.CreatedAt) {
+			return a.Session.CreatedAt.After(b.Session.CreatedAt)
+		}
+		return a.Session.SessionID > b.Session.SessionID
+	})
+}
+
+func PageSessionSummaries(in []SessionSummary, after int, limit int) SessionPage {
+	if after > len(in) {
+		after = len(in)
+	}
+	end := len(in)
+	if limit > 0 && after+limit < end {
+		end = after + limit
+	}
+	out := SessionPage{}
+	for _, item := range in[after:end] {
+		out.Sessions = append(out.Sessions, CloneSessionSummary(item))
+	}
+	if end < len(in) {
+		out.NextCursor = Cursor(strconv.Itoa(end))
+	}
+	return out
+}
+
+func sessionSearchText(active Session) string {
+	return strings.Join([]string{
+		active.SessionID,
+		active.Title,
+		active.Workspace.Key,
+		active.Workspace.CWD,
+	}, "\n")
 }
 
 func CloneEvent(in Event) Event {

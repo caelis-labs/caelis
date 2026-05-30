@@ -184,6 +184,39 @@ func TestViewServiceProjectsLoadedSession(t *testing.T) {
 	}
 }
 
+func TestSessionServiceListAppliesWorkspaceDefaults(t *testing.T) {
+	engine := &recordingEngine{page: session.SessionPage{
+		Sessions: []session.SessionSummary{{
+			Session: session.Session{
+				Ref:       session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-1", WorkspaceKey: "repo"},
+				Workspace: session.Workspace{Key: "repo", CWD: "/tmp/repo"},
+				Title:     "scratch",
+			},
+			EventCount: 3,
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo", WorkspaceCWD: "/tmp/repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := svc.Sessions().List(context.Background(), ListSessionsRequest{Search: " scratch ", Limit: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.list.Ref.AppName != "caelis-app" || engine.list.Ref.UserID != "tester" || engine.list.Ref.WorkspaceKey != "repo" {
+		t.Fatalf("list ref = %#v, want runtime defaults", engine.list.Ref)
+	}
+	if engine.list.WorkspaceCWD != "/tmp/repo" || engine.list.Search != "scratch" || engine.list.Limit != 20 {
+		t.Fatalf("list query = %#v, want workspace/search/limit", engine.list)
+	}
+	if len(page.Sessions) != 1 || page.Sessions[0].Session.SessionID != "sess-1" || page.Sessions[0].EventCount != 3 {
+		t.Fatalf("page = %#v, want returned session summary", page)
+	}
+}
+
 func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -252,6 +285,8 @@ func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 
 type recordingEngine struct {
 	start    session.StartRequest
+	list     session.ListQuery
+	page     session.SessionPage
 	turn     coreruntime.TurnRequest
 	events   []session.Event
 	loadRef  session.Ref
@@ -271,6 +306,11 @@ func (e *recordingEngine) StartSession(_ context.Context, req session.StartReque
 		Workspace: req.Workspace,
 		Title:     req.Title,
 	}, nil
+}
+
+func (e *recordingEngine) ListSessions(_ context.Context, query session.ListQuery) (session.SessionPage, error) {
+	e.list = query
+	return session.CloneSessionPage(e.page), nil
 }
 
 func (e *recordingEngine) LoadSession(_ context.Context, ref session.Ref) (session.Snapshot, error) {

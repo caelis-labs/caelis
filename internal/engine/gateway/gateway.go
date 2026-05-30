@@ -61,6 +61,10 @@ func (g *Gateway) StartSession(ctx context.Context, req session.StartRequest) (s
 	return g.store.Create(ctx, req)
 }
 
+func (g *Gateway) ListSessions(ctx context.Context, query session.ListQuery) (session.SessionPage, error) {
+	return g.store.List(ctx, query)
+}
+
 func (g *Gateway) LoadSession(ctx context.Context, ref session.Ref) (session.Snapshot, error) {
 	return g.store.Load(ctx, ref)
 }

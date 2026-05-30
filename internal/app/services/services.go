@@ -370,6 +370,13 @@ type StartSessionRequest struct {
 	Meta               map[string]any
 }
 
+type ListSessionsRequest struct {
+	Workspace session.Workspace
+	Search    string
+	After     session.Cursor
+	Limit     int
+}
+
 func (s SessionService) Start(ctx context.Context, req StartSessionRequest) (session.Session, error) {
 	if s.services.engine == nil {
 		return session.Session{}, errors.New("app/services: runtime engine is required")
@@ -381,6 +388,24 @@ func (s SessionService) Start(ctx context.Context, req StartSessionRequest) (ses
 		PreferredSessionID: strings.TrimSpace(req.PreferredSessionID),
 		Title:              strings.TrimSpace(req.Title),
 		Meta:               req.Meta,
+	})
+}
+
+func (s SessionService) List(ctx context.Context, req ListSessionsRequest) (session.SessionPage, error) {
+	if s.services.engine == nil {
+		return session.SessionPage{}, errors.New("app/services: runtime engine is required")
+	}
+	workspace := s.workspaceWithDefaults(req.Workspace)
+	return s.services.engine.ListSessions(ctx, session.ListQuery{
+		Ref: session.Ref{
+			AppName:      s.services.runtime.AppName,
+			UserID:       s.services.runtime.UserID,
+			WorkspaceKey: workspace.Key,
+		},
+		WorkspaceCWD: workspace.CWD,
+		Search:       strings.TrimSpace(req.Search),
+		After:        req.After,
+		Limit:        req.Limit,
 	})
 }
 

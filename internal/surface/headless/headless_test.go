@@ -173,6 +173,10 @@ func (e *fakeEngine) LoadSession(context.Context, session.Ref) (session.Snapshot
 	return session.Snapshot{}, nil
 }
 
+func (e *fakeEngine) ListSessions(context.Context, session.ListQuery) (session.SessionPage, error) {
+	return session.SessionPage{}, nil
+}
+
 func (e *fakeEngine) RecordEvents(context.Context, session.Ref, []session.Event) (session.Cursor, error) {
 	return "", nil
 }

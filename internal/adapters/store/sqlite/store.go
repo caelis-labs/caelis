@@ -138,6 +138,82 @@ VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
 	return session.CloneSession(active), nil
 }
 
+func (s *Store) List(ctx context.Context, query session.ListQuery) (session.SessionPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return session.SessionPage{}, err
+	}
+	if s == nil || s.db == nil {
+		return session.SessionPage{}, session.ErrNotFound
+	}
+	query = session.NormalizeListQuery(query)
+	after, err := session.ParseOffsetCursor(query.After)
+	if err != nil {
+		return session.SessionPage{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	conditions := []string{"1=1"}
+	args := make([]any, 0, 3)
+	if query.Ref.AppName != "" {
+		conditions = append(conditions, "s.app_name = ?")
+		args = append(args, query.Ref.AppName)
+	}
+	if query.Ref.UserID != "" {
+		conditions = append(conditions, "s.user_id = ?")
+		args = append(args, query.Ref.UserID)
+	}
+	if query.Ref.WorkspaceKey != "" {
+		conditions = append(conditions, "s.workspace_key = ?")
+		args = append(args, query.Ref.WorkspaceKey)
+	}
+	if query.Ref.SessionID != "" {
+		conditions = append(conditions, "s.session_id = ?")
+		args = append(args, query.Ref.SessionID)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT s.session_json, COUNT(e.seq), MAX(e.created_at)
+FROM sessions s
+LEFT JOIN events e ON e.session_id = s.session_id
+WHERE `+strings.Join(conditions, " AND ")+`
+GROUP BY s.session_id
+ORDER BY s.updated_at DESC, s.created_at DESC, s.session_id DESC`, args...)
+	if err != nil {
+		return session.SessionPage{}, err
+	}
+	defer rows.Close()
+
+	matches := make([]session.SessionSummary, 0)
+	for rows.Next() {
+		var raw string
+		var count int
+		var lastRaw sql.NullString
+		if err := rows.Scan(&raw, &count, &lastRaw); err != nil {
+			return session.SessionPage{}, err
+		}
+		var active session.Session
+		if err := json.Unmarshal([]byte(raw), &active); err != nil {
+			return session.SessionPage{}, err
+		}
+		if !session.SessionMatchesListQuery(active, query) {
+			continue
+		}
+		matches = append(matches, session.SessionSummary{
+			Session:     session.CloneSession(active),
+			EventCount:  count,
+			LastEventAt: parseStoredTime(lastRaw.String),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return session.SessionPage{}, err
+	}
+	return session.PageSessionSummaries(matches, after, query.Limit), nil
+}
+
 func (s *Store) Load(ctx context.Context, ref session.Ref) (session.Snapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -585,6 +661,17 @@ func cloneState(in session.State) session.State {
 		return nil
 	}
 	return session.State(maps.Clone(in))
+}
+
+func parseStoredTime(raw string) time.Time {
+	if strings.TrimSpace(raw) == "" {
+		return time.Time{}
+	}
+	value, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}
+	}
+	return value
 }
 
 var _ session.Store = (*Store)(nil)
