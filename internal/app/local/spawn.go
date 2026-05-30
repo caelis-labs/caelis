@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
@@ -19,15 +20,17 @@ import (
 
 type spawnDelegator struct {
 	configs []acpexternal.Config
+	tasks   *spawnTaskManager
 	now     func() time.Time
 }
 
 type spawnInput struct {
-	Agent  string `json:"agent,omitempty"`
-	Prompt string `json:"prompt,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Prompt      string `json:"prompt,omitempty"`
+	YieldTimeMS int    `json:"yield_time_ms,omitempty"`
 }
 
-func newSpawnDelegator(configs []acpexternal.Config) *spawnDelegator {
+func newSpawnDelegator(configs []acpexternal.Config, tasks *spawnTaskManager) *spawnDelegator {
 	if len(configs) == 0 {
 		return nil
 	}
@@ -47,7 +50,7 @@ func newSpawnDelegator(configs []acpexternal.Config) *spawnDelegator {
 	if len(out) == 0 {
 		return nil
 	}
-	return &spawnDelegator{configs: out, now: func() time.Time { return time.Now().UTC() }}
+	return &spawnDelegator{configs: out, tasks: tasks, now: func() time.Time { return time.Now().UTC() }}
 }
 
 func (d *spawnDelegator) Spawn(ctx context.Context, req loop.SpawnRequest) (loop.SpawnResult, error) {
@@ -68,6 +71,9 @@ func (d *spawnDelegator) Spawn(ctx context.Context, req loop.SpawnRequest) (loop
 	cfg, agent, err := d.resolveAgent(in.Agent)
 	if err != nil {
 		return loop.SpawnResult{}, err
+	}
+	if d.tasks != nil {
+		return d.spawnTask(ctx, req, in, cfg, agent)
 	}
 	client, err := acpexternal.StartProcess(ctx, cfg)
 	if err != nil {
@@ -156,6 +162,113 @@ func (d *spawnDelegator) Spawn(ctx context.Context, req loop.SpawnRequest) (loop
 		},
 		Events: events,
 	}, nil
+}
+
+func (d *spawnDelegator) spawnTask(ctx context.Context, req loop.SpawnRequest, in spawnInput, cfg acpexternal.Config, agent string) (loop.SpawnResult, error) {
+	taskID := firstNonEmpty(strings.TrimSpace(req.Call.ID), "spawn-"+agent)
+	task, err := d.tasks.Start(spawnTaskStartRequest{
+		Session: req.Session,
+		TurnID:  req.TurnID,
+		TaskID:  taskID,
+		Config:  cfg,
+		Agent:   agent,
+		Prompt:  in.Prompt,
+	})
+	if err != nil {
+		return loop.SpawnResult{}, err
+	}
+	wait := spawnWaitDuration(in.YieldTimeMS)
+	if wait > 0 {
+		waitCtx, cancel := context.WithTimeout(ctx, wait)
+		_, err := task.Wait(waitCtx)
+		cancel()
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			task.MarkAsync()
+			return loop.SpawnResult{Result: d.resultForTask(req, task, nil)}, nil
+		}
+		if err != nil {
+			return loop.SpawnResult{}, err
+		}
+	} else {
+		if _, err := task.Wait(ctx); err != nil {
+			_ = task.Cancel(context.Background())
+			return loop.SpawnResult{}, err
+		}
+	}
+	return loop.SpawnResult{
+		Result: d.resultForTask(req, task, task.Events()),
+		Events: task.Events(),
+	}, nil
+}
+
+func (d *spawnDelegator) resultForTask(req loop.SpawnRequest, task *spawnTaskSession, events []session.Event) tool.Result {
+	snapshot, _ := task.Snapshot(context.Background())
+	output, _ := task.Read(context.Background(), sandbox.OutputCursor{})
+	finalMessage := strings.TrimSpace(output.Stdout)
+	payload := map[string]any{
+		"task_id": task.taskID,
+		"agent":   task.agent,
+		"state":   string(snapshot.State),
+		"running": snapshot.Running,
+	}
+	if finalMessage == "" && len(events) > 0 {
+		finalMessage = lastAssistantText(events)
+	}
+	if finalMessage != "" && !snapshot.Running {
+		payload["final_message"] = finalMessage
+	}
+	parts, err := toolspawn.ResultParts(payload)
+	if err != nil {
+		parts = []model.Part{model.NewTextPart("task_id: " + task.taskID)}
+	}
+	taskMeta := map[string]any{
+		"task_id":   task.taskID,
+		"task_kind": "subagent",
+		"state":     string(snapshot.State),
+		"running":   snapshot.Running,
+		"agent":     task.agent,
+	}
+	if remoteSessionID := taskRemoteSessionID(task); remoteSessionID != "" {
+		taskMeta["remote_session_id"] = remoteSessionID
+	}
+	return tool.Result{
+		ID:      strings.TrimSpace(req.Call.ID),
+		Name:    toolspawn.ToolName,
+		IsError: snapshot.State == sandbox.SessionFailed,
+		Content: parts,
+		Meta: map[string]any{
+			"task_id": task.taskID,
+			"agent":   task.agent,
+			"state":   string(snapshot.State),
+			"running": snapshot.Running,
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"tool": map[string]any{
+						"name":  toolspawn.ToolName,
+						"agent": task.agent,
+					},
+					"task": taskMeta,
+				},
+			},
+		},
+	}
+}
+
+func spawnWaitDuration(ms int) time.Duration {
+	if ms <= 0 {
+		return 0
+	}
+	return time.Duration(ms) * time.Millisecond
+}
+
+func taskRemoteSessionID(task *spawnTaskSession) string {
+	if task == nil {
+		return ""
+	}
+	task.mu.RLock()
+	defer task.mu.RUnlock()
+	return strings.TrimSpace(task.remoteSessionID)
 }
 
 func (d *spawnDelegator) resolveAgent(requested string) (acpexternal.Config, string, error) {

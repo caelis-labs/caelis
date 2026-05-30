@@ -7,7 +7,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 )
 
-func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
+func TestDefinitionExposesAsyncYieldControl(t *testing.T) {
 	t.Parallel()
 
 	def := New([]Agent{{Name: "self"}}).Definition()
@@ -15,8 +15,9 @@ func TestDefinitionDoesNotExposeYieldTimeMS(t *testing.T) {
 	if !ok {
 		t.Fatalf("properties = %#v, want object", def.InputSchema["properties"])
 	}
-	if _, ok := props["yield_time_ms"]; ok {
-		t.Fatalf("SPAWN properties include yield_time_ms: %#v", props)
+	yieldProp, ok := props["yield_time_ms"].(map[string]any)
+	if !ok || yieldProp["type"] != "integer" {
+		t.Fatalf("SPAWN yield_time_ms property = %#v, want integer", props["yield_time_ms"])
 	}
 	if def.Meta["caelis.kind"] != "spawn" {
 		t.Fatalf("meta = %#v, want spawn kind", def.Meta)

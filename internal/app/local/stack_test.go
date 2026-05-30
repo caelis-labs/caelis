@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -508,6 +510,105 @@ func TestStackRunsCoreSpawnToolThroughExternalACPAgent(t *testing.T) {
 	}
 }
 
+func TestStackRunsAsyncSpawnThroughTaskWait(t *testing.T) {
+	rawSpawnInput, err := json.Marshal(map[string]any{"agent": "helper", "prompt": "delegate", "yield_time_ms": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawTaskWaitInput, err := json.Marshal(map[string]any{"action": "wait", "task_id": "spawn-call", "yield_time_ms": 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "spawn-call",
+					Name:  toolspawn.ToolName,
+					Input: rawSpawnInput,
+				},
+			}},
+		},
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "task-wait",
+					Name:  tooltask.ToolName,
+					Input: rawTaskWaitInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime:      config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceCWD: t.TempDir()},
+		Provider:     provider,
+		Sandbox:      rt,
+		BuiltinTools: true,
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "helper",
+			AgentName: "helper",
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:       []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1", "CAELIS_TEST_EXTERNAL_ACP_DELAY_MS=150"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "spawn helper async",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var liveEvents []session.Event
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		liveEvents = append(liveEvents, env.Event)
+	}
+	spawnResult := findToolResult(liveEvents, toolspawn.ToolName)
+	if spawnResult == nil || spawnResult.Tool.Output["state"] != "running" || spawnResult.Tool.Output["task_id"] != "spawn-call" {
+		t.Fatalf("spawn result = %#v, want running task result", spawnResult)
+	}
+	taskResult := findToolResult(liveEvents, tooltask.ToolName)
+	if taskResult == nil {
+		t.Fatalf("events = %#v, missing TASK wait result", liveEvents)
+	}
+	if stdout, _ := taskResult.Tool.Output["stdout"].(string); !strings.Contains(stdout, "external helper response") {
+		t.Fatalf("TASK wait output = %#v, want external helper response", taskResult.Tool.Output)
+	}
+	if runtimeTask := nestedRuntimeTask(taskResult.Tool.Meta); runtimeTask["task_kind"] != "subagent" || runtimeTask["agent"] != "helper" {
+		t.Fatalf("TASK wait meta = %#v, want subagent helper task", taskResult.Tool.Meta)
+	}
+	snapshot, err := stack.Services().Sessions().Load(context.Background(), session.Ref{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childEvent := findSubagentEvent(snapshot.Events, "spawn-call")
+	if childEvent == nil || session.EventText(*childEvent) != "external helper response" {
+		t.Fatalf("stored events = %#v, want canonical async subagent response", snapshot.Events)
+	}
+}
+
 func TestExternalACPHelperProcess(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_EXTERNAL_ACP_HELPER") != "1" {
 		return
@@ -529,6 +630,9 @@ func TestExternalACPHelperProcess(t *testing.T) {
 			var req schema.PromptRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if delayMS, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("CAELIS_TEST_EXTERNAL_ACP_DELAY_MS"))); delayMS > 0 {
+				time.Sleep(time.Duration(delayMS) * time.Millisecond)
 			}
 			_ = conn.Notify(schema.MethodSessionUpdate, schema.SessionNotification{
 				SessionID: req.SessionID,
@@ -1617,6 +1721,36 @@ func capturedTool(tools []model.ToolSpec, name string) bool {
 		}
 	}
 	return false
+}
+
+func findToolResult(events []session.Event, name string) *session.Event {
+	for idx := range events {
+		event := &events[idx]
+		if event.Type == session.EventToolResult && event.Tool != nil && event.Tool.Name == name {
+			return event
+		}
+	}
+	return nil
+}
+
+func findSubagentEvent(events []session.Event, delegationID string) *session.Event {
+	for idx := range events {
+		event := &events[idx]
+		if event.Scope == nil || event.Scope.Participant.Kind != session.ParticipantSubagent {
+			continue
+		}
+		if event.Scope.Participant.DelegationID == delegationID {
+			return event
+		}
+	}
+	return nil
+}
+
+func nestedRuntimeTask(meta map[string]any) map[string]any {
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	taskMeta, _ := runtimeMeta["task"].(map[string]any)
+	return taskMeta
 }
 
 type capturingProvider struct {

@@ -19,7 +19,13 @@ const ToolName = "task"
 
 type Tool struct {
 	Sandbox     sandbox.Runtime
+	Resolver    Resolver
 	DefaultWait time.Duration
+}
+
+type Resolver interface {
+	OpenTask(context.Context, sandbox.SessionRef) (sandbox.Session, bool, error)
+	ListTasks(context.Context, sandbox.SessionListQuery) ([]sandbox.SessionSnapshot, error)
 }
 
 type input struct {
@@ -33,10 +39,14 @@ type input struct {
 }
 
 func New(runtime sandbox.Runtime) (*Tool, error) {
+	return NewWithResolver(runtime, nil)
+}
+
+func NewWithResolver(runtime sandbox.Runtime, resolver Resolver) (*Tool, error) {
 	if runtime == nil {
 		return nil, errors.New("tools/task: sandbox runtime is required")
 	}
-	return &Tool{Sandbox: runtime, DefaultWait: time.Second}, nil
+	return &Tool{Sandbox: runtime, Resolver: resolver, DefaultWait: time.Second}, nil
 }
 
 func (t *Tool) Definition() tool.Definition {
@@ -103,7 +113,7 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if in.TaskID == "" {
 		return tool.Result{}, errors.New("tools/task: task_id is required")
 	}
-	session, err := t.Sandbox.Open(ctx, sandbox.SessionRef{ID: in.TaskID})
+	session, err := t.open(ctx, sandbox.SessionRef{ID: in.TaskID})
 	if err != nil {
 		return tool.Result{}, err
 	}
@@ -138,13 +148,45 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 }
 
 func (t *Tool) list(ctx context.Context, call tool.Call, in input) (tool.Result, error) {
+	var snapshots []sandbox.SessionSnapshot
+	seen := map[string]struct{}{}
 	lister, ok := t.Sandbox.(sandbox.SessionLister)
-	if !ok {
+	if ok {
+		listed, err := lister.ListSessions(ctx, sandbox.SessionListQuery{Limit: in.Limit})
+		if err != nil {
+			return tool.Result{}, err
+		}
+		for _, snapshot := range listed {
+			taskID := strings.TrimSpace(snapshot.Ref.ID)
+			if taskID == "" {
+				continue
+			}
+			seen[taskID] = struct{}{}
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	if t.Resolver != nil {
+		listed, err := t.Resolver.ListTasks(ctx, sandbox.SessionListQuery{Limit: in.Limit})
+		if err != nil {
+			return tool.Result{}, err
+		}
+		for _, snapshot := range listed {
+			taskID := strings.TrimSpace(snapshot.Ref.ID)
+			if taskID == "" {
+				continue
+			}
+			if _, ok := seen[taskID]; ok {
+				continue
+			}
+			seen[taskID] = struct{}{}
+			snapshots = append(snapshots, snapshot)
+		}
+	}
+	if !ok && t.Resolver == nil {
 		return tool.Result{}, errors.New("tools/task: sandbox runtime does not support task listing")
 	}
-	snapshots, err := lister.ListSessions(ctx, sandbox.SessionListQuery{Limit: in.Limit})
-	if err != nil {
-		return tool.Result{}, err
+	if in.Limit > 0 && len(snapshots) > in.Limit {
+		snapshots = snapshots[:in.Limit]
 	}
 	tasks := make([]map[string]any, 0, len(snapshots))
 	for _, snapshot := range snapshots {
@@ -199,6 +241,30 @@ func (t *Tool) list(ctx context.Context, call tool.Call, in input) (tool.Result,
 			},
 		},
 	}, nil
+}
+
+func (t *Tool) open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {
+	var sandboxErr error
+	if t.Sandbox != nil {
+		session, err := t.Sandbox.Open(ctx, ref)
+		if err == nil {
+			return session, nil
+		}
+		sandboxErr = err
+	}
+	if t.Resolver != nil {
+		session, ok, err := t.Resolver.OpenTask(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return session, nil
+		}
+	}
+	if sandboxErr != nil {
+		return nil, sandboxErr
+	}
+	return nil, fmt.Errorf("tools/task: task %q not found", strings.TrimSpace(ref.ID))
 }
 
 func taskListSummary(tasks []map[string]any) string {

@@ -49,7 +49,7 @@ func SessionResult(ctx context.Context, call tool.Call, name string, action stri
 				JSON: &model.JSONPart{Value: raw},
 			},
 		},
-		Meta: sessionMeta(action, snapshot, output),
+		Meta: sessionMeta(action, snapshot, output, session),
 	}, nil
 }
 
@@ -95,7 +95,7 @@ func sessionPayload(action string, snapshot sandbox.SessionSnapshot, output sand
 	return payload
 }
 
-func sessionMeta(action string, snapshot sandbox.SessionSnapshot, output sandbox.OutputSnapshot) map[string]any {
+func sessionMeta(action string, snapshot sandbox.SessionSnapshot, output sandbox.OutputSnapshot, session sandbox.Session) map[string]any {
 	task := map[string]any{
 		"action":        strings.TrimSpace(action),
 		"state":         string(snapshot.State),
@@ -107,6 +107,14 @@ func sessionMeta(action string, snapshot sandbox.SessionSnapshot, output sandbox
 	}
 	if !snapshot.Running {
 		task["exit_code"] = snapshot.ExitCode
+	}
+	if provider, ok := session.(interface{ TaskMeta() map[string]any }); ok {
+		for key, value := range provider.TaskMeta() {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				task[key] = value
+			}
+		}
 	}
 	return map[string]any{
 		"task_id":       snapshot.Ref.ID,

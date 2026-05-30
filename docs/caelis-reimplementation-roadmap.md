@@ -1311,10 +1311,16 @@ be migrated before retiring the old stack:
      targets, invoke them without old runtime wrappers, normalize their output
      into canonical delegated participant events, and return a model-visible
      `task_id` / `final_message` payload.
-   - Still pending: durable async SPAWN tasks, TASK wait/write/cancel control
-     for spawned subagents, richer task lifecycle stores beyond completed host
-     command output journals, and display metadata for compact/rich tool panels
-     still need core-native adapters.
+   - Migrated baseline: `SPAWN` now supports `yield_time_ms` and can return a
+     running subagent `task_id`. The core-native `task` tool can resolve those
+     runtime subagent tasks alongside sandbox sessions and use the same
+     wait/write/cancel entrypoint. Async subagent completion records canonical
+     participant events into the owning session instead of relying on a
+     surface-only side channel.
+   - Still pending: durable async SPAWN task restoration across process
+     restarts, richer task lifecycle stores beyond in-memory subagent tasks and
+     completed host command output journals, and display metadata for
+     compact/rich tool panels still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -1398,8 +1404,13 @@ be migrated before retiring the old stack:
       as canonical participant/subagent events with delegation ids tied to the
       SPAWN tool call, so TUI and future APP surfaces can replay the same child
       work without a surface-only side channel.
-    - Still pending: durable async delegated subagent tasks with TASK
-      wait/write/cancel, durable remote controller process/session lifecycle
+    - Migrated baseline: async delegated subagent tasks now have a core-native
+      local runtime path. `SPAWN` can yield a running task, `task wait` can join
+      that child ACP prompt, `task cancel` can stop it, and `task write` can
+      continue a completed child ACP session while preserving canonical
+      participant events.
+    - Still pending: durable async delegated subagent restoration across
+      process restarts, durable remote controller process/session lifecycle
       beyond canonical remote session id reuse, live remote ACP controller
       config RPC/reconnect application, remote-declared controller option
       discovery, and terminal previews remain old-stack or unmigrated.
@@ -1428,10 +1439,13 @@ be migrated before retiring the old stack:
       buffers. A restarted host runtime can reopen archived command sessions,
       and the core-native `task` tool can list/tail/wait those restored
       sessions through the same `core/sandbox` interface.
+    - Migrated baseline: the core-native `task` tool now has a resolver hook
+      for non-sandbox runtime tasks. The local stack uses it for async SPAWN
+      subagent tasks, so model-driven TASK wait/write/cancel no longer depends
+      on the old `ports/task` runtime.
     - Still pending: a real durable task store for active process/subagent
-      lifecycle, async SPAWN/subagent TASK wait/write/cancel control, terminal
-      previews, and full production TUI/APP task-panel wiring remain
-      incomplete.
+      lifecycle across restarts, terminal previews, and full production
+      TUI/APP task-panel wiring remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`

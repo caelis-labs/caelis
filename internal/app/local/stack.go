@@ -123,6 +123,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 			return nil, err
 		}
 	}
+	spawnTasks := newSpawnTaskManager(store, externalAgents)
 	tools := cfg.Tools
 	if tools == nil {
 		toolList := append([]tool.Tool(nil), cfg.ToolList...)
@@ -135,7 +136,12 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 				if !ok {
 					return nil, fmt.Errorf("app/local: builtin tool %q is not registered", name)
 				}
-				item, err := factory(ctx, plugin.ToolConfig{Name: name, Sandbox: sandboxRuntime, ACPAgents: spawnAgentDescriptors})
+				var item tool.Tool
+				if name == tooltask.ToolName {
+					item, err = tooltask.NewWithResolver(sandboxRuntime, spawnTasks)
+				} else {
+					item, err = factory(ctx, plugin.ToolConfig{Name: name, Sandbox: sandboxRuntime, ACPAgents: spawnAgentDescriptors})
+				}
 				if err != nil {
 					return nil, err
 				}
@@ -165,7 +171,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Provider:     provider,
 		Tools:        tools,
 		Approval:     approvalPolicy,
-		Spawner:      newSpawnDelegator(externalAgents),
+		Spawner:      newSpawnDelegator(externalAgents, spawnTasks),
 		Instructions: instructions,
 		MaxToolSteps: cfg.MaxToolSteps,
 	})

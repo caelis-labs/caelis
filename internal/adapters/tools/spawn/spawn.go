@@ -72,6 +72,10 @@ func (t *Tool) Definition() tool.Definition {
 			"type":        "string",
 			"description": "Specific self-contained sub-task for the delegated ACP child agent.",
 		},
+		"yield_time_ms": map[string]any{
+			"type":        "integer",
+			"description": "Optional milliseconds to wait before returning a running task_id for TASK wait/write/cancel.",
+		},
 	}
 	if enum := agentNames(agents); len(enum) > 0 {
 		props["agent"].(map[string]any)["enum"] = enum
