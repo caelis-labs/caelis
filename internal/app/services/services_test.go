@@ -491,6 +491,78 @@ func TestAgentServiceInstallsBuiltinACPAgentThroughInstaller(t *testing.T) {
 	}
 }
 
+func TestAgentServiceManagementViewProjectsActions(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertACPAgent(ctx, plugin.ACPAgentDescriptor{
+		Name:    "helper",
+		Command: "helper-acp",
+		Args:    []string{"--stdio"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		Agents: []AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "reviewer",
+			Kind:        AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Description: "plugin reviewer",
+		}},
+		BuiltinAgents: []AgentDescriptor{{
+			ID:          "codex",
+			Name:        "codex",
+			Kind:        AgentKindExternalACP,
+			Description: "OpenAI Codex ACP agent",
+			Command:     "npx",
+			Args:        []string{"-y", "@zed-industries/codex-acp"},
+		}, {
+			ID:          "helper",
+			Name:        "helper",
+			Kind:        AgentKindExternalACP,
+			Description: "Helper ACP agent",
+			Command:     "helper-acp",
+		}},
+		AgentInstaller: &recordingAgentInstaller{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Agents().Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.CanRegisterCustom || len(view.Registered) != 2 || len(view.Builtins) != 2 || len(view.Installable) != 2 {
+		t.Fatalf("management view counts = %#v, want custom registration, two registered/builtin/installable entries", view)
+	}
+	helper, ok := findAgentManagementItem(view.Registered, "helper")
+	if !ok || !helper.Registered || !agentActionEnabled(helper.Actions, agentActionInvoke) || !agentActionEnabled(helper.Actions, agentActionRemove) {
+		t.Fatalf("registered helper = %#v ok=%v, want invoke/remove actions", helper, ok)
+	}
+	codex, ok := findAgentManagementItem(view.Builtins, "codex")
+	if !ok || !codex.Builtin || codex.Registered || !codex.Installable || !agentActionEnabled(codex.Actions, agentActionRegister) || !agentActionEnabled(codex.Actions, agentActionInstall) {
+		t.Fatalf("builtin codex = %#v ok=%v, want register/install actions", codex, ok)
+	}
+	builtinHelper, ok := findAgentManagementItem(view.Builtins, "helper")
+	if !ok || !builtinHelper.Registered || agentActionEnabled(builtinHelper.Actions, agentActionRegister) || !agentActionEnabled(builtinHelper.Actions, agentActionUpdate) {
+		t.Fatalf("builtin helper = %#v ok=%v, want registered helper with update action", builtinHelper, ok)
+	}
+	view.Registered[0].Agent.Name = "mutated"
+	again, err := svc.Agents().Management(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Registered[0].Agent.Name == "mutated" {
+		t.Fatalf("management view was not cloned: %#v", again.Registered[0])
+	}
+}
+
 func TestAgentServiceInvokeControllerRecordsControllerScopedEvents(t *testing.T) {
 	ctx := context.Background()
 	engine := &recordingEngine{}
@@ -2038,6 +2110,24 @@ func findModelCandidate(candidates []appviewmodel.ModelCandidate, modelName stri
 		}
 	}
 	return appviewmodel.ModelCandidate{}, false
+}
+
+func findAgentManagementItem(items []appviewmodel.AgentManagementItem, name string) (appviewmodel.AgentManagementItem, bool) {
+	for _, item := range items {
+		if item.Agent.Name == name || item.Agent.ID == name {
+			return item, true
+		}
+	}
+	return appviewmodel.AgentManagementItem{}, false
+}
+
+func agentActionEnabled(actions []appviewmodel.AgentManagementAction, id string) bool {
+	for _, action := range actions {
+		if action.ID == id {
+			return action.Enabled
+		}
+	}
+	return false
 }
 
 func (p catalogProvider) ID() string {

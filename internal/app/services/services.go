@@ -1597,16 +1597,7 @@ func statusAgentView(in []AgentDescriptor) appviewmodel.AgentStatus {
 		if agent.Kind == AgentKindExternalACP {
 			status.ExternalACPCount++
 		}
-		status.Items = append(status.Items, appviewmodel.AgentItem{
-			ID:          strings.TrimSpace(agent.ID),
-			Name:        strings.TrimSpace(agent.Name),
-			Kind:        strings.TrimSpace(string(agent.Kind)),
-			Command:     strings.TrimSpace(agent.Command),
-			Args:        append([]string(nil), agent.Args...),
-			WorkDir:     strings.TrimSpace(agent.WorkDir),
-			Description: strings.TrimSpace(agent.Description),
-			Meta:        maps.Clone(agent.Meta),
-		})
+		status.Items = append(status.Items, agentItemFromDescriptor(agent))
 	}
 	return status
 }

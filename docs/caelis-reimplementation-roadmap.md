@@ -604,9 +604,9 @@ alongside the old stack without importing it:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval/action, participant, model selection, task list/output, settings,
-  and status DTOs shared by the TUI and future APP, including runtime store
-  identity needed by read-only diagnostics.
+  approval/action, participant, agent management, model selection, task
+  list/output, settings, and status DTOs shared by the TUI and future APP,
+  including runtime store identity needed by read-only diagnostics.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -660,6 +660,9 @@ alongside the old stack without importing it:
   Service-native built-in ACP adapter install now runs through a replaceable
   app-service installer, with the default local stack installing supported npm
   adapters into the Caelis store and persisting the installed binary path.
+  It also exposes a surface-neutral management view for registered agents,
+  built-in catalog entries, installable adapters, and per-agent management
+  actions.
 - `internal/app/services.ModelService`: shared model settings and catalog
   surface for configured models, provider model presets, capability defaults,
   and reasoning-level choices used by TUI/future APP connect flows.
@@ -1097,9 +1100,13 @@ be migrated before retiring the old stack:
      exposes a surface-neutral model/provider selection view with configured
      models, provider options, plugin aliases, remote/catalog candidates,
      capabilities, and reasoning-level metadata.
-   - Still pending: remaining settings mutation flows, agent management
-     actions, transcript actions, durable task history, and live event
-     subscriptions still need APP-ready
+   - Migrated baseline: `internal/app/services.AgentService.Management` now
+     exposes a surface-neutral agent management view for registered agents,
+     built-in catalog entries, installable adapters, and actions such as
+     invoke, use as controller, register, install/update, remove, and custom
+     registration.
+   - Still pending: remaining settings mutation flows, transcript actions,
+     durable task history, and live event subscriptions still need APP-ready
      service/view-model contracts.
 
 4. Headless CLI and ACP serving
@@ -1315,6 +1322,10 @@ be migrated before retiring the old stack:
       installer runs npm into the managed Caelis store, verifies the installed
       adapter binary, and persists the installed command through shared
       settings for both TUI and future APP consumers.
+    - Migrated baseline: agent management now has a shared view contract through
+      `AgentService.Management`, covering registered agents, built-in catalog
+      entries, installable adapters, and surface-neutral actions for TUI and
+      future APP panels.
     - Migrated baseline: built-in ACP adapter update now reuses the same
       shared app-service install contract as registration. The TUI exposes
       `/agent update <adapter>` with installable adapter completion and routes
