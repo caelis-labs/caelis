@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -940,6 +941,52 @@ func TestModelServiceCatalogSupportsConnectDefaults(t *testing.T) {
 	}
 }
 
+func TestModelServiceProviderModelsMergesConfiguredAndRemoteModels(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-configured",
+		BaseURL:  "https://api.example.test/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var captured appsettings.ModelConfig
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (model.Provider, error) {
+			captured = cfg
+			return catalogProvider{models: []model.ModelInfo{
+				{ID: "gpt-remote", Provider: "openai-compatible"},
+				{ID: "gpt-configured", Provider: "openai-compatible"},
+				{Name: "gpt-named", Provider: "openai-compatible"},
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := svc.Models().ProviderModels(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		BaseURL:  "https://api.example.test/v1",
+		Token:    "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(models, []string{"gpt-configured", "gpt-named", "gpt-remote"}) {
+		t.Fatalf("provider models = %#v, want configured and remote models", models)
+	}
+	if captured.Provider != "openai-compatible" || captured.BaseURL != "https://api.example.test/v1" || captured.Token != "secret" {
+		t.Fatalf("provider factory cfg = %#v, want connect candidate config", captured)
+	}
+}
+
 func TestModelServiceCodeFreeAuthDelegatesToConfiguredAuthenticator(t *testing.T) {
 	ctx := context.Background()
 	auth := &recordingCodeFreeAuth{
@@ -1034,6 +1081,22 @@ type recordingEngine struct {
 type fakeSandboxRuntime struct {
 	descriptor sandbox.Descriptor
 	status     sandbox.Status
+}
+
+type catalogProvider struct {
+	models []model.ModelInfo
+}
+
+func (p catalogProvider) ID() string {
+	return "catalog"
+}
+
+func (p catalogProvider) Models(context.Context) ([]model.ModelInfo, error) {
+	return append([]model.ModelInfo(nil), p.models...), nil
+}
+
+func (catalogProvider) Stream(context.Context, model.Request) (model.Stream, error) {
+	return nil, errors.New("not implemented")
 }
 
 func (r fakeSandboxRuntime) Descriptor() sandbox.Descriptor {

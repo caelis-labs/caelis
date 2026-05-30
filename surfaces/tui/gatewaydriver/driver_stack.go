@@ -212,6 +212,7 @@ type DriverStack struct {
 	ListModelAliasesFn                   func(context.Context, session.SessionRef) ([]string, error)
 	ListModelChoicesFn                   func(context.Context, session.SessionRef) ([]ModelChoice, error)
 	ListProviderModelsFn                 func(string) []string
+	ListProviderModelsForConfigFn        func(context.Context, ModelConfig) ([]string, error)
 	ListCatalogModelsFn                  func(string) []string
 	DefaultModelCapabilitiesFn           func() ModelCapabilityInfo
 	LookupModelCapabilitiesFn            func(string, string) (ModelCapabilityInfo, bool)
@@ -438,6 +439,13 @@ func (s *DriverStack) ListProviderModels(provider string) []string {
 		return nil
 	}
 	return s.ListProviderModelsFn(provider)
+}
+
+func (s *DriverStack) ListProviderModelsForConfig(ctx context.Context, cfg ModelConfig) ([]string, error) {
+	if s == nil || s.ListProviderModelsForConfigFn == nil {
+		return nil, nil
+	}
+	return s.ListProviderModelsForConfigFn(ctx, cfg)
 }
 
 func (s *DriverStack) ListCatalogModels(provider string) []string {

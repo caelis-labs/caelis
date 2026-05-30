@@ -1124,15 +1124,19 @@ be migrated before retiring the old stack:
      are now exposed through a replaceable `ModelService` auth contract, wired
      by the local app stack to the core-native CodeFree adapter and consumed by
      the TUI `/connect` binding.
+   - Migrated baseline: remote provider model discovery for `/connect` now
+     flows through `ModelService.ProviderModels`, with the local app stack
+     injecting registry-backed provider factories and the TUI passing the
+     current provider/base URL/token candidate as UI data rather than creating
+     provider adapters itself.
    - Migrated baseline: standalone CLI doctor and host sandbox lifecycle
      subcommands now use the new local stack and shared app services instead
      of constructing `app/gatewayapp`.
    - Still pending: default home-dir bootstrapping, full persisted config
      hydration, connect wizard persistence, remaining TUI command integration,
-     remote provider model discovery UI data, additional non-model ACP config
-     providers, non-host sandbox setup/repair config, and removal of the old
-     `app/gatewayapp` config/model services once compatibility entrypoints are
-     gone.
+     additional non-model ACP config providers, non-host sandbox setup/repair
+     config, and removal of the old `app/gatewayapp` config/model services
+     once compatibility entrypoints are gone.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
@@ -1163,8 +1167,8 @@ be migrated before retiring the old stack:
    - Mimo/Xiaomi and Volcengine now have core-native provider profiles with
      default endpoints, token lookup, structured JSON output, reasoning-content
      parsing, thinking payload mapping, and settings endpoint normalization.
-   - Still pending: broader model discovery, detailed error mapping, SSE
-     streaming, provider-specific
+   - Still pending: provider discovery caching/capability hydration, detailed
+     error mapping, SSE streaming, provider-specific
      tool/argument behavior beyond the migrated profiles, and removal of the
      corresponding old `impl/model/providers` code once no old-stack entrypoint
      requires it.

@@ -5,6 +5,9 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 )
 
 const (
@@ -108,6 +111,38 @@ func (s ModelService) ConfiguredProviderModels(ctx context.Context, provider str
 	return out, nil
 }
 
+func (s ModelService) ProviderModels(ctx context.Context, cfg appsettings.ModelConfig) ([]string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg = appsettings.NormalizeModelConfig(cfg)
+	var out []string
+	providerKey := normalizeModelCatalogKey(cfg.Provider)
+	if providerKey != "" {
+		configured, err := s.ConfiguredProviderModels(ctx, providerKey)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, configured...)
+	}
+	if providerKey == "" || s.services.modelProvider == nil {
+		return uniqueSortedModelNames(out), nil
+	}
+	provider, err := s.services.modelProvider(ctx, cfg)
+	if err != nil {
+		return uniqueSortedModelNames(out), err
+	}
+	if provider == nil {
+		return uniqueSortedModelNames(out), nil
+	}
+	remote, err := provider.Models(ctx)
+	if err != nil {
+		return uniqueSortedModelNames(out), err
+	}
+	out = append(out, modelInfoNames(remote)...)
+	return uniqueSortedModelNames(out), nil
+}
+
 func (s ModelService) DefaultCapabilities() ModelCapabilityInfo {
 	return ModelCapabilityInfo{
 		ContextWindowTokens:    128000,
@@ -155,6 +190,44 @@ func (s ModelService) ReasoningLevels(provider string, modelName string) []strin
 
 func normalizeModelCatalogKey(value string) string {
 	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func modelInfoNames(models []coremodel.ModelInfo) []string {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(models))
+	for _, item := range models {
+		name := firstNonEmpty(item.ID, item.Name)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func uniqueSortedModelNames(models []string) []string {
+	if len(models) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(models))
+	for _, model := range models {
+		model = strings.TrimSpace(model)
+		if model == "" {
+			continue
+		}
+		key := strings.ToLower(model)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, model)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i]) < strings.ToLower(out[j])
+	})
+	return out
 }
 
 func normalizeModelCapabilityInfo(in ModelCapabilityInfo) ModelCapabilityInfo {

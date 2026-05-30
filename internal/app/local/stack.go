@@ -180,6 +180,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Runtime:        runtimeCfg,
 		Engine:         engine,
 		Sandbox:        sandboxRuntime,
+		ModelProvider:  modelProviderFactory(reg),
 		Agents:         agentDescriptors(externalAgents),
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
 		Invokers:       agentInvokers(store, externalAgents),
@@ -233,6 +234,33 @@ func externalAgentInvokerFactory(store session.Store) services.AgentInvokerFacto
 			return nil, fmt.Errorf("app/local: external ACP agent id and command are required")
 		}
 		return externalAgentInvoker(store, cfg), nil
+	}
+}
+
+func modelProviderFactory(reg *appregistry.Registry) services.ModelProviderFactory {
+	return func(ctx context.Context, cfg appsettings.ModelConfig) (model.Provider, error) {
+		if reg == nil {
+			return nil, fmt.Errorf("app/local: model provider registry is required")
+		}
+		cfg = appsettings.NormalizeModelConfig(cfg)
+		providerName := strings.ToLower(firstNonEmpty(cfg.Provider, "openai_compatible"))
+		factory, ok := reg.ModelProvider(providerName)
+		if !ok {
+			return nil, fmt.Errorf("app/local: unsupported model provider %q", cfg.Provider)
+		}
+		return factory(ctx, plugin.ModelProviderConfig{
+			ID:              cfg.ID,
+			Profile:         cfg.ProfileID,
+			Provider:        providerName,
+			Endpoint:        cfg.BaseURL,
+			Model:           cfg.Model,
+			Token:           cfg.Token,
+			TokenEnv:        cfg.TokenEnv,
+			AuthType:        cfg.AuthType,
+			HeaderKey:       cfg.HeaderKey,
+			MaxOutputTokens: cfg.MaxOutputTokens,
+			Meta:            maps.Clone(cfg.Meta),
+		})
 	}
 }
 

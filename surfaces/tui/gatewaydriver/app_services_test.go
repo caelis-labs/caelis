@@ -38,6 +38,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	engine := &appServiceDriverEngine{}
 	codeFreeAuth := &appServiceDriverCodeFreeAuth{}
+	var providerDiscovery appsettings.ModelConfig
 	workspaceCWD := t.TempDir()
 	sandboxRuntime, err := sandboxhost.New(ctx, coresandbox.Config{CWD: workspaceCWD})
 	if err != nil {
@@ -56,6 +57,10 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 		Sandbox:  sandboxRuntime,
 		Settings: manager,
 		CodeFree: codeFreeAuth,
+		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (coremodel.Provider, error) {
+			providerDiscovery = cfg
+			return appServiceDriverModelCatalog{models: []coremodel.ModelInfo{{ID: "gpt-remote", Provider: "openai-compatible"}}}, nil
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -81,6 +86,16 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	if !slashCandidatesHaveValue(models, "doubao-seed-2.0-code") {
 		t.Fatalf("connect model candidates = %#v, want app-service provider catalog model", models)
+	}
+	models, err = driver.CompleteSlashArg(ctx, "connect-model:openai-compatible|https%3A%2F%2Fapi.example.test%2Fv1|60|secret|", "remote", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model remote) error = %v", err)
+	}
+	if !slashCandidatesHaveValue(models, "gpt-remote") {
+		t.Fatalf("connect model candidates = %#v, want remote provider model", models)
+	}
+	if providerDiscovery.Provider != "openai-compatible" || providerDiscovery.BaseURL != "https://api.example.test/v1" || providerDiscovery.Token != "secret" {
+		t.Fatalf("provider discovery cfg = %#v, want connect wizard provider config", providerDiscovery)
 	}
 	defaults, err := connectDefaultsForConfigWithStack(ctx, stack, ConnectConfig{Provider: "deepseek", Model: "deepseek-v4-pro"})
 	if err != nil {
@@ -652,6 +667,22 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	if status.ControllerKind != "kernel" {
 		t.Fatalf("status after local handoff = %#v, want kernel controller", status)
 	}
+}
+
+type appServiceDriverModelCatalog struct {
+	models []coremodel.ModelInfo
+}
+
+func (p appServiceDriverModelCatalog) ID() string {
+	return "app-service-driver-model-catalog"
+}
+
+func (p appServiceDriverModelCatalog) Models(context.Context) ([]coremodel.ModelInfo, error) {
+	return append([]coremodel.ModelInfo(nil), p.models...), nil
+}
+
+func (appServiceDriverModelCatalog) Stream(context.Context, coremodel.Request) (coremodel.Stream, error) {
+	return &coremodel.StaticStream{}, nil
 }
 
 type appServiceDriverEngine struct {

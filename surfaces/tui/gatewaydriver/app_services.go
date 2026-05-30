@@ -77,6 +77,9 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return models
 	}
+	stack.ListProviderModelsForConfigFn = func(ctx context.Context, cfg ModelConfig) ([]string, error) {
+		return svc.Models().ProviderModels(ctx, modelConfigToApp(cfg))
+	}
 	stack.ListCatalogModelsFn = func(provider string) []string {
 		return svc.Models().ListCatalogModels(provider)
 	}

@@ -206,7 +206,13 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 	}
 	fallbackModels := fallbackConnectModels(stackForDriver(driver), tpl)
 	if driver != nil && driver.stack != nil {
-		fallbackModels = append(fallbackModels, driver.stack.ListProviderModels(tpl.provider)...)
+		discoverCtx, cancel := providerModelDiscoveryContext(ctx)
+		defer cancel()
+		discovered, _ := driver.stack.ListProviderModelsForConfig(discoverCtx, connectModelConfigFromPayload(tpl, payload))
+		if len(discovered) == 0 {
+			discovered = driver.stack.ListProviderModels(tpl.provider)
+		}
+		fallbackModels = append(fallbackModels, discovered...)
 	}
 	choices := buildConnectModelChoices(stackForDriver(driver), tpl.provider, fallbackModels)
 	out := make([]SlashArgCandidate, 0, len(choices))
@@ -224,6 +230,16 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 		}
 	}
 	return out, nil
+}
+
+func providerModelDiscoveryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, 3*time.Second)
 }
 
 func connectDefaultsForConfig(ctx context.Context, cfg ConnectConfig) (connectModelDefaults, error) {
@@ -429,6 +445,46 @@ func buildConnectModelChoices(stack *DriverStack, provider string, fallbackModel
 		return strings.ToLower(out[i].Display) < strings.ToLower(out[j].Display)
 	})
 	return out
+}
+
+func connectModelConfigFromPayload(tpl providerTemplate, payload connectWizardPayload) ModelConfig {
+	baseURL := strings.TrimSpace(payload.BaseURL)
+	if baseURL == "" {
+		baseURL = tpl.defaultBaseURL
+	}
+	timeoutSeconds := payload.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = tuicommands.DefaultConnectTimeoutSeconds
+	}
+	endpoint, hasEndpoint := connectEndpointForBaseURL(tpl, baseURL)
+	api := tpl.api
+	if hasEndpoint && strings.TrimSpace(string(endpoint.api)) != "" {
+		api = endpoint.api
+	}
+	authType := defaultConnectAuthType(tpl.provider)
+	if tpl.noAuthRequired {
+		authType = model.AuthNone
+	}
+	cfg := ModelConfig{
+		Provider:            tpl.provider,
+		API:                 api,
+		Model:               strings.TrimSpace(payload.Model),
+		BaseURL:             baseURL,
+		AuthType:            authType,
+		ContextWindowTokens: payload.ContextWindowTokens,
+		MaxOutputTok:        payload.MaxOutputTokens,
+		Timeout:             time.Duration(timeoutSeconds) * time.Second,
+	}
+	if hasEndpoint {
+		cfg.EndpointID = strings.TrimSpace(endpoint.id)
+	}
+	tokenRef := strings.TrimSpace(payload.TokenRef)
+	if env, ok := parseTokenEnvSpec(tokenRef); ok {
+		cfg.TokenEnv = env
+	} else {
+		cfg.Token = tokenRef
+	}
+	return cfg
 }
 
 func fallbackConnectModels(stack *DriverStack, tpl providerTemplate) []string {

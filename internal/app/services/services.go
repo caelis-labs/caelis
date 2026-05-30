@@ -32,17 +32,18 @@ const (
 )
 
 type Services struct {
-	runtime   config.Runtime
-	engine    coreruntime.Engine
-	sandbox   sandbox.Runtime
-	agents    []AgentDescriptor
-	builtins  []AgentDescriptor
-	invokers  map[string]AgentInvoker
-	factory   AgentInvokerFactory
-	installer AgentInstaller
-	resources appresources.Catalog
-	settings  *appsettings.Manager
-	codefree  CodeFreeAuthenticator
+	runtime       config.Runtime
+	engine        coreruntime.Engine
+	sandbox       sandbox.Runtime
+	modelProvider ModelProviderFactory
+	agents        []AgentDescriptor
+	builtins      []AgentDescriptor
+	invokers      map[string]AgentInvoker
+	factory       AgentInvokerFactory
+	installer     AgentInstaller
+	resources     appresources.Catalog
+	settings      *appsettings.Manager
+	codefree      CodeFreeAuthenticator
 }
 
 type Config struct {
@@ -51,6 +52,7 @@ type Config struct {
 	UserID         string
 	Engine         coreruntime.Engine
 	Sandbox        sandbox.Runtime
+	ModelProvider  ModelProviderFactory
 	Agents         []AgentDescriptor
 	BuiltinAgents  []AgentDescriptor
 	Invokers       map[string]AgentInvoker
@@ -69,17 +71,18 @@ func New(cfg Config) (Services, error) {
 	runtimeCfg.AppName = firstNonEmpty(cfg.AppName, runtimeCfg.AppName, "caelis")
 	runtimeCfg.UserID = firstNonEmpty(cfg.UserID, runtimeCfg.UserID, "local-user")
 	return Services{
-		runtime:   runtimeCfg,
-		engine:    cfg.Engine,
-		sandbox:   cfg.Sandbox,
-		agents:    cloneAgents(cfg.Agents),
-		builtins:  cloneAgents(cfg.BuiltinAgents),
-		invokers:  maps.Clone(cfg.Invokers),
-		factory:   cfg.InvokerFactory,
-		installer: cfg.AgentInstaller,
-		resources: appresources.CloneCatalog(cfg.Resources),
-		settings:  cfg.Settings,
-		codefree:  cfg.CodeFree,
+		runtime:       runtimeCfg,
+		engine:        cfg.Engine,
+		sandbox:       cfg.Sandbox,
+		modelProvider: cfg.ModelProvider,
+		agents:        cloneAgents(cfg.Agents),
+		builtins:      cloneAgents(cfg.BuiltinAgents),
+		invokers:      maps.Clone(cfg.Invokers),
+		factory:       cfg.InvokerFactory,
+		installer:     cfg.AgentInstaller,
+		resources:     appresources.CloneCatalog(cfg.Resources),
+		settings:      cfg.Settings,
+		codefree:      cfg.CodeFree,
 	}, nil
 }
 
@@ -233,6 +236,8 @@ func (s SettingsService) Save(ctx context.Context, doc appsettings.Document) err
 type ModelService struct {
 	services Services
 }
+
+type ModelProviderFactory func(context.Context, appsettings.ModelConfig) (model.Provider, error)
 
 type CodeFreeAuthRequest struct {
 	BaseURL         string        `json:"base_url,omitempty"`

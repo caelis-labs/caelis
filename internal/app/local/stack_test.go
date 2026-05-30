@@ -39,6 +39,47 @@ func TestNewRequiresProvider(t *testing.T) {
 	}
 }
 
+func TestStackServicesListProviderModelsThroughRegistry(t *testing.T) {
+	ctx := context.Background()
+	var captured plugin.ModelProviderConfig
+	stack, err := NewWithContext(ctx, Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: t.TempDir(),
+		},
+		Model: config.ModelProfile{
+			Provider: "catalog-test",
+			Model:    "seed",
+			BaseURL:  "https://runtime.example.test/v1",
+		},
+		Contributions: []plugin.Contribution{contributionFunc(func(_ context.Context, reg plugin.Registry) error {
+			return reg.RegisterModelProvider("catalog-test", func(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+				captured = cfg
+				return catalogTestProvider{models: []model.ModelInfo{{ID: "remote-live", Provider: "catalog-test"}}}, nil
+			})
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	models, err := stack.Services().Models().ProviderModels(ctx, appsettings.ModelConfig{
+		Provider: "catalog-test",
+		BaseURL:  "https://models.example.test/v1",
+		Token:    "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(models) != 1 || models[0] != "remote-live" {
+		t.Fatalf("provider models = %#v, want registry-backed remote model", models)
+	}
+	if captured.Provider != "catalog-test" || captured.Endpoint != "https://models.example.test/v1" || captured.Token != "secret" {
+		t.Fatalf("provider factory cfg = %#v, want discovery config", captured)
+	}
+}
+
 func TestStackRunsTurnThroughServices(t *testing.T) {
 	provider := &capturingProvider{message: model.Message{
 		Role:  model.RoleAssistant,
@@ -1468,6 +1509,22 @@ func cloneMessages(in []model.Message) []model.Message {
 type scriptedProvider struct {
 	requests  []model.Request
 	responses []model.Message
+}
+
+type catalogTestProvider struct {
+	models []model.ModelInfo
+}
+
+func (p catalogTestProvider) ID() string {
+	return "catalog-test"
+}
+
+func (p catalogTestProvider) Models(context.Context) ([]model.ModelInfo, error) {
+	return append([]model.ModelInfo(nil), p.models...), nil
+}
+
+func (catalogTestProvider) Stream(context.Context, model.Request) (model.Stream, error) {
+	return &model.StaticStream{}, nil
 }
 
 type contributionFunc func(context.Context, plugin.Registry) error
