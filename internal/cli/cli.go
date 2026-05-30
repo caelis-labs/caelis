@@ -12,11 +12,14 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	applocal "github.com/OnslaughtSnail/caelis/internal/app/local"
+	coreacpserver "github.com/OnslaughtSnail/caelis/internal/surface/acpserver"
+	coreheadless "github.com/OnslaughtSnail/caelis/internal/surface/headless"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/surfaces/acpserver"
-	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
 
 type outputFormat string
@@ -137,15 +140,23 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return err
 	}
 	cfg.Assembly = assemblyFromEnv()
-	stack, err := gatewayapp.NewLocalStack(cfg)
-	if err != nil {
-		return err
-	}
 	if acpSubcommand {
-		return acpserver.ServeStdio(ctx, stack, stdin, stdout)
+		stack, err := newCoreLocalStack(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		return coreacpserver.ServeStdio(ctx, coreacpserver.Config{
+			Engine:  stack.Engine(),
+			AppName: cfg.AppName,
+			UserID:  cfg.UserID,
+		}, stdin, stdout)
 	}
 	if doctorSubcommand || *doctor {
 		outFmt, err := parseOutputFormat(*format)
+		if err != nil {
+			return err
+		}
+		stack, err := gatewayapp.NewLocalStack(cfg)
 		if err != nil {
 			return err
 		}
@@ -153,6 +164,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
+		if err != nil {
+			return err
+		}
+		stack, err := gatewayapp.NewLocalStack(cfg)
 		if err != nil {
 			return err
 		}
@@ -176,7 +191,15 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		if err != nil {
 			return err
 		}
-		return runHeadless(ctx, stack, preferredHeadlessSessionID(*sessionID), input, outFmt, stdout)
+		stack, err := newCoreLocalStack(ctx, cfg)
+		if err != nil {
+			return err
+		}
+		return runCoreHeadless(ctx, stack, cfg, preferredHeadlessSessionID(*sessionID), input, outFmt, stdout)
+	}
+	stack, err := gatewayapp.NewLocalStack(cfg)
+	if err != nil {
+		return err
 	}
 	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
 }
@@ -216,23 +239,79 @@ func preferredHeadlessSessionID(sessionID string) string {
 	return strings.TrimSpace(sessionID)
 }
 
-func runHeadless(ctx context.Context, stack *gatewayapp.Stack, sessionID string, input string, format outputFormat, stdout io.Writer) error {
-	session, err := stack.StartSession(ctx, sessionID, "cli-headless")
-	if err != nil {
-		return err
+func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.Stack, error) {
+	sandboxBackend := strings.ToLower(strings.TrimSpace(cfg.Sandbox.RequestedType))
+	if sandboxBackend == "" || sandboxBackend == "auto" {
+		sandboxBackend = "host"
 	}
-	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
-		SessionRef: session.SessionRef,
-		Input:      input,
-		Surface:    "headless",
-	}, headless.Options{})
+	modelProvider := coreModelProvider(cfg.Model.Provider)
+	return applocal.NewWithContext(ctx, applocal.Config{
+		Runtime: coreconfig.Runtime{
+			AppName:      cfg.AppName,
+			UserID:       cfg.UserID,
+			WorkspaceKey: cfg.WorkspaceKey,
+			WorkspaceCWD: cfg.WorkspaceCWD,
+			Model:        strings.TrimSpace(cfg.Model.Model),
+			Store: coreconfig.Store{
+				Backend: "jsonl",
+				URI:     cfg.StoreDir,
+			},
+			Sandbox: coreconfig.Sandbox{
+				Backend:    sandboxBackend,
+				HelperPath: cfg.Sandbox.HelperPath,
+			},
+		},
+		Model: coreconfig.ModelProfile{
+			ID:                  firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Provider), "cli"),
+			Alias:               strings.TrimSpace(cfg.Model.Alias),
+			Provider:            modelProvider,
+			Model:               strings.TrimSpace(cfg.Model.Model),
+			BaseURL:             strings.TrimSpace(cfg.Model.BaseURL),
+			Token:               strings.TrimSpace(cfg.Model.Token),
+			TokenEnv:            strings.TrimSpace(cfg.Model.TokenEnv),
+			AuthType:            string(cfg.Model.AuthType),
+			HeaderKey:           strings.TrimSpace(cfg.Model.HeaderKey),
+			ContextWindowTokens: cfg.ContextWindow,
+			MaxOutputTokens:     cfg.Model.MaxOutputTok,
+			Meta: map[string]any{
+				"cli_provider": strings.TrimSpace(cfg.Model.Provider),
+				"cli_api":      string(cfg.Model.API),
+			},
+		},
+		BuiltinTools: true,
+	})
+}
+
+func coreModelProvider(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "", "openai", "openai_compatible", "openai-compatible":
+		return "openai_compatible"
+	default:
+		return "openai_compatible"
+	}
+}
+
+func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg gatewayapp.Config, sessionID string, input string, format outputFormat, stdout io.Writer) error {
+	result, err := coreheadless.RunOnce(ctx, coreheadless.Request{
+		Services:           stack.Services(),
+		PreferredSessionID: strings.TrimSpace(sessionID),
+		Workspace: coresession.Workspace{
+			Key: cfg.WorkspaceKey,
+			CWD: cfg.WorkspaceCWD,
+		},
+		Title:          "cli-headless",
+		Input:          input,
+		Model:          strings.TrimSpace(cfg.Model.Model),
+		Surface:        "headless",
+		ApprovalPolicy: coreheadless.ApprovalPolicyAutoDeny,
+	})
 	if err != nil {
 		return err
 	}
 	return writeResult(stdout, format, runResult{
-		SessionID:    session.SessionID,
+		SessionID:    result.Session.SessionID,
 		Output:       strings.TrimSpace(result.Output),
-		PromptTokens: result.PromptTokens,
+		PromptTokens: result.Usage.InputTokens,
 	})
 }
 

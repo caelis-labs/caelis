@@ -761,6 +761,9 @@ The completed work is intentionally limited to the reusable skeleton:
   results, and is covered by a new local-stack e2e path using settings model
   routing, the OpenAI-compatible adapter, host sandbox tools, and canonical
   persistence.
+- Production CLI baseline for headless and ACP stdio: `internal/cli` now routes
+  single-shot prompts and the `caelis acp` subcommand through the new
+  `internal/app/local` service stack and core-native surfaces.
 - Shared TUI/APP view-model projection for transcript, current plan, pending
   approvals, and participants.
 - Core-native ACP server for initialize, session/new, session/prompt, cancel,
@@ -778,10 +781,12 @@ These are product capabilities still owned by the old implementation and must
 be migrated before retiring the old stack:
 
 1. CLI and process entrypoints
-   - `cmd/caelis` and `internal/cli` still route interactive, headless, doctor,
-     sandbox, and ACP subcommands through `app/gatewayapp` and `kernel.Service`.
-   - The new stack has no production CLI argument mapping, default home layout,
-     config hydration, output formatting, or command dispatch.
+   - Migrated baseline: single-shot headless prompts and `caelis acp` now build
+     the new `internal/app/local` stack directly and use core-native headless
+     and ACP server surfaces.
+   - Still pending: interactive TUI, doctor, sandbox setup/fix/reset/clean,
+     default home layout, full config hydration, setup diagnostics, and command
+     dispatch still depend on `app/gatewayapp` and `kernel.Service`.
 
 2. TUI surface
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
@@ -800,9 +805,11 @@ be migrated before retiring the old stack:
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
      one-shot runner exists with text/JSON output and approval policy hooks.
-   - Still pending: production CLI entrypoint wiring; the old product
-     `surfaces/headless` and current product `surfaces/acpserver` still use old
-     contracts.
+   - Migrated baseline: production single-shot CLI execution and `caelis acp`
+     stdio serving now enter the new local service stack instead of old
+     `surfaces/headless` or `surfaces/acpserver`.
+   - Still pending: old package cleanup after remaining entrypoints move,
+     production settings/config parity, and richer ACP surface behavior.
    - The new ACP server is minimal and does not yet expose load-session,
      terminal integration, client mode/config flows, session resume, or the full
      behavior covered by current public ACP e2e tests.
@@ -913,16 +920,14 @@ Recommended sequence:
    tools.
 4. Port spawn and durable task runtime behavior behind `core/tool.Registry`
    and `internal/engine/tasks`.
-5. Wire the production headless CLI and ACP stdio entry to the new service
-   facade, with e2e parity tests.
-6. Port TUI driver commands to `internal/app/services`, preserving existing
+5. Port TUI driver commands to `internal/app/services`, preserving existing
    rendering as surface-local code.
-7. Expand shared APP view models for status, settings, agents, models,
+6. Expand shared APP view models for status, settings, agents, models,
    approvals, tasks, and live transcript actions.
-8. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
+7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
    to canonical events.
-9. Add full store round-trip and ACP projection parity tests for product flows.
-10. Delete the old runtime stack once the new entrypoints satisfy current CLI,
+8. Add full store round-trip and ACP projection parity tests for product flows.
+9. Delete the old runtime stack once the new entrypoints satisfy current CLI,
     TUI, ACP, and eval behavior.
 
 ## Validation Gates

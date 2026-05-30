@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,6 +245,66 @@ func TestRunACPSubcommandConstructsStdioServer(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreLocalStack(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var captured struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"gpt-test",
+			"choices":[{"message":{"role":"assistant","content":"core pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "openai",
+		"-model", "gpt-test",
+		"-base-url", server.URL,
+		"-auth-type", "none",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "core pong" || result.PromptTokens != 3 || strings.TrimSpace(result.SessionID) == "" {
+		t.Fatalf("headless result = %#v, want core output and usage", result)
+	}
+	if captured.Model != "gpt-test" || len(captured.Messages) == 0 || captured.Messages[len(captured.Messages)-1].Role != "user" {
+		t.Fatalf("captured request = %#v", captured)
+	}
+	if !capturedCLITool(captured.Tools, "task") || !capturedCLITool(captured.Tools, "write_file") {
+		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
+	}
+}
+
 func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer
@@ -397,6 +459,19 @@ func TestRunSandboxCleanSubcommandAliasesReset(t *testing.T) {
 	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
 		t.Fatalf("sandbox clean output = %q, want requested host backend", out.String())
 	}
+}
+
+func capturedCLITool(tools []struct {
+	Function struct {
+		Name string `json:"name"`
+	} `json:"function"`
+}, name string) bool {
+	for _, item := range tools {
+		if item.Function.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 type fakeHandle struct {
