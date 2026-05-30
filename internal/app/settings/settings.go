@@ -25,6 +25,7 @@ import (
 type Document struct {
 	Runtime        config.Runtime              `json:"runtime,omitempty"`
 	Models         ModelCatalog                `json:"models,omitempty"`
+	Compaction     CompactionPolicy            `json:"compaction,omitempty"`
 	Agents         []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
 	DisabledAgents []string                    `json:"disabled_acp_agents,omitempty"`
 	Meta           map[string]any              `json:"meta,omitempty"`
@@ -83,6 +84,11 @@ type ModelChoice struct {
 	BaseURL    string `json:"base_url,omitempty"`
 	Detail     string `json:"detail,omitempty"`
 	Default    bool   `json:"default,omitempty"`
+}
+
+type CompactionPolicy struct {
+	Prompt         string `json:"prompt,omitempty"`
+	MaxSourceChars int    `json:"max_source_chars,omitempty"`
 }
 
 type Store interface {
@@ -290,6 +296,30 @@ func (m *Manager) ListModelChoices() ([]ModelChoice, error) {
 		return nil, err
 	}
 	return index.choices(), nil
+}
+
+func (m *Manager) CompactionPolicy() CompactionPolicy {
+	if m == nil {
+		return CompactionPolicy{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return NormalizeCompactionPolicy(m.doc.Compaction)
+}
+
+func (m *Manager) SetCompactionPolicy(ctx context.Context, policy CompactionPolicy) (CompactionPolicy, error) {
+	if m == nil {
+		return CompactionPolicy{}, errors.New("app/settings: manager is nil")
+	}
+	policy = NormalizeCompactionPolicy(policy)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc := CloneDocument(m.doc)
+	doc.Compaction = policy
+	if err := m.saveDocumentLocked(ctx, doc); err != nil {
+		return CompactionPolicy{}, err
+	}
+	return policy, nil
 }
 
 func (m *Manager) ListACPAgents() []plugin.ACPAgentDescriptor {
@@ -632,10 +662,19 @@ func (i *modelIndex) profileReferenced(profileID string) bool {
 func NormalizeDocument(doc Document) Document {
 	doc.Runtime = cloneRuntime(doc.Runtime)
 	doc.Models = NormalizeModelCatalog(doc.Models)
+	doc.Compaction = NormalizeCompactionPolicy(doc.Compaction)
 	doc.Agents = cloneAgents(doc.Agents)
 	doc.DisabledAgents = normalizeAgentNames(doc.DisabledAgents)
 	doc.Meta = maps.Clone(doc.Meta)
 	return doc
+}
+
+func NormalizeCompactionPolicy(policy CompactionPolicy) CompactionPolicy {
+	policy.Prompt = strings.TrimSpace(policy.Prompt)
+	if policy.MaxSourceChars < 0 {
+		policy.MaxSourceChars = 0
+	}
+	return policy
 }
 
 func NormalizeModelCatalog(catalog ModelCatalog) ModelCatalog {
@@ -829,6 +868,9 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 	if len(loaded.Models.Configs) > 0 || len(loaded.Models.Profiles) > 0 || strings.TrimSpace(loaded.Models.DefaultID) != "" {
 		out.Models = loaded.Models
 	}
+	if compactionPolicyConfigured(loaded.Compaction) {
+		out.Compaction = loaded.Compaction
+	}
 	if len(loaded.Agents) > 0 {
 		out.Agents = loaded.Agents
 	}
@@ -839,6 +881,11 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 		out.Meta = maps.Clone(loaded.Meta)
 	}
 	return NormalizeDocument(out)
+}
+
+func compactionPolicyConfigured(policy CompactionPolicy) bool {
+	policy = NormalizeCompactionPolicy(policy)
+	return policy.Prompt != "" || policy.MaxSourceChars > 0
 }
 
 func modelCarriesProfileAuth(cfg ModelConfig) bool {

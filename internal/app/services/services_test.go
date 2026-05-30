@@ -769,6 +769,71 @@ func TestCompactionUsesConfiguredModelProvider(t *testing.T) {
 	}
 }
 
+func TestCompactionUsesConfiguredPromptPolicy(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-policy",
+		BaseURL:  "https://api.example.test/v1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-policy", WorkspaceKey: "repo"}},
+		Events: []session.Event{{
+			ID:   "evt-policy",
+			Type: session.EventUser,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("policy source fact " + strings.Repeat("x", 120) + " END_MARKER")},
+			},
+		}},
+	}}
+	provider := &compactSummaryProvider{response: "CONTEXT CHECKPOINT\n\nPolicy summary"}
+	svc, err := New(Config{
+		Runtime:       config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:        engine,
+		Settings:      manager,
+		ModelProvider: func(context.Context, appsettings.ModelConfig) (model.Provider, error) { return provider, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := svc.Compaction().SetPolicy(ctx, CompactPromptPolicy{
+		Prompt:         "MIGRATION_POLICY_MARKER: write only durable facts.",
+		MaxSourceChars: 80,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.Source != "settings" || policy.MaxSourceChars != 80 {
+		t.Fatalf("policy = %#v, want settings policy", policy)
+	}
+
+	event, err := svc.Compaction().Compact(ctx, CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-policy"}})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	prompt := provider.request.Messages[0].TextContent()
+	if !strings.Contains(prompt, "MIGRATION_POLICY_MARKER") || strings.Contains(prompt, "Preserve durable objective") {
+		t.Fatalf("compact prompt = %q, want configured prompt policy without default instructions", prompt)
+	}
+	if strings.Contains(prompt, "END_MARKER") {
+		t.Fatalf("compact prompt = %q, want max_source_chars to bound source text", prompt)
+	}
+	meta, ok := event.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("compact meta = %#v, want compact metadata map", event.Meta)
+	}
+	if meta["prompt_policy"] != "settings" || meta["max_source_chars"] != 80 {
+		t.Fatalf("compact meta = %#v, want prompt policy metadata", meta)
+	}
+}
+
 func TestCompactionFallsBackWhenModelProviderReturnsNoCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

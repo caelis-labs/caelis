@@ -129,6 +129,48 @@ func TestManagerModelCatalogSupportsProfilesAliasesAndDefaults(t *testing.T) {
 	}
 }
 
+func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileStore(t.TempDir())
+	manager, err := NewManager(ctx, store, Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := manager.SetCompactionPolicy(ctx, CompactionPolicy{
+		Prompt:         "  Write a terse checkpoint.  ",
+		MaxSourceChars: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.Prompt != "Write a terse checkpoint." || policy.MaxSourceChars != 0 {
+		t.Fatalf("policy = %#v, want normalized prompt and non-negative max chars", policy)
+	}
+	if got := manager.CompactionPolicy(); got != policy {
+		t.Fatalf("CompactionPolicy() = %#v, want %#v", got, policy)
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Compaction.Prompt != "Write a terse checkpoint." {
+		t.Fatalf("persisted compaction policy = %#v, want prompt", doc.Compaction)
+	}
+	loaded, err := NewManager(ctx, store, Document{
+		Compaction: CompactionPolicy{Prompt: "default prompt", MaxSourceChars: 10},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.CompactionPolicy(); got.Prompt != "Write a terse checkpoint." || got.MaxSourceChars != 0 {
+		t.Fatalf("loaded compaction policy = %#v, want persisted override", got)
+	}
+}
+
 func TestManagerACPAgentUpsertDeletePersistsNormalizedAgents(t *testing.T) {
 	ctx := context.Background()
 	store := NewFileStore(t.TempDir())

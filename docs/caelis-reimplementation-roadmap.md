@@ -1117,9 +1117,10 @@ be migrated before retiring the old stack:
      connect/delete/default/use service methods, session model override state,
      context window/output token fields, reasoning effort fields, auth/header
      fields, request-time model router, session reasoning override propagation,
-     session mode service, and ACP stdio model/config/mode projection backed by
-     shared app services. The TUI gateway driver also has a service-native
-     binding for model connect/list/use/delete and session mode set/cycle.
+     session mode service, compaction prompt policy, and ACP stdio
+     model/config/mode projection backed by shared app services. The TUI
+     gateway driver also has a service-native binding for model
+     connect/list/use/delete and session mode set/cycle.
    - Migrated baseline: shared model catalog data now provides configured
      provider models, built-in provider model presets, capability defaults, and
      reasoning levels to TUI/future APP setup flows through `ModelService`.
@@ -1341,9 +1342,13 @@ be migrated before retiring the old stack:
       top-level usage metadata, and shared app status view-models aggregate
       canonical event usage across main, subagent, auto-review, and compaction
       buckets for TUI and future APP consumers.
-    - Still pending: automatic compaction, configurable compaction prompt
-      policy, post-compaction budget estimation, and full runtime-vs-reload
-      semantic round-trip tests remain to be migrated.
+    - Migrated baseline: compaction prompt policy is now part of shared app
+      settings and `CompactionService`, with configurable checkpoint
+      instructions for model-backed summaries and source-character budget
+      metadata applied by both model-backed and deterministic fallback paths.
+    - Still pending: automatic compaction, post-compaction budget estimation,
+      and full runtime-vs-reload semantic round-trip tests remain to be
+      migrated.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill

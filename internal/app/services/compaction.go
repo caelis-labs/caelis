@@ -10,6 +10,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 )
 
 const (
@@ -28,6 +29,13 @@ type CompactSessionRequest struct {
 	SessionRef session.Ref `json:"session_ref,omitempty"`
 	Trigger    string      `json:"trigger,omitempty"`
 	MaxChars   int         `json:"max_chars,omitempty"`
+	Prompt     string      `json:"prompt,omitempty"`
+}
+
+type CompactPromptPolicy struct {
+	Prompt         string `json:"prompt,omitempty"`
+	MaxSourceChars int    `json:"max_source_chars,omitempty"`
+	Source         string `json:"source,omitempty"`
 }
 
 func (s CompactionService) Compact(ctx context.Context, req CompactSessionRequest) (session.Event, error) {
@@ -57,37 +65,63 @@ func (s CompactionService) Compact(ctx context.Context, req CompactSessionReques
 	return session.CloneEvent(event), nil
 }
 
+func (s CompactionService) Policy(context.Context) (CompactPromptPolicy, error) {
+	settingsPolicy := appsettings.CompactionPolicy{}
+	if s.services.settings != nil {
+		settingsPolicy = s.services.settings.CompactionPolicy()
+	}
+	return compactPromptPolicy(CompactSessionRequest{}, settingsPolicy), nil
+}
+
+func (s CompactionService) SetPolicy(ctx context.Context, policy CompactPromptPolicy) (CompactPromptPolicy, error) {
+	if s.services.settings == nil {
+		return CompactPromptPolicy{}, errors.New("app/services: settings manager is not configured")
+	}
+	saved, err := s.services.settings.SetCompactionPolicy(ctx, appsettings.CompactionPolicy{
+		Prompt:         policy.Prompt,
+		MaxSourceChars: policy.MaxSourceChars,
+	})
+	if err != nil {
+		return CompactPromptPolicy{}, err
+	}
+	return compactPromptPolicy(CompactSessionRequest{}, saved), nil
+}
+
 func (s CompactionService) compactText(ctx context.Context, snapshot session.Snapshot, source []session.Event, req CompactSessionRequest) (string, *model.Usage, map[string]any, error) {
-	fallback := compactText(source, req.MaxChars)
+	settingsPolicy := appsettings.CompactionPolicy{}
+	if s.services.settings != nil {
+		settingsPolicy = s.services.settings.CompactionPolicy()
+	}
+	policy := compactPromptPolicy(req, settingsPolicy)
+	fallback := compactText(source, policy.MaxSourceChars)
+	meta := compactPolicyMeta(policy)
 	if s.services.modelProvider == nil || s.services.settings == nil {
-		return fallback, nil, nil, nil
+		return fallback, nil, meta, nil
 	}
 	cfg, ok, err := s.services.Models().Current(ctx, snapshot.Session.Ref)
 	if err != nil {
 		return "", nil, nil, err
 	}
 	if !ok {
-		return fallback, nil, nil, nil
+		return fallback, nil, meta, nil
 	}
 	provider, err := s.services.modelProvider(ctx, cfg)
 	if err != nil {
 		return "", nil, nil, err
 	}
-	response, err := compactProviderResponse(ctx, provider, cfg.Model, compactPrompt(source, req.MaxChars))
+	response, err := compactProviderResponse(ctx, provider, cfg.Model, compactPrompt(source, policy))
 	if err != nil {
 		if errors.Is(err, errCompactNoModelResponse) {
-			return fallback, nil, nil, nil
+			return fallback, nil, meta, nil
 		}
 		return "", nil, nil, err
 	}
 	text := normalizeCompactModelText(response.Message.TextContent(), fallback)
 	usage := cloneModelUsage(response.Usage)
-	meta := map[string]any{
-		"generator":      "app-services/model",
-		"model_id":       strings.TrimSpace(cfg.ID),
-		"model_provider": strings.TrimSpace(cfg.Provider),
-		"model":          strings.TrimSpace(cfg.Model),
-	}
+	meta["generator"] = "app-services/model"
+	meta["model_id"] = strings.TrimSpace(cfg.ID)
+	meta["model_provider"] = strings.TrimSpace(cfg.Provider)
+	meta["model"] = strings.TrimSpace(cfg.Model)
 	if usage != nil {
 		meta["usage"] = modelUsageMeta(*usage)
 	}
@@ -135,15 +169,61 @@ func compactProviderResponse(ctx context.Context, provider model.Provider, model
 	return *final, nil
 }
 
-func compactPrompt(source []session.Event, maxChars int) string {
+func compactPrompt(source []session.Event, policy CompactPromptPolicy) string {
+	instructions := strings.TrimSpace(policy.Prompt)
+	if instructions == "" {
+		instructions = defaultCompactPrompt()
+	}
+	return strings.Join([]string{
+		instructions,
+		"",
+		compactText(source, policy.MaxSourceChars),
+	}, "\n")
+}
+
+func defaultCompactPrompt() string {
 	return strings.Join([]string{
 		"Create a durable context checkpoint for this coding-agent session.",
 		"Return only the checkpoint text. Start with CONTEXT CHECKPOINT.",
 		"Preserve durable objective, current progress, blockers, decisions, file facts, task handles, validation results, and next actions.",
 		"Drop stale repetition, transient UI chatter, and low-value narration.",
-		"",
-		compactText(source, maxChars),
 	}, "\n")
+}
+
+func compactPromptPolicy(req CompactSessionRequest, settingsPolicy appsettings.CompactionPolicy) CompactPromptPolicy {
+	settingsPolicy = appsettings.NormalizeCompactionPolicy(settingsPolicy)
+	out := CompactPromptPolicy{
+		Prompt:         settingsPolicy.Prompt,
+		MaxSourceChars: settingsPolicy.MaxSourceChars,
+		Source:         "settings",
+	}
+	if out.Prompt == "" {
+		out.Prompt = defaultCompactPrompt()
+		out.Source = "default"
+	}
+	if req.MaxChars > 0 {
+		out.MaxSourceChars = req.MaxChars
+	}
+	if out.MaxSourceChars <= 0 {
+		out.MaxSourceChars = defaultCompactMaxChars
+	}
+	if prompt := strings.TrimSpace(req.Prompt); prompt != "" {
+		out.Prompt = prompt
+		out.Source = "request"
+	}
+	return out
+}
+
+func compactPolicyMeta(policy CompactPromptPolicy) map[string]any {
+	out := map[string]any{}
+	source := strings.TrimSpace(policy.Source)
+	if source != "" {
+		out["prompt_policy"] = source
+	}
+	if policy.MaxSourceChars > 0 {
+		out["max_source_chars"] = policy.MaxSourceChars
+	}
+	return out
 }
 
 func normalizeCompactModelText(text string, fallback string) string {
