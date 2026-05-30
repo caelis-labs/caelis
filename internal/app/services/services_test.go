@@ -1701,6 +1701,19 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 				ID:   "agents.workspace",
 				Path: "AGENTS.md",
 			}},
+			Diagnostics: []appresources.Diagnostic{{
+				Severity: appresources.DiagnosticInfo,
+				Kind:     "agent_file",
+				ID:       "agents.workspace",
+				Path:     "AGENTS.md",
+				Message:  "agent instruction file loaded",
+				Meta:     map[string]string{"scope": "workspace"},
+			}, {
+				Severity: appresources.DiagnosticWarning,
+				Kind:     "skill_root",
+				Path:     "/missing-skill-root",
+				Message:  "skill root is not a directory",
+			}},
 		},
 	})
 	if err != nil {
@@ -1779,15 +1792,22 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	if status.Resources.Tools != 1 || status.Resources.Prompts != 1 || status.Resources.AgentFiles != 1 {
 		t.Fatalf("resource status = %#v, want tool/prompt/agent file counts", status.Resources)
 	}
+	if status.Resources.InfoCount != 1 || status.Resources.WarningCount != 1 || status.Resources.ErrorCount != 0 || len(status.Resources.Diagnostics) != 2 {
+		t.Fatalf("resource diagnostics = %#v, want info/warning diagnostics", status.Resources)
+	}
 
 	status.Agents.Items[0].Args[0] = "changed"
 	status.Agents.Items[0].Meta["scope"] = "changed"
+	status.Resources.Diagnostics[0].Meta["scope"] = "changed"
 	again, err := svc.Status().View(ctx, StatusRequest{SessionRef: session.Ref{SessionID: "sess-1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if again.Agents.Items[0].Args[0] != "--stdio" || again.Agents.Items[0].Meta["scope"] != "workspace" {
 		t.Fatalf("agent status was not cloned: %#v", again.Agents.Items[0])
+	}
+	if again.Resources.Diagnostics[0].Meta["scope"] != "workspace" {
+		t.Fatalf("resource diagnostics were not cloned: %#v", again.Resources.Diagnostics[0])
 	}
 }
 

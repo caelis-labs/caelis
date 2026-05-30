@@ -114,6 +114,22 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 	if len(catalog.AgentFiles) != 2 {
 		t.Fatalf("agent files = %#v, want global and workspace", catalog.AgentFiles)
 	}
+	for _, want := range []Diagnostic{
+		{Kind: "plugin", ID: "disabled", Message: "plugin disabled"},
+		{Kind: "plugin", ID: "reviewer", Message: "plugin loaded"},
+		{Kind: "agent_file", ID: "agents.workspace", Message: "agent instruction file loaded"},
+		{Kind: "skill", ID: "echo", Message: "skill overrides earlier discovery"},
+		{Kind: "skill_root", Path: filepath.Join(workspace, ".agents", "skills"), Message: "skill root scanned"},
+	} {
+		if !hasDiagnostic(catalog.Diagnostics, want) {
+			t.Fatalf("diagnostics = %#v, missing %#v", catalog.Diagnostics, want)
+		}
+	}
+	clone := CloneCatalog(catalog)
+	clone.Diagnostics[0].Meta = map[string]string{"mutated": "true"}
+	if len(catalog.Diagnostics[0].Meta) != 0 {
+		t.Fatalf("diagnostic meta was not cloned: %#v", catalog.Diagnostics[0].Meta)
+	}
 }
 
 func TestSkillRootsIncludeSystemWorkspaceUserAndExtraDirs(t *testing.T) {
@@ -208,4 +224,23 @@ func skillNames(skills []plugin.SkillDescriptor) []string {
 		out = append(out, skill.Name)
 	}
 	return out
+}
+
+func hasDiagnostic(diagnostics []Diagnostic, want Diagnostic) bool {
+	for _, diagnostic := range diagnostics {
+		if want.Kind != "" && diagnostic.Kind != want.Kind {
+			continue
+		}
+		if want.ID != "" && diagnostic.ID != want.ID {
+			continue
+		}
+		if want.Path != "" && diagnostic.Path != want.Path {
+			continue
+		}
+		if want.Message != "" && diagnostic.Message != want.Message {
+			continue
+		}
+		return true
+	}
+	return false
 }

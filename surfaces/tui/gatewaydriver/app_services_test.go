@@ -9,10 +9,12 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
+	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -82,6 +84,13 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 		Engine:   engine,
 		Sandbox:  sandboxRuntime,
 		Settings: manager,
+		Resources: appresources.Catalog{
+			Skills: []plugin.SkillDescriptor{{
+				Name:        "lint",
+				Description: "Run lint checks",
+				Paths:       []string{workspaceCWD + "/.agents/skills/lint/SKILL.md"},
+			}},
+		},
 		CodeFree: codeFreeAuth,
 		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (coremodel.Provider, error) {
 			providerDiscovery = cfg
@@ -129,6 +138,13 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	if defaults.ContextWindow != 1048576 || defaults.MaxOutput != 32768 || !equalStrings(defaults.ReasoningLevels, []string{"none", "high", "max"}) {
 		t.Fatalf("connect defaults = %#v, want app-service capability catalog", defaults)
+	}
+	skills, err := driver.CompleteSkill(ctx, "lin", 10)
+	if err != nil {
+		t.Fatalf("CompleteSkill() error = %v", err)
+	}
+	if len(skills) != 1 || skills[0].Value != "lint" || !strings.Contains(skills[0].Detail, "Run lint checks") {
+		t.Fatalf("CompleteSkill() = %#v, want app-service resource skill metadata", skills)
 	}
 	connected, err := stack.Connect(ModelConfig{
 		Alias:    "next-model",

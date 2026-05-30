@@ -92,16 +92,29 @@ type AgentItem struct {
 }
 
 type ResourceStatus struct {
-	Plugins        int `json:"plugins,omitempty"`
-	ModelProviders int `json:"model_providers,omitempty"`
-	Stores         int `json:"stores,omitempty"`
-	Sandboxes      int `json:"sandbox_backends,omitempty"`
-	Tools          int `json:"tools,omitempty"`
-	Prompts        int `json:"prompts,omitempty"`
-	Skills         int `json:"skills,omitempty"`
-	ACPAgents      int `json:"acp_agents,omitempty"`
-	RendererHints  int `json:"renderer_hints,omitempty"`
-	AgentFiles     int `json:"agent_files,omitempty"`
+	Plugins        int                  `json:"plugins,omitempty"`
+	ModelProviders int                  `json:"model_providers,omitempty"`
+	Stores         int                  `json:"stores,omitempty"`
+	Sandboxes      int                  `json:"sandbox_backends,omitempty"`
+	Tools          int                  `json:"tools,omitempty"`
+	Prompts        int                  `json:"prompts,omitempty"`
+	Skills         int                  `json:"skills,omitempty"`
+	ACPAgents      int                  `json:"acp_agents,omitempty"`
+	RendererHints  int                  `json:"renderer_hints,omitempty"`
+	AgentFiles     int                  `json:"agent_files,omitempty"`
+	InfoCount      int                  `json:"info_count,omitempty"`
+	WarningCount   int                  `json:"warning_count,omitempty"`
+	ErrorCount     int                  `json:"error_count,omitempty"`
+	Diagnostics    []ResourceDiagnostic `json:"diagnostics,omitempty"`
+}
+
+type ResourceDiagnostic struct {
+	Severity string            `json:"severity,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	ID       string            `json:"id,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
 }
 
 type UsageStatus struct {

@@ -1042,6 +1042,10 @@ be migrated before retiring the old stack:
      TUI binding, and successful installs or updates persist the managed
      adapter binary path in shared settings instead of routing through
      `gatewayapp`.
+   - Migrated baseline: TUI `$skill` completion now has a service-native path
+     through the shared app resource catalog. The app-service binding projects
+     discovered skill descriptors into the existing completion DTO instead of
+     calling the old gateway skill discovery service.
    - Migrated baseline: `/agent use <agent|local>` now records canonical
      controller handoff events through the app-service TUI gateway. When an ACP
      controller is active, normal TUI submissions are routed to the registered
@@ -1093,9 +1097,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
      `internal/app/services.Status().View()` provide a service-native,
      surface-neutral status contract for runtime identity, current session
-     summary, model selection, session mode, agents, resource counts, and store
-     identity. This gives TUI and the future APP a shared status/diagnostics
-     panel input without importing `gatewayapp` or any TUI package.
+     summary, model selection, session mode, agents, resource counts, resource
+     diagnostics, and store identity. This gives TUI and the future APP a
+     shared status/diagnostics panel input without importing `gatewayapp` or
+     any TUI package.
    - Migrated baseline: `internal/app/services.ControllerService` gives both
      TUI and the future APP the same controller config-intent contract for an
      active ACP controller, keeping controller model/reasoning/mode state out
@@ -1586,9 +1591,19 @@ be migrated before retiring the old stack:
       including system, user, workspace, and configured roots. This keeps skill
       installation/editing policy out of surfaces and ready for future non-host
       sandbox backends.
+    - Migrated baseline: resource discovery now records normalized diagnostics
+      for plugin sources, `AGENTS.md` files, skill roots, loaded skills, and
+      skill override decisions. `ResourceService` and the shared status view
+      expose those diagnostics with severity counters for TUI and future APP
+      consumers.
+    - Migrated baseline: the app-service TUI binding now uses the shared
+      resource catalog for `$skill` completion, removing another interactive
+      path that previously had to call old gateway prompt/skill discovery
+      helpers.
     - Still pending: finer-grained prompt policy controls beyond skill loading
-      and compaction, richer resource diagnostics, and removal of the remaining
-      old gateway prompt/skill discovery helpers still need migration.
+      and compaction, diagnostic rendering/repair actions, and removal of the
+      remaining old gateway prompt/skill discovery helpers still need
+      migration.
 
 14. Rendering and display semantics
     - The new view model is intentionally small.

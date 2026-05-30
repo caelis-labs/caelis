@@ -598,6 +598,10 @@ func (s ResourceService) Catalog(context.Context) (appresources.Catalog, error) 
 	return appresources.CloneCatalog(s.services.resources), nil
 }
 
+func (s ResourceService) Diagnostics(context.Context) ([]appresources.Diagnostic, error) {
+	return cloneResourceDiagnostics(s.services.resources.Diagnostics), nil
+}
+
 type SandboxService struct {
 	services Services
 }
@@ -1870,7 +1874,7 @@ func statusAgentView(in []AgentDescriptor) appviewmodel.AgentStatus {
 }
 
 func statusResourceView(in appresources.Catalog) appviewmodel.ResourceStatus {
-	return appviewmodel.ResourceStatus{
+	out := appviewmodel.ResourceStatus{
 		Plugins:        len(in.Plugins),
 		ModelProviders: len(in.ModelProviders),
 		Stores:         len(in.Stores),
@@ -1882,6 +1886,48 @@ func statusResourceView(in appresources.Catalog) appviewmodel.ResourceStatus {
 		RendererHints:  len(in.RendererHints),
 		AgentFiles:     len(in.AgentFiles),
 	}
+	out.Diagnostics = resourceDiagnosticsView(in.Diagnostics)
+	for _, diagnostic := range out.Diagnostics {
+		switch diagnostic.Severity {
+		case appresources.DiagnosticWarning:
+			out.WarningCount++
+		case appresources.DiagnosticError:
+			out.ErrorCount++
+		default:
+			out.InfoCount++
+		}
+	}
+	return out
+}
+
+func resourceDiagnosticsView(in []appresources.Diagnostic) []appviewmodel.ResourceDiagnostic {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ResourceDiagnostic, 0, len(in))
+	for _, item := range cloneResourceDiagnostics(in) {
+		out = append(out, appviewmodel.ResourceDiagnostic{
+			Severity: strings.TrimSpace(item.Severity),
+			Kind:     strings.TrimSpace(item.Kind),
+			ID:       strings.TrimSpace(item.ID),
+			Path:     strings.TrimSpace(item.Path),
+			Message:  strings.TrimSpace(item.Message),
+			Meta:     maps.Clone(item.Meta),
+		})
+	}
+	return out
+}
+
+func cloneResourceDiagnostics(in []appresources.Diagnostic) []appresources.Diagnostic {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appresources.Diagnostic, 0, len(in))
+	for _, item := range in {
+		item.Meta = maps.Clone(item.Meta)
+		out = append(out, item)
+	}
+	return out
 }
 
 func stateString(state session.State, key string) string {

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
@@ -15,6 +16,7 @@ import (
 	portscontroller "github.com/OnslaughtSnail/caelis/ports/controller"
 	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
+	portskill "github.com/OnslaughtSnail/caelis/ports/skill"
 )
 
 func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack {
@@ -99,6 +101,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.EnsureCodeFreeModelSelectionAuthFn = func(ctx context.Context, req CodeFreeAuthRequest) error {
 		_, err := svc.Models().EnsureCodeFreeModelSelectionAuth(ctx, codeFreeAuthRequestToApp(req))
 		return err
+	}
+	stack.DiscoverSkillsFn = func(ctx context.Context, _ string) ([]portskill.Meta, error) {
+		catalog, err := svc.Resources().Catalog(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return skillMetasFromApp(catalog.Skills), nil
 	}
 	stack.ConnectFn = func(cfg ModelConfig) (string, error) {
 		connected, err := svc.Models().Connect(context.Background(), modelConfigToApp(cfg))
@@ -448,6 +457,25 @@ func codeFreeAuthRequestToApp(req CodeFreeAuthRequest) appservices.CodeFreeAuthR
 		OpenBrowser:     req.OpenBrowser,
 		CallbackTimeout: req.CallbackTimeout,
 	}
+}
+
+func skillMetasFromApp(skills []plugin.SkillDescriptor) []portskill.Meta {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]portskill.Meta, 0, len(skills))
+	for _, item := range skills {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, portskill.Meta{
+			Name:        name,
+			Description: strings.TrimSpace(item.Description),
+			Path:        firstNonEmpty(item.Paths...),
+		})
+	}
+	return out
 }
 
 func sandboxStatusFromApp(status appservices.SandboxStatus) SandboxStatus {

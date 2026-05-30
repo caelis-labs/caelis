@@ -37,6 +37,7 @@ type Catalog struct {
 	ACPAgents      []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
 	RendererHints  []plugin.RendererHint       `json:"renderer_hints,omitempty"`
 	AgentFiles     []AgentFile                 `json:"agent_files,omitempty"`
+	Diagnostics    []Diagnostic                `json:"diagnostics,omitempty"`
 }
 
 type PluginResource struct {
@@ -50,6 +51,21 @@ type AgentFile struct {
 	Scope    string `json:"scope,omitempty"`
 	Priority int    `json:"priority,omitempty"`
 	Text     string `json:"text,omitempty"`
+}
+
+const (
+	DiagnosticInfo    = "info"
+	DiagnosticWarning = "warning"
+	DiagnosticError   = "error"
+)
+
+type Diagnostic struct {
+	Severity string            `json:"severity,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	ID       string            `json:"id,omitempty"`
+	Path     string            `json:"path,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
 }
 
 func Discover(ctx context.Context, req Request) (Catalog, error) {
@@ -94,6 +110,7 @@ func CloneCatalog(in Catalog) Catalog {
 		ACPAgents:      make([]plugin.ACPAgentDescriptor, 0, len(in.ACPAgents)),
 		RendererHints:  make([]plugin.RendererHint, 0, len(in.RendererHints)),
 		AgentFiles:     slices.Clone(in.AgentFiles),
+		Diagnostics:    make([]Diagnostic, 0, len(in.Diagnostics)),
 	}
 	for _, item := range in.Plugins {
 		item.Manifest = cloneManifest(item.Manifest)
@@ -117,6 +134,10 @@ func CloneCatalog(in Catalog) Catalog {
 		item.Meta = maps.Clone(item.Meta)
 		out.RendererHints = append(out.RendererHints, item)
 	}
+	for _, item := range in.Diagnostics {
+		item.Meta = maps.Clone(item.Meta)
+		out.Diagnostics = append(out.Diagnostics, item)
+	}
 	return out
 }
 
@@ -138,6 +159,13 @@ func discoverPluginSources(ctx context.Context, sources []config.Plugin, homeDir
 			return err
 		}
 		if !source.Enabled {
+			addDiagnostic(catalog, Diagnostic{
+				Severity: DiagnosticInfo,
+				Kind:     "plugin",
+				ID:       strings.TrimSpace(source.ID),
+				Path:     strings.TrimSpace(source.Source),
+				Message:  "plugin disabled",
+			})
 			continue
 		}
 		rawPath := strings.TrimSpace(source.Source)
@@ -166,6 +194,13 @@ func discoverPluginSources(ctx context.Context, sources []config.Plugin, homeDir
 		baseDir := filepath.Dir(path)
 		manifest := cloneManifest(item.Manifest)
 		catalog.Plugins = append(catalog.Plugins, PluginResource{Manifest: manifest, Path: path})
+		addDiagnostic(catalog, Diagnostic{
+			Severity: DiagnosticInfo,
+			Kind:     "plugin",
+			ID:       manifest.ID,
+			Path:     path,
+			Message:  "plugin loaded",
+		})
 		modelProviders, err := pluginAliases(manifest.ID, "model provider", item.ModelProviders)
 		if err != nil {
 			return err
@@ -246,10 +281,24 @@ func discoverAgentFiles(ctx context.Context, homeDir string, workspaceDir string
 			return err
 		}
 		if strings.TrimSpace(text) == "" {
+			addDiagnostic(catalog, Diagnostic{
+				Severity: DiagnosticInfo,
+				Kind:     "agent_file",
+				ID:       candidate.ID,
+				Path:     candidate.Path,
+				Message:  "agent instruction file not found or empty",
+			})
 			continue
 		}
 		candidate.Text = text
 		catalog.AgentFiles = append(catalog.AgentFiles, candidate)
+		addDiagnostic(catalog, Diagnostic{
+			Severity: DiagnosticInfo,
+			Kind:     "agent_file",
+			ID:       candidate.ID,
+			Path:     candidate.Path,
+			Message:  "agent instruction file loaded",
+		})
 		catalog.Prompts = append(catalog.Prompts, plugin.PromptFragment{
 			ID:       candidate.ID,
 			Scope:    candidate.Scope,
@@ -273,18 +322,31 @@ func discoverSkills(ctx context.Context, roots []string, catalog *Catalog) error
 		}
 		info, err := os.Stat(root)
 		if errors.Is(err, os.ErrNotExist) {
+			addDiagnostic(catalog, Diagnostic{
+				Severity: DiagnosticInfo,
+				Kind:     "skill_root",
+				Path:     root,
+				Message:  "skill root not found",
+			})
 			continue
 		}
 		if err != nil {
 			return err
 		}
 		if !info.IsDir() {
+			addDiagnostic(catalog, Diagnostic{
+				Severity: DiagnosticWarning,
+				Kind:     "skill_root",
+				Path:     root,
+				Message:  "skill root is not a directory",
+			})
 			continue
 		}
 		entries, err := os.ReadDir(root)
 		if err != nil {
 			return err
 		}
+		loaded := 0
 		for _, entry := range entries {
 			if !entry.IsDir() {
 				continue
@@ -308,8 +370,34 @@ func discoverSkills(ctx context.Context, roots []string, catalog *Catalog) error
 				skill.Name = entry.Name()
 			}
 			skill.Paths = []string{path}
+			if previous, ok := byName[strings.ToLower(skill.Name)]; ok {
+				addDiagnostic(catalog, Diagnostic{
+					Severity: DiagnosticInfo,
+					Kind:     "skill",
+					ID:       strings.TrimSpace(skill.Name),
+					Path:     path,
+					Message:  "skill overrides earlier discovery",
+					Meta:     map[string]string{"previous_path": firstPath(previous.Paths)},
+				})
+			} else {
+				addDiagnostic(catalog, Diagnostic{
+					Severity: DiagnosticInfo,
+					Kind:     "skill",
+					ID:       strings.TrimSpace(skill.Name),
+					Path:     path,
+					Message:  "skill loaded",
+				})
+			}
 			byName[strings.ToLower(skill.Name)] = skill
+			loaded++
 		}
+		addDiagnostic(catalog, Diagnostic{
+			Severity: DiagnosticInfo,
+			Kind:     "skill_root",
+			Path:     root,
+			Message:  "skill root scanned",
+			Meta:     map[string]string{"skills": fmt.Sprintf("%d", loaded)},
+		})
 	}
 	keys := make([]string, 0, len(byName))
 	for key := range byName {
@@ -438,6 +526,60 @@ func sortCatalog(catalog *Catalog) {
 		}
 		return catalog.RendererHints[i].EventType < catalog.RendererHints[j].EventType
 	})
+	sort.SliceStable(catalog.Diagnostics, func(i, j int) bool {
+		left := diagnosticSortKey(catalog.Diagnostics[i])
+		right := diagnosticSortKey(catalog.Diagnostics[j])
+		return left < right
+	})
+}
+
+func addDiagnostic(catalog *Catalog, diagnostic Diagnostic) {
+	if catalog == nil {
+		return
+	}
+	diagnostic = normalizeDiagnostic(diagnostic)
+	if diagnostic.Severity == "" && diagnostic.Kind == "" && diagnostic.ID == "" && diagnostic.Path == "" && diagnostic.Message == "" {
+		return
+	}
+	catalog.Diagnostics = append(catalog.Diagnostics, diagnostic)
+}
+
+func normalizeDiagnostic(in Diagnostic) Diagnostic {
+	out := in
+	out.Severity = normalizeDiagnosticSeverity(out.Severity)
+	out.Kind = strings.ToLower(strings.TrimSpace(out.Kind))
+	out.ID = strings.TrimSpace(out.ID)
+	out.Path = strings.TrimSpace(out.Path)
+	out.Message = strings.TrimSpace(out.Message)
+	out.Meta = cloneStringMap(out.Meta)
+	return out
+}
+
+func normalizeDiagnosticSeverity(severity string) string {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "", DiagnosticInfo:
+		return DiagnosticInfo
+	case DiagnosticWarning, "warn":
+		return DiagnosticWarning
+	case DiagnosticError:
+		return DiagnosticError
+	default:
+		return strings.ToLower(strings.TrimSpace(severity))
+	}
+}
+
+func diagnosticSortKey(in Diagnostic) string {
+	in = normalizeDiagnostic(in)
+	return in.Kind + "\x00" + in.Path + "\x00" + in.ID + "\x00" + in.Message
+}
+
+func firstPath(paths []string) string {
+	for _, path := range paths {
+		if path = strings.TrimSpace(path); path != "" {
+			return path
+		}
+	}
+	return ""
 }
 
 func cleanOptionalPath(path string, homeDir string) (string, error) {
@@ -605,6 +747,13 @@ func cloneRendererHints(in []plugin.RendererHint) []plugin.RendererHint {
 		out = append(out, item)
 	}
 	return out
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	return maps.Clone(in)
 }
 
 func firstNonEmpty(values ...string) string {
