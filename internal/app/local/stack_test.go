@@ -31,6 +31,7 @@ import (
 	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
 	"github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -606,6 +607,116 @@ func TestStackRunsAsyncSpawnThroughTaskWait(t *testing.T) {
 	childEvent := findSubagentEvent(snapshot.Events, "spawn-call")
 	if childEvent == nil || session.EventText(*childEvent) != "external helper response" {
 		t.Fatalf("stored events = %#v, want canonical async subagent response", snapshot.Events)
+	}
+}
+
+func TestStackRestoresCompletedAsyncSpawnTaskFromJournal(t *testing.T) {
+	rawSpawnInput, err := json.Marshal(map[string]any{"agent": "helper", "prompt": "delegate", "yield_time_ms": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawTaskWaitInput, err := json.Marshal(map[string]any{"action": "wait", "task_id": "spawn-call", "yield_time_ms": 2000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "spawn-call",
+					Name:  toolspawn.ToolName,
+					Input: rawSpawnInput,
+				},
+			}},
+		},
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "task-wait",
+					Name:  tooltask.ToolName,
+					Input: rawTaskWaitInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storeRoot := t.TempDir()
+	runtimeCfg := config.Runtime{
+		AppName:      "caelis",
+		UserID:       "tester",
+		WorkspaceCWD: t.TempDir(),
+		Store:        config.Store{Backend: "jsonl", URI: storeRoot},
+	}
+	agents := []acpexternal.Config{{
+		AgentID:   "helper",
+		AgentName: "helper",
+		Command:   os.Args[0],
+		Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+		Env:       []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1", "CAELIS_TEST_EXTERNAL_ACP_DELAY_MS=100"},
+	}}
+	stack, err := New(Config{
+		Runtime:           runtimeCfg,
+		Provider:          provider,
+		Sandbox:           rt,
+		BuiltinTools:      true,
+		ExternalACPAgents: agents,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "spawn helper async",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+	}
+
+	reopened, err := New(Config{
+		Runtime:           runtimeCfg,
+		Provider:          &scriptedProvider{},
+		ExternalACPAgents: agents,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	list, err := reopened.Services().Tasks().List(context.Background(), services.ListTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := findTaskView(list.Tasks, "spawn-call")
+	if !ok {
+		t.Fatalf("restored tasks = %#v, want spawn-call", list.Tasks)
+	}
+	if task.Kind != "subagent" || task.Agent != "helper" || task.State != string(sandbox.SessionCompleted) || task.Running {
+		t.Fatalf("restored task = %#v, want completed helper subagent", task)
+	}
+	output, err := reopened.Services().Tasks().Tail(context.Background(), services.TaskOutputRequest{TaskID: "spawn-call"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.Stdout, "external helper response") || output.Task.Kind != "subagent" {
+		t.Fatalf("restored output = %#v, want durable helper response", output)
 	}
 }
 
@@ -1744,6 +1855,15 @@ func findSubagentEvent(events []session.Event, delegationID string) *session.Eve
 		}
 	}
 	return nil
+}
+
+func findTaskView(items []appviewmodel.TaskItem, id string) (appviewmodel.TaskItem, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return appviewmodel.TaskItem{}, false
 }
 
 func nestedRuntimeTask(meta map[string]any) map[string]any {

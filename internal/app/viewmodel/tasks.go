@@ -1,6 +1,7 @@
 package viewmodel
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -49,22 +50,44 @@ type TaskOutputView struct {
 }
 
 func TaskItemFromSnapshot(snapshot sandbox.SessionSnapshot) TaskItem {
+	meta := snapshot.Metadata
+	kind := firstTaskSnapshotString(meta, "task_kind", "kind")
+	if kind == "" {
+		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(snapshot.Command)), "SPAWN") {
+			kind = "subagent"
+		} else {
+			kind = "command"
+		}
+	}
+	source := firstTaskSnapshotString(meta, "source")
+	if source == "" {
+		source = "live"
+	}
+	title := firstTaskSnapshotString(meta, "title")
+	if title == "" {
+		title = strings.TrimSpace(snapshot.Command)
+	}
 	return TaskItem{
-		ID:            strings.TrimSpace(snapshot.Ref.ID),
-		Kind:          "command",
-		Source:        "live",
-		Title:         strings.TrimSpace(snapshot.Command),
-		Backend:       strings.TrimSpace(string(snapshot.Ref.Backend)),
-		State:         strings.TrimSpace(string(snapshot.State)),
-		Running:       snapshot.Running,
-		SupportsInput: snapshot.SupportsInput,
-		Command:       strings.TrimSpace(snapshot.Command),
-		CWD:           strings.TrimSpace(snapshot.Dir),
-		TerminalID:    strings.TrimSpace(snapshot.Terminal.ID),
-		ExitCode:      snapshot.ExitCode,
-		Error:         strings.TrimSpace(snapshot.Error),
-		StartedAt:     snapshot.StartedAt,
-		UpdatedAt:     snapshot.UpdatedAt,
+		ID:              strings.TrimSpace(snapshot.Ref.ID),
+		Kind:            kind,
+		Source:          source,
+		Title:           title,
+		Backend:         strings.TrimSpace(string(snapshot.Ref.Backend)),
+		Action:          firstTaskSnapshotString(meta, "action"),
+		State:           strings.TrimSpace(string(snapshot.State)),
+		Running:         snapshot.Running,
+		SupportsInput:   snapshot.SupportsInput,
+		Command:         strings.TrimSpace(snapshot.Command),
+		CWD:             strings.TrimSpace(snapshot.Dir),
+		TerminalID:      strings.TrimSpace(snapshot.Terminal.ID),
+		Agent:           firstTaskSnapshotString(meta, "agent"),
+		RemoteSessionID: firstTaskSnapshotString(meta, "remote_session_id"),
+		StdoutCursor:    firstTaskSnapshotInt64(meta, "stdout_cursor"),
+		StderrCursor:    firstTaskSnapshotInt64(meta, "stderr_cursor"),
+		ExitCode:        snapshot.ExitCode,
+		Error:           strings.TrimSpace(snapshot.Error),
+		StartedAt:       snapshot.StartedAt,
+		UpdatedAt:       snapshot.UpdatedAt,
 	}
 }
 
@@ -78,4 +101,48 @@ func TaskOutputFromSnapshot(snapshot sandbox.SessionSnapshot, output sandbox.Out
 		StdoutDroppedBytes: output.StdoutDroppedBytes,
 		StderrDroppedBytes: output.StderrDroppedBytes,
 	}
+}
+
+func firstTaskSnapshotString(meta map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, ok := meta[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case string:
+			if out := strings.TrimSpace(typed); out != "" {
+				return out
+			}
+		case fmt.Stringer:
+			if out := strings.TrimSpace(typed.String()); out != "" {
+				return out
+			}
+		}
+	}
+	return ""
+}
+
+func firstTaskSnapshotInt64(meta map[string]any, keys ...string) int64 {
+	for _, key := range keys {
+		value, ok := meta[key]
+		if !ok {
+			continue
+		}
+		switch typed := value.(type) {
+		case int:
+			if typed != 0 {
+				return int64(typed)
+			}
+		case int64:
+			if typed != 0 {
+				return typed
+			}
+		case float64:
+			if typed != 0 {
+				return int64(typed)
+			}
+		}
+	}
+	return 0
 }

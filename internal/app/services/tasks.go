@@ -17,6 +17,11 @@ type TaskService struct {
 	services Services
 }
 
+type TaskResolver interface {
+	OpenTask(context.Context, sandbox.SessionRef) (sandbox.Session, bool, error)
+	ListTasks(context.Context, sandbox.SessionListQuery) ([]sandbox.SessionSnapshot, error)
+}
+
 type ListTasksRequest struct {
 	SessionRef     session.Ref `json:"session_ref,omitempty"`
 	Limit          int         `json:"limit,omitempty"`
@@ -71,6 +76,19 @@ func (s TaskService) List(ctx context.Context, req ListTasksRequest) (appviewmod
 			live = append(live, appviewmodel.TaskItemFromSnapshot(snapshot))
 		}
 		items = mergeTaskItemSlices(items, live)
+		supported = true
+	}
+
+	if s.services.tasks != nil {
+		snapshots, err := s.services.tasks.ListTasks(ctx, sandbox.SessionListQuery{Limit: req.Limit})
+		if err != nil {
+			return appviewmodel.TaskListView{}, err
+		}
+		resolved := make([]appviewmodel.TaskItem, 0, len(snapshots))
+		for _, snapshot := range snapshots {
+			resolved = append(resolved, appviewmodel.TaskItemFromSnapshot(snapshot))
+		}
+		items = mergeTaskItemSlices(items, resolved)
 		supported = true
 	}
 
@@ -132,13 +150,29 @@ func (s TaskService) open(ctx context.Context, taskID string) (sandbox.Session, 
 		return nil, errors.New("app/services: task id is required")
 	}
 	if s.services.sandbox == nil {
-		return nil, errors.New("app/services: sandbox runtime is not configured")
+		return s.openResolved(ctx, taskID, nil)
 	}
 	session, err := s.services.sandbox.Open(ctx, sandbox.SessionRef{ID: taskID})
 	if err != nil {
-		return nil, fmt.Errorf("app/services: open task %q: %w", taskID, err)
+		return s.openResolved(ctx, taskID, err)
 	}
 	return session, nil
+}
+
+func (s TaskService) openResolved(ctx context.Context, taskID string, sandboxErr error) (sandbox.Session, error) {
+	if s.services.tasks != nil {
+		session, ok, err := s.services.tasks.OpenTask(ctx, sandbox.SessionRef{ID: taskID})
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			return session, nil
+		}
+	}
+	if sandboxErr != nil {
+		return nil, fmt.Errorf("app/services: open task %q: %w", taskID, sandboxErr)
+	}
+	return nil, errors.New("app/services: task runtime is not configured")
 }
 
 func (s TaskService) output(ctx context.Context, session sandbox.Session, req TaskOutputRequest, wait time.Duration) (appviewmodel.TaskOutputView, error) {

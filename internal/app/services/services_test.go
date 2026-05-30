@@ -1776,6 +1776,66 @@ func TestTaskServiceListsAndControlsSandboxTasks(t *testing.T) {
 	}
 }
 
+func TestTaskServiceListsAndControlsResolvedTasksWithoutSandbox(t *testing.T) {
+	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	taskSession := &recordingTaskSession{
+		snapshot: sandbox.SessionSnapshot{
+			Ref:           sandbox.SessionRef{ID: "spawn-1", Backend: sandbox.BackendCustom},
+			Command:       "SPAWN reviewer",
+			State:         sandbox.SessionCompleted,
+			Running:       false,
+			SupportsInput: false,
+			ExitCode:      0,
+			StartedAt:     now,
+			UpdatedAt:     now.Add(time.Second),
+			Terminal:      sandbox.TerminalRef{ID: "spawn-spawn-1", SessionID: "spawn-1"},
+			Metadata: map[string]any{
+				"task_kind":         "subagent",
+				"source":            "spawn",
+				"agent":             "reviewer",
+				"remote_session_id": "remote-1",
+			},
+		},
+		stdout: "child done\n",
+	}
+	svc, err := New(Config{
+		Runtime:      config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:       &recordingEngine{},
+		TaskResolver: &recordingTaskResolver{sessions: map[string]*recordingTaskSession{"spawn-1": taskSession}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := svc.Tasks().List(context.Background(), ListTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list.Supported || list.Count != 1 {
+		t.Fatalf("task list = %#v, want resolver-backed task list", list)
+	}
+	task := list.Tasks[0]
+	if task.ID != "spawn-1" || task.Kind != "subagent" || task.Agent != "reviewer" || task.RemoteSessionID != "remote-1" || task.Source != "spawn" {
+		t.Fatalf("resolved task = %#v, want spawn subagent metadata", task)
+	}
+
+	tail, err := svc.Tasks().Tail(context.Background(), TaskOutputRequest{TaskID: "spawn-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail.Stdout != "child done\n" || tail.Task.Kind != "subagent" {
+		t.Fatalf("tail = %#v, want resolver output and metadata", tail)
+	}
+
+	cancelled, err := svc.Tasks().Cancel(context.Background(), TaskCancelRequest{TaskOutputRequest: TaskOutputRequest{TaskID: "spawn-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Task.State != string(sandbox.SessionCancelled) {
+		t.Fatalf("cancelled task = %#v, want resolver cancel path", cancelled.Task)
+	}
+}
+
 func TestTaskServiceListsLiveAndDurableTaskHistory(t *testing.T) {
 	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
 	engine := &recordingEngine{
@@ -2677,6 +2737,26 @@ func (r *recordingTaskRuntime) ListSessions(context.Context, sandbox.SessionList
 
 func (*recordingTaskRuntime) Close() error {
 	return nil
+}
+
+type recordingTaskResolver struct {
+	sessions map[string]*recordingTaskSession
+}
+
+func (r *recordingTaskResolver) OpenTask(_ context.Context, ref sandbox.SessionRef) (sandbox.Session, bool, error) {
+	session, ok := r.sessions[strings.TrimSpace(ref.ID)]
+	if !ok {
+		return nil, false, nil
+	}
+	return session, true, nil
+}
+
+func (r *recordingTaskResolver) ListTasks(context.Context, sandbox.SessionListQuery) ([]sandbox.SessionSnapshot, error) {
+	out := make([]sandbox.SessionSnapshot, 0, len(r.sessions))
+	for _, session := range r.sessions {
+		out = append(out, session.snapshot)
+	}
+	return out, nil
 }
 
 type recordingTaskSession struct {

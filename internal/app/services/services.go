@@ -37,6 +37,7 @@ type Services struct {
 	state         *serviceState
 	engine        coreruntime.Engine
 	sandbox       sandbox.Runtime
+	tasks         TaskResolver
 	modelProvider ModelProviderFactory
 	agents        []AgentDescriptor
 	builtins      []AgentDescriptor
@@ -59,6 +60,7 @@ type Config struct {
 	UserID         string
 	Engine         coreruntime.Engine
 	Sandbox        sandbox.Runtime
+	TaskResolver   TaskResolver
 	ModelProvider  ModelProviderFactory
 	Agents         []AgentDescriptor
 	BuiltinAgents  []AgentDescriptor
@@ -81,6 +83,7 @@ func New(cfg Config) (Services, error) {
 		state:         &serviceState{runtime: runtimeCfg},
 		engine:        cfg.Engine,
 		sandbox:       cfg.Sandbox,
+		tasks:         cfg.TaskResolver,
 		modelProvider: cfg.ModelProvider,
 		agents:        cloneAgents(cfg.Agents),
 		builtins:      cloneAgents(cfg.BuiltinAgents),

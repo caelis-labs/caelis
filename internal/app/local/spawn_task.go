@@ -19,6 +19,7 @@ import (
 type spawnTaskManager struct {
 	store   session.Store
 	configs []acpexternal.Config
+	journal *spawnTaskJournal
 	now     func() time.Time
 
 	mu    sync.RWMutex
@@ -49,7 +50,7 @@ type spawnTaskSession struct {
 	updatedAt       time.Time
 }
 
-func newSpawnTaskManager(store session.Store, configs []acpexternal.Config) *spawnTaskManager {
+func newSpawnTaskManager(store session.Store, configs []acpexternal.Config, stateDir string) *spawnTaskManager {
 	if len(configs) == 0 {
 		return nil
 	}
@@ -72,6 +73,7 @@ func newSpawnTaskManager(store session.Store, configs []acpexternal.Config) *spa
 	return &spawnTaskManager{
 		store:   store,
 		configs: out,
+		journal: newSpawnTaskJournal(stateDir),
 		now:     func() time.Time { return time.Now().UTC() },
 		tasks:   map[string]*spawnTaskSession{},
 	}
@@ -108,6 +110,7 @@ func (m *spawnTaskManager) Start(req spawnTaskStartRequest) (*spawnTaskSession, 
 	m.mu.Lock()
 	m.tasks[task.taskID] = task
 	m.mu.Unlock()
+	task.persist(context.Background())
 	task.startPrompt(req.Prompt, false)
 	return task, nil
 }
@@ -121,7 +124,7 @@ type spawnTaskStartRequest struct {
 	Prompt  string
 }
 
-func (m *spawnTaskManager) OpenTask(_ context.Context, ref sandbox.SessionRef) (sandbox.Session, bool, error) {
+func (m *spawnTaskManager) OpenTask(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, bool, error) {
 	if m == nil {
 		return nil, false, nil
 	}
@@ -133,7 +136,7 @@ func (m *spawnTaskManager) OpenTask(_ context.Context, ref sandbox.SessionRef) (
 	task := m.tasks[taskID]
 	m.mu.RUnlock()
 	if task == nil {
-		return nil, false, nil
+		return m.journal.open(ctx, ref)
 	}
 	return task, true, nil
 }
@@ -158,6 +161,28 @@ func (m *spawnTaskManager) ListTasks(ctx context.Context, query sandbox.SessionL
 			return nil, err
 		}
 		out = append(out, snapshot)
+	}
+	if m.journal != nil {
+		archived, err := m.journal.list(ctx)
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[string]struct{}, len(out))
+		for _, snapshot := range out {
+			if id := strings.TrimSpace(snapshot.Ref.ID); id != "" {
+				seen[id] = struct{}{}
+			}
+		}
+		for _, snapshot := range archived {
+			id := strings.TrimSpace(snapshot.Ref.ID)
+			if id == "" {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			out = append(out, snapshot)
+		}
 	}
 	sort.SliceStable(out, func(i int, j int) bool {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
@@ -227,6 +252,7 @@ func (s *spawnTaskSession) Write(ctx context.Context, input []byte) error {
 	s.errText = ""
 	s.touchLocked()
 	s.mu.Unlock()
+	s.persist(context.Background())
 	s.startPrompt(prompt, true)
 	return nil
 }
@@ -249,6 +275,7 @@ func (s *spawnTaskSession) Cancel(ctx context.Context) error {
 	s.touchLocked()
 	done := s.done
 	s.mu.Unlock()
+	s.persist(context.Background())
 	if cancel != nil {
 		cancel()
 	}
@@ -365,6 +392,7 @@ func (s *spawnTaskSession) runPrompt(ctx context.Context, prompt string) {
 	if recordAsync && len(events) > 0 && s.manager != nil && s.manager.store != nil {
 		_, _ = s.manager.store.Append(context.Background(), s.parent.Ref, events)
 	}
+	s.persist(context.Background())
 	closeDone(done)
 }
 
@@ -394,6 +422,7 @@ func (s *spawnTaskSession) prompt(ctx context.Context, prompt string) ([]session
 		s.remoteSessionID = remoteSessionID
 		s.touchLocked()
 		s.mu.Unlock()
+		s.persist(context.Background())
 	}
 	events, err := client.PromptCore(ctx, remoteSessionID, []model.ContentPart{{
 		Type: model.ContentPartText,
@@ -426,6 +455,20 @@ func (s *spawnTaskSession) prompt(ctx context.Context, prompt string) ([]session
 }
 
 func (s *spawnTaskSession) snapshotLocked() sandbox.SessionSnapshot {
+	metadata := map[string]any{
+		"task_kind":      "subagent",
+		"source":         "spawn",
+		"agent":          s.agent,
+		"state":          string(s.state),
+		"running":        s.running,
+		"supports_input": !s.running && s.state == sandbox.SessionCompleted && s.client != nil,
+	}
+	if s.remoteSessionID != "" {
+		metadata["remote_session_id"] = s.remoteSessionID
+	}
+	if !s.running {
+		metadata["exit_code"] = s.exitCode
+	}
 	return sandbox.SessionSnapshot{
 		Ref:           s.Ref(),
 		Command:       strings.TrimSpace("SPAWN " + s.agent),
@@ -440,7 +483,27 @@ func (s *spawnTaskSession) snapshotLocked() sandbox.SessionSnapshot {
 			ID:        "spawn-" + s.taskID,
 			SessionID: s.taskID,
 		},
+		Metadata: metadata,
 	}
+}
+
+func (s *spawnTaskSession) persist(ctx context.Context) {
+	if s == nil || s.manager == nil || s.manager.journal == nil {
+		return
+	}
+	s.mu.RLock()
+	record := spawnTaskJournalRecord{
+		Parent:           s.parent.Ref,
+		TurnID:           s.turnID,
+		Agent:            s.agent,
+		RemoteSessionID:  s.remoteSessionID,
+		Snapshot:         s.snapshotLocked(),
+		Stdout:           s.output,
+		StdoutTotalBytes: int64(len([]byte(s.output))),
+		UpdatedAt:        s.updatedAt,
+	}
+	s.mu.RUnlock()
+	_ = s.manager.journal.write(ctx, record)
 }
 
 func (s *spawnTaskSession) appendOutputLocked(text string) {

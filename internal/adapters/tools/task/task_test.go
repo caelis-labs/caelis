@@ -194,6 +194,53 @@ func TestTaskToolReadsArchivedAsyncCommandAfterRuntimeRestart(t *testing.T) {
 	}
 }
 
+func TestTaskToolUsesResolverWithoutSandboxRuntime(t *testing.T) {
+	resolver := &resolverOnly{
+		session: &resolverOnlySession{
+			snapshot: sandbox.SessionSnapshot{
+				Ref:           sandbox.SessionRef{ID: "spawn-1", Backend: sandbox.BackendCustom},
+				Command:       "SPAWN reviewer",
+				State:         sandbox.SessionCompleted,
+				Running:       false,
+				SupportsInput: false,
+				ExitCode:      0,
+				Terminal:      sandbox.TerminalRef{ID: "spawn-spawn-1", SessionID: "spawn-1"},
+				Metadata: map[string]any{
+					"task_kind": "subagent",
+					"agent":     "reviewer",
+				},
+			},
+			stdout: "child done\n",
+		},
+	}
+	taskTool, err := NewWithResolver(nil, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := callTool(t, taskTool, map[string]any{
+		"action": "list",
+		"limit":  10,
+	})
+	listPayload := resultPayload(t, list)
+	tasks, ok := listPayload["tasks"].([]any)
+	if !ok || len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, want resolver task", listPayload["tasks"])
+	}
+	taskEntry, ok := tasks[0].(map[string]any)
+	if !ok || taskEntry["task_kind"] != "subagent" || taskEntry["agent"] != "reviewer" {
+		t.Fatalf("task entry = %#v, want resolver metadata", taskEntry)
+	}
+
+	tail := callTool(t, taskTool, map[string]any{
+		"action":  "tail",
+		"task_id": "spawn-1",
+	})
+	tailPayload := resultPayload(t, tail)
+	if tailPayload["task_kind"] != "subagent" || !strings.Contains(stringValue(tailPayload["stdout"]), "child done") {
+		t.Fatalf("tail payload = %#v, want resolver output and metadata", tailPayload)
+	}
+}
+
 func newRuntime(t *testing.T) sandbox.Runtime {
 	t.Helper()
 	return newRuntimeWithConfig(t, sandbox.Config{CWD: t.TempDir()})
@@ -253,4 +300,71 @@ func taskListContains(payload map[string]any, taskID string) bool {
 		}
 	}
 	return false
+}
+
+func stringValue(value any) string {
+	out, _ := value.(string)
+	return out
+}
+
+type resolverOnly struct {
+	session *resolverOnlySession
+}
+
+func (r *resolverOnly) OpenTask(_ context.Context, ref sandbox.SessionRef) (sandbox.Session, bool, error) {
+	if strings.TrimSpace(ref.ID) != r.session.snapshot.Ref.ID {
+		return nil, false, nil
+	}
+	return r.session, true, nil
+}
+
+func (r *resolverOnly) ListTasks(context.Context, sandbox.SessionListQuery) ([]sandbox.SessionSnapshot, error) {
+	return []sandbox.SessionSnapshot{r.session.snapshot}, nil
+}
+
+type resolverOnlySession struct {
+	snapshot sandbox.SessionSnapshot
+	stdout   string
+}
+
+func (s *resolverOnlySession) Ref() sandbox.SessionRef {
+	return s.snapshot.Ref
+}
+
+func (s *resolverOnlySession) Snapshot(context.Context) (sandbox.SessionSnapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s *resolverOnlySession) Read(_ context.Context, cursor sandbox.OutputCursor) (sandbox.OutputSnapshot, error) {
+	start := clampResolverCursor(cursor.Stdout, s.stdout)
+	return sandbox.OutputSnapshot{
+		Stdout: s.stdout[start:],
+		Cursor: sandbox.OutputCursor{Stdout: int64(len(s.stdout))},
+	}, nil
+}
+
+func (*resolverOnlySession) Write(context.Context, []byte) error {
+	return nil
+}
+
+func (*resolverOnlySession) Cancel(context.Context) error {
+	return nil
+}
+
+func (*resolverOnlySession) Wait(context.Context) (sandbox.CommandResult, error) {
+	return sandbox.CommandResult{}, nil
+}
+
+func (*resolverOnlySession) Close() error {
+	return nil
+}
+
+func clampResolverCursor(cursor int64, text string) int64 {
+	if cursor < 0 {
+		return 0
+	}
+	if cursor > int64(len(text)) {
+		return int64(len(text))
+	}
+	return cursor
 }

@@ -123,7 +123,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 			return nil, err
 		}
 	}
-	spawnTasks := newSpawnTaskManager(store, externalAgents)
+	spawnTasks := newSpawnTaskManager(store, externalAgents, taskStateDir(runtimeCfg.Store))
 	tools := cfg.Tools
 	if tools == nil {
 		toolList := append([]tool.Tool(nil), cfg.ToolList...)
@@ -189,6 +189,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Runtime:        runtimeCfg,
 		Engine:         engine,
 		Sandbox:        sandboxRuntime,
+		TaskResolver:   spawnTasks,
 		ModelProvider:  modelProviderFactory(reg),
 		Agents:         agentDescriptors(externalAgents),
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
@@ -646,6 +647,21 @@ func sandboxStateDir(store config.Store) string {
 		return filepath.Join(filepath.Dir(uri), "sandbox")
 	}
 	return filepath.Join(uri, "sandbox")
+}
+
+func taskStateDir(store config.Store) string {
+	backend := strings.ToLower(firstNonEmpty(store.Backend, "memory"))
+	if backend == "memory" {
+		return ""
+	}
+	uri := strings.TrimSpace(store.URI)
+	if uri == "" {
+		return ""
+	}
+	if backend == "sqlite" {
+		return filepath.Join(filepath.Dir(uri), "tasks")
+	}
+	return filepath.Join(uri, "tasks")
 }
 
 func (s *Stack) Services() services.Services {

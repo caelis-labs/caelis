@@ -43,8 +43,8 @@ func New(runtime sandbox.Runtime) (*Tool, error) {
 }
 
 func NewWithResolver(runtime sandbox.Runtime, resolver Resolver) (*Tool, error) {
-	if runtime == nil {
-		return nil, errors.New("tools/task: sandbox runtime is required")
+	if runtime == nil && resolver == nil {
+		return nil, errors.New("tools/task: task runtime is required")
 	}
 	return &Tool{Sandbox: runtime, Resolver: resolver, DefaultWait: time.Second}, nil
 }
@@ -52,7 +52,7 @@ func NewWithResolver(runtime sandbox.Runtime, resolver Resolver) (*Tool, error) 
 func (t *Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "List, tail, wait, write stdin to, or cancel yielded sandbox tasks.",
+		Description: "List, tail, wait, write stdin to, or cancel yielded runtime tasks.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -96,8 +96,8 @@ func (t *Tool) Definition() tool.Definition {
 }
 
 func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
-	if t == nil || t.Sandbox == nil {
-		return tool.Result{}, errors.New("tools/task: sandbox runtime is required")
+	if t == nil || (t.Sandbox == nil && t.Resolver == nil) {
+		return tool.Result{}, errors.New("tools/task: task runtime is required")
 	}
 	var in input
 	if len(call.Input) > 0 {
@@ -206,6 +206,12 @@ func (t *Tool) list(ctx context.Context, call tool.Call, in input) (tool.Result,
 		}
 		if errText := strings.TrimSpace(snapshot.Error); errText != "" {
 			task["error"] = errText
+		}
+		for key, value := range snapshot.Metadata {
+			key = strings.TrimSpace(key)
+			if key != "" {
+				task[key] = value
+			}
 		}
 		tasks = append(tasks, task)
 	}

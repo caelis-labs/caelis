@@ -86,6 +86,12 @@ func sessionPayload(action string, snapshot sandbox.SessionSnapshot, output sand
 	if output.StderrDroppedBytes > 0 {
 		payload["stderr_dropped_bytes"] = output.StderrDroppedBytes
 	}
+	for key, value := range snapshot.Metadata {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			payload[key] = value
+		}
+	}
 	if !snapshot.Running {
 		payload["exit_code"] = snapshot.ExitCode
 	}
@@ -107,6 +113,12 @@ func sessionMeta(action string, snapshot sandbox.SessionSnapshot, output sandbox
 	}
 	if !snapshot.Running {
 		task["exit_code"] = snapshot.ExitCode
+	}
+	for key, value := range snapshot.Metadata {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			task[key] = value
+		}
 	}
 	if provider, ok := session.(interface{ TaskMeta() map[string]any }); ok {
 		for key, value := range provider.TaskMeta() {

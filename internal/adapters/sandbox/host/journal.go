@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -180,6 +181,7 @@ func normalizeSessionJournalRecord(record sessionJournalRecord) sessionJournalRe
 	if record.Snapshot.Terminal.ID == "" {
 		record.Snapshot.Terminal.ID = record.Snapshot.Ref.ID
 	}
+	record.Snapshot.Metadata = maps.Clone(record.Snapshot.Metadata)
 	if record.Snapshot.UpdatedAt.IsZero() {
 		record.Snapshot.UpdatedAt = record.UpdatedAt
 	}
