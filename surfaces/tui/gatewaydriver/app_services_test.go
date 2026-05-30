@@ -180,6 +180,20 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if status.StoreDir != "/tmp/caelis-app-service.sqlite" {
 		t.Fatalf("status store = %q, want app-service store URI for /doctor", status.StoreDir)
 	}
+	status, err = driver.SetSandboxBackend(ctx, "bwrap")
+	if err != nil {
+		t.Fatalf("SetSandboxBackend() error = %v", err)
+	}
+	doc, err := manager.Document(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Runtime.Sandbox.Backend != "bwrap" || svc.Runtime().Sandbox.Backend != "bwrap" {
+		t.Fatalf("sandbox setting = doc:%#v runtime:%#v, want bwrap", doc.Runtime.Sandbox, svc.Runtime().Sandbox)
+	}
+	if status.SandboxRequestedBackend != "bwrap" || status.SandboxResolvedBackend != "host" || status.Route != "host" {
+		t.Fatalf("sandbox switch status = %#v, want persisted bwrap request with current host runtime", status)
+	}
 	status, err = driver.RepairSandbox(ctx)
 	if err != nil {
 		t.Fatalf("RepairSandbox() error = %v", err)

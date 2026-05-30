@@ -29,7 +29,7 @@ func (s CompactionService) ContextBudget(ctx context.Context, req ContextBudgetR
 	if s.services.engine == nil {
 		return appviewmodel.ContextBudget{}, errors.New("app/services: runtime engine is required")
 	}
-	ref := defaultSessionRef(s.services.runtime, req.SessionRef)
+	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return appviewmodel.ContextBudget{}, fmt.Errorf("%w: session id is required", session.ErrInvalid)
 	}
@@ -119,8 +119,9 @@ func (s Services) modelConfigForContextBudget(snapshot session.Snapshot, modelRe
 }
 
 func (s Services) runtimeModelConfig() appsettings.ModelConfig {
+	runtimeCfg := s.Runtime()
 	return appsettings.NormalizeModelConfig(appsettings.ModelConfig{
-		Model: strings.TrimSpace(s.runtime.Model),
+		Model: strings.TrimSpace(runtimeCfg.Model),
 	})
 }
 
@@ -138,8 +139,9 @@ func (s Services) contextBudgetLimits(cfg appsettings.ModelConfig, configured bo
 }
 
 func (s Services) estimatedPromptPrefixTokens(ctx context.Context) (int, error) {
+	runtimeCfg := s.Runtime()
 	instructions, err := appprompt.BuildInstructions(ctx, appprompt.Config{
-		AppName: s.runtime.AppName,
+		AppName: runtimeCfg.AppName,
 		Catalog: s.resources,
 	})
 	if err != nil {

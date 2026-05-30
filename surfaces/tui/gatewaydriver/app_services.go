@@ -2,7 +2,6 @@ package gatewaydriver
 
 import (
 	"context"
-	"fmt"
 	"maps"
 	"strings"
 
@@ -132,17 +131,18 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		return svc.Models().Delete(ctx, modelRef)
 	}
 	stack.SetSandboxBackendFn = func(ctx context.Context, backend string) (SandboxStatus, error) {
+		if _, err := svc.Settings().SetSandboxBackend(ctx, backend); err != nil {
+			status, statusErr := svc.Sandbox().Status(ctx)
+			if statusErr != nil {
+				return SandboxStatus{}, err
+			}
+			return sandboxStatusFromApp(status), err
+		}
 		status, err := svc.Sandbox().Status(ctx)
-		out := sandboxStatusFromApp(status)
 		if err != nil {
-			return out, err
+			return SandboxStatus{}, err
 		}
-		requested := strings.ToLower(strings.TrimSpace(backend))
-		current := strings.ToLower(firstNonEmpty(out.ResolvedBackend, out.RequestedBackend))
-		if requested == "" || requested == "auto" || requested == current {
-			return out, nil
-		}
-		return out, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox backend switching is not migrated to app services")
+		return sandboxStatusFromApp(status), nil
 	}
 	stack.PrepareSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
 		status, err := svc.Sandbox().Prepare(ctx)

@@ -144,7 +144,7 @@ func (s ControllerService) activeControllerSnapshot(ctx context.Context, ref ses
 	if s.services.engine == nil {
 		return session.Snapshot{}, session.ControllerBinding{}, false, errors.New("app/services: runtime engine is required")
 	}
-	ref = defaultSessionRef(s.services.runtime, ref)
+	ref = defaultSessionRef(s.services.Runtime(), ref)
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return session.Snapshot{}, session.ControllerBinding{}, false, nil
 	}

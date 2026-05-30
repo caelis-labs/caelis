@@ -180,6 +180,14 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	initialStore, err := svc.Settings().SetStore(ctx, config.Store{Backend: "sqlite", URI: " /tmp/initial.db "})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if initialStore.Runtime.AppName != "caelis" || initialStore.Runtime.UserID != "tester" || initialStore.Store.URI != "/tmp/initial.db" {
+		t.Fatalf("initial store mutation view = %#v, want effective runtime identity preserved", initialStore)
+	}
+
 	view, err := svc.Settings().SetRuntime(ctx, config.Runtime{
 		AppName:      " caelis-app ",
 		UserID:       " user-1 ",
@@ -224,6 +232,63 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 	if again.Sandbox.ReadableRoots[0] != "/read" {
 		t.Fatalf("settings view was not cloned: %#v", again.Sandbox.ReadableRoots)
+	}
+	runtime := svc.Runtime()
+	if runtime.AppName != "caelis-app" || runtime.Store.Backend != "sqlite" || runtime.Sandbox.Backend != "host" {
+		t.Fatalf("service runtime = %#v, want updated settings runtime", runtime)
+	}
+
+	storeView, err := svc.Settings().SetStore(ctx, config.Store{
+		Backend: " JSONL ",
+		URI:     " /tmp/events.jsonl ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storeView.Runtime.AppName != "caelis-app" || storeView.Store.Backend != "jsonl" || storeView.Store.URI != "/tmp/events.jsonl" {
+		t.Fatalf("store mutation view = %#v, want patched store preserving runtime identity", storeView)
+	}
+	if runtime := svc.Runtime(); runtime.Store.Backend != "jsonl" || runtime.Store.URI != "/tmp/events.jsonl" || runtime.Sandbox.Backend != "host" {
+		t.Fatalf("service runtime after SetStore = %#v, want live store patch only", runtime)
+	}
+
+	sandboxView, err := svc.Settings().SetSandboxBackend(ctx, "windows elevated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sandboxView.Sandbox.Backend != "windows" || sandboxView.Sandbox.ReadableRoots[0] != "/read" {
+		t.Fatalf("sandbox backend view = %#v, want normalized backend preserving sandbox roots", sandboxView.Sandbox)
+	}
+	if _, err := svc.Settings().SetSandboxBackend(ctx, "unknown-sandbox"); err == nil {
+		t.Fatal("SetSandboxBackend(unknown) error = nil, want validation error")
+	}
+
+	sandboxView, err = svc.Settings().SetSandbox(ctx, config.Sandbox{
+		Backend:       " BWRAP ",
+		Network:       " DISABLED ",
+		ReadableRoots: []string{" /src "},
+		WritableRoots: []string{" /out "},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sandboxView.Sandbox.Backend != "bwrap" || sandboxView.Sandbox.Network != "disabled" || sandboxView.Sandbox.WritableRoots[0] != "/out" {
+		t.Fatalf("sandbox mutation view = %#v, want normalized sandbox replacement", sandboxView.Sandbox)
+	}
+
+	compactionView, err := svc.Settings().SetCompaction(ctx, appsettings.CompactionPolicy{
+		Prompt:         " summarize durable state ",
+		MaxSourceChars: 256,
+		Auto: appsettings.AutoCompactionPolicy{
+			Mode:           "off",
+			WatermarkRatio: 0.5,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if compactionView.Compaction.Prompt != "summarize durable state" || compactionView.Compaction.AutoMode != "disabled" || compactionView.Compaction.AutoWatermarkRatio != 0.5 {
+		t.Fatalf("compaction mutation view = %#v, want normalized compaction settings", compactionView.Compaction)
 	}
 }
 

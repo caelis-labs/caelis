@@ -607,6 +607,11 @@ alongside the old stack without importing it:
   approval/action, participant, agent management, model selection, task
   list/output, settings, and status DTOs shared by the TUI and future APP,
   including runtime store identity needed by read-only diagnostics.
+- `internal/app/services.SettingsService`: shared settings contract for
+  runtime identity, store, sandbox, sandbox backend, and compaction policy
+  mutations. It persists through the app settings manager and updates the
+  service runtime view so peer TUI/APP surfaces do not need raw document edits
+  or surface-local config state for these core settings.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -1055,6 +1060,11 @@ be migrated before retiring the old stack:
      `/doctor fix` can reach `internal/app/services.SandboxService` instead of
      requiring the old gatewayapp sandbox repair dependency for the host
      backend.
+   - Migrated baseline: TUI sandbox backend selection now routes through
+     `internal/app/services.SettingsService.SetSandboxBackend`, persists the
+     normalized backend in shared app settings, and reflects the requested
+     backend through the shared sandbox status view instead of returning a
+     not-migrated gatewaydriver branch.
    - Migrated baseline: `/connect` model completion and default
      context/output/reasoning values now come from
      `internal/app/services.Models()` through `BindAppServices`, including
@@ -1085,9 +1095,11 @@ be migrated before retiring the old stack:
      active ACP controller, keeping controller model/reasoning/mode state out
      of surface-specific UI state.
    - Migrated baseline: `internal/app/services.SettingsService` now exposes a
-     surface-neutral settings view plus typed runtime/store/sandbox mutation
-     path, so TUI and the future APP do not need to edit raw settings documents
-     for core runtime configuration.
+     surface-neutral settings view plus typed runtime, store, sandbox,
+     sandbox-backend, and compaction mutation paths, so TUI and the future APP
+     do not need to edit raw settings documents for core runtime
+     configuration. Runtime/store/sandbox changes update the shared service
+     runtime view after persistence.
    - Migrated baseline: `internal/app/services.TaskService` now exposes a
      surface-neutral task panel contract for sandbox async session list, tail,
      wait, stdin write, and cancel operations, backed by `core/sandbox`
@@ -1105,8 +1117,8 @@ be migrated before retiring the old stack:
      built-in catalog entries, installable adapters, and actions such as
      invoke, use as controller, register, install/update, remove, and custom
      registration.
-   - Still pending: remaining settings mutation flows, transcript actions,
-     durable task history, and live event subscriptions still need APP-ready
+   - Still pending: transcript actions, durable task history, live event
+     subscriptions, and richer settings-panel composition still need APP-ready
      service/view-model contracts.
 
 4. Headless CLI and ACP serving
@@ -1230,6 +1242,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: the app-service TUI driver binding now maps the same
      sandbox status/lifecycle service into existing TUI sandbox hooks, covering
      host `/doctor fix` repair flow without gatewayapp.
+   - Migrated baseline: sandbox backend selection now has a service-native
+     settings mutation path. The TUI binding persists requested backends
+     through `SettingsService.SetSandboxBackend` and reads the resulting
+     requested/resolved backend projection from the shared sandbox status view.
    - macOS seatbelt, Linux bubblewrap/Landlock, Windows sandbox/helper/ACL
      repair, non-host sandbox setup/fix/reset/clean, network policy,
      writable/readable root policy, skill sandbox roots, rich route

@@ -9,6 +9,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
@@ -33,7 +34,7 @@ const (
 )
 
 type Services struct {
-	runtime       config.Runtime
+	state         *serviceState
 	engine        coreruntime.Engine
 	sandbox       sandbox.Runtime
 	modelProvider ModelProviderFactory
@@ -45,6 +46,11 @@ type Services struct {
 	resources     appresources.Catalog
 	settings      *appsettings.Manager
 	codefree      CodeFreeAuthenticator
+}
+
+type serviceState struct {
+	mu      sync.RWMutex
+	runtime config.Runtime
 }
 
 type Config struct {
@@ -72,7 +78,7 @@ func New(cfg Config) (Services, error) {
 	runtimeCfg.AppName = firstNonEmpty(cfg.AppName, runtimeCfg.AppName, "caelis")
 	runtimeCfg.UserID = firstNonEmpty(cfg.UserID, runtimeCfg.UserID, "local-user")
 	return Services{
-		runtime:       runtimeCfg,
+		state:         &serviceState{runtime: runtimeCfg},
 		engine:        cfg.Engine,
 		sandbox:       cfg.Sandbox,
 		modelProvider: cfg.ModelProvider,
@@ -92,15 +98,29 @@ func (s Services) Engine() coreruntime.Engine {
 }
 
 func (s Services) Runtime() config.Runtime {
-	return cloneRuntime(s.runtime)
+	if s.state == nil {
+		return config.Runtime{}
+	}
+	s.state.mu.RLock()
+	defer s.state.mu.RUnlock()
+	return cloneRuntime(s.state.runtime)
+}
+
+func (s Services) setRuntime(runtime config.Runtime) {
+	if s.state == nil {
+		return
+	}
+	s.state.mu.Lock()
+	defer s.state.mu.Unlock()
+	s.state.runtime = cloneRuntime(runtime)
 }
 
 func (s Services) AppName() string {
-	return s.runtime.AppName
+	return s.Runtime().AppName
 }
 
 func (s Services) UserID() string {
-	return s.runtime.UserID
+	return s.Runtime().UserID
 }
 
 func (s Services) Sessions() SessionService {
@@ -181,7 +201,7 @@ func (s ModeService) CurrentID(ctx context.Context, ref session.Ref) (string, er
 	if s.services.engine == nil {
 		return coreruntime.SessionModeAutoReview, nil
 	}
-	ref = defaultSessionRef(s.services.runtime, ref)
+	ref = defaultSessionRef(s.services.Runtime(), ref)
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return coreruntime.SessionModeAutoReview, nil
 	}
@@ -213,7 +233,7 @@ func (s ModeService) Set(ctx context.Context, ref session.Ref, mode string) (Mod
 	if s.services.engine == nil {
 		return ModeChoice{}, errors.New("app/services: runtime engine is required")
 	}
-	ref = defaultSessionRef(s.services.runtime, ref)
+	ref = defaultSessionRef(s.services.Runtime(), ref)
 	if err := s.services.engine.UpdateSessionState(ctx, ref, func(state session.State) (session.State, error) {
 		next := cloneState(state)
 		if next == nil {
@@ -247,7 +267,44 @@ func (s SettingsService) SetRuntime(ctx context.Context, runtime config.Runtime)
 	if s.services.settings == nil {
 		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
 	}
-	if _, err := s.services.settings.SetRuntime(ctx, runtime); err != nil {
+	stored, err := s.services.settings.SetRuntime(ctx, runtime)
+	if err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	s.services.setRuntime(stored)
+	return s.View(ctx)
+}
+
+func (s SettingsService) SetStore(ctx context.Context, store config.Store) (appviewmodel.SettingsView, error) {
+	return s.updateRuntime(ctx, func(runtime config.Runtime) config.Runtime {
+		runtime.Store = store
+		return runtime
+	})
+}
+
+func (s SettingsService) SetSandbox(ctx context.Context, sandbox config.Sandbox) (appviewmodel.SettingsView, error) {
+	return s.updateRuntime(ctx, func(runtime config.Runtime) config.Runtime {
+		runtime.Sandbox = sandbox
+		return runtime
+	})
+}
+
+func (s SettingsService) SetSandboxBackend(ctx context.Context, backend string) (appviewmodel.SettingsView, error) {
+	normalized, err := normalizeSettingsSandboxBackend(backend)
+	if err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	return s.updateRuntime(ctx, func(runtime config.Runtime) config.Runtime {
+		runtime.Sandbox.Backend = normalized
+		return runtime
+	})
+}
+
+func (s SettingsService) SetCompaction(ctx context.Context, policy appsettings.CompactionPolicy) (appviewmodel.SettingsView, error) {
+	if s.services.settings == nil {
+		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
+	}
+	if _, err := s.services.settings.SetCompactionPolicy(ctx, policy); err != nil {
 		return appviewmodel.SettingsView{}, err
 	}
 	return s.View(ctx)
@@ -257,7 +314,37 @@ func (s SettingsService) Save(ctx context.Context, doc appsettings.Document) err
 	if s.services.settings == nil {
 		return errors.New("app/services: settings manager is not configured")
 	}
-	return s.services.settings.Save(ctx, doc)
+	if err := s.services.settings.Save(ctx, doc); err != nil {
+		return err
+	}
+	s.services.setRuntime(appsettings.NormalizeRuntime(doc.Runtime))
+	return nil
+}
+
+func (s SettingsService) updateRuntime(ctx context.Context, update func(config.Runtime) config.Runtime) (appviewmodel.SettingsView, error) {
+	if s.services.settings == nil {
+		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
+	}
+	runtime := appsettings.NormalizeRuntime(update(s.services.Runtime()))
+	stored, err := s.services.settings.SetRuntime(ctx, runtime)
+	if err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	s.services.setRuntime(stored)
+	return s.View(ctx)
+}
+
+func normalizeSettingsSandboxBackend(backend string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "", "auto":
+		return "auto", nil
+	case "host", "seatbelt", "bwrap", "landlock":
+		return strings.ToLower(strings.TrimSpace(backend)), nil
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		return "windows", nil
+	default:
+		return "", fmt.Errorf("app/services: unknown sandbox backend %q", backend)
+	}
 }
 
 func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsView {
@@ -475,7 +562,7 @@ func (s ModelService) RefreshCodeFreeAuth(ctx context.Context, req CodeFreeAuthR
 }
 
 func (s ModelService) withDefaults(ref session.Ref) session.Ref {
-	return defaultSessionRef(s.services.runtime, ref)
+	return defaultSessionRef(s.services.Runtime(), ref)
 }
 
 type ResourceService struct {
@@ -540,8 +627,9 @@ func (s SandboxService) noopHostLifecycle(ctx context.Context, action string) (S
 
 func (s SandboxService) statusFromRuntime() SandboxStatus {
 	runtimeCfg := s.services.Runtime()
+	configuredBackend := strings.TrimSpace(runtimeCfg.Sandbox.Backend)
 	out := SandboxStatus{
-		RequestedBackend: strings.TrimSpace(runtimeCfg.Sandbox.Backend),
+		RequestedBackend: configuredBackend,
 	}
 	if s.services.sandbox == nil {
 		return out
@@ -549,7 +637,7 @@ func (s SandboxService) statusFromRuntime() SandboxStatus {
 	status := sandbox.CloneStatus(s.services.sandbox.Status())
 	descriptor := sandbox.CloneDescriptor(s.services.sandbox.Descriptor())
 	out.SandboxRuntimeConfigured = true
-	out.RequestedBackend = firstNonEmpty(string(status.RequestedBackend), out.RequestedBackend, string(descriptor.Backend))
+	out.RequestedBackend = firstNonEmpty(configuredBackend, string(status.RequestedBackend), string(descriptor.Backend))
 	out.ResolvedBackend = firstNonEmpty(string(status.ResolvedBackend), string(descriptor.Backend), out.RequestedBackend)
 	out.Route = firstNonEmpty(string(descriptor.DefaultConstraints.Route), sandboxRouteForBackend(out.ResolvedBackend))
 	out.FallbackToHost = status.FallbackToHost
@@ -961,14 +1049,15 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 		return AgentInvokeResult{}, errors.New("app/services: agent invoker not found")
 	}
 	ref := session.NormalizeRef(req.SessionRef)
+	runtimeCfg := s.services.Runtime()
 	if ref.AppName == "" {
-		ref.AppName = s.services.runtime.AppName
+		ref.AppName = runtimeCfg.AppName
 	}
 	if ref.UserID == "" {
-		ref.UserID = s.services.runtime.UserID
+		ref.UserID = runtimeCfg.UserID
 	}
 	if ref.WorkspaceKey == "" {
-		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
+		ref.WorkspaceKey = strings.TrimSpace(runtimeCfg.WorkspaceKey)
 	}
 	req.SessionRef = ref
 	req.AgentID = agentID
@@ -1138,9 +1227,10 @@ func (s SessionService) Start(ctx context.Context, req StartSessionRequest) (ses
 	if s.services.engine == nil {
 		return session.Session{}, errors.New("app/services: runtime engine is required")
 	}
+	runtimeCfg := s.services.Runtime()
 	return s.services.engine.StartSession(ctx, session.StartRequest{
-		AppName:            s.services.runtime.AppName,
-		UserID:             s.services.runtime.UserID,
+		AppName:            runtimeCfg.AppName,
+		UserID:             runtimeCfg.UserID,
 		Workspace:          s.workspaceWithDefaults(req.Workspace),
 		PreferredSessionID: strings.TrimSpace(req.PreferredSessionID),
 		Title:              strings.TrimSpace(req.Title),
@@ -1152,14 +1242,15 @@ func (s SessionService) List(ctx context.Context, req ListSessionsRequest) (sess
 	if s.services.engine == nil {
 		return session.SessionPage{}, errors.New("app/services: runtime engine is required")
 	}
+	runtimeCfg := s.services.Runtime()
 	workspace := session.Workspace{}
 	if !req.AllWorkspaces {
 		workspace = s.workspaceWithDefaults(req.Workspace)
 	}
 	page, err := s.services.engine.ListSessions(ctx, session.ListQuery{
 		Ref: session.Ref{
-			AppName:      s.services.runtime.AppName,
-			UserID:       s.services.runtime.UserID,
+			AppName:      runtimeCfg.AppName,
+			UserID:       runtimeCfg.UserID,
 			WorkspaceKey: workspace.Key,
 		},
 		WorkspaceCWD: workspace.CWD,
@@ -1182,17 +1273,18 @@ func (s SessionService) Load(ctx context.Context, ref session.Ref) (session.Snap
 }
 
 func (s SessionService) withDefaults(ref session.Ref) session.Ref {
-	return defaultSessionRef(s.services.runtime, ref)
+	return defaultSessionRef(s.services.Runtime(), ref)
 }
 
 func (s SessionService) workspaceWithDefaults(workspace session.Workspace) session.Workspace {
 	workspace.Key = strings.TrimSpace(workspace.Key)
 	workspace.CWD = strings.TrimSpace(workspace.CWD)
+	runtimeCfg := s.services.Runtime()
 	if workspace.Key == "" {
-		workspace.Key = strings.TrimSpace(s.services.runtime.WorkspaceKey)
+		workspace.Key = strings.TrimSpace(runtimeCfg.WorkspaceKey)
 	}
 	if workspace.CWD == "" {
-		workspace.CWD = strings.TrimSpace(s.services.runtime.WorkspaceCWD)
+		workspace.CWD = strings.TrimSpace(runtimeCfg.WorkspaceCWD)
 	}
 	return workspace
 }
@@ -1267,7 +1359,7 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 	if s.services.engine == nil {
 		return nil, errors.New("app/services: runtime engine is required")
 	}
-	ref := defaultSessionRef(s.services.runtime, req.SessionRef)
+	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
 	modelRef := strings.TrimSpace(req.Model)
 	if modelRef == "" && s.services.settings != nil {
 		if cfg, ok, err := s.services.Models().Current(ctx, ref); err == nil && ok {
@@ -1319,7 +1411,7 @@ func (s TurnService) Replay(ctx context.Context, req coreruntime.ReplayRequest) 
 	if s.services.engine == nil {
 		return nil, errors.New("app/services: runtime engine is required")
 	}
-	ref := defaultSessionRef(s.services.runtime, req.SessionRef)
+	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
 	req.SessionRef = ref
 	return s.services.engine.Replay(ctx, req)
 }
@@ -1328,7 +1420,7 @@ func (s TurnService) Interrupt(ctx context.Context, ref session.Ref) error {
 	if s.services.engine == nil {
 		return errors.New("app/services: runtime engine is required")
 	}
-	ref = defaultSessionRef(s.services.runtime, ref)
+	ref = defaultSessionRef(s.services.Runtime(), ref)
 	return s.services.engine.Interrupt(ctx, ref)
 }
 

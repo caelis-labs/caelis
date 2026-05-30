@@ -45,7 +45,7 @@ func (s CompactionService) Compact(ctx context.Context, req CompactSessionReques
 	if s.services.engine == nil {
 		return session.Event{}, errors.New("app/services: runtime engine is required")
 	}
-	ref := defaultSessionRef(s.services.runtime, req.SessionRef)
+	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return session.Event{}, fmt.Errorf("%w: session id is required", session.ErrInvalid)
 	}
