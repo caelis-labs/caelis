@@ -42,3 +42,32 @@ func TestCloneEventPreservesCanonicalMessageIndependently(t *testing.T) {
 		t.Fatalf("cloned event meta = %v, want test", got)
 	}
 }
+
+func TestSessionMatchesListQuerySearchesMetadata(t *testing.T) {
+	active := Session{
+		Ref: Ref{
+			AppName:      "caelis",
+			UserID:       "tester",
+			SessionID:    "sess-1",
+			WorkspaceKey: "repo",
+		},
+		Workspace: Workspace{Key: "repo", CWD: "/tmp/repo"},
+		Title:     "ordinary notes",
+		Meta: map[string]any{
+			"project": "Phoenix migration",
+			"labels":  []any{"roadmap", "canonical-store"},
+		},
+	}
+	if !SessionMatchesListQuery(active, ListQuery{
+		Ref:    Ref{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Search: "phoenix",
+	}) {
+		t.Fatal("metadata search did not match session")
+	}
+	if SessionMatchesListQuery(active, ListQuery{
+		Ref:    Ref{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Search: "missing",
+	}) {
+		t.Fatal("unrelated search matched session metadata")
+	}
+}

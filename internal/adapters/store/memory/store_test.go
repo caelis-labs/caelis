@@ -52,6 +52,7 @@ func TestStoreListFiltersAndSummarizesSessions(t *testing.T) {
 		PreferredSessionID: "sess-alpha",
 		Workspace:          session.Workspace{Key: "repo", CWD: "/tmp/repo"},
 		Title:              "Alpha notes",
+		Meta:               map[string]any{"project": "Phoenix migration"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +86,7 @@ func TestStoreListFiltersAndSummarizesSessions(t *testing.T) {
 	page, err := store.List(ctx, session.ListQuery{
 		Ref:          session.Ref{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
 		WorkspaceCWD: "/tmp/repo",
-		Search:       "alpha",
+		Search:       "phoenix",
 	})
 	if err != nil {
 		t.Fatal(err)

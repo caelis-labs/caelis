@@ -1390,9 +1390,12 @@ be migrated before retiring the old stack:
     - Migrated baseline: TUI `/new` and `/resume` now use the app-service
       driver binding over the same core session list/load/replay contract, with
       canonical user-event prompt fallback for untitled sessions.
-    - Still pending: richer title generation, metadata search, cross-workspace
-      filters, current on-disk legacy session layout migration, and reload UX
-      polish are not implemented.
+    - Migrated baseline: session list search now includes canonical session
+      metadata, with memory, JSONL, SQLite, and engine test stores covered by
+      the same `core/session` matching contract.
+    - Still pending: richer title generation, cross-workspace filters, current
+      on-disk legacy session layout migration, and reload UX polish are not
+      implemented.
 
 ### Next Migration Milestones
 

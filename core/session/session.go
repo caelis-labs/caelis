@@ -3,6 +3,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -434,7 +435,28 @@ func sessionSearchText(active Session) string {
 		active.Title,
 		active.Workspace.Key,
 		active.Workspace.CWD,
+		sessionMetaSearchText(active.Meta),
 	}, "\n")
+}
+
+func sessionMetaSearchText(meta map[string]any) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	raw, err := json.Marshal(meta)
+	if err == nil {
+		return string(raw)
+	}
+	keys := make([]string, 0, len(meta))
+	for key := range meta {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, key := range keys {
+		parts = append(parts, key, fmt.Sprint(meta[key]))
+	}
+	return strings.Join(parts, "\n")
 }
 
 func CloneEvent(in Event) Event {

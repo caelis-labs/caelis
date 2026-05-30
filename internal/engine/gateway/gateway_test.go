@@ -107,6 +107,7 @@ func TestGatewayListsSessionsThroughStoreContract(t *testing.T) {
 		PreferredSessionID: "sess-alpha",
 		Workspace:          session.Workspace{Key: "workspace", CWD: "/tmp/workspace"},
 		Title:              "Alpha notes",
+		Meta:               map[string]any{"project": "Phoenix migration"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -127,7 +128,7 @@ func TestGatewayListsSessionsThroughStoreContract(t *testing.T) {
 	page, err := gateway.ListSessions(ctx, session.ListQuery{
 		Ref:          session.Ref{AppName: "caelis", UserID: "tester", WorkspaceKey: "workspace"},
 		WorkspaceCWD: "/tmp/workspace",
-		Search:       "alpha",
+		Search:       "phoenix",
 	})
 	if err != nil {
 		t.Fatal(err)
