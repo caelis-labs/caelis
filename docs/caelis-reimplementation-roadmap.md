@@ -1264,8 +1264,13 @@ be migrated before retiring the old stack:
      chat requests, parses native consecutive JSON stream frames, emits
      provider-neutral text/reasoning deltas, accumulates streamed tool calls,
      and returns a final canonical response with streamed usage metadata.
+   - Migrated baseline: the core-native CodeFree adapter now sends streaming
+     chat requests with usage-inclusive stream options, parses
+     OpenAI-compatible SSE text/reasoning/tool-call deltas, carries streamed
+     usage and origin metadata into the final canonical response, and keeps a
+     JSON fallback for compatible mocks or non-SSE CodeFree responses.
    - Still pending: provider-specific tool/argument behavior beyond the
-     migrated profiles, SSE parity for Anthropic/Gemini/CodeFree, and removal
+     migrated profiles, SSE parity for Anthropic/Gemini, and removal
      of the corresponding old `impl/model/providers` code once no old-stack
      entrypoint requires it.
 

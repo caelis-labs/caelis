@@ -817,7 +817,10 @@ func TestRunHeadlessUsesCoreCodeFreeProvider(t *testing.T) {
 				Name string `json:"name"`
 			} `json:"function"`
 		} `json:"tools"`
-		Stream bool `json:"stream"`
+		Stream        bool `json:"stream"`
+		StreamOptions struct {
+			IncludeUsage bool `json:"include_usage"`
+		} `json:"stream_options"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/acbackend/codechat/v1/completions" {
@@ -862,7 +865,7 @@ func TestRunHeadlessUsesCoreCodeFreeProvider(t *testing.T) {
 		headers.Get("Apikey") != "codefree-api-key" {
 		t.Fatalf("headers = auth:%q user:%q apikey:%q", headers.Get("Authorization"), headers.Get("Userid"), headers.Get("Apikey"))
 	}
-	if captured.Model != "GLM-4.7" || captured.Stream {
+	if captured.Model != "GLM-4.7" || !captured.Stream || !captured.StreamOptions.IncludeUsage {
 		t.Fatalf("captured model/stream = %q/%v", captured.Model, captured.Stream)
 	}
 	if !capturedCLITool(captured.Tools, "task") || !capturedCLITool(captured.Tools, "write_file") {

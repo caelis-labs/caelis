@@ -6,10 +6,12 @@ import (
 	"crypto/cipher"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -66,6 +68,7 @@ func TestProviderStreamUsesStoredCredentialsAndParsesResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer stream.Close()
 	event, err := stream.Recv()
 	if err != nil {
 		t.Fatal(err)
@@ -95,9 +98,15 @@ func TestProviderStreamUsesStoredCredentialsAndParsesResponse(t *testing.T) {
 	if headers.Get("Sessionid") == "" {
 		t.Fatal("Sessionid header is empty")
 	}
+	if got := headers.Get("Accept"); got != streamAcceptValue {
+		t.Fatalf("accept = %q, want %q", got, streamAcceptValue)
+	}
 
-	if captured.Model != "GLM-4.7" || captured.Stream {
-		t.Fatalf("captured model/stream = %q/%v, want GLM-4.7/false", captured.Model, captured.Stream)
+	if captured.Model != "GLM-4.7" || !captured.Stream {
+		t.Fatalf("captured model/stream = %q/%v, want GLM-4.7/true", captured.Model, captured.Stream)
+	}
+	if captured.StreamOptions == nil || !captured.StreamOptions.IncludeUsage {
+		t.Fatalf("stream_options = %#v, want include_usage", captured.StreamOptions)
 	}
 	if captured.MaxTokens != 1024 || captured.Temperature == nil || *captured.Temperature != 0 ||
 		captured.TopP == nil || *captured.TopP != 1 {
@@ -108,6 +117,98 @@ func TestProviderStreamUsesStoredCredentialsAndParsesResponse(t *testing.T) {
 	}
 	if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != "run_command" {
 		t.Fatalf("tools = %#v", captured.Tools)
+	}
+}
+
+func TestProviderStreamParsesSSE(t *testing.T) {
+	credsPath := writeCredentials(t, "272182", "live-api-key")
+	t.Setenv(credsPathEnv, credsPath)
+
+	var captured chatCompletionRequest
+	var headers http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		headers = r.Header.Clone()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"model":"GLM-4.7","created":1700000000,"choices":[{"index":0,"delta":{"role":"assistant","content":"pong "}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"done"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"run_command","arguments":"{\"command\""}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"echo hi\"}"}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, Model: "GLM-4.7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+		Stream:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	var deltas []string
+	var final *model.Response
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == model.StreamPartDelta {
+			deltas = append(deltas, event.Delta)
+		}
+		if event.Response != nil {
+			final = event.Response
+		}
+	}
+
+	if !captured.Stream || captured.StreamOptions == nil || !captured.StreamOptions.IncludeUsage {
+		t.Fatalf("captured stream settings = stream:%v options:%#v, want streaming usage", captured.Stream, captured.StreamOptions)
+	}
+	if got := headers.Get("Accept"); got != streamAcceptValue {
+		t.Fatalf("accept = %q, want %q", got, streamAcceptValue)
+	}
+	if strings.Join(deltas, "") != "pong donethink" {
+		t.Fatalf("deltas = %#v, want text and reasoning deltas", deltas)
+	}
+	if final == nil {
+		t.Fatal("final response = nil")
+	}
+	if got := final.Message.TextContent(); got != "pong done" {
+		t.Fatalf("final text = %q, want pong done", got)
+	}
+	var reasoningText string
+	for _, part := range final.Message.Parts {
+		if part.Kind == model.PartReasoning && part.Reasoning != nil {
+			reasoningText = part.Reasoning.VisibleText
+		}
+	}
+	if reasoningText != "think" {
+		t.Fatalf("reasoning = %#v, want streamed reasoning", final.Message.Parts)
+	}
+	calls := final.Message.ToolCalls()
+	if len(calls) != 1 || calls[0].ID != "call-1" || calls[0].Name != "run_command" ||
+		string(calls[0].Input) != `{"command":"echo hi"}` {
+		t.Fatalf("tool calls = %#v, want streamed tool call", calls)
+	}
+	if final.Usage == nil || final.Usage.TotalTokens != 14 ||
+		final.Usage.InputTokens != 10 || final.Usage.OutputTokens != 4 {
+		t.Fatalf("usage = %#v, want streamed usage", final.Usage)
+	}
+	if final.Origin == nil || final.Origin.Provider != "codefree" ||
+		final.Origin.Model != "GLM-4.7" || final.Origin.RawFinishReason != "tool_calls" {
+		t.Fatalf("origin = %#v, want streamed origin", final.Origin)
 	}
 }
 
