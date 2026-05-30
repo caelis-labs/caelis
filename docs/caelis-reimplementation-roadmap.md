@@ -1346,9 +1346,13 @@ be migrated before retiring the old stack:
       settings and `CompactionService`, with configurable checkpoint
       instructions for model-backed summaries and source-character budget
       metadata applied by both model-backed and deterministic fallback paths.
-    - Still pending: automatic compaction, post-compaction budget estimation,
-      and full runtime-vs-reload semantic round-trip tests remain to be
-      migrated.
+    - Migrated baseline: core gateway reload validation now exercises both
+      JSONL and SQLite stores end-to-end, proving that a reloaded provider
+      request is rebuilt from the canonical compact checkpoint, post-compact
+      user/assistant/tool messages, reasoning replay signatures, provider
+      metadata, and usage state.
+    - Still pending: automatic compaction and post-compaction budget estimation
+      remain to be migrated.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill
