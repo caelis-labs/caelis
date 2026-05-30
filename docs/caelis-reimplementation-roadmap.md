@@ -809,7 +809,9 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared TUI/APP view-model projection for transcript, current plan, pending
   approvals, and participants.
 - Core-native ACP server for initialize, session/new, session/prompt, cancel,
-  `session/update`, and permission request bridging.
+  session/list, session/load, session/resume, cancel, `session/update`, and
+  permission request bridging. `session/load` replays canonical stored events
+  through the same ACP projection path used for live updates.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
 - Architecture lint rules for the new package boundaries.
@@ -852,9 +854,11 @@ be migrated before retiring the old stack:
      `surfaces/headless` or `surfaces/acpserver`.
    - Still pending: old package cleanup after remaining entrypoints move,
      production settings/config parity, and richer ACP surface behavior.
-   - The new ACP server is minimal and does not yet expose load-session,
-     terminal integration, client mode/config flows, session resume, or the full
-     behavior covered by current public ACP e2e tests.
+   - The new ACP server now exposes session list/load/resume over the
+     core-native session store and canonical ACP projector.
+   - Still pending: terminal integration, client mode/config flows, config/model
+     option updates, close-session handling, and the full behavior covered by
+     current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -979,6 +983,10 @@ be migrated before retiring the old stack:
       pagination, event counts, and last-event timestamps. `internal/app/services`
       exposes the same list path with runtime workspace defaults so TUI and
       future APP surfaces can share the same resume data source.
+    - Migrated baseline: the new ACP stdio server now serves `session/list`,
+      `session/load`, and `session/resume` from the same core-native session
+      contract, and `session/load` replays canonical events as ACP
+      `session/update` notifications.
     - Still pending: TUI/CLI `/resume` command wiring, richer title generation,
       metadata search, cross-workspace filters, current on-disk legacy session
       layout migration, and reload UX are not implemented.

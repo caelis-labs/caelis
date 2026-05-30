@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
@@ -91,6 +92,24 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 			return nil, invalidParams(err)
 		}
 		return responseOrError(s.newSession(ctx, req))
+	case schema.MethodSessionList:
+		var req schema.SessionListRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.listSessions(ctx, req))
+	case schema.MethodSessionLoad:
+		var req schema.LoadSessionRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.loadSession(ctx, req))
+	case schema.MethodSessionResume:
+		var req schema.ResumeSessionRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.resumeSession(ctx, req))
 	case schema.MethodSessionPrompt:
 		var req schema.PromptRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -121,7 +140,7 @@ func (s *Server) initialize(context.Context, schema.InitializeRequest) (any, *js
 	return schema.InitializeResponse{
 		ProtocolVersion: schema.CurrentProtocolVersion,
 		AgentCapabilities: schema.AgentCapabilities{
-			LoadSession: false,
+			LoadSession: true,
 			MCPCapabilities: schema.MCPCapabilities{
 				HTTP: false,
 				SSE:  false,
@@ -150,6 +169,57 @@ func (s *Server) newSession(ctx context.Context, req schema.NewSessionRequest) (
 		return schema.NewSessionResponse{}, err
 	}
 	return schema.NewSessionResponse{SessionID: active.SessionID}, nil
+}
+
+func (s *Server) listSessions(ctx context.Context, req schema.SessionListRequest) (schema.SessionListResponse, error) {
+	cwd := strings.TrimSpace(req.CWD)
+	workspace := ""
+	if cwd != "" {
+		workspace = workspaceKey(cwd)
+	}
+	page, err := s.engine.ListSessions(ctx, session.ListQuery{
+		Ref: session.Ref{
+			AppName:      s.appName,
+			UserID:       s.userID,
+			WorkspaceKey: workspace,
+		},
+		WorkspaceCWD: cwd,
+		After:        session.Cursor(strings.TrimSpace(req.Cursor)),
+	})
+	if err != nil {
+		return schema.SessionListResponse{}, err
+	}
+	out := schema.SessionListResponse{
+		Sessions:   make([]schema.SessionSummary, 0, len(page.Sessions)),
+		NextCursor: strings.TrimSpace(string(page.NextCursor)),
+	}
+	for _, item := range page.Sessions {
+		out.Sessions = append(out.Sessions, schema.SessionSummary{
+			SessionID: strings.TrimSpace(item.Session.SessionID),
+			CWD:       strings.TrimSpace(item.Session.Workspace.CWD),
+			Title:     strings.TrimSpace(item.Session.Title),
+			UpdatedAt: formatACPTime(item.Session.UpdatedAt),
+		})
+	}
+	return out, nil
+}
+
+func (s *Server) loadSession(ctx context.Context, req schema.LoadSessionRequest) (schema.LoadSessionResponse, error) {
+	snapshot, err := s.loadSnapshot(ctx, req.SessionID)
+	if err != nil {
+		return schema.LoadSessionResponse{}, err
+	}
+	if err := s.publishSnapshot(ctx, snapshot); err != nil {
+		return schema.LoadSessionResponse{}, err
+	}
+	return schema.LoadSessionResponse{}, nil
+}
+
+func (s *Server) resumeSession(ctx context.Context, req schema.ResumeSessionRequest) (schema.ResumeSessionResponse, error) {
+	if _, err := s.loadSnapshot(ctx, req.SessionID); err != nil {
+		return schema.ResumeSessionResponse{}, err
+	}
+	return schema.ResumeSessionResponse{}, nil
 }
 
 func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.PromptResponse, error) {
@@ -184,6 +254,39 @@ func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.P
 		}
 	}
 	return schema.PromptResponse{StopReason: stopReason}, nil
+}
+
+func (s *Server) loadSnapshot(ctx context.Context, sessionID string) (session.Snapshot, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return session.Snapshot{}, fmt.Errorf("surface/acpserver: session id is required")
+	}
+	return s.engine.LoadSession(ctx, session.Ref{
+		AppName:   s.appName,
+		UserID:    s.userID,
+		SessionID: sessionID,
+	})
+}
+
+func (s *Server) publishSnapshot(ctx context.Context, snapshot session.Snapshot) error {
+	if s.conn == nil {
+		return errors.New("surface/acpserver: connection is unavailable")
+	}
+	for _, event := range snapshot.Events {
+		notifications, err := s.projector.ProjectNotifications(event)
+		if err != nil {
+			return err
+		}
+		for _, notification := range notifications {
+			if strings.TrimSpace(notification.SessionID) == "" {
+				notification.SessionID = strings.TrimSpace(snapshot.Session.SessionID)
+			}
+			if err := s.conn.Notify(schema.MethodSessionUpdate, notification); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) publishEvent(ctx context.Context, turn coreruntime.Turn, event session.Event) error {
@@ -235,6 +338,13 @@ func permissionApproved(response schema.RequestPermissionResponse) bool {
 	default:
 		return false
 	}
+}
+
+func formatACPTime(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func promptParts(raw []json.RawMessage) (string, []model.ContentPart, error) {

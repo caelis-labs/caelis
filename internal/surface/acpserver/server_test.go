@@ -141,6 +141,146 @@ func TestServeStdioRunsPromptThroughCoreEngine(t *testing.T) {
 	}
 }
 
+func TestServeStdioListsLoadsAndResumesSessions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stack, err := local.New(local.Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+		},
+		Provider: &testProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := stack.Services().Engine()
+	active, err := engine.StartSession(ctx, session.StartRequest{
+		AppName:            "caelis",
+		UserID:             "tester",
+		PreferredSessionID: "sess-load",
+		Workspace:          session.Workspace{Key: "project", CWD: "/tmp/project"},
+		Title:              "Loaded session",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := engine.RecordEvents(ctx, active.Ref, []session.Event{
+		{
+			Type: session.EventUser,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("ping")},
+			},
+		},
+		{
+			Type: session.EventAssistant,
+			Message: &model.Message{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("pong")},
+			},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Engine:  engine,
+			AppName: "caelis",
+			UserID:  "tester",
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	updates := make(chan updateNotification, 4)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(_ context.Context, msg jsonrpc.Message) {
+			if msg.Method != schema.MethodSessionUpdate {
+				return
+			}
+			var notification updateNotification
+			if err := json.Unmarshal(msg.Params, &notification); err == nil {
+				updates <- notification
+			}
+		})
+	}()
+
+	var initResp schema.InitializeResponse
+	if err := conn.Call(ctx, schema.MethodInitialize, schema.InitializeRequest{
+		ProtocolVersion:    schema.CurrentProtocolVersion,
+		ClientCapabilities: map[string]any{},
+	}, &initResp); err != nil {
+		t.Fatalf("initialize call error = %v", err)
+	}
+	if !initResp.AgentCapabilities.LoadSession {
+		t.Fatalf("load session capability = false, want true")
+	}
+
+	var listResp schema.SessionListResponse
+	if err := conn.Call(ctx, schema.MethodSessionList, schema.SessionListRequest{CWD: "/tmp/project"}, &listResp); err != nil {
+		t.Fatalf("session/list call error = %v", err)
+	}
+	if len(listResp.Sessions) != 1 || listResp.Sessions[0].SessionID != "sess-load" {
+		t.Fatalf("session/list response = %#v, want sess-load", listResp)
+	}
+	if listResp.Sessions[0].CWD != "/tmp/project" || listResp.Sessions[0].Title != "Loaded session" || listResp.Sessions[0].UpdatedAt == "" {
+		t.Fatalf("session/list summary = %#v, want cwd/title/updatedAt", listResp.Sessions[0])
+	}
+
+	var loadResp schema.LoadSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionLoad, schema.LoadSessionRequest{SessionID: "sess-load", CWD: "/tmp/project"}, &loadResp); err != nil {
+		t.Fatalf("session/load call error = %v", err)
+	}
+	var kinds []string
+	for len(kinds) < 2 {
+		select {
+		case update := <-updates:
+			if update.SessionID != "sess-load" {
+				t.Fatalf("load update session id = %q, want sess-load", update.SessionID)
+			}
+			kinds = append(kinds, update.Update.SessionUpdate)
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for load updates, got %v", kinds)
+		}
+	}
+	if kinds[0] != schema.UpdateUserMessage || kinds[1] != schema.UpdateAgentMessage {
+		t.Fatalf("load update kinds = %v, want user then agent", kinds)
+	}
+
+	var resumeResp schema.ResumeSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionResume, schema.ResumeSessionRequest{SessionID: "sess-load", CWD: "/tmp/project"}, &resumeResp); err != nil {
+		t.Fatalf("session/resume call error = %v", err)
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
 func TestServeStdioBridgesPermissionResponseIntoTurnSubmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
