@@ -994,12 +994,12 @@ be migrated before retiring the old stack:
      id, so follow-up prompts can reuse that id without storing controller state
      in TUI-only memory.
    - Migrated baseline: when an app-service ACP controller is active, TUI
-     `/model use <model> [reasoning]` and session mode cycling now route
-     through `internal/app/services.ControllerService` instead of mutating
-     local model/session state. The selected controller model, reasoning
-     effort, and mode are stored as controller-scoped session state, projected
-     into `/status`, and injected into subsequent controller invocations as a
-     surface-neutral config intent.
+     `/model use <model> [reasoning]`, `/approval <mode>`, and session mode
+     cycling now route through `internal/app/services.ControllerService`
+     instead of mutating local model/session state. The selected controller
+     model, reasoning effort, and mode are stored as controller-scoped session
+     state, projected into `/status`, and injected into subsequent controller
+     invocations as a surface-neutral config intent.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness

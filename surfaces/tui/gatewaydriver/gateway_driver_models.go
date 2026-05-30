@@ -278,6 +278,14 @@ func (d *GatewayDriver) SetSessionMode(ctx context.Context, mode string) (Status
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
+	if _, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
+		return StatusSnapshot{}, err
+	} else if activeACP {
+		if _, err := d.stack.SetACPControllerMode(ctx, activeSession.SessionRef, mode); err != nil {
+			return StatusSnapshot{}, err
+		}
+		return d.Status(ctx)
+	}
 	normalized, err := d.stack.SetSessionMode(ctx, activeSession.SessionRef, mode)
 	if err != nil {
 		return StatusSnapshot{}, err

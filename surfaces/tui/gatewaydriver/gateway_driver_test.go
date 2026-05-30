@@ -1904,38 +1904,55 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	}
 }
 
-func TestGatewayDriverSetSessionModeUpdatesLocalApprovalModeUnderACPController(t *testing.T) {
+func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "acp-approval-mode-test",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   t.TempDir(),
-		WorkspaceCWD:   t.TempDir(),
-		PermissionMode: "default",
-		Assembly:       assembly.ResolvedAssembly{},
-	})
-	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
-	}
-	activeSession, err := stack.StartSession(ctx, "acp-approval-session", "surface")
-	if err != nil {
-		t.Fatalf("StartSession() error = %v", err)
-	}
-	activeSession, err = stack.Sessions.BindController(ctx, session.BindControllerRequest{
-		SessionRef: activeSession.SessionRef,
-		Binding: session.ControllerBinding{
+	ref := session.SessionRef{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
+	activeSession := session.Session{
+		SessionRef: ref,
+		CWD:        t.TempDir(),
+		Controller: session.ControllerBinding{
 			Kind:            session.ControllerKindACP,
-			ControllerID:    "codex",
-			Label:           "Codex ACP",
+			AgentName:       "codex",
 			RemoteSessionID: "remote-1",
 		},
-	})
-	if err != nil {
-		t.Fatalf("BindController() error = %v", err)
 	}
+	remoteStatus := gatewayapp.ACPControllerStatus{
+		SessionRef: activeSession.SessionRef,
+		Agent:      "codex",
+		Model:      "remote-model",
+		Mode:       "auto-review",
+		ModeOptions: []gatewayapp.ACPControllerMode{
+			{ID: "auto-review", Name: "Auto Review"},
+			{ID: "manual", Name: "Manual"},
+		},
+	}
+	var localSetCalled bool
+	var setRemoteMode string
 	driver := &GatewayDriver{
-		stack:               gatewayAppStackForRuntimeTest(stack),
+		stack: &DriverStack{
+			Workspace: session.WorkspaceRef{CWD: activeSession.CWD},
+			GatewayFn: func() GatewayService {
+				return &activeSubmitGatewayService{}
+			},
+			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
+			},
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
+				return remoteStatus, true, nil
+			},
+			SetSessionModeFn: func(context.Context, session.SessionRef, string) (string, error) {
+				localSetCalled = true
+				return "manual", nil
+			},
+			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (gatewayapp.ACPControllerStatus, error) {
+				if ref.SessionID != activeSession.SessionID {
+					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
+				}
+				setRemoteMode = mode
+				remoteStatus.Mode = mode
+				return remoteStatus, nil
+			},
+		},
 		session:             activeSession,
 		hasSession:          true,
 		bindingKey:          "surface",
@@ -1950,22 +1967,14 @@ func TestGatewayDriverSetSessionModeUpdatesLocalApprovalModeUnderACPController(t
 	if err != nil {
 		t.Fatalf("SetSessionMode(manual) error = %v", err)
 	}
-	if status.SessionMode != "manual" {
-		t.Fatalf("status.SessionMode = %q, want manual", status.SessionMode)
+	if localSetCalled {
+		t.Fatal("SetSessionMode() called local session mode setter under an active ACP controller")
 	}
-	state, err := stack.SessionRuntimeState(ctx, activeSession.SessionRef)
-	if err != nil {
-		t.Fatalf("SessionRuntimeState() error = %v", err)
+	if setRemoteMode != "manual" {
+		t.Fatalf("remote mode set to %q, want manual", setRemoteMode)
 	}
-	if state.SessionMode != "manual" {
-		t.Fatalf("state.SessionMode = %q, want manual", state.SessionMode)
-	}
-	status, err = driver.Status(ctx)
-	if err != nil {
-		t.Fatalf("Status() error = %v", err)
-	}
-	if status.SessionMode != "manual" {
-		t.Fatalf("Status().SessionMode = %q, want manual", status.SessionMode)
+	if status.SessionMode != "manual" || status.ModeLabel != "Manual" {
+		t.Fatalf("status mode = %q/%q, want manual/Manual", status.SessionMode, status.ModeLabel)
 	}
 }
 

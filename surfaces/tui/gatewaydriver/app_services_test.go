@@ -536,6 +536,16 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	if modelStatus.Model != "remote-model [high]" || modelStatus.Provider != "acp" {
 		t.Fatalf("status after ACP UseModel = %#v, want remote ACP model projection", modelStatus)
 	}
+	setModeStatus, err := driver.SetSessionMode(ctx, coreruntime.SessionModeManual)
+	if err != nil {
+		t.Fatalf("SetSessionMode under ACP controller error = %v", err)
+	}
+	if engine.state[appservices.StateControllerMode] != coreruntime.SessionModeManual || setModeStatus.SessionMode != coreruntime.SessionModeManual {
+		t.Fatalf("controller mode after set = state:%#v status:%#v, want manual", engine.state, setModeStatus)
+	}
+	if _, ok := engine.state[appservices.StateSessionMode]; ok {
+		t.Fatalf("local session mode state = %#v, want unchanged under ACP controller", engine.state)
+	}
 	modeStatus, err := driver.CycleSessionMode(ctx)
 	if err != nil {
 		t.Fatalf("CycleSessionMode under ACP controller error = %v", err)
