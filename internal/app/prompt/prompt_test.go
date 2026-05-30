@@ -37,6 +37,7 @@ func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
 	joined := strings.Join(instructions, "\n\n")
 	for _, want := range []string{
 		"You are caelis-test",
+		"sandbox_permissions=require_escalated",
 		"### plugin\nreview prompt",
 		"### workspace\nworkspace rule",
 		"### Available Skills",

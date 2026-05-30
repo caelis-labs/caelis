@@ -30,6 +30,9 @@ func BuildInstructions(ctx context.Context, cfg Config) ([]string, error) {
 	if intro := systemIdentity(cfg.AppName); intro != "" {
 		instructions = append(instructions, intro)
 	}
+	if permissions := runtimePermissionInstructions(); permissions != "" {
+		instructions = append(instructions, permissions)
+	}
 	prompts, err := promptInstructions(ctx, cfg.Catalog.Prompts)
 	if err != nil {
 		return nil, err
@@ -136,6 +139,12 @@ func skillsInstruction(skills []plugin.SkillDescriptor) string {
 func systemIdentity(appName string) string {
 	appName = firstNonEmpty(appName, "caelis")
 	return "You are " + appName + ", an ACP-native coding agent runtime."
+}
+
+func runtimePermissionInstructions() string {
+	return strings.TrimSpace(`### Runtime Permissions
+- Run normal inspection, builds, tests, and workspace file edits with default sandbox permissions.
+- For host-level operations that must bypass the sandbox, such as git/control metadata writes, use run_command with sandbox_permissions=require_escalated and a concise justification.`)
 }
 
 func renderSection(id string, text string) string {

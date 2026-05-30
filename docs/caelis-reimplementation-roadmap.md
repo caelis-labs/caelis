@@ -654,7 +654,8 @@ alongside the old stack without importing it:
 - `internal/adapters/sandbox/host`: core-native host sandbox runtime with async
   command session start/open/read/write/wait/cancel support.
 - `internal/adapters/tools/shell`: core-native `run_command` tool using
-  `core/sandbox.Runtime`.
+  `core/sandbox.Runtime`, including the public
+  `sandbox_permissions=require_escalated` contract for host execution.
 - `internal/adapters/tools/task`: core-native wait/write/cancel control for
   yielded sandbox sessions.
 - `internal/adapters/acpagent/external`: core-native external ACP client that
@@ -1286,6 +1287,11 @@ be migrated before retiring the old stack:
      `core/sandbox.Runtime.Start/Open` contract, and `task` can wait, write
      stdin, tail output from returned cursors, list runtime sessions, or cancel
      that yielded session without importing old task/runtime code.
+   - Migrated baseline: `run_command` now exposes
+     `sandbox_permissions=require_escalated` plus mandatory `justification`,
+     maps that request to `core/sandbox.HostExecutionConstraints`, and records
+     the escalation metadata in the tool result instead of relying on old
+     policy-preset command parsing.
    - Migrated baseline: `task list/tail/wait` can operate on host async command
      sessions restored from the sandbox journal after a runtime restart, giving
      shell tasks a durable output-buffer baseline without reintroducing the old
@@ -1347,9 +1353,14 @@ be migrated before retiring the old stack:
      wraps the default mutating-filesystem approval policy with this reviewer,
      so auto-review can approve or deny without routing through old
      `gatewayapp`/`kernel` reviewer adapters.
-   - Still pending: richer policy presets, sandbox-aware permission escalation,
-     reusable approval-review transcript prefixes, token usage accounting for
-     review calls, and richer denial metadata are not migrated.
+   - Migrated baseline: sandbox-aware escalation now lives in the new approval
+     chain. Requests with `sandbox_permissions=require_escalated` require a
+     justification, force a user approval prompt with one-shot allow/reject
+     choices even when a normal tool decision was remembered, and only execute
+     after approval through the shared core turn loop.
+   - Still pending: richer policy presets, reusable approval-review transcript
+     prefixes, token usage accounting for review calls, and richer denial
+     metadata are not migrated.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant

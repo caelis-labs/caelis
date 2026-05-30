@@ -2,6 +2,8 @@ package approval
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -91,4 +93,86 @@ func TestWithSessionModeUsesRememberedToolDecisions(t *testing.T) {
 	if rejected.Verdict != VerdictDeny || rejected.Reason != "do not patch" {
 		t.Fatalf("remembered reject = %#v, want deny decision", rejected)
 	}
+}
+
+func TestWithSandboxEscalationRequiresApprovalForEscalatedTool(t *testing.T) {
+	raw := mustApprovalJSON(t, map[string]any{
+		"command":             "git commit -m test",
+		"sandbox_permissions": "require_escalated",
+		"justification":       "create the requested commit",
+	})
+	policy := WithSandboxEscalation(AllowAll())
+
+	decision, err := policy.ReviewToolCall(context.Background(), Request{
+		Call: model.ToolCall{Name: "run_command", Input: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != VerdictAsk {
+		t.Fatalf("decision = %#v, want ask", decision)
+	}
+	if !strings.Contains(decision.Reason, "create the requested commit") {
+		t.Fatalf("reason = %q, want justification", decision.Reason)
+	}
+	for _, option := range decision.Options {
+		if option.ID == OptionAllowAlways || option.ID == OptionRejectAlways {
+			t.Fatalf("options = %#v, want one-shot escalation choices", decision.Options)
+		}
+	}
+}
+
+func TestWithSandboxEscalationOverridesRememberedAllow(t *testing.T) {
+	state := session.State{}
+	if !RememberToolDecision(state, "run_command", OptionAllowAlways, "trusted command") {
+		t.Fatal("RememberToolDecision allow_always = false")
+	}
+	raw := mustApprovalJSON(t, map[string]any{
+		"command":             "git tag v0.0.0",
+		"sandbox_permissions": "require_escalated",
+		"justification":       "tag the exact commit",
+	})
+	policy := WithSandboxEscalation(WithSessionMode(AllowAll()))
+
+	decision, err := policy.ReviewToolCall(context.Background(), Request{
+		Mode:  ModeAutoReview,
+		State: state,
+		Call:  model.ToolCall{Name: "run_command", Input: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != VerdictAsk {
+		t.Fatalf("decision = %#v, want escalation to ask despite remembered allow", decision)
+	}
+	if strings.Contains(decision.Reason, "trusted command") || !strings.Contains(decision.Reason, "host execution") {
+		t.Fatalf("reason = %q, want escalation reason instead of remembered allow reason", decision.Reason)
+	}
+}
+
+func TestWithSandboxEscalationDeniesMissingJustification(t *testing.T) {
+	raw := mustApprovalJSON(t, map[string]any{
+		"command":             "git commit -m test",
+		"sandbox_permissions": "require_escalated",
+	})
+	policy := WithSandboxEscalation(AllowAll())
+
+	decision, err := policy.ReviewToolCall(context.Background(), Request{
+		Call: model.ToolCall{Name: "run_command", Input: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != VerdictDeny || !strings.Contains(decision.Reason, "justification") {
+		t.Fatalf("decision = %#v, want denial for missing justification", decision)
+	}
+}
+
+func mustApprovalJSON(t *testing.T, value map[string]any) json.RawMessage {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

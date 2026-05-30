@@ -4,6 +4,7 @@ package sandbox
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -37,6 +38,13 @@ const (
 	PermissionDefault        Permission = "default"
 	PermissionWorkspaceWrite Permission = "workspace_write"
 	PermissionFullAccess     Permission = "danger_full_access"
+)
+
+type PermissionRequest string
+
+const (
+	PermissionRequestUseDefault       PermissionRequest = "use_default"
+	PermissionRequestRequireEscalated PermissionRequest = "require_escalated"
 )
 
 type Isolation string
@@ -269,6 +277,27 @@ func NormalizeConstraints(in Constraints) Constraints {
 		out.PathRules[i].Path = strings.TrimSpace(out.PathRules[i].Path)
 	}
 	return out
+}
+
+func NormalizePermissionRequest(value string) (PermissionRequest, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", string(PermissionRequestUseDefault):
+		return PermissionRequestUseDefault, nil
+	case string(PermissionRequestRequireEscalated):
+		return PermissionRequestRequireEscalated, nil
+	default:
+		return PermissionRequestUseDefault, fmt.Errorf("unknown sandbox_permissions value %q", value)
+	}
+}
+
+func HostExecutionConstraints() Constraints {
+	return Constraints{
+		Route:      RouteHost,
+		Backend:    BackendHost,
+		Permission: PermissionFullAccess,
+		Isolation:  IsolationHost,
+		Network:    NetworkInherit,
+	}
 }
 
 func CloneDescriptor(in Descriptor) Descriptor {

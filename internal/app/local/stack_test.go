@@ -1073,6 +1073,103 @@ func TestStackAutoReviewDeniesBuiltinMutatingFilesystemTool(t *testing.T) {
 	}
 }
 
+func TestStackAutoReviewAsksBeforeEscalatedShellCommand(t *testing.T) {
+	workspace := t.TempDir()
+	rawInput, err := json.Marshal(map[string]any{
+		"command":             "echo blocked > escalated.txt",
+		"sandbox_permissions": "require_escalated",
+		"justification":       "write git control metadata",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-shell",
+					Name:  toolshell.RunCommandToolName,
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("stopped")},
+		},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Provider:     provider,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "commit changes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawPending bool
+	var sawRejected bool
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		event := session.CloneEvent(env.Event)
+		if event.Approval == nil {
+			continue
+		}
+		switch event.Approval.Status {
+		case session.ApprovalPending:
+			sawPending = true
+			if event.Approval.Tool == nil || event.Approval.Tool.Name != toolshell.RunCommandToolName {
+				t.Fatalf("pending approval = %#v, want run_command tool", event.Approval)
+			}
+			if !strings.Contains(event.Approval.Reason, "write git control metadata") {
+				t.Fatalf("pending reason = %q, want justification", event.Approval.Reason)
+			}
+			if err := turn.Submit(context.Background(), coreruntime.Submission{
+				Kind: coreruntime.SubmissionApproval,
+				Approval: &coreruntime.ApprovalDecision{
+					Approved: false,
+					Outcome:  approval.OptionRejectOnce,
+					OptionID: approval.OptionRejectOnce,
+					Reason:   "blocked by test",
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		case session.ApprovalRejected:
+			sawRejected = true
+		}
+	}
+	if !sawPending || !sawRejected {
+		t.Fatalf("approval pending=%v rejected=%v, want both", sawPending, sawRejected)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "escalated.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("escalated file stat error = %v, want not exists", err)
+	}
+	if len(provider.requests) != 2 {
+		t.Fatalf("provider requests = %d, want turn request plus final follow-up without approval-review model call", len(provider.requests))
+	}
+}
+
 func TestStackManualSessionModeAsksApprovalForReadOnlyTools(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "visible.txt"), []byte("visible\n"), 0o644); err != nil {

@@ -170,6 +170,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		)
 	}
 	approvalPolicy = approval.WithSessionMode(approvalPolicy)
+	approvalPolicy = approval.WithSandboxEscalation(approvalPolicy)
 	runner, err := loop.New(loop.Config{
 		Provider:     provider,
 		Tools:        tools,

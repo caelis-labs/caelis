@@ -22,11 +22,13 @@ type RunCommandTool struct {
 }
 
 type runCommandInput struct {
-	Command     string `json:"command"`
-	CWD         string `json:"cwd,omitempty"`
-	TimeoutMS   int    `json:"timeout_ms,omitempty"`
-	YieldTimeMS int    `json:"yield_time_ms,omitempty"`
-	Stdin       string `json:"stdin,omitempty"`
+	Command            string `json:"command"`
+	CWD                string `json:"cwd,omitempty"`
+	TimeoutMS          int    `json:"timeout_ms,omitempty"`
+	YieldTimeMS        int    `json:"yield_time_ms,omitempty"`
+	Stdin              string `json:"stdin,omitempty"`
+	SandboxPermissions string `json:"sandbox_permissions,omitempty"`
+	Justification      string `json:"justification,omitempty"`
 }
 
 func NewRunCommandTool(runtime sandbox.Runtime) (*RunCommandTool, error) {
@@ -60,8 +62,18 @@ func (t *RunCommandTool) Definition() tool.Definition {
 					"type":        "string",
 					"description": "Optional initial stdin for async commands.",
 				},
+				"sandbox_permissions": map[string]any{
+					"type":        "string",
+					"enum":        []any{string(sandbox.PermissionRequestUseDefault), string(sandbox.PermissionRequestRequireEscalated)},
+					"description": "Use require_escalated only for host-level operations that must bypass the default sandbox.",
+				},
+				"justification": map[string]any{
+					"type":        "string",
+					"description": "Required when sandbox_permissions=require_escalated; explain why host execution is needed.",
+				},
 			},
-			"required": []any{"command"},
+			"required":             []any{"command"},
+			"additionalProperties": false,
 		},
 	}
 }
@@ -78,17 +90,22 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if input.Command == "" {
 		return tool.Result{}, errors.New("tools/shell: command is required")
 	}
+	constraints, permission, err := commandConstraints(input)
+	if err != nil {
+		return tool.Result{}, err
+	}
 	timeout := t.DefaultTimeout
 	if input.TimeoutMS > 0 {
 		timeout = time.Duration(input.TimeoutMS) * time.Millisecond
 	}
 	if input.YieldTimeMS > 0 {
-		return t.callAsync(ctx, call, input, timeout)
+		return t.callAsync(ctx, call, input, timeout, constraints, permission)
 	}
 	result, runErr := t.Sandbox.Run(ctx, sandbox.CommandRequest{
-		Command: input.Command,
-		Dir:     strings.TrimSpace(input.CWD),
-		Timeout: timeout,
+		Command:     input.Command,
+		Dir:         strings.TrimSpace(input.CWD),
+		Timeout:     timeout,
+		Constraints: constraints,
 	})
 	out := tool.Result{
 		ID:      strings.TrimSpace(call.ID),
@@ -101,23 +118,53 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		},
 		Content: []model.Part{model.NewTextPart(formatCommandResult(result, runErr))},
 	}
+	addPermissionMeta(out.Meta, permission, input.Justification)
 	if runErr != nil && ctx.Err() != nil {
 		return out, runErr
 	}
 	return out, nil
 }
 
-func (t *RunCommandTool) callAsync(ctx context.Context, call tool.Call, input runCommandInput, timeout time.Duration) (tool.Result, error) {
+func (t *RunCommandTool) callAsync(ctx context.Context, call tool.Call, input runCommandInput, timeout time.Duration, constraints sandbox.Constraints, permission sandbox.PermissionRequest) (tool.Result, error) {
 	session, err := t.Sandbox.Start(ctx, sandbox.CommandRequest{
-		Command: input.Command,
-		Dir:     strings.TrimSpace(input.CWD),
-		Timeout: timeout,
-		Stdin:   []byte(input.Stdin),
+		Command:     input.Command,
+		Dir:         strings.TrimSpace(input.CWD),
+		Timeout:     timeout,
+		Stdin:       []byte(input.Stdin),
+		Constraints: constraints,
 	})
 	if err != nil {
 		return tool.Result{}, err
 	}
-	return SessionResult(ctx, call, RunCommandToolName, "start", session, sandbox.OutputCursor{}, time.Duration(input.YieldTimeMS)*time.Millisecond)
+	result, err := SessionResult(ctx, call, RunCommandToolName, "start", session, sandbox.OutputCursor{}, time.Duration(input.YieldTimeMS)*time.Millisecond)
+	addPermissionMeta(result.Meta, permission, input.Justification)
+	return result, err
+}
+
+func commandConstraints(input runCommandInput) (sandbox.Constraints, sandbox.PermissionRequest, error) {
+	permission, err := sandbox.NormalizePermissionRequest(input.SandboxPermissions)
+	if err != nil {
+		return sandbox.Constraints{}, sandbox.PermissionRequestUseDefault, err
+	}
+	switch permission {
+	case sandbox.PermissionRequestRequireEscalated:
+		if strings.TrimSpace(input.Justification) == "" {
+			return sandbox.Constraints{}, permission, errors.New("tools/shell: justification is required when sandbox_permissions=require_escalated")
+		}
+		return sandbox.HostExecutionConstraints(), permission, nil
+	default:
+		return sandbox.Constraints{}, permission, nil
+	}
+}
+
+func addPermissionMeta(meta map[string]any, permission sandbox.PermissionRequest, justification string) {
+	if meta == nil || permission != sandbox.PermissionRequestRequireEscalated {
+		return
+	}
+	meta["sandbox_permissions"] = string(permission)
+	if text := strings.TrimSpace(justification); text != "" {
+		meta["justification"] = text
+	}
 }
 
 func formatCommandResult(result sandbox.CommandResult, err error) string {
