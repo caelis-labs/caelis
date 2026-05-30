@@ -63,7 +63,19 @@ func (s *Server) executeCommandPrompt(ctx context.Context, ref session.Ref, inpu
 	if err != nil || !result.Handled {
 		return result.Handled, err
 	}
-	return true, s.publishCommandOutput(ref.SessionID, result.Output)
+	if err := s.publishCommandOutput(ref.SessionID, result.Output); err != nil {
+		return true, err
+	}
+	if result.SessionRef != nil && strings.TrimSpace(result.SessionRef.SessionID) != "" {
+		snapshot, err := s.loadSnapshot(ctx, result.SessionRef.SessionID)
+		if err != nil {
+			return true, err
+		}
+		if err := s.publishSnapshot(ctx, snapshot); err != nil {
+			return true, err
+		}
+	}
+	return true, nil
 }
 
 func (s *Server) publishCommandOutput(sessionID string, text string) error {

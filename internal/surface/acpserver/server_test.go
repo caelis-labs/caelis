@@ -319,6 +319,7 @@ func TestServeStdioExecutesSlashCommandsThroughAppServices(t *testing.T) {
 	if promptResp.StopReason != schema.StopReasonEndTurn {
 		t.Fatalf("normal stop reason = %q, want %q", promptResp.StopReason, schema.StopReasonEndTurn)
 	}
+	waitForAgentMessage(t, ctx, agentMessages, "normal response")
 
 	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
 		SessionID: newResp.SessionID,
@@ -338,6 +339,154 @@ func TestServeStdioExecutesSlashCommandsThroughAppServices(t *testing.T) {
 	}
 	if !snapshotContainsEventType(snapshot, session.EventCompact) {
 		t.Fatalf("events after /compact = %#v, want compact checkpoint event", snapshot.Events)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/resume " + newResp.SessionID}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/resume) call error = %v", err)
+	}
+	if promptResp.StopReason != schema.StopReasonEndTurn {
+		t.Fatalf("resume stop reason = %q, want %q", promptResp.StopReason, schema.StopReasonEndTurn)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "resume session: "+newResp.SessionID)
+	waitForAgentMessage(t, ctx, agentMessages, "normal response")
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
+func TestServeStdioExecutesModelAndApprovalSlashCommandsThroughAppServices(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "alpha",
+		Provider:        "openai-compatible",
+		Model:           "gpt-alpha",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "beta",
+		Provider:        "openai-compatible",
+		Model:           "gpt-beta",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SetDefaultModel(ctx, alpha.ID); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := local.New(local.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Settings: manager,
+		Provider: &testProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	agentMessages := make(chan string, 8)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(_ context.Context, msg jsonrpc.Message) {
+			if msg.Method != schema.MethodSessionUpdate {
+				return
+			}
+			var notification contentNotification
+			if err := json.Unmarshal(msg.Params, &notification); err != nil {
+				return
+			}
+			if notification.Update.SessionUpdate == schema.UpdateAgentMessage && notification.Update.Content.Text != "" {
+				agentMessages <- notification.Update.Content.Text
+			}
+		})
+	}()
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: "/tmp/project"}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+	var promptResp schema.PromptResponse
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/model"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/model) call error = %v", err)
+	}
+	modelsText := waitForAgentMessage(t, ctx, agentMessages, "models:")
+	if !strings.Contains(modelsText, "alpha") || !strings.Contains(modelsText, "beta") {
+		t.Fatalf("models output = %q, want alpha and beta", modelsText)
+	}
+
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/model use beta high"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/model use) call error = %v", err)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "model switched to: beta")
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/approval manual"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/approval manual) call error = %v", err)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "approval mode: manual")
+
+	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State[appservices.StateCurrentModelID] != beta.ID || snapshot.State[appservices.StateCurrentReasoningEffort] != "high" || snapshot.State[appservices.StateSessionMode] != coreruntime.SessionModeManual {
+		t.Fatalf("session state = %#v, want beta/high/manual", snapshot.State)
 	}
 
 	cancel()

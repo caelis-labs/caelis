@@ -700,10 +700,11 @@ alongside the old stack without importing it:
   approval list and decision-submission contract that converts surface choices
   into `core/runtime` approval submissions.
 - `internal/app/services.CommandService`: shared command catalog plus
-  service-native command execution contract. The first execution baseline
-  handles non-interactive `/status` and `/compact`, so ACP clients, TUI, and the
-  future APP can share command semantics instead of reimplementing status and
-  compaction in each surface.
+  service-native command execution contract. The current execution baseline
+  handles non-wizard `/status`, `/compact`, `/model`, `/approval`, and
+  `/resume`, so ACP clients, TUI, and the future APP can share command
+  semantics instead of reimplementing status, model selection, approval mode,
+  compaction, and resume behavior in each surface.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime and treats host setup/fix/reset/clean as explicit
@@ -1149,9 +1150,10 @@ be migrated before retiring the old stack:
      projection before adapting to the existing kernel envelope shape.
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
-     ACP clients, TUI, and the future APP. `/status` and `/compact` now share
-     app-service behavior; remaining interactive commands can be added without
-     making ACP, TUI, or APP surfaces own command semantics.
+     ACP clients, TUI, and the future APP. `/status`, `/compact`, `/model`,
+     `/approval`, and `/resume` now share app-service behavior; remaining
+     interactive commands can be added without making ACP, TUI, or APP surfaces
+     own command semantics.
    - Still pending: transcript actions and richer settings-panel composition
      still need APP-ready service/view-model contracts. Durable async task
      control and output storage remain kernel/runtime work rather than APP-only
@@ -1196,14 +1198,17 @@ be migrated before retiring the old stack:
      publishes standard `available_commands_update` notifications after
      session new/load/resume using the shared command catalog.
    - Migrated baseline: ACP `session/prompt` now executes service-native
-     `/status` and `/compact` through `CommandService`; handled commands return
-     `end_turn`, publish standard `agent_message_chunk` output, and do not enter
-     the model turn loop.
+     `/status`, `/compact`, `/model`, `/approval`, and `/resume` through
+     `CommandService`; handled commands return `end_turn`, publish standard
+     `agent_message_chunk` output, mutate model/mode/session state through
+     shared app services, and do not enter the model turn loop. `/resume`
+     command execution can also replay the targeted canonical snapshot through
+     the same ACP projection path as `session/load`.
    - Still pending: terminal integration, client mode flows, remaining
-     interactive slash-command parity for commands such as `/agent`, `/connect`,
-     `/model`, `/approval`, and `/resume`, richer non-model config providers beyond
-     prompt/context/sandbox backend settings, and the full behavior covered by
-     current public ACP e2e tests.
+     interactive slash-command parity for commands such as `/agent` and the
+     `/connect` wizard, remote controller option discovery/reconnect, richer
+     non-model config providers beyond prompt/context/sandbox backend settings,
+     and the full behavior covered by current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1689,8 +1694,9 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI command migrations against app services,
-   especially `/connect`, interactive ACP agent/controller commands, and
-   non-host doctor/sandbox repair flows.
+   especially `/connect`, interactive ACP agent/controller commands, remote
+   controller reconnect/config discovery, and non-host doctor/sandbox repair
+   flows.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating

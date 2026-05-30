@@ -545,6 +545,169 @@ func TestCommandServiceExecuteCompactRecordsCheckpoint(t *testing.T) {
 	}
 }
 
+func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "alpha",
+		Provider:        "openai-compatible",
+		Model:           "gpt-alpha",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "beta",
+		Provider:        "openai-compatible",
+		Model:           "gpt-beta",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SetDefaultModel(ctx, alpha.ID); err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-command"}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/model",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !listed.Handled || listed.Command != "model" {
+		t.Fatalf("model list = %#v, want handled model", listed)
+	}
+	for _, want := range []string{"models:", "alpha", "default", "current", "beta"} {
+		if !strings.Contains(listed.Output, want) {
+			t.Fatalf("model list output = %q, missing %q", listed.Output, want)
+		}
+	}
+
+	switched, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/model use beta high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(switched.Output, "model switched to: beta") || !strings.Contains(switched.Output, "reasoning: high") {
+		t.Fatalf("model switch output = %q, want beta/high", switched.Output)
+	}
+	if engine.state[StateCurrentModelID] != beta.ID || engine.state[StateCurrentReasoningEffort] != "high" {
+		t.Fatalf("state after model use = %#v, want beta/high", engine.state)
+	}
+
+	currentMode, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/approval",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if currentMode.Output != "approval mode: auto-review" {
+		t.Fatalf("approval output = %q, want auto-review", currentMode.Output)
+	}
+	manual, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/approval manual",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manual.Output != "approval mode: manual" || engine.state[StateSessionMode] != coreruntime.SessionModeManual {
+		t.Fatalf("approval manual = %#v state=%#v, want manual", manual, engine.state)
+	}
+
+	deleted, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/model del alpha",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Output != "model deleted: alpha" {
+		t.Fatalf("delete output = %q, want deleted alpha", deleted.Output)
+	}
+	if _, err := manager.ResolveModel("alpha"); err == nil {
+		t.Fatal("ResolveModel(alpha) error = nil, want deleted model")
+	}
+}
+
+func TestCommandServiceExecuteResumeListsAndTargetsSession(t *testing.T) {
+	ctx := context.Background()
+	updated := time.Date(2026, 5, 31, 10, 30, 0, 0, time.UTC)
+	engine := &recordingEngine{
+		page: session.SessionPage{Sessions: []session.SessionSummary{{
+			Session: session.Session{
+				Ref:       session.Ref{SessionID: "sess-alpha"},
+				Title:     "alpha work",
+				UpdatedAt: updated,
+			},
+		}}},
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:       session.Ref{SessionID: "sess-alpha"},
+				Title:     "alpha work",
+				Workspace: session.Workspace{CWD: "/tmp/project"},
+			},
+			Events: []session.Event{{
+				Type: session.EventUser,
+				Message: &model.Message{
+					Role:  model.RoleUser,
+					Parts: []model.Part{model.NewTextPart("resume me")},
+				},
+			}},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/resume"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !listed.Handled || listed.Command != "resume" || !strings.Contains(listed.Output, "sess-alpha") || !strings.Contains(listed.Output, "alpha work") {
+		t.Fatalf("resume list = %#v, want listed session", listed)
+	}
+	target, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/resume sess-alpha"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if target.SessionRef == nil || target.SessionRef.SessionID != "sess-alpha" {
+		t.Fatalf("resume target = %#v, want sess-alpha ref", target)
+	}
+	if !strings.Contains(target.Output, "resume session: sess-alpha") || !strings.Contains(target.Output, "events: 1") {
+		t.Fatalf("resume output = %q, want summary", target.Output)
+	}
+	if engine.loadRef.SessionID != "sess-alpha" {
+		t.Fatalf("load ref = %#v, want sess-alpha", engine.loadRef)
+	}
+}
+
 func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
