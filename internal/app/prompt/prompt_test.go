@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 )
 
 func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
@@ -75,6 +76,22 @@ func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
 	}
 	if strings.Index(joined, "### plugin") > strings.Index(joined, "### workspace") {
 		t.Fatalf("instructions = %q, want priority order", joined)
+	}
+}
+
+func TestBuildInstructionsCanDisableSkillMetadata(t *testing.T) {
+	instructions, err := BuildInstructions(context.Background(), Config{
+		SkillPolicy: appsettings.SkillPolicy{LoadingMode: appsettings.SkillLoadingModeDisabled},
+		Catalog: appresources.Catalog{
+			Skills: []plugin.SkillDescriptor{{Name: "review", Description: "Review code"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(instructions, "\n\n")
+	if strings.Contains(joined, "## Skills") || strings.Contains(joined, "Review code") {
+		t.Fatalf("instructions = %q, want skill metadata disabled", joined)
 	}
 }
 

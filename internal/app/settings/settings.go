@@ -26,6 +26,7 @@ type Document struct {
 	Runtime        config.Runtime              `json:"runtime,omitempty"`
 	Models         ModelCatalog                `json:"models,omitempty"`
 	Compaction     CompactionPolicy            `json:"compaction,omitempty"`
+	Skills         SkillPolicy                 `json:"skills,omitempty"`
 	Agents         []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
 	DisabledAgents []string                    `json:"disabled_acp_agents,omitempty"`
 	Meta           map[string]any              `json:"meta,omitempty"`
@@ -95,6 +96,19 @@ type CompactionPolicy struct {
 type AutoCompactionPolicy struct {
 	Mode           string  `json:"mode,omitempty"`
 	WatermarkRatio float64 `json:"watermark_ratio,omitempty"`
+}
+
+const (
+	SkillLoadingModeExplicit     = "explicit"
+	SkillLoadingModeMetadataOnly = "metadata_only"
+	SkillLoadingModeDisabled     = "disabled"
+
+	DefaultSkillExpansionChars = 64000
+)
+
+type SkillPolicy struct {
+	LoadingMode       string `json:"loading_mode,omitempty"`
+	MaxExpansionChars int    `json:"max_expansion_chars,omitempty"`
 }
 
 type Store interface {
@@ -339,6 +353,30 @@ func (m *Manager) SetCompactionPolicy(ctx context.Context, policy CompactionPoli
 	doc.Compaction = policy
 	if err := m.saveDocumentLocked(ctx, doc); err != nil {
 		return CompactionPolicy{}, err
+	}
+	return policy, nil
+}
+
+func (m *Manager) SkillPolicy() SkillPolicy {
+	if m == nil {
+		return SkillPolicy{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return NormalizeSkillPolicy(m.doc.Skills)
+}
+
+func (m *Manager) SetSkillPolicy(ctx context.Context, policy SkillPolicy) (SkillPolicy, error) {
+	if m == nil {
+		return SkillPolicy{}, errors.New("app/settings: manager is nil")
+	}
+	policy = NormalizeSkillPolicy(policy)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc := CloneDocument(m.doc)
+	doc.Skills = policy
+	if err := m.saveDocumentLocked(ctx, doc); err != nil {
+		return SkillPolicy{}, err
 	}
 	return policy, nil
 }
@@ -684,6 +722,7 @@ func NormalizeDocument(doc Document) Document {
 	doc.Runtime = NormalizeRuntime(doc.Runtime)
 	doc.Models = NormalizeModelCatalog(doc.Models)
 	doc.Compaction = NormalizeCompactionPolicy(doc.Compaction)
+	doc.Skills = NormalizeSkillPolicy(doc.Skills)
 	doc.Agents = cloneAgents(doc.Agents)
 	doc.DisabledAgents = normalizeAgentNames(doc.DisabledAgents)
 	doc.Meta = maps.Clone(doc.Meta)
@@ -709,6 +748,62 @@ func NormalizeAutoCompactionPolicy(policy AutoCompactionPolicy) AutoCompactionPo
 		policy.WatermarkRatio = 0
 	}
 	return policy
+}
+
+func NormalizeSkillPolicy(policy SkillPolicy) SkillPolicy {
+	policy.LoadingMode = normalizeSkillLoadingMode(policy.LoadingMode)
+	if policy.MaxExpansionChars < 0 {
+		policy.MaxExpansionChars = 0
+	}
+	return policy
+}
+
+func SkillLoadingMode(policy SkillPolicy) string {
+	policy = NormalizeSkillPolicy(policy)
+	switch policy.LoadingMode {
+	case "", SkillLoadingModeExplicit:
+		return SkillLoadingModeExplicit
+	case SkillLoadingModeMetadataOnly:
+		return SkillLoadingModeMetadataOnly
+	case SkillLoadingModeDisabled:
+		return SkillLoadingModeDisabled
+	default:
+		return SkillLoadingModeExplicit
+	}
+}
+
+func SkillMetadataEnabled(policy SkillPolicy) bool {
+	return SkillLoadingMode(policy) != SkillLoadingModeDisabled
+}
+
+func SkillExpansionEnabled(policy SkillPolicy) bool {
+	return SkillLoadingMode(policy) == SkillLoadingModeExplicit
+}
+
+func SkillExpansionBudget(policy SkillPolicy) int {
+	policy = NormalizeSkillPolicy(policy)
+	if !SkillExpansionEnabled(policy) {
+		return 0
+	}
+	if policy.MaxExpansionChars <= 0 {
+		return DefaultSkillExpansionChars
+	}
+	return policy.MaxExpansionChars
+}
+
+func normalizeSkillLoadingMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "default":
+		return ""
+	case "explicit", "expand", "expanded", "enabled", "enable", "on", "true", "yes":
+		return SkillLoadingModeExplicit
+	case "metadata", "metadata_only", "metadata-only", "meta":
+		return SkillLoadingModeMetadataOnly
+	case "disabled", "disable", "off", "false", "no":
+		return SkillLoadingModeDisabled
+	default:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
 }
 
 func normalizeAutoCompactionMode(mode string) string {
@@ -918,6 +1013,9 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 	if compactionPolicyConfigured(loaded.Compaction) {
 		out.Compaction = loaded.Compaction
 	}
+	if skillPolicyConfigured(loaded.Skills) {
+		out.Skills = loaded.Skills
+	}
 	if len(loaded.Agents) > 0 {
 		out.Agents = loaded.Agents
 	}
@@ -936,6 +1034,11 @@ func compactionPolicyConfigured(policy CompactionPolicy) bool {
 		policy.MaxSourceChars > 0 ||
 		policy.Auto.Mode != "" ||
 		policy.Auto.WatermarkRatio > 0
+}
+
+func skillPolicyConfigured(policy SkillPolicy) bool {
+	policy = NormalizeSkillPolicy(policy)
+	return policy.LoadingMode != "" || policy.MaxExpansionChars > 0
 }
 
 func modelCarriesProfileAuth(cfg ModelConfig) bool {

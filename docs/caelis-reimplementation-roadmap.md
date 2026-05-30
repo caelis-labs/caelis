@@ -1296,11 +1296,14 @@ be migrated before retiring the old stack:
      settings mutation path. The TUI binding persists requested backends
      through `SettingsService.SetSandboxBackend` and reads the resulting
      requested/resolved backend projection from the shared sandbox status view.
+   - Migrated baseline: sandbox backend construction now receives effective
+     skill writable roots from the local composition root, so future sandbox
+     backends can allow skill install/edit workflows without importing surface
+     or old gateway policy code.
    - macOS seatbelt, Linux bubblewrap/Landlock, Windows sandbox/helper/ACL
      repair, non-host sandbox setup/fix/reset/clean, network policy,
-     writable/readable root policy, skill sandbox roots, rich route
-     diagnostics, and production doctor repair reporting remain old-stack
-     capabilities.
+     writable/readable root policy beyond skill roots, rich route diagnostics,
+     and production doctor repair reporting remain old-stack capabilities.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
@@ -1573,9 +1576,19 @@ be migrated before retiring the old stack:
       discovered `SKILL.md` content into that turn's model instructions with a
       bounded expansion budget, while preserving the original user message and
       leaving unreferenced skills as metadata only.
-    - Still pending: richer skill loading policy controls, skill sandbox roots,
-      prompt policy controls beyond the current expansion budget, and richer
-      resource diagnostics still need migration.
+    - Migrated baseline: skill loading policy is now a shared app settings
+      contract. TUI and future APP consumers see the same surface-neutral
+      settings view, prompt assembly can disable skill metadata entirely, and
+      turn orchestration honors explicit/metadata-only/disabled loading plus a
+      configurable expansion budget without mutating the user message.
+    - Migrated baseline: the local composition root now passes default skill
+      roots into sandbox backend configuration as effective writable roots,
+      including system, user, workspace, and configured roots. This keeps skill
+      installation/editing policy out of surfaces and ready for future non-host
+      sandbox backends.
+    - Still pending: finer-grained prompt policy controls beyond skill loading
+      and compaction, richer resource diagnostics, and removal of the remaining
+      old gateway prompt/skill discovery helpers still need migration.
 
 14. Rendering and display semantics
     - The new view model is intentionally small.

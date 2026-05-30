@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -161,6 +162,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		WorkspaceDir: runtimeCfg.WorkspaceCWD,
 		BasePrompt:   firstNonEmpty(cfg.SystemPrompt, runtimeMetaString(runtimeCfg.Meta, "system_prompt")),
 		Catalog:      resourceCatalog,
+		SkillPolicy:  skillPolicyFromSettings(cfg.Settings),
 		ACPAgents:    spawnAgentDescriptors,
 	})
 	if err != nil {
@@ -636,10 +638,48 @@ func sandboxFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeCf
 	return factory.NewRuntime(ctx, sandbox.Config{
 		CWD:           runtimeCfg.WorkspaceCWD,
 		StateDir:      sandboxStateDir(runtimeCfg.Store),
-		ReadableRoots: runtimeCfg.Sandbox.ReadableRoots,
-		WritableRoots: runtimeCfg.Sandbox.WritableRoots,
+		ReadableRoots: slices.Clone(runtimeCfg.Sandbox.ReadableRoots),
+		WritableRoots: effectiveSandboxWritableRoots(runtimeCfg),
 		HelperPath:    runtimeCfg.Sandbox.HelperPath,
 	})
+}
+
+func effectiveSandboxWritableRoots(runtimeCfg config.Runtime) []string {
+	roots := slices.Clone(runtimeCfg.Sandbox.WritableRoots)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = ""
+	}
+	roots = append(roots, appresources.SkillRoots(homeDir, runtimeCfg.WorkspaceCWD, nil)...)
+	return dedupeRootPaths(roots)
+}
+
+func skillPolicyFromSettings(manager *appsettings.Manager) appsettings.SkillPolicy {
+	if manager == nil {
+		return appsettings.SkillPolicy{}
+	}
+	return manager.SkillPolicy()
+}
+
+func dedupeRootPaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		clean := filepath.Clean(path)
+		if _, ok := seen[clean]; ok {
+			continue
+		}
+		seen[clean] = struct{}{}
+		out = append(out, clean)
+	}
+	return out
 }
 
 func sandboxStateDir(store config.Store) string {

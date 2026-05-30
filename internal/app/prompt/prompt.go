@@ -14,6 +14,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 )
 
 type Config struct {
@@ -21,6 +22,7 @@ type Config struct {
 	WorkspaceDir string
 	BasePrompt   string
 	Catalog      appresources.Catalog
+	SkillPolicy  appsettings.SkillPolicy
 	ACPAgents    []plugin.ACPAgentDescriptor
 }
 
@@ -44,7 +46,7 @@ func BuildInstructions(ctx context.Context, cfg Config) ([]string, error) {
 		return nil, err
 	}
 	instructions = append(instructions, prompts...)
-	if skills := skillsInstruction(cfg.Catalog.Skills); skills != "" {
+	if skills := skillsInstruction(cfg.Catalog.Skills, cfg.SkillPolicy); skills != "" {
 		instructions = append(instructions, skills)
 	}
 	env, err := environmentContext(cfg.WorkspaceDir)
@@ -120,8 +122,8 @@ func promptText(fragment plugin.PromptFragment) (string, error) {
 	return strings.Join(parts, "\n\n"), nil
 }
 
-func skillsInstruction(skills []plugin.SkillDescriptor) string {
-	if len(skills) == 0 {
+func skillsInstruction(skills []plugin.SkillDescriptor, policy appsettings.SkillPolicy) string {
+	if len(skills) == 0 || !appsettings.SkillMetadataEnabled(policy) {
 		return ""
 	}
 	ordered := make([]plugin.SkillDescriptor, 0, len(skills))

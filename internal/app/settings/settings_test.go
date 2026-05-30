@@ -176,6 +176,51 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	}
 }
 
+func TestManagerSkillPolicyPersistsNormalizedSettings(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileStore(t.TempDir())
+	manager, err := NewManager(ctx, store, Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := manager.SetSkillPolicy(ctx, SkillPolicy{
+		LoadingMode:       "metadata-only",
+		MaxExpansionChars: -1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.LoadingMode != SkillLoadingModeMetadataOnly || policy.MaxExpansionChars != 0 {
+		t.Fatalf("policy = %#v, want metadata-only with non-negative expansion chars", policy)
+	}
+	if got := manager.SkillPolicy(); got != policy {
+		t.Fatalf("SkillPolicy() = %#v, want %#v", got, policy)
+	}
+	if SkillMetadataEnabled(policy) != true || SkillExpansionEnabled(policy) != false || SkillExpansionBudget(policy) != 0 {
+		t.Fatalf("effective metadata/expansion = %v/%v/%d, want true/false/0", SkillMetadataEnabled(policy), SkillExpansionEnabled(policy), SkillExpansionBudget(policy))
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Skills.LoadingMode != SkillLoadingModeMetadataOnly || doc.Skills.MaxExpansionChars != 0 {
+		t.Fatalf("persisted skill policy = %#v, want normalized policy", doc.Skills)
+	}
+	loaded, err := NewManager(ctx, store, Document{
+		Skills: SkillPolicy{LoadingMode: SkillLoadingModeExplicit, MaxExpansionChars: 123},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.SkillPolicy(); got.LoadingMode != SkillLoadingModeMetadataOnly || got.MaxExpansionChars != 0 {
+		t.Fatalf("loaded skill policy = %#v, want persisted override", got)
+	}
+}
+
 func TestManagerSetRuntimePersistsNormalizedSettings(t *testing.T) {
 	ctx := context.Background()
 	store := NewFileStore(t.TempDir())

@@ -75,7 +75,7 @@ func Discover(ctx context.Context, req Request) (Catalog, error) {
 	if err := discoverAgentFiles(ctx, homeDir, workspaceDir, &catalog); err != nil {
 		return Catalog{}, err
 	}
-	if err := discoverSkills(ctx, skillRoots(homeDir, workspaceDir, req.SkillDirs), &catalog); err != nil {
+	if err := discoverSkills(ctx, SkillRoots(homeDir, workspaceDir, req.SkillDirs), &catalog); err != nil {
 		return Catalog{}, err
 	}
 	sortCatalog(&catalog)
@@ -359,10 +359,11 @@ func parseSkillFrontMatter(text string) (string, string) {
 	return name, description
 }
 
-func skillRoots(homeDir string, workspaceDir string, extra []string) []string {
+func SkillRoots(homeDir string, workspaceDir string, extra []string) []string {
 	var roots []string
 	if homeDir != "" {
 		roots = append(roots,
+			filepath.Join(homeDir, ".caelis", "skills", ".system"),
 			filepath.Join(homeDir, ".agents", "skills"),
 			filepath.Join(homeDir, ".caelis", "skills"),
 		)
@@ -378,7 +379,28 @@ func skillRoots(homeDir string, workspaceDir string, extra []string) []string {
 			roots = append(roots, clean)
 		}
 	}
-	return roots
+	return dedupePaths(roots)
+}
+
+func dedupePaths(paths []string) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	seen := map[string]struct{}{}
+	for _, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		key := filepath.Clean(path)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, key)
+	}
+	return out
 }
 
 func sortCatalog(catalog *Catalog) {

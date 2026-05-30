@@ -51,6 +51,7 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeSkill(t, filepath.Join(home, ".agents", "skills", "echo"), "echo", "home echo")
+	writeSkill(t, filepath.Join(home, ".caelis", "skills", ".system", "builtin"), "builtin", "system skill")
 	writeSkill(t, filepath.Join(workspace, ".agents", "skills", "echo"), "echo", "workspace echo")
 	writeSkill(t, filepath.Join(workspace, "skills", "local"), "local", "local skill")
 
@@ -94,7 +95,7 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 		t.Fatalf("workspace prompt = %#v", catalog.Prompts[2])
 	}
 	names := skillNames(catalog.Skills)
-	for _, name := range []string{"echo", "local", "review-skill"} {
+	for _, name := range []string{"builtin", "echo", "local", "review-skill"} {
 		if !slices.Contains(names, name) {
 			t.Fatalf("skills = %#v, missing %q", catalog.Skills, name)
 		}
@@ -112,6 +113,24 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 	}
 	if len(catalog.AgentFiles) != 2 {
 		t.Fatalf("agent files = %#v, want global and workspace", catalog.AgentFiles)
+	}
+}
+
+func TestSkillRootsIncludeSystemWorkspaceUserAndExtraDirs(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	extra := filepath.Join(t.TempDir(), "extra")
+	got := SkillRoots(home, workspace, []string{" ", extra, extra})
+	want := []string{
+		filepath.Join(home, ".caelis", "skills", ".system"),
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".caelis", "skills"),
+		filepath.Join(workspace, "skills"),
+		filepath.Join(workspace, ".agents", "skills"),
+		extra,
+	}
+	if !slices.Equal(got, want) {
+		t.Fatalf("SkillRoots() = %#v, want %#v", got, want)
 	}
 }
 

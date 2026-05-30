@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -1622,6 +1623,104 @@ func TestStackDiscoversPluginAndWorkspaceResources(t *testing.T) {
 	}
 }
 
+func TestStackAppliesSkillPolicyToPromptAssembly(t *testing.T) {
+	workspace := t.TempDir()
+	skillDir := filepath.Join(workspace, ".agents", "skills", "review")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: review\ndescription: Review code\n---\n# Review\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := appsettings.NewManager(context.Background(), nil, appsettings.Document{
+		Skills: appsettings.SkillPolicy{LoadingMode: appsettings.SkillLoadingModeDisabled},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("done")},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+		},
+		Provider: provider,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "ping",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+	}
+	joined := strings.Join(provider.request.Instructions, "\n\n")
+	if strings.Contains(joined, "## Skills") || strings.Contains(joined, "Review code") {
+		t.Fatalf("instructions = %q, want skill metadata disabled", joined)
+	}
+}
+
+func TestStackAddsSkillRootsToSandboxConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	factory := &capturingSandboxFactory{}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox: config.Sandbox{
+				Backend:       "capture",
+				WritableRoots: []string{"/configured-write"},
+			},
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		Contributions: []plugin.Contribution{
+			contributionFunc(func(_ context.Context, registry plugin.Registry) error {
+				return registry.RegisterSandboxBackend("capture", factory)
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stack.Sandbox() == nil {
+		t.Fatal("stack sandbox = nil, want configured capture runtime")
+	}
+	for _, root := range []string{
+		"/configured-write",
+		filepath.Join(home, ".caelis", "skills", ".system"),
+		filepath.Join(home, ".agents", "skills"),
+		filepath.Join(home, ".caelis", "skills"),
+		filepath.Join(workspace, "skills"),
+		filepath.Join(workspace, ".agents", "skills"),
+	} {
+		if !slices.Contains(factory.cfg.WritableRoots, root) {
+			t.Fatalf("sandbox writable roots = %#v, want %q", factory.cfg.WritableRoots, root)
+		}
+	}
+}
+
 func TestStackInvokesPluginDeclaredACPAgent(t *testing.T) {
 	pluginDir := filepath.Join(t.TempDir(), "plugin")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
@@ -2142,6 +2241,25 @@ func nestedRuntimeTask(meta map[string]any) map[string]any {
 type capturingProvider struct {
 	request model.Request
 	message model.Message
+}
+
+type capturingSandboxFactory struct {
+	cfg sandbox.Config
+}
+
+func (f *capturingSandboxFactory) NewRuntime(ctx context.Context, cfg sandbox.Config) (sandbox.Runtime, error) {
+	f.cfg = sandbox.Config{
+		CWD:                 cfg.CWD,
+		RequestedBackend:    cfg.RequestedBackend,
+		BackendCandidates:   append([]sandbox.Backend(nil), cfg.BackendCandidates...),
+		FallbackInstallHint: cfg.FallbackInstallHint,
+		HelperPath:          cfg.HelperPath,
+		StateDir:            cfg.StateDir,
+		ReadableRoots:       append([]string(nil), cfg.ReadableRoots...),
+		WritableRoots:       append([]string(nil), cfg.WritableRoots...),
+		ReadOnlySubpaths:    append([]string(nil), cfg.ReadOnlySubpaths...),
+	}
+	return sandboxhost.New(ctx, cfg)
 }
 
 func (p *capturingProvider) ID() string {

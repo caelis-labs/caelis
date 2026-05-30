@@ -320,6 +320,16 @@ func (s SettingsService) SetCompaction(ctx context.Context, policy appsettings.C
 	return s.View(ctx)
 }
 
+func (s SettingsService) SetSkillPolicy(ctx context.Context, policy appsettings.SkillPolicy) (appviewmodel.SettingsView, error) {
+	if s.services.settings == nil {
+		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
+	}
+	if _, err := s.services.settings.SetSkillPolicy(ctx, policy); err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	return s.View(ctx)
+}
+
 func (s SettingsService) Save(ctx context.Context, doc appsettings.Document) error {
 	if s.services.settings == nil {
 		return errors.New("app/services: settings manager is not configured")
@@ -360,6 +370,7 @@ func normalizeSettingsSandboxBackend(backend string) (string, error) {
 func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsView {
 	runtime := appsettings.NormalizeRuntime(doc.Runtime)
 	compaction := appsettings.NormalizeCompactionPolicy(doc.Compaction)
+	skills := appsettings.NormalizeSkillPolicy(doc.Skills)
 	return appviewmodel.SettingsView{
 		Runtime: appviewmodel.RuntimeSettings{
 			AppName:      runtime.AppName,
@@ -384,6 +395,10 @@ func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsVie
 			MaxSourceChars:     compaction.MaxSourceChars,
 			AutoMode:           compaction.Auto.Mode,
 			AutoWatermarkRatio: compaction.Auto.WatermarkRatio,
+		},
+		Skills: appviewmodel.SkillSettings{
+			LoadingMode:       appsettings.SkillLoadingMode(skills),
+			MaxExpansionChars: appsettings.SkillExpansionBudget(skills),
 		},
 	}
 }
@@ -1425,11 +1440,17 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 	return turnWithPrefixedEvents(turn, prefixEvents), nil
 }
 
-const maxExpandedSkillInstructionChars = 64000
-
 func (s TurnService) skillInstructions(ctx context.Context, req BeginTurnRequest) ([]string, error) {
 	refs := skillRefsFromTurn(req)
 	if len(refs) == 0 || len(s.services.resources.Skills) == 0 {
+		return nil, nil
+	}
+	policy := appsettings.SkillPolicy{}
+	if s.services.settings != nil {
+		policy = s.services.settings.SkillPolicy()
+	}
+	remaining := appsettings.SkillExpansionBudget(policy)
+	if remaining <= 0 {
 		return nil, nil
 	}
 	byName := map[string]plugin.SkillDescriptor{}
@@ -1441,7 +1462,6 @@ func (s TurnService) skillInstructions(ctx context.Context, req BeginTurnRequest
 		byName[strings.ToLower(name)] = skill
 	}
 	var out []string
-	remaining := maxExpandedSkillInstructionChars
 	for _, ref := range refs {
 		if err := ctx.Err(); err != nil {
 			return nil, err

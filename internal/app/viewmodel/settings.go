@@ -5,6 +5,7 @@ type SettingsView struct {
 	Store      StoreSettings      `json:"store"`
 	Sandbox    SandboxSettings    `json:"sandbox"`
 	Compaction CompactionSettings `json:"compaction,omitempty"`
+	Skills     SkillSettings      `json:"skills,omitempty"`
 }
 
 type RuntimeSettings struct {
@@ -33,4 +34,9 @@ type CompactionSettings struct {
 	MaxSourceChars     int     `json:"max_source_chars,omitempty"`
 	AutoMode           string  `json:"auto_mode,omitempty"`
 	AutoWatermarkRatio float64 `json:"auto_watermark_ratio,omitempty"`
+}
+
+type SkillSettings struct {
+	LoadingMode       string `json:"loading_mode,omitempty"`
+	MaxExpansionChars int    `json:"max_expansion_chars,omitempty"`
 }

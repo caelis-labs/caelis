@@ -206,6 +206,59 @@ func TestTurnBeginExpandsExplicitSkillReferencesIntoInstructions(t *testing.T) {
 	}
 }
 
+func TestTurnBeginHonorsSkillLoadingPolicy(t *testing.T) {
+	ctx := context.Background()
+	skillDir := filepath.Join(t.TempDir(), "review")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("---\nname: review\ndescription: Review code.\n---\n# Review\n\nCheck correctness first.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
+		Skills: appsettings.SkillPolicy{
+			LoadingMode:       appsettings.SkillLoadingModeExplicit,
+			MaxExpansionChars: 12,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{}
+	svc, err := New(Config{
+		Engine:   engine,
+		Settings: manager,
+		Resources: appresources.Catalog{
+			Skills: []plugin.SkillDescriptor{{
+				Name:        "review",
+				Description: "Review code.",
+				Paths:       []string{skillPath},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Turns().Begin(ctx, BeginTurnRequest{SessionRef: session.Ref{SessionID: "sess-1"}, Input: "Use $review."}); err != nil {
+		t.Fatal(err)
+	}
+	if len(engine.turn.Instructions) != 1 || !strings.Contains(engine.turn.Instructions[0], "[Skill content truncated by prompt budget.]") {
+		t.Fatalf("instructions = %#v, want budget-truncated skill content", engine.turn.Instructions)
+	}
+
+	if _, err := manager.SetSkillPolicy(ctx, appsettings.SkillPolicy{LoadingMode: appsettings.SkillLoadingModeMetadataOnly}); err != nil {
+		t.Fatal(err)
+	}
+	engine.turn = coreruntime.TurnRequest{}
+	if _, err := svc.Turns().Begin(ctx, BeginTurnRequest{SessionRef: session.Ref{SessionID: "sess-1"}, Input: "Use $review."}); err != nil {
+		t.Fatal(err)
+	}
+	if len(engine.turn.Instructions) != 0 {
+		t.Fatalf("metadata-only instructions = %#v, want no skill expansion", engine.turn.Instructions)
+	}
+}
+
 func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, appsettings.NewFileStore(t.TempDir()), appsettings.Document{
@@ -216,6 +269,10 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 				Mode:           "on",
 				WatermarkRatio: 0.8,
 			},
+		},
+		Skills: appsettings.SkillPolicy{
+			LoadingMode:       "metadata-only",
+			MaxExpansionChars: 32,
 		},
 	})
 	if err != nil {
@@ -273,6 +330,9 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 	if view.Compaction.Prompt != "keep durable facts" || view.Compaction.AutoMode != "enabled" || view.Compaction.AutoWatermarkRatio != 0.8 {
 		t.Fatalf("compaction view = %#v, want normalized compaction settings", view.Compaction)
+	}
+	if view.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || view.Skills.MaxExpansionChars != 0 {
+		t.Fatalf("skill view = %#v, want metadata-only effective skill policy", view.Skills)
 	}
 
 	view.Sandbox.ReadableRoots[0] = "mutated"
@@ -339,6 +399,17 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 	if compactionView.Compaction.Prompt != "summarize durable state" || compactionView.Compaction.AutoMode != "disabled" || compactionView.Compaction.AutoWatermarkRatio != 0.5 {
 		t.Fatalf("compaction mutation view = %#v, want normalized compaction settings", compactionView.Compaction)
+	}
+
+	skillView, err := svc.Settings().SetSkillPolicy(ctx, appsettings.SkillPolicy{
+		LoadingMode:       "explicit",
+		MaxExpansionChars: 1024,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skillView.Skills.LoadingMode != appsettings.SkillLoadingModeExplicit || skillView.Skills.MaxExpansionChars != 1024 {
+		t.Fatalf("skill mutation view = %#v, want explicit skill policy", skillView.Skills)
 	}
 }
 
