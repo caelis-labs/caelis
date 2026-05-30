@@ -849,14 +849,21 @@ be migrated before retiring the old stack:
      `StatusSnapshot` through an injected app-status view function. This
      creates a narrow service-native status path for the current TUI shell
      without importing `gatewayapp` into the status projection.
+   - Migrated baseline: `surfaces/tui/gatewaydriver.BindAppServices` can bind
+     the existing TUI driver control points for session start, status,
+     model listing, model selection, and session mode set/cycle directly to
+     `internal/app/services`. This gives `/status`, `/model`, and `/approval`
+     a service-native driver path before the full interactive TUI entrypoint
+     moves off the old stack.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as `/connect`, `/model`, `/agent`, `/approval`,
-     `/doctor`, `/new`, `/resume`, and `/compact` still depend on the old
-     driver/app contracts. `/status` still needs product entrypoint wiring to
-     the shared app-status view before the old status stack can be removed.
+   - Slash commands such as `/connect`, `/agent`, `/doctor`, `/new`, `/resume`,
+     and `/compact` still depend on the old driver/app contracts. `/status`,
+     `/model`, and `/approval` still need product entrypoint wiring to the
+     shared app-service driver binding before the old status/model/mode stack
+     can be removed.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -901,7 +908,8 @@ be migrated before retiring the old stack:
      context window/output token fields, reasoning effort fields, auth/header
      fields, request-time model router, session reasoning override propagation,
      session mode service, and ACP stdio model/config/mode projection backed by
-     shared app services.
+     shared app services. The TUI gateway driver also has a service-native
+     binding for model list/use and session mode set/cycle.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, TUI command integration, provider discovery
      UI data, additional non-model ACP config providers, and removal of the old
