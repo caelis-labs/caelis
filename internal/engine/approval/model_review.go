@@ -2,6 +2,8 @@ package approval
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,6 +17,7 @@ const (
 	modelReviewMaxTranscriptEntries = 40
 	modelReviewMaxEntryRunes        = 4000
 	modelReviewMaxActionRunes       = 12000
+	modelReviewPrefixVersion        = 1
 )
 
 type modelReviewAssessment struct {
@@ -27,6 +30,29 @@ type modelReviewAssessment struct {
 type modelReviewResult struct {
 	Assessment modelReviewAssessment
 	Usage      *model.Usage
+	Prefix     modelReviewPrefix
+}
+
+type modelReviewPromptData struct {
+	Messages       []model.Message
+	PrefixMessages []modelReviewPrefixMessage
+	Prompt         string
+	Cursor         int
+}
+
+type modelReviewPrefix struct {
+	Version    int
+	Model      string
+	PolicyHash string
+	Messages   []modelReviewPrefixMessage
+	Prompt     string
+	Assessment string
+	Cursor     int
+}
+
+type modelReviewPrefixMessage struct {
+	Role model.Role
+	Text string
 }
 
 func WithModelReview(base Policy, provider model.Provider) Policy {
@@ -62,9 +88,10 @@ func reviewBasePolicy(ctx context.Context, base Policy, req Request) (Decision, 
 }
 
 func runModelReview(ctx context.Context, provider model.Provider, req Request) (modelReviewResult, error) {
+	prompt := modelReviewPromptDataFor(req)
 	response, err := completeModelReview(ctx, provider, model.Request{
 		Model:        strings.TrimSpace(req.Model),
-		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart(modelReviewPrompt(req))}}},
+		Messages:     prompt.Messages,
 		Instructions: []string{modelReviewPolicyPrompt()},
 		Reasoning:    model.ReasoningConfig{Effort: "none"},
 		Output:       modelReviewOutputSpec(),
@@ -80,9 +107,23 @@ func runModelReview(ctx context.Context, provider model.Provider, req Request) (
 	if err != nil {
 		return modelReviewResult{}, err
 	}
+	assessmentJSON := mustJSON(assessment)
+	prefixMessages := append(cloneModelReviewPrefixMessages(prompt.PrefixMessages), modelReviewPrefixMessage{
+		Role: model.RoleAssistant,
+		Text: assessmentJSON,
+	})
 	return modelReviewResult{
 		Assessment: assessment,
 		Usage:      modelReviewUsage(response),
+		Prefix: modelReviewPrefix{
+			Version:    modelReviewPrefixVersion,
+			Model:      strings.TrimSpace(req.Model),
+			PolicyHash: modelReviewPolicyHash(),
+			Messages:   prefixMessages,
+			Prompt:     prompt.Prompt,
+			Assessment: assessmentJSON,
+			Cursor:     prompt.Cursor,
+		},
 	}, nil
 }
 
@@ -120,11 +161,45 @@ func completeModelReview(ctx context.Context, provider model.Provider, req model
 	return model.Response{}, fmt.Errorf("model returned no approval review response")
 }
 
-func modelReviewPrompt(req Request) string {
+func modelReviewPromptDataFor(req Request) modelReviewPromptData {
+	prior, ok := latestModelReviewPrefix(req)
+	if !ok {
+		entries := modelReviewTranscriptEntries(req.Events)
+		prompt := modelReviewPrompt(req, entries, false)
+		prefixMessages := []modelReviewPrefixMessage{{Role: model.RoleUser, Text: prompt}}
+		return modelReviewPromptData{
+			Messages:       []model.Message{modelReviewTextMessage(model.RoleUser, prompt)},
+			PrefixMessages: prefixMessages,
+			Prompt:         prompt,
+			Cursor:         len(req.Events),
+		}
+	}
+	cursor := prior.Cursor
+	if cursor < 0 || cursor > len(req.Events) {
+		cursor = len(req.Events)
+	}
+	prompt := modelReviewPrompt(req, modelReviewTranscriptEntries(req.Events[cursor:]), true)
+	prefixMessages := append(cloneModelReviewPrefixMessages(prior.Messages), modelReviewPrefixMessage{
+		Role: model.RoleUser,
+		Text: prompt,
+	})
+	return modelReviewPromptData{
+		Messages:       modelReviewMessagesFromPrefix(prefixMessages),
+		PrefixMessages: prefixMessages,
+		Prompt:         prompt,
+		Cursor:         len(req.Events),
+	}
+}
+
+func modelReviewPrompt(req Request, entries []string, delta bool) string {
 	var b strings.Builder
-	b.WriteString("Assess whether the Caelis runtime should execute the planned tool call.\n\n")
-	b.WriteString("Transcript:\n")
-	entries := modelReviewTranscriptEntries(req.Events)
+	if delta {
+		b.WriteString("Assess whether the Caelis runtime should execute the next planned tool call. Continue the prior approval-review conversation.\n\n")
+		b.WriteString("Transcript delta since the last approval review:\n")
+	} else {
+		b.WriteString("Assess whether the Caelis runtime should execute the planned tool call.\n\n")
+		b.WriteString("Transcript:\n")
+	}
 	if len(entries) == 0 {
 		b.WriteString("<no retained transcript entries>\n")
 	} else {
@@ -132,7 +207,11 @@ func modelReviewPrompt(req Request) string {
 			fmt.Fprintf(&b, "[%d] %s\n", idx+1, entry)
 		}
 	}
-	b.WriteString("\nPlanned action JSON:\n")
+	if delta {
+		b.WriteString("\nNext planned action JSON:\n")
+	} else {
+		b.WriteString("\nPlanned action JSON:\n")
+	}
 	b.WriteString(modelReviewActionJSON(req))
 	return b.String()
 }
@@ -303,8 +382,9 @@ func modelReviewDecisionMeta(result modelReviewResult) map[string]any {
 		review["rationale"] = assessment.Rationale
 	}
 	meta := map[string]any{
-		"usage_category":  "auto_review",
-		"approval_review": review,
+		"usage_category":         "auto_review",
+		"approval_review":        review,
+		"approval_review_prefix": modelReviewPrefixMeta(result.Prefix),
 		"caelis": map[string]any{
 			"approval_review": review,
 		},
@@ -313,6 +393,18 @@ func modelReviewDecisionMeta(result modelReviewResult) map[string]any {
 		meta["usage"] = modelReviewUsageMeta(*result.Usage)
 	}
 	return meta
+}
+
+func modelReviewPrefixMeta(prefix modelReviewPrefix) map[string]any {
+	return map[string]any{
+		"version":      prefix.Version,
+		"model":        strings.TrimSpace(prefix.Model),
+		"policy_hash":  strings.TrimSpace(prefix.PolicyHash),
+		"messages":     modelReviewPrefixMessagesMeta(prefix.Messages),
+		"prompt":       strings.TrimSpace(prefix.Prompt),
+		"assessment":   strings.TrimSpace(prefix.Assessment),
+		"event_cursor": prefix.Cursor,
+	}
 }
 
 func modelReviewUsage(response model.Response) *model.Usage {
@@ -347,6 +439,140 @@ func modelReviewUsageEmpty(usage model.Usage) bool {
 		usage.ContextWindowTokens == 0
 }
 
+func latestModelReviewPrefix(req Request) (modelReviewPrefix, bool) {
+	wantModel := strings.TrimSpace(req.Model)
+	wantPolicy := modelReviewPolicyHash()
+	for idx := len(req.Events) - 1; idx >= 0; idx-- {
+		event := req.Events[idx]
+		prefix, ok := modelReviewPrefixFromMeta(event.Meta)
+		if !ok {
+			continue
+		}
+		if prefix.Version != modelReviewPrefixVersion ||
+			prefix.Model != wantModel ||
+			prefix.PolicyHash != wantPolicy ||
+			len(prefix.Messages) == 0 {
+			continue
+		}
+		return prefix, true
+	}
+	return modelReviewPrefix{}, false
+}
+
+func modelReviewPrefixFromMeta(meta map[string]any) (modelReviewPrefix, bool) {
+	if len(meta) == 0 {
+		return modelReviewPrefix{}, false
+	}
+	raw, ok := meta["approval_review_prefix"]
+	if !ok {
+		if caelis, ok := meta["caelis"].(map[string]any); ok {
+			raw = caelis["approval_review_prefix"]
+		}
+	}
+	values, ok := raw.(map[string]any)
+	if !ok {
+		return modelReviewPrefix{}, false
+	}
+	prefix := modelReviewPrefix{
+		Version:    intFromAny(values["version"]),
+		Model:      strings.TrimSpace(stringFromAny(values["model"])),
+		PolicyHash: strings.TrimSpace(stringFromAny(values["policy_hash"])),
+		Messages:   modelReviewPrefixMessagesFromAny(values["messages"]),
+		Prompt:     strings.TrimSpace(stringFromAny(values["prompt"])),
+		Assessment: strings.TrimSpace(stringFromAny(values["assessment"])),
+		Cursor:     intFromAny(values["event_cursor"]),
+	}
+	if prefix.Cursor == 0 {
+		prefix.Cursor = intFromAny(values["cursor"])
+	}
+	return prefix, true
+}
+
+func modelReviewMessagesFromPrefix(messages []modelReviewPrefixMessage) []model.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]model.Message, 0, len(messages))
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.Text) == "" {
+			continue
+		}
+		out = append(out, modelReviewTextMessage(msg.Role, msg.Text))
+	}
+	return out
+}
+
+func modelReviewTextMessage(role model.Role, text string) model.Message {
+	return model.Message{Role: role, Parts: []model.Part{model.NewTextPart(text)}}
+}
+
+func modelReviewPrefixMessagesMeta(messages []modelReviewPrefixMessage) []map[string]any {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(messages))
+	for _, msg := range messages {
+		if strings.TrimSpace(msg.Text) == "" {
+			continue
+		}
+		out = append(out, map[string]any{
+			"role": string(msg.Role),
+			"text": strings.TrimSpace(msg.Text),
+		})
+	}
+	return out
+}
+
+func modelReviewPrefixMessagesFromAny(value any) []modelReviewPrefixMessage {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return modelReviewPrefixMessagesFromMaps(typed)
+	case []any:
+		maps := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if values, ok := item.(map[string]any); ok {
+				maps = append(maps, values)
+			}
+		}
+		return modelReviewPrefixMessagesFromMaps(maps)
+	default:
+		return nil
+	}
+}
+
+func modelReviewPrefixMessagesFromMaps(values []map[string]any) []modelReviewPrefixMessage {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]modelReviewPrefixMessage, 0, len(values))
+	for _, item := range values {
+		role := model.Role(strings.TrimSpace(stringFromAny(item["role"])))
+		if role == "" {
+			continue
+		}
+		text := strings.TrimSpace(stringFromAny(item["text"]))
+		if text == "" {
+			continue
+		}
+		out = append(out, modelReviewPrefixMessage{Role: role, Text: text})
+	}
+	return out
+}
+
+func cloneModelReviewPrefixMessages(messages []modelReviewPrefixMessage) []modelReviewPrefixMessage {
+	if len(messages) == 0 {
+		return nil
+	}
+	out := make([]modelReviewPrefixMessage, len(messages))
+	copy(out, messages)
+	return out
+}
+
+func modelReviewPolicyHash() string {
+	sum := sha256.Sum256([]byte(modelReviewPolicyPrompt()))
+	return hex.EncodeToString(sum[:])
+}
+
 func normalizeReviewLabel(value string, fallback string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	switch value {
@@ -366,6 +592,28 @@ func rawJSONMap(raw json.RawMessage) map[string]any {
 		return nil
 	}
 	return out
+}
+
+func stringFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func intFromAny(value any) int {
+	switch typed := value.(type) {
+	case int:
+		return typed
+	case int64:
+		return int(typed)
+	case float64:
+		return int(typed)
+	default:
+		return 0
+	}
 }
 
 func mustJSON(value any) string {

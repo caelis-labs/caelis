@@ -1373,8 +1373,11 @@ be migrated before retiring the old stack:
      mutating filesystem calls on the model-backed review path, and leaves
      unknown plugin tools to explicit extension policy instead of importing the
      old `ports/policy` preset registry.
-   - Still pending: reusable approval-review transcript prefixes are not
-     migrated.
+   - Migrated baseline: approval review prompts now persist a cumulative
+     validated reusable prefix and event cursor in canonical approval metadata.
+     Later review calls replay the prior approved review messages, then submit
+     only the transcript delta and next planned action when the model and policy
+     prompt are unchanged.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant
