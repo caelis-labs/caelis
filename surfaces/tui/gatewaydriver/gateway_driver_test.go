@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
@@ -339,6 +341,89 @@ func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	}
 	if doctorCalls != 0 {
 		t.Fatalf("Doctor() calls = %d, want 0", doctorCalls)
+	}
+}
+
+func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	activeSession := session.Session{
+		SessionRef: session.SessionRef{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			SessionID:    "app-status-session",
+			WorkspaceKey: "repo",
+		},
+		CWD: workspace,
+	}
+	var seenRef session.SessionRef
+	statusCalls := 0
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		Workspace: session.WorkspaceRef{Key: "repo", CWD: workspace},
+		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
+			return activeSession, nil
+		},
+		AppStatusViewFn: func(_ context.Context, ref session.SessionRef) (appviewmodel.StatusView, error) {
+			statusCalls++
+			seenRef = ref
+			return appviewmodel.StatusView{
+				Runtime: appviewmodel.RuntimeStatus{
+					AppName:        "caelis",
+					UserID:         "user-1",
+					WorkspaceKey:   "repo",
+					WorkspaceCWD:   workspace,
+					SandboxBackend: "host",
+				},
+				Session: &appviewmodel.SessionStatus{
+					Ref:       coresession.Ref{AppName: "caelis", UserID: "user-1", SessionID: "app-status-session", WorkspaceKey: "repo"},
+					Workspace: coresession.Workspace{Key: "repo", CWD: workspace},
+					Status:    "idle",
+				},
+				Model: appviewmodel.ModelStatus{
+					Configured: true,
+					Current: &appviewmodel.ModelChoice{
+						ID:       "openai-compatible.default.gpt-test",
+						Alias:    "test-model",
+						Provider: "openai-compatible",
+						Model:    "gpt-test",
+						Default:  true,
+					},
+					ReasoningEffort: "high",
+				},
+				Mode: appviewmodel.ModeStatus{
+					Current: appviewmodel.ModeChoice{ID: "manual", Name: "Manual"},
+				},
+			}, nil
+		},
+	}, activeSession.SessionID, "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	status, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if statusCalls != 1 {
+		t.Fatalf("AppStatusView() calls = %d, want 1", statusCalls)
+	}
+	if seenRef.SessionID != activeSession.SessionID || seenRef.AppName != activeSession.AppName {
+		t.Fatalf("AppStatusView() ref = %#v, want active session ref", seenRef)
+	}
+	if status.SessionID != activeSession.SessionID {
+		t.Fatalf("Status().SessionID = %q, want active session", status.SessionID)
+	}
+	if status.Model != "test-model [high]" || status.Provider != "openai-compatible" || status.ModelName != "gpt-test" {
+		t.Fatalf("Status() model fields = model=%q provider=%q name=%q, want shared app model", status.Model, status.Provider, status.ModelName)
+	}
+	if status.SessionMode != "manual" || status.ModeLabel != "Manual" {
+		t.Fatalf("Status() mode fields = mode=%q label=%q, want shared app mode", status.SessionMode, status.ModeLabel)
+	}
+	if status.SandboxResolvedBackend != "host" || status.Route != "host" || !status.HostExecution {
+		t.Fatalf("Status() sandbox fields = %#v, want host route from app runtime status", status)
+	}
+	if status.Workspace != workspace || status.Surface != "surface" {
+		t.Fatalf("Status() workspace/surface = %q/%q, want %q/surface", status.Workspace, status.Surface, workspace)
 	}
 }
 

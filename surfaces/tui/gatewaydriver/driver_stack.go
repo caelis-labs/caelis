@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
@@ -186,6 +187,7 @@ type DriverStack struct {
 	StartSessionFn                       func(context.Context, string, string) (session.Session, error)
 	ACPControllerStatusFn                func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
 	DefaultModelAliasFn                  func() string
+	AppStatusViewFn                      func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
 	SandboxStatusFn                      func() SandboxStatus
 	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
@@ -252,6 +254,14 @@ func (s *DriverStack) DefaultModelAlias() string {
 		return ""
 	}
 	return s.DefaultModelAliasFn()
+}
+
+func (s *DriverStack) AppStatusView(ctx context.Context, ref session.SessionRef) (appviewmodel.StatusView, bool, error) {
+	if s == nil || s.AppStatusViewFn == nil {
+		return appviewmodel.StatusView{}, false, nil
+	}
+	view, err := s.AppStatusViewFn(ctx, ref)
+	return view, true, err
 }
 
 func (s *DriverStack) SandboxStatus() SandboxStatus {

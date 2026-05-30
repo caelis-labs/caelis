@@ -844,13 +844,19 @@ be migrated before retiring the old stack:
      dispatch still depend on `app/gatewayapp` and `kernel.Service`.
 
 2. TUI surface
+   - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
+     `internal/app/viewmodel.StatusView` into the existing TUI
+     `StatusSnapshot` through an injected app-status view function. This
+     creates a narrow service-native status path for the current TUI shell
+     without importing `gatewayapp` into the status projection.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as `/connect`, `/model`, `/agent`, `/approval`,
-     `/status`, `/doctor`, `/new`, `/resume`, and `/compact` still depend on the
-     old driver/app contracts.
+     `/doctor`, `/new`, `/resume`, and `/compact` still depend on the old
+     driver/app contracts. `/status` still needs product entrypoint wiring to
+     the shared app-status view before the old status stack can be removed.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

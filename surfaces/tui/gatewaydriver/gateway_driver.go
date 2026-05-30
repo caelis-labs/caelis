@@ -211,6 +211,9 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	if status, ok, err := d.statusFromAppView(ctx); ok || err != nil {
+		return status, err
+	}
 	modelText, sessionMode, sandboxType := d.defaultDisplays()
 	reasoningEffort := ""
 	if d.stack != nil {
