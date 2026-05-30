@@ -15,11 +15,14 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolregistry "github.com/OnslaughtSnail/caelis/internal/adapters/tools/registry"
+	appmodelrouter "github.com/OnslaughtSnail/caelis/internal/app/modelrouter"
 	appprompt "github.com/OnslaughtSnail/caelis/internal/app/prompt"
 	appregistry "github.com/OnslaughtSnail/caelis/internal/app/registry"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	"github.com/OnslaughtSnail/caelis/internal/app/services"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
 	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 	enginegateway "github.com/OnslaughtSnail/caelis/internal/engine/gateway"
@@ -37,6 +40,7 @@ type Config struct {
 	Approval          approval.Policy
 	ExternalACPAgents []acpexternal.Config
 	Contributions     []plugin.Contribution
+	Settings          *appsettings.Manager
 	BuiltinTools      bool
 	MaxToolSteps      int
 }
@@ -83,7 +87,11 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	provider := cfg.Provider
 	if provider == nil {
 		var err error
-		provider, err = providerFromConfig(ctx, reg, runtimeCfg, cfg.Model)
+		if cfg.Settings != nil {
+			provider, err = appmodelrouter.New(cfg.Settings, reg)
+		} else {
+			provider, err = providerFromConfig(ctx, reg, runtimeCfg, cfg.Model)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -111,15 +119,17 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 			if sandboxRuntime == nil {
 				return nil, fmt.Errorf("app/local: sandbox runtime is required for builtin tools")
 			}
-			factory, ok := reg.Tool("run_command")
-			if !ok {
-				return nil, fmt.Errorf("app/local: builtin tool %q is not registered", "run_command")
+			for _, name := range builtinToolNames() {
+				factory, ok := reg.Tool(name)
+				if !ok {
+					return nil, fmt.Errorf("app/local: builtin tool %q is not registered", name)
+				}
+				item, err := factory(ctx, plugin.ToolConfig{Name: name, Sandbox: sandboxRuntime})
+				if err != nil {
+					return nil, err
+				}
+				toolList = append(toolList, item)
 			}
-			runCommand, err := factory(ctx, plugin.ToolConfig{Name: "run_command", Sandbox: sandboxRuntime})
-			if err != nil {
-				return nil, err
-			}
-			toolList = append(toolList, runCommand)
 		}
 		reg, err := toolregistry.New(toolList...)
 		if err != nil {
@@ -160,6 +170,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Agents:    agentDescriptors(externalAgents),
 		Invokers:  agentInvokers(store, externalAgents),
 		Resources: resourceCatalog,
+		Settings:  cfg.Settings,
 	})
 	if err != nil {
 		return nil, err
@@ -261,6 +272,16 @@ func agentDescriptors(configs []acpexternal.Config) []services.AgentDescriptor {
 	return out
 }
 
+func builtinToolNames() []string {
+	return []string{
+		toolfilesystem.ReadFileToolName,
+		toolfilesystem.ListDirectoryToolName,
+		toolfilesystem.GlobFilesToolName,
+		toolfilesystem.SearchFilesToolName,
+		"run_command",
+	}
+}
+
 func pluginACPAgentConfigs(catalog appresources.Catalog) []acpexternal.Config {
 	if len(catalog.ACPAgents) == 0 {
 		return nil
@@ -296,13 +317,16 @@ func providerFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeC
 		return nil, fmt.Errorf("app/local: unsupported model provider %q", profile.Provider)
 	}
 	return factory(ctx, plugin.ModelProviderConfig{
-		ID:       profile.ID,
-		Profile:  profile.Provider,
-		Provider: providerName,
-		Endpoint: profile.BaseURL,
-		Model:    profile.Model,
-		TokenEnv: profile.TokenEnv,
-		Meta:     maps.Clone(profile.Meta),
+		ID:        profile.ID,
+		Profile:   profile.Provider,
+		Provider:  providerName,
+		Endpoint:  profile.BaseURL,
+		Model:     profile.Model,
+		Token:     profile.Token,
+		TokenEnv:  profile.TokenEnv,
+		AuthType:  profile.AuthType,
+		HeaderKey: profile.HeaderKey,
+		Meta:      maps.Clone(profile.Meta),
 	})
 }
 

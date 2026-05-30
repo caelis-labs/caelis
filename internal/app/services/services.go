@@ -5,6 +5,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -13,7 +14,13 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+)
+
+const (
+	StateCurrentModelID         = "caelis.model.current_id"
+	StateCurrentReasoningEffort = "caelis.model.reasoning_effort"
 )
 
 type Services struct {
@@ -22,6 +29,7 @@ type Services struct {
 	agents    []AgentDescriptor
 	invokers  map[string]AgentInvoker
 	resources appresources.Catalog
+	settings  *appsettings.Manager
 }
 
 type Config struct {
@@ -32,6 +40,7 @@ type Config struct {
 	Agents    []AgentDescriptor
 	Invokers  map[string]AgentInvoker
 	Resources appresources.Catalog
+	Settings  *appsettings.Manager
 }
 
 func New(cfg Config) (Services, error) {
@@ -47,6 +56,7 @@ func New(cfg Config) (Services, error) {
 		agents:    cloneAgents(cfg.Agents),
 		invokers:  maps.Clone(cfg.Invokers),
 		resources: appresources.CloneCatalog(cfg.Resources),
+		settings:  cfg.Settings,
 	}, nil
 }
 
@@ -84,6 +94,162 @@ func (s Services) Resources() ResourceService {
 
 func (s Services) Views() ViewService {
 	return ViewService{services: s}
+}
+
+func (s Services) Settings() SettingsService {
+	return SettingsService{services: s}
+}
+
+func (s Services) Models() ModelService {
+	return ModelService{services: s}
+}
+
+type SettingsService struct {
+	services Services
+}
+
+func (s SettingsService) Document(ctx context.Context) (appsettings.Document, error) {
+	if s.services.settings == nil {
+		return appsettings.Document{Runtime: s.services.Runtime()}, nil
+	}
+	return s.services.settings.Document(ctx)
+}
+
+func (s SettingsService) Save(ctx context.Context, doc appsettings.Document) error {
+	if s.services.settings == nil {
+		return errors.New("app/services: settings manager is not configured")
+	}
+	return s.services.settings.Save(ctx, doc)
+}
+
+type ModelService struct {
+	services Services
+}
+
+func (s ModelService) Connect(ctx context.Context, cfg appsettings.ModelConfig) (appsettings.ModelConfig, error) {
+	if s.services.settings == nil {
+		return appsettings.ModelConfig{}, errors.New("app/services: settings manager is not configured")
+	}
+	return s.services.settings.UpsertModel(ctx, cfg)
+}
+
+func (s ModelService) List(context.Context) ([]appsettings.ModelChoice, error) {
+	if s.services.settings == nil {
+		return nil, nil
+	}
+	return s.services.settings.ListModelChoices()
+}
+
+func (s ModelService) Resolve(ctx context.Context, ref string) (appsettings.ModelConfig, error) {
+	if s.services.settings == nil {
+		return appsettings.ModelConfig{}, errors.New("app/services: settings manager is not configured")
+	}
+	return s.services.settings.ResolveModel(ref)
+}
+
+func (s ModelService) SetDefault(ctx context.Context, ref string) (appsettings.ModelConfig, error) {
+	if s.services.settings == nil {
+		return appsettings.ModelConfig{}, errors.New("app/services: settings manager is not configured")
+	}
+	return s.services.settings.SetDefaultModel(ctx, ref)
+}
+
+func (s ModelService) Delete(ctx context.Context, ref string) error {
+	if s.services.settings == nil {
+		return errors.New("app/services: settings manager is not configured")
+	}
+	return s.services.settings.DeleteModel(ctx, ref)
+}
+
+func (s ModelService) Use(ctx context.Context, ref session.Ref, modelRef string, reasoningEffort string) (appsettings.ModelConfig, error) {
+	if s.services.settings == nil {
+		return appsettings.ModelConfig{}, errors.New("app/services: settings manager is not configured")
+	}
+	cfg, err := s.services.settings.ResolveModel(modelRef)
+	if err != nil {
+		return appsettings.ModelConfig{}, err
+	}
+	reasoning := strings.ToLower(strings.TrimSpace(reasoningEffort))
+	if reasoning != "" && !appsettings.SupportsReasoningEffort(cfg, reasoning) {
+		return appsettings.ModelConfig{}, fmt.Errorf("app/services: model %q does not support reasoning effort %q", modelRef, reasoning)
+	}
+	if s.services.engine == nil {
+		return appsettings.ModelConfig{}, errors.New("app/services: runtime engine is required")
+	}
+	ref = s.withDefaults(ref)
+	if err := s.services.engine.UpdateSessionState(ctx, ref, func(state session.State) (session.State, error) {
+		next := cloneState(state)
+		if next == nil {
+			next = session.State{}
+		}
+		next[StateCurrentModelID] = cfg.ID
+		if reasoning != "" {
+			next[StateCurrentReasoningEffort] = reasoning
+		} else {
+			delete(next, StateCurrentReasoningEffort)
+		}
+		return next, nil
+	}); err != nil {
+		return appsettings.ModelConfig{}, err
+	}
+	return cfg, nil
+}
+
+func (s ModelService) ClearSession(ctx context.Context, ref session.Ref) error {
+	if s.services.engine == nil {
+		return errors.New("app/services: runtime engine is required")
+	}
+	ref = s.withDefaults(ref)
+	return s.services.engine.UpdateSessionState(ctx, ref, func(state session.State) (session.State, error) {
+		next := cloneState(state)
+		delete(next, StateCurrentModelID)
+		delete(next, StateCurrentReasoningEffort)
+		return next, nil
+	})
+}
+
+func (s ModelService) Current(ctx context.Context, ref session.Ref) (appsettings.ModelConfig, bool, error) {
+	if s.services.settings == nil {
+		return appsettings.ModelConfig{}, false, nil
+	}
+	ref = s.withDefaults(ref)
+	if strings.TrimSpace(ref.SessionID) != "" && s.services.engine != nil {
+		snapshot, err := s.services.engine.LoadSession(ctx, ref)
+		if err != nil {
+			return appsettings.ModelConfig{}, false, err
+		}
+		if modelID, _ := snapshot.State[StateCurrentModelID].(string); strings.TrimSpace(modelID) != "" {
+			cfg, err := s.services.settings.ResolveModel(modelID)
+			return cfg, err == nil, err
+		}
+	}
+	cfg, err := s.services.settings.ResolveModel("")
+	if err != nil {
+		return appsettings.ModelConfig{}, false, err
+	}
+	return cfg, true, nil
+}
+
+func (s ModelService) RuntimeProfile(ctx context.Context, ref session.Ref) (config.ModelProfile, bool, error) {
+	cfg, ok, err := s.Current(ctx, ref)
+	if err != nil || !ok {
+		return config.ModelProfile{}, ok, err
+	}
+	return appsettings.RuntimeModelProfile(cfg), true, nil
+}
+
+func (s ModelService) withDefaults(ref session.Ref) session.Ref {
+	ref = session.NormalizeRef(ref)
+	if ref.AppName == "" {
+		ref.AppName = s.services.runtime.AppName
+	}
+	if ref.UserID == "" {
+		ref.UserID = s.services.runtime.UserID
+	}
+	if ref.WorkspaceKey == "" {
+		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
+	}
+	return ref
 }
 
 type ResourceService struct {
@@ -280,11 +446,17 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 	if ref.WorkspaceKey == "" {
 		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
 	}
+	modelRef := strings.TrimSpace(req.Model)
+	if modelRef == "" && s.services.settings != nil {
+		if cfg, ok, err := s.services.Models().Current(ctx, ref); err == nil && ok {
+			modelRef = cfg.ID
+		}
+	}
 	return s.services.engine.BeginTurn(ctx, coreruntime.TurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
 		ContentParts: model.CloneContentParts(req.ContentParts),
-		Model:        strings.TrimSpace(req.Model),
+		Model:        modelRef,
 		Surface:      strings.TrimSpace(req.Surface),
 		Mode:         strings.TrimSpace(req.Mode),
 		Meta:         maps.Clone(req.Meta),
@@ -372,6 +544,13 @@ func cloneEvents(in []session.Event) []session.Event {
 		out = append(out, session.CloneEvent(event))
 	}
 	return out
+}
+
+func cloneState(in session.State) session.State {
+	if in == nil {
+		return nil
+	}
+	return session.State(maps.Clone(in))
 }
 
 func firstNonEmpty(values ...string) string {

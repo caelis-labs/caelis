@@ -23,6 +23,7 @@ import (
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
 	"github.com/OnslaughtSnail/caelis/internal/app/services"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -275,6 +276,48 @@ func TestStackRunsConcreteShellToolThroughSandbox(t *testing.T) {
 	}
 }
 
+func TestStackRegistersCoreFilesystemBuiltinTools(t *testing.T) {
+	workspace := t.TempDir()
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("ok")},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Provider:     provider,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "inspect files",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+	}
+	for _, name := range []string{"read_file", "list_directory", "glob_files", "search_files", "run_command"} {
+		if !capturedTool(provider.request.Tools, name) {
+			t.Fatalf("provider tools = %#v, missing %s", provider.request.Tools, name)
+		}
+	}
+}
+
 func TestStackBuildsConfiguredOpenAIProviderAndJSONLStore(t *testing.T) {
 	var captured struct {
 		Model    string `json:"model"`
@@ -355,6 +398,72 @@ func TestStackBuildsConfiguredOpenAIProviderAndJSONLStore(t *testing.T) {
 	}
 	if len(snapshot.Events) != 2 || session.EventText(snapshot.Events[1]) != "pong" {
 		t.Fatalf("reloaded events = %#v, want persisted ping/pong", snapshot.Events)
+	}
+}
+
+func TestStackRoutesConfiguredSettingsModelAtTurnTime(t *testing.T) {
+	var captured []struct {
+		Model string `json:"model"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Fatalf("path = %q, want /v1/chat/completions", r.URL.Path)
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatal(err)
+		}
+		captured = append(captured, req)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"gpt-settings",
+			"choices":[{"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	manager, err := appsettings.NewManager(context.Background(), nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := manager.UpsertModel(context.Background(), appsettings.ModelConfig{
+		Provider: "openai_compatible",
+		Model:    "gpt-settings",
+		BaseURL:  server.URL + "/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stack.Services().Models().Use(context.Background(), session.Ref{SessionID: active.SessionID}, cfg.ID, ""); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "ping",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+	}
+	if len(captured) != 1 || captured[0].Model != "gpt-settings" {
+		t.Fatalf("captured requests = %#v, want routed raw model", captured)
 	}
 }
 
@@ -669,7 +778,7 @@ func TestConfiguredStackRunsBuiltinShellTool(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch call {
 		case 1:
-			if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != toolshell.RunCommandToolName {
+			if !capturedOpenAITool(captured.Tools, toolshell.RunCommandToolName) {
 				t.Fatalf("tools = %#v, want run_command", captured.Tools)
 			}
 			_, _ = w.Write([]byte(`{
@@ -748,9 +857,31 @@ func strconvQuote(value string) string {
 	return string(raw)
 }
 
+func capturedOpenAITool(tools []struct {
+	Function struct {
+		Name string `json:"name"`
+	} `json:"function"`
+}, name string) bool {
+	for _, item := range tools {
+		if item.Function.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func hasPrompt(prompts []plugin.PromptFragment, id string) bool {
 	for _, prompt := range prompts {
 		if prompt.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func capturedTool(tools []model.ToolSpec, name string) bool {
+	for _, item := range tools {
+		if item.Name == name {
 			return true
 		}
 	}

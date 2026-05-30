@@ -14,6 +14,7 @@ type Engine interface {
 	StartSession(context.Context, session.StartRequest) (session.Session, error)
 	LoadSession(context.Context, session.Ref) (session.Snapshot, error)
 	RecordEvents(context.Context, session.Ref, []session.Event) (session.Cursor, error)
+	UpdateSessionState(context.Context, session.Ref, session.StatePatch) error
 	BeginTurn(context.Context, TurnRequest) (Turn, error)
 	Interrupt(context.Context, session.Ref) error
 	Replay(context.Context, ReplayRequest) (<-chan EventEnvelope, error)

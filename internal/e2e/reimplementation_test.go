@@ -17,8 +17,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/internal/app/local"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/surface/acpserver"
+	headlesssurface "github.com/OnslaughtSnail/caelis/internal/surface/headless"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -153,6 +155,72 @@ func TestReimplementationACPStackE2E(t *testing.T) {
 	}
 	if !transcriptContains(view.Transcript, "finished after tool") || !transcriptContains(view.Transcript, "stdout:\ne2e") {
 		t.Fatalf("view transcript = %#v, want persisted tool output and final assistant", view.Transcript)
+	}
+}
+
+func TestReimplementationHeadlessStackE2E(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	command := "printf e2e"
+	if runtime.GOOS == "windows" {
+		command = "echo e2e"
+	}
+	provider := newOpenAIStub(t, command)
+	defer provider.Close()
+
+	settings, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	modelCfg, err := settings.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai_compatible",
+		Model:    "gpt-headless",
+		BaseURL:  provider.URL + "/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := local.New(local.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Settings:     settings,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := headlesssurface.RunOnce(ctx, headlesssurface.Request{
+		Services:  stack.Services(),
+		Workspace: session.Workspace{Key: "repo", CWD: workspace},
+		Input:     "run e2e command",
+		Model:     modelCfg.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Output != "finished after tool" || result.Session.SessionID == "" {
+		t.Fatalf("headless result = %#v, want final assistant and session id", result)
+	}
+	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: result.Session.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Events) != 5 || session.EventText(snapshot.Events[4]) != "finished after tool" {
+		t.Fatalf("snapshot events = %#v, want canonical headless tool turn", snapshot.Events)
+	}
+	requests := provider.Requests()
+	if len(requests) != 2 || requests[0].Model != "gpt-headless" || !hasTool(requests[0], "run_command") {
+		t.Fatalf("provider requests = %#v, want routed headless model with run_command", requests)
 	}
 }
 

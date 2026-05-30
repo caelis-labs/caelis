@@ -23,6 +23,7 @@ import (
 	storejsonl "github.com/OnslaughtSnail/caelis/internal/adapters/store/jsonl"
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	storesqlite "github.com/OnslaughtSnail/caelis/internal/adapters/store/sqlite"
+	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 )
@@ -76,7 +77,21 @@ func RegisterDefaults(r *Registry) error {
 	if err := r.RegisterSandboxBackend("host", sandboxhost.Factory{}); err != nil {
 		return err
 	}
-	return r.RegisterTool(toolshell.RunCommandToolName, runCommandToolFactory)
+	for _, item := range []struct {
+		name    string
+		factory plugin.ToolFactory
+	}{
+		{toolfilesystem.ReadFileToolName, readFileToolFactory},
+		{toolfilesystem.ListDirectoryToolName, listDirectoryToolFactory},
+		{toolfilesystem.GlobFilesToolName, globFilesToolFactory},
+		{toolfilesystem.SearchFilesToolName, searchFilesToolFactory},
+		{toolshell.RunCommandToolName, runCommandToolFactory},
+	} {
+		if err := r.RegisterTool(item.name, item.factory); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Registry) Apply(ctx context.Context, contributions ...plugin.Contribution) error {
@@ -318,15 +333,21 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 }
 
 func openAIProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
-	token := ""
+	token := strings.TrimSpace(cfg.Token)
 	if env := strings.TrimSpace(cfg.TokenEnv); env != "" {
-		token = strings.TrimSpace(os.Getenv(env))
+		if token == "" {
+			token = strings.TrimSpace(os.Getenv(env))
+		}
+	}
+	if strings.EqualFold(strings.TrimSpace(cfg.AuthType), "none") {
+		token = ""
 	}
 	return modelopenai.New(modelopenai.Config{
-		ID:      firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "openai_compatible"),
-		BaseURL: cfg.Endpoint,
-		APIKey:  token,
-		Model:   cfg.Model,
+		ID:         firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "openai_compatible"),
+		BaseURL:    cfg.Endpoint,
+		APIKey:     token,
+		AuthHeader: cfg.HeaderKey,
+		Model:      cfg.Model,
 	})
 }
 
@@ -352,6 +373,22 @@ func sqliteStoreFactory(_ context.Context, cfg plugin.StoreConfig) (session.Stor
 
 func runCommandToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
 	return toolshell.NewRunCommandTool(cfg.Sandbox)
+}
+
+func readFileToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolfilesystem.NewReadFileTool(cfg.Sandbox)
+}
+
+func listDirectoryToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolfilesystem.NewListDirectoryTool(cfg.Sandbox)
+}
+
+func globFilesToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolfilesystem.NewGlobFilesTool(cfg.Sandbox)
+}
+
+func searchFilesToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolfilesystem.NewSearchFilesTool(cfg.Sandbox)
 }
 
 func key(name string, kind string) (string, error) {

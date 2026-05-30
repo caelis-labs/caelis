@@ -739,9 +739,22 @@ The completed work is intentionally limited to the reusable skeleton:
 - Model context reconstruction from canonical events.
 - OpenAI-compatible provider adapter sufficient for Chat Completions and tool
   calls.
-- Host sandbox adapter and core-native `run_command` tool.
+- Host sandbox adapter, core-native `run_command` tool, and core-native
+  read-only filesystem tools: `read_file`, `list_directory`, `glob_files`, and
+  `search_files`.
 - App composition root, registry, plugin manifest discovery, prompt assembly,
   resource catalog, external ACP agent descriptors, and shared services.
+- App settings and model-selection baseline: clean `internal/app/settings`
+  document/store/manager, token redaction by default, provider profiles,
+  generated model aliases/ids, default model selection, model delete, session
+  model override state, runtime model-profile projection, and request-time model
+  routing through app registries.
+- Headless surface baseline: `internal/surface/headless` runs one-shot prompts
+  over shared app services, starts or resumes canonical sessions through the
+  engine, resolves approvals with explicit policy hooks, renders text/JSON
+  results, and is covered by a new local-stack e2e path using settings model
+  routing, the OpenAI-compatible adapter, host sandbox tools, and canonical
+  persistence.
 - Shared TUI/APP view-model projection for transcript, pending approvals, and
   participants.
 - Core-native ACP server for initialize, session/new, session/prompt, cancel,
@@ -779,19 +792,25 @@ be migrated before retiring the old stack:
      subscriptions still need APP-ready service/view-model contracts.
 
 4. Headless CLI and ACP serving
-   - `surfaces/headless` and the current product `surfaces/acpserver` still use
-     old contracts.
+   - Migrated baseline: a new service-native `internal/surface/headless`
+     one-shot runner exists with text/JSON output and approval policy hooks.
+   - Still pending: production CLI entrypoint wiring; the old product
+     `surfaces/headless` and current product `surfaces/acpserver` still use old
+     contracts.
    - The new ACP server is minimal and does not yet expose load-session,
      terminal integration, client mode/config flows, session resume, or the full
      behavior covered by current public ACP e2e tests.
 
 5. Settings, config, and model catalog
-   - Persistent `~/.caelis` config, token redaction, provider profiles, model
-     aliases, model deletion/use flows, context window/output token settings,
-     reasoning effort, auth/header options, and connect wizard persistence still
-     live in `app/gatewayapp`.
-   - The new `core/config` is typed runtime input only; it is not yet a product
-     settings system.
+   - Migrated baseline: new app settings store, token redaction by default,
+     provider profile/model config normalization, generated aliases/ids, model
+     connect/delete/default/use service methods, session model override state,
+     context window/output token fields, reasoning effort fields, auth/header
+     fields, and request-time model router.
+   - Still pending: production CLI flag mapping, default home-dir bootstrapping,
+     connect wizard persistence, TUI command integration, provider discovery
+     UI data, and removal of the old `app/gatewayapp` config/model services
+     once entrypoints move to the new stack.
 
 6. Model providers
    - The new adapter set only covers OpenAI-compatible Chat Completions.
@@ -808,11 +827,14 @@ be migrated before retiring the old stack:
      remain old-stack capabilities.
 
 8. Built-in tools
-   - The new stack has only `run_command`.
-   - Filesystem read/list/search/glob/write/patch, diff rendering metadata,
-     plan tool, spawn tool, task tool, async command sessions, stdin writes,
-     task wait/cancel, and display metadata for compact/rich tool panels still
-     need core-native adapters.
+   - Migrated baseline: `run_command` plus read-only filesystem tools
+     `read_file`, `list_directory`, `glob_files`, and `search_files` now
+     implement `core/tool.Tool` directly and are registered as builtin local
+     stack tools through the new app registry.
+   - Still pending: filesystem `write_file`/`patch_file`, diff rendering
+     metadata, plan tool, spawn tool, task tool, async command sessions, stdin
+     writes, task wait/cancel, and display metadata for compact/rich tool
+     panels still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask and ACP permission response
@@ -864,15 +886,16 @@ be migrated before retiring the old stack:
 
 Recommended sequence:
 
-1. Make settings/config/model catalog product-ready in the new app layer.
+1. Finish wiring settings/model services into product entrypoints and TUI
+   commands.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating
    tools.
-4. Port filesystem, plan, spawn, task, and async shell tools behind
-   `core/tool.Registry`.
-5. Port headless CLI and new ACP stdio entry to the new service facade, with
-   e2e parity tests.
+4. Port mutating filesystem tools, plan, spawn, task, and async shell tools
+   behind `core/tool.Registry`.
+5. Wire the production headless CLI and ACP stdio entry to the new service
+   facade, with e2e parity tests.
 6. Port TUI driver commands to `internal/app/services`, preserving existing
    rendering as surface-local code.
 7. Expand shared APP view models for status, settings, agents, models,

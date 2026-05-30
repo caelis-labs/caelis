@@ -84,6 +84,24 @@ func (g *Gateway) RecordEvents(ctx context.Context, ref session.Ref, events []se
 	return g.store.Append(ctx, snapshot.Session.Ref, events)
 }
 
+func (g *Gateway) UpdateSessionState(ctx context.Context, ref session.Ref, patch session.StatePatch) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	ref = session.NormalizeRef(ref)
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return fmt.Errorf("%w: session id is required", session.ErrInvalid)
+	}
+	snapshot, err := g.store.Load(ctx, ref)
+	if err != nil {
+		return err
+	}
+	return g.store.UpdateState(ctx, snapshot.Session.Ref, patch)
+}
+
 func (g *Gateway) BeginTurn(ctx context.Context, req coreruntime.TurnRequest) (coreruntime.Turn, error) {
 	if ctx == nil {
 		ctx = context.Background()

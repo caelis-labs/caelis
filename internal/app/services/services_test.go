@@ -11,6 +11,7 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 )
 
 func TestNewRequiresEngine(t *testing.T) {
@@ -183,11 +184,78 @@ func TestViewServiceProjectsLoadedSession(t *testing.T) {
 	}
 }
 
+func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-1", WorkspaceKey: "repo"}},
+		State:   session.State{},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := svc.Models().Connect(ctx, appsettings.ModelConfig{
+		Provider:        "openai-compatible",
+		Model:           "gpt-test",
+		BaseURL:         "https://api.example.test/v1",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	choices, err := svc.Models().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(choices) != 1 || choices[0].ID != cfg.ID || !choices[0].Default {
+		t.Fatalf("model choices = %#v, want connected default", choices)
+	}
+	if _, err := svc.Models().Use(ctx, session.Ref{SessionID: "sess-1"}, cfg.Alias, "high"); err != nil {
+		t.Fatal(err)
+	}
+	if engine.state[StateCurrentModelID] != cfg.ID || engine.state[StateCurrentReasoningEffort] != "high" {
+		t.Fatalf("session state = %#v, want selected model and reasoning", engine.state)
+	}
+	if _, err := svc.Models().Use(ctx, session.Ref{SessionID: "sess-1"}, cfg.Alias, "max"); err == nil {
+		t.Fatal("Use unsupported reasoning error = nil, want error")
+	}
+	current, ok, err := svc.Models().Current(ctx, session.Ref{SessionID: "sess-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || current.ID != cfg.ID {
+		t.Fatalf("current model = %#v, %v, want selected model", current, ok)
+	}
+	profile, ok, err := svc.Models().RuntimeProfile(ctx, session.Ref{SessionID: "sess-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || profile.Model != "gpt-test" || profile.BaseURL != "https://api.example.test/v1" {
+		t.Fatalf("runtime profile = %#v, %v, want selected model profile", profile, ok)
+	}
+	if err := svc.Models().ClearSession(ctx, session.Ref{SessionID: "sess-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := engine.state[StateCurrentModelID]; ok {
+		t.Fatalf("session state after clear = %#v, want no model override", engine.state)
+	}
+}
+
 type recordingEngine struct {
 	start    session.StartRequest
 	turn     coreruntime.TurnRequest
 	events   []session.Event
 	loadRef  session.Ref
+	state    session.State
 	snapshot session.Snapshot
 }
 
@@ -213,6 +281,19 @@ func (e *recordingEngine) LoadSession(_ context.Context, ref session.Ref) (sessi
 func (e *recordingEngine) RecordEvents(_ context.Context, _ session.Ref, events []session.Event) (session.Cursor, error) {
 	e.events = cloneTestEvents(events)
 	return "1", nil
+}
+
+func (e *recordingEngine) UpdateSessionState(_ context.Context, _ session.Ref, patch session.StatePatch) error {
+	if patch == nil {
+		return nil
+	}
+	next, err := patch(cloneState(e.state))
+	if err != nil {
+		return err
+	}
+	e.state = cloneState(next)
+	e.snapshot.State = cloneState(next)
+	return nil
 }
 
 func (e *recordingEngine) BeginTurn(_ context.Context, req coreruntime.TurnRequest) (coreruntime.Turn, error) {
