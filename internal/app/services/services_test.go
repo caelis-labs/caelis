@@ -335,6 +335,127 @@ func TestAgentServiceInvokeControllerRecordsControllerScopedEvents(t *testing.T)
 	}
 }
 
+func TestAgentServiceInvokeControllerIncludesConfigIntent(t *testing.T) {
+	ctx := context.Background()
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	state := session.State{
+		StateControllerConfigRef: "controller-1",
+		StateControllerModel:     "remote-model",
+		StateControllerReasoning: "high",
+		StateControllerMode:      "manual",
+	}
+	engine := &recordingEngine{
+		state: state,
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: state,
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+		Invokers: map[string]AgentInvoker{
+			"reviewer": AgentInvokerFunc(func(_ context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
+				if req.ControllerModel != "remote-model" || req.ControllerReasoningEffort != "high" || req.ControllerMode != "manual" {
+					t.Fatalf("controller config intent = model:%q reasoning:%q mode:%q, want remote-model/high/manual", req.ControllerModel, req.ControllerReasoningEffort, req.ControllerMode)
+				}
+				return AgentInvokeResult{}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agents().Invoke(ctx, AgentInvokeRequest{
+		AgentID:    "reviewer",
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Controller: controller,
+		Input:      "inspect",
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestControllerServicePersistsACPControllerConfigIntent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "remote-model",
+		Provider:        "openai-compatible",
+		Model:           "gpt-test",
+		BaseURL:         "https://api.example.test/v1",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	engine := &recordingEngine{
+		state: session.State{},
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: session.State{},
+		},
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, ok, err := svc.Controllers().Status(ctx, session.Ref{SessionID: "sess-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || status.Agent != "reviewer" || status.RemoteSessionID != "remote-reviewer" {
+		t.Fatalf("controller status = %#v ok=%v, want active reviewer status", status, ok)
+	}
+	if len(status.ModelOptions) != 1 || status.ModelOptions[0].Value != "remote-model" {
+		t.Fatalf("controller model options = %#v, want configured model option", status.ModelOptions)
+	}
+	status, err = svc.Controllers().SetModel(ctx, session.Ref{SessionID: "sess-controller"}, cfg.ID, "high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Model != "remote-model" || status.ReasoningEffort != "high" || len(status.EffortOptions) != 2 {
+		t.Fatalf("status after SetModel = %#v, want model/reasoning intent", status)
+	}
+	if engine.state[StateControllerConfigRef] != "controller-1" || engine.state[StateControllerModel] != "remote-model" || engine.state[StateControllerReasoning] != "high" {
+		t.Fatalf("session state after SetModel = %#v, want controller config intent", engine.state)
+	}
+	status, err = svc.Controllers().SetMode(ctx, session.Ref{SessionID: "sess-controller"}, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Mode != "manual" || engine.state[StateControllerMode] != "manual" {
+		t.Fatalf("status after SetMode = %#v state=%#v, want manual controller mode", status, engine.state)
+	}
+}
+
 func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	engine := &recordingEngine{
 		snapshot: session.Snapshot{

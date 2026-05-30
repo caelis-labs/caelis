@@ -13,6 +13,7 @@ import (
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+	portscontroller "github.com/OnslaughtSnail/caelis/ports/controller"
 	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -111,6 +112,18 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		_, err := svc.Models().Use(ctx, coreRefFromPort(ref), modelRef, effort)
 		return err
+	}
+	stack.ACPControllerStatusFn = func(ctx context.Context, ref portsession.SessionRef) (portscontroller.ControllerStatus, bool, error) {
+		status, ok, err := svc.Controllers().Status(ctx, coreRefFromPort(ref))
+		return controllerStatusFromApp(status), ok, err
+	}
+	stack.SetACPControllerModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning string) (portscontroller.ControllerStatus, error) {
+		status, err := svc.Controllers().SetModel(ctx, coreRefFromPort(ref), modelRef, reasoning)
+		return controllerStatusFromApp(status), err
+	}
+	stack.SetACPControllerModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (portscontroller.ControllerStatus, error) {
+		status, err := svc.Controllers().SetMode(ctx, coreRefFromPort(ref), mode)
+		return controllerStatusFromApp(status), err
 	}
 	stack.DeleteModelFn = func(ctx context.Context, _ portsession.SessionRef, modelRef string) error {
 		return svc.Models().Delete(ctx, modelRef)
@@ -248,6 +261,50 @@ func portSessionFromCore(active coresession.Session) portsession.Session {
 		CreatedAt:    active.CreatedAt,
 		UpdatedAt:    active.UpdatedAt,
 	}
+}
+
+func controllerStatusFromApp(status appservices.ControllerStatus) portscontroller.ControllerStatus {
+	return portscontroller.ControllerStatus{
+		SessionRef:      portRefFromCore(status.SessionRef),
+		Agent:           strings.TrimSpace(status.Agent),
+		RemoteSessionID: strings.TrimSpace(status.RemoteSessionID),
+		Model:           strings.TrimSpace(status.Model),
+		ModelOptions:    controllerConfigChoicesFromApp(status.ModelOptions),
+		ReasoningEffort: strings.TrimSpace(status.ReasoningEffort),
+		EffortOptions:   controllerConfigChoicesFromApp(status.EffortOptions),
+		Mode:            strings.TrimSpace(status.Mode),
+		ModeOptions:     controllerModesFromApp(status.ModeOptions),
+	}
+}
+
+func controllerConfigChoicesFromApp(choices []appservices.ControllerConfigChoice) []portscontroller.ControllerConfigChoice {
+	if len(choices) == 0 {
+		return nil
+	}
+	out := make([]portscontroller.ControllerConfigChoice, 0, len(choices))
+	for _, choice := range choices {
+		out = append(out, portscontroller.ControllerConfigChoice{
+			Value:       strings.TrimSpace(choice.Value),
+			Name:        strings.TrimSpace(choice.Name),
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
+}
+
+func controllerModesFromApp(modes []appservices.ControllerMode) []portscontroller.ControllerMode {
+	if len(modes) == 0 {
+		return nil
+	}
+	out := make([]portscontroller.ControllerMode, 0, len(modes))
+	for _, mode := range modes {
+		out = append(out, portscontroller.ControllerMode{
+			ID:          strings.TrimSpace(mode.ID),
+			Name:        strings.TrimSpace(mode.Name),
+			Description: strings.TrimSpace(mode.Description),
+		})
+	}
+	return out
 }
 
 func portControllerFromCore(in coresession.ControllerBinding) portsession.ControllerBinding {

@@ -905,6 +905,11 @@ The completed work is intentionally limited to the reusable skeleton:
 - Service-native `/agent use <agent|local>` baseline for registered external
   ACP agents, using canonical handoff events and controller-scoped ACP prompt
   execution through shared app services.
+- Service-native ACP controller config-intent baseline: active controller
+  model/reasoning/mode choices are persisted in shared session state, exposed
+  through `internal/app/services.ControllerService`, injected into
+  controller invocations, and projected through the existing TUI status/model
+  hooks without TUI-owned controller state.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -988,6 +993,13 @@ be migrated before retiring the old stack:
      events after each load, including the latest controller remote ACP session
      id, so follow-up prompts can reuse that id without storing controller state
      in TUI-only memory.
+   - Migrated baseline: when an app-service ACP controller is active, TUI
+     `/model use <model> [reasoning]` and session mode cycling now route
+     through `internal/app/services.ControllerService` instead of mutating
+     local model/session state. The selected controller model, reasoning
+     effort, and mode are stored as controller-scoped session state, projected
+     into `/status`, and injected into subsequent controller invocations as a
+     surface-neutral config intent.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
@@ -1006,10 +1018,11 @@ be migrated before retiring the old stack:
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as the `/connect` wizard shell, built-in
-     `/agent install` and adapter update, plugin/static agent removal, remote
-     ACP controller config commands, and non-host `/doctor fix` repair flows
-     still have old driver/app assumptions or missing service-native feature
-     parity, so the old TUI stack cannot be removed yet.
+     `/agent install` and adapter update, plugin/static agent removal, live
+     remote ACP config RPC/reconnect behavior, remote-declared controller
+     option discovery, and non-host `/doctor fix` repair flows still have old
+     driver/app assumptions or missing service-native feature parity, so the
+     old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1018,6 +1031,10 @@ be migrated before retiring the old stack:
      summary, model selection, session mode, agents, resource counts, and store
      identity. This gives TUI and the future APP a shared status/diagnostics
      panel input without importing `gatewayapp` or any TUI package.
+   - Migrated baseline: `internal/app/services.ControllerService` gives both
+     TUI and the future APP the same controller config-intent contract for an
+     active ACP controller, keeping controller model/reasoning/mode state out
+     of surface-specific UI state.
    - Still pending: task panels, settings mutation flows, richer model/provider
      selection views, agent management actions, approvals, transcript actions,
      and live event subscriptions still need APP-ready service/view-model
@@ -1174,12 +1191,18 @@ be migrated before retiring the old stack:
       as controller-scoped session events. Controller-scoped response events
       now also feed the derived controller binding, so the latest remote ACP
       session id is carried forward into the next controller prompt.
+    - Migrated baseline: ACP controller model/reasoning/mode intent now has a
+      shared app-service contract. `ControllerService` derives the active ACP
+      controller from canonical session state/events, persists controller
+      config intent under a controller identity, exposes it to the TUI driver,
+      and injects it into controller invocations without putting config
+      semantics in TUI-only memory.
     - Still pending: built-in ACP adapter install/update, self-agent spawning,
       durable sidecar continuation across restarts, delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical
-      remote session id reuse, plugin/static agent removal, remote ACP
-      controller model/mode config commands, and terminal previews remain
-      old-stack.
+      remote session id reuse, plugin/static agent removal, live remote ACP
+      controller config RPC/reconnect application, remote-declared controller
+      option discovery, and terminal previews remain old-stack or unmigrated.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the

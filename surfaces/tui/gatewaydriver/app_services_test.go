@@ -457,8 +457,23 @@ func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
 
 func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "remote-model",
+		Provider:        "openai-compatible",
+		Model:           "gpt-test",
+		BaseURL:         "https://api.example.test/v1",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	}); err != nil {
+		t.Fatal(err)
+	}
 	engine := &appServiceDriverEngine{}
 	var controllerRemoteIDs []string
+	var controllerConfigs []string
 	svc, err := appservices.New(appservices.Config{
 		Runtime: config.Runtime{
 			AppName:      "caelis",
@@ -466,7 +481,8 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 			WorkspaceKey: "repo",
 			WorkspaceCWD: "/repo",
 		},
-		Engine: engine,
+		Engine:   engine,
+		Settings: manager,
 		Agents: []appservices.AgentDescriptor{{
 			ID:          "reviewer",
 			Name:        "reviewer",
@@ -480,6 +496,7 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 					t.Fatalf("controller invoke = %#v, want reviewer ACP controller", req.Controller)
 				}
 				controllerRemoteIDs = append(controllerRemoteIDs, req.Controller.RemoteSessionID)
+				controllerConfigs = append(controllerConfigs, req.ControllerModel+"/"+req.ControllerReasoningEffort+"/"+req.ControllerMode)
 				controller := req.Controller
 				controller.RemoteSessionID = "remote-reviewer"
 				return appservices.AgentInvokeResult{
@@ -508,6 +525,23 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	}
 	if status.ControllerKind != "acp" || status.ControllerLabel != "reviewer" {
 		t.Fatalf("status after handoff = %#v, want reviewer ACP controller", status)
+	}
+	modelStatus, err := driver.UseModel(ctx, "remote-model", "high")
+	if err != nil {
+		t.Fatalf("UseModel under ACP controller error = %v", err)
+	}
+	if engine.state[appservices.StateControllerModel] != "remote-model" || engine.state[appservices.StateControllerReasoning] != "high" {
+		t.Fatalf("controller state after UseModel = %#v, want remote-model/high", engine.state)
+	}
+	if modelStatus.Model != "remote-model [high]" || modelStatus.Provider != "acp" {
+		t.Fatalf("status after ACP UseModel = %#v, want remote ACP model projection", modelStatus)
+	}
+	modeStatus, err := driver.CycleSessionMode(ctx)
+	if err != nil {
+		t.Fatalf("CycleSessionMode under ACP controller error = %v", err)
+	}
+	if engine.state[appservices.StateControllerMode] != coreruntime.SessionModeAutoReview || modeStatus.SessionMode != coreruntime.SessionModeAutoReview {
+		t.Fatalf("controller mode after cycle = state:%#v status:%#v, want auto-review", engine.state, modeStatus)
 	}
 	turn, err := driver.Submit(ctx, Submission{Text: " inspect "})
 	if err != nil {
@@ -542,6 +576,9 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	}
 	if len(controllerRemoteIDs) != 2 || controllerRemoteIDs[0] != "" || controllerRemoteIDs[1] != "remote-reviewer" {
 		t.Fatalf("controller remote ids = %#v, want first empty then reused remote-reviewer", controllerRemoteIDs)
+	}
+	if len(controllerConfigs) != 2 || controllerConfigs[0] != "remote-model/high/auto-review" || controllerConfigs[1] != "remote-model/high/auto-review" {
+		t.Fatalf("controller configs = %#v, want persisted controller config intent on prompts", controllerConfigs)
 	}
 	status, err = driver.HandoffAgent(ctx, "local")
 	if err != nil {

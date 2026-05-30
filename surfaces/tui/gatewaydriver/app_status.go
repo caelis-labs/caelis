@@ -89,6 +89,34 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		status.SecuritySummary = firstNonEmpty(strings.TrimSpace(sandboxStatus.SecuritySummary), status.SecuritySummary)
 		status.HostExecution = strings.EqualFold(strings.TrimSpace(status.Route), "host")
 	}
+	if hasSession && activeSession.Controller.Kind == session.ControllerKindACP {
+		acpStatus, activeACP, err := d.activeACPControllerStatus(ctx)
+		if err != nil {
+			return StatusSnapshot{}, false, err
+		}
+		if activeACP {
+			acpModelText := acpControllerModelText(acpStatus, activeSession)
+			acpReasoning := strings.TrimSpace(acpStatus.ReasoningEffort)
+			status.Model = formatReasoningModelDisplay(acpModelText, acpReasoning)
+			status.ReasoningEffort = acpReasoning
+			if mode := strings.TrimSpace(acpStatus.Mode); mode != "" {
+				status.SessionMode = mode
+			}
+			if label := acpControllerModeDisplay(acpStatus); label != "" {
+				status.ModeLabel = label
+			} else if mode := strings.TrimSpace(acpStatus.Mode); mode != "" {
+				status.ModeLabel = mode
+			}
+			status.Provider = "acp"
+			status.ModelName = strings.TrimSpace(acpStatus.Model)
+			status.MissingAPIKey = false
+			status.FullAccessMode = false
+			status.PromptTokens = 0
+			status.CompletionTokens = 0
+			status.TotalTokens = 0
+			status.ContextWindowTokens = 0
+		}
+	}
 	if gw, err := d.gateway(); err == nil && gw != nil {
 		active := gw.ActiveTurns()
 		status.ActiveJobs = len(active)

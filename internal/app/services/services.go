@@ -25,6 +25,10 @@ const (
 	StateCurrentModelID         = "caelis.model.current_id"
 	StateCurrentReasoningEffort = "caelis.model.reasoning_effort"
 	StateSessionMode            = "caelis.session.mode"
+	StateControllerConfigRef    = "caelis.controller.config_ref"
+	StateControllerModel        = "caelis.controller.model"
+	StateControllerReasoning    = "caelis.controller.reasoning_effort"
+	StateControllerMode         = "caelis.controller.mode"
 )
 
 type Services struct {
@@ -102,6 +106,10 @@ func (s Services) Turns() TurnService {
 
 func (s Services) Agents() AgentService {
 	return AgentService{services: s}
+}
+
+func (s Services) Controllers() ControllerService {
+	return ControllerService{services: s}
 }
 
 func (s Services) Resources() ResourceService {
@@ -737,12 +745,15 @@ func (f AgentInvokerFunc) Invoke(ctx context.Context, req AgentInvokeRequest) (A
 }
 
 type AgentInvokeRequest struct {
-	AgentID      string
-	SessionRef   session.Ref
-	Controller   session.ControllerBinding
-	Participant  session.ParticipantBinding
-	Input        string
-	ContentParts []model.ContentPart
+	AgentID                   string
+	SessionRef                session.Ref
+	Controller                session.ControllerBinding
+	ControllerModel           string
+	ControllerReasoningEffort string
+	ControllerMode            string
+	Participant               session.ParticipantBinding
+	Input                     string
+	ContentParts              []model.ContentPart
 }
 
 type AgentInvokeResult struct {
@@ -783,6 +794,13 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	controllerMode := req.Controller.Kind != "" || strings.TrimSpace(req.Controller.ID) != "" || strings.TrimSpace(req.Controller.AgentName) != ""
 	if controllerMode {
 		req.Controller = normalizeAgentController(req.Controller, agentID)
+		if status, ok, err := s.services.Controllers().Status(ctx, ref); err != nil {
+			return AgentInvokeResult{}, err
+		} else if ok {
+			req.ControllerModel = firstNonEmpty(strings.TrimSpace(req.ControllerModel), strings.TrimSpace(status.Model))
+			req.ControllerReasoningEffort = firstNonEmpty(strings.TrimSpace(req.ControllerReasoningEffort), strings.TrimSpace(status.ReasoningEffort))
+			req.ControllerMode = firstNonEmpty(strings.TrimSpace(req.ControllerMode), strings.TrimSpace(status.Mode))
+		}
 	} else {
 		req.Participant = normalizeAgentParticipant(req.Participant, agentID)
 	}
