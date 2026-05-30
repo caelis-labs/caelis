@@ -69,3 +69,53 @@ func TestControllerRunnerInvokesAgentAndStoresCanonicalEvents(t *testing.T) {
 		t.Fatalf("event time = %s, want %s", event.Time, clock)
 	}
 }
+
+func TestControllerRunnerReusesRemoteSessionID(t *testing.T) {
+	ctx := context.Background()
+	store := teststore.New()
+	active, err := store.Create(ctx, session.StartRequest{
+		AppName:   "caelis",
+		UserID:    "tester",
+		Workspace: session.Workspace{Key: "repo", CWD: "/repo"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := &fakeAgentSession{
+		events: []session.Event{{
+			Type: session.EventAssistant,
+			Message: &model.Message{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("continued controller response")},
+			},
+		}},
+	}
+	runner := ControllerRunner{Store: store}
+	result, err := runner.Invoke(ctx, ControllerRequest{
+		SessionRef: active.Ref,
+		Controller: session.ControllerBinding{
+			Kind:            session.ControllerACP,
+			ID:              "reviewer",
+			AgentName:       "reviewer",
+			Label:           "Reviewer",
+			RemoteSessionID: "remote-existing",
+		},
+		Input: "continue",
+		Agent: agent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agent.newSessions != 0 {
+		t.Fatalf("new sessions = %d, want 0 for existing remote session", agent.newSessions)
+	}
+	if len(agent.promptSessionIDs) != 1 || agent.promptSessionIDs[0] != "remote-existing" {
+		t.Fatalf("prompt session ids = %#v, want remote-existing", agent.promptSessionIDs)
+	}
+	if result.RemoteSessionID != "remote-existing" {
+		t.Fatalf("result remote session id = %q, want remote-existing", result.RemoteSessionID)
+	}
+	if len(result.Events) != 1 || result.Events[0].Scope == nil || result.Events[0].Scope.Controller.RemoteSessionID != "remote-existing" {
+		t.Fatalf("result events = %#v, want reused remote controller scope", result.Events)
+	}
+}

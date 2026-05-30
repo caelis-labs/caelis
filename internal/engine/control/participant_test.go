@@ -69,6 +69,9 @@ func TestParticipantRunnerInvokesAgentAndStoresCanonicalEvents(t *testing.T) {
 	if len(agent.prompts) != 1 || agent.prompts[0][0].Text != "inspect" {
 		t.Fatalf("agent prompts = %#v, want inspect prompt", agent.prompts)
 	}
+	if len(agent.promptSessionIDs) != 1 || agent.promptSessionIDs[0] != "remote-1" {
+		t.Fatalf("agent prompt session ids = %#v, want remote-1", agent.promptSessionIDs)
+	}
 
 	snapshot, err := store.Load(ctx, active.Ref)
 	if err != nil {
@@ -80,10 +83,11 @@ func TestParticipantRunnerInvokesAgentAndStoresCanonicalEvents(t *testing.T) {
 }
 
 type fakeAgentSession struct {
-	initialized bool
-	newSessions int
-	prompts     [][]model.ContentPart
-	events      []session.Event
+	initialized      bool
+	newSessions      int
+	promptSessionIDs []string
+	prompts          [][]model.ContentPart
+	events           []session.Event
 }
 
 func (a *fakeAgentSession) Initialize(context.Context) error {
@@ -96,7 +100,8 @@ func (a *fakeAgentSession) NewSession(context.Context, session.Workspace) (strin
 	return "remote-1", nil
 }
 
-func (a *fakeAgentSession) Prompt(_ context.Context, _ string, parts []model.ContentPart) ([]session.Event, error) {
+func (a *fakeAgentSession) Prompt(_ context.Context, sessionID string, parts []model.ContentPart) ([]session.Event, error) {
+	a.promptSessionIDs = append(a.promptSessionIDs, sessionID)
 	a.prompts = append(a.prompts, model.CloneContentParts(parts))
 	out := make([]session.Event, 0, len(a.events))
 	for _, event := range a.events {

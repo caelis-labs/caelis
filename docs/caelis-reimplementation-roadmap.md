@@ -662,7 +662,9 @@ alongside the old stack without importing it:
   core session events. It also routes settings-backed `/agent add custom` and
   `/agent add <builtin>` and `/agent remove` through shared app services. The
   same gateway now records `/agent use <agent|local>` as canonical handoff
-  events and routes subsequent prompts to the active external ACP controller.
+  events, rebuilds active controller state from canonical handoff and
+  controller-scoped events, and routes subsequent prompts to the active
+  external ACP controller with the latest known remote ACP session id.
 - `internal/app/services.ResourceService`: shared TUI/APP-facing catalog
   surface for discovered plugins, prompt fragments, skills, ACP agents,
   renderer hints, and `AGENTS.md` prompt resources.
@@ -712,6 +714,9 @@ The current verification path covers:
   catalog and registration path
 - TUI `/agent use <agent|local>` -> canonical `EventHandoff` ->
   app-service control-plane state -> ACP controller-scoped prompt routing
+- TUI ACP controller response carrying a remote session id -> canonical
+  controller-scoped event -> next TUI prompt reuses that remote id through
+  app-service controller invocation
 - app-service TUI binding -> configured external ACP agent catalog -> dynamic
   participant prompt -> canonical participant/user/assistant events -> TUI
   participant-scoped event projection
@@ -962,7 +967,11 @@ be migrated before retiring the old stack:
    - Migrated baseline: `/agent use <agent|local>` now records canonical
      controller handoff events through the app-service TUI gateway. When an ACP
      controller is active, normal TUI submissions are routed to the registered
-     external ACP agent and recorded as controller-scoped canonical events.
+     external ACP agent and recorded as controller-scoped canonical events. The
+     app-service TUI gateway now derives the active controller from canonical
+     events after each load, including the latest controller remote ACP session
+     id, so follow-up prompts can reuse that id without storing controller state
+     in TUI-only memory.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
@@ -1130,12 +1139,15 @@ be migrated before retiring the old stack:
       path for registered external ACP agents. Handoffs are durable
       `EventHandoff` records, control-plane state is rebuilt from canonical
       events, and subsequent prompts can execute through the external ACP agent
-      as controller-scoped session events.
+      as controller-scoped session events. Controller-scoped response events
+      now also feed the derived controller binding, so the latest remote ACP
+      session id is carried forward into the next controller prompt.
     - Still pending: built-in ACP adapter install/update, self-agent spawning,
       durable sidecar continuation across restarts, delegated subagent tasks,
-      remote controller session resume/new semantics, plugin/static agent
-      removal, remote ACP controller model/mode config commands, and terminal
-      previews remain old-stack.
+      durable remote controller process/session lifecycle beyond canonical
+      remote session id reuse, plugin/static agent removal, remote ACP
+      controller model/mode config commands, and terminal previews remain
+      old-stack.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the

@@ -863,16 +863,70 @@ func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []kernel.Ac
 func controllerFromCoreSnapshot(snapshot coresession.Snapshot) coresession.ControllerBinding {
 	controller := normalizeCoreController(snapshot.Session.Controller)
 	for _, event := range snapshot.Events {
-		if event.Type != coresession.EventHandoff || event.Scope == nil {
+		if event.Scope == nil {
 			continue
 		}
-		next := normalizeCoreController(event.Scope.Controller)
-		if next.Kind == "" && strings.TrimSpace(next.ID) == "" {
-			continue
+		switch event.Type {
+		case coresession.EventHandoff:
+			next := normalizeCoreController(event.Scope.Controller)
+			if next.Kind == "" && strings.TrimSpace(next.ID) == "" {
+				continue
+			}
+			controller = next
+		default:
+			next := normalizeCoreController(event.Scope.Controller)
+			if !sameCoreController(controller, next) {
+				continue
+			}
+			controller = mergeCoreController(controller, next)
 		}
-		controller = next
 	}
 	return controller
+}
+
+func sameCoreController(active coresession.ControllerBinding, next coresession.ControllerBinding) bool {
+	active = normalizeCoreController(active)
+	next = normalizeCoreController(next)
+	if active.Kind == "" || next.Kind == "" || active.Kind != next.Kind {
+		return false
+	}
+	if active.Kind != coresession.ControllerACP {
+		return false
+	}
+	if active.EpochID != "" && next.EpochID != "" && active.EpochID != next.EpochID {
+		return false
+	}
+	activeID := strings.ToLower(firstNonEmpty(active.ID, active.AgentName, active.Label))
+	nextID := strings.ToLower(firstNonEmpty(next.ID, next.AgentName, next.Label))
+	return activeID != "" && activeID == nextID
+}
+
+func mergeCoreController(existing coresession.ControllerBinding, next coresession.ControllerBinding) coresession.ControllerBinding {
+	existing = normalizeCoreController(existing)
+	next = normalizeCoreController(next)
+	existing.Kind = firstCoreControllerKind(existing.Kind, next.Kind)
+	existing.ID = firstNonEmpty(existing.ID, next.ID)
+	existing.AgentName = firstNonEmpty(existing.AgentName, next.AgentName)
+	existing.Label = firstNonEmpty(existing.Label, next.Label)
+	existing.EpochID = firstNonEmpty(existing.EpochID, next.EpochID)
+	existing.RemoteSessionID = firstNonEmpty(next.RemoteSessionID, existing.RemoteSessionID)
+	if next.ContextSyncSeq != 0 {
+		existing.ContextSyncSeq = next.ContextSyncSeq
+	}
+	if !next.AttachedAt.IsZero() {
+		existing.AttachedAt = next.AttachedAt
+	}
+	existing.Source = firstNonEmpty(next.Source, existing.Source)
+	return existing
+}
+
+func firstCoreControllerKind(values ...coresession.ControllerKind) coresession.ControllerKind {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func normalizeCoreController(in coresession.ControllerBinding) coresession.ControllerBinding {

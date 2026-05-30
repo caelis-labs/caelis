@@ -443,6 +443,7 @@ func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
 func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{}
+	var controllerRemoteIDs []string
 	svc, err := appservices.New(appservices.Config{
 		Runtime: config.Runtime{
 			AppName:      "caelis",
@@ -463,9 +464,13 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 				if req.Controller.Kind != coresession.ControllerACP || req.Controller.ID != "reviewer" {
 					t.Fatalf("controller invoke = %#v, want reviewer ACP controller", req.Controller)
 				}
+				controllerRemoteIDs = append(controllerRemoteIDs, req.Controller.RemoteSessionID)
+				controller := req.Controller
+				controller.RemoteSessionID = "remote-reviewer"
 				return appservices.AgentInvokeResult{
 					Events: []coresession.Event{{
-						Type: coresession.EventAssistant,
+						Type:  coresession.EventAssistant,
+						Scope: &coresession.EventScope{Controller: controller},
 						Message: &coremodel.Message{
 							Role:  coremodel.RoleAssistant,
 							Parts: []coremodel.Part{coremodel.NewTextPart("controller result for " + req.Input)},
@@ -508,6 +513,20 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	}
 	if engine.events[2].Type != coresession.EventAssistant || engine.events[2].Scope == nil || engine.events[2].Scope.Controller.ID != "reviewer" {
 		t.Fatalf("controller response event = %#v, want reviewer scope", engine.events[2])
+	}
+	if engine.events[2].Scope.Controller.RemoteSessionID != "remote-reviewer" {
+		t.Fatalf("controller response remote session = %q, want remote-reviewer", engine.events[2].Scope.Controller.RemoteSessionID)
+	}
+	turn, err = driver.Submit(ctx, Submission{Text: " continue "})
+	if err != nil {
+		t.Fatalf("second Submit under ACP controller error = %v", err)
+	}
+	got = drainGatewayDriverTestTurn(t, turn)
+	if len(got) != 2 {
+		t.Fatalf("second turn events = %#v, want controller user prompt and response", got)
+	}
+	if len(controllerRemoteIDs) != 2 || controllerRemoteIDs[0] != "" || controllerRemoteIDs[1] != "remote-reviewer" {
+		t.Fatalf("controller remote ids = %#v, want first empty then reused remote-reviewer", controllerRemoteIDs)
 	}
 	status, err = driver.HandoffAgent(ctx, "local")
 	if err != nil {
