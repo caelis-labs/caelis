@@ -1011,6 +1011,7 @@ func TestStackAutoReviewDeniesBuiltinMutatingFilesystemTool(t *testing.T) {
 		{
 			Role:  model.RoleAssistant,
 			Parts: []model.Part{model.NewTextPart(`{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}`)},
+			Usage: &model.Usage{InputTokens: 8, OutputTokens: 2, TotalTokens: 10},
 		},
 		{
 			Role:  model.RoleAssistant,
@@ -1059,6 +1060,11 @@ func TestStackAutoReviewDeniesBuiltinMutatingFilesystemTool(t *testing.T) {
 			sawRejected = true
 			if !strings.Contains(event.Approval.Reason, "not authorized") {
 				t.Fatalf("rejected approval = %#v, want model rationale", event.Approval)
+			}
+			usage, _ := event.Meta["usage"].(map[string]any)
+			review, _ := event.Meta["approval_review"].(map[string]any)
+			if event.Meta["usage_category"] != "auto_review" || usage["total_tokens"] != 10 || review["risk_level"] != "high" {
+				t.Fatalf("rejected approval meta = %#v, want review usage and risk metadata", event.Meta)
 			}
 		}
 	}

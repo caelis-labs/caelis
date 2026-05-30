@@ -52,6 +52,7 @@ type Decision struct {
 	Verdict Verdict
 	Reason  string
 	Options []session.ApprovalOption
+	Meta    map[string]any
 }
 
 type Policy interface {

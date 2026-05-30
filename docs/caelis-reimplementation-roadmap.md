@@ -1362,9 +1362,13 @@ be migrated before retiring the old stack:
      justification, force a user approval prompt with one-shot allow/reject
      choices even when a normal tool decision was remembered, and only execute
      after approval through the shared core turn loop.
-   - Still pending: richer policy presets, reusable approval-review transcript
-     prefixes, token usage accounting for review calls, and richer denial
-     metadata are not migrated.
+   - Migrated baseline: model-backed auto-review decisions now carry
+     surface-neutral approval metadata (`outcome`, `risk_level`,
+     `user_authorization`, rationale) and provider usage as canonical approval
+     event metadata, categorized as `auto_review` for shared status usage
+     accounting.
+   - Still pending: richer policy presets and reusable approval-review
+     transcript prefixes are not migrated.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant

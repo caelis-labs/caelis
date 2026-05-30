@@ -11,7 +11,10 @@ import (
 )
 
 func TestWithModelReviewDeniesAskedToolFromModelAssessment(t *testing.T) {
-	provider := &recordingReviewProvider{response: `{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}`}
+	provider := &recordingReviewProvider{
+		response: `{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}`,
+		usage:    &model.Usage{InputTokens: 12, OutputTokens: 3, TotalTokens: 15},
+	}
 	policy := WithModelReview(AskTools("write_file"), provider)
 	raw := json.RawMessage(`{"path":"secrets.txt","content":"x"}`)
 
@@ -29,6 +32,15 @@ func TestWithModelReviewDeniesAskedToolFromModelAssessment(t *testing.T) {
 	}
 	if decision.Verdict != VerdictDeny || decision.Reason != "not authorized" {
 		t.Fatalf("decision = %#v, want model denial", decision)
+	}
+	usage, _ := decision.Meta["usage"].(map[string]any)
+	review, _ := decision.Meta["approval_review"].(map[string]any)
+	if decision.Meta["usage_category"] != "auto_review" ||
+		usage["total_tokens"] != 15 ||
+		review["risk_level"] != "high" ||
+		review["user_authorization"] != "unknown" ||
+		review["outcome"] != "deny" {
+		t.Fatalf("decision meta = %#v, want review usage and denial metadata", decision.Meta)
 	}
 	if provider.calls != 1 {
 		t.Fatalf("provider calls = %d, want 1", provider.calls)
@@ -64,6 +76,7 @@ func TestWithModelReviewLeavesUnaskedToolsAlone(t *testing.T) {
 type recordingReviewProvider struct {
 	request  model.Request
 	response string
+	usage    *model.Usage
 	calls    int
 }
 
@@ -86,6 +99,7 @@ func (p *recordingReviewProvider) Stream(_ context.Context, req model.Request) (
 				Role:  model.RoleAssistant,
 				Parts: []model.Part{model.NewTextPart(p.response)},
 			},
+			Usage: p.usage,
 		},
 	}}}, nil
 }

@@ -24,6 +24,11 @@ type modelReviewAssessment struct {
 	Rationale         string `json:"rationale"`
 }
 
+type modelReviewResult struct {
+	Assessment modelReviewAssessment
+	Usage      *model.Usage
+}
+
 func WithModelReview(base Policy, provider model.Provider) Policy {
 	return PolicyFunc(func(ctx context.Context, req Request) (Decision, error) {
 		decision, err := reviewBasePolicy(ctx, base, req)
@@ -40,11 +45,12 @@ func WithModelReview(base Policy, provider model.Provider) Policy {
 		if err != nil {
 			return Decision{Verdict: VerdictDeny, Reason: "automatic approval reviewer failed: " + err.Error()}, nil
 		}
-		reason := modelReviewReason(assessment)
-		if strings.EqualFold(assessment.Outcome, "allow") {
-			return Decision{Verdict: VerdictAllow, Reason: reason}, nil
+		reason := modelReviewReason(assessment.Assessment)
+		meta := modelReviewDecisionMeta(assessment)
+		if strings.EqualFold(assessment.Assessment.Outcome, "allow") {
+			return Decision{Verdict: VerdictAllow, Reason: reason, Meta: meta}, nil
 		}
-		return Decision{Verdict: VerdictDeny, Reason: reason}, nil
+		return Decision{Verdict: VerdictDeny, Reason: reason, Meta: meta}, nil
 	})
 }
 
@@ -55,7 +61,7 @@ func reviewBasePolicy(ctx context.Context, base Policy, req Request) (Decision, 
 	return base.ReviewToolCall(ctx, req)
 }
 
-func runModelReview(ctx context.Context, provider model.Provider, req Request) (modelReviewAssessment, error) {
+func runModelReview(ctx context.Context, provider model.Provider, req Request) (modelReviewResult, error) {
 	response, err := completeModelReview(ctx, provider, model.Request{
 		Model:        strings.TrimSpace(req.Model),
 		Messages:     []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart(modelReviewPrompt(req))}}},
@@ -68,9 +74,16 @@ func runModelReview(ctx context.Context, provider model.Provider, req Request) (
 		},
 	})
 	if err != nil {
-		return modelReviewAssessment{}, err
+		return modelReviewResult{}, err
 	}
-	return parseModelReviewAssessment(response.Message)
+	assessment, err := parseModelReviewAssessment(response.Message)
+	if err != nil {
+		return modelReviewResult{}, err
+	}
+	return modelReviewResult{
+		Assessment: assessment,
+		Usage:      modelReviewUsage(response),
+	}, nil
 }
 
 func completeModelReview(ctx context.Context, provider model.Provider, req model.Request) (model.Response, error) {
@@ -277,6 +290,61 @@ func modelReviewReason(assessment modelReviewAssessment) string {
 		return "automatic approval review allowed the action"
 	}
 	return "automatic approval review denied the action"
+}
+
+func modelReviewDecisionMeta(result modelReviewResult) map[string]any {
+	assessment := result.Assessment
+	review := map[string]any{
+		"outcome":            strings.TrimSpace(assessment.Outcome),
+		"risk_level":         strings.TrimSpace(assessment.RiskLevel),
+		"user_authorization": strings.TrimSpace(assessment.UserAuthorization),
+	}
+	if assessment.Rationale != "" {
+		review["rationale"] = assessment.Rationale
+	}
+	meta := map[string]any{
+		"usage_category":  "auto_review",
+		"approval_review": review,
+		"caelis": map[string]any{
+			"approval_review": review,
+		},
+	}
+	if result.Usage != nil {
+		meta["usage"] = modelReviewUsageMeta(*result.Usage)
+	}
+	return meta
+}
+
+func modelReviewUsage(response model.Response) *model.Usage {
+	if response.Usage != nil && !modelReviewUsageEmpty(*response.Usage) {
+		usage := *response.Usage
+		return &usage
+	}
+	if response.Message.Usage != nil && !modelReviewUsageEmpty(*response.Message.Usage) {
+		usage := *response.Message.Usage
+		return &usage
+	}
+	return nil
+}
+
+func modelReviewUsageMeta(usage model.Usage) map[string]any {
+	return map[string]any{
+		"input_tokens":          usage.InputTokens,
+		"cached_input_tokens":   usage.CachedInputTokens,
+		"output_tokens":         usage.OutputTokens,
+		"reasoning_tokens":      usage.ReasoningTokens,
+		"total_tokens":          usage.TotalTokens,
+		"context_window_tokens": usage.ContextWindowTokens,
+	}
+}
+
+func modelReviewUsageEmpty(usage model.Usage) bool {
+	return usage.InputTokens == 0 &&
+		usage.CachedInputTokens == 0 &&
+		usage.OutputTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.TotalTokens == 0 &&
+		usage.ContextWindowTokens == 0
 }
 
 func normalizeReviewLabel(value string, fallback string) string {

@@ -107,6 +107,67 @@ func TestLoopPassesSessionModeToApprovalPolicy(t *testing.T) {
 	}
 }
 
+func TestLoopRecordsApprovalDecisionMetadata(t *testing.T) {
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-plan",
+					Name:  "update_plan",
+					Input: json.RawMessage(`{"content":"review"}`),
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	runner, err := New(Config{
+		Provider: provider,
+		Tools:    staticRegistry{tools: []tool.Tool{fakePlanTool{name: "update_plan"}}},
+		Approval: approval.PolicyFunc(func(_ context.Context, req approval.Request) (approval.Decision, error) {
+			return approval.Decision{
+				Verdict: approval.VerdictDeny,
+				Reason:  "review denied",
+				Meta: map[string]any{
+					"usage_category": "auto_review",
+					"usage": map[string]any{
+						"total_tokens": 17,
+					},
+				},
+			}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := runner.Run(context.Background(), Request{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:   "plan",
+		TurnID:  "turn-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var approvalEvent *session.Event
+	for idx := range events {
+		if events[idx].Type == session.EventApproval {
+			approvalEvent = &events[idx]
+			break
+		}
+	}
+	if approvalEvent == nil || approvalEvent.Approval == nil || approvalEvent.Approval.Status != session.ApprovalRejected {
+		t.Fatalf("events = %#v, want rejected approval event", eventTypes(events))
+	}
+	usage, _ := approvalEvent.Meta["usage"].(map[string]any)
+	if approvalEvent.Meta["usage_category"] != "auto_review" || usage["total_tokens"] != 17 {
+		t.Fatalf("approval meta = %#v, want decision metadata", approvalEvent.Meta)
+	}
+}
+
 func TestLoopRecordsPlanEventFromPlanToolResult(t *testing.T) {
 	const planToolName = "update_plan"
 	rawPlan, err := json.Marshal(map[string]any{

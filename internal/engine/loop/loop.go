@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"strings"
 	"time"
 
@@ -400,6 +401,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, reviewEvents []s
 	}
 	toolEvent := toolCallEvent(call)
 	toolEvent.Status = session.ToolWaitingApproval
+	meta := approvalMeta(decision.Meta)
 	switch decision.Verdict {
 	case approval.VerdictAsk:
 		pending := session.Event{
@@ -409,6 +411,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, reviewEvents []s
 			Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "approval", Name: "approval"},
 			Scope:      eventScope(req),
 			Tool:       toolEvent,
+			Meta:       meta,
 			Approval: &session.ApprovalEvent{
 				ID:      approvalID(call),
 				Status:  session.ApprovalPending,
@@ -442,6 +445,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, reviewEvents []s
 			Scope:      eventScope(req),
 			Tool:       result.Tool,
 			Approval:   &result,
+			Meta:       meta,
 		}, true, nil
 	case approval.VerdictDeny:
 		return session.Event{
@@ -451,6 +455,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, reviewEvents []s
 			Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "approval", Name: "approval"},
 			Scope:      eventScope(req),
 			Tool:       toolEvent,
+			Meta:       meta,
 			Approval: &session.ApprovalEvent{
 				ID:     approvalID(call),
 				Status: session.ApprovalRejected,
@@ -466,6 +471,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, reviewEvents []s
 			Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "approval", Name: "approval"},
 			Scope:      eventScope(req),
 			Tool:       toolEvent,
+			Meta:       meta,
 			Approval: &session.ApprovalEvent{
 				ID:     approvalID(call),
 				Status: session.ApprovalApproved,
@@ -598,6 +604,13 @@ func approvalOptions(options []session.ApprovalOption) []session.ApprovalOption 
 		{ID: approval.OptionAllowOnce, Name: "Allow once", Kind: "allow"},
 		{ID: approval.OptionRejectOnce, Name: "Reject", Kind: "reject"},
 	}
+}
+
+func approvalMeta(meta map[string]any) map[string]any {
+	if len(meta) == 0 {
+		return nil
+	}
+	return maps.Clone(meta)
 }
 
 func toolResultMessage(call model.ToolCall, result tool.Result) model.Message {
