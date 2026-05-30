@@ -182,13 +182,18 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 					}
 				}
 			}
-			resultMessage, resultEvent, err := l.executeTool(ctx, req, call, tools)
+			resultMessage, resultEvent, result, err := l.executeTool(ctx, req, call, tools)
 			if err != nil {
 				return nil, err
 			}
 			messages = append(messages, resultMessage)
 			if err := l.record(ctx, req, &out, resultEvent); err != nil {
 				return nil, err
+			}
+			if planEvent, ok := l.planEvent(req, result); ok {
+				if err := l.record(ctx, req, &out, planEvent); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -237,7 +242,7 @@ func (l *Loop) complete(ctx context.Context, req model.Request) (model.Response,
 	return *final, nil
 }
 
-func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall, tools []tool.Tool) (model.Message, session.Event, error) {
+func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall, tools []tool.Tool) (model.Message, session.Event, tool.Result, error) {
 	name := strings.TrimSpace(call.Name)
 	selected := l.lookupTool(call, tools)
 	if selected == nil {
@@ -247,7 +252,7 @@ func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall
 			IsError: true,
 			Content: []model.Part{model.NewTextPart("tool not found: " + name)},
 		}
-		return toolResultMessage(call, result), l.toolResultEvent(req, call, result), nil
+		return toolResultMessage(call, result), l.toolResultEvent(req, call, result), result, nil
 	}
 	result, err := selected.Call(ctx, tool.Call{
 		ID:    strings.TrimSpace(call.ID),
@@ -262,7 +267,7 @@ func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall
 			Content: []model.Part{model.NewTextPart(err.Error())},
 		}
 	}
-	return toolResultMessage(call, result), l.toolResultEvent(req, call, result), nil
+	return toolResultMessage(call, result), l.toolResultEvent(req, call, result), result, nil
 }
 
 func (l *Loop) lookupTool(call model.ToolCall, tools []tool.Tool) tool.Tool {
@@ -530,6 +535,93 @@ func (l *Loop) toolResultEvent(req Request, call model.ToolCall, result tool.Res
 			Meta:    result.Meta,
 		},
 	}
+}
+
+func (l *Loop) planEvent(req Request, result tool.Result) (session.Event, bool) {
+	entries, ok := planEntriesFromMeta(result.Meta)
+	if !ok {
+		return session.Event{}, false
+	}
+	return session.Event{
+		Type:       session.EventPlan,
+		Visibility: session.VisibilityCanonical,
+		Time:       l.now(),
+		Actor:      session.ActorRef{Kind: session.ActorTool, ID: strings.TrimSpace(result.ID), Name: strings.TrimSpace(result.Name)},
+		Scope:      eventScope(req),
+		Plan:       entries,
+		Meta: map[string]any{
+			"tool_call_id": strings.TrimSpace(result.ID),
+			"tool_name":    strings.TrimSpace(result.Name),
+			"explanation":  strings.TrimSpace(metaString(result.Meta, "explanation")),
+		},
+	}, true
+}
+
+func planEntriesFromMeta(meta map[string]any) ([]session.PlanEntry, bool) {
+	raw, ok := meta["plan_entries"]
+	if !ok || raw == nil {
+		return nil, false
+	}
+	switch typed := raw.(type) {
+	case []session.PlanEntry:
+		return normalizePlanEntries(typed), true
+	case []map[string]any:
+		return normalizePlanEntries(planEntriesFromMaps(typed)), true
+	case []any:
+		return normalizePlanEntries(planEntriesFromAny(typed)), true
+	default:
+		return nil, false
+	}
+}
+
+func planEntriesFromAny(values []any) []session.PlanEntry {
+	out := make([]session.PlanEntry, 0, len(values))
+	for _, item := range values {
+		switch typed := item.(type) {
+		case session.PlanEntry:
+			out = append(out, typed)
+		case map[string]any:
+			out = append(out, planEntryFromMap(typed))
+		}
+	}
+	return out
+}
+
+func planEntriesFromMaps(values []map[string]any) []session.PlanEntry {
+	out := make([]session.PlanEntry, 0, len(values))
+	for _, item := range values {
+		out = append(out, planEntryFromMap(item))
+	}
+	return out
+}
+
+func planEntryFromMap(value map[string]any) session.PlanEntry {
+	content, _ := value["content"].(string)
+	status, _ := value["status"].(string)
+	return session.PlanEntry{
+		Content: strings.TrimSpace(content),
+		Status:  strings.TrimSpace(status),
+	}
+}
+
+func normalizePlanEntries(entries []session.PlanEntry) []session.PlanEntry {
+	out := make([]session.PlanEntry, 0, len(entries))
+	for _, entry := range entries {
+		content := strings.TrimSpace(entry.Content)
+		if content == "" {
+			continue
+		}
+		out = append(out, session.PlanEntry{
+			Content: content,
+			Status:  strings.TrimSpace(entry.Status),
+		})
+	}
+	return out
+}
+
+func metaString(meta map[string]any, key string) string {
+	value, _ := meta[key].(string)
+	return value
 }
 
 func toolContent(parts []model.Part) []session.ToolContent {

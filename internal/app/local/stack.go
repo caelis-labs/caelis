@@ -16,6 +16,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
+	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolregistry "github.com/OnslaughtSnail/caelis/internal/adapters/tools/registry"
 	appmodelrouter "github.com/OnslaughtSnail/caelis/internal/app/modelrouter"
 	appprompt "github.com/OnslaughtSnail/caelis/internal/app/prompt"
@@ -278,6 +279,7 @@ func builtinToolNames() []string {
 		toolfilesystem.ListDirectoryToolName,
 		toolfilesystem.GlobFilesToolName,
 		toolfilesystem.SearchFilesToolName,
+		toolplan.ToolName,
 		"run_command",
 	}
 }

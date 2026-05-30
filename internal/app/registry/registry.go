@@ -24,6 +24,7 @@ import (
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	storesqlite "github.com/OnslaughtSnail/caelis/internal/adapters/store/sqlite"
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
+	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 )
@@ -85,6 +86,7 @@ func RegisterDefaults(r *Registry) error {
 		{toolfilesystem.ListDirectoryToolName, listDirectoryToolFactory},
 		{toolfilesystem.GlobFilesToolName, globFilesToolFactory},
 		{toolfilesystem.SearchFilesToolName, searchFilesToolFactory},
+		{toolplan.ToolName, planToolFactory},
 		{toolshell.RunCommandToolName, runCommandToolFactory},
 	} {
 		if err := r.RegisterTool(item.name, item.factory); err != nil {
@@ -389,6 +391,10 @@ func globFilesToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, 
 
 func searchFilesToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
 	return toolfilesystem.NewSearchFilesTool(cfg.Sandbox)
+}
+
+func planToolFactory(context.Context, plugin.ToolConfig) (tool.Tool, error) {
+	return toolplan.New(), nil
 }
 
 func key(name string, kind string) (string, error) {

@@ -11,14 +11,15 @@ import (
 )
 
 type SessionView struct {
-	Ref              session.Ref       `json:"ref"`
-	Title            string            `json:"title,omitempty"`
-	Workspace        session.Workspace `json:"workspace,omitempty"`
-	Status           string            `json:"status,omitempty"`
-	UpdatedAt        time.Time         `json:"updated_at,omitempty"`
-	Transcript       []TranscriptItem  `json:"transcript,omitempty"`
-	PendingApprovals []ApprovalItem    `json:"pending_approvals,omitempty"`
-	Participants     []ParticipantItem `json:"participants,omitempty"`
+	Ref              session.Ref         `json:"ref"`
+	Title            string              `json:"title,omitempty"`
+	Workspace        session.Workspace   `json:"workspace,omitempty"`
+	Status           string              `json:"status,omitempty"`
+	UpdatedAt        time.Time           `json:"updated_at,omitempty"`
+	Transcript       []TranscriptItem    `json:"transcript,omitempty"`
+	Plan             []session.PlanEntry `json:"plan,omitempty"`
+	PendingApprovals []ApprovalItem      `json:"pending_approvals,omitempty"`
+	Participants     []ParticipantItem   `json:"participants,omitempty"`
 }
 
 type TranscriptItem struct {
@@ -85,6 +86,9 @@ func FromSnapshot(snapshot session.Snapshot) SessionView {
 		}
 		if item, ok := transcriptItem(event); ok {
 			view.Transcript = append(view.Transcript, item)
+		}
+		if event.Type == session.EventPlan {
+			view.Plan = append([]session.PlanEntry(nil), event.Plan...)
 		}
 		if approval := pendingApproval(event); approval != nil {
 			view.PendingApprovals = append(view.PendingApprovals, *approval)

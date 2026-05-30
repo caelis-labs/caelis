@@ -311,7 +311,7 @@ func TestStackRegistersCoreFilesystemBuiltinTools(t *testing.T) {
 			t.Fatal(env.Err)
 		}
 	}
-	for _, name := range []string{"read_file", "list_directory", "glob_files", "search_files", "run_command"} {
+	for _, name := range []string{"read_file", "list_directory", "glob_files", "search_files", "update_plan", "run_command"} {
 		if !capturedTool(provider.request.Tools, name) {
 			t.Fatalf("provider tools = %#v, missing %s", provider.request.Tools, name)
 		}

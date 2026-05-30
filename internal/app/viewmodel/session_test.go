@@ -59,6 +59,14 @@ func TestFromSnapshotProjectsTranscriptApprovalsAndParticipants(t *testing.T) {
 			},
 			{
 				ID:   "evt-3",
+				Type: session.EventPlan,
+				Plan: []session.PlanEntry{
+					{Content: "Read code", Status: "completed"},
+					{Content: "Implement fix", Status: "in_progress"},
+				},
+			},
+			{
+				ID:   "evt-4",
 				Type: session.EventAssistant,
 				Message: &model.Message{
 					Role:  model.RoleAssistant,
@@ -74,11 +82,14 @@ func TestFromSnapshotProjectsTranscriptApprovalsAndParticipants(t *testing.T) {
 	if view.Status != "waiting_approval" {
 		t.Fatalf("status = %q, want waiting_approval", view.Status)
 	}
-	if len(view.Transcript) != 3 {
-		t.Fatalf("transcript = %#v, want user, approval, assistant", view.Transcript)
+	if len(view.Transcript) != 4 {
+		t.Fatalf("transcript = %#v, want user, approval, plan, assistant", view.Transcript)
 	}
-	if view.Transcript[0].Text != "ping" || view.Transcript[2].Text != "pong" {
+	if view.Transcript[0].Text != "ping" || view.Transcript[3].Text != "pong" {
 		t.Fatalf("transcript texts = %#v", view.Transcript)
+	}
+	if len(view.Plan) != 2 || view.Plan[1].Content != "Implement fix" || view.Plan[1].Status != "in_progress" {
+		t.Fatalf("plan = %#v, want latest canonical plan", view.Plan)
 	}
 	if len(view.PendingApprovals) != 1 {
 		t.Fatalf("pending approvals = %#v, want one", view.PendingApprovals)
