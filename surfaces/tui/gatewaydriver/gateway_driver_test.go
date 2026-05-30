@@ -372,6 +372,8 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 					UserID:         "user-1",
 					WorkspaceKey:   "repo",
 					WorkspaceCWD:   workspace,
+					StoreBackend:   "sqlite",
+					StoreURI:       "/tmp/caelis-app-status.sqlite",
 					SandboxBackend: "host",
 				},
 				Session: &appviewmodel.SessionStatus{
@@ -424,6 +426,9 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 	}
 	if status.Workspace != workspace || status.Surface != "surface" {
 		t.Fatalf("Status() workspace/surface = %q/%q, want %q/surface", status.Workspace, status.Surface, workspace)
+	}
+	if status.StoreDir != "/tmp/caelis-app-status.sqlite" {
+		t.Fatalf("Status().StoreDir = %q, want shared app store URI", status.StoreDir)
 	}
 }
 

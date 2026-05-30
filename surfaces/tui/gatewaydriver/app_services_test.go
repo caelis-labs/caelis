@@ -41,6 +41,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 			UserID:       "user-1",
 			WorkspaceKey: "repo",
 			WorkspaceCWD: t.TempDir(),
+			Store:        config.Store{Backend: "sqlite", URI: "/tmp/caelis-app-service.sqlite"},
 			Sandbox:      config.Sandbox{Backend: "host"},
 		},
 		Engine:   engine,
@@ -98,6 +99,9 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	if status.SandboxResolvedBackend != "host" || status.Route != "host" {
 		t.Fatalf("status sandbox = %#v, want host app runtime projection", status)
+	}
+	if status.StoreDir != "/tmp/caelis-app-service.sqlite" {
+		t.Fatalf("status store = %q, want app-service store URI for /doctor", status.StoreDir)
 	}
 
 	status, err = driver.SetSessionMode(ctx, coreruntime.SessionModeManual)

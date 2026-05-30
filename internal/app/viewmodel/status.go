@@ -23,6 +23,7 @@ type RuntimeStatus struct {
 	WorkspaceCWD             string `json:"workspace_cwd,omitempty"`
 	DefaultModel             string `json:"default_model,omitempty"`
 	StoreBackend             string `json:"store_backend,omitempty"`
+	StoreURI                 string `json:"store_uri,omitempty"`
 	SandboxBackend           string `json:"sandbox_backend,omitempty"`
 	SandboxNetwork           string `json:"sandbox_network,omitempty"`
 	SandboxReadableRootCount int    `json:"sandbox_readable_root_count,omitempty"`
@@ -110,6 +111,7 @@ func RuntimeStatusFromConfig(runtime config.Runtime) RuntimeStatus {
 		WorkspaceCWD:             runtime.WorkspaceCWD,
 		DefaultModel:             runtime.Model,
 		StoreBackend:             runtime.Store.Backend,
+		StoreURI:                 runtime.Store.URI,
 		SandboxBackend:           runtime.Sandbox.Backend,
 		SandboxNetwork:           runtime.Sandbox.Network,
 		SandboxReadableRootCount: len(runtime.Sandbox.ReadableRoots),

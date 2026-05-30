@@ -316,7 +316,7 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 			WorkspaceKey: "repo",
 			WorkspaceCWD: "/tmp/repo",
 			Model:        "fallback-model",
-			Store:        config.Store{Backend: "sqlite"},
+			Store:        config.Store{Backend: "sqlite", URI: "/tmp/caelis-services.sqlite"},
 			Sandbox: config.Sandbox{
 				Backend:       "host",
 				Network:       "disabled",
@@ -360,6 +360,9 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	}
 	if status.Runtime.AppName != "caelis-app" || status.Runtime.StoreBackend != "sqlite" || status.Runtime.SandboxBackend != "host" {
 		t.Fatalf("runtime status = %#v, want app/store/sandbox defaults", status.Runtime)
+	}
+	if status.Runtime.StoreURI != "/tmp/caelis-services.sqlite" {
+		t.Fatalf("runtime store uri = %q, want configured store URI", status.Runtime.StoreURI)
 	}
 	if status.Runtime.SandboxReadableRootCount != 1 || status.Runtime.SandboxWritableRootCount != 1 {
 		t.Fatalf("runtime sandbox root counts = %#v, want 1/1", status.Runtime)

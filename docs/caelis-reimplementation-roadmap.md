@@ -595,7 +595,8 @@ alongside the old stack without importing it:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval, participant, and status DTOs shared by the TUI and future APP.
+  approval, participant, and status DTOs shared by the TUI and future APP,
+  including runtime store identity needed by read-only diagnostics.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -818,7 +819,8 @@ The completed work is intentionally limited to the reusable skeleton:
   single-shot prompts and the `caelis acp` subcommand through the new
   `internal/app/local` service stack and core-native surfaces.
 - Shared TUI/APP view-model projection for transcript, current plan, pending
-  approvals, participants, and runtime/session/model/mode/agent/resource status.
+  approvals, participants, and runtime/session/model/mode/agent/resource status,
+  including store identity for read-only diagnostic displays.
 - Core-native ACP server for initialize, session/new, session/prompt,
   session/list, session/load, session/resume, session/close, cancel,
   `session/update`, and permission request bridging. It also exposes configured
@@ -855,9 +857,15 @@ be migrated before retiring the old stack:
      into the existing TUI driver through `BindAppServices`, so normal TUI
      prompts, status/model/mode state, and core turn streaming no longer
      construct `app/gatewayapp`.
-   - Still pending: doctor, sandbox setup/fix/reset/clean, default home
-     layout, full config hydration, setup diagnostics, and several command
-     dispatch paths still depend on `app/gatewayapp` and `kernel.Service`.
+   - Migrated baseline: the production interactive TUI `/doctor` read-only
+     status path can now render provider/model, session, store, sandbox, and
+     active-job diagnostics from `internal/app/services.Status().View()`
+     through the shared app status view, instead of requiring
+     `app/gatewayapp` doctor state.
+   - Still pending: standalone doctor entrypoints, sandbox
+     setup/fix/reset/clean, default home layout, full config hydration, setup
+     diagnostics, and several command dispatch paths still depend on
+     `app/gatewayapp` and `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -893,21 +901,25 @@ be migrated before retiring the old stack:
      records participant attachment, the user prompt to the participant, and
      the participant response as canonical core session events, then projects
      participant scope/origin back into the existing TUI event stream.
+   - Migrated baseline: `/doctor` without repair now reads the same app-service
+     status view as `/status`, including configured store URI, so the diagnostic
+     display no longer needs the old gatewayapp doctor path for basic readiness
+     checks.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as `/connect`, `/agent add/install/use/remove`, and
-     `/doctor` still have old driver/app assumptions or missing service-native
-     feature parity, so the old TUI stack cannot be removed yet.
+     `/doctor fix` still have old driver/app assumptions or missing
+     service-native feature parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
      `internal/app/services.Status().View()` provide a service-native,
      surface-neutral status contract for runtime identity, current session
-     summary, model selection, session mode, agents, and resource counts. This
-     gives TUI and the future APP a shared status-panel input without importing
-     `gatewayapp` or any TUI package.
+     summary, model selection, session mode, agents, resource counts, and store
+     identity. This gives TUI and the future APP a shared status/diagnostics
+     panel input without importing `gatewayapp` or any TUI package.
    - Still pending: task panels, settings mutation flows, richer model/provider
      selection views, agent management actions, approvals, transcript actions,
      and live event subscriptions still need APP-ready service/view-model
