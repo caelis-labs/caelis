@@ -97,6 +97,10 @@ func (s Services) Views() ViewService {
 	return ViewService{services: s}
 }
 
+func (s Services) Status() StatusService {
+	return StatusService{services: s}
+}
+
 func (s Services) Settings() SettingsService {
 	return SettingsService{services: s}
 }
@@ -352,6 +356,88 @@ func (s ViewService) Session(ctx context.Context, ref session.Ref) (appviewmodel
 		return appviewmodel.SessionView{}, err
 	}
 	return appviewmodel.FromSnapshot(snapshot), nil
+}
+
+type StatusRequest struct {
+	SessionRef session.Ref `json:"session_ref,omitempty"`
+}
+
+type StatusService struct {
+	services Services
+}
+
+func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmodel.StatusView, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	runtimeCfg := s.services.Runtime()
+	ref := defaultSessionRef(runtimeCfg, req.SessionRef)
+	view := appviewmodel.StatusView{
+		Runtime:   appviewmodel.RuntimeStatusFromConfig(runtimeCfg),
+		Agents:    statusAgentView(s.services.agents),
+		Resources: statusResourceView(s.services.resources),
+	}
+	var state session.State
+	if strings.TrimSpace(ref.SessionID) != "" {
+		snapshot, err := s.services.Sessions().Load(ctx, ref)
+		if err != nil {
+			return appviewmodel.StatusView{}, err
+		}
+		state = cloneState(snapshot.State)
+		sessionView := appviewmodel.FromSnapshot(snapshot)
+		sessionStatus := appviewmodel.SessionStatusFromView(sessionView)
+		view.Session = &sessionStatus
+	}
+	modelStatus, err := s.modelStatus(ctx, state)
+	if err != nil {
+		return appviewmodel.StatusView{}, err
+	}
+	view.Model = modelStatus
+	view.Mode = s.modeStatus(state)
+	return view, nil
+}
+
+func (s StatusService) modelStatus(ctx context.Context, state session.State) (appviewmodel.ModelStatus, error) {
+	choices, err := s.services.Models().List(ctx)
+	if err != nil {
+		return appviewmodel.ModelStatus{}, err
+	}
+	status := appviewmodel.ModelStatus{
+		Configured: len(choices) > 0,
+		Count:      len(choices),
+		Choices:    statusModelChoices(choices),
+	}
+	if s.services.settings == nil || len(choices) == 0 {
+		return status, nil
+	}
+	modelID := stateString(state, StateCurrentModelID)
+	var current appsettings.ModelConfig
+	if modelID != "" {
+		current, err = s.services.settings.ResolveModel(modelID)
+	} else {
+		current, err = s.services.settings.ResolveModel("")
+	}
+	if err != nil {
+		return appviewmodel.ModelStatus{}, err
+	}
+	choice := statusModelChoice(appsettings.ModelChoiceFromConfig(current, modelChoiceIsDefault(choices, current.ID)))
+	status.Current = &choice
+	status.ReasoningEffort = firstNonEmpty(
+		strings.ToLower(stateString(state, StateCurrentReasoningEffort)),
+		current.ReasoningEffort,
+		current.DefaultReasoningEffort,
+	)
+	return status, nil
+}
+
+func (s StatusService) modeStatus(state session.State) appviewmodel.ModeStatus {
+	choices := sessionModeChoices()
+	modeID := defaultSessionMode(stateString(state, StateSessionMode))
+	current, _ := lookupSessionMode(modeID)
+	return appviewmodel.ModeStatus{
+		Current: statusModeChoice(current),
+		Choices: statusModeChoices(choices),
+	}
 }
 
 type AgentKind string
@@ -637,6 +723,113 @@ func cloneEvents(in []session.Event) []session.Event {
 		out = append(out, session.CloneEvent(event))
 	}
 	return out
+}
+
+func statusModelChoices(in []appsettings.ModelChoice) []appviewmodel.ModelChoice {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ModelChoice, 0, len(in))
+	for _, item := range in {
+		out = append(out, statusModelChoice(item))
+	}
+	return out
+}
+
+func statusModelChoice(in appsettings.ModelChoice) appviewmodel.ModelChoice {
+	return appviewmodel.ModelChoice{
+		ID:         strings.TrimSpace(in.ID),
+		Alias:      strings.TrimSpace(in.Alias),
+		Provider:   strings.TrimSpace(in.Provider),
+		Model:      strings.TrimSpace(in.Model),
+		ProfileID:  strings.TrimSpace(in.ProfileID),
+		EndpointID: strings.TrimSpace(in.EndpointID),
+		BaseURL:    strings.TrimSpace(in.BaseURL),
+		Detail:     strings.TrimSpace(in.Detail),
+		Default:    in.Default,
+	}
+}
+
+func modelChoiceIsDefault(choices []appsettings.ModelChoice, id string) bool {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false
+	}
+	for _, choice := range choices {
+		if choice.Default && strings.EqualFold(choice.ID, id) {
+			return true
+		}
+	}
+	return false
+}
+
+func statusModeChoices(in []ModeChoice) []appviewmodel.ModeChoice {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ModeChoice, 0, len(in))
+	for _, item := range in {
+		out = append(out, statusModeChoice(item))
+	}
+	return out
+}
+
+func statusModeChoice(in ModeChoice) appviewmodel.ModeChoice {
+	return appviewmodel.ModeChoice{
+		ID:          strings.TrimSpace(in.ID),
+		Name:        strings.TrimSpace(in.Name),
+		Description: strings.TrimSpace(in.Description),
+	}
+}
+
+func statusAgentView(in []AgentDescriptor) appviewmodel.AgentStatus {
+	agents := cloneAgents(in)
+	status := appviewmodel.AgentStatus{
+		Count: len(agents),
+	}
+	if len(agents) == 0 {
+		return status
+	}
+	status.Items = make([]appviewmodel.AgentItem, 0, len(agents))
+	for _, agent := range agents {
+		if agent.Kind == AgentKindExternalACP {
+			status.ExternalACPCount++
+		}
+		status.Items = append(status.Items, appviewmodel.AgentItem{
+			ID:          strings.TrimSpace(agent.ID),
+			Name:        strings.TrimSpace(agent.Name),
+			Kind:        strings.TrimSpace(string(agent.Kind)),
+			Command:     strings.TrimSpace(agent.Command),
+			Args:        append([]string(nil), agent.Args...),
+			WorkDir:     strings.TrimSpace(agent.WorkDir),
+			Description: strings.TrimSpace(agent.Description),
+			Meta:        maps.Clone(agent.Meta),
+		})
+	}
+	return status
+}
+
+func statusResourceView(in appresources.Catalog) appviewmodel.ResourceStatus {
+	return appviewmodel.ResourceStatus{
+		Plugins:        len(in.Plugins),
+		ModelProviders: len(in.ModelProviders),
+		Stores:         len(in.Stores),
+		Sandboxes:      len(in.Sandboxes),
+		Tools:          len(in.Tools),
+		Prompts:        len(in.Prompts),
+		Skills:         len(in.Skills),
+		ACPAgents:      len(in.ACPAgents),
+		RendererHints:  len(in.RendererHints),
+		AgentFiles:     len(in.AgentFiles),
+	}
+}
+
+func stateString(state session.State, key string) string {
+	if state == nil {
+		return ""
+	}
+	value, _ := state[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func cloneState(in session.State) session.State {

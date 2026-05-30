@@ -595,7 +595,7 @@ alongside the old stack without importing it:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval, and participant DTOs shared by the TUI and future APP.
+  approval, participant, and status DTOs shared by the TUI and future APP.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -811,7 +811,7 @@ The completed work is intentionally limited to the reusable skeleton:
   single-shot prompts and the `caelis acp` subcommand through the new
   `internal/app/local` service stack and core-native surfaces.
 - Shared TUI/APP view-model projection for transcript, current plan, pending
-  approvals, and participants.
+  approvals, participants, and runtime/session/model/mode/agent/resource status.
 - Core-native ACP server for initialize, session/new, session/prompt,
   session/list, session/load, session/resume, session/close, cancel,
   `session/update`, and permission request bridging. It also exposes configured
@@ -853,9 +853,16 @@ be migrated before retiring the old stack:
      old driver/app contracts.
 
 3. Future APP surface
-   - Only common DTOs exist. Status panels, task panels, settings, model
-     selection, agent management, approvals, transcript actions, and live event
-     subscriptions still need APP-ready service/view-model contracts.
+   - Migrated baseline: `internal/app/viewmodel.StatusView` and
+     `internal/app/services.Status().View()` provide a service-native,
+     surface-neutral status contract for runtime identity, current session
+     summary, model selection, session mode, agents, and resource counts. This
+     gives TUI and the future APP a shared status-panel input without importing
+     `gatewayapp` or any TUI package.
+   - Still pending: task panels, settings mutation flows, richer model/provider
+     selection views, agent management actions, approvals, transcript actions,
+     and live event subscriptions still need APP-ready service/view-model
+     contracts.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
@@ -1030,8 +1037,8 @@ Recommended sequence:
    and `internal/engine/tasks`.
 5. Port TUI driver commands, including session list/resume, to
    `internal/app/services`, preserving existing rendering as surface-local code.
-6. Expand shared APP view models for status, settings, agents, models,
-   approvals, tasks, and live transcript actions.
+6. Expand shared APP view models for settings, agent management, richer model
+   selection, approvals, tasks, and live transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
    to canonical events.
 8. Add full store round-trip and ACP projection parity tests for product flows.

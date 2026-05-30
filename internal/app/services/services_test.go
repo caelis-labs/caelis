@@ -184,6 +184,149 @@ func TestViewServiceProjectsLoadedSession(t *testing.T) {
 	}
 }
 
+func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
+	ctx := context.Background()
+	updatedAt := time.Date(2026, 5, 30, 10, 30, 0, 0, time.UTC)
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider:               "openai-compatible",
+		Model:                  "gpt-test",
+		BaseURL:                "https://api.example.test/v1",
+		DefaultReasoningEffort: "low",
+		ReasoningMode:          "fixed",
+		ReasoningLevels:        []string{"low", "high"},
+		ContextWindowTokens:    128000,
+		MaxOutputTokens:        4096,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref:       session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-1", WorkspaceKey: "repo"},
+			Workspace: session.Workspace{Key: "repo", CWD: "/tmp/repo"},
+			Title:     "scratch",
+			UpdatedAt: updatedAt,
+			Participants: []session.ParticipantBinding{{
+				ID:        "agent-1",
+				Kind:      session.ParticipantACP,
+				Role:      session.ParticipantSidecar,
+				AgentName: "reviewer",
+				Label:     "Reviewer",
+			}},
+		},
+		State: session.State{
+			StateCurrentModelID:         cfg.ID,
+			StateCurrentReasoningEffort: "high",
+			StateSessionMode:            coreruntime.SessionModeManual,
+		},
+		Events: []session.Event{{
+			ID:   "evt-1",
+			Type: session.EventAssistant,
+			Message: &model.Message{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("pong")},
+			},
+		}, {
+			ID:   "evt-2",
+			Type: session.EventApproval,
+			Approval: &session.ApprovalEvent{
+				ID:     "approval-1",
+				Status: session.ApprovalPending,
+			},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis-app",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/tmp/repo",
+			Model:        "fallback-model",
+			Store:        config.Store{Backend: "sqlite"},
+			Sandbox: config.Sandbox{
+				Backend:       "host",
+				Network:       "disabled",
+				ReadableRoots: []string{"/tmp/repo"},
+				WritableRoots: []string{"/tmp/repo"},
+			},
+		},
+		Engine:   engine,
+		Settings: manager,
+		Agents: []AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "Reviewer",
+			Kind:        AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Args:        []string{"--stdio"},
+			Description: "reviews changes",
+			Meta:        map[string]string{"scope": "workspace"},
+		}},
+		Resources: appresources.Catalog{
+			Tools: []plugin.FactoryAlias{{
+				Name: "run_command",
+				Uses: "builtin.run_command",
+			}},
+			Prompts: []plugin.PromptFragment{{
+				ID:   "agents.workspace",
+				Text: "workspace rule",
+			}},
+			AgentFiles: []appresources.AgentFile{{
+				ID:   "agents.workspace",
+				Path: "AGENTS.md",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := svc.Status().View(ctx, StatusRequest{SessionRef: session.Ref{SessionID: "sess-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Runtime.AppName != "caelis-app" || status.Runtime.StoreBackend != "sqlite" || status.Runtime.SandboxBackend != "host" {
+		t.Fatalf("runtime status = %#v, want app/store/sandbox defaults", status.Runtime)
+	}
+	if status.Runtime.SandboxReadableRootCount != 1 || status.Runtime.SandboxWritableRootCount != 1 {
+		t.Fatalf("runtime sandbox root counts = %#v, want 1/1", status.Runtime)
+	}
+	if status.Session == nil || status.Session.Ref.SessionID != "sess-1" || status.Session.Title != "scratch" {
+		t.Fatalf("session status = %#v, want projected session", status.Session)
+	}
+	if status.Session.Status != "waiting_approval" || status.Session.TranscriptCount != 2 || status.Session.PendingApprovalCount != 1 || status.Session.ParticipantCount != 1 {
+		t.Fatalf("session counters = %#v, want transcript/approval/participant projection", status.Session)
+	}
+	if !status.Model.Configured || status.Model.Count != 1 || status.Model.Current == nil || status.Model.Current.ID != cfg.ID {
+		t.Fatalf("model status = %#v, want selected current model", status.Model)
+	}
+	if status.Model.ReasoningEffort != "high" || len(status.Model.Choices) != 1 || !status.Model.Choices[0].Default {
+		t.Fatalf("model choices = %#v reasoning=%q, want default choice and session reasoning", status.Model.Choices, status.Model.ReasoningEffort)
+	}
+	if status.Mode.Current.ID != coreruntime.SessionModeManual || len(status.Mode.Choices) != 2 {
+		t.Fatalf("mode status = %#v, want manual with choices", status.Mode)
+	}
+	if status.Agents.Count != 1 || status.Agents.ExternalACPCount != 1 || status.Agents.Items[0].Args[0] != "--stdio" {
+		t.Fatalf("agent status = %#v, want one external ACP agent", status.Agents)
+	}
+	if status.Resources.Tools != 1 || status.Resources.Prompts != 1 || status.Resources.AgentFiles != 1 {
+		t.Fatalf("resource status = %#v, want tool/prompt/agent file counts", status.Resources)
+	}
+
+	status.Agents.Items[0].Args[0] = "changed"
+	status.Agents.Items[0].Meta["scope"] = "changed"
+	again, err := svc.Status().View(ctx, StatusRequest{SessionRef: session.Ref{SessionID: "sess-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Agents.Items[0].Args[0] != "--stdio" || again.Agents.Items[0].Meta["scope"] != "workspace" {
+		t.Fatalf("agent status was not cloned: %#v", again.Agents.Items[0])
+	}
+}
+
 func TestSessionServiceListAppliesWorkspaceDefaults(t *testing.T) {
 	engine := &recordingEngine{page: session.SessionPage{
 		Sessions: []session.SessionSummary{{
