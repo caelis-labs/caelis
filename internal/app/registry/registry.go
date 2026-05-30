@@ -86,6 +86,8 @@ func RegisterDefaults(r *Registry) error {
 		{toolfilesystem.ListDirectoryToolName, listDirectoryToolFactory},
 		{toolfilesystem.GlobFilesToolName, globFilesToolFactory},
 		{toolfilesystem.SearchFilesToolName, searchFilesToolFactory},
+		{toolfilesystem.WriteFileToolName, writeFileToolFactory},
+		{toolfilesystem.PatchFileToolName, patchFileToolFactory},
 		{toolplan.ToolName, planToolFactory},
 		{toolshell.RunCommandToolName, runCommandToolFactory},
 	} {
@@ -391,6 +393,14 @@ func globFilesToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, 
 
 func searchFilesToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
 	return toolfilesystem.NewSearchFilesTool(cfg.Sandbox)
+}
+
+func writeFileToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolfilesystem.NewWriteFileTool(cfg.Sandbox)
+}
+
+func patchFileToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolfilesystem.NewPatchFileTool(cfg.Sandbox)
 }
 
 func planToolFactory(context.Context, plugin.ToolConfig) (tool.Tool, error) {

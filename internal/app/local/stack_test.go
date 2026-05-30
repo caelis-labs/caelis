@@ -3,6 +3,7 @@ package local
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,15 +16,18 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
+	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
 	"github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -311,10 +315,111 @@ func TestStackRegistersCoreFilesystemBuiltinTools(t *testing.T) {
 			t.Fatal(env.Err)
 		}
 	}
-	for _, name := range []string{"read_file", "list_directory", "glob_files", "search_files", "update_plan", "run_command"} {
+	for _, name := range []string{
+		toolfilesystem.ReadFileToolName,
+		toolfilesystem.ListDirectoryToolName,
+		toolfilesystem.GlobFilesToolName,
+		toolfilesystem.SearchFilesToolName,
+		toolfilesystem.WriteFileToolName,
+		toolfilesystem.PatchFileToolName,
+		"update_plan",
+		toolshell.RunCommandToolName,
+	} {
 		if !capturedTool(provider.request.Tools, name) {
 			t.Fatalf("provider tools = %#v, missing %s", provider.request.Tools, name)
 		}
+	}
+}
+
+func TestStackAsksApprovalForBuiltinMutatingFilesystemTools(t *testing.T) {
+	workspace := t.TempDir()
+	rawInput, err := json.Marshal(map[string]any{
+		"path":    "blocked.txt",
+		"content": "blocked\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-1",
+					Name:  toolfilesystem.WriteFileToolName,
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Provider:     provider,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "write file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var events []session.Event
+	var sawPending bool
+	var sawRejected bool
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		event := session.CloneEvent(env.Event)
+		events = append(events, event)
+		if event.Approval == nil {
+			continue
+		}
+		switch event.Approval.Status {
+		case session.ApprovalPending:
+			sawPending = true
+			if event.Approval.Tool == nil || event.Approval.Tool.Name != toolfilesystem.WriteFileToolName {
+				t.Fatalf("pending approval = %#v, want write_file tool", event.Approval)
+			}
+			if err := turn.Submit(context.Background(), coreruntime.Submission{
+				Kind: coreruntime.SubmissionApproval,
+				Approval: &coreruntime.ApprovalDecision{
+					Approved: false,
+					Outcome:  approval.OptionRejectOnce,
+					OptionID: approval.OptionRejectOnce,
+					Reason:   "blocked by test",
+				},
+			}); err != nil {
+				t.Fatal(err)
+			}
+		case session.ApprovalRejected:
+			sawRejected = true
+		}
+	}
+	if !sawPending || !sawRejected {
+		t.Fatalf("events = %#v, want pending and rejected approval", events)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "blocked.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("blocked file stat error = %v, want not exists", err)
 	}
 }
 

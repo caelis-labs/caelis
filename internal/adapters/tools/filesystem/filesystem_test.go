@@ -119,6 +119,89 @@ func TestSearchFilesToolFindsTextAndHonorsGitignore(t *testing.T) {
 	}
 }
 
+func TestWriteFileToolCreatesParentDirectories(t *testing.T) {
+	rt := newHostRuntime(t)
+	writeTool, err := NewWriteFileTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := callTool(t, writeTool, map[string]any{
+		"path":        "nested/out.txt",
+		"content":     "hello\nworld\n",
+		"create_dirs": true,
+	})
+	payload := resultPayload(t, result)
+	if payload["created"] != true || payload["changed"] != true {
+		t.Fatalf("payload = %#v, want created changed file", payload)
+	}
+	raw, err := rt.FileSystem().ReadFile("nested/out.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "hello\nworld\n" {
+		t.Fatalf("written content = %q", raw)
+	}
+}
+
+func TestPatchFileToolAppliesExactBatchEditsAtomically(t *testing.T) {
+	rt := newHostRuntime(t)
+	if err := rt.FileSystem().WriteFile("notes.txt", []byte("alpha\nbeta\ngamma\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patchTool, err := NewPatchFileTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := callTool(t, patchTool, map[string]any{
+		"path": "notes.txt",
+		"edits": []map[string]any{
+			{"old": "alpha", "new": "one"},
+			{"old": "gamma", "new": "three"},
+		},
+	})
+	payload := resultPayload(t, result)
+	if payload["replacement_count"] != float64(2) || payload["changed"] != true {
+		t.Fatalf("payload = %#v, want two replacements", payload)
+	}
+	raw, err := rt.FileSystem().ReadFile("notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "one\nbeta\nthree\n" {
+		t.Fatalf("patched content = %q", raw)
+	}
+}
+
+func TestPatchFileToolRejectsAmbiguousReplacement(t *testing.T) {
+	rt := newHostRuntime(t)
+	if err := rt.FileSystem().WriteFile("notes.txt", []byte("x + x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patchTool, err := NewPatchFileTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(map[string]any{
+		"path": "notes.txt",
+		"edits": []map[string]any{
+			{"old": "x", "new": "y"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := patchTool.Call(context.Background(), tool.Call{Input: raw}); err == nil {
+		t.Fatal("patch error = nil, want ambiguous replacement error")
+	}
+	content, err := rt.FileSystem().ReadFile("notes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "x + x\n" {
+		t.Fatalf("content = %q, want unchanged file after rejected patch", content)
+	}
+}
+
 func newHostRuntime(t *testing.T) sandbox.Runtime {
 	t.Helper()
 	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})

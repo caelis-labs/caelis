@@ -146,10 +146,14 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
+	approvalPolicy := cfg.Approval
+	if approvalPolicy == nil && cfg.BuiltinTools {
+		approvalPolicy = approval.AskTools(toolfilesystem.WriteFileToolName, toolfilesystem.PatchFileToolName)
+	}
 	runner, err := loop.New(loop.Config{
 		Provider:     provider,
 		Tools:        tools,
-		Approval:     cfg.Approval,
+		Approval:     approvalPolicy,
 		Instructions: instructions,
 		MaxToolSteps: cfg.MaxToolSteps,
 	})
@@ -279,6 +283,8 @@ func builtinToolNames() []string {
 		toolfilesystem.ListDirectoryToolName,
 		toolfilesystem.GlobFilesToolName,
 		toolfilesystem.SearchFilesToolName,
+		toolfilesystem.WriteFileToolName,
+		toolfilesystem.PatchFileToolName,
 		toolplan.ToolName,
 		"run_command",
 	}

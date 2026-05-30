@@ -740,8 +740,8 @@ The completed work is intentionally limited to the reusable skeleton:
 - OpenAI-compatible provider adapter sufficient for Chat Completions and tool
   calls.
 - Host sandbox adapter, core-native `run_command` tool, and core-native
-  read-only filesystem tools: `read_file`, `list_directory`, `glob_files`, and
-  `search_files`.
+  filesystem tools: `read_file`, `list_directory`, `glob_files`,
+  `search_files`, `write_file`, and `patch_file`.
 - Core-native `update_plan` tool with runtime conversion into canonical
   `session.EventPlan` events.
 - App composition root, registry, plugin manifest discovery, prompt assembly,
@@ -829,24 +829,29 @@ be migrated before retiring the old stack:
      remain old-stack capabilities.
 
 8. Built-in tools
-   - Migrated baseline: `run_command` plus read-only filesystem tools
-     `read_file`, `list_directory`, `glob_files`, `search_files`, and
-     `update_plan` now implement `core/tool.Tool` directly and are registered as
-     builtin local stack tools through the new app registry.
+   - Migrated baseline: `run_command`, filesystem tools `read_file`,
+     `list_directory`, `glob_files`, `search_files`, `write_file`,
+     `patch_file`, and `update_plan` now implement `core/tool.Tool` directly
+     and are registered as builtin local stack tools through the new app
+     registry.
+   - `write_file` and `patch_file` are intentionally small exact-text tools
+     built on the `core/sandbox.FileSystem` contract, so future sandbox
+     backends can replace host execution without changing tool semantics.
    - Plan updates are no longer only display metadata in the new runtime:
      `update_plan` results are converted into canonical `session.EventPlan`
      records for ACP/TUI/APP projection.
-   - Still pending: filesystem `write_file`/`patch_file`, diff rendering
-     metadata, spawn tool, task tool, async command sessions, stdin writes,
-     task wait/cancel, and display metadata for compact/rich tool panels still
-     need core-native adapters.
+   - Still pending: rich diff rendering metadata, spawn tool, task tool, async
+     command sessions, stdin writes, task wait/cancel, and display metadata for
+     compact/rich tool panels still need core-native adapters.
 
 9. Approval and permission policy
-   - The new approval path supports allow/deny/ask and ACP permission response
-     bridging.
+   - The new approval path supports allow/deny/ask, ACP permission response
+     bridging, and a default local-stack ask policy for mutating filesystem
+     tools.
    - Manual surface controls, model-backed auto-review, policy presets,
      sandbox-aware permission escalation, allow-always/reject-always persistence,
-     approval review transcript context, and denial metadata are not migrated.
+     approval review transcript context, and richer denial metadata are not
+     migrated.
 
 10. Agents, subagents, and controller handoff
     - The new external ACP path covers basic participant invocation.
@@ -897,7 +902,7 @@ Recommended sequence:
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating
    tools.
-4. Port mutating filesystem tools, spawn, task, and async shell tools behind
+4. Port spawn, task, async shell, stdin, wait, and cancel tools behind
    `core/tool.Registry`.
 5. Wire the production headless CLI and ACP stdio entry to the new service
    facade, with e2e parity tests.

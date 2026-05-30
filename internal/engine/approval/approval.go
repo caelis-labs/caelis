@@ -87,7 +87,7 @@ func AskTools(names ...string) Policy {
 		if len(wanted) == 0 || slices.Contains(wanted, strings.ToLower(strings.TrimSpace(req.Call.Name))) {
 			return AskAll().ReviewToolCall(ctx, req)
 		}
-		return Decision{Verdict: VerdictAllow}, nil
+		return Decision{}, nil
 	})
 }
 

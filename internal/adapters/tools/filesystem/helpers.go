@@ -21,6 +21,8 @@ const (
 	ListDirectoryToolName = "list_directory"
 	GlobFilesToolName     = "glob_files"
 	SearchFilesToolName   = "search_files"
+	WriteFileToolName     = "write_file"
+	PatchFileToolName     = "patch_file"
 )
 
 type constraintAwareFileSystemRuntime interface {

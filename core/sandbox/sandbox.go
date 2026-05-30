@@ -152,6 +152,7 @@ type FileSystem interface {
 	Stat(path string) (os.FileInfo, error)
 	ReadFile(path string) ([]byte, error)
 	WriteFile(path string, data []byte, perm os.FileMode) error
+	MkdirAll(path string, perm os.FileMode) error
 	Glob(pattern string) ([]string, error)
 	WalkDir(root string, fn fs.WalkDirFunc) error
 }

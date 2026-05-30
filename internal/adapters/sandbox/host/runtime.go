@@ -215,6 +215,10 @@ func (f fileSystem) WriteFile(path string, data []byte, perm os.FileMode) error 
 	return os.WriteFile(f.resolve(path), data, perm)
 }
 
+func (f fileSystem) MkdirAll(path string, perm os.FileMode) error {
+	return os.MkdirAll(f.resolve(path), perm)
+}
+
 func (f fileSystem) Glob(pattern string) ([]string, error) {
 	return filepath.Glob(f.resolve(pattern))
 }
