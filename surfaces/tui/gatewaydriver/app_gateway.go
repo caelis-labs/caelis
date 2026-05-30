@@ -2,6 +2,7 @@ package gatewaydriver
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"strings"
 	"sync"
@@ -22,13 +23,18 @@ import (
 type appServiceGateway struct {
 	services appservices.Services
 	mu       sync.Mutex
-	active   map[string]*appServiceTurnHandle
+	active   map[string]appServiceActiveTurn
+}
+
+type appServiceActiveTurn interface {
+	kernel.TurnHandle
+	state() kernel.ActiveTurnState
 }
 
 func newAppServiceGateway(svc appservices.Services) *appServiceGateway {
 	return &appServiceGateway{
 		services: svc,
-		active:   map[string]*appServiceTurnHandle{},
+		active:   map[string]appServiceActiveTurn{},
 	}
 }
 
@@ -65,6 +71,13 @@ func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnR
 func (g *appServiceGateway) SubmitActiveTurn(ctx context.Context, req kernel.SubmitActiveTurnRequest) error {
 	handle := g.activeForSession(req.SessionRef.SessionID)
 	if handle == nil {
+		return &kernel.Error{
+			Kind:    kernel.KindConflict,
+			Code:    kernel.CodeNoActiveRun,
+			Message: "no active core turn for session",
+		}
+	}
+	if handle.state().Kind != kernel.ActiveTurnKindKernel {
 		return &kernel.Error{
 			Kind:    kernel.KindConflict,
 			Code:    kernel.CodeNoActiveRun,
@@ -142,16 +155,68 @@ func (g *appServiceGateway) HandoffController(context.Context, kernel.HandoffCon
 	return portsession.Session{}, unsupportedControlPlaneError("handoff controller")
 }
 
-func (g *appServiceGateway) AttachParticipant(context.Context, kernel.AttachParticipantRequest) (portsession.Session, error) {
-	return portsession.Session{}, unsupportedControlPlaneError("attach participant")
+func (g *appServiceGateway) AttachParticipant(ctx context.Context, req kernel.AttachParticipantRequest) (portsession.Session, error) {
+	ref := coreRefFromPort(req.SessionRef)
+	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	participant, err := g.participantForAttach(ctx, snapshot, req)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	event := participantLifecycleEvent(participant, "attached", req.Source)
+	if _, err := g.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, []coresession.Event{event}); err != nil {
+		return portsession.Session{}, err
+	}
+	snapshot.Events = append(snapshot.Events, event)
+	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
+	return portSessionFromCore(snapshot.Session), nil
 }
 
-func (g *appServiceGateway) PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
-	return kernel.BeginTurnResult{}, unsupportedControlPlaneError("prompt participant")
+func (g *appServiceGateway) PromptParticipant(ctx context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
+	ref := coreRefFromPort(req.SessionRef)
+	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	if err != nil {
+		return kernel.BeginTurnResult{}, err
+	}
+	participants := participantsFromCoreSnapshot(snapshot)
+	participant, ok := findCoreParticipant(participants, req.ParticipantID)
+	if !ok {
+		return kernel.BeginTurnResult{}, fmt.Errorf("core app-service TUI gateway: participant %q is not attached", strings.TrimSpace(req.ParticipantID))
+	}
+	snapshot.Session.Participants = participants
+	handle := newAppServiceAgentTurnHandle(g.services, snapshot.Session.Ref, participant, req.Input, coreContentPartsFromPort(req.ContentParts), req.Source)
+	g.register(handle)
+	go func() {
+		defer g.unregister(handle)
+		handle.run(ctx)
+	}()
+	return kernel.BeginTurnResult{
+		Session: portSessionFromCore(snapshot.Session),
+		Handle:  handle,
+	}, nil
 }
 
-func (g *appServiceGateway) DetachParticipant(context.Context, kernel.DetachParticipantRequest) (portsession.Session, error) {
-	return portsession.Session{}, unsupportedControlPlaneError("detach participant")
+func (g *appServiceGateway) DetachParticipant(ctx context.Context, req kernel.DetachParticipantRequest) (portsession.Session, error) {
+	ref := coreRefFromPort(req.SessionRef)
+	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	participants := participantsFromCoreSnapshot(snapshot)
+	participant, ok := findCoreParticipant(participants, req.ParticipantID)
+	if !ok {
+		snapshot.Session.Participants = participants
+		return portSessionFromCore(snapshot.Session), nil
+	}
+	event := participantLifecycleEvent(participant, "detached", req.Source)
+	if _, err := g.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, []coresession.Event{event}); err != nil {
+		return portsession.Session{}, err
+	}
+	snapshot.Events = append(snapshot.Events, event)
+	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
+	return portSessionFromCore(snapshot.Session), nil
 }
 
 func (g *appServiceGateway) ActiveTurns() []kernel.ActiveTurnState {
@@ -164,13 +229,13 @@ func (g *appServiceGateway) ActiveTurns() []kernel.ActiveTurnState {
 	return out
 }
 
-func (g *appServiceGateway) register(handle *appServiceTurnHandle) {
+func (g *appServiceGateway) register(handle appServiceActiveTurn) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.active[handle.SessionRef().SessionID] = handle
 }
 
-func (g *appServiceGateway) unregister(handle *appServiceTurnHandle) {
+func (g *appServiceGateway) unregister(handle appServiceActiveTurn) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if current := g.active[handle.SessionRef().SessionID]; current == handle {
@@ -178,7 +243,7 @@ func (g *appServiceGateway) unregister(handle *appServiceTurnHandle) {
 	}
 }
 
-func (g *appServiceGateway) activeForSession(sessionID string) *appServiceTurnHandle {
+func (g *appServiceGateway) activeForSession(sessionID string) appServiceActiveTurn {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	return g.active[strings.TrimSpace(sessionID)]
@@ -340,11 +405,15 @@ func kernelEnvelopeFromCore(env coreruntime.EventEnvelope) (kernel.EventEnvelope
 
 func kernelEventFromCore(event coresession.Event) kernel.Event {
 	ref := portsession.SessionRef{SessionID: strings.TrimSpace(event.SessionID)}
+	scope := coreEventScope(event)
+	participantID := coreEventParticipantID(event)
+	actor := coreEventActor(event)
 	out := kernel.Event{
 		Kind:       kernelEventKind(event.Type),
 		TurnID:     coreEventTurnID(event),
 		OccurredAt: event.Time,
 		SessionRef: ref,
+		Origin:     coreEventOrigin(event, scope, participantID, actor),
 		Meta:       maps.Clone(event.Meta),
 	}
 	if out.Meta == nil {
@@ -353,13 +422,13 @@ func kernelEventFromCore(event coresession.Event) kernel.Event {
 	text := coresession.EventText(event)
 	switch event.Type {
 	case coresession.EventUser:
-		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleUser, Text: text, Final: true, Scope: kernel.EventScopeMain}
+		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleUser, Actor: actor, Text: text, Final: true, Scope: scope, ParticipantID: participantID}
 	case coresession.EventAssistant:
-		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleAssistant, Text: text, Final: true, Scope: kernel.EventScopeMain}
+		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleAssistant, Actor: actor, Text: text, Final: true, Scope: scope, ParticipantID: participantID}
 	case coresession.EventSystem:
-		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleSystem, Text: text, Final: true, Scope: kernel.EventScopeMain}
+		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleSystem, Actor: actor, Text: text, Final: true, Scope: scope, ParticipantID: participantID}
 	case coresession.EventNotice:
-		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleNotice, Text: text, Final: true, Scope: kernel.EventScopeMain}
+		out.Narrative = &kernel.NarrativePayload{Role: kernel.NarrativeRoleNotice, Actor: actor, Text: text, Final: true, Scope: scope, ParticipantID: participantID}
 	case coresession.EventToolCall:
 		out.ToolCall = coreToolCallPayload(event)
 	case coresession.EventToolResult:
@@ -374,6 +443,55 @@ func kernelEventFromCore(event coresession.Event) kernel.Event {
 		out.Participant = coreParticipantPayload(event)
 	}
 	return out
+}
+
+func coreEventScope(event coresession.Event) kernel.EventScope {
+	if event.Scope == nil {
+		return kernel.EventScopeMain
+	}
+	participant := event.Scope.Participant
+	if strings.TrimSpace(participant.ID) == "" {
+		return kernel.EventScopeMain
+	}
+	if participant.Kind == coresession.ParticipantSubagent {
+		return kernel.EventScopeSubagent
+	}
+	return kernel.EventScopeParticipant
+}
+
+func coreEventParticipantID(event coresession.Event) string {
+	if event.Scope == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Scope.Participant.ID)
+}
+
+func coreEventActor(event coresession.Event) string {
+	if event.Scope != nil && strings.TrimSpace(event.Scope.Participant.ID) != "" {
+		participant := event.Scope.Participant
+		return firstNonEmpty(participant.Label, participant.AgentName, participant.ID)
+	}
+	return firstNonEmpty(event.Actor.Name, event.Actor.ID, string(event.Actor.Kind))
+}
+
+func coreEventOrigin(event coresession.Event, scope kernel.EventScope, participantID string, actor string) *kernel.EventOrigin {
+	if scope == kernel.EventScopeMain && strings.TrimSpace(participantID) == "" {
+		return nil
+	}
+	origin := &kernel.EventOrigin{
+		Scope:         scope,
+		ScopeID:       strings.TrimSpace(participantID),
+		Source:        "core",
+		Actor:         strings.TrimSpace(actor),
+		ParticipantID: strings.TrimSpace(participantID),
+	}
+	if event.Scope != nil {
+		origin.Source = firstNonEmpty(event.Scope.Source, origin.Source)
+		participant := event.Scope.Participant
+		origin.ParticipantKind = strings.TrimSpace(string(participant.Kind))
+		origin.ParticipantSessionID = strings.TrimSpace(participant.SessionID)
+	}
+	return origin
 }
 
 func kernelEventKind(kind coresession.EventType) kernel.EventKind {
@@ -418,14 +536,17 @@ func coreToolCallPayload(event coresession.Event) *kernel.ToolCallPayload {
 	if event.Tool == nil {
 		return nil
 	}
+	scope := coreEventScope(event)
 	return &kernel.ToolCallPayload{
-		CallID:    strings.TrimSpace(event.Tool.ID),
-		ToolName:  strings.TrimSpace(event.Tool.Name),
-		ToolKind:  strings.TrimSpace(event.Tool.Kind),
-		ToolTitle: strings.TrimSpace(event.Tool.Title),
-		RawInput:  maps.Clone(event.Tool.Input),
-		Status:    coreToolStatus(event.Tool.Status),
-		Scope:     kernel.EventScopeMain,
+		CallID:        strings.TrimSpace(event.Tool.ID),
+		ToolName:      strings.TrimSpace(event.Tool.Name),
+		ToolKind:      strings.TrimSpace(event.Tool.Kind),
+		ToolTitle:     strings.TrimSpace(event.Tool.Title),
+		RawInput:      maps.Clone(event.Tool.Input),
+		Status:        coreToolStatus(event.Tool.Status),
+		Actor:         coreEventActor(event),
+		Scope:         scope,
+		ParticipantID: coreEventParticipantID(event),
 	}
 }
 
@@ -433,16 +554,19 @@ func coreToolResultPayload(event coresession.Event) *kernel.ToolResultPayload {
 	if event.Tool == nil {
 		return nil
 	}
+	scope := coreEventScope(event)
 	return &kernel.ToolResultPayload{
-		CallID:    strings.TrimSpace(event.Tool.ID),
-		ToolName:  strings.TrimSpace(event.Tool.Name),
-		ToolKind:  strings.TrimSpace(event.Tool.Kind),
-		ToolTitle: strings.TrimSpace(event.Tool.Title),
-		RawInput:  maps.Clone(event.Tool.Input),
-		RawOutput: maps.Clone(event.Tool.Output),
-		Status:    coreToolStatus(event.Tool.Status),
-		Error:     event.Tool.Status == coresession.ToolFailed,
-		Scope:     kernel.EventScopeMain,
+		CallID:        strings.TrimSpace(event.Tool.ID),
+		ToolName:      strings.TrimSpace(event.Tool.Name),
+		ToolKind:      strings.TrimSpace(event.Tool.Kind),
+		ToolTitle:     strings.TrimSpace(event.Tool.Title),
+		RawInput:      maps.Clone(event.Tool.Input),
+		RawOutput:     maps.Clone(event.Tool.Output),
+		Status:        coreToolStatus(event.Tool.Status),
+		Error:         event.Tool.Status == coresession.ToolFailed,
+		Actor:         coreEventActor(event),
+		Scope:         scope,
+		ParticipantID: coreEventParticipantID(event),
 	}
 }
 
@@ -520,9 +644,11 @@ func coreLifecyclePayload(event coresession.Event) *kernel.LifecyclePayload {
 		return nil
 	}
 	return &kernel.LifecyclePayload{
-		Status: kernel.LifecycleStatus(event.Lifecycle.Status),
-		Reason: strings.TrimSpace(event.Lifecycle.Reason),
-		Scope:  kernel.EventScopeMain,
+		Status:        kernel.LifecycleStatus(event.Lifecycle.Status),
+		Reason:        strings.TrimSpace(event.Lifecycle.Reason),
+		Actor:         coreEventActor(event),
+		Scope:         coreEventScope(event),
+		ParticipantID: coreEventParticipantID(event),
 	}
 }
 
@@ -536,14 +662,28 @@ func coreParticipantPayload(event coresession.Event) *kernel.ParticipantPayload 
 		ParticipantKind: strings.TrimSpace(string(participant.Kind)),
 		Role:            strings.TrimSpace(string(participant.Role)),
 		Label:           firstNonEmpty(participant.Label, participant.AgentName, participant.ID),
+		Action:          coreParticipantAction(event),
 		SessionID:       strings.TrimSpace(participant.SessionID),
 		ParentTurnID:    strings.TrimSpace(participant.ParentTurnID),
 		DelegationID:    strings.TrimSpace(participant.DelegationID),
-		Scope:           kernel.EventScopeMain,
+		Scope:           coreEventScope(event),
+	}
+}
+
+func coreParticipantAction(event coresession.Event) kernel.ParticipantAction {
+	action := strings.ToLower(strings.TrimSpace(coreEventMetaString(event.Meta, "action")))
+	switch action {
+	case "attached":
+		return kernel.ParticipantActionAttached
+	case "detached":
+		return kernel.ParticipantActionDetached
+	default:
+		return ""
 	}
 }
 
 func loadedSessionFromCore(snapshot coresession.Snapshot) portsession.LoadedSession {
+	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
 	return portsession.LoadedSession{
 		Session: portSessionFromCore(snapshot.Session),
 		Events:  portEventsFromCore(snapshot.Events),
@@ -625,17 +765,22 @@ func compactResumeTitle(text string, limit int) string {
 
 func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []kernel.ActiveTurnState) kernel.ControlPlaneState {
 	ref := portRefFromCore(snapshot.Session.Ref)
+	participants := participantsFromCoreSnapshot(snapshot)
 	return kernel.ControlPlaneState{
 		SessionRef:    ref,
 		Controller:    controllerStateFromCore(snapshot.Session.Controller),
-		Participants:  participantStatesFromCore(snapshot.Session.Participants),
+		Participants:  participantStatesFromCore(participants),
 		HasActiveTurn: activeTurnForSession(active, ref.SessionID),
 	}
 }
 
 func controllerStateFromCore(in coresession.ControllerBinding) kernel.ControllerState {
+	kind := portsession.ControllerKind(in.Kind)
+	if in.Kind == coresession.ControllerBuiltin {
+		kind = portsession.ControllerKindKernel
+	}
 	return kernel.ControllerState{
-		Kind:            portsession.ControllerKind(in.Kind),
+		Kind:            kind,
 		ControllerID:    strings.TrimSpace(in.ID),
 		AgentName:       strings.TrimSpace(in.AgentName),
 		Label:           strings.TrimSpace(in.Label),

@@ -77,6 +77,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.DeleteModelFn = func(ctx context.Context, _ portsession.SessionRef, modelRef string) error {
 		return svc.Models().Delete(ctx, modelRef)
 	}
+	stack.ListACPAgentsFn = func() []ACPAgentInfo {
+		agents, err := svc.Agents().List(context.Background())
+		if err != nil {
+			return nil
+		}
+		return acpAgentsFromApp(agents)
+	}
 	stack.CompactSessionFn = func(ctx context.Context, ref portsession.SessionRef) error {
 		_, err := svc.Compaction().Compact(ctx, appservices.CompactSessionRequest{
 			SessionRef: coreRefFromPort(ref),
@@ -144,12 +151,60 @@ func portRefFromCore(ref coresession.Ref) portsession.SessionRef {
 
 func portSessionFromCore(active coresession.Session) portsession.Session {
 	return portsession.Session{
-		SessionRef: portRefFromCore(active.Ref),
-		CWD:        strings.TrimSpace(active.Workspace.CWD),
-		Title:      strings.TrimSpace(active.Title),
-		Metadata:   maps.Clone(active.Meta),
-		CreatedAt:  active.CreatedAt,
-		UpdatedAt:  active.UpdatedAt,
+		SessionRef:   portRefFromCore(active.Ref),
+		CWD:          strings.TrimSpace(active.Workspace.CWD),
+		Title:        strings.TrimSpace(active.Title),
+		Metadata:     maps.Clone(active.Meta),
+		Controller:   portControllerFromCore(active.Controller),
+		Participants: portParticipantsFromCore(active.Participants),
+		CreatedAt:    active.CreatedAt,
+		UpdatedAt:    active.UpdatedAt,
+	}
+}
+
+func portControllerFromCore(in coresession.ControllerBinding) portsession.ControllerBinding {
+	kind := portsession.ControllerKind(in.Kind)
+	if in.Kind == coresession.ControllerBuiltin {
+		kind = portsession.ControllerKindKernel
+	}
+	return portsession.ControllerBinding{
+		Kind:            kind,
+		ControllerID:    strings.TrimSpace(in.ID),
+		AgentName:       strings.TrimSpace(in.AgentName),
+		Label:           strings.TrimSpace(in.Label),
+		EpochID:         strings.TrimSpace(in.EpochID),
+		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
+		ContextSyncSeq:  in.ContextSyncSeq,
+		AttachedAt:      in.AttachedAt,
+		Source:          strings.TrimSpace(in.Source),
+	}
+}
+
+func portParticipantsFromCore(in []coresession.ParticipantBinding) []portsession.ParticipantBinding {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]portsession.ParticipantBinding, 0, len(in))
+	for _, participant := range in {
+		out = append(out, portParticipantFromCore(participant))
+	}
+	return out
+}
+
+func portParticipantFromCore(in coresession.ParticipantBinding) portsession.ParticipantBinding {
+	return portsession.ParticipantBinding{
+		ID:             strings.TrimSpace(in.ID),
+		Kind:           portsession.ParticipantKind(in.Kind),
+		Role:           portsession.ParticipantRole(in.Role),
+		AgentName:      strings.TrimSpace(in.AgentName),
+		Label:          strings.TrimSpace(in.Label),
+		SessionID:      strings.TrimSpace(in.SessionID),
+		Source:         strings.TrimSpace(in.Source),
+		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
+		DelegationID:   strings.TrimSpace(in.DelegationID),
+		ContextSyncSeq: in.ContextSyncSeq,
+		AttachedAt:     in.AttachedAt,
+		ControllerRef:  strings.TrimSpace(in.ControllerRef),
 	}
 }
 
@@ -217,6 +272,54 @@ func modelChoicesFromApp(choices []appsettings.ModelChoice) []ModelChoice {
 			BaseURL:    strings.TrimSpace(choice.BaseURL),
 			Detail:     strings.TrimSpace(choice.Detail),
 		})
+	}
+	return out
+}
+
+func acpAgentsFromApp(agents []appservices.AgentDescriptor) []ACPAgentInfo {
+	if len(agents) == 0 {
+		return nil
+	}
+	out := make([]ACPAgentInfo, 0, len(agents))
+	for _, agent := range agents {
+		if agent.Kind != appservices.AgentKindExternalACP {
+			continue
+		}
+		id := strings.TrimSpace(agent.ID)
+		name := strings.TrimSpace(agent.Name)
+		command := strings.TrimSpace(agent.Command)
+		if id == "" {
+			id = firstNonEmpty(name, command)
+		}
+		if id == "" {
+			continue
+		}
+		description := strings.TrimSpace(agent.Description)
+		if description == "" {
+			description = strings.Join(compactAgentDetails([]string{name, command}), " · ")
+		}
+		out = append(out, ACPAgentInfo{
+			Name:        id,
+			Description: description,
+		})
+	}
+	return out
+}
+
+func compactAgentDetails(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
 	}
 	return out
 }

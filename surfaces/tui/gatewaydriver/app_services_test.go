@@ -12,6 +12,7 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -189,6 +190,83 @@ func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T
 	}
 }
 
+func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine: engine,
+		Agents: []appservices.AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "Reviewer",
+			Kind:        appservices.AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Description: "review code through ACP",
+		}},
+		Invokers: map[string]appservices.AgentInvoker{
+			"reviewer": appservices.AgentInvokerFunc(func(_ context.Context, req appservices.AgentInvokeRequest) (appservices.AgentInvokeResult, error) {
+				return appservices.AgentInvokeResult{
+					Events: []coresession.Event{{
+						Type: coresession.EventAssistant,
+						Message: &coremodel.Message{
+							Role:  coremodel.RoleAssistant,
+							Parts: []coremodel.Part{coremodel.NewTextPart("agent result for " + req.Input)},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	agents, err := driver.ListAgents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListAgents() error = %v", err)
+	}
+	if len(agents) != 1 || agents[0].Name != "reviewer" || agents[0].Description != "review code through ACP" {
+		t.Fatalf("agents = %#v, want service-backed reviewer catalog", agents)
+	}
+
+	turn, err := driver.StartAgentSubagent(ctx, "reviewer", " inspect ", nil)
+	if err != nil {
+		t.Fatalf("StartAgentSubagent() error = %v", err)
+	}
+	got := drainGatewayDriverTestTurn(t, turn)
+	if len(got) != 2 {
+		t.Fatalf("turn events = %#v, want user prompt and agent response", got)
+	}
+	if got[0].Event.Kind != kernel.EventKindUserMessage || got[0].Event.Origin == nil || got[0].Event.Origin.Scope != kernel.EventScopeParticipant {
+		t.Fatalf("first event = %#v, want participant-scoped user prompt", got[0].Event)
+	}
+	if got[1].Event.Kind != kernel.EventKindAssistantMessage || got[1].Event.Origin == nil || got[1].Event.Origin.ParticipantID != "reviewer" {
+		t.Fatalf("second event = %#v, want participant-scoped assistant response", got[1].Event)
+	}
+	if len(engine.events) != 3 {
+		t.Fatalf("recorded events = %#v, want attach, user prompt, assistant response", engine.events)
+	}
+	if engine.events[0].Type != coresession.EventParticipant || engine.events[1].Type != coresession.EventUser || engine.events[2].Type != coresession.EventAssistant {
+		t.Fatalf("recorded event types = %#v, want participant/user/assistant", engine.events)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus() error = %v", err)
+	}
+	if len(status.Participants) != 1 || status.Participants[0].ID != "reviewer" {
+		t.Fatalf("agent status = %#v, want reviewer participant from canonical events", status)
+	}
+}
+
 type appServiceDriverEngine struct {
 	start    coresession.StartRequest
 	page     coresession.SessionPage
@@ -232,13 +310,14 @@ func (e *appServiceDriverEngine) LoadSession(_ context.Context, ref coresession.
 	if snapshot.Session.SessionID == "" {
 		snapshot.Session.Ref = ref
 	}
+	snapshot.Events = append(cloneCoreEvents(snapshot.Events), cloneCoreEvents(e.events)...)
 	snapshot.State = cloneCoreState(e.state)
 	return snapshot, nil
 }
 
 func (e *appServiceDriverEngine) RecordEvents(_ context.Context, _ coresession.Ref, events []coresession.Event) (coresession.Cursor, error) {
-	e.events = cloneCoreEvents(events)
-	return "", nil
+	e.events = append(e.events, cloneCoreEvents(events)...)
+	return coresession.Cursor("test-cursor"), nil
 }
 
 func (e *appServiceDriverEngine) UpdateSessionState(_ context.Context, _ coresession.Ref, patch coresession.StatePatch) error {
@@ -317,4 +396,27 @@ func cloneCoreEvents(in []coresession.Event) []coresession.Event {
 		out = append(out, coresession.CloneEvent(event))
 	}
 	return out
+}
+
+func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []kernel.EventEnvelope {
+	t.Helper()
+	if turn == nil {
+		t.Fatal("turn = nil")
+	}
+	defer turn.Close()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	var out []kernel.EventEnvelope
+	for {
+		select {
+		case env, ok := <-turn.Events():
+			if !ok {
+				return out
+			}
+			out = append(out, env)
+		case <-timer.C:
+			_ = turn.Close()
+			t.Fatal("turn did not close")
+		}
+	}
 }

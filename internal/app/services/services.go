@@ -485,6 +485,7 @@ func (f AgentInvokerFunc) Invoke(ctx context.Context, req AgentInvokeRequest) (A
 type AgentInvokeRequest struct {
 	AgentID      string
 	SessionRef   session.Ref
+	Participant  session.ParticipantBinding
 	Input        string
 	ContentParts []model.ContentPart
 }
@@ -516,12 +517,13 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	}
 	req.SessionRef = ref
 	req.AgentID = agentID
+	req.Participant = normalizeAgentParticipant(req.Participant, agentID)
 	req.ContentParts = model.CloneContentParts(req.ContentParts)
 	result, err := invoker.Invoke(ctx, req)
 	if err != nil {
 		return AgentInvokeResult{}, err
 	}
-	events := cloneEvents(result.Events)
+	events := normalizeAgentInvokeEvents(ref.SessionID, req.Participant, cloneEvents(result.Events))
 	if len(events) > 0 && !result.Recorded {
 		if _, err := s.services.engine.RecordEvents(ctx, ref, events); err != nil {
 			return AgentInvokeResult{}, err
@@ -529,6 +531,54 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	}
 	result.Events = events
 	return result, nil
+}
+
+func normalizeAgentParticipant(in session.ParticipantBinding, agentID string) session.ParticipantBinding {
+	out := in
+	out.ID = firstNonEmpty(out.ID, agentID)
+	out.AgentName = firstNonEmpty(out.AgentName, agentID)
+	out.Label = firstNonEmpty(out.Label, out.AgentName, out.ID)
+	out.Source = firstNonEmpty(out.Source, "app_agent")
+	if out.Kind == "" {
+		out.Kind = session.ParticipantACP
+	}
+	if out.Role == "" {
+		out.Role = session.ParticipantDelegated
+	}
+	return out
+}
+
+func normalizeAgentInvokeEvents(sessionID string, participant session.ParticipantBinding, events []session.Event) []session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	participant = normalizeAgentParticipant(participant, participant.ID)
+	out := make([]session.Event, 0, len(events))
+	for _, event := range events {
+		next := session.CloneEvent(event)
+		if strings.TrimSpace(next.SessionID) == "" {
+			next.SessionID = strings.TrimSpace(sessionID)
+		}
+		if next.Visibility == "" {
+			next.Visibility = session.VisibilityCanonical
+		}
+		if next.Scope == nil {
+			next.Scope = &session.EventScope{}
+		}
+		next.Scope.Source = firstNonEmpty(next.Scope.Source, participant.Source, "app_agent")
+		if strings.TrimSpace(next.Scope.Participant.ID) == "" {
+			next.Scope.Participant = participant
+		}
+		if next.Actor.Kind == "" {
+			next.Actor = session.ActorRef{
+				Kind: session.ActorParticipant,
+				ID:   participant.ID,
+				Name: firstNonEmpty(participant.Label, participant.AgentName, participant.ID),
+			}
+		}
+		out = append(out, next)
+	}
+	return out
 }
 
 type SessionService struct {

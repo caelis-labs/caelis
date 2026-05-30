@@ -212,19 +212,25 @@ func agentInvokers(store session.Store, configs []acpexternal.Config) map[string
 			defer client.Close()
 			adapter := externalAgentSession{client: client}
 			runner := control.ParticipantRunner{Store: store}
+			participant := req.Participant
+			if strings.TrimSpace(participant.ID) == "" {
+				participant.ID = id
+			}
+			if participant.Kind == "" {
+				participant.Kind = session.ParticipantACP
+			}
+			if participant.Role == "" {
+				participant.Role = session.ParticipantDelegated
+			}
+			participant.AgentName = firstNonEmpty(participant.AgentName, cfg.AgentName, id)
+			participant.Label = firstNonEmpty(participant.Label, cfg.AgentName, id)
+			participant.Source = firstNonEmpty(participant.Source, "external_acp")
 			result, err := runner.Invoke(ctx, control.ParticipantRequest{
 				SessionRef:   req.SessionRef,
 				Input:        req.Input,
 				ContentParts: req.ContentParts,
-				Participant: session.ParticipantBinding{
-					ID:        id,
-					Kind:      session.ParticipantACP,
-					Role:      session.ParticipantDelegated,
-					AgentName: firstNonEmpty(cfg.AgentName, id),
-					Label:     firstNonEmpty(cfg.AgentName, id),
-					Source:    "external_acp",
-				},
-				Agent: adapter,
+				Participant:  participant,
+				Agent:        adapter,
 			})
 			if err != nil {
 				return services.AgentInvokeResult{}, err
