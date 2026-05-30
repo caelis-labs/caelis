@@ -39,6 +39,7 @@ type Services struct {
 	sandbox       sandbox.Runtime
 	tasks         TaskResolver
 	modelProvider ModelProviderFactory
+	modelCache    *modelDiscoveryCache
 	agents        []AgentDescriptor
 	builtins      []AgentDescriptor
 	invokers      map[string]AgentInvoker
@@ -85,6 +86,7 @@ func New(cfg Config) (Services, error) {
 		sandbox:       cfg.Sandbox,
 		tasks:         cfg.TaskResolver,
 		modelProvider: cfg.ModelProvider,
+		modelCache:    newModelDiscoveryCache(),
 		agents:        cloneAgents(cfg.Agents),
 		builtins:      cloneAgents(cfg.BuiltinAgents),
 		invokers:      maps.Clone(cfg.Invokers),

@@ -2330,11 +2330,13 @@ func TestModelServiceProviderModelsMergesConfiguredAndRemoteModels(t *testing.T)
 		t.Fatal(err)
 	}
 	var captured appsettings.ModelConfig
+	var factoryCalls int
 	svc, err := New(Config{
 		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
 		Engine:   &recordingEngine{},
 		Settings: manager,
 		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (model.Provider, error) {
+			factoryCalls++
 			captured = cfg
 			return catalogProvider{models: []model.ModelInfo{
 				{ID: "gpt-remote", Provider: "openai-compatible"},
@@ -2359,6 +2361,17 @@ func TestModelServiceProviderModelsMergesConfiguredAndRemoteModels(t *testing.T)
 	}
 	if captured.Provider != "openai-compatible" || captured.BaseURL != "https://api.example.test/v1" || captured.Token != "secret" {
 		t.Fatalf("provider factory cfg = %#v, want connect candidate config", captured)
+	}
+	again, err := svc.Models().ProviderModels(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		BaseURL:  "https://api.example.test/v1",
+		Token:    "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(again, models) || factoryCalls != 1 {
+		t.Fatalf("cached provider models = %#v calls=%d, want cached result with one provider call", again, factoryCalls)
 	}
 }
 
@@ -2401,7 +2414,16 @@ func TestModelServiceSelectionViewProjectsProvidersAndCandidates(t *testing.T) {
 		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (model.Provider, error) {
 			captured = cfg
 			return catalogProvider{models: []model.ModelInfo{
-				{ID: "gpt-remote", Provider: "openai-compatible"},
+				{
+					ID:                     "gpt-remote",
+					Provider:               "openai-compatible",
+					ContextWindowTokens:    64000,
+					MaxOutputTokens:        12000,
+					ReasoningEfforts:       []string{"low", "high"},
+					DefaultReasoningEffort: "low",
+					SupportsToolCalls:      true,
+					SupportsJSON:           true,
+				},
 				{ID: "gpt-configured", Provider: "openai-compatible"},
 			}}, nil
 		},
@@ -2442,6 +2464,18 @@ func TestModelServiceSelectionViewProjectsProvidersAndCandidates(t *testing.T) {
 	remote, ok := findModelCandidate(view.Candidates, "gpt-remote")
 	if !ok || !remote.Remote || remote.Configured || remote.Catalog {
 		t.Fatalf("remote candidate = %#v ok=%v, want remote-only candidate", remote, ok)
+	}
+	if !remote.CapabilitiesKnown ||
+		remote.Capabilities.ContextWindowTokens != 64000 ||
+		remote.Capabilities.MaxOutputTokens != 12000 ||
+		!remote.Capabilities.SupportsToolCalls ||
+		!remote.Capabilities.SupportsJSONOutput ||
+		!slices.Equal(remote.ReasoningLevels, []string{"none", "low", "high"}) {
+		t.Fatalf("remote capabilities = %#v levels=%#v, want hydrated remote capabilities", remote.Capabilities, remote.ReasoningLevels)
+	}
+	remoteCaps, ok := svc.Models().LookupCapabilities("openai-compatible", "gpt-remote")
+	if !ok || remoteCaps.ContextWindowTokens != 64000 || !slices.Equal(svc.Models().ReasoningLevels("openai-compatible", "gpt-remote"), []string{"none", "low", "high"}) {
+		t.Fatalf("cached remote caps = %#v ok=%v, want cached discovery capabilities", remoteCaps, ok)
 	}
 	if captured.Provider != "openai-compatible" || captured.BaseURL != "https://api.example.test/v1" || captured.Token != "secret" {
 		t.Fatalf("provider factory cfg = %#v, want discovery config with selected provider", captured)

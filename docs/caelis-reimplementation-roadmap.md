@@ -1244,8 +1244,12 @@ be migrated before retiring the old stack:
    - Mimo/Xiaomi and Volcengine now have core-native provider profiles with
      default endpoints, token lookup, structured JSON output, reasoning-content
      parsing, thinking payload mapping, and settings endpoint normalization.
-   - Still pending: provider discovery caching/capability hydration, detailed
-     error mapping, SSE streaming, provider-specific
+   - Migrated baseline: app-service model discovery now caches remote
+     `core/model.ModelInfo` results per normalized provider endpoint and token
+     fingerprint, and model-selection candidates hydrate context window,
+     output, tool-call, image, JSON, and reasoning-level capabilities from
+     discovered remote metadata before falling back to static catalog defaults.
+   - Still pending: detailed error mapping, SSE streaming, provider-specific
      tool/argument behavior beyond the migrated profiles, and removal of the
      corresponding old `impl/model/providers` code once no old-stack entrypoint
      requires it.

@@ -2,9 +2,12 @@ package services
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
@@ -136,19 +139,45 @@ func (s ModelService) ProviderModels(ctx context.Context, cfg appsettings.ModelC
 	if providerKey == "" || s.services.modelProvider == nil {
 		return uniqueSortedModelNames(out), nil
 	}
-	provider, err := s.services.modelProvider(ctx, cfg)
-	if err != nil {
-		return uniqueSortedModelNames(out), err
-	}
-	if provider == nil {
-		return uniqueSortedModelNames(out), nil
-	}
-	remote, err := provider.Models(ctx)
+	remote, err := s.ProviderModelInfos(ctx, cfg)
 	if err != nil {
 		return uniqueSortedModelNames(out), err
 	}
 	out = append(out, modelInfoNames(remote)...)
 	return uniqueSortedModelNames(out), nil
+}
+
+func (s ModelService) ProviderModelInfos(ctx context.Context, cfg appsettings.ModelConfig) ([]coremodel.ModelInfo, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	cfg = appsettings.NormalizeModelConfig(cfg)
+	if normalizeModelCatalogKey(cfg.Provider) == "" || s.services.modelProvider == nil {
+		return nil, nil
+	}
+	cache := s.services.modelCache
+	key := modelDiscoveryCacheKey(cfg)
+	if cache != nil {
+		if cached, ok := cache.Get(key); ok {
+			return cached, nil
+		}
+	}
+	provider, err := s.services.modelProvider(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if provider == nil {
+		return nil, nil
+	}
+	remote, err := provider.Models(ctx)
+	if err != nil {
+		return nil, err
+	}
+	remote = normalizeModelInfos(cfg.Provider, remote)
+	if cache != nil {
+		cache.Put(key, remote)
+	}
+	return cloneModelInfos(remote), nil
 }
 
 func (s ModelService) DefaultCapabilities() ModelCapabilityInfo {
@@ -174,26 +203,18 @@ func (s ModelService) LookupCapabilities(provider string, modelName string) (Mod
 			return normalizeModelCapabilityInfo(entry.caps), true
 		}
 	}
+	if caps, ok := s.lookupCachedCapabilities(provider, modelName); ok {
+		return caps, true
+	}
 	return ModelCapabilityInfo{}, false
 }
 
 func (s ModelService) ReasoningLevels(provider string, modelName string) []string {
 	caps, ok := s.LookupCapabilities(provider, modelName)
-	if !ok || !caps.SupportsReasoning {
+	if !ok {
 		return nil
 	}
-	switch strings.ToLower(strings.TrimSpace(caps.ReasoningMode)) {
-	case ReasoningModeFixed, ReasoningModeNone:
-		return nil
-	}
-	levels := normalizeReasoningEfforts(caps.ReasoningEfforts)
-	if len(levels) == 0 {
-		return []string{"none"}
-	}
-	out := make([]string, 0, len(levels)+1)
-	out = append(out, "none")
-	out = append(out, levels...)
-	return out
+	return reasoningLevelsFromCapabilities(caps)
 }
 
 func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) (appviewmodel.ModelSelectionView, error) {
@@ -238,13 +259,18 @@ func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) 
 	})
 	discovery := req.Discovery
 	discovery.Provider = firstNonEmpty(discovery.Provider, provider)
-	remote, err := s.ProviderModels(ctx, discovery)
+	remote, err := s.ProviderModelInfos(ctx, discovery)
 	if err != nil {
 		view.DiscoveryErr = err.Error()
 	}
-	addModelCandidates(candidates, provider, remote, func(candidate *appviewmodel.ModelCandidate) {
+	addModelInfoCandidates(candidates, provider, remote, func(candidate *appviewmodel.ModelCandidate, info coremodel.ModelInfo) {
 		if !candidate.Configured {
 			candidate.Remote = true
+		}
+		if caps, ok := modelInfoCapabilities(info); ok {
+			candidate.CapabilitiesKnown = true
+			candidate.Capabilities = modelCapabilityView(caps)
+			candidate.ReasoningLevels = reasoningLevelsFromCapabilities(caps)
 		}
 	})
 	view.Candidates = s.sortedModelCandidates(candidates)
@@ -316,16 +342,36 @@ func addModelCandidates(candidates map[string]appviewmodel.ModelCandidate, provi
 	}
 }
 
+func addModelInfoCandidates(candidates map[string]appviewmodel.ModelCandidate, provider string, models []coremodel.ModelInfo, update func(*appviewmodel.ModelCandidate, coremodel.ModelInfo)) {
+	for _, info := range models {
+		modelName := firstNonEmpty(info.ID, info.Name)
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			continue
+		}
+		key := strings.ToLower(modelName)
+		candidate := candidates[key]
+		candidate.Provider = firstNonEmpty(normalizeModelCatalogKey(info.Provider), provider)
+		candidate.Model = modelName
+		update(&candidate, info)
+		candidates[key] = candidate
+	}
+}
+
 func (s ModelService) sortedModelCandidates(candidates map[string]appviewmodel.ModelCandidate) []appviewmodel.ModelCandidate {
 	if len(candidates) == 0 {
 		return nil
 	}
 	out := make([]appviewmodel.ModelCandidate, 0, len(candidates))
 	for _, candidate := range candidates {
-		if caps, ok := s.LookupCapabilities(candidate.Provider, candidate.Model); ok {
+		if candidate.CapabilitiesKnown {
+			if len(candidate.ReasoningLevels) == 0 {
+				candidate.ReasoningLevels = reasoningLevelsFromCapabilityView(candidate.Capabilities)
+			}
+		} else if caps, ok := s.LookupCapabilities(candidate.Provider, candidate.Model); ok {
 			candidate.CapabilitiesKnown = true
 			candidate.Capabilities = modelCapabilityView(caps)
-			candidate.ReasoningLevels = s.ReasoningLevels(candidate.Provider, candidate.Model)
+			candidate.ReasoningLevels = reasoningLevelsFromCapabilities(caps)
 		} else {
 			candidate.Capabilities = modelCapabilityView(s.DefaultCapabilities())
 		}
@@ -389,6 +435,64 @@ func modelInfoNames(models []coremodel.ModelInfo) []string {
 	return out
 }
 
+func normalizeModelInfos(provider string, models []coremodel.ModelInfo) []coremodel.ModelInfo {
+	if len(models) == 0 {
+		return nil
+	}
+	out := make([]coremodel.ModelInfo, 0, len(models))
+	for _, item := range models {
+		item.ID = strings.TrimSpace(item.ID)
+		item.Name = strings.TrimSpace(item.Name)
+		item.Provider = firstNonEmpty(normalizeModelCatalogKey(item.Provider), normalizeModelCatalogKey(provider))
+		item.DefaultReasoningEffort = strings.ToLower(strings.TrimSpace(item.DefaultReasoningEffort))
+		item.ReasoningEfforts = normalizeReasoningEfforts(item.ReasoningEfforts)
+		if item.ID == "" && item.Name == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func cloneModelInfos(models []coremodel.ModelInfo) []coremodel.ModelInfo {
+	if len(models) == 0 {
+		return nil
+	}
+	out := slices.Clone(models)
+	for i := range out {
+		out[i].ReasoningEfforts = slices.Clone(models[i].ReasoningEfforts)
+	}
+	return out
+}
+
+func modelInfoCapabilities(info coremodel.ModelInfo) (ModelCapabilityInfo, bool) {
+	caps := ModelCapabilityInfo{
+		ContextWindowTokens:    info.ContextWindowTokens,
+		MaxOutputTokens:        info.MaxOutputTokens,
+		DefaultMaxOutputTokens: info.MaxOutputTokens,
+		SupportsImages:         info.SupportsImages,
+		SupportsToolCalls:      info.SupportsToolCalls,
+		ReasoningEfforts:       slices.Clone(info.ReasoningEfforts),
+		DefaultReasoningEffort: strings.ToLower(strings.TrimSpace(info.DefaultReasoningEffort)),
+		SupportsJSONOutput:     info.SupportsJSON,
+	}
+	if len(caps.ReasoningEfforts) == 0 && caps.DefaultReasoningEffort != "" {
+		caps.ReasoningEfforts = []string{caps.DefaultReasoningEffort}
+	}
+	caps.SupportsReasoning = len(caps.ReasoningEfforts) > 0 || caps.DefaultReasoningEffort != ""
+	if caps.SupportsReasoning {
+		caps.ReasoningMode = ReasoningModeEffort
+	}
+	caps = normalizeModelCapabilityInfo(caps)
+	known := caps.ContextWindowTokens > 0 ||
+		caps.MaxOutputTokens > 0 ||
+		caps.SupportsImages ||
+		caps.SupportsToolCalls ||
+		caps.SupportsReasoning ||
+		caps.SupportsJSONOutput
+	return caps, known
+}
+
 func uniqueSortedModelNames(models []string) []string {
 	if len(models) == 0 {
 		return nil
@@ -434,6 +538,40 @@ func normalizeModelCapabilityInfo(in ModelCapabilityInfo) ModelCapabilityInfo {
 	return out
 }
 
+func reasoningLevelsFromCapabilities(caps ModelCapabilityInfo) []string {
+	caps = normalizeModelCapabilityInfo(caps)
+	if !caps.SupportsReasoning {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(caps.ReasoningMode)) {
+	case ReasoningModeFixed, ReasoningModeNone:
+		return nil
+	}
+	levels := normalizeReasoningEfforts(caps.ReasoningEfforts)
+	if len(levels) == 0 {
+		return []string{"none"}
+	}
+	out := make([]string, 0, len(levels)+1)
+	out = append(out, "none")
+	out = append(out, levels...)
+	return out
+}
+
+func reasoningLevelsFromCapabilityView(caps appviewmodel.ModelCapability) []string {
+	return reasoningLevelsFromCapabilities(ModelCapabilityInfo{
+		ContextWindowTokens:    caps.ContextWindowTokens,
+		MaxOutputTokens:        caps.MaxOutputTokens,
+		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
+		SupportsImages:         caps.SupportsImages,
+		SupportsToolCalls:      caps.SupportsToolCalls,
+		SupportsReasoning:      caps.SupportsReasoning,
+		ReasoningMode:          caps.ReasoningMode,
+		ReasoningEfforts:       slices.Clone(caps.ReasoningEfforts),
+		DefaultReasoningEffort: caps.DefaultReasoningEffort,
+		SupportsJSONOutput:     caps.SupportsJSONOutput,
+	})
+}
+
 func normalizeReasoningEfforts(levels []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(levels))
@@ -449,4 +587,99 @@ func normalizeReasoningEfforts(levels []string) []string {
 		out = append(out, level)
 	}
 	return out
+}
+
+func (s ModelService) lookupCachedCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
+	cache := s.services.modelCache
+	if cache == nil {
+		return ModelCapabilityInfo{}, false
+	}
+	info, ok := cache.Find(provider, modelName)
+	if !ok {
+		return ModelCapabilityInfo{}, false
+	}
+	return modelInfoCapabilities(info)
+}
+
+type modelDiscoveryCache struct {
+	mu      sync.RWMutex
+	entries map[string][]coremodel.ModelInfo
+}
+
+func newModelDiscoveryCache() *modelDiscoveryCache {
+	return &modelDiscoveryCache{entries: map[string][]coremodel.ModelInfo{}}
+}
+
+func (c *modelDiscoveryCache) Get(key string) ([]coremodel.ModelInfo, bool) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return nil, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	models, ok := c.entries[key]
+	if !ok {
+		return nil, false
+	}
+	return cloneModelInfos(models), true
+}
+
+func (c *modelDiscoveryCache) Put(key string, models []coremodel.ModelInfo) {
+	if c == nil || strings.TrimSpace(key) == "" {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.entries == nil {
+		c.entries = map[string][]coremodel.ModelInfo{}
+	}
+	c.entries[key] = cloneModelInfos(models)
+}
+
+func (c *modelDiscoveryCache) Find(provider string, modelName string) (coremodel.ModelInfo, bool) {
+	if c == nil {
+		return coremodel.ModelInfo{}, false
+	}
+	provider = normalizeModelCatalogKey(provider)
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	if provider == "" || modelName == "" {
+		return coremodel.ModelInfo{}, false
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, models := range c.entries {
+		for _, info := range models {
+			if normalizeModelCatalogKey(info.Provider) != provider {
+				continue
+			}
+			if strings.ToLower(firstNonEmpty(info.ID, info.Name)) != modelName {
+				continue
+			}
+			return cloneModelInfo(info), true
+		}
+	}
+	return coremodel.ModelInfo{}, false
+}
+
+func cloneModelInfo(info coremodel.ModelInfo) coremodel.ModelInfo {
+	info.ReasoningEfforts = slices.Clone(info.ReasoningEfforts)
+	return info
+}
+
+func modelDiscoveryCacheKey(cfg appsettings.ModelConfig) string {
+	cfg = appsettings.NormalizeModelConfig(cfg)
+	tokenHash := ""
+	if cfg.Token != "" {
+		sum := sha256.Sum256([]byte(cfg.Token))
+		tokenHash = hex.EncodeToString(sum[:])
+	}
+	parts := []string{
+		normalizeModelCatalogKey(cfg.Provider),
+		strings.TrimSpace(cfg.EndpointID),
+		strings.TrimSpace(cfg.BaseURL),
+		strings.TrimSpace(cfg.AuthType),
+		strings.TrimSpace(cfg.HeaderKey),
+		strings.TrimSpace(cfg.TokenEnv),
+		tokenHash,
+	}
+	return strings.Join(parts, "\x00")
 }
