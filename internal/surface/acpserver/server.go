@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	coreprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector/core"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -20,6 +21,7 @@ import (
 
 type Config struct {
 	Engine         coreruntime.Engine
+	Services       appservices.Services
 	AppName        string
 	UserID         string
 	Implementation schema.Implementation
@@ -27,6 +29,7 @@ type Config struct {
 
 type Server struct {
 	engine         coreruntime.Engine
+	services       appservices.Services
 	appName        string
 	userID         string
 	implementation schema.Implementation
@@ -35,16 +38,20 @@ type Server struct {
 }
 
 func New(cfg Config) (*Server, error) {
-	if cfg.Engine == nil {
+	engine := cfg.Engine
+	if engine == nil {
+		engine = cfg.Services.Engine()
+	}
+	if engine == nil {
 		return nil, errors.New("surface/acpserver: engine is required")
 	}
 	appName := strings.TrimSpace(cfg.AppName)
 	if appName == "" {
-		appName = "caelis"
+		appName = firstNonEmpty(cfg.Services.AppName(), "caelis")
 	}
 	userID := strings.TrimSpace(cfg.UserID)
 	if userID == "" {
-		userID = "local-user"
+		userID = firstNonEmpty(cfg.Services.UserID(), "local-user")
 	}
 	impl := cfg.Implementation
 	if strings.TrimSpace(impl.Name) == "" {
@@ -54,7 +61,8 @@ func New(cfg Config) (*Server, error) {
 		impl.Version = "dev"
 	}
 	return &Server{
-		engine:         cfg.Engine,
+		engine:         engine,
+		services:       cfg.Services,
 		appName:        appName,
 		userID:         userID,
 		implementation: impl,
@@ -110,6 +118,18 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 			return nil, invalidParams(err)
 		}
 		return responseOrError(s.resumeSession(ctx, req))
+	case schema.MethodSessionSetConfig:
+		var req schema.SetSessionConfigOptionRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.setSessionConfigOption(ctx, req))
+	case schema.MethodSessionSetModel:
+		var req schema.SetSessionModelRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.setSessionModel(ctx, req))
 	case schema.MethodSessionPrompt:
 		var req schema.PromptRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -168,7 +188,11 @@ func (s *Server) newSession(ctx context.Context, req schema.NewSessionRequest) (
 	if err != nil {
 		return schema.NewSessionResponse{}, err
 	}
-	return schema.NewSessionResponse{SessionID: active.SessionID}, nil
+	resp := schema.NewSessionResponse{SessionID: active.SessionID}
+	if err := s.applySessionMetadata(ctx, active.Ref, &resp.ConfigOptions, &resp.Models); err != nil {
+		return schema.NewSessionResponse{}, err
+	}
+	return resp, nil
 }
 
 func (s *Server) listSessions(ctx context.Context, req schema.SessionListRequest) (schema.SessionListResponse, error) {
@@ -212,14 +236,23 @@ func (s *Server) loadSession(ctx context.Context, req schema.LoadSessionRequest)
 	if err := s.publishSnapshot(ctx, snapshot); err != nil {
 		return schema.LoadSessionResponse{}, err
 	}
-	return schema.LoadSessionResponse{}, nil
+	resp := schema.LoadSessionResponse{}
+	if err := s.applySessionMetadata(ctx, snapshot.Session.Ref, &resp.ConfigOptions, &resp.Models); err != nil {
+		return schema.LoadSessionResponse{}, err
+	}
+	return resp, nil
 }
 
 func (s *Server) resumeSession(ctx context.Context, req schema.ResumeSessionRequest) (schema.ResumeSessionResponse, error) {
-	if _, err := s.loadSnapshot(ctx, req.SessionID); err != nil {
+	snapshot, err := s.loadSnapshot(ctx, req.SessionID)
+	if err != nil {
 		return schema.ResumeSessionResponse{}, err
 	}
-	return schema.ResumeSessionResponse{}, nil
+	resp := schema.ResumeSessionResponse{}
+	if err := s.applySessionMetadata(ctx, snapshot.Session.Ref, &resp.ConfigOptions, &resp.Models); err != nil {
+		return schema.ResumeSessionResponse{}, err
+	}
+	return resp, nil
 }
 
 func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.PromptResponse, error) {
@@ -261,11 +294,15 @@ func (s *Server) loadSnapshot(ctx context.Context, sessionID string) (session.Sn
 	if sessionID == "" {
 		return session.Snapshot{}, fmt.Errorf("surface/acpserver: session id is required")
 	}
-	return s.engine.LoadSession(ctx, session.Ref{
+	return s.engine.LoadSession(ctx, s.sessionRef(sessionID))
+}
+
+func (s *Server) sessionRef(sessionID string) session.Ref {
+	return session.Ref{
 		AppName:   s.appName,
 		UserID:    s.userID,
 		SessionID: sessionID,
-	})
+	}
 }
 
 func (s *Server) publishSnapshot(ctx context.Context, snapshot session.Snapshot) error {
@@ -459,4 +496,13 @@ func responseOrError[T any](resp T, err error) (any, *jsonrpc.RPCError) {
 		return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
 	}
 	return resp, nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

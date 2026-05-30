@@ -808,10 +808,12 @@ The completed work is intentionally limited to the reusable skeleton:
   `internal/app/local` service stack and core-native surfaces.
 - Shared TUI/APP view-model projection for transcript, current plan, pending
   approvals, and participants.
-- Core-native ACP server for initialize, session/new, session/prompt, cancel,
+- Core-native ACP server for initialize, session/new, session/prompt,
   session/list, session/load, session/resume, cancel, `session/update`, and
-  permission request bridging. `session/load` replays canonical stored events
-  through the same ACP projection path used for live updates.
+  permission request bridging. It also exposes configured model metadata and
+  model/reasoning selection through ACP session model/config methods when the
+  shared app settings service is available. `session/load` replays canonical
+  stored events through the same ACP projection path used for live updates.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
 - Architecture lint rules for the new package boundaries.
@@ -856,20 +858,26 @@ be migrated before retiring the old stack:
      production settings/config parity, and richer ACP surface behavior.
    - The new ACP server now exposes session list/load/resume over the
      core-native session store and canonical ACP projector.
-   - Still pending: terminal integration, client mode/config flows, config/model
-     option updates, close-session handling, and the full behavior covered by
-     current public ACP e2e tests.
+   - The new ACP server now exposes session model metadata, `session/set_model`,
+     and model/reasoning `session/set_config_option` through
+     `internal/app/services.Models()` rather than owning config semantics in
+     the ACP surface.
+   - Still pending: terminal integration, client mode flows, non-model config
+     options, close-session handling, and the full behavior covered by current
+     public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
      provider profile/model config normalization, generated aliases/ids, model
      connect/delete/default/use service methods, session model override state,
      context window/output token fields, reasoning effort fields, auth/header
-     fields, and request-time model router.
+     fields, request-time model router, and ACP stdio model/config projection
+     backed by shared app services.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, TUI command integration, provider discovery
-     UI data, and removal of the old `app/gatewayapp` config/model services
-     once entrypoints move to the new stack.
+     UI data, non-model ACP config providers, and removal of the old
+     `app/gatewayapp` config/model services once entrypoints move to the new
+     stack.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,

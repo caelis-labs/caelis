@@ -12,6 +12,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	"github.com/OnslaughtSnail/caelis/internal/app/local"
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -267,6 +269,127 @@ func TestServeStdioListsLoadsAndResumesSessions(t *testing.T) {
 	var resumeResp schema.ResumeSessionResponse
 	if err := conn.Call(ctx, schema.MethodSessionResume, schema.ResumeSessionRequest{SessionID: "sess-load", CWD: "/tmp/project"}, &resumeResp); err != nil {
 		t.Fatalf("session/resume call error = %v", err)
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
+func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:                  "alpha",
+		Provider:               "openai-compatible",
+		Model:                  "gpt-alpha",
+		BaseURL:                "https://api.alpha.test/v1",
+		DefaultReasoningEffort: "low",
+		ReasoningMode:          "fixed",
+		ReasoningLevels:        []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:                  "beta",
+		Provider:               "openai-compatible",
+		Model:                  "gpt-beta",
+		BaseURL:                "https://api.beta.test/v1",
+		DefaultReasoningEffort: "low",
+		ReasoningMode:          "fixed",
+		ReasoningLevels:        []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SetDefaultModel(ctx, alpha.ID); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := local.New(local.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Provider: &testProvider{message: model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("unused")}}},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(context.Context, jsonrpc.Message) {})
+	}()
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: "/tmp/project"}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+	if newResp.Models == nil || newResp.Models.CurrentModelID != alpha.ID || len(newResp.Models.AvailableModels) != 2 {
+		t.Fatalf("new session models = %#v, want alpha current with two models", newResp.Models)
+	}
+	if len(newResp.ConfigOptions) != 2 {
+		t.Fatalf("new session config options = %#v, want model and reasoning", newResp.ConfigOptions)
+	}
+
+	var setModelResp schema.SetSessionModelResponse
+	if err := conn.Call(ctx, schema.MethodSessionSetModel, schema.SetSessionModelRequest{SessionID: newResp.SessionID, ModelID: beta.ID}, &setModelResp); err != nil {
+		t.Fatalf("session/set_model call error = %v", err)
+	}
+	current, ok, err := stack.Services().Models().Current(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || current.ID != beta.ID {
+		t.Fatalf("current model = %#v, %v, want beta", current, ok)
+	}
+
+	var setConfigResp schema.SetSessionConfigOptionResponse
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "reasoning_effort",
+		Value:     "high",
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option call error = %v", err)
+	}
+	if len(setConfigResp.ConfigOptions) != 2 || setConfigResp.ConfigOptions[1].CurrentValue != "high" {
+		t.Fatalf("set config response = %#v, want high reasoning", setConfigResp.ConfigOptions)
+	}
+	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.State[appservices.StateCurrentModelID] != beta.ID || snapshot.State[appservices.StateCurrentReasoningEffort] != "high" {
+		t.Fatalf("session state = %#v, want beta/high", snapshot.State)
 	}
 
 	cancel()

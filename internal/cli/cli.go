@@ -16,6 +16,7 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	applocal "github.com/OnslaughtSnail/caelis/internal/app/local"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	coreacpserver "github.com/OnslaughtSnail/caelis/internal/surface/acpserver"
 	coreheadless "github.com/OnslaughtSnail/caelis/internal/surface/headless"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -146,9 +147,10 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			return err
 		}
 		return coreacpserver.ServeStdio(ctx, coreacpserver.Config{
-			Engine:  stack.Engine(),
-			AppName: cfg.AppName,
-			UserID:  cfg.UserID,
+			Engine:   stack.Engine(),
+			Services: stack.Services(),
+			AppName:  cfg.AppName,
+			UserID:   cfg.UserID,
 		}, stdin, stdout)
 	}
 	if doctorSubcommand || *doctor {
@@ -245,6 +247,10 @@ func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.St
 		sandboxBackend = "host"
 	}
 	modelProvider := coreModelProvider(cfg.Model.Provider, cfg.Model.API)
+	settings, err := coreSettingsManager(ctx, cfg, modelProvider)
+	if err != nil {
+		return nil, err
+	}
 	return applocal.NewWithContext(ctx, applocal.Config{
 		Runtime: coreconfig.Runtime{
 			AppName:      cfg.AppName,
@@ -279,6 +285,39 @@ func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.St
 			},
 		},
 		BuiltinTools: true,
+		Settings:     settings,
+	})
+}
+
+func coreSettingsManager(ctx context.Context, cfg gatewayapp.Config, provider string) (*appsettings.Manager, error) {
+	if strings.TrimSpace(cfg.Model.Model) == "" && strings.TrimSpace(cfg.Model.Provider) == "" && strings.TrimSpace(cfg.Model.BaseURL) == "" {
+		return nil, nil
+	}
+	modelCfg := appsettings.ModelConfig{
+		Alias:                  firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Model)),
+		Provider:               strings.TrimSpace(provider),
+		Model:                  strings.TrimSpace(cfg.Model.Model),
+		BaseURL:                strings.TrimSpace(cfg.Model.BaseURL),
+		Token:                  strings.TrimSpace(cfg.Model.Token),
+		TokenEnv:               strings.TrimSpace(cfg.Model.TokenEnv),
+		AuthType:               string(cfg.Model.AuthType),
+		HeaderKey:              strings.TrimSpace(cfg.Model.HeaderKey),
+		ContextWindowTokens:    cfg.ContextWindow,
+		MaxOutputTokens:        cfg.Model.MaxOutputTok,
+		ReasoningEffort:        strings.TrimSpace(cfg.Model.ReasoningEffort),
+		DefaultReasoningEffort: strings.TrimSpace(cfg.Model.DefaultReasoningEffort),
+		ReasoningMode:          strings.TrimSpace(cfg.Model.ReasoningMode),
+		ReasoningLevels:        append([]string(nil), cfg.Model.ReasoningLevels...),
+	}
+	modelCfg = appsettings.NormalizeModelConfig(modelCfg)
+	if modelCfg.Provider == "" || modelCfg.Model == "" {
+		return nil, nil
+	}
+	return appsettings.NewManager(ctx, nil, appsettings.Document{
+		Models: appsettings.ModelCatalog{
+			DefaultID: modelCfg.ID,
+			Configs:   []appsettings.ModelConfig{modelCfg},
+		},
 	})
 }
 
@@ -324,7 +363,7 @@ func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg gatewayapp.
 		},
 		Title:          "cli-headless",
 		Input:          input,
-		Model:          strings.TrimSpace(cfg.Model.Model),
+		Model:          firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Model)),
 		Surface:        "headless",
 		ApprovalPolicy: coreheadless.ApprovalPolicyAutoDeny,
 	})
