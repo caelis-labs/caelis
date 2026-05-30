@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -52,19 +53,25 @@ func (s *Server) publishAvailableCommands(ctx context.Context, sessionID string)
 	})
 }
 
-func (s *Server) executeCommandPrompt(ctx context.Context, ref session.Ref, input string) (bool, error) {
+func (s *Server) executeCommandPrompt(ctx context.Context, ref session.Ref, input string, parts []model.ContentPart) (bool, error) {
 	if s.services.Engine() == nil {
 		return false, nil
 	}
 	result, err := s.services.Commands().Execute(ctx, appservices.CommandExecutionRequest{
-		SessionRef: ref,
-		Input:      input,
+		SessionRef:   ref,
+		Input:        input,
+		ContentParts: parts,
 	})
 	if err != nil || !result.Handled {
 		return result.Handled, err
 	}
 	if err := s.publishCommandOutput(ref.SessionID, result.Output); err != nil {
 		return true, err
+	}
+	for _, event := range result.Events {
+		if err := s.publishEvent(ctx, nil, event); err != nil {
+			return true, err
+		}
 	}
 	if result.SessionRef != nil && strings.TrimSpace(result.SessionRef.SessionID) != "" {
 		snapshot, err := s.loadSnapshot(ctx, result.SessionRef.SessionID)

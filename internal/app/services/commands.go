@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -17,22 +18,52 @@ const commandConnectDefaultTimeoutSeconds = 60
 type CommandCatalogRequest struct{}
 
 type CommandExecutionRequest struct {
-	SessionRef session.Ref `json:"session_ref,omitempty"`
-	Input      string      `json:"input,omitempty"`
+	SessionRef   session.Ref         `json:"session_ref,omitempty"`
+	Input        string              `json:"input,omitempty"`
+	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
 }
 
-func (s CommandService) Available(context.Context, CommandCatalogRequest) (appviewmodel.CommandCatalogView, error) {
-	return appviewmodel.CommandCatalogView{
-		Commands: []appviewmodel.CommandView{
-			{Name: "agent", Description: "Manage ACP agents", InputHint: "use|add|install|list|remove"},
-			{Name: "connect", Description: "Configure a model provider", InputHint: "provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]"},
-			{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
-			{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual]"},
-			{Name: "status", Description: "Show current runtime status"},
-			{Name: "resume", Description: "Resume a previous session", InputHint: "[session id]"},
-			{Name: "compact", Description: "Compact the current conversation"},
-		},
-	}, nil
+func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) (appviewmodel.CommandCatalogView, error) {
+	commands := []appviewmodel.CommandView{
+		{Name: "agent", Description: "Manage ACP agents", InputHint: "use|add|install|list|remove"},
+		{Name: "connect", Description: "Configure a model provider", InputHint: "provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]"},
+		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
+		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual]"},
+		{Name: "status", Description: "Show current runtime status"},
+		{Name: "resume", Description: "Resume a previous session", InputHint: "[session id]"},
+		{Name: "compact", Description: "Compact the current conversation"},
+	}
+	seen := map[string]struct{}{}
+	for _, command := range commands {
+		if name := strings.ToLower(strings.TrimSpace(command.Name)); name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	agents, err := s.services.Agents().List(ctx)
+	if err != nil {
+		return appviewmodel.CommandCatalogView{}, err
+	}
+	for _, agent := range agents {
+		agent = normalizeAgentDescriptor(agent)
+		if agent.Kind != AgentKindExternalACP {
+			continue
+		}
+		name := strings.ToLower(firstNonEmpty(agent.Name, agent.ID))
+		if name == "" || reservedSlashCommandName(name) {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		description := firstNonEmpty(agent.Description, "Invoke ACP agent "+name)
+		commands = append(commands, appviewmodel.CommandView{
+			Name:        name,
+			Description: description,
+			InputHint:   "prompt",
+		})
+	}
+	return appviewmodel.CommandCatalogView{Commands: commands}, nil
 }
 
 func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest) (appviewmodel.CommandExecutionView, error) {
@@ -80,8 +111,76 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 			Output:  "compaction completed",
 		}, nil
 	default:
-		return appviewmodel.CommandExecutionView{}, nil
+		return s.executeAgentPrompt(ctx, req, command, args)
 	}
+}
+
+func (s CommandService) executeAgentPrompt(ctx context.Context, req CommandExecutionRequest, command string, args string) (appviewmodel.CommandExecutionView, error) {
+	agent, ok, err := s.lookupCommandAgent(ctx, command)
+	if err != nil || !ok {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	prompt := strings.TrimSpace(args)
+	parts := commandAgentContentParts(prompt, req.ContentParts)
+	if prompt == "" && len(parts) == 0 {
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /%s <prompt>", command)
+	}
+	snapshot, err := s.services.Sessions().Load(ctx, req.SessionRef)
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	participant := commandAgentParticipant(snapshot, agent, command)
+	preface := []session.Event{commandParticipantEvent(snapshot.Session.Ref.SessionID, participant, "attached", "slash_"+command)}
+	if event := commandAgentUserEvent(snapshot.Session.Ref.SessionID, participant, prompt, parts, "slash_"+command); event.Type != "" {
+		preface = append(preface, event)
+	}
+	if len(preface) > 0 {
+		if _, err := s.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, preface); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+	}
+	result, err := s.services.Agents().Invoke(ctx, AgentInvokeRequest{
+		AgentID:      agent.ID,
+		SessionRef:   snapshot.Session.Ref,
+		Participant:  participant,
+		Input:        prompt,
+		ContentParts: parts,
+	})
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	events := make([]session.Event, 0, len(preface)+len(result.Events))
+	events = append(events, preface...)
+	events = append(events, result.Events...)
+	return appviewmodel.CommandExecutionView{
+		Handled: true,
+		Command: command,
+		Events:  events,
+	}, nil
+}
+
+func (s CommandService) lookupCommandAgent(ctx context.Context, command string) (AgentDescriptor, bool, error) {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" || reservedSlashCommandName(command) {
+		return AgentDescriptor{}, false, nil
+	}
+	agents, err := s.services.Agents().List(ctx)
+	if err != nil {
+		return AgentDescriptor{}, false, err
+	}
+	for _, agent := range agents {
+		agent = normalizeAgentDescriptor(agent)
+		if agent.Kind != AgentKindExternalACP {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(agent.ID), command) || strings.EqualFold(strings.TrimSpace(agent.Name), command) {
+			if strings.TrimSpace(agent.ID) == "" {
+				agent.ID = firstNonEmpty(agent.Name, agent.Command)
+			}
+			return agent, strings.TrimSpace(agent.ID) != "", nil
+		}
+	}
+	return AgentDescriptor{}, false, nil
 }
 
 func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
@@ -477,6 +576,152 @@ func parseSlashCommand(input string) (string, string, bool) {
 		return "", "", false
 	}
 	return command, strings.TrimSpace(args), true
+}
+
+func commandAgentContentParts(prompt string, in []model.ContentPart) []model.ContentPart {
+	prompt = strings.TrimSpace(prompt)
+	out := make([]model.ContentPart, 0, len(in)+1)
+	if prompt != "" {
+		out = append(out, model.ContentPart{Type: model.ContentPartText, Text: prompt})
+	}
+	for _, part := range model.CloneContentParts(in) {
+		if part.Type == model.ContentPartText {
+			continue
+		}
+		out = append(out, part)
+	}
+	return out
+}
+
+func commandAgentParticipant(snapshot session.Snapshot, agent AgentDescriptor, command string) session.ParticipantBinding {
+	agent = normalizeAgentDescriptor(agent)
+	base := firstNonEmpty(agent.ID, agent.Name, command)
+	label := "@" + base
+	return session.ParticipantBinding{
+		ID:         allocateCommandParticipantID(snapshot, base),
+		Kind:       session.ParticipantACP,
+		Role:       session.ParticipantSidecar,
+		AgentName:  base,
+		Label:      label,
+		Source:     "app_command_agent",
+		AttachedAt: time.Now().UTC(),
+	}
+}
+
+func allocateCommandParticipantID(snapshot session.Snapshot, base string) string {
+	base = strings.ToLower(firstNonEmpty(base, "agent"))
+	used := map[string]struct{}{}
+	add := func(id string) {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" {
+			used[id] = struct{}{}
+		}
+	}
+	for _, participant := range snapshot.Session.Participants {
+		add(participant.ID)
+	}
+	for _, event := range snapshot.Events {
+		if event.Scope != nil {
+			add(event.Scope.Participant.ID)
+		}
+	}
+	if _, ok := used[base]; !ok {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if _, ok := used[candidate]; !ok {
+			return candidate
+		}
+	}
+}
+
+func commandParticipantEvent(sessionID string, participant session.ParticipantBinding, action string, source string) session.Event {
+	return session.Event{
+		Type:       session.EventParticipant,
+		SessionID:  strings.TrimSpace(sessionID),
+		Visibility: session.VisibilityCanonical,
+		Time:       time.Now().UTC(),
+		Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "caelis", Name: "caelis"},
+		Scope: &session.EventScope{
+			Source:      firstNonEmpty(source, "app_command_agent"),
+			Participant: participant,
+		},
+		Meta: map[string]any{"action": strings.TrimSpace(action)},
+	}
+}
+
+func commandAgentUserEvent(sessionID string, participant session.ParticipantBinding, prompt string, contentParts []model.ContentPart, source string) session.Event {
+	parts := commandMessageParts(prompt, contentParts)
+	if len(parts) == 0 {
+		return session.Event{}
+	}
+	return session.Event{
+		Type:       session.EventUser,
+		SessionID:  strings.TrimSpace(sessionID),
+		Visibility: session.VisibilityCanonical,
+		Time:       time.Now().UTC(),
+		Actor:      session.ActorRef{Kind: session.ActorUser, ID: "user", Name: "user"},
+		Scope: &session.EventScope{
+			Source:      firstNonEmpty(source, "app_command_agent"),
+			Participant: participant,
+		},
+		Message: &model.Message{
+			Role:  model.RoleUser,
+			Parts: parts,
+		},
+		Meta: map[string]any{
+			"agent":  strings.TrimSpace(participant.AgentName),
+			"handle": strings.TrimSpace(participant.Label),
+		},
+	}
+}
+
+func commandMessageParts(prompt string, contentParts []model.ContentPart) []model.Part {
+	out := make([]model.Part, 0, len(contentParts)+1)
+	for _, part := range contentParts {
+		switch part.Type {
+		case model.ContentPartText:
+			if text := strings.TrimSpace(part.Text); text != "" {
+				out = append(out, model.NewTextPart(text))
+			}
+		case model.ContentPartImage:
+			source := model.MediaSource{Kind: model.MediaInline, Data: part.Data}
+			if strings.TrimSpace(part.URI) != "" {
+				source = model.MediaSource{Kind: model.MediaURL, URI: strings.TrimSpace(part.URI)}
+			} else if strings.TrimSpace(part.Data) == "" && strings.TrimSpace(part.FileName) != "" {
+				source = model.MediaSource{Kind: model.MediaLocalRef, LocalRef: strings.TrimSpace(part.FileName)}
+			}
+			if source.Data == "" && source.URI == "" && source.LocalRef == "" {
+				continue
+			}
+			out = append(out, model.Part{Kind: model.PartMedia, Media: &model.MediaPart{
+				Modality: model.MediaImage,
+				Source:   source,
+				MimeType: strings.TrimSpace(part.MimeType),
+				Name:     strings.TrimSpace(part.FileName),
+			}})
+		case model.ContentPartFile:
+			ref := model.FileRefPart{
+				Name:     strings.TrimSpace(part.FileName),
+				MimeType: strings.TrimSpace(part.MimeType),
+				URI:      strings.TrimSpace(part.URI),
+			}
+			if ref.URI == "" {
+				ref.LocalRef = strings.TrimSpace(part.FileName)
+			}
+			if ref.Name == "" && ref.URI == "" && ref.LocalRef == "" {
+				continue
+			}
+			out = append(out, model.Part{Kind: model.PartFileRef, FileRef: &ref})
+		}
+	}
+	if len(out) == 0 {
+		if prompt = strings.TrimSpace(prompt); prompt != "" {
+			out = append(out, model.NewTextPart(prompt))
+		}
+	}
+	return out
 }
 
 func splitCommandArg(input string) (string, string, bool) {

@@ -701,12 +701,12 @@ alongside the old stack without importing it:
   into `core/runtime` approval submissions.
 - `internal/app/services.CommandService`: shared command catalog plus
   service-native command execution contract. The current execution baseline
-  handles `/agent` management/handoff, direct `/connect` configuration, and
-  non-wizard `/status`, `/compact`, `/model`, `/approval`, and `/resume`, so ACP
-  clients, TUI, and the future APP can share command semantics instead of
-  reimplementing agent registry/controller handoff, provider setup, status,
-  model selection, approval mode, compaction, and resume behavior in each
-  surface.
+  handles `/agent` management/handoff, dynamic `/<agent> <prompt>`
+  participant invocation, direct `/connect` configuration, and non-wizard
+  `/status`, `/compact`, `/model`, `/approval`, and `/resume`, so ACP clients,
+  TUI, and the future APP can share command semantics instead of reimplementing
+  agent registry/controller handoff, provider setup, status, model selection,
+  approval mode, compaction, and resume behavior in each surface.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime and treats host setup/fix/reset/clean as explicit
@@ -933,8 +933,8 @@ The completed work is intentionally limited to the reusable skeleton:
   `session/close` interrupts any active turn while remaining idempotent when no
   turn is running.
 - ACP slash command execution baseline: ACP `session/prompt` now recognizes
-  service-native `/status` and `/compact`, publishes standard
-  `agent_message_chunk` output, and records compact checkpoints through the
+  service-native command execution, publishes standard `agent_message_chunk`
+  output for command responses, and records compact checkpoints through the
   shared compaction service instead of starting a model turn.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
@@ -942,6 +942,11 @@ The completed work is intentionally limited to the reusable skeleton:
   for configured external ACP agents, with participant attach/user/assistant
   activity recorded as canonical session events and projected back through the
   existing TUI driver event stream.
+- Service-native dynamic `/<agent> <prompt>` command execution through
+  `internal/app/services.CommandService`, including command catalog exposure
+  for registered external ACP agents, canonical sidecar participant attach/user
+  events, shared `AgentService.Invoke`, and ACP projection of the resulting
+  canonical participant events.
 - Service-native settings-backed custom external ACP agent registration and
   removal, including TUI `/agent add custom` and `/agent remove` for custom
   agents without rebuilding the app-service stack.
@@ -1153,9 +1158,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
-     `/connect`, `/status`, `/compact`, `/model`, `/approval`, and `/resume`
-     now share app-service behavior; remaining interactive commands can be
-     added without making ACP, TUI, or APP surfaces own command semantics.
+     `/connect`, `/status`, `/compact`, `/model`, `/approval`, `/resume`, and
+     dynamic `/<agent> <prompt>` participant invocation now share app-service
+     behavior; remaining interactive commands can be added without making ACP,
+     TUI, or APP surfaces own command semantics.
    - Still pending: transcript actions and richer settings-panel composition
      still need APP-ready service/view-model contracts. Durable async task
      control and output storage remain kernel/runtime work rather than APP-only
@@ -1200,24 +1206,26 @@ be migrated before retiring the old stack:
      publishes standard `available_commands_update` notifications after
      session new/load/resume using the shared command catalog.
    - Migrated baseline: ACP `session/prompt` now executes service-native
-     `/agent`, `/connect`, `/status`, `/compact`, `/model`, `/approval`, and
-     `/resume` through `CommandService`; handled commands return `end_turn`,
-     publish standard `agent_message_chunk` output, mutate
+     `/agent`, `/connect`, `/status`, `/compact`, `/model`, `/approval`,
+     `/resume`, and dynamic `/<agent> <prompt>` commands through
+     `CommandService`; handled commands return `end_turn`, publish standard
+     `agent_message_chunk` output or canonical event projections, mutate
      settings/agent/model/mode/session state through shared app services, and
      do not enter the model turn loop. `/agent use <agent|local>` records
      canonical controller handoff events through `ControllerService`, and
      `/agent add/remove/install/update` uses the shared `AgentService`
-     registry/settings contract. `/connect` parses provider/model/base
-     URL/token/limit/reasoning arguments into the shared model settings
-     contract and switches the active session to the new model. `/resume`
-     command execution can also replay the targeted canonical snapshot through
-     the same ACP projection path as `session/load`.
-   - Still pending: terminal integration, client mode flows, remaining
-     interactive slash-command parity for dynamic `/<agent> <prompt>` commands
-     and the TUI `/connect` wizard shell, remote controller option
-     discovery/reconnect, richer non-model config providers beyond
-     prompt/context/sandbox backend settings, and the full behavior covered by
-     current public ACP e2e tests.
+     registry/settings contract. Dynamic agent commands expose registered ACP
+     agents in the command catalog, record sidecar participant attach/user
+     events, invoke the agent through `AgentService`, and project the resulting
+     canonical participant response events over ACP. `/connect` parses
+     provider/model/base URL/token/limit/reasoning arguments into the shared
+     model settings contract and switches the active session to the new model.
+     `/resume` command execution can also replay the targeted canonical
+     snapshot through the same ACP projection path as `session/load`.
+   - Still pending: terminal integration, client mode flows, the TUI
+     `/connect` wizard shell, remote controller option discovery/reconnect,
+     richer non-model config providers beyond prompt/context/sandbox backend
+     settings, and the full behavior covered by current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1465,10 +1473,11 @@ be migrated before retiring the old stack:
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant
       invocation through shared app services, plugin-declared agent descriptors,
-      local-stack invokers, and the app-service TUI dynamic `/<agent> <prompt>`
-      path. Participant attachment, user prompts to participants, and external
-      ACP responses are now canonical session events with participant
-      scope/origin instead of TUI-only side effects.
+      local-stack invokers, the app-service TUI dynamic `/<agent> <prompt>`
+      path, and the shared `CommandService` dynamic command path used by ACP
+      clients and future APP panels. Participant attachment, user prompts to
+      participants, and external ACP responses are now canonical session events
+      with participant scope/origin instead of TUI-only side effects.
     - Migrated baseline: custom external ACP agents now have app-service
       settings mutation, startup loading, dynamic invocation, and TUI
       add/remove/list coverage for settings-backed descriptors.
@@ -1506,10 +1515,12 @@ be migrated before retiring the old stack:
     - Migrated baseline: shared command execution now covers `/agent list`,
       `/agent add <builtin>`, `/agent add custom <name> -- <command> [args...]`,
       `/agent install|update <builtin>`, `/agent remove <agent>`, and
-      `/agent use <agent|local>`. The command path uses `AgentService` for
-      registry/settings mutation and `ControllerService.Handoff` for canonical
-      `EventHandoff` recording, so ACP clients and future APP panels no longer
-      need a surface-local copy of the non-prompt agent command semantics.
+      `/agent use <agent|local>`, plus dynamic `/<agent> <prompt>`
+      participant invocation for registered external ACP agents. The command
+      path uses `AgentService` for registry/settings mutation and invocation,
+      and `ControllerService.Handoff` for canonical `EventHandoff` recording,
+      so ACP clients and future APP panels no longer need a surface-local copy
+      of agent command semantics.
     - Migrated baseline: built-in ACP adapter update now reuses the same
       shared app-service install contract as registration. The TUI exposes
       `/agent update <adapter>` with installable adapter completion and routes
@@ -1712,8 +1723,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI command migrations against app services,
-   especially `/connect`, interactive ACP agent/controller commands, remote
-   controller reconnect/config discovery, and non-host doctor/sandbox repair
+   especially the `/connect` wizard shell, interactive remote controller
+   option discovery/reconnect/config flows, and non-host doctor/sandbox repair
    flows.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.

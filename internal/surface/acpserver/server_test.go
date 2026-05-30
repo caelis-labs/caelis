@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -531,8 +532,9 @@ func TestServeStdioExecutesAgentSlashCommandsThroughAppServices(t *testing.T) {
 	}
 	if _, err := manager.UpsertACPAgent(ctx, plugin.ACPAgentDescriptor{
 		Name:    "helper",
-		Command: "helper-acp",
-		Args:    []string{"--stdio"},
+		Command: os.Args[0],
+		Args:    []string{"-test.run=TestACPServerExternalACPHelperProcess", "--"},
+		Env:     map[string]string{"CAELIS_TEST_ACPSERVER_EXTERNAL_HELPER": "1"},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -603,13 +605,29 @@ func TestServeStdioExecutesAgentSlashCommandsThroughAppServices(t *testing.T) {
 	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
 		SessionID: newResp.SessionID,
 		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/helper inspect repo"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/helper) call error = %v", err)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "acpserver helper response")
+	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotContainsAgentParticipant(snapshot, "helper") {
+		t.Fatalf("events after /helper = %#v, want helper participant events", snapshot.Events)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
 			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/agent use helper"}),
 		},
 	}, &promptResp); err != nil {
 		t.Fatalf("session/prompt(/agent use helper) call error = %v", err)
 	}
 	waitForAgentMessage(t, ctx, agentMessages, "agent controller: helper")
-	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	snapshot, err = stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -648,6 +666,46 @@ func TestServeStdioExecutesAgentSlashCommandsThroughAppServices(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("server did not stop")
 	}
+}
+
+func TestACPServerExternalACPHelperProcess(t *testing.T) {
+	if os.Getenv("CAELIS_TEST_ACPSERVER_EXTERNAL_HELPER") != "1" {
+		return
+	}
+	conn := jsonrpc.New(os.Stdin, os.Stdout)
+	err := conn.Serve(context.Background(), func(_ context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
+		switch msg.Method {
+		case schema.MethodInitialize:
+			return schema.InitializeResponse{
+				ProtocolVersion: schema.CurrentProtocolVersion,
+				AgentCapabilities: schema.AgentCapabilities{
+					PromptCapabilities: schema.PromptCapabilities{Image: true},
+				},
+				AgentInfo: &schema.Implementation{Name: "helper", Version: "test"},
+			}, nil
+		case schema.MethodSessionNew:
+			return schema.NewSessionResponse{SessionID: "remote-helper-session"}, nil
+		case schema.MethodSessionPrompt:
+			var req schema.PromptRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			_ = conn.Notify(schema.MethodSessionUpdate, schema.SessionNotification{
+				SessionID: req.SessionID,
+				Update: schema.ContentChunk{
+					SessionUpdate: schema.UpdateAgentMessage,
+					Content:       schema.TextContent{Type: "text", Text: "acpserver helper response"},
+				},
+			})
+			return schema.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+		default:
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(0)
 }
 
 func TestInitializeUsesAppServicePromptCapabilities(t *testing.T) {
@@ -1431,6 +1489,22 @@ func snapshotContainsControllerHandoff(snapshot session.Snapshot, agent string) 
 		if strings.EqualFold(strings.TrimSpace(controller.ID), agent) ||
 			strings.EqualFold(strings.TrimSpace(controller.AgentName), agent) ||
 			strings.EqualFold(strings.TrimSpace(controller.Label), agent) {
+			return true
+		}
+	}
+	return false
+}
+
+func snapshotContainsAgentParticipant(snapshot session.Snapshot, agent string) bool {
+	agent = strings.TrimSpace(agent)
+	for _, event := range snapshot.Events {
+		if event.Scope == nil {
+			continue
+		}
+		participant := event.Scope.Participant
+		if strings.EqualFold(strings.TrimSpace(participant.ID), agent) ||
+			strings.EqualFold(strings.TrimSpace(participant.AgentName), agent) ||
+			strings.EqualFold(strings.TrimSpace(participant.Label), "@"+agent) {
 			return true
 		}
 	}

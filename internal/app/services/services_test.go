@@ -438,6 +438,31 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	}
 }
 
+func TestCommandServiceAvailableProjectsRegisteredAgentCommands(t *testing.T) {
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  &recordingEngine{},
+		Agents: []AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "reviewer",
+			Kind:        AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Description: "Review code through ACP",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Available(context.Background(), CommandCatalogRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reviewer, ok := findCommandView(view.Commands, "reviewer")
+	if !ok || reviewer.InputHint != "prompt" || reviewer.Description != "Review code through ACP" {
+		t.Fatalf("reviewer command = %#v ok=%v, want dynamic ACP agent command", reviewer, ok)
+	}
+}
+
 func TestCommandServiceExecuteStatus(t *testing.T) {
 	ctx := context.Background()
 	engine := &recordingEngine{snapshot: session.Snapshot{
@@ -694,6 +719,80 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	}
 	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" {
 		t.Fatalf("settings agents after remove = %#v, want only copilot", agents)
+	}
+}
+
+func TestCommandServiceExecuteDynamicAgentPrompt(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-agent", WorkspaceKey: "repo"}},
+	}}
+	var invokeReq AgentInvokeRequest
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+		Agents: []AgentDescriptor{{
+			ID:      "reviewer",
+			Name:    "reviewer",
+			Kind:    AgentKindExternalACP,
+			Command: "reviewer-acp",
+		}},
+		Invokers: map[string]AgentInvoker{
+			"reviewer": AgentInvokerFunc(func(_ context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
+				invokeReq = req
+				return AgentInvokeResult{
+					Events: []session.Event{{
+						Type: session.EventAssistant,
+						Message: &model.Message{
+							Role:  model.RoleAssistant,
+							Parts: []model.Part{model.NewTextPart("reviewed: " + req.Input)},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-agent"},
+		Input:      "/reviewer inspect repo",
+		ContentParts: []model.ContentPart{{
+			Type: model.ContentPartText,
+			Text: "/reviewer inspect repo",
+		}, {
+			Type:     model.ContentPartImage,
+			MimeType: "image/png",
+			Data:     "aW1hZ2U=",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "reviewer" {
+		t.Fatalf("dynamic command = %#v, want handled reviewer", view)
+	}
+	if invokeReq.AgentID != "reviewer" || invokeReq.Input != "inspect repo" {
+		t.Fatalf("invoke request = %#v, want reviewer prompt without slash prefix", invokeReq)
+	}
+	if invokeReq.Participant.Kind != session.ParticipantACP || invokeReq.Participant.Role != session.ParticipantSidecar || invokeReq.Participant.ID != "reviewer" {
+		t.Fatalf("invoke participant = %#v, want reviewer ACP sidecar", invokeReq.Participant)
+	}
+	if len(invokeReq.ContentParts) != 2 || invokeReq.ContentParts[0].Text != "inspect repo" || invokeReq.ContentParts[1].Type != model.ContentPartImage {
+		t.Fatalf("invoke content parts = %#v, want prompt text plus image", invokeReq.ContentParts)
+	}
+	if len(view.Events) != 3 {
+		t.Fatalf("dynamic events = %#v, want attach, user, assistant", view.Events)
+	}
+	if view.Events[0].Type != session.EventParticipant || view.Events[1].Type != session.EventUser || view.Events[2].Type != session.EventAssistant {
+		t.Fatalf("dynamic event types = %#v, want participant/user/assistant", view.Events)
+	}
+	if session.EventText(view.Events[1]) != "inspect repo" || session.EventText(view.Events[2]) != "reviewed: inspect repo" {
+		t.Fatalf("dynamic event text = %q / %q, want prompt and response", session.EventText(view.Events[1]), session.EventText(view.Events[2]))
+	}
+	if len(engine.eventBatches) != 2 || len(engine.eventBatches[0]) != 2 || len(engine.eventBatches[1]) != 1 {
+		t.Fatalf("recorded event batches = %#v, want preface then assistant", engine.eventBatches)
 	}
 }
 
@@ -3198,6 +3297,7 @@ type recordingEngine struct {
 	page         session.SessionPage
 	turn         coreruntime.TurnRequest
 	events       []session.Event
+	eventBatches [][]session.Event
 	turnEvents   []session.Event
 	replayReq    coreruntime.ReplayRequest
 	replayEvents []coreruntime.EventEnvelope
@@ -3518,6 +3618,7 @@ func (e *recordingEngine) LoadSession(_ context.Context, ref session.Ref) (sessi
 
 func (e *recordingEngine) RecordEvents(_ context.Context, _ session.Ref, events []session.Event) (session.Cursor, error) {
 	e.events = cloneTestEvents(events)
+	e.eventBatches = append(e.eventBatches, cloneTestEvents(events))
 	return "1", nil
 }
 
