@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -891,7 +892,7 @@ func TestStackRegistersCoreFilesystemBuiltinTools(t *testing.T) {
 	}
 }
 
-func TestStackAsksApprovalForBuiltinMutatingFilesystemTools(t *testing.T) {
+func TestStackManualApprovalRejectsBuiltinMutatingFilesystemTools(t *testing.T) {
 	workspace := t.TempDir()
 	rawInput, err := json.Marshal(map[string]any{
 		"path":    "blocked.txt",
@@ -932,6 +933,9 @@ func TestStackAsksApprovalForBuiltinMutatingFilesystemTools(t *testing.T) {
 	}
 	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stack.Services().Modes().Set(context.Background(), session.Ref{SessionID: active.SessionID}, coreruntime.SessionModeManual); err != nil {
 		t.Fatal(err)
 	}
 	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
@@ -980,6 +984,92 @@ func TestStackAsksApprovalForBuiltinMutatingFilesystemTools(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, "blocked.txt")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("blocked file stat error = %v, want not exists", err)
+	}
+}
+
+func TestStackAutoReviewDeniesBuiltinMutatingFilesystemTool(t *testing.T) {
+	workspace := t.TempDir()
+	rawInput, err := json.Marshal(map[string]any{
+		"path":    "blocked.txt",
+		"content": "blocked\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-1",
+					Name:  toolfilesystem.WriteFileToolName,
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart(`{"risk_level":"high","user_authorization":"unknown","outcome":"deny","rationale":"not authorized"}`)},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("stopped")},
+		},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Provider:     provider,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "inspect files",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawPending bool
+	var sawRejected bool
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		event := session.CloneEvent(env.Event)
+		if event.Approval == nil {
+			continue
+		}
+		if event.Approval.Status == session.ApprovalPending {
+			sawPending = true
+		}
+		if event.Approval.Status == session.ApprovalRejected {
+			sawRejected = true
+			if !strings.Contains(event.Approval.Reason, "not authorized") {
+				t.Fatalf("rejected approval = %#v, want model rationale", event.Approval)
+			}
+		}
+	}
+	if sawPending || !sawRejected {
+		t.Fatalf("auto-review pending=%v rejected=%v, want direct model rejection", sawPending, sawRejected)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "blocked.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("blocked file stat error = %v, want not exists", err)
+	}
+	if len(provider.requests) < 2 || provider.requests[1].Meta["caelis.purpose"] != "approval_review" {
+		t.Fatalf("provider requests = %#v, want model approval review call", provider.requests)
 	}
 }
 
@@ -1959,6 +2049,8 @@ func (p *scriptedProvider) Stream(_ context.Context, req model.Request) (model.S
 		Messages: cloneMessages(req.Messages),
 		Tools:    req.Tools,
 		Stream:   req.Stream,
+		Output:   req.Output,
+		Meta:     maps.Clone(req.Meta),
 	})
 	response := model.Message{
 		Role:  model.RoleAssistant,

@@ -164,7 +164,10 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	}
 	approvalPolicy := cfg.Approval
 	if approvalPolicy == nil && cfg.BuiltinTools {
-		approvalPolicy = approval.AskTools(toolfilesystem.WriteFileToolName, toolfilesystem.PatchFileToolName)
+		approvalPolicy = approval.WithModelReview(
+			approval.AskTools(toolfilesystem.WriteFileToolName, toolfilesystem.PatchFileToolName),
+			provider,
+		)
 	}
 	approvalPolicy = approval.WithSessionMode(approvalPolicy)
 	runner, err := loop.New(loop.Config{

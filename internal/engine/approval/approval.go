@@ -42,6 +42,8 @@ type Request struct {
 	Surface    string
 	Mode       string
 	State      session.State
+	Events     []session.Event
+	Model      string
 	Call       model.ToolCall
 	Definition tool.Definition
 }

@@ -1328,10 +1328,10 @@ be migrated before retiring the old stack:
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
-     bridging, and a default local-stack ask policy for mutating filesystem
-     tools. It now also supports a core-native per-session `manual` approval
-     preset that forces approval prompts for every tool call while `auto-review`
-     continues to use the configured policy.
+     bridging, model-backed auto-review, and a default local-stack auto-review
+     policy for mutating filesystem tools. It now also supports a core-native
+     per-session `manual` approval preset that forces approval prompts for every
+     tool call while `auto-review` uses the configured model provider.
    - Migrated baseline: pending approval projection now includes
      surface-neutral approval actions, and `ApprovalService` owns decision
      normalization plus active-turn submission for TUI and future APP
@@ -1341,9 +1341,15 @@ be migrated before retiring the old stack:
      choices through the shared approval submission path, and later turns read
      the same state before asking again, without a TUI-owned cache or old-stack
      compatibility branch.
-   - Model-backed auto-review, richer policy presets, sandbox-aware permission
-     escalation, approval review transcript context, and richer denial metadata
-     are not migrated.
+   - Migrated baseline: model-backed auto-review now lives in
+     `internal/engine/approval` and uses the core `model.Provider` contract,
+     canonical session events, and exact planned tool-call JSON. The local stack
+     wraps the default mutating-filesystem approval policy with this reviewer,
+     so auto-review can approve or deny without routing through old
+     `gatewayapp`/`kernel` reviewer adapters.
+   - Still pending: richer policy presets, sandbox-aware permission escalation,
+     reusable approval-review transcript prefixes, token usage accounting for
+     review calls, and richer denial metadata are not migrated.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant

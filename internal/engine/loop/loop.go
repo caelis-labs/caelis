@@ -106,10 +106,18 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 		return nil, errors.New("engine/loop: turn id is required")
 	}
 	messages := enginecontext.Messages(req.Events)
+	reviewEvents := cloneEvents(req.Events)
 	userMessage := userMessage(req.Input, req.ContentParts)
 	now := l.now()
 	out := make([]session.Event, 0)
-	if err := l.record(ctx, req, &out, session.Event{
+	record := func(event session.Event) error {
+		if err := l.record(ctx, req, &out, event); err != nil {
+			return err
+		}
+		reviewEvents = append(reviewEvents, session.CloneEvent(event))
+		return nil
+	}
+	if err := record(session.Event{
 		Type:       session.EventUser,
 		Visibility: session.VisibilityCanonical,
 		Time:       now,
@@ -147,7 +155,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 			origin := *response.Origin
 			assistant.Origin = &origin
 		}
-		if err := l.record(ctx, req, &out, session.Event{
+		if err := record(session.Event{
 			Type:       session.EventAssistant,
 			Visibility: session.VisibilityCanonical,
 			Time:       l.now(),
@@ -172,17 +180,17 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 				Scope:      eventScope(req),
 				Tool:       toolCallEvent(call),
 			}
-			if err := l.record(ctx, req, &out, callEvent); err != nil {
+			if err := record(callEvent); err != nil {
 				return nil, err
 			}
 			selected := l.lookupTool(call, tools)
 			if selected != nil {
-				decisionEvent, ok, err := l.reviewToolCall(ctx, req, call, selected.Definition())
+				decisionEvent, ok, err := l.reviewToolCall(ctx, req, reviewEvents, call, selected.Definition())
 				if err != nil {
 					return nil, err
 				}
 				if ok {
-					if err := l.record(ctx, req, &out, decisionEvent); err != nil {
+					if err := record(decisionEvent); err != nil {
 						return nil, err
 					}
 					if decisionEvent.Approval == nil || decisionEvent.Approval.Status != session.ApprovalApproved {
@@ -199,7 +207,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 						resultMessage := toolResultMessage(call, result)
 						resultEvent := l.toolResultEvent(req, call, result)
 						messages = append(messages, resultMessage)
-						if err := l.record(ctx, req, &out, resultEvent); err != nil {
+						if err := record(resultEvent); err != nil {
 							return nil, err
 						}
 						continue
@@ -211,16 +219,16 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 				return nil, err
 			}
 			for _, event := range childEvents {
-				if err := l.record(ctx, req, &out, event); err != nil {
+				if err := record(event); err != nil {
 					return nil, err
 				}
 			}
 			messages = append(messages, resultMessage)
-			if err := l.record(ctx, req, &out, resultEvent); err != nil {
+			if err := record(resultEvent); err != nil {
 				return nil, err
 			}
 			if planEvent, ok := l.planEvent(req, result); ok {
-				if err := l.record(ctx, req, &out, planEvent); err != nil {
+				if err := record(planEvent); err != nil {
 					return nil, err
 				}
 			}
@@ -372,7 +380,7 @@ func normalizeSpawnEvents(req Request, events []session.Event) []session.Event {
 	return out
 }
 
-func (l *Loop) reviewToolCall(ctx context.Context, req Request, call model.ToolCall, def tool.Definition) (session.Event, bool, error) {
+func (l *Loop) reviewToolCall(ctx context.Context, req Request, reviewEvents []session.Event, call model.ToolCall, def tool.Definition) (session.Event, bool, error) {
 	if l.approval == nil {
 		return session.Event{}, false, nil
 	}
@@ -382,6 +390,8 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, call model.ToolC
 		Surface:    req.Surface,
 		Mode:       req.Mode,
 		State:      req.State,
+		Events:     cloneEvents(reviewEvents),
+		Model:      strings.TrimSpace(req.Model),
 		Call:       call,
 		Definition: def,
 	})
@@ -743,4 +753,15 @@ func toolOutput(parts []model.Part) map[string]any {
 		}
 	}
 	return nil
+}
+
+func cloneEvents(events []session.Event) []session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]session.Event, 0, len(events))
+	for _, event := range events {
+		out = append(out, session.CloneEvent(event))
+	}
+	return out
 }
