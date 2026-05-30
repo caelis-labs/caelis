@@ -217,6 +217,33 @@ func (s ModelService) ReasoningLevels(provider string, modelName string) []strin
 	return reasoningLevelsFromCapabilities(caps)
 }
 
+func (s ModelService) PromptCapabilities(ctx context.Context) (appviewmodel.PromptCapabilitiesView, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.services.settings == nil {
+		return appviewmodel.PromptCapabilitiesView{Image: true}, nil
+	}
+	choices, err := s.List(ctx)
+	if err != nil {
+		return appviewmodel.PromptCapabilitiesView{}, err
+	}
+	if len(choices) == 0 {
+		return appviewmodel.PromptCapabilitiesView{}, nil
+	}
+	for _, choice := range choices {
+		cfg, err := s.services.settings.ResolveModel(choice.ID)
+		if err != nil {
+			return appviewmodel.PromptCapabilitiesView{}, err
+		}
+		caps, ok := s.LookupCapabilities(cfg.Provider, cfg.Model)
+		if ok && caps.SupportsImages {
+			return appviewmodel.PromptCapabilitiesView{Image: true}, nil
+		}
+	}
+	return appviewmodel.PromptCapabilitiesView{}, nil
+}
+
 func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) (appviewmodel.ModelSelectionView, error) {
 	if ctx == nil {
 		ctx = context.Background()

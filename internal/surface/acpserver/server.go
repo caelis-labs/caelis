@@ -99,7 +99,8 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 		if err := decodeParams(msg.Params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		return responseOrError(s.newSession(ctx, req))
+		resp, err := s.newSession(ctx, req)
+		return s.responseWithAvailableCommands(ctx, resp, err, resp.SessionID)
 	case schema.MethodSessionList:
 		var req schema.SessionListRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -111,13 +112,15 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 		if err := decodeParams(msg.Params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		return responseOrError(s.loadSession(ctx, req))
+		resp, err := s.loadSession(ctx, req)
+		return s.responseWithAvailableCommands(ctx, resp, err, req.SessionID)
 	case schema.MethodSessionResume:
 		var req schema.ResumeSessionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
 			return nil, invalidParams(err)
 		}
-		return responseOrError(s.resumeSession(ctx, req))
+		resp, err := s.resumeSession(ctx, req)
+		return s.responseWithAvailableCommands(ctx, resp, err, req.SessionID)
 	case schema.MethodSessionSetMode:
 		var req schema.SetSessionModeRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -168,7 +171,11 @@ func (s *Server) handleNotification(ctx context.Context, msg jsonrpc.Message) {
 	})
 }
 
-func (s *Server) initialize(context.Context, schema.InitializeRequest) (any, *jsonrpc.RPCError) {
+func (s *Server) initialize(ctx context.Context, _ schema.InitializeRequest) (any, *jsonrpc.RPCError) {
+	promptCapabilities, err := s.promptCapabilities(ctx)
+	if err != nil {
+		return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+	}
 	return schema.InitializeResponse{
 		ProtocolVersion: schema.CurrentProtocolVersion,
 		AgentCapabilities: schema.AgentCapabilities{
@@ -177,13 +184,28 @@ func (s *Server) initialize(context.Context, schema.InitializeRequest) (any, *js
 				HTTP: false,
 				SSE:  false,
 			},
-			PromptCapabilities: schema.PromptCapabilities{
-				Audio:           false,
-				EmbeddedContext: false,
-				Image:           true,
-			},
+			PromptCapabilities: promptCapabilities,
 		},
 		AgentInfo: &s.implementation,
+	}, nil
+}
+
+func (s *Server) promptCapabilities(ctx context.Context) (schema.PromptCapabilities, error) {
+	if s.services.Engine() == nil {
+		return schema.PromptCapabilities{
+			Audio:           false,
+			EmbeddedContext: false,
+			Image:           true,
+		}, nil
+	}
+	caps, err := s.services.Models().PromptCapabilities(ctx)
+	if err != nil {
+		return schema.PromptCapabilities{}, err
+	}
+	return schema.PromptCapabilities{
+		Audio:           caps.Audio,
+		EmbeddedContext: caps.EmbeddedContext,
+		Image:           caps.Image,
 	}, nil
 }
 

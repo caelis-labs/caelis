@@ -413,6 +413,31 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 }
 
+func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  &recordingEngine{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Available(context.Background(), CommandCatalogRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Commands) != 7 {
+		t.Fatalf("commands = %#v, want seven core commands", view.Commands)
+	}
+	agent, ok := findCommandView(view.Commands, "agent")
+	if !ok || agent.InputHint != "use|add|install|list|remove" {
+		t.Fatalf("agent command = %#v ok=%v, want management hint", agent, ok)
+	}
+	compact, ok := findCommandView(view.Commands, "compact")
+	if !ok || compact.InputHint != "" {
+		t.Fatalf("compact command = %#v ok=%v, want no input hint", compact, ok)
+	}
+}
+
 func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -2457,6 +2482,48 @@ func TestModelServiceCatalogSupportsConnectDefaults(t *testing.T) {
 	}
 }
 
+func TestModelServicePromptCapabilitiesReflectConfiguredModels(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Models().Connect(ctx, appsettings.ModelConfig{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-pro",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	caps, err := svc.Models().PromptCapabilities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if caps.Image {
+		t.Fatalf("prompt capabilities = %#v, want no image support for deepseek-only config", caps)
+	}
+	if _, err := svc.Models().Connect(ctx, appsettings.ModelConfig{
+		Provider: "openai",
+		Model:    "gpt-4o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	caps, err = svc.Models().PromptCapabilities(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !caps.Image {
+		t.Fatalf("prompt capabilities = %#v, want image support once configured model supports images", caps)
+	}
+}
+
 func TestModelServiceProviderModelsMergesConfiguredAndRemoteModels(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -2801,6 +2868,15 @@ func findModelCandidate(candidates []appviewmodel.ModelCandidate, modelName stri
 		}
 	}
 	return appviewmodel.ModelCandidate{}, false
+}
+
+func findCommandView(commands []appviewmodel.CommandView, name string) (appviewmodel.CommandView, bool) {
+	for _, command := range commands {
+		if command.Name == name {
+			return command, true
+		}
+	}
+	return appviewmodel.CommandView{}, false
 }
 
 func findAgentManagementItem(items []appviewmodel.AgentManagementItem, name string) (appviewmodel.AgentManagementItem, bool) {

@@ -144,6 +144,139 @@ func TestServeStdioRunsPromptThroughCoreEngine(t *testing.T) {
 	}
 }
 
+func TestServeStdioPublishesAvailableCommandsFromAppServices(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stack, err := local.New(local.Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+		},
+		Provider: &testProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	updates := make(chan availableCommandsNotification, 2)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(_ context.Context, msg jsonrpc.Message) {
+			if msg.Method != schema.MethodSessionUpdate {
+				return
+			}
+			var notification availableCommandsNotification
+			if err := json.Unmarshal(msg.Params, &notification); err == nil && notification.Update.SessionUpdate == schema.UpdateAvailableCmds {
+				updates <- notification
+			}
+		})
+	}()
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: "/tmp/project"}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+	select {
+	case update := <-updates:
+		if update.SessionID != newResp.SessionID {
+			t.Fatalf("available command update session id = %q, want %q", update.SessionID, newResp.SessionID)
+		}
+		if command := requireAvailableCommand(t, update.Update.AvailableCommands, "connect"); command.Input == nil || command.Input.Hint == "" {
+			t.Fatalf("connect command = %#v, want input hint", command)
+		}
+		if command := requireAvailableCommand(t, update.Update.AvailableCommands, "compact"); command.Input != nil {
+			t.Fatalf("compact command = %#v, want no input hint", command)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for available_commands_update")
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
+func TestInitializeUsesAppServicePromptCapabilities(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "deepseek",
+		Model:    "deepseek-v4-pro",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	services, err := appservices.New(appservices.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingServiceEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, rpcErr := server.initialize(ctx, schema.InitializeRequest{ProtocolVersion: schema.CurrentProtocolVersion})
+	if rpcErr != nil {
+		t.Fatalf("initialize rpc error = %#v", rpcErr)
+	}
+	resp, ok := raw.(schema.InitializeResponse)
+	if !ok {
+		t.Fatalf("initialize response = %#v, want schema.InitializeResponse", raw)
+	}
+	if resp.AgentCapabilities.PromptCapabilities.Image {
+		t.Fatalf("prompt capabilities = %#v, want deepseek-only image support disabled", resp.AgentCapabilities.PromptCapabilities)
+	}
+
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai",
+		Model:    "gpt-4o",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	raw, rpcErr = server.initialize(ctx, schema.InitializeRequest{ProtocolVersion: schema.CurrentProtocolVersion})
+	if rpcErr != nil {
+		t.Fatalf("initialize rpc error after image model = %#v", rpcErr)
+	}
+	resp = raw.(schema.InitializeResponse)
+	if !resp.AgentCapabilities.PromptCapabilities.Image {
+		t.Fatalf("prompt capabilities = %#v, want image support from configured gpt-4o", resp.AgentCapabilities.PromptCapabilities)
+	}
+}
+
 func TestServeStdioListsLoadsAndResumesSessions(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -824,6 +957,14 @@ type updateNotification struct {
 	} `json:"update"`
 }
 
+type availableCommandsNotification struct {
+	SessionID string `json:"sessionId"`
+	Update    struct {
+		SessionUpdate     string                    `json:"sessionUpdate"`
+		AvailableCommands []schema.AvailableCommand `json:"availableCommands"`
+	} `json:"update"`
+}
+
 func requireACPConfigOption(t *testing.T, options []schema.SessionConfigOption, id string) schema.SessionConfigOption {
 	t.Helper()
 	for _, option := range options {
@@ -833,6 +974,17 @@ func requireACPConfigOption(t *testing.T, options []schema.SessionConfigOption, 
 	}
 	t.Fatalf("config option %q not found in %#v", id, options)
 	return schema.SessionConfigOption{}
+}
+
+func requireAvailableCommand(t *testing.T, commands []schema.AvailableCommand, name string) schema.AvailableCommand {
+	t.Helper()
+	for _, command := range commands {
+		if command.Name == name {
+			return command
+		}
+	}
+	t.Fatalf("available command %q not found in %#v", name, commands)
+	return schema.AvailableCommand{}
 }
 
 type testProvider struct {

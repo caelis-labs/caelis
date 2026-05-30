@@ -189,7 +189,15 @@ func (s Services) Events() EventService {
 	return EventService{services: s}
 }
 
+func (s Services) Commands() CommandService {
+	return CommandService{services: s}
+}
+
 type SettingsService struct {
+	services Services
+}
+
+type CommandService struct {
 	services Services
 }
 

@@ -46,3 +46,9 @@ type ModelCapability struct {
 	DefaultReasoningEffort string   `json:"default_reasoning_effort,omitempty"`
 	SupportsJSONOutput     bool     `json:"supports_json_output,omitempty"`
 }
+
+type PromptCapabilitiesView struct {
+	Audio           bool `json:"audio,omitempty"`
+	EmbeddedContext bool `json:"embedded_context,omitempty"`
+	Image           bool `json:"image,omitempty"`
+}

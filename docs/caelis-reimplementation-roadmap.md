@@ -1138,6 +1138,10 @@ be migrated before retiring the old stack:
      `internal/app/viewmodel.SessionEventEnvelope` DTOs. The app-service TUI
      gateway replay and local-turn forwarding path consume this service-level
      projection before adapting to the existing kernel envelope shape.
+   - Migrated baseline: `internal/app/services.CommandService` now exposes a
+     surface-neutral command catalog for ACP clients, TUI, and the future APP,
+     so the new ACP path no longer needs the old `gatewayapp` ACP surface for
+     available-command metadata.
    - Still pending: transcript actions and richer settings-panel composition
      still need APP-ready service/view-model contracts. Durable async task
      control and output storage remain kernel/runtime work rather than APP-only
@@ -1177,9 +1181,14 @@ be migrated before retiring the old stack:
      requested sandbox backend. These options read and mutate the shared
      `SettingsService` contract, so ACP clients such as Zed see the same prompt
      policy, context policy, and sandbox request state as TUI and the future APP.
-   - Still pending: terminal integration, client mode flows, richer non-model
-     config providers beyond prompt/context/sandbox backend settings, and the
-     full behavior covered by current public ACP e2e tests.
+   - Migrated baseline: ACP initialize prompt capabilities now come from the
+     shared model catalog and configured model set, and the new ACP server
+     publishes standard `available_commands_update` notifications after
+     session new/load/resume using the shared command catalog.
+   - Still pending: terminal integration, client mode flows, slash-command
+     execution parity, richer non-model config providers beyond
+     prompt/context/sandbox backend settings, and the full behavior covered by
+     current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1223,6 +1232,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: ACP `session/set_config_option` now reaches shared
      settings for skill loading, auto-compaction mode, and sandbox backend
      selection instead of limiting ACP clients to model/mode controls.
+   - Migrated baseline: ACP prompt capability projection now uses
+     `ModelService.PromptCapabilities`, so configured multimodal model support
+     is reported through the same model catalog used by TUI and APP setup.
    - Still pending: remaining TUI command integration, additional non-model ACP
      config providers beyond the first settings-backed set, non-host sandbox
      setup/repair config, and removal of the old `app/gatewayapp` config/model
