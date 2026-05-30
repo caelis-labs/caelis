@@ -265,6 +265,10 @@ func (s SettingsService) Document(ctx context.Context) (appsettings.Document, er
 	return s.services.settings.Document(ctx)
 }
 
+func (s SettingsService) Configured() bool {
+	return s.services.settings != nil
+}
+
 func (s SettingsService) View(ctx context.Context) (appviewmodel.SettingsView, error) {
 	doc, err := s.Document(ctx)
 	if err != nil {

@@ -13,9 +13,12 @@ import (
 )
 
 const (
-	acpConfigModeID      = "mode"
-	acpConfigModelID     = "model"
-	acpConfigReasoningID = "reasoning_effort"
+	acpConfigModeID           = "mode"
+	acpConfigModelID          = "model"
+	acpConfigReasoningID      = "reasoning_effort"
+	acpConfigSkillLoadingID   = "skill_loading_mode"
+	acpConfigAutoCompactionID = "auto_compaction"
+	acpConfigSandboxBackendID = "sandbox_backend"
 )
 
 func (s *Server) setSessionModel(ctx context.Context, req schema.SetSessionModelRequest) (schema.SetSessionModelResponse, error) {
@@ -70,6 +73,13 @@ func (s *Server) setSessionConfigOption(ctx context.Context, req schema.SetSessi
 			return schema.SetSessionConfigOptionResponse{}, err
 		}
 	default:
+		handled, err := s.setSettingsConfigOption(ctx, req)
+		if err != nil {
+			return schema.SetSessionConfigOptionResponse{}, err
+		}
+		if handled {
+			break
+		}
 		return schema.SetSessionConfigOptionResponse{}, fmt.Errorf("surface/acpserver: unsupported config option %q", req.ConfigID)
 	}
 	resp := schema.SetSessionConfigOptionResponse{}
@@ -191,18 +201,32 @@ func (s *Server) sessionConfigOptions(ctx context.Context, ref session.Ref) ([]s
 	} else if ok {
 		options = append(options, modeOption)
 	}
+	modelOptions, err := s.sessionModelConfigOptions(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	options = append(options, modelOptions...)
+	settingsOptions, err := s.sessionSettingsConfigOptions(ctx)
+	if err != nil {
+		return nil, err
+	}
+	options = append(options, settingsOptions...)
+	return options, nil
+}
+
+func (s *Server) sessionModelConfigOptions(ctx context.Context, ref session.Ref) ([]schema.SessionConfigOption, error) {
 	choices, err := s.services.Models().List(ctx)
 	if err != nil || len(choices) == 0 {
-		return options, err
+		return nil, err
 	}
 	current, ok, err := s.services.Models().Current(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return options, nil
+		return nil, nil
 	}
-	options = append(options, schema.SessionConfigOption{
+	options := []schema.SessionConfigOption{{
 		Type:         "select",
 		ID:           acpConfigModelID,
 		Name:         "Model",
@@ -210,7 +234,7 @@ func (s *Server) sessionConfigOptions(ctx context.Context, ref session.Ref) ([]s
 		Category:     "model",
 		CurrentValue: current.ID,
 		Options:      modelSelectOptions(choices),
-	})
+	}}
 	levels := reasoningLevels(current)
 	if len(levels) > 0 {
 		options = append(options, schema.SessionConfigOption{

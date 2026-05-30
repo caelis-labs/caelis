@@ -1172,9 +1172,14 @@ be migrated before retiring the old stack:
      runtime turns and treating already-idle sessions as successfully closed.
    - The new ACP server now exposes `session/set_mode`, session mode metadata,
      and the non-model `mode` config option through `internal/app/services.Modes()`.
-   - Still pending: terminal integration, client mode flows, additional
-     non-model config providers, and the full behavior covered by current
-     public ACP e2e tests.
+   - Migrated baseline: the new ACP server now exposes settings-backed
+     non-model config options for skill loading mode, automatic compaction, and
+     requested sandbox backend. These options read and mutate the shared
+     `SettingsService` contract, so ACP clients such as Zed see the same prompt
+     policy, context policy, and sandbox request state as TUI and the future APP.
+   - Still pending: terminal integration, client mode flows, richer non-model
+     config providers beyond prompt/context/sandbox backend settings, and the
+     full behavior covered by current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1215,10 +1220,13 @@ be migrated before retiring the old stack:
    - Migrated baseline: standalone CLI doctor and host sandbox lifecycle
      subcommands now use the new local stack and shared app services instead
      of constructing `app/gatewayapp`.
+   - Migrated baseline: ACP `session/set_config_option` now reaches shared
+     settings for skill loading, auto-compaction mode, and sandbox backend
+     selection instead of limiting ACP clients to model/mode controls.
    - Still pending: remaining TUI command integration, additional non-model ACP
-     config providers, non-host sandbox setup/repair config, and removal of the
-     old `app/gatewayapp` config/model services once compatibility entrypoints
-     are gone.
+     config providers beyond the first settings-backed set, non-host sandbox
+     setup/repair config, and removal of the old `app/gatewayapp` config/model
+     services once compatibility entrypoints are gone.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,

@@ -361,8 +361,17 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if newResp.Modes == nil || newResp.Modes.CurrentModeID != coreruntime.SessionModeAutoReview || len(newResp.Modes.AvailableModes) != 2 {
 		t.Fatalf("new session modes = %#v, want auto-review with two modes", newResp.Modes)
 	}
-	if len(newResp.ConfigOptions) != 3 {
-		t.Fatalf("new session config options = %#v, want mode, model, and reasoning", newResp.ConfigOptions)
+	if len(newResp.ConfigOptions) != 6 {
+		t.Fatalf("new session config options = %#v, want mode/model/reasoning plus settings options", newResp.ConfigOptions)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "skill_loading_mode"); option.CurrentValue != appsettings.SkillLoadingModeExplicit {
+		t.Fatalf("skill loading option = %#v, want explicit default", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "auto_compaction"); option.CurrentValue != "enabled" {
+		t.Fatalf("auto compaction option = %#v, want enabled default", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "auto" {
+		t.Fatalf("sandbox backend option = %#v, want auto default", option)
 	}
 
 	var setModeResp schema.SetSessionModeResponse
@@ -396,8 +405,11 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}, &setConfigResp); err != nil {
 		t.Fatalf("session/set_config_option call error = %v", err)
 	}
-	if len(setConfigResp.ConfigOptions) != 3 || setConfigResp.ConfigOptions[2].CurrentValue != "high" {
-		t.Fatalf("set config response = %#v, want high reasoning", setConfigResp.ConfigOptions)
+	if len(setConfigResp.ConfigOptions) != 6 {
+		t.Fatalf("set config response = %#v, want six config options", setConfigResp.ConfigOptions)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "reasoning_effort"); option.CurrentValue != "high" {
+		t.Fatalf("reasoning option = %#v, want high", option)
 	}
 	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
 	if err != nil {
@@ -405,6 +417,46 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if snapshot.State[appservices.StateCurrentModelID] != beta.ID || snapshot.State[appservices.StateCurrentReasoningEffort] != "high" {
 		t.Fatalf("session state = %#v, want beta/high", snapshot.State)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "skill_loading_mode",
+		Value:     appsettings.SkillLoadingModeMetadataOnly,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(skill_loading_mode) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "skill_loading_mode"); option.CurrentValue != appsettings.SkillLoadingModeMetadataOnly {
+		t.Fatalf("skill loading option = %#v, want metadata_only", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "auto_compaction",
+		Value:     "disabled",
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(auto_compaction) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "auto_compaction"); option.CurrentValue != "disabled" {
+		t.Fatalf("auto compaction option = %#v, want disabled", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "sandbox_backend",
+		Value:     "bwrap",
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(sandbox_backend) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "bwrap" {
+		t.Fatalf("sandbox backend option = %#v, want bwrap", option)
+	}
+	doc, err := manager.Document(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Compaction.Auto.Mode != "disabled" || doc.Runtime.Sandbox.Backend != "bwrap" {
+		t.Fatalf("settings document = %#v, want metadata_only/disabled/bwrap", doc)
+	}
+	if runtime := stack.Services().Runtime(); runtime.Sandbox.Backend != "bwrap" {
+		t.Fatalf("service runtime sandbox = %#v, want bwrap", runtime.Sandbox)
 	}
 
 	cancel()
@@ -770,6 +822,17 @@ type updateNotification struct {
 	Update    struct {
 		SessionUpdate string `json:"sessionUpdate"`
 	} `json:"update"`
+}
+
+func requireACPConfigOption(t *testing.T, options []schema.SessionConfigOption, id string) schema.SessionConfigOption {
+	t.Helper()
+	for _, option := range options {
+		if option.ID == id {
+			return option
+		}
+	}
+	t.Fatalf("config option %q not found in %#v", id, options)
+	return schema.SessionConfigOption{}
 }
 
 type testProvider struct {
