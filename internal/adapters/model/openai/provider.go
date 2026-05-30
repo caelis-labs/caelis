@@ -2,6 +2,7 @@
 package openai
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,7 +12,9 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -166,10 +169,15 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, responseError("chat completion", resp)
+		err := responseError("chat completion", resp)
+		_ = resp.Body.Close()
+		return nil, err
 	}
+	if payload.Stream && responseLooksLikeSSE(resp) {
+		return newChatSSEStream(resp.Body, p.ID(), payload.Model), nil
+	}
+	defer resp.Body.Close()
 	var completion chatCompletionResponse
 	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
 		return nil, err
@@ -182,6 +190,13 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 		Type:     model.StreamTurnDone,
 		Response: &response,
 	}}}, nil
+}
+
+func responseLooksLikeSSE(resp *http.Response) bool {
+	if resp == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream")
 }
 
 func (p *Provider) chatRequest(req model.Request) (chatCompletionRequest, error) {
@@ -212,11 +227,14 @@ func (p *Provider) chatRequest(req model.Request) (chatCompletionRequest, error)
 	}
 	payload := chatCompletionRequest{
 		Model:          modelID,
-		Stream:         false,
+		Stream:         req.Stream,
 		Messages:       messages,
 		Tools:          chatTools(req.Tools),
 		MaxTokens:      p.maxOutputTokens,
 		ResponseFormat: outputResponseFormat(req.Output, p.flavor),
+	}
+	if payload.Stream {
+		payload.StreamOptions = &chatStreamOptions{IncludeUsage: true}
 	}
 	p.applyReasoning(&payload, req.Reasoning)
 	return payload, nil
@@ -243,6 +261,206 @@ func (p *Provider) modelResponse(modelID string, completion chatCompletionRespon
 		Usage:   &usage,
 		Origin:  message.Origin,
 	}, nil
+}
+
+type chatSSEStream struct {
+	body   io.Closer
+	events <-chan chatStreamItem
+	once   sync.Once
+}
+
+type chatStreamItem struct {
+	event model.StreamEvent
+	err   error
+}
+
+func newChatSSEStream(body io.ReadCloser, providerID string, modelID string) model.Stream {
+	events := make(chan chatStreamItem, 32)
+	stream := &chatSSEStream{body: body, events: events}
+	go readChatSSE(body, providerID, modelID, events)
+	return stream
+}
+
+func (s *chatSSEStream) Recv() (model.StreamEvent, error) {
+	if s == nil || s.events == nil {
+		return model.StreamEvent{}, io.EOF
+	}
+	item, ok := <-s.events
+	if !ok {
+		return model.StreamEvent{}, io.EOF
+	}
+	if item.err != nil {
+		return model.StreamEvent{}, item.err
+	}
+	return item.event, nil
+}
+
+func (s *chatSSEStream) Close() error {
+	if s == nil || s.body == nil {
+		return nil
+	}
+	var err error
+	s.once.Do(func() {
+		err = s.body.Close()
+	})
+	return err
+}
+
+func readChatSSE(body io.ReadCloser, providerID string, modelID string, out chan<- chatStreamItem) {
+	defer close(out)
+	defer body.Close()
+	acc := chatStreamAccumulator{
+		role:      model.RoleAssistant,
+		toolCalls: map[int]*chatToolCall{},
+	}
+	var usage model.Usage
+	origin := &model.Origin{Provider: providerID, Model: strings.TrimSpace(modelID)}
+	finishReason := ""
+	err := readSSE(body, func(data []byte) error {
+		var chunk chatStreamChunk
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return err
+		}
+		if strings.TrimSpace(chunk.Model) != "" {
+			origin.Model = strings.TrimSpace(chunk.Model)
+		}
+		if created := unixTime(chunk.Created); !created.IsZero() {
+			origin.CreatedAt = created
+		}
+		if chunk.Usage.hasAny() {
+			usage = usageFromChat(chunk.Usage)
+		}
+		if len(chunk.Choices) == 0 {
+			return nil
+		}
+		choice := chunk.Choices[0]
+		if strings.TrimSpace(choice.FinishReason) != "" {
+			finishReason = strings.TrimSpace(choice.FinishReason)
+		}
+		for _, event := range acc.apply(choice.Delta) {
+			if !sendChatStreamItem(out, chatStreamItem{event: event}) {
+				return errStopSSE
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		_ = sendChatStreamItem(out, chatStreamItem{err: err})
+		return
+	}
+	message := acc.message()
+	message.Origin = origin
+	message.Usage = &usage
+	origin.RawFinishReason = finishReason
+	response := model.Response{
+		Message: message,
+		Status:  model.ResponseCompleted,
+		Usage:   &usage,
+		Origin:  origin,
+	}
+	_ = sendChatStreamItem(out, chatStreamItem{event: model.StreamEvent{
+		Type:     model.StreamTurnDone,
+		Response: &response,
+	}})
+}
+
+func sendChatStreamItem(out chan<- chatStreamItem, item chatStreamItem) bool {
+	select {
+	case out <- item:
+		return true
+	default:
+		out <- item
+		return true
+	}
+}
+
+type chatStreamAccumulator struct {
+	role      model.Role
+	text      strings.Builder
+	reasoning strings.Builder
+	toolCalls map[int]*chatToolCall
+}
+
+func (a *chatStreamAccumulator) apply(delta chatMessage) []model.StreamEvent {
+	if a == nil {
+		return nil
+	}
+	if role := model.Role(strings.TrimSpace(delta.Role)); role != "" {
+		a.role = role
+	}
+	var events []model.StreamEvent
+	if text := chatDeltaContentText(delta.Content); text != "" {
+		a.text.WriteString(text)
+		events = append(events, model.StreamEvent{
+			Type:  model.StreamPartDelta,
+			Delta: text,
+			Part:  ptrPart(model.NewTextPart(text)),
+		})
+	}
+	if text := firstNonEmpty(stringPtrRawValue(delta.ReasoningContent), stringPtrRawValue(delta.Reasoning)); text != "" {
+		a.reasoning.WriteString(text)
+		events = append(events, model.StreamEvent{
+			Type:  model.StreamPartDelta,
+			Delta: text,
+			Part:  ptrPart(model.NewReasoningPart(text, model.ReasoningVisible)),
+		})
+	}
+	for _, call := range delta.ToolCalls {
+		entry := a.toolCalls[call.Index]
+		if entry == nil {
+			entry = &chatToolCall{Index: call.Index}
+			a.toolCalls[call.Index] = entry
+		}
+		if strings.TrimSpace(call.ID) != "" {
+			entry.ID = strings.TrimSpace(call.ID)
+		}
+		if strings.TrimSpace(call.Type) != "" {
+			entry.Type = strings.TrimSpace(call.Type)
+		}
+		if strings.TrimSpace(call.Function.Name) != "" {
+			entry.Function.Name = strings.TrimSpace(call.Function.Name)
+		}
+		entry.Function.Arguments += call.Function.Arguments
+	}
+	return events
+}
+
+func (a *chatStreamAccumulator) message() model.Message {
+	role := a.role
+	if role == "" {
+		role = model.RoleAssistant
+	}
+	out := model.Message{Role: role}
+	if text := a.text.String(); text != "" {
+		out.Parts = append(out.Parts, model.NewTextPart(text))
+	}
+	if text := a.reasoning.String(); text != "" {
+		out.Parts = append(out.Parts, model.NewReasoningPart(text, model.ReasoningVisible))
+	}
+	indexes := make([]int, 0, len(a.toolCalls))
+	for index := range a.toolCalls {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	for _, index := range indexes {
+		call := a.toolCalls[index]
+		if call == nil {
+			continue
+		}
+		out.Parts = append(out.Parts, model.Part{
+			Kind: model.PartToolUse,
+			ToolUse: &model.ToolCall{
+				ID:    strings.TrimSpace(call.ID),
+				Name:  strings.TrimSpace(call.Function.Name),
+				Input: normalizeToolInput(call.Function.Arguments),
+			},
+		})
+	}
+	return out
+}
+
+func ptrPart(part model.Part) *model.Part {
+	return &part
 }
 
 func (p *Provider) setHeaders(req *http.Request) {
@@ -275,6 +493,7 @@ type chatCompletionRequest struct {
 	Messages        []chatMessage       `json:"messages"`
 	Tools           []chatTool          `json:"tools,omitempty"`
 	Stream          bool                `json:"stream"`
+	StreamOptions   *chatStreamOptions  `json:"stream_options,omitempty"`
 	MaxTokens       int                 `json:"max_tokens,omitempty"`
 	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
 	Reasoning       *chatReasoning      `json:"reasoning,omitempty"`
@@ -302,6 +521,10 @@ type chatJSONSchemaFormat struct {
 	Schema map[string]any `json:"schema"`
 }
 
+type chatStreamOptions struct {
+	IncludeUsage bool `json:"include_usage,omitempty"`
+}
+
 type chatReasoning struct {
 	Effort string `json:"effort,omitempty"`
 }
@@ -322,6 +545,7 @@ type chatFunction struct {
 }
 
 type chatToolCall struct {
+	Index    int              `json:"index,omitempty"`
 	ID       string           `json:"id,omitempty"`
 	Type     string           `json:"type,omitempty"`
 	Function chatToolFunction `json:"function"`
@@ -339,6 +563,18 @@ type chatCompletionResponse struct {
 	Choices []struct {
 		Index        int         `json:"index"`
 		Message      chatMessage `json:"message"`
+		FinishReason string      `json:"finish_reason"`
+	} `json:"choices"`
+	Usage chatUsage `json:"usage"`
+}
+
+type chatStreamChunk struct {
+	ID      string `json:"id"`
+	Model   string `json:"model"`
+	Created int64  `json:"created"`
+	Choices []struct {
+		Index        int         `json:"index"`
+		Delta        chatMessage `json:"delta"`
 		FinishReason string      `json:"finish_reason"`
 	} `json:"choices"`
 	Usage chatUsage `json:"usage"`
@@ -556,6 +792,15 @@ func chatContentText(value any) string {
 		return strings.Join(texts, "\n")
 	default:
 		return ""
+	}
+}
+
+func chatDeltaContentText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return chatContentText(value)
 	}
 }
 
@@ -876,6 +1121,14 @@ func usageFromChat(in chatUsage) model.Usage {
 	}
 }
 
+func (u chatUsage) hasAny() bool {
+	return u.PromptTokens != 0 ||
+		u.PromptTokensDetails.CachedTokens != 0 ||
+		u.CompletionTokens != 0 ||
+		u.CompletionTokensDetails.ReasoningTokens != 0 ||
+		u.TotalTokens != 0
+}
+
 func unixTime(value int64) time.Time {
 	if value <= 0 {
 		return time.Time{}
@@ -895,6 +1148,51 @@ func responseError(operation string, resp *http.Response) error {
 		return fmt.Errorf("model/openai: %s failed: %s: %s", operation, resp.Status, payload.Error.Message)
 	}
 	return fmt.Errorf("model/openai: %s failed: %s", operation, resp.Status)
+}
+
+var errStopSSE = errors.New("model/openai: stop sse")
+
+func readSSE(reader io.Reader, onData func([]byte) error) error {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	var dataLines [][]byte
+	flush := func() error {
+		if len(dataLines) == 0 {
+			return nil
+		}
+		payload := bytes.Join(dataLines, []byte("\n"))
+		dataLines = dataLines[:0]
+		chunk := strings.TrimSpace(string(payload))
+		if chunk == "" {
+			return nil
+		}
+		if chunk == "[DONE]" {
+			return errStopSSE
+		}
+		return onData([]byte(chunk))
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			if err := flush(); err != nil {
+				if errors.Is(err, errStopSSE) {
+					return nil
+				}
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, []byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("model/openai: sse scanner: %w", err)
+	}
+	if err := flush(); err != nil && !errors.Is(err, errStopSSE) {
+		return err
+	}
+	return nil
 }
 
 func caelisUserAgent() string {
@@ -921,6 +1219,13 @@ func stringPtrValue(value *string) string {
 		return ""
 	}
 	return strings.TrimSpace(*value)
+}
+
+func stringPtrRawValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 func firstNonEmpty(values ...string) string {

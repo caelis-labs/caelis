@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -72,7 +73,6 @@ func TestProviderStreamSendsChatCompletionRequestAndParsesToolCall(t *testing.T)
 		Tools: []model.ToolSpec{model.NewFunctionToolSpec("run_command", "run shell", map[string]any{
 			"type": "object",
 		})},
-		Stream: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,6 +106,87 @@ func TestProviderStreamSendsChatCompletionRequestAndParsesToolCall(t *testing.T)
 	}
 	if len(captured.Tools) != 1 || captured.Tools[0].Function.Name != "run_command" {
 		t.Fatalf("captured tools = %#v", captured.Tools)
+	}
+}
+
+func TestProviderStreamParsesChatCompletionSSE(t *testing.T) {
+	var captured chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(`data: {"id":"chatcmpl-stream","model":"gpt-test","created":1700000000,"choices":[{"index":0,"delta":{"role":"assistant"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"hello "}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"content":"world"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"reasoning_content":"think"}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"run_command","arguments":"{\"command\""}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":":\"echo hi\"}"}}]}}]}` + "\n\n"))
+		_, _ = w.Write([]byte(`data: {"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":7,"completion_tokens":5,"total_tokens":12,"prompt_tokens_details":{"cached_tokens":3},"completion_tokens_details":{"reasoning_tokens":2}}}` + "\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, Model: "gpt-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+		Stream:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	var deltas []string
+	var final *model.Response
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == model.StreamPartDelta {
+			deltas = append(deltas, event.Delta)
+		}
+		if event.Response != nil {
+			final = event.Response
+		}
+	}
+	if !captured.Stream || captured.StreamOptions == nil || !captured.StreamOptions.IncludeUsage {
+		t.Fatalf("captured stream settings = stream:%v options:%#v, want streaming usage", captured.Stream, captured.StreamOptions)
+	}
+	if strings.Join(deltas, "") != "hello worldthink" {
+		t.Fatalf("deltas = %#v, want text and reasoning deltas", deltas)
+	}
+	if final == nil {
+		t.Fatal("final response = nil")
+	}
+	if got := final.Message.TextContent(); got != "hello world" {
+		t.Fatalf("final text = %q, want hello world", got)
+	}
+	var reasoningText string
+	for _, part := range final.Message.Parts {
+		if part.Kind == model.PartReasoning && part.Reasoning != nil {
+			reasoningText = part.Reasoning.VisibleText
+		}
+	}
+	if reasoningText != "think" {
+		t.Fatalf("reasoning = %#v, want streamed reasoning", final.Message.Parts)
+	}
+	calls := final.Message.ToolCalls()
+	if len(calls) != 1 || calls[0].Name != "run_command" || string(calls[0].Input) != `{"command":"echo hi"}` {
+		t.Fatalf("tool calls = %#v, want streamed tool call", calls)
+	}
+	if final.Usage == nil || final.Usage.TotalTokens != 12 || final.Usage.CachedInputTokens != 3 || final.Usage.ReasoningTokens != 2 {
+		t.Fatalf("usage = %#v, want streamed usage", final.Usage)
+	}
+	if final.Origin == nil || final.Origin.Model != "gpt-test" || final.Origin.RawFinishReason != "tool_calls" {
+		t.Fatalf("origin = %#v, want streamed origin", final.Origin)
 	}
 }
 
