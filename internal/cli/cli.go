@@ -21,7 +21,6 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	coreacpserver "github.com/OnslaughtSnail/caelis/internal/surface/acpserver"
 	coreheadless "github.com/OnslaughtSnail/caelis/internal/surface/headless"
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
 type outputFormat string
@@ -531,32 +530,6 @@ func renderConfiguredModelText(alias string, provider string, model string) stri
 		return model
 	}
 	return provider + "/" + model
-}
-
-func streamHandle(ctx context.Context, handle kernel.TurnHandle, stdout io.Writer, stderr io.Writer) error {
-	if handle == nil {
-		return nil
-	}
-	defer handle.Close()
-
-	for env := range handle.Events() {
-		if env.Err != nil {
-			return env.Err
-		}
-		if env.Event.Kind == kernel.EventKindApprovalRequested {
-			fmt.Fprintln(stderr, "[approval] denied by default")
-			if err := handle.Submit(ctx, kernel.SubmitRequest{
-				Kind:     kernel.SubmissionKindApproval,
-				Approval: &kernel.ApprovalDecision{Approved: false, Outcome: string(kernel.ApprovalStatusRejected)},
-			}); err != nil {
-				return err
-			}
-		}
-		if text := kernel.AssistantText(env.Event); text != "" {
-			fmt.Fprintln(stdout, text)
-		}
-	}
-	return nil
 }
 
 func writeDoctorResult(w io.Writer, format outputFormat, result doctorResult) error {

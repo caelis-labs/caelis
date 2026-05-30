@@ -960,6 +960,9 @@ be migrated before retiring the old stack:
      then maps directly into `internal/app/local`. This removes the production
      CLI entrypoint's compile-time dependency on the old gatewayapp config
      types.
+   - Migrated baseline: the old `kernel.TurnHandle` streaming helper has been
+     removed from `internal/cli`; production CLI code no longer imports the old
+     public `kernel` facade.
    - Still pending: default home layout, full persisted config hydration, rich
      setup diagnostics, non-host sandbox repair/setup flows, and several
      command dispatch paths still depend on old TUI/gateway compatibility

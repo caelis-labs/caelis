@@ -20,7 +20,6 @@ import (
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
@@ -127,80 +126,6 @@ func cliTestStoreDir(t *testing.T) string {
 		t.Fatalf("write CLI test config: %v", err)
 	}
 	return dir
-}
-
-func TestStreamHandleWritesAssistantTextAndDeniesApproval(t *testing.T) {
-	handle := newFakeHandle([]kernel.EventEnvelope{
-		{
-			Event: kernel.Event{
-				Kind:            kernel.EventKindApprovalRequested,
-				ApprovalPayload: &kernel.ApprovalPayload{Status: kernel.ApprovalStatusPending},
-			},
-		},
-		{
-			Event: kernel.Event{
-				Kind: kernel.EventKindAssistantMessage,
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
-					Text:  "interactive ok",
-					Final: true,
-				},
-			},
-		},
-	})
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
-		t.Fatalf("streamHandle() error = %v", err)
-	}
-	if got := out.String(); !strings.Contains(got, "interactive ok") {
-		t.Fatalf("stdout = %q", got)
-	}
-	if got := errBuf.String(); !strings.Contains(got, "denied by default") {
-		t.Fatalf("stderr = %q", got)
-	}
-	if len(handle.submits) != 1 || handle.submits[0].Approval == nil || handle.submits[0].Approval.Approved {
-		t.Fatalf("submits = %#v", handle.submits)
-	}
-}
-
-func TestStreamHandleIgnoresAutomaticApprovalReviewEvents(t *testing.T) {
-	handle := newFakeHandle([]kernel.EventEnvelope{
-		{
-			Event: kernel.Event{
-				Kind: kernel.EventKindApprovalReview,
-				ApprovalPayload: &kernel.ApprovalPayload{
-					Status:         kernel.ApprovalStatusPending,
-					ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
-					DecisionSource: "auto-review",
-				},
-			},
-		},
-		{
-			Event: kernel.Event{
-				Kind: kernel.EventKindAssistantMessage,
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
-					Text:  "interactive ok",
-					Final: true,
-				},
-			},
-		},
-	})
-	var out bytes.Buffer
-	var errBuf bytes.Buffer
-	if err := streamHandle(context.Background(), handle, &out, &errBuf); err != nil {
-		t.Fatalf("streamHandle() error = %v", err)
-	}
-	if got := out.String(); !strings.Contains(got, "interactive ok") {
-		t.Fatalf("stdout = %q", got)
-	}
-	if got := errBuf.String(); got != "" {
-		t.Fatalf("stderr = %q, want empty", got)
-	}
-	if len(handle.submits) != 0 {
-		t.Fatalf("submits = %#v, want no manual decision for auto-review event", handle.submits)
-	}
 }
 
 func TestRunDoctorJSONDoesNotLeakToken(t *testing.T) {
@@ -1176,46 +1101,4 @@ func encryptCodeFreeAPIKeyForCLITest(t *testing.T, apiKey string) string {
 	ciphertext := make([]byte, len(plain))
 	cipher.NewCBCEncrypter(block, []byte("%1KJIrl3!XUxr04V")).CryptBlocks(ciphertext, plain)
 	return base64.StdEncoding.EncodeToString(ciphertext)
-}
-
-type fakeHandle struct {
-	events    chan kernel.EventEnvelope
-	submits   []kernel.SubmitRequest
-	closed    bool
-	cancelled bool
-}
-
-func newFakeHandle(events []kernel.EventEnvelope) *fakeHandle {
-	ch := make(chan kernel.EventEnvelope, len(events))
-	for _, event := range events {
-		ch <- event
-	}
-	close(ch)
-	return &fakeHandle{events: ch}
-}
-
-func (h *fakeHandle) HandleID() string { return "h1" }
-func (h *fakeHandle) RunID() string    { return "r1" }
-func (h *fakeHandle) TurnID() string   { return "t1" }
-func (h *fakeHandle) SessionRef() session.SessionRef {
-	return session.SessionRef{SessionID: "s1"}
-}
-func (h *fakeHandle) CreatedAt() time.Time { return time.Time{} }
-func (h *fakeHandle) Events() <-chan kernel.EventEnvelope {
-	return h.events
-}
-func (h *fakeHandle) EventsAfter(string) ([]kernel.EventEnvelope, string, error) {
-	return nil, "", nil
-}
-func (h *fakeHandle) Submit(_ context.Context, req kernel.SubmitRequest) error {
-	h.submits = append(h.submits, req)
-	return nil
-}
-func (h *fakeHandle) Cancel() kernel.CancelResult {
-	h.cancelled = true
-	return kernel.CancelResult{Status: kernel.CancelStatusCancelled}
-}
-func (h *fakeHandle) Close() error {
-	h.closed = true
-	return nil
 }
