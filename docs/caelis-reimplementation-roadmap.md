@@ -1215,9 +1215,14 @@ be migrated before retiring the old stack:
    - Plan updates are no longer only display metadata in the new runtime:
      `update_plan` results are converted into canonical `session.EventPlan`
      records for ACP/TUI/APP projection.
-   - Still pending: rich diff rendering metadata, spawn tool, durable task
-     storage, task listing/tails, subagent task association, and display
-     metadata for compact/rich tool panels still need core-native adapters.
+   - Migrated baseline: mutating filesystem tools now emit bounded structured
+     unified diff hunks in `_meta.caelis.runtime.tool` while their JSON results
+     retain canonical mutation facts; the turn loop promotes JSON tool results
+     into canonical `session.ToolEvent.Output` for ACP/TUI/APP raw-output
+     projection.
+   - Still pending: spawn tool, durable task storage, task listing/tails,
+     subagent task association, and display metadata for compact/rich tool
+     panels still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response

@@ -1401,6 +1401,40 @@ func TestGatewayToolDisplayMetaRendersActionableSummaries(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "patch meta diff panel without content",
+			call: &kernel.ToolCallPayload{
+				CallID:   "patch-meta-1",
+				ToolName: "PATCH",
+				Status:   kernel.ToolStatusRunning,
+				Scope:    kernel.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go"},
+			},
+			result: &kernel.ToolResultPayload{
+				CallID:   "patch-meta-1",
+				ToolName: "PATCH",
+				Status:   kernel.ToolStatusCompleted,
+				Scope:    kernel.EventScopeMain,
+				RawInput: map[string]any{"path": "/tmp/workspace/gm_license_repo.go"},
+				RawOutput: map[string]any{
+					"path": "/tmp/workspace/gm_license_repo.go",
+				},
+			},
+			want:        []string{"• Patched gm_license_repo.go +1 -1", "diff / hunk", "@@ -2,3 +2,3 @@", "-entity.GMLicense", "+entity.GmLicense"},
+			forbidden:   []string{"╭", "╰", "completed"},
+			expandPanel: true,
+			meta: testRuntimeToolMeta(map[string]any{
+				"path":          "/tmp/workspace/gm_license_repo.go",
+				"added_lines":   1,
+				"removed_lines": 1,
+				"diff_hunks": []any{
+					map[string]any{
+						"header": "@@ -2,3 +2,3 @@",
+						"lines":  []any{" context-a", "-entity.GMLicense", "+entity.GmLicense", " context-b"},
+					},
+				},
+			}),
+		},
 	}
 
 	for _, tt := range tests {

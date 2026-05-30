@@ -103,7 +103,9 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 	toolOutput := acpprojector.FormatToolContent(input.Content)
 	toolOutputSynthetic := false
 	if strings.TrimSpace(toolOutput) == "" {
-		if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Event.Meta, input.Content, status, toolErr); terminalOutput != "" {
+		if mutationOutput := mutationToolOutputText(semanticName, rawInput, rawOutput, input.Event.Meta); mutationOutput != "" && !toolErr {
+			toolOutput = mutationOutput
+		} else if terminalOutput := terminalToolOutputText(semanticName, input.ToolKind, rawOutput, input.Event.Meta, input.Content, status, toolErr); terminalOutput != "" {
 			toolOutput = terminalOutput
 		} else if terminalNoOutputPlaceholder(semanticName, input.ToolKind, rawOutput, input.Event.Meta, input.Content, status, toolErr) {
 			toolOutput = "(no output)"

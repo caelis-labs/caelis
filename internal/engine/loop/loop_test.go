@@ -158,6 +158,58 @@ func TestLoopRecordsPlanEventFromPlanToolResult(t *testing.T) {
 	}
 }
 
+func TestLoopProjectsJSONToolResultOutput(t *testing.T) {
+	const toolName = "write_file"
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-write",
+					Name:  toolName,
+					Input: json.RawMessage(`{"path":"demo.txt","content":"hello\n"}`),
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	runner, err := New(Config{
+		Provider: provider,
+		Tools:    staticRegistry{tools: []tool.Tool{fakeJSONTool{name: toolName}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := runner.Run(context.Background(), Request{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:   "write",
+		TurnID:  "turn-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var result *session.ToolEvent
+	for idx := range events {
+		if events[idx].Type == session.EventToolResult {
+			result = events[idx].Tool
+			break
+		}
+	}
+	if result == nil {
+		t.Fatalf("events = %#v, want tool result event", eventTypes(events))
+	}
+	if result.Output["path"] != "demo.txt" || result.Output["changed"] != true {
+		t.Fatalf("tool output = %#v, want decoded JSON payload", result.Output)
+	}
+	if result.Meta["source"] != "fake-json" {
+		t.Fatalf("tool meta = %#v, want tool result metadata", result.Meta)
+	}
+}
+
 type capturingProvider struct {
 	request model.Request
 	message model.Message
@@ -240,6 +292,26 @@ func (t fakePlanTool) Call(_ context.Context, call tool.Call) (tool.Result, erro
 			},
 			"explanation": "test",
 		},
+	}, nil
+}
+
+type fakeJSONTool struct {
+	name string
+}
+
+func (t fakeJSONTool) Definition() tool.Definition {
+	return tool.Definition{Name: t.name}
+}
+
+func (t fakeJSONTool) Call(_ context.Context, call tool.Call) (tool.Result, error) {
+	return tool.Result{
+		ID:   call.ID,
+		Name: t.name,
+		Content: []model.Part{{
+			Kind: model.PartJSON,
+			JSON: &model.JSONPart{Value: []byte(`{"path":"demo.txt","changed":true}`)},
+		}},
+		Meta: map[string]any{"source": "fake-json"},
 	}, nil
 }
 

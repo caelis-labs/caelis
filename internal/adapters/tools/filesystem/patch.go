@@ -108,7 +108,7 @@ func (t *PatchFileTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 		return tool.Result{}, err
 	}
 	stats := countLineDiff(before, after)
-	return jsonResult(call, PatchFileToolName, map[string]any{
+	payload := map[string]any{
 		"path":              target,
 		"changed":           before != after,
 		"edit_count":        len(input.Edits),
@@ -116,14 +116,17 @@ func (t *PatchFileTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 		"added_lines":       stats.Added,
 		"removed_lines":     stats.Removed,
 		"summary":           mutationSummary(false, stats.Added, stats.Removed),
-	}, map[string]any{
+	}
+	meta := map[string]any{
 		"path":              target,
 		"changed":           before != after,
 		"edit_count":        len(input.Edits),
 		"replacement_count": len(replacements),
 		"added_lines":       stats.Added,
 		"removed_lines":     stats.Removed,
-	})
+	}
+	addUnifiedDiffMetadata(meta, buildUnifiedDiff(before, after))
+	return jsonResult(call, PatchFileToolName, payload, meta)
 }
 
 func collectPatchReplacements(path string, content string, edits []patchEdit) ([]patchReplacement, error) {

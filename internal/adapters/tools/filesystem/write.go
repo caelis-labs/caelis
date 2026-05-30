@@ -81,20 +81,23 @@ func (t *WriteFileTool) Call(ctx context.Context, call tool.Call) (tool.Result, 
 	}
 	stats := countLineDiff(before, after)
 	changed := created || before != after
-	return jsonResult(call, WriteFileToolName, map[string]any{
+	payload := map[string]any{
 		"path":          target,
 		"created":       created,
 		"changed":       changed,
 		"added_lines":   stats.Added,
 		"removed_lines": stats.Removed,
 		"summary":       mutationSummary(created, stats.Added, stats.Removed),
-	}, map[string]any{
+	}
+	meta := map[string]any{
 		"path":          target,
 		"created":       created,
 		"changed":       changed,
 		"added_lines":   stats.Added,
 		"removed_lines": stats.Removed,
-	})
+	}
+	addUnifiedDiffMetadata(meta, buildUnifiedDiff(before, after))
+	return jsonResult(call, WriteFileToolName, payload, meta)
 }
 
 func readExistingFile(fsys sandbox.FileSystem, target string) (string, bool, os.FileMode, error) {

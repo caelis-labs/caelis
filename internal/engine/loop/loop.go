@@ -535,6 +535,7 @@ func (l *Loop) toolResultEvent(req Request, call model.ToolCall, result tool.Res
 			ID:      strings.TrimSpace(call.ID),
 			Name:    strings.TrimSpace(call.Name),
 			Status:  status,
+			Output:  toolOutput(result.Content),
 			Content: toolContent(result.Content),
 			Meta:    result.Meta,
 		},
@@ -637,6 +638,24 @@ func toolContent(parts []model.Part) []session.ToolContent {
 		if part.Kind == model.PartText && part.Text != nil {
 			out = append(out, session.ToolContent{Type: "text", Text: part.Text.Text})
 		}
+	}
+	return out
+}
+
+func toolOutput(parts []model.Part) map[string]any {
+	if len(parts) != 1 {
+		return nil
+	}
+	part := parts[0]
+	if part.Kind != model.PartJSON || part.JSON == nil || len(part.JSON.Value) == 0 {
+		return nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(part.JSON.Value, &out); err != nil {
+		return nil
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

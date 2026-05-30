@@ -19,6 +19,31 @@ import (
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
+func TestCoreEventMetaMergesToolRuntimeMeta(t *testing.T) {
+	got := coreEventMeta(coresession.Event{
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"stream": map[string]any{"parent_call_id": "spawn-1"},
+				},
+			},
+		},
+		Tool: &coresession.ToolEvent{
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"tool": map[string]any{"diff_hunks": []any{"hunk-1"}},
+					},
+				},
+			},
+		},
+	})
+	runtimeMeta := got["caelis"].(map[string]any)["runtime"].(map[string]any)
+	if runtimeMeta["stream"] == nil || runtimeMeta["tool"] == nil {
+		t.Fatalf("meta = %#v, want stream and tool runtime metadata", got)
+	}
+}
+
 func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

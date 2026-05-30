@@ -498,7 +498,7 @@ func kernelEventFromCore(event coresession.Event) kernel.Event {
 		OccurredAt: event.Time,
 		SessionRef: ref,
 		Origin:     coreEventOrigin(event, scope, participantID, actor),
-		Meta:       maps.Clone(event.Meta),
+		Meta:       coreEventMeta(event),
 	}
 	if out.Meta == nil {
 		out.Meta = map[string]any{}
@@ -652,6 +652,47 @@ func coreToolResultPayload(event coresession.Event) *kernel.ToolResultPayload {
 		Scope:         scope,
 		ParticipantID: coreEventParticipantID(event),
 	}
+}
+
+func coreEventMeta(event coresession.Event) map[string]any {
+	meta := maps.Clone(event.Meta)
+	if event.Tool != nil {
+		meta = mergeCoreMeta(meta, event.Tool.Meta)
+	}
+	return meta
+}
+
+func mergeCoreMeta(base map[string]any, extra map[string]any) map[string]any {
+	if len(extra) == 0 {
+		return maps.Clone(base)
+	}
+	out := maps.Clone(base)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range extra {
+		if value == nil {
+			continue
+		}
+		if existing, ok := out[key]; ok {
+			existingMap, existingOK := existing.(map[string]any)
+			valueMap, valueOK := value.(map[string]any)
+			if existingOK && valueOK {
+				out[key] = mergeCoreMeta(existingMap, valueMap)
+			}
+			continue
+		}
+		out[key] = cloneCoreMetaValue(value)
+	}
+	return out
+}
+
+func cloneCoreMetaValue(value any) any {
+	mapped, ok := value.(map[string]any)
+	if !ok {
+		return value
+	}
+	return mergeCoreMeta(nil, mapped)
 }
 
 func coreToolStatus(status coresession.ToolStatus) kernel.ToolStatus {

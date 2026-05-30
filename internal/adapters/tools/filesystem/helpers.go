@@ -111,8 +111,49 @@ func jsonResult(call tool.Call, name string, payload map[string]any, meta map[st
 			Kind: model.PartJSON,
 			JSON: &model.JSONPart{Value: raw},
 		}},
-		Meta: maps.Clone(meta),
+		Meta: filesystemToolMeta(meta),
 	}, nil
+}
+
+func filesystemToolMeta(values map[string]any) map[string]any {
+	out := maps.Clone(values)
+	if out == nil {
+		out = map[string]any{}
+	}
+	caelis, _ := out["caelis"].(map[string]any)
+	caelis = maps.Clone(caelis)
+	if caelis == nil {
+		caelis = map[string]any{}
+	}
+	caelis["version"] = 1
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	runtimeMeta = maps.Clone(runtimeMeta)
+	if runtimeMeta == nil {
+		runtimeMeta = map[string]any{}
+	}
+	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
+	toolMeta = maps.Clone(toolMeta)
+	if toolMeta == nil {
+		toolMeta = map[string]any{}
+	}
+	for key, value := range values {
+		if key == "caelis" || value == nil {
+			continue
+		}
+		if text, ok := value.(string); ok {
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+			toolMeta[key] = text
+			continue
+		}
+		toolMeta[key] = value
+	}
+	runtimeMeta["tool"] = toolMeta
+	caelis["runtime"] = runtimeMeta
+	out["caelis"] = caelis
+	return out
 }
 
 func checkContext(ctx context.Context) error {

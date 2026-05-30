@@ -77,6 +77,13 @@ func TestProjectToolResultUpdate(t *testing.T) {
 			Name:   "shell",
 			Status: session.ToolCompleted,
 			Output: map[string]any{"exit_code": 0},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"tool": map[string]any{"path": "demo.txt"},
+					},
+				},
+			},
 			Content: []session.ToolContent{{
 				Type: "text",
 				Text: "ok",
@@ -99,6 +106,13 @@ func TestProjectToolResultUpdate(t *testing.T) {
 	}
 	if len(update.Content) != 1 || update.Content[0].Content != "ok" {
 		t.Fatalf("content = %#v, want ok", update.Content)
+	}
+	rawOutput, ok := update.RawOutput.(map[string]any)
+	if !ok || rawOutput["exit_code"] != 0 {
+		t.Fatalf("raw output = %#v, want exit_code", update.RawOutput)
+	}
+	if update.Meta["caelis"] == nil {
+		t.Fatalf("meta = %#v, want caelis runtime metadata", update.Meta)
 	}
 }
 

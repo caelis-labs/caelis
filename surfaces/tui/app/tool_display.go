@@ -1125,6 +1125,39 @@ func mutationDisplaySummary(input map[string]any, output map[string]any) string 
 	return header
 }
 
+func mutationToolOutputText(name string, input map[string]any, output map[string]any, meta map[string]any) string {
+	switch strings.ToUpper(strings.TrimSpace(name)) {
+	case "WRITE", "PATCH":
+	default:
+		return ""
+	}
+	return mutationDisplaySummary(input, mutationDisplayOutput(output, meta))
+}
+
+func mutationDisplayOutput(output map[string]any, meta map[string]any) map[string]any {
+	out := cloneAnyMap(output)
+	if out == nil {
+		out = map[string]any{}
+	}
+	toolMeta := eventRuntimeToolMeta(meta)
+	for _, key := range []string{
+		"path", "file_path", "created", "changed", "previous_empty",
+		"added_lines", "removed_lines", "edit_count", "replacement_count",
+		"hunk", "diff_hunks", "diff_truncated",
+	} {
+		if _, exists := out[key]; exists {
+			continue
+		}
+		if value, ok := toolMeta[key]; ok {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 type mutationDisplayDiffHunk struct {
 	Header string   `json:"header"`
 	Lines  []string `json:"lines"`

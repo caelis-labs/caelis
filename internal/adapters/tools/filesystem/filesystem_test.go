@@ -143,6 +143,37 @@ func TestWriteFileToolCreatesParentDirectories(t *testing.T) {
 	}
 }
 
+func TestWriteFileToolReturnsStructuredDiffMetadata(t *testing.T) {
+	rt := newHostRuntime(t)
+	writeTool, err := NewWriteFileTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := callTool(t, writeTool, map[string]any{
+		"path":    "created.txt",
+		"content": "one\ntwo\n",
+	})
+	payload := resultPayload(t, result)
+	if payload["diff_hunks"] != nil {
+		t.Fatalf("payload = %#v, diff_hunks must stay in metadata", payload)
+	}
+	toolMeta := runtimeToolMetaPayload(t, result.Meta)
+	hunks := diffHunksPayload(t, toolMeta["diff_hunks"])
+	if len(hunks) != 1 {
+		t.Fatalf("diff_hunks = %#v, want one create hunk", toolMeta["diff_hunks"])
+	}
+	if hunks[0]["header"] != "@@ -0,0 +1,2 @@" {
+		t.Fatalf("hunk header = %#v", hunks[0]["header"])
+	}
+	lines := stringSlicePayload(t, hunks[0]["lines"])
+	if len(lines) != 2 || lines[0] != "+one" || lines[1] != "+two" {
+		t.Fatalf("hunk lines = %#v", lines)
+	}
+	if toolMeta["path"] == "" || toolMeta["diff_hunks"] == nil {
+		t.Fatalf("tool meta = %#v, want nested runtime tool diff metadata", toolMeta)
+	}
+}
+
 func TestPatchFileToolAppliesExactBatchEditsAtomically(t *testing.T) {
 	rt := newHostRuntime(t)
 	if err := rt.FileSystem().WriteFile("notes.txt", []byte("alpha\nbeta\ngamma\n"), 0o644); err != nil {
@@ -169,6 +200,44 @@ func TestPatchFileToolAppliesExactBatchEditsAtomically(t *testing.T) {
 	}
 	if string(raw) != "one\nbeta\nthree\n" {
 		t.Fatalf("patched content = %q", raw)
+	}
+}
+
+func TestPatchFileToolReturnsBoundedDiffHunks(t *testing.T) {
+	rt := newHostRuntime(t)
+	if err := rt.FileSystem().WriteFile("notes.txt", []byte("first-line\nsame1\nsame2\nsame3\nsame4\nsame5\nlast-line\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	patchTool, err := NewPatchFileTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := callTool(t, patchTool, map[string]any{
+		"path": "notes.txt",
+		"edits": []map[string]any{
+			{"old": "first-line", "new": "FIRST-LINE"},
+			{"old": "last-line", "new": "LAST-LINE"},
+		},
+	})
+	payload := resultPayload(t, result)
+	if payload["diff_hunks"] != nil {
+		t.Fatalf("payload = %#v, diff_hunks must stay in metadata", payload)
+	}
+	toolMeta := runtimeToolMetaPayload(t, result.Meta)
+	hunks := diffHunksPayload(t, toolMeta["diff_hunks"])
+	if len(hunks) != 2 {
+		t.Fatalf("diff_hunks = %#v, want two separated hunks", toolMeta["diff_hunks"])
+	}
+	firstLines := stringSlicePayload(t, hunks[0]["lines"])
+	secondLines := stringSlicePayload(t, hunks[1]["lines"])
+	if !containsString(firstLines, "-first-line") || !containsString(firstLines, "+FIRST-LINE") {
+		t.Fatalf("first hunk lines = %#v, want first-line replacement", firstLines)
+	}
+	if !containsString(secondLines, "-last-line") || !containsString(secondLines, "+LAST-LINE") {
+		t.Fatalf("second hunk lines = %#v, want last-line replacement", secondLines)
+	}
+	if payload["added_lines"] != float64(2) || payload["removed_lines"] != float64(2) {
+		t.Fatalf("payload = %#v, want +2 -2", payload)
 	}
 }
 
@@ -264,4 +333,43 @@ func stringSlicePayload(t *testing.T, raw any) []string {
 		out = append(out, text)
 	}
 	return out
+}
+
+func diffHunksPayload(t *testing.T, raw any) []map[string]any {
+	t.Helper()
+	data, err := json.Marshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []map[string]any
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatalf("raw = %#v, want diff hunk list: %v", raw, err)
+	}
+	return out
+}
+
+func runtimeToolMetaPayload(t *testing.T, meta map[string]any) map[string]any {
+	t.Helper()
+	caelis, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, want caelis map", meta)
+	}
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("caelis meta = %#v, want runtime map", caelis)
+	}
+	toolMeta, ok := runtimeMeta["tool"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime meta = %#v, want tool map", runtimeMeta)
+	}
+	return toolMeta
+}
+
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
 }
