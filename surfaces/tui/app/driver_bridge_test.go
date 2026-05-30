@@ -374,6 +374,16 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 			},
 			{
 				Event: kernel.Event{
+					Kind:   kernel.EventKindPlanUpdate,
+					TurnID: "turn-complete",
+					Plan: &kernel.PlanPayload{Entries: []kernel.PlanEntryPayload{
+						{Content: "Inspect stored session", Status: "completed"},
+						{Content: "Continue migration", Status: "in_progress"},
+					}},
+				},
+			},
+			{
+				Event: kernel.Event{
 					Kind:   kernel.EventKindAssistantMessage,
 					TurnID: "turn-complete",
 					Narrative: &kernel.NarrativePayload{
@@ -408,6 +418,7 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 	var sawUserReplay bool
 	var sawAssistantReplay bool
+	var sawPlanReplay bool
 	var replayBatchCount int
 	for _, msg := range msgs {
 		if log, ok := msg.(LogChunkMsg); ok && (strings.Contains(log.Chunk, "resumed session") || strings.Contains(log.Chunk, "replayed")) {
@@ -431,14 +442,17 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 				if event.Text == "history reply" {
 					sawAssistantReplay = true
 				}
+				if event.Kind == TranscriptEventPlan && len(event.PlanEntries) == 2 && event.PlanEntries[1].Content == "Continue migration" {
+					sawPlanReplay = true
+				}
 			}
 		}
 	}
 	if replayBatchCount != 1 {
 		t.Fatalf("slashResume() replay batches = %d, want 1", replayBatchCount)
 	}
-	if !sawUserReplay || !sawAssistantReplay {
-		t.Fatalf("slashResume() messages = %#v, want user and final assistant replay", msgs)
+	if !sawUserReplay || !sawAssistantReplay || !sawPlanReplay {
+		t.Fatalf("slashResume() messages = %#v, want user, plan, and final assistant replay", msgs)
 	}
 }
 

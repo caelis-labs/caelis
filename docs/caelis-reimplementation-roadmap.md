@@ -1401,8 +1401,11 @@ be migrated before retiring the old stack:
       from canonical durable events, preferring the first user message and
       reusing the same generated summary for TUI, ACP, and future APP list
       consumers instead of keeping a TUI-only resume fallback.
-    - Still pending: current on-disk legacy session layout migration and reload
-      UX polish are not implemented.
+    - Migrated baseline: TUI resume/reload replay now restores canonical plan
+      updates alongside durable user and final assistant messages, while still
+      filtering transient chunks and process-level tool trace events.
+    - Still pending: current on-disk legacy session layout migration and
+      remaining reload UX polish are not implemented.
 
 ### Next Migration Milestones
 

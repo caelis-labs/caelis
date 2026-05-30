@@ -551,6 +551,8 @@ func shouldReplayEventInTUIResume(event kernel.Event) bool {
 	switch event.Kind {
 	case kernel.EventKindUserMessage:
 		return strings.TrimSpace(gatewayUserText(event)) != ""
+	case kernel.EventKindPlanUpdate:
+		return event.Plan != nil && len(event.Plan.Entries) > 0
 	case kernel.EventKindAssistantMessage:
 		payload := event.Narrative
 		if payload == nil {
