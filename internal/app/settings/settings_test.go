@@ -187,6 +187,47 @@ func TestManagerACPAgentUpsertDeletePersistsNormalizedAgents(t *testing.T) {
 	}
 }
 
+func TestManagerDisableACPAgentPersistsTombstoneAndUpsertClearsIt(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileStore(t.TempDir())
+	manager, err := NewManager(ctx, store, Document{
+		Agents: []plugin.ACPAgentDescriptor{{
+			Name:    "Helper",
+			Command: "helper-acp",
+		}},
+		DisabledAgents: []string{"old", "Helper"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.DisableACPAgent(ctx, " Helper "); err != nil {
+		t.Fatal(err)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 0 {
+		t.Fatalf("agents after disable = %#v, want none", agents)
+	}
+	if disabled := manager.ListDisabledACPAgents(); len(disabled) != 2 || disabled[0] != "helper" || disabled[1] != "old" {
+		t.Fatalf("disabled agents = %#v, want helper/old", disabled)
+	}
+	if _, err := manager.UpsertACPAgent(ctx, plugin.ACPAgentDescriptor{Name: "helper", Command: "helper-next"}); err != nil {
+		t.Fatal(err)
+	}
+	if disabled := manager.ListDisabledACPAgents(); len(disabled) != 1 || disabled[0] != "old" {
+		t.Fatalf("disabled agents after upsert = %#v, want old", disabled)
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.DisabledAgents) != 1 || doc.DisabledAgents[0] != "old" {
+		t.Fatalf("persisted disabled agents = %#v, want old", doc.DisabledAgents)
+	}
+}
+
 func TestNormalizeModelConfigKnownProviderEndpointIDs(t *testing.T) {
 	tests := []struct {
 		name       string

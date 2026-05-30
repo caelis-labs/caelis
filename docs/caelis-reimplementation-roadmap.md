@@ -1056,12 +1056,11 @@ be migrated before retiring the old stack:
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell, built-in adapter
-     update, plugin/static agent removal, live
-     remote ACP config RPC/reconnect behavior, remote-declared controller
-     option discovery, and non-host `/doctor fix` repair flows still have old
-     driver/app assumptions or missing service-native feature parity, so the
-     old TUI stack cannot be removed yet.
+   - Slash commands such as the `/connect` wizard shell, live remote ACP config
+     RPC/reconnect behavior, remote-declared controller option discovery, and
+     non-host `/doctor fix` repair flows still have old driver/app assumptions
+     or missing service-native feature parity, so the old TUI stack cannot be
+     removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1273,6 +1272,11 @@ be migrated before retiring the old stack:
       it through `RegisterBuiltinWithOptions(Install: true)`, so updates refresh
       the managed adapter command in shared settings without a separate surface
       or old-stack branch.
+    - Migrated baseline: plugin/static external ACP agent removal now has a
+      service-native settings tombstone. `/agent remove <agent>` can hide an
+      agent supplied by plugin discovery or static local composition, while
+      later explicit registration clears the tombstone and restores the shared
+      descriptor path for TUI and future APP consumers.
     - Migrated baseline: default self-agent spawning now belongs to
       `internal/app/local`. When no explicit `self` descriptor is configured and
       the runtime has a durable store URI, the local stack exposes a service
@@ -1282,9 +1286,9 @@ be migrated before retiring the old stack:
     - Still pending: durable sidecar continuation across restarts,
       delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical
-      remote session id reuse, plugin/static agent removal, live remote ACP
-      controller config RPC/reconnect application, remote-declared controller
-      option discovery, and terminal previews remain old-stack or unmigrated.
+      remote session id reuse, live remote ACP controller config RPC/reconnect
+      application, remote-declared controller option discovery, and terminal
+      previews remain old-stack or unmigrated.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the

@@ -236,6 +236,94 @@ func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
 	}
 }
 
+func TestAgentServiceRemoveDisablesStaticAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		Agents: []AgentDescriptor{{
+			ID:          "plugin-helper",
+			Name:        "helper",
+			Kind:        AgentKindExternalACP,
+			Description: "plugin helper",
+			Command:     "helper-acp",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agents, err := svc.Agents().List(ctx); err != nil || len(agents) != 1 || agents[0].ID != "plugin-helper" {
+		t.Fatalf("agents before remove = %#v err=%v, want plugin-helper", agents, err)
+	}
+	if err := svc.Agents().Remove(ctx, "helper"); err != nil {
+		t.Fatal(err)
+	}
+	if agents, err := svc.Agents().List(ctx); err != nil || len(agents) != 0 {
+		t.Fatalf("agents after static remove = %#v err=%v, want none", agents, err)
+	}
+	if disabled := manager.ListDisabledACPAgents(); len(disabled) != 1 || disabled[0] != "helper" {
+		t.Fatalf("disabled agents = %#v, want helper", disabled)
+	}
+	registered, err := svc.Agents().RegisterCustom(ctx, AgentDescriptor{Name: "helper", Command: "helper-next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.Command != "helper-next" {
+		t.Fatalf("registered = %#v, want helper-next", registered)
+	}
+	if disabled := manager.ListDisabledACPAgents(); len(disabled) != 0 {
+		t.Fatalf("disabled agents after register = %#v, want none", disabled)
+	}
+	agents, err := svc.Agents().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].Command != "helper-next" {
+		t.Fatalf("agents after re-register = %#v, want settings-backed helper", agents)
+	}
+}
+
+func TestAgentServiceRemoveStaticAgentByIDDisablesNameAlias(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
+		Agents: []plugin.ACPAgentDescriptor{{
+			Name:    "helper",
+			Command: "helper-override",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		Agents: []AgentDescriptor{{
+			ID:      "plugin-helper",
+			Name:    "helper",
+			Kind:    AgentKindExternalACP,
+			Command: "helper-acp",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Agents().Remove(ctx, "plugin-helper"); err != nil {
+		t.Fatal(err)
+	}
+	if agents, err := svc.Agents().List(ctx); err != nil || len(agents) != 0 {
+		t.Fatalf("agents after remove by id = %#v err=%v, want none", agents, err)
+	}
+	if disabled := manager.ListDisabledACPAgents(); !slices.Contains(disabled, "helper") || !slices.Contains(disabled, "plugin-helper") {
+		t.Fatalf("disabled agents = %#v, want helper and plugin-helper", disabled)
+	}
+}
+
 func TestAgentServiceRegistersBuiltinAgent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

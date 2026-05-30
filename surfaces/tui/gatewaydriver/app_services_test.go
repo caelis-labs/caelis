@@ -329,6 +329,58 @@ func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesRemovesStaticACPAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine:   &appServiceDriverEngine{},
+		Settings: manager,
+		Agents: []appservices.AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "reviewer",
+			Kind:        appservices.AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Description: "review code through ACP",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := driver.ListAgents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListAgents() error = %v", err)
+	}
+	if len(agents) != 1 || agents[0].Name != "reviewer" {
+		t.Fatalf("agents before remove = %#v, want reviewer", agents)
+	}
+	if _, err := driver.RemoveAgent(ctx, "reviewer"); err != nil {
+		t.Fatalf("RemoveAgent(static) error = %v", err)
+	}
+	agents, err = driver.ListAgents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListAgents(after remove) error = %v", err)
+	}
+	if len(agents) != 0 {
+		t.Fatalf("agents after remove = %#v, want none", agents)
+	}
+	if disabled := manager.ListDisabledACPAgents(); len(disabled) != 1 || disabled[0] != "reviewer" {
+		t.Fatalf("disabled agents = %#v, want reviewer", disabled)
+	}
+}
+
 func TestBindAppServicesRegistersCustomACPAgent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

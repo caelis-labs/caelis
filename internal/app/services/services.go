@@ -708,12 +708,29 @@ type AgentService struct {
 }
 
 func (s AgentService) List(context.Context) ([]AgentDescriptor, error) {
-	agents := cloneAgents(s.services.agents)
+	disabled := map[string]struct{}{}
 	if s.services.settings == nil {
-		return agents, nil
+		return cloneAgents(s.services.agents), nil
+	}
+	for _, name := range s.services.settings.ListDisabledACPAgents() {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name != "" {
+			disabled[name] = struct{}{}
+		}
+	}
+	agents := make([]AgentDescriptor, 0, len(s.services.agents))
+	for _, agent := range cloneAgents(s.services.agents) {
+		if agentDisabled(agent, disabled) {
+			continue
+		}
+		agents = append(agents, agent)
 	}
 	for _, agent := range s.services.settings.ListACPAgents() {
-		agents = upsertAgentDescriptor(agents, agentDescriptorFromPlugin(agent))
+		descriptor := agentDescriptorFromPlugin(agent)
+		if agentDisabled(descriptor, disabled) {
+			continue
+		}
+		agents = upsertAgentDescriptor(agents, descriptor)
 	}
 	return agents, nil
 }
@@ -804,6 +821,14 @@ func (s AgentService) ListInstallableBuiltins(ctx context.Context) ([]AgentInsta
 func (s AgentService) Remove(ctx context.Context, name string) error {
 	if s.services.settings == nil {
 		return errors.New("app/services: settings manager is not configured")
+	}
+	if tombstones := s.staticAgentDisableNames(name); len(tombstones) > 0 {
+		for _, tombstone := range tombstones {
+			if err := s.services.settings.DisableACPAgent(ctx, tombstone); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	return s.services.settings.DeleteACPAgent(ctx, name)
 }
@@ -1220,13 +1245,12 @@ func normalizeAgentDescriptor(agent AgentDescriptor) AgentDescriptor {
 
 func upsertAgentDescriptor(agents []AgentDescriptor, agent AgentDescriptor) []AgentDescriptor {
 	agent = normalizeAgentDescriptor(agent)
-	id := strings.ToLower(firstNonEmpty(agent.ID, agent.Name))
+	id := agentLookupKey(agent)
 	if id == "" {
 		return agents
 	}
 	for i, existing := range agents {
-		existingID := strings.ToLower(firstNonEmpty(existing.ID, existing.Name))
-		if existingID == id {
+		if agentIdentityMatches(existing, agent) {
 			next := cloneAgents(agents)
 			next[i] = agent
 			return next
@@ -1234,6 +1258,93 @@ func upsertAgentDescriptor(agents []AgentDescriptor, agent AgentDescriptor) []Ag
 	}
 	out := cloneAgents(agents)
 	out = append(out, agent)
+	return out
+}
+
+func (s AgentService) staticAgentDisableNames(name string) []string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return nil
+	}
+	for _, agent := range s.services.agents {
+		if agentMatchesName(agent, name) {
+			names := []string{name}
+			agentName := strings.ToLower(strings.TrimSpace(agent.Name))
+			if agentName != "" && agentName != name {
+				names = append(names, agentName)
+			}
+			return dedupeServiceNames(names)
+		}
+	}
+	return nil
+}
+
+func agentLookupKey(agent AgentDescriptor) string {
+	return strings.ToLower(strings.TrimSpace(firstNonEmpty(agent.ID, agent.Name)))
+}
+
+func agentMatchesName(agent AgentDescriptor, name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(agent.ID), name) ||
+		strings.EqualFold(strings.TrimSpace(agent.Name), name) ||
+		agentLookupKey(agent) == name
+}
+
+func agentIdentityMatches(left AgentDescriptor, right AgentDescriptor) bool {
+	for _, leftKey := range []string{left.ID, left.Name, agentLookupKey(left)} {
+		leftKey = strings.ToLower(strings.TrimSpace(leftKey))
+		if leftKey == "" {
+			continue
+		}
+		for _, rightKey := range []string{right.ID, right.Name, agentLookupKey(right)} {
+			rightKey = strings.ToLower(strings.TrimSpace(rightKey))
+			if rightKey == "" {
+				continue
+			}
+			if leftKey == rightKey {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func agentDisabled(agent AgentDescriptor, disabled map[string]struct{}) bool {
+	if len(disabled) == 0 {
+		return false
+	}
+	for _, key := range []string{agent.ID, agent.Name, agentLookupKey(agent)} {
+		key = strings.ToLower(strings.TrimSpace(key))
+		if key == "" {
+			continue
+		}
+		if _, ok := disabled[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func dedupeServiceNames(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, name := range in {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
 	return out
 }
 

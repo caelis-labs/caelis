@@ -23,10 +23,11 @@ import (
 )
 
 type Document struct {
-	Runtime config.Runtime              `json:"runtime,omitempty"`
-	Models  ModelCatalog                `json:"models,omitempty"`
-	Agents  []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
-	Meta    map[string]any              `json:"meta,omitempty"`
+	Runtime        config.Runtime              `json:"runtime,omitempty"`
+	Models         ModelCatalog                `json:"models,omitempty"`
+	Agents         []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
+	DisabledAgents []string                    `json:"disabled_acp_agents,omitempty"`
+	Meta           map[string]any              `json:"meta,omitempty"`
 }
 
 type ModelCatalog struct {
@@ -300,6 +301,15 @@ func (m *Manager) ListACPAgents() []plugin.ACPAgentDescriptor {
 	return cloneAgents(m.doc.Agents)
 }
 
+func (m *Manager) ListDisabledACPAgents() []string {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return normalizeAgentNames(m.doc.DisabledAgents)
+}
+
 func (m *Manager) UpsertACPAgent(ctx context.Context, agent plugin.ACPAgentDescriptor) (plugin.ACPAgentDescriptor, error) {
 	if m == nil {
 		return plugin.ACPAgentDescriptor{}, errors.New("app/settings: manager is nil")
@@ -329,6 +339,7 @@ func (m *Manager) UpsertACPAgent(ctx context.Context, agent plugin.ACPAgentDescr
 	}
 	doc := CloneDocument(m.doc)
 	doc.Agents = next
+	doc.DisabledAgents = removeAgentName(doc.DisabledAgents, agent.Name)
 	if err := m.saveDocumentLocked(ctx, doc); err != nil {
 		return plugin.ACPAgentDescriptor{}, err
 	}
@@ -359,6 +370,22 @@ func (m *Manager) DeleteACPAgent(ctx context.Context, name string) error {
 	}
 	doc := CloneDocument(m.doc)
 	doc.Agents = next
+	return m.saveDocumentLocked(ctx, doc)
+}
+
+func (m *Manager) DisableACPAgent(ctx context.Context, name string) error {
+	if m == nil {
+		return errors.New("app/settings: manager is nil")
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return errors.New("app/settings: ACP agent name is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc := CloneDocument(m.doc)
+	doc.Agents = removeACPAgentDescriptor(doc.Agents, name)
+	doc.DisabledAgents = normalizeAgentNames(append(doc.DisabledAgents, name))
 	return m.saveDocumentLocked(ctx, doc)
 }
 
@@ -606,6 +633,7 @@ func NormalizeDocument(doc Document) Document {
 	doc.Runtime = cloneRuntime(doc.Runtime)
 	doc.Models = NormalizeModelCatalog(doc.Models)
 	doc.Agents = cloneAgents(doc.Agents)
+	doc.DisabledAgents = normalizeAgentNames(doc.DisabledAgents)
 	doc.Meta = maps.Clone(doc.Meta)
 	return doc
 }
@@ -804,6 +832,9 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 	if len(loaded.Agents) > 0 {
 		out.Agents = loaded.Agents
 	}
+	if len(loaded.DisabledAgents) > 0 {
+		out.DisabledAgents = loaded.DisabledAgents
+	}
 	if len(loaded.Meta) > 0 {
 		out.Meta = maps.Clone(loaded.Meta)
 	}
@@ -859,6 +890,57 @@ func cloneAgents(in []plugin.ACPAgentDescriptor) []plugin.ACPAgentDescriptor {
 		}
 		seen[agent.Name] = struct{}{}
 		out = append(out, agent)
+	}
+	return out
+}
+
+func removeACPAgentDescriptor(in []plugin.ACPAgentDescriptor, name string) []plugin.ACPAgentDescriptor {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || len(in) == 0 {
+		return cloneAgents(in)
+	}
+	out := make([]plugin.ACPAgentDescriptor, 0, len(in))
+	for _, agent := range cloneAgents(in) {
+		if strings.EqualFold(strings.TrimSpace(agent.Name), name) {
+			continue
+		}
+		out = append(out, agent)
+	}
+	return out
+}
+
+func normalizeAgentNames(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	seen := map[string]struct{}{}
+	for _, name := range in {
+		name = strings.ToLower(strings.TrimSpace(name))
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func removeAgentName(in []string, name string) []string {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" || len(in) == 0 {
+		return normalizeAgentNames(in)
+	}
+	out := make([]string, 0, len(in))
+	for _, existing := range normalizeAgentNames(in) {
+		if existing == name {
+			continue
+		}
+		out = append(out, existing)
 	}
 	return out
 }
