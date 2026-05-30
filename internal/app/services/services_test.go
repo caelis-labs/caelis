@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -582,6 +584,45 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceHostLifecycleIsNoop(t *testing.T) {
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			Sandbox: config.Sandbox{Backend: "host"},
+		},
+		Engine: &recordingEngine{},
+		Sandbox: fakeSandboxRuntime{
+			descriptor: sandbox.Descriptor{
+				Backend: sandbox.BackendHost,
+				DefaultConstraints: sandbox.Constraints{
+					Route:   sandbox.RouteHost,
+					Backend: sandbox.BackendHost,
+				},
+			},
+			status: sandbox.Status{
+				RequestedBackend: sandbox.BackendHost,
+				ResolvedBackend:  sandbox.BackendHost,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, call := range map[string]func(context.Context) (SandboxStatus, error){
+		"status":  svc.Sandbox().Status,
+		"prepare": svc.Sandbox().Prepare,
+		"repair":  svc.Sandbox().Repair,
+		"reset":   svc.Sandbox().Reset,
+	} {
+		status, err := call(context.Background())
+		if err != nil {
+			t.Fatalf("%s error = %v", name, err)
+		}
+		if status.RequestedBackend != "host" || status.ResolvedBackend != "host" || status.Route != "host" {
+			t.Fatalf("%s status = %#v, want host route", name, status)
+		}
+	}
+}
+
 func TestSessionServiceListAppliesWorkspaceDefaults(t *testing.T) {
 	engine := &recordingEngine{page: session.SessionPage{
 		Sessions: []session.SessionSummary{{
@@ -821,6 +862,39 @@ type recordingEngine struct {
 	loadRef  session.Ref
 	state    session.State
 	snapshot session.Snapshot
+}
+
+type fakeSandboxRuntime struct {
+	descriptor sandbox.Descriptor
+	status     sandbox.Status
+}
+
+func (r fakeSandboxRuntime) Descriptor() sandbox.Descriptor {
+	return sandbox.CloneDescriptor(r.descriptor)
+}
+
+func (r fakeSandboxRuntime) Status() sandbox.Status {
+	return sandbox.CloneStatus(r.status)
+}
+
+func (fakeSandboxRuntime) FileSystem() sandbox.FileSystem {
+	return nil
+}
+
+func (fakeSandboxRuntime) Run(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	return sandbox.CommandResult{}, errors.New("not implemented")
+}
+
+func (fakeSandboxRuntime) Start(context.Context, sandbox.CommandRequest) (sandbox.Session, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (fakeSandboxRuntime) Open(context.Context, sandbox.SessionRef) (sandbox.Session, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (fakeSandboxRuntime) Close() error {
+	return nil
 }
 
 func (e *recordingEngine) StartSession(_ context.Context, req session.StartRequest) (session.Session, error) {

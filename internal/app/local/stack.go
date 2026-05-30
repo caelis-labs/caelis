@@ -178,6 +178,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	svc, err := services.New(services.Config{
 		Runtime:        runtimeCfg,
 		Engine:         engine,
+		Sandbox:        sandboxRuntime,
 		Agents:         agentDescriptors(externalAgents),
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
 		Invokers:       agentInvokers(store, externalAgents),

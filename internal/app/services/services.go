@@ -14,6 +14,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -29,6 +30,7 @@ const (
 type Services struct {
 	runtime   config.Runtime
 	engine    coreruntime.Engine
+	sandbox   sandbox.Runtime
 	agents    []AgentDescriptor
 	builtins  []AgentDescriptor
 	invokers  map[string]AgentInvoker
@@ -43,6 +45,7 @@ type Config struct {
 	AppName        string
 	UserID         string
 	Engine         coreruntime.Engine
+	Sandbox        sandbox.Runtime
 	Agents         []AgentDescriptor
 	BuiltinAgents  []AgentDescriptor
 	Invokers       map[string]AgentInvoker
@@ -62,6 +65,7 @@ func New(cfg Config) (Services, error) {
 	return Services{
 		runtime:   runtimeCfg,
 		engine:    cfg.Engine,
+		sandbox:   cfg.Sandbox,
 		agents:    cloneAgents(cfg.Agents),
 		builtins:  cloneAgents(cfg.BuiltinAgents),
 		invokers:  maps.Clone(cfg.Invokers),
@@ -102,6 +106,10 @@ func (s Services) Agents() AgentService {
 
 func (s Services) Resources() ResourceService {
 	return ResourceService{services: s}
+}
+
+func (s Services) Sandbox() SandboxService {
+	return SandboxService{services: s}
 }
 
 func (s Services) Views() ViewService {
@@ -402,6 +410,110 @@ type ResourceService struct {
 
 func (s ResourceService) Catalog(context.Context) (appresources.Catalog, error) {
 	return appresources.CloneCatalog(s.services.resources), nil
+}
+
+type SandboxService struct {
+	services Services
+}
+
+type SandboxStatus struct {
+	RequestedBackend         string              `json:"requested_backend,omitempty"`
+	ResolvedBackend          string              `json:"resolved_backend,omitempty"`
+	Route                    string              `json:"route,omitempty"`
+	FallbackToHost           bool                `json:"fallback_to_host,omitempty"`
+	FallbackReason           string              `json:"fallback_reason,omitempty"`
+	FallbackInstallHint      string              `json:"fallback_install_hint,omitempty"`
+	Setup                    sandbox.SetupStatus `json:"setup,omitempty"`
+	SetupRequired            bool                `json:"setup_required,omitempty"`
+	SetupError               string              `json:"setup_error,omitempty"`
+	SetupMarkerCurrent       bool                `json:"setup_marker_current,omitempty"`
+	SetupMarkerReason        string              `json:"setup_marker_reason,omitempty"`
+	SandboxRuntimeConfigured bool                `json:"sandbox_runtime_configured,omitempty"`
+}
+
+func (s SandboxService) Status(ctx context.Context) (SandboxStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return SandboxStatus{}, err
+	}
+	return s.statusFromRuntime(), nil
+}
+
+func (s SandboxService) Prepare(ctx context.Context) (SandboxStatus, error) {
+	return s.noopHostLifecycle(ctx, "prepare")
+}
+
+func (s SandboxService) Repair(ctx context.Context) (SandboxStatus, error) {
+	return s.noopHostLifecycle(ctx, "repair")
+}
+
+func (s SandboxService) Reset(ctx context.Context) (SandboxStatus, error) {
+	return s.noopHostLifecycle(ctx, "reset")
+}
+
+func (s SandboxService) noopHostLifecycle(ctx context.Context, action string) (SandboxStatus, error) {
+	status, err := s.Status(ctx)
+	if err != nil {
+		return status, err
+	}
+	if strings.EqualFold(strings.TrimSpace(status.ResolvedBackend), string(sandbox.BackendHost)) {
+		return status, nil
+	}
+	return status, fmt.Errorf("app/services: sandbox %q does not support %s through app services", status.ResolvedBackend, strings.TrimSpace(action))
+}
+
+func (s SandboxService) statusFromRuntime() SandboxStatus {
+	runtimeCfg := s.services.Runtime()
+	out := SandboxStatus{
+		RequestedBackend: strings.TrimSpace(runtimeCfg.Sandbox.Backend),
+	}
+	if s.services.sandbox == nil {
+		return out
+	}
+	status := sandbox.CloneStatus(s.services.sandbox.Status())
+	descriptor := sandbox.CloneDescriptor(s.services.sandbox.Descriptor())
+	out.SandboxRuntimeConfigured = true
+	out.RequestedBackend = firstNonEmpty(string(status.RequestedBackend), out.RequestedBackend, string(descriptor.Backend))
+	out.ResolvedBackend = firstNonEmpty(string(status.ResolvedBackend), string(descriptor.Backend), out.RequestedBackend)
+	out.Route = firstNonEmpty(string(descriptor.DefaultConstraints.Route), sandboxRouteForBackend(out.ResolvedBackend))
+	out.FallbackToHost = status.FallbackToHost
+	out.FallbackReason = strings.TrimSpace(status.FallbackReason)
+	out.FallbackInstallHint = strings.TrimSpace(status.FallbackInstallHint)
+	out.Setup = sandbox.CloneSetupStatus(status.Setup)
+	out.SetupRequired = status.Setup.Required
+	out.SetupError = strings.TrimSpace(status.Setup.Error)
+	if global, ok := sandboxSetupCheck(status.Setup, sandbox.SetupGlobal); ok {
+		out.SetupMarkerCurrent = global.Current
+		out.SetupMarkerReason = strings.TrimSpace(global.Reason)
+		if out.SetupError == "" {
+			out.SetupError = strings.TrimSpace(global.Error)
+		}
+		if !out.SetupRequired {
+			out.SetupRequired = global.Required && !global.Current
+		}
+	}
+	return out
+}
+
+func sandboxRouteForBackend(backend string) string {
+	if strings.EqualFold(strings.TrimSpace(backend), string(sandbox.BackendHost)) {
+		return string(sandbox.RouteHost)
+	}
+	if strings.TrimSpace(backend) == "" {
+		return ""
+	}
+	return string(sandbox.RouteSandbox)
+}
+
+func sandboxSetupCheck(status sandbox.SetupStatus, scope sandbox.SetupScope) (sandbox.SetupCheck, bool) {
+	for _, check := range status.Checks {
+		if check.Scope == scope {
+			return check, true
+		}
+	}
+	return sandbox.SetupCheck{}, false
 }
 
 type ViewService struct {

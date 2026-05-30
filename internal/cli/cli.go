@@ -16,7 +16,9 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	applocal "github.com/OnslaughtSnail/caelis/internal/app/local"
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	coreacpserver "github.com/OnslaughtSnail/caelis/internal/surface/acpserver"
 	coreheadless "github.com/OnslaughtSnail/caelis/internal/surface/headless"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -36,8 +38,36 @@ type runResult struct {
 	PromptTokens int    `json:"prompt_tokens,omitempty"`
 }
 
-type doctorResult = gatewayapp.DoctorReport
-type sandboxStatusResult = gatewayapp.SandboxStatus
+type doctorResult struct {
+	AppName                 string   `json:"app_name,omitempty"`
+	UserID                  string   `json:"user_id,omitempty"`
+	WorkspaceKey            string   `json:"workspace_key,omitempty"`
+	WorkspaceCWD            string   `json:"workspace_cwd,omitempty"`
+	ActiveProvider          string   `json:"active_provider,omitempty"`
+	ActiveModel             string   `json:"active_model,omitempty"`
+	ActiveModelAlias        string   `json:"active_model_alias,omitempty"`
+	ReasoningEffort         string   `json:"reasoning_effort,omitempty"`
+	StoreBackend            string   `json:"store_backend,omitempty"`
+	StoreDir                string   `json:"store_dir,omitempty"`
+	SandboxRequestedBackend string   `json:"sandbox_requested_backend,omitempty"`
+	SandboxResolvedBackend  string   `json:"sandbox_resolved_backend,omitempty"`
+	SandboxRoute            string   `json:"sandbox_route,omitempty"`
+	SandboxSetupRequired    bool     `json:"sandbox_setup_required,omitempty"`
+	SandboxSetupError       string   `json:"sandbox_setup_error,omitempty"`
+	SandboxMarkerCurrent    bool     `json:"sandbox_setup_marker_current,omitempty"`
+	SandboxMarkerReason     string   `json:"sandbox_setup_marker_reason,omitempty"`
+	Warnings                []string `json:"warnings,omitempty"`
+}
+
+type sandboxStatusResult struct {
+	RequestedBackend   string
+	ResolvedBackend    string
+	Route              string
+	SetupRequired      bool
+	SetupError         string
+	SetupMarkerCurrent bool
+	SetupMarkerReason  string
+}
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	return run(ctx, args, stdin, stdout, stderr)
@@ -158,28 +188,29 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		if err != nil {
 			return err
 		}
-		stack, err := gatewayapp.NewLocalStack(cfg)
+		stack, err := newCoreLocalStack(ctx, cfg)
 		if err != nil {
 			return err
 		}
-		return runDoctor(ctx, stack, strings.TrimSpace(*sessionID), outFmt, stdout)
+		return runDoctor(ctx, stack.Services(), strings.TrimSpace(*sessionID), outFmt, stdout)
 	}
 	if sandboxSubcommand != "" {
 		outFmt, err := parseOutputFormat(*format)
 		if err != nil {
 			return err
 		}
-		stack, err := gatewayapp.NewLocalStack(cfg)
+		stack, err := newCoreLocalStack(ctx, cfg)
 		if err != nil {
 			return err
 		}
+		services := stack.Services()
 		switch sandboxSubcommand {
 		case "setup":
-			return runSandboxSetup(ctx, stack, outFmt, stdout)
+			return runSandboxSetup(ctx, services, outFmt, stdout)
 		case "fix":
-			return runSandboxFix(ctx, stack, outFmt, stdout)
+			return runSandboxFix(ctx, services, outFmt, stdout)
 		case "reset", "clean":
-			return runSandboxReset(ctx, stack, outFmt, stdout)
+			return runSandboxReset(ctx, services, outFmt, stdout)
 		}
 	}
 
@@ -385,35 +416,43 @@ func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg gatewayapp.
 	})
 }
 
-func runDoctor(ctx context.Context, stack *gatewayapp.Stack, sessionID string, format outputFormat, stdout io.Writer) error {
-	report, err := stack.Doctor(ctx, gatewayapp.DoctorRequest{
-		SessionID: strings.TrimSpace(sessionID),
+func runDoctor(ctx context.Context, services appservices.Services, sessionID string, format outputFormat, stdout io.Writer) error {
+	view, err := services.Status().View(ctx, appservices.StatusRequest{
+		SessionRef: coresession.Ref{SessionID: strings.TrimSpace(sessionID)},
 	})
 	if err != nil {
 		return err
 	}
+	sandboxStatus, err := services.Sandbox().Status(ctx)
+	if err != nil {
+		return err
+	}
+	report := doctorResultFromApp(view, sandboxStatus)
 	return writeDoctorResult(stdout, format, report)
 }
 
-func runSandboxSetup(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
-	status, err := stack.PrepareSandbox(ctx)
-	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
+func runSandboxSetup(ctx context.Context, services appservices.Services, format outputFormat, stdout io.Writer) error {
+	status, err := services.Sandbox().Prepare(ctx)
+	result := sandboxStatusResultFromApp(status)
+	if writeErr := writeSandboxStatusResult(stdout, format, result); writeErr != nil && err == nil {
 		err = writeErr
 	}
 	return err
 }
 
-func runSandboxFix(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
-	status, err := stack.RepairSandbox(ctx)
-	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
+func runSandboxFix(ctx context.Context, services appservices.Services, format outputFormat, stdout io.Writer) error {
+	status, err := services.Sandbox().Repair(ctx)
+	result := sandboxStatusResultFromApp(status)
+	if writeErr := writeSandboxStatusResult(stdout, format, result); writeErr != nil && err == nil {
 		err = writeErr
 	}
 	return err
 }
 
-func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format outputFormat, stdout io.Writer) error {
-	status, err := stack.ResetSandbox(ctx)
-	if writeErr := writeSandboxStatusResult(stdout, format, status); writeErr != nil && err == nil {
+func runSandboxReset(ctx context.Context, services appservices.Services, format outputFormat, stdout io.Writer) error {
+	status, err := services.Sandbox().Reset(ctx)
+	result := sandboxStatusResultFromApp(status)
+	if writeErr := writeSandboxStatusResult(stdout, format, result); writeErr != nil && err == nil {
 		err = writeErr
 	}
 	return err
@@ -488,8 +527,77 @@ func writeDoctorResult(w io.Writer, format outputFormat, result doctorResult) er
 		enc.SetEscapeHTML(false)
 		return enc.Encode(result)
 	default:
-		_, err := fmt.Fprintln(w, gatewayapp.FormatDoctorText(result))
+		_, err := fmt.Fprintln(w, formatDoctorResult(result))
 		return err
+	}
+}
+
+func doctorResultFromApp(view appviewmodel.StatusView, sandboxStatus appservices.SandboxStatus) doctorResult {
+	result := doctorResult{
+		AppName:                 strings.TrimSpace(view.Runtime.AppName),
+		UserID:                  strings.TrimSpace(view.Runtime.UserID),
+		WorkspaceKey:            strings.TrimSpace(view.Runtime.WorkspaceKey),
+		WorkspaceCWD:            strings.TrimSpace(view.Runtime.WorkspaceCWD),
+		StoreBackend:            strings.TrimSpace(view.Runtime.StoreBackend),
+		StoreDir:                strings.TrimSpace(view.Runtime.StoreURI),
+		SandboxRequestedBackend: strings.TrimSpace(sandboxStatus.RequestedBackend),
+		SandboxResolvedBackend:  strings.TrimSpace(sandboxStatus.ResolvedBackend),
+		SandboxRoute:            strings.TrimSpace(sandboxStatus.Route),
+		SandboxSetupRequired:    sandboxStatus.SetupRequired,
+		SandboxSetupError:       strings.TrimSpace(sandboxStatus.SetupError),
+		SandboxMarkerCurrent:    sandboxStatus.SetupMarkerCurrent,
+		SandboxMarkerReason:     strings.TrimSpace(sandboxStatus.SetupMarkerReason),
+		ReasoningEffort:         strings.TrimSpace(view.Model.ReasoningEffort),
+	}
+	if view.Model.Current != nil {
+		result.ActiveProvider = strings.TrimSpace(view.Model.Current.Provider)
+		result.ActiveModel = strings.TrimSpace(view.Model.Current.Model)
+		result.ActiveModelAlias = strings.TrimSpace(firstNonEmptyString(view.Model.Current.Alias, view.Model.Current.ID))
+	}
+	if result.SandboxSetupError != "" {
+		result.Warnings = append(result.Warnings, "sandbox setup error: "+result.SandboxSetupError)
+	}
+	return result
+}
+
+func formatDoctorResult(report doctorResult) string {
+	lines := []string{
+		fmt.Sprintf("app_name: %s", firstNonEmptyString(report.AppName, "-")),
+		fmt.Sprintf("user_id: %s", firstNonEmptyString(report.UserID, "-")),
+		fmt.Sprintf("workspace_key: %s", firstNonEmptyString(report.WorkspaceKey, "-")),
+		fmt.Sprintf("workspace_cwd: %s", firstNonEmptyString(report.WorkspaceCWD, "-")),
+		fmt.Sprintf("active_provider: %s", firstNonEmptyString(report.ActiveProvider, "-")),
+		fmt.Sprintf("active_model: %s", firstNonEmptyString(report.ActiveModel, "-")),
+		fmt.Sprintf("active_model_alias: %s", firstNonEmptyString(report.ActiveModelAlias, "-")),
+		fmt.Sprintf("reasoning_effort: %s", firstNonEmptyString(report.ReasoningEffort, "-")),
+		fmt.Sprintf("store_backend: %s", firstNonEmptyString(report.StoreBackend, "-")),
+		fmt.Sprintf("store_dir: %s", firstNonEmptyString(report.StoreDir, "-")),
+		fmt.Sprintf("sandbox_requested_backend: %s", firstNonEmptyString(report.SandboxRequestedBackend, "-")),
+		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmptyString(report.SandboxResolvedBackend, "-")),
+		fmt.Sprintf("sandbox_route: %s", firstNonEmptyString(report.SandboxRoute, "-")),
+		fmt.Sprintf("sandbox_setup_required: %t", report.SandboxSetupRequired),
+		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(report.SandboxSetupError, "-")),
+		fmt.Sprintf("sandbox_setup_marker_current: %t", report.SandboxMarkerCurrent),
+		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(report.SandboxMarkerReason, "-")),
+	}
+	if len(report.Warnings) > 0 {
+		lines = append(lines, "warnings:")
+		for _, warning := range report.Warnings {
+			lines = append(lines, "  - "+strings.TrimSpace(warning))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func sandboxStatusResultFromApp(status appservices.SandboxStatus) sandboxStatusResult {
+	return sandboxStatusResult{
+		RequestedBackend:   strings.TrimSpace(status.RequestedBackend),
+		ResolvedBackend:    strings.TrimSpace(status.ResolvedBackend),
+		Route:              strings.TrimSpace(status.Route),
+		SetupRequired:      status.SetupRequired,
+		SetupError:         strings.TrimSpace(status.SetupError),
+		SetupMarkerCurrent: status.SetupMarkerCurrent,
+		SetupMarkerReason:  strings.TrimSpace(status.SetupMarkerReason),
 	}
 }
 
@@ -506,19 +614,14 @@ func writeSandboxStatusResult(w io.Writer, format outputFormat, result sandboxSt
 }
 
 func formatSandboxStatus(status sandboxStatusResult) string {
-	globalSetup, _ := status.Setup.Check("global")
-	setupRequired := status.Setup.Required || status.SetupRequired
-	setupError := firstNonEmptyString(status.Setup.Error, globalSetup.Error, status.SetupError)
-	setupMarkerCurrent := status.SetupMarkerCurrent || globalSetup.Current
-	setupMarkerReason := firstNonEmptyString(globalSetup.Reason, status.SetupMarkerReason)
 	lines := []string{
 		fmt.Sprintf("sandbox_requested_backend: %s", firstNonEmptyString(strings.TrimSpace(status.RequestedBackend), "-")),
 		fmt.Sprintf("sandbox_resolved_backend: %s", firstNonEmptyString(strings.TrimSpace(status.ResolvedBackend), "-")),
 		fmt.Sprintf("sandbox_route: %s", firstNonEmptyString(strings.TrimSpace(status.Route), "-")),
-		fmt.Sprintf("sandbox_setup_required: %t", setupRequired),
-		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(strings.TrimSpace(setupError), "-")),
-		fmt.Sprintf("sandbox_setup_marker_current: %t", setupMarkerCurrent),
-		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(strings.TrimSpace(setupMarkerReason), "-")),
+		fmt.Sprintf("sandbox_setup_required: %t", status.SetupRequired),
+		fmt.Sprintf("sandbox_setup_error: %s", firstNonEmptyString(strings.TrimSpace(status.SetupError), "-")),
+		fmt.Sprintf("sandbox_setup_marker_current: %t", status.SetupMarkerCurrent),
+		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(strings.TrimSpace(status.SetupMarkerReason), "-")),
 	}
 	return strings.Join(lines, "\n")
 }

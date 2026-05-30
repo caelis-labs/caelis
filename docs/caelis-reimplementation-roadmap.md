@@ -671,6 +671,11 @@ alongside the old stack without importing it:
 - `internal/app/services.ViewService`: shared TUI/APP-facing projection from
   canonical session snapshots to surface-neutral transcript, approval, and
   participant view models.
+- `internal/app/services.SandboxService`: shared sandbox status and lifecycle
+  surface. The current migrated baseline exposes core-native sandbox status
+  from the composed runtime and treats host setup/fix/reset/clean as explicit
+  no-op lifecycle operations instead of routing those commands through the old
+  stack.
 - `protocol/acp/projector/core`: canonical session event projection to ACP
   updates and permission requests.
 - `internal/surface/acpserver`: ACP JSON-RPC server over the new runtime engine.
@@ -727,6 +732,10 @@ The current verification path covers:
   context/output/reasoning values
 - local stack -> enabled plugin manifest + workspace `AGENTS.md` ->
   shared `ResourceService` catalog
+- CLI `doctor` and `-doctor` -> new local stack -> shared status/sandbox
+  services -> redacted text/JSON diagnostics
+- CLI `sandbox setup|fix|reset|clean` with host backend -> new local stack ->
+  shared sandbox service -> text/JSON sandbox lifecycle status
 - resource discovery -> home/workspace skills + plugin descriptors ->
   deterministic app resource catalog
 - resource catalog -> app prompt assembler -> loop instructions -> provider
@@ -917,10 +926,14 @@ be migrated before retiring the old stack:
      active-job diagnostics from `internal/app/services.Status().View()`
      through the shared app status view, instead of requiring
      `app/gatewayapp` doctor state.
-   - Still pending: standalone doctor entrypoints, sandbox
-     setup/fix/reset/clean, default home layout, full config hydration, setup
-     diagnostics, and several command dispatch paths still depend on
-     `app/gatewayapp` and `kernel.Service`.
+   - Migrated baseline: standalone CLI `doctor`/`-doctor` and
+     `sandbox setup|fix|reset|clean` now build the new
+     `internal/app/local` stack and use shared app status/sandbox services.
+     Host sandbox lifecycle commands are explicit no-ops with status output,
+     not old-stack fallbacks.
+   - Still pending: default home layout, full config hydration, rich setup
+     diagnostics, non-host sandbox repair/setup flows, and several command
+     dispatch paths still depend on `app/gatewayapp` and `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1042,10 +1055,13 @@ be migrated before retiring the old stack:
      are now exposed through a replaceable `ModelService` auth contract, wired
      by the local app stack to the core-native CodeFree adapter and consumed by
      the TUI `/connect` binding.
+   - Migrated baseline: standalone CLI doctor and host sandbox lifecycle
+     subcommands now use the new local stack and shared app services instead
+     of constructing `app/gatewayapp`.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, remaining TUI command integration, remote
      provider model discovery UI data, additional non-model ACP config
-     providers, and removal of the old
+     providers, non-host sandbox setup/repair config, and removal of the old
      `app/gatewayapp` config/model services once entrypoints move to the new
      stack.
 
@@ -1086,10 +1102,15 @@ be migrated before retiring the old stack:
 
 7. Sandbox backends and policy
    - The new stack only has a host sandbox adapter.
+   - Migrated baseline: shared app sandbox status now projects the composed
+     core sandbox runtime, and standalone CLI host
+     `sandbox setup|fix|reset|clean` commands use that service as explicit
+     no-op lifecycle operations.
    - macOS seatbelt, Linux bubblewrap/Landlock, Windows sandbox/helper/ACL
-     repair, sandbox setup/fix/reset/clean, network policy, writable/readable
-     root policy, skill sandbox roots, route diagnostics, and doctor reporting
-     remain old-stack capabilities.
+     repair, non-host sandbox setup/fix/reset/clean, network policy,
+     writable/readable root policy, skill sandbox roots, rich route
+     diagnostics, and production doctor repair reporting remain old-stack
+     capabilities.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
