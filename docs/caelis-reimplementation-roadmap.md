@@ -1332,10 +1332,14 @@ be migrated before retiring the old stack:
     - Migrated baseline: manual TUI compaction through `internal/app/services`
       now records a canonical compact checkpoint event, and runtime model
       context reconstruction starts from the latest compact checkpoint.
-    - Still pending: model-backed compact summary generation, automatic
-      compaction, usage accounting after compaction, compaction prompt policy,
-      and full runtime-vs-reload semantic round-trip tests remain to be
-      migrated.
+    - Migrated baseline: shared app-service compaction can now use the current
+      configured model provider to generate the checkpoint summary, preserving
+      the deterministic source-summary fallback when no model settings/provider
+      are configured. Provider usage returned by the compaction call is stored
+      in compact metadata for later surface/status projection.
+    - Still pending: automatic compaction, full usage accounting snapshots after
+      compaction, configurable compaction prompt policy, and full
+      runtime-vs-reload semantic round-trip tests remain to be migrated.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -16,6 +17,8 @@ const (
 	compactContractVersion = 1
 	defaultCompactMaxChars = 12000
 )
+
+var errCompactNoModelResponse = errors.New("app/services: compaction model stream ended without response")
 
 type CompactionService struct {
 	services Services
@@ -43,15 +46,124 @@ func (s CompactionService) Compact(ctx context.Context, req CompactSessionReques
 		return session.Event{}, err
 	}
 	source := compactSourceEvents(snapshot.Events)
-	event := compactEvent(snapshot.Session, source, req)
+	text, meta, err := s.compactText(ctx, snapshot, source, req)
+	if err != nil {
+		return session.Event{}, err
+	}
+	event := compactEvent(snapshot.Session, source, req, text, meta)
 	if _, err := s.services.engine.RecordEvents(ctx, snapshot.Session.Ref, []session.Event{event}); err != nil {
 		return session.Event{}, err
 	}
 	return session.CloneEvent(event), nil
 }
 
-func compactEvent(active session.Session, source []session.Event, req CompactSessionRequest) session.Event {
-	text := compactText(source, req.MaxChars)
+func (s CompactionService) compactText(ctx context.Context, snapshot session.Snapshot, source []session.Event, req CompactSessionRequest) (string, map[string]any, error) {
+	fallback := compactText(source, req.MaxChars)
+	if s.services.modelProvider == nil || s.services.settings == nil {
+		return fallback, nil, nil
+	}
+	cfg, ok, err := s.services.Models().Current(ctx, snapshot.Session.Ref)
+	if err != nil {
+		return "", nil, err
+	}
+	if !ok {
+		return fallback, nil, nil
+	}
+	provider, err := s.services.modelProvider(ctx, cfg)
+	if err != nil {
+		return "", nil, err
+	}
+	response, err := compactProviderResponse(ctx, provider, cfg.Model, compactPrompt(source, req.MaxChars))
+	if err != nil {
+		if errors.Is(err, errCompactNoModelResponse) {
+			return fallback, nil, nil
+		}
+		return "", nil, err
+	}
+	text := normalizeCompactModelText(response.Message.TextContent(), fallback)
+	meta := map[string]any{
+		"generator":      "app-services/model",
+		"model_id":       strings.TrimSpace(cfg.ID),
+		"model_provider": strings.TrimSpace(cfg.Provider),
+		"model":          strings.TrimSpace(cfg.Model),
+	}
+	if response.Usage != nil {
+		meta["usage"] = map[string]any{
+			"input_tokens":          response.Usage.InputTokens,
+			"cached_input_tokens":   response.Usage.CachedInputTokens,
+			"output_tokens":         response.Usage.OutputTokens,
+			"reasoning_tokens":      response.Usage.ReasoningTokens,
+			"total_tokens":          response.Usage.TotalTokens,
+			"context_window_tokens": response.Usage.ContextWindowTokens,
+		}
+	}
+	return text, meta, nil
+}
+
+func compactProviderResponse(ctx context.Context, provider model.Provider, modelID string, prompt string) (model.Response, error) {
+	if provider == nil {
+		return model.Response{}, errors.New("app/services: compaction model provider is required")
+	}
+	stream, err := provider.Stream(ctx, model.Request{
+		Model:    strings.TrimSpace(modelID),
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart(prompt)}}},
+		Stream:   true,
+		Meta: map[string]any{
+			"caelis.operation": "compact",
+		},
+	})
+	if err != nil {
+		return model.Response{}, err
+	}
+	defer stream.Close()
+	var final *model.Response
+	for {
+		event, err := stream.Recv()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return model.Response{}, err
+		}
+		if event.Response != nil {
+			response := *event.Response
+			final = &response
+			continue
+		}
+		if event.Message != nil {
+			message := model.CloneMessage(*event.Message)
+			final = &model.Response{Message: message, Status: model.ResponseCompleted}
+		}
+	}
+	if final == nil {
+		return model.Response{}, errCompactNoModelResponse
+	}
+	return *final, nil
+}
+
+func compactPrompt(source []session.Event, maxChars int) string {
+	return strings.Join([]string{
+		"Create a durable context checkpoint for this coding-agent session.",
+		"Return only the checkpoint text. Start with CONTEXT CHECKPOINT.",
+		"Preserve durable objective, current progress, blockers, decisions, file facts, task handles, validation results, and next actions.",
+		"Drop stale repetition, transient UI chatter, and low-value narration.",
+		"",
+		compactText(source, maxChars),
+	}, "\n")
+}
+
+func normalizeCompactModelText(text string, fallback string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return fallback
+	}
+	if strings.HasPrefix(strings.ToUpper(text), "CONTEXT CHECKPOINT") {
+		return text
+	}
+	return "CONTEXT CHECKPOINT\n\n" + text
+}
+
+func compactEvent(active session.Session, source []session.Event, req CompactSessionRequest, text string, modelMeta map[string]any) session.Event {
 	message := model.Message{
 		Role: model.RoleUser,
 		Parts: []model.Part{
@@ -68,13 +180,13 @@ func compactEvent(active session.Session, source []session.Event, req CompactSes
 		Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "caelis", Name: "caelis"},
 		Message:    &message,
 		Meta: map[string]any{
-			compactMetaKey: compactMeta(source, req),
+			compactMetaKey: compactMeta(source, req, modelMeta),
 		},
 		SessionID: active.SessionID,
 	}
 }
 
-func compactMeta(source []session.Event, req CompactSessionRequest) map[string]any {
+func compactMeta(source []session.Event, req CompactSessionRequest, modelMeta map[string]any) map[string]any {
 	trigger := strings.TrimSpace(req.Trigger)
 	if trigger == "" {
 		trigger = "manual"
@@ -83,13 +195,24 @@ func compactMeta(source []session.Event, req CompactSessionRequest) map[string]a
 	if len(source) > 0 {
 		summarizedThrough = strings.TrimSpace(source[len(source)-1].ID)
 	}
-	return map[string]any{
+	generator := "app-services/manual"
+	if value, _ := modelMeta["generator"].(string); strings.TrimSpace(value) != "" {
+		generator = strings.TrimSpace(value)
+	}
+	out := map[string]any{
 		"contract_version":      compactContractVersion,
-		"generator":             "app-services/manual",
+		"generator":             generator,
 		"trigger":               trigger,
 		"source_event_count":    len(source),
 		"summarized_through_id": summarizedThrough,
 	}
+	for key, value := range modelMeta {
+		if strings.TrimSpace(key) == "" || key == "generator" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func compactSourceEvents(events []session.Event) []session.Event {

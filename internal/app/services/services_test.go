@@ -660,6 +660,153 @@ func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	}
 }
 
+func TestCompactionUsesConfiguredModelProvider(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-compact",
+		Alias:    "compact",
+		BaseURL:  "https://api.example.test/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref: session.Ref{
+					AppName:      "caelis",
+					UserID:       "tester",
+					SessionID:    "sess-compact-model",
+					WorkspaceKey: "repo",
+				},
+			},
+			State: session.State{},
+			Events: []session.Event{
+				{
+					ID:   "evt-1",
+					Type: session.EventUser,
+					Message: &model.Message{
+						Role:  model.RoleUser,
+						Parts: []model.Part{model.NewTextPart("Project objective: migrate model-backed compaction")},
+					},
+				},
+				{
+					ID:   "evt-2",
+					Type: session.EventAssistant,
+					Message: &model.Message{
+						Role:  model.RoleAssistant,
+						Parts: []model.Part{model.NewTextPart("Implemented the service path")},
+					},
+				},
+			},
+		},
+	}
+	provider := &compactSummaryProvider{
+		response: "CONTEXT CHECKPOINT\n\nObjective: model compacted summary\nNext action: continue migration",
+		usage:    &model.Usage{InputTokens: 100, OutputTokens: 20, TotalTokens: 120},
+	}
+	var captured appsettings.ModelConfig
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (model.Provider, error) {
+			captured = cfg
+			return provider, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event, err := svc.Compaction().Compact(ctx, CompactSessionRequest{
+		SessionRef: session.Ref{SessionID: "sess-compact-model"},
+		Trigger:    "manual",
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if captured.ID != cfg.ID || captured.Model != "gpt-compact" {
+		t.Fatalf("captured config = %#v, want current compact model", captured)
+	}
+	if provider.request.Model != "gpt-compact" || len(provider.request.Messages) != 1 {
+		t.Fatalf("provider request = %#v, want compact model request", provider.request)
+	}
+	if prompt := provider.request.Messages[0].TextContent(); !strings.Contains(prompt, "Project objective: migrate model-backed compaction") || !strings.Contains(prompt, "Return only the checkpoint text") {
+		t.Fatalf("compact prompt = %q, want source facts and output contract", prompt)
+	}
+	if got := event.Message.TextContent(); got != provider.response {
+		t.Fatalf("compact text = %q, want model checkpoint", got)
+	}
+	meta, ok := event.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("compact meta = %#v, want compact metadata map", event.Meta)
+	}
+	if meta["generator"] != "app-services/model" || meta["model"] != "gpt-compact" || meta["model_provider"] != "openai-compatible" {
+		t.Fatalf("compact meta = %#v, want model generator metadata", meta)
+	}
+	usage, ok := meta["usage"].(map[string]any)
+	if !ok || usage["total_tokens"] != 120 {
+		t.Fatalf("compact usage = %#v, want provider usage metadata", meta["usage"])
+	}
+	if len(engine.events) != 1 || engine.events[0].Message.TextContent() != provider.response {
+		t.Fatalf("recorded compact events = %#v, want model checkpoint", engine.events)
+	}
+}
+
+func TestCompactionFallsBackWhenModelProviderReturnsNoCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-empty",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-empty", WorkspaceKey: "repo"}},
+		Events: []session.Event{{
+			ID:   "evt-1",
+			Type: session.EventUser,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("fallback source fact")},
+			},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+		ModelProvider: func(context.Context, appsettings.ModelConfig) (model.Provider, error) {
+			return emptyCompactProvider{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event, err := svc.Compaction().Compact(ctx, CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-empty"}})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if text := event.Message.TextContent(); !strings.Contains(text, "fallback source fact") {
+		t.Fatalf("compact text = %q, want deterministic fallback summary", text)
+	}
+	meta, ok := event.Meta[compactMetaKey].(map[string]any)
+	if !ok || meta["generator"] != "app-services/manual" {
+		t.Fatalf("compact meta = %#v, want manual fallback generator", event.Meta)
+	}
+}
+
 func TestViewServiceProjectsLoadedSession(t *testing.T) {
 	engine := &recordingEngine{snapshot: session.Snapshot{
 		Session: session.Session{
@@ -1173,6 +1320,65 @@ type fakeSandboxRuntime struct {
 
 type catalogProvider struct {
 	models []model.ModelInfo
+}
+
+type compactSummaryProvider struct {
+	request  model.Request
+	response string
+	usage    *model.Usage
+}
+
+type emptyCompactProvider struct{}
+
+func (emptyCompactProvider) ID() string {
+	return "empty-compact"
+}
+
+func (emptyCompactProvider) Models(context.Context) ([]model.ModelInfo, error) {
+	return []model.ModelInfo{{ID: "gpt-empty", Provider: "openai-compatible"}}, nil
+}
+
+func (emptyCompactProvider) Stream(context.Context, model.Request) (model.Stream, error) {
+	return &model.StaticStream{}, nil
+}
+
+func (p *compactSummaryProvider) ID() string {
+	return "compact-summary"
+}
+
+func (p *compactSummaryProvider) Models(context.Context) ([]model.ModelInfo, error) {
+	return []model.ModelInfo{{ID: "gpt-compact", Provider: "openai-compatible"}}, nil
+}
+
+func (p *compactSummaryProvider) Stream(_ context.Context, req model.Request) (model.Stream, error) {
+	p.request = model.Request{
+		Model:    req.Model,
+		Messages: cloneModelMessages(req.Messages),
+		Stream:   req.Stream,
+	}
+	response := model.Response{
+		Status: model.ResponseCompleted,
+		Message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart(p.response)},
+		},
+		Usage: p.usage,
+	}
+	return &model.StaticStream{Events: []model.StreamEvent{{
+		Type:     model.StreamTurnDone,
+		Response: &response,
+	}}}, nil
+}
+
+func cloneModelMessages(in []model.Message) []model.Message {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]model.Message, 0, len(in))
+	for _, message := range in {
+		out = append(out, model.CloneMessage(message))
+	}
+	return out
 }
 
 func (p catalogProvider) ID() string {
