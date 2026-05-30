@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -139,10 +140,15 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, responseError("chat", resp)
+		err := responseError("chat", resp)
+		_ = resp.Body.Close()
+		return nil, err
 	}
+	if payload.Stream {
+		return newChatStream(resp.Body, p.ID(), payload.Model), nil
+	}
+	defer resp.Body.Close()
 	var completion chatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
 		return nil, err
@@ -182,13 +188,168 @@ func (p *Provider) chatRequest(req model.Request) (chatRequest, error) {
 	}
 	return chatRequest{
 		Model:    modelID,
-		Stream:   false,
+		Stream:   req.Stream,
 		Messages: messages,
 		Tools:    chatTools(req.Tools),
 		Format:   outputFormat(req.Output),
 		Think:    thinkValue(req),
 		Options:  p.requestOptions(),
 	}, nil
+}
+
+type chatStream struct {
+	body   io.Closer
+	events <-chan chatStreamItem
+	once   sync.Once
+}
+
+type chatStreamItem struct {
+	event model.StreamEvent
+	err   error
+}
+
+func newChatStream(body io.ReadCloser, providerID string, modelID string) model.Stream {
+	events := make(chan chatStreamItem, 32)
+	stream := &chatStream{body: body, events: events}
+	go readChatStream(body, providerID, modelID, events)
+	return stream
+}
+
+func (s *chatStream) Recv() (model.StreamEvent, error) {
+	if s == nil || s.events == nil {
+		return model.StreamEvent{}, io.EOF
+	}
+	item, ok := <-s.events
+	if !ok {
+		return model.StreamEvent{}, io.EOF
+	}
+	if item.err != nil {
+		return model.StreamEvent{}, item.err
+	}
+	return item.event, nil
+}
+
+func (s *chatStream) Close() error {
+	if s == nil || s.body == nil {
+		return nil
+	}
+	var err error
+	s.once.Do(func() {
+		err = s.body.Close()
+	})
+	return err
+}
+
+func readChatStream(body io.ReadCloser, providerID string, modelID string, out chan<- chatStreamItem) {
+	defer close(out)
+	defer body.Close()
+	decoder := json.NewDecoder(body)
+	acc := chatStreamAccumulator{role: model.RoleAssistant}
+	origin := &model.Origin{Provider: providerID, Model: strings.TrimSpace(modelID)}
+	var usage model.Usage
+	seen := false
+	for {
+		var chunk chatResponse
+		if err := decoder.Decode(&chunk); err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			_ = sendChatStreamItem(out, chatStreamItem{err: err})
+			return
+		}
+		seen = true
+		if strings.TrimSpace(chunk.Model) != "" {
+			origin.Model = strings.TrimSpace(chunk.Model)
+		}
+		for _, event := range acc.apply(chunk.Message) {
+			if !sendChatStreamItem(out, chatStreamItem{event: event}) {
+				return
+			}
+		}
+		if chunk.Done {
+			usage = usageFromChat(chunk)
+			break
+		}
+	}
+	if !seen {
+		_ = sendChatStreamItem(out, chatStreamItem{err: errors.New("model/ollama: stream ended without response")})
+		return
+	}
+	message := acc.message()
+	message.Origin = origin
+	message.Usage = &usage
+	response := model.Response{
+		Message: message,
+		Status:  model.ResponseCompleted,
+		Usage:   &usage,
+		Origin:  origin,
+	}
+	_ = sendChatStreamItem(out, chatStreamItem{event: model.StreamEvent{
+		Type:     model.StreamTurnDone,
+		Response: &response,
+	}})
+}
+
+func sendChatStreamItem(out chan<- chatStreamItem, item chatStreamItem) bool {
+	out <- item
+	return true
+}
+
+type chatStreamAccumulator struct {
+	role      model.Role
+	text      strings.Builder
+	reasoning strings.Builder
+	toolCalls []toolCall
+}
+
+func (a *chatStreamAccumulator) apply(message chatMessage) []model.StreamEvent {
+	if a == nil {
+		return nil
+	}
+	if role := model.Role(strings.TrimSpace(message.Role)); role != "" {
+		a.role = role
+	}
+	var events []model.StreamEvent
+	if message.Content != "" {
+		a.text.WriteString(message.Content)
+		events = append(events, model.StreamEvent{
+			Type:  model.StreamPartDelta,
+			Delta: message.Content,
+			Part:  ptrPart(model.NewTextPart(message.Content)),
+		})
+	}
+	if message.Thinking != "" {
+		a.reasoning.WriteString(message.Thinking)
+		events = append(events, model.StreamEvent{
+			Type:  model.StreamPartDelta,
+			Delta: message.Thinking,
+			Part:  ptrPart(model.NewReasoningPart(message.Thinking, model.ReasoningVisible)),
+		})
+	}
+	a.toolCalls = append(a.toolCalls, message.ToolCalls...)
+	return events
+}
+
+func (a *chatStreamAccumulator) message() model.Message {
+	role := a.role
+	if role == "" {
+		role = model.RoleAssistant
+	}
+	message, err := coreMessageFromChat(chatMessage{
+		Role:      string(role),
+		Content:   a.text.String(),
+		Thinking:  a.reasoning.String(),
+		ToolCalls: append([]toolCall(nil), a.toolCalls...),
+	})
+	if err != nil {
+		return model.Message{Role: role}
+	}
+	message.Role = role
+	return message
+}
+
+func ptrPart(part model.Part) *model.Part {
+	return &part
 }
 
 func (p *Provider) modelResponse(modelID string, completion chatResponse) (model.Response, error) {

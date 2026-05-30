@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -69,7 +70,6 @@ func TestProviderStreamSendsChatRequestAndParsesToolCall(t *testing.T) {
 			"type": "object",
 		})},
 		Output: &model.OutputSpec{Mode: model.OutputJSON},
-		Stream: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +118,80 @@ func TestProviderStreamSendsChatRequestAndParsesToolCall(t *testing.T) {
 	}
 	if captured.Options == nil || captured.Options.NumPredict != 128 {
 		t.Fatalf("options = %#v, want num_predict 128", captured.Options)
+	}
+}
+
+func TestProviderStreamsChatResponse(t *testing.T) {
+	var captured chatRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		_, _ = w.Write([]byte(`{"model":"llama3.1","message":{"role":"assistant","content":"hello "},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"llama3.1","message":{"role":"assistant","content":"world","thinking":"think"},"done":false}` + "\n"))
+		_, _ = w.Write([]byte(`{"model":"llama3.1","message":{"role":"assistant","tool_calls":[{"function":{"name":"run_command","arguments":{"command":"echo hi"}}}]},"done":true,"prompt_eval_count":4,"eval_count":3}` + "\n"))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, Model: "llama3.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+		Tools:    []model.ToolSpec{model.NewFunctionToolSpec("run_command", "run shell", map[string]any{"type": "object"})},
+		Stream:   true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	var deltas []string
+	var final *model.Response
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == model.StreamPartDelta {
+			deltas = append(deltas, event.Delta)
+		}
+		if event.Response != nil {
+			final = event.Response
+		}
+	}
+	if !captured.Stream {
+		t.Fatalf("captured stream = false, want true")
+	}
+	if strings.Join(deltas, "") != "hello worldthink" {
+		t.Fatalf("deltas = %#v, want streamed text and reasoning", deltas)
+	}
+	if final == nil {
+		t.Fatal("final response = nil")
+	}
+	if got := final.Message.TextContent(); got != "hello world" {
+		t.Fatalf("final text = %q, want hello world", got)
+	}
+	var reasoning string
+	for _, part := range final.Message.Parts {
+		if part.Kind == model.PartReasoning && part.Reasoning != nil {
+			reasoning = part.Reasoning.VisibleText
+		}
+	}
+	if reasoning != "think" {
+		t.Fatalf("final parts = %#v, want reasoning", final.Message.Parts)
+	}
+	calls := final.Message.ToolCalls()
+	if len(calls) != 1 || calls[0].Name != "run_command" || string(calls[0].Input) != `{"command":"echo hi"}` {
+		t.Fatalf("tool calls = %#v, want streamed tool call", calls)
+	}
+	if final.Usage == nil || final.Usage.TotalTokens != 7 {
+		t.Fatalf("usage = %#v, want streamed usage", final.Usage)
 	}
 }
 

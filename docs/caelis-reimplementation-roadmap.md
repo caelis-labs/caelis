@@ -1260,8 +1260,12 @@ be migrated before retiring the old stack:
      retryability, backpressure, and context-overflow classification. The
      core-native OpenAI-compatible, Anthropic, Gemini, Ollama, and CodeFree
      adapters map their HTTP/provider error payloads into that contract.
+   - Migrated baseline: the core-native Ollama adapter now honors streaming
+     chat requests, parses native consecutive JSON stream frames, emits
+     provider-neutral text/reasoning deltas, accumulates streamed tool calls,
+     and returns a final canonical response with streamed usage metadata.
    - Still pending: provider-specific tool/argument behavior beyond the
-     migrated profiles, SSE parity for every non-OpenAI adapter, and removal
+     migrated profiles, SSE parity for Anthropic/Gemini/CodeFree, and removal
      of the corresponding old `impl/model/providers` code once no old-stack
      entrypoint requires it.
 
