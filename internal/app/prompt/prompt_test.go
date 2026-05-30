@@ -18,10 +18,18 @@ func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
 		t.Fatal(err)
 	}
 	instructions, err := BuildInstructions(context.Background(), Config{
-		AppName: "caelis-test",
+		AppName:      "caelis-test",
+		WorkspaceDir: root,
+		BasePrompt:   "session rule",
 		Catalog: appresources.Catalog{
+			AgentFiles: []appresources.AgentFile{
+				{ID: "agents.global", Text: "global rule"},
+				{ID: "agents.workspace", Text: "workspace agents rule"},
+			},
 			Prompts: []plugin.PromptFragment{
 				{ID: "ignore", Scope: "ui", Text: "ui only"},
+				{ID: "agents.global", Scope: "system", Priority: 100, Text: "global rule"},
+				{ID: "agents.workspace", Scope: "system", Priority: 200, Text: "workspace agents rule"},
 				{ID: "workspace", Scope: "system", Priority: 20, Text: "workspace rule"},
 				{ID: "plugin", Scope: "system", Priority: 10, Paths: []string{promptPath}},
 			},
@@ -36,20 +44,34 @@ func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
 	}
 	joined := strings.Join(instructions, "\n\n")
 	for _, want := range []string{
+		"<system_instructions>",
+		"## Core Stable Rules",
 		"You are caelis-test",
 		"sandbox_permissions=require_escalated",
+		"<user_custom_instructions>",
+		"Session overrides workspace instructions",
+		"## Session Overrides",
+		"session rule",
+		"## Workspace Instructions",
+		"workspace agents rule",
+		"## Global Instructions",
+		"global rule",
 		"### plugin\nreview prompt",
 		"### workspace\nworkspace rule",
-		"### Available Skills",
+		"## Skills",
+		"### Available skills",
 		"- echo: Echo input",
 		"- review: Review code (/skills/review/SKILL.md)",
+		"<environment_context>",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("instructions = %q, missing %q", joined, want)
 		}
 	}
-	if strings.Contains(joined, "ui only") {
-		t.Fatalf("instructions = %q, want ui-scoped prompt excluded", joined)
+	for _, forbidden := range []string{"ui only", "### agents.global", "### agents.workspace"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("instructions = %q, want %q excluded", joined, forbidden)
+		}
 	}
 	if strings.Index(joined, "### plugin") > strings.Index(joined, "### workspace") {
 		t.Fatalf("instructions = %q, want priority order", joined)

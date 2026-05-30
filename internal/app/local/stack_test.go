@@ -1579,7 +1579,8 @@ func TestStackDiscoversPluginAndWorkspaceResources(t *testing.T) {
 				Enabled: true,
 			}},
 		},
-		Provider: provider,
+		Provider:     provider,
+		SystemPrompt: "session override",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1614,7 +1615,7 @@ func TestStackDiscoversPluginAndWorkspaceResources(t *testing.T) {
 		}
 	}
 	joined := strings.Join(provider.request.Instructions, "\n\n")
-	for _, want := range []string{"review prompt", "workspace rule", "You are caelis"} {
+	for _, want := range []string{"review prompt", "workspace rule", "session override", "<environment_context>", "You are caelis"} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("instructions = %q, missing %q", joined, want)
 		}

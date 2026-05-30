@@ -1537,9 +1537,16 @@ be migrated before retiring the old stack:
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill
       metadata.
-    - Built-in system prompt parity, session `-system-prompt`, skill content
-      expansion, skill sandbox roots, prompt policy controls, and prompt budget
-      handling still need migration.
+    - Migrated baseline: core-native prompt assembly now owns the stable
+      system rules, main-session role guidance, capability guidance,
+      permission guidance, session `-system-prompt` override, AGENTS.md
+      precedence (`session > workspace > global`), plugin prompt fragments,
+      skill metadata, and workspace environment context. The local stack and
+      production CLI route through this shared app prompt assembler instead of
+      the old gateway prompt path.
+    - Still pending: skill content expansion/loading policy, skill sandbox
+      roots, prompt policy controls, prompt budget handling, and richer
+      resource diagnostics still need migration.
 
 14. Rendering and display semantics
     - The new view model is intentionally small.

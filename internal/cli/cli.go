@@ -416,6 +416,7 @@ func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, err
 		ExternalACPAgents: append([]acpexternal.Config(nil), cfg.ExternalAgents...),
 		BuiltinTools:      true,
 		Settings:          settings,
+		SystemPrompt:      cfg.SystemPrompt,
 	})
 }
 

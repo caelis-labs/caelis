@@ -47,6 +47,7 @@ type Config struct {
 	ExternalACPAgents []acpexternal.Config
 	Contributions     []plugin.Contribution
 	Settings          *appsettings.Manager
+	SystemPrompt      string
 	BuiltinTools      bool
 	MaxToolSteps      int
 }
@@ -156,8 +157,11 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	}
 	resourceCatalog = mergeRegistryResources(resourceCatalog, reg)
 	instructions, err := appprompt.BuildInstructions(ctx, appprompt.Config{
-		AppName: runtimeCfg.AppName,
-		Catalog: resourceCatalog,
+		AppName:      runtimeCfg.AppName,
+		WorkspaceDir: runtimeCfg.WorkspaceCWD,
+		BasePrompt:   firstNonEmpty(cfg.SystemPrompt, runtimeMetaString(runtimeCfg.Meta, "system_prompt")),
+		Catalog:      resourceCatalog,
+		ACPAgents:    spawnAgentDescriptors,
 	})
 	if err != nil {
 		return nil, err
@@ -751,4 +755,20 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func runtimeMetaString(meta map[string]any, key string) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	value, ok := meta[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
