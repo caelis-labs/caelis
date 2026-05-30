@@ -876,7 +876,9 @@ The completed work is intentionally limited to the reusable skeleton:
 - App session mode baseline: shared app services persist a per-session approval
   preset, ACP exposes it through `session/set_mode` and the `mode` config
   option, and the core approval policy receives the selected mode for each tool
-  review.
+  review. Headless CLI now applies the requested permission/session mode before
+  beginning a one-shot turn, so `-permission-mode manual` and `auto-review`
+  enter the same shared app-service mode path used by TUI and ACP.
 - Headless surface baseline: `internal/surface/headless` runs one-shot prompts
   over shared app services, starts or resumes canonical sessions through the
   engine, resolves approvals with explicit policy hooks, renders text/JSON
@@ -949,6 +951,10 @@ be migrated before retiring the old stack:
      `internal/app/local` stack and use shared app status/sandbox services.
      Host sandbox lifecycle commands are explicit no-ops with status output,
      not old-stack fallbacks.
+   - Migrated baseline: one-shot headless CLI now applies the normalized
+     `-permission-mode` value through `internal/app/services.Modes()` before
+     beginning the turn, so approval policy selection is no longer only a
+     display/config flag.
    - Migrated baseline: production CLI flag normalization now uses a
      lightweight `internal/cli` config contract instead of `gatewayapp.Config`,
      then maps directly into `internal/app/local`. This removes the production

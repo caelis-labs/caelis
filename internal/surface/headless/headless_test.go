@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -101,6 +102,35 @@ func TestRunOnceAutoDeniesApprovalByDefault(t *testing.T) {
 	}
 }
 
+func TestRunOnceAppliesSessionModeBeforeTurn(t *testing.T) {
+	engine := &fakeEngine{
+		events: []coreruntime.EventEnvelope{{
+			Event: session.Event{
+				Type: session.EventAssistant,
+				Message: &model.Message{
+					Role:  model.RoleAssistant,
+					Parts: []model.Part{model.NewTextPart("done")},
+				},
+			},
+		}},
+	}
+	svc := newTestServices(t, engine)
+
+	if _, err := RunOnce(context.Background(), Request{
+		Services:    svc,
+		Input:       "hello",
+		SessionMode: coreruntime.SessionModeManual,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := engine.turn.Mode; got != coreruntime.SessionModeManual {
+		t.Fatalf("turn mode = %q, want manual", got)
+	}
+	if got := engine.state[services.StateSessionMode]; got != coreruntime.SessionModeManual {
+		t.Fatalf("state mode = %#v, want manual", got)
+	}
+}
+
 func TestRunOnceCanApproveWithCustomResolver(t *testing.T) {
 	engine := &fakeEngine{
 		events: []coreruntime.EventEnvelope{{
@@ -152,6 +182,7 @@ type fakeEngine struct {
 	start  session.StartRequest
 	turn   *fakeTurn
 	events []coreruntime.EventEnvelope
+	state  session.State
 }
 
 func (e *fakeEngine) StartSession(_ context.Context, req session.StartRequest) (session.Session, error) {
@@ -169,8 +200,11 @@ func (e *fakeEngine) StartSession(_ context.Context, req session.StartRequest) (
 	}, nil
 }
 
-func (e *fakeEngine) LoadSession(context.Context, session.Ref) (session.Snapshot, error) {
-	return session.Snapshot{}, nil
+func (e *fakeEngine) LoadSession(_ context.Context, ref session.Ref) (session.Snapshot, error) {
+	return session.Snapshot{
+		Session: session.Session{Ref: ref},
+		State:   maps.Clone(e.state),
+	}, nil
 }
 
 func (e *fakeEngine) ListSessions(context.Context, session.ListQuery) (session.SessionPage, error) {
@@ -181,7 +215,15 @@ func (e *fakeEngine) RecordEvents(context.Context, session.Ref, []session.Event)
 	return "", nil
 }
 
-func (e *fakeEngine) UpdateSessionState(context.Context, session.Ref, session.StatePatch) error {
+func (e *fakeEngine) UpdateSessionState(_ context.Context, _ session.Ref, patch session.StatePatch) error {
+	if patch == nil {
+		return nil
+	}
+	next, err := patch(maps.Clone(e.state))
+	if err != nil {
+		return err
+	}
+	e.state = maps.Clone(next)
 	return nil
 }
 

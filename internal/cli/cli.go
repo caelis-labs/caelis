@@ -441,6 +441,7 @@ func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg cliConfig, 
 		Title:          "cli-headless",
 		Input:          input,
 		Model:          firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Model)),
+		SessionMode:    strings.TrimSpace(cfg.PermissionMode),
 		Surface:        "headless",
 		ApprovalPolicy: coreheadless.ApprovalPolicyAutoDeny,
 	})

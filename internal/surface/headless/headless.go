@@ -38,6 +38,7 @@ type Request struct {
 	Input              string
 	ContentParts       []model.ContentPart
 	Model              string
+	SessionMode        string
 	Surface            string
 	ApprovalPolicy     ApprovalPolicy
 	ResolveApproval    func(context.Context, *session.ApprovalEvent) (coreruntime.ApprovalDecision, error)
@@ -66,6 +67,11 @@ func RunOnce(ctx context.Context, req Request) (Result, error) {
 	})
 	if err != nil {
 		return Result{}, err
+	}
+	if mode := coreruntime.NormalizeSessionMode(req.SessionMode); mode != "" {
+		if _, err := req.Services.Modes().Set(ctx, active.Ref, mode); err != nil {
+			return Result{}, err
+		}
 	}
 	turn, err := req.Services.Turns().Begin(ctx, services.BeginTurnRequest{
 		SessionRef:   active.Ref,
