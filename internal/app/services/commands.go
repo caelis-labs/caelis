@@ -3,12 +3,16 @@ package services
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
+
+const commandConnectDefaultTimeoutSeconds = 60
 
 type CommandCatalogRequest struct{}
 
@@ -39,6 +43,8 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 	switch command {
 	case "approval":
 		return s.executeApproval(ctx, req.SessionRef, args)
+	case "connect":
+		return s.executeConnect(ctx, req.SessionRef, args)
 	case "model":
 		return s.executeModel(ctx, req.SessionRef, args)
 	case "resume":
@@ -73,6 +79,139 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 		}, nil
 	default:
 		return appviewmodel.CommandExecutionView{}, nil
+	}
+}
+
+func (s CommandService) executeConnect(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
+	cfg, err := s.commandConnectConfig(args)
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	connected, err := s.services.Models().Connect(ctx, cfg)
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	if strings.TrimSpace(ref.SessionID) != "" {
+		if _, err := s.services.Models().Use(ctx, ref, connected.ID, connected.DefaultReasoningEffort); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+	}
+	output := "connected: " + formatModelConfigName(connected)
+	if connected.BaseURL != "" {
+		output += "\n  base_url: " + connected.BaseURL
+	}
+	if connected.ContextWindowTokens > 0 {
+		output += fmt.Sprintf("\n  context_window_tokens: %d", connected.ContextWindowTokens)
+	}
+	if connected.MaxOutputTokens > 0 {
+		output += fmt.Sprintf("\n  max_output_tokens: %d", connected.MaxOutputTokens)
+	}
+	if len(connected.ReasoningLevels) > 0 {
+		output += "\n  reasoning_levels: " + strings.Join(connected.ReasoningLevels, ",")
+	}
+	return appviewmodel.CommandExecutionView{
+		Handled: true,
+		Command: "connect",
+		Output:  output,
+	}, nil
+}
+
+func (s CommandService) commandConnectConfig(args string) (appsettings.ModelConfig, error) {
+	fields := strings.Fields(args)
+	if len(fields) < 2 {
+		return appsettings.ModelConfig{}, fmt.Errorf("app/services: usage: /connect provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]")
+	}
+	if len(fields) > 8 {
+		return appsettings.ModelConfig{}, fmt.Errorf("app/services: usage: /connect provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]")
+	}
+	cfg := appsettings.ModelConfig{
+		Provider: strings.TrimSpace(fields[0]),
+		Model:    strings.TrimSpace(fields[1]),
+	}
+	if len(fields) >= 3 {
+		cfg.BaseURL = dashAsEmpty(fields[2])
+	}
+	timeoutSeconds := commandConnectDefaultTimeoutSeconds
+	if len(fields) >= 4 {
+		raw := dashAsEmpty(fields[3])
+		if raw != "" {
+			value, err := strconv.Atoi(raw)
+			if err != nil || value <= 0 {
+				if len(fields) == 4 {
+					applyCommandConnectToken(&cfg, raw)
+					raw = ""
+				} else {
+					return appsettings.ModelConfig{}, fmt.Errorf("app/services: connect timeout must be a positive integer")
+				}
+			}
+			if raw != "" {
+				timeoutSeconds = value
+			}
+		}
+	}
+	if len(fields) >= 5 {
+		applyCommandConnectToken(&cfg, dashAsEmpty(fields[4]))
+	}
+	if len(fields) >= 6 {
+		value, err := parseCommandPositiveInt(fields[5], "context window")
+		if err != nil {
+			return appsettings.ModelConfig{}, err
+		}
+		cfg.ContextWindowTokens = value
+	}
+	if len(fields) >= 7 {
+		value, err := parseCommandPositiveInt(fields[6], "max output")
+		if err != nil {
+			return appsettings.ModelConfig{}, err
+		}
+		cfg.MaxOutputTokens = value
+	}
+	if len(fields) >= 8 {
+		cfg.ReasoningLevels = parseCommandReasoningLevels(fields[7])
+	}
+	cfg.Timeout = time.Duration(timeoutSeconds) * time.Second
+	return s.commandConnectConfigWithDefaults(cfg), nil
+}
+
+func (s CommandService) commandConnectConfigWithDefaults(cfg appsettings.ModelConfig) appsettings.ModelConfig {
+	caps, ok := s.services.Models().LookupCapabilities(cfg.Provider, cfg.Model)
+	if !ok {
+		caps = s.services.Models().DefaultCapabilities()
+	}
+	if cfg.ContextWindowTokens <= 0 {
+		cfg.ContextWindowTokens = caps.ContextWindowTokens
+	}
+	if cfg.MaxOutputTokens <= 0 {
+		cfg.MaxOutputTokens = caps.DefaultMaxOutputTokens
+		if cfg.MaxOutputTokens <= 0 {
+			cfg.MaxOutputTokens = caps.MaxOutputTokens
+		}
+	}
+	if cfg.DefaultReasoningEffort == "" {
+		cfg.DefaultReasoningEffort = strings.ToLower(strings.TrimSpace(caps.DefaultReasoningEffort))
+	}
+	if cfg.ReasoningMode == "" {
+		cfg.ReasoningMode = strings.ToLower(strings.TrimSpace(caps.ReasoningMode))
+	}
+	if len(cfg.ReasoningLevels) == 0 {
+		cfg.ReasoningLevels = reasoningLevelsFromCapabilities(caps)
+	}
+	return cfg
+}
+
+func applyCommandConnectToken(cfg *appsettings.ModelConfig, raw string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	switch {
+	case strings.HasPrefix(strings.ToLower(raw), "env:"):
+		cfg.TokenEnv = strings.TrimSpace(raw[len("env:"):])
+	case strings.HasPrefix(raw, "$"):
+		cfg.TokenEnv = strings.TrimSpace(strings.TrimPrefix(raw, "$"))
+	default:
+		cfg.Token = raw
+		cfg.PersistToken = true
 	}
 }
 
@@ -226,6 +365,35 @@ func splitCommandArg(input string) (string, string, bool) {
 func parseCommandModelUse(args string) (string, string) {
 	modelRef, reasoning, _ := strings.Cut(strings.TrimSpace(args), " ")
 	return strings.TrimSpace(modelRef), strings.ToLower(strings.TrimSpace(reasoning))
+}
+
+func parseCommandPositiveInt(raw string, label string) (int, error) {
+	raw = dashAsEmpty(raw)
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("app/services: connect %s must be a positive integer", label)
+	}
+	return value, nil
+}
+
+func parseCommandReasoningLevels(raw string) []string {
+	raw = dashAsEmpty(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	return appsettings.DedupeStrings(parts)
+}
+
+func dashAsEmpty(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "-" {
+		return ""
+	}
+	return value
 }
 
 func formatCommandStatus(status appviewmodel.StatusView) string {

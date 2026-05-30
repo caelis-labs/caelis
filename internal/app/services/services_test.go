@@ -545,6 +545,60 @@ func TestCommandServiceExecuteCompactRecordsCheckpoint(t *testing.T) {
 	}
 }
 
+func TestCommandServiceExecuteConnectConfiguresAndUsesModel(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-connect"}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-connect"},
+		Input:      "/connect openai-compatible gpt-connect https://api.example.test/v1 45 env:CONNECT_KEY 131072 4096 low,high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "connect" {
+		t.Fatalf("connect execution = %#v, want handled connect", view)
+	}
+	for _, want := range []string{
+		"connected: openai-compatible/gpt-connect",
+		"base_url: https://api.example.test/v1",
+		"context_window_tokens: 131072",
+		"max_output_tokens: 4096",
+		"reasoning_levels: low,high",
+	} {
+		if !strings.Contains(view.Output, want) {
+			t.Fatalf("connect output = %q, missing %q", view.Output, want)
+		}
+	}
+	cfg, err := manager.ResolveModel("openai-compatible/gpt-connect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TokenEnv != "CONNECT_KEY" || cfg.Token != "" || cfg.Timeout != 45*time.Second {
+		t.Fatalf("connected cfg auth/timeout = %#v, want env token and 45s", cfg)
+	}
+	if cfg.ContextWindowTokens != 131072 || cfg.MaxOutputTokens != 4096 || len(cfg.ReasoningLevels) != 2 {
+		t.Fatalf("connected cfg limits = %#v, want parsed limits", cfg)
+	}
+	if engine.state[StateCurrentModelID] != cfg.ID {
+		t.Fatalf("state after connect = %#v, want current model %q", engine.state, cfg.ID)
+	}
+}
+
 func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

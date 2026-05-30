@@ -452,6 +452,25 @@ func TestServeStdioExecutesModelAndApprovalSlashCommandsThroughAppServices(t *te
 	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
 		SessionID: newResp.SessionID,
 		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/connect openai-compatible gpt-gamma https://api.gamma.test/v1 30 env:GAMMA_KEY 131072 4096 low,high"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/connect) call error = %v", err)
+	}
+	if promptResp.StopReason != schema.StopReasonEndTurn {
+		t.Fatalf("connect stop reason = %q, want %q", promptResp.StopReason, schema.StopReasonEndTurn)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "connected: openai-compatible/gpt-gamma")
+	gamma, err := manager.ResolveModel("openai-compatible/gpt-gamma")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gamma.TokenEnv != "GAMMA_KEY" || gamma.ContextWindowTokens != 131072 || gamma.MaxOutputTokens != 4096 {
+		t.Fatalf("connected gamma = %#v, want parsed config", gamma)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
 			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/model"}),
 		},
 	}, &promptResp); err != nil {
