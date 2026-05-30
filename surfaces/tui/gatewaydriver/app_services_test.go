@@ -455,6 +455,61 @@ func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesInstallsBuiltinACPAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := &appServiceDriverAgentInstaller{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine:   &appServiceDriverEngine{},
+		Settings: manager,
+		BuiltinAgents: []appservices.AgentDescriptor{{
+			ID:          "codex",
+			Name:        "codex",
+			Kind:        appservices.AgentKindExternalACP,
+			Description: "OpenAI Codex ACP agent",
+			Command:     "npx",
+			Args:        []string{"-y", "@zed-industries/codex-acp"},
+		}},
+		AgentInstaller: installer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := driver.CompleteSlashArg(ctx, "agent install", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(agent install) error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Value != "codex" || candidates[0].Display != "codex (npm install)" {
+		t.Fatalf("agent install candidates = %#v, want codex install option", candidates)
+	}
+	status, err := driver.AddAgentWithOptions(ctx, "codex", AgentAddOptions{Install: true})
+	if err != nil {
+		t.Fatalf("AddAgentWithOptions(codex install) error = %v", err)
+	}
+	if !installer.called || installer.agent.Name != "codex" {
+		t.Fatalf("installer called=%v agent=%#v, want codex", installer.called, installer.agent)
+	}
+	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "codex" {
+		t.Fatalf("status agents = %#v, want codex", status.AvailableAgents)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "codex" || agents[0].Command != "/installed/codex-acp" {
+		t.Fatalf("settings agents = %#v, want installed codex", agents)
+	}
+}
+
 func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -749,6 +804,31 @@ func (a *appServiceDriverCodeFreeAuth) EnsureModelSelectionAuth(_ context.Contex
 func (a *appServiceDriverCodeFreeAuth) Refresh(_ context.Context, req appservices.CodeFreeAuthRequest) (appservices.CodeFreeAuthResult, error) {
 	a.refresh = req
 	return appservices.CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1"}, nil
+}
+
+type appServiceDriverAgentInstaller struct {
+	called bool
+	agent  appservices.AgentDescriptor
+}
+
+func (i *appServiceDriverAgentInstaller) InstallBuiltinACPAgent(_ context.Context, agent appservices.AgentDescriptor) (appservices.AgentDescriptor, error) {
+	i.called = true
+	i.agent = agent
+	agent.Command = "/installed/" + agent.Name + "-acp"
+	agent.Args = nil
+	return agent, nil
+}
+
+func (i *appServiceDriverAgentInstaller) InstallableBuiltinACPAgentOptions(_ context.Context, builtins []appservices.AgentDescriptor) ([]appservices.AgentInstallOption, error) {
+	out := make([]appservices.AgentInstallOption, 0, len(builtins))
+	for _, agent := range builtins {
+		out = append(out, appservices.AgentInstallOption{
+			Value:   agent.Name,
+			Display: agent.Name + " (npm install)",
+			Detail:  "npm install " + agent.Name,
+		})
+	}
+	return out, nil
 }
 
 func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []kernel.EventEnvelope {

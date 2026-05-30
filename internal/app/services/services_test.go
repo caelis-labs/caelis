@@ -283,6 +283,52 @@ func TestAgentServiceRegistersBuiltinAgent(t *testing.T) {
 	}
 }
 
+func TestAgentServiceInstallsBuiltinACPAgentThroughInstaller(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	installer := &recordingAgentInstaller{}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		BuiltinAgents: []AgentDescriptor{{
+			ID:          "codex",
+			Name:        "codex",
+			Kind:        AgentKindExternalACP,
+			Description: "OpenAI Codex ACP agent",
+			Command:     "npx",
+			Args:        []string{"-y", "@zed-industries/codex-acp"},
+		}},
+		AgentInstaller: installer,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := svc.Agents().ListInstallableBuiltins(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(options) != 1 || options[0].Value != "codex" {
+		t.Fatalf("installable options = %#v, want codex", options)
+	}
+	registered, err := svc.Agents().RegisterBuiltinWithOptions(ctx, "codex", RegisterBuiltinAgentOptions{Install: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !installer.called || installer.agent.Name != "codex" {
+		t.Fatalf("installer called=%v agent=%#v, want codex", installer.called, installer.agent)
+	}
+	if registered.Command != "/installed/codex-acp" || len(registered.Args) != 0 {
+		t.Fatalf("registered = %#v, want installed command without args", registered)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Command != "/installed/codex-acp" || len(agents[0].Args) != 0 {
+		t.Fatalf("settings agents = %#v, want installed codex", agents)
+	}
+}
+
 func TestAgentServiceInvokeControllerRecordsControllerScopedEvents(t *testing.T) {
 	ctx := context.Background()
 	engine := &recordingEngine{}
@@ -1097,6 +1143,31 @@ func (a *recordingCodeFreeAuth) EnsureModelSelectionAuth(_ context.Context, req 
 func (a *recordingCodeFreeAuth) Refresh(_ context.Context, req CodeFreeAuthRequest) (CodeFreeAuthResult, error) {
 	a.refreshReq = req
 	return a.refreshResult, nil
+}
+
+type recordingAgentInstaller struct {
+	called bool
+	agent  AgentDescriptor
+}
+
+func (i *recordingAgentInstaller) InstallBuiltinACPAgent(_ context.Context, agent AgentDescriptor) (AgentDescriptor, error) {
+	i.called = true
+	i.agent = agent
+	agent.Command = "/installed/" + agent.Name + "-acp"
+	agent.Args = nil
+	return agent, nil
+}
+
+func (i *recordingAgentInstaller) InstallableBuiltinACPAgentOptions(_ context.Context, builtins []AgentDescriptor) ([]AgentInstallOption, error) {
+	out := make([]AgentInstallOption, 0, len(builtins))
+	for _, agent := range builtins {
+		out = append(out, AgentInstallOption{
+			Value:   agent.Name,
+			Display: agent.Name + " (npm install)",
+			Detail:  "npm install " + agent.Name,
+		})
+	}
+	return out, nil
 }
 
 func (e *recordingEngine) Interrupt(context.Context, session.Ref) error {

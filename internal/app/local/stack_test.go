@@ -1016,6 +1016,70 @@ func TestStackExposesBuiltinACPAgentCatalog(t *testing.T) {
 	}
 }
 
+func TestStackInstallsBuiltinACPAgent(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake npm script uses POSIX shell")
+	}
+	ctx := context.Background()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	writeExecutableForLocalTest(t, binDir, "npm", `#!/bin/sh
+set -eu
+prefix=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--prefix" ]; then
+    shift
+    prefix="$1"
+  fi
+  shift || true
+done
+mkdir -p "$prefix/node_modules/.bin"
+cat > "$prefix/node_modules/.bin/codex-acp" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+chmod +x "$prefix/node_modules/.bin/codex-acp"
+`)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Store:   config.Store{Backend: "jsonl", URI: storeDir},
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	options, err := stack.Services().Agents().ListInstallableBuiltins(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agentInstallOptionsHave(options, "codex") || agentInstallOptionsHave(options, "copilot") {
+		t.Fatalf("installable options = %#v, want codex but not copilot", options)
+	}
+	registered, err := stack.Services().Agents().RegisterBuiltinWithOptions(ctx, "codex", services.RegisterBuiltinAgentOptions{Install: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantCommand := filepath.Join(storeDir, "acp-agents", "npm", "node_modules", ".bin", "codex-acp")
+	if registered.Command != wantCommand || len(registered.Args) != 0 {
+		t.Fatalf("registered = %#v, want installed command %q without args", registered, wantCommand)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "codex" || agents[0].Command != wantCommand || len(agents[0].Args) != 0 {
+		t.Fatalf("settings agents = %#v, want installed codex", agents)
+	}
+}
+
 func TestStackAppliesPluginContributionStoreFactory(t *testing.T) {
 	stack, err := New(Config{
 		Runtime: config.Runtime{
@@ -1221,6 +1285,27 @@ func agentDescriptorsHave(agents []services.AgentDescriptor, id string) bool {
 		}
 	}
 	return false
+}
+
+func agentInstallOptionsHave(options []services.AgentInstallOption, value string) bool {
+	for _, option := range options {
+		if strings.EqualFold(strings.TrimSpace(option.Value), value) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeExecutableForLocalTest(t *testing.T, dir string, name string, body string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(body), 0o755); err != nil {
+		t.Fatalf("os.WriteFile(%s) error = %v", path, err)
+	}
+	if err := os.Chmod(path, 0o755); err != nil {
+		t.Fatalf("os.Chmod(%s) error = %v", path, err)
+	}
+	return path
 }
 
 func capturedTool(tools []model.ToolSpec, name string) bool {

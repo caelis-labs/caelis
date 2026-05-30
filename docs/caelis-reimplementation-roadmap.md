@@ -653,6 +653,9 @@ alongside the old stack without importing it:
   rebuilding service state. Built-in ACP agents are registered by copying their
   catalog descriptors into the same settings-backed external agent contract,
   and invocations can target either participant scope or ACP controller scope.
+  Service-native built-in ACP adapter install now runs through a replaceable
+  app-service installer, with the default local stack installing supported npm
+  adapters into the Caelis store and persisting the installed binary path.
 - `internal/app/services.ModelService`: shared model settings and catalog
   surface for configured models, provider model presets, capability defaults,
   and reasoning-level choices used by TUI/future APP connect flows.
@@ -995,6 +998,12 @@ be migrated before retiring the old stack:
      built-in ACP catalog and persists the selected descriptor through
      `AgentService.RegisterBuiltin`, so non-install built-in registration no
      longer requires the old gatewayapp agent registry.
+   - Migrated baseline: `/agent install <builtin>` now uses the same shared
+     `AgentService` contract with a local-stack npm installer for supported
+     built-in adapters such as Codex and Claude. Installable options are exposed
+     through the app-service TUI binding, and successful installs persist the
+     managed adapter binary path in shared settings instead of routing through
+     `gatewayapp`.
    - Migrated baseline: `/agent use <agent|local>` now records canonical
      controller handoff events through the app-service TUI gateway. When an ACP
      controller is active, normal TUI submissions are routed to the registered
@@ -1031,8 +1040,8 @@ be migrated before retiring the old stack:
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell, built-in
-     `/agent install` and adapter update, plugin/static agent removal, live
+   - Slash commands such as the `/connect` wizard shell, built-in adapter
+     update, plugin/static agent removal, live
      remote ACP config RPC/reconnect behavior, remote-declared controller
      option discovery, and non-host `/doctor fix` repair flows still have old
      driver/app assumptions or missing service-native feature parity, so the
@@ -1224,7 +1233,12 @@ be migrated before retiring the old stack:
       `CAELIS_ACP_SELF_AGENT_*` self-agent path, are now projected into the
       new local app stack as external ACP agent descriptors instead of being
       stranded in the old gatewayapp agent registry shape.
-    - Still pending: built-in ACP adapter install/update, self-agent spawning,
+    - Migrated baseline: supported built-in ACP adapter install now belongs to
+      shared app services and the default local composition root. The local
+      installer runs npm into the managed Caelis store, verifies the installed
+      adapter binary, and persists the installed command through shared
+      settings for both TUI and future APP consumers.
+    - Still pending: built-in ACP adapter update, self-agent spawning,
       durable sidecar continuation across restarts, delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical
       remote session id reuse, plugin/static agent removal, live remote ACP

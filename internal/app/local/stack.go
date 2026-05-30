@@ -183,6 +183,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
 		Invokers:       agentInvokers(store, externalAgents),
 		InvokerFactory: externalAgentInvokerFactory(store),
+		AgentInstaller: newBuiltinAgentInstaller(runtimeCfg),
 		Resources:      resourceCatalog,
 		Settings:       cfg.Settings,
 		CodeFree:       codeFreeAuthAdapter{},

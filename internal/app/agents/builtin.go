@@ -9,6 +9,12 @@ import (
 
 const claudeACPAdapterVersion = "^0.31.0"
 
+type BuiltinACPAdapterPackage struct {
+	Package string
+	Version string
+	Bin     string
+}
+
 func BuiltinACPAgents() []plugin.ACPAgentDescriptor {
 	return []plugin.ACPAgentDescriptor{
 		npxAgent("codex", "OpenAI Codex ACP agent", "@zed-industries/codex-acp"),
@@ -18,6 +24,24 @@ func BuiltinACPAgents() []plugin.ACPAgentDescriptor {
 		nativeAgent("copilot", "GitHub Copilot ACP agent", "copilot", "--acp", "--stdio"),
 		nativeAgent("gemini", "Gemini ACP agent", "gemini", "--acp"),
 	}
+}
+
+func LookupBuiltinACPAdapterPackage(name string) (BuiltinACPAdapterPackage, bool) {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "codex":
+		return BuiltinACPAdapterPackage{Package: "@zed-industries/codex-acp", Bin: "codex-acp"}, true
+	case "claude":
+		return BuiltinACPAdapterPackage{Package: "@agentclientprotocol/claude-agent-acp", Version: claudeACPAdapterVersion, Bin: "claude-agent-acp"}, true
+	default:
+		return BuiltinACPAdapterPackage{}, false
+	}
+}
+
+func BuiltinACPAdapterInstallSpec(pkg BuiltinACPAdapterPackage) string {
+	if strings.TrimSpace(pkg.Version) != "" {
+		return strings.TrimSpace(pkg.Package) + "@" + strings.TrimSpace(pkg.Version)
+	}
+	return strings.TrimSpace(pkg.Package) + "@latest"
 }
 
 func LookupBuiltinACPAgent(name string) (plugin.ACPAgentDescriptor, bool) {

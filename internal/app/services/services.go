@@ -39,6 +39,7 @@ type Services struct {
 	builtins  []AgentDescriptor
 	invokers  map[string]AgentInvoker
 	factory   AgentInvokerFactory
+	installer AgentInstaller
 	resources appresources.Catalog
 	settings  *appsettings.Manager
 	codefree  CodeFreeAuthenticator
@@ -54,6 +55,7 @@ type Config struct {
 	BuiltinAgents  []AgentDescriptor
 	Invokers       map[string]AgentInvoker
 	InvokerFactory AgentInvokerFactory
+	AgentInstaller AgentInstaller
 	Resources      appresources.Catalog
 	Settings       *appsettings.Manager
 	CodeFree       CodeFreeAuthenticator
@@ -74,6 +76,7 @@ func New(cfg Config) (Services, error) {
 		builtins:  cloneAgents(cfg.BuiltinAgents),
 		invokers:  maps.Clone(cfg.Invokers),
 		factory:   cfg.InvokerFactory,
+		installer: cfg.AgentInstaller,
 		resources: appresources.CloneCatalog(cfg.Resources),
 		settings:  cfg.Settings,
 		codefree:  cfg.CodeFree,
@@ -640,6 +643,61 @@ type AgentDescriptor struct {
 	Meta        map[string]string `json:"meta,omitempty"`
 }
 
+type RegisterBuiltinAgentOptions struct {
+	Install bool
+}
+
+type AgentInstallOption struct {
+	Value   string `json:"value,omitempty"`
+	Display string `json:"display,omitempty"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+type AgentInstaller interface {
+	InstallBuiltinACPAgent(context.Context, AgentDescriptor) (AgentDescriptor, error)
+	InstallableBuiltinACPAgentOptions(context.Context, []AgentDescriptor) ([]AgentInstallOption, error)
+}
+
+type AgentInstallError struct {
+	Agent   string
+	Command []string
+	Output  string
+	Err     error
+}
+
+func (e *AgentInstallError) Error() string {
+	if e == nil {
+		return ""
+	}
+	agent := strings.TrimSpace(e.Agent)
+	if agent == "" {
+		agent = "unknown"
+	}
+	errText := "failed"
+	if e.Err != nil {
+		errText = e.Err.Error()
+	}
+	msg := fmt.Sprintf("app/services: install ACP agent %q: %s", agent, errText)
+	if out := strings.TrimSpace(e.Output); out != "" {
+		msg += "\n" + out
+	}
+	return msg
+}
+
+func (e *AgentInstallError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func (e *AgentInstallError) CommandString() string {
+	if e == nil {
+		return ""
+	}
+	return strings.Join(e.Command, " ")
+}
+
 type AgentService struct {
 	services Services
 }
@@ -688,6 +746,10 @@ func (s AgentService) ListBuiltins(context.Context) ([]AgentDescriptor, error) {
 }
 
 func (s AgentService) RegisterBuiltin(ctx context.Context, name string) (AgentDescriptor, error) {
+	return s.RegisterBuiltinWithOptions(ctx, name, RegisterBuiltinAgentOptions{})
+}
+
+func (s AgentService) RegisterBuiltinWithOptions(ctx context.Context, name string, opts RegisterBuiltinAgentOptions) (AgentDescriptor, error) {
 	if s.services.settings == nil {
 		return AgentDescriptor{}, errors.New("app/services: settings manager is not configured")
 	}
@@ -701,11 +763,37 @@ func (s AgentService) RegisterBuiltin(ctx context.Context, name string) (AgentDe
 	if strings.TrimSpace(agent.Command) == "" {
 		return AgentDescriptor{}, fmt.Errorf("app/services: command is required for ACP agent %q", agent.Name)
 	}
+	if opts.Install {
+		if s.services.installer == nil {
+			return AgentDescriptor{}, fmt.Errorf("app/services: ACP agent %q does not support local install", agent.Name)
+		}
+		installed, err := s.services.installer.InstallBuiltinACPAgent(ctx, agent)
+		if err != nil {
+			return AgentDescriptor{}, err
+		}
+		agent = normalizeAgentDescriptor(installed)
+		if agent.ID == "" {
+			agent.ID = firstNonEmpty(agent.Name, name)
+		}
+		if agent.Name == "" {
+			agent.Name = agent.ID
+		}
+		if strings.TrimSpace(agent.Command) == "" {
+			return AgentDescriptor{}, fmt.Errorf("app/services: installed ACP agent %q has no command", agent.Name)
+		}
+	}
 	stored, err := s.services.settings.UpsertACPAgent(ctx, pluginDescriptorFromAgent(agent))
 	if err != nil {
 		return AgentDescriptor{}, err
 	}
 	return agentDescriptorFromPlugin(stored), nil
+}
+
+func (s AgentService) ListInstallableBuiltins(ctx context.Context) ([]AgentInstallOption, error) {
+	if s.services.installer == nil {
+		return nil, nil
+	}
+	return s.services.installer.InstallableBuiltinACPAgentOptions(ctx, cloneAgents(s.services.builtins))
 }
 
 func (s AgentService) Remove(ctx context.Context, name string) error {
