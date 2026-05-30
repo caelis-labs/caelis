@@ -44,6 +44,7 @@ type Request struct {
 	ContentParts  []model.ContentPart
 	Model         string
 	Reasoning     model.ReasoningConfig
+	Mode          string
 	TurnID        string
 	Surface       string
 	StartedAt     time.Time
@@ -293,6 +294,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, call model.ToolC
 		Session:    req.Session,
 		TurnID:     req.TurnID,
 		Surface:    req.Surface,
+		Mode:       req.Mode,
 		Call:       call,
 		Definition: def,
 	})

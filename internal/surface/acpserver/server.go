@@ -118,6 +118,12 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 			return nil, invalidParams(err)
 		}
 		return responseOrError(s.resumeSession(ctx, req))
+	case schema.MethodSessionSetMode:
+		var req schema.SetSessionModeRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.setSessionMode(ctx, req))
 	case schema.MethodSessionClose:
 		var req schema.CloseSessionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -195,7 +201,7 @@ func (s *Server) newSession(ctx context.Context, req schema.NewSessionRequest) (
 		return schema.NewSessionResponse{}, err
 	}
 	resp := schema.NewSessionResponse{SessionID: active.SessionID}
-	if err := s.applySessionMetadata(ctx, active.Ref, &resp.ConfigOptions, &resp.Models); err != nil {
+	if err := s.applySessionMetadata(ctx, active.Ref, &resp.ConfigOptions, &resp.Models, &resp.Modes); err != nil {
 		return schema.NewSessionResponse{}, err
 	}
 	return resp, nil
@@ -243,7 +249,7 @@ func (s *Server) loadSession(ctx context.Context, req schema.LoadSessionRequest)
 		return schema.LoadSessionResponse{}, err
 	}
 	resp := schema.LoadSessionResponse{}
-	if err := s.applySessionMetadata(ctx, snapshot.Session.Ref, &resp.ConfigOptions, &resp.Models); err != nil {
+	if err := s.applySessionMetadata(ctx, snapshot.Session.Ref, &resp.ConfigOptions, &resp.Models, &resp.Modes); err != nil {
 		return schema.LoadSessionResponse{}, err
 	}
 	return resp, nil
@@ -255,10 +261,23 @@ func (s *Server) resumeSession(ctx context.Context, req schema.ResumeSessionRequ
 		return schema.ResumeSessionResponse{}, err
 	}
 	resp := schema.ResumeSessionResponse{}
-	if err := s.applySessionMetadata(ctx, snapshot.Session.Ref, &resp.ConfigOptions, &resp.Models); err != nil {
+	if err := s.applySessionMetadata(ctx, snapshot.Session.Ref, &resp.ConfigOptions, &resp.Models, &resp.Modes); err != nil {
 		return schema.ResumeSessionResponse{}, err
 	}
 	return resp, nil
+}
+
+func (s *Server) setSessionMode(ctx context.Context, req schema.SetSessionModeRequest) (schema.SetSessionModeResponse, error) {
+	if strings.TrimSpace(req.SessionID) == "" {
+		return schema.SetSessionModeResponse{}, fmt.Errorf("surface/acpserver: session id is required")
+	}
+	if s.services.Engine() == nil {
+		return schema.SetSessionModeResponse{}, errors.New("surface/acpserver: mode service is not configured")
+	}
+	if _, err := s.services.Modes().Set(ctx, s.sessionRef(req.SessionID), req.ModeID); err != nil {
+		return schema.SetSessionModeResponse{}, err
+	}
+	return schema.SetSessionModeResponse{}, nil
 }
 
 func (s *Server) closeSession(ctx context.Context, req schema.CloseSessionRequest) (schema.CloseSessionResponse, error) {

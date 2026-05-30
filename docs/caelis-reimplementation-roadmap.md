@@ -797,6 +797,10 @@ The completed work is intentionally limited to the reusable skeleton:
   generated model aliases/ids, default model selection, model delete, session
   model override state, runtime model-profile projection, and request-time model
   routing through app registries.
+- App session mode baseline: shared app services persist a per-session approval
+  preset, ACP exposes it through `session/set_mode` and the `mode` config
+  option, and the core approval policy receives the selected mode for each tool
+  review.
 - Headless surface baseline: `internal/surface/headless` runs one-shot prompts
   over shared app services, starts or resumes canonical sessions through the
   engine, resolves approvals with explicit policy hooks, renders text/JSON
@@ -814,9 +818,11 @@ The completed work is intentionally limited to the reusable skeleton:
   model metadata and model/reasoning selection through ACP session model/config
   methods when the shared app settings service is available, and applies those
   session overrides to subsequent ACP prompts through the shared app turn
-  service. `session/load` replays canonical stored events through the same ACP
-  projection path used for live updates, and `session/close` interrupts any
-  active turn while remaining idempotent when no turn is running.
+  service. It also exposes core-native session modes and the non-model `mode`
+  config option through shared app services. `session/load` replays canonical
+  stored events through the same ACP projection path used for live updates, and
+  `session/close` interrupts any active turn while remaining idempotent when no
+  turn is running.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
 - Architecture lint rules for the new package boundaries.
@@ -869,8 +875,11 @@ be migrated before retiring the old stack:
      part of the actual runtime model request instead of display-only state.
    - The new ACP server now handles `session/close` by cancelling active core
      runtime turns and treating already-idle sessions as successfully closed.
-   - Still pending: terminal integration, client mode flows, non-model config
-     options, and the full behavior covered by current public ACP e2e tests.
+   - The new ACP server now exposes `session/set_mode`, session mode metadata,
+     and the non-model `mode` config option through `internal/app/services.Modes()`.
+   - Still pending: terminal integration, client mode flows, additional
+     non-model config providers, and the full behavior covered by current
+     public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -878,10 +887,11 @@ be migrated before retiring the old stack:
      connect/delete/default/use service methods, session model override state,
      context window/output token fields, reasoning effort fields, auth/header
      fields, request-time model router, session reasoning override propagation,
-     and ACP stdio model/config projection backed by shared app services.
+     session mode service, and ACP stdio model/config/mode projection backed by
+     shared app services.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, TUI command integration, provider discovery
-     UI data, non-model ACP config providers, and removal of the old
+     UI data, additional non-model ACP config providers, and removal of the old
      `app/gatewayapp` config/model services once entrypoints move to the new
      stack.
 
@@ -949,11 +959,12 @@ be migrated before retiring the old stack:
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
      bridging, and a default local-stack ask policy for mutating filesystem
-     tools.
-   - Manual surface controls, model-backed auto-review, policy presets,
-     sandbox-aware permission escalation, allow-always/reject-always persistence,
-     approval review transcript context, and richer denial metadata are not
-     migrated.
+     tools. It now also supports a core-native per-session `manual` approval
+     preset that forces approval prompts for every tool call while `auto-review`
+     continues to use the configured policy.
+   - Model-backed auto-review, richer policy presets, sandbox-aware permission
+     escalation, allow-always/reject-always persistence, approval review
+     transcript context, and richer denial metadata are not migrated.
 
 10. Agents, subagents, and controller handoff
     - The new external ACP path covers basic participant invocation.

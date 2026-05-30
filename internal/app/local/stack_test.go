@@ -425,6 +425,90 @@ func TestStackAsksApprovalForBuiltinMutatingFilesystemTools(t *testing.T) {
 	}
 }
 
+func TestStackManualSessionModeAsksApprovalForReadOnlyTools(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "visible.txt"), []byte("visible\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rawInput, err := json.Marshal(map[string]any{"path": "visible.txt"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-read",
+					Name:  toolfilesystem.ReadFileToolName,
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Provider:     provider,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stack.Services().Modes().Set(context.Background(), session.Ref{SessionID: active.SessionID}, coreruntime.SessionModeManual); err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "read file",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawReadApproval bool
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		event := session.CloneEvent(env.Event)
+		if event.Approval == nil || event.Approval.Status != session.ApprovalPending {
+			continue
+		}
+		sawReadApproval = true
+		if event.Approval.Tool == nil || event.Approval.Tool.Name != toolfilesystem.ReadFileToolName {
+			t.Fatalf("pending approval = %#v, want read_file tool", event.Approval)
+		}
+		if err := turn.Submit(context.Background(), coreruntime.Submission{
+			Kind: coreruntime.SubmissionApproval,
+			Approval: &coreruntime.ApprovalDecision{
+				Approved: false,
+				Outcome:  approval.OptionRejectOnce,
+				OptionID: approval.OptionRejectOnce,
+				Reason:   "manual review rejected",
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !sawReadApproval {
+		t.Fatal("manual mode did not request approval for read_file")
+	}
+}
+
 func TestStackBuildsConfiguredOpenAIProviderAndJSONLStore(t *testing.T) {
 	var captured struct {
 		Model    string `json:"model"`

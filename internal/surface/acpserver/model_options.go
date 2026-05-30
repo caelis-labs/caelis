@@ -13,6 +13,7 @@ import (
 )
 
 const (
+	acpConfigModeID      = "mode"
 	acpConfigModelID     = "model"
 	acpConfigReasoningID = "reasoning_effort"
 )
@@ -29,12 +30,20 @@ func (s *Server) setSessionModel(ctx context.Context, req schema.SetSessionModel
 }
 
 func (s *Server) setSessionConfigOption(ctx context.Context, req schema.SetSessionConfigOptionRequest) (schema.SetSessionConfigOptionResponse, error) {
-	if err := s.requireModelService(ctx); err != nil {
-		return schema.SetSessionConfigOptionResponse{}, err
-	}
 	ref := s.sessionRef(req.SessionID)
 	switch strings.TrimSpace(req.ConfigID) {
+	case acpConfigModeID:
+		value, ok := req.Value.(string)
+		if !ok {
+			return schema.SetSessionConfigOptionResponse{}, fmt.Errorf("surface/acpserver: mode value must be a string")
+		}
+		if _, err := s.setSessionMode(ctx, schema.SetSessionModeRequest{SessionID: req.SessionID, ModeID: value}); err != nil {
+			return schema.SetSessionConfigOptionResponse{}, err
+		}
 	case acpConfigModelID:
+		if err := s.requireModelService(ctx); err != nil {
+			return schema.SetSessionConfigOptionResponse{}, err
+		}
 		value, ok := req.Value.(string)
 		if !ok {
 			return schema.SetSessionConfigOptionResponse{}, fmt.Errorf("surface/acpserver: model value must be a string")
@@ -43,6 +52,9 @@ func (s *Server) setSessionConfigOption(ctx context.Context, req schema.SetSessi
 			return schema.SetSessionConfigOptionResponse{}, err
 		}
 	case acpConfigReasoningID:
+		if err := s.requireModelService(ctx); err != nil {
+			return schema.SetSessionConfigOptionResponse{}, err
+		}
 		value, ok := req.Value.(string)
 		if !ok {
 			return schema.SetSessionConfigOptionResponse{}, fmt.Errorf("surface/acpserver: reasoning effort value must be a string")
@@ -61,13 +73,13 @@ func (s *Server) setSessionConfigOption(ctx context.Context, req schema.SetSessi
 		return schema.SetSessionConfigOptionResponse{}, fmt.Errorf("surface/acpserver: unsupported config option %q", req.ConfigID)
 	}
 	resp := schema.SetSessionConfigOptionResponse{}
-	if err := s.applySessionMetadata(ctx, ref, &resp.ConfigOptions, nil); err != nil {
+	if err := s.applySessionMetadata(ctx, ref, &resp.ConfigOptions, nil, nil); err != nil {
 		return schema.SetSessionConfigOptionResponse{}, err
 	}
 	return resp, nil
 }
 
-func (s *Server) applySessionMetadata(ctx context.Context, ref session.Ref, configOptions *[]schema.SessionConfigOption, models **schema.SessionModelState) error {
+func (s *Server) applySessionMetadata(ctx context.Context, ref session.Ref, configOptions *[]schema.SessionConfigOption, models **schema.SessionModelState, modes **schema.SessionModeState) error {
 	ref = session.NormalizeRef(ref)
 	if ref.AppName == "" {
 		ref.AppName = s.appName
@@ -89,7 +101,47 @@ func (s *Server) applySessionMetadata(ctx context.Context, ref session.Ref, conf
 		}
 		*models = state
 	}
+	if modes != nil {
+		state, err := s.sessionModeState(ctx, ref)
+		if err != nil {
+			return err
+		}
+		*modes = state
+	}
 	return nil
+}
+
+func (s *Server) sessionModeState(ctx context.Context, ref session.Ref) (*schema.SessionModeState, error) {
+	if s.services.Engine() == nil {
+		return nil, nil
+	}
+	choices, err := s.services.Modes().List(ctx)
+	if err != nil || len(choices) == 0 {
+		return nil, err
+	}
+	currentID, err := s.services.Modes().CurrentID(ctx, ref)
+	if err != nil {
+		return nil, err
+	}
+	modes := make([]schema.SessionMode, 0, len(choices))
+	for _, choice := range choices {
+		id := strings.TrimSpace(choice.ID)
+		if id == "" {
+			continue
+		}
+		modes = append(modes, schema.SessionMode{
+			ID:          id,
+			Name:        strings.TrimSpace(choice.Name),
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	if len(modes) == 0 {
+		return nil, nil
+	}
+	return &schema.SessionModeState{
+		AvailableModes: modes,
+		CurrentModeID:  strings.TrimSpace(currentID),
+	}, nil
 }
 
 func (s *Server) sessionModelState(ctx context.Context, ref session.Ref) (*schema.SessionModelState, error) {
@@ -133,18 +185,24 @@ func (s *Server) sessionModelState(ctx context.Context, ref session.Ref) (*schem
 }
 
 func (s *Server) sessionConfigOptions(ctx context.Context, ref session.Ref) ([]schema.SessionConfigOption, error) {
+	options := []schema.SessionConfigOption{}
+	if modeOption, ok, err := s.sessionModeConfigOption(ctx, ref); err != nil {
+		return nil, err
+	} else if ok {
+		options = append(options, modeOption)
+	}
 	choices, err := s.services.Models().List(ctx)
 	if err != nil || len(choices) == 0 {
-		return nil, err
+		return options, err
 	}
 	current, ok, err := s.services.Models().Current(ctx, ref)
 	if err != nil {
 		return nil, err
 	}
 	if !ok {
-		return nil, nil
+		return options, nil
 	}
-	options := []schema.SessionConfigOption{{
+	options = append(options, schema.SessionConfigOption{
 		Type:         "select",
 		ID:           acpConfigModelID,
 		Name:         "Model",
@@ -152,7 +210,7 @@ func (s *Server) sessionConfigOptions(ctx context.Context, ref session.Ref) ([]s
 		Category:     "model",
 		CurrentValue: current.ID,
 		Options:      modelSelectOptions(choices),
-	}}
+	})
 	levels := reasoningLevels(current)
 	if len(levels) > 0 {
 		options = append(options, schema.SessionConfigOption{
@@ -166,6 +224,22 @@ func (s *Server) sessionConfigOptions(ctx context.Context, ref session.Ref) ([]s
 		})
 	}
 	return options, nil
+}
+
+func (s *Server) sessionModeConfigOption(ctx context.Context, ref session.Ref) (schema.SessionConfigOption, bool, error) {
+	state, err := s.sessionModeState(ctx, ref)
+	if err != nil || state == nil || len(state.AvailableModes) == 0 {
+		return schema.SessionConfigOption{}, false, err
+	}
+	return schema.SessionConfigOption{
+		Type:         "select",
+		ID:           acpConfigModeID,
+		Name:         "Approval Preset",
+		Description:  "Choose approval behavior for this session",
+		Category:     "mode",
+		CurrentValue: state.CurrentModeID,
+		Options:      modeSelectOptions(state.AvailableModes),
+	}, true, nil
 }
 
 func (s *Server) currentReasoningEffort(ctx context.Context, ref session.Ref, cfg appsettings.ModelConfig, levels []string) string {
@@ -211,6 +285,25 @@ func modelSelectOptions(choices []appsettings.ModelChoice) []schema.SessionConfi
 			Value:       id,
 			Name:        firstNonEmpty(choice.Alias, choice.Model, id),
 			Description: strings.TrimSpace(choice.Detail),
+		})
+	}
+	return out
+}
+
+func modeSelectOptions(modes []schema.SessionMode) []schema.SessionConfigSelectOption {
+	if len(modes) == 0 {
+		return nil
+	}
+	out := make([]schema.SessionConfigSelectOption, 0, len(modes))
+	for _, mode := range modes {
+		id := strings.TrimSpace(mode.ID)
+		if id == "" {
+			continue
+		}
+		out = append(out, schema.SessionConfigSelectOption{
+			Value:       id,
+			Name:        firstNonEmpty(mode.Name, id),
+			Description: strings.TrimSpace(mode.Description),
 		})
 	}
 	return out

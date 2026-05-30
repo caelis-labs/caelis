@@ -289,6 +289,43 @@ func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 	}
 }
 
+func TestModeServicePersistsSessionModeAndTurnsUseIt(t *testing.T) {
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-1", WorkspaceKey: "repo"}},
+		State:   session.State{},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := svc.Modes().Current(context.Background(), session.Ref{SessionID: "sess-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.ID != coreruntime.SessionModeAutoReview {
+		t.Fatalf("default mode = %#v, want auto-review", current)
+	}
+	manual, err := svc.Modes().Set(context.Background(), session.Ref{SessionID: "sess-1"}, "manual")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manual.ID != coreruntime.SessionModeManual || engine.state[StateSessionMode] != coreruntime.SessionModeManual {
+		t.Fatalf("manual mode = %#v state=%#v, want persisted manual", manual, engine.state)
+	}
+	if _, err := svc.Turns().Begin(context.Background(), BeginTurnRequest{SessionRef: session.Ref{SessionID: "sess-1"}, Input: "ping"}); err != nil {
+		t.Fatal(err)
+	}
+	if engine.turn.Mode != coreruntime.SessionModeManual {
+		t.Fatalf("turn mode = %q, want manual", engine.turn.Mode)
+	}
+	if _, err := svc.Modes().Set(context.Background(), session.Ref{SessionID: "sess-1"}, "unknown"); err == nil {
+		t.Fatal("Set(unknown) error = nil, want validation error")
+	}
+}
+
 type recordingEngine struct {
 	start    session.StartRequest
 	list     session.ListQuery

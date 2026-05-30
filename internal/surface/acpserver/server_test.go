@@ -358,10 +358,24 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if newResp.Models == nil || newResp.Models.CurrentModelID != alpha.ID || len(newResp.Models.AvailableModels) != 2 {
 		t.Fatalf("new session models = %#v, want alpha current with two models", newResp.Models)
 	}
-	if len(newResp.ConfigOptions) != 2 {
-		t.Fatalf("new session config options = %#v, want model and reasoning", newResp.ConfigOptions)
+	if newResp.Modes == nil || newResp.Modes.CurrentModeID != coreruntime.SessionModeAutoReview || len(newResp.Modes.AvailableModes) != 2 {
+		t.Fatalf("new session modes = %#v, want auto-review with two modes", newResp.Modes)
+	}
+	if len(newResp.ConfigOptions) != 3 {
+		t.Fatalf("new session config options = %#v, want mode, model, and reasoning", newResp.ConfigOptions)
 	}
 
+	var setModeResp schema.SetSessionModeResponse
+	if err := conn.Call(ctx, schema.MethodSessionSetMode, schema.SetSessionModeRequest{SessionID: newResp.SessionID, ModeID: coreruntime.SessionModeManual}, &setModeResp); err != nil {
+		t.Fatalf("session/set_mode call error = %v", err)
+	}
+	mode, err := stack.Services().Modes().Current(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode.ID != coreruntime.SessionModeManual {
+		t.Fatalf("current mode = %#v, want manual", mode)
+	}
 	var setModelResp schema.SetSessionModelResponse
 	if err := conn.Call(ctx, schema.MethodSessionSetModel, schema.SetSessionModelRequest{SessionID: newResp.SessionID, ModelID: beta.ID}, &setModelResp); err != nil {
 		t.Fatalf("session/set_model call error = %v", err)
@@ -382,7 +396,7 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}, &setConfigResp); err != nil {
 		t.Fatalf("session/set_config_option call error = %v", err)
 	}
-	if len(setConfigResp.ConfigOptions) != 2 || setConfigResp.ConfigOptions[1].CurrentValue != "high" {
+	if len(setConfigResp.ConfigOptions) != 3 || setConfigResp.ConfigOptions[2].CurrentValue != "high" {
 		t.Fatalf("set config response = %#v, want high reasoning", setConfigResp.ConfigOptions)
 	}
 	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
@@ -465,6 +479,13 @@ func TestPromptUsesSessionModelSelectionFromAppServices(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := server.setSessionConfigOption(ctx, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "mode",
+		Value:     coreruntime.SessionModeManual,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := server.prompt(ctx, schema.PromptRequest{
 		SessionID: newResp.SessionID,
 		Prompt: []json.RawMessage{
@@ -473,8 +494,8 @@ func TestPromptUsesSessionModelSelectionFromAppServices(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if engine.turn.Model != beta.ID || engine.turn.Reasoning.Effort != "high" {
-		t.Fatalf("turn request = %#v, want beta/high from session state", engine.turn)
+	if engine.turn.Model != beta.ID || engine.turn.Reasoning.Effort != "high" || engine.turn.Mode != coreruntime.SessionModeManual {
+		t.Fatalf("turn request = %#v, want beta/high/manual from session state", engine.turn)
 	}
 }
 

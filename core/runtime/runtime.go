@@ -5,6 +5,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -12,6 +13,22 @@ import (
 )
 
 var ErrNoActiveTurn = errors.New("core/runtime: no active turn")
+
+const (
+	SessionModeAutoReview = "auto-review"
+	SessionModeManual     = "manual"
+)
+
+func NormalizeSessionMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "manual":
+		return SessionModeManual
+	case "", "auto", "auto-review", "auto_review", "autoreview":
+		return SessionModeAutoReview
+	default:
+		return ""
+	}
+}
 
 type Engine interface {
 	StartSession(context.Context, session.StartRequest) (session.Session, error)

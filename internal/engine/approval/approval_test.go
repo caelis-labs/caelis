@@ -30,3 +30,29 @@ func TestAskToolsOnlyReviewsSelectedTools(t *testing.T) {
 		t.Fatalf("ignored verdict = %q, want no review", ignored.Verdict)
 	}
 }
+
+func TestWithSessionModeManualAsksForEveryTool(t *testing.T) {
+	policy := WithSessionMode(AskTools("write_file"))
+
+	manual, err := policy.ReviewToolCall(context.Background(), Request{
+		Mode: ModeManual,
+		Call: model.ToolCall{Name: "read_file"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manual.Verdict != VerdictAsk {
+		t.Fatalf("manual verdict = %q, want ask", manual.Verdict)
+	}
+
+	auto, err := policy.ReviewToolCall(context.Background(), Request{
+		Mode: ModeAutoReview,
+		Call: model.ToolCall{Name: "read_file"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if auto.Verdict != "" {
+		t.Fatalf("auto-review verdict = %q, want base policy to ignore read_file", auto.Verdict)
+	}
+}

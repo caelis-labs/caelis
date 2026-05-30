@@ -21,6 +21,7 @@ import (
 const (
 	StateCurrentModelID         = "caelis.model.current_id"
 	StateCurrentReasoningEffort = "caelis.model.reasoning_effort"
+	StateSessionMode            = "caelis.session.mode"
 )
 
 type Services struct {
@@ -104,8 +105,77 @@ func (s Services) Models() ModelService {
 	return ModelService{services: s}
 }
 
+func (s Services) Modes() ModeService {
+	return ModeService{services: s}
+}
+
 type SettingsService struct {
 	services Services
+}
+
+type ModeChoice struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type ModeService struct {
+	services Services
+}
+
+func (s ModeService) List(context.Context) ([]ModeChoice, error) {
+	return sessionModeChoices(), nil
+}
+
+func (s ModeService) CurrentID(ctx context.Context, ref session.Ref) (string, error) {
+	if s.services.engine == nil {
+		return coreruntime.SessionModeAutoReview, nil
+	}
+	ref = defaultSessionRef(s.services.runtime, ref)
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return coreruntime.SessionModeAutoReview, nil
+	}
+	snapshot, err := s.services.engine.LoadSession(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	value, _ := snapshot.State[StateSessionMode].(string)
+	return defaultSessionMode(value), nil
+}
+
+func (s ModeService) Current(ctx context.Context, ref session.Ref) (ModeChoice, error) {
+	modeID, err := s.CurrentID(ctx, ref)
+	if err != nil {
+		return ModeChoice{}, err
+	}
+	mode, ok := lookupSessionMode(modeID)
+	if !ok {
+		return ModeChoice{}, fmt.Errorf("app/services: unknown session mode %q", modeID)
+	}
+	return mode, nil
+}
+
+func (s ModeService) Set(ctx context.Context, ref session.Ref, mode string) (ModeChoice, error) {
+	modeID := coreruntime.NormalizeSessionMode(mode)
+	if modeID == "" {
+		return ModeChoice{}, fmt.Errorf("app/services: unknown session mode %q", strings.TrimSpace(mode))
+	}
+	if s.services.engine == nil {
+		return ModeChoice{}, errors.New("app/services: runtime engine is required")
+	}
+	ref = defaultSessionRef(s.services.runtime, ref)
+	if err := s.services.engine.UpdateSessionState(ctx, ref, func(state session.State) (session.State, error) {
+		next := cloneState(state)
+		if next == nil {
+			next = session.State{}
+		}
+		next[StateSessionMode] = modeID
+		return next, nil
+	}); err != nil {
+		return ModeChoice{}, err
+	}
+	modeChoice, _ := lookupSessionMode(modeID)
+	return modeChoice, nil
 }
 
 func (s SettingsService) Document(ctx context.Context) (appsettings.Document, error) {
@@ -261,17 +331,7 @@ func (s ModelService) RuntimeProfile(ctx context.Context, ref session.Ref) (conf
 }
 
 func (s ModelService) withDefaults(ref session.Ref) session.Ref {
-	ref = session.NormalizeRef(ref)
-	if ref.AppName == "" {
-		ref.AppName = s.services.runtime.AppName
-	}
-	if ref.UserID == "" {
-		ref.UserID = s.services.runtime.UserID
-	}
-	if ref.WorkspaceKey == "" {
-		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
-	}
-	return ref
+	return defaultSessionRef(s.services.runtime, ref)
 }
 
 type ResourceService struct {
@@ -440,17 +500,7 @@ func (s SessionService) Load(ctx context.Context, ref session.Ref) (session.Snap
 }
 
 func (s SessionService) withDefaults(ref session.Ref) session.Ref {
-	ref = session.NormalizeRef(ref)
-	if ref.AppName == "" {
-		ref.AppName = s.services.runtime.AppName
-	}
-	if ref.UserID == "" {
-		ref.UserID = s.services.runtime.UserID
-	}
-	if ref.WorkspaceKey == "" {
-		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
-	}
-	return ref
+	return defaultSessionRef(s.services.runtime, ref)
 }
 
 func (s SessionService) workspaceWithDefaults(workspace session.Workspace) session.Workspace {
@@ -484,16 +534,7 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 	if s.services.engine == nil {
 		return nil, errors.New("app/services: runtime engine is required")
 	}
-	ref := session.NormalizeRef(req.SessionRef)
-	if ref.AppName == "" {
-		ref.AppName = s.services.runtime.AppName
-	}
-	if ref.UserID == "" {
-		ref.UserID = s.services.runtime.UserID
-	}
-	if ref.WorkspaceKey == "" {
-		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
-	}
+	ref := defaultSessionRef(s.services.runtime, req.SessionRef)
 	modelRef := strings.TrimSpace(req.Model)
 	if modelRef == "" && s.services.settings != nil {
 		if cfg, ok, err := s.services.Models().Current(ctx, ref); err == nil && ok {
@@ -508,6 +549,19 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 		}
 		reasoning.Effort = effort
 	}
+	mode := strings.TrimSpace(req.Mode)
+	if mode == "" {
+		var err error
+		mode, err = s.services.Modes().CurrentID(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		mode = coreruntime.NormalizeSessionMode(mode)
+		if mode == "" {
+			return nil, fmt.Errorf("app/services: unknown session mode %q", strings.TrimSpace(req.Mode))
+		}
+	}
 	return s.services.engine.BeginTurn(ctx, coreruntime.TurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
@@ -515,7 +569,7 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 		Model:        modelRef,
 		Reasoning:    reasoning,
 		Surface:      strings.TrimSpace(req.Surface),
-		Mode:         strings.TrimSpace(req.Mode),
+		Mode:         mode,
 		Meta:         maps.Clone(req.Meta),
 	})
 }
@@ -524,16 +578,7 @@ func (s TurnService) Replay(ctx context.Context, req coreruntime.ReplayRequest) 
 	if s.services.engine == nil {
 		return nil, errors.New("app/services: runtime engine is required")
 	}
-	ref := session.NormalizeRef(req.SessionRef)
-	if ref.AppName == "" {
-		ref.AppName = s.services.runtime.AppName
-	}
-	if ref.UserID == "" {
-		ref.UserID = s.services.runtime.UserID
-	}
-	if ref.WorkspaceKey == "" {
-		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
-	}
+	ref := defaultSessionRef(s.services.runtime, req.SessionRef)
 	req.SessionRef = ref
 	return s.services.engine.Replay(ctx, req)
 }
@@ -542,16 +587,7 @@ func (s TurnService) Interrupt(ctx context.Context, ref session.Ref) error {
 	if s.services.engine == nil {
 		return errors.New("app/services: runtime engine is required")
 	}
-	ref = session.NormalizeRef(ref)
-	if ref.AppName == "" {
-		ref.AppName = s.services.runtime.AppName
-	}
-	if ref.UserID == "" {
-		ref.UserID = s.services.runtime.UserID
-	}
-	if ref.WorkspaceKey == "" {
-		ref.WorkspaceKey = strings.TrimSpace(s.services.runtime.WorkspaceKey)
-	}
+	ref = defaultSessionRef(s.services.runtime, ref)
 	return s.services.engine.Interrupt(ctx, ref)
 }
 
@@ -608,6 +644,52 @@ func cloneState(in session.State) session.State {
 		return nil
 	}
 	return session.State(maps.Clone(in))
+}
+
+func defaultSessionRef(runtimeCfg config.Runtime, ref session.Ref) session.Ref {
+	ref = session.NormalizeRef(ref)
+	if ref.AppName == "" {
+		ref.AppName = runtimeCfg.AppName
+	}
+	if ref.UserID == "" {
+		ref.UserID = runtimeCfg.UserID
+	}
+	if ref.WorkspaceKey == "" {
+		ref.WorkspaceKey = strings.TrimSpace(runtimeCfg.WorkspaceKey)
+	}
+	return ref
+}
+
+func sessionModeChoices() []ModeChoice {
+	return []ModeChoice{
+		{
+			ID:          coreruntime.SessionModeAutoReview,
+			Name:        "Auto Review",
+			Description: "Use the configured approval policy for sensitive actions.",
+		},
+		{
+			ID:          coreruntime.SessionModeManual,
+			Name:        "Manual",
+			Description: "Ask before every tool action in this session.",
+		},
+	}
+}
+
+func lookupSessionMode(modeID string) (ModeChoice, bool) {
+	modeID = defaultSessionMode(modeID)
+	for _, mode := range sessionModeChoices() {
+		if mode.ID == modeID {
+			return mode, true
+		}
+	}
+	return ModeChoice{}, false
+}
+
+func defaultSessionMode(mode string) string {
+	if modeID := coreruntime.NormalizeSessionMode(mode); modeID != "" {
+		return modeID
+	}
+	return coreruntime.SessionModeAutoReview
 }
 
 func firstNonEmpty(values ...string) string {

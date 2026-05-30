@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 )
@@ -26,10 +27,16 @@ const (
 	OptionRejectOnce  = "reject_once"
 )
 
+const (
+	ModeAutoReview = coreruntime.SessionModeAutoReview
+	ModeManual     = coreruntime.SessionModeManual
+)
+
 type Request struct {
 	Session    session.Session
 	TurnID     string
 	Surface    string
+	Mode       string
 	Call       model.ToolCall
 	Definition tool.Definition
 }
@@ -89,6 +96,22 @@ func AskTools(names ...string) Policy {
 		}
 		return Decision{}, nil
 	})
+}
+
+func WithSessionMode(base Policy) Policy {
+	return PolicyFunc(func(ctx context.Context, req Request) (Decision, error) {
+		if NormalizeMode(req.Mode) == ModeManual {
+			return AskAll().ReviewToolCall(ctx, req)
+		}
+		if base == nil {
+			return Decision{}, nil
+		}
+		return base.ReviewToolCall(ctx, req)
+	})
+}
+
+func NormalizeMode(mode string) string {
+	return coreruntime.NormalizeSessionMode(mode)
 }
 
 func normalizeNames(in []string) []string {

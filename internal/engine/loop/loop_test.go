@@ -8,6 +8,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
+	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
 )
 
 func TestLoopPassesConfiguredInstructionsToProvider(t *testing.T) {
@@ -58,6 +59,50 @@ func TestLoopPassesReasoningConfigToProvider(t *testing.T) {
 	}
 	if provider.request.Reasoning.Effort != "high" {
 		t.Fatalf("reasoning = %#v, want high effort", provider.request.Reasoning)
+	}
+}
+
+func TestLoopPassesSessionModeToApprovalPolicy(t *testing.T) {
+	rawInput := json.RawMessage(`{"content":"review"}`)
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-plan",
+					Name:  "update_plan",
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	var capturedMode string
+	runner, err := New(Config{
+		Provider: provider,
+		Tools:    staticRegistry{tools: []tool.Tool{fakePlanTool{name: "update_plan"}}},
+		Approval: approval.PolicyFunc(func(_ context.Context, req approval.Request) (approval.Decision, error) {
+			capturedMode = req.Mode
+			return approval.Decision{Verdict: approval.VerdictAllow}, nil
+		}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Run(context.Background(), Request{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:   "plan",
+		TurnID:  "turn-1",
+		Mode:    approval.ModeManual,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if capturedMode != approval.ModeManual {
+		t.Fatalf("approval mode = %q, want manual", capturedMode)
 	}
 }
 
