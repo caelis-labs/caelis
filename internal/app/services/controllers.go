@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
 )
@@ -33,6 +34,19 @@ type ControllerStatus struct {
 	ModeOptions     []ControllerMode         `json:"mode_options,omitempty"`
 }
 
+type ControllerHandoffRequest struct {
+	SessionRef session.Ref `json:"session_ref,omitempty"`
+	Target     string      `json:"target,omitempty"`
+	Source     string      `json:"source,omitempty"`
+	Reason     string      `json:"reason,omitempty"`
+}
+
+type ControllerHandoffResult struct {
+	Controller session.ControllerBinding `json:"controller,omitempty"`
+	Status     ControllerStatus          `json:"status,omitempty"`
+	ActiveACP  bool                      `json:"active_acp,omitempty"`
+}
+
 type ControllerService struct {
 	services Services
 }
@@ -47,6 +61,94 @@ func (s ControllerService) Status(ctx context.Context, ref session.Ref) (Control
 		return ControllerStatus{}, false, err
 	}
 	return status, true, nil
+}
+
+func (s ControllerService) Handoff(ctx context.Context, req ControllerHandoffRequest) (ControllerHandoffResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.services.engine == nil {
+		return ControllerHandoffResult{}, errors.New("app/services: runtime engine is required")
+	}
+	snapshot, err := s.services.Sessions().Load(ctx, req.SessionRef)
+	if err != nil {
+		return ControllerHandoffResult{}, err
+	}
+	controller, activeACP, err := s.controllerForHandoff(ctx, req.Target, req.Source)
+	if err != nil {
+		return ControllerHandoffResult{}, err
+	}
+	event := controllerHandoffEvent(controller, req.Source, req.Reason)
+	if _, err := s.services.engine.RecordEvents(ctx, snapshot.Session.Ref, []session.Event{event}); err != nil {
+		return ControllerHandoffResult{}, err
+	}
+	snapshot.Events = append(snapshot.Events, event)
+	snapshot.Session.Controller = controllerFromSnapshot(snapshot)
+	result := ControllerHandoffResult{
+		Controller: controller,
+		ActiveACP:  activeACP,
+	}
+	if activeACP {
+		status, err := s.statusFromSnapshot(ctx, snapshot, controller)
+		if err != nil {
+			return ControllerHandoffResult{}, err
+		}
+		result.Status = status
+	}
+	return result, nil
+}
+
+func (s ControllerService) controllerForHandoff(ctx context.Context, target string, source string) (session.ControllerBinding, bool, error) {
+	target = strings.TrimSpace(target)
+	switch strings.ToLower(target) {
+	case "", "main", "local", "kernel":
+		return session.ControllerBinding{
+			Kind:       session.ControllerBuiltin,
+			ID:         "builtin",
+			AgentName:  "local",
+			Label:      "local kernel",
+			EpochID:    controllerEpochID(),
+			AttachedAt: time.Now().UTC(),
+			Source:     firstNonEmpty(source, "app_command_handoff"),
+		}, false, nil
+	default:
+		agent, ok, err := s.lookupControllerAgent(ctx, target)
+		if err != nil {
+			return session.ControllerBinding{}, false, err
+		}
+		if !ok {
+			return session.ControllerBinding{}, false, fmt.Errorf("app/services: ACP agent %q is not configured", target)
+		}
+		id := firstNonEmpty(agent.ID, agent.Name, agent.Command)
+		return session.ControllerBinding{
+			Kind:       session.ControllerACP,
+			ID:         id,
+			AgentName:  id,
+			Label:      firstNonEmpty(agent.Name, id),
+			EpochID:    controllerEpochID(),
+			AttachedAt: time.Now().UTC(),
+			Source:     firstNonEmpty(source, "app_command_handoff"),
+		}, true, nil
+	}
+}
+
+func (s ControllerService) lookupControllerAgent(ctx context.Context, target string) (AgentDescriptor, bool, error) {
+	target = strings.ToLower(strings.TrimSpace(target))
+	if target == "" {
+		return AgentDescriptor{}, false, nil
+	}
+	agents, err := s.services.Agents().List(ctx)
+	if err != nil {
+		return AgentDescriptor{}, false, err
+	}
+	for _, agent := range agents {
+		if strings.EqualFold(strings.TrimSpace(agent.ID), target) ||
+			strings.EqualFold(strings.TrimSpace(agent.Name), target) ||
+			strings.EqualFold(strings.TrimSpace(agentLookupKey(agent)), target) {
+			return normalizeAgentDescriptor(agent), true, nil
+		}
+	}
+	return AgentDescriptor{}, false, nil
 }
 
 func (s ControllerService) SetModel(ctx context.Context, ref session.Ref, modelRef string, reasoningEffort string) (ControllerStatus, error) {
@@ -330,4 +432,24 @@ func controllerConfigRef(controller session.ControllerBinding) string {
 func controllerConfigRefMatches(state session.State, controller session.ControllerBinding) bool {
 	ref := strings.TrimSpace(stateString(state, StateControllerConfigRef))
 	return ref != "" && ref == controllerConfigRef(controller)
+}
+
+func controllerHandoffEvent(controller session.ControllerBinding, source string, reason string) session.Event {
+	return session.Event{
+		Type:       session.EventHandoff,
+		Visibility: session.VisibilityCanonical,
+		Time:       time.Now().UTC(),
+		Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "caelis", Name: "caelis"},
+		Scope: &session.EventScope{
+			Source:     firstNonEmpty(source, "app_command_handoff"),
+			Controller: controller,
+		},
+		Meta: map[string]any{
+			"reason": strings.TrimSpace(reason),
+		},
+	}
+}
+
+func controllerEpochID() string {
+	return fmt.Sprintf("controller-%d", time.Now().UTC().UnixNano())
 }

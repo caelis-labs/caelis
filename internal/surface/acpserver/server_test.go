@@ -10,6 +10,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
@@ -506,6 +507,135 @@ func TestServeStdioExecutesModelAndApprovalSlashCommandsThroughAppServices(t *te
 	}
 	if snapshot.State[appservices.StateCurrentModelID] != beta.ID || snapshot.State[appservices.StateCurrentReasoningEffort] != "high" || snapshot.State[appservices.StateSessionMode] != coreruntime.SessionModeManual {
 		t.Fatalf("session state = %#v, want beta/high/manual", snapshot.State)
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
+func TestServeStdioExecutesAgentSlashCommandsThroughAppServices(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertACPAgent(ctx, plugin.ACPAgentDescriptor{
+		Name:    "helper",
+		Command: "helper-acp",
+		Args:    []string{"--stdio"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := local.New(local.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Settings: manager,
+		Provider: &testProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	agentMessages := make(chan string, 8)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(_ context.Context, msg jsonrpc.Message) {
+			if msg.Method != schema.MethodSessionUpdate {
+				return
+			}
+			var notification contentNotification
+			if err := json.Unmarshal(msg.Params, &notification); err != nil {
+				return
+			}
+			if notification.Update.SessionUpdate == schema.UpdateAgentMessage && notification.Update.Content.Text != "" {
+				agentMessages <- notification.Update.Content.Text
+			}
+		})
+	}()
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: "/tmp/project"}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+	var promptResp schema.PromptResponse
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/agent list"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/agent list) call error = %v", err)
+	}
+	listText := waitForAgentMessage(t, ctx, agentMessages, "agents:")
+	if !strings.Contains(listText, "helper") || !strings.Contains(listText, "controller: local") {
+		t.Fatalf("agent list output = %q, want helper and local controller", listText)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/agent use helper"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/agent use helper) call error = %v", err)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "agent controller: helper")
+	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotContainsControllerHandoff(snapshot, "helper") {
+		t.Fatalf("events after /agent use helper = %#v, want helper handoff", snapshot.Events)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/agent use local"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/agent use local) call error = %v", err)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "agent controller: local")
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/agent remove helper"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/agent remove helper) call error = %v", err)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "agent removed: helper")
+	if agents := manager.ListACPAgents(); len(agents) != 0 {
+		t.Fatalf("settings agents after remove = %#v, want none", agents)
 	}
 
 	cancel()
@@ -1285,6 +1415,22 @@ func waitForAgentMessage(t *testing.T, ctx context.Context, messages <-chan stri
 func snapshotContainsEventType(snapshot session.Snapshot, eventType session.EventType) bool {
 	for _, event := range snapshot.Events {
 		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func snapshotContainsControllerHandoff(snapshot session.Snapshot, agent string) bool {
+	agent = strings.TrimSpace(agent)
+	for _, event := range snapshot.Events {
+		if event.Type != session.EventHandoff || event.Scope == nil {
+			continue
+		}
+		controller := event.Scope.Controller
+		if strings.EqualFold(strings.TrimSpace(controller.ID), agent) ||
+			strings.EqualFold(strings.TrimSpace(controller.AgentName), agent) ||
+			strings.EqualFold(strings.TrimSpace(controller.Label), agent) {
 			return true
 		}
 	}

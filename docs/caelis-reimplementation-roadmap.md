@@ -701,11 +701,12 @@ alongside the old stack without importing it:
   into `core/runtime` approval submissions.
 - `internal/app/services.CommandService`: shared command catalog plus
   service-native command execution contract. The current execution baseline
-  handles direct `/connect` configuration plus non-wizard `/status`,
-  `/compact`, `/model`, `/approval`, and `/resume`, so ACP clients, TUI, and
-  the future APP can share command semantics instead of reimplementing provider
-  setup, status, model selection, approval mode, compaction, and resume behavior
-  in each surface.
+  handles `/agent` management/handoff, direct `/connect` configuration, and
+  non-wizard `/status`, `/compact`, `/model`, `/approval`, and `/resume`, so ACP
+  clients, TUI, and the future APP can share command semantics instead of
+  reimplementing agent registry/controller handoff, provider setup, status,
+  model selection, approval mode, compaction, and resume behavior in each
+  surface.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime and treats host setup/fix/reset/clean as explicit
@@ -1151,10 +1152,10 @@ be migrated before retiring the old stack:
      projection before adapting to the existing kernel envelope shape.
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
-     ACP clients, TUI, and the future APP. Direct `/connect`, `/status`,
-     `/compact`, `/model`, `/approval`, and `/resume` now share app-service
-     behavior; remaining interactive commands can be added without making ACP,
-     TUI, or APP surfaces own command semantics.
+     ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
+     `/connect`, `/status`, `/compact`, `/model`, `/approval`, and `/resume`
+     now share app-service behavior; remaining interactive commands can be
+     added without making ACP, TUI, or APP surfaces own command semantics.
    - Still pending: transcript actions and richer settings-panel composition
      still need APP-ready service/view-model contracts. Durable async task
      control and output storage remain kernel/runtime work rather than APP-only
@@ -1199,17 +1200,21 @@ be migrated before retiring the old stack:
      publishes standard `available_commands_update` notifications after
      session new/load/resume using the shared command catalog.
    - Migrated baseline: ACP `session/prompt` now executes service-native
-     `/connect`, `/status`, `/compact`, `/model`, `/approval`, and `/resume`
-     through `CommandService`; handled commands return `end_turn`, publish
-     standard `agent_message_chunk` output, mutate settings/model/mode/session
-     state through shared app services, and do not enter the model turn loop.
-     `/connect` parses provider/model/base URL/token/limit/reasoning arguments
-     into the shared model settings contract and switches the active session to
-     the new model. `/resume` command execution can also replay the targeted
-     canonical snapshot through the same ACP projection path as `session/load`.
+     `/agent`, `/connect`, `/status`, `/compact`, `/model`, `/approval`, and
+     `/resume` through `CommandService`; handled commands return `end_turn`,
+     publish standard `agent_message_chunk` output, mutate
+     settings/agent/model/mode/session state through shared app services, and
+     do not enter the model turn loop. `/agent use <agent|local>` records
+     canonical controller handoff events through `ControllerService`, and
+     `/agent add/remove/install/update` uses the shared `AgentService`
+     registry/settings contract. `/connect` parses provider/model/base
+     URL/token/limit/reasoning arguments into the shared model settings
+     contract and switches the active session to the new model. `/resume`
+     command execution can also replay the targeted canonical snapshot through
+     the same ACP projection path as `session/load`.
    - Still pending: terminal integration, client mode flows, remaining
-     interactive slash-command parity for commands such as `/agent` and the
-     TUI `/connect` wizard shell, remote controller option
+     interactive slash-command parity for dynamic `/<agent> <prompt>` commands
+     and the TUI `/connect` wizard shell, remote controller option
      discovery/reconnect, richer non-model config providers beyond
      prompt/context/sandbox backend settings, and the full behavior covered by
      current public ACP e2e tests.
@@ -1498,6 +1503,13 @@ be migrated before retiring the old stack:
       `AgentService.Management`, covering registered agents, built-in catalog
       entries, installable adapters, and surface-neutral actions for TUI and
       future APP panels.
+    - Migrated baseline: shared command execution now covers `/agent list`,
+      `/agent add <builtin>`, `/agent add custom <name> -- <command> [args...]`,
+      `/agent install|update <builtin>`, `/agent remove <agent>`, and
+      `/agent use <agent|local>`. The command path uses `AgentService` for
+      registry/settings mutation and `ControllerService.Handoff` for canonical
+      `EventHandoff` recording, so ACP clients and future APP panels no longer
+      need a surface-local copy of the non-prompt agent command semantics.
     - Migrated baseline: built-in ACP adapter update now reuses the same
       shared app-service install contract as registration. The TUI exposes
       `/agent update <adapter>` with installable adapter completion and routes

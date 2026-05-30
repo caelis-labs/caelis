@@ -599,6 +599,104 @@ func TestCommandServiceExecuteConnectConfiguresAndUsesModel(t *testing.T) {
 	}
 }
 
+func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-agent", WorkspaceKey: "repo"}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+		Agents: []AgentDescriptor{{
+			ID:      "reviewer",
+			Name:    "reviewer",
+			Kind:    AgentKindExternalACP,
+			Command: "reviewer-acp",
+		}},
+		BuiltinAgents: []AgentDescriptor{{
+			ID:          "copilot",
+			Name:        "copilot",
+			Kind:        AgentKindExternalACP,
+			Command:     "copilot",
+			Args:        []string{"--acp", "--stdio"},
+			Description: "GitHub Copilot ACP agent",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-agent"},
+		Input:      "/agent list",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"agents:", "controller: local", "reviewer", "copilot"} {
+		if !strings.Contains(listed.Output, want) {
+			t.Fatalf("agent list output = %q, missing %q", listed.Output, want)
+		}
+	}
+
+	added, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent add copilot"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added.Output != "agent registered: copilot" {
+		t.Fatalf("agent add output = %q, want registered copilot", added.Output)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" {
+		t.Fatalf("settings agents after builtin add = %#v, want copilot", agents)
+	}
+
+	custom, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent add custom helper -- helper-acp --stdio"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if custom.Output != "agent registered: helper" {
+		t.Fatalf("custom add output = %q, want helper", custom.Output)
+	}
+	handoff, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-agent"},
+		Input:      "/agent use reviewer",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handoff.Output != "agent controller: reviewer" {
+		t.Fatalf("handoff output = %q, want reviewer", handoff.Output)
+	}
+	if len(engine.events) != 1 || engine.events[0].Type != session.EventHandoff || engine.events[0].Scope == nil || engine.events[0].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("handoff events = %#v, want reviewer handoff event", engine.events)
+	}
+	local, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-agent"},
+		Input:      "/agent use local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if local.Output != "agent controller: local" || engine.events[0].Scope.Controller.Kind != session.ControllerBuiltin {
+		t.Fatalf("local handoff = %#v events=%#v, want local controller", local, engine.events)
+	}
+	removed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent remove helper"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed.Output != "agent removed: helper" {
+		t.Fatalf("remove output = %q, want removed helper", removed.Output)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" {
+		t.Fatalf("settings agents after remove = %#v, want only copilot", agents)
+	}
+}
+
 func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

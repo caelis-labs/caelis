@@ -41,6 +41,8 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 		return appviewmodel.CommandExecutionView{}, nil
 	}
 	switch command {
+	case "agent":
+		return s.executeAgent(ctx, req.SessionRef, args)
 	case "approval":
 		return s.executeApproval(ctx, req.SessionRef, args)
 	case "connect":
@@ -80,6 +82,133 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 	default:
 		return appviewmodel.CommandExecutionView{}, nil
 	}
+}
+
+func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
+	sub, rest, hasSub := splitCommandArg(args)
+	if !hasSub || strings.EqualFold(sub, "list") || strings.EqualFold(sub, "ls") || strings.EqualFold(sub, "status") {
+		if strings.TrimSpace(rest) != "" {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /agent [list]")
+		}
+		view, err := s.services.Agents().Management(ctx)
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "agent",
+			Output:  s.formatCommandAgents(ctx, ref, view),
+		}, nil
+	}
+	switch strings.ToLower(sub) {
+	case "use":
+		target := strings.TrimSpace(rest)
+		if target == "" || strings.ContainsAny(target, " \t\n") {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /agent use <agent|local>")
+		}
+		result, err := s.services.Controllers().Handoff(ctx, ControllerHandoffRequest{
+			SessionRef: ref,
+			Target:     target,
+			Source:     "app_command_agent",
+			Reason:     "slash command handoff",
+		})
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		output := "agent controller: local"
+		if result.ActiveACP {
+			output = "agent controller: " + firstNonEmpty(result.Status.Agent, result.Controller.AgentName, result.Controller.ID)
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "agent",
+			Output:  output,
+		}, nil
+	case "add", "register":
+		agent, err := s.executeAgentAdd(ctx, rest)
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "agent",
+			Output:  "agent registered: " + firstNonEmpty(agent.Name, agent.ID),
+		}, nil
+	case "install", "update":
+		target := strings.TrimSpace(rest)
+		if target == "" || strings.ContainsAny(target, " \t\n") {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /agent %s <builtin>", strings.ToLower(sub))
+		}
+		agent, err := s.services.Agents().RegisterBuiltinWithOptions(ctx, target, RegisterBuiltinAgentOptions{Install: true})
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "agent",
+			Output:  "agent installed: " + firstNonEmpty(agent.Name, agent.ID),
+		}, nil
+	case "remove", "rm", "delete", "del":
+		target := strings.TrimSpace(rest)
+		if target == "" || strings.ContainsAny(target, " \t\n") {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /agent remove <agent>")
+		}
+		if status, ok, err := s.services.Controllers().Status(ctx, ref); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		} else if ok && strings.EqualFold(strings.TrimSpace(status.Agent), target) {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: agent %q is the active controller; run /agent use local before removing it", target)
+		}
+		if err := s.services.Agents().Remove(ctx, target); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "agent",
+			Output:  "agent removed: " + target,
+		}, nil
+	default:
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /agent list|use <agent|local>|add <builtin>|add custom <name> -- <command> [args...]|install <builtin>|update <builtin>|remove <agent>")
+	}
+}
+
+func (s CommandService) executeAgentAdd(ctx context.Context, args string) (AgentDescriptor, error) {
+	sub, rest, hasSub := splitCommandArg(args)
+	if !hasSub {
+		return AgentDescriptor{}, fmt.Errorf("app/services: usage: /agent add <builtin>|custom <name> -- <command> [args...]")
+	}
+	if strings.EqualFold(sub, "custom") {
+		agent, err := parseCommandCustomAgent(rest)
+		if err != nil {
+			return AgentDescriptor{}, err
+		}
+		return s.services.Agents().RegisterCustom(ctx, agent)
+	}
+	if strings.TrimSpace(rest) != "" {
+		return AgentDescriptor{}, fmt.Errorf("app/services: usage: /agent add <builtin>")
+	}
+	return s.services.Agents().RegisterBuiltin(ctx, sub)
+}
+
+func parseCommandCustomAgent(args string) (AgentDescriptor, error) {
+	fields := strings.Fields(args)
+	if len(fields) < 3 {
+		return AgentDescriptor{}, fmt.Errorf("app/services: usage: /agent add custom <name> -- <command> [args...]")
+	}
+	sep := -1
+	for i, field := range fields {
+		if field == "--" {
+			sep = i
+			break
+		}
+	}
+	if sep != 1 || sep+1 >= len(fields) {
+		return AgentDescriptor{}, fmt.Errorf("app/services: usage: /agent add custom <name> -- <command> [args...]")
+	}
+	return AgentDescriptor{
+		Name:    strings.TrimSpace(fields[0]),
+		Command: strings.TrimSpace(fields[sep+1]),
+		Args:    append([]string(nil), fields[sep+2:]...),
+	}, nil
 }
 
 func (s CommandService) executeConnect(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
@@ -394,6 +523,66 @@ func dashAsEmpty(value string) string {
 		return ""
 	}
 	return value
+}
+
+func (s CommandService) formatCommandAgents(ctx context.Context, ref session.Ref, view appviewmodel.AgentManagementView) string {
+	lines := []string{"agents:"}
+	if status, ok, err := s.services.Controllers().Status(ctx, ref); err == nil && ok {
+		lines = append(lines, "  controller: "+firstNonEmpty(status.Agent, "acp"))
+	} else {
+		lines = append(lines, "  controller: local")
+	}
+	if len(view.Registered) == 0 {
+		lines = append(lines, "  registered: none")
+	} else {
+		lines = append(lines, "  registered:")
+		for _, item := range view.Registered {
+			lines = append(lines, "    "+formatCommandAgentItem(item.Agent))
+		}
+	}
+	if len(view.Builtins) > 0 {
+		lines = append(lines, "  builtins:")
+		for _, item := range view.Builtins {
+			line := "    " + formatCommandAgentItem(item.Agent)
+			if item.Registered {
+				line += " (registered)"
+			}
+			if item.Installable {
+				line += " (installable)"
+			}
+			lines = append(lines, line)
+		}
+	}
+	if len(view.Installable) > 0 {
+		lines = append(lines, "  installable:")
+		for _, item := range view.Installable {
+			line := "    " + firstNonEmpty(item.Name, item.ID)
+			if detail := strings.TrimSpace(item.Detail); detail != "" {
+				line += "  " + detail
+			}
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatCommandAgentItem(agent appviewmodel.AgentItem) string {
+	name := firstNonEmpty(agent.Name, agent.ID, agent.Command)
+	details := []string{}
+	if agent.Kind != "" {
+		details = append(details, agent.Kind)
+	}
+	if agent.Command != "" {
+		command := agent.Command
+		if len(agent.Args) > 0 {
+			command += " " + strings.Join(agent.Args, " ")
+		}
+		details = append(details, command)
+	}
+	if len(details) > 0 {
+		name += "  " + strings.Join(details, " · ")
+	}
+	return name
 }
 
 func formatCommandStatus(status appviewmodel.StatusView) string {
