@@ -244,7 +244,7 @@ func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.St
 	if sandboxBackend == "" || sandboxBackend == "auto" {
 		sandboxBackend = "host"
 	}
-	modelProvider := coreModelProvider(cfg.Model.Provider)
+	modelProvider := coreModelProvider(cfg.Model.Provider, cfg.Model.API)
 	return applocal.NewWithContext(ctx, applocal.Config{
 		Runtime: coreconfig.Runtime{
 			AppName:      cfg.AppName,
@@ -282,14 +282,23 @@ func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.St
 	})
 }
 
-func coreModelProvider(provider string) string {
+func coreModelProvider(provider string, api providers.APIType) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "openai", "openai_compatible", "openai-compatible":
 		return "openai_compatible"
 	case "deepseek":
 		return "deepseek"
+	case "mimo", "xiaomi":
+		return "xiaomi"
 	case "openrouter":
 		return "openrouter"
+	case "volcengine":
+		if api == providers.APIVolcengineCoding {
+			return "volcengine-coding-plan"
+		}
+		return "volcengine"
+	case "volcengine-coding-plan", "volcengine_coding_plan":
+		return "volcengine-coding-plan"
 	case "ollama":
 		return "ollama"
 	default:
@@ -595,6 +604,30 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "OPENROUTER_API_KEY"
+		}
+	case "mimo", "xiaomi":
+		cfg.Model.Provider = "xiaomi"
+		if cfg.Model.API == "" {
+			cfg.Model.API = providers.APIMimo
+		}
+		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
+			cfg.Model.BaseURL = "https://api.xiaomimimo.com/v1"
+		}
+	case "volcengine":
+		cfg.Model.Provider = "volcengine"
+		if cfg.Model.API == "" {
+			cfg.Model.API = providers.APIVolcengine
+		}
+		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
+			cfg.Model.BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
+		}
+	case "volcengine-coding-plan", "volcengine_coding_plan":
+		cfg.Model.Provider = "volcengine-coding-plan"
+		if cfg.Model.API == "" {
+			cfg.Model.API = providers.APIVolcengineCoding
+		}
+		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
+			cfg.Model.BaseURL = "https://ark.cn-beijing.volces.com/api/coding/v3"
 		}
 	case "openai":
 		cfg.Model.Provider = "openai"

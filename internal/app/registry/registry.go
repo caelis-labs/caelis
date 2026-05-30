@@ -74,6 +74,19 @@ func RegisterDefaults(r *Registry) error {
 	if err := r.RegisterModelProvider("openrouter", openRouterProviderFactory); err != nil {
 		return err
 	}
+	for _, name := range []string{"mimo", "xiaomi"} {
+		if err := r.RegisterModelProvider(name, mimoProviderFactory); err != nil {
+			return err
+		}
+	}
+	if err := r.RegisterModelProvider("volcengine", volcengineProviderFactory); err != nil {
+		return err
+	}
+	for _, name := range []string{"volcengine-coding-plan", "volcengine_coding_plan"} {
+		if err := r.RegisterModelProvider(name, volcengineCodingProviderFactory); err != nil {
+			return err
+		}
+	}
 	if err := r.RegisterModelProvider("ollama", ollamaProviderFactory); err != nil {
 		return err
 	}
@@ -349,8 +362,11 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 }
 
 const (
-	deepSeekDefaultBaseURL   = "https://api.deepseek.com/v1"
-	openRouterDefaultBaseURL = "https://openrouter.ai/api/v1"
+	deepSeekDefaultBaseURL             = "https://api.deepseek.com/v1"
+	mimoDefaultBaseURL                 = "https://api.xiaomimimo.com/v1"
+	openRouterDefaultBaseURL           = "https://openrouter.ai/api/v1"
+	volcengineDefaultBaseURL           = "https://ark.cn-beijing.volces.com/api/v3"
+	volcengineCodingPlanDefaultBaseURL = "https://ark.cn-beijing.volces.com/api/coding/v3"
 )
 
 func openAIProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
@@ -390,6 +406,48 @@ func openRouterProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig
 		Model:           cfg.Model,
 		MaxOutputTokens: cfg.MaxOutputTokens,
 		Flavor:          modelopenai.FlavorOpenRouter,
+	})
+}
+
+func mimoProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelopenai.New(modelopenai.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "xiaomi"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  mimoDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      cfg.HeaderKey,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		Flavor:          modelopenai.FlavorMimo,
+	})
+}
+
+func volcengineProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelopenai.New(modelopenai.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "volcengine"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  volcengineDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      cfg.HeaderKey,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		Flavor:          modelopenai.FlavorVolcengine,
+	})
+}
+
+func volcengineCodingProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelopenai.New(modelopenai.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "volcengine-coding-plan"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  volcengineCodingPlanDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      cfg.HeaderKey,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		Flavor:          modelopenai.FlavorVolcengine,
 	})
 }
 

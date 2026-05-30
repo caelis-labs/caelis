@@ -871,6 +871,24 @@ func normalizeEndpointID(provider string, endpointID string, baseURL string) str
 		if normalizedBaseURL == "" || normalizedBaseURL == "https://api.deepseek.com/v1" {
 			return "default"
 		}
+	case "mimo", "xiaomi":
+		switch normalizedBaseURL {
+		case "", "https://api.xiaomimimo.com/v1":
+			return "api-cn"
+		case "https://token-plan-cn.xiaomimimo.com/v1":
+			return "token-plan-cn"
+		}
+	case "volcengine":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/v3" {
+			return "standard"
+		}
+		if normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/coding/v3" {
+			return "coding-plan"
+		}
+	case "volcengine-coding-plan", "volcengine_coding_plan":
+		if normalizedBaseURL == "" || normalizedBaseURL == "https://ark.cn-beijing.volces.com/api/coding/v3" {
+			return "coding-plan"
+		}
 	case "ollama":
 		if normalizedBaseURL == "" || normalizedBaseURL == "http://localhost:11434" {
 			return "default"

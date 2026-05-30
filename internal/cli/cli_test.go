@@ -483,6 +483,109 @@ func TestRunHeadlessUsesCoreOpenRouterProvider(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreMimoProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var authHeader string
+	var captured struct {
+		Model string `json:"model"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		authHeader = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"mimo-v2-pro",
+			"choices":[{"message":{"role":"assistant","content":"mimo pong","reasoning_content":"thinking"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":8,"completion_tokens":2,"total_tokens":10}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-mimo-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "xiaomi",
+		"-model", "mimo-v2-pro",
+		"-base-url", server.URL,
+		"-token", "mimo-token",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "mimo pong" || result.PromptTokens != 8 {
+		t.Fatalf("headless result = %#v, want Mimo output and usage", result)
+	}
+	if authHeader != "Bearer mimo-token" || captured.Model != "mimo-v2-pro" {
+		t.Fatalf("captured auth/model = %q/%q", authHeader, captured.Model)
+	}
+}
+
+func TestRunHeadlessUsesCoreVolcengineCodingProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var captured struct {
+		Model    string `json:"model"`
+		Thinking struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"doubao-seed-2.0-pro",
+			"choices":[{"message":{"role":"assistant","content":"volcengine pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-volcengine-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "volcengine-coding-plan",
+		"-model", "doubao-seed-2.0-pro",
+		"-base-url", server.URL,
+		"-token", "volc-token",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "volcengine pong" || result.PromptTokens != 9 {
+		t.Fatalf("headless result = %#v, want Volcengine output and usage", result)
+	}
+	if captured.Model != "doubao-seed-2.0-pro" || captured.Thinking.Type != "auto" {
+		t.Fatalf("captured request = %#v, want Volcengine auto thinking", captured)
+	}
+}
+
 func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer

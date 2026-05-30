@@ -329,12 +329,142 @@ func TestProviderOpenRouterProfileSetsAttributionHeaders(t *testing.T) {
 	if got := event.Response.Message.TextContent(); got != "ok" {
 		t.Fatalf("assistant text = %q, want ok", got)
 	}
+	if len(event.Response.Message.Parts) < 2 ||
+		event.Response.Message.Parts[1].Kind != model.PartReasoning ||
+		event.Response.Message.Parts[1].Reasoning == nil ||
+		event.Response.Message.Parts[1].Reasoning.VisibleText != "route" {
+		t.Fatalf("assistant parts = %#v, want OpenRouter reasoning", event.Response.Message.Parts)
+	}
 	if captured.Model != "openrouter/auto" {
 		t.Fatalf("captured model = %q, want normalized openrouter/auto", captured.Model)
 	}
 	if captured.ResponseFormat == nil || captured.ResponseFormat.Type != "json_schema" ||
 		captured.ResponseFormat.JSONSchema == nil || !captured.ResponseFormat.JSONSchema.Strict {
 		t.Fatalf("response_format = %#v, want strict json_schema", captured.ResponseFormat)
+	}
+}
+
+func TestProviderMimoProfileUsesThinkingAndJSONObjectSchema(t *testing.T) {
+	var captured chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"mimo-v2-pro",
+			"choices":[{"message":{"role":"assistant","content":"ok","reasoning_content":"cached"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":64,"completion_tokens":9,"total_tokens":73,"prompt_tokens_details":{"cached_tokens":48}}
+		}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{
+		ID:              "xiaomi",
+		BaseURL:         server.URL,
+		APIKey:          "mimo-token",
+		Model:           "mimo-v2-pro",
+		MaxOutputTokens: 256,
+		Flavor:          FlavorMimo,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages:  []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+		Reasoning: model.ReasoningConfig{Effort: "high"},
+		Output: &model.OutputSpec{
+			Mode: model.OutputSchema,
+			JSONSchema: map[string]any{
+				"type": "object",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event.Response.Usage == nil || event.Response.Usage.CachedInputTokens != 48 {
+		t.Fatalf("usage = %#v, want cached tokens", event.Response.Usage)
+	}
+	if captured.Thinking == nil || captured.Thinking.Type != "enabled" || captured.Reasoning != nil || captured.ReasoningEffort != "" {
+		t.Fatalf("captured reasoning = thinking:%#v reasoning:%#v effort:%q", captured.Thinking, captured.Reasoning, captured.ReasoningEffort)
+	}
+	if captured.ResponseFormat == nil || captured.ResponseFormat.Type != "json_object" {
+		t.Fatalf("response_format = %#v, want json_object", captured.ResponseFormat)
+	}
+	if captured.MaxTokens != 256 {
+		t.Fatalf("max_tokens = %d, want 256", captured.MaxTokens)
+	}
+}
+
+func TestProviderVolcengineProfileUsesThinkingStates(t *testing.T) {
+	tests := []struct {
+		name       string
+		effort     string
+		wantThink  string
+		wantFormat string
+	}{
+		{name: "auto", effort: "", wantThink: "auto", wantFormat: ""},
+		{name: "disabled", effort: "none", wantThink: "disabled", wantFormat: "json_object"},
+		{name: "enabled", effort: "high", wantThink: "enabled", wantFormat: "json_object"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var captured chatCompletionRequest
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+					t.Fatal(err)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{
+					"model":"doubao-seed-2.0-pro",
+					"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]
+				}`))
+			}))
+			defer server.Close()
+
+			provider, err := New(Config{
+				ID:      "volcengine",
+				BaseURL: server.URL,
+				APIKey:  "volc-token",
+				Model:   "doubao-seed-2.0-pro",
+				Flavor:  FlavorVolcengine,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := model.Request{
+				Messages:  []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+				Reasoning: model.ReasoningConfig{Effort: tc.effort},
+			}
+			if tc.wantFormat != "" {
+				req.Output = &model.OutputSpec{
+					Mode:       model.OutputSchema,
+					JSONSchema: map[string]any{"type": "object"},
+				}
+			}
+			stream, err := provider.Stream(context.Background(), req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := stream.Recv(); err != nil {
+				t.Fatal(err)
+			}
+			if captured.Thinking == nil || captured.Thinking.Type != tc.wantThink || captured.Reasoning != nil || captured.ReasoningEffort != "" {
+				t.Fatalf("captured reasoning = thinking:%#v reasoning:%#v effort:%q", captured.Thinking, captured.Reasoning, captured.ReasoningEffort)
+			}
+			if tc.wantFormat == "" {
+				if captured.ResponseFormat != nil {
+					t.Fatalf("response_format = %#v, want nil", captured.ResponseFormat)
+				}
+			} else if captured.ResponseFormat == nil || captured.ResponseFormat.Type != tc.wantFormat {
+				t.Fatalf("response_format = %#v, want %s", captured.ResponseFormat, tc.wantFormat)
+			}
+		})
 	}
 }
 

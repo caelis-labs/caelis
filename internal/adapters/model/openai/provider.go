@@ -26,7 +26,9 @@ type Flavor string
 const (
 	FlavorDefault    Flavor = ""
 	FlavorDeepSeek   Flavor = "deepseek"
+	FlavorMimo       Flavor = "mimo"
 	FlavorOpenRouter Flavor = "openrouter"
+	FlavorVolcengine Flavor = "volcengine"
 )
 
 type Config struct {
@@ -283,8 +285,8 @@ type chatCompletionRequest struct {
 type chatMessage struct {
 	Role             string         `json:"role"`
 	Content          any            `json:"content,omitempty"`
-	Reasoning        string         `json:"reasoning,omitempty"`
-	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	Reasoning        *string        `json:"reasoning,omitempty"`
+	ReasoningContent *string        `json:"reasoning_content,omitempty"`
 	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
 	ToolCallID       string         `json:"tool_call_id,omitempty"`
 }
@@ -365,14 +367,11 @@ func (p *Provider) chatMessageFromCore(message model.Message) (chatMessage, bool
 		if text := contentText(message.Parts); text != "" {
 			out.Content = text
 		}
+		calls := message.ToolCalls()
 		if p.includeReasoningContent() {
-			if p.flavor == FlavorOpenRouter {
-				out.Reasoning = reasoningText(message.Parts)
-			} else {
-				out.ReasoningContent = reasoningText(message.Parts)
-			}
+			p.setRequestReasoning(&out, reasoningText(message.Parts), len(calls) > 0, out.Content != nil)
 		}
-		for _, call := range message.ToolCalls() {
+		for _, call := range calls {
 			out.ToolCalls = append(out.ToolCalls, chatToolCall{
 				ID:   strings.TrimSpace(call.ID),
 				Type: "function",
@@ -403,7 +402,7 @@ func coreMessageFromChat(message chatMessage) model.Message {
 	if text := chatContentText(message.Content); text != "" {
 		out.Parts = append(out.Parts, model.NewTextPart(text))
 	}
-	if text := firstNonEmpty(message.ReasoningContent, message.Reasoning); text != "" {
+	if text := firstNonEmpty(stringPtrValue(message.ReasoningContent), stringPtrValue(message.Reasoning)); text != "" {
 		out.Parts = append(out.Parts, model.NewReasoningPart(text, model.ReasoningVisible))
 	}
 	for _, call := range message.ToolCalls {
@@ -561,7 +560,30 @@ func chatContentText(value any) string {
 }
 
 func (p *Provider) includeReasoningContent() bool {
-	return p != nil && (p.flavor == FlavorDeepSeek || p.flavor == FlavorOpenRouter)
+	return p != nil && (p.flavor == FlavorDeepSeek || p.flavor == FlavorMimo || p.flavor == FlavorOpenRouter || p.flavor == FlavorVolcengine)
+}
+
+func (p *Provider) setRequestReasoning(out *chatMessage, reasoning string, hasToolCalls bool, hasContent bool) {
+	if p == nil || out == nil {
+		return
+	}
+	reasoning = strings.TrimSpace(reasoning)
+	emitEmpty := false
+	switch p.flavor {
+	case FlavorDeepSeek:
+		emitEmpty = hasToolCalls || !hasContent
+	case FlavorMimo, FlavorVolcengine:
+		emitEmpty = hasToolCalls
+	}
+	if reasoning == "" && !emitEmpty {
+		return
+	}
+	value := reasoning
+	if p.flavor == FlavorOpenRouter {
+		out.Reasoning = &value
+		return
+	}
+	out.ReasoningContent = &value
 }
 
 func (p *Provider) applyReasoning(payload *chatCompletionRequest, cfg model.ReasoningConfig) {
@@ -572,12 +594,54 @@ func (p *Provider) applyReasoning(payload *chatCompletionRequest, cfg model.Reas
 		applyDeepSeekReasoning(payload, cfg)
 		return
 	}
+	if p.flavor == FlavorMimo {
+		applyMimoReasoning(payload, cfg)
+		return
+	}
+	if p.flavor == FlavorVolcengine {
+		applyVolcengineReasoning(payload, cfg)
+		return
+	}
 	effort := strings.TrimSpace(cfg.Effort)
 	if effort == "" {
 		return
 	}
 	payload.Reasoning = &chatReasoning{Effort: effort}
 	payload.ReasoningEffort = effort
+}
+
+func applyMimoReasoning(payload *chatCompletionRequest, cfg model.ReasoningConfig) {
+	if payload == nil {
+		return
+	}
+	effort := strings.ToLower(strings.TrimSpace(cfg.Effort))
+	switch effort {
+	case "":
+		return
+	case "none":
+		payload.Thinking = &chatThinking{Type: "disabled"}
+	default:
+		payload.Thinking = &chatThinking{Type: "enabled"}
+	}
+	payload.Reasoning = nil
+	payload.ReasoningEffort = ""
+}
+
+func applyVolcengineReasoning(payload *chatCompletionRequest, cfg model.ReasoningConfig) {
+	if payload == nil {
+		return
+	}
+	effort := strings.ToLower(strings.TrimSpace(cfg.Effort))
+	state := "enabled"
+	switch effort {
+	case "none":
+		state = "disabled"
+	case "":
+		state = "auto"
+	}
+	payload.Thinking = &chatThinking{Type: state}
+	payload.Reasoning = nil
+	payload.ReasoningEffort = ""
 }
 
 func applyDeepSeekReasoning(payload *chatCompletionRequest, cfg model.ReasoningConfig) {
@@ -665,7 +729,7 @@ func outputResponseFormat(output *model.OutputSpec, flavor Flavor) *chatResponse
 	case model.OutputJSON:
 		return &chatResponseFormat{Type: "json_object"}
 	case model.OutputSchema:
-		if flavor == FlavorDeepSeek {
+		if usesJSONObjectSchemaFallback(flavor) {
 			return &chatResponseFormat{Type: "json_object"}
 		}
 		if len(output.JSONSchema) == 0 {
@@ -682,6 +746,10 @@ func outputResponseFormat(output *model.OutputSpec, flavor Flavor) *chatResponse
 	default:
 		return nil
 	}
+}
+
+func usesJSONObjectSchemaFallback(flavor Flavor) bool {
+	return flavor == FlavorDeepSeek || flavor == FlavorMimo || flavor == FlavorVolcengine
 }
 
 func strictSchema(schema map[string]any) bool {
@@ -846,6 +914,13 @@ func setHeaderDefault(headers http.Header, key string, value string) {
 		return
 	}
 	headers.Set(key, value)
+}
+
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 func firstNonEmpty(values ...string) string {

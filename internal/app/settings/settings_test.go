@@ -127,6 +127,36 @@ func TestManagerModelCatalogSupportsProfilesAliasesAndDefaults(t *testing.T) {
 	}
 }
 
+func TestNormalizeModelConfigKnownProviderEndpointIDs(t *testing.T) {
+	tests := []struct {
+		name       string
+		provider   string
+		baseURL    string
+		wantID     string
+		wantPrefix string
+	}{
+		{name: "mimo default", provider: "xiaomi", baseURL: "https://api.xiaomimimo.com/v1", wantID: "api-cn", wantPrefix: "xiaomi@api-cn/"},
+		{name: "mimo token plan", provider: "xiaomi", baseURL: "https://token-plan-cn.xiaomimimo.com/v1", wantID: "token-plan-cn", wantPrefix: "xiaomi@token-plan-cn/"},
+		{name: "volcengine standard", provider: "volcengine", baseURL: "https://ark.cn-beijing.volces.com/api/v3", wantID: "standard", wantPrefix: "volcengine@standard/"},
+		{name: "volcengine coding", provider: "volcengine-coding-plan", baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", wantID: "coding-plan", wantPrefix: "volcengine-coding-plan@coding-plan/"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := NormalizeModelConfig(ModelConfig{
+				Provider: tc.provider,
+				BaseURL:  tc.baseURL,
+				Model:    "test-model",
+			})
+			if cfg.EndpointID != tc.wantID {
+				t.Fatalf("EndpointID = %q, want %q", cfg.EndpointID, tc.wantID)
+			}
+			if got := cfg.ID; len(got) < len(tc.wantPrefix) || got[:len(tc.wantPrefix)] != tc.wantPrefix {
+				t.Fatalf("ID = %q, want prefix %q", got, tc.wantPrefix)
+			}
+		})
+	}
+}
+
 func TestProfilePersistTokenDoesNotPropagateToModelConfig(t *testing.T) {
 	ctx := context.Background()
 	store := NewFileStore(t.TempDir())

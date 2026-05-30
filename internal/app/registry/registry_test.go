@@ -104,12 +104,13 @@ func TestDefaultRegistryCreatesOpenAICompatibleProviderProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"deepseek", "openrouter"} {
+	for _, name := range []string{"deepseek", "mimo", "xiaomi", "openrouter", "volcengine", "volcengine-coding-plan", "volcengine_coding_plan"} {
 		factory, ok := reg.ModelProvider(name)
 		if !ok {
 			t.Fatalf("%s model provider not found", name)
 		}
 		provider, err := factory(context.Background(), plugin.ModelProviderConfig{
+			Provider:        name,
 			Model:           "test-model",
 			MaxOutputTokens: 128,
 			AuthType:        "none",
