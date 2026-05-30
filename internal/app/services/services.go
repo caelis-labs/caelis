@@ -30,6 +30,7 @@ type Services struct {
 	runtime   config.Runtime
 	engine    coreruntime.Engine
 	agents    []AgentDescriptor
+	builtins  []AgentDescriptor
 	invokers  map[string]AgentInvoker
 	factory   AgentInvokerFactory
 	resources appresources.Catalog
@@ -43,6 +44,7 @@ type Config struct {
 	UserID         string
 	Engine         coreruntime.Engine
 	Agents         []AgentDescriptor
+	BuiltinAgents  []AgentDescriptor
 	Invokers       map[string]AgentInvoker
 	InvokerFactory AgentInvokerFactory
 	Resources      appresources.Catalog
@@ -61,6 +63,7 @@ func New(cfg Config) (Services, error) {
 		runtime:   runtimeCfg,
 		engine:    cfg.Engine,
 		agents:    cloneAgents(cfg.Agents),
+		builtins:  cloneAgents(cfg.BuiltinAgents),
 		invokers:  maps.Clone(cfg.Invokers),
 		factory:   cfg.InvokerFactory,
 		resources: appresources.CloneCatalog(cfg.Resources),
@@ -560,11 +563,50 @@ func (s AgentService) RegisterCustom(ctx context.Context, agent AgentDescriptor)
 	return agentDescriptorFromPlugin(stored), nil
 }
 
+func (s AgentService) ListBuiltins(context.Context) ([]AgentDescriptor, error) {
+	return cloneAgents(s.services.builtins), nil
+}
+
+func (s AgentService) RegisterBuiltin(ctx context.Context, name string) (AgentDescriptor, error) {
+	if s.services.settings == nil {
+		return AgentDescriptor{}, errors.New("app/services: settings manager is not configured")
+	}
+	agent, ok := s.lookupBuiltin(name)
+	if !ok {
+		return AgentDescriptor{}, fmt.Errorf("app/services: unknown builtin ACP agent %q", strings.TrimSpace(name))
+	}
+	if reservedSlashCommandName(agent.Name) || reservedSlashCommandName(agent.ID) {
+		return AgentDescriptor{}, fmt.Errorf("app/services: ACP agent %q conflicts with an existing slash command", agent.Name)
+	}
+	if strings.TrimSpace(agent.Command) == "" {
+		return AgentDescriptor{}, fmt.Errorf("app/services: command is required for ACP agent %q", agent.Name)
+	}
+	stored, err := s.services.settings.UpsertACPAgent(ctx, pluginDescriptorFromAgent(agent))
+	if err != nil {
+		return AgentDescriptor{}, err
+	}
+	return agentDescriptorFromPlugin(stored), nil
+}
+
 func (s AgentService) Remove(ctx context.Context, name string) error {
 	if s.services.settings == nil {
 		return errors.New("app/services: settings manager is not configured")
 	}
 	return s.services.settings.DeleteACPAgent(ctx, name)
+}
+
+func (s AgentService) lookupBuiltin(name string) (AgentDescriptor, bool) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return AgentDescriptor{}, false
+	}
+	for _, agent := range s.services.builtins {
+		agent = normalizeAgentDescriptor(agent)
+		if strings.EqualFold(strings.TrimSpace(agent.ID), name) || strings.EqualFold(strings.TrimSpace(agent.Name), name) {
+			return agent, true
+		}
+	}
+	return AgentDescriptor{}, false
 }
 
 type AgentInvoker interface {

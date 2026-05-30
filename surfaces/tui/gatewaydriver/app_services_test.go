@@ -380,6 +380,66 @@ func TestBindAppServicesRegistersCustomACPAgent(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine:   &appServiceDriverEngine{},
+		Settings: manager,
+		BuiltinAgents: []appservices.AgentDescriptor{{
+			ID:          "copilot",
+			Name:        "copilot",
+			Kind:        appservices.AgentKindExternalACP,
+			Description: "GitHub Copilot ACP agent",
+			Command:     "copilot",
+			Args:        []string{"--acp", "--stdio"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, err := driver.CompleteSlashArg(ctx, "agent add", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(agent add) error = %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].Value != "copilot" || candidates[0].Detail != "GitHub Copilot ACP agent" {
+		t.Fatalf("agent add candidates = %#v, want copilot builtin", candidates)
+	}
+	status, err := driver.AddAgent(ctx, "copilot")
+	if err != nil {
+		t.Fatalf("AddAgent(copilot) error = %v", err)
+	}
+	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "copilot" {
+		t.Fatalf("status agents = %#v, want copilot", status.AvailableAgents)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" || agents[0].Command != "copilot" {
+		t.Fatalf("settings agents = %#v, want persisted copilot", agents)
+	}
+	if _, err := driver.AddAgentWithOptions(ctx, "copilot", AgentAddOptions{Install: true}); err == nil {
+		t.Fatal("AddAgentWithOptions(install) error = nil, want explicit unsupported install error")
+	}
+	status, err = driver.RemoveAgent(ctx, "copilot")
+	if err != nil {
+		t.Fatalf("RemoveAgent(copilot) error = %v", err)
+	}
+	if len(status.AvailableAgents) != 0 {
+		t.Fatalf("status agents after remove = %#v, want none", status.AvailableAgents)
+	}
+}
+
 type appServiceDriverEngine struct {
 	start    coresession.StartRequest
 	page     coresession.SessionPage

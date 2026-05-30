@@ -927,6 +927,45 @@ func TestStackLoadsSettingsBackedACPAgent(t *testing.T) {
 	}
 }
 
+func TestStackExposesBuiltinACPAgentCatalog(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtins, err := stack.Services().Agents().ListBuiltins(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !agentDescriptorsHave(builtins, "codex") || !agentDescriptorsHave(builtins, "copilot") {
+		t.Fatalf("builtins = %#v, want codex and copilot catalog entries", builtins)
+	}
+	registered, err := stack.Services().Agents().RegisterBuiltin(ctx, "copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.ID != "copilot" || registered.Command != "copilot" {
+		t.Fatalf("registered = %#v, want copilot builtin descriptor", registered)
+	}
+	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" {
+		t.Fatalf("settings agents = %#v, want persisted builtin copilot", agents)
+	}
+}
+
 func TestStackAppliesPluginContributionStoreFactory(t *testing.T) {
 	stack, err := New(Config{
 		Runtime: config.Runtime{
@@ -1119,6 +1158,15 @@ func capturedOpenAITool(tools []struct {
 func hasPrompt(prompts []plugin.PromptFragment, id string) bool {
 	for _, prompt := range prompts {
 		if prompt.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func agentDescriptorsHave(agents []services.AgentDescriptor, id string) bool {
+	for _, agent := range agents {
+		if strings.EqualFold(strings.TrimSpace(agent.ID), id) || strings.EqualFold(strings.TrimSpace(agent.Name), id) {
 			return true
 		}
 	}

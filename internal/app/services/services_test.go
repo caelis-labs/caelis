@@ -233,6 +233,54 @@ func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
 	}
 }
 
+func TestAgentServiceRegistersBuiltinAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		BuiltinAgents: []AgentDescriptor{{
+			ID:          "copilot",
+			Name:        "copilot",
+			Kind:        AgentKindExternalACP,
+			Description: "GitHub Copilot ACP agent",
+			Command:     "copilot",
+			Args:        []string{"--acp", "--stdio"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	builtins, err := svc.Agents().ListBuiltins(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(builtins) != 1 || builtins[0].ID != "copilot" || builtins[0].Description == "" {
+		t.Fatalf("builtins = %#v, want copilot", builtins)
+	}
+	registered, err := svc.Agents().RegisterBuiltin(ctx, "copilot")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.ID != "copilot" || registered.Command != "copilot" || registered.Args[1] != "--stdio" {
+		t.Fatalf("registered = %#v, want copilot command", registered)
+	}
+	agents, err := svc.Agents().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].ID != "copilot" || agents[0].Description != "GitHub Copilot ACP agent" {
+		t.Fatalf("agents = %#v, want registered builtin copilot", agents)
+	}
+	if _, err := svc.Agents().RegisterBuiltin(ctx, "missing"); err == nil {
+		t.Fatal("RegisterBuiltin(missing) error = nil, want unknown builtin error")
+	}
+}
+
 func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	engine := &recordingEngine{
 		snapshot: session.Snapshot{

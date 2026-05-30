@@ -21,6 +21,7 @@ import (
 	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolregistry "github.com/OnslaughtSnail/caelis/internal/adapters/tools/registry"
 	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
+	appagents "github.com/OnslaughtSnail/caelis/internal/app/agents"
 	appmodelrouter "github.com/OnslaughtSnail/caelis/internal/app/modelrouter"
 	appprompt "github.com/OnslaughtSnail/caelis/internal/app/prompt"
 	appregistry "github.com/OnslaughtSnail/caelis/internal/app/registry"
@@ -178,6 +179,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Runtime:        runtimeCfg,
 		Engine:         engine,
 		Agents:         agentDescriptors(externalAgents),
+		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
 		Invokers:       agentInvokers(store, externalAgents),
 		InvokerFactory: externalAgentInvokerFactory(store),
 		Resources:      resourceCatalog,
@@ -358,6 +360,32 @@ func agentDescriptors(configs []acpexternal.Config) []services.AgentDescriptor {
 			Args:    append([]string(nil), cfg.Args...),
 			Env:     envMap(cfg.Env),
 			WorkDir: strings.TrimSpace(cfg.WorkDir),
+		})
+	}
+	return out
+}
+
+func pluginAgentDescriptors(agents []plugin.ACPAgentDescriptor) []services.AgentDescriptor {
+	if len(agents) == 0 {
+		return nil
+	}
+	out := make([]services.AgentDescriptor, 0, len(agents))
+	for _, agent := range agents {
+		name := strings.ToLower(strings.TrimSpace(agent.Name))
+		command := strings.TrimSpace(agent.Command)
+		id := firstNonEmpty(name, command)
+		if id == "" {
+			continue
+		}
+		out = append(out, services.AgentDescriptor{
+			ID:          id,
+			Name:        firstNonEmpty(name, id),
+			Kind:        services.AgentKindExternalACP,
+			Command:     command,
+			Args:        append([]string(nil), agent.Args...),
+			Env:         maps.Clone(agent.Env),
+			WorkDir:     strings.TrimSpace(agent.WorkDir),
+			Description: strings.TrimSpace(agent.Description),
 		})
 	}
 	return out

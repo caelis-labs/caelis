@@ -2,6 +2,7 @@ package gatewaydriver
 
 import (
 	"context"
+	"fmt"
 	"maps"
 	"strings"
 
@@ -111,6 +112,20 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 			return nil
 		}
 		return acpAgentsFromApp(agents)
+	}
+	stack.ListBuiltinACPAgentAddOptionsFn = func() []ACPAgentAddOption {
+		agents, err := svc.Agents().ListBuiltins(context.Background())
+		if err != nil {
+			return nil
+		}
+		return builtinAgentOptionsFromApp(agents)
+	}
+	stack.RegisterBuiltinACPAgentWithOptionsFn = func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
+		if opts.Install {
+			return fmt.Errorf("surfaces/tui/gatewaydriver: builtin ACP agent install is not migrated to app services")
+		}
+		_, err := svc.Agents().RegisterBuiltin(ctx, target)
+		return err
 	}
 	stack.RegisterACPAgentFn = func(ctx context.Context, cfg CustomAgentConfig) error {
 		_, err := svc.Agents().RegisterCustom(ctx, customAgentToApp(cfg))
@@ -374,6 +389,25 @@ func customAgentToApp(cfg CustomAgentConfig) appservices.AgentDescriptor {
 		WorkDir:     strings.TrimSpace(cfg.WorkDir),
 		Description: strings.TrimSpace(cfg.Description),
 	}
+}
+
+func builtinAgentOptionsFromApp(agents []appservices.AgentDescriptor) []ACPAgentAddOption {
+	if len(agents) == 0 {
+		return nil
+	}
+	out := make([]ACPAgentAddOption, 0, len(agents))
+	for _, agent := range agents {
+		value := strings.TrimSpace(firstNonEmpty(agent.ID, agent.Name))
+		if value == "" {
+			continue
+		}
+		out = append(out, ACPAgentAddOption{
+			Value:   value,
+			Display: firstNonEmpty(strings.TrimSpace(agent.Name), value),
+			Detail:  strings.TrimSpace(agent.Description),
+		})
+	}
+	return out
 }
 
 func compactAgentDetails(values []string) []string {

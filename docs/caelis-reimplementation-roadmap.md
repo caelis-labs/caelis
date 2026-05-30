@@ -583,6 +583,9 @@ alongside the old stack without importing it:
   models and settings-backed custom external ACP agent descriptors, with
   normalized upsert/list/delete operations independent of the old gatewayapp
   config store.
+- `internal/app/agents`: small app-level catalog for registerable built-in
+  external ACP agent descriptors. The catalog is data-only and stays separate
+  from runtime orchestration and package-install side effects.
 - `internal/app/resources`: deterministic discovery baseline for enabled
   `plugin.json` manifests, plugin prompt/skill/ACP-agent/renderer descriptors,
   workspace/global `AGENTS.md`, and skill metadata. Plugin-declared ACP agents
@@ -605,7 +608,8 @@ alongside the old stack without importing it:
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
   It also wires plugin-declared and settings-backed custom ACP agents into the
-  shared `AgentService`.
+  shared `AgentService`, and injects the built-in ACP agent catalog for
+  service-native registration.
 - `internal/adapters/model/openai`: core-native OpenAI-compatible Chat
   Completions provider with tool-call, usage, structured-output, reasoning,
   and provider-profile mapping. It now backs OpenAI-compatible, DeepSeek, and
@@ -644,7 +648,8 @@ alongside the old stack without importing it:
   registration, removal, and invocation surface for external ACP agents
   contributed by local composition or stored in app settings. Runtime-added
   custom agents are resolved through a narrow invoker factory instead of
-  rebuilding service state.
+  rebuilding service state. Built-in ACP agents are registered by copying their
+  catalog descriptors into the same settings-backed external agent contract.
 - `internal/app/services.ModelService`: shared model settings and catalog
   surface for configured models, provider model presets, capability defaults,
   and reasoning-level choices used by TUI/future APP connect flows.
@@ -652,7 +657,7 @@ alongside the old stack without importing it:
   list and dynamic `/<agent> <prompt>` baseline for configured external ACP
   agents, recording participant attach/user/assistant activity as canonical
   core session events. It also routes settings-backed `/agent add custom` and
-  `/agent remove` through shared app services.
+  `/agent add <builtin>` and `/agent remove` through shared app services.
 - `internal/app/services.ResourceService`: shared TUI/APP-facing catalog
   surface for discovered plugins, prompt fragments, skills, ACP agents,
   renderer hints, and `AGENTS.md` prompt resources.
@@ -697,6 +702,9 @@ The current verification path covers:
 - app settings `acp_agents` -> shared `AgentService` descriptor/register/remove
   -> local-stack dynamic invoker factory -> external ACP subprocess ->
   canonical participant events
+- built-in ACP agent catalog -> shared `AgentService.RegisterBuiltin` ->
+  settings-backed external ACP descriptor -> TUI `/agent add <builtin>`
+  catalog and registration path
 - app-service TUI binding -> configured external ACP agent catalog -> dynamic
   participant prompt -> canonical participant/user/assistant events -> TUI
   participant-scoped event projection
@@ -867,6 +875,9 @@ The completed work is intentionally limited to the reusable skeleton:
 - Service-native settings-backed custom external ACP agent registration and
   removal, including TUI `/agent add custom` and `/agent remove` for custom
   agents without rebuilding the app-service stack.
+- Service-native built-in ACP agent catalog and non-install registration,
+  including TUI `/agent add <builtin>` completion/registration backed by the
+  same settings document used for external ACP descriptors.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -934,6 +945,10 @@ be migrated before retiring the old stack:
      `/agent remove <custom-agent>` now route through
      `internal/app/services.AgentService` and persist settings-backed external
      ACP agent descriptors in the shared app settings document.
+   - Migrated baseline: `/agent add <builtin>` now reads a service-native
+     built-in ACP catalog and persists the selected descriptor through
+     `AgentService.RegisterBuiltin`, so non-install built-in registration no
+     longer requires the old gatewayapp agent registry.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
@@ -947,9 +962,10 @@ be migrated before retiring the old stack:
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as the `/connect` wizard shell, built-in
-     `/agent add/install`, `/agent use`, non-custom agent removal, and
-     `/doctor fix` still have old driver/app assumptions or missing
-     service-native feature parity, so the old TUI stack cannot be removed yet.
+     `/agent install` and adapter update, `/agent use`, plugin/static agent
+     removal, and `/doctor fix` still have old driver/app assumptions or
+     missing service-native feature parity, so the old TUI stack cannot be
+     removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1092,11 +1108,15 @@ be migrated before retiring the old stack:
     - Migrated baseline: custom external ACP agents now have app-service
       settings mutation, startup loading, dynamic invocation, and TUI
       add/remove/list coverage for settings-backed descriptors.
-    - Still pending: built-in ACP agent registry/install/update, self-agent
-      spawning, Claude and OpenCode-family built-ins, `/agent use`
-      main-controller handoff, durable sidecar continuation across restarts,
-      delegated subagent tasks, remote session resume/new semantics, and
-      terminal previews remain old-stack.
+    - Migrated baseline: built-in ACP agent descriptors now live in a
+      service-native app catalog and `/agent add <builtin>` registers them into
+      the same settings-backed external ACP descriptor contract as custom
+      agents.
+    - Still pending: built-in ACP adapter install/update, self-agent spawning,
+      `/agent use` main-controller handoff, durable sidecar continuation
+      across restarts, delegated subagent tasks, remote session resume/new
+      semantics, plugin/static agent removal, and terminal previews remain
+      old-stack.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
