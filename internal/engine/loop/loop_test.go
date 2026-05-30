@@ -3,6 +3,7 @@ package loop
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -210,6 +211,81 @@ func TestLoopProjectsJSONToolResultOutputFromMultipartContent(t *testing.T) {
 	}
 }
 
+func TestLoopExecutesSpawnThroughRuntimeSpawner(t *testing.T) {
+	rawInput := json.RawMessage(`{"agent":"helper","prompt":"inspect"}`)
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "spawn-call",
+					Name:  "SPAWN",
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	spawner := &fakeSpawner{}
+	runner, err := New(Config{
+		Provider: provider,
+		Tools: staticRegistry{tools: []tool.Tool{tool.NamedTool{
+			Def: tool.Definition{
+				Name:        "SPAWN",
+				Description: "spawn child",
+				InputSchema: map[string]any{"type": "object"},
+				Meta:        map[string]any{"caelis.kind": "spawn"},
+			},
+		}}},
+		Spawner: spawner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events, err := runner.Run(context.Background(), Request{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:   "spawn",
+		TurnID:  "turn-1",
+		Surface: "tui",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spawner.call.ID != "spawn-call" || spawner.call.Name != "SPAWN" {
+		t.Fatalf("spawner call = %#v, want spawn-call", spawner.call)
+	}
+	if spawner.session.SessionID != "sess-1" || spawner.turnID != "turn-1" {
+		t.Fatalf("spawner context = session %q turn %q, want sess-1 turn-1", spawner.session.SessionID, spawner.turnID)
+	}
+	wantTypes := []session.EventType{
+		session.EventUser,
+		session.EventAssistant,
+		session.EventToolCall,
+		session.EventAssistant,
+		session.EventToolResult,
+		session.EventAssistant,
+	}
+	if got := eventTypes(events); len(got) != len(wantTypes) {
+		t.Fatalf("events = %#v, want %#v", got, wantTypes)
+	} else {
+		for idx := range wantTypes {
+			if got[idx] != wantTypes[idx] {
+				t.Fatalf("events = %#v, want %#v", got, wantTypes)
+			}
+		}
+	}
+	if events[3].Scope == nil || events[3].Scope.TurnID != "turn-1" || events[3].Scope.Participant.ID != "spawn-call" {
+		t.Fatalf("child event scope = %#v, want spawn participant turn scope", events[3].Scope)
+	}
+	if events[4].Tool == nil || events[4].Tool.Output["task_id"] != "spawn-call" || events[4].Tool.Output["final_message"] != "child done" {
+		t.Fatalf("spawn tool output = %#v, want task_id and final_message", events[4].Tool)
+	}
+}
+
 type capturingProvider struct {
 	request model.Request
 	message model.Message
@@ -315,6 +391,56 @@ func (t fakeJSONTool) Call(_ context.Context, call tool.Call) (tool.Result, erro
 			JSON: &model.JSONPart{Value: []byte(`{"path":"demo.txt","changed":true}`)},
 		}},
 		Meta: map[string]any{"source": "fake-json"},
+	}, nil
+}
+
+type fakeSpawner struct {
+	call    tool.Call
+	session session.Session
+	turnID  string
+}
+
+func (s *fakeSpawner) Spawn(_ context.Context, req SpawnRequest) (SpawnResult, error) {
+	s.call = tool.CloneCall(req.Call)
+	s.session = session.CloneSession(req.Session)
+	s.turnID = req.TurnID
+	payload := map[string]any{
+		"task_id":       strings.TrimSpace(req.Call.ID),
+		"agent":         "helper",
+		"state":         "completed",
+		"running":       false,
+		"final_message": "child done",
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return SpawnResult{}, err
+	}
+	return SpawnResult{
+		Result: tool.Result{
+			ID:   req.Call.ID,
+			Name: req.Call.Name,
+			Content: []model.Part{
+				model.NewTextPart("child done"),
+				{
+					Kind: model.PartJSON,
+					JSON: &model.JSONPart{Value: raw},
+				},
+			},
+		},
+		Events: []session.Event{{
+			Type:       session.EventAssistant,
+			Visibility: session.VisibilityCanonical,
+			Actor:      session.ActorRef{Kind: session.ActorParticipant, ID: "spawn-call", Name: "helper"},
+			Scope: &session.EventScope{
+				Participant: session.ParticipantBinding{
+					ID:        "spawn-call",
+					Kind:      session.ParticipantSubagent,
+					Role:      session.ParticipantDelegated,
+					AgentName: "helper",
+				},
+			},
+			Message: &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("child done")}},
+		}},
 	}, nil
 }
 

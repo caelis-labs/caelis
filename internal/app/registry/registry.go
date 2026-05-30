@@ -30,6 +30,7 @@ import (
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
+	toolspawn "github.com/OnslaughtSnail/caelis/internal/adapters/tools/spawn"
 	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 )
@@ -131,6 +132,7 @@ func RegisterDefaults(r *Registry) error {
 		{toolfilesystem.PatchFileToolName, patchFileToolFactory},
 		{toolplan.ToolName, planToolFactory},
 		{toolshell.RunCommandToolName, runCommandToolFactory},
+		{toolspawn.ToolName, spawnToolFactory},
 		{tooltask.ToolName, taskToolFactory},
 	} {
 		if err := r.RegisterTool(item.name, item.factory); err != nil {
@@ -571,6 +573,10 @@ func runCommandToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool,
 
 func taskToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
 	return tooltask.New(cfg.Sandbox)
+}
+
+func spawnToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return toolspawn.New(toolspawn.AgentsFromPlugin(cfg.ACPAgents)), nil
 }
 
 func readFileToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {

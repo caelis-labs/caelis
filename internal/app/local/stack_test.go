@@ -25,6 +25,7 @@ import (
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
+	toolspawn "github.com/OnslaughtSnail/caelis/internal/adapters/tools/spawn"
 	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
 	"github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -351,6 +352,159 @@ func TestStackInvokesExternalACPAgentAsControllerThroughServices(t *testing.T) {
 	}
 	if snapshot.Events[0].Actor.Kind != session.ActorController {
 		t.Fatalf("stored event actor = %#v, want controller", snapshot.Events[0].Actor)
+	}
+}
+
+func TestStackRegistersCoreSpawnToolForACPAgents(t *testing.T) {
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("ok")},
+	}}
+	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime:      config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceCWD: t.TempDir()},
+		Provider:     provider,
+		Sandbox:      rt,
+		BuiltinTools: true,
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:     "helper",
+			AgentName:   "helper",
+			Description: "test helper",
+			Command:     os.Args[0],
+			Args:        []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:         []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "list tools",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+	}
+	if !capturedTool(provider.request.Tools, toolspawn.ToolName) {
+		t.Fatalf("provider tools = %#v, missing SPAWN", provider.request.Tools)
+	}
+	var spawnSpec *model.ToolSpec
+	for idx := range provider.request.Tools {
+		if provider.request.Tools[idx].Name == toolspawn.ToolName {
+			spawnSpec = &provider.request.Tools[idx]
+			break
+		}
+	}
+	if spawnSpec == nil || spawnSpec.Kind != model.ToolSpecFunction {
+		t.Fatalf("spawn spec = %#v, want function tool", spawnSpec)
+	}
+	props, _ := spawnSpec.InputSchema["properties"].(map[string]any)
+	agentProp, _ := props["agent"].(map[string]any)
+	if !schemaEnumHas(agentProp["enum"], "helper") {
+		t.Fatalf("spawn agent schema = %#v, want helper enum", agentProp)
+	}
+}
+
+func TestStackRunsCoreSpawnToolThroughExternalACPAgent(t *testing.T) {
+	rawInput, err := json.Marshal(map[string]any{"agent": "helper", "prompt": "delegate"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "spawn-call",
+					Name:  toolspawn.ToolName,
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("done")},
+		},
+	}}
+	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime:      config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceCWD: t.TempDir()},
+		Provider:     provider,
+		Sandbox:      rt,
+		BuiltinTools: true,
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "helper",
+			AgentName: "helper",
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:       []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "spawn helper",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []session.Event
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		events = append(events, env.Event)
+	}
+	var childEvent, spawnResult *session.Event
+	for idx := range events {
+		event := &events[idx]
+		if event.Scope != nil && event.Scope.Participant.Kind == session.ParticipantSubagent {
+			childEvent = event
+		}
+		if event.Type == session.EventToolResult && event.Tool != nil && event.Tool.Name == toolspawn.ToolName {
+			spawnResult = event
+		}
+	}
+	if childEvent == nil || session.EventText(*childEvent) != "external helper response" {
+		t.Fatalf("events = %#v, want canonical subagent child response", events)
+	}
+	if childEvent.Scope.Participant.ID != "spawn-call" || childEvent.Scope.Participant.DelegationID != "spawn-call" || childEvent.Scope.Participant.ParentTurnID == "" {
+		t.Fatalf("child participant = %#v, want spawn-call delegation", childEvent.Scope.Participant)
+	}
+	if childEvent.Scope.Source != "spawn" {
+		t.Fatalf("child scope source = %q, want spawn", childEvent.Scope.Source)
+	}
+	if spawnResult == nil || spawnResult.Tool.Output["task_id"] != "spawn-call" || spawnResult.Tool.Output["final_message"] != "external helper response" {
+		t.Fatalf("spawn result = %#v, want model-visible final message", spawnResult)
+	}
+	snapshot, err := stack.Services().Sessions().Load(context.Background(), session.Ref{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Events) != len(events) {
+		t.Fatalf("stored events = %d, live events = %d", len(snapshot.Events), len(events))
 	}
 }
 
@@ -1567,4 +1721,23 @@ func (p *scriptedProvider) Stream(_ context.Context, req model.Request) (model.S
 			Message: response,
 		},
 	}}}, nil
+}
+
+func schemaEnumHas(raw any, want string) bool {
+	want = strings.TrimSpace(want)
+	switch values := raw.(type) {
+	case []any:
+		for _, value := range values {
+			if text, ok := value.(string); ok && text == want {
+				return true
+			}
+		}
+	case []string:
+		for _, value := range values {
+			if value == want {
+				return true
+			}
+		}
+	}
+	return false
 }

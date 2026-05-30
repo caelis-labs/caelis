@@ -23,6 +23,7 @@ type Config struct {
 	Provider     model.Provider
 	Tools        tool.Registry
 	Approval     approval.Policy
+	Spawner      Spawner
 	Instructions []string
 	Clock        func() time.Time
 	MaxToolSteps int
@@ -32,9 +33,27 @@ type Loop struct {
 	provider     model.Provider
 	tools        tool.Registry
 	approval     approval.Policy
+	spawner      Spawner
 	instructions []string
 	clock        func() time.Time
 	maxToolSteps int
+}
+
+type Spawner interface {
+	Spawn(context.Context, SpawnRequest) (SpawnResult, error)
+}
+
+type SpawnRequest struct {
+	Session    session.Session
+	TurnID     string
+	Surface    string
+	Call       tool.Call
+	Definition tool.Definition
+}
+
+type SpawnResult struct {
+	Result tool.Result
+	Events []session.Event
 }
 
 type Request struct {
@@ -66,6 +85,7 @@ func New(cfg Config) (*Loop, error) {
 		provider:     cfg.Provider,
 		tools:        cfg.Tools,
 		approval:     cfg.Approval,
+		spawner:      cfg.Spawner,
 		instructions: cloneStrings(cfg.Instructions),
 		clock:        cfg.Clock,
 		maxToolSteps: cfg.MaxToolSteps,
@@ -185,9 +205,14 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 					}
 				}
 			}
-			resultMessage, resultEvent, result, err := l.executeTool(ctx, req, call, tools)
+			resultMessage, childEvents, resultEvent, result, err := l.executeTool(ctx, req, call, tools)
 			if err != nil {
 				return nil, err
+			}
+			for _, event := range childEvents {
+				if err := l.record(ctx, req, &out, event); err != nil {
+					return nil, err
+				}
 			}
 			messages = append(messages, resultMessage)
 			if err := l.record(ctx, req, &out, resultEvent); err != nil {
@@ -245,7 +270,7 @@ func (l *Loop) complete(ctx context.Context, req model.Request) (model.Response,
 	return *final, nil
 }
 
-func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall, tools []tool.Tool) (model.Message, session.Event, tool.Result, error) {
+func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall, tools []tool.Tool) (model.Message, []session.Event, session.Event, tool.Result, error) {
 	name := strings.TrimSpace(call.Name)
 	selected := l.lookupTool(call, tools)
 	if selected == nil {
@@ -255,7 +280,36 @@ func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall
 			IsError: true,
 			Content: []model.Part{model.NewTextPart("tool not found: " + name)},
 		}
-		return toolResultMessage(call, result), l.toolResultEvent(req, call, result), result, nil
+		return toolResultMessage(call, result), nil, l.toolResultEvent(req, call, result), result, nil
+	}
+	if l.spawner != nil && isSpawnTool(selected.Definition(), name) {
+		spawned, err := l.spawner.Spawn(ctx, SpawnRequest{
+			Session:    session.CloneSession(req.Session),
+			TurnID:     req.TurnID,
+			Surface:    req.Surface,
+			Definition: selected.Definition(),
+			Call: tool.Call{
+				ID:    strings.TrimSpace(call.ID),
+				Name:  name,
+				Input: call.Input,
+			},
+		})
+		result, _ := tool.CloneResult(spawned.Result, nil)
+		if err != nil {
+			result = tool.Result{
+				ID:      strings.TrimSpace(call.ID),
+				Name:    name,
+				IsError: true,
+				Content: []model.Part{model.NewTextPart(err.Error())},
+			}
+		}
+		if strings.TrimSpace(result.ID) == "" {
+			result.ID = strings.TrimSpace(call.ID)
+		}
+		if strings.TrimSpace(result.Name) == "" {
+			result.Name = name
+		}
+		return toolResultMessage(call, result), normalizeSpawnEvents(req, spawned.Events), l.toolResultEvent(req, call, result), result, nil
 	}
 	result, err := selected.Call(ctx, tool.Call{
 		ID:    strings.TrimSpace(call.ID),
@@ -270,7 +324,7 @@ func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall
 			Content: []model.Part{model.NewTextPart(err.Error())},
 		}
 	}
-	return toolResultMessage(call, result), l.toolResultEvent(req, call, result), result, nil
+	return toolResultMessage(call, result), nil, l.toolResultEvent(req, call, result), result, nil
 }
 
 func (l *Loop) lookupTool(call model.ToolCall, tools []tool.Tool) tool.Tool {
@@ -284,6 +338,37 @@ func (l *Loop) lookupTool(call model.ToolCall, tools []tool.Tool) tool.Tool {
 		}
 	}
 	return nil
+}
+
+func isSpawnTool(def tool.Definition, name string) bool {
+	if kind, _ := def.Meta["caelis.kind"].(string); strings.EqualFold(strings.TrimSpace(kind), "spawn") {
+		return true
+	}
+	return strings.EqualFold(strings.TrimSpace(def.Name), "SPAWN") || strings.EqualFold(strings.TrimSpace(name), "SPAWN")
+}
+
+func normalizeSpawnEvents(req Request, events []session.Event) []session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]session.Event, 0, len(events))
+	for _, event := range events {
+		next := session.CloneEvent(event)
+		if next.Visibility == "" {
+			next.Visibility = session.VisibilityCanonical
+		}
+		if next.Scope == nil {
+			next.Scope = eventScope(req)
+		}
+		if next.Scope.TurnID == "" {
+			next.Scope.TurnID = strings.TrimSpace(req.TurnID)
+		}
+		if next.Scope.Source == "" {
+			next.Scope.Source = "spawn"
+		}
+		out = append(out, next)
+	}
+	return out
 }
 
 func (l *Loop) reviewToolCall(ctx context.Context, req Request, call model.ToolCall, def tool.Definition) (session.Event, bool, error) {

@@ -52,9 +52,10 @@ type StoreConfig struct {
 type ToolFactory func(context.Context, ToolConfig) (tool.Tool, error)
 
 type ToolConfig struct {
-	Name    string          `json:"name,omitempty"`
-	Sandbox sandbox.Runtime `json:"-"`
-	Meta    map[string]any  `json:"meta,omitempty"`
+	Name      string               `json:"name,omitempty"`
+	Sandbox   sandbox.Runtime      `json:"-"`
+	ACPAgents []ACPAgentDescriptor `json:"acp_agents,omitempty"`
+	Meta      map[string]any       `json:"meta,omitempty"`
 }
 
 type ACPAgentDescriptor struct {

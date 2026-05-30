@@ -141,6 +141,12 @@ func normalizeParticipantEvents(sessionID string, remoteSessionID string, partic
 	return out
 }
 
+// NormalizeParticipantEvents projects remote participant events into the parent
+// canonical session without recording them.
+func NormalizeParticipantEvents(sessionID string, remoteSessionID string, participant session.ParticipantBinding, events []session.Event, now time.Time) []session.Event {
+	return normalizeParticipantEvents(sessionID, remoteSessionID, participant, events, now)
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {

@@ -89,6 +89,11 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	if err := reg.ApplyCatalog(resourceCatalog); err != nil {
 		return nil, err
 	}
+	externalAgents := append([]acpexternal.Config(nil), cfg.ExternalACPAgents...)
+	externalAgents = append(externalAgents, pluginACPAgentConfigs(resourceCatalog)...)
+	externalAgents = append(externalAgents, settingsACPAgentConfigs(cfg.Settings)...)
+	externalAgents = appendDefaultSelfACPAgent(ctx, runtimeCfg, cfg.Model, cfg.Settings, externalAgents)
+	spawnAgentDescriptors := pluginACPAgentDescriptors(externalAgents)
 	provider := cfg.Provider
 	if provider == nil {
 		var err error
@@ -124,12 +129,12 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 			if sandboxRuntime == nil {
 				return nil, fmt.Errorf("app/local: sandbox runtime is required for builtin tools")
 			}
-			for _, name := range builtinToolNames() {
+			for _, name := range builtinToolNames(len(externalAgents) > 0) {
 				factory, ok := reg.Tool(name)
 				if !ok {
 					return nil, fmt.Errorf("app/local: builtin tool %q is not registered", name)
 				}
-				item, err := factory(ctx, plugin.ToolConfig{Name: name, Sandbox: sandboxRuntime})
+				item, err := factory(ctx, plugin.ToolConfig{Name: name, Sandbox: sandboxRuntime, ACPAgents: spawnAgentDescriptors})
 				if err != nil {
 					return nil, err
 				}
@@ -159,6 +164,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Provider:     provider,
 		Tools:        tools,
 		Approval:     approvalPolicy,
+		Spawner:      newSpawnDelegator(externalAgents),
 		Instructions: instructions,
 		MaxToolSteps: cfg.MaxToolSteps,
 	})
@@ -172,10 +178,6 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	if err != nil {
 		return nil, err
 	}
-	externalAgents := append([]acpexternal.Config(nil), cfg.ExternalACPAgents...)
-	externalAgents = append(externalAgents, pluginACPAgentConfigs(resourceCatalog)...)
-	externalAgents = append(externalAgents, settingsACPAgentConfigs(cfg.Settings)...)
-	externalAgents = appendDefaultSelfACPAgent(ctx, runtimeCfg, cfg.Model, cfg.Settings, externalAgents)
 	svc, err := services.New(services.Config{
 		Runtime:        runtimeCfg,
 		Engine:         engine,
@@ -451,8 +453,8 @@ func pluginAgentDescriptors(agents []plugin.ACPAgentDescriptor) []services.Agent
 	return out
 }
 
-func builtinToolNames() []string {
-	return []string{
+func builtinToolNames(includeSpawn bool) []string {
+	names := []string{
 		toolfilesystem.ReadFileToolName,
 		toolfilesystem.ListDirectoryToolName,
 		toolfilesystem.GlobFilesToolName,
@@ -463,6 +465,10 @@ func builtinToolNames() []string {
 		"run_command",
 		tooltask.ToolName,
 	}
+	if includeSpawn {
+		names = append(names, "SPAWN")
+	}
+	return names
 }
 
 func pluginACPAgentConfigs(catalog appresources.Catalog) []acpexternal.Config {
@@ -476,6 +482,28 @@ func pluginACPAgentConfigs(catalog appresources.Catalog) []acpexternal.Config {
 			continue
 		}
 		out = append(out, cfg)
+	}
+	return out
+}
+
+func pluginACPAgentDescriptors(configs []acpexternal.Config) []plugin.ACPAgentDescriptor {
+	if len(configs) == 0 {
+		return nil
+	}
+	out := make([]plugin.ACPAgentDescriptor, 0, len(configs))
+	for _, cfg := range configs {
+		name := firstNonEmpty(cfg.AgentName, cfg.AgentID, cfg.Command)
+		if name == "" {
+			continue
+		}
+		out = append(out, plugin.ACPAgentDescriptor{
+			Name:        name,
+			Description: strings.TrimSpace(cfg.Description),
+			Command:     strings.TrimSpace(cfg.Command),
+			Args:        append([]string(nil), cfg.Args...),
+			Env:         envMap(cfg.Env),
+			WorkDir:     strings.TrimSpace(cfg.WorkDir),
+		})
 	}
 	return out
 }

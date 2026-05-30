@@ -1223,9 +1223,16 @@ be migrated before retiring the old stack:
    - Migrated baseline: task list/tail control is now part of the core-native
      `task` tool and backed by a public sandbox session listing contract for
      runtimes that support async sessions.
-   - Still pending: spawn tool, durable task storage, subagent task
-     association, output tail cursors across process restarts, and display
-     metadata for compact/rich tool panels still need core-native adapters.
+   - Migrated baseline: `SPAWN` now has a core-native tool declaration and is
+     executed by the runtime loop through an explicit spawner interface. The
+     default local stack can expose registered external ACP agents as SPAWN
+     targets, invoke them without old runtime wrappers, normalize their output
+     into canonical delegated participant events, and return a model-visible
+     `task_id` / `final_message` payload.
+   - Still pending: durable async SPAWN tasks, TASK wait/write/cancel control
+     for spawned subagents, durable task storage, output tail cursors across
+     process restarts, and display metadata for compact/rich tool panels still
+     need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -1296,11 +1303,16 @@ be migrated before retiring the old stack:
       native `self` ACP agent that launches the current Caelis executable with
       ACP stdio flags, workspace/store/model settings, and token-env
       indirection.
-    - Still pending: delegated subagent tasks,
-      durable remote controller process/session lifecycle beyond canonical
-      remote session id reuse, live remote ACP controller config RPC/reconnect
-      application, remote-declared controller option discovery, and terminal
-      previews remain old-stack or unmigrated.
+    - Migrated baseline: synchronous delegated subagent invocation is now
+      available through the core-native `SPAWN` path. Child ACP output is stored
+      as canonical participant/subagent events with delegation ids tied to the
+      SPAWN tool call, so TUI and future APP surfaces can replay the same child
+      work without a surface-only side channel.
+    - Still pending: durable async delegated subagent tasks with TASK
+      wait/write/cancel, durable remote controller process/session lifecycle
+      beyond canonical remote session id reuse, live remote ACP controller
+      config RPC/reconnect application, remote-declared controller option
+      discovery, and terminal previews remain old-stack or unmigrated.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -1308,8 +1320,12 @@ be migrated before retiring the old stack:
       `core/sandbox.SessionLister`, and the core-native `task` tool can wait,
       tail from output cursors, list, write stdin, and cancel yielded shell
       work.
+    - Migrated baseline: synchronous SPAWN invocations now create canonical
+      subagent participant events and return a stable `task_id` matching the
+      parent tool call, establishing the new event-level association point for
+      future async task control.
     - Still pending: durable task storage, output tail cursors across process
-      restarts, SPAWN/subagent task association, terminal previews, and
+      restarts, async SPAWN/subagent TASK control, terminal previews, and
       production surface controls still live in old paths.
 
 12. Compaction and replay validation
@@ -1363,8 +1379,8 @@ Recommended sequence:
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating
    tools.
-4. Port spawn and durable task runtime behavior behind `core/tool.Registry`
-   and `internal/engine/tasks`.
+4. Finish durable async SPAWN task control and durable task runtime behavior
+   behind `core/tool.Registry` and `internal/engine/tasks`.
 5. Port TUI driver commands, including the remaining built-in agent management
    actions, to `internal/app/services`, preserving existing rendering as
    surface-local code.
