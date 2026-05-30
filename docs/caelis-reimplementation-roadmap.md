@@ -604,8 +604,9 @@ alongside the old stack without importing it:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval, participant, and status DTOs shared by the TUI and future APP,
-  including runtime store identity needed by read-only diagnostics.
+  approval, participant, task list/output, settings, and status DTOs shared by
+  the TUI and future APP, including runtime store identity needed by read-only
+  diagnostics.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -1077,9 +1078,13 @@ be migrated before retiring the old stack:
      surface-neutral settings view plus typed runtime/store/sandbox mutation
      path, so TUI and the future APP do not need to edit raw settings documents
      for core runtime configuration.
-   - Still pending: task panels, remaining settings mutation flows, richer
-     model/provider selection views, agent management actions, approvals,
-     transcript actions, and live event subscriptions still need APP-ready
+   - Migrated baseline: `internal/app/services.TaskService` now exposes a
+     surface-neutral task panel contract for sandbox async session list, tail,
+     wait, stdin write, and cancel operations, backed by `core/sandbox`
+     session contracts instead of old TUI task state.
+   - Still pending: remaining settings mutation flows, richer model/provider
+     selection views, agent management actions, approvals, transcript actions,
+     durable task history, and live event subscriptions still need APP-ready
      service/view-model contracts.
 
 4. Headless CLI and ACP serving
@@ -1325,13 +1330,17 @@ be migrated before retiring the old stack:
       `core/sandbox.SessionLister`, and the core-native `task` tool can wait,
       tail from output cursors, list, write stdin, and cancel yielded shell
       work.
+    - Migrated baseline: shared app services now expose the same sandbox task
+      list/tail/wait/write/cancel controls through
+      `internal/app/services.TaskService` and `internal/app/viewmodel` task
+      DTOs, giving TUI and the future APP a common task-panel API.
     - Migrated baseline: synchronous SPAWN invocations now create canonical
       subagent participant events and return a stable `task_id` matching the
       parent tool call, establishing the new event-level association point for
       future async task control.
     - Still pending: durable task storage, output tail cursors across process
-      restarts, async SPAWN/subagent TASK control, terminal previews, and
-      production surface controls still live in old paths.
+      restarts, async SPAWN/subagent TASK control, terminal previews, and full
+      production TUI/APP task-panel wiring remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`

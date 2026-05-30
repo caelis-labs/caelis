@@ -151,6 +151,10 @@ func (s Services) Compaction() CompactionService {
 	return CompactionService{services: s}
 }
 
+func (s Services) Tasks() TaskService {
+	return TaskService{services: s}
+}
+
 type SettingsService struct {
 	services Services
 }

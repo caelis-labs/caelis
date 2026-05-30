@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -1375,6 +1376,73 @@ func TestSandboxServiceHostLifecycleIsNoop(t *testing.T) {
 	}
 }
 
+func TestTaskServiceListsAndControlsSandboxTasks(t *testing.T) {
+	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	taskSession := &recordingTaskSession{
+		snapshot: sandbox.SessionSnapshot{
+			Ref:           sandbox.SessionRef{ID: "task-1", Backend: sandbox.BackendHost},
+			Command:       "cat",
+			Dir:           "/repo",
+			State:         sandbox.SessionRunning,
+			Running:       true,
+			SupportsInput: true,
+			StartedAt:     now,
+			UpdatedAt:     now,
+			Terminal:      sandbox.TerminalRef{ID: "term-1", SessionID: "task-1"},
+		},
+		stdout: "hello world\n",
+		stderr: "warn\n",
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  &recordingEngine{},
+		Sandbox: &recordingTaskRuntime{sessions: map[string]*recordingTaskSession{"task-1": taskSession}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := svc.Tasks().List(context.Background(), ListTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !list.Supported || list.Count != 1 || list.Tasks[0].ID != "task-1" || list.Tasks[0].TerminalID != "term-1" {
+		t.Fatalf("task list = %#v, want one supported task", list)
+	}
+	list.Tasks[0].Command = "mutated"
+	list, err = svc.Tasks().List(context.Background(), ListTasksRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if list.Tasks[0].Command != "cat" {
+		t.Fatalf("task list was not rebuilt from snapshots: %#v", list.Tasks[0])
+	}
+
+	tail, err := svc.Tasks().Tail(context.Background(), TaskOutputRequest{TaskID: " task-1 ", StdoutCursor: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tail.Stdout != "world\n" || tail.Stderr != "warn\n" || tail.StdoutCursor != int64(len(taskSession.stdout)) {
+		t.Fatalf("tail = %#v, want cursor-based output", tail)
+	}
+
+	wrote, err := svc.Tasks().Write(context.Background(), TaskWriteRequest{TaskOutputRequest: TaskOutputRequest{TaskID: "task-1"}, Input: "ping\n", YieldTimeMS: -1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskSession.wrote != "ping\n" || !wrote.Task.Running {
+		t.Fatalf("write result = %#v wrote=%q, want running task with stdin", wrote, taskSession.wrote)
+	}
+
+	cancelled, err := svc.Tasks().Cancel(context.Background(), TaskCancelRequest{TaskOutputRequest: TaskOutputRequest{TaskID: "task-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Task.State != string(sandbox.SessionCancelled) || cancelled.Task.Running {
+		t.Fatalf("cancelled task = %#v, want cancelled non-running task", cancelled.Task)
+	}
+}
+
 func TestSessionServiceListAppliesWorkspaceDefaults(t *testing.T) {
 	engine := &recordingEngine{page: session.SessionPage{
 		Sessions: []session.SessionSummary{{
@@ -1834,6 +1902,110 @@ func (fakeSandboxRuntime) Open(context.Context, sandbox.SessionRef) (sandbox.Ses
 
 func (fakeSandboxRuntime) Close() error {
 	return nil
+}
+
+type recordingTaskRuntime struct {
+	sessions map[string]*recordingTaskSession
+}
+
+func (r *recordingTaskRuntime) Descriptor() sandbox.Descriptor {
+	return sandbox.Descriptor{Backend: sandbox.BackendHost}
+}
+
+func (r *recordingTaskRuntime) Status() sandbox.Status {
+	return sandbox.Status{RequestedBackend: sandbox.BackendHost, ResolvedBackend: sandbox.BackendHost}
+}
+
+func (*recordingTaskRuntime) FileSystem() sandbox.FileSystem {
+	return nil
+}
+
+func (*recordingTaskRuntime) Run(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	return sandbox.CommandResult{}, errors.New("not implemented")
+}
+
+func (*recordingTaskRuntime) Start(context.Context, sandbox.CommandRequest) (sandbox.Session, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (r *recordingTaskRuntime) Open(_ context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {
+	session, ok := r.sessions[strings.TrimSpace(ref.ID)]
+	if !ok {
+		return nil, fmt.Errorf("unknown task %q", ref.ID)
+	}
+	return session, nil
+}
+
+func (r *recordingTaskRuntime) ListSessions(context.Context, sandbox.SessionListQuery) ([]sandbox.SessionSnapshot, error) {
+	out := make([]sandbox.SessionSnapshot, 0, len(r.sessions))
+	for _, session := range r.sessions {
+		out = append(out, session.snapshot)
+	}
+	return out, nil
+}
+
+func (*recordingTaskRuntime) Close() error {
+	return nil
+}
+
+type recordingTaskSession struct {
+	snapshot sandbox.SessionSnapshot
+	stdout   string
+	stderr   string
+	wrote    string
+}
+
+func (s *recordingTaskSession) Ref() sandbox.SessionRef {
+	return s.snapshot.Ref
+}
+
+func (s *recordingTaskSession) Snapshot(context.Context) (sandbox.SessionSnapshot, error) {
+	return s.snapshot, nil
+}
+
+func (s *recordingTaskSession) Read(_ context.Context, cursor sandbox.OutputCursor) (sandbox.OutputSnapshot, error) {
+	stdoutCursor := clampCursor(cursor.Stdout, s.stdout)
+	stderrCursor := clampCursor(cursor.Stderr, s.stderr)
+	return sandbox.OutputSnapshot{
+		Stdout: s.stdout[stdoutCursor:],
+		Stderr: s.stderr[stderrCursor:],
+		Cursor: sandbox.OutputCursor{
+			Stdout: int64(len(s.stdout)),
+			Stderr: int64(len(s.stderr)),
+		},
+	}, nil
+}
+
+func (s *recordingTaskSession) Write(_ context.Context, input []byte) error {
+	s.wrote += string(input)
+	return nil
+}
+
+func (s *recordingTaskSession) Cancel(context.Context) error {
+	s.snapshot.State = sandbox.SessionCancelled
+	s.snapshot.Running = false
+	return nil
+}
+
+func (s *recordingTaskSession) Wait(ctx context.Context) (sandbox.CommandResult, error) {
+	if err := ctx.Err(); err != nil {
+		return sandbox.CommandResult{}, err
+	}
+	return sandbox.CommandResult{}, nil
+}
+
+func (*recordingTaskSession) Close() error {
+	return nil
+}
+
+func clampCursor(cursor int64, text string) int64 {
+	if cursor < 0 {
+		return 0
+	}
+	if cursor > int64(len(text)) {
+		return int64(len(text))
+	}
+	return cursor
 }
 
 func (e *recordingEngine) StartSession(_ context.Context, req session.StartRequest) (session.Session, error) {
