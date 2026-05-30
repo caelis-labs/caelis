@@ -643,19 +643,17 @@ func toolContent(parts []model.Part) []session.ToolContent {
 }
 
 func toolOutput(parts []model.Part) map[string]any {
-	if len(parts) != 1 {
-		return nil
+	for _, part := range parts {
+		if part.Kind != model.PartJSON || part.JSON == nil || len(part.JSON.Value) == 0 {
+			continue
+		}
+		var out map[string]any
+		if err := json.Unmarshal(part.JSON.Value, &out); err != nil {
+			continue
+		}
+		if len(out) > 0 {
+			return out
+		}
 	}
-	part := parts[0]
-	if part.Kind != model.PartJSON || part.JSON == nil || len(part.JSON.Value) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(part.JSON.Value, &out); err != nil {
-		return nil
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
+	return nil
 }

@@ -1210,8 +1210,8 @@ be migrated before retiring the old stack:
      backends can replace host execution without changing tool semantics.
    - `run_command` can now yield an async sandbox session through the
      `core/sandbox.Runtime.Start/Open` contract, and `task` can wait, write
-     stdin, or cancel that yielded session without importing old task/runtime
-     code.
+     stdin, tail output from returned cursors, list runtime sessions, or cancel
+     that yielded session without importing old task/runtime code.
    - Plan updates are no longer only display metadata in the new runtime:
      `update_plan` results are converted into canonical `session.EventPlan`
      records for ACP/TUI/APP projection.
@@ -1220,9 +1220,12 @@ be migrated before retiring the old stack:
      retain canonical mutation facts; the turn loop promotes JSON tool results
      into canonical `session.ToolEvent.Output` for ACP/TUI/APP raw-output
      projection.
-   - Still pending: spawn tool, durable task storage, task listing/tails,
-     subagent task association, and display metadata for compact/rich tool
-     panels still need core-native adapters.
+   - Migrated baseline: task list/tail control is now part of the core-native
+     `task` tool and backed by a public sandbox session listing contract for
+     runtimes that support async sessions.
+   - Still pending: spawn tool, durable task storage, subagent task
+     association, output tail cursors across process restarts, and display
+     metadata for compact/rich tool panels still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -1301,11 +1304,13 @@ be migrated before retiring the old stack:
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
-      `core/sandbox.Session` contract, and the core-native `task` tool can
-      wait, write stdin, and cancel yielded shell work.
-    - Still pending: durable task storage, task listing, output tail cursors
-      across process restarts, SPAWN/subagent task association, terminal
-      previews, and production surface controls still live in old paths.
+      `core/sandbox.Session` contract, expose session listing through
+      `core/sandbox.SessionLister`, and the core-native `task` tool can wait,
+      tail from output cursors, list, write stdin, and cancel yielded shell
+      work.
+    - Still pending: durable task storage, output tail cursors across process
+      restarts, SPAWN/subagent task association, terminal previews, and
+      production surface controls still live in old paths.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`

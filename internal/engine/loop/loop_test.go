@@ -158,7 +158,7 @@ func TestLoopRecordsPlanEventFromPlanToolResult(t *testing.T) {
 	}
 }
 
-func TestLoopProjectsJSONToolResultOutput(t *testing.T) {
+func TestLoopProjectsJSONToolResultOutputFromMultipartContent(t *testing.T) {
 	const toolName = "write_file"
 	provider := &scriptedProvider{responses: []model.Message{
 		{
@@ -308,6 +308,9 @@ func (t fakeJSONTool) Call(_ context.Context, call tool.Call) (tool.Result, erro
 		ID:   call.ID,
 		Name: t.name,
 		Content: []model.Part{{
+			Kind: model.PartText,
+			Text: &model.TextPart{Text: "changed demo.txt"},
+		}, {
 			Kind: model.PartJSON,
 			JSON: &model.JSONPart{Value: []byte(`{"path":"demo.txt","changed":true}`)},
 		}},

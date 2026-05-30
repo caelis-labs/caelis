@@ -229,6 +229,10 @@ type SessionSnapshot struct {
 	Terminal      TerminalRef  `json:"terminal,omitempty"`
 }
 
+type SessionListQuery struct {
+	Limit int `json:"limit,omitempty"`
+}
+
 type Session interface {
 	Ref() SessionRef
 	Snapshot(context.Context) (SessionSnapshot, error)
@@ -237,6 +241,10 @@ type Session interface {
 	Cancel(context.Context) error
 	Wait(context.Context) (CommandResult, error)
 	Close() error
+}
+
+type SessionLister interface {
+	ListSessions(context.Context, SessionListQuery) ([]SessionSnapshot, error)
 }
 
 type Runtime interface {

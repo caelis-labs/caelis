@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
@@ -28,6 +29,7 @@ type input struct {
 	YieldTimeMS  int    `json:"yield_time_ms,omitempty"`
 	StdoutCursor int64  `json:"stdout_cursor,omitempty"`
 	StderrCursor int64  `json:"stderr_cursor,omitempty"`
+	Limit        int    `json:"limit,omitempty"`
 }
 
 func New(runtime sandbox.Runtime) (*Tool, error) {
@@ -40,18 +42,18 @@ func New(runtime sandbox.Runtime) (*Tool, error) {
 func (t *Tool) Definition() tool.Definition {
 	return tool.Definition{
 		Name:        ToolName,
-		Description: "Wait, write stdin to, or cancel a yielded sandbox task.",
+		Description: "List, tail, wait, write stdin to, or cancel yielded sandbox tasks.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"action": map[string]any{
 					"type":        "string",
-					"enum":        []any{"wait", "write", "cancel"},
+					"enum":        []any{"wait", "write", "cancel", "tail", "list"},
 					"description": "Task action.",
 				},
 				"task_id": map[string]any{
 					"type":        "string",
-					"description": "Task handle returned by run_command.",
+					"description": "Task handle returned by run_command. Required except for action=list.",
 				},
 				"input": map[string]any{
 					"type":        "string",
@@ -69,8 +71,12 @@ func (t *Tool) Definition() tool.Definition {
 					"type":        "integer",
 					"description": "Previously returned stderr cursor.",
 				},
+				"limit": map[string]any{
+					"type":        "integer",
+					"description": "Maximum tasks to return for action=list.",
+				},
 			},
-			"required":             []any{"action", "task_id"},
+			"required":             []any{"action"},
 			"additionalProperties": false,
 		},
 		Meta: map[string]any{
@@ -91,6 +97,9 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	}
 	in.Action = strings.ToLower(strings.TrimSpace(in.Action))
 	in.TaskID = strings.TrimSpace(in.TaskID)
+	if in.Action == "list" {
+		return t.list(ctx, call, in)
+	}
 	if in.TaskID == "" {
 		return tool.Result{}, errors.New("tools/task: task_id is required")
 	}
@@ -100,6 +109,7 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	}
 	switch in.Action {
 	case "wait":
+	case "tail":
 	case "write":
 		if err := session.Write(ctx, []byte(in.Input)); err != nil {
 			return tool.Result{}, err
@@ -115,6 +125,9 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 	if in.YieldTimeMS > 0 {
 		wait = time.Duration(in.YieldTimeMS) * time.Millisecond
 	}
+	if in.Action == "tail" {
+		wait = 0
+	}
 	if in.Action == "cancel" {
 		wait = 100 * time.Millisecond
 	}
@@ -122,6 +135,91 @@ func (t *Tool) Call(ctx context.Context, call tool.Call) (tool.Result, error) {
 		Stdout: in.StdoutCursor,
 		Stderr: in.StderrCursor,
 	}, wait)
+}
+
+func (t *Tool) list(ctx context.Context, call tool.Call, in input) (tool.Result, error) {
+	lister, ok := t.Sandbox.(sandbox.SessionLister)
+	if !ok {
+		return tool.Result{}, errors.New("tools/task: sandbox runtime does not support task listing")
+	}
+	snapshots, err := lister.ListSessions(ctx, sandbox.SessionListQuery{Limit: in.Limit})
+	if err != nil {
+		return tool.Result{}, err
+	}
+	tasks := make([]map[string]any, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		task := map[string]any{
+			"task_id":        strings.TrimSpace(snapshot.Ref.ID),
+			"backend":        string(snapshot.Ref.Backend),
+			"state":          string(snapshot.State),
+			"running":        snapshot.Running,
+			"supports_input": snapshot.SupportsInput,
+			"terminal_id":    strings.TrimSpace(snapshot.Terminal.ID),
+			"command":        strings.TrimSpace(snapshot.Command),
+			"cwd":            strings.TrimSpace(snapshot.Dir),
+			"updated_at":     snapshot.UpdatedAt,
+		}
+		if !snapshot.Running {
+			task["exit_code"] = snapshot.ExitCode
+		}
+		if errText := strings.TrimSpace(snapshot.Error); errText != "" {
+			task["error"] = errText
+		}
+		tasks = append(tasks, task)
+	}
+	payload := map[string]any{
+		"action": "list",
+		"count":  len(tasks),
+		"tasks":  tasks,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return tool.Result{
+		ID:   strings.TrimSpace(call.ID),
+		Name: ToolName,
+		Content: []model.Part{
+			model.NewTextPart(taskListSummary(tasks)),
+			{
+				Kind: model.PartJSON,
+				JSON: &model.JSONPart{Value: raw},
+			},
+		},
+		Meta: map[string]any{
+			"task_count": len(tasks),
+			"caelis": map[string]any{
+				"version": 1,
+				"runtime": map[string]any{
+					"task": map[string]any{
+						"action": "list",
+						"count":  len(tasks),
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func taskListSummary(tasks []map[string]any) string {
+	if len(tasks) == 0 {
+		return "tasks: none"
+	}
+	lines := make([]string, 0, len(tasks)+1)
+	lines = append(lines, fmt.Sprintf("tasks: %d", len(tasks)))
+	for _, task := range tasks {
+		taskID, _ := task["task_id"].(string)
+		state, _ := task["state"].(string)
+		command, _ := task["command"].(string)
+		line := strings.TrimSpace(taskID + " " + state)
+		if command != "" {
+			line = strings.TrimSpace(line + " " + command)
+		}
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 var _ tool.Tool = (*Tool)(nil)

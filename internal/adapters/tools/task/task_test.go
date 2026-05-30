@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/tool"
@@ -88,6 +89,62 @@ func TestTaskToolWritesAndCancelsAsyncCommand(t *testing.T) {
 	})
 	if resultPayload(t, cancelled)["state"] != "cancelled" {
 		t.Fatalf("cancel payload = %#v, want cancelled", resultPayload(t, cancelled))
+	}
+}
+
+func TestTaskToolListsAndTailsAsyncCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("async shell test uses POSIX sleep")
+	}
+	rt := newRuntime(t)
+	runTool, err := toolshell.NewRunCommandTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskTool, err := New(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := callTool(t, runTool, map[string]any{
+		"command":       "printf one; sleep 0.2; printf two",
+		"yield_time_ms": 50,
+	})
+	startPayload := resultPayload(t, start)
+	taskID, _ := startPayload["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("start payload = %#v, missing task id", startPayload)
+	}
+	if stdout, _ := startPayload["stdout"].(string); !strings.Contains(stdout, "one") {
+		t.Fatalf("start stdout = %q, want first chunk", stdout)
+	}
+
+	list := callTool(t, taskTool, map[string]any{
+		"action": "list",
+		"limit":  10,
+	})
+	listPayload := resultPayload(t, list)
+	if listPayload["count"] != float64(1) {
+		t.Fatalf("list payload = %#v, want one task", listPayload)
+	}
+	tasks, ok := listPayload["tasks"].([]any)
+	if !ok || len(tasks) != 1 {
+		t.Fatalf("tasks = %#v, want one task", listPayload["tasks"])
+	}
+	taskEntry, ok := tasks[0].(map[string]any)
+	if !ok || taskEntry["task_id"] != taskID {
+		t.Fatalf("task entry = %#v, want task id %q", taskEntry, taskID)
+	}
+
+	stdoutCursor, _ := startPayload["stdout_cursor"].(float64)
+	time.Sleep(250 * time.Millisecond)
+	tail := callTool(t, taskTool, map[string]any{
+		"action":        "tail",
+		"task_id":       taskID,
+		"stdout_cursor": int64(stdoutCursor),
+	})
+	tailPayload := resultPayload(t, tail)
+	if stdout, _ := tailPayload["stdout"].(string); strings.Contains(stdout, "one") || !strings.Contains(stdout, "two") {
+		t.Fatalf("tail stdout = %q, want only data after cursor", stdout)
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 
@@ -57,8 +58,9 @@ func (r *Runtime) Descriptor() sandbox.Descriptor {
 		Backend:   sandbox.BackendHost,
 		Isolation: sandbox.IsolationHost,
 		Capabilities: sandbox.CapabilitySet{
-			FileSystem:  true,
-			CommandExec: true,
+			FileSystem:    true,
+			CommandExec:   true,
+			AsyncSessions: true,
 		},
 		DefaultConstraints: sandbox.Constraints{
 			Route:      sandbox.RouteHost,
@@ -197,6 +199,36 @@ func (r *Runtime) Open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Ses
 		return nil, fmt.Errorf("sandbox/host: session not found: %s", id)
 	}
 	return session, nil
+}
+
+func (r *Runtime) ListSessions(ctx context.Context, query sandbox.SessionListQuery) ([]sandbox.SessionSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	r.mu.RLock()
+	sessions := make([]*commandSession, 0, len(r.sessions))
+	for _, session := range r.sessions {
+		sessions = append(sessions, session)
+	}
+	r.mu.RUnlock()
+	out := make([]sandbox.SessionSnapshot, 0, len(sessions))
+	for _, session := range sessions {
+		snapshot, err := session.Snapshot(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, snapshot)
+	}
+	sort.SliceStable(out, func(i int, j int) bool {
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	if query.Limit > 0 && len(out) > query.Limit {
+		out = out[:query.Limit]
+	}
+	return out, nil
 }
 
 func (r *Runtime) Close() error {
