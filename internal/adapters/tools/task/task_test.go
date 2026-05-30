@@ -3,6 +3,7 @@ package task
 import (
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -148,9 +149,59 @@ func TestTaskToolListsAndTailsAsyncCommand(t *testing.T) {
 	}
 }
 
+func TestTaskToolReadsArchivedAsyncCommandAfterRuntimeRestart(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	rt := newRuntimeWithConfig(t, sandbox.Config{CWD: dir, StateDir: stateDir})
+	runTool, err := toolshell.NewRunCommandTool(rt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "printf archived"
+	if runtime.GOOS == "windows" {
+		command = "echo archived"
+	}
+	start := callTool(t, runTool, map[string]any{
+		"command":       command,
+		"yield_time_ms": 500,
+	})
+	taskID, _ := resultPayload(t, start)["task_id"].(string)
+	if taskID == "" {
+		t.Fatalf("start payload = %#v, missing task id", resultPayload(t, start))
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened := newRuntimeWithConfig(t, sandbox.Config{CWD: dir, StateDir: stateDir})
+	taskTool, err := New(reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := callTool(t, taskTool, map[string]any{
+		"action": "list",
+		"limit":  10,
+	})
+	if !taskListContains(resultPayload(t, list), taskID) {
+		t.Fatalf("list payload = %#v, want archived task %q", resultPayload(t, list), taskID)
+	}
+	tail := callTool(t, taskTool, map[string]any{
+		"action":  "tail",
+		"task_id": taskID,
+	})
+	if stdout, _ := resultPayload(t, tail)["stdout"].(string); !strings.Contains(stdout, "archived") {
+		t.Fatalf("tail stdout = %q, want archived output", stdout)
+	}
+}
+
 func newRuntime(t *testing.T) sandbox.Runtime {
 	t.Helper()
-	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	return newRuntimeWithConfig(t, sandbox.Config{CWD: t.TempDir()})
+}
+
+func newRuntimeWithConfig(t *testing.T, cfg sandbox.Config) sandbox.Runtime {
+	t.Helper()
+	rt, err := sandboxhost.New(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,4 +239,18 @@ func resultPayload(t *testing.T, result tool.Result) map[string]any {
 	}
 	t.Fatalf("result content = %#v, want json payload", result.Content)
 	return nil
+}
+
+func taskListContains(payload map[string]any, taskID string) bool {
+	tasks, ok := payload["tasks"].([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range tasks {
+		task, ok := item.(map[string]any)
+		if ok && task["task_id"] == taskID {
+			return true
+		}
+	}
+	return false
 }

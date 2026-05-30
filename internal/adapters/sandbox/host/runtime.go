@@ -20,6 +20,7 @@ import (
 
 type Runtime struct {
 	cwd      string
+	journal  *sessionJournal
 	mu       sync.RWMutex
 	sessions map[string]*commandSession
 	closed   bool
@@ -50,7 +51,7 @@ func New(ctx context.Context, cfg sandbox.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{cwd: abs, sessions: map[string]*commandSession{}}, nil
+	return &Runtime{cwd: abs, journal: newSessionJournal(cfg.StateDir), sessions: map[string]*commandSession{}}, nil
 }
 
 func (r *Runtime) Descriptor() sandbox.Descriptor {
@@ -164,8 +165,12 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	if command == "" {
 		return nil, errors.New("sandbox/host: command is required")
 	}
-	session := newCommandSession(r.resolveDir(req.Dir), req)
+	session := newCommandSession(r.resolveDir(req.Dir), req, r.journal)
 	if err := session.start(); err != nil {
+		return nil, err
+	}
+	if err := session.persist(ctx); err != nil {
+		_ = session.Close()
 		return nil, err
 	}
 	r.mu.Lock()
@@ -193,9 +198,16 @@ func (r *Runtime) Open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Ses
 		return nil, fmt.Errorf("sandbox/host: unsupported session backend %q", ref.Backend)
 	}
 	r.mu.RLock()
-	defer r.mu.RUnlock()
 	session, ok := r.sessions[id]
+	r.mu.RUnlock()
 	if !ok {
+		session, err := r.journal.open(ctx, ref)
+		if err == nil {
+			return session, nil
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
 		return nil, fmt.Errorf("sandbox/host: session not found: %s", id)
 	}
 	return session, nil
@@ -215,10 +227,22 @@ func (r *Runtime) ListSessions(ctx context.Context, query sandbox.SessionListQue
 	}
 	r.mu.RUnlock()
 	out := make([]sandbox.SessionSnapshot, 0, len(sessions))
+	seen := make(map[string]struct{}, len(sessions))
 	for _, session := range sessions {
 		snapshot, err := session.Snapshot(ctx)
 		if err != nil {
 			return nil, err
+		}
+		out = append(out, snapshot)
+		seen[snapshot.Ref.ID] = struct{}{}
+	}
+	archived, err := r.journal.list(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, snapshot := range archived {
+		if _, ok := seen[snapshot.Ref.ID]; ok {
+			continue
 		}
 		out = append(out, snapshot)
 	}

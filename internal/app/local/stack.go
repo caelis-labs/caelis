@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -619,10 +620,26 @@ func sandboxFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeCf
 	}
 	return factory.NewRuntime(ctx, sandbox.Config{
 		CWD:           runtimeCfg.WorkspaceCWD,
+		StateDir:      sandboxStateDir(runtimeCfg.Store),
 		ReadableRoots: runtimeCfg.Sandbox.ReadableRoots,
 		WritableRoots: runtimeCfg.Sandbox.WritableRoots,
 		HelperPath:    runtimeCfg.Sandbox.HelperPath,
 	})
+}
+
+func sandboxStateDir(store config.Store) string {
+	backend := strings.ToLower(strings.TrimSpace(store.Backend))
+	if backend == "memory" {
+		return ""
+	}
+	uri := strings.TrimSpace(store.URI)
+	if uri == "" {
+		return ""
+	}
+	if backend == "sqlite" {
+		return filepath.Join(filepath.Dir(uri), "sandbox")
+	}
+	return filepath.Join(uri, "sandbox")
 }
 
 func (s *Stack) Services() services.Services {

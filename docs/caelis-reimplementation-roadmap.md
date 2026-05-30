@@ -1255,6 +1255,11 @@ be migrated before retiring the old stack:
      core sandbox runtime, and standalone CLI host
      `sandbox setup|fix|reset|clean` commands use that service as explicit
      no-op lifecycle operations.
+   - Migrated baseline: the core-native host sandbox can persist async command
+     session snapshots and bounded stdout/stderr buffers under a sandbox
+     `StateDir`. The local app stack derives that state directory from the
+     configured session store URI, so completed shell tasks can be reopened,
+     listed, tailed, and waited after a runtime restart.
    - Migrated baseline: the app-service TUI driver binding now maps the same
      sandbox status/lifecycle service into existing TUI sandbox hooks, covering
      host `/doctor fix` repair flow without gatewayapp.
@@ -1281,6 +1286,10 @@ be migrated before retiring the old stack:
      `core/sandbox.Runtime.Start/Open` contract, and `task` can wait, write
      stdin, tail output from returned cursors, list runtime sessions, or cancel
      that yielded session without importing old task/runtime code.
+   - Migrated baseline: `task list/tail/wait` can operate on host async command
+     sessions restored from the sandbox journal after a runtime restart, giving
+     shell tasks a durable output-buffer baseline without reintroducing the old
+     `ports/task` runtime.
    - Plan updates are no longer only display metadata in the new runtime:
      `update_plan` results are converted into canonical `session.EventPlan`
      records for ACP/TUI/APP projection.
@@ -1303,9 +1312,9 @@ be migrated before retiring the old stack:
      into canonical delegated participant events, and return a model-visible
      `task_id` / `final_message` payload.
    - Still pending: durable async SPAWN tasks, TASK wait/write/cancel control
-     for spawned subagents, durable task storage/output buffers across process
-     restarts, and display metadata for compact/rich tool panels still need
-     core-native adapters.
+     for spawned subagents, richer task lifecycle stores beyond completed host
+     command output journals, and display metadata for compact/rich tool panels
+     still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -1414,9 +1423,14 @@ be migrated before retiring the old stack:
       participant delegation events, preserves output cursors recorded in tool
       results, and overlays live sandbox snapshots when a task is still known to
       the active runtime.
-    - Still pending: a real durable task store for process/subagent lifecycle
-      and output buffers, async SPAWN/subagent TASK wait/write/cancel control,
-      terminal previews, and full production TUI/APP task-panel wiring remain
+    - Migrated baseline: host async command tasks now have a core-native
+      sandbox journal for completed session snapshots and bounded output
+      buffers. A restarted host runtime can reopen archived command sessions,
+      and the core-native `task` tool can list/tail/wait those restored
+      sessions through the same `core/sandbox` interface.
+    - Still pending: a real durable task store for active process/subagent
+      lifecycle, async SPAWN/subagent TASK wait/write/cancel control, terminal
+      previews, and full production TUI/APP task-panel wiring remain
       incomplete.
 
 12. Compaction and replay validation

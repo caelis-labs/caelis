@@ -2,6 +2,7 @@ package host
 
 import (
 	"context"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -92,6 +93,70 @@ func TestRuntimeStartSupportsAsyncOutputInputAndCancel(t *testing.T) {
 	}
 }
 
+func TestRuntimeReopensArchivedAsyncSessionFromStateDir(t *testing.T) {
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	rt, err := New(context.Background(), sandbox.Config{CWD: dir, StateDir: stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	command := "printf durable"
+	if runtime.GOOS == "windows" {
+		command = "echo durable"
+	}
+	session, err := rt.Start(context.Background(), sandbox.CommandRequest{Command: command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := session.Ref()
+	waitCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := session.Wait(waitCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Stdout, "durable") {
+		t.Fatalf("stdout = %q, want durable output", result.Stdout)
+	}
+	if err := rt.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := New(context.Background(), sandbox.Config{CWD: dir, StateDir: stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	archived, err := reopened.Open(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := archived.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Running || snapshot.State != sandbox.SessionCompleted || snapshot.Ref.ID != ref.ID {
+		t.Fatalf("archived snapshot = %#v, want completed session %q", snapshot, ref.ID)
+	}
+	output, err := archived.Read(context.Background(), sandbox.OutputCursor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output.Stdout, "durable") || output.Cursor.Stdout == 0 {
+		t.Fatalf("archived output = %#v, want durable stdout and cursor", output)
+	}
+	if err := archived.Write(context.Background(), []byte("input\n")); err == nil {
+		t.Fatal("archived Write() error = nil, want read-only session")
+	}
+	listed, err := reopened.ListSessions(context.Background(), sandbox.SessionListQuery{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasSessionSnapshot(listed, ref.ID) {
+		t.Fatalf("archived session %q missing from list: %#v", ref.ID, listed)
+	}
+}
+
 func TestRuntimeFileSystemResolvesRelativePaths(t *testing.T) {
 	dir := t.TempDir()
 	rt, err := New(context.Background(), sandbox.Config{CWD: dir})
@@ -109,4 +174,13 @@ func TestRuntimeFileSystemResolvesRelativePaths(t *testing.T) {
 	if string(data) != "ok" {
 		t.Fatalf("file content = %q, want ok", string(data))
 	}
+}
+
+func hasSessionSnapshot(items []sandbox.SessionSnapshot, id string) bool {
+	for _, item := range items {
+		if item.Ref.ID == id {
+			return true
+		}
+	}
+	return false
 }

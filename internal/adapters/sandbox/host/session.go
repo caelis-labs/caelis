@@ -45,9 +45,11 @@ type commandSession struct {
 	closeOnce sync.Once
 
 	req sandbox.CommandRequest
+
+	journal *sessionJournal
 }
 
-func newCommandSession(dir string, req sandbox.CommandRequest) *commandSession {
+func newCommandSession(dir string, req sandbox.CommandRequest, journal *sessionJournal) *commandSession {
 	id := fmt.Sprintf("host-%d-%d", time.Now().UnixNano(), sessionSeq.Add(1))
 	now := time.Now().UTC()
 	return &commandSession{
@@ -64,6 +66,7 @@ func newCommandSession(dir string, req sandbox.CommandRequest) *commandSession {
 		updatedAt: now,
 		done:      make(chan struct{}),
 		req:       req,
+		journal:   journal,
 	}
 }
 
@@ -179,6 +182,7 @@ func (s *commandSession) Write(ctx context.Context, input []byte) error {
 	s.mu.Lock()
 	s.touchLocked()
 	s.mu.Unlock()
+	_ = s.persist(context.Background())
 	return nil
 }
 
@@ -203,6 +207,7 @@ func (s *commandSession) Cancel(ctx context.Context) error {
 	if cmd != nil && cmd.Process != nil {
 		_ = cmd.Process.Kill()
 	}
+	_ = s.persist(context.Background())
 	return nil
 }
 
@@ -240,6 +245,7 @@ func (s *commandSession) copyOutput(reader io.Reader, stream string, buffer *ses
 			if s.req.OnOutput != nil {
 				s.req.OnOutput(sandbox.OutputChunk{Stream: stream, Text: string(chunk)})
 			}
+			_ = s.persist(context.Background())
 		}
 		if err != nil {
 			return
@@ -251,7 +257,6 @@ func (s *commandSession) waitForExit() {
 	err := s.cmd.Wait()
 	s.readers.Wait()
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.running = false
 	if s.stdin != nil {
 		_ = s.stdin.Close()
@@ -259,6 +264,8 @@ func (s *commandSession) waitForExit() {
 	if s.state == sandbox.SessionCancelled {
 		s.exitCode = -1
 		s.touchLocked()
+		s.mu.Unlock()
+		_ = s.persist(context.Background())
 		close(s.done)
 		return
 	}
@@ -282,6 +289,8 @@ func (s *commandSession) waitForExit() {
 		s.state = sandbox.SessionCompleted
 	}
 	s.touchLocked()
+	s.mu.Unlock()
+	_ = s.persist(context.Background())
 	close(s.done)
 }
 
@@ -318,6 +327,31 @@ func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
 
 func (s *commandSession) touchLocked() {
 	s.updatedAt = time.Now().UTC()
+}
+
+func (s *commandSession) persist(ctx context.Context) error {
+	if s == nil || s.journal == nil {
+		return nil
+	}
+	return s.journal.write(ctx, s.journalRecord())
+}
+
+func (s *commandSession) journalRecord() sessionJournalRecord {
+	s.mu.RLock()
+	snapshot := s.snapshotLocked()
+	s.mu.RUnlock()
+	stdout, stdoutTotal, stdoutDropped := s.stdout.snapshot()
+	stderr, stderrTotal, stderrDropped := s.stderr.snapshot()
+	return sessionJournalRecord{
+		Snapshot:           snapshot,
+		Stdout:             string(stdout),
+		Stderr:             string(stderr),
+		StdoutTotalBytes:   stdoutTotal,
+		StderrTotalBytes:   stderrTotal,
+		StdoutDroppedBytes: stdoutDropped,
+		StderrDroppedBytes: stderrDropped,
+		UpdatedAt:          snapshot.UpdatedAt,
+	}
 }
 
 func contextErr(ctx context.Context) error {
@@ -386,6 +420,12 @@ func (b *sessionOutputBuffer) readAll() []byte {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return append([]byte(nil), b.data...)
+}
+
+func (b *sessionOutputBuffer) snapshot() ([]byte, int64, int64) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return append([]byte(nil), b.data...), b.total, b.dropped
 }
 
 var _ sandbox.Session = (*commandSession)(nil)
