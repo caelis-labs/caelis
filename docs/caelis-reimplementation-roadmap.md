@@ -1367,8 +1367,14 @@ be migrated before retiring the old stack:
      `user_authorization`, rationale) and provider usage as canonical approval
      event metadata, categorized as `auto_review` for shared status usage
      accounting.
-   - Still pending: richer policy presets and reusable approval-review
-     transcript prefixes are not migrated.
+   - Migrated baseline: the default core-native built-in policy now covers more
+     than mutating filesystem tools. It blocks known dangerous shell commands,
+     asks for one-shot approval on destructive recursive removals, keeps
+     mutating filesystem calls on the model-backed review path, and leaves
+     unknown plugin tools to explicit extension policy instead of importing the
+     old `ports/policy` preset registry.
+   - Still pending: reusable approval-review transcript prefixes are not
+     migrated.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant

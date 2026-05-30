@@ -95,6 +95,81 @@ func TestWithSessionModeUsesRememberedToolDecisions(t *testing.T) {
 	}
 }
 
+func TestBuiltinToolsPolicyReviewsMutatingFilesystemTools(t *testing.T) {
+	policy := BuiltinToolsPolicy()
+
+	write, err := policy.ReviewToolCall(context.Background(), Request{
+		Call: model.ToolCall{Name: "write_file"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if write.Verdict != VerdictAsk {
+		t.Fatalf("write verdict = %#v, want ask", write)
+	}
+
+	read, err := policy.ReviewToolCall(context.Background(), Request{
+		Call: model.ToolCall{Name: "read_file"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if read.Verdict != "" {
+		t.Fatalf("read verdict = %#v, want no review", read)
+	}
+}
+
+func TestBuiltinToolsPolicyBlocksDangerousCommands(t *testing.T) {
+	policy := BuiltinToolsPolicy()
+	raw := mustApprovalJSON(t, map[string]any{"command": "git reset --hard HEAD"})
+
+	decision, err := policy.ReviewToolCall(context.Background(), Request{
+		Mode: ModeAutoReview,
+		Call: model.ToolCall{Name: "run_command", Input: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != VerdictDeny || !strings.Contains(decision.Reason, "dangerous command") || decision.Meta["dangerous_command"] != true {
+		t.Fatalf("decision = %#v, want dangerous command denial", decision)
+	}
+}
+
+func TestBuiltinToolsPolicyAsksForDestructiveCommands(t *testing.T) {
+	policy := BuiltinToolsPolicy()
+	raw := mustApprovalJSON(t, map[string]any{"command": "rm -rf build"})
+
+	decision, err := policy.ReviewToolCall(context.Background(), Request{
+		Call: model.ToolCall{Name: "run_command", Input: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != VerdictAsk || !strings.Contains(decision.Reason, "destructive filesystem") || decision.Meta["destructive_command"] != true {
+		t.Fatalf("decision = %#v, want destructive command approval", decision)
+	}
+	for _, option := range decision.Options {
+		if option.ID == OptionAllowAlways || option.ID == OptionRejectAlways {
+			t.Fatalf("options = %#v, want one-shot destructive command choices", decision.Options)
+		}
+	}
+}
+
+func TestBuiltinToolsPolicyBlocksProtectedRemoveTargets(t *testing.T) {
+	policy := BuiltinToolsPolicy()
+	raw := mustApprovalJSON(t, map[string]any{"command": "rm -rf /"})
+
+	decision, err := policy.ReviewToolCall(context.Background(), Request{
+		Call: model.ToolCall{Name: "run_command", Input: raw},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Verdict != VerdictDeny {
+		t.Fatalf("decision = %#v, want protected remove target denial", decision)
+	}
+}
+
 func TestWithSandboxEscalationRequiresApprovalForEscalatedTool(t *testing.T) {
 	raw := mustApprovalJSON(t, map[string]any{
 		"command":             "git commit -m test",

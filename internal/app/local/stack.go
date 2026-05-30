@@ -165,7 +165,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	approvalPolicy := cfg.Approval
 	if approvalPolicy == nil && cfg.BuiltinTools {
 		approvalPolicy = approval.WithModelReview(
-			approval.AskTools(toolfilesystem.WriteFileToolName, toolfilesystem.PatchFileToolName),
+			approval.BuiltinToolsPolicy(),
 			provider,
 		)
 	}

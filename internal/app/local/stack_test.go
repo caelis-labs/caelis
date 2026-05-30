@@ -1176,6 +1176,78 @@ func TestStackAutoReviewAsksBeforeEscalatedShellCommand(t *testing.T) {
 	}
 }
 
+func TestStackAutoReviewBlocksDangerousShellCommand(t *testing.T) {
+	workspace := t.TempDir()
+	rawInput, err := json.Marshal(map[string]any{"command": "git reset --hard HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "call-shell-danger",
+					Name:  toolshell.RunCommandToolName,
+					Input: rawInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("stopped")},
+		},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: workspace,
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Provider:     provider,
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "reset repo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var sawRejected bool
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+		event := session.CloneEvent(env.Event)
+		if event.Approval == nil || event.Approval.Status != session.ApprovalRejected {
+			continue
+		}
+		sawRejected = true
+		if !strings.Contains(event.Approval.Reason, "dangerous command") || event.Meta["dangerous_command"] != true {
+			t.Fatalf("rejected approval = %#v meta=%#v, want dangerous command denial", event.Approval, event.Meta)
+		}
+	}
+	if !sawRejected {
+		t.Fatal("dangerous shell command was not rejected")
+	}
+	for _, req := range provider.requests {
+		if req.Meta["caelis.purpose"] == "approval_review" {
+			t.Fatalf("provider requests = %#v, dangerous command should not reach model approval review", provider.requests)
+		}
+	}
+}
+
 func TestStackManualSessionModeAsksApprovalForReadOnlyTools(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "visible.txt"), []byte("visible\n"), 0o644); err != nil {
