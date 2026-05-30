@@ -118,6 +118,12 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 			return nil, invalidParams(err)
 		}
 		return responseOrError(s.resumeSession(ctx, req))
+	case schema.MethodSessionClose:
+		var req schema.CloseSessionRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.closeSession(ctx, req))
 	case schema.MethodSessionSetConfig:
 		var req schema.SetSessionConfigOptionRequest
 		if err := decodeParams(msg.Params, &req); err != nil {
@@ -253,6 +259,17 @@ func (s *Server) resumeSession(ctx context.Context, req schema.ResumeSessionRequ
 		return schema.ResumeSessionResponse{}, err
 	}
 	return resp, nil
+}
+
+func (s *Server) closeSession(ctx context.Context, req schema.CloseSessionRequest) (schema.CloseSessionResponse, error) {
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID == "" {
+		return schema.CloseSessionResponse{}, fmt.Errorf("surface/acpserver: session id is required")
+	}
+	if err := s.engine.Interrupt(ctx, s.sessionRef(sessionID)); err != nil && !errors.Is(err, coreruntime.ErrNoActiveTurn) {
+		return schema.CloseSessionResponse{}, err
+	}
+	return schema.CloseSessionResponse{}, nil
 }
 
 func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.PromptResponse, error) {

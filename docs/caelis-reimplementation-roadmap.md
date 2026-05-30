@@ -809,11 +809,13 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared TUI/APP view-model projection for transcript, current plan, pending
   approvals, and participants.
 - Core-native ACP server for initialize, session/new, session/prompt,
-  session/list, session/load, session/resume, cancel, `session/update`, and
-  permission request bridging. It also exposes configured model metadata and
-  model/reasoning selection through ACP session model/config methods when the
-  shared app settings service is available. `session/load` replays canonical
-  stored events through the same ACP projection path used for live updates.
+  session/list, session/load, session/resume, session/close, cancel,
+  `session/update`, and permission request bridging. It also exposes configured
+  model metadata and model/reasoning selection through ACP session model/config
+  methods when the shared app settings service is available. `session/load`
+  replays canonical stored events through the same ACP projection path used for
+  live updates, and `session/close` interrupts any active turn while remaining
+  idempotent when no turn is running.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
 - Architecture lint rules for the new package boundaries.
@@ -862,9 +864,10 @@ be migrated before retiring the old stack:
      and model/reasoning `session/set_config_option` through
      `internal/app/services.Models()` rather than owning config semantics in
      the ACP surface.
+   - The new ACP server now handles `session/close` by cancelling active core
+     runtime turns and treating already-idle sessions as successfully closed.
    - Still pending: terminal integration, client mode flows, non-model config
-     options, close-session handling, and the full behavior covered by current
-     public ACP e2e tests.
+     options, and the full behavior covered by current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,

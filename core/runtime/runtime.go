@@ -4,11 +4,14 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
 )
+
+var ErrNoActiveTurn = errors.New("core/runtime: no active turn")
 
 type Engine interface {
 	StartSession(context.Context, session.StartRequest) (session.Session, error)

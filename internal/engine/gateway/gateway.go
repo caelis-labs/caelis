@@ -151,7 +151,7 @@ func (g *Gateway) Interrupt(ctx context.Context, ref session.Ref) error {
 	handle := g.active[ref.SessionID]
 	g.mu.Unlock()
 	if handle == nil {
-		return fmt.Errorf("engine/gateway: no active turn for session %q", ref.SessionID)
+		return fmt.Errorf("%w for session %q", coreruntime.ErrNoActiveTurn, ref.SessionID)
 	}
 	handle.Cancel()
 	return nil

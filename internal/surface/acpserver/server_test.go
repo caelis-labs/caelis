@@ -404,6 +404,100 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 }
 
+func TestServeStdioClosesActiveSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	provider := &blockingProvider{
+		started:   make(chan struct{}),
+		cancelled: make(chan struct{}),
+	}
+	stack, err := local.New(local.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Provider: provider,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(context.Context, jsonrpc.Message) {})
+	}()
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: "/tmp/project"}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+
+	promptErr := make(chan error, 1)
+	go func() {
+		var promptResp schema.PromptResponse
+		promptErr <- conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+			SessionID: newResp.SessionID,
+			Prompt: []json.RawMessage{
+				jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "wait"}),
+			},
+		}, &promptResp)
+	}()
+
+	select {
+	case <-provider.started:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for provider to start")
+	}
+
+	var closeResp schema.CloseSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionClose, schema.CloseSessionRequest{SessionID: newResp.SessionID}, &closeResp); err != nil {
+		t.Fatalf("session/close call error = %v", err)
+	}
+	select {
+	case <-provider.cancelled:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for provider cancellation")
+	}
+	select {
+	case err := <-promptErr:
+		if err == nil {
+			t.Fatal("session/prompt error = nil, want cancellation error")
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for prompt cancellation")
+	}
+	if err := conn.Call(ctx, schema.MethodSessionClose, schema.CloseSessionRequest{SessionID: newResp.SessionID}, &closeResp); err != nil {
+		t.Fatalf("second session/close call error = %v", err)
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
 func TestServeStdioBridgesPermissionResponseIntoTurnSubmission(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -637,4 +731,24 @@ func (p *scriptedProvider) Stream(context.Context, model.Request) (model.Stream,
 			Message: response,
 		},
 	}}}, nil
+}
+
+type blockingProvider struct {
+	started   chan struct{}
+	cancelled chan struct{}
+}
+
+func (p *blockingProvider) ID() string {
+	return "blocking"
+}
+
+func (p *blockingProvider) Models(context.Context) ([]model.ModelInfo, error) {
+	return []model.ModelInfo{{ID: "blocking", Provider: "blocking"}}, nil
+}
+
+func (p *blockingProvider) Stream(ctx context.Context, _ model.Request) (model.Stream, error) {
+	close(p.started)
+	<-ctx.Done()
+	close(p.cancelled)
+	return nil, ctx.Err()
 }
