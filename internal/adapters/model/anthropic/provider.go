@@ -2,6 +2,7 @@
 package anthropic
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -11,7 +12,9 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -21,6 +24,7 @@ import (
 const defaultBaseURL = "https://api.anthropic.com"
 const defaultAPIVersion = "2023-06-01"
 const replayKindThinkingSignature = "thinking_signature"
+const streamAcceptValue = "text/event-stream"
 
 type Config struct {
 	ID                     string
@@ -165,17 +169,26 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if payload.Stream {
+		httpReq.Header.Set("Accept", streamAcceptValue)
+	}
 	p.setHeaders(httpReq)
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, responseError("messages", resp)
+		err := responseError("messages", resp)
+		_ = resp.Body.Close()
+		return nil, err
 	}
+	bodyReader := bufio.NewReader(resp.Body)
+	if payload.Stream && responseLooksLikeSSE(resp, bodyReader) {
+		return newMessageSSEStream(bodyReader, resp.Body, p.ID(), payload.Model), nil
+	}
+	defer resp.Body.Close()
 	var completion messageResponse
-	if err := json.NewDecoder(resp.Body).Decode(&completion); err != nil {
+	if err := json.NewDecoder(bodyReader).Decode(&completion); err != nil {
 		return nil, err
 	}
 	response, err := p.modelResponse(payload.Model, completion)
@@ -220,6 +233,7 @@ func (p *Provider) messagesRequest(req model.Request) (messagesRequest, error) {
 		Messages:  messages,
 		Tools:     toolParams(req.Tools),
 		Thinking:  p.thinkingConfig(req.Reasoning),
+		Stream:    req.Stream,
 	}
 	if payload.MaxTokens <= 0 {
 		payload.MaxTokens = 1024
@@ -354,6 +368,7 @@ type messagesRequest struct {
 	Messages  []messageParam  `json:"messages"`
 	Tools     []toolParam     `json:"tools,omitempty"`
 	Thinking  *thinkingConfig `json:"thinking,omitempty"`
+	Stream    bool            `json:"stream,omitempty"`
 }
 
 type messageParam struct {
@@ -392,6 +407,311 @@ type toolParam struct {
 type thinkingConfig struct {
 	Type         string `json:"type"`
 	BudgetTokens int    `json:"budget_tokens"`
+}
+
+type messageSSEStream struct {
+	body   io.Closer
+	events <-chan messageStreamItem
+	once   sync.Once
+}
+
+type messageStreamItem struct {
+	event model.StreamEvent
+	err   error
+}
+
+func newMessageSSEStream(reader *bufio.Reader, body io.ReadCloser, providerID string, modelID string) model.Stream {
+	events := make(chan messageStreamItem, 32)
+	stream := &messageSSEStream{body: body, events: events}
+	go readMessageSSE(reader, body, providerID, modelID, events)
+	return stream
+}
+
+func (s *messageSSEStream) Recv() (model.StreamEvent, error) {
+	if s == nil || s.events == nil {
+		return model.StreamEvent{}, io.EOF
+	}
+	item, ok := <-s.events
+	if !ok {
+		return model.StreamEvent{}, io.EOF
+	}
+	if item.err != nil {
+		return model.StreamEvent{}, item.err
+	}
+	return item.event, nil
+}
+
+func (s *messageSSEStream) Close() error {
+	if s == nil || s.body == nil {
+		return nil
+	}
+	var err error
+	s.once.Do(func() {
+		err = s.body.Close()
+	})
+	return err
+}
+
+func readMessageSSE(reader *bufio.Reader, body io.Closer, providerID string, modelID string, out chan<- messageStreamItem) {
+	defer close(out)
+	defer body.Close()
+	acc := newMessageStreamAccumulator(providerID, modelID)
+	err := readSSE(reader, func(data []byte) error {
+		var event messageStreamEvent
+		if err := json.Unmarshal(data, &event); err != nil {
+			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(event.Type), "error") {
+			return model.NewProviderError(model.ProviderError{
+				Provider:  "anthropic",
+				Operation: "messages",
+				Type:      strings.TrimSpace(event.Error.Type),
+				Message:   strings.TrimSpace(event.Error.Message),
+				Body:      strings.TrimSpace(string(data)),
+			})
+		}
+		for _, streamEvent := range acc.apply(event) {
+			if !sendMessageStreamItem(out, messageStreamItem{event: streamEvent}) {
+				return errStopSSE
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		_ = sendMessageStreamItem(out, messageStreamItem{err: err})
+		return
+	}
+	response, err := acc.response()
+	if err != nil {
+		_ = sendMessageStreamItem(out, messageStreamItem{err: err})
+		return
+	}
+	_ = sendMessageStreamItem(out, messageStreamItem{event: model.StreamEvent{
+		Type:     model.StreamTurnDone,
+		Response: &response,
+	}})
+}
+
+func sendMessageStreamItem(out chan<- messageStreamItem, item messageStreamItem) bool {
+	out <- item
+	return true
+}
+
+type messageStreamEvent struct {
+	Type         string               `json:"type"`
+	Message      messageResponse      `json:"message,omitempty"`
+	Index        int                  `json:"index,omitempty"`
+	ContentBlock contentBlockResponse `json:"content_block,omitempty"`
+	Delta        messageStreamDelta   `json:"delta,omitempty"`
+	Usage        usage                `json:"usage,omitempty"`
+	Error        struct {
+		Type    string `json:"type"`
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+type messageStreamDelta struct {
+	Type        string `json:"type"`
+	Text        string `json:"text,omitempty"`
+	Thinking    string `json:"thinking,omitempty"`
+	Signature   string `json:"signature,omitempty"`
+	PartialJSON string `json:"partial_json,omitempty"`
+	StopReason  string `json:"stop_reason,omitempty"`
+}
+
+type messageStreamAccumulator struct {
+	providerID string
+	modelID    string
+	stopReason string
+	usage      usage
+	blocks     map[int]*messageStreamBlock
+}
+
+type messageStreamBlock struct {
+	Type      string
+	Text      strings.Builder
+	Thinking  strings.Builder
+	Signature string
+	Data      string
+	ID        string
+	Name      string
+	Input     strings.Builder
+}
+
+func newMessageStreamAccumulator(providerID string, modelID string) *messageStreamAccumulator {
+	return &messageStreamAccumulator{
+		providerID: providerID,
+		modelID:    strings.TrimSpace(modelID),
+		blocks:     map[int]*messageStreamBlock{},
+	}
+}
+
+func (a *messageStreamAccumulator) apply(event messageStreamEvent) []model.StreamEvent {
+	if a == nil {
+		return nil
+	}
+	switch strings.ToLower(strings.TrimSpace(event.Type)) {
+	case "message_start":
+		if strings.TrimSpace(event.Message.Model) != "" {
+			a.modelID = strings.TrimSpace(event.Message.Model)
+		}
+		a.mergeUsage(event.Message.Usage)
+	case "content_block_start":
+		return a.applyBlockStart(event.Index, event.ContentBlock)
+	case "content_block_delta":
+		return a.applyBlockDelta(event.Index, event.Delta)
+	case "message_delta":
+		if strings.TrimSpace(event.Delta.StopReason) != "" {
+			a.stopReason = strings.TrimSpace(event.Delta.StopReason)
+		}
+		a.mergeUsage(event.Usage)
+	}
+	return nil
+}
+
+func (a *messageStreamAccumulator) applyBlockStart(index int, block contentBlockResponse) []model.StreamEvent {
+	entry := a.block(index)
+	entry.Type = strings.TrimSpace(block.Type)
+	entry.ID = strings.TrimSpace(block.ID)
+	entry.Name = strings.TrimSpace(block.Name)
+	entry.Signature = strings.TrimSpace(block.Signature)
+	entry.Data = strings.TrimSpace(block.Data)
+	if raw := bytes.TrimSpace(block.Input); len(raw) > 0 && !bytes.Equal(raw, []byte("{}")) {
+		entry.Input.Write(raw)
+	}
+	var events []model.StreamEvent
+	if block.Text != "" {
+		entry.Text.WriteString(block.Text)
+		events = append(events, textDeltaEvent(block.Text))
+	}
+	if block.Thinking != "" {
+		entry.Thinking.WriteString(block.Thinking)
+		events = append(events, reasoningDeltaEvent(block.Thinking))
+	}
+	return events
+}
+
+func (a *messageStreamAccumulator) applyBlockDelta(index int, delta messageStreamDelta) []model.StreamEvent {
+	entry := a.block(index)
+	switch strings.ToLower(strings.TrimSpace(delta.Type)) {
+	case "text_delta":
+		if delta.Text == "" {
+			return nil
+		}
+		entry.Text.WriteString(delta.Text)
+		return []model.StreamEvent{textDeltaEvent(delta.Text)}
+	case "thinking_delta":
+		if delta.Thinking == "" {
+			return nil
+		}
+		if entry.Type == "" {
+			entry.Type = "thinking"
+		}
+		entry.Thinking.WriteString(delta.Thinking)
+		return []model.StreamEvent{reasoningDeltaEvent(delta.Thinking)}
+	case "signature_delta":
+		entry.Signature = strings.TrimSpace(delta.Signature)
+	case "input_json_delta":
+		if entry.Type == "" {
+			entry.Type = "tool_use"
+		}
+		entry.Input.WriteString(delta.PartialJSON)
+	}
+	return nil
+}
+
+func (a *messageStreamAccumulator) block(index int) *messageStreamBlock {
+	entry := a.blocks[index]
+	if entry == nil {
+		entry = &messageStreamBlock{}
+		a.blocks[index] = entry
+	}
+	return entry
+}
+
+func (a *messageStreamAccumulator) mergeUsage(next usage) {
+	if next.InputTokens != 0 {
+		a.usage.InputTokens = next.InputTokens
+	}
+	if next.CacheCreationInputTokens != 0 {
+		a.usage.CacheCreationInputTokens = next.CacheCreationInputTokens
+	}
+	if next.CacheReadInputTokens != 0 {
+		a.usage.CacheReadInputTokens = next.CacheReadInputTokens
+	}
+	if next.OutputTokens != 0 {
+		a.usage.OutputTokens = next.OutputTokens
+	}
+}
+
+func (a *messageStreamAccumulator) response() (model.Response, error) {
+	completion := messageResponse{
+		Model:      strings.TrimSpace(a.modelID),
+		StopReason: strings.TrimSpace(a.stopReason),
+		Content:    a.content(),
+		Usage:      a.usage,
+	}
+	provider := &Provider{id: a.providerID}
+	return provider.modelResponse(a.modelID, completion)
+}
+
+func (a *messageStreamAccumulator) content() []contentBlockResponse {
+	indexes := make([]int, 0, len(a.blocks))
+	for index := range a.blocks {
+		indexes = append(indexes, index)
+	}
+	sort.Ints(indexes)
+	out := make([]contentBlockResponse, 0, len(indexes))
+	for _, index := range indexes {
+		block := a.blocks[index]
+		if block == nil {
+			continue
+		}
+		kind := strings.TrimSpace(block.Type)
+		if kind == "" {
+			if block.Input.Len() > 0 || strings.TrimSpace(block.ID) != "" || strings.TrimSpace(block.Name) != "" {
+				kind = "tool_use"
+			} else if block.Thinking.Len() > 0 || strings.TrimSpace(block.Signature) != "" {
+				kind = "thinking"
+			} else {
+				kind = "text"
+			}
+		}
+		item := contentBlockResponse{
+			Type:      kind,
+			Text:      block.Text.String(),
+			Thinking:  block.Thinking.String(),
+			Signature: strings.TrimSpace(block.Signature),
+			Data:      strings.TrimSpace(block.Data),
+			ID:        strings.TrimSpace(block.ID),
+			Name:      strings.TrimSpace(block.Name),
+		}
+		if block.Input.Len() > 0 {
+			item.Input = json.RawMessage(block.Input.String())
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func textDeltaEvent(text string) model.StreamEvent {
+	return model.StreamEvent{
+		Type:  model.StreamPartDelta,
+		Delta: text,
+		Part:  ptrPart(model.NewTextPart(text)),
+	}
+}
+
+func reasoningDeltaEvent(text string) model.StreamEvent {
+	return model.StreamEvent{
+		Type:  model.StreamPartDelta,
+		Delta: text,
+		Part:  ptrPart(model.NewReasoningPart(text, model.ReasoningVisible)),
+	}
+}
+
+func ptrPart(part model.Part) *model.Part {
+	return &part
 }
 
 type messageResponse struct {
@@ -722,6 +1042,70 @@ func responseError(operation string, resp *http.Response) error {
 		providerErr.Type = payload.Error.Type
 	}
 	return model.NewProviderError(providerErr)
+}
+
+func responseLooksLikeSSE(resp *http.Response, reader *bufio.Reader) bool {
+	contentType := ""
+	if resp != nil {
+		contentType = strings.ToLower(resp.Header.Get("Content-Type"))
+	}
+	if reader == nil {
+		return strings.Contains(contentType, "text/event-stream")
+	}
+	sample, _ := reader.Peek(1)
+	trimmed := strings.TrimSpace(string(sample))
+	switch {
+	case strings.HasPrefix(trimmed, "d"), strings.HasPrefix(trimmed, "e"):
+		return true
+	case strings.HasPrefix(trimmed, "{"), strings.HasPrefix(trimmed, "["):
+		return false
+	}
+	return strings.Contains(contentType, "text/event-stream")
+}
+
+var errStopSSE = errors.New("model/anthropic: stop sse")
+
+func readSSE(reader io.Reader, onData func([]byte) error) error {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	var dataLines [][]byte
+	flush := func() error {
+		if len(dataLines) == 0 {
+			return nil
+		}
+		payload := bytes.Join(dataLines, []byte("\n"))
+		dataLines = dataLines[:0]
+		chunk := strings.TrimSpace(string(payload))
+		if chunk == "" {
+			return nil
+		}
+		if chunk == "[DONE]" {
+			return errStopSSE
+		}
+		return onData([]byte(chunk))
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			if err := flush(); err != nil {
+				if errors.Is(err, errStopSSE) {
+					return nil
+				}
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, []byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("model/anthropic: sse scanner: %w", err)
+	}
+	if err := flush(); err != nil && !errors.Is(err, errStopSSE) {
+		return err
+	}
+	return nil
 }
 
 func caelisUserAgent() string {

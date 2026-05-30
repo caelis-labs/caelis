@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -13,6 +14,7 @@ import (
 
 func TestProviderStreamSendsMessagesRequestAndParsesToolUse(t *testing.T) {
 	var captured messagesRequest
+	var acceptHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
 			t.Fatalf("path = %q, want /v1/messages", r.URL.Path)
@@ -23,6 +25,7 @@ func TestProviderStreamSendsMessagesRequestAndParsesToolUse(t *testing.T) {
 		if got := r.Header.Get("anthropic-version"); got != defaultAPIVersion {
 			t.Fatalf("anthropic-version = %q, want default", got)
 		}
+		acceptHeader = r.Header.Get("Accept")
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			t.Fatal(err)
@@ -119,6 +122,9 @@ func TestProviderStreamSendsMessagesRequestAndParsesToolUse(t *testing.T) {
 	if captured.Model != "claude-test" || captured.MaxTokens != 2048 {
 		t.Fatalf("captured model/max = %q/%d", captured.Model, captured.MaxTokens)
 	}
+	if !captured.Stream || acceptHeader != streamAcceptValue {
+		t.Fatalf("stream request = %v accept = %q, want streaming request", captured.Stream, acceptHeader)
+	}
 	if captured.System != "You are concise.\n\nProject policy." {
 		t.Fatalf("system = %q", captured.System)
 	}
@@ -133,6 +139,103 @@ func TestProviderStreamSendsMessagesRequestAndParsesToolUse(t *testing.T) {
 	}
 	if captured.Thinking == nil || captured.Thinking.BudgetTokens != 4096 {
 		t.Fatalf("thinking = %#v, want medium budget", captured.Thinking)
+	}
+}
+
+func TestProviderStreamParsesSSE(t *testing.T) {
+	var captured messagesRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("event: message_start\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-test","content":[],"usage":{"input_tokens":11,"cache_read_input_tokens":3}}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"checking"}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig-1"}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I will run it."}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_start\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"call-1","name":"run_command","input":{}}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"command\""}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: content_block_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":":\"echo hi\"}"}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: message_delta\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":5}}` + "\n\n"))
+		_, _ = w.Write([]byte("event: message_stop\n"))
+		_, _ = w.Write([]byte(`data: {"type":"message_stop"}` + "\n\n"))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, APIKey: "anthropic-token", Model: "claude-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("run it")}}},
+		Tools: []model.ToolSpec{model.NewFunctionToolSpec("run_command", "run shell", map[string]any{
+			"type": "object",
+		})},
+		Stream: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+
+	var deltas []string
+	var final *model.Response
+	for {
+		event, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if event.Type == model.StreamPartDelta {
+			deltas = append(deltas, event.Delta)
+		}
+		if event.Response != nil {
+			final = event.Response
+		}
+	}
+	if !captured.Stream {
+		t.Fatalf("captured stream = false, want true")
+	}
+	if strings.Join(deltas, "") != "checkingI will run it." {
+		t.Fatalf("deltas = %#v, want reasoning and text deltas", deltas)
+	}
+	if final == nil {
+		t.Fatal("final response = nil")
+	}
+	if got := final.Message.TextContent(); got != "I will run it." {
+		t.Fatalf("assistant text = %q", got)
+	}
+	calls := final.Message.ToolCalls()
+	if len(calls) != 1 || calls[0].ID != "call-1" || calls[0].Name != "run_command" ||
+		string(calls[0].Input) != `{"command":"echo hi"}` {
+		t.Fatalf("tool calls = %#v, want streamed tool call", calls)
+	}
+	if final.Usage == nil || final.Usage.InputTokens != 11 ||
+		final.Usage.CachedInputTokens != 3 || final.Usage.OutputTokens != 5 ||
+		final.Usage.TotalTokens != 16 {
+		t.Fatalf("usage = %#v, want streamed usage", final.Usage)
+	}
+	if final.Origin == nil || final.Origin.Model != "claude-test" || final.Origin.RawFinishReason != "tool_use" {
+		t.Fatalf("origin = %#v, want streamed origin", final.Origin)
+	}
+	if len(final.Message.Parts) == 0 || final.Message.Parts[0].Reasoning == nil ||
+		final.Message.Parts[0].Reasoning.Replay == nil ||
+		final.Message.Parts[0].Reasoning.Replay.Token != "sig-1" {
+		t.Fatalf("reasoning part = %#v, want streamed signature", final.Message.Parts)
 	}
 }
 

@@ -2,6 +2,7 @@
 package gemini
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -22,6 +24,7 @@ import (
 const defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 const replayKindThoughtSignature = "thought_signature"
 const thoughtSignaturePrefix = "b64:"
+const streamAcceptValue = "text/event-stream"
 
 type Config struct {
 	ID              string
@@ -152,19 +155,34 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 		return nil, err
 	}
 	endpoint := p.baseURL + "/models/" + url.PathEscape(modelID) + ":generateContent"
+	if req.Stream {
+		endpoint = p.baseURL + "/models/" + url.PathEscape(modelID) + ":streamGenerateContent?alt=sse"
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if req.Stream {
+		httpReq.Header.Set("Accept", streamAcceptValue)
+	}
 	p.setHeaders(httpReq)
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		err := responseError("generate content", resp)
+		_ = resp.Body.Close()
+		return nil, err
+	}
+	bodyReader := bufio.NewReader(resp.Body)
+	if req.Stream && responseLooksLikeSSE(resp, bodyReader) {
+		return newGenerateSSEStream(bodyReader, resp.Body, p.ID(), modelID), nil
+	}
 	defer resp.Body.Close()
 	var completion generateContentResponse
-	if err := decodeResponse(resp, "generate content", &completion); err != nil {
+	if err := json.NewDecoder(bodyReader).Decode(&completion); err != nil {
 		return nil, err
 	}
 	response, err := p.modelResponse(modelID, completion)
@@ -392,6 +410,177 @@ type usage struct {
 	CandidatesTokenCount    int `json:"candidatesTokenCount,omitempty"`
 	ThoughtsTokenCount      int `json:"thoughtsTokenCount,omitempty"`
 	TotalTokenCount         int `json:"totalTokenCount,omitempty"`
+}
+
+type generateSSEStream struct {
+	body   io.Closer
+	events <-chan generateStreamItem
+	once   sync.Once
+}
+
+type generateStreamItem struct {
+	event model.StreamEvent
+	err   error
+}
+
+func newGenerateSSEStream(reader *bufio.Reader, body io.ReadCloser, providerID string, modelID string) model.Stream {
+	events := make(chan generateStreamItem, 32)
+	stream := &generateSSEStream{body: body, events: events}
+	go readGenerateSSE(reader, body, providerID, modelID, events)
+	return stream
+}
+
+func (s *generateSSEStream) Recv() (model.StreamEvent, error) {
+	if s == nil || s.events == nil {
+		return model.StreamEvent{}, io.EOF
+	}
+	item, ok := <-s.events
+	if !ok {
+		return model.StreamEvent{}, io.EOF
+	}
+	if item.err != nil {
+		return model.StreamEvent{}, item.err
+	}
+	return item.event, nil
+}
+
+func (s *generateSSEStream) Close() error {
+	if s == nil || s.body == nil {
+		return nil
+	}
+	var err error
+	s.once.Do(func() {
+		err = s.body.Close()
+	})
+	return err
+}
+
+func readGenerateSSE(reader *bufio.Reader, body io.Closer, providerID string, modelID string, out chan<- generateStreamItem) {
+	defer close(out)
+	defer body.Close()
+	acc := newGenerateStreamAccumulator(providerID, modelID)
+	err := readSSE(reader, func(data []byte) error {
+		if err := streamChunkError(data); err != nil {
+			return err
+		}
+		var chunk generateContentResponse
+		if err := json.Unmarshal(data, &chunk); err != nil {
+			return err
+		}
+		for _, event := range acc.apply(chunk) {
+			if !sendGenerateStreamItem(out, generateStreamItem{event: event}) {
+				return errStopSSE
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		_ = sendGenerateStreamItem(out, generateStreamItem{err: err})
+		return
+	}
+	response, err := acc.response()
+	if err != nil {
+		_ = sendGenerateStreamItem(out, generateStreamItem{err: err})
+		return
+	}
+	_ = sendGenerateStreamItem(out, generateStreamItem{event: model.StreamEvent{
+		Type:     model.StreamTurnDone,
+		Response: &response,
+	}})
+}
+
+func sendGenerateStreamItem(out chan<- generateStreamItem, item generateStreamItem) bool {
+	out <- item
+	return true
+}
+
+type generateStreamAccumulator struct {
+	providerID   string
+	modelID      string
+	modelVersion string
+	finishReason string
+	parts        []part
+	usage        usage
+}
+
+func newGenerateStreamAccumulator(providerID string, modelID string) *generateStreamAccumulator {
+	return &generateStreamAccumulator{
+		providerID: providerID,
+		modelID:    strings.TrimSpace(modelID),
+	}
+}
+
+func (a *generateStreamAccumulator) apply(chunk generateContentResponse) []model.StreamEvent {
+	if a == nil {
+		return nil
+	}
+	if strings.TrimSpace(chunk.ModelVersion) != "" {
+		a.modelVersion = strings.TrimSpace(chunk.ModelVersion)
+	}
+	if chunk.UsageMetadata.hasAny() {
+		a.usage = chunk.UsageMetadata
+	}
+	if len(chunk.Candidates) == 0 {
+		return nil
+	}
+	candidate := chunk.Candidates[0]
+	if strings.TrimSpace(candidate.FinishReason) != "" {
+		a.finishReason = strings.TrimSpace(candidate.FinishReason)
+	}
+	var events []model.StreamEvent
+	for _, item := range candidate.Content.Parts {
+		a.parts = append(a.parts, item)
+		if item.Text == "" {
+			continue
+		}
+		if item.Thought {
+			events = append(events, reasoningDeltaEvent(item.Text))
+		} else {
+			events = append(events, textDeltaEvent(item.Text))
+		}
+	}
+	return events
+}
+
+func (a *generateStreamAccumulator) response() (model.Response, error) {
+	completion := generateContentResponse{
+		ModelVersion: firstNonEmpty(a.modelVersion, a.modelID),
+		Candidates: []candidate{{
+			Content:      content{Role: "model", Parts: a.parts},
+			FinishReason: strings.TrimSpace(a.finishReason),
+		}},
+		UsageMetadata: a.usage,
+	}
+	provider := &Provider{id: a.providerID}
+	return provider.modelResponse(a.modelID, completion)
+}
+
+func textDeltaEvent(text string) model.StreamEvent {
+	return model.StreamEvent{
+		Type:  model.StreamPartDelta,
+		Delta: text,
+		Part:  ptrPart(model.NewTextPart(text)),
+	}
+}
+
+func reasoningDeltaEvent(text string) model.StreamEvent {
+	return model.StreamEvent{
+		Type:  model.StreamPartDelta,
+		Delta: text,
+		Part:  ptrPart(model.NewReasoningPart(text, model.ReasoningVisible)),
+	}
+}
+
+func ptrPart(part model.Part) *model.Part {
+	return &part
+}
+
+func (u usage) hasAny() bool {
+	return u.PromptTokenCount != 0 ||
+		u.CachedContentTokenCount != 0 ||
+		u.CandidatesTokenCount != 0 ||
+		u.ThoughtsTokenCount != 0 ||
+		u.TotalTokenCount != 0
 }
 
 type listModelsResponse struct {
@@ -853,6 +1042,94 @@ func responseError(operation string, resp *http.Response) error {
 		}
 	}
 	return model.NewProviderError(providerErr)
+}
+
+func streamChunkError(raw []byte) error {
+	var payload struct {
+		Error struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+			Code    int    `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil || strings.TrimSpace(payload.Error.Message) == "" {
+		return nil
+	}
+	providerErr := model.ProviderError{
+		Provider:  "gemini",
+		Operation: "generate content",
+		Message:   strings.TrimSpace(payload.Error.Message),
+		Type:      strings.TrimSpace(payload.Error.Status),
+		Body:      strings.TrimSpace(string(raw)),
+	}
+	if payload.Error.Code != 0 {
+		providerErr.Code = fmt.Sprint(payload.Error.Code)
+	}
+	return model.NewProviderError(providerErr)
+}
+
+func responseLooksLikeSSE(resp *http.Response, reader *bufio.Reader) bool {
+	contentType := ""
+	if resp != nil {
+		contentType = strings.ToLower(resp.Header.Get("Content-Type"))
+	}
+	if reader == nil {
+		return strings.Contains(contentType, "text/event-stream")
+	}
+	sample, _ := reader.Peek(1)
+	trimmed := strings.TrimSpace(string(sample))
+	switch {
+	case strings.HasPrefix(trimmed, "d"), strings.HasPrefix(trimmed, "e"):
+		return true
+	case strings.HasPrefix(trimmed, "{"), strings.HasPrefix(trimmed, "["):
+		return false
+	}
+	return strings.Contains(contentType, "text/event-stream")
+}
+
+var errStopSSE = errors.New("model/gemini: stop sse")
+
+func readSSE(reader io.Reader, onData func([]byte) error) error {
+	scanner := bufio.NewScanner(reader)
+	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
+	var dataLines [][]byte
+	flush := func() error {
+		if len(dataLines) == 0 {
+			return nil
+		}
+		payload := bytes.Join(dataLines, []byte("\n"))
+		dataLines = dataLines[:0]
+		chunk := strings.TrimSpace(string(payload))
+		if chunk == "" {
+			return nil
+		}
+		if chunk == "[DONE]" {
+			return errStopSSE
+		}
+		return onData([]byte(chunk))
+	}
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.TrimSpace(line) == "" {
+			if err := flush(); err != nil {
+				if errors.Is(err, errStopSSE) {
+					return nil
+				}
+				return err
+			}
+			continue
+		}
+		if strings.HasPrefix(line, "data:") {
+			dataLines = append(dataLines, []byte(strings.TrimSpace(strings.TrimPrefix(line, "data:"))))
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("model/gemini: sse scanner: %w", err)
+	}
+	if err := flush(); err != nil && !errors.Is(err, errStopSSE) {
+		return err
+	}
+	return nil
 }
 
 func caelisUserAgent() string {

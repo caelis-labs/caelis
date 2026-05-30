@@ -1269,10 +1269,14 @@ be migrated before retiring the old stack:
      OpenAI-compatible SSE text/reasoning/tool-call deltas, carries streamed
      usage and origin metadata into the final canonical response, and keeps a
      JSON fallback for compatible mocks or non-SSE CodeFree responses.
+   - Migrated baseline: the core-native Anthropic and Gemini adapters now honor
+     provider streaming requests, parse their native SSE event streams,
+     preserve streamed text/reasoning/tool-call state in canonical model
+     messages, carry usage and raw finish metadata into the final response, and
+     keep JSON fallbacks for compatible mocks or non-SSE responses.
    - Still pending: provider-specific tool/argument behavior beyond the
-     migrated profiles, SSE parity for Anthropic/Gemini, and removal
-     of the corresponding old `impl/model/providers` code once no old-stack
-     entrypoint requires it.
+     migrated profiles and removal of the corresponding old
+     `impl/model/providers` code once no old-stack entrypoint requires it.
 
 7. Sandbox backends and policy
    - The new stack only has a host sandbox adapter.

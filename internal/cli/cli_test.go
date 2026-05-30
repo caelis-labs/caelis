@@ -681,6 +681,7 @@ func TestRunHeadlessUsesCoreAnthropicProvider(t *testing.T) {
 		Tools []struct {
 			Name string `json:"name"`
 		} `json:"tools"`
+		Stream bool `json:"stream"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/messages" {
@@ -733,6 +734,9 @@ func TestRunHeadlessUsesCoreAnthropicProvider(t *testing.T) {
 	if captured.Model != "claude-test" || len(captured.Messages) == 0 || captured.Messages[len(captured.Messages)-1].Role != "user" {
 		t.Fatalf("captured request = %#v", captured)
 	}
+	if !captured.Stream {
+		t.Fatalf("captured stream = false, want true")
+	}
 	if !capturedAnthropicTool(captured.Tools, "task") || !capturedAnthropicTool(captured.Tools, "write_file") {
 		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
 	}
@@ -752,8 +756,11 @@ func TestRunHeadlessUsesCoreGeminiProvider(t *testing.T) {
 		} `json:"tools"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1beta/models/gemini-test:generateContent" {
-			t.Fatalf("path = %q, want Gemini generateContent", r.URL.Path)
+		if r.URL.Path != "/v1beta/models/gemini-test:streamGenerateContent" {
+			t.Fatalf("path = %q, want Gemini streamGenerateContent", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("alt"); got != "sse" {
+			t.Fatalf("alt = %q, want sse", got)
 		}
 		apiKeyHeader = r.Header.Get("x-goog-api-key")
 		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
