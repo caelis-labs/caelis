@@ -1277,14 +1277,18 @@ be migrated before retiring the old stack:
       agent supplied by plugin discovery or static local composition, while
       later explicit registration clears the tombstone and restores the shared
       descriptor path for TUI and future APP consumers.
+    - Migrated baseline: durable sidecar continuation across driver restarts is
+      covered by canonical participant events. Participant remote ACP session
+      ids are rebuilt from stored event scope on reload, and follow-up
+      `@handle` prompts reuse that remote session id through the shared
+      app-service gateway instead of TUI-only memory.
     - Migrated baseline: default self-agent spawning now belongs to
       `internal/app/local`. When no explicit `self` descriptor is configured and
       the runtime has a durable store URI, the local stack exposes a service
       native `self` ACP agent that launches the current Caelis executable with
       ACP stdio flags, workspace/store/model settings, and token-env
       indirection.
-    - Still pending: durable sidecar continuation across restarts,
-      delegated subagent tasks,
+    - Still pending: delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical
       remote session id reuse, live remote ACP controller config RPC/reconnect
       application, remote-declared controller option discovery, and terminal

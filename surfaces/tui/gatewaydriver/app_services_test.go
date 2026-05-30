@@ -3,6 +3,7 @@ package gatewaydriver
 import (
 	"context"
 	"maps"
+	"strings"
 	"testing"
 	"time"
 
@@ -326,6 +327,83 @@ func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	}
 	if len(status.Participants) != 1 || status.Participants[0].ID != "reviewer" {
 		t.Fatalf("agent status = %#v, want reviewer participant from canonical events", status)
+	}
+}
+
+func TestBindAppServicesContinuesSidecarAfterDriverReload(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{}
+	participantSessionIDs := []string{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine: engine,
+		Agents: []appservices.AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "reviewer",
+			Kind:        appservices.AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Description: "review code through ACP",
+		}},
+		Invokers: map[string]appservices.AgentInvoker{
+			"reviewer": appservices.AgentInvokerFunc(func(_ context.Context, req appservices.AgentInvokeRequest) (appservices.AgentInvokeResult, error) {
+				participantSessionIDs = append(participantSessionIDs, req.Participant.SessionID)
+				remoteSessionID := strings.TrimSpace(req.Participant.SessionID)
+				if remoteSessionID == "" {
+					remoteSessionID = "remote-reviewer"
+				}
+				participant := req.Participant
+				participant.SessionID = remoteSessionID
+				return appservices.AgentInvokeResult{
+					Events: []coresession.Event{{
+						Type: coresession.EventAssistant,
+						Scope: &coresession.EventScope{
+							Participant: participant,
+						},
+						Message: &coremodel.Message{
+							Role:  coremodel.RoleAssistant,
+							Parts: []coremodel.Part{coremodel.NewTextPart("agent result for " + req.Input)},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := driver.StartAgentSubagent(ctx, "reviewer", " inspect ", nil)
+	if err != nil {
+		t.Fatalf("StartAgentSubagent() error = %v", err)
+	}
+	drainGatewayDriverTestTurn(t, turn)
+
+	reloaded, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := reloaded.AgentStatus(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.Participants) != 1 || status.Participants[0].SessionID != "remote-reviewer" {
+		t.Fatalf("reloaded status = %#v, want remote-reviewer participant session", status)
+	}
+	followup, err := reloaded.ContinueSubagent(ctx, "reviewer", " follow-up ", nil)
+	if err != nil {
+		t.Fatalf("ContinueSubagent() error = %v", err)
+	}
+	drainGatewayDriverTestTurn(t, followup)
+	if len(participantSessionIDs) != 2 || participantSessionIDs[0] != "" || participantSessionIDs[1] != "remote-reviewer" {
+		t.Fatalf("participant session ids = %#v, want initial empty then remote-reviewer", participantSessionIDs)
 	}
 }
 
