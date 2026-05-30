@@ -1055,8 +1055,11 @@ be migrated before retiring the old stack:
    - Migrated baseline: production CLI configuration is no longer shaped as
      `gatewayapp.Config`; CLI flags normalize into a local CLI config contract
      and are projected into `internal/app/local` plus shared app settings.
-   - Still pending: old package cleanup after remaining entrypoints move,
-     production settings/config parity, and richer ACP surface behavior.
+   - Migrated baseline: the unused old `surfaces/acpserver` wrapper around
+     `gatewayapp.Stack.ACPAgent()` has been removed; the remaining ACP stdio
+     path is the core-native `internal/surface/acpserver` entrypoint.
+   - Still pending: old `surfaces/headless` cleanup after tagged e2e coverage
+     moves, production settings/config parity, and richer ACP surface behavior.
    - The new ACP server now exposes session list/load/resume over the
      core-native session store and canonical ACP projector.
    - The new ACP server now exposes session model metadata, `session/set_model`,
