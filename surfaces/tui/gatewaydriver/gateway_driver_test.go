@@ -1277,6 +1277,16 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 	}); err != nil {
 		t.Fatalf("AppendEvent(main) error = %v", err)
 	}
+	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
+		SessionRef: activeSession.SessionRef,
+		Event: &session.Event{
+			Type: session.EventTypeCompact,
+			Text: "CONTEXT CHECKPOINT\nsummary",
+			Meta: modelUsageMetaForRuntimeTest(4, 0, 1, 5),
+		},
+	}); err != nil {
+		t.Fatalf("AppendEvent(compaction) error = %v", err)
+	}
 	if err := stack.Sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
@@ -1341,7 +1351,10 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 	if usage.AutoReview.PromptTokens != 7 || usage.AutoReview.ReasoningTokens != 2 || usage.AutoReview.TotalTokens != 9 {
 		t.Fatalf("auto-review usage = %+v, want review usage", usage.AutoReview)
 	}
-	if usage.Total.PromptTokens != 37 || usage.Total.CachedInputTokens != 8 || usage.Total.CompletionTokens != 10 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 47 {
+	if usage.Compaction.PromptTokens != 4 || usage.Compaction.CompletionTokens != 1 || usage.Compaction.TotalTokens != 5 {
+		t.Fatalf("compaction usage = %+v, want compact usage", usage.Compaction)
+	}
+	if usage.Total.PromptTokens != 41 || usage.Total.CachedInputTokens != 8 || usage.Total.CompletionTokens != 11 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 52 {
 		t.Fatalf("total usage = %+v, want all buckets", usage.Total)
 	}
 }

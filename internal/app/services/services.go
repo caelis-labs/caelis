@@ -577,6 +577,7 @@ func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmode
 		sessionView := appviewmodel.FromSnapshot(snapshot)
 		sessionStatus := appviewmodel.SessionStatusFromView(sessionView)
 		view.Session = &sessionStatus
+		view.Usage = statusUsageView(snapshot)
 	}
 	modelStatus, err := s.modelStatus(ctx, state)
 	if err != nil {

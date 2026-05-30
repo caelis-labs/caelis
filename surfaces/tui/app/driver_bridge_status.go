@@ -164,6 +164,7 @@ func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
 	main := normalizedUsageSnapshot(status.SessionUsageMain)
 	subagents := normalizedUsageSnapshot(status.SessionUsageSubagents)
 	autoReview := normalizedUsageSnapshot(status.SessionUsageAutoReview)
+	compaction := normalizedUsageSnapshot(status.SessionUsageCompaction)
 	if !usageSnapshotZero(main) {
 		rows = append(rows, tokenUsageStatusRow{scope: "main", usage: main})
 	}
@@ -172,6 +173,9 @@ func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
 	}
 	if !usageSnapshotZero(autoReview) {
 		rows = append(rows, tokenUsageStatusRow{scope: "auto-review", usage: autoReview})
+	}
+	if !usageSnapshotZero(compaction) {
+		rows = append(rows, tokenUsageStatusRow{scope: "compaction", usage: compaction})
 	}
 	return formatTokenUsageTable(rows)
 }

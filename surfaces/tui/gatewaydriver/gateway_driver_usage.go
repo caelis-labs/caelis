@@ -23,12 +23,14 @@ type sessionTokenUsageBreakdown struct {
 	Main       kernel.UsageSnapshot
 	Subagents  kernel.UsageSnapshot
 	AutoReview kernel.UsageSnapshot
+	Compaction kernel.UsageSnapshot
 }
 
 const (
 	tokenUsageCategoryMain       = "main"
 	tokenUsageCategorySubagent   = "subagent"
 	tokenUsageCategoryAutoReview = "auto_review"
+	tokenUsageCategoryCompaction = "compact"
 )
 
 func (d *GatewayDriver) sessionTokenUsageBreakdown(ctx context.Context, ref session.SessionRef) (sessionTokenUsageBreakdown, error) {
@@ -109,6 +111,8 @@ func (u *sessionTokenUsageBreakdown) add(category string, usage kernel.UsageSnap
 		addUsageSnapshot(&u.AutoReview, usage)
 	case tokenUsageCategorySubagent:
 		addUsageSnapshot(&u.Subagents, usage)
+	case tokenUsageCategoryCompaction:
+		addUsageSnapshot(&u.Compaction, usage)
 	default:
 		addUsageSnapshot(&u.Main, usage)
 	}
@@ -122,6 +126,7 @@ func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdo
 	addUsageSnapshot(&u.Main, other.Main)
 	addUsageSnapshot(&u.Subagents, other.Subagents)
 	addUsageSnapshot(&u.AutoReview, other.AutoReview)
+	addUsageSnapshot(&u.Compaction, other.Compaction)
 }
 
 func addUsageSnapshot(total *kernel.UsageSnapshot, usage kernel.UsageSnapshot) {
@@ -141,6 +146,9 @@ func usageCategoryFromSessionEvent(event *session.Event, fallback string) string
 	}
 	if category := usageCategoryFromMeta(event.Meta); category != "" {
 		return category
+	}
+	if session.EventTypeOf(event) == session.EventTypeCompact {
+		return tokenUsageCategoryCompaction
 	}
 	if event.Scope != nil && event.Scope.Participant.Kind == session.ParticipantKindSubagent {
 		return tokenUsageCategorySubagent
@@ -198,6 +206,8 @@ func normalizeUsageCategory(category string) string {
 		return tokenUsageCategoryAutoReview
 	case "subagent", "sub_agent", "child", "child_agent":
 		return tokenUsageCategorySubagent
+	case "compact", "compaction":
+		return tokenUsageCategoryCompaction
 	case "main", "controller":
 		return tokenUsageCategoryMain
 	default:

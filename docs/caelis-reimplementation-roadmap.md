@@ -1337,9 +1337,13 @@ be migrated before retiring the old stack:
       the deterministic source-summary fallback when no model settings/provider
       are configured. Provider usage returned by the compaction call is stored
       in compact metadata for later surface/status projection.
-    - Still pending: automatic compaction, full usage accounting snapshots after
-      compaction, configurable compaction prompt policy, and full
-      runtime-vs-reload semantic round-trip tests remain to be migrated.
+    - Migrated baseline: compact events now also carry standard message and
+      top-level usage metadata, and shared app status view-models aggregate
+      canonical event usage across main, subagent, auto-review, and compaction
+      buckets for TUI and future APP consumers.
+    - Still pending: automatic compaction, configurable compaction prompt
+      policy, post-compaction budget estimation, and full runtime-vs-reload
+      semantic round-trip tests remain to be migrated.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill
@@ -1350,10 +1354,11 @@ be migrated before retiring the old stack:
 
 14. Rendering and display semantics
     - The new view model is intentionally small.
-    - Rich transcript rendering, reasoning/narrative smoothing, ACP tool
-      content formatting, diff panels, mutation panels, exploration compaction,
-      status/usage display, and UI-only live chunk handling remain surface-local
-      old-stack work.
+    - Shared app status now has a surface-neutral usage view, but rich
+      transcript rendering, reasoning/narrative smoothing, ACP tool content
+      formatting, diff panels, mutation panels, exploration compaction,
+      terminal-specific usage rendering, and UI-only live chunk handling remain
+      surface-local old-stack work.
 
 15. Session listing and resume workflows
     - Migrated baseline: `core/session.Store` and `core/runtime.Engine` now

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -49,21 +50,31 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		route = "host"
 	}
 	status := StatusSnapshot{
-		SessionID:               sessionID,
-		Workspace:               workspaceStatusDisplay(ctx, workspace),
-		Model:                   formatReasoningModelDisplay(modelText, reasoning),
-		ReasoningEffort:         reasoning,
-		Provider:                provider,
-		ModelName:               modelName,
-		ModeLabel:               modeLabel,
-		SessionMode:             modeID,
-		StoreDir:                firstNonEmpty(view.Runtime.StoreURI, view.Runtime.StoreBackend),
-		SandboxType:             sandboxType,
-		SandboxRequestedBackend: firstNonEmpty(sandboxType, "auto"),
-		SandboxResolvedBackend:  sandboxType,
-		Route:                   route,
-		HostExecution:           route == "host",
-		Surface:                 bindingKey,
+		SessionID:                sessionID,
+		Workspace:                workspaceStatusDisplay(ctx, workspace),
+		Model:                    formatReasoningModelDisplay(modelText, reasoning),
+		ReasoningEffort:          reasoning,
+		Provider:                 provider,
+		ModelName:                modelName,
+		ModeLabel:                modeLabel,
+		SessionMode:              modeID,
+		StoreDir:                 firstNonEmpty(view.Runtime.StoreURI, view.Runtime.StoreBackend),
+		SandboxType:              sandboxType,
+		SandboxRequestedBackend:  firstNonEmpty(sandboxType, "auto"),
+		SandboxResolvedBackend:   sandboxType,
+		Route:                    route,
+		HostExecution:            route == "host",
+		Surface:                  bindingKey,
+		SessionUsageTotal:        appStatusUsageSnapshot(view.Usage.Total),
+		SessionUsageMain:         appStatusUsageSnapshot(view.Usage.Main),
+		SessionUsageSubagents:    appStatusUsageSnapshot(view.Usage.Subagents),
+		SessionUsageAutoReview:   appStatusUsageSnapshot(view.Usage.AutoReview),
+		SessionUsageCompaction:   appStatusUsageSnapshot(view.Usage.Compaction),
+		SessionInputTokens:       view.Usage.Total.InputTokens,
+		SessionCachedInputTokens: view.Usage.Total.CachedInputTokens,
+		SessionOutputTokens:      view.Usage.Total.OutputTokens,
+		SessionReasoningTokens:   view.Usage.Total.ReasoningTokens,
+		SessionTotalTokens:       view.Usage.Total.TotalTokens,
 	}
 	if sandboxStatus := d.stack.SandboxStatus(); sandboxStatus.RequestedBackend != "" || sandboxStatus.ResolvedBackend != "" || sandboxStatus.Route != "" {
 		status.SandboxRequestedBackend = firstNonEmpty(sandboxStatus.RequestedBackend, status.SandboxRequestedBackend)
@@ -126,6 +137,16 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		}
 	}
 	return status, true, nil
+}
+
+func appStatusUsageSnapshot(usage appviewmodel.TokenUsage) kernel.UsageSnapshot {
+	return kernel.UsageSnapshot{
+		PromptTokens:      usage.InputTokens,
+		CachedInputTokens: usage.CachedInputTokens,
+		CompletionTokens:  usage.OutputTokens,
+		ReasoningTokens:   usage.ReasoningTokens,
+		TotalTokens:       usage.TotalTokens,
+	}
 }
 
 func appStatusModelText(status appviewmodel.ModelStatus) (string, string, string) {

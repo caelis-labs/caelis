@@ -14,6 +14,7 @@ type StatusView struct {
 	Mode      ModeStatus     `json:"mode"`
 	Agents    AgentStatus    `json:"agents"`
 	Resources ResourceStatus `json:"resources"`
+	Usage     UsageStatus    `json:"usage,omitempty"`
 }
 
 type RuntimeStatus struct {
@@ -101,6 +102,23 @@ type ResourceStatus struct {
 	ACPAgents      int `json:"acp_agents,omitempty"`
 	RendererHints  int `json:"renderer_hints,omitempty"`
 	AgentFiles     int `json:"agent_files,omitempty"`
+}
+
+type UsageStatus struct {
+	Total      TokenUsage `json:"total,omitempty"`
+	Main       TokenUsage `json:"main,omitempty"`
+	Subagents  TokenUsage `json:"subagents,omitempty"`
+	AutoReview TokenUsage `json:"auto_review,omitempty"`
+	Compaction TokenUsage `json:"compaction,omitempty"`
+}
+
+type TokenUsage struct {
+	InputTokens         int `json:"input_tokens,omitempty"`
+	CachedInputTokens   int `json:"cached_input_tokens,omitempty"`
+	OutputTokens        int `json:"output_tokens,omitempty"`
+	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
+	TotalTokens         int `json:"total_tokens,omitempty"`
+	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
 }
 
 func RuntimeStatusFromConfig(runtime config.Runtime) RuntimeStatus {

@@ -75,6 +75,7 @@ type StatusSnapshot struct {
 	SessionUsageMain                kernel.UsageSnapshot
 	SessionUsageSubagents           kernel.UsageSnapshot
 	SessionUsageAutoReview          kernel.UsageSnapshot
+	SessionUsageCompaction          kernel.UsageSnapshot
 	SessionInputTokens              int
 	SessionCachedInputTokens        int
 	SessionOutputTokens             int

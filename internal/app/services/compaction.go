@@ -46,58 +46,52 @@ func (s CompactionService) Compact(ctx context.Context, req CompactSessionReques
 		return session.Event{}, err
 	}
 	source := compactSourceEvents(snapshot.Events)
-	text, meta, err := s.compactText(ctx, snapshot, source, req)
+	text, usage, meta, err := s.compactText(ctx, snapshot, source, req)
 	if err != nil {
 		return session.Event{}, err
 	}
-	event := compactEvent(snapshot.Session, source, req, text, meta)
+	event := compactEvent(snapshot.Session, source, req, text, usage, meta)
 	if _, err := s.services.engine.RecordEvents(ctx, snapshot.Session.Ref, []session.Event{event}); err != nil {
 		return session.Event{}, err
 	}
 	return session.CloneEvent(event), nil
 }
 
-func (s CompactionService) compactText(ctx context.Context, snapshot session.Snapshot, source []session.Event, req CompactSessionRequest) (string, map[string]any, error) {
+func (s CompactionService) compactText(ctx context.Context, snapshot session.Snapshot, source []session.Event, req CompactSessionRequest) (string, *model.Usage, map[string]any, error) {
 	fallback := compactText(source, req.MaxChars)
 	if s.services.modelProvider == nil || s.services.settings == nil {
-		return fallback, nil, nil
+		return fallback, nil, nil, nil
 	}
 	cfg, ok, err := s.services.Models().Current(ctx, snapshot.Session.Ref)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	if !ok {
-		return fallback, nil, nil
+		return fallback, nil, nil, nil
 	}
 	provider, err := s.services.modelProvider(ctx, cfg)
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	response, err := compactProviderResponse(ctx, provider, cfg.Model, compactPrompt(source, req.MaxChars))
 	if err != nil {
 		if errors.Is(err, errCompactNoModelResponse) {
-			return fallback, nil, nil
+			return fallback, nil, nil, nil
 		}
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	text := normalizeCompactModelText(response.Message.TextContent(), fallback)
+	usage := cloneModelUsage(response.Usage)
 	meta := map[string]any{
 		"generator":      "app-services/model",
 		"model_id":       strings.TrimSpace(cfg.ID),
 		"model_provider": strings.TrimSpace(cfg.Provider),
 		"model":          strings.TrimSpace(cfg.Model),
 	}
-	if response.Usage != nil {
-		meta["usage"] = map[string]any{
-			"input_tokens":          response.Usage.InputTokens,
-			"cached_input_tokens":   response.Usage.CachedInputTokens,
-			"output_tokens":         response.Usage.OutputTokens,
-			"reasoning_tokens":      response.Usage.ReasoningTokens,
-			"total_tokens":          response.Usage.TotalTokens,
-			"context_window_tokens": response.Usage.ContextWindowTokens,
-		}
+	if usage != nil {
+		meta["usage"] = modelUsageMeta(*usage)
 	}
-	return text, meta, nil
+	return text, usage, meta, nil
 }
 
 func compactProviderResponse(ctx context.Context, provider model.Provider, modelID string, prompt string) (model.Response, error) {
@@ -163,7 +157,7 @@ func normalizeCompactModelText(text string, fallback string) string {
 	return "CONTEXT CHECKPOINT\n\n" + text
 }
 
-func compactEvent(active session.Session, source []session.Event, req CompactSessionRequest, text string, modelMeta map[string]any) session.Event {
+func compactEvent(active session.Session, source []session.Event, req CompactSessionRequest, text string, usage *model.Usage, modelMeta map[string]any) session.Event {
 	message := model.Message{
 		Role: model.RoleUser,
 		Parts: []model.Part{
@@ -173,17 +167,60 @@ func compactEvent(active session.Session, source []session.Event, req CompactSes
 			"caelis_compact_checkpoint": true,
 		},
 	}
+	if usage != nil {
+		message.Usage = cloneModelUsage(usage)
+	}
+	meta := map[string]any{
+		compactMetaKey: compactMeta(source, req, modelMeta),
+	}
+	if usage != nil {
+		meta["usage"] = modelUsageMeta(*usage)
+		meta["usage_category"] = "compact"
+	}
 	return session.Event{
 		Type:       session.EventCompact,
 		Visibility: session.VisibilityCanonical,
 		Time:       time.Now().UTC(),
 		Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "caelis", Name: "caelis"},
 		Message:    &message,
-		Meta: map[string]any{
-			compactMetaKey: compactMeta(source, req, modelMeta),
-		},
-		SessionID: active.SessionID,
+		Meta:       meta,
+		SessionID:  active.SessionID,
 	}
+}
+
+func cloneModelUsage(in *model.Usage) *model.Usage {
+	if in == nil || modelUsageEmpty(*in) {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+func modelUsageMeta(usage model.Usage) map[string]any {
+	out := map[string]any{
+		"input_tokens":          usage.InputTokens,
+		"cached_input_tokens":   usage.CachedInputTokens,
+		"output_tokens":         usage.OutputTokens,
+		"completion_tokens":     usage.OutputTokens,
+		"reasoning_tokens":      usage.ReasoningTokens,
+		"total_tokens":          usage.TotalTokens,
+		"context_window_tokens": usage.ContextWindowTokens,
+	}
+	for key, value := range out {
+		if number, ok := value.(int); ok && number == 0 {
+			delete(out, key)
+		}
+	}
+	return out
+}
+
+func modelUsageEmpty(usage model.Usage) bool {
+	return usage.InputTokens == 0 &&
+		usage.CachedInputTokens == 0 &&
+		usage.OutputTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.TotalTokens == 0 &&
+		usage.ContextWindowTokens == 0
 }
 
 func compactMeta(source []session.Event, req CompactSessionRequest, modelMeta map[string]any) map[string]any {

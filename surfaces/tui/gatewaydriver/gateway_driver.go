@@ -379,6 +379,7 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 				status.SessionUsageMain = usage.Main
 				status.SessionUsageSubagents = usage.Subagents
 				status.SessionUsageAutoReview = usage.AutoReview
+				status.SessionUsageCompaction = usage.Compaction
 				status.SessionInputTokens = usage.Total.PromptTokens
 				status.SessionCachedInputTokens = usage.Total.CachedInputTokens
 				status.SessionOutputTokens = usage.Total.CompletionTokens

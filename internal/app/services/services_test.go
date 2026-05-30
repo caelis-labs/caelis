@@ -743,6 +743,16 @@ func TestCompactionUsesConfiguredModelProvider(t *testing.T) {
 	if got := event.Message.TextContent(); got != provider.response {
 		t.Fatalf("compact text = %q, want model checkpoint", got)
 	}
+	if event.Message.Usage == nil || event.Message.Usage.TotalTokens != 120 {
+		t.Fatalf("compact message usage = %#v, want provider usage", event.Message.Usage)
+	}
+	if usageCategory, _ := event.Meta["usage_category"].(string); usageCategory != "compact" {
+		t.Fatalf("compact usage category = %#v, want compact", event.Meta["usage_category"])
+	}
+	topUsage, ok := event.Meta["usage"].(map[string]any)
+	if !ok || topUsage["total_tokens"] != 120 {
+		t.Fatalf("compact top-level usage = %#v, want provider usage", event.Meta["usage"])
+	}
 	meta, ok := event.Meta[compactMetaKey].(map[string]any)
 	if !ok {
 		t.Fatalf("compact meta = %#v, want compact metadata map", event.Meta)
@@ -886,6 +896,46 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 			Message: &model.Message{
 				Role:  model.RoleAssistant,
 				Parts: []model.Part{model.NewTextPart("pong")},
+				Usage: &model.Usage{
+					InputTokens:         10,
+					CachedInputTokens:   2,
+					OutputTokens:        3,
+					ReasoningTokens:     1,
+					TotalTokens:         14,
+					ContextWindowTokens: 128000,
+				},
+			},
+		}, {
+			ID:   "evt-review-usage",
+			Type: session.EventNotice,
+			Meta: map[string]any{
+				"usage_category": "auto_review",
+				"usage": map[string]any{
+					"prompt_tokens":     5,
+					"completion_tokens": 1,
+					"reasoning_tokens":  1,
+					"total_tokens":      6,
+				},
+			},
+		}, {
+			ID:   "evt-subagent-usage",
+			Type: session.EventAssistant,
+			Scope: &session.EventScope{
+				Participant: session.ParticipantBinding{
+					Kind: session.ParticipantSubagent,
+				},
+			},
+			Message: &model.Message{
+				Role:  model.RoleAssistant,
+				Usage: &model.Usage{InputTokens: 7, OutputTokens: 2, TotalTokens: 9, ContextWindowTokens: 64000},
+			},
+		}, {
+			ID:   "evt-compact-usage",
+			Type: session.EventCompact,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("CONTEXT CHECKPOINT\nsummary")},
+				Usage: &model.Usage{InputTokens: 4, OutputTokens: 1, TotalTokens: 5, ContextWindowTokens: 256000},
 			},
 		}, {
 			ID:   "evt-2",
@@ -959,6 +1009,21 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	}
 	if status.Session.Status != "waiting_approval" || status.Session.TranscriptCount != 2 || status.Session.PendingApprovalCount != 1 || status.Session.ParticipantCount != 1 {
 		t.Fatalf("session counters = %#v, want transcript/approval/participant projection", status.Session)
+	}
+	if status.Usage.Main.InputTokens != 10 || status.Usage.Main.CachedInputTokens != 2 || status.Usage.Main.OutputTokens != 3 || status.Usage.Main.ReasoningTokens != 1 || status.Usage.Main.TotalTokens != 14 {
+		t.Fatalf("main usage = %#v, want assistant usage", status.Usage.Main)
+	}
+	if status.Usage.AutoReview.InputTokens != 5 || status.Usage.AutoReview.OutputTokens != 1 || status.Usage.AutoReview.ReasoningTokens != 1 || status.Usage.AutoReview.TotalTokens != 6 {
+		t.Fatalf("auto-review usage = %#v, want review usage", status.Usage.AutoReview)
+	}
+	if status.Usage.Subagents.InputTokens != 7 || status.Usage.Subagents.OutputTokens != 2 || status.Usage.Subagents.TotalTokens != 9 {
+		t.Fatalf("subagent usage = %#v, want participant usage", status.Usage.Subagents)
+	}
+	if status.Usage.Compaction.InputTokens != 4 || status.Usage.Compaction.OutputTokens != 1 || status.Usage.Compaction.TotalTokens != 5 {
+		t.Fatalf("compaction usage = %#v, want compact usage", status.Usage.Compaction)
+	}
+	if status.Usage.Total.InputTokens != 26 || status.Usage.Total.CachedInputTokens != 2 || status.Usage.Total.OutputTokens != 7 || status.Usage.Total.ReasoningTokens != 2 || status.Usage.Total.TotalTokens != 34 || status.Usage.Total.ContextWindowTokens != 256000 {
+		t.Fatalf("total usage = %#v, want accumulated usage with max context window", status.Usage.Total)
 	}
 	if !status.Model.Configured || status.Model.Count != 1 || status.Model.Current == nil || status.Model.Current.ID != cfg.ID {
 		t.Fatalf("model status = %#v, want selected current model", status.Model)
