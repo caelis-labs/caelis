@@ -601,7 +601,9 @@ alongside the old stack without importing it:
   from `core/config` without importing the old `ports` or `kernel` packages.
   It also wires plugin-declared ACP agents into the shared `AgentService`.
 - `internal/adapters/model/openai`: core-native OpenAI-compatible Chat
-  Completions provider with tool-call and usage mapping.
+  Completions provider with tool-call, usage, structured-output, reasoning,
+  and provider-profile mapping. It now backs OpenAI-compatible, DeepSeek, and
+  OpenRouter factories in the app registry.
 - `internal/adapters/model/ollama`: core-native Ollama `/api/chat`
   provider with model listing, tool-call mapping, reasoning text, JSON output
   mode, and usage mapping.
@@ -639,6 +641,8 @@ The current verification path covers:
 
 - local stack -> shared services -> engine -> canonical memory store
 - configured local stack -> OpenAI-compatible provider -> JSONL store
+- configured local stack -> DeepSeek/OpenRouter provider profiles -> JSONL
+  store
 - configured local stack -> native Ollama provider -> JSONL store
 - configured local stack -> SQLite store -> persisted canonical events after
   reload
@@ -745,8 +749,9 @@ The completed work is intentionally limited to the reusable skeleton:
   cancellation, record-events ingress, approval wait/resume, and model/tool
   continuation.
 - Model context reconstruction from canonical events.
-- OpenAI-compatible provider adapter sufficient for Chat Completions and tool
-  calls.
+- OpenAI-compatible provider adapter sufficient for Chat Completions, tool
+  calls, structured output, reasoning content, DeepSeek reasoning defaults, and
+  OpenRouter attribution headers.
 - Native Ollama provider adapter sufficient for `/api/chat`, model listing,
   tool calls, reasoning text, JSON output mode, and usage mapping.
 - Host sandbox adapter, core-native async command sessions, core-native
@@ -833,13 +838,21 @@ be migrated before retiring the old stack:
      once entrypoints move to the new stack.
 
 6. Model providers
-   - Migrated baseline: OpenAI-compatible Chat Completions and native Ollama
-     `/api/chat` now implement `core/model.Provider` and can be selected by the
-     new local stack and headless CLI.
-   - Still pending: Anthropic, Gemini, OpenRouter, CodeFree, Volcengine,
-     DeepSeek, Mimo, MiniMax, provider attribution, broader model discovery,
-     detailed error mapping, SSE streaming, and provider-specific
-     tool/argument behavior remain in `impl/model/providers`.
+   - Migrated baseline: OpenAI-compatible Chat Completions, DeepSeek,
+     OpenRouter, and native Ollama `/api/chat` now implement
+     `core/model.Provider` and can be selected by the new local stack and
+     headless CLI.
+   - DeepSeek now has a core-native provider profile with default endpoint,
+     token lookup, structured JSON output, reasoning content parsing, and
+     thinking-mode request defaults for current reasoning models.
+   - OpenRouter now has a core-native provider profile with default endpoint,
+     token lookup, structured JSON-schema output, reasoning parsing, and Caelis
+     attribution headers.
+   - Still pending: Anthropic, Gemini, CodeFree, Volcengine, Mimo, MiniMax,
+     broader model discovery, detailed error mapping, SSE streaming,
+     provider-specific tool/argument behavior beyond the migrated profiles, and
+     removal of the corresponding old `impl/model/providers` code once no
+     old-stack entrypoint requires it.
 
 7. Sandbox backends and policy
    - The new stack only has a host sandbox adapter.

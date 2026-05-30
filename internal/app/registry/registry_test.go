@@ -99,6 +99,30 @@ func TestDefaultRegistryCreatesOllamaProvider(t *testing.T) {
 	}
 }
 
+func TestDefaultRegistryCreatesOpenAICompatibleProviderProfiles(t *testing.T) {
+	reg, err := NewDefault()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"deepseek", "openrouter"} {
+		factory, ok := reg.ModelProvider(name)
+		if !ok {
+			t.Fatalf("%s model provider not found", name)
+		}
+		provider, err := factory(context.Background(), plugin.ModelProviderConfig{
+			Model:           "test-model",
+			MaxOutputTokens: 128,
+			AuthType:        "none",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if provider.ID() != name {
+			t.Fatalf("%s provider ID = %q, want %s", name, provider.ID(), name)
+		}
+	}
+}
+
 func TestRegistryRejectsCatalogAliasWithUnknownFactory(t *testing.T) {
 	reg := New()
 	err := reg.ApplyCatalog(appresources.Catalog{

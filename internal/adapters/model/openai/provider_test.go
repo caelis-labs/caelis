@@ -196,6 +196,148 @@ func TestProviderModelsListsRemoteModels(t *testing.T) {
 	}
 }
 
+func TestProviderDeepSeekProfileSendsReasoningAndParsesReasoningContent(t *testing.T) {
+	var captured chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer deepseek-token" {
+			t.Fatalf("authorization = %q, want bearer token", got)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"deepseek-v4-pro",
+			"choices":[{
+				"message":{
+					"role":"assistant",
+					"content":"answer",
+					"reasoning_content":"thinking"
+				},
+				"finish_reason":"stop"
+			}],
+			"usage":{"prompt_tokens":5,"completion_tokens":3,"total_tokens":8}
+		}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{
+		ID:              "deepseek",
+		BaseURL:         server.URL,
+		APIKey:          "deepseek-token",
+		Model:           "deepseek-v4-pro",
+		MaxOutputTokens: 128,
+		Flavor:          FlavorDeepSeek,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+		Reasoning: model.ReasoningConfig{
+			Effort: "max",
+		},
+		Output: &model.OutputSpec{Mode: model.OutputJSON},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := event.Response.Message.TextContent(); got != "answer" {
+		t.Fatalf("assistant text = %q, want answer", got)
+	}
+	if len(event.Response.Message.Parts) < 2 ||
+		event.Response.Message.Parts[1].Kind != model.PartReasoning ||
+		event.Response.Message.Parts[1].Reasoning == nil ||
+		event.Response.Message.Parts[1].Reasoning.VisibleText != "thinking" {
+		t.Fatalf("assistant parts = %#v, want reasoning content", event.Response.Message.Parts)
+	}
+	if captured.Thinking == nil || captured.Thinking.Type != "enabled" || captured.ReasoningEffort != "max" {
+		t.Fatalf("captured reasoning = thinking:%#v effort:%q", captured.Thinking, captured.ReasoningEffort)
+	}
+	if captured.MaxTokens != deepSeekThinkingMinTokens {
+		t.Fatalf("max_tokens = %d, want DeepSeek thinking minimum", captured.MaxTokens)
+	}
+	if captured.ResponseFormat == nil || captured.ResponseFormat.Type != "json_object" {
+		t.Fatalf("response_format = %#v, want json_object", captured.ResponseFormat)
+	}
+}
+
+func TestProviderOpenRouterProfileSetsAttributionHeaders(t *testing.T) {
+	var captured chatCompletionRequest
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer openrouter-token" {
+			t.Fatalf("authorization = %q, want bearer token", got)
+		}
+		if got := r.Header.Get("HTTP-Referer"); got != openRouterReferer {
+			t.Fatalf("HTTP-Referer = %q, want Caelis attribution", got)
+		}
+		if got := r.Header.Get("X-Title"); got != "Caelis" {
+			t.Fatalf("X-Title = %q, want Caelis", got)
+		}
+		if got := r.Header.Get("User-Agent"); got == "" {
+			t.Fatal("User-Agent is empty")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"openrouter/auto",
+			"choices":[{"message":{"role":"assistant","content":"ok","reasoning":"route"},"finish_reason":"stop"}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{
+		ID:      "openrouter",
+		BaseURL: server.URL,
+		APIKey:  "openrouter-token",
+		Model:   "openrouter/openrouter/auto",
+		Flavor:  FlavorOpenRouter,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+		Output: &model.OutputSpec{
+			Mode: model.OutputSchema,
+			JSONSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": false,
+				"required":             []any{"answer"},
+				"properties": map[string]any{
+					"answer": map[string]any{"type": "string"},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := event.Response.Message.TextContent(); got != "ok" {
+		t.Fatalf("assistant text = %q, want ok", got)
+	}
+	if captured.Model != "openrouter/auto" {
+		t.Fatalf("captured model = %q, want normalized openrouter/auto", captured.Model)
+	}
+	if captured.ResponseFormat == nil || captured.ResponseFormat.Type != "json_schema" ||
+		captured.ResponseFormat.JSONSchema == nil || !captured.ResponseFormat.JSONSchema.Strict {
+		t.Fatalf("response_format = %#v, want strict json_schema", captured.ResponseFormat)
+	}
+}
+
 func TestProviderNormalizesInvalidToolArguments(t *testing.T) {
 	message := coreMessageFromChat(chatMessage{ToolCalls: []chatToolCall{{
 		ID: "call-1",

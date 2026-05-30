@@ -286,6 +286,10 @@ func coreModelProvider(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "openai", "openai_compatible", "openai-compatible":
 		return "openai_compatible"
+	case "deepseek":
+		return "deepseek"
+	case "openrouter":
+		return "openrouter"
 	case "ollama":
 		return "ollama"
 	default:
@@ -583,6 +587,14 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "DEEPSEEK_API_KEY"
+		}
+	case "openrouter":
+		cfg.Model.Provider = "openrouter"
+		if cfg.Model.API == "" {
+			cfg.Model.API = providers.APIOpenRouter
+		}
+		if cfg.Model.TokenEnv == "" {
+			cfg.Model.TokenEnv = "OPENROUTER_API_KEY"
 		}
 	case "openai":
 		cfg.Model.Provider = "openai"

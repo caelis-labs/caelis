@@ -366,6 +366,123 @@ func TestRunHeadlessUsesCoreOllamaProvider(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreDeepSeekProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var authHeader string
+	var captured struct {
+		Model           string `json:"model"`
+		MaxTokens       int    `json:"max_tokens"`
+		ReasoningEffort string `json:"reasoning_effort"`
+		Thinking        struct {
+			Type string `json:"type"`
+		} `json:"thinking"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		authHeader = r.Header.Get("Authorization")
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"deepseek-v4-pro",
+			"choices":[{"message":{"role":"assistant","content":"deepseek pong","reasoning_content":"thinking"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":6,"completion_tokens":3,"total_tokens":9}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-deepseek-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "deepseek",
+		"-model", "deepseek-v4-pro",
+		"-base-url", server.URL,
+		"-token", "deepseek-token",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "deepseek pong" || result.PromptTokens != 6 {
+		t.Fatalf("headless result = %#v, want DeepSeek output and usage", result)
+	}
+	if authHeader != "Bearer deepseek-token" {
+		t.Fatalf("authorization = %q, want bearer token", authHeader)
+	}
+	if captured.Model != "deepseek-v4-pro" || captured.Thinking.Type != "enabled" || captured.ReasoningEffort != "high" || captured.MaxTokens != 32768 {
+		t.Fatalf("captured request = %#v, want DeepSeek reasoning defaults", captured)
+	}
+}
+
+func TestRunHeadlessUsesCoreOpenRouterProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var authHeader string
+	var refererHeader string
+	var titleHeader string
+	var captured struct {
+		Model string `json:"model"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		authHeader = r.Header.Get("Authorization")
+		refererHeader = r.Header.Get("HTTP-Referer")
+		titleHeader = r.Header.Get("X-Title")
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"openai/gpt-4.1",
+			"choices":[{"message":{"role":"assistant","content":"openrouter pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-openrouter-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "openrouter",
+		"-model", "openrouter/openai/gpt-4.1",
+		"-base-url", server.URL,
+		"-token", "openrouter-token",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "openrouter pong" || result.PromptTokens != 7 {
+		t.Fatalf("headless result = %#v, want OpenRouter output and usage", result)
+	}
+	if authHeader != "Bearer openrouter-token" || refererHeader == "" || titleHeader != "Caelis" {
+		t.Fatalf("headers = auth:%q referer:%q title:%q", authHeader, refererHeader, titleHeader)
+	}
+	if captured.Model != "openai/gpt-4.1" {
+		t.Fatalf("captured model = %q, want normalized openai/gpt-4.1", captured.Model)
+	}
+}
+
 func TestRunDoctorSubcommandTextOutput(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var out bytes.Buffer

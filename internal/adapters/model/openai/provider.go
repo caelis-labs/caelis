@@ -15,30 +15,50 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/internal/version"
 )
 
 const defaultBaseURL = "https://api.openai.com/v1"
+const openRouterReferer = "https://github.com/OnslaughtSnail/caelis"
+
+type Flavor string
+
+const (
+	FlavorDefault    Flavor = ""
+	FlavorDeepSeek   Flavor = "deepseek"
+	FlavorOpenRouter Flavor = "openrouter"
+)
 
 type Config struct {
-	ID         string
-	BaseURL    string
-	APIKey     string
-	AuthHeader string
-	Model      string
-	HTTPClient *http.Client
+	ID              string
+	BaseURL         string
+	DefaultBaseURL  string
+	APIKey          string
+	AuthHeader      string
+	Model           string
+	MaxOutputTokens int
+	Flavor          Flavor
+	Headers         map[string]string
+	HTTPClient      *http.Client
 }
 
 type Provider struct {
-	id         string
-	baseURL    string
-	apiKey     string
-	authHeader string
-	model      string
-	client     *http.Client
+	id              string
+	baseURL         string
+	apiKey          string
+	authHeader      string
+	model           string
+	maxOutputTokens int
+	flavor          Flavor
+	headers         map[string]string
+	client          *http.Client
 }
 
 func New(cfg Config) (*Provider, error) {
 	baseURL := strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")
+	if baseURL == "" {
+		baseURL = strings.TrimRight(strings.TrimSpace(cfg.DefaultBaseURL), "/")
+	}
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
@@ -59,12 +79,15 @@ func New(cfg Config) (*Provider, error) {
 		id = "openai-compatible"
 	}
 	return &Provider{
-		id:         id,
-		baseURL:    baseURL,
-		apiKey:     strings.TrimSpace(cfg.APIKey),
-		authHeader: authHeader,
-		model:      strings.TrimSpace(cfg.Model),
-		client:     client,
+		id:              id,
+		baseURL:         baseURL,
+		apiKey:          strings.TrimSpace(cfg.APIKey),
+		authHeader:      authHeader,
+		model:           strings.TrimSpace(cfg.Model),
+		maxOutputTokens: cfg.MaxOutputTokens,
+		flavor:          cfg.Flavor,
+		headers:         maps.Clone(cfg.Headers),
+		client:          client,
 	}, nil
 }
 
@@ -83,7 +106,7 @@ func (p *Provider) Models(ctx context.Context) ([]model.ModelInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	p.setAuth(req)
+	p.setHeaders(req)
 	resp, err := p.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -136,7 +159,7 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	p.setAuth(httpReq)
+	p.setHeaders(httpReq)
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
 		return nil, err
@@ -164,6 +187,9 @@ func (p *Provider) chatRequest(req model.Request) (chatCompletionRequest, error)
 	if modelID == "" {
 		modelID = p.model
 	}
+	if p.flavor == FlavorOpenRouter {
+		modelID = normalizeOpenRouterModelID(modelID)
+	}
 	if modelID == "" {
 		return chatCompletionRequest{}, errors.New("model/openai: model is required")
 	}
@@ -174,7 +200,7 @@ func (p *Provider) chatRequest(req model.Request) (chatCompletionRequest, error)
 		}
 	}
 	for _, message := range req.Messages {
-		converted, ok := chatMessageFromCore(message)
+		converted, ok := p.chatMessageFromCore(message)
 		if ok {
 			messages = append(messages, converted)
 		}
@@ -182,12 +208,16 @@ func (p *Provider) chatRequest(req model.Request) (chatCompletionRequest, error)
 	if len(messages) == 0 {
 		return chatCompletionRequest{}, errors.New("model/openai: at least one message is required")
 	}
-	return chatCompletionRequest{
-		Model:    modelID,
-		Stream:   false,
-		Messages: messages,
-		Tools:    chatTools(req.Tools),
-	}, nil
+	payload := chatCompletionRequest{
+		Model:          modelID,
+		Stream:         false,
+		Messages:       messages,
+		Tools:          chatTools(req.Tools),
+		MaxTokens:      p.maxOutputTokens,
+		ResponseFormat: outputResponseFormat(req.Output, p.flavor),
+	}
+	p.applyReasoning(&payload, req.Reasoning)
+	return payload, nil
 }
 
 func (p *Provider) modelResponse(modelID string, completion chatCompletionResponse) (model.Response, error) {
@@ -213,29 +243,69 @@ func (p *Provider) modelResponse(modelID string, completion chatCompletionRespon
 	}, nil
 }
 
-func (p *Provider) setAuth(req *http.Request) {
-	if p.apiKey == "" {
+func (p *Provider) setHeaders(req *http.Request) {
+	if req == nil {
 		return
 	}
-	if strings.EqualFold(p.authHeader, "Authorization") {
-		req.Header.Set("Authorization", "Bearer "+p.apiKey)
-		return
+	setHeaderDefault(req.Header, "User-Agent", caelisUserAgent())
+	if p.flavor == FlavorOpenRouter {
+		setHeaderDefault(req.Header, "HTTP-Referer", openRouterReferer)
+		setHeaderDefault(req.Header, "X-Title", "Caelis")
 	}
-	req.Header.Set(p.authHeader, p.apiKey)
+	for key, value := range p.headers {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			req.Header.Set(key, value)
+		}
+	}
+	if p.apiKey != "" {
+		if strings.EqualFold(p.authHeader, "Authorization") {
+			req.Header.Set("Authorization", "Bearer "+p.apiKey)
+			return
+		}
+		req.Header.Set(p.authHeader, p.apiKey)
+	}
 }
 
 type chatCompletionRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools,omitempty"`
-	Stream   bool          `json:"stream"`
+	Model           string              `json:"model"`
+	Messages        []chatMessage       `json:"messages"`
+	Tools           []chatTool          `json:"tools,omitempty"`
+	Stream          bool                `json:"stream"`
+	MaxTokens       int                 `json:"max_tokens,omitempty"`
+	ResponseFormat  *chatResponseFormat `json:"response_format,omitempty"`
+	Reasoning       *chatReasoning      `json:"reasoning,omitempty"`
+	ReasoningEffort string              `json:"reasoning_effort,omitempty"`
+	Thinking        *chatThinking       `json:"thinking,omitempty"`
 }
 
 type chatMessage struct {
-	Role       string         `json:"role"`
-	Content    any            `json:"content,omitempty"`
-	ToolCalls  []chatToolCall `json:"tool_calls,omitempty"`
-	ToolCallID string         `json:"tool_call_id,omitempty"`
+	Role             string         `json:"role"`
+	Content          any            `json:"content,omitempty"`
+	Reasoning        string         `json:"reasoning,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []chatToolCall `json:"tool_calls,omitempty"`
+	ToolCallID       string         `json:"tool_call_id,omitempty"`
+}
+
+type chatResponseFormat struct {
+	Type       string                `json:"type"`
+	JSONSchema *chatJSONSchemaFormat `json:"json_schema,omitempty"`
+}
+
+type chatJSONSchemaFormat struct {
+	Name   string         `json:"name"`
+	Strict bool           `json:"strict,omitempty"`
+	Schema map[string]any `json:"schema"`
+}
+
+type chatReasoning struct {
+	Effort string `json:"effort,omitempty"`
+}
+
+type chatThinking struct {
+	Type string `json:"type"`
 }
 
 type chatTool struct {
@@ -284,7 +354,7 @@ type chatUsage struct {
 	} `json:"completion_tokens_details"`
 }
 
-func chatMessageFromCore(message model.Message) (chatMessage, bool) {
+func (p *Provider) chatMessageFromCore(message model.Message) (chatMessage, bool) {
 	switch message.Role {
 	case model.RoleSystem:
 		return chatMessage{Role: "system", Content: contentText(message.Parts)}, true
@@ -294,6 +364,13 @@ func chatMessageFromCore(message model.Message) (chatMessage, bool) {
 		out := chatMessage{Role: "assistant"}
 		if text := contentText(message.Parts); text != "" {
 			out.Content = text
+		}
+		if p.includeReasoningContent() {
+			if p.flavor == FlavorOpenRouter {
+				out.Reasoning = reasoningText(message.Parts)
+			} else {
+				out.ReasoningContent = reasoningText(message.Parts)
+			}
 		}
 		for _, call := range message.ToolCalls() {
 			out.ToolCalls = append(out.ToolCalls, chatToolCall{
@@ -325,6 +402,9 @@ func coreMessageFromChat(message chatMessage) model.Message {
 	out := model.Message{Role: model.RoleAssistant}
 	if text := chatContentText(message.Content); text != "" {
 		out.Parts = append(out.Parts, model.NewTextPart(text))
+	}
+	if text := firstNonEmpty(message.ReasoningContent, message.Reasoning); text != "" {
+		out.Parts = append(out.Parts, model.NewReasoningPart(text, model.ReasoningVisible))
 	}
 	for _, call := range message.ToolCalls {
 		out.Parts = append(out.Parts, model.Part{
@@ -446,6 +526,21 @@ func contentText(parts []model.Part) string {
 	return strings.Join(texts, "\n")
 }
 
+func reasoningText(parts []model.Part) string {
+	if len(parts) == 0 {
+		return ""
+	}
+	texts := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part.Kind == model.PartReasoning && part.Reasoning != nil {
+			if text := strings.TrimSpace(part.Reasoning.VisibleText); text != "" {
+				texts = append(texts, text)
+			}
+		}
+	}
+	return strings.Join(texts, "\n")
+}
+
 func chatContentText(value any) string {
 	switch typed := value.(type) {
 	case string:
@@ -463,6 +558,205 @@ func chatContentText(value any) string {
 	default:
 		return ""
 	}
+}
+
+func (p *Provider) includeReasoningContent() bool {
+	return p != nil && (p.flavor == FlavorDeepSeek || p.flavor == FlavorOpenRouter)
+}
+
+func (p *Provider) applyReasoning(payload *chatCompletionRequest, cfg model.ReasoningConfig) {
+	if p == nil || payload == nil {
+		return
+	}
+	if p.flavor == FlavorDeepSeek {
+		applyDeepSeekReasoning(payload, cfg)
+		return
+	}
+	effort := strings.TrimSpace(cfg.Effort)
+	if effort == "" {
+		return
+	}
+	payload.Reasoning = &chatReasoning{Effort: effort}
+	payload.ReasoningEffort = effort
+}
+
+func applyDeepSeekReasoning(payload *chatCompletionRequest, cfg model.ReasoningConfig) {
+	if payload == nil {
+		return
+	}
+	if !deepSeekModelSupportsThinking(payload.Model) {
+		payload.MaxTokens = clampDeepSeekMaxTokens(payload.MaxTokens)
+		payload.Reasoning = nil
+		payload.ReasoningEffort = ""
+		payload.Thinking = nil
+		return
+	}
+	effort := normalizeDeepSeekReasoningEffort(cfg.Effort)
+	if effort == "none" {
+		payload.Thinking = &chatThinking{Type: "disabled"}
+		payload.Reasoning = nil
+		payload.ReasoningEffort = ""
+		payload.MaxTokens = clampDeepSeekMaxTokens(payload.MaxTokens)
+		return
+	}
+	payload.Thinking = &chatThinking{Type: "enabled"}
+	payload.Reasoning = nil
+	payload.ReasoningEffort = effort
+	payload.MaxTokens = clampDeepSeekReasonerMaxTokens(payload.MaxTokens)
+}
+
+func normalizeDeepSeekReasoningEffort(effort string) string {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none":
+		return "none"
+	case "max", "xhigh", "very_high", "veryhigh":
+		return "max"
+	case "", "minimal", "low", "medium", "high":
+		return "high"
+	default:
+		return "high"
+	}
+}
+
+func deepSeekModelSupportsThinking(modelName string) bool {
+	switch strings.ToLower(strings.TrimSpace(modelName)) {
+	case "deepseek-v4-flash", "deepseek-v4-pro":
+		return true
+	default:
+		return false
+	}
+}
+
+const (
+	deepSeekDefaultMaxTokens  = 32768
+	deepSeekThinkingMinTokens = 32768
+	deepSeekAbsoluteMaxTokens = 393216
+)
+
+func clampDeepSeekMaxTokens(current int) int {
+	switch {
+	case current <= 0:
+		return deepSeekDefaultMaxTokens
+	case current > deepSeekAbsoluteMaxTokens:
+		return deepSeekAbsoluteMaxTokens
+	default:
+		return current
+	}
+}
+
+func clampDeepSeekReasonerMaxTokens(current int) int {
+	switch {
+	case current <= 0:
+		return deepSeekThinkingMinTokens
+	case current < deepSeekThinkingMinTokens:
+		return deepSeekThinkingMinTokens
+	case current > deepSeekAbsoluteMaxTokens:
+		return deepSeekAbsoluteMaxTokens
+	default:
+		return current
+	}
+}
+
+func outputResponseFormat(output *model.OutputSpec, flavor Flavor) *chatResponseFormat {
+	if output == nil {
+		return nil
+	}
+	switch output.Mode {
+	case model.OutputJSON:
+		return &chatResponseFormat{Type: "json_object"}
+	case model.OutputSchema:
+		if flavor == FlavorDeepSeek {
+			return &chatResponseFormat{Type: "json_object"}
+		}
+		if len(output.JSONSchema) == 0 {
+			return nil
+		}
+		return &chatResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &chatJSONSchemaFormat{
+				Name:   "caelis_output",
+				Strict: strictSchema(output.JSONSchema),
+				Schema: maps.Clone(output.JSONSchema),
+			},
+		}
+	default:
+		return nil
+	}
+}
+
+func strictSchema(schema map[string]any) bool {
+	if len(schema) == 0 {
+		return false
+	}
+	typ, _ := schema["type"].(string)
+	switch strings.ToLower(strings.TrimSpace(typ)) {
+	case "object":
+		if additionalProperties, ok := schema["additionalProperties"].(bool); !ok || additionalProperties {
+			return false
+		}
+		properties, _ := schema["properties"].(map[string]any)
+		if len(properties) == 0 {
+			return true
+		}
+		required := map[string]struct{}{}
+		for _, key := range stringSliceFromAny(schema["required"]) {
+			required[key] = struct{}{}
+		}
+		for key, value := range properties {
+			if _, ok := required[key]; !ok {
+				return false
+			}
+			if nested, _ := value.(map[string]any); len(nested) > 0 && !strictSchema(nested) {
+				return false
+			}
+		}
+		return true
+	case "array":
+		if items, _ := schema["items"].(map[string]any); len(items) > 0 {
+			return strictSchema(items)
+		}
+		return true
+	default:
+		return true
+	}
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if trimmed := strings.TrimSpace(item); trimmed != "" {
+				out = append(out, trimmed)
+			}
+		}
+		return out
+	case []any:
+		out := make([]string, 0, len(typed))
+		for _, item := range typed {
+			if text, _ := item.(string); strings.TrimSpace(text) != "" {
+				out = append(out, strings.TrimSpace(text))
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func normalizeOpenRouterModelID(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	const providerPrefix = "openrouter/"
+	if strings.HasPrefix(strings.ToLower(value), providerPrefix) {
+		remainder := strings.TrimSpace(value[len(providerPrefix):])
+		if strings.Contains(remainder, "/") {
+			return remainder
+		}
+	}
+	return value
 }
 
 func chatTools(specs []model.ToolSpec) []chatTool {
@@ -533,6 +827,25 @@ func responseError(operation string, resp *http.Response) error {
 		return fmt.Errorf("model/openai: %s failed: %s: %s", operation, resp.Status, payload.Error.Message)
 	}
 	return fmt.Errorf("model/openai: %s failed: %s", operation, resp.Status)
+}
+
+func caelisUserAgent() string {
+	value := strings.TrimSpace(version.String())
+	value = strings.TrimPrefix(value, "v")
+	if value == "" {
+		value = "dev"
+	}
+	return "caelis/" + value
+}
+
+func setHeaderDefault(headers http.Header, key string, value string) {
+	if headers == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return
+	}
+	if strings.TrimSpace(headers.Get(key)) != "" {
+		return
+	}
+	headers.Set(key, value)
 }
 
 func firstNonEmpty(values ...string) string {

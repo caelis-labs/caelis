@@ -68,6 +68,12 @@ func RegisterDefaults(r *Registry) error {
 			return err
 		}
 	}
+	if err := r.RegisterModelProvider("deepseek", deepSeekProviderFactory); err != nil {
+		return err
+	}
+	if err := r.RegisterModelProvider("openrouter", openRouterProviderFactory); err != nil {
+		return err
+	}
 	if err := r.RegisterModelProvider("ollama", ollamaProviderFactory); err != nil {
 		return err
 	}
@@ -342,7 +348,52 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 	return out
 }
 
+const (
+	deepSeekDefaultBaseURL   = "https://api.deepseek.com/v1"
+	openRouterDefaultBaseURL = "https://openrouter.ai/api/v1"
+)
+
 func openAIProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelopenai.New(modelopenai.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "openai_compatible"),
+		BaseURL:         cfg.Endpoint,
+		APIKey:          token,
+		AuthHeader:      cfg.HeaderKey,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+	})
+}
+
+func deepSeekProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelopenai.New(modelopenai.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "deepseek"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  deepSeekDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      cfg.HeaderKey,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		Flavor:          modelopenai.FlavorDeepSeek,
+	})
+}
+
+func openRouterProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelopenai.New(modelopenai.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "openrouter"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  openRouterDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      cfg.HeaderKey,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		Flavor:          modelopenai.FlavorOpenRouter,
+	})
+}
+
+func modelToken(cfg plugin.ModelProviderConfig) string {
 	token := strings.TrimSpace(cfg.Token)
 	if env := strings.TrimSpace(cfg.TokenEnv); env != "" {
 		if token == "" {
@@ -352,13 +403,7 @@ func openAIProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (m
 	if strings.EqualFold(strings.TrimSpace(cfg.AuthType), "none") {
 		token = ""
 	}
-	return modelopenai.New(modelopenai.Config{
-		ID:         firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "openai_compatible"),
-		BaseURL:    cfg.Endpoint,
-		APIKey:     token,
-		AuthHeader: cfg.HeaderKey,
-		Model:      cfg.Model,
-	})
+	return token
 }
 
 func ollamaProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
