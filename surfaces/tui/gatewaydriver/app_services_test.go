@@ -65,6 +65,20 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if len(choices) != 1 || choices[0].ID != cfg.ID || choices[0].Alias != "test-model" {
 		t.Fatalf("model choices = %#v, want bound app settings model", choices)
 	}
+	models, err := driver.CompleteSlashArg(ctx, "connect-model:volcengine|https%3A%2F%2Fark.cn-beijing.volces.com%2Fapi%2Fv3|60|secret|", "", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(connect-model) error = %v", err)
+	}
+	if !slashCandidatesHaveValue(models, "doubao-seed-2.0-code") {
+		t.Fatalf("connect model candidates = %#v, want app-service provider catalog model", models)
+	}
+	defaults, err := connectDefaultsForConfigWithStack(ctx, stack, ConnectConfig{Provider: "deepseek", Model: "deepseek-v4-pro"})
+	if err != nil {
+		t.Fatalf("connect defaults error = %v", err)
+	}
+	if defaults.ContextWindow != 1048576 || defaults.MaxOutput != 32768 || !equalStrings(defaults.ReasoningLevels, []string{"none", "high", "max"}) {
+		t.Fatalf("connect defaults = %#v, want app-service capability catalog", defaults)
+	}
 	connected, err := stack.Connect(ModelConfig{
 		Alias:    "next-model",
 		Provider: "openai-compatible",

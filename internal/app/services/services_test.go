@@ -505,6 +505,51 @@ func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 	}
 }
 
+func TestModelServiceCatalogSupportsConnectDefaults(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Models().Connect(ctx, appsettings.ModelConfig{
+		Provider: "minimax",
+		Model:    "MiniMax-M2.7-highspeed",
+		BaseURL:  "https://api.minimaxi.com/anthropic",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	configured, err := svc.Models().ConfiguredProviderModels(ctx, "minimax")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(configured) != 1 || configured[0] != "MiniMax-M2.7-highspeed" {
+		t.Fatalf("configured models = %#v, want saved minimax model", configured)
+	}
+	catalog := svc.Models().ListCatalogModels("deepseek")
+	if len(catalog) == 0 || catalog[0] != "deepseek-v4-flash" {
+		t.Fatalf("deepseek catalog = %#v, want sorted built-in models", catalog)
+	}
+	caps, ok := svc.Models().LookupCapabilities("deepseek", "deepseek-v4-pro")
+	if !ok || caps.ContextWindowTokens != 1048576 || caps.DefaultMaxOutputTokens != 32768 || !caps.SupportsReasoning {
+		t.Fatalf("deepseek caps = %#v, %v, want app-service catalog capabilities", caps, ok)
+	}
+	levels := svc.Models().ReasoningLevels("deepseek", "deepseek-v4-pro")
+	if len(levels) != 3 || levels[0] != "none" || levels[1] != "high" || levels[2] != "max" {
+		t.Fatalf("deepseek reasoning levels = %#v, want none/high/max", levels)
+	}
+	if levels := svc.Models().ReasoningLevels("codefree", "GLM-4.7"); len(levels) != 0 {
+		t.Fatalf("codefree reasoning levels = %#v, want none", levels)
+	}
+}
+
 func TestModeServicePersistsSessionModeAndTurnsUseIt(t *testing.T) {
 	engine := &recordingEngine{snapshot: session.Snapshot{
 		Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-1", WorkspaceKey: "repo"}},

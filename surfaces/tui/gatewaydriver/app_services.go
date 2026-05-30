@@ -59,6 +59,26 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return modelChoicesFromApp(choices), nil
 	}
+	stack.ListProviderModelsFn = func(provider string) []string {
+		models, err := svc.Models().ConfiguredProviderModels(context.Background(), provider)
+		if err != nil {
+			return nil
+		}
+		return models
+	}
+	stack.ListCatalogModelsFn = func(provider string) []string {
+		return svc.Models().ListCatalogModels(provider)
+	}
+	stack.DefaultModelCapabilitiesFn = func() ModelCapabilityInfo {
+		return modelCapabilityInfoFromApp(svc.Models().DefaultCapabilities())
+	}
+	stack.LookupModelCapabilitiesFn = func(provider string, modelName string) (ModelCapabilityInfo, bool) {
+		caps, ok := svc.Models().LookupCapabilities(provider, modelName)
+		return modelCapabilityInfoFromApp(caps), ok
+	}
+	stack.ReasoningLevelsForModelFn = func(provider string, modelName string) []string {
+		return svc.Models().ReasoningLevels(provider, modelName)
+	}
 	stack.ConnectFn = func(cfg ModelConfig) (string, error) {
 		connected, err := svc.Models().Connect(context.Background(), modelConfigToApp(cfg))
 		if err != nil {
@@ -274,6 +294,20 @@ func modelChoicesFromApp(choices []appsettings.ModelChoice) []ModelChoice {
 		})
 	}
 	return out
+}
+
+func modelCapabilityInfoFromApp(caps appservices.ModelCapabilityInfo) ModelCapabilityInfo {
+	return ModelCapabilityInfo{
+		ContextWindowTokens:    caps.ContextWindowTokens,
+		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
+		MaxOutputTokens:        caps.MaxOutputTokens,
+		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
+		DefaultReasoningEffort: strings.TrimSpace(caps.DefaultReasoningEffort),
+		SupportsReasoning:      caps.SupportsReasoning,
+		SupportsToolCalls:      caps.SupportsToolCalls,
+		SupportsImages:         caps.SupportsImages,
+		SupportsJSON:           caps.SupportsJSONOutput,
+	}
 }
 
 func acpAgentsFromApp(agents []appservices.AgentDescriptor) []ACPAgentInfo {

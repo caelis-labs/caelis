@@ -637,6 +637,9 @@ alongside the old stack without importing it:
   canonical `core/session.Event` values.
 - `internal/app/services.AgentService`: shared TUI/APP-facing descriptor surface
   for external ACP agents contributed by local composition.
+- `internal/app/services.ModelService`: shared model settings and catalog
+  surface for configured models, provider model presets, capability defaults,
+  and reasoning-level choices used by TUI/future APP connect flows.
 - `surfaces/tui/gatewaydriver.BindAppServices`: service-native TUI `/agent`
   list and dynamic `/<agent> <prompt>` baseline for configured external ACP
   agents, recording participant attach/user/assistant activity as canonical
@@ -683,6 +686,8 @@ The current verification path covers:
 - app-service TUI binding -> configured external ACP agent catalog -> dynamic
   participant prompt -> canonical participant/user/assistant events -> TUI
   participant-scoped event projection
+- app-service model catalog -> TUI `/connect` model completion and default
+  context/output/reasoning values
 - local stack -> enabled plugin manifest + workspace `AGENTS.md` ->
   shared `ResourceService` catalog
 - resource discovery -> home/workspace skills + plugin descriptors ->
@@ -805,6 +810,10 @@ The completed work is intentionally limited to the reusable skeleton:
   generated model aliases/ids, default model selection, model delete, session
   model override state, runtime model-profile projection, and request-time model
   routing through app registries.
+- App model catalog baseline: shared `ModelService` exposes configured
+  provider models, built-in provider model presets, capability defaults, and
+  reasoning levels so TUI and future APP connect/setup flows do not need to own
+  provider capability tables.
 - App session mode baseline: shared app services persist a per-session approval
   preset, ACP exposes it through `session/set_mode` and the `mode` config
   option, and the core approval policy receives the selected mode for each tool
@@ -905,12 +914,17 @@ be migrated before retiring the old stack:
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
      checks.
+   - Migrated baseline: `/connect` model completion and default
+     context/output/reasoning values now come from
+     `internal/app/services.Models()` through `BindAppServices`, including
+     configured provider models and shared provider capability presets.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as `/connect`, `/agent add/install/use/remove`, and
-     `/doctor fix` still have old driver/app assumptions or missing
+   - Slash commands such as the `/connect` wizard shell and CodeFree OAuth
+     steps, `/agent add/install/use/remove`, and `/doctor fix` still have old
+     driver/app assumptions or missing
      service-native feature parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
@@ -958,9 +972,13 @@ be migrated before retiring the old stack:
      session mode service, and ACP stdio model/config/mode projection backed by
      shared app services. The TUI gateway driver also has a service-native
      binding for model connect/list/use/delete and session mode set/cycle.
+   - Migrated baseline: shared model catalog data now provides configured
+     provider models, built-in provider model presets, capability defaults, and
+     reasoning levels to TUI/future APP setup flows through `ModelService`.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
-     connect wizard persistence, TUI command integration, provider discovery
-     UI data, additional non-model ACP config providers, and removal of the old
+     connect wizard persistence, remaining TUI command integration, remote
+     provider model discovery UI data, additional non-model ACP config
+     providers, and removal of the old
      `app/gatewayapp` config/model services once entrypoints move to the new
      stack.
 
