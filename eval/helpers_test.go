@@ -3,7 +3,6 @@
 package eval
 
 import (
-	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +11,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver/local"
 )
 
 func repoRootForEval(t *testing.T) string {
@@ -43,10 +41,6 @@ func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp
 		cfg.Sandbox.RequestedType = "host"
 	}
 	return gatewayapp.NewLocalStack(cfg)
-}
-
-func newGatewayDriverFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*gatewaydriver.GatewayDriver, error) {
-	return local.NewLocalDriver(ctx, stack, preferredSessionID, bindingKey, modelText)
 }
 
 func slashCandidatesHaveValue(candidates []gatewaydriver.SlashArgCandidate, value string) bool {

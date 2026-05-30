@@ -1,4 +1,6 @@
-package local
+//go:build e2e
+
+package eval
 
 import (
 	"context"
@@ -9,27 +11,11 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
-type GatewayDriver = gatewaydriver.GatewayDriver
-type DriverStack = gatewaydriver.DriverStack
-type GatewayService = gatewaydriver.GatewayService
-type ModelConfig = gatewaydriver.ModelConfig
-type ModelCapabilityInfo = gatewaydriver.ModelCapabilityInfo
-type ModelChoice = gatewaydriver.ModelChoice
-type SessionRuntimeState = gatewaydriver.SessionRuntimeState
-type SandboxStatus = gatewaydriver.SandboxStatus
-type DoctorRequest = gatewaydriver.DoctorRequest
-type DoctorReport = gatewaydriver.DoctorReport
-type RegisterBuiltinACPAgentOptions = gatewaydriver.RegisterBuiltinACPAgentOptions
-type ACPAgentInfo = gatewaydriver.ACPAgentInfo
-type ACPAgentAddOption = gatewaydriver.ACPAgentAddOption
-type CodeFreeAuthRequest = gatewaydriver.CodeFreeAuthRequest
-type CustomAgentConfig = gatewaydriver.CustomAgentConfig
-
-func NewLocalDriver(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
-	return gatewaydriver.NewGatewayDriver(ctx, driverStack(stack), preferredSessionID, bindingKey, modelText)
+func newGatewayDriverFromGatewayAppStack(ctx context.Context, stack *gatewayapp.Stack, preferredSessionID string, bindingKey string, modelText string) (*gatewaydriver.GatewayDriver, error) {
+	return gatewaydriver.NewGatewayDriver(ctx, evalGatewayDriverStack(stack), preferredSessionID, bindingKey, modelText)
 }
 
-func driverStack(stack *gatewayapp.Stack) *DriverStack {
+func evalGatewayDriverStack(stack *gatewayapp.Stack) *gatewaydriver.DriverStack {
 	if stack == nil {
 		return nil
 	}
@@ -37,8 +23,8 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 	agents := stack.Agents()
 	skills := stack.Skills()
 	status := stack.Status()
-	return &DriverStack{
-		GatewayFn: func() GatewayService { return stack.CurrentGateway() },
+	return &gatewaydriver.DriverStack{
+		GatewayFn: func() gatewaydriver.GatewayService { return stack.CurrentGateway() },
 		Sessions:  stack.Sessions,
 		AppName:   stack.AppName,
 		UserID:    stack.UserID,
@@ -47,44 +33,46 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		StartSessionFn:        stack.StartSession,
 		ACPControllerStatusFn: agents.ControllerStatus,
 		DefaultModelAliasFn:   models.DefaultAlias,
-		SandboxStatusFn:       func() SandboxStatus { return toRuntimeSandboxStatus(status.Sandbox()) },
-		SessionRuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
-			return toRuntimeSessionRuntimeState(status.SessionRuntimeState(ctx, ref))
+		SandboxStatusFn:       func() gatewaydriver.SandboxStatus { return evalRuntimeSandboxStatus(status.Sandbox()) },
+		SessionRuntimeStateFn: func(ctx context.Context, ref session.SessionRef) (gatewaydriver.SessionRuntimeState, error) {
+			return evalRuntimeSessionRuntimeState(status.SessionRuntimeState(ctx, ref))
 		},
-		DoctorFn: func(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-			return toRuntimeDoctorReport(status.Doctor(ctx, toGatewayDoctorRequest(req)))
+		DoctorFn: func(ctx context.Context, req gatewaydriver.DoctorRequest) (gatewaydriver.DoctorReport, error) {
+			return evalRuntimeDoctorReport(status.Doctor(ctx, evalGatewayDoctorRequest(req)))
 		},
-		ModelConfigFn: func(alias string) (ModelConfig, bool) {
-			return toRuntimeModelConfigWithOK(models.Config(alias))
+		ModelConfigFn: func(alias string) (gatewaydriver.ModelConfig, bool) {
+			return evalRuntimeModelConfigWithOK(models.Config(alias))
 		},
-		SessionUsageSnapshotFn:  models.UsageSnapshot,
-		CompactSessionFn:        stack.CompactSession,
-		ConnectFn:               func(cfg ModelConfig) (string, error) { return models.Connect(toGatewayModelConfig(cfg)) },
+		SessionUsageSnapshotFn: models.UsageSnapshot,
+		CompactSessionFn:       stack.CompactSession,
+		ConnectFn: func(cfg gatewaydriver.ModelConfig) (string, error) {
+			return models.Connect(evalGatewayModelConfig(cfg))
+		},
 		UseModelFn:              models.Use,
 		DeleteModelFn:           models.Delete,
 		SetACPControllerModelFn: agents.SetControllerModel,
 		CycleSessionModeFn:      status.CycleSessionMode,
-		SetSandboxBackendFn: func(ctx context.Context, backend string) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
+		SetSandboxBackendFn: func(ctx context.Context, backend string) (gatewaydriver.SandboxStatus, error) {
+			return evalRuntimeSandboxStatusWithError(status.SetSandboxBackend(ctx, backend))
 		},
-		PrepareSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
+		PrepareSandboxFn: func(ctx context.Context) (gatewaydriver.SandboxStatus, error) {
+			return evalRuntimeSandboxStatusWithError(status.PrepareSandbox(ctx))
 		},
-		RepairSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.RepairSandbox(ctx))
+		RepairSandboxFn: func(ctx context.Context) (gatewaydriver.SandboxStatus, error) {
+			return evalRuntimeSandboxStatusWithError(status.RepairSandbox(ctx))
 		},
-		PreflightSandboxFn: func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.PreflightSandbox(ctx, allowNonElevatedRepair))
+		PreflightSandboxFn: func(ctx context.Context, allowNonElevatedRepair bool) (gatewaydriver.SandboxStatus, error) {
+			return evalRuntimeSandboxStatusWithError(status.PreflightSandbox(ctx, allowNonElevatedRepair))
 		},
-		ResetSandboxFn: func(ctx context.Context) (SandboxStatus, error) {
-			return toRuntimeSandboxStatusWithError(status.ResetSandbox(ctx))
+		ResetSandboxFn: func(ctx context.Context) (gatewaydriver.SandboxStatus, error) {
+			return evalRuntimeSandboxStatusWithError(status.ResetSandbox(ctx))
 		},
 		SetACPControllerModeFn: agents.SetControllerMode,
 		SetSessionModeFn:       status.SetSessionMode,
-		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
+		RegisterBuiltinACPAgentWithOptionsFn: func(ctx context.Context, target string, opts gatewaydriver.RegisterBuiltinACPAgentOptions) error {
 			return agents.RegisterBuiltinWithOptions(ctx, target, gatewayapp.RegisterBuiltinACPAgentOptions{Install: opts.Install})
 		},
-		RegisterACPAgentFn: func(ctx context.Context, cfg CustomAgentConfig) error {
+		RegisterACPAgentFn: func(ctx context.Context, cfg gatewaydriver.CustomAgentConfig) error {
 			env := make(map[string]string, len(cfg.Env))
 			for key, value := range cfg.Env {
 				env[key] = value
@@ -100,24 +88,26 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 		},
 		UnregisterACPAgentFn: agents.Unregister,
 		ListModelAliasesFn:   models.ListAliases,
-		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
-			return toRuntimeModelChoices(models.ListChoices(ctx, ref))
+		ListModelChoicesFn: func(ctx context.Context, ref session.SessionRef) ([]gatewaydriver.ModelChoice, error) {
+			return evalRuntimeModelChoices(models.ListChoices(ctx, ref))
 		},
-		ListProviderModelsFn:       models.ListProviderModels,
-		ListCatalogModelsFn:        models.ListCatalogModels,
-		DefaultModelCapabilitiesFn: func() ModelCapabilityInfo { return toRuntimeModelCapabilities(models.DefaultCapabilities()) },
-		LookupModelCapabilitiesFn: func(provider string, modelName string) (ModelCapabilityInfo, bool) {
-			return toRuntimeModelCapabilitiesWithOK(models.LookupCapabilities(provider, modelName))
+		ListProviderModelsFn: models.ListProviderModels,
+		ListCatalogModelsFn:  models.ListCatalogModels,
+		DefaultModelCapabilitiesFn: func() gatewaydriver.ModelCapabilityInfo {
+			return evalRuntimeModelCapabilities(models.DefaultCapabilities())
+		},
+		LookupModelCapabilitiesFn: func(provider string, modelName string) (gatewaydriver.ModelCapabilityInfo, bool) {
+			return evalRuntimeModelCapabilitiesWithOK(models.LookupCapabilities(provider, modelName))
 		},
 		ReasoningLevelsForModelFn: models.ReasoningLevels,
-		EnsureCodeFreeAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
+		EnsureCodeFreeAuthFn: func(ctx context.Context, req gatewaydriver.CodeFreeAuthRequest) error {
 			return models.EnsureCodeFreeAuth(ctx, gatewayapp.CodeFreeAuthRequest{
 				BaseURL:         req.BaseURL,
 				OpenBrowser:     req.OpenBrowser,
 				CallbackTimeout: req.CallbackTimeout,
 			})
 		},
-		EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req CodeFreeAuthRequest) error {
+		EnsureCodeFreeModelSelectionAuthFn: func(ctx context.Context, req gatewaydriver.CodeFreeAuthRequest) error {
 			return models.EnsureCodeFreeModelSelectionAuth(ctx, gatewayapp.CodeFreeAuthRequest{
 				BaseURL:         req.BaseURL,
 				OpenBrowser:     req.OpenBrowser,
@@ -125,25 +115,25 @@ func driverStack(stack *gatewayapp.Stack) *DriverStack {
 			})
 		},
 		DiscoverSkillsFn: skills.Discover,
-		ListBuiltinACPAgentAddOptionsFn: func() []ACPAgentAddOption {
-			return toRuntimeACPAgentAddOptions(agents.BuiltinAddOptions())
+		ListBuiltinACPAgentAddOptionsFn: func() []gatewaydriver.ACPAgentAddOption {
+			return evalRuntimeACPAgentAddOptions(agents.BuiltinAddOptions())
 		},
-		ListInstallableACPAgentOptionsFn: func() []ACPAgentAddOption {
-			return toRuntimeACPAgentAddOptions(agents.InstallableOptions())
+		ListInstallableACPAgentOptionsFn: func() []gatewaydriver.ACPAgentAddOption {
+			return evalRuntimeACPAgentAddOptions(agents.InstallableOptions())
 		},
-		ListACPAgentsFn: func() []ACPAgentInfo { return toRuntimeACPAgents(agents.List()) },
+		ListACPAgentsFn: func() []gatewaydriver.ACPAgentInfo { return evalRuntimeACPAgents(agents.List()) },
 	}
 }
 
-func toRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (ModelConfig, bool) {
+func evalRuntimeModelConfigWithOK(cfg gatewayapp.ModelConfig, ok bool) (gatewaydriver.ModelConfig, bool) {
 	if !ok {
-		return ModelConfig{}, false
+		return gatewaydriver.ModelConfig{}, false
 	}
-	return toRuntimeModelConfig(cfg), true
+	return evalRuntimeModelConfig(cfg), true
 }
 
-func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
-	return ModelConfig{
+func evalRuntimeModelConfig(cfg gatewayapp.ModelConfig) gatewaydriver.ModelConfig {
+	return gatewaydriver.ModelConfig{
 		ID:                     cfg.ID,
 		Alias:                  cfg.Alias,
 		Provider:               cfg.Provider,
@@ -168,7 +158,7 @@ func toRuntimeModelConfig(cfg gatewayapp.ModelConfig) ModelConfig {
 	}
 }
 
-func toGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
+func evalGatewayModelConfig(cfg gatewaydriver.ModelConfig) gatewayapp.ModelConfig {
 	return gatewayapp.ModelConfig{
 		ID:                     cfg.ID,
 		Alias:                  cfg.Alias,
@@ -194,12 +184,12 @@ func toGatewayModelConfig(cfg ModelConfig) gatewayapp.ModelConfig {
 	}
 }
 
-func toRuntimeModelCapabilitiesWithOK(caps gatewayapp.ModelCapabilityInfo, ok bool) (ModelCapabilityInfo, bool) {
-	return toRuntimeModelCapabilities(caps), ok
+func evalRuntimeModelCapabilitiesWithOK(caps gatewayapp.ModelCapabilityInfo, ok bool) (gatewaydriver.ModelCapabilityInfo, bool) {
+	return evalRuntimeModelCapabilities(caps), ok
 }
 
-func toRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabilityInfo {
-	return ModelCapabilityInfo{
+func evalRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) gatewaydriver.ModelCapabilityInfo {
+	return gatewaydriver.ModelCapabilityInfo{
 		ContextWindowTokens:    caps.ContextWindowTokens,
 		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
 		MaxOutputTokens:        caps.MaxOutputTokens,
@@ -212,8 +202,8 @@ func toRuntimeModelCapabilities(caps gatewayapp.ModelCapabilityInfo) ModelCapabi
 	}
 }
 
-func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
-	return SandboxStatus{
+func evalRuntimeSandboxStatus(status gatewayapp.SandboxStatus) gatewaydriver.SandboxStatus {
+	return gatewaydriver.SandboxStatus{
 		RequestedBackend:         status.RequestedBackend,
 		ResolvedBackend:          status.ResolvedBackend,
 		Route:                    status.Route,
@@ -238,12 +228,12 @@ func toRuntimeSandboxStatus(status gatewayapp.SandboxStatus) SandboxStatus {
 	}
 }
 
-func toRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error) (SandboxStatus, error) {
-	return toRuntimeSandboxStatus(status), err
+func evalRuntimeSandboxStatusWithError(status gatewayapp.SandboxStatus, err error) (gatewaydriver.SandboxStatus, error) {
+	return evalRuntimeSandboxStatus(status), err
 }
 
-func toRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (SessionRuntimeState, error) {
-	return SessionRuntimeState{
+func evalRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err error) (gatewaydriver.SessionRuntimeState, error) {
+	return gatewaydriver.SessionRuntimeState{
 		ModelID:         state.ModelID,
 		ModelAlias:      state.ModelAlias,
 		ReasoningEffort: state.ReasoningEffort,
@@ -252,13 +242,13 @@ func toRuntimeSessionRuntimeState(state gatewayapp.SessionRuntimeState, err erro
 	}, err
 }
 
-func toRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]ModelChoice, error) {
+func evalRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]gatewaydriver.ModelChoice, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := make([]ModelChoice, 0, len(choices))
+	out := make([]gatewaydriver.ModelChoice, 0, len(choices))
 	for _, choice := range choices {
-		out = append(out, ModelChoice{
+		out = append(out, gatewaydriver.ModelChoice{
 			ID:         choice.ID,
 			Alias:      choice.Alias,
 			Provider:   choice.Provider,
@@ -272,7 +262,7 @@ func toRuntimeModelChoices(choices []gatewayapp.ModelChoice, err error) ([]Model
 	return out, nil
 }
 
-func toGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
+func evalGatewayDoctorRequest(req gatewaydriver.DoctorRequest) gatewayapp.DoctorRequest {
 	return gatewayapp.DoctorRequest{
 		SessionRef: req.SessionRef,
 		SessionID:  req.SessionID,
@@ -280,8 +270,8 @@ func toGatewayDoctorRequest(req DoctorRequest) gatewayapp.DoctorRequest {
 	}
 }
 
-func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorReport, error) {
-	return DoctorReport{
+func evalRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (gatewaydriver.DoctorReport, error) {
+	return gatewaydriver.DoctorReport{
 		StoreDir:                        report.StoreDir,
 		SessionID:                       report.SessionID,
 		SessionMode:                     report.SessionMode,
@@ -294,7 +284,7 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 		SandboxRoute:                    report.SandboxRoute,
 		SandboxFallbackReason:           report.SandboxFallbackReason,
 		SandboxInstallHint:              report.SandboxInstallHint,
-		SandboxSetup:                    cloneOptionalSetupStatus(report.SandboxSetup),
+		SandboxSetup:                    evalCloneOptionalSetupStatus(report.SandboxSetup),
 		SandboxSetupRequired:            report.SandboxSetupRequired,
 		SandboxSetupError:               report.SandboxSetupError,
 		SandboxSetupMarkerCurrent:       report.SandboxSetupMarkerCurrent,
@@ -320,7 +310,7 @@ func toRuntimeDoctorReport(report gatewayapp.DoctorReport, err error) (DoctorRep
 	}, err
 }
 
-func cloneOptionalSetupStatus(status *sandbox.SetupStatus) *sandbox.SetupStatus {
+func evalCloneOptionalSetupStatus(status *sandbox.SetupStatus) *sandbox.SetupStatus {
 	if status == nil {
 		return nil
 	}
@@ -328,10 +318,10 @@ func cloneOptionalSetupStatus(status *sandbox.SetupStatus) *sandbox.SetupStatus 
 	return &out
 }
 
-func toRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAgentAddOption {
-	out := make([]ACPAgentAddOption, 0, len(options))
+func evalRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []gatewaydriver.ACPAgentAddOption {
+	out := make([]gatewaydriver.ACPAgentAddOption, 0, len(options))
 	for _, option := range options {
-		out = append(out, ACPAgentAddOption{
+		out = append(out, gatewaydriver.ACPAgentAddOption{
 			Value:   option.Value,
 			Display: option.Display,
 			Detail:  option.Detail,
@@ -340,10 +330,10 @@ func toRuntimeACPAgentAddOptions(options []gatewayapp.ACPAgentAddOption) []ACPAg
 	return out
 }
 
-func toRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []ACPAgentInfo {
-	out := make([]ACPAgentInfo, 0, len(agents))
+func evalRuntimeACPAgents(agents []gatewayapp.ACPAgentInfo) []gatewaydriver.ACPAgentInfo {
+	out := make([]gatewaydriver.ACPAgentInfo, 0, len(agents))
 	for _, agent := range agents {
-		out = append(out, ACPAgentInfo{
+		out = append(out, gatewaydriver.ACPAgentInfo{
 			Name:        agent.Name,
 			Description: agent.Description,
 		})

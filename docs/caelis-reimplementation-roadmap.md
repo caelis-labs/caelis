@@ -665,6 +665,10 @@ alongside the old stack without importing it:
   events, rebuilds active controller state from canonical handoff and
   controller-scoped events, and routes subsequent prompts to the active
   external ACP controller with the latest known remote ACP session id.
+- The old `surfaces/tui/gatewaydriver/local` package has been removed. The
+  remaining gatewayapp-to-gatewaydriver adapter needed by real ACP controller
+  e2e coverage now lives inside `eval` test helpers, so production packages no
+  longer expose this old-stack bridge as a reusable surface.
 - `internal/app/services.ResourceService`: shared TUI/APP-facing catalog
   surface for discovered plugins, prompt fragments, skills, ACP agents,
   renderer hints, and `AGENTS.md` prompt resources.
@@ -1019,6 +1023,10 @@ be migrated before retiring the old stack:
      context/output/reasoning values now come from
      `internal/app/services.Models()` through `BindAppServices`, including
      configured provider models and shared provider capability presets.
+   - Migrated baseline: the old formal `surfaces/tui/gatewaydriver/local`
+     adapter package has been deleted. Remaining gatewayapp driver coverage is
+     test-local under `eval`, which keeps old-stack validation available
+     without preserving the bridge as production architecture.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
