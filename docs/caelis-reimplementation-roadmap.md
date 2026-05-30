@@ -939,9 +939,15 @@ be migrated before retiring the old stack:
      `internal/app/local` stack and use shared app status/sandbox services.
      Host sandbox lifecycle commands are explicit no-ops with status output,
      not old-stack fallbacks.
-   - Still pending: default home layout, full config hydration, rich setup
-     diagnostics, non-host sandbox repair/setup flows, and several command
-     dispatch paths still depend on `app/gatewayapp` and `kernel.Service`.
+   - Migrated baseline: production CLI flag normalization now uses a
+     lightweight `internal/cli` config contract instead of `gatewayapp.Config`,
+     then maps directly into `internal/app/local`. This removes the production
+     CLI entrypoint's compile-time dependency on the old gatewayapp config
+     types.
+   - Still pending: default home layout, full persisted config hydration, rich
+     setup diagnostics, non-host sandbox repair/setup flows, and several
+     command dispatch paths still depend on old TUI/gateway compatibility
+     packages or `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1046,6 +1052,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: production single-shot CLI execution and `caelis acp`
      stdio serving now enter the new local service stack instead of old
      `surfaces/headless` or `surfaces/acpserver`.
+   - Migrated baseline: production CLI configuration is no longer shaped as
+     `gatewayapp.Config`; CLI flags normalize into a local CLI config contract
+     and are projected into `internal/app/local` plus shared app settings.
    - Still pending: old package cleanup after remaining entrypoints move,
      production settings/config parity, and richer ACP surface behavior.
    - The new ACP server now exposes session list/load/resume over the
@@ -1083,12 +1092,12 @@ be migrated before retiring the old stack:
    - Migrated baseline: standalone CLI doctor and host sandbox lifecycle
      subcommands now use the new local stack and shared app services instead
      of constructing `app/gatewayapp`.
-   - Still pending: production CLI flag mapping, default home-dir bootstrapping,
-     connect wizard persistence, remaining TUI command integration, remote
-     provider model discovery UI data, additional non-model ACP config
+   - Still pending: default home-dir bootstrapping, full persisted config
+     hydration, connect wizard persistence, remaining TUI command integration,
+     remote provider model discovery UI data, additional non-model ACP config
      providers, non-host sandbox setup/repair config, and removal of the old
-     `app/gatewayapp` config/model services once entrypoints move to the new
-     stack.
+     `app/gatewayapp` config/model services once compatibility entrypoints are
+     gone.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
@@ -1197,6 +1206,10 @@ be migrated before retiring the old stack:
       config intent under a controller identity, exposes it to the TUI driver,
       and injects it into controller invocations without putting config
       semantics in TUI-only memory.
+    - Migrated baseline: CLI-declared assembly ACP agents, including the
+      `CAELIS_ACP_SELF_AGENT_*` self-agent path, are now projected into the
+      new local app stack as external ACP agent descriptors instead of being
+      stranded in the old gatewayapp agent registry shape.
     - Still pending: built-in ACP adapter install/update, self-agent spawning,
       durable sidecar continuation across restarts, delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical

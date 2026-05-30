@@ -9,12 +9,13 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	applocal "github.com/OnslaughtSnail/caelis/internal/app/local"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -67,6 +68,42 @@ type sandboxStatusResult struct {
 	SetupError         string
 	SetupMarkerCurrent bool
 	SetupMarkerReason  string
+}
+
+type cliConfig struct {
+	AppName        string
+	UserID         string
+	StoreDir       string
+	WorkspaceKey   string
+	WorkspaceCWD   string
+	PermissionMode string
+	ContextWindow  int
+	SystemPrompt   string
+	Model          cliModelConfig
+	Sandbox        cliSandboxConfig
+	Assembly       assembly.ResolvedAssembly
+}
+
+type cliModelConfig struct {
+	Alias                  string
+	Provider               string
+	API                    providers.APIType
+	Model                  string
+	BaseURL                string
+	Token                  string
+	TokenEnv               string
+	AuthType               providers.AuthType
+	HeaderKey              string
+	MaxOutputTok           int
+	ReasoningEffort        string
+	DefaultReasoningEffort string
+	ReasoningMode          string
+	ReasoningLevels        []string
+}
+
+type cliSandboxConfig struct {
+	RequestedType string
+	HelperPath    string
 }
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
@@ -141,7 +178,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return fmt.Errorf("unknown arguments: %v", fs.Args())
 	}
 
-	cfg, err := normalizeConfig(gatewayapp.Config{
+	cfg, err := normalizeConfig(cliConfig{
 		AppName:        *appName,
 		UserID:         *userID,
 		StoreDir:       *storeDir,
@@ -150,7 +187,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		PermissionMode: *permissionMode,
 		ContextWindow:  *contextWindow,
 		SystemPrompt:   *systemPrompt,
-		Model: gatewayapp.ModelConfig{
+		Model: cliModelConfig{
 			Alias:        *modelAlias,
 			Provider:     *modelProvider,
 			API:          providers.APIType(strings.TrimSpace(*modelAPI)),
@@ -162,7 +199,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			HeaderKey:    *headerKey,
 			MaxOutputTok: *maxOutputTokens,
 		},
-		Sandbox: gatewayapp.SandboxConfig{
+		Sandbox: cliSandboxConfig{
 			RequestedType: strings.TrimSpace(*sandboxBackend),
 			HelperPath:    strings.TrimSpace(*sandboxHelper),
 		},
@@ -272,7 +309,7 @@ func preferredHeadlessSessionID(sessionID string) string {
 	return strings.TrimSpace(sessionID)
 }
 
-func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.Stack, error) {
+func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, error) {
 	sandboxBackend := strings.ToLower(strings.TrimSpace(cfg.Sandbox.RequestedType))
 	if sandboxBackend == "" || sandboxBackend == "auto" {
 		sandboxBackend = "host"
@@ -315,12 +352,55 @@ func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.St
 				"cli_api":      string(cfg.Model.API),
 			},
 		},
-		BuiltinTools: true,
-		Settings:     settings,
+		ExternalACPAgents: assemblyExternalACPAgents(cfg.Assembly),
+		BuiltinTools:      true,
+		Settings:          settings,
 	})
 }
 
-func coreSettingsManager(ctx context.Context, cfg gatewayapp.Config, provider string) (*appsettings.Manager, error) {
+func assemblyExternalACPAgents(resolved assembly.ResolvedAssembly) []acpexternal.Config {
+	if len(resolved.Agents) == 0 {
+		return nil
+	}
+	out := make([]acpexternal.Config, 0, len(resolved.Agents))
+	for _, agent := range resolved.Agents {
+		command := strings.TrimSpace(agent.Command)
+		name := strings.TrimSpace(agent.Name)
+		if command == "" {
+			continue
+		}
+		out = append(out, acpexternal.Config{
+			AgentID:   firstNonEmptyString(name, command),
+			AgentName: firstNonEmptyString(name, command),
+			Command:   command,
+			Args:      append([]string(nil), agent.Args...),
+			WorkDir:   strings.TrimSpace(agent.WorkDir),
+			Env:       sortedEnv(agent.Env),
+		})
+	}
+	return out
+}
+
+func sortedEnv(env map[string]string) []string {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out
+}
+
+func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*appsettings.Manager, error) {
 	doc := appsettings.Document{
 		Runtime: coreconfig.Runtime{
 			AppName:      cfg.AppName,
@@ -392,7 +472,7 @@ func coreModelProvider(provider string, api providers.APIType) string {
 	}
 }
 
-func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg gatewayapp.Config, sessionID string, input string, format outputFormat, stdout io.Writer) error {
+func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg cliConfig, sessionID string, input string, format outputFormat, stdout io.Writer) error {
 	result, err := coreheadless.RunOnce(ctx, coreheadless.Request{
 		Services:           stack.Services(),
 		PreferredSessionID: strings.TrimSpace(sessionID),
@@ -458,13 +538,13 @@ func runSandboxReset(ctx context.Context, services appservices.Services, format 
 	return err
 }
 
-func runInteractive(ctx context.Context, stack *applocal.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+func runInteractive(ctx context.Context, stack *applocal.Stack, sessionID string, cfg cliConfig, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	_ = stderr
 	_ = cfg
 	return runTUI(ctx, stack, strings.TrimSpace(sessionID), displayModelText, stdin, stdout)
 }
 
-func renderModelText(cfg gatewayapp.Config) string {
+func renderModelText(cfg cliConfig) string {
 	provider := strings.TrimSpace(cfg.Model.Provider)
 	model := strings.TrimSpace(cfg.Model.Model)
 	switch {
@@ -733,7 +813,7 @@ func envInt(key string, fallback int) int {
 	return fallback
 }
 
-func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
+func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	provider := strings.ToLower(strings.TrimSpace(cfg.Model.Provider))
 	switch provider {
 	case "", "minimax":
@@ -831,7 +911,7 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 		cfg.Model.AuthType = providers.AuthNone
 	default:
 		if cfg.Model.API == "" {
-			return gatewayapp.Config{}, fmt.Errorf("provider %q requires --api", cfg.Model.Provider)
+			return cliConfig{}, fmt.Errorf("provider %q requires --api", cfg.Model.Provider)
 		}
 	}
 	if strings.TrimSpace(cfg.Model.Model) == "" {

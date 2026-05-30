@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
+	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
@@ -336,14 +336,14 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 	defer server.Close()
 
 	workspace := t.TempDir()
-	cfg, err := normalizeConfig(gatewayapp.Config{
+	cfg, err := normalizeConfig(cliConfig{
 		AppName:        "caelis",
 		UserID:         "tui-user",
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   "tui-ws",
 		WorkspaceCWD:   workspace,
 		PermissionMode: "auto-review",
-		Model: gatewayapp.ModelConfig{
+		Model: cliModelConfig{
 			Alias:        "tui-model",
 			Provider:     "openai",
 			API:          providers.APIOpenAI,
@@ -352,7 +352,7 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 			AuthType:     providers.AuthNone,
 			MaxOutputTok: 4096,
 		},
-		Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+		Sandbox: cliSandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatalf("normalizeConfig() error = %v", err)
@@ -405,14 +405,14 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 
 func TestCoreTUIStackAllowsEmptyModelConfiguration(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
-	cfg, err := normalizeConfig(gatewayapp.Config{
+	cfg, err := normalizeConfig(cliConfig{
 		AppName:        "caelis",
 		UserID:         "empty-model-user",
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   "empty-model-ws",
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "auto-review",
-		Sandbox:        gatewayapp.SandboxConfig{RequestedType: "host"},
+		Sandbox:        cliSandboxConfig{RequestedType: "host"},
 	})
 	if err != nil {
 		t.Fatalf("normalizeConfig() error = %v", err)
@@ -431,6 +431,42 @@ func TestCoreTUIStackAllowsEmptyModelConfiguration(t *testing.T) {
 	}
 	if status.Model != "not configured" {
 		t.Fatalf("status model = %q, want not configured", status.Model)
+	}
+}
+
+func TestCoreLocalStackRegistersAssemblyACPAgent(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	cfg, err := normalizeConfig(cliConfig{
+		AppName:      "caelis",
+		UserID:       "assembly-agent-user",
+		StoreDir:     t.TempDir(),
+		WorkspaceKey: "assembly-agent-ws",
+		WorkspaceCWD: t.TempDir(),
+		Sandbox:      cliSandboxConfig{RequestedType: "host"},
+		Assembly: assembly.ResolvedAssembly{
+			Agents: []assembly.AgentConfig{{
+				Name:        "self",
+				Description: "self ACP agent",
+				Command:     "self-acp",
+				Args:        []string{"--stdio"},
+				Env:         map[string]string{"SELF_TOKEN": "secret"},
+				WorkDir:     "/tmp/self-agent",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeConfig() error = %v", err)
+	}
+	stack, err := newCoreLocalStack(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newCoreLocalStack() error = %v", err)
+	}
+	agents, err := stack.Services().Agents().List(context.Background())
+	if err != nil {
+		t.Fatalf("Agents().List() error = %v", err)
+	}
+	if len(agents) != 1 || agents[0].ID != "self" || agents[0].Command != "self-acp" || agents[0].Env["SELF_TOKEN"] != "secret" {
+		t.Fatalf("agents = %#v, want assembly self ACP agent", agents)
 	}
 }
 
