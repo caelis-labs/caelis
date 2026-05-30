@@ -1351,8 +1351,11 @@ be migrated before retiring the old stack:
       request is rebuilt from the canonical compact checkpoint, post-compact
       user/assistant/tool messages, reasoning replay signatures, provider
       metadata, and usage state.
-    - Still pending: automatic compaction and post-compaction budget estimation
-      remain to be migrated.
+    - Migrated baseline: shared app services now expose post-compaction context
+      budget estimation from canonical model-visible messages, prompt/tool
+      prefix estimates, and current model context/output limits. Status
+      view-models surface the same estimate for TUI and future APP consumers.
+    - Still pending: automatic compaction remains to be migrated.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill

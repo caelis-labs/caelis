@@ -578,6 +578,11 @@ func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmode
 		sessionStatus := appviewmodel.SessionStatusFromView(sessionView)
 		view.Session = &sessionStatus
 		view.Usage = statusUsageView(snapshot)
+		budget, err := s.contextBudget(ctx, snapshot)
+		if err != nil {
+			return appviewmodel.StatusView{}, err
+		}
+		view.Usage.ContextBudget = budget
 	}
 	modelStatus, err := s.modelStatus(ctx, state)
 	if err != nil {

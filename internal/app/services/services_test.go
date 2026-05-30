@@ -1090,6 +1090,29 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	if status.Usage.Total.InputTokens != 26 || status.Usage.Total.CachedInputTokens != 2 || status.Usage.Total.OutputTokens != 7 || status.Usage.Total.ReasoningTokens != 2 || status.Usage.Total.TotalTokens != 34 || status.Usage.Total.ContextWindowTokens != 256000 {
 		t.Fatalf("total usage = %#v, want accumulated usage with max context window", status.Usage.Total)
 	}
+	budget := status.Usage.ContextBudget
+	if budget.Source != contextBudgetSourceEstimated || !budget.PostCompact || budget.LastCompactEventID != "evt-compact-usage" || budget.AsOfEventID != "evt-2" {
+		t.Fatalf("context budget identity = %#v, want estimated post-compact budget through evt-2", budget)
+	}
+	if budget.ContextWindowTokens != 128000 || budget.MaxOutputTokens != 4096 || budget.EffectiveInputBudget != 123904 {
+		t.Fatalf("context budget limits = %#v, want model context window minus max output", budget)
+	}
+	if budget.MessageCount != 1 || budget.EstimatedHistoryTokens <= 0 || budget.EstimatedPrefixTokens <= 0 {
+		t.Fatalf("context budget estimate = %#v, want compact checkpoint history plus prompt prefix", budget)
+	}
+	if budget.EstimatedInputTokens != budget.EstimatedHistoryTokens+budget.EstimatedPrefixTokens {
+		t.Fatalf("context input estimate = %#v, want history plus prefix", budget)
+	}
+	if budget.EstimatedRemainingTokens != budget.EffectiveInputBudget-budget.EstimatedInputTokens || budget.EstimatedOverBudgetTokens != 0 {
+		t.Fatalf("context remaining budget = %#v, want effective minus estimated input", budget)
+	}
+	directBudget, err := svc.Compaction().ContextBudget(ctx, ContextBudgetRequest{SessionRef: session.Ref{SessionID: "sess-1"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if directBudget != budget {
+		t.Fatalf("direct context budget = %#v, want status budget %#v", directBudget, budget)
+	}
 	if !status.Model.Configured || status.Model.Count != 1 || status.Model.Current == nil || status.Model.Current.ID != cfg.ID {
 		t.Fatalf("model status = %#v, want selected current model", status.Model)
 	}

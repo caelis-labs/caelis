@@ -105,11 +105,12 @@ type ResourceStatus struct {
 }
 
 type UsageStatus struct {
-	Total      TokenUsage `json:"total,omitempty"`
-	Main       TokenUsage `json:"main,omitempty"`
-	Subagents  TokenUsage `json:"subagents,omitempty"`
-	AutoReview TokenUsage `json:"auto_review,omitempty"`
-	Compaction TokenUsage `json:"compaction,omitempty"`
+	Total         TokenUsage    `json:"total,omitempty"`
+	Main          TokenUsage    `json:"main,omitempty"`
+	Subagents     TokenUsage    `json:"subagents,omitempty"`
+	AutoReview    TokenUsage    `json:"auto_review,omitempty"`
+	Compaction    TokenUsage    `json:"compaction,omitempty"`
+	ContextBudget ContextBudget `json:"context_budget,omitempty"`
 }
 
 type TokenUsage struct {
@@ -119,6 +120,25 @@ type TokenUsage struct {
 	ReasoningTokens     int `json:"reasoning_tokens,omitempty"`
 	TotalTokens         int `json:"total_tokens,omitempty"`
 	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
+}
+
+type ContextBudget struct {
+	Source                    string `json:"source,omitempty"`
+	ModelID                   string `json:"model_id,omitempty"`
+	Provider                  string `json:"provider,omitempty"`
+	Model                     string `json:"model,omitempty"`
+	AsOfEventID               string `json:"as_of_event_id,omitempty"`
+	LastCompactEventID        string `json:"last_compact_event_id,omitempty"`
+	PostCompact               bool   `json:"post_compact,omitempty"`
+	MessageCount              int    `json:"message_count,omitempty"`
+	ContextWindowTokens       int    `json:"context_window_tokens,omitempty"`
+	MaxOutputTokens           int    `json:"max_output_tokens,omitempty"`
+	EffectiveInputBudget      int    `json:"effective_input_budget,omitempty"`
+	EstimatedInputTokens      int    `json:"estimated_input_tokens,omitempty"`
+	EstimatedHistoryTokens    int    `json:"estimated_history_tokens,omitempty"`
+	EstimatedPrefixTokens     int    `json:"estimated_prefix_tokens,omitempty"`
+	EstimatedRemainingTokens  int    `json:"estimated_remaining_tokens,omitempty"`
+	EstimatedOverBudgetTokens int    `json:"estimated_over_budget_tokens,omitempty"`
 }
 
 func RuntimeStatusFromConfig(runtime config.Runtime) RuntimeStatus {
