@@ -291,9 +291,84 @@ func (m *Manager) ListModelChoices() ([]ModelChoice, error) {
 	return index.choices(), nil
 }
 
+func (m *Manager) ListACPAgents() []plugin.ACPAgentDescriptor {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return cloneAgents(m.doc.Agents)
+}
+
+func (m *Manager) UpsertACPAgent(ctx context.Context, agent plugin.ACPAgentDescriptor) (plugin.ACPAgentDescriptor, error) {
+	if m == nil {
+		return plugin.ACPAgentDescriptor{}, errors.New("app/settings: manager is nil")
+	}
+	normalized := cloneAgents([]plugin.ACPAgentDescriptor{agent})
+	if len(normalized) == 0 || strings.TrimSpace(normalized[0].Name) == "" {
+		return plugin.ACPAgentDescriptor{}, errors.New("app/settings: ACP agent name is required")
+	}
+	agent = normalized[0]
+	if strings.TrimSpace(agent.Command) == "" {
+		return plugin.ACPAgentDescriptor{}, fmt.Errorf("app/settings: command is required for ACP agent %q", agent.Name)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := make([]plugin.ACPAgentDescriptor, 0, len(m.doc.Agents)+1)
+	replaced := false
+	for _, existing := range cloneAgents(m.doc.Agents) {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), agent.Name) {
+			next = append(next, agent)
+			replaced = true
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !replaced {
+		next = append(next, agent)
+	}
+	doc := CloneDocument(m.doc)
+	doc.Agents = next
+	if err := m.saveDocumentLocked(ctx, doc); err != nil {
+		return plugin.ACPAgentDescriptor{}, err
+	}
+	return agent, nil
+}
+
+func (m *Manager) DeleteACPAgent(ctx context.Context, name string) error {
+	if m == nil {
+		return errors.New("app/settings: manager is nil")
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return errors.New("app/settings: ACP agent name is required")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	next := make([]plugin.ACPAgentDescriptor, 0, len(m.doc.Agents))
+	removed := false
+	for _, existing := range cloneAgents(m.doc.Agents) {
+		if strings.EqualFold(strings.TrimSpace(existing.Name), name) {
+			removed = true
+			continue
+		}
+		next = append(next, existing)
+	}
+	if !removed {
+		return fmt.Errorf("app/settings: ACP agent %q is not configured", name)
+	}
+	doc := CloneDocument(m.doc)
+	doc.Agents = next
+	return m.saveDocumentLocked(ctx, doc)
+}
+
 func (m *Manager) saveLocked(ctx context.Context, index *modelIndex) error {
 	m.doc.Models = index.snapshot()
-	next := NormalizeDocument(m.doc)
+	return m.saveDocumentLocked(ctx, m.doc)
+}
+
+func (m *Manager) saveDocumentLocked(ctx context.Context, doc Document) error {
+	next := NormalizeDocument(doc)
 	if m.store != nil {
 		if err := m.store.Save(ctx, next); err != nil {
 			return err

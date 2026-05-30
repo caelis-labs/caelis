@@ -579,6 +579,10 @@ alongside the old stack without importing it:
   agent and appends normalized events into the canonical session store.
 - `internal/app/services`: shared service facade for TUI, future APP, CLI, and
   protocol surfaces.
+- `internal/app/settings`: shared product settings document for configured
+  models and settings-backed custom external ACP agent descriptors, with
+  normalized upsert/list/delete operations independent of the old gatewayapp
+  config store.
 - `internal/app/resources`: deterministic discovery baseline for enabled
   `plugin.json` manifests, plugin prompt/skill/ACP-agent/renderer descriptors,
   workspace/global `AGENTS.md`, and skill metadata. Plugin-declared ACP agents
@@ -600,7 +604,8 @@ alongside the old stack without importing it:
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
-  It also wires plugin-declared ACP agents into the shared `AgentService`.
+  It also wires plugin-declared and settings-backed custom ACP agents into the
+  shared `AgentService`.
 - `internal/adapters/model/openai`: core-native OpenAI-compatible Chat
   Completions provider with tool-call, usage, structured-output, reasoning,
   and provider-profile mapping. It now backs OpenAI-compatible, DeepSeek, and
@@ -635,15 +640,19 @@ alongside the old stack without importing it:
 - `internal/adapters/acpagent/external`: core-native external ACP client that
   normalizes ACP `session/update` and `session/request_permission` traffic into
   canonical `core/session.Event` values.
-- `internal/app/services.AgentService`: shared TUI/APP-facing descriptor surface
-  for external ACP agents contributed by local composition.
+- `internal/app/services.AgentService`: shared TUI/APP-facing descriptor,
+  registration, removal, and invocation surface for external ACP agents
+  contributed by local composition or stored in app settings. Runtime-added
+  custom agents are resolved through a narrow invoker factory instead of
+  rebuilding service state.
 - `internal/app/services.ModelService`: shared model settings and catalog
   surface for configured models, provider model presets, capability defaults,
   and reasoning-level choices used by TUI/future APP connect flows.
 - `surfaces/tui/gatewaydriver.BindAppServices`: service-native TUI `/agent`
   list and dynamic `/<agent> <prompt>` baseline for configured external ACP
   agents, recording participant attach/user/assistant activity as canonical
-  core session events.
+  core session events. It also routes settings-backed `/agent add custom` and
+  `/agent remove` through shared app services.
 - `internal/app/services.ResourceService`: shared TUI/APP-facing catalog
   surface for discovered plugins, prompt fragments, skills, ACP agents,
   renderer hints, and `AGENTS.md` prompt resources.
@@ -685,9 +694,15 @@ The current verification path covers:
   participant runner -> canonical session events
 - enabled plugin manifest `acp_agents` -> shared `AgentService` descriptor and
   invoker -> external ACP subprocess -> canonical participant events
+- app settings `acp_agents` -> shared `AgentService` descriptor/register/remove
+  -> local-stack dynamic invoker factory -> external ACP subprocess ->
+  canonical participant events
 - app-service TUI binding -> configured external ACP agent catalog -> dynamic
   participant prompt -> canonical participant/user/assistant events -> TUI
   participant-scoped event projection
+- app-service TUI binding -> `/agent add custom` and `/agent remove` for
+  settings-backed custom external ACP agents -> shared settings persistence ->
+  refreshed agent catalog
 - app-service model catalog -> TUI `/connect` model completion and default
   context/output/reasoning values
 - local stack -> enabled plugin manifest + workspace `AGENTS.md` ->
@@ -849,6 +864,9 @@ The completed work is intentionally limited to the reusable skeleton:
   for configured external ACP agents, with participant attach/user/assistant
   activity recorded as canonical session events and projected back through the
   existing TUI driver event stream.
+- Service-native settings-backed custom external ACP agent registration and
+  removal, including TUI `/agent add custom` and `/agent remove` for custom
+  agents without rebuilding the app-service stack.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -912,6 +930,10 @@ be migrated before retiring the old stack:
      records participant attachment, the user prompt to the participant, and
      the participant response as canonical core session events, then projects
      participant scope/origin back into the existing TUI event stream.
+   - Migrated baseline: `/agent add custom <name> -- <command> [args...]` and
+     `/agent remove <custom-agent>` now route through
+     `internal/app/services.AgentService` and persist settings-backed external
+     ACP agent descriptors in the shared app settings document.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
@@ -924,9 +946,9 @@ be migrated before retiring the old stack:
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell,
-     `/agent add/install/use/remove`, and `/doctor fix` still have old
-     driver/app assumptions or missing
+   - Slash commands such as the `/connect` wizard shell, built-in
+     `/agent add/install`, `/agent use`, non-custom agent removal, and
+     `/doctor fix` still have old driver/app assumptions or missing
      service-native feature parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
@@ -1067,11 +1089,14 @@ be migrated before retiring the old stack:
       path. Participant attachment, user prompts to participants, and external
       ACP responses are now canonical session events with participant
       scope/origin instead of TUI-only side effects.
-    - Still pending: built-in ACP agent registry/install/update, custom agent
-      settings mutation, self-agent spawning, Claude and OpenCode-family
-      built-ins, `/agent use` main-controller handoff, durable sidecar
-      continuation across restarts, delegated subagent tasks, remote session
-      resume/new semantics, and terminal previews remain old-stack.
+    - Migrated baseline: custom external ACP agents now have app-service
+      settings mutation, startup loading, dynamic invocation, and TUI
+      add/remove/list coverage for settings-backed descriptors.
+    - Still pending: built-in ACP agent registry/install/update, self-agent
+      spawning, Claude and OpenCode-family built-ins, `/agent use`
+      main-controller handoff, durable sidecar continuation across restarts,
+      delegated subagent tasks, remote session resume/new semantics, and
+      terminal previews remain old-stack.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -1134,9 +1159,9 @@ Recommended sequence:
    tools.
 4. Port spawn and durable task runtime behavior behind `core/tool.Registry`
    and `internal/engine/tasks`.
-5. Port TUI driver commands, including session list/resume and the remaining
-   agent-management actions, to `internal/app/services`, preserving existing
-   rendering as surface-local code.
+5. Port TUI driver commands, including the remaining built-in agent management
+   actions, to `internal/app/services`, preserving existing rendering as
+   surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and live transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
@@ -172,14 +173,16 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	}
 	externalAgents := append([]acpexternal.Config(nil), cfg.ExternalACPAgents...)
 	externalAgents = append(externalAgents, pluginACPAgentConfigs(resourceCatalog)...)
+	externalAgents = append(externalAgents, settingsACPAgentConfigs(cfg.Settings)...)
 	svc, err := services.New(services.Config{
-		Runtime:   runtimeCfg,
-		Engine:    engine,
-		Agents:    agentDescriptors(externalAgents),
-		Invokers:  agentInvokers(store, externalAgents),
-		Resources: resourceCatalog,
-		Settings:  cfg.Settings,
-		CodeFree:  codeFreeAuthAdapter{},
+		Runtime:        runtimeCfg,
+		Engine:         engine,
+		Agents:         agentDescriptors(externalAgents),
+		Invokers:       agentInvokers(store, externalAgents),
+		InvokerFactory: externalAgentInvokerFactory(store),
+		Resources:      resourceCatalog,
+		Settings:       cfg.Settings,
+		CodeFree:       codeFreeAuthAdapter{},
 	})
 	if err != nil {
 		return nil, err
@@ -206,45 +209,67 @@ func agentInvokers(store session.Store, configs []acpexternal.Config) map[string
 		if id == "" {
 			continue
 		}
-		out[id] = services.AgentInvokerFunc(func(ctx context.Context, req services.AgentInvokeRequest) (services.AgentInvokeResult, error) {
-			client, err := acpexternal.StartProcess(ctx, cfg)
-			if err != nil {
-				return services.AgentInvokeResult{}, err
-			}
-			defer client.Close()
-			adapter := externalAgentSession{client: client}
-			runner := control.ParticipantRunner{Store: store}
-			participant := req.Participant
-			if strings.TrimSpace(participant.ID) == "" {
-				participant.ID = id
-			}
-			if participant.Kind == "" {
-				participant.Kind = session.ParticipantACP
-			}
-			if participant.Role == "" {
-				participant.Role = session.ParticipantDelegated
-			}
-			participant.AgentName = firstNonEmpty(participant.AgentName, cfg.AgentName, id)
-			participant.Label = firstNonEmpty(participant.Label, cfg.AgentName, id)
-			participant.Source = firstNonEmpty(participant.Source, "external_acp")
-			result, err := runner.Invoke(ctx, control.ParticipantRequest{
-				SessionRef:   req.SessionRef,
-				Input:        req.Input,
-				ContentParts: req.ContentParts,
-				Participant:  participant,
-				Agent:        adapter,
-			})
-			if err != nil {
-				return services.AgentInvokeResult{}, err
-			}
-			return services.AgentInvokeResult{
-				StopReason: "",
-				Events:     result.Events,
-				Recorded:   true,
-			}, nil
-		})
+		out[id] = externalAgentInvoker(store, cfg)
 	}
 	return out
+}
+
+func externalAgentInvokerFactory(store session.Store) services.AgentInvokerFactory {
+	return func(agent services.AgentDescriptor) (services.AgentInvoker, error) {
+		cfg := acpexternal.Config{
+			AgentID:   firstNonEmpty(agent.ID, agent.Name, agent.Command),
+			AgentName: firstNonEmpty(agent.Name, agent.ID, agent.Command),
+			Command:   strings.TrimSpace(agent.Command),
+			Args:      append([]string(nil), agent.Args...),
+			WorkDir:   strings.TrimSpace(agent.WorkDir),
+			Env:       envList(agent.Env),
+		}
+		if strings.TrimSpace(cfg.AgentID) == "" || strings.TrimSpace(cfg.Command) == "" {
+			return nil, fmt.Errorf("app/local: external ACP agent id and command are required")
+		}
+		return externalAgentInvoker(store, cfg), nil
+	}
+}
+
+func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.AgentInvoker {
+	id := firstNonEmpty(cfg.AgentID, cfg.AgentName, cfg.Command)
+	return services.AgentInvokerFunc(func(ctx context.Context, req services.AgentInvokeRequest) (services.AgentInvokeResult, error) {
+		client, err := acpexternal.StartProcess(ctx, cfg)
+		if err != nil {
+			return services.AgentInvokeResult{}, err
+		}
+		defer client.Close()
+		adapter := externalAgentSession{client: client}
+		runner := control.ParticipantRunner{Store: store}
+		participant := req.Participant
+		if strings.TrimSpace(participant.ID) == "" {
+			participant.ID = id
+		}
+		if participant.Kind == "" {
+			participant.Kind = session.ParticipantACP
+		}
+		if participant.Role == "" {
+			participant.Role = session.ParticipantDelegated
+		}
+		participant.AgentName = firstNonEmpty(participant.AgentName, cfg.AgentName, id)
+		participant.Label = firstNonEmpty(participant.Label, cfg.AgentName, id)
+		participant.Source = firstNonEmpty(participant.Source, "external_acp")
+		result, err := runner.Invoke(ctx, control.ParticipantRequest{
+			SessionRef:   req.SessionRef,
+			Input:        req.Input,
+			ContentParts: req.ContentParts,
+			Participant:  participant,
+			Agent:        adapter,
+		})
+		if err != nil {
+			return services.AgentInvokeResult{}, err
+		}
+		return services.AgentInvokeResult{
+			StopReason: "",
+			Events:     result.Events,
+			Recorded:   true,
+		}, nil
+	})
 }
 
 type externalAgentSession struct {
@@ -331,6 +356,7 @@ func agentDescriptors(configs []acpexternal.Config) []services.AgentDescriptor {
 			Kind:    services.AgentKindExternalACP,
 			Command: strings.TrimSpace(cfg.Command),
 			Args:    append([]string(nil), cfg.Args...),
+			Env:     envMap(cfg.Env),
 			WorkDir: strings.TrimSpace(cfg.WorkDir),
 		})
 	}
@@ -362,6 +388,62 @@ func pluginACPAgentConfigs(catalog appresources.Catalog) []acpexternal.Config {
 			continue
 		}
 		out = append(out, cfg)
+	}
+	return out
+}
+
+func settingsACPAgentConfigs(manager *appsettings.Manager) []acpexternal.Config {
+	if manager == nil {
+		return nil
+	}
+	agents := manager.ListACPAgents()
+	if len(agents) == 0 {
+		return nil
+	}
+	out := make([]acpexternal.Config, 0, len(agents))
+	for _, agent := range agents {
+		cfg := appregistry.ACPAgentConfig(agent)
+		if strings.TrimSpace(cfg.AgentID) == "" || strings.TrimSpace(cfg.Command) == "" {
+			continue
+		}
+		out = append(out, cfg)
+	}
+	return out
+}
+
+func envList(values map[string]string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, key)
+		}
+	}
+	slices.Sort(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, strings.TrimSpace(key)+"="+values[key])
+	}
+	return out
+}
+
+func envMap(values []string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for _, value := range values {
+		key, val, ok := strings.Cut(value, "=")
+		key = strings.TrimSpace(key)
+		if !ok || key == "" {
+			continue
+		}
+		out[key] = val
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

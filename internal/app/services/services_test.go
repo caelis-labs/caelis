@@ -151,6 +151,88 @@ func TestServicesApplyRuntimeDefaults(t *testing.T) {
 	}
 }
 
+func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{}
+	var factoryAgent AgentDescriptor
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+		},
+		Engine:   engine,
+		Settings: manager,
+		InvokerFactory: func(agent AgentDescriptor) (AgentInvoker, error) {
+			factoryAgent = agent
+			return AgentInvokerFunc(func(_ context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
+				return AgentInvokeResult{
+					Events: []session.Event{{
+						Type: session.EventAssistant,
+						Message: &model.Message{
+							Role:  model.RoleAssistant,
+							Parts: []model.Part{model.NewTextPart("custom result for " + req.Input)},
+						},
+					}},
+				}, nil
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agents().RegisterCustom(ctx, AgentDescriptor{Name: "status", Command: "bad"}); err == nil {
+		t.Fatal("RegisterCustom(status) error = nil, want reserved slash command conflict")
+	}
+	registered, err := svc.Agents().RegisterCustom(ctx, AgentDescriptor{
+		Name:        " Helper ",
+		Description: "review code",
+		Command:     "helper-acp",
+		Args:        []string{"--stdio"},
+		Env:         map[string]string{"HELPER_TOKEN": "secret"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if registered.ID != "helper" || registered.Name != "helper" || registered.Env["HELPER_TOKEN"] != "secret" {
+		t.Fatalf("registered = %#v, want normalized helper", registered)
+	}
+	agents, err := svc.Agents().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].ID != "helper" || agents[0].Command != "helper-acp" {
+		t.Fatalf("agents = %#v, want settings-backed helper", agents)
+	}
+	result, err := svc.Agents().Invoke(ctx, AgentInvokeRequest{
+		AgentID:    "helper",
+		SessionRef: session.Ref{SessionID: "sess-agent"},
+		Input:      "inspect",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if factoryAgent.ID != "helper" || factoryAgent.Env["HELPER_TOKEN"] != "secret" {
+		t.Fatalf("factory agent = %#v, want helper descriptor with env", factoryAgent)
+	}
+	if len(result.Events) != 1 || session.EventText(result.Events[0]) != "custom result for inspect" {
+		t.Fatalf("invoke result = %#v, want custom agent response", result)
+	}
+	if len(engine.events) != 1 || engine.events[0].Scope == nil || engine.events[0].Scope.Participant.ID != "helper" {
+		t.Fatalf("recorded events = %#v, want helper participant event", engine.events)
+	}
+	if err := svc.Agents().Remove(ctx, "helper"); err != nil {
+		t.Fatal(err)
+	}
+	if agents, err := svc.Agents().List(ctx); err != nil || len(agents) != 0 {
+		t.Fatalf("agents after remove = %#v err=%v, want none", agents, err)
+	}
+}
+
 func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	engine := &recordingEngine{
 		snapshot: session.Snapshot{

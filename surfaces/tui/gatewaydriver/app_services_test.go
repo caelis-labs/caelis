@@ -299,6 +299,87 @@ func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesRegistersCustomACPAgent(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := &appServiceDriverEngine{}
+	var invokedAgent appservices.AgentDescriptor
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine:   engine,
+		Settings: manager,
+		InvokerFactory: func(agent appservices.AgentDescriptor) (appservices.AgentInvoker, error) {
+			invokedAgent = agent
+			return appservices.AgentInvokerFunc(func(_ context.Context, req appservices.AgentInvokeRequest) (appservices.AgentInvokeResult, error) {
+				return appservices.AgentInvokeResult{
+					Events: []coresession.Event{{
+						Type: coresession.EventAssistant,
+						Message: &coremodel.Message{
+							Role:  coremodel.RoleAssistant,
+							Parts: []coremodel.Part{coremodel.NewTextPart("custom result for " + req.Input)},
+						},
+					}},
+				}, nil
+			}), nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := driver.AddAgentWithOptions(ctx, "helper", AgentAddOptions{
+		Custom: &CustomAgentConfig{
+			Name:        "helper",
+			Description: "custom helper",
+			Command:     "helper-acp",
+			Args:        []string{"--stdio"},
+			Env:         map[string]string{"HELPER_TOKEN": "secret"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddAgentWithOptions(custom) error = %v", err)
+	}
+	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "helper" {
+		t.Fatalf("status agents = %#v, want helper", status.AvailableAgents)
+	}
+	agents, err := driver.ListAgents(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListAgents() error = %v", err)
+	}
+	if len(agents) != 1 || agents[0].Name != "helper" || agents[0].Description != "custom helper" {
+		t.Fatalf("agents = %#v, want custom helper", agents)
+	}
+	turn, err := driver.StartAgentSubagent(ctx, "helper", " inspect ", nil)
+	if err != nil {
+		t.Fatalf("StartAgentSubagent(custom) error = %v", err)
+	}
+	got := drainGatewayDriverTestTurn(t, turn)
+	if len(got) != 2 || got[1].Event.Origin == nil || got[1].Event.Origin.ParticipantID != "helper" {
+		t.Fatalf("turn events = %#v, want helper participant response", got)
+	}
+	if invokedAgent.ID != "helper" || invokedAgent.Env["HELPER_TOKEN"] != "secret" {
+		t.Fatalf("invoked agent = %#v, want custom helper descriptor", invokedAgent)
+	}
+	status, err = driver.RemoveAgent(ctx, "helper")
+	if err != nil {
+		t.Fatalf("RemoveAgent(custom) error = %v", err)
+	}
+	if len(status.AvailableAgents) != 0 {
+		t.Fatalf("status agents after remove = %#v, want none", status.AvailableAgents)
+	}
+}
+
 type appServiceDriverEngine struct {
 	start    coresession.StartRequest
 	page     coresession.SessionPage

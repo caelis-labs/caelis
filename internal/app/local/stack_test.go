@@ -872,6 +872,61 @@ func TestStackInvokesPluginDeclaredACPAgent(t *testing.T) {
 	}
 }
 
+func TestStackLoadsSettingsBackedACPAgent(t *testing.T) {
+	ctx := context.Background()
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
+		Agents: []plugin.ACPAgentDescriptor{{
+			Name:    "settings-helper",
+			Command: executable,
+			Args:    []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:     map[string]string{"CAELIS_TEST_EXTERNAL_ACP_HELPER": "1"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := stack.Services().Agents().List(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].ID != "settings-helper" || agents[0].Env["CAELIS_TEST_EXTERNAL_ACP_HELPER"] != "1" {
+		t.Fatalf("agents = %#v, want settings-backed helper", agents)
+	}
+	active, err := stack.Services().Sessions().Start(ctx, services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := stack.Services().Agents().Invoke(ctx, services.AgentInvokeRequest{
+		AgentID:    "settings-helper",
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "delegate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || session.EventText(result.Events[0]) != "external helper response" {
+		t.Fatalf("invoke result = %#v, want helper response", result)
+	}
+}
+
 func TestStackAppliesPluginContributionStoreFactory(t *testing.T) {
 	stack, err := New(Config{
 		Runtime: config.Runtime{

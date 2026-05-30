@@ -112,6 +112,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return acpAgentsFromApp(agents)
 	}
+	stack.RegisterACPAgentFn = func(ctx context.Context, cfg CustomAgentConfig) error {
+		_, err := svc.Agents().RegisterCustom(ctx, customAgentToApp(cfg))
+		return err
+	}
+	stack.UnregisterACPAgentFn = func(target string) error {
+		return svc.Agents().Remove(context.Background(), target)
+	}
 	stack.CompactSessionFn = func(ctx context.Context, ref portsession.SessionRef) error {
 		_, err := svc.Compaction().Compact(ctx, appservices.CompactSessionRequest{
 			SessionRef: coreRefFromPort(ref),
@@ -354,6 +361,19 @@ func acpAgentsFromApp(agents []appservices.AgentDescriptor) []ACPAgentInfo {
 		})
 	}
 	return out
+}
+
+func customAgentToApp(cfg CustomAgentConfig) appservices.AgentDescriptor {
+	return appservices.AgentDescriptor{
+		ID:          strings.ToLower(strings.TrimSpace(cfg.Name)),
+		Name:        strings.ToLower(strings.TrimSpace(cfg.Name)),
+		Kind:        appservices.AgentKindExternalACP,
+		Command:     strings.TrimSpace(cfg.Command),
+		Args:        append([]string(nil), cfg.Args...),
+		Env:         maps.Clone(cfg.Env),
+		WorkDir:     strings.TrimSpace(cfg.WorkDir),
+		Description: strings.TrimSpace(cfg.Description),
+	}
 }
 
 func compactAgentDetails(values []string) []string {

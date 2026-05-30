@@ -12,6 +12,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
@@ -30,21 +31,23 @@ type Services struct {
 	engine    coreruntime.Engine
 	agents    []AgentDescriptor
 	invokers  map[string]AgentInvoker
+	factory   AgentInvokerFactory
 	resources appresources.Catalog
 	settings  *appsettings.Manager
 	codefree  CodeFreeAuthenticator
 }
 
 type Config struct {
-	Runtime   config.Runtime
-	AppName   string
-	UserID    string
-	Engine    coreruntime.Engine
-	Agents    []AgentDescriptor
-	Invokers  map[string]AgentInvoker
-	Resources appresources.Catalog
-	Settings  *appsettings.Manager
-	CodeFree  CodeFreeAuthenticator
+	Runtime        config.Runtime
+	AppName        string
+	UserID         string
+	Engine         coreruntime.Engine
+	Agents         []AgentDescriptor
+	Invokers       map[string]AgentInvoker
+	InvokerFactory AgentInvokerFactory
+	Resources      appresources.Catalog
+	Settings       *appsettings.Manager
+	CodeFree       CodeFreeAuthenticator
 }
 
 func New(cfg Config) (Services, error) {
@@ -59,6 +62,7 @@ func New(cfg Config) (Services, error) {
 		engine:    cfg.Engine,
 		agents:    cloneAgents(cfg.Agents),
 		invokers:  maps.Clone(cfg.Invokers),
+		factory:   cfg.InvokerFactory,
 		resources: appresources.CloneCatalog(cfg.Resources),
 		settings:  cfg.Settings,
 		codefree:  cfg.CodeFree,
@@ -425,9 +429,13 @@ func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmode
 	ref := defaultSessionRef(runtimeCfg, req.SessionRef)
 	view := appviewmodel.StatusView{
 		Runtime:   appviewmodel.RuntimeStatusFromConfig(runtimeCfg),
-		Agents:    statusAgentView(s.services.agents),
 		Resources: statusResourceView(s.services.resources),
 	}
+	agents, err := s.services.Agents().List(ctx)
+	if err != nil {
+		return appviewmodel.StatusView{}, err
+	}
+	view.Agents = statusAgentView(agents)
 	var state session.State
 	if strings.TrimSpace(ref.SessionID) != "" {
 		snapshot, err := s.services.Sessions().Load(ctx, ref)
@@ -503,6 +511,7 @@ type AgentDescriptor struct {
 	Kind        AgentKind         `json:"kind,omitempty"`
 	Command     string            `json:"command,omitempty"`
 	Args        []string          `json:"args,omitempty"`
+	Env         map[string]string `json:"env,omitempty"`
 	WorkDir     string            `json:"work_dir,omitempty"`
 	Description string            `json:"description,omitempty"`
 	Meta        map[string]string `json:"meta,omitempty"`
@@ -513,12 +522,56 @@ type AgentService struct {
 }
 
 func (s AgentService) List(context.Context) ([]AgentDescriptor, error) {
-	return cloneAgents(s.services.agents), nil
+	agents := cloneAgents(s.services.agents)
+	if s.services.settings == nil {
+		return agents, nil
+	}
+	for _, agent := range s.services.settings.ListACPAgents() {
+		agents = upsertAgentDescriptor(agents, agentDescriptorFromPlugin(agent))
+	}
+	return agents, nil
+}
+
+func (s AgentService) RegisterCustom(ctx context.Context, agent AgentDescriptor) (AgentDescriptor, error) {
+	if s.services.settings == nil {
+		return AgentDescriptor{}, errors.New("app/services: settings manager is not configured")
+	}
+	agent = normalizeAgentDescriptor(agent)
+	agent.Kind = AgentKindExternalACP
+	if agent.ID == "" {
+		agent.ID = firstNonEmpty(agent.Name, agent.Command)
+	}
+	if agent.Name == "" {
+		agent.Name = agent.ID
+	}
+	if agent.ID == "" || agent.Name == "" {
+		return AgentDescriptor{}, errors.New("app/services: ACP agent name is required")
+	}
+	if reservedSlashCommandName(agent.Name) || reservedSlashCommandName(agent.ID) {
+		return AgentDescriptor{}, fmt.Errorf("app/services: ACP agent %q conflicts with an existing slash command", agent.Name)
+	}
+	if strings.TrimSpace(agent.Command) == "" {
+		return AgentDescriptor{}, fmt.Errorf("app/services: command is required for ACP agent %q", agent.Name)
+	}
+	stored, err := s.services.settings.UpsertACPAgent(ctx, pluginDescriptorFromAgent(agent))
+	if err != nil {
+		return AgentDescriptor{}, err
+	}
+	return agentDescriptorFromPlugin(stored), nil
+}
+
+func (s AgentService) Remove(ctx context.Context, name string) error {
+	if s.services.settings == nil {
+		return errors.New("app/services: settings manager is not configured")
+	}
+	return s.services.settings.DeleteACPAgent(ctx, name)
 }
 
 type AgentInvoker interface {
 	Invoke(context.Context, AgentInvokeRequest) (AgentInvokeResult, error)
 }
+
+type AgentInvokerFactory func(AgentDescriptor) (AgentInvoker, error)
 
 type AgentInvokerFunc func(context.Context, AgentInvokeRequest) (AgentInvokeResult, error)
 
@@ -550,6 +603,13 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	}
 	invoker := s.services.invokers[agentID]
 	if invoker == nil {
+		var err error
+		invoker, err = s.invokerForAgent(ctx, agentID)
+		if err != nil {
+			return AgentInvokeResult{}, err
+		}
+	}
+	if invoker == nil {
 		return AgentInvokeResult{}, errors.New("app/services: agent invoker not found")
 	}
 	ref := session.NormalizeRef(req.SessionRef)
@@ -578,6 +638,22 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	}
 	result.Events = events
 	return result, nil
+}
+
+func (s AgentService) invokerForAgent(ctx context.Context, agentID string) (AgentInvoker, error) {
+	if s.services.factory == nil {
+		return nil, fmt.Errorf("app/services: agent invoker %q not found", agentID)
+	}
+	agents, err := s.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, agent := range agents {
+		if strings.EqualFold(strings.TrimSpace(agent.ID), agentID) || strings.EqualFold(strings.TrimSpace(agent.Name), agentID) {
+			return s.services.factory(agent)
+		}
+	}
+	return nil, fmt.Errorf("app/services: agent invoker %q not found", agentID)
 }
 
 func normalizeAgentParticipant(in session.ParticipantBinding, agentID string) session.ParticipantBinding {
@@ -809,10 +885,71 @@ func cloneAgents(in []AgentDescriptor) []AgentDescriptor {
 		next.WorkDir = strings.TrimSpace(item.WorkDir)
 		next.Description = strings.TrimSpace(item.Description)
 		next.Args = append([]string(nil), item.Args...)
+		next.Env = maps.Clone(item.Env)
 		next.Meta = maps.Clone(item.Meta)
 		out = append(out, next)
 	}
 	return out
+}
+
+func normalizeAgentDescriptor(agent AgentDescriptor) AgentDescriptor {
+	return cloneAgents([]AgentDescriptor{agent})[0]
+}
+
+func upsertAgentDescriptor(agents []AgentDescriptor, agent AgentDescriptor) []AgentDescriptor {
+	agent = normalizeAgentDescriptor(agent)
+	id := strings.ToLower(firstNonEmpty(agent.ID, agent.Name))
+	if id == "" {
+		return agents
+	}
+	for i, existing := range agents {
+		existingID := strings.ToLower(firstNonEmpty(existing.ID, existing.Name))
+		if existingID == id {
+			next := cloneAgents(agents)
+			next[i] = agent
+			return next
+		}
+	}
+	out := cloneAgents(agents)
+	out = append(out, agent)
+	return out
+}
+
+func agentDescriptorFromPlugin(agent plugin.ACPAgentDescriptor) AgentDescriptor {
+	name := strings.ToLower(strings.TrimSpace(agent.Name))
+	command := strings.TrimSpace(agent.Command)
+	return normalizeAgentDescriptor(AgentDescriptor{
+		ID:          firstNonEmpty(name, command),
+		Name:        firstNonEmpty(name, command),
+		Kind:        AgentKindExternalACP,
+		Command:     command,
+		Args:        append([]string(nil), agent.Args...),
+		Env:         maps.Clone(agent.Env),
+		WorkDir:     strings.TrimSpace(agent.WorkDir),
+		Description: strings.TrimSpace(agent.Description),
+	})
+}
+
+func pluginDescriptorFromAgent(agent AgentDescriptor) plugin.ACPAgentDescriptor {
+	agent = normalizeAgentDescriptor(agent)
+	return plugin.ACPAgentDescriptor{
+		Name:        strings.ToLower(firstNonEmpty(agent.Name, agent.ID)),
+		Description: strings.TrimSpace(agent.Description),
+		Command:     strings.TrimSpace(agent.Command),
+		Args:        append([]string(nil), agent.Args...),
+		Env:         maps.Clone(agent.Env),
+		WorkDir:     strings.TrimSpace(agent.WorkDir),
+		Roles:       []string{"participant"},
+	}
+}
+
+func reservedSlashCommandName(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(name)) {
+	case "help", "agent", "connect", "model", "approval", "sandbox", "status", "doctor", "new", "resume", "compact", "exit", "quit":
+		return true
+	default:
+		return false
+	}
 }
 
 func cloneEvents(in []session.Event) []session.Event {
