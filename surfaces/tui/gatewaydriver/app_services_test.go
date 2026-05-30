@@ -62,6 +62,21 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if len(choices) != 1 || choices[0].ID != cfg.ID || choices[0].Alias != "test-model" {
 		t.Fatalf("model choices = %#v, want bound app settings model", choices)
 	}
+	connected, err := stack.Connect(ModelConfig{
+		Alias:    "next-model",
+		Provider: "openai-compatible",
+		Model:    "gpt-next",
+		BaseURL:  "https://api.example.test/v1",
+	})
+	if err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	if connected != "next-model" {
+		t.Fatalf("Connect() = %q, want next-model", connected)
+	}
+	if err := stack.DeleteModel(ctx, portsession.SessionRef{SessionID: "sess-app"}, "next-model"); err != nil {
+		t.Fatalf("DeleteModel() error = %v", err)
+	}
 
 	status, err := driver.UseModel(ctx, "test-model", "high")
 	if err != nil {

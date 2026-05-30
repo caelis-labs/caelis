@@ -59,6 +59,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return modelChoicesFromApp(choices), nil
 	}
+	stack.ConnectFn = func(cfg ModelConfig) (string, error) {
+		connected, err := svc.Models().Connect(context.Background(), modelConfigToApp(cfg))
+		if err != nil {
+			return "", err
+		}
+		return firstNonEmpty(connected.Alias, connected.ID), nil
+	}
 	stack.UseModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning ...string) error {
 		effort := ""
 		if len(reasoning) > 0 {
@@ -66,6 +73,9 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		_, err := svc.Models().Use(ctx, coreRefFromPort(ref), modelRef, effort)
 		return err
+	}
+	stack.DeleteModelFn = func(ctx context.Context, _ portsession.SessionRef, modelRef string) error {
+		return svc.Models().Delete(ctx, modelRef)
 	}
 	stack.SetSessionModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (string, error) {
 		choice, err := svc.Modes().Set(ctx, coreRefFromPort(ref), mode)
@@ -156,6 +166,30 @@ func modelConfigFromApp(cfg appsettings.ModelConfig) ModelConfig {
 		ReasoningLevels:        append([]string(nil), cfg.ReasoningLevels...),
 		ReasoningMode:          strings.TrimSpace(cfg.ReasoningMode),
 		MaxOutputTok:           cfg.MaxOutputTokens,
+		Timeout:                cfg.Timeout,
+	}
+}
+
+func modelConfigToApp(cfg ModelConfig) appsettings.ModelConfig {
+	return appsettings.ModelConfig{
+		ID:                     strings.TrimSpace(cfg.ID),
+		Alias:                  strings.TrimSpace(cfg.Alias),
+		ProfileID:              strings.TrimSpace(cfg.ProfileID),
+		Provider:               strings.TrimSpace(cfg.Provider),
+		EndpointID:             strings.TrimSpace(cfg.EndpointID),
+		Model:                  strings.TrimSpace(cfg.Model),
+		BaseURL:                strings.TrimSpace(cfg.BaseURL),
+		Token:                  strings.TrimSpace(cfg.Token),
+		TokenEnv:               strings.TrimSpace(cfg.TokenEnv),
+		PersistToken:           cfg.PersistToken,
+		AuthType:               strings.TrimSpace(string(cfg.AuthType)),
+		HeaderKey:              strings.TrimSpace(cfg.HeaderKey),
+		ContextWindowTokens:    cfg.ContextWindowTokens,
+		MaxOutputTokens:        cfg.MaxOutputTok,
+		ReasoningEffort:        strings.TrimSpace(cfg.ReasoningEffort),
+		DefaultReasoningEffort: strings.TrimSpace(cfg.DefaultReasoningEffort),
+		ReasoningMode:          strings.TrimSpace(cfg.ReasoningMode),
+		ReasoningLevels:        append([]string(nil), cfg.ReasoningLevels...),
 		Timeout:                cfg.Timeout,
 	}
 }

@@ -16,9 +16,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
+	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
 func TestResolveInputFromPrompt(t *testing.T) {
@@ -305,6 +308,129 @@ func TestRunHeadlessUsesCoreLocalStack(t *testing.T) {
 	}
 	if !capturedCLITool(captured.Tools, "task") || !capturedCLITool(captured.Tools, "write_file") {
 		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
+	}
+}
+
+func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var captured struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("path = %q, want /chat/completions", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"gpt-tui",
+			"choices":[{"message":{"role":"assistant","content":"core tui pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}
+		}`))
+	}))
+	defer server.Close()
+
+	workspace := t.TempDir()
+	cfg, err := normalizeConfig(gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "tui-user",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   "tui-ws",
+		WorkspaceCWD:   workspace,
+		PermissionMode: "auto-review",
+		Model: gatewayapp.ModelConfig{
+			Alias:        "tui-model",
+			Provider:     "openai",
+			API:          providers.APIOpenAI,
+			Model:        "gpt-tui",
+			BaseURL:      server.URL,
+			AuthType:     providers.AuthNone,
+			MaxOutputTok: 4096,
+		},
+		Sandbox: gatewayapp.SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatalf("normalizeConfig() error = %v", err)
+	}
+	stack, err := newCoreLocalStack(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newCoreLocalStack() error = %v", err)
+	}
+	driver, err := newCoreTUIDriver(context.Background(), stack, "", "cli-tui", renderModelText(cfg))
+	if err != nil {
+		t.Fatalf("newCoreTUIDriver() error = %v", err)
+	}
+
+	turn, err := driver.Submit(context.Background(), gatewaydriver.Submission{Text: "ping"})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if turn == nil {
+		t.Fatal("Submit() turn = nil, want core turn")
+	}
+	defer turn.Close()
+
+	var assistantText string
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case env, ok := <-turn.Events():
+			if !ok {
+				if assistantText != "core tui pong" {
+					t.Fatalf("assistant text = %q, want core tui pong", assistantText)
+				}
+				if captured.Model != "gpt-tui" || len(captured.Messages) == 0 || captured.Messages[len(captured.Messages)-1].Role != "user" {
+					t.Fatalf("captured request = %#v", captured)
+				}
+				return
+			}
+			if env.Err != nil {
+				t.Fatalf("turn event error = %v", env.Err)
+			}
+			if env.Event.Narrative != nil && env.Event.Narrative.Role == kernel.NarrativeRoleAssistant {
+				assistantText += env.Event.Narrative.Text
+			}
+		case <-timer.C:
+			turn.Cancel()
+			t.Fatal("core TUI turn did not finish")
+		}
+	}
+}
+
+func TestCoreTUIStackAllowsEmptyModelConfiguration(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	cfg, err := normalizeConfig(gatewayapp.Config{
+		AppName:        "caelis",
+		UserID:         "empty-model-user",
+		StoreDir:       t.TempDir(),
+		WorkspaceKey:   "empty-model-ws",
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "auto-review",
+		Sandbox:        gatewayapp.SandboxConfig{RequestedType: "host"},
+	})
+	if err != nil {
+		t.Fatalf("normalizeConfig() error = %v", err)
+	}
+	stack, err := newCoreLocalStack(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("newCoreLocalStack() error = %v", err)
+	}
+	driver, err := newCoreTUIDriver(context.Background(), stack, "", "cli-tui", renderModelText(cfg))
+	if err != nil {
+		t.Fatalf("newCoreTUIDriver() error = %v", err)
+	}
+	status, err := driver.LightweightStatus(context.Background())
+	if err != nil {
+		t.Fatalf("LightweightStatus() error = %v", err)
+	}
+	if status.Model != "not configured" {
+		t.Fatalf("status model = %q, want not configured", status.Model)
 	}
 }
 

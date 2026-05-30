@@ -839,9 +839,14 @@ be migrated before retiring the old stack:
    - Migrated baseline: single-shot headless prompts and `caelis acp` now build
      the new `internal/app/local` stack directly and use core-native headless
      and ACP server surfaces.
-   - Still pending: interactive TUI, doctor, sandbox setup/fix/reset/clean,
-     default home layout, full config hydration, setup diagnostics, and command
-     dispatch still depend on `app/gatewayapp` and `kernel.Service`.
+   - Migrated baseline: the production interactive TUI entrypoint now builds
+     the same `internal/app/local` stack and injects `internal/app/services`
+     into the existing TUI driver through `BindAppServices`, so normal TUI
+     prompts, status/model/mode state, and core turn streaming no longer
+     construct `app/gatewayapp`.
+   - Still pending: doctor, sandbox setup/fix/reset/clean, default home
+     layout, full config hydration, setup diagnostics, and several command
+     dispatch paths still depend on `app/gatewayapp` and `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -861,14 +866,17 @@ be migrated before retiring the old stack:
      Basic interactive prompts can therefore enter `internal/app/services`
      without constructing `app/gatewayapp`, while unsupported advanced
      participant operations fail explicitly at the adapter boundary.
+   - Migrated baseline: `internal/cli` now wires the production interactive
+     TUI to this app-service binding for the core-native host runtime path,
+     and the binding includes app settings backed model connect/delete/use
+     operations.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as `/connect`, `/agent`, `/doctor`, `/new`, `/resume`,
-     and `/compact` still depend on the old driver/app contracts. The actual
-     `internal/cli` interactive entrypoint still needs product wiring to the
-     shared app-service driver binding before the old TUI stack can be removed.
+     and `/compact` still have old driver/app assumptions or missing
+     service-native feature parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -914,7 +922,7 @@ be migrated before retiring the old stack:
      fields, request-time model router, session reasoning override propagation,
      session mode service, and ACP stdio model/config/mode projection backed by
      shared app services. The TUI gateway driver also has a service-native
-     binding for model list/use and session mode set/cycle.
+     binding for model connect/list/use/delete and session mode set/cycle.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, TUI command integration, provider discovery
      UI data, additional non-model ACP config providers, and removal of the old

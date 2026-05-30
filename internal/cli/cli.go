@@ -199,7 +199,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		}
 		return runCoreHeadless(ctx, stack, cfg, preferredHeadlessSessionID(*sessionID), input, outFmt, stdout)
 	}
-	stack, err := gatewayapp.NewLocalStack(cfg)
+	stack, err := newCoreLocalStack(ctx, cfg)
 	if err != nil {
 		return err
 	}
@@ -290,8 +290,17 @@ func newCoreLocalStack(ctx context.Context, cfg gatewayapp.Config) (*applocal.St
 }
 
 func coreSettingsManager(ctx context.Context, cfg gatewayapp.Config, provider string) (*appsettings.Manager, error) {
+	doc := appsettings.Document{
+		Runtime: coreconfig.Runtime{
+			AppName:      cfg.AppName,
+			UserID:       cfg.UserID,
+			WorkspaceKey: cfg.WorkspaceKey,
+			WorkspaceCWD: cfg.WorkspaceCWD,
+			Model:        strings.TrimSpace(cfg.Model.Model),
+		},
+	}
 	if strings.TrimSpace(cfg.Model.Model) == "" && strings.TrimSpace(cfg.Model.Provider) == "" && strings.TrimSpace(cfg.Model.BaseURL) == "" {
-		return nil, nil
+		return appsettings.NewManager(ctx, nil, doc)
 	}
 	modelCfg := appsettings.ModelConfig{
 		Alias:                  firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Model)),
@@ -311,14 +320,13 @@ func coreSettingsManager(ctx context.Context, cfg gatewayapp.Config, provider st
 	}
 	modelCfg = appsettings.NormalizeModelConfig(modelCfg)
 	if modelCfg.Provider == "" || modelCfg.Model == "" {
-		return nil, nil
+		return appsettings.NewManager(ctx, nil, doc)
 	}
-	return appsettings.NewManager(ctx, nil, appsettings.Document{
-		Models: appsettings.ModelCatalog{
-			DefaultID: modelCfg.ID,
-			Configs:   []appsettings.ModelConfig{modelCfg},
-		},
-	})
+	doc.Models = appsettings.ModelCatalog{
+		DefaultID: modelCfg.ID,
+		Configs:   []appsettings.ModelConfig{modelCfg},
+	}
+	return appsettings.NewManager(ctx, nil, doc)
 }
 
 func coreModelProvider(provider string, api providers.APIType) string {
@@ -411,7 +419,7 @@ func runSandboxReset(ctx context.Context, stack *gatewayapp.Stack, format output
 	return err
 }
 
-func runInteractive(ctx context.Context, stack *gatewayapp.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
+func runInteractive(ctx context.Context, stack *applocal.Stack, sessionID string, cfg gatewayapp.Config, displayModelText string, stdin io.Reader, stdout io.Writer, stderr io.Writer) error {
 	_ = stderr
 	_ = cfg
 	return runTUI(ctx, stack, strings.TrimSpace(sessionID), displayModelText, stdin, stdout)
