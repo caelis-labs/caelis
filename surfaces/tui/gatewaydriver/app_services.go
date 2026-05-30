@@ -77,6 +77,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.DeleteModelFn = func(ctx context.Context, _ portsession.SessionRef, modelRef string) error {
 		return svc.Models().Delete(ctx, modelRef)
 	}
+	stack.CompactSessionFn = func(ctx context.Context, ref portsession.SessionRef) error {
+		_, err := svc.Compaction().Compact(ctx, appservices.CompactSessionRequest{
+			SessionRef: coreRefFromPort(ref),
+			Trigger:    "manual",
+		})
+		return err
+	}
 	stack.SetSessionModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (string, error) {
 		choice, err := svc.Modes().Set(ctx, coreRefFromPort(ref), mode)
 		if err != nil {

@@ -11,6 +11,7 @@ func Messages(events []session.Event) []model.Message {
 	if len(events) == 0 {
 		return nil
 	}
+	events = eventsFromLatestCompact(events)
 	out := make([]model.Message, 0, len(events))
 	for _, event := range events {
 		if session.IsTransient(event) || event.Message == nil {
@@ -26,4 +27,16 @@ func Messages(events []session.Event) []model.Message {
 
 func SnapshotMessages(snapshot session.Snapshot) []model.Message {
 	return Messages(snapshot.Events)
+}
+
+func eventsFromLatestCompact(events []session.Event) []session.Event {
+	for i := len(events) - 1; i >= 0; i-- {
+		if session.IsTransient(events[i]) {
+			continue
+		}
+		if events[i].Type == session.EventCompact {
+			return events[i:]
+		}
+	}
+	return events
 }

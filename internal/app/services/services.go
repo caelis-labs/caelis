@@ -113,6 +113,10 @@ func (s Services) Modes() ModeService {
 	return ModeService{services: s}
 }
 
+func (s Services) Compaction() CompactionService {
+	return CompactionService{services: s}
+}
+
 type SettingsService struct {
 	services Services
 }

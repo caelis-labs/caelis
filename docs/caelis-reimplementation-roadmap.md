@@ -870,13 +870,16 @@ be migrated before retiring the old stack:
      TUI to this app-service binding for the core-native host runtime path,
      and the binding includes app settings backed model connect/delete/use
      operations.
+   - Migrated baseline: `/compact` now has an app-service binding that records
+     a core-native `session.EventCompact` checkpoint and the new engine rebuilds
+     provider-visible context from the latest checkpoint forward.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as `/connect`, `/agent`, `/doctor`, `/new`, `/resume`,
-     and `/compact` still have old driver/app assumptions or missing
-     service-native feature parity, so the old TUI stack cannot be removed yet.
+   - Slash commands such as `/connect`, `/agent`, `/doctor`, `/new`, and
+     `/resume` still have old driver/app assumptions or missing service-native
+     feature parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1016,10 +1019,13 @@ be migrated before retiring the old stack:
       previews, and production surface controls still live in old paths.
 
 12. Compaction and replay validation
-    - Canonical context reconstruction exists for normal message/tool events.
-    - Automatic/manual compaction, summary events, usage accounting after
-      compaction, compaction prompt policy, and full runtime-vs-reload semantic
-      round-trip tests remain to be migrated.
+    - Migrated baseline: manual TUI compaction through `internal/app/services`
+      now records a canonical compact checkpoint event, and runtime model
+      context reconstruction starts from the latest compact checkpoint.
+    - Still pending: model-backed compact summary generation, automatic
+      compaction, usage accounting after compaction, compaction prompt policy,
+      and full runtime-vs-reload semantic round-trip tests remain to be
+      migrated.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill

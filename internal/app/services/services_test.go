@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,6 +148,75 @@ func TestServicesApplyRuntimeDefaults(t *testing.T) {
 	}
 	if catalog.Prompts[0].Paths[0] != "AGENTS.md" {
 		t.Fatalf("resource catalog was not cloned: %#v", catalog.Prompts[0].Paths)
+	}
+}
+
+func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref: session.Ref{
+					AppName:      "caelis",
+					UserID:       "tester",
+					SessionID:    "sess-compact",
+					WorkspaceKey: "repo",
+				},
+			},
+			Events: []session.Event{
+				{
+					ID:   "evt-1",
+					Type: session.EventUser,
+					Message: &model.Message{
+						Role:  model.RoleUser,
+						Parts: []model.Part{model.NewTextPart("first user request")},
+					},
+				},
+				{
+					ID:   "evt-2",
+					Type: session.EventAssistant,
+					Message: &model.Message{
+						Role:  model.RoleAssistant,
+						Parts: []model.Part{model.NewTextPart("first assistant answer")},
+					},
+				},
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event, err := svc.Compaction().Compact(context.Background(), CompactSessionRequest{
+		SessionRef: session.Ref{SessionID: "sess-compact"},
+		Trigger:    "manual",
+	})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	if event.Type != session.EventCompact || event.Message == nil {
+		t.Fatalf("compact event = %#v, want compact model-visible event", event)
+	}
+	text := event.Message.TextContent()
+	if !strings.Contains(text, "CONTEXT CHECKPOINT") || !strings.Contains(text, "first user request") || !strings.Contains(text, "first assistant answer") {
+		t.Fatalf("compact text = %q, want checkpoint with source summary", text)
+	}
+	meta, ok := event.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("compact meta = %#v, want compact metadata map", event.Meta)
+	}
+	if meta["trigger"] != "manual" || meta["source_event_count"] != 2 || meta["summarized_through_id"] != "evt-2" {
+		t.Fatalf("compact meta = %#v, want manual source summary through evt-2", meta)
+	}
+	if len(engine.events) != 1 || engine.events[0].Type != session.EventCompact {
+		t.Fatalf("recorded events = %#v, want one compact event", engine.events)
 	}
 }
 

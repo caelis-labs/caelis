@@ -75,3 +75,40 @@ func TestMessagesRebuildsOnlyCanonicalModelVisibleMessages(t *testing.T) {
 		t.Fatalf("messages were not cloned: %q", messages[0].TextContent())
 	}
 }
+
+func TestMessagesStartAtLatestCompactCheckpoint(t *testing.T) {
+	events := []session.Event{
+		{
+			Type: session.EventUser,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("old prompt")},
+			},
+		},
+		{
+			Type: session.EventCompact,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("CONTEXT CHECKPOINT\ncurrent summary")},
+			},
+		},
+		{
+			Type: session.EventAssistant,
+			Message: &model.Message{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("new answer")},
+			},
+		},
+	}
+
+	messages := Messages(events)
+	if len(messages) != 2 {
+		t.Fatalf("messages = %d, want compact checkpoint plus post-compact assistant", len(messages))
+	}
+	if got := messages[0].TextContent(); got != "CONTEXT CHECKPOINT\ncurrent summary" {
+		t.Fatalf("first message = %q, want compact checkpoint", got)
+	}
+	if got := messages[1].TextContent(); got != "new answer" {
+		t.Fatalf("second message = %q, want post-compact assistant", got)
+	}
+}

@@ -77,6 +77,12 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if err := stack.DeleteModel(ctx, portsession.SessionRef{SessionID: "sess-app"}, "next-model"); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
+	if err := stack.CompactSession(ctx, portsession.SessionRef{SessionID: "sess-app"}); err != nil {
+		t.Fatalf("CompactSession() error = %v", err)
+	}
+	if len(engine.events) != 1 || engine.events[0].Type != coresession.EventCompact {
+		t.Fatalf("compact events = %#v, want app-service compact event", engine.events)
+	}
 
 	status, err := driver.UseModel(ctx, "test-model", "high")
 	if err != nil {
@@ -127,6 +133,7 @@ type appServiceDriverEngine struct {
 	start    coresession.StartRequest
 	state    coresession.State
 	snapshot coresession.Snapshot
+	events   []coresession.Event
 	turn     coreruntime.TurnRequest
 }
 
@@ -168,7 +175,8 @@ func (e *appServiceDriverEngine) LoadSession(_ context.Context, ref coresession.
 	return snapshot, nil
 }
 
-func (e *appServiceDriverEngine) RecordEvents(context.Context, coresession.Ref, []coresession.Event) (coresession.Cursor, error) {
+func (e *appServiceDriverEngine) RecordEvents(_ context.Context, _ coresession.Ref, events []coresession.Event) (coresession.Cursor, error) {
+	e.events = cloneCoreEvents(events)
 	return "", nil
 }
 
@@ -240,4 +248,12 @@ func cloneCoreState(in coresession.State) coresession.State {
 		return nil
 	}
 	return coresession.State(maps.Clone(in))
+}
+
+func cloneCoreEvents(in []coresession.Event) []coresession.Event {
+	out := make([]coresession.Event, 0, len(in))
+	for _, event := range in {
+		out = append(out, coresession.CloneEvent(event))
+	}
+	return out
 }
