@@ -108,7 +108,7 @@ func (g *appServiceGateway) ListSessions(ctx context.Context, req kernel.ListSes
 	if err != nil {
 		return portsession.SessionList{}, err
 	}
-	return sessionListFromCore(page), nil
+	return g.sessionListFromCore(ctx, page), nil
 }
 
 func (g *appServiceGateway) ReplayEvents(ctx context.Context, req kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error) {
@@ -573,20 +573,54 @@ func portEventFromCore(event coresession.Event) portsession.Event {
 	}
 }
 
-func sessionListFromCore(page coresession.SessionPage) portsession.SessionList {
+func (g *appServiceGateway) sessionListFromCore(ctx context.Context, page coresession.SessionPage) portsession.SessionList {
 	out := portsession.SessionList{
 		Sessions:   make([]portsession.SessionSummary, 0, len(page.Sessions)),
 		NextCursor: string(page.NextCursor),
 	}
 	for _, item := range page.Sessions {
+		title := strings.TrimSpace(item.Session.Title)
+		if title == "" {
+			if snapshot, err := g.services.Sessions().Load(ctx, item.Session.Ref); err == nil {
+				title = resumeTitleFromCoreSnapshot(snapshot)
+			}
+		}
 		out.Sessions = append(out.Sessions, portsession.SessionSummary{
 			SessionRef: portRefFromCore(item.Session.Ref),
 			CWD:        strings.TrimSpace(item.Session.Workspace.CWD),
-			Title:      strings.TrimSpace(item.Session.Title),
+			Title:      title,
 			UpdatedAt:  item.Session.UpdatedAt,
 		})
 	}
 	return out
+}
+
+func resumeTitleFromCoreSnapshot(snapshot coresession.Snapshot) string {
+	for _, event := range snapshot.Events {
+		if event.Type != coresession.EventUser {
+			continue
+		}
+		if text := compactResumeTitle(coresession.EventText(event), 96); text != "" {
+			return text
+		}
+	}
+	for _, event := range snapshot.Events {
+		if text := compactResumeTitle(coresession.EventText(event), 96); text != "" {
+			return text
+		}
+	}
+	return ""
+}
+
+func compactResumeTitle(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	if limit <= len("...") {
+		return text[:limit]
+	}
+	return strings.TrimSpace(text[:limit-len("...")]) + "..."
 }
 
 func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []kernel.ActiveTurnState) kernel.ControlPlaneState {

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
@@ -129,8 +130,68 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{
+		page: coresession.SessionPage{
+			Sessions: []coresession.SessionSummary{{
+				Session: coresession.Session{
+					Ref: coresession.Ref{
+						AppName:      "caelis",
+						UserID:       "user-1",
+						SessionID:    "sess-resume",
+						WorkspaceKey: "repo",
+					},
+					Workspace: coresession.Workspace{Key: "repo", CWD: "/repo"},
+				},
+			}},
+		},
+		snapshot: coresession.Snapshot{
+			Session: coresession.Session{
+				Ref:       coresession.Ref{AppName: "caelis", UserID: "user-1", SessionID: "sess-resume", WorkspaceKey: "repo"},
+				Workspace: coresession.Workspace{Key: "repo", CWD: "/repo"},
+			},
+			Events: []coresession.Event{{
+				Type: coresession.EventUser,
+				Message: &coremodel.Message{
+					Role:  coremodel.RoleUser,
+					Parts: []coremodel.Part{coremodel.NewTextPart("  resume this canonical prompt\nwith extra spacing  ")},
+				},
+			}},
+		},
+	}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	candidates, err := driver.ListSessions(ctx, 10)
+	if err != nil {
+		t.Fatalf("ListSessions() error = %v", err)
+	}
+	if len(candidates) != 1 {
+		t.Fatalf("ListSessions() = %#v, want one prompt-backed candidate", candidates)
+	}
+	if candidates[0].SessionID != "sess-resume" || candidates[0].Prompt != "resume this canonical prompt with extra spacing" {
+		t.Fatalf("candidate = %#v, want prompt fallback from canonical user event", candidates[0])
+	}
+}
+
 type appServiceDriverEngine struct {
 	start    coresession.StartRequest
+	page     coresession.SessionPage
 	state    coresession.State
 	snapshot coresession.Snapshot
 	events   []coresession.Event
@@ -163,7 +224,7 @@ func (e *appServiceDriverEngine) StartSession(_ context.Context, req coresession
 }
 
 func (e *appServiceDriverEngine) ListSessions(context.Context, coresession.ListQuery) (coresession.SessionPage, error) {
-	return coresession.SessionPage{}, nil
+	return coresession.CloneSessionPage(e.page), nil
 }
 
 func (e *appServiceDriverEngine) LoadSession(_ context.Context, ref coresession.Ref) (coresession.Snapshot, error) {

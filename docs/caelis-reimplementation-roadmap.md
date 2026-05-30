@@ -873,13 +873,17 @@ be migrated before retiring the old stack:
    - Migrated baseline: `/compact` now has an app-service binding that records
      a core-native `session.EventCompact` checkpoint and the new engine rebuilds
      provider-visible context from the latest checkpoint forward.
+   - Migrated baseline: `/new` and `/resume` now use the app-service TUI
+     binding for core-native session start/list/load/replay, and resume lists
+     can derive a display prompt from canonical user events when a session has
+     no generated title yet.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as `/connect`, `/agent`, `/doctor`, `/new`, and
-     `/resume` still have old driver/app assumptions or missing service-native
-     feature parity, so the old TUI stack cannot be removed yet.
+   - Slash commands such as `/connect`, `/agent`, and `/doctor` still have old
+     driver/app assumptions or missing service-native feature parity, so the
+     old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1052,9 +1056,12 @@ be migrated before retiring the old stack:
       `session/load`, and `session/resume` from the same core-native session
       contract, and `session/load` replays canonical events as ACP
       `session/update` notifications.
-    - Still pending: TUI/CLI `/resume` command wiring, richer title generation,
-      metadata search, cross-workspace filters, current on-disk legacy session
-      layout migration, and reload UX are not implemented.
+    - Migrated baseline: TUI `/new` and `/resume` now use the app-service
+      driver binding over the same core session list/load/replay contract, with
+      canonical user-event prompt fallback for untitled sessions.
+    - Still pending: richer title generation, metadata search, cross-workspace
+      filters, current on-disk legacy session layout migration, and reload UX
+      polish are not implemented.
 
 ### Next Migration Milestones
 
