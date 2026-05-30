@@ -208,6 +208,22 @@ func (s ModelService) ClearSession(ctx context.Context, ref session.Ref) error {
 	})
 }
 
+func (s ModelService) CurrentReasoningEffort(ctx context.Context, ref session.Ref) (string, error) {
+	if s.services.engine == nil {
+		return "", nil
+	}
+	ref = s.withDefaults(ref)
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return "", nil
+	}
+	snapshot, err := s.services.engine.LoadSession(ctx, ref)
+	if err != nil {
+		return "", err
+	}
+	value, _ := snapshot.State[StateCurrentReasoningEffort].(string)
+	return strings.ToLower(strings.TrimSpace(value)), nil
+}
+
 func (s ModelService) Current(ctx context.Context, ref session.Ref) (appsettings.ModelConfig, bool, error) {
 	if s.services.settings == nil {
 		return appsettings.ModelConfig{}, false, nil
@@ -235,7 +251,13 @@ func (s ModelService) RuntimeProfile(ctx context.Context, ref session.Ref) (conf
 	if err != nil || !ok {
 		return config.ModelProfile{}, ok, err
 	}
-	return appsettings.RuntimeModelProfile(cfg), true, nil
+	profile := appsettings.RuntimeModelProfile(cfg)
+	if effort, err := s.CurrentReasoningEffort(ctx, ref); err != nil {
+		return config.ModelProfile{}, false, err
+	} else if effort != "" {
+		profile.ReasoningEffort = effort
+	}
+	return profile, true, nil
 }
 
 func (s ModelService) withDefaults(ref session.Ref) session.Ref {
@@ -452,6 +474,7 @@ type BeginTurnRequest struct {
 	Input        string
 	ContentParts []model.ContentPart
 	Model        string
+	Reasoning    model.ReasoningConfig
 	Surface      string
 	Mode         string
 	Meta         map[string]any
@@ -477,11 +500,20 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 			modelRef = cfg.ID
 		}
 	}
+	reasoning := req.Reasoning
+	if reasoning.Effort == "" {
+		effort, err := s.services.Models().CurrentReasoningEffort(ctx, ref)
+		if err != nil {
+			return nil, err
+		}
+		reasoning.Effort = effort
+	}
 	return s.services.engine.BeginTurn(ctx, coreruntime.TurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
 		ContentParts: model.CloneContentParts(req.ContentParts),
 		Model:        modelRef,
+		Reasoning:    reasoning,
 		Surface:      strings.TrimSpace(req.Surface),
 		Mode:         strings.TrimSpace(req.Mode),
 		Meta:         maps.Clone(req.Meta),

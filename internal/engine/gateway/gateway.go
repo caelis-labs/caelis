@@ -194,6 +194,7 @@ func (g *Gateway) execute(ctx context.Context, snapshot session.Snapshot, req co
 		Input:        req.Input,
 		ContentParts: req.ContentParts,
 		Model:        req.Model,
+		Reasoning:    req.Reasoning,
 		TurnID:       handle.id,
 		Surface:      req.Surface,
 		StartedAt:    handle.startedAt,

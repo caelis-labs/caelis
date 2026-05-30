@@ -38,6 +38,29 @@ func TestLoopPassesConfiguredInstructionsToProvider(t *testing.T) {
 	}
 }
 
+func TestLoopPassesReasoningConfigToProvider(t *testing.T) {
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("pong")},
+	}}
+	runner, err := New(Config{Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), Request{
+		Session:   session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:     "ping",
+		TurnID:    "turn-1",
+		Reasoning: model.ReasoningConfig{Effort: "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if provider.request.Reasoning.Effort != "high" {
+		t.Fatalf("reasoning = %#v, want high effort", provider.request.Reasoning)
+	}
+}
+
 func TestLoopRecordsPlanEventFromPlanToolResult(t *testing.T) {
 	const planToolName = "update_plan"
 	rawPlan, err := json.Marshal(map[string]any{
@@ -109,6 +132,7 @@ func (p *capturingProvider) Stream(_ context.Context, req model.Request) (model.
 		Messages:     cloneTestMessages(req.Messages),
 		Tools:        req.Tools,
 		Instructions: append([]string(nil), req.Instructions...),
+		Reasoning:    req.Reasoning,
 		Stream:       req.Stream,
 	}
 	return &model.StaticStream{Events: []model.StreamEvent{{
@@ -193,6 +217,7 @@ func (p *scriptedProvider) Stream(_ context.Context, req model.Request) (model.S
 		Messages:     cloneTestMessages(req.Messages),
 		Tools:        append([]model.ToolSpec(nil), req.Tools...),
 		Instructions: append([]string(nil), req.Instructions...),
+		Reasoning:    req.Reasoning,
 		Stream:       req.Stream,
 	})
 	if len(p.responses) == 0 {

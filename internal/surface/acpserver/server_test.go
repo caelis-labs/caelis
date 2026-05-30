@@ -9,6 +9,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/model"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	"github.com/OnslaughtSnail/caelis/internal/app/local"
@@ -404,6 +405,79 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 }
 
+func TestPromptUsesSessionModelSelectionFromAppServices(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:                  "alpha",
+		Provider:               "openai-compatible",
+		Model:                  "gpt-alpha",
+		BaseURL:                "https://api.alpha.test/v1",
+		DefaultReasoningEffort: "low",
+		ReasoningMode:          "fixed",
+		ReasoningLevels:        []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:                  "beta",
+		Provider:               "openai-compatible",
+		Model:                  "gpt-beta",
+		BaseURL:                "https://api.beta.test/v1",
+		DefaultReasoningEffort: "low",
+		ReasoningMode:          "fixed",
+		ReasoningLevels:        []string{"low", "high"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SetDefaultModel(ctx, alpha.ID); err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingServiceEngine{state: session.State{}}
+	services, err := appservices.New(appservices.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := New(Config{Services: services})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newResp, err := server.newSession(ctx, schema.NewSessionRequest{CWD: "/tmp/project"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.setSessionModel(ctx, schema.SetSessionModelRequest{SessionID: newResp.SessionID, ModelID: beta.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.setSessionConfigOption(ctx, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "reasoning_effort",
+		Value:     "high",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := server.prompt(ctx, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "ping"}),
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if engine.turn.Model != beta.ID || engine.turn.Reasoning.Effort != "high" {
+		t.Fatalf("turn request = %#v, want beta/high from session state", engine.turn)
+	}
+}
+
 func TestServeStdioClosesActiveSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -751,4 +825,109 @@ func (p *blockingProvider) Stream(ctx context.Context, _ model.Request) (model.S
 	<-ctx.Done()
 	close(p.cancelled)
 	return nil, ctx.Err()
+}
+
+type recordingServiceEngine struct {
+	state session.State
+	turn  coreruntime.TurnRequest
+}
+
+func (e *recordingServiceEngine) StartSession(_ context.Context, req session.StartRequest) (session.Session, error) {
+	return session.Session{
+		Ref: session.Ref{
+			AppName:      req.AppName,
+			UserID:       req.UserID,
+			SessionID:    "sess-routing",
+			WorkspaceKey: req.Workspace.Key,
+		},
+		Workspace: req.Workspace,
+	}, nil
+}
+
+func (e *recordingServiceEngine) ListSessions(context.Context, session.ListQuery) (session.SessionPage, error) {
+	return session.SessionPage{}, nil
+}
+
+func (e *recordingServiceEngine) LoadSession(_ context.Context, ref session.Ref) (session.Snapshot, error) {
+	return session.Snapshot{
+		Session: session.Session{Ref: ref},
+		State:   cloneTestState(e.state),
+	}, nil
+}
+
+func (e *recordingServiceEngine) RecordEvents(context.Context, session.Ref, []session.Event) (session.Cursor, error) {
+	return "", nil
+}
+
+func (e *recordingServiceEngine) UpdateSessionState(_ context.Context, _ session.Ref, patch session.StatePatch) error {
+	next, err := patch(cloneTestState(e.state))
+	if err != nil {
+		return err
+	}
+	e.state = cloneTestState(next)
+	return nil
+}
+
+func (e *recordingServiceEngine) BeginTurn(_ context.Context, req coreruntime.TurnRequest) (coreruntime.Turn, error) {
+	e.turn = req
+	events := make(chan coreruntime.EventEnvelope)
+	close(events)
+	return emptyTurn{events: events}, nil
+}
+
+func (e *recordingServiceEngine) Interrupt(context.Context, session.Ref) error {
+	return nil
+}
+
+func (e *recordingServiceEngine) Replay(context.Context, coreruntime.ReplayRequest) (<-chan coreruntime.EventEnvelope, error) {
+	events := make(chan coreruntime.EventEnvelope)
+	close(events)
+	return events, nil
+}
+
+type emptyTurn struct {
+	events <-chan coreruntime.EventEnvelope
+}
+
+func (t emptyTurn) ID() string {
+	return "turn"
+}
+
+func (t emptyTurn) RunID() string {
+	return "run"
+}
+
+func (t emptyTurn) SessionRef() session.Ref {
+	return session.Ref{SessionID: "sess-routing"}
+}
+
+func (t emptyTurn) StartedAt() time.Time {
+	return time.Time{}
+}
+
+func (t emptyTurn) Events() <-chan coreruntime.EventEnvelope {
+	return t.events
+}
+
+func (t emptyTurn) Submit(context.Context, coreruntime.Submission) error {
+	return nil
+}
+
+func (t emptyTurn) Cancel() coreruntime.CancelResult {
+	return coreruntime.CancelResult{Status: coreruntime.CancelCancelled}
+}
+
+func (t emptyTurn) Close() error {
+	return nil
+}
+
+func cloneTestState(in session.State) session.State {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(session.State, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }

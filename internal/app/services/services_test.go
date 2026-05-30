@@ -272,8 +272,14 @@ func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || profile.Model != "gpt-test" || profile.BaseURL != "https://api.example.test/v1" {
-		t.Fatalf("runtime profile = %#v, %v, want selected model profile", profile, ok)
+	if !ok || profile.Model != "gpt-test" || profile.BaseURL != "https://api.example.test/v1" || profile.ReasoningEffort != "high" {
+		t.Fatalf("runtime profile = %#v, %v, want selected model profile with reasoning override", profile, ok)
+	}
+	if _, err := svc.Turns().Begin(ctx, BeginTurnRequest{SessionRef: session.Ref{SessionID: "sess-1"}, Input: "ping"}); err != nil {
+		t.Fatal(err)
+	}
+	if engine.turn.Model != cfg.ID || engine.turn.Reasoning.Effort != "high" {
+		t.Fatalf("turn request = %#v, want selected model and reasoning override", engine.turn)
 	}
 	if err := svc.Models().ClearSession(ctx, session.Ref{SessionID: "sess-1"}); err != nil {
 		t.Fatal(err)

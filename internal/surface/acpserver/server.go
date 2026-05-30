@@ -281,16 +281,7 @@ func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.P
 	if err != nil {
 		return schema.PromptResponse{}, err
 	}
-	turn, err := s.engine.BeginTurn(ctx, coreruntime.TurnRequest{
-		SessionRef: session.Ref{
-			AppName:   s.appName,
-			UserID:    s.userID,
-			SessionID: sessionID,
-		},
-		Input:        input,
-		ContentParts: parts,
-		Surface:      "acp",
-	})
+	turn, err := s.beginTurn(ctx, s.sessionRef(sessionID), input, parts)
 	if err != nil {
 		return schema.PromptResponse{}, err
 	}
@@ -304,6 +295,23 @@ func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.P
 		}
 	}
 	return schema.PromptResponse{StopReason: stopReason}, nil
+}
+
+func (s *Server) beginTurn(ctx context.Context, ref session.Ref, input string, parts []model.ContentPart) (coreruntime.Turn, error) {
+	if s.services.Engine() != nil {
+		return s.services.Turns().Begin(ctx, appservices.BeginTurnRequest{
+			SessionRef:   ref,
+			Input:        input,
+			ContentParts: parts,
+			Surface:      "acp",
+		})
+	}
+	return s.engine.BeginTurn(ctx, coreruntime.TurnRequest{
+		SessionRef:   ref,
+		Input:        input,
+		ContentParts: parts,
+		Surface:      "acp",
+	})
 }
 
 func (s *Server) loadSnapshot(ctx context.Context, sessionID string) (session.Snapshot, error) {

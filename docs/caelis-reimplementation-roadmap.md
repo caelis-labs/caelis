@@ -812,10 +812,11 @@ The completed work is intentionally limited to the reusable skeleton:
   session/list, session/load, session/resume, session/close, cancel,
   `session/update`, and permission request bridging. It also exposes configured
   model metadata and model/reasoning selection through ACP session model/config
-  methods when the shared app settings service is available. `session/load`
-  replays canonical stored events through the same ACP projection path used for
-  live updates, and `session/close` interrupts any active turn while remaining
-  idempotent when no turn is running.
+  methods when the shared app settings service is available, and applies those
+  session overrides to subsequent ACP prompts through the shared app turn
+  service. `session/load` replays canonical stored events through the same ACP
+  projection path used for live updates, and `session/close` interrupts any
+  active turn while remaining idempotent when no turn is running.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
 - Architecture lint rules for the new package boundaries.
@@ -863,7 +864,9 @@ be migrated before retiring the old stack:
    - The new ACP server now exposes session model metadata, `session/set_model`,
      and model/reasoning `session/set_config_option` through
      `internal/app/services.Models()` rather than owning config semantics in
-     the ACP surface.
+     the ACP surface. ACP prompts now enter through the shared app turn service
+     when services are available, so selected model and reasoning overrides are
+     part of the actual runtime model request instead of display-only state.
    - The new ACP server now handles `session/close` by cancelling active core
      runtime turns and treating already-idle sessions as successfully closed.
    - Still pending: terminal integration, client mode flows, non-model config
@@ -874,8 +877,8 @@ be migrated before retiring the old stack:
      provider profile/model config normalization, generated aliases/ids, model
      connect/delete/default/use service methods, session model override state,
      context window/output token fields, reasoning effort fields, auth/header
-     fields, request-time model router, and ACP stdio model/config projection
-     backed by shared app services.
+     fields, request-time model router, session reasoning override propagation,
+     and ACP stdio model/config projection backed by shared app services.
    - Still pending: production CLI flag mapping, default home-dir bootstrapping,
      connect wizard persistence, TUI command integration, provider discovery
      UI data, non-model ACP config providers, and removal of the old

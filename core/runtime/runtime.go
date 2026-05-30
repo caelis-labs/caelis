@@ -25,13 +25,14 @@ type Engine interface {
 }
 
 type TurnRequest struct {
-	SessionRef   session.Ref         `json:"session_ref"`
-	Input        string              `json:"input,omitempty"`
-	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
-	Model        string              `json:"model,omitempty"`
-	Surface      string              `json:"surface,omitempty"`
-	Mode         string              `json:"mode,omitempty"`
-	Meta         map[string]any      `json:"meta,omitempty"`
+	SessionRef   session.Ref           `json:"session_ref"`
+	Input        string                `json:"input,omitempty"`
+	ContentParts []model.ContentPart   `json:"content_parts,omitempty"`
+	Model        string                `json:"model,omitempty"`
+	Reasoning    model.ReasoningConfig `json:"reasoning,omitempty"`
+	Surface      string                `json:"surface,omitempty"`
+	Mode         string                `json:"mode,omitempty"`
+	Meta         map[string]any        `json:"meta,omitempty"`
 }
 
 type ReplayRequest struct {

@@ -43,6 +43,7 @@ type Request struct {
 	Input         string
 	ContentParts  []model.ContentPart
 	Model         string
+	Reasoning     model.ReasoningConfig
 	TurnID        string
 	Surface       string
 	StartedAt     time.Time
@@ -108,6 +109,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 			Messages:     cloneMessages(messages),
 			Tools:        tool.ModelSpecs(tools),
 			Instructions: cloneStrings(l.instructions),
+			Reasoning:    req.Reasoning,
 			Stream:       true,
 		})
 		if err != nil {
