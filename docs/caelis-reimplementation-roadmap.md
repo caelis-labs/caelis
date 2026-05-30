@@ -609,6 +609,10 @@ alongside the old stack without importing it:
   provider with text, image, tool-use/tool-result, reasoning replay signature,
   usage, and model-listing mapping. It now backs Anthropic,
   Anthropic-compatible, and MiniMax factories in the app registry.
+- `internal/adapters/model/gemini`: core-native Gemini API provider with
+  text/image/file content, tool-call/tool-result mapping, thought-signature
+  replay metadata, JSON/schema output, reasoning configuration, usage, and
+  model-listing mapping.
 - `internal/adapters/model/ollama`: core-native Ollama `/api/chat`
   provider with model listing, tool-call mapping, reasoning text, JSON output
   mode, and usage mapping.
@@ -646,7 +650,7 @@ The current verification path covers:
 
 - local stack -> shared services -> engine -> canonical memory store
 - configured local stack -> OpenAI-compatible provider -> JSONL store
-- configured local stack -> Anthropic/MiniMax and
+- configured local stack -> Anthropic/MiniMax, Gemini, and
   DeepSeek/OpenRouter/Mimo/Volcengine provider profiles -> JSONL store
 - configured local stack -> native Ollama provider -> JSONL store
 - configured local stack -> SQLite store -> persisted canonical events after
@@ -762,6 +766,10 @@ The completed work is intentionally limited to the reusable skeleton:
   tool-use/tool-result mapping, thinking signature replay metadata, usage,
   model listing, and Anthropic-compatible MiniMax auth/default endpoint
   behavior.
+- Gemini API provider adapter sufficient for text/image/file content,
+  tool-call/tool-result mapping, thought-signature replay metadata, usage,
+  model listing, JSON/schema output, and Gemini 2.x budget-based reasoning
+  configuration.
 - Native Ollama provider adapter sufficient for `/api/chat`, model listing,
   tool calls, reasoning text, JSON output mode, and usage mapping.
 - Host sandbox adapter, core-native async command sessions, core-native
@@ -849,7 +857,7 @@ be migrated before retiring the old stack:
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
-     Anthropic-compatible, MiniMax, DeepSeek, OpenRouter, Mimo/Xiaomi,
+     Anthropic-compatible, MiniMax, Gemini, DeepSeek, OpenRouter, Mimo/Xiaomi,
      Volcengine, Volcengine Coding Plan, and native Ollama `/api/chat` now
      implement `core/model.Provider` and can be selected by the new local stack
      and headless CLI.
@@ -857,6 +865,11 @@ be migrated before retiring the old stack:
      endpoints, token lookup, API-version headers, text/image content mapping,
      tool-use/tool-result mapping, thinking signature replay metadata, usage
      mapping, and model listing.
+   - Gemini now has a core-native API adapter with default endpoint, API-key
+     header auth, text/image/file content mapping, tool-call/tool-result
+     mapping, thought-signature replay metadata, JSON/schema output,
+     reasoning config mapping, usage mapping, model listing, and settings
+     endpoint normalization.
    - DeepSeek now has a core-native provider profile with default endpoint,
      token lookup, structured JSON output, reasoning content parsing, and
      thinking-mode request defaults for current reasoning models.
@@ -866,9 +879,9 @@ be migrated before retiring the old stack:
    - Mimo/Xiaomi and Volcengine now have core-native provider profiles with
      default endpoints, token lookup, structured JSON output, reasoning-content
      parsing, thinking payload mapping, and settings endpoint normalization.
-   - Still pending: Gemini, CodeFree, broader model discovery, detailed error
-     mapping, SSE streaming, provider-specific tool/argument behavior beyond
-     the migrated profiles, and removal of the corresponding old
+   - Still pending: CodeFree, broader model discovery, detailed error mapping,
+     SSE streaming, provider-specific tool/argument behavior beyond the
+     migrated profiles, and removal of the corresponding old
      `impl/model/providers` code once no old-stack entrypoint requires it.
 
 7. Sandbox backends and policy

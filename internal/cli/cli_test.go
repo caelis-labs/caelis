@@ -435,6 +435,70 @@ func TestRunHeadlessUsesCoreAnthropicProvider(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreGeminiProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	var apiKeyHeader string
+	var captured struct {
+		Contents []struct {
+			Role string `json:"role"`
+		} `json:"contents"`
+		Tools []struct {
+			FunctionDeclarations []struct {
+				Name string `json:"name"`
+			} `json:"functionDeclarations"`
+		} `json:"tools"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1beta/models/gemini-test:generateContent" {
+			t.Fatalf("path = %q, want Gemini generateContent", r.URL.Path)
+		}
+		apiKeyHeader = r.Header.Get("x-goog-api-key")
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"modelVersion":"gemini-test",
+			"candidates":[{"content":{"role":"model","parts":[{"text":"gemini pong"}]}}],
+			"usageMetadata":{"promptTokenCount":6,"candidatesTokenCount":2,"totalTokenCount":8}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-gemini-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "gemini",
+		"-model", "gemini-test",
+		"-base-url", server.URL + "/v1beta",
+		"-token", "gemini-token",
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "gemini pong" || result.PromptTokens != 6 {
+		t.Fatalf("headless result = %#v, want Gemini output and usage", result)
+	}
+	if apiKeyHeader != "gemini-token" {
+		t.Fatalf("x-goog-api-key = %q, want token", apiKeyHeader)
+	}
+	if len(captured.Contents) == 0 || captured.Contents[len(captured.Contents)-1].Role != "user" {
+		t.Fatalf("captured request = %#v", captured)
+	}
+	if !capturedGeminiTool(captured.Tools, "task") || !capturedGeminiTool(captured.Tools, "write_file") {
+		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
+	}
+}
+
 func TestRunHeadlessUsesCoreDeepSeekProvider(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var authHeader string
@@ -830,6 +894,21 @@ func capturedAnthropicTool(tools []struct {
 	for _, tool := range tools {
 		if tool.Name == name {
 			return true
+		}
+	}
+	return false
+}
+
+func capturedGeminiTool(tools []struct {
+	FunctionDeclarations []struct {
+		Name string `json:"name"`
+	} `json:"functionDeclarations"`
+}, name string) bool {
+	for _, tool := range tools {
+		for _, declaration := range tool.FunctionDeclarations {
+			if declaration.Name == name {
+				return true
+			}
 		}
 	}
 	return false

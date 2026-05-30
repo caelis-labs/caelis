@@ -138,6 +138,7 @@ func TestNormalizeModelConfigKnownProviderEndpointIDs(t *testing.T) {
 		{name: "mimo default", provider: "xiaomi", baseURL: "https://api.xiaomimimo.com/v1", wantID: "api-cn", wantPrefix: "xiaomi@api-cn/"},
 		{name: "mimo token plan", provider: "xiaomi", baseURL: "https://token-plan-cn.xiaomimimo.com/v1", wantID: "token-plan-cn", wantPrefix: "xiaomi@token-plan-cn/"},
 		{name: "minimax default", provider: "minimax", baseURL: "https://api.minimaxi.com/anthropic", wantID: "default", wantPrefix: "minimax@default/"},
+		{name: "gemini default", provider: "gemini", baseURL: "https://generativelanguage.googleapis.com/v1beta", wantID: "default", wantPrefix: "gemini@default/"},
 		{name: "volcengine standard", provider: "volcengine", baseURL: "https://ark.cn-beijing.volces.com/api/v3", wantID: "standard", wantPrefix: "volcengine@standard/"},
 		{name: "volcengine coding", provider: "volcengine-coding-plan", baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", wantID: "coding-plan", wantPrefix: "volcengine-coding-plan@coding-plan/"},
 	}

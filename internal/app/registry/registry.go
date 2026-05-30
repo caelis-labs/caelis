@@ -19,6 +19,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	modelanthropic "github.com/OnslaughtSnail/caelis/internal/adapters/model/anthropic"
+	modelgemini "github.com/OnslaughtSnail/caelis/internal/adapters/model/gemini"
 	modelollama "github.com/OnslaughtSnail/caelis/internal/adapters/model/ollama"
 	modelopenai "github.com/OnslaughtSnail/caelis/internal/adapters/model/openai"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
@@ -75,6 +76,9 @@ func RegisterDefaults(r *Registry) error {
 		}
 	}
 	if err := r.RegisterModelProvider("minimax", miniMaxProviderFactory); err != nil {
+		return err
+	}
+	if err := r.RegisterModelProvider("gemini", geminiProviderFactory); err != nil {
 		return err
 	}
 	if err := r.RegisterModelProvider("deepseek", deepSeekProviderFactory); err != nil {
@@ -373,6 +377,7 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 const (
 	anthropicDefaultBaseURL            = "https://api.anthropic.com"
 	deepSeekDefaultBaseURL             = "https://api.deepseek.com/v1"
+	geminiDefaultBaseURL               = "https://generativelanguage.googleapis.com/v1beta"
 	miniMaxDefaultBaseURL              = "https://api.minimaxi.com/anthropic"
 	mimoDefaultBaseURL                 = "https://api.xiaomimimo.com/v1"
 	openRouterDefaultBaseURL           = "https://openrouter.ai/api/v1"
@@ -416,6 +421,19 @@ func miniMaxProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (
 		Model:                  cfg.Model,
 		MaxOutputTokens:        firstPositive(cfg.MaxOutputTokens, 4096),
 		DefaultReasoningBudget: 4096,
+	})
+}
+
+func geminiProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	token := modelToken(cfg)
+	return modelgemini.New(modelgemini.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "gemini"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  geminiDefaultBaseURL,
+		APIKey:          token,
+		AuthHeader:      firstNonEmpty(cfg.HeaderKey, "x-goog-api-key"),
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
 	})
 }
 

@@ -290,6 +290,8 @@ func coreModelProvider(provider string, api providers.APIType) string {
 		return "anthropic"
 	case "minimax":
 		return "minimax"
+	case "gemini":
+		return "gemini"
 	case "deepseek":
 		return "deepseek"
 	case "mimo", "xiaomi":
@@ -648,6 +650,17 @@ func normalizeConfig(cfg gatewayapp.Config) (gatewayapp.Config, error) {
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "ANTHROPIC_API_KEY"
+		}
+	case "gemini":
+		cfg.Model.Provider = "gemini"
+		if cfg.Model.API == "" {
+			cfg.Model.API = providers.APIGemini
+		}
+		if cfg.Model.TokenEnv == "" {
+			cfg.Model.TokenEnv = "GEMINI_API_KEY"
+		}
+		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
+			cfg.Model.BaseURL = "https://generativelanguage.googleapis.com/v1beta"
 		}
 	case "ollama":
 		cfg.Model.Provider = "ollama"
