@@ -292,6 +292,8 @@ func coreModelProvider(provider string, api providers.APIType) string {
 		return "minimax"
 	case "gemini":
 		return "gemini"
+	case "codefree":
+		return "codefree"
 	case "deepseek":
 		return "deepseek"
 	case "mimo", "xiaomi":

@@ -3,6 +3,9 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -499,6 +502,74 @@ func TestRunHeadlessUsesCoreGeminiProvider(t *testing.T) {
 	}
 }
 
+func TestRunHeadlessUsesCoreCodeFreeProvider(t *testing.T) {
+	testenv.SetHome(t, t.TempDir())
+	credsPath := writeCodeFreeCredentialsForCLITest(t, "272182", "codefree-api-key")
+	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
+	var headers http.Header
+	var captured struct {
+		Model    string `json:"model"`
+		Messages []struct {
+			Role string `json:"role"`
+		} `json:"messages"`
+		Tools []struct {
+			Function struct {
+				Name string `json:"name"`
+			} `json:"function"`
+		} `json:"tools"`
+		Stream bool `json:"stream"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/acbackend/codechat/v1/completions" {
+			t.Fatalf("path = %q, want CodeFree completions", r.URL.Path)
+		}
+		headers = r.Header.Clone()
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"model":"GLM-4.7",
+			"choices":[{"message":{"role":"assistant","content":"codefree pong"},"finish_reason":"stop"}],
+			"usage":{"prompt_tokens":7,"completion_tokens":2,"total_tokens":9}
+		}`))
+	}))
+	defer server.Close()
+
+	var out bytes.Buffer
+	var errBuf bytes.Buffer
+	err := run(context.Background(), []string{
+		"-p", "ping",
+		"-format", "json",
+		"-store-dir", t.TempDir(),
+		"-workspace-key", "headless-codefree-ws",
+		"-workspace-cwd", t.TempDir(),
+		"-provider", "codefree",
+		"-model", "GLM-4.7",
+		"-base-url", server.URL,
+	}, strings.NewReader(""), &out, &errBuf)
+	if err != nil {
+		t.Fatalf("run headless error = %v; stderr=%q", err, errBuf.String())
+	}
+	var result runResult
+	if err := json.Unmarshal(out.Bytes(), &result); err != nil {
+		t.Fatalf("decode headless json: %v; output=%q", err, out.String())
+	}
+	if result.Output != "codefree pong" || result.PromptTokens != 7 {
+		t.Fatalf("headless result = %#v, want CodeFree output and usage", result)
+	}
+	if headers.Get("Authorization") != "Bearer codefree" || headers.Get("Userid") != "272182" ||
+		headers.Get("Apikey") != "codefree-api-key" {
+		t.Fatalf("headers = auth:%q user:%q apikey:%q", headers.Get("Authorization"), headers.Get("Userid"), headers.Get("Apikey"))
+	}
+	if captured.Model != "GLM-4.7" || captured.Stream {
+		t.Fatalf("captured model/stream = %q/%v", captured.Model, captured.Stream)
+	}
+	if !capturedCLITool(captured.Tools, "task") || !capturedCLITool(captured.Tools, "write_file") {
+		t.Fatalf("captured tools = %#v, want core builtin tools", captured.Tools)
+	}
+}
+
 func TestRunHeadlessUsesCoreDeepSeekProvider(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	var authHeader string
@@ -912,6 +983,38 @@ func capturedGeminiTool(tools []struct {
 		}
 	}
 	return false
+}
+
+func writeCodeFreeCredentialsForCLITest(t *testing.T, userID string, apiKey string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "oauth_creds.json")
+	raw, err := json.Marshal(map[string]string{
+		"id_token": userID,
+		"apikey":   encryptCodeFreeAPIKeyForCLITest(t, apiKey),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func encryptCodeFreeAPIKeyForCLITest(t *testing.T, apiKey string) string {
+	t.Helper()
+	block, err := aes.NewCipher([]byte("Xtpa6sS&+D.NAo%CP8LA:7pk"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := []byte(apiKey)
+	padding := block.BlockSize() - len(plain)%block.BlockSize()
+	for i := 0; i < padding; i++ {
+		plain = append(plain, byte(padding))
+	}
+	ciphertext := make([]byte, len(plain))
+	cipher.NewCBCEncrypter(block, []byte("%1KJIrl3!XUxr04V")).CryptBlocks(ciphertext, plain)
+	return base64.StdEncoding.EncodeToString(ciphertext)
 }
 
 type fakeHandle struct {

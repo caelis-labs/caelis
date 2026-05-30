@@ -613,6 +613,10 @@ alongside the old stack without importing it:
   text/image/file content, tool-call/tool-result mapping, thought-signature
   replay metadata, JSON/schema output, reasoning configuration, usage, and
   model-listing mapping.
+- `internal/adapters/model/codefree`: core-native CodeFree chat provider with
+  clean Caelis credential loading, CodeFree headers, OpenAI-compatible message
+  and tool mapping, JSON output mode, usage, and version-endpoint model
+  listing.
 - `internal/adapters/model/ollama`: core-native Ollama `/api/chat`
   provider with model listing, tool-call mapping, reasoning text, JSON output
   mode, and usage mapping.
@@ -650,7 +654,7 @@ The current verification path covers:
 
 - local stack -> shared services -> engine -> canonical memory store
 - configured local stack -> OpenAI-compatible provider -> JSONL store
-- configured local stack -> Anthropic/MiniMax, Gemini, and
+- configured local stack -> Anthropic/MiniMax, Gemini, CodeFree, and
   DeepSeek/OpenRouter/Mimo/Volcengine provider profiles -> JSONL store
 - configured local stack -> native Ollama provider -> JSONL store
 - configured local stack -> SQLite store -> persisted canonical events after
@@ -770,6 +774,10 @@ The completed work is intentionally limited to the reusable skeleton:
   tool-call/tool-result mapping, thought-signature replay metadata, usage,
   model listing, JSON/schema output, and Gemini 2.x budget-based reasoning
   configuration.
+- CodeFree provider adapter sufficient for non-stream chat completions,
+  CodeFree header/auth semantics, clean Caelis credential loading,
+  OpenAI-compatible message/tool mapping, JSON output mode, usage, model
+  listing, and headless CLI selection.
 - Native Ollama provider adapter sufficient for `/api/chat`, model listing,
   tool calls, reasoning text, JSON output mode, and usage mapping.
 - Host sandbox adapter, core-native async command sessions, core-native
@@ -857,10 +865,10 @@ be migrated before retiring the old stack:
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
-     Anthropic-compatible, MiniMax, Gemini, DeepSeek, OpenRouter, Mimo/Xiaomi,
-     Volcengine, Volcengine Coding Plan, and native Ollama `/api/chat` now
-     implement `core/model.Provider` and can be selected by the new local stack
-     and headless CLI.
+     Anthropic-compatible, MiniMax, Gemini, CodeFree, DeepSeek, OpenRouter,
+     Mimo/Xiaomi, Volcengine, Volcengine Coding Plan, and native Ollama
+     `/api/chat` now implement `core/model.Provider` and can be selected by
+     the new local stack and headless CLI.
    - Anthropic/MiniMax now have a core-native Messages API adapter with default
      endpoints, token lookup, API-version headers, text/image content mapping,
      tool-use/tool-result mapping, thinking signature replay metadata, usage
@@ -870,6 +878,10 @@ be migrated before retiring the old stack:
      mapping, thought-signature replay metadata, JSON/schema output,
      reasoning config mapping, usage mapping, model listing, and settings
      endpoint normalization.
+   - CodeFree now has a core-native chat adapter with default endpoint, clean
+     Caelis credential loading, CodeFree request headers, OpenAI-compatible
+     message/tool mapping, JSON output mode, usage mapping, model listing, and
+     production headless CLI routing.
    - DeepSeek now has a core-native provider profile with default endpoint,
      token lookup, structured JSON output, reasoning content parsing, and
      thinking-mode request defaults for current reasoning models.
@@ -879,10 +891,11 @@ be migrated before retiring the old stack:
    - Mimo/Xiaomi and Volcengine now have core-native provider profiles with
      default endpoints, token lookup, structured JSON output, reasoning-content
      parsing, thinking payload mapping, and settings endpoint normalization.
-   - Still pending: CodeFree, broader model discovery, detailed error mapping,
-     SSE streaming, provider-specific tool/argument behavior beyond the
-     migrated profiles, and removal of the corresponding old
-     `impl/model/providers` code once no old-stack entrypoint requires it.
+   - Still pending: broader model discovery, CodeFree OAuth login/refresh as an
+     app service, detailed error mapping, SSE streaming, provider-specific
+     tool/argument behavior beyond the migrated profiles, and removal of the
+     corresponding old `impl/model/providers` code once no old-stack entrypoint
+     requires it.
 
 7. Sandbox backends and policy
    - The new stack only has a host sandbox adapter.

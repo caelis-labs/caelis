@@ -104,7 +104,7 @@ func TestDefaultRegistryCreatesOpenAICompatibleProviderProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"anthropic", "anthropic-compatible", "minimax", "gemini", "deepseek", "mimo", "xiaomi", "openrouter", "volcengine", "volcengine-coding-plan", "volcengine_coding_plan"} {
+	for _, name := range []string{"anthropic", "anthropic-compatible", "minimax", "gemini", "codefree", "deepseek", "mimo", "xiaomi", "openrouter", "volcengine", "volcengine-coding-plan", "volcengine_coding_plan"} {
 		factory, ok := reg.ModelProvider(name)
 		if !ok {
 			t.Fatalf("%s model provider not found", name)

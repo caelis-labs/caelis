@@ -19,6 +19,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	modelanthropic "github.com/OnslaughtSnail/caelis/internal/adapters/model/anthropic"
+	modelcodefree "github.com/OnslaughtSnail/caelis/internal/adapters/model/codefree"
 	modelgemini "github.com/OnslaughtSnail/caelis/internal/adapters/model/gemini"
 	modelollama "github.com/OnslaughtSnail/caelis/internal/adapters/model/ollama"
 	modelopenai "github.com/OnslaughtSnail/caelis/internal/adapters/model/openai"
@@ -79,6 +80,9 @@ func RegisterDefaults(r *Registry) error {
 		return err
 	}
 	if err := r.RegisterModelProvider("gemini", geminiProviderFactory); err != nil {
+		return err
+	}
+	if err := r.RegisterModelProvider("codefree", codeFreeProviderFactory); err != nil {
 		return err
 	}
 	if err := r.RegisterModelProvider("deepseek", deepSeekProviderFactory); err != nil {
@@ -376,6 +380,7 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 
 const (
 	anthropicDefaultBaseURL            = "https://api.anthropic.com"
+	codeFreeDefaultBaseURL             = "https://www.srdcloud.cn"
 	deepSeekDefaultBaseURL             = "https://api.deepseek.com/v1"
 	geminiDefaultBaseURL               = "https://generativelanguage.googleapis.com/v1beta"
 	miniMaxDefaultBaseURL              = "https://api.minimaxi.com/anthropic"
@@ -434,6 +439,17 @@ func geminiProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (m
 		AuthHeader:      firstNonEmpty(cfg.HeaderKey, "x-goog-api-key"),
 		Model:           cfg.Model,
 		MaxOutputTokens: cfg.MaxOutputTokens,
+	})
+}
+
+func codeFreeProviderFactory(_ context.Context, cfg plugin.ModelProviderConfig) (model.Provider, error) {
+	return modelcodefree.New(modelcodefree.Config{
+		ID:              firstNonEmpty(cfg.ID, cfg.Provider, cfg.Profile, "codefree"),
+		BaseURL:         cfg.Endpoint,
+		DefaultBaseURL:  codeFreeDefaultBaseURL,
+		Model:           cfg.Model,
+		MaxOutputTokens: cfg.MaxOutputTokens,
+		CredentialPath:  stringMeta(cfg.Meta, "credential_path"),
 	})
 }
 
@@ -613,6 +629,14 @@ func firstPositive(values ...int) int {
 		}
 	}
 	return 0
+}
+
+func stringMeta(meta map[string]any, key string) string {
+	if len(meta) == 0 || strings.TrimSpace(key) == "" {
+		return ""
+	}
+	value, _ := meta[key].(string)
+	return strings.TrimSpace(value)
 }
 
 var _ plugin.Registry = (*Registry)(nil)
