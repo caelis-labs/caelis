@@ -855,15 +855,20 @@ be migrated before retiring the old stack:
      `internal/app/services`. This gives `/status`, `/model`, and `/approval`
      a service-native driver path before the full interactive TUI entrypoint
      moves off the old stack.
+   - Migrated baseline: the same binding now supplies a thin core-runtime
+     `GatewayService` adapter for TUI submit, active-turn submission,
+     interrupt, replay, session list/resume, and minimal control-plane state.
+     Basic interactive prompts can therefore enter `internal/app/services`
+     without constructing `app/gatewayapp`, while unsupported advanced
+     participant operations fail explicitly at the adapter boundary.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as `/connect`, `/agent`, `/doctor`, `/new`, `/resume`,
-     and `/compact` still depend on the old driver/app contracts. `/status`,
-     `/model`, and `/approval` still need product entrypoint wiring to the
-     shared app-service driver binding before the old status/model/mode stack
-     can be removed.
+     and `/compact` still depend on the old driver/app contracts. The actual
+     `internal/cli` interactive entrypoint still needs product wiring to the
+     shared app-service driver binding before the old TUI stack can be removed.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

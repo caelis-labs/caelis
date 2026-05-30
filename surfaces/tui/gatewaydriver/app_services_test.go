@@ -94,6 +94,18 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if engine.state[appservices.StateSessionMode] != coreruntime.SessionModeAutoReview || status.SessionMode != coreruntime.SessionModeAutoReview {
 		t.Fatalf("session mode after cycle = state=%#v status=%q, want auto-review", engine.state, status.SessionMode)
 	}
+
+	turn, err := driver.Submit(ctx, Submission{Text: "  hello from tui  "})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if turn == nil {
+		t.Fatal("Submit() turn = nil, want core app-service turn")
+	}
+	closeGatewayDriverTestTurn(t, turn)
+	if engine.turn.SessionRef.SessionID != "sess-app" || engine.turn.Input != "hello from tui" || engine.turn.Surface != "surface" {
+		t.Fatalf("turn request = %#v, want active session/input/surface from TUI driver", engine.turn)
+	}
 }
 
 type appServiceDriverEngine struct {
