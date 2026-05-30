@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -170,6 +171,13 @@ func TestCoreSettingsManagerCLIModelOverridesSettingsFile(t *testing.T) {
 		BaseURL:  "https://api.example.test/v1",
 	})
 	if err := appsettings.NewFileStore(storeDir).Save(ctx, appsettings.Document{
+		Runtime: coreconfig.Runtime{
+			AppName: "persisted-app",
+			Sandbox: coreconfig.Sandbox{
+				Backend: "host",
+			},
+			Meta: map[string]any{"permission_mode": "manual"},
+		},
 		Models: appsettings.ModelCatalog{
 			DefaultID: storedModel.ID,
 			Configs:   []appsettings.ModelConfig{storedModel},
@@ -198,6 +206,114 @@ func TestCoreSettingsManagerCLIModelOverridesSettingsFile(t *testing.T) {
 	}
 	if len(choices) != 1 || choices[0].Model != "MiniMax-M2.7" {
 		t.Fatalf("model choices = %#v, want CLI model to override settings file", choices)
+	}
+	doc, err := manager.Document(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Runtime.AppName != "persisted-app" || runtimeMetaString(doc.Runtime.Meta, "permission_mode") != "manual" {
+		t.Fatalf("runtime = %#v, want non-model settings hydrated alongside CLI model", doc.Runtime)
+	}
+}
+
+func TestNewCoreLocalStackHydratesRuntimeSandboxAndStoreFromSettingsFile(t *testing.T) {
+	ctx := context.Background()
+	storeDir := t.TempDir()
+	workspace := t.TempDir()
+	dbPath := filepath.Join(storeDir, "sessions.sqlite3")
+	if err := appsettings.NewFileStore(storeDir).Save(ctx, appsettings.Document{
+		Runtime: coreconfig.Runtime{
+			AppName:      "persisted-app",
+			UserID:       "persisted-user",
+			WorkspaceKey: "persisted-workspace",
+			WorkspaceCWD: workspace,
+			Store:        coreconfig.Store{Backend: "sqlite", URI: dbPath},
+			Sandbox: coreconfig.Sandbox{
+				Backend:       "host",
+				ReadableRoots: []string{workspace},
+				WritableRoots: []string{workspace},
+				Network:       "enabled",
+				HelperPath:    "/tmp/persisted-helper",
+			},
+			Meta: map[string]any{"permission_mode": "manual"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stack, err := newCoreLocalStack(ctx, cliConfig{
+		AppName:        "caelis",
+		UserID:         "local-user",
+		StoreDir:       storeDir,
+		WorkspaceKey:   "default-workspace",
+		WorkspaceCWD:   t.TempDir(),
+		PermissionMode: "auto-review",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := stack.Services().Runtime()
+	if runtime.AppName != "persisted-app" || runtime.UserID != "persisted-user" || runtime.WorkspaceKey != "persisted-workspace" || runtime.WorkspaceCWD != workspace {
+		t.Fatalf("runtime identity = %#v, want persisted runtime", runtime)
+	}
+	if runtime.Store.Backend != "sqlite" || runtime.Store.URI != dbPath {
+		t.Fatalf("runtime store = %#v, want persisted sqlite store", runtime.Store)
+	}
+	if runtime.Sandbox.Backend != "host" || runtime.Sandbox.Network != "enabled" || runtime.Sandbox.HelperPath != "/tmp/persisted-helper" {
+		t.Fatalf("runtime sandbox = %#v, want persisted sandbox config", runtime.Sandbox)
+	}
+	if got := runtimeMetaString(runtime.Meta, "permission_mode"); got != "manual" {
+		t.Fatalf("permission mode = %q, want manual", got)
+	}
+}
+
+func TestNewCoreLocalStackExplicitRuntimeFlagsOverrideSettingsFile(t *testing.T) {
+	ctx := context.Background()
+	storeDir := t.TempDir()
+	if err := appsettings.NewFileStore(storeDir).Save(ctx, appsettings.Document{
+		Runtime: coreconfig.Runtime{
+			AppName:      "persisted-app",
+			UserID:       "persisted-user",
+			WorkspaceKey: "persisted-workspace",
+			WorkspaceCWD: t.TempDir(),
+			Store:        coreconfig.Store{Backend: "sqlite", URI: filepath.Join(storeDir, "persisted.sqlite3")},
+			Sandbox:      coreconfig.Sandbox{Backend: "host"},
+			Meta:         map[string]any{"permission_mode": "manual"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	workspace := t.TempDir()
+	stack, err := newCoreLocalStack(ctx, cliConfig{
+		AppName:        "flag-app",
+		UserID:         "flag-user",
+		StoreDir:       storeDir,
+		StoreBackend:   "memory",
+		WorkspaceKey:   "flag-workspace",
+		WorkspaceCWD:   workspace,
+		PermissionMode: "auto-review",
+		Sandbox:        cliSandboxConfig{RequestedType: "host"},
+		Source: cliConfigSource{
+			AppName:        true,
+			UserID:         true,
+			StoreBackend:   true,
+			WorkspaceKey:   true,
+			WorkspaceCWD:   true,
+			PermissionMode: true,
+			SandboxBackend: true,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime := stack.Services().Runtime()
+	if runtime.AppName != "flag-app" || runtime.UserID != "flag-user" || runtime.WorkspaceKey != "flag-workspace" || runtime.WorkspaceCWD != workspace {
+		t.Fatalf("runtime identity = %#v, want explicit runtime flags", runtime)
+	}
+	if runtime.Store.Backend != "memory" {
+		t.Fatalf("runtime store = %#v, want explicit memory store", runtime.Store)
+	}
+	if got := runtimeMetaString(runtime.Meta, "permission_mode"); got != "auto-review" {
+		t.Fatalf("permission mode = %q, want explicit auto-review", got)
 	}
 }
 

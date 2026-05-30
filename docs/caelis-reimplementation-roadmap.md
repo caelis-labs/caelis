@@ -960,13 +960,16 @@ be migrated before retiring the old stack:
      then maps directly into `internal/app/local`. This removes the production
      CLI entrypoint's compile-time dependency on the old gatewayapp config
      types.
+   - Migrated baseline: production CLI startup now hydrates runtime identity,
+     workspace, store backend/URI, sandbox backend/roots/network/helper, plugin
+     declarations, and permission mode from the new `app/settings` document.
+     Explicit flags or environment variables still win for the same field.
    - Migrated baseline: the old `kernel.TurnHandle` streaming helper has been
      removed from `internal/cli`; production CLI code no longer imports the old
      public `kernel` facade.
-   - Still pending: default home layout, full persisted config hydration, rich
-     setup diagnostics, non-host sandbox repair/setup flows, and several
-     command dispatch paths still depend on old TUI/gateway compatibility
-     packages or `kernel.Service`.
+   - Still pending: default home layout, rich setup diagnostics, non-host
+     sandbox repair/setup flows, and several command dispatch paths still
+     depend on old TUI/gateway compatibility packages or `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1134,14 +1137,17 @@ be migrated before retiring the old stack:
      directory, so normal TUI `/connect` changes persist through the shared
      `app/settings` store. Explicit CLI model flags remain session-local and
      override the settings file instead of rewriting it.
+   - Migrated baseline: the same settings document now hydrates runtime and
+     sandbox configuration into `internal/app/local`, including store backend
+     selection (`jsonl`, `sqlite`, or `memory`) and sandbox roots/network/helper
+     fields, while preserving explicit CLI/env overrides.
    - Migrated baseline: standalone CLI doctor and host sandbox lifecycle
      subcommands now use the new local stack and shared app services instead
      of constructing `app/gatewayapp`.
-   - Still pending: full persisted runtime/sandbox config hydration, remaining
-     TUI command integration, additional non-model ACP config providers,
-     non-host sandbox setup/repair config, and removal of the old
-     `app/gatewayapp` config/model services once compatibility entrypoints are
-     gone.
+   - Still pending: remaining TUI command integration, additional non-model ACP
+     config providers, non-host sandbox setup/repair config, and removal of the
+     old `app/gatewayapp` config/model services once compatibility entrypoints
+     are gone.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,

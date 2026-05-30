@@ -7,8 +7,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
@@ -71,6 +73,8 @@ type cliConfig struct {
 	AppName        string
 	UserID         string
 	StoreDir       string
+	StoreBackend   string
+	StoreURI       string
 	WorkspaceKey   string
 	WorkspaceCWD   string
 	PermissionMode string
@@ -79,6 +83,20 @@ type cliConfig struct {
 	Model          cliModelConfig
 	Sandbox        cliSandboxConfig
 	ExternalAgents []acpexternal.Config
+	Plugins        []coreconfig.Plugin
+	Source         cliConfigSource
+}
+
+type cliConfigSource struct {
+	AppName        bool
+	UserID         bool
+	StoreBackend   bool
+	StoreURI       bool
+	WorkspaceKey   bool
+	WorkspaceCWD   bool
+	PermissionMode bool
+	SandboxBackend bool
+	SandboxHelper  bool
 }
 
 type cliModelConfig struct {
@@ -100,6 +118,9 @@ type cliModelConfig struct {
 
 type cliSandboxConfig struct {
 	RequestedType string
+	ReadableRoots []string
+	WritableRoots []string
+	Network       string
 	HelperPath    string
 }
 
@@ -145,6 +166,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		userID           = fs.String("user", envOr("CAELIS_USER_ID", "local-user"), "User id")
 		sessionID        = fs.String("session", envOr("CAELIS_SESSION_ID", ""), "Session id")
 		storeDir         = fs.String("store-dir", envOr("CAELIS_STORE_DIR", defaultStoreDir(cwd)), "Store directory")
+		storeBackend     = fs.String("store-backend", envOr("CAELIS_STORE_BACKEND", ""), "Session store backend: jsonl|sqlite|memory")
+		storeURI         = fs.String("store-uri", envOr("CAELIS_STORE_URI", ""), "Session store URI")
 		workspaceKey     = fs.String("workspace-key", envOr("CAELIS_WORKSPACE_KEY", defaultWorkspaceKey), "Workspace key")
 		workspaceCWD     = fs.String("workspace-cwd", envOr("CAELIS_WORKSPACE_CWD", cwd), "Workspace cwd")
 		systemPrompt     = fs.String("system-prompt", envOr("CAELIS_SYSTEM_PROMPT", ""), "Session override text to append into the assembled system prompt")
@@ -175,10 +198,13 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		return fmt.Errorf("unknown arguments: %v", fs.Args())
 	}
 
+	sources := cliConfigSources(fs)
 	cfg, err := normalizeConfig(cliConfig{
 		AppName:        *appName,
 		UserID:         *userID,
 		StoreDir:       *storeDir,
+		StoreBackend:   *storeBackend,
+		StoreURI:       *storeURI,
 		WorkspaceKey:   *workspaceKey,
 		WorkspaceCWD:   *workspaceCWD,
 		PermissionMode: *permissionMode,
@@ -200,6 +226,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 			RequestedType: strings.TrimSpace(*sandboxBackend),
 			HelperPath:    strings.TrimSpace(*sandboxHelper),
 		},
+		Source: sources,
 	})
 	if err != nil {
 		return err
@@ -210,11 +237,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		if err != nil {
 			return err
 		}
+		services := stack.Services()
 		return coreacpserver.ServeStdio(ctx, coreacpserver.Config{
 			Engine:   stack.Engine(),
-			Services: stack.Services(),
-			AppName:  cfg.AppName,
-			UserID:   cfg.UserID,
+			Services: services,
+			AppName:  services.AppName(),
+			UserID:   services.UserID(),
 		}, stdin, stdout)
 	}
 	if doctorSubcommand || *doctor {
@@ -268,7 +296,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if err != nil {
 		return err
 	}
-	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
+	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderStackModelText(ctx, stack, cfg), stdin, stdout, stderr)
 }
 
 func externalACPAgentsFromEnv() []acpexternal.Config {
@@ -290,6 +318,31 @@ func externalACPAgentsFromEnv() []acpexternal.Config {
 	}}
 }
 
+func cliConfigSources(fs *flag.FlagSet) cliConfigSource {
+	visited := map[string]bool{}
+	if fs != nil {
+		fs.Visit(func(item *flag.Flag) {
+			visited[item.Name] = true
+		})
+	}
+	return cliConfigSource{
+		AppName:        visited["app"] || envConfigured("CAELIS_APP_NAME"),
+		UserID:         visited["user"] || envConfigured("CAELIS_USER_ID"),
+		StoreBackend:   visited["store-backend"] || envConfigured("CAELIS_STORE_BACKEND"),
+		StoreURI:       visited["store-uri"] || envConfigured("CAELIS_STORE_URI"),
+		WorkspaceKey:   visited["workspace-key"] || envConfigured("CAELIS_WORKSPACE_KEY"),
+		WorkspaceCWD:   visited["workspace-cwd"] || envConfigured("CAELIS_WORKSPACE_CWD"),
+		PermissionMode: visited["permission-mode"] || envConfigured("CAELIS_PERMISSION_MODE"),
+		SandboxBackend: visited["sandbox-backend"] || envConfigured("CAELIS_SANDBOX_BACKEND"),
+		SandboxHelper:  visited["sandbox-helper-path"] || envConfigured("CAELIS_SANDBOX_HELPER_PATH"),
+	}
+}
+
+func envConfigured(key string) bool {
+	_, ok := os.LookupEnv(key)
+	return ok
+}
+
 func defaultStoreDir(cwd string) string {
 	if home, err := os.UserHomeDir(); err == nil && strings.TrimSpace(home) != "" {
 		return filepath.Join(home, ".caelis")
@@ -306,15 +359,20 @@ func preferredHeadlessSessionID(sessionID string) string {
 }
 
 func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, error) {
-	sandboxBackend := strings.ToLower(strings.TrimSpace(cfg.Sandbox.RequestedType))
-	if sandboxBackend == "" || sandboxBackend == "auto" {
-		sandboxBackend = "host"
-	}
 	modelProvider := coreModelProvider(cfg.Model.Provider, cfg.Model.API)
 	settings, err := coreSettingsManager(ctx, cfg, modelProvider)
 	if err != nil {
 		return nil, err
 	}
+	cfg, err = hydrateCLIConfigFromSettings(ctx, cfg, settings)
+	if err != nil {
+		return nil, err
+	}
+	sandboxBackend := strings.ToLower(strings.TrimSpace(cfg.Sandbox.RequestedType))
+	if sandboxBackend == "" || sandboxBackend == "auto" {
+		sandboxBackend = "host"
+	}
+	storeBackend := strings.ToLower(firstNonEmptyString(strings.TrimSpace(cfg.StoreBackend), "jsonl"))
 	return applocal.NewWithContext(ctx, applocal.Config{
 		Runtime: coreconfig.Runtime{
 			AppName:      cfg.AppName,
@@ -323,16 +381,20 @@ func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, err
 			WorkspaceCWD: cfg.WorkspaceCWD,
 			Model:        strings.TrimSpace(cfg.Model.Model),
 			Store: coreconfig.Store{
-				Backend: "jsonl",
-				URI:     cfg.StoreDir,
+				Backend: storeBackend,
+				URI:     cliRuntimeStoreURI(storeBackend, cfg.StoreURI, cfg.StoreDir),
 			},
 			Meta: map[string]any{
 				"permission_mode": strings.TrimSpace(cfg.PermissionMode),
 			},
 			Sandbox: coreconfig.Sandbox{
-				Backend:    sandboxBackend,
-				HelperPath: cfg.Sandbox.HelperPath,
+				Backend:       sandboxBackend,
+				ReadableRoots: slices.Clone(cfg.Sandbox.ReadableRoots),
+				WritableRoots: slices.Clone(cfg.Sandbox.WritableRoots),
+				Network:       strings.TrimSpace(cfg.Sandbox.Network),
+				HelperPath:    cfg.Sandbox.HelperPath,
 			},
+			Plugins: cloneConfigPlugins(cfg.Plugins),
 		},
 		Model: coreconfig.ModelProfile{
 			ID:                  firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Provider), "cli"),
@@ -359,6 +421,7 @@ func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, err
 
 func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*appsettings.Manager, error) {
 	store := appsettings.NewFileStore(cfg.StoreDir)
+	storeBackend := strings.ToLower(firstNonEmptyString(strings.TrimSpace(cfg.StoreBackend), "jsonl"))
 	doc := appsettings.Document{
 		Runtime: coreconfig.Runtime{
 			AppName:      cfg.AppName,
@@ -366,6 +429,21 @@ func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*
 			WorkspaceKey: cfg.WorkspaceKey,
 			WorkspaceCWD: cfg.WorkspaceCWD,
 			Model:        strings.TrimSpace(cfg.Model.Model),
+			Store: coreconfig.Store{
+				Backend: storeBackend,
+				URI:     cliRuntimeStoreURI(storeBackend, cfg.StoreURI, cfg.StoreDir),
+			},
+			Sandbox: coreconfig.Sandbox{
+				Backend:       strings.TrimSpace(cfg.Sandbox.RequestedType),
+				ReadableRoots: slices.Clone(cfg.Sandbox.ReadableRoots),
+				WritableRoots: slices.Clone(cfg.Sandbox.WritableRoots),
+				Network:       strings.TrimSpace(cfg.Sandbox.Network),
+				HelperPath:    strings.TrimSpace(cfg.Sandbox.HelperPath),
+			},
+			Plugins: cloneConfigPlugins(cfg.Plugins),
+			Meta: map[string]any{
+				"permission_mode": strings.TrimSpace(cfg.PermissionMode),
+			},
 		},
 	}
 	if strings.TrimSpace(cfg.Model.Model) == "" && strings.TrimSpace(cfg.Model.Provider) == "" && strings.TrimSpace(cfg.Model.BaseURL) == "" {
@@ -391,11 +469,142 @@ func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*
 	if modelCfg.Provider == "" || modelCfg.Model == "" {
 		return appsettings.NewManager(ctx, store, doc)
 	}
+	doc, err := cliSessionSettingsDocument(ctx, store, doc)
+	if err != nil {
+		return nil, err
+	}
 	doc.Models = appsettings.ModelCatalog{
 		DefaultID: modelCfg.ID,
 		Configs:   []appsettings.ModelConfig{modelCfg},
 	}
 	return appsettings.NewManager(ctx, nil, doc)
+}
+
+func cliSessionSettingsDocument(ctx context.Context, store appsettings.Store, defaults appsettings.Document) (appsettings.Document, error) {
+	out := appsettings.CloneDocument(defaults)
+	if store == nil {
+		return out, nil
+	}
+	loaded, err := store.Load(ctx)
+	if err != nil {
+		return appsettings.Document{}, err
+	}
+	if runtimeConfigPresent(loaded.Runtime) {
+		out.Runtime = loaded.Runtime
+	}
+	if len(loaded.Agents) > 0 {
+		out.Agents = loaded.Agents
+	}
+	if len(loaded.Meta) > 0 {
+		out.Meta = maps.Clone(loaded.Meta)
+	}
+	return appsettings.CloneDocument(out), nil
+}
+
+func runtimeConfigPresent(runtime coreconfig.Runtime) bool {
+	return strings.TrimSpace(runtime.AppName) != "" ||
+		strings.TrimSpace(runtime.UserID) != "" ||
+		strings.TrimSpace(runtime.WorkspaceKey) != "" ||
+		strings.TrimSpace(runtime.WorkspaceCWD) != "" ||
+		strings.TrimSpace(runtime.Model) != "" ||
+		strings.TrimSpace(runtime.Store.Backend) != "" ||
+		strings.TrimSpace(runtime.Store.URI) != "" ||
+		strings.TrimSpace(runtime.Sandbox.Backend) != "" ||
+		strings.TrimSpace(runtime.Sandbox.Network) != "" ||
+		strings.TrimSpace(runtime.Sandbox.HelperPath) != "" ||
+		len(runtime.Sandbox.ReadableRoots) > 0 ||
+		len(runtime.Sandbox.WritableRoots) > 0 ||
+		len(runtime.Plugins) > 0 ||
+		len(runtime.Meta) > 0
+}
+
+func hydrateCLIConfigFromSettings(ctx context.Context, cfg cliConfig, settings *appsettings.Manager) (cliConfig, error) {
+	if settings == nil {
+		return cfg, nil
+	}
+	doc, err := settings.Document(ctx)
+	if err != nil {
+		return cfg, err
+	}
+	runtime := doc.Runtime
+	if !cfg.Source.AppName {
+		cfg.AppName = firstNonEmptyString(runtime.AppName, cfg.AppName)
+	}
+	if !cfg.Source.UserID {
+		cfg.UserID = firstNonEmptyString(runtime.UserID, cfg.UserID)
+	}
+	if !cfg.Source.WorkspaceKey {
+		cfg.WorkspaceKey = firstNonEmptyString(runtime.WorkspaceKey, cfg.WorkspaceKey)
+	}
+	if !cfg.Source.WorkspaceCWD {
+		cfg.WorkspaceCWD = firstNonEmptyString(runtime.WorkspaceCWD, cfg.WorkspaceCWD)
+	}
+	if !cfg.Source.StoreBackend {
+		cfg.StoreBackend = firstNonEmptyString(runtime.Store.Backend, cfg.StoreBackend)
+	}
+	if !cfg.Source.StoreURI {
+		cfg.StoreURI = firstNonEmptyString(runtime.Store.URI, cfg.StoreURI)
+	}
+	if !cfg.Source.PermissionMode {
+		cfg.PermissionMode = firstNonEmptyString(runtimeMetaString(runtime.Meta, "permission_mode"), cfg.PermissionMode)
+	}
+	if !cfg.Source.SandboxBackend {
+		cfg.Sandbox.RequestedType = firstNonEmptyString(runtime.Sandbox.Backend, cfg.Sandbox.RequestedType)
+	}
+	if !cfg.Source.SandboxHelper {
+		cfg.Sandbox.HelperPath = firstNonEmptyString(runtime.Sandbox.HelperPath, cfg.Sandbox.HelperPath)
+	}
+	if len(cfg.Sandbox.ReadableRoots) == 0 {
+		cfg.Sandbox.ReadableRoots = slices.Clone(runtime.Sandbox.ReadableRoots)
+	}
+	if len(cfg.Sandbox.WritableRoots) == 0 {
+		cfg.Sandbox.WritableRoots = slices.Clone(runtime.Sandbox.WritableRoots)
+	}
+	if strings.TrimSpace(cfg.Sandbox.Network) == "" {
+		cfg.Sandbox.Network = strings.TrimSpace(runtime.Sandbox.Network)
+	}
+	if len(cfg.Plugins) == 0 {
+		cfg.Plugins = cloneConfigPlugins(runtime.Plugins)
+	}
+	return cfg, nil
+}
+
+func cliRuntimeStoreURI(backend string, uri string, storeDir string) string {
+	if trimmed := strings.TrimSpace(uri); trimmed != "" {
+		return trimmed
+	}
+	if strings.EqualFold(strings.TrimSpace(backend), "sqlite") {
+		return filepath.Join(strings.TrimSpace(storeDir), "sessions.sqlite3")
+	}
+	return strings.TrimSpace(storeDir)
+}
+
+func runtimeMetaString(meta map[string]any, key string) string {
+	if len(meta) == 0 {
+		return ""
+	}
+	value, ok := meta[key]
+	if !ok {
+		return ""
+	}
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func cloneConfigPlugins(in []coreconfig.Plugin) []coreconfig.Plugin {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]coreconfig.Plugin, 0, len(in))
+	for _, plugin := range in {
+		plugin.Meta = maps.Clone(plugin.Meta)
+		out = append(out, plugin)
+	}
+	return out
 }
 
 func coreModelProvider(provider string, api providers.APIType) string {
@@ -431,17 +640,18 @@ func coreModelProvider(provider string, api providers.APIType) string {
 }
 
 func runCoreHeadless(ctx context.Context, stack *applocal.Stack, cfg cliConfig, sessionID string, input string, format outputFormat, stdout io.Writer) error {
+	runtimeCfg := stack.Services().Runtime()
 	result, err := coreheadless.RunOnce(ctx, coreheadless.Request{
 		Services:           stack.Services(),
 		PreferredSessionID: strings.TrimSpace(sessionID),
 		Workspace: coresession.Workspace{
-			Key: cfg.WorkspaceKey,
-			CWD: cfg.WorkspaceCWD,
+			Key: runtimeCfg.WorkspaceKey,
+			CWD: runtimeCfg.WorkspaceCWD,
 		},
 		Title:          "cli-headless",
 		Input:          input,
 		Model:          firstNonEmptyString(strings.TrimSpace(cfg.Model.Alias), strings.TrimSpace(cfg.Model.Model)),
-		SessionMode:    strings.TrimSpace(cfg.PermissionMode),
+		SessionMode:    firstNonEmptyString(runtimeMetaString(runtimeCfg.Meta, "permission_mode"), cfg.PermissionMode),
 		Surface:        "headless",
 		ApprovalPolicy: coreheadless.ApprovalPolicyAutoDeny,
 	})
@@ -516,6 +726,15 @@ func renderModelText(cfg cliConfig) string {
 	default:
 		return provider + "/" + model
 	}
+}
+
+func renderStackModelText(ctx context.Context, stack *applocal.Stack, fallback cliConfig) string {
+	if stack != nil {
+		if cfg, ok, err := stack.Services().Models().Current(ctx, coresession.Ref{}); err == nil && ok {
+			return renderConfiguredModelText(cfg.Alias, cfg.Provider, cfg.Model)
+		}
+	}
+	return renderModelText(fallback)
 }
 
 func renderConfiguredModelText(alias string, provider string, model string) string {
