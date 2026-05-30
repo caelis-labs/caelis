@@ -4,6 +4,7 @@ package approval
 
 import (
 	"context"
+	"maps"
 	"slices"
 	"strings"
 
@@ -22,10 +23,13 @@ const (
 )
 
 const (
-	OptionAllowOnce   = "allow_once"
-	OptionAllowAlways = "allow_always"
-	OptionRejectOnce  = "reject_once"
+	OptionAllowOnce    = "allow_once"
+	OptionAllowAlways  = "allow_always"
+	OptionRejectOnce   = "reject_once"
+	OptionRejectAlways = "reject_always"
 )
+
+const StateRememberedApprovals = "caelis.approval.remembered"
 
 const (
 	ModeAutoReview = coreruntime.SessionModeAutoReview
@@ -37,6 +41,7 @@ type Request struct {
 	TurnID     string
 	Surface    string
 	Mode       string
+	State      session.State
 	Call       model.ToolCall
 	Definition tool.Definition
 }
@@ -83,6 +88,7 @@ func AskAll() Policy {
 				{ID: OptionAllowOnce, Name: "Allow once", Kind: "allow"},
 				{ID: OptionAllowAlways, Name: "Allow always", Kind: "allow"},
 				{ID: OptionRejectOnce, Name: "Reject", Kind: "reject"},
+				{ID: OptionRejectAlways, Name: "Reject always", Kind: "reject"},
 			},
 		}, nil
 	})
@@ -100,6 +106,9 @@ func AskTools(names ...string) Policy {
 
 func WithSessionMode(base Policy) Policy {
 	return PolicyFunc(func(ctx context.Context, req Request) (Decision, error) {
+		if remembered, ok := RememberedToolDecision(req.State, req.Call.Name); ok {
+			return remembered, nil
+		}
 		if NormalizeMode(req.Mode) == ModeManual {
 			return AskAll().ReviewToolCall(ctx, req)
 		}
@@ -108,6 +117,72 @@ func WithSessionMode(base Policy) Policy {
 		}
 		return base.ReviewToolCall(ctx, req)
 	})
+}
+
+func RememberedToolDecision(state session.State, toolName string) (Decision, bool) {
+	entries, ok := rememberedApprovalEntries(state)
+	if !ok {
+		return Decision{}, false
+	}
+	entry, ok := entries[normalizeToolName(toolName)]
+	if !ok {
+		return Decision{}, false
+	}
+	values, ok := entry.(map[string]any)
+	if !ok {
+		return Decision{}, false
+	}
+	verdict := strings.ToLower(strings.TrimSpace(stringValue(values["verdict"])))
+	reason := strings.TrimSpace(stringValue(values["reason"]))
+	switch verdict {
+	case string(VerdictAllow):
+		return Decision{Verdict: VerdictAllow, Reason: firstNonEmpty(reason, "remembered approval allow_always")}, true
+	case string(VerdictDeny):
+		return Decision{Verdict: VerdictDeny, Reason: firstNonEmpty(reason, "remembered approval reject_always")}, true
+	default:
+		return Decision{}, false
+	}
+}
+
+func RememberToolDecision(state session.State, toolName string, optionID string, reason string) bool {
+	toolName = normalizeToolName(toolName)
+	if state == nil || toolName == "" {
+		return false
+	}
+	optionID = strings.ToLower(strings.TrimSpace(optionID))
+	var verdict Verdict
+	switch optionID {
+	case OptionAllowAlways:
+		verdict = VerdictAllow
+	case OptionRejectAlways:
+		verdict = VerdictDeny
+	default:
+		return false
+	}
+	entries, _ := rememberedApprovalEntries(state)
+	if entries == nil {
+		entries = map[string]any{}
+	}
+	entries = maps.Clone(entries)
+	entries[toolName] = map[string]any{
+		"tool":    toolName,
+		"verdict": string(verdict),
+		"reason":  strings.TrimSpace(firstNonEmpty(reason, optionID)),
+	}
+	state[StateRememberedApprovals] = entries
+	return true
+}
+
+func RememberToolDecisionPatch(toolName string, optionID string, reason string) session.StatePatch {
+	return func(state session.State) (session.State, error) {
+		if state == nil {
+			state = session.State{}
+		} else {
+			state = maps.Clone(state)
+		}
+		RememberToolDecision(state, toolName, optionID, reason)
+		return state, nil
+	}
 }
 
 func NormalizeMode(mode string) string {
@@ -122,4 +197,37 @@ func normalizeNames(in []string) []string {
 		}
 	}
 	return out
+}
+
+func rememberedApprovalEntries(state session.State) (map[string]any, bool) {
+	if len(state) == 0 {
+		return nil, false
+	}
+	entries, ok := state[StateRememberedApprovals].(map[string]any)
+	if !ok || len(entries) == 0 {
+		return nil, false
+	}
+	return entries, true
+}
+
+func normalizeToolName(name string) string {
+	return strings.ToLower(strings.TrimSpace(name))
+}
+
+func stringValue(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	default:
+		return ""
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

@@ -1336,9 +1336,14 @@ be migrated before retiring the old stack:
      surface-neutral approval actions, and `ApprovalService` owns decision
      normalization plus active-turn submission for TUI and future APP
      consumers.
+   - Migrated baseline: `allow_always` and `reject_always` are now durable
+     runtime policy decisions stored in session state. The gateway records those
+     choices through the shared approval submission path, and later turns read
+     the same state before asking again, without a TUI-owned cache or old-stack
+     compatibility branch.
    - Model-backed auto-review, richer policy presets, sandbox-aware permission
-     escalation, allow-always/reject-always persistence, approval review
-     transcript context, and richer denial metadata are not migrated.
+     escalation, approval review transcript context, and richer denial metadata
+     are not migrated.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant

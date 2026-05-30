@@ -304,6 +304,104 @@ func TestGatewayApprovalSubmissionResumesToolExecution(t *testing.T) {
 	}
 }
 
+func TestGatewayRemembersAllowAlwaysApprovalAcrossTurns(t *testing.T) {
+	ctx := context.Background()
+	store := teststore.New()
+	provider := &scriptedProvider{
+		responses: []model.Message{
+			{
+				Role: model.RoleAssistant,
+				Parts: []model.Part{{
+					Kind: model.PartToolUse,
+					ToolUse: &model.ToolCall{
+						ID:    "call-1",
+						Name:  "ECHO",
+						Input: json.RawMessage(`{"text":"first"}`),
+					},
+				}},
+			},
+			{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("first done")},
+			},
+			{
+				Role: model.RoleAssistant,
+				Parts: []model.Part{{
+					Kind: model.PartToolUse,
+					ToolUse: &model.ToolCall{
+						ID:    "call-2",
+						Name:  "ECHO",
+						Input: json.RawMessage(`{"text":"second"}`),
+					},
+				}},
+			},
+			{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("second done")},
+			},
+		},
+	}
+	calls := 0
+	tools := staticTools{tool.NamedTool{
+		Def: tool.Definition{Name: "ECHO"},
+		Invoke: func(_ context.Context, call tool.Call) (tool.Result, error) {
+			calls++
+			return tool.Result{
+				ID:      call.ID,
+				Name:    call.Name,
+				Content: []model.Part{model.NewTextPart("output " + call.ID)},
+			}, nil
+		},
+	}}
+	runner, err := loop.New(loop.Config{
+		Provider: provider,
+		Tools:    tools,
+		Approval: approval.WithSessionMode(approval.AskTools("echo")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := New(Config{Store: store, Runner: runner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := gateway.StartSession(ctx, session.StartRequest{AppName: "caelis", UserID: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := gateway.BeginTurn(ctx, coreruntime.TurnRequest{SessionRef: active.Ref, Input: "run echo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstEvents := collectTurnEventsWithApprovalOption(t, first, approval.OptionAllowAlways, true)
+	if pending := countApprovalStatus(firstEvents, session.ApprovalPending); pending != 1 {
+		t.Fatalf("first pending approvals = %d, want 1", pending)
+	}
+
+	snapshot, err := gateway.LoadSession(ctx, active.Ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := snapshot.State[approval.StateRememberedApprovals].(map[string]any); !ok {
+		t.Fatalf("session state = %#v, want remembered approvals", snapshot.State)
+	}
+
+	second, err := gateway.BeginTurn(ctx, coreruntime.TurnRequest{SessionRef: active.Ref, Input: "run echo again"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondEvents := collectTurnEventsWithApproval(t, second, true)
+	if pending := countApprovalStatus(secondEvents, session.ApprovalPending); pending != 0 {
+		t.Fatalf("second pending approvals = %d, want remembered approval without prompt", pending)
+	}
+	if approved := countApprovalStatus(secondEvents, session.ApprovalApproved); approved != 1 {
+		t.Fatalf("second approved approvals = %d, want one remembered approval event", approved)
+	}
+	if calls != 2 {
+		t.Fatalf("tool calls = %d, want both turns executed", calls)
+	}
+}
+
 func TestGatewayRejectedApprovalReturnsToolError(t *testing.T) {
 	ctx := context.Background()
 	store := teststore.New()
@@ -446,6 +544,15 @@ func collectTurnEvents(t *testing.T, turn coreruntime.Turn) []session.Event {
 
 func collectTurnEventsWithApproval(t *testing.T, turn coreruntime.Turn, approved bool) []session.Event {
 	t.Helper()
+	outcome := approval.OptionRejectOnce
+	if approved {
+		outcome = approval.OptionAllowOnce
+	}
+	return collectTurnEventsWithApprovalOption(t, turn, outcome, approved)
+}
+
+func collectTurnEventsWithApprovalOption(t *testing.T, turn coreruntime.Turn, optionID string, approved bool) []session.Event {
+	t.Helper()
 	var out []session.Event
 	for env := range turn.Events() {
 		if env.Err != "" {
@@ -454,17 +561,13 @@ func collectTurnEventsWithApproval(t *testing.T, turn coreruntime.Turn, approved
 		event := session.CloneEvent(env.Event)
 		out = append(out, event)
 		if event.Approval != nil && event.Approval.Status == session.ApprovalPending {
-			outcome := approval.OptionRejectOnce
-			if approved {
-				outcome = approval.OptionAllowOnce
-			}
 			if err := turn.Submit(context.Background(), coreruntime.Submission{
 				Kind: coreruntime.SubmissionApproval,
 				Approval: &coreruntime.ApprovalDecision{
-					Outcome:  outcome,
-					OptionID: outcome,
+					Outcome:  optionID,
+					OptionID: optionID,
 					Approved: approved,
-					Reason:   outcome,
+					Reason:   optionID,
 				},
 			}); err != nil {
 				t.Fatal(err)
@@ -472,6 +575,16 @@ func collectTurnEventsWithApproval(t *testing.T, turn coreruntime.Turn, approved
 		}
 	}
 	return out
+}
+
+func countApprovalStatus(events []session.Event, status session.ApprovalStatus) int {
+	count := 0
+	for _, event := range events {
+		if event.Approval != nil && event.Approval.Status == status {
+			count++
+		}
+	}
+	return count
 }
 
 func collectReplayEvents(t *testing.T, replay <-chan coreruntime.EventEnvelope) []session.Event {

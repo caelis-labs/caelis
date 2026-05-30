@@ -59,6 +59,7 @@ type SpawnResult struct {
 type Request struct {
 	Session       session.Session
 	Events        []session.Event
+	State         session.State
 	Input         string
 	ContentParts  []model.ContentPart
 	Model         string
@@ -380,6 +381,7 @@ func (l *Loop) reviewToolCall(ctx context.Context, req Request, call model.ToolC
 		TurnID:     req.TurnID,
 		Surface:    req.Surface,
 		Mode:       req.Mode,
+		State:      req.State,
 		Call:       call,
 		Definition: def,
 	})

@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,6 +14,7 @@ import (
 
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	engineapproval "github.com/OnslaughtSnail/caelis/internal/engine/approval"
 	"github.com/OnslaughtSnail/caelis/internal/engine/loop"
 )
 
@@ -188,9 +190,14 @@ func (g *Gateway) execute(ctx context.Context, snapshot session.Snapshot, req co
 	defer close(handle.events)
 	defer close(handle.done)
 	defer g.unregister(handle)
+	runState := maps.Clone(snapshot.State)
+	if runState == nil {
+		runState = session.State{}
+	}
 	events, err := g.runner.Run(ctx, loop.Request{
 		Session:      snapshot.Session,
 		Events:       snapshot.Events,
+		State:        runState,
 		Input:        req.Input,
 		ContentParts: req.ContentParts,
 		Model:        req.Model,
@@ -203,7 +210,14 @@ func (g *Gateway) execute(ctx context.Context, snapshot session.Snapshot, req co
 			return g.emitEvents(ctx, snapshot.Session.Ref, handle, events)
 		},
 		AwaitApproval: func(waitCtx context.Context, event session.Event) (session.ApprovalEvent, error) {
-			return g.awaitApproval(waitCtx, snapshot.Session.Ref, handle, event)
+			result, err := g.awaitApproval(waitCtx, snapshot.Session.Ref, handle, event)
+			if err != nil {
+				return session.ApprovalEvent{}, err
+			}
+			if err := g.rememberApprovalDecision(ctx, snapshot.Session.Ref, runState, result); err != nil {
+				return session.ApprovalEvent{}, err
+			}
+			return result, nil
 		},
 	})
 	if err != nil {
@@ -258,6 +272,19 @@ func (g *Gateway) awaitApproval(ctx context.Context, ref session.Ref, handle *tu
 	}
 }
 
+func (g *Gateway) rememberApprovalDecision(ctx context.Context, ref session.Ref, state session.State, result session.ApprovalEvent) error {
+	if result.Tool == nil {
+		return nil
+	}
+	toolName := strings.TrimSpace(result.Tool.Name)
+	optionID := strings.TrimSpace(result.Decision)
+	reason := strings.TrimSpace(result.Reason)
+	if !engineapproval.RememberToolDecision(state, toolName, optionID, reason) {
+		return nil
+	}
+	return g.store.UpdateState(context.WithoutCancel(ctx), ref, engineapproval.RememberToolDecisionPatch(toolName, optionID, reason))
+}
+
 func approvalFromSubmission(pending session.ApprovalEvent, decision coreruntime.ApprovalDecision) session.ApprovalEvent {
 	out := pending
 	optionID := strings.TrimSpace(decision.OptionID)
@@ -266,7 +293,9 @@ func approvalFromSubmission(pending session.ApprovalEvent, decision coreruntime.
 	if out.Reason == "" {
 		out.Reason = strings.TrimSpace(decision.Outcome)
 	}
-	if decision.Approved || strings.HasPrefix(strings.ToLower(strings.TrimSpace(decision.Outcome)), "allow") {
+	normalizedOption := strings.ToLower(optionID)
+	normalizedOutcome := strings.ToLower(strings.TrimSpace(decision.Outcome))
+	if decision.Approved || strings.HasPrefix(normalizedOutcome, "allow") || strings.HasPrefix(normalizedOption, "allow") {
 		out.Status = session.ApprovalApproved
 		return out
 	}
