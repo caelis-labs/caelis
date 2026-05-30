@@ -139,11 +139,15 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	policy, err := manager.SetCompactionPolicy(ctx, CompactionPolicy{
 		Prompt:         "  Write a terse checkpoint.  ",
 		MaxSourceChars: -1,
+		Auto: AutoCompactionPolicy{
+			Mode:           "off",
+			WatermarkRatio: -0.5,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.Prompt != "Write a terse checkpoint." || policy.MaxSourceChars != 0 {
+	if policy.Prompt != "Write a terse checkpoint." || policy.MaxSourceChars != 0 || policy.Auto.Mode != "disabled" || policy.Auto.WatermarkRatio != 0 {
 		t.Fatalf("policy = %#v, want normalized prompt and non-negative max chars", policy)
 	}
 	if got := manager.CompactionPolicy(); got != policy {
@@ -157,7 +161,7 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Compaction.Prompt != "Write a terse checkpoint." {
+	if doc.Compaction.Prompt != "Write a terse checkpoint." || doc.Compaction.Auto.Mode != "disabled" {
 		t.Fatalf("persisted compaction policy = %#v, want prompt", doc.Compaction)
 	}
 	loaded, err := NewManager(ctx, store, Document{
@@ -166,7 +170,7 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := loaded.CompactionPolicy(); got.Prompt != "Write a terse checkpoint." || got.MaxSourceChars != 0 {
+	if got := loaded.CompactionPolicy(); got.Prompt != "Write a terse checkpoint." || got.MaxSourceChars != 0 || got.Auto.Mode != "disabled" {
 		t.Fatalf("loaded compaction policy = %#v, want persisted override", got)
 	}
 }

@@ -45,13 +45,17 @@ func (s StatusService) contextBudget(ctx context.Context, snapshot session.Snaps
 }
 
 func (s Services) contextBudgetFromSnapshot(ctx context.Context, snapshot session.Snapshot) (appviewmodel.ContextBudget, error) {
+	return s.contextBudgetFromSnapshotWithModel(ctx, snapshot, "")
+}
+
+func (s Services) contextBudgetFromSnapshotWithModel(ctx context.Context, snapshot session.Snapshot, modelRef string) (appviewmodel.ContextBudget, error) {
 	messages := enginecontext.SnapshotMessages(snapshot)
 	historyTokens := estimateContextMessagesTokens(messages)
 	prefixTokens, err := s.estimatedPromptPrefixTokens(ctx)
 	if err != nil {
 		return appviewmodel.ContextBudget{}, err
 	}
-	cfg, ok, err := s.currentModelConfigFromSnapshot(snapshot)
+	cfg, ok, err := s.modelConfigForContextBudget(snapshot, modelRef)
 	if err != nil {
 		return appviewmodel.ContextBudget{}, err
 	}
@@ -88,7 +92,15 @@ func (s Services) contextBudgetFromSnapshot(ctx context.Context, snapshot sessio
 	}, nil
 }
 
-func (s Services) currentModelConfigFromSnapshot(snapshot session.Snapshot) (appsettings.ModelConfig, bool, error) {
+func (s Services) modelConfigForContextBudget(snapshot session.Snapshot, modelRef string) (appsettings.ModelConfig, bool, error) {
+	if modelRef = strings.TrimSpace(modelRef); modelRef != "" {
+		if s.settings != nil {
+			if cfg, err := s.settings.ResolveModel(modelRef); err == nil {
+				return cfg, true, nil
+			}
+		}
+		return appsettings.NormalizeModelConfig(appsettings.ModelConfig{Model: modelRef}), false, nil
+	}
 	if s.settings == nil {
 		return s.runtimeModelConfig(), false, nil
 	}

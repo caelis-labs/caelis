@@ -834,6 +834,131 @@ func TestCompactionUsesConfiguredPromptPolicy(t *testing.T) {
 	}
 }
 
+func TestTurnServiceAutoCompactsBeforeWatermarkTurn(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider:            "openai-compatible",
+		Model:               "gpt-compact-auto",
+		ContextWindowTokens: 120,
+		MaxOutputTokens:     10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SetCompactionPolicy(ctx, appsettings.CompactionPolicy{
+		Auto: appsettings.AutoCompactionPolicy{
+			Mode:           "enabled",
+			WatermarkRatio: 0.2,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-auto-compact", WorkspaceKey: "repo"}},
+		Events: []session.Event{{
+			ID:   "evt-history",
+			Type: session.EventUser,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart(strings.Repeat("long history fact ", 120))},
+			},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	turn, err := svc.Turns().Begin(ctx, BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: "sess-auto-compact"},
+		Input:      "continue after checkpoint",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := collectRuntimeTurnEvents(t, turn)
+	if len(engine.events) != 1 || engine.events[0].Type != session.EventCompact {
+		t.Fatalf("recorded events = %#v, want automatic compact event", engine.events)
+	}
+	meta, ok := engine.events[0].Meta[compactMetaKey].(map[string]any)
+	if !ok || meta["trigger"] != "context_watermark" {
+		t.Fatalf("compact meta = %#v, want context_watermark trigger", engine.events[0].Meta)
+	}
+	if len(live) != 1 || live[0].Type != session.EventCompact {
+		t.Fatalf("live events = %#v, want prefixed compact event", live)
+	}
+	if engine.turn.Input != "continue after checkpoint" {
+		t.Fatalf("turn input = %q, want original user turn after compaction", engine.turn.Input)
+	}
+}
+
+func TestTurnServiceAutoCompactionSkipsFreshCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider:            "openai-compatible",
+		Model:               "gpt-compact-auto",
+		ContextWindowTokens: 120,
+		MaxOutputTokens:     10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.SetCompactionPolicy(ctx, appsettings.CompactionPolicy{
+		Auto: appsettings.AutoCompactionPolicy{
+			Mode:           "enabled",
+			WatermarkRatio: 0.01,
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	compactMessage := model.Message{
+		Role:  model.RoleUser,
+		Parts: []model.Part{model.NewTextPart(strings.Repeat("CONTEXT CHECKPOINT\nsummary ", 120))},
+		Meta:  map[string]any{"caelis_compact_checkpoint": true},
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-fresh-compact", WorkspaceKey: "repo"}},
+		Events: []session.Event{{
+			ID:      "evt-compact",
+			Type:    session.EventCompact,
+			Message: &compactMessage,
+			Meta:    map[string]any{compactMetaKey: map[string]any{"contract_version": 1}},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	turn, err := svc.Turns().Begin(ctx, BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: "sess-fresh-compact"},
+		Input:      "continue",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events := collectRuntimeTurnEvents(t, turn); len(events) != 0 {
+		t.Fatalf("live events = %#v, want no redundant compaction prefix", events)
+	}
+	if len(engine.events) != 0 {
+		t.Fatalf("recorded events = %#v, want no redundant compact event", engine.events)
+	}
+}
+
 func TestCompactionFallsBackWhenModelProviderReturnsNoCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -1456,14 +1581,15 @@ func TestModeServicePersistsSessionModeAndTurnsUseIt(t *testing.T) {
 }
 
 type recordingEngine struct {
-	start    session.StartRequest
-	list     session.ListQuery
-	page     session.SessionPage
-	turn     coreruntime.TurnRequest
-	events   []session.Event
-	loadRef  session.Ref
-	state    session.State
-	snapshot session.Snapshot
+	start      session.StartRequest
+	list       session.ListQuery
+	page       session.SessionPage
+	turn       coreruntime.TurnRequest
+	events     []session.Event
+	turnEvents []session.Event
+	loadRef    session.Ref
+	state      session.State
+	snapshot   session.Snapshot
 }
 
 type fakeSandboxRuntime struct {
@@ -1618,9 +1744,24 @@ func (e *recordingEngine) UpdateSessionState(_ context.Context, _ session.Ref, p
 
 func (e *recordingEngine) BeginTurn(_ context.Context, req coreruntime.TurnRequest) (coreruntime.Turn, error) {
 	e.turn = req
-	events := make(chan coreruntime.EventEnvelope)
+	events := make(chan coreruntime.EventEnvelope, len(e.turnEvents))
+	for _, event := range e.turnEvents {
+		events <- coreruntime.EventEnvelope{Event: session.CloneEvent(event)}
+	}
 	close(events)
 	return staticTurn{events: events}, nil
+}
+
+func collectRuntimeTurnEvents(t *testing.T, turn coreruntime.Turn) []session.Event {
+	t.Helper()
+	var out []session.Event
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatalf("turn event error: %s", env.Err)
+		}
+		out = append(out, session.CloneEvent(env.Event))
+	}
+	return out
 }
 
 func cloneTestEvents(in []session.Event) []session.Event {

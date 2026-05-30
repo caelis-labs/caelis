@@ -1355,7 +1355,11 @@ be migrated before retiring the old stack:
       budget estimation from canonical model-visible messages, prompt/tool
       prefix estimates, and current model context/output limits. Status
       view-models surface the same estimate for TUI and future APP consumers.
-    - Still pending: automatic compaction remains to be migrated.
+    - Migrated baseline: `TurnService.Begin` now performs shared app-layer
+      automatic pre-turn compaction when the estimated current context plus the
+      pending user input crosses the configured watermark. The compact event is
+      recorded through the core engine and prefixed onto the returned turn event
+      stream, so TUI and future APP consumers see the same ACP-native flow.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill

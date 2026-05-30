@@ -1178,7 +1178,11 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 			return nil, fmt.Errorf("app/services: unknown session mode %q", strings.TrimSpace(req.Mode))
 		}
 	}
-	return s.services.engine.BeginTurn(ctx, coreruntime.TurnRequest{
+	prefixEvents, err := s.autoCompactBeforeTurn(ctx, ref, req, modelRef)
+	if err != nil {
+		return nil, err
+	}
+	turn, err := s.services.engine.BeginTurn(ctx, coreruntime.TurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
 		ContentParts: model.CloneContentParts(req.ContentParts),
@@ -1188,6 +1192,10 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 		Mode:         mode,
 		Meta:         maps.Clone(req.Meta),
 	})
+	if err != nil {
+		return nil, err
+	}
+	return turnWithPrefixedEvents(turn, prefixEvents), nil
 }
 
 func (s TurnService) Replay(ctx context.Context, req coreruntime.ReplayRequest) (<-chan coreruntime.EventEnvelope, error) {

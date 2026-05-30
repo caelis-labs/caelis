@@ -87,8 +87,14 @@ type ModelChoice struct {
 }
 
 type CompactionPolicy struct {
-	Prompt         string `json:"prompt,omitempty"`
-	MaxSourceChars int    `json:"max_source_chars,omitempty"`
+	Prompt         string               `json:"prompt,omitempty"`
+	MaxSourceChars int                  `json:"max_source_chars,omitempty"`
+	Auto           AutoCompactionPolicy `json:"auto,omitempty"`
+}
+
+type AutoCompactionPolicy struct {
+	Mode           string  `json:"mode,omitempty"`
+	WatermarkRatio float64 `json:"watermark_ratio,omitempty"`
 }
 
 type Store interface {
@@ -674,7 +680,29 @@ func NormalizeCompactionPolicy(policy CompactionPolicy) CompactionPolicy {
 	if policy.MaxSourceChars < 0 {
 		policy.MaxSourceChars = 0
 	}
+	policy.Auto = NormalizeAutoCompactionPolicy(policy.Auto)
 	return policy
+}
+
+func NormalizeAutoCompactionPolicy(policy AutoCompactionPolicy) AutoCompactionPolicy {
+	policy.Mode = normalizeAutoCompactionMode(policy.Mode)
+	if policy.WatermarkRatio < 0 {
+		policy.WatermarkRatio = 0
+	}
+	return policy
+}
+
+func normalizeAutoCompactionMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", "default":
+		return ""
+	case "enabled", "enable", "on", "true", "yes":
+		return "enabled"
+	case "disabled", "disable", "off", "false", "no":
+		return "disabled"
+	default:
+		return strings.ToLower(strings.TrimSpace(mode))
+	}
 }
 
 func NormalizeModelCatalog(catalog ModelCatalog) ModelCatalog {
@@ -885,7 +913,10 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 
 func compactionPolicyConfigured(policy CompactionPolicy) bool {
 	policy = NormalizeCompactionPolicy(policy)
-	return policy.Prompt != "" || policy.MaxSourceChars > 0
+	return policy.Prompt != "" ||
+		policy.MaxSourceChars > 0 ||
+		policy.Auto.Mode != "" ||
+		policy.Auto.WatermarkRatio > 0
 }
 
 func modelCarriesProfileAuth(cfg ModelConfig) bool {
