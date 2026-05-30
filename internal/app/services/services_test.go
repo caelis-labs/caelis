@@ -17,6 +17,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
 func TestNewRequiresEngine(t *testing.T) {
@@ -1775,6 +1776,92 @@ func TestModelServiceProviderModelsMergesConfiguredAndRemoteModels(t *testing.T)
 	}
 }
 
+func TestModelServiceSelectionViewProjectsProvidersAndCandidates(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-configured",
+		BaseURL:  "https://api.example.test/v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "minimax",
+		Model:    "MiniMax-M2.7-highspeed",
+		BaseURL:  "https://api.minimaxi.com/anthropic",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var captured appsettings.ModelConfig
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine: &recordingEngine{snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-model", WorkspaceKey: "repo"}},
+			State:   session.State{StateCurrentModelID: cfg.ID},
+		}},
+		Settings: manager,
+		Resources: appresources.Catalog{
+			ModelProviders: []plugin.FactoryAlias{{
+				Name:        "reviewer-openai",
+				Uses:        "openai-compatible",
+				Description: "plugin OpenAI profile",
+			}},
+		},
+		ModelProvider: func(_ context.Context, cfg appsettings.ModelConfig) (model.Provider, error) {
+			captured = cfg
+			return catalogProvider{models: []model.ModelInfo{
+				{ID: "gpt-remote", Provider: "openai-compatible"},
+				{ID: "gpt-configured", Provider: "openai-compatible"},
+			}}, nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Models().Selection(ctx, ModelSelectionRequest{
+		SessionRef: session.Ref{SessionID: "sess-model"},
+		Provider:   "openai-compatible",
+		Discovery: appsettings.ModelConfig{
+			BaseURL: "https://api.example.test/v1",
+			Token:   "secret",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Current == nil || view.Current.ID != cfg.ID || len(view.Configured) != 2 {
+		t.Fatalf("selection current/configured = %#v/%#v, want selected model and two configured models", view.Current, view.Configured)
+	}
+	provider, ok := findModelProviderOption(view.Providers, "openai-compatible")
+	if !ok || !provider.Builtin || !provider.Configured || provider.ConfiguredModelCount != 1 || provider.CatalogModelCount == 0 || !provider.RemoteDiscovery {
+		t.Fatalf("openai-compatible provider option = %#v ok=%v, want builtin/configured/remote provider", provider, ok)
+	}
+	pluginProvider, ok := findModelProviderOption(view.Providers, "reviewer-openai")
+	if !ok || !pluginProvider.Plugin || pluginProvider.Uses != "openai-compatible" || pluginProvider.Description != "plugin OpenAI profile" {
+		t.Fatalf("plugin provider option = %#v ok=%v, want plugin alias", pluginProvider, ok)
+	}
+	configured, ok := findModelCandidate(view.Candidates, "gpt-configured")
+	if !ok || !configured.Configured || configured.Remote {
+		t.Fatalf("configured candidate = %#v ok=%v, want configured only candidate", configured, ok)
+	}
+	catalog, ok := findModelCandidate(view.Candidates, "gpt-4o")
+	if !ok || !catalog.Catalog || !catalog.CapabilitiesKnown || !catalog.Capabilities.SupportsImages {
+		t.Fatalf("catalog candidate = %#v ok=%v, want catalog candidate with image capabilities", catalog, ok)
+	}
+	remote, ok := findModelCandidate(view.Candidates, "gpt-remote")
+	if !ok || !remote.Remote || remote.Configured || remote.Catalog {
+		t.Fatalf("remote candidate = %#v ok=%v, want remote-only candidate", remote, ok)
+	}
+	if captured.Provider != "openai-compatible" || captured.BaseURL != "https://api.example.test/v1" || captured.Token != "secret" {
+		t.Fatalf("provider factory cfg = %#v, want discovery config with selected provider", captured)
+	}
+}
+
 func TestModelServiceCodeFreeAuthDelegatesToConfiguredAuthenticator(t *testing.T) {
 	ctx := context.Background()
 	auth := &recordingCodeFreeAuth{
@@ -1933,6 +2020,24 @@ func cloneModelMessages(in []model.Message) []model.Message {
 		out = append(out, model.CloneMessage(message))
 	}
 	return out
+}
+
+func findModelProviderOption(options []appviewmodel.ModelProviderOption, id string) (appviewmodel.ModelProviderOption, bool) {
+	for _, option := range options {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return appviewmodel.ModelProviderOption{}, false
+}
+
+func findModelCandidate(candidates []appviewmodel.ModelCandidate, modelName string) (appviewmodel.ModelCandidate, bool) {
+	for _, candidate := range candidates {
+		if candidate.Model == modelName {
+			return candidate, true
+		}
+	}
+	return appviewmodel.ModelCandidate{}, false
 }
 
 func (p catalogProvider) ID() string {

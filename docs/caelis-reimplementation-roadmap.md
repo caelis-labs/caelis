@@ -604,9 +604,9 @@ alongside the old stack without importing it:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval/action, participant, task list/output, settings, and status DTOs
-  shared by the TUI and future APP, including runtime store identity needed by
-  read-only diagnostics.
+  approval/action, participant, model selection, task list/output, settings,
+  and status DTOs shared by the TUI and future APP, including runtime store
+  identity needed by read-only diagnostics.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -877,6 +877,10 @@ The completed work is intentionally limited to the reusable skeleton:
   provider models, built-in provider model presets, capability defaults, and
   reasoning levels so TUI and future APP connect/setup flows do not need to own
   provider capability tables.
+- App model selection baseline: `ModelService.Selection` now projects current
+  configured model, provider options, plugin provider aliases, discovered
+  remote models, built-in catalog candidates, and capability/reasoning metadata
+  into a single surface-neutral view model for TUI and future APP setup flows.
 - App session mode baseline: shared app services persist a per-session approval
   preset, ACP exposes it through `session/set_mode` and the `mode` config
   option, and the core approval policy receives the selected mode for each tool
@@ -1089,9 +1093,13 @@ be migrated before retiring the old stack:
      pending approval actions and a shared decision-submission contract for TUI
      and the future APP. The app-service TUI turn bridge uses this contract
      instead of hand-writing runtime approval submissions in gatewaydriver.
-   - Still pending: remaining settings mutation flows, richer model/provider
-     selection views, agent management actions, transcript actions, durable
-     task history, and live event subscriptions still need APP-ready
+   - Migrated baseline: `internal/app/services.ModelService.Selection` now
+     exposes a surface-neutral model/provider selection view with configured
+     models, provider options, plugin aliases, remote/catalog candidates,
+     capabilities, and reasoning-level metadata.
+   - Still pending: remaining settings mutation flows, agent management
+     actions, transcript actions, durable task history, and live event
+     subscriptions still need APP-ready
      service/view-model contracts.
 
 4. Headless CLI and ACP serving
@@ -1149,6 +1157,11 @@ be migrated before retiring the old stack:
      injecting registry-backed provider factories and the TUI passing the
      current provider/base URL/token candidate as UI data rather than creating
      provider adapters itself.
+   - Migrated baseline: richer model/provider setup is now available through
+     `ModelService.Selection`, which merges configured choices, provider
+     options, plugin provider aliases, built-in catalog candidates, remote
+     provider discovery, and model capability/reasoning metadata into one
+     surface-neutral view.
    - Migrated baseline: the new CLI/local stack now hydrates models and ACP
      agents from the default app settings file under the configured store
      directory, so normal TUI `/connect` changes persist through the shared

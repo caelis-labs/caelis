@@ -7,7 +7,9 @@ import (
 	"strings"
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	"github.com/OnslaughtSnail/caelis/core/session"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
 const (
@@ -34,6 +36,12 @@ type modelCatalogEntry struct {
 	provider string
 	pattern  string
 	caps     ModelCapabilityInfo
+}
+
+type ModelSelectionRequest struct {
+	SessionRef session.Ref             `json:"session_ref,omitempty"`
+	Provider   string                  `json:"provider,omitempty"`
+	Discovery  appsettings.ModelConfig `json:"discovery,omitempty"`
 }
 
 var catalogModels = map[string][]string{
@@ -186,6 +194,181 @@ func (s ModelService) ReasoningLevels(provider string, modelName string) []strin
 	out = append(out, "none")
 	out = append(out, levels...)
 	return out
+}
+
+func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) (appviewmodel.ModelSelectionView, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	choices, err := s.List(ctx)
+	if err != nil {
+		return appviewmodel.ModelSelectionView{}, err
+	}
+	view := appviewmodel.ModelSelectionView{
+		Configured:    statusModelChoices(choices),
+		RemoteEnabled: s.services.modelProvider != nil,
+	}
+	if len(choices) > 0 {
+		current, ok, err := s.Current(ctx, req.SessionRef)
+		if err != nil {
+			return appviewmodel.ModelSelectionView{}, err
+		}
+		if ok {
+			choice := statusModelChoice(appsettings.ModelChoiceFromConfig(current, modelChoiceIsDefault(choices, current.ID)))
+			view.Current = &choice
+		}
+	}
+	provider := firstNonEmpty(req.Provider, req.Discovery.Provider)
+	provider = normalizeModelCatalogKey(provider)
+	view.Provider = provider
+	view.Providers = s.modelProviderOptions(choices)
+	if provider == "" {
+		return view, nil
+	}
+	candidates := map[string]appviewmodel.ModelCandidate{}
+	addModelCandidates(candidates, provider, s.ListCatalogModels(provider), func(candidate *appviewmodel.ModelCandidate) {
+		candidate.Catalog = true
+	})
+	configured, err := s.ConfiguredProviderModels(ctx, provider)
+	if err != nil {
+		return appviewmodel.ModelSelectionView{}, err
+	}
+	addModelCandidates(candidates, provider, configured, func(candidate *appviewmodel.ModelCandidate) {
+		candidate.Configured = true
+	})
+	discovery := req.Discovery
+	discovery.Provider = firstNonEmpty(discovery.Provider, provider)
+	remote, err := s.ProviderModels(ctx, discovery)
+	if err != nil {
+		view.DiscoveryErr = err.Error()
+	}
+	addModelCandidates(candidates, provider, remote, func(candidate *appviewmodel.ModelCandidate) {
+		if !candidate.Configured {
+			candidate.Remote = true
+		}
+	})
+	view.Candidates = s.sortedModelCandidates(candidates)
+	return view, nil
+}
+
+func (s ModelService) modelProviderOptions(choices []appsettings.ModelChoice) []appviewmodel.ModelProviderOption {
+	providers := map[string]appviewmodel.ModelProviderOption{}
+	for provider, models := range catalogModels {
+		key := normalizeModelCatalogKey(provider)
+		providers[key] = appviewmodel.ModelProviderOption{
+			ID:                key,
+			Name:              key,
+			Builtin:           true,
+			RemoteDiscovery:   s.services.modelProvider != nil,
+			CatalogModelCount: len(models),
+		}
+	}
+	for _, alias := range s.services.resources.ModelProviders {
+		key := normalizeModelCatalogKey(alias.Name)
+		if key == "" {
+			continue
+		}
+		option := providers[key]
+		option.ID = key
+		option.Name = key
+		option.Description = strings.TrimSpace(alias.Description)
+		option.Uses = strings.TrimSpace(alias.Uses)
+		option.Plugin = true
+		option.RemoteDiscovery = s.services.modelProvider != nil
+		providers[key] = option
+	}
+	for _, choice := range choices {
+		key := normalizeModelCatalogKey(choice.Provider)
+		if key == "" {
+			continue
+		}
+		option := providers[key]
+		option.ID = key
+		option.Name = key
+		option.Configured = true
+		option.RemoteDiscovery = s.services.modelProvider != nil
+		option.ConfiguredModelCount++
+		option.CatalogModelCount = len(s.ListCatalogModels(key))
+		providers[key] = option
+	}
+	out := make([]appviewmodel.ModelProviderOption, 0, len(providers))
+	for _, option := range providers {
+		out = append(out, option)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return strings.ToLower(out[i].ID) < strings.ToLower(out[j].ID)
+	})
+	return out
+}
+
+func addModelCandidates(candidates map[string]appviewmodel.ModelCandidate, provider string, models []string, update func(*appviewmodel.ModelCandidate)) {
+	for _, modelName := range models {
+		modelName = strings.TrimSpace(modelName)
+		if modelName == "" {
+			continue
+		}
+		key := strings.ToLower(modelName)
+		candidate := candidates[key]
+		candidate.Provider = provider
+		candidate.Model = modelName
+		update(&candidate)
+		candidates[key] = candidate
+	}
+}
+
+func (s ModelService) sortedModelCandidates(candidates map[string]appviewmodel.ModelCandidate) []appviewmodel.ModelCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ModelCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		if caps, ok := s.LookupCapabilities(candidate.Provider, candidate.Model); ok {
+			candidate.CapabilitiesKnown = true
+			candidate.Capabilities = modelCapabilityView(caps)
+			candidate.ReasoningLevels = s.ReasoningLevels(candidate.Provider, candidate.Model)
+		} else {
+			candidate.Capabilities = modelCapabilityView(s.DefaultCapabilities())
+		}
+		out = append(out, candidate)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		left := candidateRank(out[i])
+		right := candidateRank(out[j])
+		if left != right {
+			return left < right
+		}
+		return strings.ToLower(out[i].Model) < strings.ToLower(out[j].Model)
+	})
+	return out
+}
+
+func candidateRank(candidate appviewmodel.ModelCandidate) int {
+	if candidate.Configured {
+		return 0
+	}
+	if candidate.Catalog {
+		return 1
+	}
+	if candidate.Remote {
+		return 2
+	}
+	return 3
+}
+
+func modelCapabilityView(in ModelCapabilityInfo) appviewmodel.ModelCapability {
+	in = normalizeModelCapabilityInfo(in)
+	return appviewmodel.ModelCapability{
+		ContextWindowTokens:    in.ContextWindowTokens,
+		MaxOutputTokens:        in.MaxOutputTokens,
+		DefaultMaxOutputTokens: in.DefaultMaxOutputTokens,
+		SupportsImages:         in.SupportsImages,
+		SupportsToolCalls:      in.SupportsToolCalls,
+		SupportsReasoning:      in.SupportsReasoning,
+		ReasoningMode:          in.ReasoningMode,
+		ReasoningEfforts:       slices.Clone(in.ReasoningEfforts),
+		DefaultReasoningEffort: in.DefaultReasoningEffort,
+		SupportsJSONOutput:     in.SupportsJSONOutput,
+	}
 }
 
 func normalizeModelCatalogKey(value string) string {
