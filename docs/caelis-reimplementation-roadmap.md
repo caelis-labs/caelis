@@ -1393,9 +1393,12 @@ be migrated before retiring the old stack:
     - Migrated baseline: session list search now includes canonical session
       metadata, with memory, JSONL, SQLite, and engine test stores covered by
       the same `core/session` matching contract.
-    - Still pending: richer title generation, cross-workspace filters, current
-      on-disk legacy session layout migration, and reload UX polish are not
-      implemented.
+    - Migrated baseline: shared app session listing can now explicitly request
+      all workspaces without defaulting to the current runtime workspace, and
+      the app-service TUI gateway preserves the old user-namespace list
+      contract when a caller omits the workspace key.
+    - Still pending: richer title generation, current on-disk legacy session
+      layout migration, and reload UX polish are not implemented.
 
 ### Next Migration Milestones
 

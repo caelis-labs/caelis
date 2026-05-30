@@ -1069,10 +1069,11 @@ type StartSessionRequest struct {
 }
 
 type ListSessionsRequest struct {
-	Workspace session.Workspace
-	Search    string
-	After     session.Cursor
-	Limit     int
+	Workspace     session.Workspace
+	AllWorkspaces bool
+	Search        string
+	After         session.Cursor
+	Limit         int
 }
 
 func (s SessionService) Start(ctx context.Context, req StartSessionRequest) (session.Session, error) {
@@ -1093,7 +1094,10 @@ func (s SessionService) List(ctx context.Context, req ListSessionsRequest) (sess
 	if s.services.engine == nil {
 		return session.SessionPage{}, errors.New("app/services: runtime engine is required")
 	}
-	workspace := s.workspaceWithDefaults(req.Workspace)
+	workspace := session.Workspace{}
+	if !req.AllWorkspaces {
+		workspace = s.workspaceWithDefaults(req.Workspace)
+	}
 	return s.services.engine.ListSessions(ctx, session.ListQuery{
 		Ref: session.Ref{
 			AppName:      s.services.runtime.AppName,

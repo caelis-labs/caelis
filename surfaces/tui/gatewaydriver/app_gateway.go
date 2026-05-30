@@ -125,12 +125,14 @@ func (g *appServiceGateway) ResumeSession(ctx context.Context, req kernel.Resume
 }
 
 func (g *appServiceGateway) ListSessions(ctx context.Context, req kernel.ListSessionsRequest) (portsession.SessionList, error) {
+	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
 	page, err := g.services.Sessions().List(ctx, appservices.ListSessionsRequest{
 		Workspace: coresession.Workspace{
-			Key: strings.TrimSpace(req.WorkspaceKey),
+			Key: workspaceKey,
 		},
-		After: coresession.Cursor(req.Cursor),
-		Limit: req.Limit,
+		AllWorkspaces: workspaceKey == "",
+		After:         coresession.Cursor(req.Cursor),
+		Limit:         req.Limit,
 	})
 	if err != nil {
 		return portsession.SessionList{}, err

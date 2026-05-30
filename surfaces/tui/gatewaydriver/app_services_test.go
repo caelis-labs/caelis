@@ -278,6 +278,34 @@ func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T
 	}
 }
 
+func TestBindAppServicesListSessionsPreservesAllWorkspaceRequest(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := BindAppServices(&DriverStack{}, svc)
+	if _, err := bound.GatewayFn().ListSessions(ctx, kernel.ListSessionsRequest{
+		AppName: "caelis",
+		UserID:  "user-1",
+		Limit:   10,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if engine.list.Ref.WorkspaceKey != "" || engine.list.WorkspaceCWD != "" {
+		t.Fatalf("list query = %#v, want no workspace filters", engine.list)
+	}
+}
+
 func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{}
@@ -860,6 +888,7 @@ func (appServiceDriverModelCatalog) Stream(context.Context, coremodel.Request) (
 
 type appServiceDriverEngine struct {
 	start    coresession.StartRequest
+	list     coresession.ListQuery
 	page     coresession.SessionPage
 	state    coresession.State
 	snapshot coresession.Snapshot
@@ -892,7 +921,8 @@ func (e *appServiceDriverEngine) StartSession(_ context.Context, req coresession
 	return active, nil
 }
 
-func (e *appServiceDriverEngine) ListSessions(context.Context, coresession.ListQuery) (coresession.SessionPage, error) {
+func (e *appServiceDriverEngine) ListSessions(_ context.Context, query coresession.ListQuery) (coresession.SessionPage, error) {
+	e.list = query
 	return coresession.CloneSessionPage(e.page), nil
 }
 

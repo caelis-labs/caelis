@@ -1337,6 +1337,26 @@ func TestSessionServiceListAppliesWorkspaceDefaults(t *testing.T) {
 	}
 }
 
+func TestSessionServiceListCanOmitWorkspaceFilters(t *testing.T) {
+	engine := &recordingEngine{}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo", WorkspaceCWD: "/tmp/repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Sessions().List(context.Background(), ListSessionsRequest{AllWorkspaces: true, Limit: 20}); err != nil {
+		t.Fatal(err)
+	}
+	if engine.list.Ref.AppName != "caelis-app" || engine.list.Ref.UserID != "tester" {
+		t.Fatalf("list ref = %#v, want runtime app/user defaults", engine.list.Ref)
+	}
+	if engine.list.Ref.WorkspaceKey != "" || engine.list.WorkspaceCWD != "" {
+		t.Fatalf("list query = %#v, want no workspace filters", engine.list)
+	}
+}
+
 func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
