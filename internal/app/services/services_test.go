@@ -438,6 +438,113 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	}
 }
 
+func TestCommandServiceExecuteStatus(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref:   session.Ref{SessionID: "sess-status"},
+			Title: "work",
+		},
+		State: session.State{
+			StateSessionMode: coreruntime.SessionModeManual,
+		},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Store: config.Store{
+				Backend: "jsonl",
+				URI:     "/tmp/events.jsonl",
+			},
+			Sandbox: config.Sandbox{Backend: "host"},
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-status"},
+		Input:      " /status ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "status" {
+		t.Fatalf("status execution = %#v, want handled status", view)
+	}
+	for _, want := range []string{
+		"status:",
+		"session: sess-status",
+		"title: work",
+		"model: not configured",
+		"mode: manual",
+		"store: jsonl /tmp/events.jsonl",
+		"sandbox: host",
+	} {
+		if !strings.Contains(view.Output, want) {
+			t.Fatalf("status output = %q, missing %q", view.Output, want)
+		}
+	}
+
+	unhandled, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-status"},
+		Input:      "hello",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unhandled.Handled {
+		t.Fatalf("non-slash execution = %#v, want unhandled", unhandled)
+	}
+}
+
+func TestCommandServiceExecuteCompactRecordsCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-compact"}},
+		Events: []session.Event{{
+			ID:   "event-1",
+			Type: session.EventUser,
+			Message: &model.Message{
+				Role:  model.RoleUser,
+				Parts: []model.Part{model.NewTextPart("important state")},
+			},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-compact"},
+		Input:      "/compact",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "compact" || view.Output != "compaction completed" {
+		t.Fatalf("compact execution = %#v, want handled completion", view)
+	}
+	if len(engine.events) != 1 {
+		t.Fatalf("recorded events = %#v, want one compact event", engine.events)
+	}
+	event := engine.events[0]
+	if event.Type != session.EventCompact {
+		t.Fatalf("recorded event type = %q, want compact", event.Type)
+	}
+	text := session.EventText(event)
+	if !strings.Contains(text, "CONTEXT CHECKPOINT") || !strings.Contains(text, "important state") {
+		t.Fatalf("compact checkpoint = %q, want source summary", text)
+	}
+}
+
 func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

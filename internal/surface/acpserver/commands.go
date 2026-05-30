@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
@@ -47,6 +48,37 @@ func (s *Server) publishAvailableCommands(ctx context.Context, sessionID string)
 		Update: schema.AvailableCommandsUpdate{
 			SessionUpdate:     schema.UpdateAvailableCmds,
 			AvailableCommands: commands,
+		},
+	})
+}
+
+func (s *Server) executeCommandPrompt(ctx context.Context, ref session.Ref, input string) (bool, error) {
+	if s.services.Engine() == nil {
+		return false, nil
+	}
+	result, err := s.services.Commands().Execute(ctx, appservices.CommandExecutionRequest{
+		SessionRef: ref,
+		Input:      input,
+	})
+	if err != nil || !result.Handled {
+		return result.Handled, err
+	}
+	return true, s.publishCommandOutput(ref.SessionID, result.Output)
+}
+
+func (s *Server) publishCommandOutput(sessionID string, text string) error {
+	if s.conn == nil {
+		return nil
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return nil
+	}
+	return s.conn.Notify(schema.MethodSessionUpdate, schema.SessionNotification{
+		SessionID: strings.TrimSpace(sessionID),
+		Update: schema.ContentChunk{
+			SessionUpdate: schema.UpdateAgentMessage,
+			Content:       schema.TextContent{Type: "text", Text: text},
 		},
 	})
 }

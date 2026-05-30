@@ -336,6 +336,11 @@ func (s *Server) prompt(ctx context.Context, req schema.PromptRequest) (schema.P
 	if err != nil {
 		return schema.PromptResponse{}, err
 	}
+	if handled, err := s.executeCommandPrompt(ctx, s.sessionRef(sessionID), input); err != nil {
+		return schema.PromptResponse{}, err
+	} else if handled {
+		return schema.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
+	}
 	turn, err := s.beginTurn(ctx, s.sessionRef(sessionID), input, parts)
 	if err != nil {
 		return schema.PromptResponse{}, err

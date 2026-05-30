@@ -699,6 +699,11 @@ alongside the old stack without importing it:
 - `internal/app/services.ApprovalService`: shared TUI/APP-facing pending
   approval list and decision-submission contract that converts surface choices
   into `core/runtime` approval submissions.
+- `internal/app/services.CommandService`: shared command catalog plus
+  service-native command execution contract. The first execution baseline
+  handles non-interactive `/status` and `/compact`, so ACP clients, TUI, and the
+  future APP can share command semantics instead of reimplementing status and
+  compaction in each surface.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime and treats host setup/fix/reset/clean as explicit
@@ -924,6 +929,10 @@ The completed work is intentionally limited to the reusable skeleton:
   stored events through the same ACP projection path used for live updates, and
   `session/close` interrupts any active turn while remaining idempotent when no
   turn is running.
+- ACP slash command execution baseline: ACP `session/prompt` now recognizes
+  service-native `/status` and `/compact`, publishes standard
+  `agent_message_chunk` output, and records compact checkpoints through the
+  shared compaction service instead of starting a model turn.
 - Core-native external ACP process adapter for participant-style invocation and
   normalized canonical event recording.
 - Service-native TUI `/agent list` and dynamic `/<agent> <prompt>` baseline
@@ -1139,9 +1148,10 @@ be migrated before retiring the old stack:
      gateway replay and local-turn forwarding path consume this service-level
      projection before adapting to the existing kernel envelope shape.
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
-     surface-neutral command catalog for ACP clients, TUI, and the future APP,
-     so the new ACP path no longer needs the old `gatewayapp` ACP surface for
-     available-command metadata.
+     surface-neutral command catalog and non-interactive execution contract for
+     ACP clients, TUI, and the future APP. `/status` and `/compact` now share
+     app-service behavior; remaining interactive commands can be added without
+     making ACP, TUI, or APP surfaces own command semantics.
    - Still pending: transcript actions and richer settings-panel composition
      still need APP-ready service/view-model contracts. Durable async task
      control and output storage remain kernel/runtime work rather than APP-only
@@ -1185,8 +1195,13 @@ be migrated before retiring the old stack:
      shared model catalog and configured model set, and the new ACP server
      publishes standard `available_commands_update` notifications after
      session new/load/resume using the shared command catalog.
-   - Still pending: terminal integration, client mode flows, slash-command
-     execution parity, richer non-model config providers beyond
+   - Migrated baseline: ACP `session/prompt` now executes service-native
+     `/status` and `/compact` through `CommandService`; handled commands return
+     `end_turn`, publish standard `agent_message_chunk` output, and do not enter
+     the model turn loop.
+   - Still pending: terminal integration, client mode flows, remaining
+     interactive slash-command parity for commands such as `/agent`, `/connect`,
+     `/model`, `/approval`, and `/resume`, richer non-model config providers beyond
      prompt/context/sandbox backend settings, and the full behavior covered by
      current public ACP e2e tests.
 
@@ -1673,8 +1688,9 @@ be migrated before retiring the old stack:
 
 Recommended sequence:
 
-1. Finish wiring settings/model services into product entrypoints and TUI
-   commands.
+1. Finish the remaining large TUI command migrations against app services,
+   especially `/connect`, interactive ACP agent/controller commands, and
+   non-host doctor/sandbox repair flows.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating

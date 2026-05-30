@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"strings"
 	"testing"
 	"time"
 
@@ -211,6 +212,132 @@ func TestServeStdioPublishesAvailableCommandsFromAppServices(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for available_commands_update")
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
+func TestServeStdioExecutesSlashCommandsThroughAppServices(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stack, err := local.New(local.Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+		},
+		Provider: &testProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("normal response")},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	agentMessages := make(chan string, 8)
+	go func() {
+		_ = conn.Serve(ctx, nil, func(_ context.Context, msg jsonrpc.Message) {
+			if msg.Method != schema.MethodSessionUpdate {
+				return
+			}
+			var notification contentNotification
+			if err := json.Unmarshal(msg.Params, &notification); err != nil {
+				return
+			}
+			if notification.Update.SessionUpdate == schema.UpdateAgentMessage && notification.Update.Content.Text != "" {
+				agentMessages <- notification.Update.Content.Text
+			}
+		})
+	}()
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: "/tmp/project"}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+
+	var promptResp schema.PromptResponse
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/status"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/status) call error = %v", err)
+	}
+	if promptResp.StopReason != schema.StopReasonEndTurn {
+		t.Fatalf("status stop reason = %q, want %q", promptResp.StopReason, schema.StopReasonEndTurn)
+	}
+	statusText := waitForAgentMessage(t, ctx, agentMessages, "status:")
+	if !strings.Contains(statusText, "model: not configured") {
+		t.Fatalf("status output = %q, want model status", statusText)
+	}
+	snapshot, err := stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Events) != 0 {
+		t.Fatalf("events after /status = %#v, want no model turn events", snapshot.Events)
+	}
+
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "remember durable state"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(normal) call error = %v", err)
+	}
+	if promptResp.StopReason != schema.StopReasonEndTurn {
+		t.Fatalf("normal stop reason = %q, want %q", promptResp.StopReason, schema.StopReasonEndTurn)
+	}
+
+	if err := conn.Call(ctx, schema.MethodSessionPrompt, schema.PromptRequest{
+		SessionID: newResp.SessionID,
+		Prompt: []json.RawMessage{
+			jsonrpc.MustMarshalRaw(schema.TextContent{Type: "text", Text: "/compact"}),
+		},
+	}, &promptResp); err != nil {
+		t.Fatalf("session/prompt(/compact) call error = %v", err)
+	}
+	if promptResp.StopReason != schema.StopReasonEndTurn {
+		t.Fatalf("compact stop reason = %q, want %q", promptResp.StopReason, schema.StopReasonEndTurn)
+	}
+	waitForAgentMessage(t, ctx, agentMessages, "compaction completed")
+	snapshot, err = stack.Services().Sessions().Load(ctx, session.Ref{SessionID: newResp.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshotContainsEventType(snapshot, session.EventCompact) {
+		t.Fatalf("events after /compact = %#v, want compact checkpoint event", snapshot.Events)
 	}
 
 	cancel()
@@ -963,6 +1090,37 @@ type availableCommandsNotification struct {
 		SessionUpdate     string                    `json:"sessionUpdate"`
 		AvailableCommands []schema.AvailableCommand `json:"availableCommands"`
 	} `json:"update"`
+}
+
+type contentNotification struct {
+	SessionID string `json:"sessionId"`
+	Update    struct {
+		SessionUpdate string             `json:"sessionUpdate"`
+		Content       schema.TextContent `json:"content"`
+	} `json:"update"`
+}
+
+func waitForAgentMessage(t *testing.T, ctx context.Context, messages <-chan string, contains string) string {
+	t.Helper()
+	for {
+		select {
+		case message := <-messages:
+			if strings.Contains(message, contains) {
+				return message
+			}
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for agent message containing %q", contains)
+		}
+	}
+}
+
+func snapshotContainsEventType(snapshot session.Snapshot, eventType session.EventType) bool {
+	for _, event := range snapshot.Events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func requireACPConfigOption(t *testing.T, options []schema.SessionConfigOption, id string) schema.SessionConfigOption {
