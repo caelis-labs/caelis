@@ -155,6 +155,10 @@ func (s Services) Tasks() TaskService {
 	return TaskService{services: s}
 }
 
+func (s Services) Approvals() ApprovalService {
+	return ApprovalService{services: s}
+}
+
 type SettingsService struct {
 	services Services
 }

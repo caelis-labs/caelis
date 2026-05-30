@@ -604,9 +604,9 @@ alongside the old stack without importing it:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval, participant, task list/output, settings, and status DTOs shared by
-  the TUI and future APP, including runtime store identity needed by read-only
-  diagnostics.
+  approval/action, participant, task list/output, settings, and status DTOs
+  shared by the TUI and future APP, including runtime store identity needed by
+  read-only diagnostics.
 - `internal/app/local`: local composition root for core provider, store, tools,
   sandbox runtime, and engine wiring. It can now build a configured local stack
   from `core/config` without importing the old `ports` or `kernel` packages.
@@ -682,6 +682,9 @@ alongside the old stack without importing it:
 - `internal/app/services.ViewService`: shared TUI/APP-facing projection from
   canonical session snapshots to surface-neutral transcript, approval, and
   participant view models.
+- `internal/app/services.ApprovalService`: shared TUI/APP-facing pending
+  approval list and decision-submission contract that converts surface choices
+  into `core/runtime` approval submissions.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime and treats host setup/fix/reset/clean as explicit
@@ -1082,9 +1085,13 @@ be migrated before retiring the old stack:
      surface-neutral task panel contract for sandbox async session list, tail,
      wait, stdin write, and cancel operations, backed by `core/sandbox`
      session contracts instead of old TUI task state.
+   - Migrated baseline: `internal/app/services.ApprovalService` now exposes
+     pending approval actions and a shared decision-submission contract for TUI
+     and the future APP. The app-service TUI turn bridge uses this contract
+     instead of hand-writing runtime approval submissions in gatewaydriver.
    - Still pending: remaining settings mutation flows, richer model/provider
-     selection views, agent management actions, approvals, transcript actions,
-     durable task history, and live event subscriptions still need APP-ready
+     selection views, agent management actions, transcript actions, durable
+     task history, and live event subscriptions still need APP-ready
      service/view-model contracts.
 
 4. Headless CLI and ACP serving
@@ -1250,6 +1257,10 @@ be migrated before retiring the old stack:
      tools. It now also supports a core-native per-session `manual` approval
      preset that forces approval prompts for every tool call while `auto-review`
      continues to use the configured policy.
+   - Migrated baseline: pending approval projection now includes
+     surface-neutral approval actions, and `ApprovalService` owns decision
+     normalization plus active-turn submission for TUI and future APP
+     consumers.
    - Model-backed auto-review, richer policy presets, sandbox-aware permission
      escalation, allow-always/reject-always persistence, approval review
      transcript context, and richer denial metadata are not migrated.

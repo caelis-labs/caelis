@@ -73,7 +73,7 @@ func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnR
 	if err != nil {
 		return kernel.BeginTurnResult{}, err
 	}
-	handle := newAppServiceTurnHandle(turn)
+	handle := newAppServiceTurnHandle(g.services, turn)
 	g.register(handle)
 	go g.forward(handle)
 	return kernel.BeginTurnResult{
@@ -341,18 +341,20 @@ func (g *appServiceGateway) forward(handle *appServiceTurnHandle) {
 }
 
 type appServiceTurnHandle struct {
-	turn    coreruntime.Turn
-	events  chan kernel.EventEnvelope
-	done    chan struct{}
-	mu      sync.Mutex
-	history []kernel.EventEnvelope
+	services appservices.Services
+	turn     coreruntime.Turn
+	events   chan kernel.EventEnvelope
+	done     chan struct{}
+	mu       sync.Mutex
+	history  []kernel.EventEnvelope
 }
 
-func newAppServiceTurnHandle(turn coreruntime.Turn) *appServiceTurnHandle {
+func newAppServiceTurnHandle(services appservices.Services, turn coreruntime.Turn) *appServiceTurnHandle {
 	return &appServiceTurnHandle{
-		turn:   turn,
-		events: make(chan kernel.EventEnvelope, 32),
-		done:   make(chan struct{}),
+		services: services,
+		turn:     turn,
+		events:   make(chan kernel.EventEnvelope, 32),
+		done:     make(chan struct{}),
 	}
 }
 
@@ -409,13 +411,13 @@ func (h *appServiceTurnHandle) Submit(ctx context.Context, req kernel.SubmitRequ
 		Meta:         maps.Clone(req.Metadata),
 	}
 	if req.Kind == kernel.SubmissionKindApproval && req.Approval != nil {
-		submission.Kind = coreruntime.SubmissionApproval
-		submission.Approval = &coreruntime.ApprovalDecision{
+		_, err := h.services.Approvals().Submit(ctx, h.turn, appservices.ApprovalDecisionRequest{
 			Outcome:  strings.TrimSpace(req.Approval.Outcome),
 			OptionID: strings.TrimSpace(req.Approval.OptionID),
 			Approved: req.Approval.Approved,
 			Reason:   strings.TrimSpace(req.Approval.Reason),
-		}
+		})
+		return err
 	}
 	return h.turn.Submit(ctx, submission)
 }

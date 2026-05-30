@@ -44,6 +44,7 @@ type ApprovalItem struct {
 	Status  string                   `json:"status,omitempty"`
 	Reason  string                   `json:"reason,omitempty"`
 	Options []session.ApprovalOption `json:"options,omitempty"`
+	Actions []ApprovalAction         `json:"actions,omitempty"`
 }
 
 type ParticipantItem struct {
@@ -139,6 +140,7 @@ func pendingApproval(event session.Event) *ApprovalItem {
 		Reason:  strings.TrimSpace(event.Approval.Reason),
 		Options: append([]session.ApprovalOption(nil), event.Approval.Options...),
 	}
+	item.Actions = ApprovalActionsFromOptions(item.Options)
 	if event.Scope != nil {
 		item.TurnID = strings.TrimSpace(event.Scope.TurnID)
 	}

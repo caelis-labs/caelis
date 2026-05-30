@@ -1113,6 +1113,77 @@ func TestViewServiceProjectsLoadedSession(t *testing.T) {
 	}
 }
 
+func TestApprovalServiceProjectsActionsAndSubmitsDecision(t *testing.T) {
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-approve", WorkspaceKey: "repo"},
+		},
+		Events: []session.Event{{
+			ID:   "evt-approval",
+			Type: session.EventApproval,
+			Approval: &session.ApprovalEvent{
+				ID:     "approval-1",
+				Status: session.ApprovalPending,
+				Tool: &session.ToolEvent{
+					ID:   "tool-1",
+					Name: "write_file",
+					Input: map[string]any{
+						"path": "/repo/file.txt",
+					},
+				},
+				Options: []session.ApprovalOption{
+					{ID: "allow_once", Name: "Allow once", Kind: "allow"},
+					{ID: "reject_once", Name: "Reject once", Kind: "reject"},
+				},
+			},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending, err := svc.Approvals().Pending(context.Background(), session.Ref{SessionID: "sess-approve"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != "approval-1" || pending[0].Tool != "write_file" {
+		t.Fatalf("pending approvals = %#v, want one write_file approval", pending)
+	}
+	if len(pending[0].Actions) != 2 || !pending[0].Actions[0].Approved || !pending[0].Actions[0].Primary || pending[0].Actions[1].Approved {
+		t.Fatalf("approval actions = %#v, want allow primary and reject secondary", pending[0].Actions)
+	}
+	pending[0].Actions[0].Name = "mutated"
+	again, err := svc.Approvals().Pending(context.Background(), session.Ref{SessionID: "sess-approve"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again[0].Actions[0].Name != "Allow once" {
+		t.Fatalf("pending approvals were not cloned: %#v", again[0].Actions)
+	}
+
+	turn := &recordingRuntimeTurn{ref: session.Ref{SessionID: "sess-approve"}}
+	decision, err := svc.Approvals().Submit(context.Background(), turn, ApprovalDecisionRequest{
+		Approval: again[0],
+		OptionID: "allow_once",
+		Reason:   "user approved",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decision.Outcome != "selected" || decision.OptionID != "allow_once" || !decision.Approved {
+		t.Fatalf("decision = %#v, want selected allow_once approval", decision)
+	}
+	if turn.submission.Kind != coreruntime.SubmissionApproval || turn.submission.Approval == nil || !turn.submission.Approval.Approved || turn.submission.Approval.OptionID != "allow_once" {
+		t.Fatalf("submitted approval = %#v, want runtime approval submission", turn.submission)
+	}
+	if _, err := svc.Approvals().Decision(ApprovalDecisionRequest{Outcome: "selected"}); err == nil {
+		t.Fatal("Decision(selected without option) error = nil, want validation error")
+	}
+}
+
 func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	ctx := context.Background()
 	updatedAt := time.Date(2026, 5, 30, 10, 30, 0, 0, time.UTC)
@@ -2172,5 +2243,45 @@ func (t staticTurn) Cancel() coreruntime.CancelResult {
 }
 
 func (t staticTurn) Close() error {
+	return nil
+}
+
+type recordingRuntimeTurn struct {
+	ref        session.Ref
+	submission coreruntime.Submission
+}
+
+func (t *recordingRuntimeTurn) ID() string {
+	return "turn"
+}
+
+func (t *recordingRuntimeTurn) RunID() string {
+	return "run"
+}
+
+func (t *recordingRuntimeTurn) SessionRef() session.Ref {
+	return t.ref
+}
+
+func (t *recordingRuntimeTurn) StartedAt() time.Time {
+	return time.Time{}
+}
+
+func (t *recordingRuntimeTurn) Events() <-chan coreruntime.EventEnvelope {
+	events := make(chan coreruntime.EventEnvelope)
+	close(events)
+	return events
+}
+
+func (t *recordingRuntimeTurn) Submit(_ context.Context, submission coreruntime.Submission) error {
+	t.submission = submission
+	return nil
+}
+
+func (t *recordingRuntimeTurn) Cancel() coreruntime.CancelResult {
+	return coreruntime.CancelResult{Status: coreruntime.CancelCancelled}
+}
+
+func (*recordingRuntimeTurn) Close() error {
 	return nil
 }
