@@ -200,6 +200,7 @@ func (g *Gateway) execute(ctx context.Context, snapshot session.Snapshot, req co
 		State:        runState,
 		Input:        req.Input,
 		ContentParts: req.ContentParts,
+		Instructions: req.Instructions,
 		Model:        req.Model,
 		Reasoning:    req.Reasoning,
 		Mode:         req.Mode,

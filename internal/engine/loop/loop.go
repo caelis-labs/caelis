@@ -63,6 +63,7 @@ type Request struct {
 	State         session.State
 	Input         string
 	ContentParts  []model.ContentPart
+	Instructions  []string
 	Model         string
 	Reasoning     model.ReasoningConfig
 	Mode          string
@@ -139,7 +140,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 			Model:        strings.TrimSpace(req.Model),
 			Messages:     cloneMessages(messages),
 			Tools:        tool.ModelSpecs(tools),
-			Instructions: cloneStrings(l.instructions),
+			Instructions: requestInstructions(l.instructions, req.Instructions),
 			Reasoning:    req.Reasoning,
 			Stream:       true,
 		})
@@ -516,6 +517,15 @@ func cloneStrings(in []string) []string {
 			out = append(out, trimmed)
 		}
 	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func requestInstructions(base []string, turn []string) []string {
+	out := cloneStrings(base)
+	out = append(out, cloneStrings(turn)...)
 	if len(out) == 0 {
 		return nil
 	}

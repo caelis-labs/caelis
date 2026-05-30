@@ -1568,8 +1568,13 @@ be migrated before retiring the old stack:
       skill metadata, and workspace environment context. The local stack and
       production CLI route through this shared app prompt assembler instead of
       the old gateway prompt path.
-    - Still pending: skill content expansion/loading policy, skill sandbox
-      roots, prompt policy controls, prompt budget handling, and richer
+    - Migrated baseline: shared app turns now have a turn-level instruction
+      contract. Explicit `$skill` references in user input load the matching
+      discovered `SKILL.md` content into that turn's model instructions with a
+      bounded expansion budget, while preserving the original user message and
+      leaving unreferenced skills as metadata only.
+    - Still pending: richer skill loading policy controls, skill sandbox roots,
+      prompt policy controls beyond the current expansion budget, and richer
       resource diagnostics still need migration.
 
 14. Rendering and display semantics

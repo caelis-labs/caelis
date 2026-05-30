@@ -45,6 +45,7 @@ type TurnRequest struct {
 	SessionRef   session.Ref           `json:"session_ref"`
 	Input        string                `json:"input,omitempty"`
 	ContentParts []model.ContentPart   `json:"content_parts,omitempty"`
+	Instructions []string              `json:"instructions,omitempty"`
 	Model        string                `json:"model,omitempty"`
 	Reasoning    model.ReasoningConfig `json:"reasoning,omitempty"`
 	Surface      string                `json:"surface,omitempty"`

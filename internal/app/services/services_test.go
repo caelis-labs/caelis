@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -153,6 +155,54 @@ func TestServicesApplyRuntimeDefaults(t *testing.T) {
 	}
 	if catalog.Prompts[0].Paths[0] != "AGENTS.md" {
 		t.Fatalf("resource catalog was not cloned: %#v", catalog.Prompts[0].Paths)
+	}
+}
+
+func TestTurnBeginExpandsExplicitSkillReferencesIntoInstructions(t *testing.T) {
+	engine := &recordingEngine{}
+	skillDir := filepath.Join(t.TempDir(), "review")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	skillPath := filepath.Join(skillDir, "SKILL.md")
+	if err := os.WriteFile(skillPath, []byte("---\nname: review\ndescription: Review code.\n---\n# Review\n\nCheck correctness first.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Engine: engine,
+		Runtime: config.Runtime{
+			AppName: "caelis-app",
+			UserID:  "tester",
+		},
+		Resources: appresources.Catalog{
+			Skills: []plugin.SkillDescriptor{{
+				Name:        "review",
+				Description: "Review code.",
+				Paths:       []string{skillPath},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Turns().Begin(context.Background(), BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: "sess-1"},
+		Input:      "Use $review on this patch and ignore $missing.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.turn.Input != "Use $review on this patch and ignore $missing." {
+		t.Fatalf("turn input = %q, want original input preserved", engine.turn.Input)
+	}
+	if len(engine.turn.Instructions) != 1 {
+		t.Fatalf("instructions = %#v, want one expanded skill instruction", engine.turn.Instructions)
+	}
+	instruction := engine.turn.Instructions[0]
+	for _, want := range []string{"## Skill: review", "Source: " + skillPath, "# Review", "Check correctness first."} {
+		if !strings.Contains(instruction, want) {
+			t.Fatalf("instruction = %q, missing %q", instruction, want)
+		}
 	}
 }
 

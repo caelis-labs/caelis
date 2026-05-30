@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -1357,6 +1358,7 @@ type BeginTurnRequest struct {
 	SessionRef   session.Ref
 	Input        string
 	ContentParts []model.ContentPart
+	Instructions []string
 	Model        string
 	Reasoning    model.ReasoningConfig
 	Surface      string
@@ -1400,10 +1402,17 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 	if err != nil {
 		return nil, err
 	}
+	instructions := cloneStrings(req.Instructions)
+	skillInstructions, err := s.skillInstructions(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	instructions = append(instructions, skillInstructions...)
 	turn, err := s.services.engine.BeginTurn(ctx, coreruntime.TurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
 		ContentParts: model.CloneContentParts(req.ContentParts),
+		Instructions: instructions,
 		Model:        modelRef,
 		Reasoning:    reasoning,
 		Surface:      strings.TrimSpace(req.Surface),
@@ -1414,6 +1423,143 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 		return nil, err
 	}
 	return turnWithPrefixedEvents(turn, prefixEvents), nil
+}
+
+const maxExpandedSkillInstructionChars = 64000
+
+func (s TurnService) skillInstructions(ctx context.Context, req BeginTurnRequest) ([]string, error) {
+	refs := skillRefsFromTurn(req)
+	if len(refs) == 0 || len(s.services.resources.Skills) == 0 {
+		return nil, nil
+	}
+	byName := map[string]plugin.SkillDescriptor{}
+	for _, skill := range s.services.resources.Skills {
+		name := strings.TrimSpace(skill.Name)
+		if name == "" {
+			continue
+		}
+		byName[strings.ToLower(name)] = skill
+	}
+	var out []string
+	remaining := maxExpandedSkillInstructionChars
+	for _, ref := range refs {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		skill, ok := byName[strings.ToLower(ref)]
+		if !ok || len(skill.Paths) == 0 || remaining <= 0 {
+			continue
+		}
+		path := strings.TrimSpace(skill.Paths[0])
+		if path == "" {
+			continue
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("app/services: load skill %q from %s: %w", skill.Name, path, err)
+		}
+		content := strings.TrimSpace(string(raw))
+		if content == "" {
+			continue
+		}
+		content, consumed := boundedSkillContent(content, remaining)
+		remaining -= consumed
+		out = append(out, renderSkillInstruction(skill, path, content))
+	}
+	return out, nil
+}
+
+func boundedSkillContent(content string, remaining int) (string, int) {
+	if remaining <= 0 {
+		return "", 0
+	}
+	runes := []rune(content)
+	if len(runes) <= remaining {
+		return content, len(runes)
+	}
+	return string(runes[:remaining]) + "\n\n[Skill content truncated by prompt budget.]", remaining
+}
+
+func renderSkillInstruction(skill plugin.SkillDescriptor, path string, content string) string {
+	name := strings.TrimSpace(skill.Name)
+	return strings.TrimSpace(fmt.Sprintf(`## Skill: %s
+The user explicitly referenced $%s. Apply this skill when it is relevant to the turn.
+Source: %s
+
+<skill_content>
+%s
+</skill_content>`, name, name, strings.TrimSpace(path), strings.TrimSpace(content)))
+}
+
+func skillRefsFromTurn(req BeginTurnRequest) []string {
+	var texts []string
+	if strings.TrimSpace(req.Input) != "" {
+		texts = append(texts, req.Input)
+	}
+	for _, part := range req.ContentParts {
+		if part.Type == model.ContentPartText && strings.TrimSpace(part.Text) != "" {
+			texts = append(texts, part.Text)
+		}
+	}
+	return skillRefsFromText(strings.Join(texts, "\n"))
+}
+
+func skillRefsFromText(text string) []string {
+	runes := []rune(text)
+	var out []string
+	seen := map[string]struct{}{}
+	for i := 0; i < len(runes); i++ {
+		if runes[i] != '$' || (i > 0 && !skillRefBoundary(runes[i-1])) {
+			continue
+		}
+		start := i + 1
+		end := start
+		for end < len(runes) && isSkillRefRune(runes[end]) {
+			end++
+		}
+		if end == start {
+			continue
+		}
+		name := string(runes[start:end])
+		key := strings.ToLower(name)
+		if _, ok := seen[key]; ok {
+			i = end - 1
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, name)
+		i = end - 1
+	}
+	return out
+}
+
+func skillRefBoundary(prev rune) bool {
+	switch prev {
+	case ' ', '\t', '\n', '\r', '(', '[', '{', ',', ';', ':', '"', '\'':
+		return true
+	default:
+		return false
+	}
+}
+
+func isSkillRefRune(r rune) bool {
+	if r == '_' || r == '-' {
+		return true
+	}
+	return (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(in))
+	for _, value := range in {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func (s TurnService) Replay(ctx context.Context, req coreruntime.ReplayRequest) (<-chan coreruntime.EventEnvelope, error) {

@@ -40,6 +40,32 @@ func TestLoopPassesConfiguredInstructionsToProvider(t *testing.T) {
 	}
 }
 
+func TestLoopAppendsTurnInstructionsToProviderRequest(t *testing.T) {
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("pong")},
+	}}
+	runner, err := New(Config{
+		Provider:     provider,
+		Instructions: []string{"system rule"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), Request{
+		Session:      session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:        "ping",
+		TurnID:       "turn-1",
+		Instructions: []string{" skill body ", ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(provider.request.Instructions, "|"); got != "system rule|skill body" {
+		t.Fatalf("instructions = %#v, want base then turn instructions", provider.request.Instructions)
+	}
+}
+
 func TestLoopPassesReasoningConfigToProvider(t *testing.T) {
 	provider := &capturingProvider{message: model.Message{
 		Role:  model.RoleAssistant,
