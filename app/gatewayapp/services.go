@@ -2,14 +2,18 @@ package gatewayapp
 
 import (
 	"context"
+	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/plugin"
 	"github.com/OnslaughtSnail/caelis/impl/model/catalog"
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/protocol/acp"
 )
 
@@ -22,6 +26,8 @@ type AgentService struct {
 }
 
 type SkillService struct{}
+
+type SkillMeta = skill.Meta
 
 type StatusService struct {
 	stack *Stack
@@ -199,7 +205,30 @@ func (SkillService) Discover(ctx context.Context, workspaceDir string) ([]SkillM
 			return nil, err
 		}
 	}
-	return DiscoverSkillMeta(nil, workspaceDir)
+	catalog, err := appresources.Discover(ctx, appresources.Request{WorkspaceDir: workspaceDir})
+	if err != nil {
+		return nil, err
+	}
+	return gatewaySkillMetas(catalog.Skills), nil
+}
+
+func gatewaySkillMetas(skills []plugin.SkillDescriptor) []SkillMeta {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]SkillMeta, 0, len(skills))
+	for _, item := range skills {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, SkillMeta{
+			Name:        name,
+			Description: strings.TrimSpace(item.Description),
+			Path:        firstNonEmpty(item.Paths...),
+		})
+	}
+	return out
 }
 
 func (s StatusService) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {

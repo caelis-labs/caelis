@@ -449,23 +449,27 @@ func parseSkillFrontMatter(text string) (string, string) {
 
 func SkillRoots(homeDir string, workspaceDir string, extra []string) []string {
 	var roots []string
+	appendRoot := func(root string) {
+		root = strings.TrimSpace(root)
+		if root == "" {
+			return
+		}
+		if strings.HasPrefix(root, "~/") && strings.TrimSpace(homeDir) != "" {
+			root = filepath.Join(strings.TrimSpace(homeDir), strings.TrimPrefix(root, "~/"))
+		}
+		roots = append(roots, root)
+	}
 	if homeDir != "" {
-		roots = append(roots,
-			filepath.Join(homeDir, ".caelis", "skills", ".system"),
-			filepath.Join(homeDir, ".agents", "skills"),
-			filepath.Join(homeDir, ".caelis", "skills"),
-		)
+		appendRoot(filepath.Join(homeDir, ".caelis", "skills", ".system"))
+		appendRoot(filepath.Join(homeDir, ".agents", "skills"))
+		appendRoot(filepath.Join(homeDir, ".caelis", "skills"))
 	}
 	if workspaceDir != "" {
-		roots = append(roots,
-			filepath.Join(workspaceDir, "skills"),
-			filepath.Join(workspaceDir, ".agents", "skills"),
-		)
+		appendRoot(filepath.Join(workspaceDir, "skills"))
+		appendRoot(filepath.Join(workspaceDir, ".agents", "skills"))
 	}
 	for _, root := range extra {
-		if clean := strings.TrimSpace(root); clean != "" {
-			roots = append(roots, clean)
-		}
+		appendRoot(root)
 	}
 	return dedupePaths(roots)
 }

@@ -10,7 +10,6 @@ import (
 const windowsSandboxTLSNoteLine = "  <sandbox_tls>Windows restricted-token sandbox: SChannel/.NET TLS may fail; prefer Python/Node HTTPS or git -c http.sslBackend=openssl.</sandbox_tls>"
 
 type promptConfig = promptassembly.Config
-type SkillMeta = promptassembly.SkillMeta
 
 func buildSystemPrompt(cfg promptConfig) (string, error) {
 	return promptassembly.BuildSystemPrompt(cfg)
@@ -30,14 +29,6 @@ func systemPromptWithWindowsSandboxTLSNote(systemPrompt string, enabled bool) st
 		return strings.Replace(systemPrompt, "</environment_context>", windowsSandboxTLSNoteLine+"\n</environment_context>", 1)
 	}
 	return systemPrompt
-}
-
-func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
-	return promptassembly.DefaultSkillDiscoveryDirs(workspaceDir)
-}
-
-func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return promptassembly.DiscoverSkillMeta(dirs, workspaceDir)
 }
 
 func resolvePromptPath(path string) (string, error) {

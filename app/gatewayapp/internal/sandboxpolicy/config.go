@@ -2,11 +2,12 @@ package sandboxpolicy
 
 import (
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/configstore"
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
+	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 )
 
 func NormalizeBackend(backend string) (string, error) {
@@ -84,16 +85,11 @@ func WithPolicyRootMetadata(metadata map[string]any, cfg configstore.SandboxConf
 }
 
 func DefaultSkillRoots(workspaceDir string) []string {
-	dirs := promptassembly.DefaultSkillDiscoveryDirs(workspaceDir)
-	out := make([]string, 0, len(dirs))
-	for _, dir := range dirs {
-		resolved, err := promptassembly.ResolvePromptPath(dir)
-		if err != nil {
-			continue
-		}
-		out = append(out, resolved)
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = ""
 	}
-	return configstore.DedupeStrings(out)
+	return configstore.DedupeStrings(appresources.SkillRoots(homeDir, workspaceDir, nil))
 }
 
 func mergePolicyRootMetadata(existing any, values []string) []string {

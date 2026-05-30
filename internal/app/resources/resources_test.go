@@ -136,7 +136,7 @@ func TestSkillRootsIncludeSystemWorkspaceUserAndExtraDirs(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	workspace := filepath.Join(t.TempDir(), "workspace")
 	extra := filepath.Join(t.TempDir(), "extra")
-	got := SkillRoots(home, workspace, []string{" ", extra, extra})
+	got := SkillRoots(home, workspace, []string{" ", extra, extra, "~/custom"})
 	want := []string{
 		filepath.Join(home, ".caelis", "skills", ".system"),
 		filepath.Join(home, ".agents", "skills"),
@@ -144,6 +144,7 @@ func TestSkillRootsIncludeSystemWorkspaceUserAndExtraDirs(t *testing.T) {
 		filepath.Join(workspace, "skills"),
 		filepath.Join(workspace, ".agents", "skills"),
 		extra,
+		filepath.Join(home, "custom"),
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("SkillRoots() = %#v, want %#v", got, want)

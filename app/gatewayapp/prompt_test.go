@@ -3,6 +3,7 @@ package gatewayapp
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,6 +98,34 @@ func TestBuildSystemPromptOmitsDynamicTimeContext(t *testing.T) {
 	}
 }
 
+func TestSkillServiceDiscoverUsesAppResourceDiscovery(t *testing.T) {
+	home := t.TempDir()
+	setHomeForGatewayAppTest(t, home)
+	workspace := t.TempDir()
+	writeGatewaySkill(t, filepath.Join(home, ".caelis", "skills", ".system", "builtin"), "builtin", "System skill.")
+	writeGatewaySkill(t, filepath.Join(home, ".agents", "skills", "echo"), "echo", "Global echo.")
+	writeGatewaySkill(t, filepath.Join(workspace, ".agents", "skills", "echo"), "echo", "Workspace echo.")
+
+	skills, err := (SkillService{}).Discover(t.Context(), workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(skills))
+	var echo SkillMeta
+	for _, skill := range skills {
+		names = append(names, skill.Name)
+		if skill.Name == "echo" {
+			echo = skill
+		}
+	}
+	if !slices.Contains(names, "builtin") || !slices.Contains(names, "echo") {
+		t.Fatalf("skills = %#v, want builtin and echo", skills)
+	}
+	if echo.Description != "Workspace echo." || echo.Path != filepath.Join(workspace, ".agents", "skills", "echo", "SKILL.md") {
+		t.Fatalf("echo skill = %#v, want workspace descriptor from app resources", echo)
+	}
+}
+
 func TestWindowsSandboxTLSNoteInjectsIntoEnvironmentContext(t *testing.T) {
 	base := "stable prefix\n\n<environment_context>\n  <cwd>C:\\work</cwd>\n  <shell>powershell</shell>\n</environment_context>"
 
@@ -119,6 +148,17 @@ func TestWindowsSandboxTLSNoteInjectsIntoEnvironmentContext(t *testing.T) {
 	}
 	if disabled := systemPromptWithWindowsSandboxTLSNote(base, false); disabled != base {
 		t.Fatalf("disabled prompt = %q, want unchanged base", disabled)
+	}
+}
+
+func writeGatewaySkill(t *testing.T, dir string, name string, description string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "---\nname: " + name + "\ndescription: " + description + "\n---\n# " + name + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

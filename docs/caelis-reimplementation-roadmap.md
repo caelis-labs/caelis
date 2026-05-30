@@ -1600,10 +1600,15 @@ be migrated before retiring the old stack:
       resource catalog for `$skill` completion, removing another interactive
       path that previously had to call old gateway prompt/skill discovery
       helpers.
+    - Migrated baseline: the remaining old gateway skill discovery entrypoints
+      now delegate to the shared app resource catalog, and sandbox skill-root
+      policy no longer imports the old promptassembly skill helper. The legacy
+      `DefaultSkillDiscoveryDirs` / `DiscoverSkillMeta` wrappers have been
+      removed from `app/gatewayapp`.
     - Still pending: finer-grained prompt policy controls beyond skill loading
       and compaction, diagnostic rendering/repair actions, and removal of the
-      remaining old gateway prompt/skill discovery helpers still need
-      migration.
+      remaining old gateway prompt assembly/token-estimation helper once old
+      stack tests and production entrypoints no longer need it.
 
 14. Rendering and display semantics
     - The new view model is intentionally small.

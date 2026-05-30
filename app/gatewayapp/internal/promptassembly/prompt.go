@@ -2,6 +2,7 @@ package promptassembly
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,8 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/impl/skill/fs"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
+	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
+	"github.com/OnslaughtSnail/caelis/ports/skill"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -44,7 +47,7 @@ type fragment struct {
 	Content string
 }
 
-type SkillMeta = fs.Meta
+type SkillMeta = skill.Meta
 
 func BuildSystemPrompt(cfg Config) (string, error) {
 	workspaceDir, err := resolvePromptPath(cfg.WorkspaceDir)
@@ -236,7 +239,7 @@ func buildUserCustomInstructionsPrompt(sessionPrompt string, workspaceAgents str
 	return strings.Join(lines, "\n\n")
 }
 
-func buildSkillsMetaPrompt(metas []fs.Meta) string {
+func buildSkillsMetaPrompt(metas []SkillMeta) string {
 	if len(metas) == 0 {
 		return ""
 	}
@@ -309,12 +312,43 @@ func renderRawFragments(fragments []fragment) string {
 	return strings.Join(parts, "\n\n")
 }
 
-func DefaultSkillDiscoveryDirs(workspaceDir string) []string {
-	return fs.DefaultDiscoveryDirs(workspaceDir)
+func discoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
+	catalog, err := appresources.Discover(context.Background(), appresources.Request{
+		WorkspaceDir: workspaceDir,
+		SkillDirs:    dirs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return skillMetasFromDescriptors(catalog.Skills), nil
 }
 
-func DiscoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return fs.DiscoverMeta(dirs, workspaceDir)
+func skillMetasFromDescriptors(skills []plugin.SkillDescriptor) []SkillMeta {
+	if len(skills) == 0 {
+		return nil
+	}
+	out := make([]SkillMeta, 0, len(skills))
+	for _, item := range skills {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		out = append(out, SkillMeta{
+			Name:        name,
+			Description: strings.TrimSpace(item.Description),
+			Path:        firstPath(item.Paths),
+		})
+	}
+	return out
+}
+
+func firstPath(paths []string) string {
+	for _, path := range paths {
+		if path = strings.TrimSpace(path); path != "" {
+			return path
+		}
+	}
+	return ""
 }
 
 func ResolvePromptPath(path string) (string, error) {
@@ -356,10 +390,6 @@ func EstimatePromptTextTokens(text string) int {
 		return 1
 	}
 	return tokens
-}
-
-func discoverSkillMeta(dirs []string, workspaceDir string) ([]SkillMeta, error) {
-	return DiscoverSkillMeta(dirs, workspaceDir)
 }
 
 func readOptionalPromptFile(path string) (string, error) {
