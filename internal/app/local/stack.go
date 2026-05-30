@@ -18,6 +18,7 @@ import (
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolregistry "github.com/OnslaughtSnail/caelis/internal/adapters/tools/registry"
+	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
 	appmodelrouter "github.com/OnslaughtSnail/caelis/internal/app/modelrouter"
 	appprompt "github.com/OnslaughtSnail/caelis/internal/app/prompt"
 	appregistry "github.com/OnslaughtSnail/caelis/internal/app/registry"
@@ -287,6 +288,7 @@ func builtinToolNames() []string {
 		toolfilesystem.PatchFileToolName,
 		toolplan.ToolName,
 		"run_command",
+		tooltask.ToolName,
 	}
 }
 

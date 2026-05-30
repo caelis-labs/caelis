@@ -188,25 +188,51 @@ type SessionRef struct {
 	Backend Backend `json:"backend,omitempty"`
 }
 
+type SessionState string
+
+const (
+	SessionRunning   SessionState = "running"
+	SessionCompleted SessionState = "completed"
+	SessionFailed    SessionState = "failed"
+	SessionCancelled SessionState = "cancelled"
+)
+
 type TerminalRef struct {
 	ID        string `json:"id,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 }
 
+type OutputCursor struct {
+	Stdout int64 `json:"stdout,omitempty"`
+	Stderr int64 `json:"stderr,omitempty"`
+}
+
+type OutputSnapshot struct {
+	Stdout             string       `json:"stdout,omitempty"`
+	Stderr             string       `json:"stderr,omitempty"`
+	Cursor             OutputCursor `json:"cursor,omitempty"`
+	StdoutDroppedBytes int64        `json:"stdout_dropped_bytes,omitempty"`
+	StderrDroppedBytes int64        `json:"stderr_dropped_bytes,omitempty"`
+}
+
 type SessionSnapshot struct {
-	Ref           SessionRef  `json:"ref,omitempty"`
-	Command       string      `json:"command,omitempty"`
-	Dir           string      `json:"dir,omitempty"`
-	Running       bool        `json:"running,omitempty"`
-	SupportsInput bool        `json:"supports_input,omitempty"`
-	StartedAt     time.Time   `json:"started_at,omitempty"`
-	UpdatedAt     time.Time   `json:"updated_at,omitempty"`
-	Terminal      TerminalRef `json:"terminal,omitempty"`
+	Ref           SessionRef   `json:"ref,omitempty"`
+	Command       string       `json:"command,omitempty"`
+	Dir           string       `json:"dir,omitempty"`
+	State         SessionState `json:"state,omitempty"`
+	Running       bool         `json:"running,omitempty"`
+	SupportsInput bool         `json:"supports_input,omitempty"`
+	ExitCode      int          `json:"exit_code,omitempty"`
+	Error         string       `json:"error,omitempty"`
+	StartedAt     time.Time    `json:"started_at,omitempty"`
+	UpdatedAt     time.Time    `json:"updated_at,omitempty"`
+	Terminal      TerminalRef  `json:"terminal,omitempty"`
 }
 
 type Session interface {
 	Ref() SessionRef
 	Snapshot(context.Context) (SessionSnapshot, error)
+	Read(context.Context, OutputCursor) (OutputSnapshot, error)
 	Write(context.Context, []byte) error
 	Cancel(context.Context) error
 	Wait(context.Context) (CommandResult, error)
@@ -219,6 +245,7 @@ type Runtime interface {
 	FileSystem() FileSystem
 	Run(context.Context, CommandRequest) (CommandResult, error)
 	Start(context.Context, CommandRequest) (Session, error)
+	Open(context.Context, SessionRef) (Session, error)
 	Close() error
 }
 

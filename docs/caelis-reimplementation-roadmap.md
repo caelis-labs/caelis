@@ -607,9 +607,12 @@ alongside the old stack without importing it:
   for ephemeral and durable local composition.
 - `internal/adapters/tools/registry`: deterministic in-memory
   `core/tool.Registry`.
-- `internal/adapters/sandbox/host`: core-native host sandbox runtime.
+- `internal/adapters/sandbox/host`: core-native host sandbox runtime with async
+  command session start/open/read/write/wait/cancel support.
 - `internal/adapters/tools/shell`: core-native `run_command` tool using
   `core/sandbox.Runtime`.
+- `internal/adapters/tools/task`: core-native wait/write/cancel control for
+  yielded sandbox sessions.
 - `internal/adapters/acpagent/external`: core-native external ACP client that
   normalizes ACP `session/update` and `session/request_permission` traffic into
   canonical `core/session.Event` values.
@@ -739,8 +742,9 @@ The completed work is intentionally limited to the reusable skeleton:
 - Model context reconstruction from canonical events.
 - OpenAI-compatible provider adapter sufficient for Chat Completions and tool
   calls.
-- Host sandbox adapter, core-native `run_command` tool, and core-native
-  filesystem tools: `read_file`, `list_directory`, `glob_files`,
+- Host sandbox adapter, core-native async command sessions, core-native
+  `run_command` tool, core-native `task` wait/write/cancel control, and
+  core-native filesystem tools: `read_file`, `list_directory`, `glob_files`,
   `search_files`, `write_file`, and `patch_file`.
 - Core-native `update_plan` tool with runtime conversion into canonical
   `session.EventPlan` events.
@@ -829,7 +833,7 @@ be migrated before retiring the old stack:
      remain old-stack capabilities.
 
 8. Built-in tools
-   - Migrated baseline: `run_command`, filesystem tools `read_file`,
+   - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
      `list_directory`, `glob_files`, `search_files`, `write_file`,
      `patch_file`, and `update_plan` now implement `core/tool.Tool` directly
      and are registered as builtin local stack tools through the new app
@@ -837,12 +841,16 @@ be migrated before retiring the old stack:
    - `write_file` and `patch_file` are intentionally small exact-text tools
      built on the `core/sandbox.FileSystem` contract, so future sandbox
      backends can replace host execution without changing tool semantics.
+   - `run_command` can now yield an async sandbox session through the
+     `core/sandbox.Runtime.Start/Open` contract, and `task` can wait, write
+     stdin, or cancel that yielded session without importing old task/runtime
+     code.
    - Plan updates are no longer only display metadata in the new runtime:
      `update_plan` results are converted into canonical `session.EventPlan`
      records for ACP/TUI/APP projection.
-   - Still pending: rich diff rendering metadata, spawn tool, task tool, async
-     command sessions, stdin writes, task wait/cancel, and display metadata for
-     compact/rich tool panels still need core-native adapters.
+   - Still pending: rich diff rendering metadata, spawn tool, durable task
+     storage, task listing/tails, subagent task association, and display
+     metadata for compact/rich tool panels still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -861,11 +869,12 @@ be migrated before retiring the old stack:
       session resume/new semantics, and terminal previews remain old-stack.
 
 11. Task runtime and async work
-    - Core lifecycle event shapes exist, but task storage and runtime behavior
-      are not migrated.
-    - Long-running shell/SPAWN work, task handles, stream tails, cancellation,
-      stdin writes, and subagent task association still live in old
-      `impl/agent/local` and `impl/task/file` paths.
+    - Migrated baseline: host async command sessions now implement the
+      `core/sandbox.Session` contract, and the core-native `task` tool can
+      wait, write stdin, and cancel yielded shell work.
+    - Still pending: durable task storage, task listing, output tail cursors
+      across process restarts, SPAWN/subagent task association, terminal
+      previews, and production surface controls still live in old paths.
 
 12. Compaction and replay validation
     - Canonical context reconstruction exists for normal message/tool events.
@@ -902,8 +911,8 @@ Recommended sequence:
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating
    tools.
-4. Port spawn, task, async shell, stdin, wait, and cancel tools behind
-   `core/tool.Registry`.
+4. Port spawn and durable task runtime behavior behind `core/tool.Registry`
+   and `internal/engine/tasks`.
 5. Wire the production headless CLI and ACP stdio entry to the new service
    facade, with e2e parity tests.
 6. Port TUI driver commands to `internal/app/services`, preserving existing

@@ -12,12 +12,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 )
 
 type Runtime struct {
-	cwd string
+	cwd      string
+	mu       sync.RWMutex
+	sessions map[string]*commandSession
+	closed   bool
 }
 
 type Factory struct{}
@@ -45,7 +49,7 @@ func New(ctx context.Context, cfg sandbox.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{cwd: abs}, nil
+	return &Runtime{cwd: abs, sessions: map[string]*commandSession{}}, nil
 }
 
 func (r *Runtime) Descriptor() sandbox.Descriptor {
@@ -147,12 +151,74 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 	return result, fmt.Errorf("sandbox/host: run command: %w", err)
 }
 
-func (r *Runtime) Start(context.Context, sandbox.CommandRequest) (sandbox.Session, error) {
-	return nil, errors.New("sandbox/host: async command sessions are not implemented")
+func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	command := strings.TrimSpace(req.Command)
+	if command == "" {
+		return nil, errors.New("sandbox/host: command is required")
+	}
+	session := newCommandSession(r.resolveDir(req.Dir), req)
+	if err := session.start(); err != nil {
+		return nil, err
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		_ = session.Close()
+		return nil, errors.New("sandbox/host: runtime is closed")
+	}
+	r.sessions[session.ref.ID] = session
+	return session, nil
+}
+
+func (r *Runtime) Open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	id := strings.TrimSpace(ref.ID)
+	if id == "" {
+		return nil, errors.New("sandbox/host: session id is required")
+	}
+	if ref.Backend != "" && ref.Backend != sandbox.BackendHost {
+		return nil, fmt.Errorf("sandbox/host: unsupported session backend %q", ref.Backend)
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	session, ok := r.sessions[id]
+	if !ok {
+		return nil, fmt.Errorf("sandbox/host: session not found: %s", id)
+	}
+	return session, nil
 }
 
 func (r *Runtime) Close() error {
-	return nil
+	r.mu.Lock()
+	if r.closed {
+		r.mu.Unlock()
+		return nil
+	}
+	r.closed = true
+	sessions := make([]*commandSession, 0, len(r.sessions))
+	for id, session := range r.sessions {
+		sessions = append(sessions, session)
+		delete(r.sessions, id)
+	}
+	r.mu.Unlock()
+	var firstErr error
+	for _, session := range sessions {
+		if err := session.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }
 
 func (r *Runtime) resolveDir(dir string) string {

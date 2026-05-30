@@ -25,6 +25,7 @@ import (
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
+	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
 	"github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
@@ -324,6 +325,7 @@ func TestStackRegistersCoreFilesystemBuiltinTools(t *testing.T) {
 		toolfilesystem.PatchFileToolName,
 		"update_plan",
 		toolshell.RunCommandToolName,
+		tooltask.ToolName,
 	} {
 		if !capturedTool(provider.request.Tools, name) {
 			t.Fatalf("provider tools = %#v, missing %s", provider.request.Tools, name)

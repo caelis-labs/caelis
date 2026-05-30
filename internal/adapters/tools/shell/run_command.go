@@ -22,9 +22,11 @@ type RunCommandTool struct {
 }
 
 type runCommandInput struct {
-	Command   string `json:"command"`
-	CWD       string `json:"cwd,omitempty"`
-	TimeoutMS int    `json:"timeout_ms,omitempty"`
+	Command     string `json:"command"`
+	CWD         string `json:"cwd,omitempty"`
+	TimeoutMS   int    `json:"timeout_ms,omitempty"`
+	YieldTimeMS int    `json:"yield_time_ms,omitempty"`
+	Stdin       string `json:"stdin,omitempty"`
 }
 
 func NewRunCommandTool(runtime sandbox.Runtime) (*RunCommandTool, error) {
@@ -50,6 +52,14 @@ func (t *RunCommandTool) Definition() tool.Definition {
 					"type":        "integer",
 					"description": "Optional command timeout in milliseconds.",
 				},
+				"yield_time_ms": map[string]any{
+					"type":        "integer",
+					"description": "Start the command as an async task and wait this many milliseconds before returning.",
+				},
+				"stdin": map[string]any{
+					"type":        "string",
+					"description": "Optional initial stdin for async commands.",
+				},
 			},
 			"required": []any{"command"},
 		},
@@ -72,6 +82,9 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 	if input.TimeoutMS > 0 {
 		timeout = time.Duration(input.TimeoutMS) * time.Millisecond
 	}
+	if input.YieldTimeMS > 0 {
+		return t.callAsync(ctx, call, input, timeout)
+	}
 	result, runErr := t.Sandbox.Run(ctx, sandbox.CommandRequest{
 		Command: input.Command,
 		Dir:     strings.TrimSpace(input.CWD),
@@ -92,6 +105,19 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		return out, runErr
 	}
 	return out, nil
+}
+
+func (t *RunCommandTool) callAsync(ctx context.Context, call tool.Call, input runCommandInput, timeout time.Duration) (tool.Result, error) {
+	session, err := t.Sandbox.Start(ctx, sandbox.CommandRequest{
+		Command: input.Command,
+		Dir:     strings.TrimSpace(input.CWD),
+		Timeout: timeout,
+		Stdin:   []byte(input.Stdin),
+	})
+	if err != nil {
+		return tool.Result{}, err
+	}
+	return SessionResult(ctx, call, RunCommandToolName, "start", session, sandbox.OutputCursor{}, time.Duration(input.YieldTimeMS)*time.Millisecond)
 }
 
 func formatCommandResult(result sandbox.CommandResult, err error) string {

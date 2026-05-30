@@ -26,6 +26,7 @@ import (
 	toolfilesystem "github.com/OnslaughtSnail/caelis/internal/adapters/tools/filesystem"
 	toolplan "github.com/OnslaughtSnail/caelis/internal/adapters/tools/plan"
 	toolshell "github.com/OnslaughtSnail/caelis/internal/adapters/tools/shell"
+	tooltask "github.com/OnslaughtSnail/caelis/internal/adapters/tools/task"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 )
 
@@ -90,6 +91,7 @@ func RegisterDefaults(r *Registry) error {
 		{toolfilesystem.PatchFileToolName, patchFileToolFactory},
 		{toolplan.ToolName, planToolFactory},
 		{toolshell.RunCommandToolName, runCommandToolFactory},
+		{tooltask.ToolName, taskToolFactory},
 	} {
 		if err := r.RegisterTool(item.name, item.factory); err != nil {
 			return err
@@ -377,6 +379,10 @@ func sqliteStoreFactory(_ context.Context, cfg plugin.StoreConfig) (session.Stor
 
 func runCommandToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
 	return toolshell.NewRunCommandTool(cfg.Sandbox)
+}
+
+func taskToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
+	return tooltask.New(cfg.Sandbox)
 }
 
 func readFileToolFactory(_ context.Context, cfg plugin.ToolConfig) (tool.Tool, error) {
