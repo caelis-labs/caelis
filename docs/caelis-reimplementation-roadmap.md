@@ -611,7 +611,10 @@ alongside the old stack without importing it:
   from `core/config` without importing the old `ports` or `kernel` packages.
   It also wires plugin-declared and settings-backed custom ACP agents into the
   shared `AgentService`, and injects the built-in ACP agent catalog for
-  service-native registration.
+  service-native registration. The local stack now also contributes a default
+  `self` external ACP agent descriptor when a durable store URI is available,
+  spawning the current Caelis executable through the core-native ACP stdio
+  surface without leaking literal model tokens into process arguments.
 - `internal/adapters/model/openai`: core-native OpenAI-compatible Chat
   Completions provider with tool-call, usage, structured-output, reasoning,
   and provider-profile mapping. It now backs OpenAI-compatible, DeepSeek, and
@@ -1229,16 +1232,23 @@ be migrated before retiring the old stack:
       config intent under a controller identity, exposes it to the TUI driver,
       and injects it into controller invocations without putting config
       semantics in TUI-only memory.
-    - Migrated baseline: CLI-declared assembly ACP agents, including the
-      `CAELIS_ACP_SELF_AGENT_*` self-agent path, are now projected into the
-      new local app stack as external ACP agent descriptors instead of being
-      stranded in the old gatewayapp agent registry shape.
+    - Migrated baseline: CLI-declared external ACP agents, including the
+      `CAELIS_ACP_SELF_AGENT_*` self-agent override path, are now projected into
+      the new local app stack as external ACP agent descriptors instead of being
+      stranded in the old gatewayapp agent registry shape. `internal/cli` no
+      longer imports the old `ports/assembly` contract for this path.
     - Migrated baseline: supported built-in ACP adapter install now belongs to
       shared app services and the default local composition root. The local
       installer runs npm into the managed Caelis store, verifies the installed
       adapter binary, and persists the installed command through shared
       settings for both TUI and future APP consumers.
-    - Still pending: built-in ACP adapter update, self-agent spawning,
+    - Migrated baseline: default self-agent spawning now belongs to
+      `internal/app/local`. When no explicit `self` descriptor is configured and
+      the runtime has a durable store URI, the local stack exposes a service
+      native `self` ACP agent that launches the current Caelis executable with
+      ACP stdio flags, workspace/store/model settings, and token-env
+      indirection.
+    - Still pending: built-in ACP adapter update,
       durable sidecar continuation across restarts, delegated subagent tasks,
       durable remote controller process/session lifecycle beyond canonical
       remote session id reuse, plugin/static agent removal, live remote ACP

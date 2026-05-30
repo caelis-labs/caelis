@@ -175,6 +175,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	externalAgents := append([]acpexternal.Config(nil), cfg.ExternalACPAgents...)
 	externalAgents = append(externalAgents, pluginACPAgentConfigs(resourceCatalog)...)
 	externalAgents = append(externalAgents, settingsACPAgentConfigs(cfg.Settings)...)
+	externalAgents = appendDefaultSelfACPAgent(ctx, runtimeCfg, cfg.Model, cfg.Settings, externalAgents)
 	svc, err := services.New(services.Config{
 		Runtime:        runtimeCfg,
 		Engine:         engine,
@@ -383,13 +384,14 @@ func agentDescriptors(configs []acpexternal.Config) []services.AgentDescriptor {
 		id := firstNonEmpty(cfg.AgentID, cfg.AgentName, cfg.Command)
 		name := firstNonEmpty(cfg.AgentName, id)
 		out = append(out, services.AgentDescriptor{
-			ID:      id,
-			Name:    name,
-			Kind:    services.AgentKindExternalACP,
-			Command: strings.TrimSpace(cfg.Command),
-			Args:    append([]string(nil), cfg.Args...),
-			Env:     envMap(cfg.Env),
-			WorkDir: strings.TrimSpace(cfg.WorkDir),
+			ID:          id,
+			Name:        name,
+			Kind:        services.AgentKindExternalACP,
+			Description: strings.TrimSpace(cfg.Description),
+			Command:     strings.TrimSpace(cfg.Command),
+			Args:        append([]string(nil), cfg.Args...),
+			Env:         envMap(cfg.Env),
+			WorkDir:     strings.TrimSpace(cfg.WorkDir),
 		})
 	}
 	return out

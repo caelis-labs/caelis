@@ -24,6 +24,7 @@ type PermissionHandler func(context.Context, schema.RequestPermissionRequest) (s
 type Config struct {
 	AgentID        string
 	AgentName      string
+	Description    string
 	Command        string
 	Args           []string
 	WorkDir        string

@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
@@ -23,7 +22,6 @@ import (
 	coreacpserver "github.com/OnslaughtSnail/caelis/internal/surface/acpserver"
 	coreheadless "github.com/OnslaughtSnail/caelis/internal/surface/headless"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
 )
 
 type outputFormat string
@@ -81,7 +79,7 @@ type cliConfig struct {
 	SystemPrompt   string
 	Model          cliModelConfig
 	Sandbox        cliSandboxConfig
-	Assembly       assembly.ResolvedAssembly
+	ExternalAgents []acpexternal.Config
 }
 
 type cliModelConfig struct {
@@ -207,7 +205,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	if err != nil {
 		return err
 	}
-	cfg.Assembly = assemblyFromEnv()
+	cfg.ExternalAgents = externalACPAgentsFromEnv()
 	if acpSubcommand {
 		stack, err := newCoreLocalStack(ctx, cfg)
 		if err != nil {
@@ -274,24 +272,23 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 	return runInteractive(ctx, stack, preferredInteractiveSessionID(*sessionID), cfg, renderModelText(cfg), stdin, stdout, stderr)
 }
 
-func assemblyFromEnv() assembly.ResolvedAssembly {
+func externalACPAgentsFromEnv() []acpexternal.Config {
 	cmd := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_CMD", ""))
 	if cmd == "" {
-		return assembly.ResolvedAssembly{}
+		return nil
 	}
 	name := strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_NAME", "self"))
 	if name == "" {
 		name = "self"
 	}
-	return assembly.ResolvedAssembly{
-		Agents: []assembly.AgentConfig{{
-			Name:        name,
-			Description: strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_DESC", "")),
-			Command:     "bash",
-			Args:        []string{"-lc", cmd},
-			WorkDir:     strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_WORKDIR", "")),
-		}},
-	}
+	return []acpexternal.Config{{
+		AgentID:     name,
+		AgentName:   name,
+		Description: strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_DESC", "")),
+		Command:     "bash",
+		Args:        []string{"-lc", cmd},
+		WorkDir:     strings.TrimSpace(envOr("CAELIS_ACP_SELF_AGENT_WORKDIR", "")),
+	}}
 }
 
 func defaultStoreDir(cwd string) string {
@@ -330,6 +327,9 @@ func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, err
 				Backend: "jsonl",
 				URI:     cfg.StoreDir,
 			},
+			Meta: map[string]any{
+				"permission_mode": strings.TrimSpace(cfg.PermissionMode),
+			},
 			Sandbox: coreconfig.Sandbox{
 				Backend:    sandboxBackend,
 				HelperPath: cfg.Sandbox.HelperPath,
@@ -352,52 +352,10 @@ func newCoreLocalStack(ctx context.Context, cfg cliConfig) (*applocal.Stack, err
 				"cli_api":      string(cfg.Model.API),
 			},
 		},
-		ExternalACPAgents: assemblyExternalACPAgents(cfg.Assembly),
+		ExternalACPAgents: append([]acpexternal.Config(nil), cfg.ExternalAgents...),
 		BuiltinTools:      true,
 		Settings:          settings,
 	})
-}
-
-func assemblyExternalACPAgents(resolved assembly.ResolvedAssembly) []acpexternal.Config {
-	if len(resolved.Agents) == 0 {
-		return nil
-	}
-	out := make([]acpexternal.Config, 0, len(resolved.Agents))
-	for _, agent := range resolved.Agents {
-		command := strings.TrimSpace(agent.Command)
-		name := strings.TrimSpace(agent.Name)
-		if command == "" {
-			continue
-		}
-		out = append(out, acpexternal.Config{
-			AgentID:   firstNonEmptyString(name, command),
-			AgentName: firstNonEmptyString(name, command),
-			Command:   command,
-			Args:      append([]string(nil), agent.Args...),
-			WorkDir:   strings.TrimSpace(agent.WorkDir),
-			Env:       sortedEnv(agent.Env),
-		})
-	}
-	return out
-}
-
-func sortedEnv(env map[string]string) []string {
-	if len(env) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(env))
-	for key := range env {
-		key = strings.TrimSpace(key)
-		if key != "" {
-			keys = append(keys, key)
-		}
-	}
-	sort.Strings(keys)
-	out := make([]string, 0, len(keys))
-	for _, key := range keys {
-		out = append(out, key+"="+env[key])
-	}
-	return out
 }
 
 func coreSettingsManager(ctx context.Context, cfg cliConfig, provider string) (*appsettings.Manager, error) {

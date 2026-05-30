@@ -119,6 +119,104 @@ func TestStackRunsTurnThroughServices(t *testing.T) {
 	}
 }
 
+func TestStackRegistersDefaultSelfACPAgent(t *testing.T) {
+	storeDir := t.TempDir()
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+			Store:        config.Store{Backend: "jsonl", URI: storeDir},
+			Meta:         map[string]any{"permission_mode": "manual"},
+		},
+		Model: config.ModelProfile{
+			Alias:               "main",
+			Provider:            "openai_compatible",
+			Model:               "gpt-test",
+			BaseURL:             "https://api.example.test/v1",
+			Token:               "secret-token",
+			AuthType:            "bearer",
+			ContextWindowTokens: 128000,
+			MaxOutputTokens:     4096,
+			Meta:                map[string]any{"cli_api": "openai"},
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := stack.Services().Agents().List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].ID != "self" || agents[0].Name != "self" || agents[0].Command == "" {
+		t.Fatalf("agents = %#v, want default self ACP agent", agents)
+	}
+	args := agents[0].Args
+	for _, want := range []string{
+		"acp",
+		"-app", "caelis",
+		"-user", "tester",
+		"-store-dir", storeDir,
+		"-workspace-key", "repo",
+		"-workspace-cwd", "/repo",
+		"-permission-mode", "manual",
+		"-model-alias", "main",
+		"-provider", "openai_compatible",
+		"-api", "openai",
+		"-model", "gpt-test",
+		"-base-url", "https://api.example.test/v1",
+		"-token-env", selfModelTokenEnv,
+		"-auth-type", "bearer",
+		"-context-window", "128000",
+		"-max-output-tokens", "4096",
+	} {
+		if !stringSliceHas(args, want) {
+			t.Fatalf("self args = %#v, want %q", args, want)
+		}
+	}
+	if stringSliceHas(args, "secret-token") {
+		t.Fatalf("self args leaked token: %#v", args)
+	}
+	if got := agents[0].Env[selfModelTokenEnv]; got != "secret-token" {
+		t.Fatalf("self env token = %q, want literal token", got)
+	}
+}
+
+func TestStackDoesNotOverrideConfiguredSelfACPAgent(t *testing.T) {
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Store:   config.Store{Backend: "jsonl", URI: t.TempDir()},
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "self",
+			AgentName: "self",
+			Command:   "custom-self-acp",
+			Args:      []string{"--stdio"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agents, err := stack.Services().Agents().List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) != 1 || agents[0].ID != "self" || agents[0].Command != "custom-self-acp" || !stringSliceHas(agents[0].Args, "--stdio") {
+		t.Fatalf("agents = %#v, want configured self ACP agent only", agents)
+	}
+}
+
 func TestStackInvokesExternalACPAgentThroughServices(t *testing.T) {
 	provider := &capturingProvider{message: model.Message{
 		Role:  model.RoleAssistant,
@@ -1290,6 +1388,15 @@ func agentDescriptorsHave(agents []services.AgentDescriptor, id string) bool {
 func agentInstallOptionsHave(options []services.AgentInstallOption, value string) bool {
 	for _, option := range options {
 		if strings.EqualFold(strings.TrimSpace(option.Value), value) {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceHas(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
 			return true
 		}
 	}

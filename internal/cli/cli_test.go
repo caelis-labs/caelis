@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
@@ -434,7 +434,7 @@ func TestCoreTUIStackAllowsEmptyModelConfiguration(t *testing.T) {
 	}
 }
 
-func TestCoreLocalStackRegistersAssemblyACPAgent(t *testing.T) {
+func TestCoreLocalStackRegistersConfiguredACPAgent(t *testing.T) {
 	testenv.SetHome(t, t.TempDir())
 	cfg, err := normalizeConfig(cliConfig{
 		AppName:      "caelis",
@@ -443,16 +443,15 @@ func TestCoreLocalStackRegistersAssemblyACPAgent(t *testing.T) {
 		WorkspaceKey: "assembly-agent-ws",
 		WorkspaceCWD: t.TempDir(),
 		Sandbox:      cliSandboxConfig{RequestedType: "host"},
-		Assembly: assembly.ResolvedAssembly{
-			Agents: []assembly.AgentConfig{{
-				Name:        "self",
-				Description: "self ACP agent",
-				Command:     "self-acp",
-				Args:        []string{"--stdio"},
-				Env:         map[string]string{"SELF_TOKEN": "secret"},
-				WorkDir:     "/tmp/self-agent",
-			}},
-		},
+		ExternalAgents: []acpexternal.Config{{
+			AgentID:     "self",
+			AgentName:   "self",
+			Description: "self ACP agent",
+			Command:     "self-acp",
+			Args:        []string{"--stdio"},
+			Env:         []string{"SELF_TOKEN=secret"},
+			WorkDir:     "/tmp/self-agent",
+		}},
 	})
 	if err != nil {
 		t.Fatalf("normalizeConfig() error = %v", err)
@@ -466,7 +465,7 @@ func TestCoreLocalStackRegistersAssemblyACPAgent(t *testing.T) {
 		t.Fatalf("Agents().List() error = %v", err)
 	}
 	if len(agents) != 1 || agents[0].ID != "self" || agents[0].Command != "self-acp" || agents[0].Env["SELF_TOKEN"] != "secret" {
-		t.Fatalf("agents = %#v, want assembly self ACP agent", agents)
+		t.Fatalf("agents = %#v, want configured self ACP agent", agents)
 	}
 }
 
