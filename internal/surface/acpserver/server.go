@@ -213,15 +213,7 @@ func (s *Server) listSessions(ctx context.Context, req schema.SessionListRequest
 	if cwd != "" {
 		workspace = workspaceKey(cwd)
 	}
-	page, err := s.engine.ListSessions(ctx, session.ListQuery{
-		Ref: session.Ref{
-			AppName:      s.appName,
-			UserID:       s.userID,
-			WorkspaceKey: workspace,
-		},
-		WorkspaceCWD: cwd,
-		After:        session.Cursor(strings.TrimSpace(req.Cursor)),
-	})
+	page, err := s.listSessionPage(ctx, workspace, cwd, session.Cursor(strings.TrimSpace(req.Cursor)))
 	if err != nil {
 		return schema.SessionListResponse{}, err
 	}
@@ -238,6 +230,28 @@ func (s *Server) listSessions(ctx context.Context, req schema.SessionListRequest
 		})
 	}
 	return out, nil
+}
+
+func (s *Server) listSessionPage(ctx context.Context, workspace string, cwd string, cursor session.Cursor) (session.SessionPage, error) {
+	if s.services.Engine() != nil {
+		return s.services.Sessions().List(ctx, appservices.ListSessionsRequest{
+			Workspace: session.Workspace{
+				Key: workspace,
+				CWD: cwd,
+			},
+			AllWorkspaces: strings.TrimSpace(cwd) == "",
+			After:         cursor,
+		})
+	}
+	return s.engine.ListSessions(ctx, session.ListQuery{
+		Ref: session.Ref{
+			AppName:      s.appName,
+			UserID:       s.userID,
+			WorkspaceKey: workspace,
+		},
+		WorkspaceCWD: cwd,
+		After:        cursor,
+	})
 }
 
 func (s *Server) loadSession(ctx context.Context, req schema.LoadSessionRequest) (schema.LoadSessionResponse, error) {

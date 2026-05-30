@@ -1397,8 +1397,12 @@ be migrated before retiring the old stack:
       all workspaces without defaulting to the current runtime workspace, and
       the app-service TUI gateway preserves the old user-namespace list
       contract when a caller omits the workspace key.
-    - Still pending: richer title generation, current on-disk legacy session
-      layout migration, and reload UX polish are not implemented.
+    - Migrated baseline: shared app session listing now derives missing titles
+      from canonical durable events, preferring the first user message and
+      reusing the same generated summary for TUI, ACP, and future APP list
+      consumers instead of keeping a TUI-only resume fallback.
+    - Still pending: current on-disk legacy session layout migration and reload
+      UX polish are not implemented.
 
 ### Next Migration Milestones
 

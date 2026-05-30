@@ -167,7 +167,6 @@ func TestServeStdioListsLoadsAndResumesSessions(t *testing.T) {
 		UserID:             "tester",
 		PreferredSessionID: "sess-load",
 		Workspace:          session.Workspace{Key: "project", CWD: "/tmp/project"},
-		Title:              "Loaded session",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -201,9 +200,10 @@ func TestServeStdioListsLoadsAndResumesSessions(t *testing.T) {
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- ServeStdio(ctx, Config{
-			Engine:  engine,
-			AppName: "caelis",
-			UserID:  "tester",
+			Engine:   engine,
+			Services: stack.Services(),
+			AppName:  "caelis",
+			UserID:   "tester",
 			Implementation: schema.Implementation{
 				Name:    "caelis",
 				Version: "test",
@@ -243,8 +243,8 @@ func TestServeStdioListsLoadsAndResumesSessions(t *testing.T) {
 	if len(listResp.Sessions) != 1 || listResp.Sessions[0].SessionID != "sess-load" {
 		t.Fatalf("session/list response = %#v, want sess-load", listResp)
 	}
-	if listResp.Sessions[0].CWD != "/tmp/project" || listResp.Sessions[0].Title != "Loaded session" || listResp.Sessions[0].UpdatedAt == "" {
-		t.Fatalf("session/list summary = %#v, want cwd/title/updatedAt", listResp.Sessions[0])
+	if listResp.Sessions[0].CWD != "/tmp/project" || listResp.Sessions[0].Title != "ping" || listResp.Sessions[0].UpdatedAt == "" {
+		t.Fatalf("session/list summary = %#v, want cwd/derived title/updatedAt", listResp.Sessions[0])
 	}
 
 	var loadResp schema.LoadSessionResponse

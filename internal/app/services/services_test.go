@@ -1357,6 +1357,51 @@ func TestSessionServiceListCanOmitWorkspaceFilters(t *testing.T) {
 	}
 }
 
+func TestSessionServiceListDerivesMissingTitlesFromCanonicalEvents(t *testing.T) {
+	engine := &recordingEngine{
+		page: session.SessionPage{
+			Sessions: []session.SessionSummary{{
+				Session: session.Session{
+					Ref:       session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-derived", WorkspaceKey: "repo"},
+					Workspace: session.Workspace{Key: "repo", CWD: "/tmp/repo"},
+				},
+			}},
+		},
+		snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-derived", WorkspaceKey: "repo"}},
+			Events: []session.Event{
+				{
+					Type:       session.EventUser,
+					Visibility: session.VisibilityUIOnly,
+					Message:    &model.Message{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("ignore transient")}},
+				},
+				{
+					Type:    session.EventAssistant,
+					Message: &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("assistant fallback")}},
+				},
+				{
+					Type:    session.EventUser,
+					Message: &model.Message{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("  migrate\ncanonical   session titles  ")}},
+				},
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo", WorkspaceCWD: "/tmp/repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := svc.Sessions().List(context.Background(), ListSessionsRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Sessions) != 1 || page.Sessions[0].Session.Title != "migrate canonical session titles" {
+		t.Fatalf("page = %#v, want title derived from first durable user event", page)
+	}
+}
+
 func TestModelServicePersistsCatalogAndSessionModelSelection(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

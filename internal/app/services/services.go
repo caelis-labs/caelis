@@ -1098,7 +1098,7 @@ func (s SessionService) List(ctx context.Context, req ListSessionsRequest) (sess
 	if !req.AllWorkspaces {
 		workspace = s.workspaceWithDefaults(req.Workspace)
 	}
-	return s.services.engine.ListSessions(ctx, session.ListQuery{
+	page, err := s.services.engine.ListSessions(ctx, session.ListQuery{
 		Ref: session.Ref{
 			AppName:      s.services.runtime.AppName,
 			UserID:       s.services.runtime.UserID,
@@ -1109,6 +1109,10 @@ func (s SessionService) List(ctx context.Context, req ListSessionsRequest) (sess
 		After:        req.After,
 		Limit:        req.Limit,
 	})
+	if err != nil {
+		return session.SessionPage{}, err
+	}
+	return s.enrichListTitles(ctx, page), nil
 }
 
 func (s SessionService) Load(ctx context.Context, ref session.Ref) (session.Snapshot, error) {
@@ -1133,6 +1137,57 @@ func (s SessionService) workspaceWithDefaults(workspace session.Workspace) sessi
 		workspace.CWD = strings.TrimSpace(s.services.runtime.WorkspaceCWD)
 	}
 	return workspace
+}
+
+func (s SessionService) enrichListTitles(ctx context.Context, page session.SessionPage) session.SessionPage {
+	out := session.CloneSessionPage(page)
+	for i := range out.Sessions {
+		if strings.TrimSpace(out.Sessions[i].Session.Title) != "" {
+			continue
+		}
+		snapshot, err := s.Load(ctx, out.Sessions[i].Session.Ref)
+		if err != nil {
+			continue
+		}
+		out.Sessions[i].Session.Title = deriveSessionTitle(snapshot, 96)
+	}
+	return out
+}
+
+func deriveSessionTitle(snapshot session.Snapshot, limit int) string {
+	for _, event := range snapshot.Events {
+		if event.Type != session.EventUser || session.IsTransient(event) {
+			continue
+		}
+		if title := compactSessionTitle(session.EventText(event), limit); title != "" {
+			return title
+		}
+	}
+	for _, event := range snapshot.Events {
+		if session.IsTransient(event) {
+			continue
+		}
+		if title := compactSessionTitle(session.EventText(event), limit); title != "" {
+			return title
+		}
+	}
+	return ""
+}
+
+func compactSessionTitle(text string, limit int) string {
+	text = strings.Join(strings.Fields(text), " ")
+	if limit <= 0 {
+		return text
+	}
+	runes := []rune(text)
+	if len(runes) <= limit {
+		return text
+	}
+	suffix := []rune("...")
+	if limit <= len(suffix) {
+		return string(runes[:limit])
+	}
+	return strings.TrimSpace(string(runes[:limit-len(suffix)])) + string(suffix)
 }
 
 type TurnService struct {
