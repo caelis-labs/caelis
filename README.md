@@ -48,8 +48,8 @@ TUI, ACP stdio, and the headless one-shot runner.
 - `app/gatewayapp`: local composition root that wires runtime, kernel resolver,
   prompt assembly, config store, model catalog, sandbox, tools, approval, and
   session storage.
-- `surfaces/headless`: legacy one-shot CLI surface over the public kernel
-  contract; production CLI prompts now use `internal/surface/headless`.
+- `internal/surface/headless`: core-native one-shot CLI surface over shared app
+  services.
 - `surfaces/tui`: terminal UI surface facades for the app, gateway driver, and
   driver contract.
 - `protocol/acp`: ACP schema, JSON-RPC, client, server, transport, terminal, and

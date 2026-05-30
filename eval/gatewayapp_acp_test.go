@@ -13,7 +13,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
 
 func TestLocalStackGatewayACPMainE2E(t *testing.T) {
@@ -104,11 +103,11 @@ func TestLocalStackGatewayACPMainE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 
-	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err := runGatewayHeadlessOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "run through acp controller",
 		Surface:    "headless-acp-main-e2e",
-	}, headless.Options{})
+	})
 	if err != nil {
 		t.Fatalf("RunOnce() error = %v", err)
 	}

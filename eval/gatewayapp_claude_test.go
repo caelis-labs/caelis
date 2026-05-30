@@ -15,7 +15,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/surfaces/headless"
 )
 
 func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
@@ -109,11 +108,11 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	const marker = "caelis claude acp resume e2e"
 	const wantFirst = marker + " first ok"
 	prompt := "Reply with exactly this text and no markdown: " + wantFirst
-	result, err := headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err := runGatewayHeadlessOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      prompt,
 		Surface:    "headless-claude-acp-resume-e2e",
-	}, headless.Options{})
+	})
 	if err != nil {
 		t.Fatalf("RunOnce(claude) error = %v", err)
 	}
@@ -140,11 +139,11 @@ func TestLocalStackClaudeACPMainResumeOrNewE2E(t *testing.T) {
 	}
 
 	const wantSecond = marker + " second ok"
-	result, err = headless.RunOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
+	result, err = runGatewayHeadlessOnce(ctx, stack.Gateway, kernel.BeginTurnRequest{
 		SessionRef: activeSession.SessionRef,
 		Input:      "Reply with exactly this text and no markdown: " + wantSecond,
 		Surface:    "headless-claude-acp-resume-e2e",
-	}, headless.Options{})
+	})
 	if err != nil {
 		t.Fatalf("RunOnce(second Claude turn) error = %v", err)
 	}
