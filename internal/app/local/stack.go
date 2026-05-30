@@ -242,6 +242,34 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.
 		}
 		defer client.Close()
 		adapter := externalAgentSession{client: client}
+		if req.Controller.Kind == session.ControllerACP || strings.TrimSpace(req.Controller.ID) != "" {
+			runner := control.ControllerRunner{Store: store}
+			controller := req.Controller
+			if strings.TrimSpace(controller.ID) == "" {
+				controller.ID = id
+			}
+			if controller.Kind == "" {
+				controller.Kind = session.ControllerACP
+			}
+			controller.AgentName = firstNonEmpty(controller.AgentName, cfg.AgentName, id)
+			controller.Label = firstNonEmpty(controller.Label, cfg.AgentName, id)
+			controller.Source = firstNonEmpty(controller.Source, "external_acp")
+			result, err := runner.Invoke(ctx, control.ControllerRequest{
+				SessionRef:   req.SessionRef,
+				Input:        req.Input,
+				ContentParts: req.ContentParts,
+				Controller:   controller,
+				Agent:        adapter,
+			})
+			if err != nil {
+				return services.AgentInvokeResult{}, err
+			}
+			return services.AgentInvokeResult{
+				StopReason: "",
+				Events:     result.Events,
+				Recorded:   true,
+			}, nil
+		}
 		runner := control.ParticipantRunner{Store: store}
 		participant := req.Participant
 		if strings.TrimSpace(participant.ID) == "" {

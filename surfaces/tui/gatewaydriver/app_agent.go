@@ -19,7 +19,9 @@ import (
 type appServiceAgentTurnHandle struct {
 	services     appservices.Services
 	coreRef      coresession.Ref
+	controller   coresession.ControllerBinding
 	participant  coresession.ParticipantBinding
+	activeKind   kernel.ActiveTurnKind
 	input        string
 	contentParts []coremodel.ContentPart
 	source       string
@@ -36,13 +38,26 @@ type appServiceAgentTurnHandle struct {
 }
 
 func newAppServiceAgentTurnHandle(svc appservices.Services, ref coresession.Ref, participant coresession.ParticipantBinding, input string, parts []coremodel.ContentPart, source string) *appServiceAgentTurnHandle {
+	handle := newAppServiceAgentTurnHandleBase(svc, ref, input, parts, source)
+	handle.participant = participant
+	handle.activeKind = kernel.ActiveTurnKindParticipant
+	return handle
+}
+
+func newAppServiceControllerTurnHandle(svc appservices.Services, ref coresession.Ref, controller coresession.ControllerBinding, input string, parts []coremodel.ContentPart, source string) *appServiceAgentTurnHandle {
+	handle := newAppServiceAgentTurnHandleBase(svc, ref, input, parts, source)
+	handle.controller = controller
+	handle.activeKind = kernel.ActiveTurnKindKernel
+	return handle
+}
+
+func newAppServiceAgentTurnHandleBase(svc appservices.Services, ref coresession.Ref, input string, parts []coremodel.ContentPart, source string) *appServiceAgentTurnHandle {
 	now := time.Now().UTC()
 	ctx, cancel := context.WithCancel(context.Background())
 	idSuffix := fmt.Sprintf("%d", now.UnixNano())
 	return &appServiceAgentTurnHandle{
 		services:     svc,
 		coreRef:      coresession.NormalizeRef(ref),
-		participant:  participant,
 		input:        strings.TrimSpace(input),
 		contentParts: coremodel.CloneContentParts(parts),
 		source:       strings.TrimSpace(source),
@@ -144,13 +159,30 @@ func (h *appServiceAgentTurnHandle) run(parent context.Context) {
 			}
 		}()
 	}
-	if event := h.participantUserEvent(); event.Type != "" {
+	if event := h.userEvent(); event.Type != "" {
 		cursor, err := h.services.Engine().RecordEvents(ctx, h.coreRef, []coresession.Event{event})
 		if err != nil {
 			h.publishError(err)
 			return
 		}
 		h.publishCore(cursor, event)
+	}
+	if h.controller.Kind != "" || strings.TrimSpace(h.controller.ID) != "" {
+		result, err := h.services.Agents().Invoke(ctx, appservices.AgentInvokeRequest{
+			AgentID:      h.controller.ID,
+			SessionRef:   h.coreRef,
+			Controller:   h.controller,
+			Input:        h.input,
+			ContentParts: h.contentParts,
+		})
+		if err != nil {
+			h.publishError(err)
+			return
+		}
+		for _, event := range result.Events {
+			h.publishCore("", event)
+		}
+		return
 	}
 	result, err := h.services.Agents().Invoke(ctx, appservices.AgentInvokeRequest{
 		AgentID:      h.participant.ID,
@@ -168,7 +200,7 @@ func (h *appServiceAgentTurnHandle) run(parent context.Context) {
 	}
 }
 
-func (h *appServiceAgentTurnHandle) participantUserEvent() coresession.Event {
+func (h *appServiceAgentTurnHandle) userEvent() coresession.Event {
 	if h.input == "" && len(h.contentParts) == 0 {
 		return coresession.Event{}
 	}
@@ -184,24 +216,31 @@ func (h *appServiceAgentTurnHandle) participantUserEvent() coresession.Event {
 	if len(parts) == 0 {
 		return coresession.Event{}
 	}
+	scope := &coresession.EventScope{
+		TurnID: h.turnID,
+		Source: firstNonEmpty(h.source, "tui_agent_prompt"),
+	}
+	meta := map[string]any{}
+	if h.controller.Kind != "" || strings.TrimSpace(h.controller.ID) != "" {
+		scope.Controller = h.controller
+		meta["agent"] = strings.TrimSpace(h.controller.ID)
+		meta["handle"] = strings.TrimSpace(h.controller.Label)
+	} else {
+		scope.Participant = h.participant
+		meta["agent"] = strings.TrimSpace(h.participant.ID)
+		meta["handle"] = strings.TrimSpace(h.participant.Label)
+	}
 	return coresession.Event{
 		Type:       coresession.EventUser,
 		Visibility: coresession.VisibilityCanonical,
 		Time:       h.startedAt,
 		Actor:      coresession.ActorRef{Kind: coresession.ActorUser, ID: "user", Name: "user"},
-		Scope: &coresession.EventScope{
-			TurnID:      h.turnID,
-			Source:      firstNonEmpty(h.source, "tui_agent_prompt"),
-			Participant: h.participant,
-		},
+		Scope:      scope,
 		Message: &coremodel.Message{
 			Role:  coremodel.RoleUser,
 			Parts: parts,
 		},
-		Meta: map[string]any{
-			"agent":  strings.TrimSpace(h.participant.ID),
-			"handle": strings.TrimSpace(h.participant.Label),
-		},
+		Meta: meta,
 	}
 }
 
@@ -277,9 +316,13 @@ func (h *appServiceAgentTurnHandle) publish(env kernel.EventEnvelope) {
 }
 
 func (h *appServiceAgentTurnHandle) state() kernel.ActiveTurnState {
+	kind := h.activeKind
+	if kind == "" {
+		kind = kernel.ActiveTurnKindParticipant
+	}
 	return kernel.ActiveTurnState{
 		SessionRef: h.SessionRef(),
-		Kind:       kernel.ActiveTurnKindParticipant,
+		Kind:       kind,
 		HandleID:   h.HandleID(),
 		RunID:      h.RunID(),
 		TurnID:     h.TurnID(),

@@ -48,6 +48,20 @@ func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnR
 	if err != nil {
 		return kernel.BeginTurnResult{}, err
 	}
+	controller := controllerFromCoreSnapshot(snapshot)
+	snapshot.Session.Controller = controller
+	if controller.Kind == coresession.ControllerACP {
+		handle := newAppServiceControllerTurnHandle(g.services, snapshot.Session.Ref, controller, req.Input, coreContentPartsFromPort(req.ContentParts), req.Surface)
+		g.register(handle)
+		go func() {
+			defer g.unregister(handle)
+			handle.run(ctx)
+		}()
+		return kernel.BeginTurnResult{
+			Session: portSessionFromCore(snapshot.Session),
+			Handle:  handle,
+		}, nil
+	}
 	turn, err := g.services.Turns().Begin(ctx, appservices.BeginTurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
@@ -151,8 +165,78 @@ func (g *appServiceGateway) ControlPlaneState(ctx context.Context, req kernel.Co
 	return controlPlaneStateFromCore(snapshot, g.ActiveTurns()), nil
 }
 
-func (g *appServiceGateway) HandoffController(context.Context, kernel.HandoffControllerRequest) (portsession.Session, error) {
-	return portsession.Session{}, unsupportedControlPlaneError("handoff controller")
+func (g *appServiceGateway) HandoffController(ctx context.Context, req kernel.HandoffControllerRequest) (portsession.Session, error) {
+	ref := coreRefFromPort(req.SessionRef)
+	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	controller, err := g.controllerForHandoff(ctx, req)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	event := controllerHandoffEvent(controller, req.Source, req.Reason)
+	if _, err := g.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, []coresession.Event{event}); err != nil {
+		return portsession.Session{}, err
+	}
+	snapshot.Events = append(snapshot.Events, event)
+	snapshot.Session.Controller = controllerFromCoreSnapshot(snapshot)
+	return portSessionFromCore(snapshot.Session), nil
+}
+
+func (g *appServiceGateway) controllerForHandoff(ctx context.Context, req kernel.HandoffControllerRequest) (coresession.ControllerBinding, error) {
+	switch req.Kind {
+	case "", portsession.ControllerKindKernel:
+		return coresession.ControllerBinding{
+			Kind:       coresession.ControllerBuiltin,
+			ID:         "builtin",
+			AgentName:  "local",
+			Label:      "local kernel",
+			EpochID:    controllerEpochID(),
+			AttachedAt: time.Now().UTC(),
+			Source:     firstNonEmpty(req.Source, "tui_agent_handoff"),
+		}, nil
+	case portsession.ControllerKindACP:
+		descriptor, ok, err := g.resolveAgentDescriptor(ctx, req.Agent)
+		if err != nil {
+			return coresession.ControllerBinding{}, err
+		}
+		if !ok {
+			return coresession.ControllerBinding{}, fmt.Errorf("core app-service TUI gateway: agent %q is not configured", strings.TrimSpace(req.Agent))
+		}
+		id := firstNonEmpty(descriptor.ID, descriptor.Name, descriptor.Command)
+		return coresession.ControllerBinding{
+			Kind:       coresession.ControllerACP,
+			ID:         id,
+			AgentName:  id,
+			Label:      firstNonEmpty(descriptor.Name, id),
+			EpochID:    controllerEpochID(),
+			AttachedAt: time.Now().UTC(),
+			Source:     firstNonEmpty(req.Source, "tui_agent_handoff"),
+		}, nil
+	default:
+		return coresession.ControllerBinding{}, fmt.Errorf("core app-service TUI gateway: unsupported controller kind %q", req.Kind)
+	}
+}
+
+func controllerHandoffEvent(controller coresession.ControllerBinding, source string, reason string) coresession.Event {
+	return coresession.Event{
+		Type:       coresession.EventHandoff,
+		Visibility: coresession.VisibilityCanonical,
+		Time:       time.Now().UTC(),
+		Actor:      coresession.ActorRef{Kind: coresession.ActorSystem, ID: "caelis", Name: "caelis"},
+		Scope: &coresession.EventScope{
+			Source:     firstNonEmpty(source, "tui_agent_handoff"),
+			Controller: controller,
+		},
+		Meta: map[string]any{
+			"reason": strings.TrimSpace(reason),
+		},
+	}
+}
+
+func controllerEpochID() string {
+	return fmt.Sprintf("controller-%d", time.Now().UTC().UnixNano())
 }
 
 func (g *appServiceGateway) AttachParticipant(ctx context.Context, req kernel.AttachParticipantRequest) (portsession.Session, error) {
@@ -683,6 +767,7 @@ func coreParticipantAction(event coresession.Event) kernel.ParticipantAction {
 }
 
 func loadedSessionFromCore(snapshot coresession.Snapshot) portsession.LoadedSession {
+	snapshot.Session.Controller = controllerFromCoreSnapshot(snapshot)
 	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
 	return portsession.LoadedSession{
 		Session: portSessionFromCore(snapshot.Session),
@@ -766,12 +851,38 @@ func compactResumeTitle(text string, limit int) string {
 func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []kernel.ActiveTurnState) kernel.ControlPlaneState {
 	ref := portRefFromCore(snapshot.Session.Ref)
 	participants := participantsFromCoreSnapshot(snapshot)
+	controller := controllerFromCoreSnapshot(snapshot)
 	return kernel.ControlPlaneState{
 		SessionRef:    ref,
-		Controller:    controllerStateFromCore(snapshot.Session.Controller),
+		Controller:    controllerStateFromCore(controller),
 		Participants:  participantStatesFromCore(participants),
 		HasActiveTurn: activeTurnForSession(active, ref.SessionID),
 	}
+}
+
+func controllerFromCoreSnapshot(snapshot coresession.Snapshot) coresession.ControllerBinding {
+	controller := normalizeCoreController(snapshot.Session.Controller)
+	for _, event := range snapshot.Events {
+		if event.Type != coresession.EventHandoff || event.Scope == nil {
+			continue
+		}
+		next := normalizeCoreController(event.Scope.Controller)
+		if next.Kind == "" && strings.TrimSpace(next.ID) == "" {
+			continue
+		}
+		controller = next
+	}
+	return controller
+}
+
+func normalizeCoreController(in coresession.ControllerBinding) coresession.ControllerBinding {
+	in.ID = strings.TrimSpace(in.ID)
+	in.AgentName = strings.TrimSpace(in.AgentName)
+	in.Label = strings.TrimSpace(in.Label)
+	in.EpochID = strings.TrimSpace(in.EpochID)
+	in.RemoteSessionID = strings.TrimSpace(in.RemoteSessionID)
+	in.Source = strings.TrimSpace(in.Source)
+	return in
 }
 
 func controllerStateFromCore(in coresession.ControllerBinding) kernel.ControllerState {

@@ -281,6 +281,58 @@ func TestAgentServiceRegistersBuiltinAgent(t *testing.T) {
 	}
 }
 
+func TestAgentServiceInvokeControllerRecordsControllerScopedEvents(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+		Agents: []AgentDescriptor{{
+			ID:      "reviewer",
+			Name:    "reviewer",
+			Kind:    AgentKindExternalACP,
+			Command: "reviewer-acp",
+		}},
+		Invokers: map[string]AgentInvoker{
+			"reviewer": AgentInvokerFunc(func(_ context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
+				if req.Controller.Kind != session.ControllerACP || req.Controller.ID != "reviewer" {
+					t.Fatalf("invoke controller = %#v, want reviewer ACP controller", req.Controller)
+				}
+				return AgentInvokeResult{
+					Events: []session.Event{{
+						Type: session.EventAssistant,
+						Message: &model.Message{
+							Role:  model.RoleAssistant,
+							Parts: []model.Part{model.NewTextPart("controller result")},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := svc.Agents().Invoke(ctx, AgentInvokeRequest{
+		AgentID:    "reviewer",
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Controller: session.ControllerBinding{
+			Kind: session.ControllerACP,
+			ID:   "reviewer",
+		},
+		Input: "inspect",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || result.Events[0].Scope == nil || result.Events[0].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("result events = %#v, want controller-scoped event", result.Events)
+	}
+	if len(engine.events) != 1 || engine.events[0].Actor.Kind != session.ActorController || engine.events[0].Scope == nil || engine.events[0].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("recorded events = %#v, want controller-scoped event", engine.events)
+	}
+}
+
 func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	engine := &recordingEngine{
 		snapshot: session.Snapshot{

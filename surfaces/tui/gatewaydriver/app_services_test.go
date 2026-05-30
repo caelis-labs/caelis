@@ -440,6 +440,84 @@ func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine: engine,
+		Agents: []appservices.AgentDescriptor{{
+			ID:          "reviewer",
+			Name:        "reviewer",
+			Kind:        appservices.AgentKindExternalACP,
+			Command:     "reviewer-acp",
+			Description: "review code through ACP",
+		}},
+		Invokers: map[string]appservices.AgentInvoker{
+			"reviewer": appservices.AgentInvokerFunc(func(_ context.Context, req appservices.AgentInvokeRequest) (appservices.AgentInvokeResult, error) {
+				if req.Controller.Kind != coresession.ControllerACP || req.Controller.ID != "reviewer" {
+					t.Fatalf("controller invoke = %#v, want reviewer ACP controller", req.Controller)
+				}
+				return appservices.AgentInvokeResult{
+					Events: []coresession.Event{{
+						Type: coresession.EventAssistant,
+						Message: &coremodel.Message{
+							Role:  coremodel.RoleAssistant,
+							Parts: []coremodel.Part{coremodel.NewTextPart("controller result for " + req.Input)},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := driver.HandoffAgent(ctx, "reviewer")
+	if err != nil {
+		t.Fatalf("HandoffAgent(reviewer) error = %v", err)
+	}
+	if status.ControllerKind != "acp" || status.ControllerLabel != "reviewer" {
+		t.Fatalf("status after handoff = %#v, want reviewer ACP controller", status)
+	}
+	turn, err := driver.Submit(ctx, Submission{Text: " inspect "})
+	if err != nil {
+		t.Fatalf("Submit under ACP controller error = %v", err)
+	}
+	got := drainGatewayDriverTestTurn(t, turn)
+	if len(got) != 2 {
+		t.Fatalf("turn events = %#v, want controller user prompt and response", got)
+	}
+	if len(engine.events) != 3 {
+		t.Fatalf("recorded events = %#v, want handoff/user/assistant", engine.events)
+	}
+	if engine.events[0].Type != coresession.EventHandoff || engine.events[0].Scope == nil || engine.events[0].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("handoff event = %#v, want reviewer controller", engine.events[0])
+	}
+	if engine.events[1].Type != coresession.EventUser || engine.events[1].Scope == nil || engine.events[1].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("controller user event = %#v, want reviewer scope", engine.events[1])
+	}
+	if engine.events[2].Type != coresession.EventAssistant || engine.events[2].Scope == nil || engine.events[2].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("controller response event = %#v, want reviewer scope", engine.events[2])
+	}
+	status, err = driver.HandoffAgent(ctx, "local")
+	if err != nil {
+		t.Fatalf("HandoffAgent(local) error = %v", err)
+	}
+	if status.ControllerKind != "kernel" {
+		t.Fatalf("status after local handoff = %#v, want kernel controller", status)
+	}
+}
+
 type appServiceDriverEngine struct {
 	start    coresession.StartRequest
 	page     coresession.SessionPage

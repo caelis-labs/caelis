@@ -576,7 +576,9 @@ alongside the old stack without importing it:
   approval/permission policy, model-context reconstruction from durable events,
   and a minimal model/tool turn loop.
 - `internal/engine/control`: external participant runner that invokes an ACP
-  agent and appends normalized events into the canonical session store.
+  agent and appends normalized events into the canonical session store. It now
+  also has a controller runner for ACP main-controller prompts, normalizing
+  responses into controller-scoped canonical events.
 - `internal/app/services`: shared service facade for TUI, future APP, CLI, and
   protocol surfaces.
 - `internal/app/settings`: shared product settings document for configured
@@ -649,7 +651,8 @@ alongside the old stack without importing it:
   contributed by local composition or stored in app settings. Runtime-added
   custom agents are resolved through a narrow invoker factory instead of
   rebuilding service state. Built-in ACP agents are registered by copying their
-  catalog descriptors into the same settings-backed external agent contract.
+  catalog descriptors into the same settings-backed external agent contract,
+  and invocations can target either participant scope or ACP controller scope.
 - `internal/app/services.ModelService`: shared model settings and catalog
   surface for configured models, provider model presets, capability defaults,
   and reasoning-level choices used by TUI/future APP connect flows.
@@ -657,7 +660,9 @@ alongside the old stack without importing it:
   list and dynamic `/<agent> <prompt>` baseline for configured external ACP
   agents, recording participant attach/user/assistant activity as canonical
   core session events. It also routes settings-backed `/agent add custom` and
-  `/agent add <builtin>` and `/agent remove` through shared app services.
+  `/agent add <builtin>` and `/agent remove` through shared app services. The
+  same gateway now records `/agent use <agent|local>` as canonical handoff
+  events and routes subsequent prompts to the active external ACP controller.
 - `internal/app/services.ResourceService`: shared TUI/APP-facing catalog
   surface for discovered plugins, prompt fragments, skills, ACP agents,
   renderer hints, and `AGENTS.md` prompt resources.
@@ -705,6 +710,8 @@ The current verification path covers:
 - built-in ACP agent catalog -> shared `AgentService.RegisterBuiltin` ->
   settings-backed external ACP descriptor -> TUI `/agent add <builtin>`
   catalog and registration path
+- TUI `/agent use <agent|local>` -> canonical `EventHandoff` ->
+  app-service control-plane state -> ACP controller-scoped prompt routing
 - app-service TUI binding -> configured external ACP agent catalog -> dynamic
   participant prompt -> canonical participant/user/assistant events -> TUI
   participant-scoped event projection
@@ -878,6 +885,9 @@ The completed work is intentionally limited to the reusable skeleton:
 - Service-native built-in ACP agent catalog and non-install registration,
   including TUI `/agent add <builtin>` completion/registration backed by the
   same settings document used for external ACP descriptors.
+- Service-native `/agent use <agent|local>` baseline for registered external
+  ACP agents, using canonical handoff events and controller-scoped ACP prompt
+  execution through shared app services.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -949,6 +959,10 @@ be migrated before retiring the old stack:
      built-in ACP catalog and persists the selected descriptor through
      `AgentService.RegisterBuiltin`, so non-install built-in registration no
      longer requires the old gatewayapp agent registry.
+   - Migrated baseline: `/agent use <agent|local>` now records canonical
+     controller handoff events through the app-service TUI gateway. When an ACP
+     controller is active, normal TUI submissions are routed to the registered
+     external ACP agent and recorded as controller-scoped canonical events.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
@@ -962,10 +976,10 @@ be migrated before retiring the old stack:
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
    - Slash commands such as the `/connect` wizard shell, built-in
-     `/agent install` and adapter update, `/agent use`, plugin/static agent
-     removal, and `/doctor fix` still have old driver/app assumptions or
-     missing service-native feature parity, so the old TUI stack cannot be
-     removed yet.
+     `/agent install` and adapter update, plugin/static agent removal, remote
+     ACP controller config commands, and `/doctor fix` still have old
+     driver/app assumptions or missing service-native feature parity, so the
+     old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1112,11 +1126,16 @@ be migrated before retiring the old stack:
       service-native app catalog and `/agent add <builtin>` registers them into
       the same settings-backed external ACP descriptor contract as custom
       agents.
+    - Migrated baseline: ACP main-controller handoff now has an app-service
+      path for registered external ACP agents. Handoffs are durable
+      `EventHandoff` records, control-plane state is rebuilt from canonical
+      events, and subsequent prompts can execute through the external ACP agent
+      as controller-scoped session events.
     - Still pending: built-in ACP adapter install/update, self-agent spawning,
-      `/agent use` main-controller handoff, durable sidecar continuation
-      across restarts, delegated subagent tasks, remote session resume/new
-      semantics, plugin/static agent removal, and terminal previews remain
-      old-stack.
+      durable sidecar continuation across restarts, delegated subagent tasks,
+      remote controller session resume/new semantics, plugin/static agent
+      removal, remote ACP controller model/mode config commands, and terminal
+      previews remain old-stack.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the

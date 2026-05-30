@@ -165,6 +165,56 @@ func TestStackInvokesExternalACPAgentThroughServices(t *testing.T) {
 	}
 }
 
+func TestStackInvokesExternalACPAgentAsControllerThroughServices(t *testing.T) {
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("local baseline")},
+	}}
+	stack, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceCWD: t.TempDir()},
+		Provider: provider,
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "helper",
+			AgentName: "Helper",
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:       []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := stack.Services().Agents().Invoke(context.Background(), services.AgentInvokeRequest{
+		AgentID:    "helper",
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Controller: session.ControllerBinding{
+			Kind: session.ControllerACP,
+			ID:   "helper",
+		},
+		Input: "delegate",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || session.EventText(result.Events[0]) != "external helper response" {
+		t.Fatalf("invoke result = %#v, want helper response", result)
+	}
+	snapshot, err := stack.Services().Sessions().Load(context.Background(), session.Ref{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Events) != 1 || snapshot.Events[0].Scope == nil || snapshot.Events[0].Scope.Controller.ID != "helper" {
+		t.Fatalf("stored events = %#v, want helper controller event", snapshot.Events)
+	}
+	if snapshot.Events[0].Actor.Kind != session.ActorController {
+		t.Fatalf("stored event actor = %#v, want controller", snapshot.Events[0].Actor)
+	}
+}
+
 func TestExternalACPHelperProcess(t *testing.T) {
 	if os.Getenv("CAELIS_TEST_EXTERNAL_ACP_HELPER") != "1" {
 		return
