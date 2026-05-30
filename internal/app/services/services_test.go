@@ -1251,6 +1251,130 @@ func TestViewServiceProjectsLoadedSession(t *testing.T) {
 	}
 }
 
+func TestEventServiceReplaysSurfaceNeutralEventStream(t *testing.T) {
+	engine := &recordingEngine{
+		replayEvents: []coreruntime.EventEnvelope{
+			{
+				Cursor: "cursor-user",
+				Event: session.Event{
+					ID:        "evt-user",
+					SessionID: "sess-events",
+					Type:      session.EventUser,
+					Scope:     &session.EventScope{TurnID: "turn-1"},
+					Message: &model.Message{
+						Role:  model.RoleUser,
+						Parts: []model.Part{model.NewTextPart("ping")},
+					},
+				},
+			},
+			{
+				Cursor: "cursor-approval",
+				Event: session.Event{
+					ID:        "evt-approval",
+					SessionID: "sess-events",
+					Type:      session.EventApproval,
+					Approval: &session.ApprovalEvent{
+						ID:     "approval-1",
+						Status: session.ApprovalPending,
+						Tool: &session.ToolEvent{
+							Name:  "run_command",
+							Input: map[string]any{"command": "printf hello"},
+						},
+						Options: []session.ApprovalOption{{ID: "allow_once", Name: "Allow once", Kind: "allow"}},
+					},
+				},
+			},
+			{Err: "provider disconnected"},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := svc.Events().Replay(context.Background(), EventReplayRequest{
+		SessionRef:       session.Ref{SessionID: "sess-events"},
+		After:            "cursor-before",
+		Limit:            10,
+		IncludeTransient: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectSessionEventEnvelopes(t, stream)
+	if engine.replayReq.SessionRef.AppName != "caelis-app" || engine.replayReq.SessionRef.UserID != "tester" || engine.replayReq.After != "cursor-before" || engine.replayReq.Limit != 10 || !engine.replayReq.IncludeTransient {
+		t.Fatalf("replay request = %#v, want runtime defaults and cursor options", engine.replayReq)
+	}
+	if len(events) != 3 {
+		t.Fatalf("events = %#v, want user, approval, error", events)
+	}
+	if events[0].Cursor != "cursor-user" || events[0].Event == nil || events[0].Event.Type != string(session.EventUser) || events[0].Transcript == nil || events[0].Transcript.Text != "ping" {
+		t.Fatalf("user event projection = %#v", events[0])
+	}
+	if events[1].Approval == nil || events[1].Approval.ID != "approval-1" || len(events[1].Approval.Actions) != 1 || !events[1].Approval.Actions[0].Approved {
+		t.Fatalf("approval event projection = %#v, want approval action", events[1])
+	}
+	if events[2].Error != "provider disconnected" {
+		t.Fatalf("error event = %#v, want provider disconnected", events[2])
+	}
+	events[0].Canonical.Message.Parts[0] = model.NewTextPart("mutated")
+	stream, err = svc.Events().Replay(context.Background(), EventReplayRequest{SessionRef: session.Ref{SessionID: "sess-events"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	again := collectSessionEventEnvelopes(t, stream)
+	if got := again[0].Canonical.Message.TextContent(); got != "ping" {
+		t.Fatalf("canonical replay event was not cloned: %q", got)
+	}
+}
+
+func TestEventServiceSubscribesActiveTurnEvents(t *testing.T) {
+	events := make(chan coreruntime.EventEnvelope, 2)
+	events <- coreruntime.EventEnvelope{
+		Event: session.Event{
+			ID:        "evt-live",
+			SessionID: "sess-live",
+			Type:      session.EventAssistant,
+			Scope:     &session.EventScope{TurnID: "turn-live"},
+			Message: &model.Message{
+				Role:  model.RoleAssistant,
+				Parts: []model.Part{model.NewTextPart("live answer")},
+			},
+		},
+	}
+	events <- coreruntime.EventEnvelope{
+		Event: session.Event{
+			ID:        "evt-lifecycle",
+			SessionID: "sess-live",
+			Type:      session.EventLifecycle,
+			Lifecycle: &session.LifecycleEvent{Status: session.LifecycleCompleted, Reason: "done"},
+		},
+	}
+	close(events)
+	svc, err := New(Config{Engine: &recordingEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stream, err := svc.Events().SubscribeTurn(context.Background(), staticTurn{events: events})
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := collectSessionEventEnvelopes(t, stream)
+	if len(live) != 2 || live[0].Transcript == nil || live[0].Transcript.Text != "live answer" {
+		t.Fatalf("live stream = %#v, want assistant transcript", live)
+	}
+	if live[1].Lifecycle == nil || live[1].Lifecycle.Status != string(session.LifecycleCompleted) || live[1].Lifecycle.Reason != "done" {
+		t.Fatalf("lifecycle projection = %#v, want completed done", live[1])
+	}
+	if _, err := svc.Events().SubscribeTurn(context.Background(), nil); err == nil {
+		t.Fatal("SubscribeTurn(nil) error = nil, want error")
+	}
+}
+
 func TestApprovalServiceProjectsActionsAndSubmitsDecision(t *testing.T) {
 	engine := &recordingEngine{snapshot: session.Snapshot{
 		Session: session.Session{
@@ -1649,6 +1773,271 @@ func TestTaskServiceListsAndControlsSandboxTasks(t *testing.T) {
 	}
 	if cancelled.Task.State != string(sandbox.SessionCancelled) || cancelled.Task.Running {
 		t.Fatalf("cancelled task = %#v, want cancelled non-running task", cancelled.Task)
+	}
+}
+
+func TestTaskServiceListsLiveAndDurableTaskHistory(t *testing.T) {
+	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-tasks", WorkspaceKey: "repo"}},
+			Events: []session.Event{
+				{
+					ID:         "evt-transient",
+					Type:       session.EventToolResult,
+					Visibility: session.VisibilityUIOnly,
+					Time:       now.Add(-time.Minute),
+					Tool: &session.ToolEvent{
+						Name: "RUN_COMMAND",
+						Meta: map[string]any{
+							"caelis": map[string]any{"runtime": map[string]any{"task": map[string]any{"task_id": "ignored"}}},
+						},
+					},
+				},
+				{
+					ID:   "evt-run-start",
+					Type: session.EventToolResult,
+					Time: now,
+					Scope: &session.EventScope{
+						TurnID: "turn-1",
+					},
+					Tool: &session.ToolEvent{
+						ID:     "call-run",
+						Name:   "RUN_COMMAND",
+						Title:  "RUN_COMMAND go test ./...",
+						Status: session.ToolRunning,
+						Input: map[string]any{
+							"command": "go test ./...",
+							"cwd":     "/repo",
+						},
+						Meta: map[string]any{
+							"caelis": map[string]any{
+								"runtime": map[string]any{
+									"task": map[string]any{
+										"action":        "start",
+										"task_id":       "task-1",
+										"state":         "running",
+										"running":       true,
+										"terminal_id":   "term-1",
+										"stdout_cursor": int64(20),
+										"stderr_cursor": int64(5),
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID:   "evt-spawn-result",
+					Type: session.EventToolResult,
+					Time: now.Add(time.Second),
+					Scope: &session.EventScope{
+						TurnID: "turn-2",
+					},
+					Tool: &session.ToolEvent{
+						ID:     "spawn-call",
+						Name:   "SPAWN",
+						Title:  "SPAWN reviewer: inspect",
+						Status: session.ToolCompleted,
+						Input: map[string]any{
+							"agent":  "reviewer",
+							"prompt": "inspect",
+						},
+						Meta: map[string]any{
+							"caelis": map[string]any{
+								"runtime": map[string]any{
+									"task": map[string]any{
+										"task_id":           "spawn-1",
+										"task_kind":         "subagent",
+										"state":             "completed",
+										"running":           false,
+										"agent":             "reviewer",
+										"remote_session_id": "remote-1",
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID:   "evt-task-tail",
+					Type: session.EventToolResult,
+					Time: now.Add(2 * time.Second),
+					Scope: &session.EventScope{
+						TurnID: "turn-1",
+					},
+					Tool: &session.ToolEvent{
+						ID:     "task-call",
+						Name:   "task",
+						Status: session.ToolRunning,
+						Output: map[string]any{
+							"action":        "tail",
+							"task_id":       "task-1",
+							"state":         "running",
+							"running":       true,
+							"stdout_cursor": float64(42),
+							"stderr_cursor": float64(6),
+						},
+					},
+				},
+				{
+					ID:   "evt-spawn-child",
+					Type: session.EventAssistant,
+					Time: now.Add(3 * time.Second),
+					Scope: &session.EventScope{
+						TurnID: "turn-2",
+						Participant: session.ParticipantBinding{
+							ID:           "spawn-1",
+							Kind:         session.ParticipantSubagent,
+							Role:         session.ParticipantDelegated,
+							AgentName:    "reviewer",
+							SessionID:    "remote-1",
+							ParentTurnID: "turn-2",
+							DelegationID: "spawn-1",
+							AttachedAt:   now.Add(time.Second),
+						},
+					},
+					Message: &model.Message{Role: model.RoleAssistant, Parts: []model.Part{model.NewTextPart("child done")}},
+				},
+			},
+		},
+	}
+	taskSession := &recordingTaskSession{
+		snapshot: sandbox.SessionSnapshot{
+			Ref:           sandbox.SessionRef{ID: "task-1", Backend: sandbox.BackendHost},
+			Command:       "go test ./...",
+			Dir:           "/repo",
+			State:         sandbox.SessionCompleted,
+			Running:       false,
+			SupportsInput: true,
+			StartedAt:     now,
+			UpdatedAt:     now.Add(4 * time.Second),
+			Terminal:      sandbox.TerminalRef{ID: "term-1", SessionID: "task-1"},
+		},
+	}
+	liveOnly := &recordingTaskSession{
+		snapshot: sandbox.SessionSnapshot{
+			Ref:       sandbox.SessionRef{ID: "live-only", Backend: sandbox.BackendHost},
+			Command:   "sleep 10",
+			State:     sandbox.SessionRunning,
+			Running:   true,
+			UpdatedAt: now.Add(5 * time.Second),
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+		Sandbox: &recordingTaskRuntime{sessions: map[string]*recordingTaskSession{
+			"task-1":    taskSession,
+			"live-only": liveOnly,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := svc.Tasks().List(context.Background(), ListTasksRequest{
+		SessionRef:     session.Ref{SessionID: "sess-tasks"},
+		IncludeHistory: true,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if engine.loadRef.AppName != "caelis-app" || engine.loadRef.UserID != "tester" || engine.loadRef.WorkspaceKey != "repo" {
+		t.Fatalf("load ref = %#v, want runtime defaults", engine.loadRef)
+	}
+	if !list.Supported || list.Count != 3 {
+		t.Fatalf("task list = %#v, want live/history task set", list)
+	}
+	if list.Tasks[0].ID != "live-only" {
+		t.Fatalf("first task = %#v, want newest live task first", list.Tasks[0])
+	}
+	task, ok := findTaskItem(list.Tasks, "task-1")
+	if !ok {
+		t.Fatalf("task-1 missing from %#v", list.Tasks)
+	}
+	if task.Source != "live" || task.State != string(sandbox.SessionCompleted) || task.StdoutCursor != 42 || task.StderrCursor != 6 || task.Action != "tail" || task.TerminalID != "term-1" {
+		t.Fatalf("task-1 = %#v, want live state merged with durable cursors", task)
+	}
+	spawn, ok := findTaskItem(list.Tasks, "spawn-1")
+	if !ok {
+		t.Fatalf("spawn-1 missing from %#v", list.Tasks)
+	}
+	if spawn.Source != "history" || spawn.Kind != "subagent" || spawn.Agent != "reviewer" || spawn.RemoteSessionID != "remote-1" || spawn.State != "completed" || spawn.EventID != "evt-spawn-child" || spawn.TurnID != "turn-2" {
+		t.Fatalf("spawn task = %#v, want durable subagent task metadata", spawn)
+	}
+	if _, ok := findTaskItem(list.Tasks, "ignored"); ok {
+		t.Fatalf("transient task leaked into history: %#v", list.Tasks)
+	}
+
+	list.Tasks[0].Command = "mutated"
+	again, err := svc.Tasks().List(context.Background(), ListTasksRequest{
+		SessionRef:     session.Ref{SessionID: "sess-tasks"},
+		IncludeHistory: true,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Tasks[0].Command == "mutated" {
+		t.Fatalf("task list was not rebuilt from live/history sources: %#v", again.Tasks[0])
+	}
+}
+
+func TestTaskServiceListsDurableTaskHistoryWithoutSandboxLister(t *testing.T) {
+	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{SessionID: "sess-history"}},
+			Events: []session.Event{{
+				ID:   "evt-run",
+				Type: session.EventToolResult,
+				Time: now,
+				Tool: &session.ToolEvent{
+					Name: "RUN_COMMAND",
+					Input: map[string]any{
+						"command": "make quality",
+					},
+					Meta: map[string]any{
+						"caelis": map[string]any{
+							"runtime": map[string]any{
+								"task": map[string]any{
+									"task_id": "task-history",
+									"state":   "completed",
+									"running": false,
+								},
+							},
+						},
+					},
+				},
+			}},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis-app", UserID: "tester"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unsupported, err := svc.Tasks().List(context.Background(), ListTasksRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unsupported.Supported || unsupported.Count != 0 {
+		t.Fatalf("task list without lister/history = %#v, want unsupported", unsupported)
+	}
+	history, err := svc.Tasks().List(context.Background(), ListTasksRequest{
+		SessionRef:     session.Ref{SessionID: "sess-history"},
+		IncludeHistory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !history.Supported || history.Count != 1 || history.Tasks[0].ID != "task-history" || history.Tasks[0].Command != "make quality" {
+		t.Fatalf("history task list = %#v, want durable task without live sandbox", history)
 	}
 }
 
@@ -2080,15 +2469,17 @@ func TestModeServicePersistsSessionModeAndTurnsUseIt(t *testing.T) {
 }
 
 type recordingEngine struct {
-	start      session.StartRequest
-	list       session.ListQuery
-	page       session.SessionPage
-	turn       coreruntime.TurnRequest
-	events     []session.Event
-	turnEvents []session.Event
-	loadRef    session.Ref
-	state      session.State
-	snapshot   session.Snapshot
+	start        session.StartRequest
+	list         session.ListQuery
+	page         session.SessionPage
+	turn         coreruntime.TurnRequest
+	events       []session.Event
+	turnEvents   []session.Event
+	replayReq    coreruntime.ReplayRequest
+	replayEvents []coreruntime.EventEnvelope
+	loadRef      session.Ref
+	state        session.State
+	snapshot     session.Snapshot
 }
 
 type fakeSandboxRuntime struct {
@@ -2184,6 +2575,15 @@ func findAgentManagementItem(items []appviewmodel.AgentManagementItem, name stri
 		}
 	}
 	return appviewmodel.AgentManagementItem{}, false
+}
+
+func findTaskItem(items []appviewmodel.TaskItem, id string) (appviewmodel.TaskItem, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return appviewmodel.TaskItem{}, false
 }
 
 func agentActionEnabled(actions []appviewmodel.AgentManagementAction, id string) bool {
@@ -2403,6 +2803,15 @@ func collectRuntimeTurnEvents(t *testing.T, turn coreruntime.Turn) []session.Eve
 	return out
 }
 
+func collectSessionEventEnvelopes(t *testing.T, stream <-chan appviewmodel.SessionEventEnvelope) []appviewmodel.SessionEventEnvelope {
+	t.Helper()
+	var out []appviewmodel.SessionEventEnvelope
+	for env := range stream {
+		out = append(out, appviewmodel.CloneSessionEventEnvelope(env))
+	}
+	return out
+}
+
 func cloneTestEvents(in []session.Event) []session.Event {
 	out := make([]session.Event, 0, len(in))
 	for _, event := range in {
@@ -2464,8 +2873,14 @@ func (e *recordingEngine) Interrupt(context.Context, session.Ref) error {
 	return nil
 }
 
-func (e *recordingEngine) Replay(context.Context, coreruntime.ReplayRequest) (<-chan coreruntime.EventEnvelope, error) {
-	events := make(chan coreruntime.EventEnvelope)
+func (e *recordingEngine) Replay(_ context.Context, req coreruntime.ReplayRequest) (<-chan coreruntime.EventEnvelope, error) {
+	e.replayReq = req
+	events := make(chan coreruntime.EventEnvelope, len(e.replayEvents))
+	for _, env := range e.replayEvents {
+		next := env
+		next.Event = session.CloneEvent(env.Event)
+		events <- next
+	}
 	close(events)
 	return events, nil
 }

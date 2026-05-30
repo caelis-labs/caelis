@@ -12,6 +12,7 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	portsapproval "github.com/OnslaughtSnail/caelis/ports/approval"
@@ -141,7 +142,7 @@ func (g *appServiceGateway) ListSessions(ctx context.Context, req kernel.ListSes
 }
 
 func (g *appServiceGateway) ReplayEvents(ctx context.Context, req kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error) {
-	events, err := g.services.Turns().Replay(ctx, coreruntime.ReplayRequest{
+	events, err := g.services.Events().Replay(ctx, appservices.EventReplayRequest{
 		SessionRef:       coreRefFromPort(req.SessionRef),
 		After:            coresession.Cursor(req.Cursor),
 		Limit:            req.Limit,
@@ -152,7 +153,7 @@ func (g *appServiceGateway) ReplayEvents(ctx context.Context, req kernel.ReplayE
 	}
 	out := make([]kernel.EventEnvelope, 0)
 	for env := range events {
-		if converted, ok := kernelEnvelopeFromCore(env); ok {
+		if converted, ok := kernelEnvelopeFromAppEvent(env); ok {
 			out = append(out, converted)
 		}
 	}
@@ -438,8 +439,13 @@ func (h *appServiceTurnHandle) Close() error {
 func (h *appServiceTurnHandle) forward() {
 	defer close(h.events)
 	defer close(h.done)
-	for env := range h.turn.Events() {
-		converted, ok := kernelEnvelopeFromCore(env)
+	stream, err := h.services.Events().SubscribeTurn(context.Background(), h.turn)
+	if err != nil {
+		h.events <- kernel.EventEnvelope{Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: err.Error()}}
+		return
+	}
+	for env := range stream {
+		converted, ok := kernelEnvelopeFromAppEvent(env)
 		if !ok {
 			continue
 		}
@@ -453,6 +459,21 @@ func (h *appServiceTurnHandle) forward() {
 		h.mu.Unlock()
 		h.events <- converted
 	}
+}
+
+func kernelEnvelopeFromAppEvent(env appviewmodel.SessionEventEnvelope) (kernel.EventEnvelope, bool) {
+	if strings.TrimSpace(env.Error) != "" {
+		return kernel.EventEnvelope{
+			Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: env.Error},
+		}, true
+	}
+	if env.Canonical == nil {
+		return kernel.EventEnvelope{}, false
+	}
+	return kernelEnvelopeFromCore(coreruntime.EventEnvelope{
+		Cursor: coresession.Cursor(strings.TrimSpace(env.Cursor)),
+		Event:  coresession.CloneEvent(*env.Canonical),
+	})
 }
 
 func (h *appServiceTurnHandle) state() kernel.ActiveTurnState {

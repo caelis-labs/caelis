@@ -1,7 +1,7 @@
 # Caelis Reimplementation Architecture Roadmap
 
 Status: long-term reference and refactor roadmap
-Last updated: 2026-05-30
+Last updated: 2026-05-31
 Scope: conceptual redesign, package layout, dependency rules, and migration path
 
 ## Purpose
@@ -605,8 +605,13 @@ alongside the old stack without importing it:
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
   approval/action, participant, agent management, model selection, task
-  list/output, settings, and status DTOs shared by the TUI and future APP,
-  including runtime store identity needed by read-only diagnostics.
+  list/output, settings, event stream, and status DTOs shared by the TUI and
+  future APP, including runtime store identity needed by read-only
+  diagnostics.
+- `internal/app/services.EventService`: shared replay/live-turn event stream
+  projection for TUI and future APP consumers. It wraps runtime replay and
+  active-turn channels into surface-neutral event envelopes with transcript,
+  approval, participant, lifecycle, and canonical event projections.
 - `internal/app/services.SettingsService`: shared settings contract for
   runtime identity, store, sandbox, sandbox backend, and compaction policy
   mutations. It persists through the app settings manager and updates the
@@ -1104,6 +1109,11 @@ be migrated before retiring the old stack:
      surface-neutral task panel contract for sandbox async session list, tail,
      wait, stdin write, and cancel operations, backed by `core/sandbox`
      session contracts instead of old TUI task state.
+   - Migrated baseline: `TaskService.List(IncludeHistory)` can rebuild durable
+     task-panel history from canonical tool/subagent events and merge it with
+     live sandbox status. The shared task DTO now carries command/subagent
+     kind, source, action, terminal, cursor, agent, remote session, event, and
+     turn metadata for TUI and future APP consumers.
    - Migrated baseline: `internal/app/services.ApprovalService` now exposes
      pending approval actions and a shared decision-submission contract for TUI
      and the future APP. The app-service TUI turn bridge uses this contract
@@ -1117,9 +1127,15 @@ be migrated before retiring the old stack:
      built-in catalog entries, installable adapters, and actions such as
      invoke, use as controller, register, install/update, remove, and custom
      registration.
-   - Still pending: transcript actions, durable task history, live event
-     subscriptions, and richer settings-panel composition still need APP-ready
-     service/view-model contracts.
+   - Migrated baseline: `internal/app/services.EventService` now exposes
+     APP-ready replay and active-turn live event streams using shared
+     `internal/app/viewmodel.SessionEventEnvelope` DTOs. The app-service TUI
+     gateway replay and local-turn forwarding path consume this service-level
+     projection before adapting to the existing kernel envelope shape.
+   - Still pending: transcript actions and richer settings-panel composition
+     still need APP-ready service/view-model contracts. Durable async task
+     control and output storage remain kernel/runtime work rather than APP-only
+     view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
@@ -1276,6 +1292,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: task list/tail control is now part of the core-native
      `task` tool and backed by a public sandbox session listing contract for
      runtimes that support async sessions.
+   - Migrated baseline: task metadata emitted by `run_command`, `task`, and
+     `SPAWN` is now recoverable through shared app-service history projection
+     from canonical `session.ToolEvent` / subagent participant events, so
+     task-panel reload does not depend on TUI-only caches.
    - Migrated baseline: `SPAWN` now has a core-native tool declaration and is
      executed by the runtime loop through an explicit spawner interface. The
      default local stack can expose registered external ACP agents as SPAWN
@@ -1283,9 +1303,9 @@ be migrated before retiring the old stack:
      into canonical delegated participant events, and return a model-visible
      `task_id` / `final_message` payload.
    - Still pending: durable async SPAWN tasks, TASK wait/write/cancel control
-     for spawned subagents, durable task storage, output tail cursors across
-     process restarts, and display metadata for compact/rich tool panels still
-     need core-native adapters.
+     for spawned subagents, durable task storage/output buffers across process
+     restarts, and display metadata for compact/rich tool panels still need
+     core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -1389,9 +1409,15 @@ be migrated before retiring the old stack:
       subagent participant events and return a stable `task_id` matching the
       parent tool call, establishing the new event-level association point for
       future async task control.
-    - Still pending: durable task storage, output tail cursors across process
-      restarts, async SPAWN/subagent TASK control, terminal previews, and full
-      production TUI/APP task-panel wiring remain incomplete.
+    - Migrated baseline: shared task history projection now rebuilds durable
+      command and SPAWN task rows from canonical tool result metadata plus
+      participant delegation events, preserves output cursors recorded in tool
+      results, and overlays live sandbox snapshots when a task is still known to
+      the active runtime.
+    - Still pending: a real durable task store for process/subagent lifecycle
+      and output buffers, async SPAWN/subagent TASK wait/write/cancel control,
+      terminal previews, and full production TUI/APP task-panel wiring remain
+      incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -1482,12 +1508,14 @@ Recommended sequence:
 3. Port sandbox router/backends and permission policy before moving mutating
    tools.
 4. Finish durable async SPAWN task control and durable task runtime behavior
-   behind `core/tool.Registry` and `internal/engine/tasks`.
+   behind `core/tool.Registry` and `internal/engine/tasks`; the shared
+   app-service history projection is now a baseline, so this milestone should
+   focus on real async process/subagent lifecycle and durable output storage.
 5. Port TUI driver commands, including the remaining built-in agent management
    actions, to `internal/app/services`, preserving existing rendering as
    surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model
-   selection, approvals, tasks, and live transcript actions.
+   selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
    to canonical events.
 8. Add full store round-trip and ACP projection parity tests for product flows.

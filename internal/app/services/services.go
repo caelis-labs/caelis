@@ -179,6 +179,10 @@ func (s Services) Approvals() ApprovalService {
 	return ApprovalService{services: s}
 }
 
+func (s Services) Events() EventService {
+	return EventService{services: s}
+}
+
 type SettingsService struct {
 	services Services
 }

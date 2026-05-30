@@ -14,18 +14,28 @@ type TaskListView struct {
 }
 
 type TaskItem struct {
-	ID            string    `json:"id,omitempty"`
-	Backend       string    `json:"backend,omitempty"`
-	State         string    `json:"state,omitempty"`
-	Running       bool      `json:"running,omitempty"`
-	SupportsInput bool      `json:"supports_input,omitempty"`
-	Command       string    `json:"command,omitempty"`
-	CWD           string    `json:"cwd,omitempty"`
-	TerminalID    string    `json:"terminal_id,omitempty"`
-	ExitCode      int       `json:"exit_code,omitempty"`
-	Error         string    `json:"error,omitempty"`
-	StartedAt     time.Time `json:"started_at,omitempty"`
-	UpdatedAt     time.Time `json:"updated_at,omitempty"`
+	ID              string    `json:"id,omitempty"`
+	Kind            string    `json:"kind,omitempty"`
+	Source          string    `json:"source,omitempty"`
+	Title           string    `json:"title,omitempty"`
+	Backend         string    `json:"backend,omitempty"`
+	Action          string    `json:"action,omitempty"`
+	State           string    `json:"state,omitempty"`
+	Running         bool      `json:"running,omitempty"`
+	SupportsInput   bool      `json:"supports_input,omitempty"`
+	Command         string    `json:"command,omitempty"`
+	CWD             string    `json:"cwd,omitempty"`
+	TerminalID      string    `json:"terminal_id,omitempty"`
+	Agent           string    `json:"agent,omitempty"`
+	RemoteSessionID string    `json:"remote_session_id,omitempty"`
+	StdoutCursor    int64     `json:"stdout_cursor,omitempty"`
+	StderrCursor    int64     `json:"stderr_cursor,omitempty"`
+	EventID         string    `json:"event_id,omitempty"`
+	TurnID          string    `json:"turn_id,omitempty"`
+	ExitCode        int       `json:"exit_code,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
 }
 
 type TaskOutputView struct {
@@ -41,6 +51,9 @@ type TaskOutputView struct {
 func TaskItemFromSnapshot(snapshot sandbox.SessionSnapshot) TaskItem {
 	return TaskItem{
 		ID:            strings.TrimSpace(snapshot.Ref.ID),
+		Kind:          "command",
+		Source:        "live",
+		Title:         strings.TrimSpace(snapshot.Command),
 		Backend:       strings.TrimSpace(string(snapshot.Ref.Backend)),
 		State:         strings.TrimSpace(string(snapshot.State)),
 		Running:       snapshot.Running,
