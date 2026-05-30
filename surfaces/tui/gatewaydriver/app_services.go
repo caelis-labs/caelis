@@ -8,10 +8,12 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/config"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
+	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -38,6 +40,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	}
 	stack.AppStatusViewFn = func(ctx context.Context, ref portsession.SessionRef) (appviewmodel.StatusView, error) {
 		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: coreRefFromPort(ref)})
+	}
+	stack.SandboxStatusFn = func() SandboxStatus {
+		status, err := svc.Sandbox().Status(context.Background())
+		if err != nil {
+			return SandboxStatus{}
+		}
+		return sandboxStatusFromApp(status)
 	}
 	stack.DefaultModelAliasFn = func() string {
 		cfg, ok, err := svc.Models().Current(context.Background(), coresession.Ref{})
@@ -105,6 +114,35 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	}
 	stack.DeleteModelFn = func(ctx context.Context, _ portsession.SessionRef, modelRef string) error {
 		return svc.Models().Delete(ctx, modelRef)
+	}
+	stack.SetSandboxBackendFn = func(ctx context.Context, backend string) (SandboxStatus, error) {
+		status, err := svc.Sandbox().Status(ctx)
+		out := sandboxStatusFromApp(status)
+		if err != nil {
+			return out, err
+		}
+		requested := strings.ToLower(strings.TrimSpace(backend))
+		current := strings.ToLower(firstNonEmpty(out.ResolvedBackend, out.RequestedBackend))
+		if requested == "" || requested == "auto" || requested == current {
+			return out, nil
+		}
+		return out, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox backend switching is not migrated to app services")
+	}
+	stack.PrepareSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
+		status, err := svc.Sandbox().Prepare(ctx)
+		return sandboxStatusFromApp(status), err
+	}
+	stack.RepairSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
+		status, err := svc.Sandbox().Repair(ctx)
+		return sandboxStatusFromApp(status), err
+	}
+	stack.PreflightSandboxFn = func(ctx context.Context, _ bool) (SandboxStatus, error) {
+		status, err := svc.Sandbox().Status(ctx)
+		return sandboxStatusFromApp(status), err
+	}
+	stack.ResetSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
+		status, err := svc.Sandbox().Reset(ctx)
+		return sandboxStatusFromApp(status), err
 	}
 	stack.ListACPAgentsFn = func() []ACPAgentInfo {
 		agents, err := svc.Agents().List(context.Background())
@@ -346,6 +384,113 @@ func codeFreeAuthRequestToApp(req CodeFreeAuthRequest) appservices.CodeFreeAuthR
 		OpenBrowser:     req.OpenBrowser,
 		CallbackTimeout: req.CallbackTimeout,
 	}
+}
+
+func sandboxStatusFromApp(status appservices.SandboxStatus) SandboxStatus {
+	setup := sandboxSetupStatusFromApp(status.Setup)
+	global, hasGlobal := sandboxSetupCheckByScope(setup, portsandbox.SetupScopeGlobal)
+	workspace, hasWorkspace := sandboxSetupCheckByScope(setup, portsandbox.SetupScopeWorkspace)
+	return SandboxStatus{
+		RequestedBackend:         strings.TrimSpace(status.RequestedBackend),
+		ResolvedBackend:          strings.TrimSpace(status.ResolvedBackend),
+		Route:                    strings.TrimSpace(status.Route),
+		FallbackReason:           strings.TrimSpace(status.FallbackReason),
+		InstallHint:              strings.TrimSpace(status.FallbackInstallHint),
+		Setup:                    setup,
+		SetupRequired:            status.SetupRequired,
+		SetupError:               strings.TrimSpace(status.SetupError),
+		SetupMarkerCurrent:       status.SetupMarkerCurrent,
+		SetupMarkerReason:        strings.TrimSpace(status.SetupMarkerReason),
+		SecuritySummary:          sandboxSecuritySummary(status),
+		GlobalSetupCurrent:       hasGlobal && global.Current,
+		GlobalSetupRequired:      hasGlobal && global.Required,
+		GlobalSetupReason:        setupReason(global, hasGlobal),
+		WorkspaceSetupCurrent:    hasWorkspace && workspace.Current,
+		WorkspaceSetupRequired:   hasWorkspace && workspace.Required,
+		WorkspaceSetupReason:     setupReason(workspace, hasWorkspace),
+		WorkspaceSetupRoot:       setupRoot(workspace, hasWorkspace),
+		WorkspaceSetupWriteRoots: setupCount(workspace, hasWorkspace, "write_roots"),
+		WorkspaceSetupPolicyHash: setupDetail(workspace, hasWorkspace, "policy_hash"),
+		WorkspaceSetupUpdatedAt:  workspace.UpdatedAt,
+	}
+}
+
+func sandboxSetupStatusFromApp(status coresandbox.SetupStatus) portsandbox.SetupStatus {
+	out := portsandbox.SetupStatus{
+		Required: status.Required,
+		Error:    strings.TrimSpace(status.Error),
+		Details:  maps.Clone(status.Details),
+		Counts:   maps.Clone(status.Counts),
+		Checks:   make([]portsandbox.SetupCheck, 0, len(status.Checks)),
+	}
+	for _, check := range status.Checks {
+		out.Checks = append(out.Checks, portsandbox.SetupCheck{
+			Name:      strings.TrimSpace(check.Name),
+			Scope:     portsandbox.SetupScope(strings.TrimSpace(string(check.Scope))),
+			Current:   check.Current,
+			Required:  check.Required,
+			Reason:    strings.TrimSpace(check.Reason),
+			Error:     strings.TrimSpace(check.Error),
+			Version:   check.Version,
+			Root:      strings.TrimSpace(check.Root),
+			UpdatedAt: check.UpdatedAt,
+			Details:   maps.Clone(check.Details),
+			Counts:    maps.Clone(check.Counts),
+		})
+	}
+	return out
+}
+
+func sandboxSetupCheckByScope(status portsandbox.SetupStatus, scope portsandbox.SetupScope) (portsandbox.SetupCheck, bool) {
+	for _, check := range status.Checks {
+		if check.Scope == scope {
+			return check, true
+		}
+	}
+	return portsandbox.SetupCheck{}, false
+}
+
+func sandboxSecuritySummary(status appservices.SandboxStatus) string {
+	backend := firstNonEmpty(status.ResolvedBackend, status.RequestedBackend)
+	switch strings.ToLower(strings.TrimSpace(status.Route)) {
+	case "host":
+		return "host execution"
+	case "sandbox":
+		if backend != "" {
+			return backend + " sandbox"
+		}
+		return "sandboxed execution"
+	default:
+		return strings.TrimSpace(backend)
+	}
+}
+
+func setupReason(check portsandbox.SetupCheck, ok bool) string {
+	if !ok {
+		return ""
+	}
+	return firstNonEmpty(check.Error, check.Reason)
+}
+
+func setupRoot(check portsandbox.SetupCheck, ok bool) string {
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(check.Root)
+}
+
+func setupDetail(check portsandbox.SetupCheck, ok bool, key string) string {
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(check.Details[strings.TrimSpace(key)])
+}
+
+func setupCount(check portsandbox.SetupCheck, ok bool, key string) int {
+	if !ok {
+		return 0
+	}
+	return check.Counts[strings.TrimSpace(key)]
 }
 
 func acpAgentsFromApp(agents []appservices.AgentDescriptor) []ACPAgentInfo {

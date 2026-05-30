@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -63,6 +64,30 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		Route:                   route,
 		HostExecution:           route == "host",
 		Surface:                 bindingKey,
+	}
+	if sandboxStatus := d.stack.SandboxStatus(); sandboxStatus.RequestedBackend != "" || sandboxStatus.ResolvedBackend != "" || sandboxStatus.Route != "" {
+		status.SandboxRequestedBackend = firstNonEmpty(sandboxStatus.RequestedBackend, status.SandboxRequestedBackend)
+		status.SandboxResolvedBackend = firstNonEmpty(sandboxStatus.ResolvedBackend, status.SandboxResolvedBackend)
+		status.Route = firstNonEmpty(sandboxStatus.Route, status.Route)
+		status.FallbackReason = firstNonEmpty(strings.TrimSpace(sandboxStatus.FallbackReason), status.FallbackReason)
+		status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(sandboxStatus.InstallHint), status.SandboxInstallHint)
+		status.SandboxSetup = sandbox.CloneSetupStatus(sandboxStatus.Setup)
+		status.SandboxSetupRequired = sandboxStatus.SetupRequired
+		status.SandboxSetupError = strings.TrimSpace(sandboxStatus.SetupError)
+		status.SandboxSetupMarkerCurrent = sandboxStatus.SetupMarkerCurrent
+		status.SandboxSetupMarkerReason = strings.TrimSpace(sandboxStatus.SetupMarkerReason)
+		status.SandboxGlobalSetupCurrent = sandboxStatus.GlobalSetupCurrent
+		status.SandboxGlobalSetupRequired = sandboxStatus.GlobalSetupRequired
+		status.SandboxGlobalSetupReason = strings.TrimSpace(sandboxStatus.GlobalSetupReason)
+		status.SandboxWorkspaceSetupCurrent = sandboxStatus.WorkspaceSetupCurrent
+		status.SandboxWorkspaceSetupRequired = sandboxStatus.WorkspaceSetupRequired
+		status.SandboxWorkspaceSetupReason = strings.TrimSpace(sandboxStatus.WorkspaceSetupReason)
+		status.SandboxWorkspaceSetupRoot = strings.TrimSpace(sandboxStatus.WorkspaceSetupRoot)
+		status.SandboxWorkspaceSetupWriteRoots = sandboxStatus.WorkspaceSetupWriteRoots
+		status.SandboxWorkspaceSetupPolicyHash = strings.TrimSpace(sandboxStatus.WorkspaceSetupPolicyHash)
+		status.SandboxWorkspaceSetupUpdatedAt = sandboxStatus.WorkspaceSetupUpdatedAt
+		status.SecuritySummary = firstNonEmpty(strings.TrimSpace(sandboxStatus.SecuritySummary), status.SecuritySummary)
+		status.HostExecution = strings.EqualFold(strings.TrimSpace(status.Route), "host")
 	}
 	if gw, err := d.gateway(); err == nil && gw != nil {
 		active := gw.ActiveTurns()

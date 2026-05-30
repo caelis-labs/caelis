@@ -9,7 +9,9 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/config"
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
+	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -36,16 +38,22 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	engine := &appServiceDriverEngine{}
 	codeFreeAuth := &appServiceDriverCodeFreeAuth{}
+	workspaceCWD := t.TempDir()
+	sandboxRuntime, err := sandboxhost.New(ctx, coresandbox.Config{CWD: workspaceCWD})
+	if err != nil {
+		t.Fatal(err)
+	}
 	svc, err := appservices.New(appservices.Config{
 		Runtime: config.Runtime{
 			AppName:      "caelis",
 			UserID:       "user-1",
 			WorkspaceKey: "repo",
-			WorkspaceCWD: t.TempDir(),
+			WorkspaceCWD: workspaceCWD,
 			Store:        config.Store{Backend: "sqlite", URI: "/tmp/caelis-app-service.sqlite"},
 			Sandbox:      config.Sandbox{Backend: "host"},
 		},
 		Engine:   engine,
+		Sandbox:  sandboxRuntime,
 		Settings: manager,
 		CodeFree: codeFreeAuth,
 	})
@@ -130,6 +138,13 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 	if status.StoreDir != "/tmp/caelis-app-service.sqlite" {
 		t.Fatalf("status store = %q, want app-service store URI for /doctor", status.StoreDir)
+	}
+	status, err = driver.RepairSandbox(ctx)
+	if err != nil {
+		t.Fatalf("RepairSandbox() error = %v", err)
+	}
+	if status.SandboxResolvedBackend != "host" || status.Route != "host" || status.SandboxSetupRequired {
+		t.Fatalf("repair sandbox status = %#v, want host no-op repair status", status)
 	}
 
 	status, err = driver.SetSessionMode(ctx, coreruntime.SessionModeManual)

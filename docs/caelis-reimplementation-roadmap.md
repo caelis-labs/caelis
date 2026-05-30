@@ -675,7 +675,8 @@ alongside the old stack without importing it:
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime and treats host setup/fix/reset/clean as explicit
   no-op lifecycle operations instead of routing those commands through the old
-  stack.
+  stack. The app-service TUI binding now maps this status/lifecycle surface
+  into the existing driver sandbox hooks.
 - `protocol/acp/projector/core`: canonical session event projection to ACP
   updates and permission requests.
 - `internal/surface/acpserver`: ACP JSON-RPC server over the new runtime engine.
@@ -736,6 +737,8 @@ The current verification path covers:
   services -> redacted text/JSON diagnostics
 - CLI `sandbox setup|fix|reset|clean` with host backend -> new local stack ->
   shared sandbox service -> text/JSON sandbox lifecycle status
+- app-service TUI binding -> shared sandbox service -> `/doctor fix` /
+  driver repair path for host backend with no old-stack dependency
 - resource discovery -> home/workspace skills + plugin descriptors ->
   deterministic app resource catalog
 - resource catalog -> app prompt assembler -> loop instructions -> provider
@@ -989,6 +992,11 @@ be migrated before retiring the old stack:
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
      checks.
+   - Migrated baseline: the app-service TUI binding now exposes shared sandbox
+     status and host sandbox lifecycle hooks to the existing driver, so
+     `/doctor fix` can reach `internal/app/services.SandboxService` instead of
+     requiring the old gatewayapp sandbox repair dependency for the host
+     backend.
    - Migrated baseline: `/connect` model completion and default
      context/output/reasoning values now come from
      `internal/app/services.Models()` through `BindAppServices`, including
@@ -999,9 +1007,9 @@ be migrated before retiring the old stack:
      ported to `internal/app/services`.
    - Slash commands such as the `/connect` wizard shell, built-in
      `/agent install` and adapter update, plugin/static agent removal, remote
-     ACP controller config commands, and `/doctor fix` still have old
-     driver/app assumptions or missing service-native feature parity, so the
-     old TUI stack cannot be removed yet.
+     ACP controller config commands, and non-host `/doctor fix` repair flows
+     still have old driver/app assumptions or missing service-native feature
+     parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1106,6 +1114,9 @@ be migrated before retiring the old stack:
      core sandbox runtime, and standalone CLI host
      `sandbox setup|fix|reset|clean` commands use that service as explicit
      no-op lifecycle operations.
+   - Migrated baseline: the app-service TUI driver binding now maps the same
+     sandbox status/lifecycle service into existing TUI sandbox hooks, covering
+     host `/doctor fix` repair flow without gatewayapp.
    - macOS seatbelt, Linux bubblewrap/Landlock, Windows sandbox/helper/ACL
      repair, non-host sandbox setup/fix/reset/clean, network policy,
      writable/readable root policy, skill sandbox roots, rich route
