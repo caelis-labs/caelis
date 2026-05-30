@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -226,11 +227,60 @@ func (s SettingsService) Document(ctx context.Context) (appsettings.Document, er
 	return s.services.settings.Document(ctx)
 }
 
+func (s SettingsService) View(ctx context.Context) (appviewmodel.SettingsView, error) {
+	doc, err := s.Document(ctx)
+	if err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	return settingsViewFromDocument(doc), nil
+}
+
+func (s SettingsService) SetRuntime(ctx context.Context, runtime config.Runtime) (appviewmodel.SettingsView, error) {
+	if s.services.settings == nil {
+		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
+	}
+	if _, err := s.services.settings.SetRuntime(ctx, runtime); err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	return s.View(ctx)
+}
+
 func (s SettingsService) Save(ctx context.Context, doc appsettings.Document) error {
 	if s.services.settings == nil {
 		return errors.New("app/services: settings manager is not configured")
 	}
 	return s.services.settings.Save(ctx, doc)
+}
+
+func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsView {
+	runtime := appsettings.NormalizeRuntime(doc.Runtime)
+	compaction := appsettings.NormalizeCompactionPolicy(doc.Compaction)
+	return appviewmodel.SettingsView{
+		Runtime: appviewmodel.RuntimeSettings{
+			AppName:      runtime.AppName,
+			UserID:       runtime.UserID,
+			WorkspaceKey: runtime.WorkspaceKey,
+			WorkspaceCWD: runtime.WorkspaceCWD,
+			Model:        runtime.Model,
+		},
+		Store: appviewmodel.StoreSettings{
+			Backend: runtime.Store.Backend,
+			URI:     runtime.Store.URI,
+		},
+		Sandbox: appviewmodel.SandboxSettings{
+			Backend:       runtime.Sandbox.Backend,
+			ReadableRoots: slices.Clone(runtime.Sandbox.ReadableRoots),
+			WritableRoots: slices.Clone(runtime.Sandbox.WritableRoots),
+			Network:       runtime.Sandbox.Network,
+			HelperPath:    runtime.Sandbox.HelperPath,
+		},
+		Compaction: appviewmodel.CompactionSettings{
+			Prompt:             compaction.Prompt,
+			MaxSourceChars:     compaction.MaxSourceChars,
+			AutoMode:           compaction.Auto.Mode,
+			AutoWatermarkRatio: compaction.Auto.WatermarkRatio,
+		},
+	}
 }
 
 type ModelService struct {

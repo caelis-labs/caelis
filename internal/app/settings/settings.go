@@ -228,6 +228,21 @@ func (m *Manager) Save(ctx context.Context, doc Document) error {
 	return nil
 }
 
+func (m *Manager) SetRuntime(ctx context.Context, runtime config.Runtime) (config.Runtime, error) {
+	if m == nil {
+		return config.Runtime{}, errors.New("app/settings: manager is nil")
+	}
+	runtime = NormalizeRuntime(runtime)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc := CloneDocument(m.doc)
+	doc.Runtime = runtime
+	if err := m.saveDocumentLocked(ctx, doc); err != nil {
+		return config.Runtime{}, err
+	}
+	return runtime, nil
+}
+
 func (m *Manager) UpsertModel(ctx context.Context, cfg ModelConfig) (ModelConfig, error) {
 	if m == nil {
 		return ModelConfig{}, errors.New("app/settings: manager is nil")
@@ -666,13 +681,17 @@ func (i *modelIndex) profileReferenced(profileID string) bool {
 }
 
 func NormalizeDocument(doc Document) Document {
-	doc.Runtime = cloneRuntime(doc.Runtime)
+	doc.Runtime = NormalizeRuntime(doc.Runtime)
 	doc.Models = NormalizeModelCatalog(doc.Models)
 	doc.Compaction = NormalizeCompactionPolicy(doc.Compaction)
 	doc.Agents = cloneAgents(doc.Agents)
 	doc.DisabledAgents = normalizeAgentNames(doc.DisabledAgents)
 	doc.Meta = maps.Clone(doc.Meta)
 	return doc
+}
+
+func NormalizeRuntime(in config.Runtime) config.Runtime {
+	return cloneRuntime(in)
 }
 
 func NormalizeCompactionPolicy(policy CompactionPolicy) CompactionPolicy {
@@ -935,9 +954,20 @@ func cloneRuntime(in config.Runtime) config.Runtime {
 	out.WorkspaceKey = strings.TrimSpace(in.WorkspaceKey)
 	out.WorkspaceCWD = strings.TrimSpace(in.WorkspaceCWD)
 	out.Model = strings.TrimSpace(in.Model)
+	out.Store.Backend = strings.ToLower(strings.TrimSpace(in.Store.Backend))
+	out.Store.URI = strings.TrimSpace(in.Store.URI)
 	out.Store.Meta = maps.Clone(in.Store.Meta)
+	out.Sandbox.Backend = strings.ToLower(strings.TrimSpace(in.Sandbox.Backend))
+	out.Sandbox.Network = strings.ToLower(strings.TrimSpace(in.Sandbox.Network))
+	out.Sandbox.HelperPath = strings.TrimSpace(in.Sandbox.HelperPath)
 	out.Sandbox.ReadableRoots = slices.Clone(in.Sandbox.ReadableRoots)
 	out.Sandbox.WritableRoots = slices.Clone(in.Sandbox.WritableRoots)
+	for i := range out.Sandbox.ReadableRoots {
+		out.Sandbox.ReadableRoots[i] = strings.TrimSpace(out.Sandbox.ReadableRoots[i])
+	}
+	for i := range out.Sandbox.WritableRoots {
+		out.Sandbox.WritableRoots[i] = strings.TrimSpace(out.Sandbox.WritableRoots[i])
+	}
 	out.Plugins = slices.Clone(in.Plugins)
 	for i := range out.Plugins {
 		out.Plugins[i].Meta = maps.Clone(in.Plugins[i].Meta)

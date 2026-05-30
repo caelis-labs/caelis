@@ -154,6 +154,77 @@ func TestServicesApplyRuntimeDefaults(t *testing.T) {
 	}
 }
 
+func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, appsettings.NewFileStore(t.TempDir()), appsettings.Document{
+		Compaction: appsettings.CompactionPolicy{
+			Prompt:         " keep durable facts ",
+			MaxSourceChars: 512,
+			Auto: appsettings.AutoCompactionPolicy{
+				Mode:           "on",
+				WatermarkRatio: 0.8,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := svc.Settings().SetRuntime(ctx, config.Runtime{
+		AppName:      " caelis-app ",
+		UserID:       " user-1 ",
+		WorkspaceKey: " repo ",
+		WorkspaceCWD: " /repo ",
+		Model:        " alpha ",
+		Store: config.Store{
+			Backend: " SQLITE ",
+			URI:     " /tmp/sessions.db ",
+		},
+		Sandbox: config.Sandbox{
+			Backend:       " HOST ",
+			Network:       " OFF ",
+			HelperPath:    " /helper ",
+			ReadableRoots: []string{" /read "},
+			WritableRoots: []string{" /write "},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Runtime.AppName != "caelis-app" || view.Runtime.UserID != "user-1" || view.Runtime.Model != "alpha" {
+		t.Fatalf("runtime view = %#v, want normalized runtime fields", view.Runtime)
+	}
+	if view.Store.Backend != "sqlite" || view.Store.URI != "/tmp/sessions.db" {
+		t.Fatalf("store view = %#v, want normalized store settings", view.Store)
+	}
+	if view.Sandbox.Backend != "host" || view.Sandbox.Network != "off" || view.Sandbox.HelperPath != "/helper" {
+		t.Fatalf("sandbox view = %#v, want normalized sandbox settings", view.Sandbox)
+	}
+	if view.Sandbox.ReadableRoots[0] != "/read" || view.Sandbox.WritableRoots[0] != "/write" {
+		t.Fatalf("sandbox roots = %#v/%#v, want trimmed roots", view.Sandbox.ReadableRoots, view.Sandbox.WritableRoots)
+	}
+	if view.Compaction.Prompt != "keep durable facts" || view.Compaction.AutoMode != "enabled" || view.Compaction.AutoWatermarkRatio != 0.8 {
+		t.Fatalf("compaction view = %#v, want normalized compaction settings", view.Compaction)
+	}
+
+	view.Sandbox.ReadableRoots[0] = "mutated"
+	again, err := svc.Settings().View(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Sandbox.ReadableRoots[0] != "/read" {
+		t.Fatalf("settings view was not cloned: %#v", again.Sandbox.ReadableRoots)
+	}
+}
+
 func TestAgentServiceRegistersCustomSettingsBackedAgent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

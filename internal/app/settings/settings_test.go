@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/core/config"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 )
 
@@ -172,6 +173,53 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	}
 	if got := loaded.CompactionPolicy(); got.Prompt != "Write a terse checkpoint." || got.MaxSourceChars != 0 || got.Auto.Mode != "disabled" {
 		t.Fatalf("loaded compaction policy = %#v, want persisted override", got)
+	}
+}
+
+func TestManagerSetRuntimePersistsNormalizedSettings(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileStore(t.TempDir())
+	manager, err := NewManager(ctx, store, Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := manager.SetRuntime(ctx, config.Runtime{
+		AppName:      " caelis-app ",
+		UserID:       " tester ",
+		WorkspaceKey: " repo ",
+		WorkspaceCWD: " /repo ",
+		Model:        " alpha ",
+		Store: config.Store{
+			Backend: " SQLITE ",
+			URI:     " /tmp/sessions.db ",
+		},
+		Sandbox: config.Sandbox{
+			Backend:       " HOST ",
+			Network:       " OFF ",
+			HelperPath:    " /usr/local/bin/helper ",
+			ReadableRoots: []string{" /read "},
+			WritableRoots: []string{" /write "},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.AppName != "caelis-app" || runtime.Store.Backend != "sqlite" || runtime.Sandbox.Backend != "host" || runtime.Sandbox.Network != "off" {
+		t.Fatalf("runtime = %#v, want normalized runtime settings", runtime)
+	}
+	if runtime.Sandbox.ReadableRoots[0] != "/read" || runtime.Sandbox.WritableRoots[0] != "/write" {
+		t.Fatalf("sandbox roots = %#v/%#v, want trimmed roots", runtime.Sandbox.ReadableRoots, runtime.Sandbox.WritableRoots)
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Runtime.Store.Backend != "sqlite" || doc.Runtime.Sandbox.HelperPath != "/usr/local/bin/helper" {
+		t.Fatalf("persisted runtime = %#v, want normalized runtime", doc.Runtime)
 	}
 }
 

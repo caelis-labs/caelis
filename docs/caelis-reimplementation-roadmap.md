@@ -1073,10 +1073,14 @@ be migrated before retiring the old stack:
      TUI and the future APP the same controller config-intent contract for an
      active ACP controller, keeping controller model/reasoning/mode state out
      of surface-specific UI state.
-   - Still pending: task panels, settings mutation flows, richer model/provider
-     selection views, agent management actions, approvals, transcript actions,
-     and live event subscriptions still need APP-ready service/view-model
-     contracts.
+   - Migrated baseline: `internal/app/services.SettingsService` now exposes a
+     surface-neutral settings view plus typed runtime/store/sandbox mutation
+     path, so TUI and the future APP do not need to edit raw settings documents
+     for core runtime configuration.
+   - Still pending: task panels, remaining settings mutation flows, richer
+     model/provider selection views, agent management actions, approvals,
+     transcript actions, and live event subscriptions still need APP-ready
+     service/view-model contracts.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
