@@ -1254,10 +1254,16 @@ be migrated before retiring the old stack:
      carries streamed usage and origin metadata into the final
      provider-neutral response, and falls back to JSON decoding when a mock or
      compatible backend answers a streaming request with non-SSE JSON.
-   - Still pending: detailed error mapping, provider-specific tool/argument
-     behavior beyond the migrated profiles, SSE parity for every non-OpenAI
-     adapter, and removal of the corresponding old `impl/model/providers` code
-     once no old-stack entrypoint requires it.
+   - Migrated baseline: `core/model.ProviderError` is now the shared
+     provider-neutral error contract for HTTP/model control-plane failures,
+     including provider, operation, HTTP status, provider code/type/message,
+     retryability, backpressure, and context-overflow classification. The
+     core-native OpenAI-compatible, Anthropic, Gemini, Ollama, and CodeFree
+     adapters map their HTTP/provider error payloads into that contract.
+   - Still pending: provider-specific tool/argument behavior beyond the
+     migrated profiles, SSE parity for every non-OpenAI adapter, and removal
+     of the corresponding old `impl/model/providers` code once no old-stack
+     entrypoint requires it.
 
 7. Sandbox backends and policy
    - The new stack only has a host sandbox adapter.

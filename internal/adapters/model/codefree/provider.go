@@ -185,7 +185,7 @@ func (p *Provider) Stream(ctx context.Context, req model.Request) (model.Stream,
 	if err != nil {
 		return nil, err
 	}
-	if err := responseBodyError(raw); err != nil {
+	if err := responseBodyError(raw, "chat completion"); err != nil {
 		return nil, err
 	}
 	var completion chatCompletionResponse
@@ -691,7 +691,7 @@ func trimPKCS7Padding(buf []byte, blockSize int) ([]byte, error) {
 	return buf[:len(buf)-pad], nil
 }
 
-func responseBodyError(raw []byte) error {
+func responseBodyError(raw []byte, operation string) error {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil
 	}
@@ -705,7 +705,15 @@ func responseBodyError(raw []byte) error {
 	if !ok || code == 0 {
 		return nil
 	}
-	return fmt.Errorf("model/codefree: provider error code=%d message=%q", code, responseMessage(payload))
+	return model.NewProviderError(model.ProviderError{
+		Provider:    "codefree",
+		Operation:   firstNonEmpty(operation, "provider response"),
+		Code:        fmt.Sprint(code),
+		Message:     responseMessage(payload),
+		Body:        strings.TrimSpace(string(raw)),
+		Temporary:   isRetryableResponseCode(code),
+		RateLimited: isRetryableResponseCode(code),
+	})
 }
 
 func responseCode(payload map[string]any) (int, bool) {
@@ -740,7 +748,7 @@ func responseMessage(payload map[string]any) string {
 }
 
 func emptyChoicesError(raw []byte) error {
-	if err := responseBodyError(raw); err != nil {
+	if err := responseBodyError(raw, "chat completion"); err != nil {
 		return err
 	}
 	return fmt.Errorf("model/codefree: response contains no choices")
@@ -776,10 +784,26 @@ func versionEndpoint(baseURL string) string {
 func responseError(operation string, resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	text := strings.TrimSpace(string(body))
-	if text == "" {
-		text = resp.Status
+	if err := responseBodyError(body, operation); err != nil {
+		if providerErr, ok := model.ProviderErrorFrom(err); ok {
+			providerErr.StatusCode = resp.StatusCode
+			providerErr.Status = resp.Status
+			return providerErr
+		}
+		return err
 	}
-	return fmt.Errorf("model/codefree: %s failed: %s", operation, text)
+	return model.NewProviderError(model.ProviderError{
+		Provider:   "codefree",
+		Operation:  operation,
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Message:    text,
+		Body:       text,
+	})
+}
+
+func isRetryableResponseCode(code int) bool {
+	return code == 51
 }
 
 func clientVersion() string {

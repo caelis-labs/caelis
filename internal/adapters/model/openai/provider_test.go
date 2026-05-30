@@ -3,6 +3,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -187,6 +188,62 @@ func TestProviderStreamParsesChatCompletionSSE(t *testing.T) {
 	}
 	if final.Origin == nil || final.Origin.Model != "gpt-test" || final.Origin.RawFinishReason != "tool_calls" {
 		t.Fatalf("origin = %#v, want streamed origin", final.Origin)
+	}
+}
+
+func TestProviderMapsHTTPErrorToProviderError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(`{"error":{"message":"slow down","type":"rate_limit_exceeded","code":"rate_limit"}}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, Model: "gpt-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+	})
+	if err == nil {
+		t.Fatal("Stream error = nil, want provider error")
+	}
+	providerErr, ok := model.ProviderErrorFrom(err)
+	if !ok {
+		t.Fatalf("error = %T %[1]v, want ProviderError", err)
+	}
+	if providerErr.Provider != "openai" ||
+		providerErr.Operation != "chat completion" ||
+		providerErr.StatusCode != http.StatusTooManyRequests ||
+		providerErr.Type != "rate_limit_exceeded" ||
+		providerErr.Code != "rate_limit" ||
+		providerErr.Message != "slow down" ||
+		!providerErr.Backpressure() ||
+		!providerErr.Retryable() {
+		t.Fatalf("provider error = %#v, want mapped rate limit", providerErr)
+	}
+}
+
+func TestProviderMapsContextOverflowError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"maximum context length exceeded","type":"invalid_request_error","code":"context_length_exceeded"}}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, Model: "gpt-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hi")}}},
+	})
+	if err == nil {
+		t.Fatal("Stream error = nil, want context overflow")
+	}
+	var providerErr *model.ProviderError
+	if !errors.As(err, &providerErr) || !model.IsContextOverflow(err) || providerErr.Retryable() {
+		t.Fatalf("error = %#v context=%v retryable=%v, want non-retryable context overflow", providerErr, model.IsContextOverflow(err), providerErr != nil && providerErr.Retryable())
 	}
 }
 

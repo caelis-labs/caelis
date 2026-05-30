@@ -835,12 +835,24 @@ func responseError(operation string, resp *http.Response) error {
 		Error struct {
 			Message string `json:"message"`
 			Status  string `json:"status"`
+			Code    int    `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error.Message) != "" {
-		return fmt.Errorf("model/gemini: %s failed: %s: %s", operation, resp.Status, payload.Error.Message)
+	providerErr := model.ProviderError{
+		Provider:   "gemini",
+		Operation:  operation,
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Body:       strings.TrimSpace(string(body)),
 	}
-	return fmt.Errorf("model/gemini: %s failed: %s", operation, resp.Status)
+	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error.Message) != "" {
+		providerErr.Message = payload.Error.Message
+		providerErr.Type = payload.Error.Status
+		if payload.Error.Code != 0 {
+			providerErr.Code = fmt.Sprint(payload.Error.Code)
+		}
+	}
+	return model.NewProviderError(providerErr)
 }
 
 func caelisUserAgent() string {

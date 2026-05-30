@@ -710,10 +710,18 @@ func responseError(operation string, resp *http.Response) error {
 			Type    string `json:"type"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error.Message) != "" {
-		return fmt.Errorf("model/anthropic: %s failed: %s: %s", operation, resp.Status, payload.Error.Message)
+	providerErr := model.ProviderError{
+		Provider:   "anthropic",
+		Operation:  operation,
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Body:       strings.TrimSpace(string(body)),
 	}
-	return fmt.Errorf("model/anthropic: %s failed: %s", operation, resp.Status)
+	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error.Message) != "" {
+		providerErr.Message = payload.Error.Message
+		providerErr.Type = payload.Error.Type
+	}
+	return model.NewProviderError(providerErr)
 }
 
 func caelisUserAgent() string {

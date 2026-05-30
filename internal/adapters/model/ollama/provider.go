@@ -493,10 +493,21 @@ func usageFromChat(in chatResponse) model.Usage {
 func responseError(action string, resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 	text := strings.TrimSpace(string(body))
-	if text == "" {
-		text = resp.Status
+	var payload struct {
+		Error string `json:"error"`
 	}
-	return fmt.Errorf("model/ollama: %s failed: %s", action, text)
+	message := text
+	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error) != "" {
+		message = payload.Error
+	}
+	return model.NewProviderError(model.ProviderError{
+		Provider:   "ollama",
+		Operation:  action,
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Message:    message,
+		Body:       text,
+	})
 }
 
 func firstNonEmpty(values ...string) string {

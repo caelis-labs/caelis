@@ -1142,12 +1142,22 @@ func responseError(operation string, resp *http.Response) error {
 		Error struct {
 			Message string `json:"message"`
 			Type    string `json:"type"`
+			Code    any    `json:"code"`
 		} `json:"error"`
 	}
-	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error.Message) != "" {
-		return fmt.Errorf("model/openai: %s failed: %s: %s", operation, resp.Status, payload.Error.Message)
+	providerErr := model.ProviderError{
+		Provider:   "openai",
+		Operation:  operation,
+		StatusCode: resp.StatusCode,
+		Status:     resp.Status,
+		Body:       strings.TrimSpace(string(body)),
 	}
-	return fmt.Errorf("model/openai: %s failed: %s", operation, resp.Status)
+	if err := json.Unmarshal(body, &payload); err == nil && strings.TrimSpace(payload.Error.Message) != "" {
+		providerErr.Message = payload.Error.Message
+		providerErr.Type = payload.Error.Type
+		providerErr.Code = providerErrorCode(payload.Error.Code)
+	}
+	return model.NewProviderError(providerErr)
 }
 
 var errStopSSE = errors.New("model/openai: stop sse")
@@ -1226,6 +1236,17 @@ func stringPtrRawValue(value *string) string {
 		return ""
 	}
 	return *value
+}
+
+func providerErrorCode(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
 }
 
 func firstNonEmpty(values ...string) string {

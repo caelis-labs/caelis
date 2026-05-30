@@ -203,6 +203,41 @@ func TestProviderModelsUsesVersionEndpoint(t *testing.T) {
 	}
 }
 
+func TestProviderMapsRetCodeBackpressureError(t *testing.T) {
+	credsPath := writeCredentials(t, "272182", "live-api-key")
+	t.Setenv(credsPathEnv, credsPath)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != chatCompletionsPath {
+			t.Fatalf("path = %q, want %s", r.URL.Path, chatCompletionsPath)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"retCode":51,"message":"server overloaded"}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{BaseURL: server.URL, Model: "GLM-4.7"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("hello")}}},
+	})
+	if err == nil {
+		t.Fatal("Stream error = nil, want provider error")
+	}
+	providerErr, ok := model.ProviderErrorFrom(err)
+	if !ok {
+		t.Fatalf("error = %T %[1]v, want ProviderError", err)
+	}
+	if providerErr.Provider != "codefree" ||
+		providerErr.Code != "51" ||
+		providerErr.Message != "server overloaded" ||
+		!providerErr.Backpressure() ||
+		!providerErr.Retryable() {
+		t.Fatalf("provider error = %#v, want codefree backpressure", providerErr)
+	}
+}
+
 func writeCredentials(t *testing.T, userID string, apiKey string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "oauth_creds.json")
