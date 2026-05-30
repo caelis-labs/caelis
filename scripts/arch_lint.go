@@ -116,6 +116,30 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
 	switch {
+	case strings.HasPrefix(rel, "core/"):
+		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
+			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"
+		}
+	case strings.HasPrefix(rel, "protocol/acp/projector/core/"):
+		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
+			return "protocol/acp/projector/core must depend only on core and protocol schema packages"
+		}
+	case strings.HasPrefix(rel, "internal/engine/"):
+		if startsWithAny(target, "app/", "impl/", "internal/adapters/", "internal/app/", "internal/surface/", "surfaces/") {
+			return "internal/engine must not depend on app, adapters, or surfaces"
+		}
+	case strings.HasPrefix(rel, "internal/app/"):
+		if startsWithAny(target, "internal/surface/", "surfaces/") {
+			return "internal/app must not depend on surfaces"
+		}
+	case strings.HasPrefix(rel, "internal/adapters/"):
+		if startsWithAny(target, "app/", "internal/app/", "internal/surface/", "surfaces/") {
+			return "internal/adapters must not depend on app or surfaces"
+		}
+	case strings.HasPrefix(rel, "internal/surface/"):
+		if strings.HasPrefix(target, "internal/adapters/") {
+			return "internal/surface must not depend directly on adapters"
+		}
 	case strings.HasPrefix(rel, "kernel/"):
 		if startsWithAny(target, "impl/", "surfaces/") {
 			return "kernel must not depend on impl or surfaces"

@@ -58,8 +58,10 @@ TUI, ACP stdio, and the headless one-shot runner.
   ACP, CLI, local-config model, and TUI gateway-driver flows.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 
-Architecture plan:
-[docs/agent-sdk-acp-architecture-plan.md](docs/agent-sdk-acp-architecture-plan.md)
+Architecture plans:
+
+- [Agent SDK and ACP architecture plan](docs/agent-sdk-acp-architecture-plan.md)
+- [Caelis reimplementation architecture roadmap](docs/caelis-reimplementation-roadmap.md)
 
 ## Install
 

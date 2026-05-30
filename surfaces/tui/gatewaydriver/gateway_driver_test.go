@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -112,7 +111,7 @@ func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 		},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -180,7 +179,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -397,7 +396,7 @@ func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -462,7 +461,7 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -557,7 +556,7 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -689,7 +688,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "deepseek",
-			API:      providers.APIDeepSeek,
+			API:      model.APIDeepSeek,
 			Model:    "deepseek-v4-pro",
 		},
 	})
@@ -945,7 +944,7 @@ func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "codefree",
-			API:      providers.APICodeFree,
+			API:      model.APICodeFree,
 			Model:    "GLM-5.1",
 		},
 	})
@@ -994,7 +993,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1033,7 +1032,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider:            "ollama",
-			API:                 providers.APIOllama,
+			API:                 model.APIOllama,
 			Model:               "llama3",
 			ContextWindowTokens: 88000,
 		},
@@ -1107,7 +1106,7 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1163,7 +1162,7 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1269,7 +1268,7 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1362,7 +1361,7 @@ func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1417,7 +1416,7 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 		},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -1633,7 +1632,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	}
 	if _, err := stack.Connect(gatewayapp.ModelConfig{
 		Provider: "deepseek",
-		API:      providers.APIDeepSeek,
+		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "secret",
 	}); err != nil {
@@ -2170,7 +2169,7 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2225,7 +2224,7 @@ func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2275,7 +2274,7 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2400,8 +2399,8 @@ func TestFindProviderTemplateSupportsXiaomiTokenPlanCN(t *testing.T) {
 	if tpl.provider != "xiaomi" {
 		t.Fatalf("provider = %q, want xiaomi", tpl.provider)
 	}
-	if tpl.api != providers.APIMimo {
-		t.Fatalf("api = %q, want %q", tpl.api, providers.APIMimo)
+	if tpl.api != model.APIMimo {
+		t.Fatalf("api = %q, want %q", tpl.api, model.APIMimo)
 	}
 	if tpl.defaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
 		t.Fatalf("defaultBaseURL = %q, want %q", tpl.defaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
@@ -2962,7 +2961,7 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
@@ -2990,7 +2989,7 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 		Assembly:       assembly.ResolvedAssembly{},
 		Model: gatewayapp.ModelConfig{
 			Provider: "ollama",
-			API:      providers.APIOllama,
+			API:      model.APIOllama,
 			Model:    "llama3",
 		},
 	})
