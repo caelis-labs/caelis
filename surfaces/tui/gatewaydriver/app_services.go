@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
@@ -14,7 +15,6 @@ import (
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	portscontroller "github.com/OnslaughtSnail/caelis/ports/controller"
-	portmodel "github.com/OnslaughtSnail/caelis/ports/model"
 	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	portskill "github.com/OnslaughtSnail/caelis/ports/skill"
@@ -433,7 +433,7 @@ func modelConfigFromApp(cfg appsettings.ModelConfig) ModelConfig {
 	}
 }
 
-func modelAuthTypeFromApp(value string) portmodel.AuthType {
+func modelAuthTypeFromApp(value string) coremodel.AuthType {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return ""

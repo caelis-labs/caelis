@@ -17,7 +17,7 @@ import (
 	"time"
 
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
@@ -485,10 +485,10 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 		Model: cliModelConfig{
 			Alias:        "tui-model",
 			Provider:     "openai",
-			API:          providers.APIOpenAI,
+			API:          coremodel.APIOpenAI,
 			Model:        "gpt-tui",
 			BaseURL:      server.URL,
-			AuthType:     providers.AuthNone,
+			AuthType:     coremodel.AuthNone,
 			MaxOutputTok: 4096,
 		},
 		Sandbox: cliSandboxConfig{RequestedType: "host"},

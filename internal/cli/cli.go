@@ -14,8 +14,8 @@ import (
 	"strings"
 
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	applocal "github.com/OnslaughtSnail/caelis/internal/app/local"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
@@ -102,12 +102,12 @@ type cliConfigSource struct {
 type cliModelConfig struct {
 	Alias                  string
 	Provider               string
-	API                    providers.APIType
+	API                    coremodel.APIType
 	Model                  string
 	BaseURL                string
 	Token                  string
 	TokenEnv               string
-	AuthType               providers.AuthType
+	AuthType               coremodel.AuthType
 	HeaderKey              string
 	MaxOutputTok           int
 	ReasoningEffort        string
@@ -213,12 +213,12 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout io.Writer, 
 		Model: cliModelConfig{
 			Alias:        *modelAlias,
 			Provider:     *modelProvider,
-			API:          providers.APIType(strings.TrimSpace(*modelAPI)),
+			API:          coremodel.APIType(strings.TrimSpace(*modelAPI)),
 			Model:        *modelName,
 			BaseURL:      *baseURL,
 			Token:        *token,
 			TokenEnv:     *tokenEnv,
-			AuthType:     providers.AuthType(strings.TrimSpace(*authType)),
+			AuthType:     coremodel.AuthType(strings.TrimSpace(*authType)),
 			HeaderKey:    *headerKey,
 			MaxOutputTok: *maxOutputTokens,
 		},
@@ -608,7 +608,7 @@ func cloneConfigPlugins(in []coreconfig.Plugin) []coreconfig.Plugin {
 	return out
 }
 
-func coreModelProvider(provider string, api providers.APIType) string {
+func coreModelProvider(provider string, api coremodel.APIType) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case "", "openai", "openai_compatible", "openai-compatible":
 		return "openai_compatible"
@@ -627,7 +627,7 @@ func coreModelProvider(provider string, api providers.APIType) string {
 	case "openrouter":
 		return "openrouter"
 	case "volcengine":
-		if api == providers.APIVolcengineCoding {
+		if api == coremodel.APIVolcengineCoding {
 			return "volcengine-coding-plan"
 		}
 		return "volcengine"
@@ -972,10 +972,10 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "", "minimax":
 		cfg.Model.Provider = "minimax"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIMiniMax
+			cfg.Model.API = coremodel.APIMiniMax
 		}
 		if cfg.Model.AuthType == "" {
-			cfg.Model.AuthType = providers.AuthBearerToken
+			cfg.Model.AuthType = coremodel.AuthBearerToken
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "MINIMAX_API_KEY"
@@ -983,7 +983,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "deepseek":
 		cfg.Model.Provider = "deepseek"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIDeepSeek
+			cfg.Model.API = coremodel.APIDeepSeek
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "DEEPSEEK_API_KEY"
@@ -991,7 +991,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "openrouter":
 		cfg.Model.Provider = "openrouter"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIOpenRouter
+			cfg.Model.API = coremodel.APIOpenRouter
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "OPENROUTER_API_KEY"
@@ -999,7 +999,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "mimo", "xiaomi":
 		cfg.Model.Provider = "xiaomi"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIMimo
+			cfg.Model.API = coremodel.APIMimo
 		}
 		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
 			cfg.Model.BaseURL = "https://api.xiaomimimo.com/v1"
@@ -1007,7 +1007,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "volcengine":
 		cfg.Model.Provider = "volcengine"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIVolcengine
+			cfg.Model.API = coremodel.APIVolcengine
 		}
 		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
 			cfg.Model.BaseURL = "https://ark.cn-beijing.volces.com/api/v3"
@@ -1015,7 +1015,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "volcengine-coding-plan", "volcengine_coding_plan":
 		cfg.Model.Provider = "volcengine-coding-plan"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIVolcengineCoding
+			cfg.Model.API = coremodel.APIVolcengineCoding
 		}
 		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
 			cfg.Model.BaseURL = "https://ark.cn-beijing.volces.com/api/coding/v3"
@@ -1023,7 +1023,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "openai":
 		cfg.Model.Provider = "openai"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIOpenAI
+			cfg.Model.API = coremodel.APIOpenAI
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "OPENAI_API_KEY"
@@ -1031,7 +1031,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "anthropic", "anthropic-compatible":
 		cfg.Model.Provider = "anthropic"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIAnthropic
+			cfg.Model.API = coremodel.APIAnthropic
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "ANTHROPIC_API_KEY"
@@ -1039,7 +1039,7 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "gemini":
 		cfg.Model.Provider = "gemini"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIGemini
+			cfg.Model.API = coremodel.APIGemini
 		}
 		if cfg.Model.TokenEnv == "" {
 			cfg.Model.TokenEnv = "GEMINI_API_KEY"
@@ -1050,18 +1050,18 @@ func normalizeConfig(cfg cliConfig) (cliConfig, error) {
 	case "ollama":
 		cfg.Model.Provider = "ollama"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APIOllama
+			cfg.Model.API = coremodel.APIOllama
 		}
-		cfg.Model.AuthType = providers.AuthNone
+		cfg.Model.AuthType = coremodel.AuthNone
 	case "codefree":
 		cfg.Model.Provider = "codefree"
 		if cfg.Model.API == "" {
-			cfg.Model.API = providers.APICodeFree
+			cfg.Model.API = coremodel.APICodeFree
 		}
 		if strings.TrimSpace(cfg.Model.BaseURL) == "" {
 			cfg.Model.BaseURL = "https://www.srdcloud.cn"
 		}
-		cfg.Model.AuthType = providers.AuthNone
+		cfg.Model.AuthType = coremodel.AuthNone
 	default:
 		if cfg.Model.API == "" {
 			return cliConfig{}, fmt.Errorf("provider %q requires --api", cfg.Model.Provider)

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/model"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
-	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
 const (

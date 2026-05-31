@@ -190,6 +190,37 @@ type Usage struct {
 	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
 }
 
+// APIType identifies the model-provider protocol dialect for one configured
+// endpoint. It belongs to core because model provider selection and settings
+// are shared by CLI, TUI, ACP, and future APP surfaces.
+type APIType string
+
+const (
+	APIOpenAI              APIType = "openai"
+	APIOpenAICompatible    APIType = "openai_compatible"
+	APIOpenRouter          APIType = "openrouter"
+	APICodeFree            APIType = "codefree"
+	APIGemini              APIType = "gemini"
+	APIAnthropic           APIType = "anthropic"
+	APIAnthropicCompatible APIType = "anthropic_compatible"
+	APIDeepSeek            APIType = "deepseek"
+	APIMiniMax             APIType = "minimax"
+	APIVolcengine          APIType = "volcengine"
+	APIMimo                APIType = "mimo"
+	APIVolcengineCoding    APIType = "volcengine_coding_plan"
+	APIOllama              APIType = "ollama"
+)
+
+// AuthType identifies how a model-provider endpoint authenticates.
+type AuthType string
+
+const (
+	AuthAPIKey      AuthType = "api_key"
+	AuthBearerToken AuthType = "bearer_token"
+	AuthOAuthToken  AuthType = "oauth_token"
+	AuthNone        AuthType = "none"
+)
+
 // ToolSpecKind identifies one model tool declaration family.
 type ToolSpecKind string
 

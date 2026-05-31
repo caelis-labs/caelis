@@ -1,35 +1,39 @@
 package model
 
-import "context"
+import (
+	"context"
+
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+)
 
 // APIType identifies the model-provider protocol dialect for one configured
 // endpoint.
-type APIType string
+type APIType = coremodel.APIType
 
 const (
-	APIOpenAI              APIType = "openai"
-	APIOpenAICompatible    APIType = "openai_compatible"
-	APIOpenRouter          APIType = "openrouter"
-	APICodeFree            APIType = "codefree"
-	APIGemini              APIType = "gemini"
-	APIAnthropic           APIType = "anthropic"
-	APIAnthropicCompatible APIType = "anthropic_compatible"
-	APIDeepSeek            APIType = "deepseek"
-	APIMiniMax             APIType = "minimax"
-	APIVolcengine          APIType = "volcengine"
-	APIMimo                APIType = "mimo"
-	APIVolcengineCoding    APIType = "volcengine_coding_plan"
-	APIOllama              APIType = "ollama"
+	APIOpenAI              = coremodel.APIOpenAI
+	APIOpenAICompatible    = coremodel.APIOpenAICompatible
+	APIOpenRouter          = coremodel.APIOpenRouter
+	APICodeFree            = coremodel.APICodeFree
+	APIGemini              = coremodel.APIGemini
+	APIAnthropic           = coremodel.APIAnthropic
+	APIAnthropicCompatible = coremodel.APIAnthropicCompatible
+	APIDeepSeek            = coremodel.APIDeepSeek
+	APIMiniMax             = coremodel.APIMiniMax
+	APIVolcengine          = coremodel.APIVolcengine
+	APIMimo                = coremodel.APIMimo
+	APIVolcengineCoding    = coremodel.APIVolcengineCoding
+	APIOllama              = coremodel.APIOllama
 )
 
 // AuthType identifies how a model-provider endpoint authenticates.
-type AuthType string
+type AuthType = coremodel.AuthType
 
 const (
-	AuthAPIKey      AuthType = "api_key"
-	AuthBearerToken AuthType = "bearer_token"
-	AuthOAuthToken  AuthType = "oauth_token"
-	AuthNone        AuthType = "none"
+	AuthAPIKey      = coremodel.AuthAPIKey
+	AuthBearerToken = coremodel.AuthBearerToken
+	AuthOAuthToken  = coremodel.AuthOAuthToken
+	AuthNone        = coremodel.AuthNone
 )
 
 type Client = LLM

@@ -4,36 +4,37 @@ import (
 	"net/http"
 	"time"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 )
 
 // APIType defines protocol dialect used by a model provider.
-type APIType = model.APIType
+type APIType = coremodel.APIType
 
 const (
-	APIOpenAI              = model.APIOpenAI
-	APIOpenAICompatible    = model.APIOpenAICompatible
-	APIOpenRouter          = model.APIOpenRouter
-	APICodeFree            = model.APICodeFree
-	APIGemini              = model.APIGemini
-	APIAnthropic           = model.APIAnthropic
-	APIAnthropicCompatible = model.APIAnthropicCompatible
-	APIDeepSeek            = model.APIDeepSeek
-	APIMiniMax             = model.APIMiniMax
-	APIVolcengine          = model.APIVolcengine
-	APIMimo                = model.APIMimo
-	APIVolcengineCoding    = model.APIVolcengineCoding
-	APIOllama              = model.APIOllama
+	APIOpenAI              = coremodel.APIOpenAI
+	APIOpenAICompatible    = coremodel.APIOpenAICompatible
+	APIOpenRouter          = coremodel.APIOpenRouter
+	APICodeFree            = coremodel.APICodeFree
+	APIGemini              = coremodel.APIGemini
+	APIAnthropic           = coremodel.APIAnthropic
+	APIAnthropicCompatible = coremodel.APIAnthropicCompatible
+	APIDeepSeek            = coremodel.APIDeepSeek
+	APIMiniMax             = coremodel.APIMiniMax
+	APIVolcengine          = coremodel.APIVolcengine
+	APIMimo                = coremodel.APIMimo
+	APIVolcengineCoding    = coremodel.APIVolcengineCoding
+	APIOllama              = coremodel.APIOllama
 )
 
 // AuthType defines model provider authentication strategy.
-type AuthType = model.AuthType
+type AuthType = coremodel.AuthType
 
 const (
-	AuthAPIKey      = model.AuthAPIKey
-	AuthBearerToken = model.AuthBearerToken
-	AuthOAuthToken  = model.AuthOAuthToken
-	AuthNone        = model.AuthNone
+	AuthAPIKey      = coremodel.AuthAPIKey
+	AuthBearerToken = coremodel.AuthBearerToken
+	AuthOAuthToken  = coremodel.AuthOAuthToken
+	AuthNone        = coremodel.AuthNone
 )
 
 // AuthConfig is provider-agnostic auth configuration.
