@@ -101,6 +101,7 @@ type Registry interface {
 	RegisterStore(string, StoreFactory) error
 	RegisterSandboxBackend(string, sandbox.BackendFactory) error
 	RegisterTool(string, ToolFactory) error
+	RegisterModelTool(model.ToolSpec) error
 	RegisterACPAgent(ACPAgentDescriptor) error
 	RegisterPrompt(PromptFragment) error
 	RegisterSkill(SkillDescriptor) error

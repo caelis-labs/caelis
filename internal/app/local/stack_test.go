@@ -2386,6 +2386,86 @@ func TestStackAppliesManifestDeclaredStoreAlias(t *testing.T) {
 	}
 }
 
+func TestStackAppliesManifestAndSettingsModelTools(t *testing.T) {
+	pluginDir := filepath.Join(t.TempDir(), "plugin")
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pluginDir, "plugin.json"), []byte(`{
+		"id":"model-tools",
+		"model_tools":[{
+			"kind":"provider_executed",
+			"name":"web_search",
+			"provider_payloads":{"openai":{"type":"web_search_preview"}}
+		}]
+	}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manager, err := appsettings.NewManager(context.Background(), nil, appsettings.Document{
+		ModelTools: []model.ToolSpec{model.NewMCPToolSpec("docs", map[string]json.RawMessage{
+			"openai": json.RawMessage(`{"type":"mcp","server_label":"docs"}`),
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("pong")},
+	}}
+	stack, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Plugins: []config.Plugin{{
+				Source:  pluginDir,
+				Enabled: true,
+			}},
+		},
+		Provider: provider,
+		Settings: manager,
+		ModelTools: []model.ToolSpec{model.NewProviderDefinedToolSpec("native", map[string]json.RawMessage{
+			"openai": json.RawMessage(`{"type":"native_tool"}`),
+		})},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := stack.Services().Turns().Begin(context.Background(), services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "ping",
+		Model:      "gpt-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for env := range turn.Events() {
+		if env.Err != "" {
+			t.Fatal(env.Err)
+		}
+	}
+	var names []string
+	for _, spec := range provider.request.Tools {
+		names = append(names, spec.Name)
+	}
+	for _, want := range []string{"native", "web_search", "docs"} {
+		if !slices.Contains(names, want) {
+			t.Fatalf("provider tools = %#v, missing %q", provider.request.Tools, want)
+		}
+	}
+	catalog, err := stack.Services().Resources().Catalog(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.ModelTools) != 1 || catalog.ModelTools[0].Name != "web_search" {
+		t.Fatalf("catalog model tools = %#v, want plugin web_search", catalog.ModelTools)
+	}
+}
+
 func TestConfiguredStackRunsBuiltinShellTool(t *testing.T) {
 	var calls atomic.Int32
 	command := "printf hello"
@@ -2698,7 +2778,7 @@ func (p *capturingProvider) Stream(_ context.Context, req model.Request) (model.
 	p.request = model.Request{
 		Model:        req.Model,
 		Messages:     cloneMessages(req.Messages),
-		Tools:        req.Tools,
+		Tools:        model.CloneToolSpecs(req.Tools),
 		Instructions: append([]string(nil), req.Instructions...),
 		Stream:       req.Stream,
 	}
@@ -2765,7 +2845,7 @@ func (p *scriptedProvider) Stream(_ context.Context, req model.Request) (model.S
 	p.requests = append(p.requests, model.Request{
 		Model:    req.Model,
 		Messages: cloneMessages(req.Messages),
-		Tools:    req.Tools,
+		Tools:    model.CloneToolSpecs(req.Tools),
 		Stream:   req.Stream,
 		Output:   req.Output,
 		Meta:     maps.Clone(req.Meta),

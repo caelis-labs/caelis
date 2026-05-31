@@ -1797,8 +1797,11 @@ be migrated before retiring the old stack:
      local executable function tools, and the OpenAI-compatible, CodeFree,
      Anthropic, Gemini, and Ollama adapters pass through provider-native
      declarations without per-tool compatibility branches.
-   - Still pending: settings/plugin catalog sources for enabling
-     provider-native tool specs in product flows where they are needed.
+   - Migrated baseline: provider-native model tool specs can now be enabled
+     through plugin manifests, Go contributions, app settings, or explicit
+     local stack composition. The local stack merges those sources into the
+     same runtime loop contract, and shared resource/status views expose
+     plugin/catalog-provided model tool counts.
 
 7. Sandbox backends and policy
    - The new stack has a core-native host sandbox adapter plus a thin internal
@@ -2340,18 +2343,15 @@ Recommended sequence:
 1. Finish the remaining large TUI surface migrations against app services,
    especially richer `/connect` rendering/panel parity, remote controller
    diagnostics, and visual settings/diagnostics editors.
-2. Wire provider-native tool declarations from settings/plugin catalog sources
-   where needed, without reintroducing a parallel provider factory/catalog
-   stack.
-3. Finish sandbox backend cleanup and Windows async-session cross-platform
+2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
-4. Finish richer durable task metadata and terminal preview behavior behind
+3. Finish richer durable task metadata and terminal preview behavior behind
    `core/tool.Registry`; host process and SPAWN continuation are now baseline
    runtime capabilities.
-5. Port the remaining TUI panels and richer interactive flows to
+4. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially richer `/connect`, task, and visual
    settings panels, preserving existing rendering as surface-local code.
-6. Expand shared APP view models for settings, agent management, richer model
+5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
    to canonical events.

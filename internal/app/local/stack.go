@@ -170,6 +170,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		tools = reg
 	}
 	resourceCatalog = mergeRegistryResources(resourceCatalog, reg)
+	modelTools := stackModelTools(cfg.ModelTools, resourceCatalog.ModelTools, settingsModelTools(cfg.Settings))
 	instructions, err := appprompt.BuildInstructions(ctx, appprompt.Config{
 		AppName:      runtimeCfg.AppName,
 		WorkspaceDir: runtimeCfg.WorkspaceCWD,
@@ -193,7 +194,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	runner, err := loop.New(loop.Config{
 		Provider:     provider,
 		Tools:        tools,
-		ModelTools:   cfg.ModelTools,
+		ModelTools:   modelTools,
 		Approval:     approvalPolicy,
 		Spawner:      newSpawnDelegator(externalAgents, spawnTasks),
 		Instructions: instructions,
@@ -726,11 +727,30 @@ func envMap(values []string) map[string]string {
 }
 
 func mergeRegistryResources(catalog appresources.Catalog, reg *appregistry.Registry) appresources.Catalog {
+	catalog.ModelTools = append(catalog.ModelTools, reg.ModelTools()...)
 	catalog.Prompts = append(catalog.Prompts, reg.Prompts()...)
 	catalog.Skills = append(catalog.Skills, reg.Skills()...)
 	catalog.ACPAgents = append(catalog.ACPAgents, reg.ACPAgents()...)
 	catalog.RendererHints = append(catalog.RendererHints, reg.RendererHints()...)
 	return appresources.CloneCatalog(catalog)
+}
+
+func stackModelTools(groups ...[]model.ToolSpec) []model.ToolSpec {
+	var out []model.ToolSpec
+	for _, group := range groups {
+		out = append(out, model.CloneToolSpecs(group)...)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func settingsModelTools(manager *appsettings.Manager) []model.ToolSpec {
+	if manager == nil {
+		return nil
+	}
+	return manager.ListModelTools()
 }
 
 func providerFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeCfg config.Runtime, profile config.ModelProfile) (model.Provider, error) {

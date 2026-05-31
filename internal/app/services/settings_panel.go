@@ -175,6 +175,7 @@ func settingsPanelSections(view appviewmodel.SettingsPanelView) []appviewmodel.S
 				textSettingsField("resources.plugins", "Plugins", strconv.Itoa(view.Resources.Plugins), false),
 				textSettingsField("resources.prompts", "Prompts", strconv.Itoa(view.Resources.Prompts), false),
 				textSettingsField("resources.skills", "Skills", strconv.Itoa(view.Resources.Skills), false),
+				textSettingsField("resources.model_tools", "Model tools", strconv.Itoa(view.Resources.ModelTools), false),
 				textSettingsField("resources.diagnostics", "Diagnostics", resourceDiagnosticSummary(view.Resources), false),
 			},
 		},

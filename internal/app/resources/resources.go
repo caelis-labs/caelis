@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 )
 
@@ -32,6 +33,7 @@ type Catalog struct {
 	Stores         []plugin.FactoryAlias       `json:"stores,omitempty"`
 	Sandboxes      []plugin.FactoryAlias       `json:"sandbox_backends,omitempty"`
 	Tools          []plugin.FactoryAlias       `json:"tools,omitempty"`
+	ModelTools     []model.ToolSpec            `json:"model_tools,omitempty"`
 	Prompts        []plugin.PromptFragment     `json:"prompts,omitempty"`
 	Skills         []plugin.SkillDescriptor    `json:"skills,omitempty"`
 	ACPAgents      []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
@@ -125,6 +127,7 @@ func CloneCatalog(in Catalog) Catalog {
 		Stores:         cloneAliases(in.Stores),
 		Sandboxes:      cloneAliases(in.Sandboxes),
 		Tools:          cloneAliases(in.Tools),
+		ModelTools:     model.CloneToolSpecs(in.ModelTools),
 		Prompts:        make([]plugin.PromptFragment, 0, len(in.Prompts)),
 		Skills:         make([]plugin.SkillDescriptor, 0, len(in.Skills)),
 		ACPAgents:      make([]plugin.ACPAgentDescriptor, 0, len(in.ACPAgents)),
@@ -167,6 +170,7 @@ type manifestFile struct {
 	Stores         []plugin.FactoryAlias       `json:"stores,omitempty"`
 	Sandboxes      []plugin.FactoryAlias       `json:"sandbox_backends,omitempty"`
 	Tools          []plugin.FactoryAlias       `json:"tools,omitempty"`
+	ModelTools     []model.ToolSpec            `json:"model_tools,omitempty"`
 	Prompts        []plugin.PromptFragment     `json:"prompts,omitempty"`
 	Skills         []plugin.SkillDescriptor    `json:"skills,omitempty"`
 	ACPAgents      []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
@@ -237,10 +241,15 @@ func discoverPluginSources(ctx context.Context, sources []config.Plugin, homeDir
 		if err != nil {
 			return err
 		}
+		modelTools, err := pluginModelTools(manifest.ID, item.ModelTools)
+		if err != nil {
+			return err
+		}
 		catalog.ModelProviders = append(catalog.ModelProviders, modelProviders...)
 		catalog.Stores = append(catalog.Stores, stores...)
 		catalog.Sandboxes = append(catalog.Sandboxes, sandboxes...)
 		catalog.Tools = append(catalog.Tools, tools...)
+		catalog.ModelTools = append(catalog.ModelTools, modelTools...)
 		for i, prompt := range item.Prompts {
 			prompt.ID = firstNonEmpty(prompt.ID, fmt.Sprintf("%s.prompt.%d", manifest.ID, i+1))
 			prompt.Scope = firstNonEmpty(prompt.Scope, "system")
@@ -526,6 +535,7 @@ func sortCatalog(catalog *Catalog) {
 	sortAliases(catalog.Stores)
 	sortAliases(catalog.Sandboxes)
 	sortAliases(catalog.Tools)
+	sortModelTools(catalog.ModelTools)
 	sort.Slice(catalog.Prompts, func(i, j int) bool {
 		if catalog.Prompts[i].Priority == catalog.Prompts[j].Priority {
 			return catalog.Prompts[i].ID < catalog.Prompts[j].ID
@@ -726,12 +736,46 @@ func pluginACPAgents(baseDir string, pluginID string, in []plugin.ACPAgentDescri
 	return out, nil
 }
 
+func pluginModelTools(pluginID string, specs []model.ToolSpec) ([]model.ToolSpec, error) {
+	if len(specs) == 0 {
+		return nil, nil
+	}
+	out := make([]model.ToolSpec, 0, len(specs))
+	for i, spec := range specs {
+		spec = model.CloneToolSpec(spec)
+		if strings.TrimSpace(spec.Name) == "" {
+			return nil, fmt.Errorf("app/resources: plugin %q model tool %d missing name", pluginID, i+1)
+		}
+		switch spec.Kind {
+		case model.ToolSpecProviderDefined, model.ToolSpecProviderExecuted, model.ToolSpecMCP:
+		case "", model.ToolSpecFunction:
+			return nil, fmt.Errorf("app/resources: plugin %q model tool %q must use provider_defined, provider_executed, or mcp kind", pluginID, spec.Name)
+		default:
+			return nil, fmt.Errorf("app/resources: plugin %q model tool %q has unsupported kind %q", pluginID, spec.Name, spec.Kind)
+		}
+		if len(spec.ProviderPayloads) == 0 {
+			return nil, fmt.Errorf("app/resources: plugin %q model tool %q requires provider_payloads", pluginID, spec.Name)
+		}
+		out = append(out, spec)
+	}
+	return out, nil
+}
+
 func sortAliases(aliases []plugin.FactoryAlias) {
 	sort.Slice(aliases, func(i, j int) bool {
 		if aliases[i].Name == aliases[j].Name {
 			return aliases[i].Uses < aliases[j].Uses
 		}
 		return aliases[i].Name < aliases[j].Name
+	})
+}
+
+func sortModelTools(specs []model.ToolSpec) {
+	sort.Slice(specs, func(i, j int) bool {
+		if specs[i].Name == specs[j].Name {
+			return specs[i].Kind < specs[j].Kind
+		}
+		return specs[i].Name < specs[j].Name
 	})
 }
 

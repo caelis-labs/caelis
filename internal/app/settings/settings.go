@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 )
 
@@ -27,6 +28,7 @@ type Document struct {
 	Models         ModelCatalog                `json:"models,omitempty"`
 	Compaction     CompactionPolicy            `json:"compaction,omitempty"`
 	Skills         SkillPolicy                 `json:"skills,omitempty"`
+	ModelTools     []model.ToolSpec            `json:"model_tools,omitempty"`
 	Agents         []plugin.ACPAgentDescriptor `json:"acp_agents,omitempty"`
 	DisabledAgents []string                    `json:"disabled_acp_agents,omitempty"`
 	Meta           map[string]any              `json:"meta,omitempty"`
@@ -382,6 +384,30 @@ func (m *Manager) SetSkillPolicy(ctx context.Context, policy SkillPolicy) (Skill
 	return policy, nil
 }
 
+func (m *Manager) ListModelTools() []model.ToolSpec {
+	if m == nil {
+		return nil
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return model.CloneToolSpecs(m.doc.ModelTools)
+}
+
+func (m *Manager) SetModelTools(ctx context.Context, specs []model.ToolSpec) ([]model.ToolSpec, error) {
+	if m == nil {
+		return nil, errors.New("app/settings: manager is nil")
+	}
+	specs = NormalizeModelTools(specs)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc := CloneDocument(m.doc)
+	doc.ModelTools = specs
+	if err := m.saveDocumentLocked(ctx, doc); err != nil {
+		return nil, err
+	}
+	return model.CloneToolSpecs(specs), nil
+}
+
 func (m *Manager) ListACPAgents() []plugin.ACPAgentDescriptor {
 	if m == nil {
 		return nil
@@ -724,6 +750,7 @@ func NormalizeDocument(doc Document) Document {
 	doc.Models = NormalizeModelCatalog(doc.Models)
 	doc.Compaction = NormalizeCompactionPolicy(doc.Compaction)
 	doc.Skills = NormalizeSkillPolicy(doc.Skills)
+	doc.ModelTools = NormalizeModelTools(doc.ModelTools)
 	doc.Agents = cloneAgents(doc.Agents)
 	doc.DisabledAgents = normalizeAgentNames(doc.DisabledAgents)
 	doc.Meta = maps.Clone(doc.Meta)
@@ -732,6 +759,32 @@ func NormalizeDocument(doc Document) Document {
 
 func NormalizeRuntime(in config.Runtime) config.Runtime {
 	return cloneRuntime(in)
+}
+
+func NormalizeModelTools(in []model.ToolSpec) []model.ToolSpec {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]model.ToolSpec, 0, len(in))
+	for _, spec := range model.CloneToolSpecs(in) {
+		if strings.TrimSpace(spec.Name) == "" || len(spec.ProviderPayloads) == 0 {
+			continue
+		}
+		switch spec.Kind {
+		case model.ToolSpecProviderDefined, model.ToolSpecProviderExecuted, model.ToolSpecMCP:
+			out = append(out, spec)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Name == out[j].Name {
+			return out[i].Kind < out[j].Kind
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
 }
 
 func NormalizeCompactionPolicy(policy CompactionPolicy) CompactionPolicy {
@@ -1049,6 +1102,9 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 	}
 	if skillPolicyConfigured(loaded.Skills) {
 		out.Skills = loaded.Skills
+	}
+	if len(loaded.ModelTools) > 0 {
+		out.ModelTools = loaded.ModelTools
 	}
 	if len(loaded.Agents) > 0 {
 		out.Agents = loaded.Agents

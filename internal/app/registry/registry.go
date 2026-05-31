@@ -44,6 +44,7 @@ type Registry struct {
 	stores         map[string]plugin.StoreFactory
 	sandboxes      map[string]sandbox.BackendFactory
 	tools          map[string]plugin.ToolFactory
+	modelTools     []model.ToolSpec
 	acpAgents      []plugin.ACPAgentDescriptor
 	prompts        []plugin.PromptFragment
 	skills         []plugin.SkillDescriptor
@@ -317,6 +318,21 @@ func (r *Registry) RegisterRendererHint(hint plugin.RendererHint) error {
 	return nil
 }
 
+func (r *Registry) RegisterModelTool(spec model.ToolSpec) error {
+	spec = model.CloneToolSpec(spec)
+	if strings.TrimSpace(spec.Name) == "" {
+		return errors.New("app/registry: model tool name is required")
+	}
+	if spec.Kind == "" || spec.Kind == model.ToolSpecFunction {
+		return errors.New("app/registry: model tool kind must be provider-defined, provider-executed, or mcp")
+	}
+	if len(spec.ProviderPayloads) == 0 {
+		return errors.New("app/registry: model tool provider payloads are required")
+	}
+	r.modelTools = append(r.modelTools, spec)
+	return nil
+}
+
 func (r *Registry) ModelProvider(name string) (plugin.ModelProviderFactory, bool) {
 	if r == nil {
 		return nil, false
@@ -397,6 +413,13 @@ func (r *Registry) RendererHints() []plugin.RendererHint {
 		out = append(out, item)
 	}
 	return out
+}
+
+func (r *Registry) ModelTools() []model.ToolSpec {
+	if r == nil || len(r.modelTools) == 0 {
+		return nil
+	}
+	return model.CloneToolSpecs(r.modelTools)
 }
 
 const (

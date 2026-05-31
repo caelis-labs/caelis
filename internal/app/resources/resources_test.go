@@ -43,6 +43,7 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 		"stores": [{"name":"reviewer-store","uses":"sqlite"}],
 		"sandbox_backends": [{"name":"reviewer-host","uses":"host"}],
 		"tools": [{"name":"reviewer-shell","uses":"run_command"}],
+		"model_tools": [{"kind":"provider_executed","name":"web_search","provider_payloads":{"openai":{"type":"web_search_preview"}}}],
 		"prompts": [{"id":"reviewer.system","priority":50,"paths":["prompts/review.md"]}],
 		"skills": [{"name":"review-skill","description":"Plugin review skill","paths":["skills/review/SKILL.md"]}],
 		"acp_agents": [{"name":"reviewer","command":"reviewer-acp","args":["--stdio"],"roles":["participant"]}],
@@ -80,6 +81,9 @@ func TestDiscoverIndexesPluginsAgentsAndSkills(t *testing.T) {
 	}
 	if len(catalog.Tools) != 1 || catalog.Tools[0].Name != "reviewer-shell" || catalog.Tools[0].Uses != "run_command" {
 		t.Fatalf("tools = %#v, want reviewer-shell alias", catalog.Tools)
+	}
+	if len(catalog.ModelTools) != 1 || catalog.ModelTools[0].Name != "web_search" {
+		t.Fatalf("model tools = %#v, want web_search", catalog.ModelTools)
 	}
 	if len(catalog.Prompts) != 3 {
 		t.Fatalf("prompts = %#v, want plugin, global AGENTS, workspace AGENTS", catalog.Prompts)

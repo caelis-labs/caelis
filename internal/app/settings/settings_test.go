@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 )
 
@@ -218,6 +219,39 @@ func TestManagerSkillPolicyPersistsNormalizedSettings(t *testing.T) {
 	}
 	if got := loaded.SkillPolicy(); got.LoadingMode != SkillLoadingModeMetadataOnly || got.MaxExpansionChars != 0 {
 		t.Fatalf("loaded skill policy = %#v, want persisted override", got)
+	}
+}
+
+func TestManagerModelToolsPersistNormalizedSettings(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileStore(t.TempDir())
+	manager, err := NewManager(ctx, store, Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	specs, err := manager.SetModelTools(ctx, []model.ToolSpec{
+		model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+			"openai": json.RawMessage(`{"type":"web_search_preview"}`),
+		}),
+		model.NewFunctionToolSpec("run_command", "local", map[string]any{"type": "object"}),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(specs) != 1 || specs[0].Name != "web_search" {
+		t.Fatalf("model tools = %#v, want only provider-native tool", specs)
+	}
+	listed := manager.ListModelTools()
+	listed[0].ProviderPayloads["openai"][0] = '['
+	if got := manager.ListModelTools(); string(got[0].ProviderPayloads["openai"]) != `{"type":"web_search_preview"}` {
+		t.Fatalf("ListModelTools did not clone payload: %#v", got)
+	}
+	loaded, err := NewManager(ctx, store, Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.ListModelTools(); len(got) != 1 || got[0].Name != "web_search" {
+		t.Fatalf("loaded model tools = %#v, want persisted web_search", got)
 	}
 }
 

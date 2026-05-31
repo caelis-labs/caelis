@@ -98,6 +98,7 @@ type ResourceStatus struct {
 	Stores         int                  `json:"stores,omitempty"`
 	Sandboxes      int                  `json:"sandbox_backends,omitempty"`
 	Tools          int                  `json:"tools,omitempty"`
+	ModelTools     int                  `json:"model_tools,omitempty"`
 	Prompts        int                  `json:"prompts,omitempty"`
 	Skills         int                  `json:"skills,omitempty"`
 	ACPAgents      int                  `json:"acp_agents,omitempty"`

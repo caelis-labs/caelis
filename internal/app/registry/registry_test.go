@@ -2,9 +2,11 @@ package registry
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
@@ -41,7 +43,12 @@ func TestRegistryAppliesContribution(t *testing.T) {
 		if err := target.RegisterPrompt(plugin.PromptFragment{ID: "prompt", Text: "hello"}); err != nil {
 			return err
 		}
-		return target.RegisterSkill(plugin.SkillDescriptor{Name: "skill"})
+		if err := target.RegisterSkill(plugin.SkillDescriptor{Name: "skill"}); err != nil {
+			return err
+		}
+		return target.RegisterModelTool(model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+			"openai": json.RawMessage(`{"type":"web_search_preview"}`),
+		}))
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -51,6 +58,9 @@ func TestRegistryAppliesContribution(t *testing.T) {
 	}
 	if len(reg.Skills()) != 1 || reg.Skills()[0].Name != "skill" {
 		t.Fatalf("skills = %#v, want skill", reg.Skills())
+	}
+	if len(reg.ModelTools()) != 1 || reg.ModelTools()[0].Name != "web_search" {
+		t.Fatalf("model tools = %#v, want web_search", reg.ModelTools())
 	}
 }
 

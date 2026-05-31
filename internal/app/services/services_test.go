@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -3138,6 +3139,9 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 				Name: "run_command",
 				Uses: "builtin.run_command",
 			}},
+			ModelTools: []model.ToolSpec{model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+				"openai": json.RawMessage(`{"type":"web_search_preview"}`),
+			})},
 			Prompts: []plugin.PromptFragment{{
 				ID:   "agents.workspace",
 				Text: "workspace rule",
@@ -3234,8 +3238,8 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	if status.Agents.Count != 1 || status.Agents.ExternalACPCount != 1 || status.Agents.Items[0].Args[0] != "--stdio" {
 		t.Fatalf("agent status = %#v, want one external ACP agent", status.Agents)
 	}
-	if status.Resources.Tools != 1 || status.Resources.Prompts != 1 || status.Resources.AgentFiles != 1 {
-		t.Fatalf("resource status = %#v, want tool/prompt/agent file counts", status.Resources)
+	if status.Resources.Tools != 1 || status.Resources.ModelTools != 1 || status.Resources.Prompts != 1 || status.Resources.AgentFiles != 1 {
+		t.Fatalf("resource status = %#v, want tool/model-tool/prompt/agent file counts", status.Resources)
 	}
 	if status.Resources.InfoCount != 1 || status.Resources.WarningCount != 1 || status.Resources.ErrorCount != 0 || len(status.Resources.Diagnostics) != 2 {
 		t.Fatalf("resource diagnostics = %#v, want info/warning diagnostics", status.Resources)

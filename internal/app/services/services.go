@@ -2316,6 +2316,7 @@ func statusResourceView(in appresources.Catalog) appviewmodel.ResourceStatus {
 		Stores:         len(in.Stores),
 		Sandboxes:      len(in.Sandboxes),
 		Tools:          len(in.Tools),
+		ModelTools:     len(in.ModelTools),
 		Prompts:        len(in.Prompts),
 		Skills:         len(in.Skills),
 		ACPAgents:      len(in.ACPAgents),
