@@ -143,6 +143,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 			Instructions: requestInstructions(l.instructions, req.Instructions),
 			Reasoning:    req.Reasoning,
 			Stream:       true,
+			Meta:         requestMeta(req),
 		})
 		if err != nil {
 			return nil, err
@@ -530,6 +531,20 @@ func requestInstructions(base []string, turn []string) []string {
 		return nil
 	}
 	return out
+}
+
+func requestMeta(req Request) map[string]any {
+	meta := map[string]any{}
+	if mode := strings.TrimSpace(req.Mode); mode != "" {
+		meta["caelis.session_mode"] = mode
+	}
+	if surface := strings.TrimSpace(req.Surface); surface != "" {
+		meta["caelis.surface"] = surface
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
 }
 
 func userMessage(input string, parts []model.ContentPart) model.Message {

@@ -720,7 +720,11 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   commands through the old stack. The app-service TUI binding now maps this
   status/lifecycle surface into the existing driver sandbox hooks.
 - `protocol/acp/projector/core`: canonical session event projection to ACP
-  updates and permission requests.
+  updates and permission requests. It now also projects core-native
+  sandbox/task terminal markers plus `_meta.terminal_info`,
+  `_meta.terminal_output`, and `_meta.terminal_exit` from canonical tool
+  events, so the ACP server no longer depends on the deleted old ACP runtime
+  projector for terminal display hints.
 - `internal/surface/acpserver`: ACP JSON-RPC server over the new runtime engine.
 - `internal/e2e`: new-architecture end-to-end harness that exercises local
   composition, ACP stdio serving, plugin resource loading, registry aliases,
@@ -799,6 +803,10 @@ The current verification path covers:
 - SQLite store round-trip -> canonical events -> rebuilt model context
 - local stack -> ACP server -> JSON-RPC `session/new` and `session/prompt` ->
   ACP `session/update` notifications -> canonical stored events
+- public ACP client lifecycle/load, permission/terminal, and mode/config e2e
+  coverage now runs through `internal/app/local`, the core-native ACP server,
+  and a core-native `internal/acpe2eagent` helper instead of the deleted old
+  `impl/agent/acp` runtime adapter
 - new architecture e2e -> enabled plugin manifest prompt + store alias ->
   SQLite store -> ACP server -> OpenAI-compatible mock provider ->
   `run_command` through host sandbox -> canonical event reload -> shared
@@ -1012,6 +1020,13 @@ The completed work is intentionally limited to the reusable skeleton:
   regression paths moved to `internal/app/local` plus shared services, the
   orphaned `app/gatewayapp` package and its private config/model/sandbox
   registries were deleted instead of kept as a compatibility layer.
+- Legacy server-side ACP runtime adapter removal: `internal/acpe2eagent` now
+  serves ACP through `internal/app/local` and `internal/surface/acpserver` with
+  a small core-native scripted provider, allowing the old
+  `impl/agent/acp` root runtime adapter plus its assembly, loader, and terminal
+  helper packages to be deleted. The remaining `impl/agent/acp/controller` and
+  `impl/agent/acp/subagent` packages are still the consumed-external-ACP client
+  assets used by the local runtime.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1338,16 +1353,19 @@ be migrated before retiring the old stack:
      status, `terminal/wait_for_exit` waits for the shared session result, and
      `terminal/kill` / `terminal/release` use the same task cancellation and
      release paths as TUI/APP task controls.
+   - Migrated baseline: core canonical tool events now project terminal task
+     markers and terminal info/output/exit `_meta` over ACP, preserving the
+     public client terminal display contract without the old server-side
+     `impl/agent/acp` runtime adapter.
    - Migrated baseline: consumed external ACP agents now also receive a
      client-side terminal capability when the local stack has a sandbox runtime.
      `terminal/create`, output, wait, kill, and release callbacks from an
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: client mode flows, the TUI `/connect` wizard shell,
-     durable live remote controller process reconnect/lifecycle, richer
-     non-model config providers beyond prompt/context/sandbox backend settings,
-     and the full behavior covered by current public ACP e2e tests.
+   - Still pending: the TUI `/connect` wizard shell, durable live remote
+     controller process reconnect/lifecycle, and richer non-model config
+     providers beyond prompt/context/sandbox backend settings.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,

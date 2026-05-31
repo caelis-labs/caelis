@@ -116,6 +116,61 @@ func TestProjectToolResultUpdate(t *testing.T) {
 	}
 }
 
+func TestProjectToolResultTerminalMetadata(t *testing.T) {
+	updates, err := (Projector{}).ProjectEvent(session.Event{
+		SessionID: "s1",
+		Type:      session.EventToolResult,
+		Tool: &session.ToolEvent{
+			ID:     "call-1",
+			Name:   "run_command",
+			Status: session.ToolCompleted,
+			Input:  map[string]any{"command": "printf ok", "cwd": "/tmp/work"},
+			Output: map[string]any{
+				"task_id":     "host-1",
+				"terminal_id": "host-1",
+				"stdout":      "ok\n",
+				"exit_code":   0,
+			},
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"task": map[string]any{
+							"task_id":     "host-1",
+							"terminal_id": "host-1",
+							"state":       "completed",
+						},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 {
+		t.Fatalf("updates = %d, want 1", len(updates))
+	}
+	update, ok := updates[0].(schema.ToolCallUpdate)
+	if !ok {
+		t.Fatalf("update = %#v, want ToolCallUpdate", updates[0])
+	}
+	if len(update.Content) != 1 || update.Content[0].Type != "terminal" || update.Content[0].TerminalID != "host-1" {
+		t.Fatalf("content = %#v, want terminal marker", update.Content)
+	}
+	info, ok := update.Meta["terminal_info"].(map[string]any)
+	if !ok || info["terminal_id"] != "host-1" || info["command"] != "printf ok" || info["cwd"] != "/tmp/work" {
+		t.Fatalf("terminal_info = %#v", update.Meta["terminal_info"])
+	}
+	output, ok := update.Meta["terminal_output"].(map[string]any)
+	if !ok || output["terminal_id"] != "host-1" || output["data"] != "ok\n" {
+		t.Fatalf("terminal_output = %#v", update.Meta["terminal_output"])
+	}
+	exit, ok := update.Meta["terminal_exit"].(map[string]any)
+	if !ok || exit["terminal_id"] != "host-1" || exit["exit_code"] != 0 {
+		t.Fatalf("terminal_exit = %#v", update.Meta["terminal_exit"])
+	}
+}
+
 func TestProjectPlanAndApproval(t *testing.T) {
 	planUpdates, err := (Projector{}).ProjectEvent(session.Event{
 		SessionID: "s1",

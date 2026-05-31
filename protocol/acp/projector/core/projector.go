@@ -3,6 +3,8 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
+	"maps"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -145,9 +147,9 @@ func toolCall(tool session.ToolEvent) schema.ToolCall {
 		Kind:          toolKind(tool),
 		Status:        toolStatus(tool.Status),
 		RawInput:      tool.Input,
-		Content:       toolContent(tool.Content),
+		Content:       toolContentWithTerminal(tool),
 		Locations:     toolLocations(tool.Locations),
-		Meta:          tool.Meta,
+		Meta:          toolMeta(tool),
 	}
 }
 
@@ -163,9 +165,9 @@ func toolCallUpdate(tool session.ToolEvent) schema.ToolCallUpdate {
 		Status:        stringPtr(status),
 		RawInput:      tool.Input,
 		RawOutput:     tool.Output,
-		Content:       toolContent(tool.Content),
+		Content:       toolContentWithTerminal(tool),
 		Locations:     toolLocations(tool.Locations),
-		Meta:          tool.Meta,
+		Meta:          toolMeta(tool),
 	}
 }
 
@@ -248,6 +250,167 @@ func toolContent(in []session.ToolContent) []schema.ToolCallContent {
 		})
 	}
 	return out
+}
+
+func toolContentWithTerminal(tool session.ToolEvent) []schema.ToolCallContent {
+	out := toolContent(tool.Content)
+	terminalID := terminalIDFromTool(tool)
+	if terminalID == "" || hasTerminalContent(out) {
+		return out
+	}
+	return append(out, schema.ToolCallContent{
+		Type:       "terminal",
+		TerminalID: terminalID,
+	})
+}
+
+func hasTerminalContent(content []schema.ToolCallContent) bool {
+	for _, item := range content {
+		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			return true
+		}
+	}
+	return false
+}
+
+func toolMeta(tool session.ToolEvent) map[string]any {
+	meta := maps.Clone(tool.Meta)
+	terminalID := terminalIDFromTool(tool)
+	if terminalID == "" {
+		return meta
+	}
+	if meta == nil {
+		meta = map[string]any{}
+	}
+	if _, ok := meta["terminal_info"]; !ok {
+		info := map[string]any{"terminal_id": terminalID}
+		if taskID := firstNonEmpty(anyString(tool.Output["task_id"]), anyString(runtimeTaskValue(tool.Meta, "task_id"))); taskID != "" {
+			info["task_id"] = taskID
+		}
+		if name := strings.TrimSpace(tool.Name); name != "" {
+			info["tool"] = name
+		}
+		if command := firstNonEmpty(anyString(tool.Input["command"]), anyString(tool.Output["command"])); command != "" {
+			info["command"] = command
+		}
+		if cwd := firstNonEmpty(anyString(tool.Input["cwd"]), anyString(tool.Input["workdir"])); cwd != "" {
+			info["cwd"] = cwd
+		}
+		meta["terminal_info"] = info
+	}
+	if output := terminalOutputText(tool); output != "" {
+		meta["terminal_output"] = map[string]any{
+			"terminal_id": terminalID,
+			"data":        output,
+		}
+	}
+	if exitCode, ok := terminalExitCode(tool); ok {
+		meta["terminal_exit"] = map[string]any{
+			"terminal_id": terminalID,
+			"exit_code":   exitCode,
+		}
+	}
+	return meta
+}
+
+func terminalIDFromTool(tool session.ToolEvent) string {
+	for _, item := range tool.Content {
+		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			if terminalID := strings.TrimSpace(item.TerminalID); terminalID != "" {
+				return terminalID
+			}
+		}
+	}
+	return firstNonEmpty(
+		anyString(tool.Output["terminal_id"]),
+		anyString(tool.Output["task_id"]),
+		anyString(runtimeTaskValue(tool.Meta, "terminal_id")),
+		anyString(runtimeTaskValue(tool.Meta, "task_id")),
+	)
+}
+
+func terminalOutputText(tool session.ToolEvent) string {
+	var parts []string
+	if stdout := anyText(tool.Output["stdout"]); stdout != "" {
+		parts = append(parts, stdout)
+	}
+	if stderr := anyText(tool.Output["stderr"]); stderr != "" {
+		parts = append(parts, stderr)
+	}
+	for _, item := range tool.Content {
+		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {
+			continue
+		}
+		if text := strings.TrimRight(item.Text, "\n"); text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+func terminalExitCode(tool session.ToolEvent) (int, bool) {
+	if code, ok := anyInt(tool.Output["exit_code"]); ok {
+		return code, true
+	}
+	return anyInt(runtimeTaskValue(tool.Meta, "exit_code"))
+}
+
+func runtimeTaskValue(meta map[string]any, key string) any {
+	if len(meta) == 0 {
+		return nil
+	}
+	caelis, _ := meta["caelis"].(map[string]any)
+	runtimeMeta, _ := caelis["runtime"].(map[string]any)
+	task, _ := runtimeMeta["task"].(map[string]any)
+	if len(task) == 0 {
+		return nil
+	}
+	return task[strings.TrimSpace(key)]
+}
+
+func anyString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case json.Number:
+		return strings.TrimSpace(typed.String())
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(typed))
+	}
+}
+
+func anyText(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return typed
+	case nil:
+		return ""
+	default:
+		return fmt.Sprint(typed)
+	}
+}
+
+func anyInt(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case json.Number:
+		if n, err := typed.Int64(); err == nil {
+			return int(n), true
+		}
+	case string:
+		var n json.Number = json.Number(strings.TrimSpace(typed))
+		if parsed, err := n.Int64(); err == nil {
+			return int(parsed), true
+		}
+	}
+	return 0, false
 }
 
 func toolLocations(in []session.ToolLocation) []schema.ToolCallLocation {

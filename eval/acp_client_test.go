@@ -118,40 +118,45 @@ func TestPublicClientPermissionAndTerminalE2E(t *testing.T) {
 		OnUpdate: func(update client.UpdateEnvelope) {
 			switch call := update.Update.(type) {
 			case client.ToolCall:
-				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && info["terminal_id"] == "command-approval-1" {
+				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && strings.TrimSpace(anyString(info["terminal_id"])) != "" {
 					mu.Lock()
 					displayTerminalInfo = true
 					mu.Unlock()
 				}
 			case client.ToolCallUpdate:
-				if output, ok := call.Meta["terminal_output"].(map[string]any); ok && output["terminal_id"] == "command-approval-1" {
+				if info, ok := call.Meta["terminal_info"].(map[string]any); ok && strings.TrimSpace(anyString(info["terminal_id"])) != "" {
+					mu.Lock()
+					displayTerminalInfo = true
+					mu.Unlock()
+				}
+				if output, ok := call.Meta["terminal_output"].(map[string]any); ok && strings.TrimSpace(anyString(output["terminal_id"])) != "" {
 					if text, _ := output["data"].(string); strings.Contains(text, "child approval ok") {
 						mu.Lock()
 						displayTerminalOutput = true
 						mu.Unlock()
 					}
 				}
-				if exit, ok := call.Meta["terminal_exit"].(map[string]any); ok && exit["terminal_id"] == "command-approval-1" {
+				if exit, ok := call.Meta["terminal_exit"].(map[string]any); ok && strings.TrimSpace(anyString(exit["terminal_id"])) != "" {
 					mu.Lock()
 					displayTerminalExit = true
 					mu.Unlock()
 				}
-				if strings.TrimSpace(call.ToolCallID) == "command-approval-1" && call.Status != nil && *call.Status == "completed" {
+				if call.Status != nil && *call.Status == "completed" && (callHasTerminalContent(call) || callHasTerminalMeta(call.Meta)) {
 					mu.Lock()
 					displayTerminalDone = true
 					mu.Unlock()
 				}
 				for _, content := range call.Content {
 					if content.Type == "terminal" && strings.TrimSpace(content.TerminalID) != "" {
-						if strings.TrimSpace(content.TerminalID) == "command-approval-1" {
-							mu.Lock()
+						mu.Lock()
+						if terminalID == "" {
 							terminalID = strings.TrimSpace(content.TerminalID)
+						}
+						mu.Unlock()
+						if text := clientTerminalContentText(content); strings.Contains(text, "child approval ok") {
+							mu.Lock()
+							displayTerminalOutput = true
 							mu.Unlock()
-							if text := clientTerminalContentText(content); strings.Contains(text, "child approval ok") {
-								mu.Lock()
-								displayTerminalOutput = true
-								mu.Unlock()
-							}
 						}
 					}
 				}
@@ -241,6 +246,44 @@ func clientTerminalContentText(content client.ToolCallContent) string {
 	}
 }
 
+func callHasTerminalContent(call client.ToolCallUpdate) bool {
+	for _, content := range call.Content {
+		if strings.EqualFold(strings.TrimSpace(content.Type), "terminal") && strings.TrimSpace(content.TerminalID) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func callHasTerminalMeta(meta map[string]any) bool {
+	for _, key := range []string{"terminal_info", "terminal_output", "terminal_exit"} {
+		value, ok := meta[key].(map[string]any)
+		if ok && strings.TrimSpace(anyString(value["terminal_id"])) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasConfigOption(options []client.SessionConfigOption, id string) bool {
+	return configCurrentValue(options, id) != nil
+}
+
+func configCurrentValue(options []client.SessionConfigOption, id string) any {
+	id = strings.TrimSpace(id)
+	for _, option := range options {
+		if strings.TrimSpace(option.ID) == id {
+			return option.CurrentValue
+		}
+	}
+	return nil
+}
+
+func anyString(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
 func TestPublicClientModeAndConfigE2E(t *testing.T) {
 	t.Parallel()
 
@@ -269,39 +312,33 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if session.Modes == nil || session.Modes.CurrentModeID != "default" {
-		t.Fatalf("session.Modes = %#v, want default assembly mode state", session.Modes)
+	if session.Modes == nil || session.Modes.CurrentModeID != "auto-review" {
+		t.Fatalf("session.Modes = %#v, want auto-review mode state", session.Modes)
 	}
-	if got, want := len(session.ConfigOptions), 1; got != want {
-		t.Fatalf("len(session.ConfigOptions) = %d, want %d", got, want)
-	}
-	if got := session.ConfigOptions[0].CurrentValue; got != "balanced" {
-		t.Fatalf("session.ConfigOptions[0].CurrentValue = %#v, want balanced", got)
+	if !hasConfigOption(session.ConfigOptions, "mode") || !hasConfigOption(session.ConfigOptions, "reasoning_effort") {
+		t.Fatalf("session.ConfigOptions = %#v, want mode and reasoning_effort options", session.ConfigOptions)
 	}
 
-	if err := acpClient.SetMode(ctx, session.SessionID, "plan"); err != nil {
+	if err := acpClient.SetMode(ctx, session.SessionID, "manual"); err != nil {
 		t.Fatalf("SetMode() error = %v", err)
 	}
-	configResp, err := acpClient.SetConfigOption(ctx, session.SessionID, "reasoning", "deep")
+	configResp, err := acpClient.SetConfigOption(ctx, session.SessionID, "reasoning_effort", "high")
 	if err != nil {
 		t.Fatalf("SetConfigOption() error = %v", err)
 	}
-	if got := configResp.ConfigOptions[0].CurrentValue; got != "deep" {
-		t.Fatalf("configResp.ConfigOptions[0].CurrentValue = %#v, want deep", got)
+	if got := configCurrentValue(configResp.ConfigOptions, "reasoning_effort"); got != "high" {
+		t.Fatalf("reasoning_effort current value = %#v, want high", got)
 	}
 
 	loadResp, err := acpClient.LoadSession(ctx, session.SessionID, t.TempDir(), nil)
 	if err != nil {
 		t.Fatalf("LoadSession() error = %v", err)
 	}
-	if loadResp.Modes == nil || loadResp.Modes.CurrentModeID != "plan" {
-		t.Fatalf("loadResp.Modes = %#v, want current mode plan", loadResp.Modes)
+	if loadResp.Modes == nil || loadResp.Modes.CurrentModeID != "manual" {
+		t.Fatalf("loadResp.Modes = %#v, want current mode manual", loadResp.Modes)
 	}
-	if got, want := len(loadResp.ConfigOptions), 1; got != want {
-		t.Fatalf("len(loadResp.ConfigOptions) = %d, want %d", got, want)
-	}
-	if got := loadResp.ConfigOptions[0].CurrentValue; got != "deep" {
-		t.Fatalf("loadResp.ConfigOptions[0].CurrentValue = %#v, want deep", got)
+	if got := configCurrentValue(loadResp.ConfigOptions, "reasoning_effort"); got != "high" {
+		t.Fatalf("load reasoning_effort current value = %#v, want high", got)
 	}
 
 	updates = nil
@@ -312,8 +349,8 @@ func TestPublicClientModeAndConfigE2E(t *testing.T) {
 	if resp.StopReason == "" {
 		t.Fatal("Prompt() returned empty stop reason")
 	}
-	if got := latestAgentText(updates); got != "mode=plan effort=high" {
-		t.Fatalf("latest agent text = %q, want %q", got, "mode=plan effort=high")
+	if got := latestAgentText(updates); got != "mode=manual effort=high" {
+		t.Fatalf("latest agent text = %q, want %q", got, "mode=manual effort=high")
 	}
 }
 
