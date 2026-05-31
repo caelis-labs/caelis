@@ -142,6 +142,30 @@ func TestProviderStreamSendsMessagesRequestAndParsesToolUse(t *testing.T) {
 	}
 }
 
+func TestProviderNormalizesQuotedToolArguments(t *testing.T) {
+	provider, err := New(Config{Model: "claude-test", APIKey: "token"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := provider.modelResponse("claude-test", messageResponse{
+		Model:      "claude-test",
+		StopReason: "tool_use",
+		Content: []contentBlockResponse{{
+			Type:  "tool_use",
+			ID:    "call-1",
+			Name:  "run_command",
+			Input: json.RawMessage(`"{\"command\":\"echo hi\"}"`),
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := response.Message.ToolCalls()
+	if len(calls) != 1 || string(calls[0].Input) != `{"command":"echo hi"}` {
+		t.Fatalf("tool input = %#v, want decoded argument object", calls)
+	}
+}
+
 func TestProviderStreamParsesSSE(t *testing.T) {
 	var captured messagesRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

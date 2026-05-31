@@ -942,10 +942,10 @@ func normalizeToolInput(args map[string]any) json.RawMessage {
 		return json.RawMessage(`{}`)
 	}
 	raw, err := json.Marshal(args)
-	if err != nil || !json.Valid(raw) {
+	if err != nil {
 		return json.RawMessage(`{}`)
 	}
-	return raw
+	return model.NormalizeToolInput(raw)
 }
 
 func toolArgsMap(raw json.RawMessage) map[string]any {

@@ -281,17 +281,30 @@ func TestProviderModelsListsRemoteModels(t *testing.T) {
 }
 
 func TestProviderNormalizesInvalidToolArguments(t *testing.T) {
-	message, err := coreMessageFromChat(chatMessage{ToolCalls: []toolCall{{
-		Function: toolCallFunction{
-			Name:      "broken",
-			Arguments: json.RawMessage(`not-json`),
-		},
-	}}})
-	if err != nil {
-		t.Fatal(err)
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "invalid", args: `not-json`, want: `{"raw":"not-json"}`},
+		{name: "quoted", args: `"{\"command\":\"echo hi\"}"`, want: `{"command":"echo hi"}`},
+		{name: "fenced", args: "```json\n{\"command\":\"echo hi\"}\n```", want: `{"command":"echo hi"}`},
 	}
-	calls := message.ToolCalls()
-	if len(calls) != 1 || !json.Valid(calls[0].Input) || string(calls[0].Input) != `{"raw":"not-json"}` {
-		t.Fatalf("tool input = %s, want wrapped canonical JSON", string(calls[0].Input))
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			message, err := coreMessageFromChat(chatMessage{ToolCalls: []toolCall{{
+				Function: toolCallFunction{
+					Name:      "run_command",
+					Arguments: json.RawMessage(test.args),
+				},
+			}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			calls := message.ToolCalls()
+			if len(calls) != 1 || !json.Valid(calls[0].Input) || string(calls[0].Input) != test.want {
+				t.Fatalf("tool input = %s, want %s", string(calls[0].Input), test.want)
+			}
+		})
 	}
 }

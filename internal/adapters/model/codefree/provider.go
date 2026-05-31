@@ -811,15 +811,7 @@ func outputResponseFormat(output *model.OutputSpec) *chatResponseFormat {
 }
 
 func normalizeToolInput(input string) json.RawMessage {
-	raw := strings.TrimSpace(input)
-	if raw == "" {
-		return json.RawMessage(`{}`)
-	}
-	if json.Valid([]byte(raw)) {
-		return append(json.RawMessage(nil), raw...)
-	}
-	wrapped, _ := json.Marshal(map[string]any{"raw": raw})
-	return wrapped
+	return model.NormalizeToolInputString(input)
 }
 
 func usageFromChat(in chatUsage) model.Usage {

@@ -1098,17 +1098,7 @@ func chatTools(specs []model.ToolSpec) []chatTool {
 }
 
 func normalizeToolInput(input string) json.RawMessage {
-	raw := strings.TrimSpace(input)
-	if raw == "" {
-		return nil
-	}
-	if json.Valid([]byte(raw)) {
-		return append(json.RawMessage(nil), raw...)
-	}
-	wrapped, _ := json.Marshal(map[string]any{
-		"raw": raw,
-	})
-	return wrapped
+	return model.NormalizeToolInputString(input)
 }
 
 func usageFromChat(in chatUsage) model.Usage {

@@ -212,6 +212,20 @@ func TestProviderStreamParsesSSE(t *testing.T) {
 	}
 }
 
+func TestProviderNormalizesQuotedToolArguments(t *testing.T) {
+	message := coreMessageFromChat(chatMessage{ToolCalls: []chatToolCall{{
+		ID: "call-1",
+		Function: chatToolFunction{
+			Name:      "run_command",
+			Arguments: `"{\"command\":\"echo hi\"}"`,
+		},
+	}}})
+	calls := message.ToolCalls()
+	if len(calls) != 1 || string(calls[0].Input) != `{"command":"echo hi"}` {
+		t.Fatalf("tool input = %#v, want decoded argument object", calls)
+	}
+}
+
 func TestProviderStreamSendsToolResultMessages(t *testing.T) {
 	credsPath := writeCredentials(t, "272182", "live-api-key")
 	t.Setenv(credsPathEnv, credsPath)

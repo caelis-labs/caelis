@@ -607,15 +607,28 @@ func TestProviderVolcengineProfileUsesThinkingStates(t *testing.T) {
 }
 
 func TestProviderNormalizesInvalidToolArguments(t *testing.T) {
-	message := coreMessageFromChat(chatMessage{ToolCalls: []chatToolCall{{
-		ID: "call-1",
-		Function: chatToolFunction{
-			Name:      "broken",
-			Arguments: "not-json",
-		},
-	}}})
-	calls := message.ToolCalls()
-	if len(calls) != 1 || !json.Valid(calls[0].Input) {
-		t.Fatalf("tool input = %s, want valid canonical JSON", string(calls[0].Input))
+	tests := []struct {
+		name string
+		args string
+		want string
+	}{
+		{name: "invalid", args: "not-json", want: `{"raw":"not-json"}`},
+		{name: "quoted", args: `"{\"command\":\"echo hi\"}"`, want: `{"command":"echo hi"}`},
+		{name: "fenced", args: "```json\n{\"command\":\"echo hi\"}\n```", want: `{"command":"echo hi"}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			message := coreMessageFromChat(chatMessage{ToolCalls: []chatToolCall{{
+				ID: "call-1",
+				Function: chatToolFunction{
+					Name:      "run_command",
+					Arguments: test.args,
+				},
+			}}})
+			calls := message.ToolCalls()
+			if len(calls) != 1 || !json.Valid(calls[0].Input) || string(calls[0].Input) != test.want {
+				t.Fatalf("tool input = %s, want %s", string(calls[0].Input), test.want)
+			}
+		})
 	}
 }

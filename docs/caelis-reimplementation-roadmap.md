@@ -1780,8 +1780,14 @@ be migrated before retiring the old stack:
      package, embedded dynamic catalog snapshot, and old snapshot generator
      have been removed now that production provider setup and runtime requests
      use `core/model`, core-native adapters, and the shared app model catalog.
-   - Still pending: provider-specific tool/argument behavior beyond the
-     migrated profiles.
+   - Migrated baseline: tool-call argument normalization now lives in
+     `core/model` and is reused by the OpenAI-compatible, CodeFree, Anthropic,
+     Gemini, and Ollama adapters. Provider-emitted quoted, fenced, empty,
+     null, and invalid tool arguments normalize into the canonical JSON object
+     consumed by `core/tool` execution instead of each adapter carrying its own
+     partial parser.
+   - Still pending: provider-defined, provider-executed, and MCP tool
+     declarations beyond function tools.
 
 7. Sandbox backends and policy
    - The new stack has a core-native host sandbox adapter plus a thin internal
@@ -2320,8 +2326,8 @@ Recommended sequence:
 1. Finish the remaining large TUI surface migrations against app services,
    especially richer `/connect` rendering/panel parity, remote controller
    diagnostics, and visual settings/diagnostics editors.
-2. Close the remaining provider-specific behavior gaps in core-native adapters
-   without reintroducing a parallel provider factory/catalog stack.
+2. Close the remaining provider-specific tool declaration gaps in core-native
+   adapters without reintroducing a parallel provider factory/catalog stack.
 3. Finish sandbox backend cleanup and production doctor repair reporting
    without reintroducing the removed router/preset/tool stacks.
 4. Finish richer durable task metadata and terminal preview behavior behind

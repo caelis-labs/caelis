@@ -1001,15 +1001,7 @@ func jsonRawToAny(raw json.RawMessage) any {
 }
 
 func normalizeToolInput(raw json.RawMessage) json.RawMessage {
-	trimmed := bytes.TrimSpace(raw)
-	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
-		return json.RawMessage(`{}`)
-	}
-	if json.Valid(trimmed) {
-		return append(json.RawMessage(nil), trimmed...)
-	}
-	wrapped, _ := json.Marshal(map[string]any{"raw": string(trimmed)})
-	return wrapped
+	return model.NormalizeToolInput(raw)
 }
 
 func usageFromResponse(in usage) model.Usage {
