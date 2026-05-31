@@ -929,7 +929,12 @@ func TestCommandServiceExecuteDoctorAndFix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.repairCalls != 1 || !strings.Contains(fixed.Output, "sandbox repair complete") || !strings.Contains(fixed.Output, "doctor:") {
+	for _, want := range []string{"sandbox repair complete", "backend: windows", "supported: true", "attempted: true", "doctor:"} {
+		if !strings.Contains(fixed.Output, want) {
+			t.Fatalf("doctor fix output = %q, missing %q", fixed.Output, want)
+		}
+	}
+	if rt.repairCalls != 1 {
 		t.Fatalf("doctor fix output = %q repairCalls=%d, want repair and report", fixed.Output, rt.repairCalls)
 	}
 }
@@ -3287,6 +3292,16 @@ func TestSandboxServiceHostLifecycleIsNoop(t *testing.T) {
 		if status.RequestedBackend != "host" || status.ResolvedBackend != "host" || status.Route != "host" {
 			t.Fatalf("%s status = %#v, want host route", name, status)
 		}
+		if name == "status" {
+			if status.Lifecycle.Action != "" {
+				t.Fatalf("status lifecycle = %#v, want empty lifecycle", status.Lifecycle)
+			}
+			continue
+		}
+		if status.Lifecycle.Action != name || status.Lifecycle.Backend != "host" ||
+			!status.Lifecycle.Noop || status.Lifecycle.Attempted || status.Lifecycle.Supported {
+			t.Fatalf("%s lifecycle = %#v, want host noop report", name, status.Lifecycle)
+		}
 	}
 }
 
@@ -3395,15 +3410,30 @@ func TestSandboxServiceRunsRuntimeLifecycle(t *testing.T) {
 	if status.RequestedBackend != "windows" || status.ResolvedBackend != "windows" || !status.SetupRequired || status.SetupError != "workspace setup required" {
 		t.Fatalf("Prepare() status = %#v, want windows setup projection", status)
 	}
+	if status.Lifecycle.Action != "prepare" || !status.Lifecycle.Attempted || !status.Lifecycle.Supported || status.Lifecycle.Backend != "windows" {
+		t.Fatalf("Prepare() lifecycle = %#v, want attempted prepare report", status.Lifecycle)
+	}
 
-	if _, err := svc.Sandbox().Repair(context.Background()); err != nil {
+	status, err = svc.Sandbox().Repair(context.Background())
+	if err != nil {
 		t.Fatalf("Repair() error = %v", err)
 	}
-	if _, err := svc.Sandbox().Preflight(context.Background(), true); err != nil {
+	if status.Lifecycle.Action != "repair" || !status.Lifecycle.Attempted || !status.Lifecycle.Supported {
+		t.Fatalf("Repair() lifecycle = %#v, want attempted repair report", status.Lifecycle)
+	}
+	status, err = svc.Sandbox().Preflight(context.Background(), true)
+	if err != nil {
 		t.Fatalf("Preflight() error = %v", err)
 	}
-	if _, err := svc.Sandbox().Reset(context.Background()); err != nil {
+	if status.Lifecycle.Action != "preflight" || !status.Lifecycle.Attempted || !status.Lifecycle.Supported {
+		t.Fatalf("Preflight() lifecycle = %#v, want attempted preflight report", status.Lifecycle)
+	}
+	status, err = svc.Sandbox().Reset(context.Background())
+	if err != nil {
 		t.Fatalf("Reset() error = %v", err)
+	}
+	if status.Lifecycle.Action != "reset" || !status.Lifecycle.Attempted || !status.Lifecycle.Supported {
+		t.Fatalf("Reset() lifecycle = %#v, want attempted reset report", status.Lifecycle)
 	}
 	if rt.repairCalls != 1 || !rt.preflightAllow || rt.resetCalls != 1 {
 		t.Fatalf("lifecycle calls repair=%d preflightAllow=%t reset=%d, want all invoked", rt.repairCalls, rt.preflightAllow, rt.resetCalls)

@@ -677,6 +677,10 @@ type SandboxService struct {
 	services Services
 }
 
+type sandboxRuntimeUnwrapper interface {
+	CurrentSandboxRuntime() (sandbox.Runtime, error)
+}
+
 type SandboxDiagnostic struct {
 	Severity string            `json:"severity,omitempty"`
 	Kind     string            `json:"kind,omitempty"`
@@ -684,28 +688,40 @@ type SandboxDiagnostic struct {
 	Meta     map[string]string `json:"meta,omitempty"`
 }
 
+type SandboxLifecycleReport struct {
+	Action         string `json:"action,omitempty"`
+	Backend        string `json:"backend,omitempty"`
+	Supported      bool   `json:"supported,omitempty"`
+	Attempted      bool   `json:"attempted,omitempty"`
+	Noop           bool   `json:"noop,omitempty"`
+	FallbackAction string `json:"fallback_action,omitempty"`
+	Message        string `json:"message,omitempty"`
+	Error          string `json:"error,omitempty"`
+}
+
 type SandboxStatus struct {
-	RequestedBackend         string              `json:"requested_backend,omitempty"`
-	ResolvedBackend          string              `json:"resolved_backend,omitempty"`
-	Route                    string              `json:"route,omitempty"`
-	Isolation                string              `json:"isolation,omitempty"`
-	DefaultPermission        string              `json:"default_permission,omitempty"`
-	Network                  string              `json:"network,omitempty"`
-	DefaultNetwork           string              `json:"default_network,omitempty"`
-	NetworkControl           bool                `json:"network_control,omitempty"`
-	PathPolicy               bool                `json:"path_policy,omitempty"`
-	ReadableRootCount        int                 `json:"readable_root_count,omitempty"`
-	WritableRootCount        int                 `json:"writable_root_count,omitempty"`
-	FallbackToHost           bool                `json:"fallback_to_host,omitempty"`
-	FallbackReason           string              `json:"fallback_reason,omitempty"`
-	FallbackInstallHint      string              `json:"fallback_install_hint,omitempty"`
-	Setup                    sandbox.SetupStatus `json:"setup,omitempty"`
-	SetupRequired            bool                `json:"setup_required,omitempty"`
-	SetupError               string              `json:"setup_error,omitempty"`
-	SetupMarkerCurrent       bool                `json:"setup_marker_current,omitempty"`
-	SetupMarkerReason        string              `json:"setup_marker_reason,omitempty"`
-	SandboxRuntimeConfigured bool                `json:"sandbox_runtime_configured,omitempty"`
-	Diagnostics              []SandboxDiagnostic `json:"diagnostics,omitempty"`
+	RequestedBackend         string                 `json:"requested_backend,omitempty"`
+	ResolvedBackend          string                 `json:"resolved_backend,omitempty"`
+	Route                    string                 `json:"route,omitempty"`
+	Isolation                string                 `json:"isolation,omitempty"`
+	DefaultPermission        string                 `json:"default_permission,omitempty"`
+	Network                  string                 `json:"network,omitempty"`
+	DefaultNetwork           string                 `json:"default_network,omitempty"`
+	NetworkControl           bool                   `json:"network_control,omitempty"`
+	PathPolicy               bool                   `json:"path_policy,omitempty"`
+	ReadableRootCount        int                    `json:"readable_root_count,omitempty"`
+	WritableRootCount        int                    `json:"writable_root_count,omitempty"`
+	FallbackToHost           bool                   `json:"fallback_to_host,omitempty"`
+	FallbackReason           string                 `json:"fallback_reason,omitempty"`
+	FallbackInstallHint      string                 `json:"fallback_install_hint,omitempty"`
+	Setup                    sandbox.SetupStatus    `json:"setup,omitempty"`
+	SetupRequired            bool                   `json:"setup_required,omitempty"`
+	SetupError               string                 `json:"setup_error,omitempty"`
+	SetupMarkerCurrent       bool                   `json:"setup_marker_current,omitempty"`
+	SetupMarkerReason        string                 `json:"setup_marker_reason,omitempty"`
+	SandboxRuntimeConfigured bool                   `json:"sandbox_runtime_configured,omitempty"`
+	Diagnostics              []SandboxDiagnostic    `json:"diagnostics,omitempty"`
+	Lifecycle                SandboxLifecycleReport `json:"lifecycle,omitempty"`
 }
 
 func (s SandboxService) Status(ctx context.Context) (SandboxStatus, error) {
@@ -719,65 +735,127 @@ func (s SandboxService) Status(ctx context.Context) (SandboxStatus, error) {
 }
 
 func (s SandboxService) Prepare(ctx context.Context) (SandboxStatus, error) {
-	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+	return s.lifecycle(ctx, "prepare", func(ctx context.Context, runtime sandbox.Runtime, report *SandboxLifecycleReport) error {
 		preparer, ok := runtime.(sandbox.PreparableRuntime)
 		if !ok {
+			report.Noop = true
+			report.Message = "sandbox backend does not require prepare"
 			return nil
 		}
+		report.Supported = true
+		report.Attempted = true
 		return preparer.Prepare(ctx)
 	})
 }
 
 func (s SandboxService) Repair(ctx context.Context) (SandboxStatus, error) {
-	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+	return s.lifecycle(ctx, "repair", func(ctx context.Context, runtime sandbox.Runtime, report *SandboxLifecycleReport) error {
 		if repairer, ok := runtime.(sandbox.RepairableRuntime); ok {
+			report.Supported = true
+			report.Attempted = true
 			return repairer.Repair(ctx)
 		}
 		preparer, ok := runtime.(sandbox.PreparableRuntime)
 		if !ok {
+			report.Noop = true
+			report.Message = "sandbox backend does not require repair"
 			return nil
 		}
+		report.Supported = true
+		report.Attempted = true
+		report.FallbackAction = "prepare"
 		return preparer.Prepare(ctx)
 	})
 }
 
 func (s SandboxService) Preflight(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
-	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+	return s.lifecycle(ctx, "preflight", func(ctx context.Context, runtime sandbox.Runtime, report *SandboxLifecycleReport) error {
 		preflight, ok := runtime.(sandbox.PreflightRuntime)
 		if !ok {
+			report.Noop = true
+			report.Message = "sandbox backend does not require preflight"
 			return nil
 		}
+		report.Supported = true
+		report.Attempted = true
 		return preflight.Preflight(ctx, sandbox.PreflightOptions{AllowNonElevatedRepair: allowNonElevatedRepair})
 	})
 }
 
 func (s SandboxService) Reset(ctx context.Context) (SandboxStatus, error) {
-	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+	return s.lifecycle(ctx, "reset", func(ctx context.Context, runtime sandbox.Runtime, report *SandboxLifecycleReport) error {
 		resetter, ok := runtime.(sandbox.ResettableRuntime)
 		if !ok {
+			report.Noop = true
+			report.Message = "sandbox backend does not require reset"
 			return nil
 		}
+		report.Supported = true
+		report.Attempted = true
 		return resetter.Reset(ctx)
 	})
 }
 
-func (s SandboxService) lifecycle(ctx context.Context, run func(context.Context, sandbox.Runtime) error) (SandboxStatus, error) {
+func (s SandboxService) lifecycle(ctx context.Context, action string, run func(context.Context, sandbox.Runtime, *SandboxLifecycleReport) error) (SandboxStatus, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
 		return SandboxStatus{}, err
 	}
+	report := SandboxLifecycleReport{Action: strings.TrimSpace(action)}
 	if s.services.sandbox == nil {
 		status := s.statusFromRuntime()
+		report.Error = "sandbox runtime is not configured"
+		status.Lifecycle = finalizeSandboxLifecycleReport(status, report)
 		return status, errors.New("app/services: sandbox runtime is not configured")
 	}
+	runtime := s.services.sandbox
+	if unwrapper, ok := runtime.(sandboxRuntimeUnwrapper); ok {
+		current, err := unwrapper.CurrentSandboxRuntime()
+		if err != nil {
+			status := s.statusFromRuntime()
+			report.Error = err.Error()
+			status.Lifecycle = finalizeSandboxLifecycleReport(status, report)
+			return status, err
+		}
+		runtime = current
+	}
 	if run != nil {
-		if err := run(ctx, s.services.sandbox); err != nil {
-			return s.statusFromRuntime(), err
+		if err := run(ctx, runtime, &report); err != nil {
+			status := s.statusFromRuntime()
+			report.Error = err.Error()
+			status.Lifecycle = finalizeSandboxLifecycleReport(status, report)
+			return status, err
 		}
 	}
-	return s.statusFromRuntime(), nil
+	status := s.statusFromRuntime()
+	status.Lifecycle = finalizeSandboxLifecycleReport(status, report)
+	return status, nil
+}
+
+func finalizeSandboxLifecycleReport(status SandboxStatus, report SandboxLifecycleReport) SandboxLifecycleReport {
+	report.Action = strings.TrimSpace(report.Action)
+	report.Backend = firstNonEmpty(strings.TrimSpace(report.Backend), status.ResolvedBackend, status.RequestedBackend)
+	report.FallbackAction = strings.TrimSpace(report.FallbackAction)
+	report.Message = strings.TrimSpace(report.Message)
+	report.Error = strings.TrimSpace(report.Error)
+	if report.Action == "" {
+		return SandboxLifecycleReport{}
+	}
+	if report.Message == "" {
+		switch {
+		case report.Error != "":
+			report.Message = "sandbox " + report.Action + " failed"
+		case report.Noop:
+			report.Message = "sandbox backend does not require " + report.Action
+		case report.FallbackAction != "":
+			report.Message = "sandbox " + report.Action + " used " + report.FallbackAction
+		default:
+			report.Message = "sandbox " + report.Action + " complete"
+		}
+	}
+	return report
 }
 
 func (s SandboxService) statusFromRuntime() SandboxStatus {

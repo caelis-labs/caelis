@@ -731,8 +731,11 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   from the composed runtime, treats host setup/fix/reset/clean as explicit
   no-op lifecycle operations, and invokes non-host backend lifecycle hooks when
   the currently constructed runtime supports them instead of routing those
-  commands through the old stack. The app-service TUI binding now maps this
-  status/lifecycle surface into the existing driver sandbox hooks.
+  commands through the old stack. Lifecycle calls now return a shared
+  action/backend/support/attempt/no-op/error report on `SandboxStatus`, so CLI,
+  `/doctor fix`, TUI bindings, and the future APP can render repair/setup
+  outcomes without surface-local sandbox logic. The app-service TUI binding now
+  maps this status/lifecycle surface into the existing driver sandbox hooks.
 - `protocol/acp/projector`: canonical session event projection to ACP
   updates and permission requests. It now also projects core-native
   sandbox/task terminal markers plus `_meta.terminal_info`,
@@ -798,9 +801,11 @@ The current verification path covers:
 - CLI `doctor` and `-doctor` -> new local stack -> shared status/sandbox
   services -> redacted text/JSON diagnostics
 - CLI `sandbox setup|fix|reset|clean` with host backend -> new local stack ->
-  shared sandbox service -> text/JSON sandbox lifecycle status
+  shared sandbox service -> text/JSON sandbox lifecycle status and lifecycle
+  action reports
 - app-service TUI binding -> shared sandbox service -> `/doctor fix` /
-  driver repair path for host backend with no old-stack dependency
+  driver repair path for host backend with no old-stack dependency and shared
+  repair reporting
 - resource discovery -> home/workspace skills + plugin descriptors ->
   deterministic app resource catalog
 - resource catalog -> app prompt assembler -> loop instructions -> provider
@@ -1852,9 +1857,13 @@ be migrated before retiring the old stack:
      policy gaps, and root-policy gaps. Settings-panel diagnostics and CLI
      `/doctor`/`sandbox` output now consume that single service contract instead
      of recomputing sandbox warnings per surface.
-   - Still pending: production doctor repair reporting and cross-platform
-     validation of the Windows restricted-token async session API after the
-     core-native session contract migration.
+   - Migrated baseline: sandbox lifecycle calls now return a shared
+     action/backend/support/attempt/no-op/error report on `SandboxStatus`.
+     `/doctor fix` preserves and renders the repair result, while CLI
+     `sandbox setup|fix|reset|clean` text/JSON output exposes the same report
+     without a surface-specific repair path.
+   - Still pending: cross-platform validation of the Windows restricted-token
+     async session API after the core-native session contract migration.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
@@ -1927,8 +1936,7 @@ be migrated before retiring the old stack:
      argument parsing packages have been removed; built-in tool execution now
      has a single core-native implementation path through
      `internal/adapters/tools/*`.
-   - Still pending: true in-flight prompt continuation for already-running
-     child processes, richer task lifecycle stores beyond local journals, and
+   - Still pending: richer task lifecycle stores beyond local journals and
      compact/rich tool-panel display metadata still need core-native adapters.
 
 9. Approval and permission policy
@@ -2328,8 +2336,8 @@ Recommended sequence:
    diagnostics, and visual settings/diagnostics editors.
 2. Close the remaining provider-specific tool declaration gaps in core-native
    adapters without reintroducing a parallel provider factory/catalog stack.
-3. Finish sandbox backend cleanup and production doctor repair reporting
-   without reintroducing the removed router/preset/tool stacks.
+3. Finish sandbox backend cleanup and Windows async-session cross-platform
+   validation without reintroducing the removed router/preset/tool stacks.
 4. Finish richer durable task metadata and terminal preview behavior behind
    `core/tool.Registry`; host process and SPAWN continuation are now baseline
    runtime capabilities.

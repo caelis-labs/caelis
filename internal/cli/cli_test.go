@@ -1188,6 +1188,16 @@ func TestRunSandboxSetupSubcommandJSONOutput(t *testing.T) {
 	if got := report["Route"]; got != "host" {
 		t.Fatalf("Route = %#v, want host", got)
 	}
+	lifecycle, ok := report["Lifecycle"].(map[string]any)
+	if !ok {
+		t.Fatalf("Lifecycle = %#v, want lifecycle report", report["Lifecycle"])
+	}
+	if got := lifecycle["action"]; got != "prepare" {
+		t.Fatalf("Lifecycle.action = %#v, want prepare", got)
+	}
+	if got := lifecycle["noop"]; got != true {
+		t.Fatalf("Lifecycle.noop = %#v, want true", got)
+	}
 }
 
 func TestRunSandboxSetupSubcommandAcceptsBackendOverride(t *testing.T) {
@@ -1223,8 +1233,16 @@ func TestRunSandboxFixSubcommandTextOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run(sandbox fix) error = %v; stderr=%q", err, errBuf.String())
 	}
-	if !strings.Contains(out.String(), "sandbox_requested_backend: host") {
-		t.Fatalf("sandbox fix output = %q, want requested host backend", out.String())
+	for _, want := range []string{
+		"sandbox_requested_backend: host",
+		"sandbox_lifecycle_action: repair",
+		"sandbox_lifecycle_backend: host",
+		"sandbox_lifecycle_noop: true",
+		"sandbox_lifecycle_message: sandbox backend does not require repair",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("sandbox fix output = %q, want %q", out.String(), want)
+		}
 	}
 }
 

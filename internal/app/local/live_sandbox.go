@@ -57,6 +57,10 @@ func (r *liveSandboxRuntime) runtime() (sandbox.Runtime, error) {
 	return r.current, nil
 }
 
+func (r *liveSandboxRuntime) CurrentSandboxRuntime() (sandbox.Runtime, error) {
+	return r.runtime()
+}
+
 func (r *liveSandboxRuntime) runtimes() ([]sandbox.Runtime, error) {
 	if r == nil {
 		return nil, errors.New("app/local: live sandbox is nil")

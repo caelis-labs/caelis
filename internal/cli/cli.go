@@ -39,32 +39,33 @@ type runResult struct {
 }
 
 type doctorResult struct {
-	AppName                  string   `json:"app_name,omitempty"`
-	UserID                   string   `json:"user_id,omitempty"`
-	WorkspaceKey             string   `json:"workspace_key,omitempty"`
-	WorkspaceCWD             string   `json:"workspace_cwd,omitempty"`
-	ActiveProvider           string   `json:"active_provider,omitempty"`
-	ActiveModel              string   `json:"active_model,omitempty"`
-	ActiveModelAlias         string   `json:"active_model_alias,omitempty"`
-	ReasoningEffort          string   `json:"reasoning_effort,omitempty"`
-	StoreBackend             string   `json:"store_backend,omitempty"`
-	StoreDir                 string   `json:"store_dir,omitempty"`
-	SandboxRequestedBackend  string   `json:"sandbox_requested_backend,omitempty"`
-	SandboxResolvedBackend   string   `json:"sandbox_resolved_backend,omitempty"`
-	SandboxRoute             string   `json:"sandbox_route,omitempty"`
-	SandboxIsolation         string   `json:"sandbox_isolation,omitempty"`
-	SandboxDefaultPermission string   `json:"sandbox_default_permission,omitempty"`
-	SandboxNetwork           string   `json:"sandbox_network,omitempty"`
-	SandboxDefaultNetwork    string   `json:"sandbox_default_network,omitempty"`
-	SandboxNetworkControl    bool     `json:"sandbox_network_control,omitempty"`
-	SandboxPathPolicy        bool     `json:"sandbox_path_policy,omitempty"`
-	SandboxReadableRoots     int      `json:"sandbox_readable_roots,omitempty"`
-	SandboxWritableRoots     int      `json:"sandbox_writable_roots,omitempty"`
-	SandboxSetupRequired     bool     `json:"sandbox_setup_required,omitempty"`
-	SandboxSetupError        string   `json:"sandbox_setup_error,omitempty"`
-	SandboxMarkerCurrent     bool     `json:"sandbox_setup_marker_current,omitempty"`
-	SandboxMarkerReason      string   `json:"sandbox_setup_marker_reason,omitempty"`
-	Warnings                 []string `json:"warnings,omitempty"`
+	AppName                  string                              `json:"app_name,omitempty"`
+	UserID                   string                              `json:"user_id,omitempty"`
+	WorkspaceKey             string                              `json:"workspace_key,omitempty"`
+	WorkspaceCWD             string                              `json:"workspace_cwd,omitempty"`
+	ActiveProvider           string                              `json:"active_provider,omitempty"`
+	ActiveModel              string                              `json:"active_model,omitempty"`
+	ActiveModelAlias         string                              `json:"active_model_alias,omitempty"`
+	ReasoningEffort          string                              `json:"reasoning_effort,omitempty"`
+	StoreBackend             string                              `json:"store_backend,omitempty"`
+	StoreDir                 string                              `json:"store_dir,omitempty"`
+	SandboxRequestedBackend  string                              `json:"sandbox_requested_backend,omitempty"`
+	SandboxResolvedBackend   string                              `json:"sandbox_resolved_backend,omitempty"`
+	SandboxRoute             string                              `json:"sandbox_route,omitempty"`
+	SandboxIsolation         string                              `json:"sandbox_isolation,omitempty"`
+	SandboxDefaultPermission string                              `json:"sandbox_default_permission,omitempty"`
+	SandboxNetwork           string                              `json:"sandbox_network,omitempty"`
+	SandboxDefaultNetwork    string                              `json:"sandbox_default_network,omitempty"`
+	SandboxNetworkControl    bool                                `json:"sandbox_network_control,omitempty"`
+	SandboxPathPolicy        bool                                `json:"sandbox_path_policy,omitempty"`
+	SandboxReadableRoots     int                                 `json:"sandbox_readable_roots,omitempty"`
+	SandboxWritableRoots     int                                 `json:"sandbox_writable_roots,omitempty"`
+	SandboxSetupRequired     bool                                `json:"sandbox_setup_required,omitempty"`
+	SandboxSetupError        string                              `json:"sandbox_setup_error,omitempty"`
+	SandboxMarkerCurrent     bool                                `json:"sandbox_setup_marker_current,omitempty"`
+	SandboxMarkerReason      string                              `json:"sandbox_setup_marker_reason,omitempty"`
+	SandboxLifecycle         *appservices.SandboxLifecycleReport `json:"sandbox_lifecycle,omitempty"`
+	Warnings                 []string                            `json:"warnings,omitempty"`
 }
 
 type sandboxStatusResult struct {
@@ -84,6 +85,7 @@ type sandboxStatusResult struct {
 	SetupMarkerCurrent bool
 	SetupMarkerReason  string
 	Diagnostics        []appservices.SandboxDiagnostic
+	Lifecycle          appservices.SandboxLifecycleReport
 }
 
 type cliConfig struct {
@@ -807,6 +809,9 @@ func doctorResultFromApp(view appviewmodel.StatusView, sandboxStatus appservices
 		SandboxMarkerReason:      strings.TrimSpace(sandboxStatus.SetupMarkerReason),
 		ReasoningEffort:          strings.TrimSpace(view.Model.ReasoningEffort),
 	}
+	if lifecycle := sandboxLifecycleResultFromApp(sandboxStatus.Lifecycle); lifecycle != nil {
+		result.SandboxLifecycle = lifecycle
+	}
 	if view.Model.Current != nil {
 		result.ActiveProvider = strings.TrimSpace(view.Model.Current.Provider)
 		result.ActiveModel = strings.TrimSpace(view.Model.Current.Model)
@@ -848,6 +853,9 @@ func formatDoctorResult(report doctorResult) string {
 		fmt.Sprintf("sandbox_setup_marker_current: %t", report.SandboxMarkerCurrent),
 		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(report.SandboxMarkerReason, "-")),
 	}
+	if report.SandboxLifecycle != nil {
+		lines = append(lines, formatSandboxLifecycleReport("sandbox_lifecycle", *report.SandboxLifecycle)...)
+	}
 	if len(report.Warnings) > 0 {
 		lines = append(lines, "warnings:")
 		for _, warning := range report.Warnings {
@@ -875,6 +883,28 @@ func sandboxStatusResultFromApp(status appservices.SandboxStatus) sandboxStatusR
 		SetupMarkerCurrent: status.SetupMarkerCurrent,
 		SetupMarkerReason:  strings.TrimSpace(status.SetupMarkerReason),
 		Diagnostics:        cloneSandboxDiagnostics(status.Diagnostics),
+		Lifecycle:          sandboxLifecycleValueFromApp(status.Lifecycle),
+	}
+}
+
+func sandboxLifecycleResultFromApp(in appservices.SandboxLifecycleReport) *appservices.SandboxLifecycleReport {
+	out := sandboxLifecycleValueFromApp(in)
+	if out.Action == "" {
+		return nil
+	}
+	return &out
+}
+
+func sandboxLifecycleValueFromApp(in appservices.SandboxLifecycleReport) appservices.SandboxLifecycleReport {
+	return appservices.SandboxLifecycleReport{
+		Action:         strings.TrimSpace(in.Action),
+		Backend:        strings.TrimSpace(in.Backend),
+		Supported:      in.Supported,
+		Attempted:      in.Attempted,
+		Noop:           in.Noop,
+		FallbackAction: strings.TrimSpace(in.FallbackAction),
+		Message:        strings.TrimSpace(in.Message),
+		Error:          strings.TrimSpace(in.Error),
 	}
 }
 
@@ -944,6 +974,7 @@ func formatSandboxStatus(status sandboxStatusResult) string {
 		fmt.Sprintf("sandbox_setup_marker_current: %t", status.SetupMarkerCurrent),
 		fmt.Sprintf("sandbox_setup_marker_reason: %s", firstNonEmptyString(strings.TrimSpace(status.SetupMarkerReason), "-")),
 	}
+	lines = append(lines, formatSandboxLifecycleReport("sandbox_lifecycle", status.Lifecycle)...)
 	if len(status.Diagnostics) > 0 {
 		lines = append(lines, "sandbox_diagnostics:")
 		for _, diagnostic := range status.Diagnostics {
@@ -951,6 +982,28 @@ func formatSandboxStatus(status sandboxStatusResult) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatSandboxLifecycleReport(prefix string, report appservices.SandboxLifecycleReport) []string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" || strings.TrimSpace(report.Action) == "" {
+		return nil
+	}
+	lines := []string{
+		fmt.Sprintf("%s_action: %s", prefix, strings.TrimSpace(report.Action)),
+		fmt.Sprintf("%s_backend: %s", prefix, firstNonEmptyString(strings.TrimSpace(report.Backend), "-")),
+		fmt.Sprintf("%s_supported: %t", prefix, report.Supported),
+		fmt.Sprintf("%s_attempted: %t", prefix, report.Attempted),
+		fmt.Sprintf("%s_noop: %t", prefix, report.Noop),
+	}
+	if fallback := strings.TrimSpace(report.FallbackAction); fallback != "" {
+		lines = append(lines, fmt.Sprintf("%s_fallback_action: %s", prefix, fallback))
+	}
+	lines = append(lines, fmt.Sprintf("%s_message: %s", prefix, firstNonEmptyString(strings.TrimSpace(report.Message), "-")))
+	if errText := strings.TrimSpace(report.Error); errText != "" {
+		lines = append(lines, fmt.Sprintf("%s_error: %s", prefix, errText))
+	}
+	return lines
 }
 
 func firstNonEmptyString(values ...string) string {

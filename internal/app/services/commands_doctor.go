@@ -11,14 +11,15 @@ import (
 
 func (s CommandService) executeDoctor(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
 	mode := strings.ToLower(strings.TrimSpace(args))
-	repaired := false
+	var lifecycle SandboxLifecycleReport
 	switch mode {
 	case "":
 	case "fix":
-		if _, err := s.services.Sandbox().Repair(ctx); err != nil {
+		repaired, err := s.services.Sandbox().Repair(ctx)
+		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		repaired = true
+		lifecycle = repaired.Lifecycle
 	default:
 		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /doctor [fix]")
 	}
@@ -30,9 +31,10 @@ func (s CommandService) executeDoctor(ctx context.Context, ref session.Ref, args
 	if err != nil {
 		return appviewmodel.CommandExecutionView{}, err
 	}
+	sandboxStatus.Lifecycle = lifecycle
 	output := formatCommandDoctor(status, sandboxStatus)
-	if repaired {
-		output = "sandbox repair complete\n\n" + output
+	if lifecycle.Action != "" {
+		output = formatCommandDoctorLifecycle(lifecycle) + "\n\n" + output
 	}
 	return appviewmodel.CommandExecutionView{
 		Handled: true,
@@ -58,6 +60,27 @@ func formatCommandDoctor(status appviewmodel.StatusView, sandboxStatus SandboxSt
 		lines = append(lines, fmt.Sprintf("  ok external ACP agents: %d", status.Agents.ExternalACPCount))
 	}
 	return strings.Join(commandNonEmpty(lines), "\n")
+}
+
+func formatCommandDoctorLifecycle(report SandboxLifecycleReport) string {
+	if strings.TrimSpace(report.Action) == "" {
+		return ""
+	}
+	action := strings.TrimSpace(report.Action)
+	lines := []string{"sandbox " + action + " complete:"}
+	lines = append(lines, "  message: "+firstNonEmpty(report.Message, "sandbox "+action+" complete"))
+	if backend := strings.TrimSpace(report.Backend); backend != "" {
+		lines = append(lines, "  backend: "+backend)
+	}
+	lines = append(lines, fmt.Sprintf("  supported: %t", report.Supported))
+	lines = append(lines, fmt.Sprintf("  attempted: %t", report.Attempted))
+	if report.Noop {
+		lines = append(lines, "  noop: true")
+	}
+	if fallback := strings.TrimSpace(report.FallbackAction); fallback != "" {
+		lines = append(lines, "  fallback_action: "+fallback)
+	}
+	return strings.Join(lines, "\n")
 }
 
 func formatCommandDoctorModel(modelStatus appviewmodel.ModelStatus) string {
