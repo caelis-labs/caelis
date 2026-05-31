@@ -1641,6 +1641,70 @@ func TestAgentServicePersistsRemoteControllerConfigOptions(t *testing.T) {
 	}
 }
 
+func TestTurnServiceRoutesActiveACPControllerThroughAgentService(t *testing.T) {
+	ctx := context.Background()
+	controller := session.ControllerBinding{
+		Kind:      session.ControllerACP,
+		ID:        "reviewer",
+		AgentName: "reviewer",
+		EpochID:   "controller-1",
+	}
+	state := session.State{
+		StateControllerConfigRef: "controller-1",
+		StateControllerMode:      "plan",
+	}
+	engine := &recordingEngine{
+		state: state,
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: state,
+		},
+	}
+	var invoked AgentInvokeRequest
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+		Invokers: map[string]AgentInvoker{
+			"reviewer": AgentInvokerFunc(func(_ context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
+				invoked = req
+				return AgentInvokeResult{
+					Events: []session.Event{{
+						Type: session.EventAssistant,
+						Message: &model.Message{
+							Role:  model.RoleAssistant,
+							Parts: []model.Part{model.NewTextPart("controller turn result")},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := svc.Turns().Begin(ctx, BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "delegate this turn",
+		Surface:    "headless",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	events := collectRuntimeTurnEvents(t, turn)
+	if invoked.AgentID != "reviewer" || invoked.Input != "delegate this turn" || invoked.Controller.Kind != session.ControllerACP || invoked.ControllerMode != "plan" {
+		t.Fatalf("invoked request = %#v, want active controller with plan mode", invoked)
+	}
+	if engine.turn.Input != "" {
+		t.Fatalf("engine turn = %#v, want controller route without local model turn", engine.turn)
+	}
+	if len(events) != 1 || session.EventText(events[0]) != "controller turn result" || events[0].Actor.Kind != session.ActorController {
+		t.Fatalf("turn events = %#v, want controller assistant event", events)
+	}
+}
+
 func TestControllerServicePersistsACPControllerConfigIntent(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

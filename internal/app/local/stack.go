@@ -365,6 +365,7 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.
 			return services.AgentInvokeResult{
 				StopReason:              "",
 				Events:                  result.Events,
+				Cursor:                  result.Cursor,
 				Recorded:                true,
 				ControllerConfigOptions: result.ConfigOptions,
 			}, nil
@@ -396,6 +397,7 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.
 		return services.AgentInvokeResult{
 			StopReason: "",
 			Events:     result.Events,
+			Cursor:     result.Cursor,
 			Recorded:   true,
 		}, nil
 	})

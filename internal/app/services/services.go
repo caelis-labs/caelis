@@ -1156,6 +1156,7 @@ type AgentInvokeRequest struct {
 type AgentInvokeResult struct {
 	StopReason              string
 	Events                  []session.Event
+	Cursor                  session.Cursor
 	Recorded                bool
 	ControllerConfigOptions []control.ConfigOption
 }
@@ -1214,9 +1215,11 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 		events = normalizeAgentInvokeEvents(ref.SessionID, req.Participant, cloneEvents(result.Events))
 	}
 	if len(events) > 0 && !result.Recorded {
-		if _, err := s.services.engine.RecordEvents(ctx, ref, events); err != nil {
+		cursor, err := s.services.engine.RecordEvents(ctx, ref, events)
+		if err != nil {
 			return AgentInvokeResult{}, err
 		}
+		result.Cursor = cursor
 	}
 	if controllerMode && len(result.ControllerConfigOptions) > 0 {
 		if err := s.persistControllerConfigOptions(ctx, ref, req.Controller, result.ControllerConfigOptions); err != nil {
@@ -1519,6 +1522,9 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 		return nil, errors.New("app/services: runtime engine is required")
 	}
 	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
+	if turn, ok, err := s.beginControllerTurn(ctx, ref, req); err != nil || ok {
+		return turn, err
+	}
 	modelRef := strings.TrimSpace(req.Model)
 	if modelRef == "" && s.services.settings != nil {
 		if cfg, ok, err := s.services.Models().Current(ctx, ref); err == nil && ok {
@@ -1571,6 +1577,28 @@ func (s TurnService) Begin(ctx context.Context, req BeginTurnRequest) (corerunti
 		return nil, err
 	}
 	return turnWithPrefixedEvents(turn, prefixEvents), nil
+}
+
+func (s TurnService) beginControllerTurn(ctx context.Context, ref session.Ref, req BeginTurnRequest) (coreruntime.Turn, bool, error) {
+	snapshot, controller, ok, err := s.services.Controllers().activeControllerSnapshot(ctx, ref)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	agentID := firstNonEmpty(controller.AgentName, controller.ID, controller.Label)
+	if agentID == "" {
+		return nil, true, errors.New("app/services: active ACP controller agent is unavailable")
+	}
+	result, err := s.services.Agents().Invoke(ctx, AgentInvokeRequest{
+		AgentID:      agentID,
+		SessionRef:   snapshot.Session.Ref,
+		Controller:   controller,
+		Input:        req.Input,
+		ContentParts: model.CloneContentParts(req.ContentParts),
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	return newCompletedTurn(snapshot.Session.Ref, result), true, nil
 }
 
 func (s TurnService) skillInstructions(ctx context.Context, req BeginTurnRequest) ([]string, error) {

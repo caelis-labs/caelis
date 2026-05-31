@@ -970,6 +970,12 @@ The completed work is intentionally limited to the reusable skeleton:
   remote-declared config options from `session/new` or `session/resume`, apply
   stored model/reasoning/mode intent through `session/set_config_option`, and
   persist the resulting option state for shared status/model projection.
+- Shared turn-controller routing baseline: `internal/app/services.TurnService`
+  now derives the active ACP controller from canonical handoff/session events
+  and routes ordinary surface turns through `AgentService.Invoke` before
+  falling back to the local model loop. Headless, ACP, TUI adapters, and the
+  future APP can therefore share controller prompt semantics instead of each
+  surface reinventing controller dispatch.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1225,6 +1231,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: the unused old `surfaces/headless` package has been
      removed. Remaining gatewayapp/e2e tests that still exercise the old kernel
      use local test helpers instead of importing a product surface.
+   - Migrated baseline: the ACP main-controller E2E formerly backed by
+     `app/gatewayapp` now runs against `internal/app/local`,
+     `ControllerService`, and `internal/surface/headless`, using a protocol-only
+     ACP helper process instead of the old gateway stack.
    - Migrated baseline: the unused old `surfaces/acpserver` wrapper around
      `gatewayapp.Stack.ACPAgent()` has been removed; the remaining ACP stdio
      path is the core-native `internal/surface/acpserver` entrypoint.
@@ -1574,6 +1584,11 @@ be migrated before retiring the old stack:
       as controller-scoped session events. Controller-scoped response events
       now also feed the derived controller binding, so the latest remote ACP
       session id is carried forward into the next controller prompt.
+    - Migrated baseline: shared `TurnService.Begin` now honors an active ACP
+      controller for normal surface turns. The controller route invokes the
+      registered external ACP agent through `AgentService`, returns a standard
+      runtime turn event stream, persists remote-declared config options, and
+      avoids starting a local model turn while the ACP controller is active.
     - Migrated baseline: ACP controller model/reasoning/mode intent now has a
       shared app-service contract. `ControllerService` derives the active ACP
       controller from canonical session state/events, persists controller
