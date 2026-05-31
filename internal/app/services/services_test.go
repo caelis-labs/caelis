@@ -2856,6 +2856,163 @@ func TestCompactionRetainsTaskHistoryIndex(t *testing.T) {
 	}
 }
 
+func TestCompactionRetainsControllerLifecycleIndex(t *testing.T) {
+	now := time.Date(2026, 5, 31, 11, 0, 0, 0, time.UTC)
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		Label:           "Reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	controllerEvent := func(runID string, phase control.ControllerInvocationPhase, status session.LifecycleStatus, at time.Time, errText string) session.Event {
+		return session.Event{
+			ID:        "evt-" + runID + "-" + string(phase),
+			SessionID: "sess-compact-controller",
+			Type:      session.EventLifecycle,
+			Time:      at,
+			Scope: &session.EventScope{
+				TurnID:     runID,
+				Source:     "controller",
+				Controller: controller,
+				ACP:        session.ACPRef{SessionID: "remote-reviewer"},
+			},
+			Lifecycle: &session.LifecycleEvent{Status: status, Reason: "controller " + string(phase)},
+			Meta: session.WithRuntimeControllerMeta(nil, map[string]any{
+				"source":            "controller_runner",
+				"run_id":            runID,
+				"phase":             string(phase),
+				"status":            string(status),
+				"running":           status == session.LifecycleRunning,
+				"active":            status == session.LifecycleRunning,
+				"turn_id":           runID,
+				"controller_kind":   string(session.ControllerACP),
+				"controller_id":     "reviewer",
+				"agent":             "reviewer",
+				"label":             "Reviewer",
+				"epoch_id":          "controller-1",
+				"remote_session_id": "remote-reviewer",
+				"started_at":        now.Format(time.RFC3339Nano),
+				"updated_at":        at.Format(time.RFC3339Nano),
+				"error":             errText,
+			}),
+		}
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-controller"},
+			Controller: controller,
+		},
+		Events: []session.Event{
+			{
+				ID:   "evt-user-controller",
+				Type: session.EventUser,
+				Time: now,
+				Message: &model.Message{
+					Role:  model.RoleUser,
+					Parts: []model.Part{model.NewTextPart("delegate to reviewer")},
+				},
+			},
+			controllerEvent("turn-controller", control.ControllerInvocationStarted, session.LifecycleRunning, now.Add(time.Second), ""),
+			controllerEvent("turn-controller", control.ControllerInvocationCompleted, session.LifecycleCompleted, now.Add(2*time.Second), ""),
+		},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := svc.Compaction().Compact(context.Background(), CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-compact-controller"}})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	meta, ok := event.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("compact meta = %#v, want compact metadata", event.Meta)
+	}
+	index := compactControllerIndexEntries(meta[compactControllerIndexKey])
+	if len(index) != 1 || meta["controller_index_count"] != 1 {
+		t.Fatalf("controller index = %#v meta=%#v, want one retained controller run", index, meta)
+	}
+
+	historySvc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine: &recordingEngine{snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-controller"},
+				Controller: controller,
+			},
+			Events: []session.Event{event},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, ok, err := historySvc.Controllers().Status(context.Background(), session.Ref{SessionID: "sess-compact-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || status.Lifecycle == nil || status.Lifecycle.RunID != "turn-controller" || status.Lifecycle.Phase != string(control.ControllerInvocationCompleted) || status.Lifecycle.Running {
+		t.Fatalf("controller status = %#v ok=%v, want compact-retained completed lifecycle", status, ok)
+	}
+
+	secondEngine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-controller"},
+			Controller: controller,
+		},
+		Events: []session.Event{
+			event,
+			controllerEvent("turn-controller-2", control.ControllerInvocationFailed, session.LifecycleFailed, now.Add(3*time.Second), "remote controller failed"),
+		},
+	}}
+	secondSvc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  secondEngine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := secondSvc.Compaction().Compact(context.Background(), CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-compact-controller"}})
+	if err != nil {
+		t.Fatalf("second Compact() error = %v", err)
+	}
+	secondMeta, ok := second.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("second compact meta = %#v, want compact metadata", second.Meta)
+	}
+	secondIndex := compactControllerIndexEntries(secondMeta[compactControllerIndexKey])
+	if len(secondIndex) != 2 || secondMeta["controller_index_count"] != 2 {
+		t.Fatalf("second controller index = %#v meta=%#v, want previous run plus failed run", secondIndex, secondMeta)
+	}
+	secondHistorySvc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine: &recordingEngine{snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-controller"},
+				Controller: controller,
+			},
+			Events: []session.Event{second},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStatus, ok, err := secondHistorySvc.Controllers().Status(context.Background(), session.Ref{SessionID: "sess-compact-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || secondStatus.Lifecycle == nil || secondStatus.Lifecycle.RunID != "turn-controller-2" || secondStatus.Lifecycle.Phase != string(control.ControllerInvocationFailed) {
+		t.Fatalf("second controller status = %#v ok=%v, want latest failed compact-retained lifecycle", secondStatus, ok)
+	}
+	if len(secondStatus.Diagnostics) != 1 || secondStatus.Diagnostics[0].Severity != "error" || !strings.Contains(secondStatus.Diagnostics[0].Message, "remote controller failed") {
+		t.Fatalf("second controller diagnostics = %#v, want retained failed diagnostic", secondStatus.Diagnostics)
+	}
+}
+
 func TestCompactionUsesConfiguredModelProvider(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

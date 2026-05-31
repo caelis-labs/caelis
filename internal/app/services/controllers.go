@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 	"time"
 
@@ -367,21 +368,31 @@ func (s ControllerService) statusFromSnapshot(ctx context.Context, snapshot sess
 }
 
 func controllerLifecycleRunsFromEvents(events []session.Event, controller session.ControllerBinding) []ControllerRunStatus {
+	return controllerRunStatusesFromEventsForController(events, controller, true)
+}
+
+func controllerRunStatusesFromEvents(events []session.Event) []ControllerRunStatus {
+	return controllerRunStatusesFromEventsForController(events, session.ControllerBinding{}, false)
+}
+
+func controllerRunStatusesFromEventsForController(events []session.Event, controller session.ControllerBinding, filter bool) []ControllerRunStatus {
 	if len(events) == 0 {
 		return nil
 	}
 	byID := map[string]ControllerRunStatus{}
 	for _, event := range events {
-		run, ok := controllerRunStatusFromLifecycleEvent(event, controller)
-		if !ok {
-			continue
+		for _, run := range controllerRunStatusesFromEvent(event, controller, filter) {
+			key := controllerRunHistoryKey(run)
+			if key == "" {
+				continue
+			}
+			existing, exists := byID[key]
+			if !exists {
+				byID[key] = run
+				continue
+			}
+			byID[key] = mergeControllerRunHistory(existing, run)
 		}
-		existing, exists := byID[run.ID]
-		if !exists {
-			byID[run.ID] = run
-			continue
-		}
-		byID[run.ID] = mergeControllerRunHistory(existing, run)
 	}
 	if len(byID) == 0 {
 		return nil
@@ -390,6 +401,7 @@ func controllerLifecycleRunsFromEvents(events []session.Event, controller sessio
 	for _, run := range byID {
 		out = append(out, run)
 	}
+	sortControllerRuns(out)
 	return out
 }
 
@@ -401,11 +413,76 @@ func controllerRunStatusFromLifecycleEvent(event session.Event, controller sessi
 	if len(meta) == 0 {
 		return ControllerRunStatus{}, false
 	}
+	return controllerRunStatusFromRuntimeControllerMeta(meta, event, controller, true)
+}
+
+func controllerRunStatusesFromEvent(event session.Event, controller session.ControllerBinding, filter bool) []ControllerRunStatus {
+	if runs, ok := controllerRunStatusFromCompactEvent(event, controller, filter); ok {
+		return runs
+	}
+	if event.Type != session.EventLifecycle || event.Lifecycle == nil {
+		return nil
+	}
+	meta := session.RuntimeControllerMeta(event.Meta)
+	if len(meta) == 0 {
+		return nil
+	}
+	run, ok := controllerRunStatusFromRuntimeControllerMeta(meta, event, controller, filter)
+	if !ok {
+		return nil
+	}
+	return []ControllerRunStatus{run}
+}
+
+func controllerRunStatusFromCompactEvent(event session.Event, controller session.ControllerBinding, filter bool) ([]ControllerRunStatus, bool) {
+	if !isCompactCheckpoint(event) {
+		return nil, false
+	}
+	compact, ok := mapAny(event.Meta[compactMetaKey])
+	if !ok {
+		return nil, false
+	}
+	entries := compactControllerIndexEntries(compact[compactControllerIndexKey])
+	if len(entries) == 0 {
+		return nil, false
+	}
+	out := make([]ControllerRunStatus, 0, len(entries))
+	for _, entry := range entries {
+		run, ok := controllerRunStatusFromRuntimeControllerMeta(entry, event, controller, filter)
+		if ok {
+			out = append(out, run)
+		}
+	}
+	return out, true
+}
+
+func compactControllerIndexEntries(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := mapAny(item); ok {
+				out = append(out, mapped)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
+}
+
+func controllerRunStatusFromRuntimeControllerMeta(meta map[string]any, event session.Event, controller session.ControllerBinding, filter bool) (ControllerRunStatus, bool) {
 	eventController := controllerBindingFromLifecycleMeta(meta)
 	if event.Scope != nil {
 		eventController = mergeControllerBinding(eventController, event.Scope.Controller)
 	}
-	if !controllerLifecycleMatches(controller, eventController) {
+	if filter {
+		if !controllerLifecycleMatches(controller, eventController) {
+			return ControllerRunStatus{}, false
+		}
+	} else if eventController.Kind != session.ControllerACP || firstNonEmpty(eventController.ID, eventController.AgentName, eventController.Label) == "" {
 		return ControllerRunStatus{}, false
 	}
 	runID := firstNonEmpty(
@@ -416,13 +493,23 @@ func controllerRunStatusFromLifecycleEvent(event session.Event, controller sessi
 	if runID == "" {
 		return ControllerRunStatus{}, false
 	}
+	lifecycleStatus := session.LifecycleStatus(stringFromAny(meta["status"]))
+	if event.Lifecycle != nil && lifecycleStatus == "" {
+		lifecycleStatus = event.Lifecycle.Status
+	}
 	phase := control.ControllerInvocationPhase(firstNonEmpty(
 		stringFromAny(meta["phase"]),
-		controllerPhaseFromLifecycleStatus(event.Lifecycle.Status),
+		controllerPhaseFromLifecycleStatus(lifecycleStatus),
 	))
 	running, ok := firstBool(meta["running"])
 	if !ok {
-		running = event.Lifecycle.Status == session.LifecycleRunning
+		running = lifecycleStatus == session.LifecycleRunning ||
+			phase == control.ControllerInvocationStarted ||
+			phase == control.ControllerInvocationRemoteSession
+	}
+	active, ok := firstBool(meta["active"])
+	if !ok {
+		active = running
 	}
 	updatedAt := firstTime(meta["updated_at"])
 	if updatedAt.IsZero() {
@@ -435,17 +522,84 @@ func controllerRunStatusFromLifecycleEvent(event session.Event, controller sessi
 	return normalizeControllerRunStatus(ControllerRunStatus{
 		ID:              runID,
 		Phase:           phase,
-		SessionRef:      session.Ref{SessionID: strings.TrimSpace(event.SessionID)},
+		SessionRef:      session.Ref{SessionID: firstNonEmpty(stringFromAny(meta["session_id"]), strings.TrimSpace(event.SessionID))},
 		TurnID:          firstNonEmpty(stringFromAny(meta["turn_id"]), eventTurnID(event)),
 		Controller:      eventController,
 		RemoteSessionID: firstNonEmpty(stringFromAny(meta["remote_session_id"]), eventController.RemoteSessionID, eventACPRemoteSessionID(event)),
 		Running:         running,
-		Active:          boolFromAny(meta["active"]),
+		Active:          active,
 		Recovering:      boolFromAny(meta["recovering"]),
 		Error:           stringFromAny(meta["error"]),
 		StartedAt:       startedAt,
 		UpdatedAt:       updatedAt,
 	}), true
+}
+
+func controllerRunRetentionMeta(run ControllerRunStatus) map[string]any {
+	run = normalizeControllerRunStatus(run)
+	if strings.TrimSpace(run.ID) == "" {
+		return nil
+	}
+	meta := map[string]any{
+		"schema":          session.RuntimeControllerMetaName,
+		"schema_version":  session.RuntimeControllerMetaVersion,
+		"source":          "compact",
+		"run_id":          strings.TrimSpace(run.ID),
+		"phase":           strings.TrimSpace(string(run.Phase)),
+		"running":         run.Running,
+		"active":          run.Active,
+		"recovering":      run.Recovering,
+		"controller_kind": strings.TrimSpace(string(run.Controller.Kind)),
+		"controller_id":   strings.TrimSpace(run.Controller.ID),
+		"agent":           firstNonEmpty(run.Controller.AgentName, run.Controller.Label, run.Controller.ID),
+		"label":           strings.TrimSpace(run.Controller.Label),
+		"epoch_id":        strings.TrimSpace(run.Controller.EpochID),
+	}
+	for key, value := range map[string]string{
+		"session_id":        run.SessionRef.SessionID,
+		"turn_id":           run.TurnID,
+		"remote_session_id": firstNonEmpty(run.RemoteSessionID, run.Controller.RemoteSessionID),
+		"error":             run.Error,
+	} {
+		if text := strings.TrimSpace(value); text != "" {
+			meta[key] = text
+		}
+	}
+	if !run.StartedAt.IsZero() {
+		meta["started_at"] = run.StartedAt.Format(time.RFC3339Nano)
+	}
+	if !run.UpdatedAt.IsZero() {
+		meta["updated_at"] = run.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	return meta
+}
+
+func controllerRunHistoryKey(run ControllerRunStatus) string {
+	run = normalizeControllerRunStatus(run)
+	parts := []string{
+		strings.TrimSpace(string(run.Controller.Kind)),
+		strings.TrimSpace(run.Controller.EpochID),
+		strings.TrimSpace(firstNonEmpty(run.Controller.ID, run.Controller.AgentName, run.Controller.Label)),
+		strings.TrimSpace(run.ID),
+	}
+	return strings.Join(commandNonEmpty(parts), "\x00")
+}
+
+func sortControllerRuns(runs []ControllerRunStatus) {
+	sort.SliceStable(runs, func(i, j int) bool {
+		left := normalizeControllerRunStatus(runs[i])
+		right := normalizeControllerRunStatus(runs[j])
+		if !left.UpdatedAt.Equal(right.UpdatedAt) {
+			if left.UpdatedAt.IsZero() {
+				return false
+			}
+			if right.UpdatedAt.IsZero() {
+				return true
+			}
+			return left.UpdatedAt.After(right.UpdatedAt)
+		}
+		return controllerRunHistoryKey(left) < controllerRunHistoryKey(right)
+	})
 }
 
 func mergeControllerRunHistory(existing ControllerRunStatus, next ControllerRunStatus) ControllerRunStatus {

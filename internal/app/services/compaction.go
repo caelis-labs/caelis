@@ -14,11 +14,13 @@ import (
 )
 
 const (
-	compactMetaKey               = "compact"
-	compactTaskIndexKey          = "task_index"
-	compactContractVersion       = 1
-	defaultCompactMaxChars       = 12000
-	defaultCompactTaskIndexLimit = 100
+	compactMetaKey                     = "compact"
+	compactTaskIndexKey                = "task_index"
+	compactControllerIndexKey          = "controller_index"
+	compactContractVersion             = 1
+	defaultCompactMaxChars             = 12000
+	defaultCompactTaskIndexLimit       = 100
+	defaultCompactControllerIndexLimit = 50
 )
 
 var errCompactNoModelResponse = errors.New("app/services: compaction model stream ended without response")
@@ -259,6 +261,11 @@ func compactEvent(active session.Session, source []session.Event, retention []se
 		compact["task_index_count"] = len(taskIndex)
 		compact["task_index_limit"] = defaultCompactTaskIndexLimit
 	}
+	if controllerIndex := compactControllerIndex(retention); len(controllerIndex) > 0 {
+		compact[compactControllerIndexKey] = controllerIndex
+		compact["controller_index_count"] = len(controllerIndex)
+		compact["controller_index_limit"] = defaultCompactControllerIndexLimit
+	}
 	meta := map[string]any{
 		compactMetaKey: compact,
 	}
@@ -403,6 +410,28 @@ func compactTaskIndex(events []session.Event) []map[string]any {
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
 		meta := taskItemRetentionMeta(item)
+		if len(meta) > 0 {
+			out = append(out, meta)
+		}
+	}
+	return out
+}
+
+func compactControllerIndex(events []session.Event) []map[string]any {
+	if len(events) == 0 {
+		return nil
+	}
+	runs := controllerRunStatusesFromEvents(events)
+	if len(runs) == 0 {
+		return nil
+	}
+	sortControllerRuns(runs)
+	if len(runs) > defaultCompactControllerIndexLimit {
+		runs = runs[:defaultCompactControllerIndexLimit]
+	}
+	out := make([]map[string]any, 0, len(runs))
+	for _, run := range runs {
+		meta := controllerRunRetentionMeta(run)
 		if len(meta) > 0 {
 			out = append(out, meta)
 		}

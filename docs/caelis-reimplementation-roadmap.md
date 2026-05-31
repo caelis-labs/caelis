@@ -2178,14 +2178,19 @@ be migrated before retiring the old stack:
       completed, and failed phases. `ControllerService` rebuilds the latest
       lifecycle from durable session events and overlays live/recovery journal
       state when present.
+    - Migrated baseline: compact checkpoints now retain a bounded controller
+      lifecycle index in compact metadata. `ControllerService` can restore the
+      latest controller run and diagnostics from compacted history, and repeated
+      compactions merge prior controller index entries with post-compact
+      lifecycle events.
     - Migrated baseline: host async command sessions now persist process id and
       durable stdout/stderr stream files when a sandbox `StateDir` is
       available. A restarted host sandbox can reopen a still-running process as
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: richer visual controller panels plus lifecycle
-      retention/compaction policy are not implemented.
+    - Still pending: richer visual controller panels and configurable
+      controller lifecycle retention policy are not implemented.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2303,6 +2308,10 @@ be migrated before retiring the old stack:
       for command and delegated subagent work. Repeated compactions merge the
       previous compact task index with new lifecycle events, so task panels can
       survive compacted history without scanning retired source events.
+    - Migrated baseline: compaction now also carries a bounded controller
+      lifecycle index. Controller status and diagnostics can be restored from a
+      compact checkpoint even after earlier controller lifecycle events are no
+      longer scanned directly.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill
