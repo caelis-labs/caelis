@@ -1167,6 +1167,9 @@ type AgentInvokeRequest struct {
 	Participant               session.ParticipantBinding
 	Input                     string
 	ContentParts              []model.ContentPart
+	// DeferRecord returns normalized events without writing them, so callers can
+	// persist a larger atomic event batch.
+	DeferRecord bool
 }
 
 type AgentInvokeResult struct {
@@ -1230,7 +1233,7 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	} else {
 		events = normalizeAgentInvokeEvents(ref.SessionID, req.Participant, req.TurnID, cloneEvents(result.Events))
 	}
-	if len(events) > 0 && !result.Recorded {
+	if len(events) > 0 && !result.Recorded && !req.DeferRecord {
 		cursor, err := s.services.engine.RecordEvents(ctx, ref, events)
 		if err != nil {
 			return AgentInvokeResult{}, err

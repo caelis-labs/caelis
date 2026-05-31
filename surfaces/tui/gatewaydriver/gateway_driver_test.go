@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
+	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
-	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -133,31 +133,6 @@ func TestGatewayDriverKeepsServiceGatewayUsableAfterSandboxUpdate(t *testing.T) 
 	}
 	if got, err := driver.gateway(); err != nil || got != after {
 		t.Fatalf("driver.gateway() after rebuild = %p, %v; want current %p", got, err, after)
-	}
-}
-
-func TestAllocateSideAgentHandleUsesSharedNamePool(t *testing.T) {
-	used := map[string]struct{}{}
-
-	first := allocateSideAgentHandle(used, "claude")
-	if !agenthandle.ContainsPoolName(first) {
-		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", first)
-	}
-	used[first] = struct{}{}
-	second := allocateSideAgentHandle(used, "claude")
-	if !agenthandle.ContainsPoolName(second) || second == first {
-		t.Fatalf("allocateSideAgentHandle() = %q after %q, want unique shared pool handle", second, first)
-	}
-	used[second] = struct{}{}
-	third := allocateSideAgentHandle(used, "claude")
-	if !agenthandle.ContainsPoolName(third) || third == first || third == second {
-		t.Fatalf("allocateSideAgentHandle() = %q after %q/%q, want unique shared pool handle", third, first, second)
-	}
-	if got := allocateSideAgentHandle(used, "anthropic/Claude Agent"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", got)
-	}
-	if got := allocateSideAgentHandle(used, "!!!"); !agenthandle.ContainsPoolName(got) {
-		t.Fatalf("allocateSideAgentHandle() = %q, want shared human-name pool handle", got)
 	}
 }
 
@@ -1629,12 +1604,16 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 		}
 	}
 
-	status, err := driver.AddAgent(ctx, "copilot")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent add copilot"})
 	if err != nil {
-		t.Fatalf("AddAgent() error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent add copilot) error = %v", err)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after add) error = %v", err)
 	}
 	if len(status.Participants) != 0 {
-		t.Fatalf("AddAgent() status = %#v, want no session participants", status)
+		t.Fatalf("agent add status = %#v, want no session participants", status)
 	}
 	agents, err = driver.ListAgents(ctx, 10)
 	if err != nil {
@@ -1651,20 +1630,28 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 		t.Fatalf("agent use candidates = %#v, want local and copilot", useCandidates)
 	}
 
-	status, err = driver.HandoffAgent(ctx, "copilot")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent use copilot"})
 	if err != nil {
-		t.Fatalf("HandoffAgent(copilot) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent use copilot) error = %v", err)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after ACP handoff) error = %v", err)
 	}
 	if got := strings.ToLower(strings.TrimSpace(status.ControllerKind)); got != "acp" {
 		t.Fatalf("controller kind after ACP handoff = %q, want acp", status.ControllerKind)
 	}
 
-	if _, err := driver.RemoveAgent(ctx, "copilot"); err == nil {
-		t.Fatal("RemoveAgent(active copilot) error = nil, want use local first")
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent remove copilot"}); err == nil {
+		t.Fatal("ExecuteCommand(/agent remove active copilot) error = nil, want use local first")
 	}
-	status, err = driver.HandoffAgent(ctx, "local")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent use local"})
 	if err != nil {
-		t.Fatalf("HandoffAgent(local) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent use local) error = %v", err)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after local handoff) error = %v", err)
 	}
 	if got := strings.ToLower(strings.TrimSpace(status.ControllerKind)); got != "kernel" {
 		t.Fatalf("controller kind after local handoff = %q, want kernel", status.ControllerKind)
@@ -1678,12 +1665,16 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 		t.Fatalf("agent remove candidates = %#v, want registered copilot", removeCandidates)
 	}
 
-	status, err = driver.RemoveAgent(ctx, "copilot")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent remove copilot"})
 	if err != nil {
-		t.Fatalf("RemoveAgent(copilot) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent remove copilot) error = %v", err)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after remove) error = %v", err)
 	}
 	if len(status.Participants) != 0 {
-		t.Fatalf("RemoveAgent() status = %#v, want zero participants", status)
+		t.Fatalf("agent remove status = %#v, want zero participants", status)
 	}
 	agents, err = driver.ListAgents(ctx, 10)
 	if err != nil {
@@ -1694,47 +1685,39 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	}
 }
 
-func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *testing.T) {
+func TestGatewayDriverDynamicAgentCommandDoesNotPersistParticipantOnPromptConflict(t *testing.T) {
 	ctx := context.Background()
-	activeSession := session.Session{
-		SessionRef: session.SessionRef{
+	root := t.TempDir()
+	engine := &appServiceDriverEngine{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: coreconfig.Runtime{
 			AppName:      "caelis",
 			UserID:       "agent-conflict-rollback-test",
-			SessionID:    "agent-conflict-session",
 			WorkspaceKey: "ws",
+			WorkspaceCWD: root,
 		},
-		CWD:        t.TempDir(),
-		Controller: session.ControllerBinding{Kind: session.ControllerKindKernel},
-		Participants: []session.ParticipantBinding{{
-			ID:        "side-existing",
-			Kind:      session.ParticipantKindACP,
-			Role:      session.ParticipantRoleSidecar,
-			AgentName: "copilot",
-			Label:     "@ari",
-			SessionID: "remote-existing",
+		Engine: engine,
+		Agents: []appservices.AgentDescriptor{{
+			ID:          "copilot",
+			Name:        "copilot",
+			Kind:        appservices.AgentKindExternalACP,
+			Description: "ACP sidecar agent.",
+			Command:     "copilot-acp",
 		}},
+		Invokers: map[string]appservices.AgentInvoker{
+			"copilot": appservices.AgentInvokerFunc(func(context.Context, appservices.AgentInvokeRequest) (appservices.AgentInvokeResult, error) {
+				return appservices.AgentInvokeResult{}, &kernel.Error{
+					Kind:    kernel.KindConflict,
+					Code:    kernel.CodeActiveRunConflict,
+					Message: "active participant run already in progress",
+				}
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("appservices.New() error = %v", err)
 	}
-	gw := &sideAgentRollbackGatewayService{
-		session: activeSession,
-		promptErr: &kernel.Error{
-			Kind:    kernel.KindConflict,
-			Code:    kernel.CodeActiveRunConflict,
-			Message: "active participant run already in progress",
-		},
-	}
-	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		GatewayFn: func() GatewayService { return gw },
-		Workspace: session.WorkspaceRef{
-			Key: "ws",
-			CWD: activeSession.CWD,
-		},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return session.CloneSession(gw.session), nil
-		},
-		ListACPAgentsFn: func() []ACPAgentInfo {
-			return []ACPAgentInfo{{Name: "copilot", Description: "ACP sidecar agent."}}
-		},
-	}, activeSession.SessionID, "surface", "ollama/llama3")
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "agent-conflict-session", "surface", "ollama/llama3")
 	if err != nil {
 		t.Fatalf("NewGatewayDriver() error = %v", err)
 	}
@@ -1742,42 +1725,30 @@ func TestGatewayDriverStartAgentSubagentRollsBackAttachmentOnPromptConflict(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(activeSession.CWD, "side.png"), imageRaw, 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "side.png"), imageRaw, 0o600); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = driver.StartAgentSubagent(ctx, "copilot", "  second prompt  ", []Attachment{{Name: "side.png", Offset: len([]rune("second "))}})
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{
+		Input:       "/copilot second prompt",
+		Attachments: []Attachment{{Name: "side.png", Offset: len([]rune("second "))}},
+	})
 	if err == nil {
-		t.Fatal("StartAgentSubagent() error = nil, want active run conflict")
+		t.Fatal("ExecuteCommand(/copilot) error = nil, want active run conflict")
 	}
 	var gwErr *kernel.Error
 	if !kernel.As(err, &gwErr) || gwErr.Code != kernel.CodeActiveRunConflict {
-		t.Fatalf("StartAgentSubagent() error = %v, want active run conflict", err)
-	}
-	if len(gw.attachReqs) != 1 {
-		t.Fatalf("AttachParticipant calls = %d, want 1", len(gw.attachReqs))
-	}
-	if len(gw.promptReqs) != 1 || gw.promptReqs[0].Input != "second prompt" {
-		t.Fatalf("PromptParticipant requests = %#v, want trimmed prompt", gw.promptReqs)
-	}
-	if parts := gw.promptReqs[0].ContentParts; len(parts) != 3 ||
-		parts[0].Type != model.ContentPartText || parts[0].Text != "second " ||
-		parts[1].Type != model.ContentPartImage || parts[1].FileName != "side.png" ||
-		parts[2].Type != model.ContentPartText || parts[2].Text != "prompt" {
-		t.Fatalf("PromptParticipant content parts = %#v, want text/image/text", parts)
-	}
-	if len(gw.detachReqs) != 1 || gw.detachReqs[0].ParticipantID != "side-new" {
-		t.Fatalf("DetachParticipant requests = %#v, want rollback of new sidecar", gw.detachReqs)
+		t.Fatalf("ExecuteCommand(/copilot) error = %v, want active run conflict", err)
 	}
 	status, err := driver.AgentStatus(ctx)
 	if err != nil {
 		t.Fatalf("AgentStatus() error = %v", err)
 	}
-	if len(status.Participants) != 1 {
-		t.Fatalf("AgentStatus().Participants = %#v, want only first sidecar after rollback", status.Participants)
+	if len(status.Participants) != 0 {
+		t.Fatalf("AgentStatus().Participants = %#v, want no partial sidecar after failed command", status.Participants)
 	}
-	if status.Participants[0].ID != "side-existing" || status.Participants[0].AgentName != "copilot" || !agenthandle.ContainsPoolName(strings.TrimPrefix(status.Participants[0].Label, "@")) {
-		t.Fatalf("remaining participant = %#v, want original copilot sidecar with shared pool label", status.Participants[0])
+	if len(engine.events) != 0 {
+		t.Fatalf("recorded events = %#v, want no partial sidecar events after failed command", engine.events)
 	}
 }
 
@@ -2464,7 +2435,7 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := driver.AddAgentWithOptions(ctx, "claude", AgentAddOptions{Install: true})
+		_, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent install claude"})
 		done <- err
 	}()
 
@@ -2475,7 +2446,7 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 		}
 		select {
 		case err := <-done:
-			t.Fatalf("AddAgentWithOptions returned before fake npm started: %v", err)
+			t.Fatalf("ExecuteCommand(/agent install claude) returned before fake npm started: %v", err)
 		case <-deadline:
 			t.Fatal("fake npm did not start")
 		case <-time.After(10 * time.Millisecond):
@@ -2487,10 +2458,10 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 	select {
 	case err := <-done:
 		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("AddAgentWithOptions error = %v, want context.Canceled", err)
+			t.Fatalf("ExecuteCommand(/agent install claude) error = %v, want context.Canceled", err)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("AddAgentWithOptions did not return after Interrupt")
+		t.Fatal("ExecuteCommand(/agent install claude) did not return after Interrupt")
 	}
 }
 
@@ -3324,82 +3295,6 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	if status.PermissionGrantCount != 2 || status.PermissionReadRootCount != 3 || status.PermissionWriteRootCount != 1 {
 		t.Fatalf("permission grant summary = count:%d read:%d write:%d, want 2/3/1", status.PermissionGrantCount, status.PermissionReadRootCount, status.PermissionWriteRootCount)
 	}
-}
-
-type sideAgentRollbackGatewayService struct {
-	activeSubmitGatewayService
-	session    session.Session
-	promptErr  error
-	attachReqs []kernel.AttachParticipantRequest
-	promptReqs []kernel.PromptParticipantRequest
-	detachReqs []kernel.DetachParticipantRequest
-}
-
-func (g *sideAgentRollbackGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
-	participants := make([]kernel.ParticipantState, 0, len(g.session.Participants))
-	for _, participant := range g.session.Participants {
-		participants = append(participants, kernel.ParticipantState{
-			ID:             participant.ID,
-			Kind:           participant.Kind,
-			Role:           participant.Role,
-			AgentName:      participant.AgentName,
-			Label:          participant.Label,
-			SessionID:      participant.SessionID,
-			Source:         participant.Source,
-			ParentTurnID:   participant.ParentTurnID,
-			DelegationID:   participant.DelegationID,
-			ContextSyncSeq: participant.ContextSyncSeq,
-			AttachedAt:     participant.AttachedAt,
-			ControllerRef:  participant.ControllerRef,
-		})
-	}
-	return kernel.ControlPlaneState{
-		SessionRef: g.session.SessionRef,
-		Controller: kernel.ControllerState{
-			Kind:            g.session.Controller.Kind,
-			ControllerID:    g.session.Controller.ControllerID,
-			AgentName:       g.session.Controller.AgentName,
-			Label:           g.session.Controller.Label,
-			EpochID:         g.session.Controller.EpochID,
-			RemoteSessionID: g.session.Controller.RemoteSessionID,
-			ContextSyncSeq:  g.session.Controller.ContextSyncSeq,
-			AttachedAt:      g.session.Controller.AttachedAt,
-			Source:          g.session.Controller.Source,
-		},
-		Participants: participants,
-	}, nil
-}
-
-func (g *sideAgentRollbackGatewayService) AttachParticipant(_ context.Context, req kernel.AttachParticipantRequest) (session.Session, error) {
-	g.attachReqs = append(g.attachReqs, req)
-	g.session.Participants = append(g.session.Participants, session.ParticipantBinding{
-		ID:        "side-new",
-		Kind:      session.ParticipantKindACP,
-		Role:      req.Role,
-		AgentName: req.Agent,
-		Label:     req.Label,
-		SessionID: "remote-new",
-		Source:    req.Source,
-	})
-	return session.CloneSession(g.session), nil
-}
-
-func (g *sideAgentRollbackGatewayService) PromptParticipant(_ context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
-	g.promptReqs = append(g.promptReqs, req)
-	return kernel.BeginTurnResult{}, g.promptErr
-}
-
-func (g *sideAgentRollbackGatewayService) DetachParticipant(_ context.Context, req kernel.DetachParticipantRequest) (session.Session, error) {
-	g.detachReqs = append(g.detachReqs, req)
-	kept := g.session.Participants[:0]
-	for _, participant := range g.session.Participants {
-		if participant.ID == req.ParticipantID {
-			continue
-		}
-		kept = append(kept, participant)
-	}
-	g.session.Participants = kept
-	return session.CloneSession(g.session), nil
 }
 
 type activeSubmitGatewayService struct {

@@ -40,11 +40,11 @@ func TestLocalStackClaudeBuiltInACPE2E(t *testing.T) {
 	}
 
 	const want = "caelis claude acp e2e ok"
-	turn, err := driver.StartAgentSubagent(ctx, "claude", "Reply with exactly: "+want, nil)
+	view, err := driver.ExecuteCommand(ctx, gatewaydriver.CommandExecutionOptions{Input: "/claude Reply with exactly: " + want})
 	if err != nil {
-		t.Fatalf("StartAgentSubagent(claude) error = %v", err)
+		t.Fatalf("ExecuteCommand(/claude) error = %v", err)
 	}
-	result := strings.TrimSpace(drainGatewayDriverAssistantText(ctx, t, turn))
+	result := strings.TrimSpace(commandAssistantText(view.Events))
 	if !strings.Contains(result, want) {
 		t.Fatalf("claude sidecar result = %q, want %q", result, want)
 	}
@@ -217,30 +217,15 @@ func registerClaudeACPAgentForE2E(ctx context.Context, t *testing.T, stack *loca
 	}
 }
 
-func drainGatewayDriverAssistantText(ctx context.Context, t *testing.T, turn gatewaydriver.Turn) string {
-	t.Helper()
-	if turn == nil {
-		t.Fatal("turn = nil")
-	}
-	defer turn.Close()
+func commandAssistantText(events []session.Event) string {
 	var out string
-	for {
-		select {
-		case <-ctx.Done():
-			t.Fatalf("turn did not finish: %v", ctx.Err())
-		case env, ok := <-turn.Events():
-			if !ok {
-				return out
-			}
-			if env.Err != nil {
-				t.Fatalf("turn event error = %v", env.Err)
-			}
-			if env.Event.Narrative == nil || string(env.Event.Narrative.Role) != "assistant" {
-				continue
-			}
-			if text := strings.TrimSpace(env.Event.Narrative.Text); text != "" {
-				out = text
-			}
+	for _, event := range events {
+		if event.Type != session.EventAssistant {
+			continue
+		}
+		if text := strings.TrimSpace(session.EventText(event)); text != "" {
+			out = text
 		}
 	}
+	return out
 }

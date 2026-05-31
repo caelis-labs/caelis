@@ -443,19 +443,18 @@ func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 		t.Fatalf("agents = %#v, want service-backed reviewer catalog", agents)
 	}
 
-	turn, err := driver.StartAgentSubagent(ctx, "reviewer", " inspect ", nil)
+	view, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/reviewer inspect"})
 	if err != nil {
-		t.Fatalf("StartAgentSubagent() error = %v", err)
+		t.Fatalf("ExecuteCommand(/reviewer) error = %v", err)
 	}
-	got := drainGatewayDriverTestTurn(t, turn)
-	if len(got) != 2 {
-		t.Fatalf("turn events = %#v, want user prompt and agent response", got)
+	if len(view.Events) != 3 {
+		t.Fatalf("command events = %#v, want attach, user prompt, agent response", view.Events)
 	}
-	if got[0].Event.Kind != kernel.EventKindUserMessage || got[0].Event.Origin == nil || got[0].Event.Origin.Scope != kernel.EventScopeParticipant {
-		t.Fatalf("first event = %#v, want participant-scoped user prompt", got[0].Event)
+	if view.Events[1].Type != coresession.EventUser || view.Events[1].Scope == nil || view.Events[1].Scope.Participant.ID != "reviewer" {
+		t.Fatalf("user event = %#v, want participant-scoped user prompt", view.Events[1])
 	}
-	if got[1].Event.Kind != kernel.EventKindAssistantMessage || got[1].Event.Origin == nil || got[1].Event.Origin.ParticipantID != "reviewer" {
-		t.Fatalf("second event = %#v, want participant-scoped assistant response", got[1].Event)
+	if view.Events[2].Type != coresession.EventAssistant || view.Events[2].Scope == nil || view.Events[2].Scope.Participant.ID != "reviewer" {
+		t.Fatalf("assistant event = %#v, want participant-scoped assistant response", view.Events[2])
 	}
 	if len(engine.events) != 3 {
 		t.Fatalf("recorded events = %#v, want attach, user prompt, assistant response", engine.events)
@@ -522,11 +521,10 @@ func TestBindAppServicesContinuesSidecarAfterDriverReload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	turn, err := driver.StartAgentSubagent(ctx, "reviewer", " inspect ", nil)
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/reviewer inspect"})
 	if err != nil {
-		t.Fatalf("StartAgentSubagent() error = %v", err)
+		t.Fatalf("ExecuteCommand(/reviewer) error = %v", err)
 	}
-	drainGatewayDriverTestTurn(t, turn)
 
 	reloaded, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
 	if err != nil {
@@ -586,8 +584,8 @@ func TestBindAppServicesRemovesStaticACPAgent(t *testing.T) {
 	if len(agents) != 1 || agents[0].Name != "reviewer" {
 		t.Fatalf("agents before remove = %#v, want reviewer", agents)
 	}
-	if _, err := driver.RemoveAgent(ctx, "reviewer"); err != nil {
-		t.Fatalf("RemoveAgent(static) error = %v", err)
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent remove reviewer"}); err != nil {
+		t.Fatalf("ExecuteCommand(/agent remove reviewer) error = %v", err)
 	}
 	agents, err = driver.ListAgents(ctx, 10)
 	if err != nil {
@@ -640,17 +638,13 @@ func TestBindAppServicesRegistersCustomACPAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := driver.AddAgentWithOptions(ctx, "helper", AgentAddOptions{
-		Custom: &CustomAgentConfig{
-			Name:        "helper",
-			Description: "custom helper",
-			Command:     "helper-acp",
-			Args:        []string{"--stdio"},
-			Env:         map[string]string{"HELPER_TOKEN": "secret"},
-		},
-	})
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent add custom helper -- helper-acp --stdio"})
 	if err != nil {
-		t.Fatalf("AddAgentWithOptions(custom) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent add custom) error = %v", err)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after custom add) error = %v", err)
 	}
 	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "helper" {
 		t.Fatalf("status agents = %#v, want helper", status.AvailableAgents)
@@ -659,23 +653,26 @@ func TestBindAppServicesRegistersCustomACPAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAgents() error = %v", err)
 	}
-	if len(agents) != 1 || agents[0].Name != "helper" || agents[0].Description != "custom helper" {
+	if len(agents) != 1 || agents[0].Name != "helper" || agents[0].Description != "helper · helper-acp" {
 		t.Fatalf("agents = %#v, want custom helper", agents)
 	}
-	turn, err := driver.StartAgentSubagent(ctx, "helper", " inspect ", nil)
+	view, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/helper inspect"})
 	if err != nil {
-		t.Fatalf("StartAgentSubagent(custom) error = %v", err)
+		t.Fatalf("ExecuteCommand(/helper) error = %v", err)
 	}
-	got := drainGatewayDriverTestTurn(t, turn)
-	if len(got) != 2 || got[1].Event.Origin == nil || got[1].Event.Origin.ParticipantID != "helper" {
-		t.Fatalf("turn events = %#v, want helper participant response", got)
+	if len(view.Events) != 3 || view.Events[2].Scope == nil || view.Events[2].Scope.Participant.ID != "helper" {
+		t.Fatalf("command events = %#v, want helper participant response", view.Events)
 	}
-	if invokedAgent.ID != "helper" || invokedAgent.Env["HELPER_TOKEN"] != "secret" {
+	if invokedAgent.ID != "helper" || invokedAgent.Command != "helper-acp" || strings.Join(invokedAgent.Args, " ") != "--stdio" {
 		t.Fatalf("invoked agent = %#v, want custom helper descriptor", invokedAgent)
 	}
-	status, err = driver.RemoveAgent(ctx, "helper")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent remove helper"})
 	if err != nil {
-		t.Fatalf("RemoveAgent(custom) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent remove helper) error = %v", err)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after custom remove) error = %v", err)
 	}
 	if len(status.AvailableAgents) != 0 {
 		t.Fatalf("status agents after remove = %#v, want none", status.AvailableAgents)
@@ -720,9 +717,13 @@ func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
 	if len(candidates) != 1 || candidates[0].Value != "copilot" || candidates[0].Detail != "GitHub Copilot ACP agent" {
 		t.Fatalf("agent add candidates = %#v, want copilot builtin", candidates)
 	}
-	status, err := driver.AddAgent(ctx, "copilot")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent add copilot"})
 	if err != nil {
-		t.Fatalf("AddAgent(copilot) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent add copilot) error = %v", err)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after copilot add) error = %v", err)
 	}
 	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "copilot" {
 		t.Fatalf("status agents = %#v, want copilot", status.AvailableAgents)
@@ -730,12 +731,16 @@ func TestBindAppServicesRegistersBuiltinACPAgent(t *testing.T) {
 	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" || agents[0].Command != "copilot" {
 		t.Fatalf("settings agents = %#v, want persisted copilot", agents)
 	}
-	if _, err := driver.AddAgentWithOptions(ctx, "copilot", AgentAddOptions{Install: true}); err == nil {
-		t.Fatal("AddAgentWithOptions(install) error = nil, want explicit unsupported install error")
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent install copilot"}); err == nil {
+		t.Fatal("ExecuteCommand(/agent install copilot) error = nil, want explicit unsupported install error")
 	}
-	status, err = driver.RemoveAgent(ctx, "copilot")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent remove copilot"})
 	if err != nil {
-		t.Fatalf("RemoveAgent(copilot) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent remove copilot) error = %v", err)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after copilot remove) error = %v", err)
 	}
 	if len(status.AvailableAgents) != 0 {
 		t.Fatalf("status agents after remove = %#v, want none", status.AvailableAgents)
@@ -789,12 +794,16 @@ func TestBindAppServicesInstallsBuiltinACPAgent(t *testing.T) {
 	if len(updateCandidates) != 1 || updateCandidates[0].Value != "codex" || updateCandidates[0].Display != "codex (npm install)" {
 		t.Fatalf("agent update candidates = %#v, want codex install option", updateCandidates)
 	}
-	status, err := driver.AddAgentWithOptions(ctx, "codex", AgentAddOptions{Install: true})
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent install codex"})
 	if err != nil {
-		t.Fatalf("AddAgentWithOptions(codex install) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent install codex) error = %v", err)
 	}
 	if !installer.called || installer.agent.Name != "codex" {
 		t.Fatalf("installer called=%v agent=%#v, want codex", installer.called, installer.agent)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after codex install) error = %v", err)
 	}
 	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "codex" {
 		t.Fatalf("status agents = %#v, want codex", status.AvailableAgents)
@@ -803,12 +812,16 @@ func TestBindAppServicesInstallsBuiltinACPAgent(t *testing.T) {
 		t.Fatalf("settings agents = %#v, want installed codex", agents)
 	}
 	installer.called = false
-	status, err = driver.AddAgentWithOptions(ctx, "codex", AgentAddOptions{Install: true})
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent update codex"})
 	if err != nil {
-		t.Fatalf("AddAgentWithOptions(codex update) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent update codex) error = %v", err)
 	}
 	if !installer.called || installer.agent.Name != "codex" {
 		t.Fatalf("update installer called=%v agent=%#v, want codex", installer.called, installer.agent)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after codex update) error = %v", err)
 	}
 	if len(status.AvailableAgents) != 1 || status.AvailableAgents[0].Name != "codex" {
 		t.Fatalf("status agents after update = %#v, want codex", status.AvailableAgents)
@@ -879,9 +892,13 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	status, err := driver.HandoffAgent(ctx, "reviewer")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent use reviewer"})
 	if err != nil {
-		t.Fatalf("HandoffAgent(reviewer) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent use reviewer) error = %v", err)
+	}
+	status, err := driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after reviewer handoff) error = %v", err)
 	}
 	if status.ControllerKind != "acp" || status.ControllerLabel != "reviewer" {
 		t.Fatalf("status after handoff = %#v, want reviewer ACP controller", status)
@@ -950,9 +967,13 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	if len(controllerConfigs) != 2 || controllerConfigs[0] != "remote-model/high/auto-review" || controllerConfigs[1] != "remote-model/high/auto-review" {
 		t.Fatalf("controller configs = %#v, want persisted controller config intent on prompts", controllerConfigs)
 	}
-	status, err = driver.HandoffAgent(ctx, "local")
+	_, err = driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/agent use local"})
 	if err != nil {
-		t.Fatalf("HandoffAgent(local) error = %v", err)
+		t.Fatalf("ExecuteCommand(/agent use local) error = %v", err)
+	}
+	status, err = driver.AgentStatus(ctx)
+	if err != nil {
+		t.Fatalf("AgentStatus(after local handoff) error = %v", err)
 	}
 	if status.ControllerKind != "kernel" {
 		t.Fatalf("status after local handoff = %#v, want kernel controller", status)

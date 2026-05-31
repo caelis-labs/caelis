@@ -1009,6 +1009,14 @@ The completed work is intentionally limited to the reusable skeleton:
   for registered external ACP agents, canonical sidecar participant attach/user
   events, shared `AgentService.Invoke`, and ACP projection of the resulting
   canonical participant events.
+- Gatewaydriver agent direct-API retirement baseline: TUI driver tests and ACP
+  eval paths now invoke agent management and dynamic agent prompts through
+  `ExecuteCommand`; the old gatewaydriver concrete methods for add/remove,
+  install/update, controller handoff, and dynamic slash-start have been removed.
+  Dynamic agent command execution now defers `AgentService` auto-recording so
+  participant attach, user prompt, and assistant response persist as one
+  atomic canonical event batch, and failed external invocation leaves no
+  partial participant preface behind.
 - Service-native settings-backed custom external ACP agent registration and
   removal, including TUI `/agent add custom` and `/agent remove` for custom
   agents without rebuilding the app-service stack.
@@ -1346,6 +1354,14 @@ be migrated before retiring the old stack:
      the existing TUI event stream during the transition, and the Bubble Tea
      driver contract no longer exposes agent mutation or dynamic slash-start
      methods.
+   - Migrated baseline: the concrete gatewaydriver agent mutation and
+     dynamic-start APIs have been deleted, and gatewaydriver/eval regression
+     coverage now drives `/agent add|install|update|remove|use` plus
+     `/<agent> <prompt>` through `ExecuteCommand`. Command execution is also
+     interruptible, preserving cancellation for long-running shared commands
+     such as built-in ACP adapter install. `/agent use` returns a canonical
+     handoff projection so the driver updates its current controller from the
+     same event stream consumed by TUI and future APP surfaces.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1879,6 +1895,14 @@ be migrated before retiring the old stack:
       and `ControllerService.Handoff` for canonical `EventHandoff` recording,
       so ACP clients and future APP panels no longer need a surface-local copy
       of agent command semantics.
+    - Migrated baseline: dynamic command-driven participant invocation records
+      attach, user prompt, and external ACP response atomically after the
+      invocation succeeds. `AgentService.Invoke` still records by default for
+      direct service consumers, but command execution can defer that write so
+      failed invocations do not persist a half-attached participant. The old
+      gatewaydriver direct methods for agent add/remove/handoff and dynamic
+      start are gone; TUI, eval, ACP command clients, and future APP panels now
+      share the command contract.
     - Migrated baseline: built-in ACP adapter update now reuses the same
       shared app-service install contract as registration. The TUI exposes
       `/agent update <adapter>` with installable adapter completion and routes

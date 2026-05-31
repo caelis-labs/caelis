@@ -155,10 +155,6 @@ type DoctorReport struct {
 	Warnings                        []string
 }
 
-type RegisterBuiltinACPAgentOptions struct {
-	Install bool
-}
-
 type ACPAgentInfo struct {
 	Name        string
 	Description string
@@ -183,59 +179,56 @@ type DriverStack struct {
 	UserID    string
 	Workspace session.WorkspaceRef
 
-	StartSessionFn                       func(context.Context, string, string) (session.Session, error)
-	ACPControllerStatusFn                func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
-	DefaultModelAliasFn                  func() string
-	AppStatusViewFn                      func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
-	SandboxStatusFn                      func() SandboxStatus
-	CommandCatalogFn                     func(context.Context) (appviewmodel.CommandCatalogView, error)
-	ExecuteCommandFn                     func(context.Context, session.SessionRef, string, []model.ContentPart) (CommandExecutionView, error)
-	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
-	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
-	ModelConfigFn                        func(string) (ModelConfig, bool)
-	CompactSessionFn                     func(context.Context, session.SessionRef) error
-	PrepareConnectModelConfigFn          func(context.Context, ModelConfig) (ModelConfig, error)
-	ConnectProviderCandidatesFn          func(context.Context, string, int) ([]SlashArgCandidate, error)
-	ConnectBaseURLCandidatesFn           func(context.Context, string, string, int) ([]SlashArgCandidate, error)
-	ConnectTimeoutCandidatesFn           func(context.Context, string, int) ([]SlashArgCandidate, error)
-	ConnectModelCandidatesFn             func(context.Context, ModelConfig, string, int) ([]SlashArgCandidate, error)
-	ConnectDefaultsFn                    func(context.Context, ModelConfig) (connectModelDefaults, error)
-	ConnectFn                            func(ModelConfig) (string, error)
-	UseModelFn                           func(context.Context, session.SessionRef, string, ...string) error
-	DeleteModelFn                        func(context.Context, session.SessionRef, string) error
-	SetACPControllerModelFn              func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
-	CycleSessionModeFn                   func(context.Context, session.SessionRef) (string, error)
-	SetSandboxBackendFn                  func(context.Context, string) (SandboxStatus, error)
-	PrepareSandboxFn                     func(context.Context) (SandboxStatus, error)
-	RepairSandboxFn                      func(context.Context) (SandboxStatus, error)
-	PreflightSandboxFn                   func(context.Context, bool) (SandboxStatus, error)
-	ResetSandboxFn                       func(context.Context) (SandboxStatus, error)
-	SetACPControllerModeFn               func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
-	SetSessionModeFn                     func(context.Context, session.SessionRef, string) (string, error)
-	RegisterBuiltinACPAgentWithOptionsFn func(context.Context, string, RegisterBuiltinACPAgentOptions) error
-	RegisterACPAgentFn                   func(context.Context, CustomAgentConfig) error
-	UnregisterACPAgentFn                 func(string) error
-	ListModelAliasesFn                   func(context.Context, session.SessionRef) ([]string, error)
-	ListModelChoicesFn                   func(context.Context, session.SessionRef) ([]ModelChoice, error)
-	ListProviderModelsFn                 func(string) []string
-	ListProviderModelsForConfigFn        func(context.Context, ModelConfig) ([]string, error)
-	ListCatalogModelsFn                  func(string) []string
-	DefaultModelCapabilitiesFn           func() ModelCapabilityInfo
-	LookupModelCapabilitiesFn            func(string, string) (ModelCapabilityInfo, bool)
-	ReasoningLevelsForModelFn            func(string, string) []string
-	EnsureCodeFreeAuthFn                 func(context.Context, CodeFreeAuthRequest) error
-	EnsureCodeFreeModelSelectionAuthFn   func(context.Context, CodeFreeAuthRequest) error
-	DiscoverSkillsFn                     func(context.Context, string) ([]plugin.SkillDescriptor, error)
-	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
-	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
-	ListACPAgentsFn                      func() []ACPAgentInfo
-	ListTasksFn                          func(context.Context, session.SessionRef, TaskListOptions) (TaskListView, error)
-	TailTaskFn                           func(context.Context, TaskOutputOptions) (TaskOutputView, error)
-	StartTaskFn                          func(context.Context, TaskStartOptions) (TaskOutputView, error)
-	WaitTaskFn                           func(context.Context, TaskWaitOptions) (TaskOutputView, error)
-	WriteTaskFn                          func(context.Context, TaskWriteOptions) (TaskOutputView, error)
-	CancelTaskFn                         func(context.Context, TaskOutputOptions) (TaskOutputView, error)
-	ReleaseTaskFn                        func(context.Context, TaskOutputOptions) error
+	StartSessionFn                     func(context.Context, string, string) (session.Session, error)
+	ACPControllerStatusFn              func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	DefaultModelAliasFn                func() string
+	AppStatusViewFn                    func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
+	SandboxStatusFn                    func() SandboxStatus
+	CommandCatalogFn                   func(context.Context) (appviewmodel.CommandCatalogView, error)
+	ExecuteCommandFn                   func(context.Context, session.SessionRef, string, []model.ContentPart) (CommandExecutionView, error)
+	SessionRuntimeStateFn              func(context.Context, session.SessionRef) (SessionRuntimeState, error)
+	DoctorFn                           func(context.Context, DoctorRequest) (DoctorReport, error)
+	ModelConfigFn                      func(string) (ModelConfig, bool)
+	CompactSessionFn                   func(context.Context, session.SessionRef) error
+	PrepareConnectModelConfigFn        func(context.Context, ModelConfig) (ModelConfig, error)
+	ConnectProviderCandidatesFn        func(context.Context, string, int) ([]SlashArgCandidate, error)
+	ConnectBaseURLCandidatesFn         func(context.Context, string, string, int) ([]SlashArgCandidate, error)
+	ConnectTimeoutCandidatesFn         func(context.Context, string, int) ([]SlashArgCandidate, error)
+	ConnectModelCandidatesFn           func(context.Context, ModelConfig, string, int) ([]SlashArgCandidate, error)
+	ConnectDefaultsFn                  func(context.Context, ModelConfig) (connectModelDefaults, error)
+	ConnectFn                          func(ModelConfig) (string, error)
+	UseModelFn                         func(context.Context, session.SessionRef, string, ...string) error
+	DeleteModelFn                      func(context.Context, session.SessionRef, string) error
+	SetACPControllerModelFn            func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
+	CycleSessionModeFn                 func(context.Context, session.SessionRef) (string, error)
+	SetSandboxBackendFn                func(context.Context, string) (SandboxStatus, error)
+	PrepareSandboxFn                   func(context.Context) (SandboxStatus, error)
+	RepairSandboxFn                    func(context.Context) (SandboxStatus, error)
+	PreflightSandboxFn                 func(context.Context, bool) (SandboxStatus, error)
+	ResetSandboxFn                     func(context.Context) (SandboxStatus, error)
+	SetACPControllerModeFn             func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
+	SetSessionModeFn                   func(context.Context, session.SessionRef, string) (string, error)
+	ListModelAliasesFn                 func(context.Context, session.SessionRef) ([]string, error)
+	ListModelChoicesFn                 func(context.Context, session.SessionRef) ([]ModelChoice, error)
+	ListProviderModelsFn               func(string) []string
+	ListProviderModelsForConfigFn      func(context.Context, ModelConfig) ([]string, error)
+	ListCatalogModelsFn                func(string) []string
+	DefaultModelCapabilitiesFn         func() ModelCapabilityInfo
+	LookupModelCapabilitiesFn          func(string, string) (ModelCapabilityInfo, bool)
+	ReasoningLevelsForModelFn          func(string, string) []string
+	EnsureCodeFreeAuthFn               func(context.Context, CodeFreeAuthRequest) error
+	EnsureCodeFreeModelSelectionAuthFn func(context.Context, CodeFreeAuthRequest) error
+	DiscoverSkillsFn                   func(context.Context, string) ([]plugin.SkillDescriptor, error)
+	ListBuiltinACPAgentAddOptionsFn    func() []ACPAgentAddOption
+	ListInstallableACPAgentOptionsFn   func() []ACPAgentAddOption
+	ListACPAgentsFn                    func() []ACPAgentInfo
+	ListTasksFn                        func(context.Context, session.SessionRef, TaskListOptions) (TaskListView, error)
+	TailTaskFn                         func(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	StartTaskFn                        func(context.Context, TaskStartOptions) (TaskOutputView, error)
+	WaitTaskFn                         func(context.Context, TaskWaitOptions) (TaskOutputView, error)
+	WriteTaskFn                        func(context.Context, TaskWriteOptions) (TaskOutputView, error)
+	CancelTaskFn                       func(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	ReleaseTaskFn                      func(context.Context, TaskOutputOptions) error
 }
 
 func (s *DriverStack) gateway() (GatewayService, error) {
@@ -458,27 +451,6 @@ func (s *DriverStack) SetSessionMode(ctx context.Context, ref session.SessionRef
 		return "", fmt.Errorf("surfaces/tui/gatewaydriver: session mode dependency is unavailable")
 	}
 	return s.SetSessionModeFn(ctx, ref, mode)
-}
-
-func (s *DriverStack) RegisterBuiltinACPAgentWithOptions(ctx context.Context, target string, opts RegisterBuiltinACPAgentOptions) error {
-	if s == nil || s.RegisterBuiltinACPAgentWithOptionsFn == nil {
-		return fmt.Errorf("surfaces/tui/gatewaydriver: builtin ACP agent dependency is unavailable")
-	}
-	return s.RegisterBuiltinACPAgentWithOptionsFn(ctx, target, opts)
-}
-
-func (s *DriverStack) RegisterACPAgent(ctx context.Context, cfg CustomAgentConfig) error {
-	if s == nil || s.RegisterACPAgentFn == nil {
-		return fmt.Errorf("surfaces/tui/gatewaydriver: custom ACP agent dependency is unavailable")
-	}
-	return s.RegisterACPAgentFn(ctx, cfg)
-}
-
-func (s *DriverStack) UnregisterACPAgent(target string) error {
-	if s == nil || s.UnregisterACPAgentFn == nil {
-		return fmt.Errorf("surfaces/tui/gatewaydriver: ACP agent unregister dependency is unavailable")
-	}
-	return s.UnregisterACPAgentFn(target)
 }
 
 func (s *DriverStack) ListModelAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {

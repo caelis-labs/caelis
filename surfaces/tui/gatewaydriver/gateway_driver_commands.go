@@ -4,8 +4,9 @@ import (
 	"context"
 	"strings"
 
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func (d *GatewayDriver) CommandCatalog(ctx context.Context) (appviewmodel.CommandCatalogView, error) {
@@ -23,7 +24,9 @@ func (d *GatewayDriver) ExecuteCommand(ctx context.Context, opts CommandExecutio
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	var ref session.SessionRef
+	ctx, finish := d.beginInterruptibleCommand(ctx)
+	defer finish()
+	var ref portsession.SessionRef
 	if active, ok := d.currentSession(); ok {
 		ref = active.SessionRef
 	}
@@ -38,14 +41,15 @@ func (d *GatewayDriver) ExecuteCommand(ctx context.Context, opts CommandExecutio
 	if view.SessionRef != nil {
 		d.setCurrentCommandSession(ctx, portRefFromCore(*view.SessionRef))
 	}
+	d.syncCurrentCommandSessionEvents(view.Events)
 	return view, nil
 }
 
-func (d *GatewayDriver) setCurrentCommandSession(ctx context.Context, ref session.SessionRef) {
+func (d *GatewayDriver) setCurrentCommandSession(ctx context.Context, ref portsession.SessionRef) {
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return
 	}
-	active := session.Session{
+	active := portsession.Session{
 		SessionRef: ref,
 		CWD:        strings.TrimSpace(d.stack.Workspace.CWD),
 	}
@@ -54,4 +58,28 @@ func (d *GatewayDriver) setCurrentCommandSession(ctx context.Context, ref sessio
 	d.hasSession = true
 	d.mu.Unlock()
 	d.refreshSessionDisplay(ctx, active)
+}
+
+func (d *GatewayDriver) syncCurrentCommandSessionEvents(events []coresession.Event) {
+	var controller coresession.ControllerBinding
+	for _, event := range events {
+		if event.Type != coresession.EventHandoff || event.Scope == nil {
+			continue
+		}
+		next := event.Scope.Controller
+		if next.Kind == "" && strings.TrimSpace(next.ID) == "" && strings.TrimSpace(next.AgentName) == "" {
+			continue
+		}
+		controller = next
+	}
+	if controller.Kind == "" && strings.TrimSpace(controller.ID) == "" && strings.TrimSpace(controller.AgentName) == "" {
+		return
+	}
+	d.mu.Lock()
+	if d.hasSession {
+		active := d.session
+		active.Controller = portControllerFromCore(controller)
+		d.session = active
+	}
+	d.mu.Unlock()
 }

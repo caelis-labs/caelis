@@ -1121,6 +1121,9 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	if handoff.Output != "agent controller: reviewer" {
 		t.Fatalf("handoff output = %q, want reviewer", handoff.Output)
 	}
+	if len(handoff.Events) != 1 || handoff.Events[0].Type != session.EventHandoff || handoff.Events[0].SessionID != "sess-agent" || handoff.Events[0].Scope == nil || handoff.Events[0].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("handoff command events = %#v, want reviewer handoff projection", handoff.Events)
+	}
 	if len(engine.events) != 1 || engine.events[0].Type != session.EventHandoff || engine.events[0].Scope == nil || engine.events[0].Scope.Controller.ID != "reviewer" {
 		t.Fatalf("handoff events = %#v, want reviewer handoff event", engine.events)
 	}
@@ -1133,6 +1136,9 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	}
 	if local.Output != "agent controller: local" || engine.events[0].Scope.Controller.Kind != session.ControllerBuiltin {
 		t.Fatalf("local handoff = %#v events=%#v, want local controller", local, engine.events)
+	}
+	if len(local.Events) != 1 || local.Events[0].Type != session.EventHandoff || local.Events[0].Scope == nil || local.Events[0].Scope.Controller.Kind != session.ControllerBuiltin {
+		t.Fatalf("local command events = %#v, want local handoff projection", local.Events)
 	}
 	removed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent remove helper"})
 	if err != nil {
@@ -1215,8 +1221,45 @@ func TestCommandServiceExecuteDynamicAgentPrompt(t *testing.T) {
 	if session.EventText(view.Events[1]) != "inspect repo" || session.EventText(view.Events[2]) != "reviewed: inspect repo" {
 		t.Fatalf("dynamic event text = %q / %q, want prompt and response", session.EventText(view.Events[1]), session.EventText(view.Events[2]))
 	}
-	if len(engine.eventBatches) != 2 || len(engine.eventBatches[0]) != 2 || len(engine.eventBatches[1]) != 1 {
-		t.Fatalf("recorded event batches = %#v, want preface then assistant", engine.eventBatches)
+	if len(engine.eventBatches) != 1 || len(engine.eventBatches[0]) != 3 {
+		t.Fatalf("recorded event batches = %#v, want atomic attach/user/assistant batch", engine.eventBatches)
+	}
+}
+
+func TestCommandServiceDynamicAgentPromptDoesNotPersistPrefaceOnInvokeFailure(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{SessionID: "sess-agent"}},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+		Agents: []AgentDescriptor{{
+			ID:      "reviewer",
+			Name:    "reviewer",
+			Kind:    AgentKindExternalACP,
+			Command: "reviewer-acp",
+		}},
+		Invokers: map[string]AgentInvoker{
+			"reviewer": AgentInvokerFunc(func(context.Context, AgentInvokeRequest) (AgentInvokeResult, error) {
+				return AgentInvokeResult{}, errors.New("active participant run already in progress")
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-agent"},
+		Input:      "/reviewer inspect repo",
+	})
+	if err == nil || !strings.Contains(err.Error(), "active participant run already in progress") {
+		t.Fatalf("dynamic command error = %v, want invoke failure", err)
+	}
+	if len(engine.events) != 0 || len(engine.eventBatches) != 0 {
+		t.Fatalf("recorded events = %#v batches=%#v, want no partial participant preface", engine.events, engine.eventBatches)
 	}
 }
 

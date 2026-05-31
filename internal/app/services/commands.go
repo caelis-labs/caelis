@@ -165,28 +165,29 @@ func (s CommandService) executeAgentPrompt(ctx context.Context, req CommandExecu
 		return appviewmodel.CommandExecutionView{}, err
 	}
 	participant := commandAgentParticipant(snapshot, agent, command)
-	preface := []session.Event{commandParticipantEvent(snapshot.Session.Ref.SessionID, participant, "attached", "slash_"+command)}
-	if event := commandAgentUserEvent(snapshot.Session.Ref.SessionID, participant, prompt, parts, "slash_"+command); event.Type != "" {
-		preface = append(preface, event)
-	}
-	if len(preface) > 0 {
-		if _, err := s.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, preface); err != nil {
-			return appviewmodel.CommandExecutionView{}, err
-		}
-	}
 	result, err := s.services.Agents().Invoke(ctx, AgentInvokeRequest{
 		AgentID:      agent.ID,
 		SessionRef:   snapshot.Session.Ref,
 		Participant:  participant,
 		Input:        prompt,
 		ContentParts: parts,
+		DeferRecord:  true,
 	})
 	if err != nil {
 		return appviewmodel.CommandExecutionView{}, err
 	}
+	preface := []session.Event{commandParticipantEvent(snapshot.Session.Ref.SessionID, participant, "attached", "slash_"+command)}
+	if event := commandAgentUserEvent(snapshot.Session.Ref.SessionID, participant, prompt, parts, "slash_"+command); event.Type != "" {
+		preface = append(preface, event)
+	}
 	events := make([]session.Event, 0, len(preface)+len(result.Events))
 	events = append(events, preface...)
 	events = append(events, result.Events...)
+	if len(events) > 0 {
+		if _, err := s.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, events); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+	}
 	return appviewmodel.CommandExecutionView{
 		Handled: true,
 		Command: command,
@@ -253,10 +254,13 @@ func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args 
 		if result.ActiveACP {
 			output = "agent controller: " + firstNonEmpty(result.Status.Agent, result.Controller.AgentName, result.Controller.ID)
 		}
+		event := controllerHandoffEvent(result.Controller, "app_command_agent", "slash command handoff")
+		event.SessionID = strings.TrimSpace(ref.SessionID)
 		return appviewmodel.CommandExecutionView{
 			Handled: true,
 			Command: "agent",
 			Output:  output,
+			Events:  []session.Event{event},
 		}, nil
 	case "add", "register":
 		agent, err := s.executeAgentAdd(ctx, rest)

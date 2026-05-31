@@ -79,9 +79,12 @@ func TestGatewayDriverCodexACPModelEffortE2E(t *testing.T) {
 		t.Fatalf("gatewaydriver.NewGatewayDriver() error = %v", err)
 	}
 
-	agentStatus, err := driver.HandoffAgent(ctx, "codex")
+	if _, err := driver.ExecuteCommand(ctx, gatewaydriver.CommandExecutionOptions{Input: "/agent use codex"}); err != nil {
+		t.Fatalf("ExecuteCommand(/agent use codex) error = %v", err)
+	}
+	agentStatus, err := driver.AgentStatus(ctx)
 	if err != nil {
-		t.Fatalf("HandoffAgent(codex) error = %v", err)
+		t.Fatalf("AgentStatus(after codex handoff) error = %v", err)
 	}
 	if got := strings.ToLower(strings.TrimSpace(agentStatus.ControllerKind)); got != "acp" {
 		t.Fatalf("controller kind = %q, want acp", agentStatus.ControllerKind)
@@ -142,9 +145,12 @@ func TestGatewayDriverCodexACPModelEffortE2E(t *testing.T) {
 		t.Fatalf("effort candidates = %#v, want current effort %q", effortCandidates, effort)
 	}
 	selectedEffort := preferredEffortCandidate(effortCandidates)
-	status, err = driver.UseModel(ctx, modelWithEffort, selectedEffort)
+	if _, err := driver.ExecuteCommand(ctx, gatewaydriver.CommandExecutionOptions{Input: "/model use " + modelWithEffort + " " + selectedEffort}); err != nil {
+		t.Fatalf("ExecuteCommand(/model use %s %s) error = %v", modelWithEffort, selectedEffort, err)
+	}
+	status, err = driver.Status(ctx)
 	if err != nil {
-		t.Fatalf("UseModel(%s, %s) error = %v", modelWithEffort, selectedEffort, err)
+		t.Fatalf("Status(after model use) error = %v", err)
 	}
 	if got := strings.TrimSpace(status.ReasoningEffort); !strings.EqualFold(got, selectedEffort) {
 		t.Fatalf("Status().ReasoningEffort after UseModel = %q, want %q", got, selectedEffort)
