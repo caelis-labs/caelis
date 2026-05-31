@@ -569,8 +569,8 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Commands) != 7 {
-		t.Fatalf("commands = %#v, want seven core commands", view.Commands)
+	if len(view.Commands) != 8 {
+		t.Fatalf("commands = %#v, want eight core commands", view.Commands)
 	}
 	agent, ok := findCommandView(view.Commands, "agent")
 	if !ok || agent.InputHint != "use|add|install|list|remove" {
@@ -579,6 +579,10 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	compact, ok := findCommandView(view.Commands, "compact")
 	if !ok || compact.InputHint != "" {
 		t.Fatalf("compact command = %#v ok=%v, want no input hint", compact, ok)
+	}
+	task, ok := findCommandView(view.Commands, "task")
+	if !ok || task.InputHint != "list|tail|wait|write|cancel|release|start" {
+		t.Fatalf("task command = %#v ok=%v, want task management hint", task, ok)
 	}
 }
 
@@ -711,6 +715,57 @@ func TestCommandServiceExecuteCompactRecordsCheckpoint(t *testing.T) {
 	text := session.EventText(event)
 	if !strings.Contains(text, "CONTEXT CHECKPOINT") || !strings.Contains(text, "important state") {
 		t.Fatalf("compact checkpoint = %q, want source summary", text)
+	}
+}
+
+func TestCommandServiceExecuteTaskCommands(t *testing.T) {
+	ctx := context.Background()
+	taskSession := &recordingTaskSession{
+		snapshot: sandbox.SessionSnapshot{
+			Ref:           sandbox.SessionRef{ID: "task-1", Backend: "host"},
+			State:         sandbox.SessionRunning,
+			Running:       true,
+			SupportsInput: true,
+			Command:       "cat",
+			Metadata: map[string]any{
+				"title": "Echo Task",
+			},
+		},
+		stdout: "ready\n",
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  &recordingEngine{},
+		Sandbox: &recordingTaskRuntime{sessions: map[string]*recordingTaskSession{"task-1": taskSession}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	listed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/task list"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"tasks:", "task-1", "running", "Echo Task"} {
+		if !strings.Contains(listed.Output, want) {
+			t.Fatalf("task list output = %q, missing %q", listed.Output, want)
+		}
+	}
+
+	wrote, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/task write task-1 -- ping"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if taskSession.wrote != "ping" || !strings.Contains(wrote.Output, "ready") {
+		t.Fatalf("task write = %#v wrote=%q, want shared task service output", wrote, taskSession.wrote)
+	}
+
+	cancelled, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/task cancel task-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cancelled.Output, "cancelled") {
+		t.Fatalf("task cancel output = %q, want cancelled state", cancelled.Output)
 	}
 }
 

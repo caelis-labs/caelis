@@ -27,6 +27,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
+		{Name: "task", Usage: "/task <action>", Description: "Inspect and control live or durable tasks", LocalDuringACP: true, Details: []string{"actions: list, tail <id>, wait <id>, write <id>, cancel <id>, release <id>, start <command>"}, ArgCandidates: taskRootCandidates(), DynamicCompleter: true},
 		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
 		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", LocalDuringACP: true, DynamicCompleter: true},
@@ -192,6 +193,18 @@ func approvalCandidates() []driver.SlashArgCandidate {
 	return []driver.SlashArgCandidate{
 		{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
 		{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
+	}
+}
+
+func taskRootCandidates() []driver.SlashArgCandidate {
+	return []driver.SlashArgCandidate{
+		{Value: "list", Display: "list", Detail: "List live and durable tasks"},
+		{Value: "tail", Display: "tail", Detail: "Read task output"},
+		{Value: "wait", Display: "wait", Detail: "Wait briefly and read output"},
+		{Value: "write", Display: "write", Detail: "Send input to a task"},
+		{Value: "cancel", Display: "cancel", Detail: "Cancel a running task"},
+		{Value: "release", Display: "release", Detail: "Close a completed task handle"},
+		{Value: "start", Display: "start", Detail: "Start a sandbox task"},
 	}
 }
 

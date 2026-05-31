@@ -2003,7 +2003,7 @@ func pluginDescriptorFromAgent(agent AgentDescriptor) plugin.ACPAgentDescriptor 
 
 func reservedSlashCommandName(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "help", "agent", "connect", "model", "approval", "sandbox", "status", "doctor", "new", "resume", "compact", "exit", "quit":
+	case "help", "agent", "connect", "model", "approval", "sandbox", "status", "task", "doctor", "new", "resume", "compact", "exit", "quit":
 		return true
 	default:
 		return false

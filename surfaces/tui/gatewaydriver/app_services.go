@@ -268,6 +268,65 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return strings.TrimSpace(choice.ID), nil
 	}
+	stack.ListTasksFn = func(ctx context.Context, ref portsession.SessionRef, opts TaskListOptions) (TaskListView, error) {
+		return svc.Tasks().List(ctx, appservices.ListTasksRequest{
+			SessionRef:     coreRefFromPort(ref),
+			Limit:          opts.Limit,
+			IncludeHistory: opts.IncludeHistory,
+		})
+	}
+	stack.TailTaskFn = func(ctx context.Context, opts TaskOutputOptions) (TaskOutputView, error) {
+		return svc.Tasks().Tail(ctx, appservices.TaskOutputRequest{
+			TaskID:       opts.TaskID,
+			StdoutCursor: opts.StdoutCursor,
+			StderrCursor: opts.StderrCursor,
+		})
+	}
+	stack.StartTaskFn = func(ctx context.Context, opts TaskStartOptions) (TaskOutputView, error) {
+		return svc.Tasks().Start(ctx, appservices.TaskStartRequest{
+			Command: opts.Command,
+			Args:    append([]string(nil), opts.Args...),
+			Dir:     opts.Dir,
+			Env:     maps.Clone(opts.Env),
+		})
+	}
+	stack.WaitTaskFn = func(ctx context.Context, opts TaskWaitOptions) (TaskOutputView, error) {
+		return svc.Tasks().Wait(ctx, appservices.TaskWaitRequest{
+			TaskOutputRequest: appservices.TaskOutputRequest{
+				TaskID:       opts.TaskID,
+				StdoutCursor: opts.StdoutCursor,
+				StderrCursor: opts.StderrCursor,
+			},
+			YieldTimeMS: opts.YieldTimeMS,
+		})
+	}
+	stack.WriteTaskFn = func(ctx context.Context, opts TaskWriteOptions) (TaskOutputView, error) {
+		return svc.Tasks().Write(ctx, appservices.TaskWriteRequest{
+			TaskOutputRequest: appservices.TaskOutputRequest{
+				TaskID:       opts.TaskID,
+				StdoutCursor: opts.StdoutCursor,
+				StderrCursor: opts.StderrCursor,
+			},
+			Input:       opts.Input,
+			YieldTimeMS: opts.YieldTimeMS,
+		})
+	}
+	stack.CancelTaskFn = func(ctx context.Context, opts TaskOutputOptions) (TaskOutputView, error) {
+		return svc.Tasks().Cancel(ctx, appservices.TaskCancelRequest{
+			TaskOutputRequest: appservices.TaskOutputRequest{
+				TaskID:       opts.TaskID,
+				StdoutCursor: opts.StdoutCursor,
+				StderrCursor: opts.StderrCursor,
+			},
+		})
+	}
+	stack.ReleaseTaskFn = func(ctx context.Context, opts TaskOutputOptions) error {
+		return svc.Tasks().Release(ctx, appservices.TaskOutputRequest{
+			TaskID:       opts.TaskID,
+			StdoutCursor: opts.StdoutCursor,
+			StderrCursor: opts.StderrCursor,
+		})
+	}
 	return stack
 }
 

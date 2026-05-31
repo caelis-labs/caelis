@@ -227,6 +227,13 @@ type DriverStack struct {
 	ListBuiltinACPAgentAddOptionsFn      func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn     func() []ACPAgentAddOption
 	ListACPAgentsFn                      func() []ACPAgentInfo
+	ListTasksFn                          func(context.Context, session.SessionRef, TaskListOptions) (TaskListView, error)
+	TailTaskFn                           func(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	StartTaskFn                          func(context.Context, TaskStartOptions) (TaskOutputView, error)
+	WaitTaskFn                           func(context.Context, TaskWaitOptions) (TaskOutputView, error)
+	WriteTaskFn                          func(context.Context, TaskWriteOptions) (TaskOutputView, error)
+	CancelTaskFn                         func(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	ReleaseTaskFn                        func(context.Context, TaskOutputOptions) error
 }
 
 func (s *DriverStack) gateway() (GatewayService, error) {
@@ -565,4 +572,53 @@ func (s *DriverStack) ListACPAgents() []ACPAgentInfo {
 		return nil
 	}
 	return s.ListACPAgentsFn()
+}
+
+func (s *DriverStack) ListTasks(ctx context.Context, ref session.SessionRef, opts TaskListOptions) (TaskListView, error) {
+	if s == nil || s.ListTasksFn == nil {
+		return TaskListView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task list dependency is unavailable")
+	}
+	return s.ListTasksFn(ctx, ref, opts)
+}
+
+func (s *DriverStack) TailTask(ctx context.Context, opts TaskOutputOptions) (TaskOutputView, error) {
+	if s == nil || s.TailTaskFn == nil {
+		return TaskOutputView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task tail dependency is unavailable")
+	}
+	return s.TailTaskFn(ctx, opts)
+}
+
+func (s *DriverStack) StartTask(ctx context.Context, opts TaskStartOptions) (TaskOutputView, error) {
+	if s == nil || s.StartTaskFn == nil {
+		return TaskOutputView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task start dependency is unavailable")
+	}
+	return s.StartTaskFn(ctx, opts)
+}
+
+func (s *DriverStack) WaitTask(ctx context.Context, opts TaskWaitOptions) (TaskOutputView, error) {
+	if s == nil || s.WaitTaskFn == nil {
+		return TaskOutputView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task wait dependency is unavailable")
+	}
+	return s.WaitTaskFn(ctx, opts)
+}
+
+func (s *DriverStack) WriteTask(ctx context.Context, opts TaskWriteOptions) (TaskOutputView, error) {
+	if s == nil || s.WriteTaskFn == nil {
+		return TaskOutputView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task write dependency is unavailable")
+	}
+	return s.WriteTaskFn(ctx, opts)
+}
+
+func (s *DriverStack) CancelTask(ctx context.Context, opts TaskOutputOptions) (TaskOutputView, error) {
+	if s == nil || s.CancelTaskFn == nil {
+		return TaskOutputView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task cancel dependency is unavailable")
+	}
+	return s.CancelTaskFn(ctx, opts)
+}
+
+func (s *DriverStack) ReleaseTask(ctx context.Context, opts TaskOutputOptions) error {
+	if s == nil || s.ReleaseTaskFn == nil {
+		return fmt.Errorf("surfaces/tui/gatewaydriver: task release dependency is unavailable")
+	}
+	return s.ReleaseTaskFn(ctx, opts)
 }

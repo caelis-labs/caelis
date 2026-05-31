@@ -346,6 +346,63 @@ func TestDefaultCommandsAreRecognizedByDispatch(t *testing.T) {
 	}
 }
 
+func TestSlashTaskListUsesTaskController(t *testing.T) {
+	driver := &bridgeTestDriver{
+		taskList: tuidriver.TaskListView{
+			Supported: true,
+			Count:     1,
+			Tasks: []tuidriver.TaskItem{{
+				ID:      "task-1",
+				Kind:    "subagent",
+				Source:  "history",
+				Title:   "SPAWN reviewer",
+				State:   "running",
+				Running: true,
+			}},
+		},
+	}
+	var msgs []tea.Msg
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/task list")
+	if !result.SuppressTurnDivider || driver.taskListCalls != 1 || !driver.taskListOptions.IncludeHistory {
+		t.Fatalf("task list result = %#v calls=%d opts=%#v, want handled history-aware list", result, driver.taskListCalls, driver.taskListOptions)
+	}
+	if !noticeMessagesContain(msgs, "task-1") || !noticeMessagesContain(msgs, "SPAWN reviewer") || !noticeMessagesContain(msgs, "source=history") {
+		t.Fatalf("task list messages = %#v, want task summary", msgs)
+	}
+}
+
+func TestSlashTaskControlsUseTaskController(t *testing.T) {
+	driver := &bridgeTestDriver{
+		taskOutput: tuidriver.TaskOutputView{
+			Task: tuidriver.TaskItem{
+				ID:      "task-1",
+				Title:   "Echo Task",
+				State:   "running",
+				Running: true,
+			},
+			Stdout: "ready\n",
+		},
+	}
+	var msgs []tea.Msg
+	send := func(msg tea.Msg) { msgs = append(msgs, msg) }
+
+	waited := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/task wait task-1 2s")
+	if waited.Err != nil || driver.taskWaitCalls != 1 || driver.taskWaitOptions.TaskID != "task-1" || driver.taskWaitOptions.YieldTimeMS != 2000 {
+		t.Fatalf("task wait result=%#v calls=%d opts=%#v, want wait task-1 2s", waited, driver.taskWaitCalls, driver.taskWaitOptions)
+	}
+	wrote := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/task write task-1 -- ping")
+	if wrote.Err != nil || driver.taskWriteCalls != 1 || driver.taskWriteOptions.TaskID != "task-1" || driver.taskWriteOptions.Input != "ping" {
+		t.Fatalf("task write result=%#v calls=%d opts=%#v, want write ping", wrote, driver.taskWriteCalls, driver.taskWriteOptions)
+	}
+	cancelled := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/task cancel task-1")
+	if cancelled.Err != nil || driver.taskCancelCalls != 1 || driver.taskOutputOptions.TaskID != "task-1" {
+		t.Fatalf("task cancel result=%#v calls=%d opts=%#v, want cancel task-1", cancelled, driver.taskCancelCalls, driver.taskOutputOptions)
+	}
+	if !noticeMessagesContain(msgs, "ready") || !noticeMessagesContain(msgs, "Echo Task") {
+		t.Fatalf("task control messages = %#v, want task output", msgs)
+	}
+}
+
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
@@ -1913,6 +1970,20 @@ type bridgeTestDriver struct {
 	agentStatus              tuidriver.AgentStatusSnapshot
 	addAgentErr              error
 	slashArgCandidates       map[string][]tuidriver.SlashArgCandidate
+	taskList                 tuidriver.TaskListView
+	taskOutput               tuidriver.TaskOutputView
+	taskListOptions          tuidriver.TaskListOptions
+	taskOutputOptions        tuidriver.TaskOutputOptions
+	taskStartOptions         tuidriver.TaskStartOptions
+	taskWaitOptions          tuidriver.TaskWaitOptions
+	taskWriteOptions         tuidriver.TaskWriteOptions
+	taskListCalls            int
+	taskTailCalls            int
+	taskStartCalls           int
+	taskWaitCalls            int
+	taskWriteCalls           int
+	taskCancelCalls          int
+	taskReleaseCalls         int
 }
 
 type bridgeLightweightStatusDriver struct {
@@ -2249,4 +2320,46 @@ func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _
 		return d.slashArgCandidates[strings.TrimSpace(command)], nil
 	}
 	return nil, nil
+}
+
+func (d *bridgeTestDriver) ListTasks(_ context.Context, opts tuidriver.TaskListOptions) (tuidriver.TaskListView, error) {
+	d.taskListCalls++
+	d.taskListOptions = opts
+	return d.taskList, nil
+}
+
+func (d *bridgeTestDriver) TailTask(_ context.Context, opts tuidriver.TaskOutputOptions) (tuidriver.TaskOutputView, error) {
+	d.taskTailCalls++
+	d.taskOutputOptions = opts
+	return d.taskOutput, nil
+}
+
+func (d *bridgeTestDriver) StartTask(_ context.Context, opts tuidriver.TaskStartOptions) (tuidriver.TaskOutputView, error) {
+	d.taskStartCalls++
+	d.taskStartOptions = opts
+	return d.taskOutput, nil
+}
+
+func (d *bridgeTestDriver) WaitTask(_ context.Context, opts tuidriver.TaskWaitOptions) (tuidriver.TaskOutputView, error) {
+	d.taskWaitCalls++
+	d.taskWaitOptions = opts
+	return d.taskOutput, nil
+}
+
+func (d *bridgeTestDriver) WriteTask(_ context.Context, opts tuidriver.TaskWriteOptions) (tuidriver.TaskOutputView, error) {
+	d.taskWriteCalls++
+	d.taskWriteOptions = opts
+	return d.taskOutput, nil
+}
+
+func (d *bridgeTestDriver) CancelTask(_ context.Context, opts tuidriver.TaskOutputOptions) (tuidriver.TaskOutputView, error) {
+	d.taskCancelCalls++
+	d.taskOutputOptions = opts
+	return d.taskOutput, nil
+}
+
+func (d *bridgeTestDriver) ReleaseTask(_ context.Context, opts tuidriver.TaskOutputOptions) error {
+	d.taskReleaseCalls++
+	d.taskOutputOptions = opts
+	return nil
 }

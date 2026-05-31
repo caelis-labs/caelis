@@ -932,6 +932,9 @@ The completed work is intentionally limited to the reusable skeleton:
   provider models, built-in provider model presets, capability defaults, and
   reasoning levels so TUI and future APP connect/setup flows do not need to own
   provider capability tables.
+- Shared task command baseline: `TaskService` is now reachable from both
+  app-level command execution and the production TUI driver path for
+  list/tail/wait/write/cancel/release/start task operations.
 - App provider configuration baseline: provider endpoint API/auth semantics now
   live in `core/model`; `internal/cli`, `internal/app/services`, and the
   service-bound TUI connect/model config path no longer import
@@ -1284,21 +1287,26 @@ be migrated before retiring the old stack:
      those parts without converting through `ports/model`. Attachment UI and
      rendering remain surface-local, but the model-visible prompt content
      contract is no longer owned by the old port package.
-  - Migrated baseline: core/app session event projection for the app-service
-    TUI binding has been centralized in `surfaces/tui/eventbridge` instead of
-    living inside `surfaces/tui/gatewaydriver`. The bridge now carries
-    canonical core tool content into the existing transcript/tool-panel
-    renderer, so service-native shell/task/filesystem results do not depend on
-    gatewaydriver-local projection details.
-  - Migrated baseline: TUI sandbox setup display state now uses
-    `core/sandbox.SetupStatus` through the driver and gatewaydriver status
-    path. This removes a display-only dependency on the old sandbox port while
-    keeping setup diagnostics, `/status`, and `/doctor` rendering behavior
-    unchanged.
-  - Migrated baseline: the app-service TUI gateway and event bridge no longer
-    import the old agent or approval ports directly for cancel and approval
-    DTOs; they consume the public kernel aliases while the remaining old
-    ownership stays contained in the legacy kernel bridge.
+   - Migrated baseline: core/app session event projection for the app-service
+     TUI binding has been centralized in `surfaces/tui/eventbridge` instead of
+     living inside `surfaces/tui/gatewaydriver`. The bridge now carries
+     canonical core tool content into the existing transcript/tool-panel
+     renderer, so service-native shell/task/filesystem results do not depend on
+     gatewaydriver-local projection details.
+   - Migrated baseline: TUI sandbox setup display state now uses
+     `core/sandbox.SetupStatus` through the driver and gatewaydriver status
+     path. This removes a display-only dependency on the old sandbox port while
+     keeping setup diagnostics, `/status`, and `/doctor` rendering behavior
+     unchanged.
+   - Migrated baseline: the app-service TUI gateway and event bridge no longer
+     import the old agent or approval ports directly for cancel and approval
+     DTOs; they consume the public kernel aliases while the remaining old
+     ownership stays contained in the legacy kernel bridge.
+   - Migrated baseline: `/task` is now a service-native TUI command backed by a
+     narrow optional task-controller interface on the driver. The gatewaydriver
+     binds list/tail/wait/write/cancel/release/start to
+     `internal/app/services.TaskService`, and task-id completion reads the
+     shared live/durable task list instead of surface-local task state.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1363,10 +1371,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
-     `/connect`, `/status`, `/compact`, `/model`, `/approval`, `/resume`, and
-     dynamic `/<agent> <prompt>` participant invocation now share app-service
-     behavior; remaining interactive commands can be added without making ACP,
-     TUI, or APP surfaces own command semantics.
+     `/connect`, `/status`, `/compact`, `/model`, `/approval`, `/resume`,
+     `/task`, and dynamic `/<agent> <prompt>` participant invocation now share
+     app-service behavior; remaining interactive commands can be added without
+     making ACP, TUI, or APP surfaces own command semantics.
    - Migrated baseline: `SettingsService.Panel` now provides an APP-ready
      settings composition contract that combines normalized settings, runtime
      status, model/agent counts, sandbox lifecycle status/actions, resource
@@ -1938,9 +1946,13 @@ be migrated before retiring the old stack:
       ACP agent is available through the same runtime session abstraction used
       by `run_command`, TASK, ACP server terminal lifecycle, and app task
       panels.
+    - Migrated baseline: production TUI `/task` commands and slash completion
+      now consume the shared app task service through the gatewaydriver binding,
+      while app `CommandService` exposes the same task actions for ACP/APP
+      command execution.
     - Still pending: durable host subprocess lifecycle continuation across
-      restarts, richer persisted terminal previews, and full production TUI/APP
-      task-panel wiring remain incomplete.
+      restarts, richer persisted terminal previews, and richer visual TUI/APP
+      task panels remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -2087,10 +2099,11 @@ Recommended sequence:
    without reintroducing the removed router/preset/tool stacks.
 4. Finish durable async SPAWN task control and durable task runtime behavior
    behind `core/tool.Registry` and `internal/engine/tasks`; the shared
-   app-service history projection is now a baseline, so this milestone should
+   app-service command/control path is now a baseline, so this milestone should
    focus on real async process/subagent lifecycle and durable output storage.
 5. Port the remaining TUI driver command shells and panels to
-   `internal/app/services`, preserving existing rendering as surface-local code.
+   `internal/app/services`, especially `/connect` UI-shell parity and richer
+   task/settings panels, preserving existing rendering as surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff

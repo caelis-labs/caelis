@@ -15,6 +15,7 @@ func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"model",
 		"approval",
 		"status",
+		"task",
 		"doctor",
 		"new",
 		"resume",

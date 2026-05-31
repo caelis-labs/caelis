@@ -147,6 +147,8 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		return d.completeRemovableAgentCatalog(query, limit), nil
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
+	case "task tail", "task wait", "task write", "task cancel", "task release":
+		return d.completeTaskIDs(ctx, query, limit)
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)
 	}
@@ -168,6 +170,49 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		}
 	}
 	return out, nil
+}
+
+func (d *GatewayDriver) completeTaskIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+	tasks, err := d.ListTasks(ctx, TaskListOptions{Limit: max(limit*4, limit), IncludeHistory: true})
+	if err != nil || !tasks.Supported {
+		return nil, err
+	}
+	out := make([]SlashArgCandidate, 0, min(limit, len(tasks.Tasks)))
+	for _, task := range tasks.Tasks {
+		value := strings.TrimSpace(task.ID)
+		if value == "" {
+			continue
+		}
+		detail := taskCompletionDetail(task)
+		if query != "" && !hasSlashArgPrefix(query, value, task.Title, task.Command, detail) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   value,
+			Display: value,
+			Detail:  detail,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func taskCompletionDetail(task TaskItem) string {
+	parts := []string{}
+	if state := strings.TrimSpace(task.State); state != "" {
+		parts = append(parts, state)
+	} else if task.Running {
+		parts = append(parts, "running")
+	}
+	if kind := strings.TrimSpace(task.Kind); kind != "" {
+		parts = append(parts, kind)
+	}
+	if title := strings.TrimSpace(firstNonEmpty(task.Title, task.Command, task.Agent)); title != "" {
+		parts = append(parts, title)
+	}
+	return strings.Join(parts, " ")
 }
 
 func (d *GatewayDriver) completeACPControllerSlashArg(status controller.ControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {

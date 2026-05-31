@@ -15,6 +15,7 @@ func TestDefaultNamesExposeCanonicalCoreCommandsOnly(t *testing.T) {
 		"model",
 		"approval",
 		"status",
+		"task",
 		"doctor",
 		"new",
 		"resume",
@@ -37,7 +38,7 @@ func TestHelpTextUsesRegistrySpecs(t *testing.T) {
 }
 
 func TestLocalDuringACPMatchesLegacyLocalCommands(t *testing.T) {
-	local := []string{"help", "agent", "status", "doctor", "resume", "model", "approval", "exit", "quit"}
+	local := []string{"help", "agent", "status", "task", "doctor", "resume", "model", "approval", "exit", "quit"}
 	for _, name := range local {
 		if !IsLocalDuringACP(name) {
 			t.Fatalf("IsLocalDuringACP(%q) = false, want true", name)

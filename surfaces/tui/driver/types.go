@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -168,6 +169,51 @@ type ConnectConfig struct {
 	MaxOutputTokens     int
 	ReasoningEffort     string
 	ReasoningLevels     []string
+}
+
+type TaskListView = appviewmodel.TaskListView
+
+type TaskItem = appviewmodel.TaskItem
+
+type TaskOutputView = appviewmodel.TaskOutputView
+
+type TaskListOptions struct {
+	Limit          int
+	IncludeHistory bool
+}
+
+type TaskOutputOptions struct {
+	TaskID       string
+	StdoutCursor int64
+	StderrCursor int64
+}
+
+type TaskStartOptions struct {
+	Command string
+	Args    []string
+	Dir     string
+	Env     map[string]string
+}
+
+type TaskWaitOptions struct {
+	TaskOutputOptions
+	YieldTimeMS int
+}
+
+type TaskWriteOptions struct {
+	TaskOutputOptions
+	Input       string
+	YieldTimeMS int
+}
+
+type TaskController interface {
+	ListTasks(context.Context, TaskListOptions) (TaskListView, error)
+	TailTask(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	StartTask(context.Context, TaskStartOptions) (TaskOutputView, error)
+	WaitTask(context.Context, TaskWaitOptions) (TaskOutputView, error)
+	WriteTask(context.Context, TaskWriteOptions) (TaskOutputView, error)
+	CancelTask(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	ReleaseTask(context.Context, TaskOutputOptions) error
 }
 
 type Turn interface {
