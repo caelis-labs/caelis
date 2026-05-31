@@ -981,6 +981,12 @@ The completed work is intentionally limited to the reusable skeleton:
   in app services, and the TUI app-service gateway no longer owns a separate
   ACP-controller prompt handle. TUI, headless, ACP, and the future APP therefore
   consume the same completed-turn stream for active external controllers.
+- Shared controller-handoff cleanup: the TUI app-service gateway now delegates
+  ACP/local controller handoff to `ControllerService.Handoff` instead of
+  constructing controller bindings and `EventHandoff` records itself. Handoff
+  event shape, epoch allocation, agent lookup, and local-controller fallback now
+  have one app-service implementation for TUI, ACP commands, headless, and the
+  future APP.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1589,6 +1595,10 @@ be migrated before retiring the old stack:
       as controller-scoped session events. Controller-scoped response events
       now also feed the derived controller binding, so the latest remote ACP
       session id is carried forward into the next controller prompt.
+    - Migrated baseline: the TUI app-service gateway now routes
+      `HandoffController` through `ControllerService.Handoff`, so TUI no longer
+      duplicates ACP agent lookup, controller binding construction, handoff
+      event writing, or local-controller fallback logic.
     - Migrated baseline: shared `TurnService.Begin` now honors an active ACP
       controller for normal surface turns. The controller route invokes the
       registered external ACP agent through `AgentService`, returns a standard

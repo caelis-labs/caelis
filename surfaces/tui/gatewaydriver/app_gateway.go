@@ -158,76 +158,39 @@ func (g *appServiceGateway) ControlPlaneState(ctx context.Context, req kernel.Co
 
 func (g *appServiceGateway) HandoffController(ctx context.Context, req kernel.HandoffControllerRequest) (portsession.Session, error) {
 	ref := coreRefFromPort(req.SessionRef)
+	target, err := handoffTargetFromRequest(req)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	if _, err := g.services.Controllers().Handoff(ctx, appservices.ControllerHandoffRequest{
+		SessionRef: ref,
+		Target:     target,
+		Source:     req.Source,
+		Reason:     req.Reason,
+	}); err != nil {
+		return portsession.Session{}, err
+	}
 	snapshot, err := g.services.Sessions().Load(ctx, ref)
 	if err != nil {
 		return portsession.Session{}, err
 	}
-	controller, err := g.controllerForHandoff(ctx, req)
-	if err != nil {
-		return portsession.Session{}, err
-	}
-	event := controllerHandoffEvent(controller, req.Source, req.Reason)
-	if _, err := g.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, []coresession.Event{event}); err != nil {
-		return portsession.Session{}, err
-	}
-	snapshot.Events = append(snapshot.Events, event)
 	snapshot.Session.Controller = controllerFromCoreSnapshot(snapshot)
 	return portSessionFromCore(snapshot.Session), nil
 }
 
-func (g *appServiceGateway) controllerForHandoff(ctx context.Context, req kernel.HandoffControllerRequest) (coresession.ControllerBinding, error) {
+func handoffTargetFromRequest(req kernel.HandoffControllerRequest) (string, error) {
 	switch req.Kind {
 	case "", portsession.ControllerKindKernel:
-		return coresession.ControllerBinding{
-			Kind:       coresession.ControllerBuiltin,
-			ID:         "builtin",
-			AgentName:  "local",
-			Label:      "local kernel",
-			EpochID:    controllerEpochID(),
-			AttachedAt: time.Now().UTC(),
-			Source:     firstNonEmpty(req.Source, "tui_agent_handoff"),
-		}, nil
+		return "local", nil
 	case portsession.ControllerKindACP:
-		descriptor, ok, err := g.resolveAgentDescriptor(ctx, req.Agent)
-		if err != nil {
-			return coresession.ControllerBinding{}, err
+		target := strings.TrimSpace(req.Agent)
+		if target == "" {
+			return "", fmt.Errorf("core app-service TUI gateway: ACP controller agent is required")
 		}
-		if !ok {
-			return coresession.ControllerBinding{}, fmt.Errorf("core app-service TUI gateway: agent %q is not configured", strings.TrimSpace(req.Agent))
-		}
-		id := firstNonEmpty(descriptor.ID, descriptor.Name, descriptor.Command)
-		return coresession.ControllerBinding{
-			Kind:       coresession.ControllerACP,
-			ID:         id,
-			AgentName:  id,
-			Label:      firstNonEmpty(descriptor.Name, id),
-			EpochID:    controllerEpochID(),
-			AttachedAt: time.Now().UTC(),
-			Source:     firstNonEmpty(req.Source, "tui_agent_handoff"),
-		}, nil
+		return target, nil
 	default:
-		return coresession.ControllerBinding{}, fmt.Errorf("core app-service TUI gateway: unsupported controller kind %q", req.Kind)
+		return "", fmt.Errorf("core app-service TUI gateway: unsupported controller kind %q", req.Kind)
 	}
-}
-
-func controllerHandoffEvent(controller coresession.ControllerBinding, source string, reason string) coresession.Event {
-	return coresession.Event{
-		Type:       coresession.EventHandoff,
-		Visibility: coresession.VisibilityCanonical,
-		Time:       time.Now().UTC(),
-		Actor:      coresession.ActorRef{Kind: coresession.ActorSystem, ID: "caelis", Name: "caelis"},
-		Scope: &coresession.EventScope{
-			Source:     firstNonEmpty(source, "tui_agent_handoff"),
-			Controller: controller,
-		},
-		Meta: map[string]any{
-			"reason": strings.TrimSpace(reason),
-		},
-	}
-}
-
-func controllerEpochID() string {
-	return fmt.Sprintf("controller-%d", time.Now().UTC().UnixNano())
 }
 
 func (g *appServiceGateway) AttachParticipant(ctx context.Context, req kernel.AttachParticipantRequest) (portsession.Session, error) {
