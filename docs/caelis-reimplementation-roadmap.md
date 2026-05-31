@@ -1421,6 +1421,11 @@ be migrated before retiring the old stack:
    - Migrated baseline: the TUI driver session contract now returns
      `core/session` session/ref values; old `ports/session` session conversion
      is contained in the gatewaydriver compatibility boundary.
+   - Migrated baseline: TUI `/resume` and resume completion now use
+     core-native driver hooks backed by `internal/app/services.Sessions()`.
+     Session list candidates are built from `core/session.SessionPage` and
+     canonical session state instead of routing through
+     `GatewayService.ListSessions` or `GatewayService.ResumeSession`.
    - Migrated baseline: the public TUI driver contract no longer exposes old
      `kernel.EventEnvelope` live/replay streams or `kernel.CancelResult`.
      App-service turns use core submissions, core sessions, and core cancel
@@ -1454,12 +1459,13 @@ be migrated before retiring the old stack:
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
    - Still pending: `surfaces/tui/gatewaydriver` still keeps old
-     `GatewayService` control-plane/session-list/session-resume adapters for
-     the current TUI shell, and `surfaces/tui/app` still imports old gateway
-     event/protocol types for transcript renderer compatibility,
-     terminal/tool formatting, and participant projections. Retiring those
-     imports requires moving the remaining TUI bridge protocol to
-     `core/runtime`, `core/session`, and `internal/app/viewmodel`.
+     `GatewayService` control-plane, active-turn-state, interrupt, and
+     participant lifecycle adapters for the current TUI shell, and
+     `surfaces/tui/app` still imports old gateway event/protocol types for
+     transcript renderer compatibility, terminal/tool formatting, and
+     participant projections. Retiring those imports requires moving the
+     remaining TUI bridge protocol to `core/runtime`, `core/session`, and
+     `internal/app/viewmodel`.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

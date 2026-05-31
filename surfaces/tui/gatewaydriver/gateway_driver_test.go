@@ -2921,7 +2921,7 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 	}
 	if err := stack.Sessions.UpdateState(ctx, first.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
-		next[kernel.StateCurrentModelAlias] = "openai/gpt-4o-mini"
+		next[appservices.StateCurrentModelID] = "openai/gpt-4o-mini"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(first) error = %v", err)
@@ -2938,7 +2938,7 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 	}
 	if err := stack.Sessions.UpdateState(ctx, second.SessionRef, func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
-		next[kernel.StateCurrentModelAlias] = "deepseek/deepseek-v4-flash"
+		next[appservices.StateCurrentModelID] = "deepseek/deepseek-v4-flash"
 		return next, nil
 	}); err != nil {
 		t.Fatalf("UpdateState(second) error = %v", err)
@@ -3173,14 +3173,6 @@ type activeSubmitGatewayService struct {
 
 func (g *activeSubmitGatewayService) Interrupt(context.Context, kernel.InterruptRequest) error {
 	return nil
-}
-
-func (g *activeSubmitGatewayService) ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error) {
-	return session.LoadedSession{}, nil
-}
-
-func (g *activeSubmitGatewayService) ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error) {
-	return session.SessionList{}, nil
 }
 
 func (g *activeSubmitGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {

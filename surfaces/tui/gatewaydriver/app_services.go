@@ -40,6 +40,43 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return active, nil
 	}
+	stack.ResumeSessionFn = func(ctx context.Context, req ResumeSessionRequest) (coresession.Session, error) {
+		snapshot, err := svc.Sessions().Load(ctx, coresession.Ref{
+			SessionID: strings.TrimSpace(req.SessionID),
+		})
+		if err != nil {
+			return coresession.Session{}, err
+		}
+		return snapshot.Session, nil
+	}
+	stack.ListSessionCandidatesFn = func(ctx context.Context, req ListSessionCandidatesRequest) ([]ResumeCandidate, error) {
+		workspace := req.Workspace
+		if strings.TrimSpace(workspace.Key) == "" {
+			workspace.Key = runtimeCfg.WorkspaceKey
+		}
+		if strings.TrimSpace(workspace.CWD) == "" {
+			workspace.CWD = runtimeCfg.WorkspaceCWD
+		}
+		page, err := svc.Sessions().List(ctx, appservices.ListSessionsRequest{
+			Workspace: workspace,
+			Limit:     req.Limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		out := make([]ResumeCandidate, 0, len(page.Sessions))
+		for _, summary := range page.Sessions {
+			candidate := resumeCandidateFromCoreSummary(summary)
+			if snapshot, err := svc.Sessions().Load(ctx, summary.Session.Ref); err == nil {
+				candidate = enrichResumeCandidateFromCoreSnapshot(candidate, snapshot)
+			}
+			if strings.TrimSpace(candidate.Prompt) == "" && strings.TrimSpace(candidate.Title) == "" {
+				continue
+			}
+			out = append(out, candidate)
+		}
+		return out, nil
+	}
 	stack.AppStatusViewFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
 		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: ref})
 	}

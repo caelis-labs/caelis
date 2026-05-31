@@ -18,8 +18,6 @@ import (
 
 type GatewayService interface {
 	Interrupt(context.Context, kernel.InterruptRequest) error
-	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
-	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
 	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
 	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
 	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
@@ -52,6 +50,16 @@ type PromptParticipantRequest struct {
 	Input         string
 	ContentParts  []model.ContentPart
 	Source        string
+}
+
+type ResumeSessionRequest struct {
+	SessionID string
+	Surface   string
+}
+
+type ListSessionCandidatesRequest struct {
+	Workspace coresession.Workspace
+	Limit     int
 }
 
 type ModelConfig struct {
@@ -202,6 +210,8 @@ type DriverStack struct {
 	Workspace session.WorkspaceRef
 
 	StartSessionFn                     func(context.Context, string, string) (coresession.Session, error)
+	ResumeSessionFn                    func(context.Context, ResumeSessionRequest) (coresession.Session, error)
+	ListSessionCandidatesFn            func(context.Context, ListSessionCandidatesRequest) ([]ResumeCandidate, error)
 	BeginTurnFn                        func(context.Context, BeginTurnRequest) (BeginTurnResult, error)
 	SubmitActiveTurnFn                 func(context.Context, SubmitActiveTurnRequest) error
 	PromptParticipantFn                func(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
@@ -273,6 +283,20 @@ func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID strin
 		return coresession.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: start session dependency is unavailable")
 	}
 	return s.StartSessionFn(ctx, preferredSessionID, bindingKey)
+}
+
+func (s *DriverStack) ResumeSession(ctx context.Context, req ResumeSessionRequest) (coresession.Session, error) {
+	if s == nil || s.ResumeSessionFn == nil {
+		return coresession.Session{}, ErrMigrationPending
+	}
+	return s.ResumeSessionFn(ctx, req)
+}
+
+func (s *DriverStack) ListSessionCandidates(ctx context.Context, req ListSessionCandidatesRequest) ([]ResumeCandidate, error) {
+	if s == nil || s.ListSessionCandidatesFn == nil {
+		return nil, ErrMigrationPending
+	}
+	return s.ListSessionCandidatesFn(ctx, req)
 }
 
 func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {

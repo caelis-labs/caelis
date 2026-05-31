@@ -87,35 +87,6 @@ func (g *appServiceGateway) Interrupt(ctx context.Context, req kernel.InterruptR
 	return g.services.Turns().Interrupt(ctx, coreRefFromPort(req.SessionRef))
 }
 
-func (g *appServiceGateway) ResumeSession(ctx context.Context, req kernel.ResumeSessionRequest) (portsession.LoadedSession, error) {
-	snapshot, err := g.services.Sessions().Load(ctx, coresession.Ref{
-		AppName:      strings.TrimSpace(req.AppName),
-		UserID:       strings.TrimSpace(req.UserID),
-		SessionID:    strings.TrimSpace(req.SessionID),
-		WorkspaceKey: strings.TrimSpace(req.Workspace.Key),
-	})
-	if err != nil {
-		return portsession.LoadedSession{}, err
-	}
-	return loadedSessionFromCore(snapshot), nil
-}
-
-func (g *appServiceGateway) ListSessions(ctx context.Context, req kernel.ListSessionsRequest) (portsession.SessionList, error) {
-	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
-	page, err := g.services.Sessions().List(ctx, appservices.ListSessionsRequest{
-		Workspace: coresession.Workspace{
-			Key: workspaceKey,
-		},
-		AllWorkspaces: workspaceKey == "",
-		After:         coresession.Cursor(req.Cursor),
-		Limit:         req.Limit,
-	})
-	if err != nil {
-		return portsession.SessionList{}, err
-	}
-	return g.sessionListFromCore(ctx, page), nil
-}
-
 func (g *appServiceGateway) ControlPlaneState(ctx context.Context, req kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
 	snapshot, err := g.services.Sessions().Load(ctx, coreRefFromPort(req.SessionRef))
 	if err != nil {
@@ -368,54 +339,6 @@ func unsupportedControlPlaneError(action string) error {
 		Code:    kernel.CodeControlPlaneUnsupported,
 		Message: "core app-service TUI gateway does not support " + action,
 	}
-}
-
-func loadedSessionFromCore(snapshot coresession.Snapshot) portsession.LoadedSession {
-	snapshot.Session.Controller = controllerFromCoreSnapshot(snapshot)
-	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
-	return portsession.LoadedSession{
-		Session: portSessionFromCore(snapshot.Session),
-		Events:  portEventsFromCore(snapshot.Events),
-		State:   maps.Clone(snapshot.State),
-	}
-}
-
-func portEventsFromCore(events []coresession.Event) []*portsession.Event {
-	if len(events) == 0 {
-		return nil
-	}
-	out := make([]*portsession.Event, 0, len(events))
-	for _, event := range events {
-		next := portEventFromCore(event)
-		out = append(out, &next)
-	}
-	return out
-}
-
-func portEventFromCore(event coresession.Event) portsession.Event {
-	return portsession.Event{
-		ID:        strings.TrimSpace(event.ID),
-		SessionID: strings.TrimSpace(event.SessionID),
-		Type:      portsession.EventType(event.Type),
-		Time:      event.Time,
-		Meta:      maps.Clone(event.Meta),
-	}
-}
-
-func (g *appServiceGateway) sessionListFromCore(_ context.Context, page coresession.SessionPage) portsession.SessionList {
-	out := portsession.SessionList{
-		Sessions:   make([]portsession.SessionSummary, 0, len(page.Sessions)),
-		NextCursor: string(page.NextCursor),
-	}
-	for _, item := range page.Sessions {
-		out.Sessions = append(out.Sessions, portsession.SessionSummary{
-			SessionRef: portRefFromCore(item.Session.Ref),
-			CWD:        strings.TrimSpace(item.Session.Workspace.CWD),
-			Title:      strings.TrimSpace(item.Session.Title),
-			UpdatedAt:  item.Session.UpdatedAt,
-		})
-	}
-	return out
 }
 
 func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []kernel.ActiveTurnState) kernel.ControlPlaneState {

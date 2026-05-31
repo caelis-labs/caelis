@@ -524,58 +524,33 @@ func (d *GatewayDriver) NewSession(ctx context.Context) (coresession.Session, er
 }
 
 func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (coresession.Session, error) {
-	gw, err := d.gateway()
-	if err != nil {
-		return coresession.Session{}, err
-	}
-	result, err := gw.ResumeSession(ctx, kernel.ResumeSessionRequest{
-		AppName:    d.stack.AppName,
-		UserID:     d.stack.UserID,
-		Workspace:  d.stack.Workspace,
-		SessionID:  strings.TrimSpace(sessionID),
-		BindingKey: d.bindingKey,
-		Binding: kernel.BindingDescriptor{
-			Surface: d.bindingKey,
-			Owner:   d.stack.AppName,
-		},
+	result, err := d.stack.ResumeSession(ctx, ResumeSessionRequest{
+		SessionID: strings.TrimSpace(sessionID),
+		Surface:   d.bindingKey,
 	})
 	if err != nil {
 		return coresession.Session{}, err
 	}
+	activeSession := portSessionFromCore(result)
 	d.mu.Lock()
-	d.session = result.Session
+	d.session = activeSession
 	d.hasSession = true
 	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, result.Session)
-	return coreSessionFromPort(result.Session), nil
+	d.refreshSessionDisplay(ctx, activeSession)
+	return result, nil
 }
 
 func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCandidate, error) {
 	limit = normalizeCompletionLimit(limit)
 	ctx, cancel := completionContext(ctx, resumeCompletionTimeout)
 	defer cancel()
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, err
-	}
-	result, err := gw.ListSessions(ctx, kernel.ListSessionsRequest{
-		AppName:      d.stack.AppName,
-		UserID:       d.stack.UserID,
-		WorkspaceKey: d.stack.Workspace.Key,
-		Limit:        limit,
+	return d.stack.ListSessionCandidates(ctx, ListSessionCandidatesRequest{
+		Workspace: coresession.Workspace{
+			Key: strings.TrimSpace(d.stack.Workspace.Key),
+			CWD: strings.TrimSpace(d.stack.Workspace.CWD),
+		},
+		Limit: limit,
 	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]ResumeCandidate, 0, len(result.Sessions))
-	for _, session := range result.Sessions {
-		candidate := enrichResumeCandidate(ctx, d.stack.Sessions, session)
-		if strings.TrimSpace(candidate.Prompt) == "" && strings.TrimSpace(candidate.Title) == "" {
-			continue
-		}
-		out = append(out, candidate)
-	}
-	return out, nil
 }
 
 func (d *GatewayDriver) ReplaySessionEvents(ctx context.Context) ([]appviewmodel.SessionEventEnvelope, error) {

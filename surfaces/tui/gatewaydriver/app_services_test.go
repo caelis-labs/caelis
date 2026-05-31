@@ -18,7 +18,6 @@ import (
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
@@ -421,7 +420,7 @@ func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T
 	}
 }
 
-func TestBindAppServicesListSessionsPreservesAllWorkspaceRequest(t *testing.T) {
+func TestBindAppServicesListSessionsUsesRuntimeWorkspaceRequest(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{}
 	svc, err := appservices.New(appservices.Config{
@@ -436,16 +435,15 @@ func TestBindAppServicesListSessionsPreservesAllWorkspaceRequest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bound := BindAppServices(&DriverStack{}, svc)
-	if _, err := bound.GatewayFn().ListSessions(ctx, kernel.ListSessionsRequest{
-		AppName: "caelis",
-		UserID:  "user-1",
-		Limit:   10,
-	}); err != nil {
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "", "surface", "")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if engine.list.Ref.WorkspaceKey != "" || engine.list.WorkspaceCWD != "" {
-		t.Fatalf("list query = %#v, want no workspace filters", engine.list)
+	if _, err := driver.ListSessions(ctx, 10); err != nil {
+		t.Fatal(err)
+	}
+	if engine.list.Ref.WorkspaceKey != "repo" || engine.list.WorkspaceCWD != "/repo" {
+		t.Fatalf("list query = %#v, want runtime workspace filter", engine.list)
 	}
 }
 

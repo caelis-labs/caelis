@@ -11,9 +11,8 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/plugin"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 const (
@@ -47,10 +46,6 @@ var ignoredCompletionDirs = map[string]struct{}{
 type scoredCompletion struct {
 	candidate CompletionCandidate
 	score     int
-}
-
-type resumeSessionLoader interface {
-	LoadSession(context.Context, session.LoadSessionRequest) (session.LoadedSession, error)
 }
 
 func normalizeCompletionLimit(limit int) int {
@@ -250,36 +245,45 @@ func sortAndTrimCandidates(items []scoredCompletion, limit int) []CompletionCand
 	return out
 }
 
-func enrichResumeCandidate(ctx context.Context, sessions resumeSessionLoader, summary session.SessionSummary) ResumeCandidate {
-	candidate := ResumeCandidate{
-		SessionID: summary.SessionID,
-		Title:     strings.TrimSpace(summary.Title),
-		Prompt:    strings.TrimSpace(summary.Title),
-		Workspace: strings.TrimSpace(summary.CWD),
-		Age:       humanAge(summary.UpdatedAt),
-		UpdatedAt: summary.UpdatedAt,
+func resumeCandidateFromCoreSummary(summary coresession.SessionSummary) ResumeCandidate {
+	updatedAt := summary.LastEventAt
+	if updatedAt.IsZero() {
+		updatedAt = summary.Session.UpdatedAt
 	}
-	if sessions == nil {
-		return candidate
+	title := strings.TrimSpace(summary.Session.Title)
+	workspace := strings.TrimSpace(summary.Session.Workspace.CWD)
+	if workspace == "" {
+		workspace = strings.TrimSpace(summary.Session.Workspace.Key)
 	}
-	loaded, err := sessions.LoadSession(ctx, session.LoadSessionRequest{
-		SessionRef:       summary.SessionRef,
-		Limit:            0,
-		IncludeTransient: false,
-	})
-	if err != nil {
-		return candidate
+	return ResumeCandidate{
+		SessionID: strings.TrimSpace(summary.Session.Ref.SessionID),
+		Title:     title,
+		Prompt:    title,
+		Workspace: workspace,
+		Age:       humanAge(updatedAt),
+		UpdatedAt: updatedAt,
 	}
-	candidate.Title = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Title)
-	candidate.Prompt = firstNonEmpty(strings.TrimSpace(loaded.Session.Title), candidate.Prompt)
-	candidate.Workspace = firstNonEmpty(strings.TrimSpace(loaded.Session.CWD), candidate.Workspace)
-	candidate.Model = strings.TrimSpace(kernel.CurrentModelAlias(loaded.State))
-	if candidate.Model == "" {
-		if modelID, _ := loaded.State[appservices.StateCurrentModelID].(string); strings.TrimSpace(modelID) != "" {
-			candidate.Model = strings.TrimSpace(modelID)
-		}
+}
+
+func enrichResumeCandidateFromCoreSnapshot(candidate ResumeCandidate, snapshot coresession.Snapshot) ResumeCandidate {
+	candidate.SessionID = firstNonEmpty(candidate.SessionID, snapshot.Session.Ref.SessionID)
+	candidate.Title = firstNonEmpty(strings.TrimSpace(snapshot.Session.Title), candidate.Title)
+	candidate.Prompt = firstNonEmpty(strings.TrimSpace(snapshot.Session.Title), candidate.Prompt)
+	candidate.Model = firstNonEmpty(coreStateString(snapshot.State, appservices.StateCurrentModelID), candidate.Model)
+	candidate.Workspace = firstNonEmpty(strings.TrimSpace(snapshot.Session.Workspace.CWD), strings.TrimSpace(snapshot.Session.Workspace.Key), candidate.Workspace)
+	if candidate.UpdatedAt.IsZero() {
+		candidate.UpdatedAt = snapshot.Session.UpdatedAt
+		candidate.Age = humanAge(candidate.UpdatedAt)
 	}
 	return candidate
+}
+
+func coreStateString(state coresession.State, key string) string {
+	if state == nil {
+		return ""
+	}
+	value, _ := state[key].(string)
+	return strings.TrimSpace(value)
 }
 
 func scoreResumeCandidate(query string, candidate ResumeCandidate) (int, bool) {

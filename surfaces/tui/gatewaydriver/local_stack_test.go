@@ -260,11 +260,19 @@ func (g *gatewayDriverTestGateway) ListSessions(ctx context.Context, req kernel.
 	if g == nil || g.stack == nil || g.stack.driverStack == nil {
 		return portsession.SessionList{}, fmt.Errorf("gatewaydriver test gateway is unavailable")
 	}
-	gw, err := g.stack.driverStack.gateway()
+	workspaceKey := strings.TrimSpace(req.WorkspaceKey)
+	page, err := g.stack.services.Sessions().List(ctx, appservices.ListSessionsRequest{
+		Workspace: coresession.Workspace{
+			Key: workspaceKey,
+		},
+		AllWorkspaces: workspaceKey == "",
+		After:         coresession.Cursor(req.Cursor),
+		Limit:         req.Limit,
+	})
 	if err != nil {
 		return portsession.SessionList{}, err
 	}
-	return gw.ListSessions(ctx, req)
+	return gatewayDriverTestSessionListFromCore(page), nil
 }
 
 type gatewayDriverTestSessionService struct {
@@ -305,7 +313,7 @@ func (s gatewayDriverTestSessionService) LoadSession(ctx context.Context, req po
 	if err != nil {
 		return portsession.LoadedSession{}, err
 	}
-	return loadedSessionFromCore(snapshot), nil
+	return gatewayDriverTestLoadedSessionFromCore(snapshot), nil
 }
 
 func (s gatewayDriverTestSessionService) ListSessions(ctx context.Context, req portsession.ListSessionsRequest) (portsession.SessionList, error) {
@@ -337,7 +345,51 @@ func (s gatewayDriverTestSessionService) Events(ctx context.Context, req portses
 	if err != nil {
 		return nil, err
 	}
-	return portEventsFromCore(snapshot.Events), nil
+	return gatewayDriverTestPortEventsFromCore(snapshot.Events), nil
+}
+
+func gatewayDriverTestLoadedSessionFromCore(snapshot coresession.Snapshot) portsession.LoadedSession {
+	snapshot.Session.Controller = controllerFromCoreSnapshot(snapshot)
+	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
+	return portsession.LoadedSession{
+		Session: portSessionFromCore(snapshot.Session),
+		Events:  gatewayDriverTestPortEventsFromCore(snapshot.Events),
+		State:   maps.Clone(snapshot.State),
+	}
+}
+
+func gatewayDriverTestPortEventsFromCore(events []coresession.Event) []*portsession.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]*portsession.Event, 0, len(events))
+	for _, event := range events {
+		next := portsession.Event{
+			ID:        strings.TrimSpace(event.ID),
+			SessionID: strings.TrimSpace(event.SessionID),
+			Type:      portsession.EventType(event.Type),
+			Time:      event.Time,
+			Meta:      maps.Clone(event.Meta),
+		}
+		out = append(out, &next)
+	}
+	return out
+}
+
+func gatewayDriverTestSessionListFromCore(page coresession.SessionPage) portsession.SessionList {
+	out := portsession.SessionList{
+		Sessions:   make([]portsession.SessionSummary, 0, len(page.Sessions)),
+		NextCursor: string(page.NextCursor),
+	}
+	for _, item := range page.Sessions {
+		out.Sessions = append(out.Sessions, portsession.SessionSummary{
+			SessionRef: portRefFromCore(item.Session.Ref),
+			CWD:        strings.TrimSpace(item.Session.Workspace.CWD),
+			Title:      strings.TrimSpace(item.Session.Title),
+			UpdatedAt:  item.Session.UpdatedAt,
+		})
+	}
+	return out
 }
 
 func (s gatewayDriverTestSessionService) ReplaceState(ctx context.Context, ref portsession.SessionRef, state map[string]any) error {
