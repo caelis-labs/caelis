@@ -1144,6 +1144,7 @@ func (f AgentInvokerFunc) Invoke(ctx context.Context, req AgentInvokeRequest) (A
 type AgentInvokeRequest struct {
 	AgentID                   string
 	SessionRef                session.Ref
+	TurnID                    string
 	Controller                session.ControllerBinding
 	ControllerModel           string
 	ControllerReasoningEffort string
@@ -1210,9 +1211,9 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	}
 	var events []session.Event
 	if controllerMode {
-		events = normalizeAgentControllerEvents(ref.SessionID, req.Controller, cloneEvents(result.Events))
+		events = normalizeAgentControllerEvents(ref.SessionID, req.Controller, req.TurnID, cloneEvents(result.Events))
 	} else {
-		events = normalizeAgentInvokeEvents(ref.SessionID, req.Participant, cloneEvents(result.Events))
+		events = normalizeAgentInvokeEvents(ref.SessionID, req.Participant, req.TurnID, cloneEvents(result.Events))
 	}
 	if len(events) > 0 && !result.Recorded {
 		cursor, err := s.services.engine.RecordEvents(ctx, ref, events)
@@ -1298,11 +1299,12 @@ func normalizeAgentParticipant(in session.ParticipantBinding, agentID string) se
 	return out
 }
 
-func normalizeAgentControllerEvents(sessionID string, controller session.ControllerBinding, events []session.Event) []session.Event {
+func normalizeAgentControllerEvents(sessionID string, controller session.ControllerBinding, turnID string, events []session.Event) []session.Event {
 	if len(events) == 0 {
 		return nil
 	}
 	controller = normalizeAgentController(controller, controller.ID)
+	turnID = strings.TrimSpace(turnID)
 	out := make([]session.Event, 0, len(events))
 	for _, event := range events {
 		next := session.CloneEvent(event)
@@ -1314,6 +1316,9 @@ func normalizeAgentControllerEvents(sessionID string, controller session.Control
 		}
 		if next.Scope == nil {
 			next.Scope = &session.EventScope{}
+		}
+		if next.Scope.TurnID == "" {
+			next.Scope.TurnID = turnID
 		}
 		next.Scope.Source = firstNonEmpty(next.Scope.Source, controller.Source, "app_agent")
 		if next.Scope.Controller.Kind == "" && strings.TrimSpace(next.Scope.Controller.ID) == "" {
@@ -1332,11 +1337,12 @@ func normalizeAgentControllerEvents(sessionID string, controller session.Control
 	return out
 }
 
-func normalizeAgentInvokeEvents(sessionID string, participant session.ParticipantBinding, events []session.Event) []session.Event {
+func normalizeAgentInvokeEvents(sessionID string, participant session.ParticipantBinding, turnID string, events []session.Event) []session.Event {
 	if len(events) == 0 {
 		return nil
 	}
 	participant = normalizeAgentParticipant(participant, participant.ID)
+	turnID = strings.TrimSpace(turnID)
 	out := make([]session.Event, 0, len(events))
 	for _, event := range events {
 		next := session.CloneEvent(event)
@@ -1348,6 +1354,9 @@ func normalizeAgentInvokeEvents(sessionID string, participant session.Participan
 		}
 		if next.Scope == nil {
 			next.Scope = &session.EventScope{}
+		}
+		if next.Scope.TurnID == "" {
+			next.Scope.TurnID = turnID
 		}
 		next.Scope.Source = firstNonEmpty(next.Scope.Source, participant.Source, "app_agent")
 		if strings.TrimSpace(next.Scope.Participant.ID) == "" {
@@ -1588,9 +1597,20 @@ func (s TurnService) beginControllerTurn(ctx context.Context, ref session.Ref, r
 	if agentID == "" {
 		return nil, true, errors.New("app/services: active ACP controller agent is unavailable")
 	}
+	controller = normalizeAgentController(controller, agentID)
+	turnID, runID, startedAt := newCompletedTurnIdentity("controller")
+	turnEvents := make([]completedTurnEvent, 0, 2)
+	if event := controllerTurnUserEvent(snapshot.Session.Ref.SessionID, controller, req, turnID, startedAt); event.Type != "" {
+		cursor, err := s.services.engine.RecordEvents(ctx, snapshot.Session.Ref, []session.Event{event})
+		if err != nil {
+			return nil, true, err
+		}
+		turnEvents = append(turnEvents, completedTurnEvent{cursor: cursor, event: event})
+	}
 	result, err := s.services.Agents().Invoke(ctx, AgentInvokeRequest{
 		AgentID:      agentID,
 		SessionRef:   snapshot.Session.Ref,
+		TurnID:       turnID,
 		Controller:   controller,
 		Input:        req.Input,
 		ContentParts: model.CloneContentParts(req.ContentParts),
@@ -1598,7 +1618,8 @@ func (s TurnService) beginControllerTurn(ctx context.Context, ref session.Ref, r
 	if err != nil {
 		return nil, true, err
 	}
-	return newCompletedTurn(snapshot.Session.Ref, result), true, nil
+	turnEvents = append(turnEvents, completedTurnEventsFromAgentResult(result)...)
+	return newCompletedTurn(snapshot.Session.Ref, turnID, runID, startedAt, turnEvents), true, nil
 }
 
 func (s TurnService) skillInstructions(ctx context.Context, req BeginTurnRequest) ([]string, error) {
@@ -1648,6 +1669,48 @@ func (s TurnService) skillInstructions(ctx context.Context, req BeginTurnRequest
 		out = append(out, renderSkillInstruction(skill, path, content))
 	}
 	return out, nil
+}
+
+func controllerTurnUserEvent(sessionID string, controller session.ControllerBinding, req BeginTurnRequest, turnID string, startedAt time.Time) session.Event {
+	parts := commandMessageParts(req.Input, req.ContentParts)
+	if len(parts) == 0 {
+		return session.Event{}
+	}
+	return session.Event{
+		Type:       session.EventUser,
+		SessionID:  strings.TrimSpace(sessionID),
+		Visibility: session.VisibilityCanonical,
+		Time:       startedAt,
+		Actor:      session.ActorRef{Kind: session.ActorUser, ID: "user", Name: "user"},
+		Scope: &session.EventScope{
+			TurnID:     strings.TrimSpace(turnID),
+			Source:     firstNonEmpty(req.Surface, controller.Source, "app_controller_turn"),
+			Controller: controller,
+		},
+		Message: &model.Message{
+			Role:  model.RoleUser,
+			Parts: parts,
+		},
+		Meta: map[string]any{
+			"agent":  strings.TrimSpace(controller.AgentName),
+			"handle": strings.TrimSpace(firstNonEmpty(controller.Label, controller.ID)),
+		},
+	}
+}
+
+func completedTurnEventsFromAgentResult(result AgentInvokeResult) []completedTurnEvent {
+	if len(result.Events) == 0 {
+		return nil
+	}
+	out := make([]completedTurnEvent, 0, len(result.Events))
+	for _, event := range result.Events {
+		cursor := session.Cursor(strings.TrimSpace(event.ID))
+		if cursor == "" {
+			cursor = result.Cursor
+		}
+		out = append(out, completedTurnEvent{cursor: cursor, event: event})
+	}
+	return out
 }
 
 func boundedSkillContent(content string, remaining int) (string, int) {

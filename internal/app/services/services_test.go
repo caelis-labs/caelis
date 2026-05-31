@@ -1700,8 +1700,20 @@ func TestTurnServiceRoutesActiveACPControllerThroughAgentService(t *testing.T) {
 	if engine.turn.Input != "" {
 		t.Fatalf("engine turn = %#v, want controller route without local model turn", engine.turn)
 	}
-	if len(events) != 1 || session.EventText(events[0]) != "controller turn result" || events[0].Actor.Kind != session.ActorController {
-		t.Fatalf("turn events = %#v, want controller assistant event", events)
+	if len(events) != 2 {
+		t.Fatalf("turn events = %#v, want controller user prompt and assistant event", events)
+	}
+	if events[0].Type != session.EventUser || session.EventText(events[0]) != "delegate this turn" || events[0].Scope == nil || events[0].Scope.Controller.ID != "reviewer" {
+		t.Fatalf("turn user event = %#v, want controller-scoped prompt", events[0])
+	}
+	if events[1].Type != session.EventAssistant || session.EventText(events[1]) != "controller turn result" || events[1].Actor.Kind != session.ActorController {
+		t.Fatalf("turn assistant event = %#v, want controller assistant event", events[1])
+	}
+	if events[0].Scope.TurnID == "" || events[0].Scope.TurnID != events[1].Scope.TurnID {
+		t.Fatalf("turn ids = %q / %q, want shared controller turn id", events[0].Scope.TurnID, events[1].Scope.TurnID)
+	}
+	if len(engine.eventBatches) != 2 || len(engine.eventBatches[0]) != 1 || engine.eventBatches[0][0].Type != session.EventUser || len(engine.eventBatches[1]) != 1 || engine.eventBatches[1][0].Type != session.EventAssistant {
+		t.Fatalf("recorded batches = %#v, want user then assistant batches", engine.eventBatches)
 	}
 }
 

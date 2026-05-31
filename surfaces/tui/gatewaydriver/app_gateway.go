@@ -51,18 +51,6 @@ func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnR
 	}
 	controller := controllerFromCoreSnapshot(snapshot)
 	snapshot.Session.Controller = controller
-	if controller.Kind == coresession.ControllerACP {
-		handle := newAppServiceControllerTurnHandle(g.services, snapshot.Session.Ref, controller, req.Input, coreContentPartsFromPort(req.ContentParts), req.Surface)
-		g.register(handle)
-		go func() {
-			defer g.unregister(handle)
-			handle.run(ctx)
-		}()
-		return kernel.BeginTurnResult{
-			Session: portSessionFromCore(snapshot.Session),
-			Handle:  handle,
-		}, nil
-	}
 	turn, err := g.services.Turns().Begin(ctx, appservices.BeginTurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,

@@ -976,6 +976,11 @@ The completed work is intentionally limited to the reusable skeleton:
   falling back to the local model loop. Headless, ACP, TUI adapters, and the
   future APP can therefore share controller prompt semantics instead of each
   surface reinventing controller dispatch.
+- Shared controller-turn contract cleanup: controller-routed turns now persist
+  the controller-scoped user prompt and remote response with one shared turn id
+  in app services, and the TUI app-service gateway no longer owns a separate
+  ACP-controller prompt handle. TUI, headless, ACP, and the future APP therefore
+  consume the same completed-turn stream for active external controllers.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1589,6 +1594,11 @@ be migrated before retiring the old stack:
       registered external ACP agent through `AgentService`, returns a standard
       runtime turn event stream, persists remote-declared config options, and
       avoids starting a local model turn while the ACP controller is active.
+    - Migrated baseline: controller-routed turns now write the
+      controller-scoped user prompt in `TurnService` before invoking the
+      external ACP agent, attach the same shared turn id to prompt and response
+      events, and let the TUI gateway consume that standard completed-turn
+      stream instead of maintaining its own controller-only handle.
     - Migrated baseline: ACP controller model/reasoning/mode intent now has a
       shared app-service contract. `ControllerService` derives the active ACP
       controller from canonical session state/events, persists controller

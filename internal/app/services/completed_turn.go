@@ -18,21 +18,44 @@ type completedTurn struct {
 	events    chan coreruntime.EventEnvelope
 }
 
-func newCompletedTurn(ref session.Ref, result AgentInvokeResult) coreruntime.Turn {
+type completedTurnEvent struct {
+	cursor session.Cursor
+	event  session.Event
+}
+
+func newCompletedTurnIdentity(kind string) (string, string, time.Time) {
 	now := time.Now().UTC()
-	turnID := fmt.Sprintf("controller-turn-%d", now.UnixNano())
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "completed"
+	}
+	turnID := fmt.Sprintf("%s-turn-%d", kind, now.UnixNano())
+	return turnID, kind + "-run-" + turnID, now
+}
+
+func newCompletedTurn(ref session.Ref, turnID string, runID string, startedAt time.Time, events []completedTurnEvent) coreruntime.Turn {
+	turnID = strings.TrimSpace(turnID)
+	if turnID == "" {
+		turnID, runID, startedAt = newCompletedTurnIdentity("completed")
+	}
+	if strings.TrimSpace(runID) == "" {
+		runID = "completed-run-" + turnID
+	}
+	if startedAt.IsZero() {
+		startedAt = time.Now().UTC()
+	}
 	out := &completedTurn{
 		id:        turnID,
-		runID:     "controller-run-" + turnID,
+		runID:     strings.TrimSpace(runID),
 		ref:       session.NormalizeRef(ref),
-		startedAt: now,
-		events:    make(chan coreruntime.EventEnvelope, len(result.Events)),
+		startedAt: startedAt,
+		events:    make(chan coreruntime.EventEnvelope, len(events)),
 	}
-	for _, event := range result.Events {
-		event = session.CloneEvent(event)
-		cursor := session.Cursor(strings.TrimSpace(event.ID))
+	for _, item := range events {
+		event := session.CloneEvent(item.event)
+		cursor := session.Cursor(strings.TrimSpace(string(item.cursor)))
 		if cursor == "" {
-			cursor = result.Cursor
+			cursor = session.Cursor(strings.TrimSpace(event.ID))
 		}
 		out.events <- coreruntime.EventEnvelope{
 			Cursor: cursor,
