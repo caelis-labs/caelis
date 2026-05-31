@@ -1,48 +1,81 @@
 package gatewayapp
 
 import (
-	"strings"
+	"context"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp/internal/promptassembly"
+	"github.com/OnslaughtSnail/caelis/core/plugin"
+	appprompt "github.com/OnslaughtSnail/caelis/internal/app/prompt"
+	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
+	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
-const windowsSandboxTLSNoteLine = "  <sandbox_tls>Windows restricted-token sandbox: SChannel/.NET TLS may fail; prefer Python/Node HTTPS or git -c http.sslBackend=openssl.</sandbox_tls>"
+const windowsSandboxTLSNoteLine = appprompt.WindowsSandboxTLSNoteLine
 
-type promptConfig = promptassembly.Config
+type promptConfig struct {
+	AppName          string
+	WorkspaceDir     string
+	BasePrompt       string
+	SkillDirs        []string
+	DelegationAgents []delegation.Agent
+}
 
 func buildSystemPrompt(cfg promptConfig) (string, error) {
-	return promptassembly.BuildSystemPrompt(cfg)
+	ctx := context.Background()
+	workspaceDir, err := appprompt.ResolvePath(cfg.WorkspaceDir)
+	if err != nil {
+		return "", err
+	}
+	catalog, err := appresources.Discover(ctx, appresources.Request{
+		WorkspaceDir: workspaceDir,
+		SkillDirs:    cfg.SkillDirs,
+	})
+	if err != nil {
+		return "", err
+	}
+	return appprompt.BuildSystemPrompt(ctx, appprompt.Config{
+		AppName:      cfg.AppName,
+		WorkspaceDir: workspaceDir,
+		BasePrompt:   cfg.BasePrompt,
+		Catalog:      catalog,
+		ACPAgents:    acpAgentDescriptorsFromDelegation(cfg.DelegationAgents),
+	})
 }
 
 func systemPromptWithWindowsSandboxTLSNote(systemPrompt string, enabled bool) string {
-	if strings.TrimSpace(systemPrompt) == "" || !enabled {
-		return systemPrompt
-	}
-	if strings.Contains(systemPrompt, "<sandbox_tls>") {
-		return systemPrompt
-	}
-	if strings.Contains(systemPrompt, "\n</environment_context>") {
-		return strings.Replace(systemPrompt, "\n</environment_context>", "\n"+windowsSandboxTLSNoteLine+"\n</environment_context>", 1)
-	}
-	if strings.Contains(systemPrompt, "</environment_context>") {
-		return strings.Replace(systemPrompt, "</environment_context>", windowsSandboxTLSNoteLine+"\n</environment_context>", 1)
-	}
-	return systemPrompt
+	return appprompt.WithWindowsSandboxTLSNote(systemPrompt, enabled)
 }
 
 func resolvePromptPath(path string) (string, error) {
-	return promptassembly.ResolvePromptPath(path)
+	return appprompt.ResolvePath(path)
 }
 
 func estimatePromptTextTokens(text string) int {
-	return promptassembly.EstimatePromptTextTokens(text)
+	return appprompt.EstimateTextTokens(text)
 }
 
 func estimateModelPromptPrefixTokens(metadata map[string]any, tools []tool.Tool) int {
-	return promptassembly.EstimateModelPromptPrefixTokens(metadata, tools)
+	return appprompt.EstimateModelPromptPrefixTokens(metadata, tools)
 }
 
 func estimateToolPromptTokens(tools []tool.Tool) int {
-	return promptassembly.EstimateToolPromptTokens(tools)
+	return appprompt.EstimateToolPromptTokens(tools)
+}
+
+func acpAgentDescriptorsFromDelegation(agents []delegation.Agent) []plugin.ACPAgentDescriptor {
+	if len(agents) == 0 {
+		return nil
+	}
+	out := make([]plugin.ACPAgentDescriptor, 0, len(agents))
+	for _, agent := range agents {
+		agent = delegation.NormalizeAgent(agent)
+		if agent.Name == "" {
+			continue
+		}
+		out = append(out, plugin.ACPAgentDescriptor{
+			Name:        agent.Name,
+			Description: agent.Description,
+		})
+	}
+	return out
 }

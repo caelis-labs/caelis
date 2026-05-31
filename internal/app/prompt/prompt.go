@@ -4,6 +4,7 @@ package prompt
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +16,10 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	porttool "github.com/OnslaughtSnail/caelis/ports/tool"
 )
+
+const WindowsSandboxTLSNoteLine = "  <sandbox_tls>Windows restricted-token sandbox: SChannel/.NET TLS may fail; prefer Python/Node HTTPS or git -c http.sslBackend=openssl.</sandbox_tls>"
 
 type Config struct {
 	AppName      string
@@ -24,6 +28,14 @@ type Config struct {
 	Catalog      appresources.Catalog
 	SkillPolicy  appsettings.SkillPolicy
 	ACPAgents    []plugin.ACPAgentDescriptor
+}
+
+func BuildSystemPrompt(ctx context.Context, cfg Config) (string, error) {
+	instructions, err := BuildInstructions(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	return RenderInstructions(instructions), nil
 }
 
 func BuildInstructions(ctx context.Context, cfg Config) ([]string, error) {
@@ -57,6 +69,10 @@ func BuildInstructions(ctx context.Context, cfg Config) ([]string, error) {
 		instructions = append(instructions, env)
 	}
 	return compactInstructions(instructions), nil
+}
+
+func RenderInstructions(instructions []string) string {
+	return strings.Join(compactInstructions(instructions), "\n\n")
 }
 
 func promptInstructions(ctx context.Context, fragments []plugin.PromptFragment, skipIDs map[string]bool) ([]string, error) {
@@ -255,7 +271,7 @@ func environmentContext(workspaceDir string) (string, error) {
 	if workspaceDir == "" {
 		return "", nil
 	}
-	cwd, err := filepath.Abs(workspaceDir)
+	cwd, err := ResolvePath(workspaceDir)
 	if err != nil {
 		return "", fmt.Errorf("app/prompt: resolve workspace dir %s: %w", workspaceDir, err)
 	}
@@ -281,7 +297,10 @@ func currentShellName() string {
 }
 
 func normalizePromptText(text string) string {
-	return strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+	text = strings.TrimPrefix(text, "\ufeff")
+	return strings.TrimSpace(text)
 }
 
 func renderSection(id string, text string) string {
@@ -324,4 +343,87 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func ResolvePath(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", fmt.Errorf("empty prompt path")
+	}
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+	}
+	if !filepath.IsAbs(path) {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return "", err
+		}
+		path = filepath.Join(cwd, path)
+	}
+	return filepath.Clean(path), nil
+}
+
+func EstimateModelPromptPrefixTokens(metadata map[string]any, tools []porttool.Tool) int {
+	total := EstimateTextTokens(stringFromMap(metadata, "system_prompt"))
+	total += EstimateToolPromptTokens(tools)
+	if total > 0 {
+		total += 96
+	}
+	return total
+}
+
+func EstimateToolPromptTokens(tools []porttool.Tool) int {
+	specs := porttool.ModelSpecs(tools)
+	if len(specs) == 0 {
+		return 0
+	}
+	raw, err := json.Marshal(specs)
+	if err != nil {
+		return len(specs) * 64
+	}
+	return EstimateTextTokens(string(raw)) + len(specs)*24
+}
+
+func EstimateTextTokens(text string) int {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return 0
+	}
+	runes := len([]rune(text))
+	tokens := runes / 4
+	if runes%4 != 0 {
+		tokens++
+	}
+	if tokens < 1 {
+		return 1
+	}
+	return tokens
+}
+
+func WithWindowsSandboxTLSNote(systemPrompt string, enabled bool) string {
+	if strings.TrimSpace(systemPrompt) == "" || !enabled {
+		return systemPrompt
+	}
+	if strings.Contains(systemPrompt, "<sandbox_tls>") {
+		return systemPrompt
+	}
+	if strings.Contains(systemPrompt, "\n</environment_context>") {
+		return strings.Replace(systemPrompt, "\n</environment_context>", "\n"+WindowsSandboxTLSNoteLine+"\n</environment_context>", 1)
+	}
+	if strings.Contains(systemPrompt, "</environment_context>") {
+		return strings.Replace(systemPrompt, "</environment_context>", WindowsSandboxTLSNoteLine+"\n</environment_context>", 1)
+	}
+	return systemPrompt
+}
+
+func stringFromMap(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	value, _ := values[key].(string)
+	return strings.TrimSpace(value)
 }

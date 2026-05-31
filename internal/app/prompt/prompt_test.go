@@ -10,6 +10,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	porttool "github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
@@ -103,5 +104,32 @@ func TestBuildInstructionsRejectsMissingPromptPathWithoutInlineFallback(t *testi
 	})
 	if err == nil {
 		t.Fatal("BuildInstructions missing prompt error = nil, want error")
+	}
+}
+
+func TestPromptUtilitiesEstimateAndDecorateSharedSystemPrompt(t *testing.T) {
+	tools := []porttool.Tool{porttool.NamedTool{Def: porttool.Definition{
+		Name:        "read",
+		Description: "Read a file",
+		InputSchema: map[string]any{"type": "object"},
+	}}}
+	if got := EstimateModelPromptPrefixTokens(nil, nil); got != 0 {
+		t.Fatalf("empty prompt prefix tokens = %d, want 0", got)
+	}
+	prefix := EstimateModelPromptPrefixTokens(map[string]any{"system_prompt": "abcd"}, tools)
+	if prefix <= EstimateTextTokens("abcd")+96 {
+		t.Fatalf("prompt prefix tokens = %d, want tool estimate included", prefix)
+	}
+
+	base := "stable\n\n<environment_context>\n  <cwd>/repo</cwd>\n  <shell>powershell</shell>\n</environment_context>"
+	decorated := WithWindowsSandboxTLSNote(base, true)
+	if !strings.Contains(decorated, WindowsSandboxTLSNoteLine) {
+		t.Fatalf("decorated prompt = %q, missing TLS note", decorated)
+	}
+	if again := WithWindowsSandboxTLSNote(decorated, true); again != decorated {
+		t.Fatalf("TLS note was not idempotent:\n%s", again)
+	}
+	if disabled := WithWindowsSandboxTLSNote(base, false); disabled != base {
+		t.Fatalf("disabled TLS note = %q, want unchanged base", disabled)
 	}
 }

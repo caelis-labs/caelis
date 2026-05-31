@@ -1760,10 +1760,13 @@ be migrated before retiring the old stack:
       policy no longer imports the old promptassembly skill helper. The legacy
       `DefaultSkillDiscoveryDirs` / `DiscoverSkillMeta` wrappers have been
       removed from `app/gatewayapp`.
+    - Migrated baseline: old gateway prompt construction now delegates to
+      `internal/app/prompt` for shared system prompt rendering, prompt path
+      resolution, prompt/tool token estimation, and Windows sandbox TLS prompt
+      decoration. The legacy `app/gatewayapp/internal/promptassembly` package
+      has been removed.
     - Still pending: finer-grained prompt policy controls beyond skill loading
-      and compaction, concrete diagnostic rendering/repair UI wiring, and
-      removal of the remaining old gateway prompt assembly/token-estimation
-      helper once old stack tests and production entrypoints no longer need it.
+      and compaction, plus concrete diagnostic rendering/repair UI wiring.
 
 14. Rendering and display semantics
     - The new view model is intentionally small.
