@@ -1813,8 +1813,22 @@ func TestSlashStatusUsesSharedCommandPanel(t *testing.T) {
 }
 
 func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
+	doctor := &appviewmodel.DoctorView{
+		Checks: []appviewmodel.DoctorCheck{
+			{ID: "model", Severity: "warning", Message: "provider key missing - run /connect", ActionIDs: []string{"model.connect"}},
+			{ID: "store", Severity: "ok", Message: "session store: /tmp/.caelis"},
+			{ID: "session", Severity: "ok", Message: "session: sess-1"},
+			{ID: "sandbox", Severity: "warning", Message: "sandbox: host"},
+		},
+		Actions: []appviewmodel.DoctorAction{{
+			ID:      "model.connect",
+			Label:   "Connect model provider",
+			Command: "/connect",
+			Enabled: true,
+		}},
+	}
 	driver := &bridgeTestDriver{
-		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "doctor", Output: "doctor:\n  warn provider key missing - run /connect\n  ok session store: /tmp/.caelis\n  ok session: sess-1\n  warn sandbox: host"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "doctor", Output: "doctor:\n  warn provider key missing - run /connect\n  ok session store: /tmp/.caelis\n  ok session: sess-1\n  warn sandbox: host", Doctor: doctor},
 	}
 	var msgs []tea.Msg
 	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
@@ -1827,20 +1841,27 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/doctor" {
 		t.Fatalf("doctor command calls=%d input=%q, want shared /doctor command", driver.commandCalls, driver.lastCommandInput)
 	}
-	log, ok := msgs[0].(LogChunkMsg)
-	if !ok {
-		t.Fatalf("slashDoctorWithContext() msg = %#v, want LogChunkMsg", msgs[0])
+	panel, ok := msgs[0].(CommandPanelMsg)
+	if !ok || panel.View.Doctor == nil {
+		t.Fatalf("slashDoctorWithContext() msg = %#v, want structured doctor command panel", msgs[0])
 	}
-	for _, want := range []string{"doctor:", "warn provider key missing", "/connect", "ok session store: /tmp/.caelis", "ok session: sess-1", "warn sandbox: host"} {
-		if !strings.Contains(log.Chunk, want) {
-			t.Fatalf("slashDoctorWithContext() chunk = %q, want substring %q", log.Chunk, want)
-		}
+	if !commandExecutionHasPanel(panel.View) || !doctorActionCommand(panel.View.Doctor.Actions, "/connect") {
+		t.Fatalf("slashDoctorWithContext() panel = %#v, want doctor actions", panel.View.Doctor)
 	}
 }
 
 func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
+	doctor := &appviewmodel.DoctorView{
+		Checks: []appviewmodel.DoctorCheck{{ID: "sandbox", Severity: "ok", Message: "sandbox: windows"}},
+		Lifecycle: &appviewmodel.DoctorLifecycleView{
+			Action:    "repair",
+			Backend:   "windows",
+			Attempted: true,
+			Message:   "sandbox repair complete",
+		},
+	}
 	driver := &bridgeTestDriver{
-		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "doctor", Output: "sandbox repair complete\n\ndoctor:\n  ok sandbox: windows"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "doctor", Output: "sandbox repair complete\n\ndoctor:\n  ok sandbox: windows", Doctor: doctor},
 	}
 	var msgs []tea.Msg
 	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "fix")
@@ -1850,8 +1871,9 @@ func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/doctor fix" {
 		t.Fatalf("doctor fix command calls=%d input=%q, want shared /doctor fix command", driver.commandCalls, driver.lastCommandInput)
 	}
-	if !noticeMessagesContain(msgs, "sandbox repair complete") || !noticeMessagesContain(msgs, "ok sandbox: windows") {
-		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want shared doctor output", msgs)
+	panel, ok := msgs[0].(CommandPanelMsg)
+	if !ok || panel.View.Doctor == nil || panel.View.Doctor.Lifecycle == nil {
+		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want structured doctor panel", msgs)
 	}
 }
 
@@ -2078,6 +2100,16 @@ func dynamicAgentCommandView(command string, events ...coresession.Event) tuidri
 		Command: command,
 		Events:  events,
 	}
+}
+
+func doctorActionCommand(actions []appviewmodel.DoctorAction, command string) bool {
+	command = strings.TrimSpace(command)
+	for _, action := range actions {
+		if strings.TrimSpace(action.Command) == command {
+			return true
+		}
+	}
+	return false
 }
 
 func appEventStream(events ...appviewmodel.SessionEventEnvelope) <-chan appviewmodel.SessionEventEnvelope {

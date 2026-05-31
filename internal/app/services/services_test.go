@@ -1014,6 +1014,15 @@ func TestCommandServiceExecuteDoctorAndFix(t *testing.T) {
 			t.Fatalf("doctor output = %q, missing %q", report.Output, want)
 		}
 	}
+	if report.Doctor == nil {
+		t.Fatalf("doctor payload = nil, want structured diagnostics")
+	}
+	if !doctorCheckSeverity(report.Doctor.Checks, "model", "warning") || !doctorCheckSeverity(report.Doctor.Checks, "sandbox", "warning") {
+		t.Fatalf("doctor checks = %#v, want warning model and sandbox checks", report.Doctor.Checks)
+	}
+	if !doctorActionCommand(report.Doctor.Actions, "/connect") || !doctorActionCommand(report.Doctor.Actions, "/doctor fix") {
+		t.Fatalf("doctor actions = %#v, want connect and repair commands", report.Doctor.Actions)
+	}
 
 	fixed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/doctor fix"})
 	if err != nil {
@@ -1026,6 +1035,12 @@ func TestCommandServiceExecuteDoctorAndFix(t *testing.T) {
 	}
 	if rt.repairCalls != 1 {
 		t.Fatalf("doctor fix output = %q repairCalls=%d, want repair and report", fixed.Output, rt.repairCalls)
+	}
+	if fixed.Doctor == nil || fixed.Doctor.Lifecycle == nil {
+		t.Fatalf("doctor fix payload = %#v, want lifecycle diagnostics", fixed.Doctor)
+	}
+	if fixed.Doctor.Lifecycle.Action != "repair" || fixed.Doctor.Lifecycle.Backend != "windows" || !fixed.Doctor.Lifecycle.Attempted {
+		t.Fatalf("doctor fix lifecycle = %#v, want attempted windows repair", fixed.Doctor.Lifecycle)
 	}
 }
 
@@ -5736,6 +5751,25 @@ func findCommandView(commands []appviewmodel.CommandView, name string) (appviewm
 		}
 	}
 	return appviewmodel.CommandView{}, false
+}
+
+func doctorCheckSeverity(checks []appviewmodel.DoctorCheck, id string, severity string) bool {
+	for _, check := range checks {
+		if check.ID == id && strings.EqualFold(strings.TrimSpace(check.Severity), severity) {
+			return true
+		}
+	}
+	return false
+}
+
+func doctorActionCommand(actions []appviewmodel.DoctorAction, command string) bool {
+	command = strings.TrimSpace(command)
+	for _, action := range actions {
+		if strings.TrimSpace(action.Command) == command {
+			return true
+		}
+	}
+	return false
 }
 
 func findAgentManagementItem(items []appviewmodel.AgentManagementItem, name string) (appviewmodel.AgentManagementItem, bool) {

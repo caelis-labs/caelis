@@ -57,6 +57,7 @@ func (m *Model) handleCommandPanelMsg(msg CommandPanelMsg) (tea.Model, tea.Cmd) 
 
 func commandExecutionHasPanel(view appviewmodel.CommandExecutionView) bool {
 	return view.Status != nil ||
+		view.Doctor != nil ||
 		view.SettingsPanel != nil ||
 		view.TaskPanel != nil ||
 		view.ResumePanel != nil ||
@@ -114,6 +115,8 @@ func commandPanelClickHints(view appviewmodel.CommandExecutionView) []commandPan
 	switch {
 	case view.SettingsPanel != nil:
 		return settingsPanelClickHints(*view.SettingsPanel)
+	case view.Doctor != nil:
+		return doctorPanelClickHints(*view.Doctor)
 	case view.TaskPanel != nil:
 		return taskPanelClickHints(*view.TaskPanel)
 	case view.ResumePanel != nil:
@@ -158,6 +161,8 @@ func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme 
 	switch {
 	case view.Status != nil:
 		return "status", "Runtime Status", statusPanelState(*view.Status), statusPanelBody(*view.Status, width, theme), commandPanelFooterForCommand("status")
+	case view.Doctor != nil:
+		return "doctor", "Diagnostics", doctorPanelState(*view.Doctor), doctorPanelBody(*view.Doctor, width, theme), commandPanelFooterForCommand("doctor")
 	case view.SettingsPanel != nil:
 		return "settings", "Configuration", settingsPanelState(*view.SettingsPanel), settingsPanelBody(*view.SettingsPanel, view.Output, width, theme), commandPanelFooterForCommand("settings")
 	case view.TaskPanel != nil:
@@ -348,6 +353,117 @@ func statusPanelUsageLabel(status appviewmodel.UsageStatus) string {
 		label += " / " + formatCompactTokenCount(contextWindow)
 	}
 	return label
+}
+
+func doctorPanelBody(panel appviewmodel.DoctorView, width int, theme tuikit.Theme) []string {
+	contentWidth := commandPanelContentWidth(width)
+	tok := theme.Tokens()
+	var body []string
+	if panel.Lifecycle != nil {
+		body = append(body, doctorPanelLifecycleLine(*panel.Lifecycle, contentWidth, theme))
+	}
+	if workspace := strings.TrimSpace(statusPanelWorkspace(panel.Status)); workspace != "" {
+		body = append(body, commandPanelKV(theme, contentWidth, "workspace", workspace))
+	}
+	if session := strings.TrimSpace(statusPanelSessionLabel(panel.Status)); session != "" && session != "-" {
+		body = append(body, commandPanelKV(theme, contentWidth, "session", session))
+	}
+	if len(panel.Checks) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Checks"))
+		for _, check := range panel.Checks {
+			body = append(body, doctorPanelCheckLine(check, contentWidth, theme))
+		}
+	}
+	if len(panel.Actions) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Actions"))
+		for _, action := range panel.Actions {
+			body = append(body, doctorPanelActionLine(action, contentWidth, theme))
+		}
+	}
+	return body
+}
+
+func doctorPanelLifecycleLine(lifecycle appviewmodel.DoctorLifecycleView, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	action := firstNonEmpty(strings.TrimSpace(lifecycle.Action), "sandbox")
+	message := firstNonEmpty(strings.TrimSpace(lifecycle.Message), "sandbox "+action+" complete")
+	parts := []string{"sandbox " + action, message}
+	if backend := strings.TrimSpace(lifecycle.Backend); backend != "" {
+		parts = append(parts, "backend="+backend)
+	}
+	if lifecycle.Noop {
+		parts = append(parts, "noop")
+	}
+	if fallback := strings.TrimSpace(lifecycle.FallbackAction); fallback != "" {
+		parts = append(parts, "fallback="+fallback)
+	}
+	if errText := strings.TrimSpace(lifecycle.Error); errText != "" {
+		parts = append(parts, "error="+errText)
+	}
+	style := tok.Success
+	if strings.TrimSpace(lifecycle.Error) != "" {
+		style = tok.Danger
+	} else if !lifecycle.Attempted || lifecycle.Noop {
+		style = tok.Warning
+	}
+	return style.Render(truncateTailDisplay(commandPanelOneLine("  "+strings.Join(compactNonEmpty(parts), "  ")), width))
+}
+
+func doctorPanelCheckLine(check appviewmodel.DoctorCheck, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	severity := strings.ToLower(strings.TrimSpace(check.Severity))
+	if severity == "" {
+		severity = "info"
+	}
+	style := tok.TextSecondary
+	switch severity {
+	case "ok", "ready", "success":
+		style = tok.Success
+	case "error", "failed":
+		style = tok.Danger
+	case "warning", "warn":
+		style = tok.Warning
+	}
+	message := firstNonEmpty(strings.TrimSpace(check.Message), strings.TrimSpace(check.Label), strings.TrimSpace(check.ID))
+	if detail := strings.TrimSpace(check.Detail); detail != "" {
+		message += " - " + detail
+	}
+	plain := fmt.Sprintf("  [%s] %s", doctorPanelSeverityLabel(severity), message)
+	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func doctorPanelSeverityLabel(severity string) string {
+	switch strings.ToLower(strings.TrimSpace(severity)) {
+	case "ok", "ready", "success":
+		return "ok"
+	case "warning", "warn":
+		return "warn"
+	case "error", "failed":
+		return "error"
+	default:
+		return "info"
+	}
+}
+
+func doctorPanelActionLine(action appviewmodel.DoctorAction, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	state := "disabled"
+	style := tok.TextMuted
+	if action.Enabled {
+		state = "enabled"
+		style = tok.TextPrimary
+	}
+	if action.Enabled && action.Destructive {
+		style = tok.Danger
+	}
+	parts := []string{firstNonEmpty(action.ID, action.Label, action.Kind), state}
+	if action.RequiresConfirmation || action.Destructive {
+		parts = append(parts, "confirm")
+	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		parts = append(parts, command)
+	}
+	return style.Render(truncateTailDisplay(commandPanelOneLine("  "+strings.Join(compactNonEmpty(parts), "  ")), width))
 }
 
 func settingsPanelBody(panel appviewmodel.SettingsPanelView, output string, width int, theme tuikit.Theme) []string {
@@ -667,6 +783,24 @@ func settingsPanelClickHints(panel appviewmodel.SettingsPanelView) []commandPane
 	return hints
 }
 
+func doctorPanelClickHints(panel appviewmodel.DoctorView) []commandPanelClickHint {
+	var hints []commandPanelClickHint
+	for _, action := range panel.Actions {
+		if !action.Enabled {
+			continue
+		}
+		command := strings.TrimSpace(action.Command)
+		if command == "" {
+			continue
+		}
+		hints = append(hints, commandPanelClickHint{
+			Needle: firstNonEmpty(action.ID, action.Label, command),
+			Input:  command,
+		})
+	}
+	return hints
+}
+
 func taskPanelClickHints(panel appviewmodel.TaskPanelView) []commandPanelClickHint {
 	hints := make([]commandPanelClickHint, 0, len(panel.Tasks))
 	tailInputs := make(map[string]string, len(panel.Actions))
@@ -929,6 +1063,8 @@ func commandPanelFooterForCommand(command string) string {
 	switch strings.ToLower(strings.TrimSpace(command)) {
 	case "status":
 		return "inspect: /status  configure: /settings, /model, /approval, /controller"
+	case "doctor":
+		return "diagnose: /doctor  repair: /doctor fix"
 	case "settings":
 		return "edit: /settings set <field-id> <value>  run: /settings run <action-id> [confirm]"
 	case "task":
@@ -1031,6 +1167,22 @@ func settingsPanelState(panel appviewmodel.SettingsPanelView) string {
 		return "warning"
 	}
 	return "ready"
+}
+
+func doctorPanelState(panel appviewmodel.DoctorView) string {
+	if panel.Lifecycle != nil && strings.TrimSpace(panel.Lifecycle.Error) != "" {
+		return "failed"
+	}
+	state := "ready"
+	for _, check := range panel.Checks {
+		switch strings.ToLower(strings.TrimSpace(check.Severity)) {
+		case "error", "failed":
+			return "failed"
+		case "warning", "warn":
+			state = "warning"
+		}
+	}
+	return state
 }
 
 func taskPanelState(panel appviewmodel.TaskPanelView) string {

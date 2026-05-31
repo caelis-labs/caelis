@@ -114,6 +114,73 @@ func TestCommandPanelBlockRendersStatusPayload(t *testing.T) {
 	}
 }
 
+func TestCommandPanelBlockRendersDoctorPayload(t *testing.T) {
+	panel := appviewmodel.DoctorView{
+		Status: appviewmodel.StatusView{
+			Runtime: appviewmodel.RuntimeStatus{
+				WorkspaceCWD: "/repo",
+			},
+			Session: &appviewmodel.SessionStatus{Ref: session.Ref{SessionID: "sess-doctor"}},
+		},
+		Checks: []appviewmodel.DoctorCheck{
+			{
+				ID:       "model",
+				Severity: "warning",
+				Message:  "provider key missing - run /connect",
+				ActionIDs: []string{
+					"model.connect",
+				},
+			},
+			{
+				ID:       "sandbox",
+				Severity: "warning",
+				Message:  "sandbox setup: workspace setup required",
+				ActionIDs: []string{
+					"sandbox.repair",
+				},
+			},
+		},
+		Actions: []appviewmodel.DoctorAction{
+			{
+				ID:      "model.connect",
+				Label:   "Connect model provider",
+				Command: "/connect",
+				Enabled: true,
+			},
+			{
+				ID:      "sandbox.repair",
+				Label:   "Repair sandbox",
+				Command: "/doctor fix",
+				Enabled: true,
+			},
+		},
+		Lifecycle: &appviewmodel.DoctorLifecycleView{
+			Action:    "repair",
+			Backend:   "windows",
+			Attempted: true,
+			Message:   "sandbox repair complete",
+		},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command: "doctor",
+		Doctor:  &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 100, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"DOCTOR", "Diagnostics", "sess-doctor", "provider key missing", "workspace setup required", "model.connect", "sandbox.repair", "/doctor fix"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered doctor panel = %q, missing %q", plain, want)
+		}
+	}
+	if !rowsContainCommandPanelInput(rows, "/connect") || !rowsContainCommandPanelInput(rows, "/doctor fix") {
+		t.Fatalf("doctor action rows missing command-panel input tokens: %#v", renderedPlainRows(rows))
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{Doctor: &panel}, "/doctor fix"); action.line != "/doctor fix" {
+		t.Fatalf("doctor repair action = %#v, want immediate /doctor fix submit", action)
+	}
+}
+
 func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 	panel := appviewmodel.TaskPanelView{
 		Supported: true,

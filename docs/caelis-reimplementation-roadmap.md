@@ -955,9 +955,10 @@ The completed work is intentionally limited to the reusable skeleton:
   ref so TUI, ACP, CLI, and the future APP can adopt the same active session
   transition without surface-local session-start semantics.
 - Shared doctor command baseline: `CommandService` now exposes `/doctor` and
-  `/doctor fix` on top of shared status and sandbox lifecycle services, so APP,
-  ACP, and CLI command surfaces can reuse diagnostics without importing TUI
-  doctor formatting or backend-specific sandbox methods.
+  `/doctor fix` as a structured `DoctorView` with readiness checks, repair
+  actions, and sandbox lifecycle results on top of shared status and sandbox
+  services. TUI and the future APP can reuse diagnostics without parsing TUI
+  text or importing backend-specific sandbox methods.
 - App provider configuration baseline: provider endpoint API/auth semantics now
   live in `core/model`; `internal/cli`, `internal/app/services`, and the
   service-bound TUI connect/model config path no longer import
@@ -1220,9 +1221,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: the old `kernel.TurnHandle` streaming helper has been
      removed from `internal/cli`; production CLI code no longer imports the old
      public `kernel` facade.
-   - Still pending: default home layout, rich setup diagnostics, and several
-     command dispatch paths still depend on old TUI/gateway compatibility
-     packages or `kernel.Service`.
+   - Still pending: default home layout, deeper setup diagnostics outside the
+     shared `/doctor` panel, and several command dispatch paths still depend on
+     old TUI/gateway compatibility packages or `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1305,6 +1306,10 @@ be migrated before retiring the old stack:
      `/doctor fix` can reach `internal/app/services.SandboxService` for the
      currently constructed backend instead of requiring the old gatewayapp
      sandbox repair dependency.
+   - Migrated baseline: `/doctor` and `/doctor fix` now return the shared
+     `DoctorView`, and TUI renders it through the same command-panel path used
+     by other app-service payloads. Readiness checks, suggested actions, and
+     sandbox repair lifecycle output are no longer TUI-only strings.
    - Migrated baseline: TUI sandbox backend selection now routes through
      `internal/app/services.SettingsService.SetSandboxBackend`, persists the
      normalized backend in shared app settings, and reflects the requested
@@ -2585,7 +2590,7 @@ Recommended sequence:
    now baseline runtime capabilities.
 4. Port the remaining richer interactive flows to `internal/app/services`,
    especially any product actions not yet represented by shared settings, task,
-   controller, resume, model-selection, or model-connect panel payloads while
+   controller, resume, doctor, model-selection, or model-connect panel payloads while
    preserving rendering as surface-local code.
 5. Expand shared APP view models for transcript actions beyond the current
    task-backed command descriptors.

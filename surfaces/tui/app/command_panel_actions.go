@@ -83,6 +83,8 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 	switch {
 	case view.SettingsPanel != nil:
 		return settingsCommandPanelAction(*view.SettingsPanel, input)
+	case view.Doctor != nil:
+		return doctorCommandPanelAction(*view.Doctor, input)
 	case view.TaskPanel != nil:
 		return taskCommandPanelAction(*view.TaskPanel, input)
 	case view.ResumePanel != nil:
@@ -149,6 +151,28 @@ func settingsCommandPanelAction(panel appviewmodel.SettingsPanelView, input stri
 			)}
 		}
 		return commandPanelAction{line: line}
+	}
+	return commandPanelAction{fillInput: input}
+}
+
+func doctorCommandPanelAction(panel appviewmodel.DoctorView, input string) commandPanelAction {
+	for _, action := range panel.Actions {
+		command := strings.TrimSpace(action.Command)
+		if !action.Enabled || command == "" || command != input {
+			continue
+		}
+		if action.Destructive || action.RequiresConfirmation {
+			return commandPanelAction{prompt: confirmCommandPanelPrompt(
+				"Run "+strings.TrimSpace(action.ID)+"?",
+				"Confirm doctor action",
+				[]PromptDetail{
+					{Label: "Action", Value: firstNonEmpty(action.Label, action.ID), Emphasis: true},
+					{Label: "Description", Value: strings.TrimSpace(action.Description)},
+				},
+				command,
+			)}
+		}
+		return commandPanelAction{line: command}
 	}
 	return commandPanelAction{fillInput: input}
 }
