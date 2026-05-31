@@ -548,7 +548,7 @@ func TestCappedOutputBufferDecodesPowerShellCLIXML(t *testing.T) {
 	}
 }
 
-func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
+func TestCleanupPlanIncludesCurrentManifestAndStatePaths(t *testing.T) {
 	stateDir := t.TempDir()
 	workspace := t.TempDir()
 	rt, err := New(sandbox.Config{CWD: workspace, StateDir: stateDir})
@@ -562,24 +562,27 @@ func TestCleanupPlanIncludesNewManifestAndLegacyArtifacts(t *testing.T) {
 	}
 
 	plan := windowsRT.cleanupPlan()
-	if !containsPath(plan.LegacyPaths, windowsRT.manifestPath()) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want new manifest", plan.LegacyPaths)
+	if !containsPath(plan.StatePaths, windowsRT.manifestPath()) {
+		t.Fatalf("cleanup StatePaths = %#v, want manifest", plan.StatePaths)
 	}
-	if !containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-bin")) ||
-		!containsPath(plan.LegacyPaths, filepath.Join(stateDir, ".sandbox-secrets")) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want legacy helper/secrets dirs", plan.LegacyPaths)
+	if !containsPath(plan.StatePaths, windowsRT.capabilityStorePath()) {
+		t.Fatalf("cleanup StatePaths = %#v, want capability store", plan.StatePaths)
 	}
-	if !containsPath(plan.LegacyPaths, filepath.Join(workspace, ".caelis-sandbox")) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want workspace sandbox env dir", plan.LegacyPaths)
+	if !containsPath(plan.StatePaths, windowsRT.sandboxEnvBase()) {
+		t.Fatalf("cleanup StatePaths = %#v, want state sandbox env base", plan.StatePaths)
 	}
-	if !containsPath(plan.LegacyPaths, windowsRT.sandboxEnvBase()) {
-		t.Fatalf("cleanup LegacyPaths = %#v, want state sandbox env base", plan.LegacyPaths)
+	for _, oldPath := range []string{
+		filepath.Join(stateDir, ".sandbox-bin"),
+		filepath.Join(stateDir, ".sandbox-secrets"),
+		filepath.Join(workspace, ".caelis-sandbox"),
+		filepath.Join(windowsRT.sandboxStateDir(), "workspace_setup.json"),
+	} {
+		if containsPath(plan.StatePaths, oldPath) {
+			t.Fatalf("cleanup StatePaths = %#v, should not include obsolete artifact %s", plan.StatePaths, oldPath)
+		}
 	}
 	if len(plan.ACLPaths) == 0 || len(plan.Principals) == 0 {
 		t.Fatalf("cleanup plan = %+v, want ACL paths and principals", plan)
-	}
-	if len(plan.LegacyProtected) == 0 {
-		t.Fatalf("cleanup plan = %+v, want protected legacy artifact reports", plan)
 	}
 }
 

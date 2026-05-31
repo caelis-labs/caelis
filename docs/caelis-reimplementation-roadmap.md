@@ -1950,8 +1950,15 @@ be migrated before retiring the old stack:
      `/doctor fix` preserves and renders the repair result, while CLI
      `sandbox setup|fix|reset|clean` text/JSON output exposes the same report
      without a surface-specific repair path.
-   - Still pending: cross-platform validation of the Windows restricted-token
-     async session API after the core-native session contract migration.
+   - Migrated baseline: Windows restricted-token reset now cleans only the
+     current manifest, capability store, ACL principals, and state-backed env
+     paths. Removed old artifact cleanup/protected-account reports keep sandbox
+     lifecycle behavior tied to the core-native backend state instead of a
+     compatibility cleanup branch.
+   - Still pending: live Windows-host smoke/e2e validation of the
+     restricted-token async session API after the core-native session contract
+     migration. Cross-compilation of the Windows package is part of the local
+     validation gate until a Windows runner is available.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
@@ -2519,8 +2526,8 @@ Recommended sequence:
 1. Finish the remaining large TUI surface migrations against app services,
    especially surface-specific controller rendering beyond the shared command
    panel baseline.
-2. Finish sandbox backend cleanup and Windows async-session cross-platform
-   validation without reintroducing the removed router/preset/tool stacks.
+2. Finish live Windows async-session validation without reintroducing the
+   removed router/preset/tool stacks.
 3. Finish surface-specific visual task-panel rendering and optional persistent
    indexed history stores behind the shared task panel contract; host process
    recovery, SPAWN continuation, bounded terminal preview metadata, app-command

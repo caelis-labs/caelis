@@ -92,9 +92,9 @@ func CommonGlobalPolicy(writeRoots []string) Policy {
 }
 
 func effectiveWindowsNetwork(_ sandbox.Network) NetworkIdentity {
-	// Windows restricted-token sandboxing is online-only today. NetworkDisabled
-	// records caller intent, but offline enforcement is not implemented and
-	// therefore falls back to the same online execution path.
+	// Windows restricted-token sandboxing does not expose a network-control
+	// capability. NetworkDisabled remains caller intent outside this policy, and
+	// restricted-token execution uses the online identity.
 	return NetworkOnline
 }
 

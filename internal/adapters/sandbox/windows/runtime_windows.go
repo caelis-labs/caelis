@@ -397,7 +397,7 @@ func (r *runtime) Reset(ctx context.Context) error {
 	plan := r.cleanupPlan()
 	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
 		Phase:   "clean",
-		Message: fmt.Sprintf("cleaning Windows sandbox state: %d ACL paths, %d legacy paths", len(plan.ACLPaths), len(plan.LegacyPaths)),
+		Message: fmt.Sprintf("cleaning Windows sandbox state: %d ACL paths, %d state paths", len(plan.ACLPaths), len(plan.StatePaths)),
 		Step:    1,
 		Total:   3,
 	})
@@ -422,21 +422,13 @@ func (r *runtime) Reset(ctx context.Context) error {
 		Step:    2,
 		Total:   3,
 	})
-	for _, path := range plan.LegacyPaths {
+	for _, path := range plan.StatePaths {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if err := os.RemoveAll(path); err != nil {
 			errs = append(errs, fmt.Errorf("remove sandbox state path %s: %w", path, err))
 		}
-	}
-	for _, leftover := range plan.LegacyProtected {
-		sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-			Phase:   "legacy",
-			Message: "legacy Windows sandbox artifact may require elevated cleanup: " + leftover,
-			Step:    2,
-			Total:   3,
-		})
 	}
 	if len(errs) > 0 {
 		joined := errors.Join(errs...)
@@ -751,9 +743,9 @@ func (r *runtime) policyForRequestWithBinding(req sandbox.CommandRequest, create
 }
 
 func effectiveWindowsSandboxNetwork(_ sandbox.Network) sandbox.Network {
-	// The restricted-token backend currently has one network implementation.
-	// Disabled/offline network intent is recorded by higher layers, but Windows
-	// enforcement is not implemented yet, so execution stays on the online path.
+	// The restricted-token backend does not advertise network-control support.
+	// Disabled/offline intent is preserved by higher layers; this backend always
+	// executes with the online identity.
 	return sandbox.NetworkEnabled
 }
 
@@ -1232,10 +1224,9 @@ func (r *runtime) workspaceSetupError() string {
 }
 
 type cleanupPlan struct {
-	ACLPaths        []string
-	Principals      []string
-	LegacyPaths     []string
-	LegacyProtected []string
+	ACLPaths   []string
+	Principals []string
+	StatePaths []string
 }
 
 func (r *runtime) cleanupPlan() cleanupPlan {
@@ -1246,59 +1237,22 @@ func (r *runtime) cleanupPlan() cleanupPlan {
 			plan.Principals = append(plan.Principals, ace.Principal)
 		}
 	}
-	legacyRoots, legacyPrincipals := r.legacyACLArtifacts()
-	plan.ACLPaths = append(plan.ACLPaths, legacyRoots...)
-	plan.Principals = append(plan.Principals, legacyPrincipals...)
+	capabilityRoots, capabilityPrincipals := r.capabilityACLArtifacts()
+	plan.ACLPaths = append(plan.ACLPaths, capabilityRoots...)
+	plan.Principals = append(plan.Principals, capabilityPrincipals...)
 	plan.ACLPaths = pathutil.Dedupe(plan.ACLPaths)
 	plan.Principals = dedupeStrings(plan.Principals)
-	plan.LegacyPaths = pathutil.Dedupe([]string{
+	plan.StatePaths = pathutil.Dedupe([]string{
 		r.manifestPath(),
 		r.capabilityStorePath(),
 		r.sandboxEnvBase(),
-		r.legacyWorkspaceSandboxEnvRoot(),
-		filepath.Join(r.sandboxStateDir(), "workspace_setup.json"),
-		filepath.Join(r.sandboxStateDir(), "setup_marker.json"),
-		filepath.Join(r.sandboxStateDir(), "setup_error.json"),
-		filepath.Join(r.sandboxStateDir(), "setup_progress.json"),
-		filepath.Join(r.stateRoot, ".sandbox-bin"),
-		filepath.Join(r.stateRoot, ".sandbox-secrets"),
-		filepath.Join(r.stateRoot, ".sandbox-reset"),
 	})
-	hash := stateRootHash(r.stateRoot)
-	plan.LegacyProtected = dedupeStrings(
-		[]string{
-			"local user CaelisSbxOff" + hash,
-			"local user CaelisSbxOn" + hash,
-			"local group CaelisSandboxUsers",
-			"Windows Firewall rules CaelisSandbox-*",
-		},
-	)
 	return plan
 }
 
-func (r *runtime) legacyACLArtifacts() ([]string, []string) {
+func (r *runtime) capabilityACLArtifacts() ([]string, []string) {
 	var roots []string
 	var principals []string
-	type oldWorkspace struct {
-		WriteRoots              []string          `json:"write_roots"`
-		DenyWritePaths          []string          `json:"deny_write_paths"`
-		CapabilitySIDs          []string          `json:"capability_sids"`
-		WriteRootCapabilitySIDs map[string]string `json:"write_root_capability_sids"`
-		OfflineUsername         string            `json:"offline_username"`
-		OnlineUsername          string            `json:"online_username"`
-	}
-	if data, err := os.ReadFile(filepath.Join(r.sandboxStateDir(), "workspace_setup.json")); err == nil {
-		var record oldWorkspace
-		if json.Unmarshal(data, &record) == nil {
-			roots = append(roots, record.WriteRoots...)
-			roots = append(roots, record.DenyWritePaths...)
-			principals = append(principals, record.CapabilitySIDs...)
-			for _, sid := range record.WriteRootCapabilitySIDs {
-				principals = append(principals, sid)
-			}
-			principals = append(principals, record.OfflineUsername, record.OnlineUsername, "CaelisSandboxUsers")
-		}
-	}
 	if data, err := os.ReadFile(r.capabilityStorePath()); err == nil {
 		var store capability.Store
 		if json.Unmarshal(data, &store) == nil {
@@ -1341,14 +1295,6 @@ func (r *runtime) sandboxEnvRoot(workspaceRoot string) string {
 	}
 	sum := sha256.Sum256([]byte(pathutil.Key(workspace)))
 	return filepath.Join(r.sandboxEnvBase(), hex.EncodeToString(sum[:])[:16])
-}
-
-func (r *runtime) legacyWorkspaceSandboxEnvRoot() string {
-	workspace := pathutil.Normalize(r.cfg.CWD)
-	if workspace == "" {
-		return ""
-	}
-	return filepath.Join(workspace, ".caelis-sandbox")
 }
 
 type windowsSession struct {
@@ -1976,12 +1922,6 @@ func hashJSON(value any) (string, error) {
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
-}
-
-func stateRootHash(stateRoot string) string {
-	normalized := strings.ToLower(strings.TrimSpace(filepath.Clean(stateRoot)))
-	sum := sha256.Sum256([]byte(normalized))
-	return hex.EncodeToString(sum[:])[:8]
 }
 
 func newID(prefix string) (string, error) {
