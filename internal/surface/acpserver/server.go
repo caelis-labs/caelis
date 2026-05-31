@@ -35,6 +35,7 @@ type Server struct {
 	implementation schema.Implementation
 	projector      coreprojector.Projector
 	conn           *jsonrpc.Conn
+	terminals      terminalRegistry
 }
 
 func New(cfg Config) (*Server, error) {
@@ -151,6 +152,36 @@ func (s *Server) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *
 			return nil, invalidParams(err)
 		}
 		return responseOrError(s.prompt(ctx, req))
+	case schema.MethodTerminalCreate:
+		var req schema.CreateTerminalRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.createTerminal(ctx, req))
+	case schema.MethodTerminalOutput:
+		var req schema.TerminalOutputRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.terminalOutput(ctx, req))
+	case schema.MethodTerminalWaitForExit:
+		var req schema.TerminalWaitForExitRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(s.terminalWaitForExit(ctx, req))
+	case schema.MethodTerminalKill:
+		var req schema.TerminalKillRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(struct{}{}, s.terminalKill(ctx, req))
+	case schema.MethodTerminalRelease:
+		var req schema.TerminalReleaseRequest
+		if err := decodeParams(msg.Params, &req); err != nil {
+			return nil, invalidParams(err)
+		}
+		return responseOrError(struct{}{}, s.terminalRelease(ctx, req))
 	default:
 		return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 	}
@@ -184,7 +215,8 @@ func (s *Server) initialize(ctx context.Context, _ schema.InitializeRequest) (an
 				HTTP: false,
 				SSE:  false,
 			},
-			PromptCapabilities: promptCapabilities,
+			PromptCapabilities:  promptCapabilities,
+			SessionCapabilities: terminalSessionCapabilities(s.terminalAvailable(ctx)),
 		},
 		AgentInfo: &s.implementation,
 	}, nil

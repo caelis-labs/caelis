@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -32,6 +33,13 @@ type TaskOutputRequest struct {
 	TaskID       string `json:"task_id,omitempty"`
 	StdoutCursor int64  `json:"stdout_cursor,omitempty"`
 	StderrCursor int64  `json:"stderr_cursor,omitempty"`
+}
+
+type TaskStartRequest struct {
+	Command string            `json:"command,omitempty"`
+	Args    []string          `json:"args,omitempty"`
+	Dir     string            `json:"dir,omitempty"`
+	Env     map[string]string `json:"env,omitempty"`
 }
 
 type TaskWaitRequest struct {
@@ -114,12 +122,42 @@ func (s TaskService) Tail(ctx context.Context, req TaskOutputRequest) (appviewmo
 	return s.output(ctx, session, req, 0)
 }
 
+func (s TaskService) Start(ctx context.Context, req TaskStartRequest) (appviewmodel.TaskOutputView, error) {
+	if s.services.sandbox == nil {
+		return appviewmodel.TaskOutputView{}, errors.New("app/services: sandbox runtime is not configured")
+	}
+	command := taskCommandLine(req.Command, req.Args)
+	if command == "" {
+		return appviewmodel.TaskOutputView{}, errors.New("app/services: task command is required")
+	}
+	session, err := s.services.sandbox.Start(ctx, sandbox.CommandRequest{
+		Command: command,
+		Dir:     strings.TrimSpace(req.Dir),
+		Env:     cloneStringMap(req.Env),
+	})
+	if err != nil {
+		return appviewmodel.TaskOutputView{}, err
+	}
+	return s.output(ctx, session, TaskOutputRequest{TaskID: session.Ref().ID}, 0)
+}
+
 func (s TaskService) Wait(ctx context.Context, req TaskWaitRequest) (appviewmodel.TaskOutputView, error) {
 	session, err := s.open(ctx, req.TaskID)
 	if err != nil {
 		return appviewmodel.TaskOutputView{}, err
 	}
 	return s.output(ctx, session, req.TaskOutputRequest, waitDuration(req.YieldTimeMS, time.Second))
+}
+
+func (s TaskService) WaitForExit(ctx context.Context, req TaskOutputRequest) (appviewmodel.TaskOutputView, error) {
+	session, err := s.open(ctx, req.TaskID)
+	if err != nil {
+		return appviewmodel.TaskOutputView{}, err
+	}
+	if _, err := session.Wait(ctx); err != nil {
+		return appviewmodel.TaskOutputView{}, err
+	}
+	return s.output(ctx, session, req, 0)
 }
 
 func (s TaskService) Write(ctx context.Context, req TaskWriteRequest) (appviewmodel.TaskOutputView, error) {
@@ -144,6 +182,21 @@ func (s TaskService) Cancel(ctx context.Context, req TaskCancelRequest) (appview
 	return s.output(ctx, session, req.TaskOutputRequest, 100*time.Millisecond)
 }
 
+func (s TaskService) Release(ctx context.Context, req TaskOutputRequest) error {
+	session, err := s.open(ctx, req.TaskID)
+	if err != nil {
+		return err
+	}
+	snapshot, err := session.Snapshot(ctx)
+	if err != nil {
+		return err
+	}
+	if snapshot.Running {
+		return nil
+	}
+	return session.Close()
+}
+
 func (s TaskService) open(ctx context.Context, taskID string) (sandbox.Session, error) {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
@@ -157,6 +210,55 @@ func (s TaskService) open(ctx context.Context, taskID string) (sandbox.Session, 
 		return s.openResolved(ctx, taskID, err)
 	}
 	return session, nil
+}
+
+func taskCommandLine(command string, args []string) string {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return ""
+	}
+	if len(args) == 0 {
+		return command
+	}
+	parts := []string{quoteTaskCommandArg(command)}
+	for _, arg := range args {
+		parts = append(parts, quoteTaskCommandArg(arg))
+	}
+	return strings.Join(parts, " ")
+}
+
+func quoteTaskCommandArg(value string) string {
+	if value == "" {
+		if runtime.GOOS == "windows" {
+			return `""`
+		}
+		return "''"
+	}
+	if runtime.GOOS == "windows" {
+		if !strings.ContainsAny(value, " \t\r\n\"") {
+			return value
+		}
+		return `"` + strings.ReplaceAll(value, `"`, `\"`) + `"`
+	}
+	if !strings.ContainsAny(value, " \t\r\n'\"\\$`!*?[]{}();&|<>") {
+		return value
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\\''") + "'"
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func (s TaskService) openResolved(ctx context.Context, taskID string, sandboxErr error) (sandbox.Session, error) {

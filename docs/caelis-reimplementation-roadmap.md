@@ -1202,6 +1202,10 @@ be migrated before retiring the old stack:
      diagnostics, and actionable diagnostic hints. `RunPanelAction` executes
      shared sandbox prepare/repair/preflight/reset actions without surfaces
      calling backend-specific methods directly.
+   - Migrated baseline: `TaskService` now also exposes a surface-neutral async
+     command start contract in addition to list/tail/wait/write/cancel/release,
+     so ACP terminal lifecycle and future APP task panels can create sandbox
+     terminal sessions without reaching into sandbox runtimes directly.
    - Still pending: transcript actions and concrete TUI/APP settings-panel
      rendering remain unmigrated. Durable async task control and output storage
      remain kernel/runtime work rather than APP-only view-model work.
@@ -1261,11 +1265,16 @@ be migrated before retiring the old stack:
      model settings contract and switches the active session to the new model.
      `/resume` command execution can also replay the targeted canonical
      snapshot through the same ACP projection path as `session/load`.
-   - Still pending: terminal integration, client mode flows, the TUI
-     `/connect` wizard shell, durable live remote controller process
-     reconnect/lifecycle, richer non-model config providers beyond
-     prompt/context/sandbox backend settings, and the full behavior covered by
-     current public ACP e2e tests.
+   - Migrated baseline: ACP terminal lifecycle requests now route through the
+     shared task/sandbox contract. `terminal/create` starts a core sandbox
+     async session, `terminal/output` tails its buffered output with truncation
+     status, `terminal/wait_for_exit` waits for the shared session result, and
+     `terminal/kill` / `terminal/release` use the same task cancellation and
+     release paths as TUI/APP task controls.
+   - Still pending: client mode flows, the TUI `/connect` wizard shell,
+     durable live remote controller process reconnect/lifecycle, richer
+     non-model config providers beyond prompt/context/sandbox backend settings,
+     and the full behavior covered by current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,

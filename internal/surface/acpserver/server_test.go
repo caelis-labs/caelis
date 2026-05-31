@@ -368,6 +368,121 @@ func TestServeStdioExecutesSlashCommandsThroughAppServices(t *testing.T) {
 	}
 }
 
+func TestServeStdioExposesTerminalLifecycleThroughAppServices(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stack, err := local.New(local.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: t.TempDir(),
+		},
+		Provider: &testProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		BuiltinTools: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientToServerReader, clientToServerWriter := io.Pipe()
+	serverToClientReader, serverToClientWriter := io.Pipe()
+	defer clientToServerReader.Close()
+	defer clientToServerWriter.Close()
+	defer serverToClientReader.Close()
+	defer serverToClientWriter.Close()
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- ServeStdio(ctx, Config{
+			Services: stack.Services(),
+			Implementation: schema.Implementation{
+				Name:    "caelis",
+				Version: "test",
+			},
+		}, clientToServerReader, serverToClientWriter)
+	}()
+
+	conn := jsonrpc.New(serverToClientReader, clientToServerWriter)
+	go func() {
+		_ = conn.Serve(ctx, nil, nil)
+	}()
+
+	var initResp schema.InitializeResponse
+	if err := conn.Call(ctx, schema.MethodInitialize, schema.InitializeRequest{
+		ProtocolVersion:    schema.CurrentProtocolVersion,
+		ClientCapabilities: map[string]any{},
+	}, &initResp); err != nil {
+		t.Fatalf("initialize call error = %v", err)
+	}
+	if _, ok := initResp.AgentCapabilities.SessionCapabilities["terminal"]; !ok {
+		t.Fatalf("session capabilities = %#v, want terminal capability", initResp.AgentCapabilities.SessionCapabilities)
+	}
+
+	var newResp schema.NewSessionResponse
+	if err := conn.Call(ctx, schema.MethodSessionNew, schema.NewSessionRequest{CWD: stack.Runtime().WorkspaceCWD}, &newResp); err != nil {
+		t.Fatalf("session/new call error = %v", err)
+	}
+
+	limit := 1024
+	var created schema.CreateTerminalResponse
+	if err := conn.Call(ctx, schema.MethodTerminalCreate, schema.CreateTerminalRequest{
+		SessionID:       newResp.SessionID,
+		Command:         "echo acp-terminal-ok",
+		OutputByteLimit: &limit,
+	}, &created); err != nil {
+		t.Fatalf("terminal/create call error = %v", err)
+	}
+	if strings.TrimSpace(created.TerminalID) == "" {
+		t.Fatal("terminal/create returned empty terminal id")
+	}
+
+	var waitResp schema.TerminalWaitForExitResponse
+	if err := conn.Call(ctx, schema.MethodTerminalWaitForExit, schema.TerminalWaitForExitRequest{
+		SessionID:  newResp.SessionID,
+		TerminalID: created.TerminalID,
+	}, &waitResp); err != nil {
+		t.Fatalf("terminal/wait_for_exit call error = %v", err)
+	}
+	if waitResp.ExitCode == nil || *waitResp.ExitCode != 0 {
+		t.Fatalf("wait response = %#v, want exit code 0", waitResp)
+	}
+
+	var outputResp schema.TerminalOutputResponse
+	if err := conn.Call(ctx, schema.MethodTerminalOutput, schema.TerminalOutputRequest{
+		SessionID:  newResp.SessionID,
+		TerminalID: created.TerminalID,
+	}, &outputResp); err != nil {
+		t.Fatalf("terminal/output call error = %v", err)
+	}
+	if !strings.Contains(outputResp.Output, "acp-terminal-ok") || outputResp.Truncated {
+		t.Fatalf("terminal output = %#v, want untruncated echo output", outputResp)
+	}
+	if outputResp.ExitStatus == nil || outputResp.ExitStatus.ExitCode == nil || *outputResp.ExitStatus.ExitCode != 0 {
+		t.Fatalf("terminal exit status = %#v, want exit code 0", outputResp.ExitStatus)
+	}
+	if err := conn.Call(ctx, schema.MethodTerminalRelease, schema.TerminalReleaseRequest{
+		SessionID:  newResp.SessionID,
+		TerminalID: created.TerminalID,
+	}, nil); err != nil {
+		t.Fatalf("terminal/release call error = %v", err)
+	}
+
+	cancel()
+	_ = clientToServerWriter.Close()
+	_ = clientToServerReader.Close()
+	_ = serverToClientWriter.Close()
+	_ = serverToClientReader.Close()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("server did not stop")
+	}
+}
+
 func TestServeStdioExecutesModelAndApprovalSlashCommandsThroughAppServices(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
