@@ -987,6 +987,10 @@ The completed work is intentionally limited to the reusable skeleton:
   event shape, epoch allocation, agent lookup, and local-controller fallback now
   have one app-service implementation for TUI, ACP commands, headless, and the
   future APP.
+- Gatewaydriver eval adapter cleanup: the real `codex-acp` model/effort E2E now
+  constructs `internal/app/local` directly and binds the TUI driver through
+  `BindAppServices`, allowing the old `eval/gatewaydriver_gatewayapp_test.go`
+  adapter layer to be deleted.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1246,6 +1250,10 @@ be migrated before retiring the old stack:
      `app/gatewayapp` now runs against `internal/app/local`,
      `ControllerService`, and `internal/surface/headless`, using a protocol-only
      ACP helper process instead of the old gateway stack.
+   - Migrated baseline: the real `codex-acp` TUI driver model/effort E2E now
+     builds the new `internal/app/local` stack with settings-backed model config
+     and external ACP agent descriptors, then binds through `BindAppServices`.
+     The old gatewaydriver-to-gatewayapp eval adapter has been removed.
    - Migrated baseline: the unused old `surfaces/acpserver` wrapper around
      `gatewayapp.Stack.ACPAgent()` has been removed; the remaining ACP stdio
      path is the core-native `internal/surface/acpserver` entrypoint.

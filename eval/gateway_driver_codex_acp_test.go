@@ -6,13 +6,15 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
-	"github.com/OnslaughtSnail/caelis/impl/model/providers"
-	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/core/config"
+	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	"github.com/OnslaughtSnail/caelis/internal/app/local"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
@@ -28,32 +30,53 @@ func TestGatewayDriverCodexACPModelEffortE2E(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	workspace := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
-		AppName:        "caelis",
-		UserID:         "codex-acp-e2e",
-		StoreDir:       t.TempDir(),
-		WorkspaceKey:   workspace,
-		WorkspaceCWD:   workspace,
-		PermissionMode: "default",
-		Assembly: assembly.ResolvedAssembly{
-			Agents: []assembly.AgentConfig{{
-				Name:        "codex",
-				Description: "real Codex ACP adapter",
-				Command:     codexACP,
-			}},
+
+	settings, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatalf("settings.NewManager() error = %v", err)
+	}
+	if _, err := settings.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:                  "gpt-5.5",
+		Provider:               "openai",
+		Model:                  "gpt-5.5",
+		ReasoningMode:          "dynamic",
+		DefaultReasoningEffort: "medium",
+		ReasoningLevels:        []string{"low", "medium", "high", "xhigh"},
+	}); err != nil {
+		t.Fatalf("settings.UpsertModel() error = %v", err)
+	}
+	stack, err := local.New(local.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "codex-acp-e2e",
+			WorkspaceKey: "codex-acp-e2e",
+			WorkspaceCWD: workspace,
+			Store: config.Store{
+				Backend: "jsonl",
+				URI:     filepath.Join(t.TempDir(), "sessions"),
+			},
 		},
-		Model: gatewayapp.ModelConfig{
-			Provider: "openai",
-			API:      providers.APIOpenAI,
-			Model:    "gpt-5.5",
-		},
+		Settings: settings,
+		Provider: localACPStaticProvider{},
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:     "codex",
+			AgentName:   "codex",
+			Description: "real Codex ACP adapter",
+			Command:     codexACP,
+		}},
 	})
 	if err != nil {
-		t.Fatalf("NewLocalStack() error = %v", err)
+		t.Fatalf("local.New() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "codex-acp-e2e-session", "surface", "gpt-5.5")
+	driver, err := gatewaydriver.NewGatewayDriver(
+		ctx,
+		gatewaydriver.BindAppServices(&gatewaydriver.DriverStack{}, stack.Services()),
+		"codex-acp-e2e-session",
+		"surface",
+		"gpt-5.5",
+	)
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("gatewaydriver.NewGatewayDriver() error = %v", err)
 	}
 
 	agentStatus, err := driver.HandoffAgent(ctx, "codex")
