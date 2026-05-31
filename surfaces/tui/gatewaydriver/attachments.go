@@ -10,7 +10,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/core/model"
 )
 
 const maxAttachmentImageBytes = 20_000_000

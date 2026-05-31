@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/model"
+	"github.com/OnslaughtSnail/caelis/core/model"
 )
 
 func TestContentPartsFromAttachmentsReadsImageFiles(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -225,7 +225,7 @@ func cloneSubmitRequest(req SubmitRequest) SubmitRequest {
 	out := SubmitRequest{
 		Kind:         req.Kind,
 		Text:         req.Text,
-		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
 		Metadata:     cloneMap(req.Metadata),
 	}
 	if req.Approval != nil {
@@ -239,7 +239,7 @@ func runnerSubmissionFromSubmitRequest(req SubmitRequest) agent.Submission {
 	return agent.Submission{
 		Kind:         req.Kind,
 		Text:         req.Text,
-		ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
 		Metadata:     cloneMap(req.Metadata),
 	}
 }

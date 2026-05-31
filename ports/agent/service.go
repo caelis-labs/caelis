@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
-	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
@@ -48,13 +48,13 @@ type ApprovalRequester interface {
 
 // RunRequest is the minimal runtime execution request.
 type RunRequest struct {
-	SessionRef        session.SessionRef  `json:"session_ref"`
-	Input             string              `json:"input,omitempty"`
-	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-	Request           ModelRequestOptions `json:"request,omitempty"`
-	ApprovalRequester ApprovalRequester   `json:"-"`
-	Agent             Agent               `json:"-"`
-	AgentSpec         AgentSpec           `json:"-"`
+	SessionRef        session.SessionRef      `json:"session_ref"`
+	Input             string                  `json:"input,omitempty"`
+	ContentParts      []coremodel.ContentPart `json:"content_parts,omitempty"`
+	Request           ModelRequestOptions     `json:"request,omitempty"`
+	ApprovalRequester ApprovalRequester       `json:"-"`
+	Agent             Agent                   `json:"-"`
+	AgentSpec         AgentSpec               `json:"-"`
 }
 
 // RunResult is one runtime execution result.
@@ -89,13 +89,13 @@ type DetachACPParticipantRequest struct {
 }
 
 type PromptACPParticipantRequest struct {
-	SessionRef        session.SessionRef  `json:"session_ref"`
-	ParticipantID     string              `json:"participant_id,omitempty"`
-	Input             string              `json:"input,omitempty"`
-	ContentParts      []model.ContentPart `json:"content_parts,omitempty"`
-	Source            string              `json:"source,omitempty"`
-	Stream            bool                `json:"stream,omitempty"`
-	ApprovalRequester ApprovalRequester   `json:"-"`
+	SessionRef        session.SessionRef      `json:"session_ref"`
+	ParticipantID     string                  `json:"participant_id,omitempty"`
+	Input             string                  `json:"input,omitempty"`
+	ContentParts      []coremodel.ContentPart `json:"content_parts,omitempty"`
+	Source            string                  `json:"source,omitempty"`
+	Stream            bool                    `json:"stream,omitempty"`
+	ApprovalRequester ApprovalRequester       `json:"-"`
 }
 
 // HandoffControllerRequest switches the active controller for one session. The

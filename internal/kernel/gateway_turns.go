@@ -6,8 +6,8 @@ import (
 	"strings"
 	"sync"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
-	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -78,7 +78,7 @@ func (g *Gateway) resolveBeginTurn(ctx context.Context, activeSession session.Se
 			RunRequest: agent.RunRequest{
 				SessionRef:   activeSession.SessionRef,
 				Input:        req.Input,
-				ContentParts: append([]model.ContentPart(nil), req.ContentParts...),
+				ContentParts: coremodel.CloneContentParts(req.ContentParts),
 			},
 		}, nil
 	}
@@ -113,7 +113,7 @@ func (g *Gateway) runTurn(
 		runReq.Input = req.Input
 	}
 	if len(runReq.ContentParts) == 0 && len(req.ContentParts) > 0 {
-		runReq.ContentParts = append([]model.ContentPart(nil), req.ContentParts...)
+		runReq.ContentParts = coremodel.CloneContentParts(req.ContentParts)
 	}
 	runReq.ApprovalRequester = approvalRequesterFunc(func(approvalCtx context.Context, req agent.ApprovalRequest) (agent.ApprovalResponse, error) {
 		return g.resolveApprovalRequest(ctx, approvalCtx, handle, &req, runReq.AgentSpec.Model)
@@ -170,7 +170,7 @@ func (g *Gateway) runParticipantTurn(
 		SessionRef:    session.SessionRef,
 		ParticipantID: strings.TrimSpace(req.ParticipantID),
 		Input:         strings.TrimSpace(req.Input),
-		ContentParts:  append([]model.ContentPart(nil), req.ContentParts...),
+		ContentParts:  coremodel.CloneContentParts(req.ContentParts),
 		Source:        strings.TrimSpace(req.Source),
 		Stream:        true,
 	}

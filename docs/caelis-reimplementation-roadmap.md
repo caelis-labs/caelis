@@ -919,6 +919,11 @@ The completed work is intentionally limited to the reusable skeleton:
   live in `core/model`; `internal/cli`, `internal/app/services`, and the
   service-bound TUI connect/model config path no longer import
   the old provider stack or `ports/model` for those settings contracts.
+- Prompt content input baseline: `core/model.ContentPart` is now the canonical
+  user-input contract for text/image/file prompt parts. The old `ports/model`
+  package only re-exports that type for residual bridge code, while kernel turn
+  requests, agent/controller run requests, app-service submissions, and the TUI
+  attachment parser all pass core content parts directly.
 - Legacy provider/catalog stack removal: the old provider factory, old layered
   model catalog, embedded models.dev snapshot, and the generator that wrote
   that snapshot have been deleted. Provider implementation now lives only in
@@ -1211,10 +1216,15 @@ be migrated before retiring the old stack:
      omitting inferred auth/default fields, projects missing API-key diagnostics
      and context-budget status from shared app view models, and keeps removable
      agent candidates separate from the built-in `self` ACP participant path.
+   - Migrated baseline: TUI image attachment parsing now emits
+     `core/model.ContentPart` values, and the app-service gateway forwards
+     those parts without converting through `ports/model`. Attachment UI and
+     rendering remain surface-local, but the model-visible prompt content
+     contract is no longer owned by the old port package.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
-     attachment handling are not ported to `internal/app/services`.
+     attachment UI/rendering are not ported to `internal/app/services`.
    - Slash commands such as the remaining `/connect` wizard UI rendering shell
      and live remote ACP process reconnect/lifecycle behavior still have old
      driver/app assumptions or missing service-native feature parity, so the old
@@ -1438,6 +1448,10 @@ be migrated before retiring the old stack:
      and the app-service-bound TUI connect/model shell now depend on the core
      contract instead of the old provider stack or broad model ports for
      provider setup semantics.
+   - Migrated baseline: prompt content parts for multimodal input now also live
+     in `core/model`, so TUI/APP/ACP-facing turn and participant prompt
+     requests can share one input contract instead of converting image/file
+     attachments through `ports/model`.
    - Still pending: remaining TUI command integration and additional non-model
      ACP config providers beyond the first settings-backed set.
 

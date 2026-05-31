@@ -6,6 +6,8 @@ import (
 	"errors"
 	"iter"
 	"strings"
+
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 )
 
 // Role identifies message author type.
@@ -19,21 +21,16 @@ const (
 )
 
 // ContentPartType identifies one prompt-side multimodal input unit.
-type ContentPartType string
+type ContentPartType = coremodel.ContentPartType
 
 const (
-	ContentPartText  ContentPartType = "text"
-	ContentPartImage ContentPartType = "image"
+	ContentPartText  = coremodel.ContentPartText
+	ContentPartImage = coremodel.ContentPartImage
+	ContentPartFile  = coremodel.ContentPartFile
 )
 
 // ContentPart is one user-facing prompt content unit.
-type ContentPart struct {
-	Type     ContentPartType `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	MimeType string          `json:"mime_type,omitempty"`
-	Data     string          `json:"data,omitempty"`
-	FileName string          `json:"file_name,omitempty"`
-}
+type ContentPart = coremodel.ContentPart
 
 // ToolCall represents one model-emitted tool invocation.
 type ToolCall struct {
@@ -327,10 +324,16 @@ func NewReasoningMessage(role Role, text string, visibility ReasoningVisibility)
 func PartFromContentPart(part ContentPart) Part {
 	switch part.Type {
 	case ContentPartImage:
-		return NewMediaPart(MediaModalityImage, MediaSource{
+		source := MediaSource{
 			Kind: MediaSourceInline,
 			Data: part.Data,
-		}, part.MimeType, part.FileName)
+		}
+		if strings.TrimSpace(part.Data) == "" && strings.TrimSpace(part.URI) != "" {
+			source = MediaSource{Kind: MediaSourceURL, URI: strings.TrimSpace(part.URI)}
+		}
+		return NewMediaPart(MediaModalityImage, source, part.MimeType, part.FileName)
+	case ContentPartFile:
+		return NewFileRefPart(part.FileName, part.MimeType, part.URI, "", "")
 	default:
 		return NewTextPart(part.Text)
 	}
@@ -358,14 +361,25 @@ func ContentPartFromPart(part Part) (ContentPart, bool) {
 		if part.Media == nil || part.Media.Modality != MediaModalityImage {
 			return ContentPart{}, false
 		}
-		if part.Media.Source.Kind != MediaSourceInline {
+		if part.Media.Source.Kind != MediaSourceInline && part.Media.Source.Kind != MediaSourceURL {
 			return ContentPart{}, false
 		}
 		return ContentPart{
 			Type:     ContentPartImage,
 			MimeType: part.Media.MimeType,
 			Data:     part.Media.Source.Data,
+			URI:      part.Media.Source.URI,
 			FileName: part.Media.Name,
+		}, true
+	case PartKindFileRef:
+		if part.FileRef == nil {
+			return ContentPart{}, false
+		}
+		return ContentPart{
+			Type:     ContentPartFile,
+			MimeType: part.FileRef.MimeType,
+			URI:      part.FileRef.URI,
+			FileName: part.FileRef.Name,
 		}, true
 	default:
 		return ContentPart{}, false

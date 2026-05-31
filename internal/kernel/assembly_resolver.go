@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -148,7 +149,7 @@ func (r *AssemblyResolver) ResolveTurn(ctx context.Context, intent TurnIntent) (
 		RunRequest: agent.RunRequest{
 			SessionRef:   intent.SessionRef,
 			Input:        intent.Input,
-			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
+			ContentParts: coremodel.CloneContentParts(intent.ContentParts),
 			AgentSpec:    spec,
 		},
 	}, nil
@@ -167,7 +168,7 @@ func (r *AssemblyResolver) ResolveControllerTurn(ctx context.Context, intent Tur
 		RunRequest: agent.RunRequest{
 			SessionRef:   intent.SessionRef,
 			Input:        intent.Input,
-			ContentParts: append([]model.ContentPart(nil), intent.ContentParts...),
+			ContentParts: coremodel.CloneContentParts(intent.ContentParts),
 			AgentSpec:    spec,
 		},
 	}, nil

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"time"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -35,10 +36,10 @@ const (
 
 // Submission is one runtime continuation submission.
 type Submission struct {
-	Kind         SubmissionKind      `json:"kind,omitempty"`
-	Text         string              `json:"text,omitempty"`
-	ContentParts []model.ContentPart `json:"content_parts,omitempty"`
-	Metadata     map[string]any      `json:"metadata,omitempty"`
+	Kind         SubmissionKind          `json:"kind,omitempty"`
+	Text         string                  `json:"text,omitempty"`
+	ContentParts []coremodel.ContentPart `json:"content_parts,omitempty"`
+	Metadata     map[string]any          `json:"metadata,omitempty"`
 }
 
 // CancelStatus identifies the outcome of one cancellation request.
@@ -321,7 +322,7 @@ func CloneSubmission(sub Submission) Submission {
 	return Submission{
 		Kind:         sub.Kind,
 		Text:         sub.Text,
-		ContentParts: append([]model.ContentPart(nil), sub.ContentParts...),
+		ContentParts: coremodel.CloneContentParts(sub.ContentParts),
 		Metadata:     maps.Clone(sub.Metadata),
 	}
 }

@@ -5,16 +5,16 @@ import (
 	"strings"
 	"time"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
-	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type BeginTurnRequest struct {
 	SessionRef   session.SessionRef
 	Input        string
-	ContentParts []model.ContentPart
+	ContentParts []coremodel.ContentPart
 	ModeName     string
 	ModelHint    string
 	Surface      string
@@ -134,7 +134,7 @@ type PromptParticipantRequest struct {
 	BindingKey    string
 	ParticipantID string
 	Input         string
-	ContentParts  []model.ContentPart
+	ContentParts  []coremodel.ContentPart
 	Source        string
 }
 
@@ -516,7 +516,7 @@ type ApprovalDecision struct {
 type SubmitRequest struct {
 	Kind         SubmissionKind
 	Text         string
-	ContentParts []model.ContentPart
+	ContentParts []coremodel.ContentPart
 	Metadata     map[string]any
 	Approval     *ApprovalDecision
 }
@@ -525,7 +525,7 @@ type SubmitActiveTurnRequest struct {
 	SessionRef   session.SessionRef
 	Kind         SubmissionKind
 	Text         string
-	ContentParts []model.ContentPart
+	ContentParts []coremodel.ContentPart
 	Metadata     map[string]any
 	Approval     *ApprovalDecision
 }

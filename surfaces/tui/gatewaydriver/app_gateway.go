@@ -16,7 +16,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	portsapproval "github.com/OnslaughtSnail/caelis/ports/approval"
-	portsmodel "github.com/OnslaughtSnail/caelis/ports/model"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -54,7 +53,7 @@ func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnR
 	turn, err := g.services.Turns().Begin(ctx, appservices.BeginTurnRequest{
 		SessionRef:   ref,
 		Input:        req.Input,
-		ContentParts: coreContentPartsFromPort(req.ContentParts),
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
 		Model:        req.ModelHint,
 		Surface:      req.Surface,
 		Meta:         maps.Clone(req.Metadata),
@@ -90,7 +89,7 @@ func (g *appServiceGateway) SubmitActiveTurn(ctx context.Context, req kernel.Sub
 	return handle.Submit(ctx, kernel.SubmitRequest{
 		Kind:         req.Kind,
 		Text:         req.Text,
-		ContentParts: append([]portsmodel.ContentPart(nil), req.ContentParts...),
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
 		Metadata:     maps.Clone(req.Metadata),
 		Approval:     req.Approval,
 	})
@@ -224,7 +223,7 @@ func (g *appServiceGateway) PromptParticipant(ctx context.Context, req kernel.Pr
 		return kernel.BeginTurnResult{}, fmt.Errorf("core app-service TUI gateway: participant %q is not attached", strings.TrimSpace(req.ParticipantID))
 	}
 	snapshot.Session.Participants = participants
-	handle := newAppServiceAgentTurnHandle(g.services, snapshot.Session.Ref, participant, req.Input, coreContentPartsFromPort(req.ContentParts), req.Source)
+	handle := newAppServiceAgentTurnHandle(g.services, snapshot.Session.Ref, participant, req.Input, coremodel.CloneContentParts(req.ContentParts), req.Source)
 	g.register(handle)
 	go func() {
 		defer g.unregister(handle)
@@ -359,7 +358,7 @@ func (h *appServiceTurnHandle) Submit(ctx context.Context, req kernel.SubmitRequ
 	submission := coreruntime.Submission{
 		Kind:         coreruntime.SubmissionConversation,
 		Text:         req.Text,
-		ContentParts: coreContentPartsFromPort(req.ContentParts),
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
 		Meta:         maps.Clone(req.Metadata),
 	}
 	if req.Kind == kernel.SubmissionKindApproval && req.Approval != nil {
@@ -972,21 +971,4 @@ func activeTurnForSession(active []kernel.ActiveTurnState, sessionID string) boo
 		}
 	}
 	return false
-}
-
-func coreContentPartsFromPort(parts []portsmodel.ContentPart) []coremodel.ContentPart {
-	if len(parts) == 0 {
-		return nil
-	}
-	out := make([]coremodel.ContentPart, 0, len(parts))
-	for _, part := range parts {
-		out = append(out, coremodel.ContentPart{
-			Type:     coremodel.ContentPartType(part.Type),
-			Text:     part.Text,
-			MimeType: part.MimeType,
-			Data:     part.Data,
-			FileName: part.FileName,
-		})
-	}
-	return out
 }
