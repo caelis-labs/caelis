@@ -216,7 +216,7 @@ func TestCommandPanelBlockRendersApprovalPanelActions(t *testing.T) {
 	model := NewModel(Config{})
 	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
 	plain := renderedPlainText(rows)
-	for _, want := range []string{"APPROVAL", "Approval", "manual", "approval-1", "run_command", "approval.mode.toggle"} {
+	for _, want := range []string{"APPROVAL", "Approval", "manual", "approval-1", "run_command", "approval.mode.toggle", "/approval auto-review", "/approval toggle"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered approval panel = %q, missing %q", plain, want)
 		}
@@ -229,6 +229,12 @@ func TestCommandPanelBlockRendersApprovalPanelActions(t *testing.T) {
 	}
 	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ApprovalPanel: &panel}, "/approval toggle"); action.line != "/approval toggle" {
 		t.Fatalf("approval panel action = %#v, want immediate submit", action)
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ApprovalPanel: &panel}, "/approval auto-review"); action.line != "/approval auto-review" {
+		t.Fatalf("approval mode action = %#v, want immediate mode submit", action)
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ApprovalPanel: &panel}, "/approval manual"); action.line != "" || action.fillInput != "/approval manual" {
+		t.Fatalf("current approval mode action = %#v, want fill input instead of broad submit", action)
 	}
 }
 

@@ -88,7 +88,7 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 	case view.ResumePanel != nil:
 		return resumeCommandPanelAction(*view.ResumePanel, input)
 	case view.ApprovalPanel != nil:
-		return commandPanelAction{line: input}
+		return approvalCommandPanelAction(*view.ApprovalPanel, input)
 	case view.ModelSelection != nil:
 		return modelSelectionCommandPanelAction(*view.ModelSelection, input)
 	case view.ControllerPanel != nil:
@@ -305,6 +305,24 @@ func resumeCommandPanelAction(panel appviewmodel.ResumePanelView, input string) 
 			}
 			return commandPanelAction{line: command}
 		}
+	}
+	return commandPanelAction{fillInput: input}
+}
+
+func approvalCommandPanelAction(panel appviewmodel.ApprovalPanelView, input string) commandPanelAction {
+	for _, mode := range panel.ModeOptions {
+		command := strings.TrimSpace(mode.Command)
+		if mode.Current || command == "" || command != input {
+			continue
+		}
+		return commandPanelAction{line: command}
+	}
+	for _, action := range panel.Actions {
+		command := strings.TrimSpace(action.Command)
+		if !action.Enabled || command == "" || command != input {
+			continue
+		}
+		return commandPanelAction{line: command}
 	}
 	return commandPanelAction{fillInput: input}
 }

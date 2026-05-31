@@ -4012,6 +4012,9 @@ func TestApprovalServiceProjectsActionsAndSubmitsDecision(t *testing.T) {
 	if len(panel.Actions) < 3 || panel.Actions[0].Command != "/approval toggle" {
 		t.Fatalf("approval panel actions = %#v, want toggle and mode commands", panel.Actions)
 	}
+	if len(panel.ModeOptions) < 2 || panel.ModeOptions[0].Command == "" {
+		t.Fatalf("approval panel modes = %#v, want shared mode commands", panel.ModeOptions)
+	}
 	pending[0].Actions[0].Name = "mutated"
 	again, err := svc.Approvals().Pending(context.Background(), session.Ref{SessionID: "sess-approve"})
 	if err != nil {

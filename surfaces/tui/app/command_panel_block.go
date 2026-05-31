@@ -1121,6 +1121,9 @@ func approvalPanelModeLine(mode appviewmodel.ApprovalModeChoice, width int, them
 	if name := strings.TrimSpace(mode.Name); name != "" && !strings.EqualFold(name, mode.ID) {
 		plain += "  " + name
 	}
+	if command := strings.TrimSpace(mode.Command); command != "" {
+		plain += "  " + command
+	}
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
 }
 
@@ -1148,6 +1151,9 @@ func approvalPanelActionLine(action appviewmodel.ApprovalPanelAction, width int,
 		style = tok.TextPrimary
 	}
 	plain := fmt.Sprintf("  %s - %s (%s)", firstNonEmpty(action.ID, action.Label, action.Kind), firstNonEmpty(action.Label, action.Kind), state)
+	if command := strings.TrimSpace(action.Command); command != "" {
+		plain += "  " + command
+	}
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
 }
 

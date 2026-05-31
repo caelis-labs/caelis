@@ -1641,6 +1641,9 @@ be migrated before retiring the old stack:
      stable shared command strings for model, reasoning, approval mode,
      remote config updates, and local handoff. TUI prompts consume those
      commands instead of deriving controller syntax from field/action ids.
+   - Migrated baseline: approval panel mode choices and actions expose shared
+     command strings, and TUI approval panels now submit only commands present
+     in that payload instead of accepting arbitrary approval-panel input.
    - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
      transcript action descriptors for task-backed tool entries, derived from
      canonical runtime task metadata and expressed as shared slash commands.
