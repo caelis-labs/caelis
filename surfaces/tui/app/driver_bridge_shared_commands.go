@@ -38,7 +38,9 @@ func slashSharedCommandWithContext(ctx context.Context, driver tuidriver.Driver,
 	if opts.ClearHistory && send != nil {
 		send(ClearHistoryMsg{})
 	}
-	if output := strings.TrimSpace(view.Output); output != "" {
+	if commandExecutionHasPanel(view) {
+		sendCommandPanel(send, view)
+	} else if output := strings.TrimSpace(view.Output); output != "" {
 		sendNotice(send, output)
 	}
 	sendSharedCommandEvents(send, view.Events)
@@ -49,6 +51,12 @@ func slashSharedCommandWithContext(ctx context.Context, driver tuidriver.Driver,
 		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
 	}
 	return TaskResultMsg{SuppressTurnDivider: !opts.KeepTurnDivider}
+}
+
+func sendCommandPanel(send func(tea.Msg), view tuidriver.CommandExecutionView) {
+	if send != nil {
+		send(CommandPanelMsg{View: view})
+	}
 }
 
 func commandUsageMessage(err error) string {

@@ -36,6 +36,8 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicyForTranscriptEvents(typed), true
 	case LogChunkMsg:
 		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, dismissHints: true}, true
+	case CommandPanelMsg:
+		return renderEventPolicy{lane: renderLaneLog, flushSmoothing: true, flushLogChunks: true, dismissHints: true}, true
 	case ParticipantStatusMsg:
 		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true}, true
 	case SubagentStartMsg:
@@ -182,6 +184,9 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			return m, policyCmd, true
 		}
 		return m, tea.Batch(policyCmd, m.ensureDeferredBatchTick()), true
+	case CommandPanelMsg:
+		model, cmd := m.handleCommandPanelMsg(typed)
+		return model, tea.Batch(policyCmd, cmd), true
 
 	case ParticipantStatusMsg:
 		model, cmd := m.handleParticipantStatusMsg(typed)

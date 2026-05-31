@@ -59,6 +59,19 @@ func TestCopySelectionToClipboardRunsAsCommand(t *testing.T) {
 	}
 }
 
+func TestCommandPanelClickTokenFillsInput(t *testing.T) {
+	model := NewModel(Config{})
+	if !model.tryToggleFoldToken("panel-1", commandPanelInputClickToken("/settings set sandbox.backend ")) {
+		t.Fatal("tryToggleFoldToken() = false, want command panel input token handled")
+	}
+	if got := string(model.input); got != "/settings set sandbox.backend " {
+		t.Fatalf("input = %q, want settings command", got)
+	}
+	if got := model.cursor; got != len(model.input) {
+		t.Fatalf("cursor = %d, want end of input %d", got, len(model.input))
+	}
+}
+
 func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
 	model := NewModel(Config{})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

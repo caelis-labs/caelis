@@ -3,7 +3,11 @@ package tuiapp
 // events.go keeps the TUI-internal message types in the app package. These were
 // previously in internal/cli/tuievents/messages.go.
 
-import "time"
+import (
+	"time"
+
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+)
 
 type HintPriority int
 
@@ -17,6 +21,10 @@ const (
 
 type LogChunkMsg struct {
 	Chunk string
+}
+
+type CommandPanelMsg struct {
+	View appviewmodel.CommandExecutionView
 }
 
 type SetStatusMsg struct {

@@ -841,6 +841,9 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 	if !view.Handled || view.Command != "settings" {
 		t.Fatalf("settings execution = %#v, want handled settings", view)
 	}
+	if view.SettingsPanel == nil || len(view.SettingsPanel.Sections) == 0 {
+		t.Fatalf("settings execution SettingsPanel = %#v, want shared panel payload", view.SettingsPanel)
+	}
 	for _, want := range []string{
 		"settings:",
 		"configured: false",
@@ -867,14 +870,14 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rt.prepareCalls != 1 || !strings.Contains(ran.Output, "settings action completed: sandbox.prepare") {
+	if rt.prepareCalls != 1 || !strings.Contains(ran.Output, "settings action completed: sandbox.prepare") || ran.SettingsPanel == nil {
 		t.Fatalf("settings action output=%q prepareCalls=%d, want prepared panel", ran.Output, rt.prepareCalls)
 	}
 	connectPanel, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings run model.connect"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if connectPanel.Command != "connect" || !strings.Contains(connectPanel.Output, "connect:") || !strings.Contains(connectPanel.Output, "providers:") {
+	if connectPanel.Command != "connect" || !strings.Contains(connectPanel.Output, "connect:") || !strings.Contains(connectPanel.Output, "providers:") || connectPanel.ModelConnectPanel == nil {
 		t.Fatalf("settings model.connect output = %#v, want shared connect panel", connectPanel)
 	}
 }
@@ -909,6 +912,9 @@ func TestCommandServiceExecuteSettingsSetField(t *testing.T) {
 	}
 	if !view.Handled || view.Command != "settings" || !strings.Contains(view.Output, "settings field updated: sandbox.network") {
 		t.Fatalf("settings set output = %#v, want handled update", view)
+	}
+	if view.SettingsPanel == nil {
+		t.Fatalf("settings set SettingsPanel = nil, want updated panel payload")
 	}
 	view, err = svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings set compaction.max_source_chars 1234"})
 	if err != nil {
@@ -1077,6 +1083,9 @@ func TestCommandServiceExecuteTaskCommands(t *testing.T) {
 		if !strings.Contains(listed.Output, want) {
 			t.Fatalf("task list output = %q, missing %q", listed.Output, want)
 		}
+	}
+	if listed.TaskPanel == nil || listed.TaskPanel.Summary.Total != 1 {
+		t.Fatalf("task list TaskPanel = %#v, want shared panel payload", listed.TaskPanel)
 	}
 
 	wrote, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/task write task-1 -- ping"})
@@ -2689,6 +2698,9 @@ func TestControllerServicePanelProjectsSharedLifecycleConfigAndActions(t *testin
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if view.ControllerPanel == nil || !view.ControllerPanel.Active {
+		t.Fatalf("controller command panel = %#v, want active shared panel payload", view.ControllerPanel)
 	}
 	for _, want := range []string{"controller:", "agent=reviewer", "remote=remote-reviewer", "model=gpt-remote", "Mode: code"} {
 		if !strings.Contains(view.Output, want) {

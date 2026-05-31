@@ -1005,6 +1005,10 @@ func (m *Model) allowsBTWSubmission() bool {
 }
 
 func (m *Model) tryToggleFoldToken(blockID string, token string) bool {
+	if input, ok := commandPanelInputFromClickToken(token); ok {
+		m.setInputText(input)
+		return true
+	}
 	if key, ok := strings.CutPrefix(strings.TrimSpace(token), "acp_reasoning:"); ok {
 		return m.tryToggleACPReasoningToken(blockID, key)
 	}

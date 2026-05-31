@@ -62,6 +62,7 @@ const (
 	BlockMainACPTurn     BlockKind = "main_acp_turn"
 	BlockParticipantTurn BlockKind = "participant_turn"
 	BlockWelcome         BlockKind = "welcome"
+	BlockCommandPanel    BlockKind = "command_panel"
 )
 
 // ---------------------------------------------------------------------------

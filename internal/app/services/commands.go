@@ -233,9 +233,10 @@ func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args 
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "agent",
-			Output:  s.formatCommandAgents(ctx, ref, view),
+			Handled:         true,
+			Command:         "agent",
+			Output:          s.formatCommandAgents(ctx, ref, view),
+			AgentManagement: &view,
 		}, nil
 	}
 	switch strings.ToLower(sub) {
@@ -363,9 +364,10 @@ func (s CommandService) executeConnect(ctx context.Context, ref session.Ref, arg
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "connect",
-			Output:  formatCommandConnectPanel(panel),
+			Handled:           true,
+			Command:           "connect",
+			Output:            formatCommandConnectPanel(panel),
+			ModelConnectPanel: &panel,
 		}, nil
 	}
 	cfg, err := s.commandConnectConfig(args)

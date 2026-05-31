@@ -27,9 +27,10 @@ func (s CommandService) executeTask(ctx context.Context, ref session.Ref, args s
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "task",
-			Output:  formatCommandTaskPanel(view),
+			Handled:   true,
+			Command:   "task",
+			Output:    formatCommandTaskPanel(view),
+			TaskPanel: &view,
 		}, nil
 	case "tail", "show":
 		taskID, _, ok := splitCommandArg(rest)

@@ -22,9 +22,10 @@ func (s CommandService) executeSettings(ctx context.Context, ref session.Ref, ar
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "settings",
-			Output:  formatCommandSettingsPanel(panel),
+			Handled:       true,
+			Command:       "settings",
+			Output:        formatCommandSettingsPanel(panel),
+			SettingsPanel: &panel,
 		}, nil
 	case "run", "action":
 		actionID, actionArgs, ok := splitCommandArg(rest)
@@ -53,9 +54,10 @@ func (s CommandService) executeSettings(ctx context.Context, ref session.Ref, ar
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "settings",
-			Output:  "settings action completed: " + action.ID + "\n\n" + formatCommandSettingsPanel(panel),
+			Handled:       true,
+			Command:       "settings",
+			Output:        "settings action completed: " + action.ID + "\n\n" + formatCommandSettingsPanel(panel),
+			SettingsPanel: &panel,
 		}, nil
 	case "set", "field":
 		fieldID, value, ok := splitCommandArg(rest)
@@ -71,9 +73,10 @@ func (s CommandService) executeSettings(ctx context.Context, ref session.Ref, ar
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "settings",
-			Output:  "settings field updated: " + strings.ToLower(strings.TrimSpace(fieldID)) + "\n\n" + formatCommandSettingsPanel(panel),
+			Handled:       true,
+			Command:       "settings",
+			Output:        "settings field updated: " + strings.ToLower(strings.TrimSpace(fieldID)) + "\n\n" + formatCommandSettingsPanel(panel),
+			SettingsPanel: &panel,
 		}, nil
 	default:
 		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /settings [set <field-id> <value>|run <action-id> [confirm]]")

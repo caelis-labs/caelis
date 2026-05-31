@@ -1,7 +1,7 @@
 # Caelis Reimplementation Architecture Roadmap
 
 Status: long-term reference and refactor roadmap
-Last updated: 2026-05-31
+Last updated: 2026-06-01
 Scope: conceptual redesign, package layout, dependency rules, and migration path
 
 ## Purpose
@@ -732,6 +732,10 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   reimplementing agent registry/controller handoff, provider setup, status,
   settings diagnostics, model selection, approval mode, compaction, and resume
   behavior in each surface.
+- `internal/app/viewmodel.CommandExecutionView`: command execution keeps text
+  `Output` for CLI/ACP fallback rendering, while settings, task, controller,
+  connect, and agent management commands also return typed panel payloads from
+  the same shared app-service DTOs consumed by TUI and the future APP.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime, treats host setup/fix/reset/clean as explicit
@@ -1482,14 +1486,24 @@ be migrated before retiring the old stack:
      old kernel stream projection helpers, and `GatewayDriver.SubscribeStream`
      are gone; terminal/task output now belongs to core sandbox sessions,
      `TaskService`, canonical task events, and the ACP terminal lifecycle.
-   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
-     completion shell, connect wizard Bubble Tea runtime, status bar,
-     renderer, transcript reducer, tool panels, approval UI, theme system, and
-     attachment UI/rendering are not ported to `internal/app/services`.
-   - Visual panels such as interactive settings editors, rich
-     task/controller panels, and some transcript actions still have old
-     driver/app assumptions or missing service-native feature parity, so the
-     old TUI stack cannot be removed yet.
+   - Migrated baseline: shared command execution now returns typed panel
+     payloads for `/settings`, `/task list`, `/controller`, `/connect`, and
+     `/agent list`. The TUI renders those payloads through a surface-local
+     `CommandPanelBlock` instead of relying only on plain command-output
+     notices, while CLI/ACP fallback text remains available from the same
+     command result.
+   - Migrated baseline: TUI command panels now attach lightweight click tokens
+     that fill the corresponding shared slash command for editable settings
+     fields, settings actions, task tailing, connect provider setup, and agent
+     management. Execution still goes through `CommandService`; the panel click
+     layer only prepares input and does not own product semantics.
+   - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
+     transcript reducer, tool panels, approval UI, theme system, and attachment
+     UI/rendering remain TUI-owned presentation code by design.
+   - Still pending: interactive settings/task/controller input widgets,
+     transcript actions, and deeper surface-specific panel interactions need to
+     build on the shared panel payloads instead of growing new surface-local
+     product semantics.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1579,13 +1593,18 @@ be migrated before retiring the old stack:
      `/settings run` action ids, and confirm prompts for guarded actions.
      The command registry and completion shell no longer need a TUI-local
      settings field catalog.
+   - Migrated baseline: `CommandExecutionView` now carries structured settings,
+     task, controller, model-connect, and agent-management panel payloads in
+     addition to text output. This gives the future APP a direct render input
+     for command-driven panels without scraping CLI-style output, and lets TUI
+     keep its panel chrome surface-local.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
      terminal sessions without reaching into sandbox runtimes directly.
    - Still pending: transcript actions, surface-specific visual settings
-     editor layout/input widgets, and concrete future APP settings rendering
-     remain unmigrated. Durable async task control and output storage remain
+     editor input widgets, and concrete future APP settings rendering remain
+     unmigrated. Durable async task control and output storage remain
      kernel/runtime work rather than APP-only view-model work.
 
 4. Headless CLI and ACP serving
@@ -2455,8 +2474,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially visual settings/diagnostics panels and surface-specific
-   controller rendering.
+   especially interactive settings/task/controller panel input widgets and
+   surface-specific controller rendering.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
 3. Finish surface-specific visual task-panel rendering and optional persistent
@@ -2464,11 +2483,10 @@ Recommended sequence:
    recovery, SPAWN continuation, bounded terminal preview metadata, app-command
    lifecycle events, compact retention indexes, and task-panel summaries are
    now baseline runtime capabilities.
-4. Port the remaining TUI panels and richer interactive flows to
-   `internal/app/services`, especially visual settings panels and richer
-   task/controller panel rendering, preserving existing rendering as
-   surface-local code; shared settings config-option metadata and TUI slash
-   completion are now available for those visual settings editors.
+4. Port the remaining richer interactive flows to `internal/app/services`,
+   especially field editors, action runners, and transcript actions around the
+   shared settings/task/controller panel payloads while preserving rendering as
+   surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and

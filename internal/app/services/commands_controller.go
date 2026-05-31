@@ -18,9 +18,10 @@ func (s CommandService) executeController(ctx context.Context, ref session.Ref, 
 		return appviewmodel.CommandExecutionView{}, err
 	}
 	return appviewmodel.CommandExecutionView{
-		Handled: true,
-		Command: "controller",
-		Output:  formatCommandControllerPanel(panel),
+		Handled:         true,
+		Command:         "controller",
+		Output:          formatCommandControllerPanel(panel),
+		ControllerPanel: &panel,
 	}, nil
 }
 

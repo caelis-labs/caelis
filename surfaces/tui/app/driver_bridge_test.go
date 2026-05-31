@@ -324,6 +324,53 @@ func TestSlashSettingsUsesSharedCommandExecutor(t *testing.T) {
 	}
 }
 
+func TestSlashSettingsEmitsStructuredCommandPanel(t *testing.T) {
+	panel := appviewmodel.SettingsPanelView{
+		Configured: true,
+		Runtime:    appviewmodel.RuntimeStatus{WorkspaceCWD: "/repo"},
+		Model: appviewmodel.ModelStatus{Current: &appviewmodel.ModelChoice{
+			Provider: "openai",
+			Model:    "gpt-4o",
+		}},
+		Sections: []appviewmodel.SettingsPanelSection{{
+			ID:    "sandbox",
+			Title: "Sandbox",
+			Fields: []appviewmodel.SettingsPanelField{{
+				ID:       "sandbox.backend",
+				Label:    "Requested backend",
+				Kind:     "select",
+				Value:    "host",
+				Editable: true,
+			}},
+		}},
+		Actions: []appviewmodel.SettingsPanelAction{{
+			ID:      "model.connect",
+			Label:   "Connect model",
+			Enabled: true,
+		}},
+	}
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{
+			Handled:       true,
+			Command:       "settings",
+			Output:        "settings:\n  workspace: /repo",
+			SettingsPanel: &panel,
+		},
+	}
+	var msgs []tea.Msg
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/settings")
+	if result.Err != nil || !result.SuppressTurnDivider {
+		t.Fatalf("settings result = %#v, want handled structured panel", result)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("settings messages = %#v, want one structured panel message", msgs)
+	}
+	panelMsg, ok := msgs[0].(CommandPanelMsg)
+	if !ok || panelMsg.View.SettingsPanel == nil {
+		t.Fatalf("settings message = %#v, want CommandPanelMsg with settings payload", msgs[0])
+	}
+}
+
 func TestSlashControllerUsesSharedCommandExecutor(t *testing.T) {
 	driver := &bridgeTestDriver{
 		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "controller", Output: "controller:\n  summary: agent=reviewer  remote=remote-1  mode=manual"},
