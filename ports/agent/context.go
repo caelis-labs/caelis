@@ -10,7 +10,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -96,10 +95,64 @@ type Runner interface {
 	Close() error
 }
 
+// SubagentApprovalToolCall is the child tool call asking for approval.
+type SubagentApprovalToolCall struct {
+	ID       string         `json:"id,omitempty"`
+	Name     string         `json:"name,omitempty"`
+	Kind     string         `json:"kind,omitempty"`
+	Title    string         `json:"title,omitempty"`
+	Status   string         `json:"status,omitempty"`
+	RawInput map[string]any `json:"raw_input,omitempty"`
+}
+
+// SubagentApprovalRequest is one runtime-owned approval bridge payload for a
+// spawned child ACP agent.
+type SubagentApprovalRequest struct {
+	SessionRef   session.SessionRef       `json:"session_ref,omitempty"`
+	Session      session.Session          `json:"session,omitempty"`
+	TaskID       string                   `json:"task_id,omitempty"`
+	ParentCallID string                   `json:"parent_call_id,omitempty"`
+	Agent        string                   `json:"agent,omitempty"`
+	Mode         string                   `json:"mode,omitempty"`
+	ToolCall     SubagentApprovalToolCall `json:"tool_call,omitempty"`
+	Options      []ApprovalOption         `json:"options,omitempty"`
+}
+
+// SubagentApprovalResponse is one bridged child approval outcome.
+type SubagentApprovalResponse struct {
+	Outcome  string `json:"outcome,omitempty"`
+	OptionID string `json:"option_id,omitempty"`
+	Approved bool   `json:"approved,omitempty"`
+}
+
+// SubagentApprovalRequester bridges child ACP permission requests into the
+// parent runtime's approval surface.
+type SubagentApprovalRequester interface {
+	RequestSubagentApproval(context.Context, SubagentApprovalRequest) (SubagentApprovalResponse, error)
+}
+
+// SpawnContext is the system-controlled parent session context inherited by
+// one child ACP agent. None of these fields are exposed on the LLM-facing SPAWN
+// tool surface.
+type SpawnContext struct {
+	SessionRef        session.SessionRef        `json:"session_ref,omitempty"`
+	Session           session.Session           `json:"session,omitempty"`
+	CWD               string                    `json:"cwd,omitempty"`
+	TaskID            string                    `json:"task_id,omitempty"`
+	ParentCallID      string                    `json:"parent_call_id,omitempty"`
+	Mode              string                    `json:"mode,omitempty"`
+	ApprovalRequester SubagentApprovalRequester `json:"-"`
+}
+
 // SubagentRunner starts delegated child runs from the current invocation.
 // Concrete child-agent configuration is app-owned; runtime only sees the
 // registry name and the resulting child instance ref.
-type SubagentRunner = subagent.Runner
+type SubagentRunner interface {
+	Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error)
+	Continue(context.Context, delegation.Anchor, delegation.ContinueRequest) (delegation.Result, error)
+	Wait(context.Context, delegation.Anchor, int) (delegation.Result, error)
+	Cancel(context.Context, delegation.Anchor) error
+}
 
 // ReadonlyContext exposes immutable invocation state derived from persisted
 // events and runtime overlays.

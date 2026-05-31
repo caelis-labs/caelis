@@ -4,7 +4,6 @@ import (
 	"context"
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
@@ -114,11 +113,4 @@ type SessionControlPlane interface {
 	PromptACPParticipant(context.Context, PromptACPParticipantRequest) (RunResult, error)
 	DetachACPParticipant(context.Context, DetachACPParticipantRequest) (session.Session, error)
 	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
-}
-
-// ControllerProvider exposes the optional controller-orchestration backend used
-// by one runtime implementation. It is intended for advanced app wiring and
-// tests rather than the LLM-facing execution surface.
-type ControllerProvider interface {
-	Controllers() controller.Backend
 }

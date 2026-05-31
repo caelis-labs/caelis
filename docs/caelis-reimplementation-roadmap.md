@@ -1118,6 +1118,12 @@ The completed work is intentionally limited to the reusable skeleton:
   approval policy, sandbox task control, and durable task history moved onto
   `core/*`, `internal/app/services`, and `internal/adapters/tools/*`, so those
   old public contracts were deleted instead of kept as extension points.
+- Legacy controller/subagent port removal: `ports/controller` and
+  `ports/subagent` no longer have independent production ownership. Controller
+  config/handoff semantics live in `internal/engine/control`,
+  `internal/app/services`, and view models; the only residual old subagent
+  runner shape needed by `ports/agent` is now folded into that package instead
+  of kept as a separate port taxonomy.
 - Legacy sandbox router removal: the unused `internal/sandboxrouter` package
   was deleted. Sandbox backend selection now stays in the shared app registry
   and local composition root instead of a second routing layer.
@@ -1264,8 +1270,9 @@ be migrated before retiring the old stack:
      invocations as a surface-neutral config intent.
    - Migrated baseline: gatewaydriver no longer imports `ports/controller` for
      active ACP controller status, model/effort completion, mode cycling, or
-     status projection. Those flows now use shared app view-model DTOs so TUI
-     and future APP surfaces do not depend on the old controller port taxonomy.
+     status projection. Those flows now use shared app view-model DTOs, and the
+     old `ports/controller` package has been removed, so TUI and future APP
+     surfaces do not depend on that port taxonomy.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness

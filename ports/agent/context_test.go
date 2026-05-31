@@ -8,7 +8,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/subagent"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -108,7 +107,7 @@ func TestAgentSpecCarriesExecutionCapabilitiesOutsideContext(t *testing.T) {
 	if got := len(spec.Tools); got != 1 {
 		t.Fatalf("len(spec.Tools) = %d, want 1", got)
 	}
-	anchor, _, err := spec.SubagentRunner.Spawn(context.Background(), subagent.SpawnContext{
+	anchor, _, err := spec.SubagentRunner.Spawn(context.Background(), SpawnContext{
 		SessionRef: session.SessionRef{SessionID: "sess-1"},
 		CWD:        "/tmp/project",
 	}, delegation.Request{Agent: "helper"})
@@ -135,7 +134,7 @@ func (m staticModel) Generate(context.Context, *model.Request) iter.Seq2[*model.
 
 type staticSubagentRunner struct{}
 
-func (staticSubagentRunner) Spawn(context.Context, subagent.SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error) {
+func (staticSubagentRunner) Spawn(context.Context, SpawnContext, delegation.Request) (delegation.Anchor, delegation.Result, error) {
 	return delegation.Anchor{TaskID: "task-sub-1", SessionID: "child-1", Agent: "helper", AgentID: "helper-1"}, delegation.Result{
 		TaskID:        "task-sub-1",
 		State:         delegation.StateRunning,
