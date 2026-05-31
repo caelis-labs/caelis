@@ -4,9 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
@@ -17,7 +14,7 @@ func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
 	for range 100 {
 		updated, _, handled := m.dispatchRenderEvent(schedulerAssistantFrame("x"))
 		if !handled {
-			t.Fatal("assistant gateway stream frame was not handled")
+			t.Fatal("assistant transcript stream frame was not handled")
 		}
 		m = updated.(*Model)
 	}
@@ -35,23 +32,14 @@ func TestRenderSchedulerCoalescesAssistantFramesToOneMutation(t *testing.T) {
 	}
 }
 
-func schedulerAssistantFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			HandleID:   "handle-1",
-			RunID:      "run-1",
-			TurnID:     "turn-1",
-			SessionRef: session.SessionRef{SessionID: "session-1"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
-				Text:       text,
-				Visibility: string(session.VisibilityUIOnly),
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
-			},
-		},
-	}
+func schedulerAssistantFrame(text string) TranscriptEventsMsg {
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "session-1",
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          text,
+	}}}
 }
 
 func TestRenderSchedulerCoalescesLogChunksToOneDrainItem(t *testing.T) {

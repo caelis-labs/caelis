@@ -1,11 +1,10 @@
 package tuiapp
 
 import (
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
 type pendingRenderEvent struct {
@@ -39,21 +38,18 @@ func (m *Model) shouldEnqueueRenderEvent(msg tea.Msg, policy renderEventPolicy) 
 	switch typed := msg.(type) {
 	case LogChunkMsg:
 		return typed.Chunk != ""
-	case kernel.EventEnvelope:
-		return gatewayEnvelopeShouldEnqueueForRenderDrain(typed)
+	case TranscriptEventsMsg:
+		return transcriptEventsShouldEnqueueForRenderDrain(typed)
 	default:
 		return false
 	}
 }
 
-func gatewayEnvelopeShouldEnqueueForRenderDrain(env kernel.EventEnvelope) bool {
-	if env.Err != nil {
-		return false
-	}
-	if _, ok := gatewayNarrativeBatchKey(env); ok {
+func transcriptEventsShouldEnqueueForRenderDrain(msg TranscriptEventsMsg) bool {
+	if _, ok := pendingTranscriptNarrativeBatchKey(msg); ok {
 		return true
 	}
-	if _, ok := gatewayTerminalBatchKey(env); ok {
+	if _, ok := pendingTranscriptTerminalBatchKey(msg); ok {
 		return true
 	}
 	return false
@@ -76,14 +72,8 @@ func (m *Model) enqueueRenderEvent(msg tea.Msg, lane renderEventLane) tea.Cmd {
 
 func clonePendingRenderMsg(msg tea.Msg) tea.Msg {
 	switch typed := msg.(type) {
-	case kernel.EventEnvelope:
-		if _, ok := gatewayTerminalBatchKey(typed); ok {
-			return cloneGatewayTerminalEnvelope(typed)
-		}
-		if _, ok := gatewayNarrativeBatchKey(typed); ok {
-			return cloneGatewayNarrativeEnvelope(typed)
-		}
-		return typed
+	case TranscriptEventsMsg:
+		return cloneTranscriptEventsMsg(typed)
 	default:
 		return msg
 	}
@@ -102,24 +92,14 @@ func mergePendingRenderEvent(dst *pendingRenderEvent, src pendingRenderEvent) bo
 		left.Chunk += right.Chunk
 		dst.msg = left
 		return true
-	case kernel.EventEnvelope:
-		right, ok := src.msg.(kernel.EventEnvelope)
+	case TranscriptEventsMsg:
+		right, ok := src.msg.(TranscriptEventsMsg)
 		if !ok {
 			return false
 		}
-		if leftKey, ok := gatewayTerminalBatchKey(left); ok {
-			if rightKey, rightOK := gatewayTerminalBatchKey(right); rightOK && rightKey == leftKey {
-				mergeGatewayTerminalEnvelope(&left, right)
-				dst.msg = left
-				return true
-			}
-		}
-		if leftKey, ok := gatewayNarrativeBatchKey(left); ok {
-			if rightKey, rightOK := gatewayNarrativeBatchKey(right); rightOK && rightKey == leftKey {
-				mergeGatewayNarrativeEnvelope(&left, right)
-				dst.msg = left
-				return true
-			}
+		if mergeTranscriptEventsMsg(&left, right) {
+			dst.msg = left
+			return true
 		}
 	}
 	return false
@@ -140,8 +120,8 @@ func (m *Model) shouldFlushPendingRenderEventsBefore(msg tea.Msg, policy renderE
 	switch typed := msg.(type) {
 	case frameTickMsg:
 		return typed.kind != frameTickRenderDrain
-	case kernel.EventEnvelope:
-		return !gatewayEnvelopeShouldEnqueueForRenderDrain(typed)
+	case TranscriptEventsMsg:
+		return !transcriptEventsShouldEnqueueForRenderDrain(typed)
 	case LogChunkMsg:
 		return false
 	default:
@@ -170,13 +150,70 @@ func (m *Model) drainPendingRenderEvents(time.Time) tea.Cmd {
 				m = next
 			}
 			cmds = append(cmds, cmd)
-		case kernel.EventEnvelope:
-			model, cmd := m.handleGatewayEventEnvelope(typed)
+		case TranscriptEventsMsg:
+			model, cmd := m.handleTranscriptEventsMsg(typed)
 			if next, ok := model.(*Model); ok {
 				m = next
 			}
-			cmds = append(cmds, cmd, m.flushImmediateViewportSyncForMsg(typed))
+			cmds = append(cmds, cmd)
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+func cloneTranscriptEventsMsg(msg TranscriptEventsMsg) TranscriptEventsMsg {
+	out := msg
+	out.Events = append([]TranscriptEvent(nil), msg.Events...)
+	return out
+}
+
+func mergeTranscriptEventsMsg(dst *TranscriptEventsMsg, src TranscriptEventsMsg) bool {
+	if dst == nil {
+		return false
+	}
+	if leftKey, ok := pendingTranscriptNarrativeBatchKey(*dst); ok {
+		if rightKey, rightOK := pendingTranscriptNarrativeBatchKey(src); rightOK && rightKey == leftKey {
+			dst.Events[0].Text += src.Events[0].Text
+			dst.Events[0].OccurredAt = src.Events[0].OccurredAt
+			return true
+		}
+	}
+	if leftKey, ok := pendingTranscriptTerminalBatchKey(*dst); ok {
+		if rightKey, rightOK := pendingTranscriptTerminalBatchKey(src); rightOK && rightKey == leftKey {
+			existing := dst.Events[0].ToolOutput
+			incoming := src.Events[0].ToolOutput
+			if strings.EqualFold(strings.TrimSpace(dst.Events[0].ToolName), "RUN_COMMAND") {
+				dst.Events[0].ToolOutput = appendDeltaStreamChunk(existing, incoming)
+			} else {
+				dst.Events[0].ToolOutput = mergeSubagentStreamChunk(existing, incoming)
+			}
+			dst.Events[0].OccurredAt = src.Events[0].OccurredAt
+			return true
+		}
+	}
+	return false
+}
+
+func pendingTranscriptNarrativeBatchKey(msg TranscriptEventsMsg) (string, bool) {
+	if len(msg.Events) != 1 {
+		return "", false
+	}
+	return appTranscriptNarrativeBatchKey(msg.Events[0])
+}
+
+func pendingTranscriptTerminalBatchKey(msg TranscriptEventsMsg) (string, bool) {
+	if len(msg.Events) != 1 {
+		return "", false
+	}
+	event := msg.Events[0]
+	if event.Kind != TranscriptEventTool || !strings.EqualFold(strings.TrimSpace(event.ToolStatus), transcriptToolStatusRunning) || strings.TrimSpace(event.ToolOutput) == "" {
+		return "", false
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(string(event.Scope)),
+		strings.TrimSpace(event.ScopeID),
+		strings.TrimSpace(event.ToolCallID),
+		strings.TrimSpace(event.ToolName),
+		strings.TrimSpace(event.ToolStream),
+	}, "\x00"), true
 }

@@ -99,6 +99,54 @@ func TestProjectCoreSessionEventToTranscriptEvents_ToolResultUsesCoreContent(t *
 	}
 }
 
+func TestProjectCoreSessionEventToTranscriptEvents_MergesToolRuntimeMeta(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "core-tool-meta",
+		SessionID: "root-session",
+		Type:      coresession.EventToolResult,
+		Meta: map[string]any{
+			"caelis": map[string]any{
+				"runtime": map[string]any{
+					"stream": map[string]any{
+						"parent_call_id": "spawn-1",
+						"parent_tool":    "SPAWN",
+					},
+				},
+			},
+		},
+		Tool: &coresession.ToolEvent{
+			ID:     "task-1",
+			Name:   "TASK",
+			Status: coresession.ToolCompleted,
+			Meta: map[string]any{
+				"caelis": map[string]any{
+					"runtime": map[string]any{
+						"tool": map[string]any{
+							"target_id":   "maya",
+							"target_kind": "subagent",
+							"action":      "write",
+							"input":       "continue",
+						},
+					},
+				},
+			},
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool transcript event", events)
+	}
+	got := events[0]
+	if got.AnchorToolCallID != "spawn-1" || got.AnchorToolName != "SPAWN" {
+		t.Fatalf("anchor = (%q, %q), want stream parent from event meta", got.AnchorToolCallID, got.AnchorToolName)
+	}
+	if got.ToolTaskID != "maya" || got.ToolTaskAction != "write" || got.ToolTaskTargetKind != "subagent" || got.ToolTaskInput != "continue" {
+		t.Fatalf("task fields = id:%q action:%q target:%q input:%q, want tool runtime meta fields", got.ToolTaskID, got.ToolTaskAction, got.ToolTaskTargetKind, got.ToolTaskInput)
+	}
+}
+
 func TestProjectCoreSessionEventToTranscriptEvents_ProjectsAutoReviewApproval(t *testing.T) {
 	t.Parallel()
 

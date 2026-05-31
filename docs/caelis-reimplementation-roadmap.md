@@ -614,9 +614,9 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   projection for TUI and future APP consumers. It wraps runtime replay and
   active-turn channels into surface-neutral event envelopes with transcript,
   approval, participant, lifecycle, and canonical event projections.
-- `surfaces/tui/eventbridge`: retired production bridge kept only for residual
-  tests while the final old `kernel.EventEnvelope` renderer paths are removed.
-  Live and replaying app-service TUI paths now project app view-model/core
+- `surfaces/tui/eventbridge`: deleted. The old core/session ->
+  `kernel.EventEnvelope` reverse bridge no longer exists in production or
+  tests; live and replaying app-service TUI paths project app view-model/core
   session events directly.
 - `internal/app/services.SettingsService`: shared settings contract for
   runtime identity, store, sandbox, sandbox backend, and compaction policy
@@ -1396,6 +1396,12 @@ be migrated before retiring the old stack:
      prompts, tool events, participant events, and automatic approval-review
      results are now handled from the app view-model/core-session contract
      without converting back through old gateway envelopes.
+   - Migrated baseline: TUI render throttling now batches
+     `TranscriptEventsMsg` directly for assistant/reasoning deltas and running
+     terminal tool output. The old gateway-envelope narrative/terminal
+     batchers and the `surfaces/tui/eventbridge` reverse bridge have been
+     deleted, so production render scheduling no longer depends on
+     `kernel.EventEnvelope`.
    - Migrated baseline: the production app-service TUI submit and side-agent
      continuation paths now bypass the old `GatewayService` turn envelope and
      return core-native `tuidriver.Turn` handles directly. These handles keep
@@ -1456,10 +1462,11 @@ be migrated before retiring the old stack:
      parity, so the old TUI stack cannot be removed yet.
    - Still pending: `surfaces/tui/app` still retains old
      `kernel.EventEnvelope` dispatch/projection code for transcript renderer
-     compatibility and terminal/tool formatting tests. Retiring those imports
-     requires finishing the remaining renderer protocol move to
-     `core/runtime`, `core/session`, ACP schema content, and
-     `internal/app/viewmodel`.
+     compatibility and terminal/tool formatting tests. The scheduler no longer
+     batches gateway envelopes, so the remaining retirement target is the
+     legacy gateway projection/dispatch compatibility entrypoint itself. That
+     requires finishing the remaining renderer protocol move to `core/runtime`,
+     `core/session`, ACP schema content, and `internal/app/viewmodel`.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

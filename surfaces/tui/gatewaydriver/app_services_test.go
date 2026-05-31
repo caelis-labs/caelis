@@ -18,34 +18,7 @@ import (
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
-
-func TestCoreEventMetaMergesToolRuntimeMeta(t *testing.T) {
-	projected := eventbridge.KernelEventFromCore(coresession.Event{
-		Meta: map[string]any{
-			"caelis": map[string]any{
-				"runtime": map[string]any{
-					"stream": map[string]any{"parent_call_id": "spawn-1"},
-				},
-			},
-		},
-		Tool: &coresession.ToolEvent{
-			Meta: map[string]any{
-				"caelis": map[string]any{
-					"runtime": map[string]any{
-						"tool": map[string]any{"diff_hunks": []any{"hunk-1"}},
-					},
-				},
-			},
-		},
-	})
-	got := projected.Meta
-	runtimeMeta := got["caelis"].(map[string]any)["runtime"].(map[string]any)
-	if runtimeMeta["stream"] == nil || runtimeMeta["tool"] == nil {
-		t.Fatalf("meta = %#v, want stream and tool runtime metadata", got)
-	}
-}
 
 func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	ctx := context.Background()

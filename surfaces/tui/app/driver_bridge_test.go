@@ -146,100 +146,43 @@ func TestConfigFromDriverRefreshStatusUsesLightweightStatus(t *testing.T) {
 	}
 }
 
-func TestGatewayTerminalBatcherMergesRunningFrames(t *testing.T) {
-	var sent []tea.Msg
-	send := func(msg tea.Msg) {
-		sent = append(sent, msg)
-	}
-	var batcher gatewayTerminalBatcher
-
-	if !batcher.enqueue(testTerminalFrame("hello ", 1), send) {
-		t.Fatal("first running frame was not accepted for batching")
-	}
-	if !batcher.enqueue(testTerminalFrame("world", 2), send) {
+func TestTranscriptTerminalBatchingMergesRunningFrames(t *testing.T) {
+	msg := testTerminalFrame("hello ", 1)
+	if !mergeTranscriptEventsMsg(&msg, testTerminalFrame("world", 2)) {
 		t.Fatal("second running frame was not accepted for batching")
 	}
-	if len(sent) != 0 {
-		t.Fatalf("batcher sent before flush: got %d messages", len(sent))
-	}
-
-	batcher.flush(send)
-	if len(sent) != 1 {
-		t.Fatalf("flush sent %d messages, want 1", len(sent))
-	}
-	env, ok := sent[0].(kernel.EventEnvelope)
-	if !ok {
-		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
-	}
-	if got, _ := gatewayTerminalContent(env); got != "hello world" {
+	if got := msg.Events[0].ToolOutput; got != "hello world" {
 		t.Fatalf("merged text = %q, want hello world", got)
-	}
-	if len(env.Event.ToolResult.RawOutput) != 0 {
-		t.Fatalf("raw output = %#v, want terminal content only", env.Event.ToolResult.RawOutput)
 	}
 }
 
-func TestGatewayTerminalBatcherMergesCumulativeRunningFrames(t *testing.T) {
-	var sent []tea.Msg
-	send := func(msg tea.Msg) {
-		sent = append(sent, msg)
-	}
-	var batcher gatewayTerminalBatcher
-
-	if !batcher.enqueue(testTerminalFrameForTool("SPAWN", "Let me write the script.", 1), send) {
-		t.Fatal("first running frame was not accepted for batching")
-	}
-	if !batcher.enqueue(testTerminalFrameForTool("SPAWN", "Let me write the script. Now let me run the script.", 2), send) {
+func TestTranscriptTerminalBatchingMergesCumulativeRunningFrames(t *testing.T) {
+	msg := testTerminalFrameForTool("SPAWN", "Let me write the script.", 1)
+	if !mergeTranscriptEventsMsg(&msg, testTerminalFrameForTool("SPAWN", "Let me write the script. Now let me run the script.", 2)) {
 		t.Fatal("second running frame was not accepted for batching")
 	}
-
-	batcher.flush(send)
-	if len(sent) != 1 {
-		t.Fatalf("flush sent %d messages, want 1", len(sent))
-	}
-	env, ok := sent[0].(kernel.EventEnvelope)
-	if !ok {
-		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
-	}
 	want := "Let me write the script. Now let me run the script."
-	if got, _ := gatewayTerminalContent(env); got != want {
+	if got := msg.Events[0].ToolOutput; got != want {
 		t.Fatalf("merged text = %q, want %q", got, want)
 	}
 }
 
-func TestGatewayTerminalBatcherPreservesCommandPrefixDeltas(t *testing.T) {
-	var sent []tea.Msg
-	send := func(msg tea.Msg) {
-		sent = append(sent, msg)
-	}
-	var batcher gatewayTerminalBatcher
-
-	if !batcher.enqueue(testTerminalFrame("abc", 1), send) {
-		t.Fatal("first running frame was not accepted for batching")
-	}
-	if !batcher.enqueue(testTerminalFrame("abcdef", 2), send) {
+func TestTranscriptTerminalBatchingPreservesCommandPrefixDeltas(t *testing.T) {
+	msg := testTerminalFrame("abc", 1)
+	if !mergeTranscriptEventsMsg(&msg, testTerminalFrame("abcdef", 2)) {
 		t.Fatal("second running frame was not accepted for batching")
 	}
-
-	batcher.flush(send)
-	if len(sent) != 1 {
-		t.Fatalf("flush sent %d messages, want 1", len(sent))
-	}
-	env, ok := sent[0].(kernel.EventEnvelope)
-	if !ok {
-		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
-	}
-	if got, _ := gatewayTerminalContent(env); got != "abcabcdef" {
+	if got := msg.Events[0].ToolOutput; got != "abcabcdef" {
 		t.Fatalf("merged RUN_COMMAND text = %q, want both byte deltas preserved", got)
 	}
 }
 
-func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
+func TestAppTranscriptNarrativeBatcherMergesStreamChunks(t *testing.T) {
 	var sent []tea.Msg
 	send := func(msg tea.Msg) {
 		sent = append(sent, msg)
 	}
-	var batcher gatewayNarrativeBatcher
+	var batcher appTranscriptNarrativeBatcher
 
 	if !batcher.enqueue(testNarrativeFrame("hello "), send) {
 		t.Fatal("first narrative frame was not accepted for batching")
@@ -252,70 +195,41 @@ func TestGatewayNarrativeBatcherSyncsProtocolUpdateContent(t *testing.T) {
 	if len(sent) != 1 {
 		t.Fatalf("flush sent %d messages, want 1", len(sent))
 	}
-	env, ok := sent[0].(kernel.EventEnvelope)
+	msg, ok := sent[0].(TranscriptEventsMsg)
 	if !ok {
-		t.Fatalf("sent msg = %#v, want EventEnvelope", sent[0])
+		t.Fatalf("sent msg = %#v, want TranscriptEventsMsg", sent[0])
 	}
-	if got := env.Event.Narrative.Text; got != "hello world" {
-		t.Fatalf("narrative text = %q, want merged text", got)
-	}
-	if env.Event.Protocol == nil || env.Event.Protocol.Update == nil {
-		t.Fatalf("protocol = %#v, want protocol update", env.Event.Protocol)
-	}
-	if got := protocolTextContent(env.Event.Protocol.Update.Content); got != "hello world" {
-		t.Fatalf("protocol content = %q, want merged text", got)
-	}
-	events := ProjectGatewayEventToTranscriptEvents(env.Event)
-	if len(events) != 1 || events[0].Text != "hello world" {
-		t.Fatalf("projected events = %#v, want protocol-first merged text", events)
+	if len(msg.Events) != 1 || msg.Events[0].Text != "hello world" {
+		t.Fatalf("transcript events = %#v, want merged narrative text", msg.Events)
 	}
 }
 
-func testTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
+func testTerminalFrame(text string, cursor int64) TranscriptEventsMsg {
 	return testTerminalFrameForTool("RUN_COMMAND", text, cursor)
 }
 
-func testNarrativeFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin:     &kernel.EventOrigin{Scope: kernel.EventScopeMain, ScopeID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
-				Text:       text,
-				Visibility: string(session.VisibilityUIOnly),
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
-			},
-			Protocol: &session.EventProtocol{
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Update: &session.ProtocolUpdate{
-					SessionUpdate: string(session.ProtocolUpdateTypeAgentMessage),
-					Content:       session.ProtocolTextContent(text),
-				},
-			},
-		},
-	}
+func testNarrativeFrame(text string) []TranscriptEvent {
+	return []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "root-session",
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          text,
+	}}
 }
 
-func testTerminalFrameForTool(toolName string, text string, cursor int64) kernel.EventEnvelope {
+func testTerminalFrameForTool(toolName string, text string, cursor int64) TranscriptEventsMsg {
 	_ = cursor
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
-			HandleID:   "h1",
-			RunID:      "r1",
-			TurnID:     "t1",
-			SessionRef: session.SessionRef{SessionID: "s1"},
-			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "call-1",
-				ToolName: toolName,
-				Status:   kernel.ToolStatusRunning,
-				Content:  testTerminalContentWithID(text, "term-1"),
-			},
-		},
-	}
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ScopeID:    "s1",
+		ToolCallID: "call-1",
+		ToolName:   toolName,
+		ToolStatus: transcriptToolStatusRunning,
+		ToolStream: "stdout",
+		ToolOutput: text,
+	}}}
 }
 
 func TestDefaultCommandsStayInHelpText(t *testing.T) {
