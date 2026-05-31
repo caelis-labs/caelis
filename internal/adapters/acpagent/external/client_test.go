@@ -189,6 +189,99 @@ func TestClientHandlesExternalPermissionRequest(t *testing.T) {
 	}
 }
 
+func TestClientHandlesExternalTerminalRequests(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	terminal := &recordingTerminalHandler{}
+	client, server, closePipes := newClientServer(t, Config{
+		AgentID:   "agent-1",
+		AgentName: "reviewer",
+		Terminal:  terminal,
+	})
+	defer closePipes()
+
+	var terminalCap bool
+	serverErr := serveFakeAgent(ctx, server, fakeAgentBehavior{
+		OnInitialize: func(_ context.Context, req schema.InitializeRequest) schema.InitializeResponse {
+			terminalCap, _ = req.ClientCapabilities["terminal"].(bool)
+			return schema.InitializeResponse{
+				ProtocolVersion: schema.CurrentProtocolVersion,
+				AgentInfo:       &schema.Implementation{Name: "fake", Version: "test"},
+			}
+		},
+		OnPrompt: func(ctx context.Context, conn *jsonrpc.Conn, req schema.PromptRequest) schema.PromptResponse {
+			var created schema.CreateTerminalResponse
+			if err := conn.Call(ctx, schema.MethodTerminalCreate, schema.CreateTerminalRequest{
+				SessionID: req.SessionID,
+				Command:   "printf",
+				Args:      []string{"external terminal ok"},
+				CWD:       "/tmp/project",
+			}, &created); err != nil {
+				t.Errorf("terminal/create call error = %v", err)
+			}
+			var output schema.TerminalOutputResponse
+			if err := conn.Call(ctx, schema.MethodTerminalOutput, schema.TerminalOutputRequest{
+				SessionID:  req.SessionID,
+				TerminalID: created.TerminalID,
+			}, &output); err != nil {
+				t.Errorf("terminal/output call error = %v", err)
+			}
+			var waited schema.TerminalWaitForExitResponse
+			if err := conn.Call(ctx, schema.MethodTerminalWaitForExit, schema.TerminalWaitForExitRequest{
+				SessionID:  req.SessionID,
+				TerminalID: created.TerminalID,
+			}, &waited); err != nil {
+				t.Errorf("terminal/wait_for_exit call error = %v", err)
+			}
+			if err := conn.Call(ctx, schema.MethodTerminalRelease, schema.TerminalReleaseRequest{
+				SessionID:  req.SessionID,
+				TerminalID: created.TerminalID,
+			}, nil); err != nil {
+				t.Errorf("terminal/release call error = %v", err)
+			}
+			_ = conn.Notify(schema.MethodSessionUpdate, schema.SessionNotification{
+				SessionID: req.SessionID,
+				Update: schema.ContentChunk{
+					SessionUpdate: schema.UpdateAgentMessage,
+					Content:       schema.TextContent{Type: "text", Text: output.Output},
+				},
+			})
+			return schema.PromptResponse{StopReason: schema.StopReasonEndTurn}
+		},
+	})
+
+	if _, err := client.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !terminalCap {
+		t.Fatal("initialize did not advertise terminal client capability")
+	}
+	newSession, err := client.NewSession(ctx, "/tmp/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := client.Prompt(ctx, newSession.SessionID, []model.ContentPart{{Type: model.ContentPartText, Text: "run terminal"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.create.Command != "printf" || len(terminal.create.Args) != 1 || terminal.create.Args[0] != "external terminal ok" {
+		t.Fatalf("terminal create request = %#v, want printf external terminal ok", terminal.create)
+	}
+	if !terminal.released {
+		t.Fatal("terminal release was not called")
+	}
+	if got := session.EventText(result.Events[len(result.Events)-1]); got != "external terminal ok" {
+		t.Fatalf("assistant text = %q, want external terminal ok", got)
+	}
+
+	closePipes()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("fake server did not stop")
+	}
+}
+
 func TestClientResumeAndSetConfigOption(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -251,9 +344,10 @@ func TestClientResumeAndSetConfigOption(t *testing.T) {
 }
 
 type fakeAgentBehavior struct {
-	OnPrompt    func(context.Context, *jsonrpc.Conn, schema.PromptRequest) schema.PromptResponse
-	OnResume    func(context.Context, schema.ResumeSessionRequest) schema.ResumeSessionResponse
-	OnSetConfig func(context.Context, schema.SetSessionConfigOptionRequest) schema.SetSessionConfigOptionResponse
+	OnInitialize func(context.Context, schema.InitializeRequest) schema.InitializeResponse
+	OnPrompt     func(context.Context, *jsonrpc.Conn, schema.PromptRequest) schema.PromptResponse
+	OnResume     func(context.Context, schema.ResumeSessionRequest) schema.ResumeSessionResponse
+	OnSetConfig  func(context.Context, schema.SetSessionConfigOptionRequest) schema.SetSessionConfigOptionResponse
 }
 
 func newClientServer(t *testing.T, cfg Config) (*Client, *jsonrpc.Conn, func()) {
@@ -277,6 +371,13 @@ func serveFakeAgent(ctx context.Context, conn *jsonrpc.Conn, behavior fakeAgentB
 		errCh <- conn.Serve(ctx, func(ctx context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
 			switch msg.Method {
 			case schema.MethodInitialize:
+				var req schema.InitializeRequest
+				if err := json.Unmarshal(msg.Params, &req); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				if behavior.OnInitialize != nil {
+					return behavior.OnInitialize(ctx, req), nil
+				}
 				return schema.InitializeResponse{
 					ProtocolVersion: schema.CurrentProtocolVersion,
 					AgentCapabilities: schema.AgentCapabilities{
@@ -319,6 +420,38 @@ func serveFakeAgent(ctx context.Context, conn *jsonrpc.Conn, behavior fakeAgentB
 		}, nil)
 	}()
 	return errCh
+}
+
+type recordingTerminalHandler struct {
+	create   schema.CreateTerminalRequest
+	released bool
+}
+
+func (h *recordingTerminalHandler) CreateTerminal(_ context.Context, req schema.CreateTerminalRequest) (schema.CreateTerminalResponse, error) {
+	h.create = req
+	return schema.CreateTerminalResponse{TerminalID: "term-1"}, nil
+}
+
+func (h *recordingTerminalHandler) TerminalOutput(context.Context, schema.TerminalOutputRequest) (schema.TerminalOutputResponse, error) {
+	code := 0
+	return schema.TerminalOutputResponse{
+		Output:     "external terminal ok",
+		ExitStatus: &schema.TerminalExitStatus{ExitCode: &code},
+	}, nil
+}
+
+func (h *recordingTerminalHandler) TerminalWaitForExit(context.Context, schema.TerminalWaitForExitRequest) (schema.TerminalWaitForExitResponse, error) {
+	code := 0
+	return schema.TerminalWaitForExitResponse{ExitCode: &code}, nil
+}
+
+func (h *recordingTerminalHandler) TerminalKill(context.Context, schema.TerminalKillRequest) error {
+	return nil
+}
+
+func (h *recordingTerminalHandler) TerminalRelease(context.Context, schema.TerminalReleaseRequest) error {
+	h.released = true
+	return nil
 }
 
 func eventTypes(events []session.Event) []session.EventType {

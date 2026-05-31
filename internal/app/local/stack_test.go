@@ -361,6 +361,49 @@ func TestStackInvokesExternalACPAgentAsControllerThroughServices(t *testing.T) {
 	}
 }
 
+func TestStackLetsExternalACPAgentUseCoreTerminalCallbacks(t *testing.T) {
+	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceCWD: t.TempDir()},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("local baseline")},
+		}},
+		Sandbox: rt,
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "helper",
+			AgentName: "Helper",
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env: []string{
+				"CAELIS_TEST_EXTERNAL_ACP_HELPER=1",
+				"CAELIS_TEST_EXTERNAL_ACP_HELPER_TERMINAL=1",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := stack.Services().Agents().Invoke(context.Background(), services.AgentInvokeRequest{
+		AgentID:    "helper",
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "run terminal",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Events) != 1 || !strings.Contains(session.EventText(result.Events[0]), "external terminal ok") {
+		t.Fatalf("invoke result = %#v, want external terminal output", result)
+	}
+}
+
 func TestStackRegistersCoreSpawnToolForACPAgents(t *testing.T) {
 	provider := &capturingProvider{message: model.Message{
 		Role:  model.RoleAssistant,
@@ -754,6 +797,49 @@ func TestExternalACPHelperProcess(t *testing.T) {
 			var req schema.PromptRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil {
 				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if os.Getenv("CAELIS_TEST_EXTERNAL_ACP_HELPER_TERMINAL") == "1" {
+				command := "printf 'external terminal ok'"
+				if runtime.GOOS == "windows" {
+					command = "cmd /c echo external terminal ok"
+				}
+				var created schema.CreateTerminalResponse
+				if err := conn.Call(ctx, schema.MethodTerminalCreate, schema.CreateTerminalRequest{
+					SessionID:       req.SessionID,
+					Command:         command,
+					OutputByteLimit: intPtr(4096),
+				}, &created); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				var waited schema.TerminalWaitForExitResponse
+				if err := conn.Call(ctx, schema.MethodTerminalWaitForExit, schema.TerminalWaitForExitRequest{
+					SessionID:  req.SessionID,
+					TerminalID: created.TerminalID,
+				}, &waited); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				var output schema.TerminalOutputResponse
+				if err := conn.Call(ctx, schema.MethodTerminalOutput, schema.TerminalOutputRequest{
+					SessionID:  req.SessionID,
+					TerminalID: created.TerminalID,
+				}, &output); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				if err := conn.Call(ctx, schema.MethodTerminalRelease, schema.TerminalReleaseRequest{
+					SessionID:  req.SessionID,
+					TerminalID: created.TerminalID,
+				}, nil); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+				}
+				_ = waited
+				_ = conn.Notify(schema.MethodSessionUpdate, schema.SessionNotification{
+					SessionID: req.SessionID,
+					Update: schema.ContentChunk{
+						SessionUpdate: schema.UpdateAgentMessage,
+						Content:       schema.TextContent{Type: "text", Text: strings.TrimSpace(output.Output)},
+					},
+				})
+				return schema.PromptResponse{StopReason: schema.StopReasonEndTurn}, nil
 			}
 			if delayMS, _ := strconv.Atoi(strings.TrimSpace(os.Getenv("CAELIS_TEST_EXTERNAL_ACP_DELAY_MS"))); delayMS > 0 {
 				time.Sleep(time.Duration(delayMS) * time.Millisecond)
@@ -2521,4 +2607,8 @@ func schemaEnumHas(raw any, want string) bool {
 		}
 	}
 	return false
+}
+
+func intPtr(value int) *int {
+	return &value
 }

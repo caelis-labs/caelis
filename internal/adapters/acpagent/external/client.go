@@ -21,6 +21,14 @@ import (
 
 type PermissionHandler func(context.Context, schema.RequestPermissionRequest) (schema.RequestPermissionResponse, error)
 
+type TerminalHandler interface {
+	CreateTerminal(context.Context, schema.CreateTerminalRequest) (schema.CreateTerminalResponse, error)
+	TerminalOutput(context.Context, schema.TerminalOutputRequest) (schema.TerminalOutputResponse, error)
+	TerminalWaitForExit(context.Context, schema.TerminalWaitForExitRequest) (schema.TerminalWaitForExitResponse, error)
+	TerminalKill(context.Context, schema.TerminalKillRequest) error
+	TerminalRelease(context.Context, schema.TerminalReleaseRequest) error
+}
+
 type Config struct {
 	AgentID        string
 	AgentName      string
@@ -31,6 +39,7 @@ type Config struct {
 	Env            []string
 	Implementation schema.Implementation
 	Permission     PermissionHandler
+	Terminal       TerminalHandler
 }
 
 type Client struct {
@@ -112,7 +121,7 @@ func (c *Client) Initialize(ctx context.Context) (schema.InitializeResponse, err
 	c.Start(ctx)
 	req := schema.InitializeRequest{
 		ProtocolVersion:    schema.CurrentProtocolVersion,
-		ClientCapabilities: map[string]any{},
+		ClientCapabilities: c.clientCapabilities(),
 		ClientInfo:         &c.cfg.Implementation,
 	}
 	var resp schema.InitializeResponse
@@ -240,34 +249,92 @@ func (c *Client) Close() error {
 	return err
 }
 
+func (c *Client) clientCapabilities() map[string]any {
+	caps := map[string]any{}
+	if c != nil && c.cfg.Terminal != nil {
+		caps["terminal"] = true
+	}
+	return caps
+}
+
 type promptCallResult struct {
 	response schema.PromptResponse
 	err      error
 }
 
 func (c *Client) handleRequest(ctx context.Context, msg jsonrpc.Message) (any, *jsonrpc.RPCError) {
-	if msg.Method != schema.MethodSessionReqPermission {
+	switch msg.Method {
+	case schema.MethodSessionReqPermission:
+		var req schema.RequestPermissionRequest
+		if err := json.Unmarshal(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		}
+		c.emit(permissionEvent(c.cfg, req, session.ApprovalPending, "", ""))
+		handler := c.cfg.Permission
+		if handler == nil {
+			handler = allowOncePermission
+		}
+		resp, err := handler(ctx, req)
+		if err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+		}
+		status := session.ApprovalRejected
+		if permissionApproved(resp) {
+			status = session.ApprovalApproved
+		}
+		c.emit(permissionEvent(c.cfg, req, status, strings.TrimSpace(resp.Outcome.OptionID), strings.TrimSpace(resp.Outcome.Outcome)))
+		return resp, nil
+	case schema.MethodTerminalCreate:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req schema.CreateTerminalRequest
+		if err := json.Unmarshal(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		}
+		resp, err := c.cfg.Terminal.CreateTerminal(ctx, req)
+		return responseOrRPCError(resp, err)
+	case schema.MethodTerminalOutput:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req schema.TerminalOutputRequest
+		if err := json.Unmarshal(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		}
+		resp, err := c.cfg.Terminal.TerminalOutput(ctx, req)
+		return responseOrRPCError(resp, err)
+	case schema.MethodTerminalWaitForExit:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req schema.TerminalWaitForExitRequest
+		if err := json.Unmarshal(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		}
+		resp, err := c.cfg.Terminal.TerminalWaitForExit(ctx, req)
+		return responseOrRPCError(resp, err)
+	case schema.MethodTerminalKill:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req schema.TerminalKillRequest
+		if err := json.Unmarshal(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		}
+		return responseOrRPCError(struct{}{}, c.cfg.Terminal.TerminalKill(ctx, req))
+	case schema.MethodTerminalRelease:
+		if c.cfg.Terminal == nil {
+			return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
+		}
+		var req schema.TerminalReleaseRequest
+		if err := json.Unmarshal(msg.Params, &req); err != nil {
+			return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
+		}
+		return responseOrRPCError(struct{}{}, c.cfg.Terminal.TerminalRelease(ctx, req))
+	default:
 		return nil, &jsonrpc.RPCError{Code: -32601, Message: "method not found"}
 	}
-	var req schema.RequestPermissionRequest
-	if err := json.Unmarshal(msg.Params, &req); err != nil {
-		return nil, &jsonrpc.RPCError{Code: -32602, Message: "invalid params", Data: err.Error()}
-	}
-	c.emit(permissionEvent(c.cfg, req, session.ApprovalPending, "", ""))
-	handler := c.cfg.Permission
-	if handler == nil {
-		handler = allowOncePermission
-	}
-	resp, err := handler(ctx, req)
-	if err != nil {
-		return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
-	}
-	status := session.ApprovalRejected
-	if permissionApproved(resp) {
-		status = session.ApprovalApproved
-	}
-	c.emit(permissionEvent(c.cfg, req, status, strings.TrimSpace(resp.Outcome.OptionID), strings.TrimSpace(resp.Outcome.Outcome)))
-	return resp, nil
 }
 
 func (c *Client) handleNotification(_ context.Context, msg jsonrpc.Message) {
@@ -352,6 +419,13 @@ func permissionApproved(resp schema.RequestPermissionResponse) bool {
 	outcome := strings.ToLower(strings.TrimSpace(resp.Outcome.Outcome))
 	optionID := strings.ToLower(strings.TrimSpace(resp.Outcome.OptionID))
 	return strings.HasPrefix(outcome, "allow") || strings.HasPrefix(optionID, "allow")
+}
+
+func responseOrRPCError(resp any, err error) (any, *jsonrpc.RPCError) {
+	if err != nil {
+		return nil, &jsonrpc.RPCError{Code: -32000, Message: err.Error()}
+	}
+	return resp, nil
 }
 
 func firstNonEmpty(values ...string) string {

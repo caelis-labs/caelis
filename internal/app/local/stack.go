@@ -134,6 +134,8 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		}
 		sandboxRuntime = liveSandbox
 	}
+	terminalHandler := newExternalTerminalHandler(sandboxRuntime, runtimeCfg.WorkspaceCWD)
+	externalAgents = withExternalTerminalHandler(externalAgents, terminalHandler)
 	spawnTasks := newSpawnTaskManager(store, externalAgents, taskStateDir(runtimeCfg.Store))
 	tools := cfg.Tools
 	if tools == nil {
@@ -213,7 +215,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Agents:         agentDescriptors(externalAgents),
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
 		Invokers:       agentInvokers(store, externalAgents),
-		InvokerFactory: externalAgentInvokerFactory(store),
+		InvokerFactory: externalAgentInvokerFactory(store, terminalHandler),
 		AgentInstaller: newBuiltinAgentInstaller(runtimeCfg),
 		Resources:      resourceCatalog,
 		Settings:       cfg.Settings,
@@ -252,6 +254,19 @@ func sandboxRuntimeApplier(reg *appregistry.Registry, live *liveSandboxRuntime) 
 	}
 }
 
+func withExternalTerminalHandler(configs []acpexternal.Config, handler acpexternal.TerminalHandler) []acpexternal.Config {
+	if handler == nil || len(configs) == 0 {
+		return configs
+	}
+	out := append([]acpexternal.Config(nil), configs...)
+	for idx := range out {
+		if out[idx].Terminal == nil {
+			out[idx].Terminal = handler
+		}
+	}
+	return out
+}
+
 func agentInvokers(store session.Store, configs []acpexternal.Config) map[string]services.AgentInvoker {
 	if len(configs) == 0 {
 		return nil
@@ -268,7 +283,7 @@ func agentInvokers(store session.Store, configs []acpexternal.Config) map[string
 	return out
 }
 
-func externalAgentInvokerFactory(store session.Store) services.AgentInvokerFactory {
+func externalAgentInvokerFactory(store session.Store, terminal acpexternal.TerminalHandler) services.AgentInvokerFactory {
 	return func(agent services.AgentDescriptor) (services.AgentInvoker, error) {
 		cfg := acpexternal.Config{
 			AgentID:   firstNonEmpty(agent.ID, agent.Name, agent.Command),
@@ -277,6 +292,7 @@ func externalAgentInvokerFactory(store session.Store) services.AgentInvokerFacto
 			Args:      append([]string(nil), agent.Args...),
 			WorkDir:   strings.TrimSpace(agent.WorkDir),
 			Env:       envList(agent.Env),
+			Terminal:  terminal,
 		}
 		if strings.TrimSpace(cfg.AgentID) == "" || strings.TrimSpace(cfg.Command) == "" {
 			return nil, fmt.Errorf("app/local: external ACP agent id and command are required")
