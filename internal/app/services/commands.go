@@ -30,7 +30,7 @@ func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) 
 		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
 		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual|toggle]"},
 		{Name: "status", Description: "Show current runtime status"},
-		{Name: "settings", Description: "Show shared settings and diagnostics panel", InputHint: "[run <action-id> [confirm]]"},
+		{Name: "settings", Description: "Show shared settings and diagnostics panel", InputHint: "[set <field-id> <value>|run <action-id> [confirm]]"},
 		{Name: "doctor", Description: "Diagnose model, session store, resources, and sandbox readiness", InputHint: "[fix]"},
 		{Name: "task", Description: "Inspect and control live or durable tasks", InputHint: "list|tail|wait|write|cancel|release|start"},
 		{Name: "new", Description: "Start a fresh session"},

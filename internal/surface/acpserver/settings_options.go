@@ -2,68 +2,75 @@ package acpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func (s *Server) setSettingsConfigOption(ctx context.Context, req schema.SetSessionConfigOptionRequest) (bool, error) {
 	id := strings.TrimSpace(req.ConfigID)
-	switch id {
-	case acpConfigSkillLoadingID, acpConfigAutoCompactionID, acpConfigSandboxBackendID:
-	default:
+	fieldID, ok := settingsConfigFieldID(id)
+	if !ok {
 		return false, nil
 	}
 	if !s.services.Settings().Configured() {
 		return true, fmt.Errorf("surface/acpserver: settings service is not configured")
 	}
-	value, ok := req.Value.(string)
+	value, ok := acpConfigValueString(req.Value)
 	if !ok {
-		return true, fmt.Errorf("surface/acpserver: %s value must be a string", id)
+		return true, fmt.Errorf("surface/acpserver: %s value must be a string or number", id)
 	}
+	_, err := s.services.Settings().SetPanelField(ctx, appservices.SettingsPanelFieldUpdateRequest{
+		SessionRef: s.sessionRef(req.SessionID),
+		FieldID:    fieldID,
+		Value:      value,
+	})
+	return true, err
+}
+
+func settingsConfigFieldID(id string) (string, bool) {
 	switch id {
 	case acpConfigSkillLoadingID:
-		return true, s.setSkillLoadingMode(ctx, value)
+		return "skills.loading_mode", true
+	case acpConfigSkillBudgetID:
+		return "skills.max_expansion_chars", true
 	case acpConfigAutoCompactionID:
-		return true, s.setAutoCompactionMode(ctx, value)
+		return "compaction.auto_mode", true
+	case acpConfigCompactionWatermarkID:
+		return "compaction.watermark", true
+	case acpConfigCompactionMaxSourceID:
+		return "compaction.max_source_chars", true
 	case acpConfigSandboxBackendID:
-		_, err := s.services.Settings().SetSandboxBackend(ctx, value)
-		return true, err
+		return "sandbox.backend", true
+	case acpConfigSandboxNetworkID:
+		return "sandbox.network", true
 	default:
-		return false, nil
+		return "", false
 	}
 }
 
-func (s *Server) setSkillLoadingMode(ctx context.Context, value string) error {
-	mode, ok := normalizeSkillLoadingConfigValue(value)
-	if !ok {
-		return fmt.Errorf("surface/acpserver: unsupported skill loading mode %q", value)
+func acpConfigValueString(value any) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed), true
+	case int:
+		return strconv.Itoa(typed), true
+	case int64:
+		return strconv.FormatInt(typed, 10), true
+	case float64:
+		return strconv.FormatFloat(typed, 'f', -1, 64), true
+	case float32:
+		return strconv.FormatFloat(float64(typed), 'f', -1, 32), true
+	case json.Number:
+		return typed.String(), true
+	default:
+		return "", false
 	}
-	doc, err := s.services.Settings().Document(ctx)
-	if err != nil {
-		return err
-	}
-	policy := appsettings.NormalizeSkillPolicy(doc.Skills)
-	policy.LoadingMode = mode
-	_, err = s.services.Settings().SetSkillPolicy(ctx, policy)
-	return err
-}
-
-func (s *Server) setAutoCompactionMode(ctx context.Context, value string) error {
-	mode, ok := normalizeAutoCompactionConfigValue(value)
-	if !ok {
-		return fmt.Errorf("surface/acpserver: unsupported auto compaction mode %q", value)
-	}
-	doc, err := s.services.Settings().Document(ctx)
-	if err != nil {
-		return err
-	}
-	policy := appsettings.NormalizeCompactionPolicy(doc.Compaction)
-	policy.Auto.Mode = mode
-	_, err = s.services.Settings().SetCompaction(ctx, policy)
-	return err
 }
 
 func (s *Server) sessionSettingsConfigOptions(ctx context.Context) ([]schema.SessionConfigOption, error) {
@@ -74,6 +81,16 @@ func (s *Server) sessionSettingsConfigOptions(ctx context.Context) ([]schema.Ses
 	if err != nil {
 		return nil, err
 	}
+	doc, err := s.services.Settings().Document(ctx)
+	if err != nil {
+		return nil, err
+	}
+	skillPolicy := appsettings.NormalizeSkillPolicy(doc.Skills)
+	skillBudget := skillPolicy.MaxExpansionChars
+	if skillBudget <= 0 {
+		skillBudget = appsettings.DefaultSkillExpansionChars
+	}
+	compactionPolicy := appsettings.NormalizeCompactionPolicy(doc.Compaction)
 	return []schema.SessionConfigOption{
 		{
 			Type:         "select",
@@ -81,12 +98,20 @@ func (s *Server) sessionSettingsConfigOptions(ctx context.Context) ([]schema.Ses
 			Name:         "Skill Loading",
 			Description:  "Choose how Caelis exposes and expands skills for prompts",
 			Category:     "prompt",
-			CurrentValue: firstNonEmpty(view.Skills.LoadingMode, appsettings.SkillLoadingModeExplicit),
+			CurrentValue: appsettings.SkillLoadingMode(skillPolicy),
 			Options: []schema.SessionConfigSelectOption{
 				{Value: appsettings.SkillLoadingModeExplicit, Name: "Explicit", Description: "Expose skill metadata and expand explicitly referenced skills"},
 				{Value: appsettings.SkillLoadingModeMetadataOnly, Name: "Metadata Only", Description: "Expose skill metadata without loading skill files into turns"},
 				{Value: appsettings.SkillLoadingModeDisabled, Name: "Disabled", Description: "Hide skill metadata and disable skill expansion"},
 			},
+		},
+		{
+			Type:         "number",
+			ID:           acpConfigSkillBudgetID,
+			Name:         "Skill Expansion Budget",
+			Description:  "Maximum characters loaded for explicitly referenced skills",
+			Category:     "prompt",
+			CurrentValue: skillBudget,
 		},
 		{
 			Type:         "select",
@@ -99,6 +124,22 @@ func (s *Server) sessionSettingsConfigOptions(ctx context.Context) ([]schema.Ses
 				{Value: "enabled", Name: "Enabled", Description: "Compact automatically when context crosses the configured watermark"},
 				{Value: "disabled", Name: "Disabled", Description: "Only compact when requested explicitly"},
 			},
+		},
+		{
+			Type:         "number",
+			ID:           acpConfigCompactionWatermarkID,
+			Name:         "Compaction Watermark",
+			Description:  "Context usage ratio that triggers automatic compaction",
+			Category:     "context",
+			CurrentValue: compactionPolicy.Auto.WatermarkRatio,
+		},
+		{
+			Type:         "number",
+			ID:           acpConfigCompactionMaxSourceID,
+			Name:         "Compaction Source Limit",
+			Description:  "Maximum source characters included in compaction input",
+			Category:     "context",
+			CurrentValue: compactionPolicy.MaxSourceChars,
 		},
 		{
 			Type:         "select",
@@ -116,31 +157,20 @@ func (s *Server) sessionSettingsConfigOptions(ctx context.Context) ([]schema.Ses
 				{Value: "windows", Name: "Windows", Description: "Use the Windows restricted-token backend when available"},
 			},
 		},
+		{
+			Type:         "select",
+			ID:           acpConfigSandboxNetworkID,
+			Name:         "Sandbox Network",
+			Description:  "Choose network policy for sandboxed local tool execution",
+			Category:     "sandbox",
+			CurrentValue: firstNonEmpty(view.Sandbox.Network, "inherit"),
+			Options: []schema.SessionConfigSelectOption{
+				{Value: "inherit", Name: "Inherit", Description: "Use the backend default network behavior"},
+				{Value: "enabled", Name: "Enabled", Description: "Allow network access when supported by the backend"},
+				{Value: "disabled", Name: "Disabled", Description: "Disable network access when supported by the backend"},
+			},
+		},
 	}, nil
-}
-
-func normalizeSkillLoadingConfigValue(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case appsettings.SkillLoadingModeExplicit, "enabled", "enable", "on", "true", "yes":
-		return appsettings.SkillLoadingModeExplicit, true
-	case appsettings.SkillLoadingModeMetadataOnly, "metadata-only", "metadata", "meta":
-		return appsettings.SkillLoadingModeMetadataOnly, true
-	case appsettings.SkillLoadingModeDisabled, "disable", "off", "false", "no":
-		return appsettings.SkillLoadingModeDisabled, true
-	default:
-		return "", false
-	}
-}
-
-func normalizeAutoCompactionConfigValue(value string) (string, bool) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "enabled", "enable", "on", "true", "yes":
-		return "enabled", true
-	case "disabled", "disable", "off", "false", "no":
-		return "disabled", true
-	default:
-		return "", false
-	}
 }
 
 func currentAutoCompactionConfigValue(mode string) string {

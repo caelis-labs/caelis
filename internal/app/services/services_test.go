@@ -412,6 +412,40 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	if skillView.Skills.LoadingMode != appsettings.SkillLoadingModeExplicit || skillView.Skills.MaxExpansionChars != 1024 {
 		t.Fatalf("skill mutation view = %#v, want explicit skill policy", skillView.Skills)
 	}
+
+	panel, err := svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{
+		FieldID: "sandbox.writable_roots",
+		Value:   " /out , /tmp/cache , /out ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(panel.Settings.Sandbox.WritableRoots, []string{"/out", "/tmp/cache"}) {
+		t.Fatalf("panel writable roots = %#v, want normalized unique roots", panel.Settings.Sandbox.WritableRoots)
+	}
+	panel, err = svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{
+		FieldID: "compaction.watermark",
+		Value:   "0.66",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Settings.Compaction.AutoWatermarkRatio != 0.66 {
+		t.Fatalf("panel compaction watermark = %#v, want 0.66", panel.Settings.Compaction)
+	}
+	panel, err = svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{
+		FieldID: "skills.max_expansion_chars",
+		Value:   "2048",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Settings.Skills.MaxExpansionChars != 2048 {
+		t.Fatalf("panel skill budget = %#v, want 2048", panel.Settings.Skills)
+	}
+	if _, err := svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{FieldID: "runtime.app_name", Value: "changed"}); err == nil {
+		t.Fatal("SetPanelField(runtime.app_name) error = nil, want non-editable error")
+	}
 }
 
 func TestSettingsServicePanelComposesDiagnosticsAndActions(t *testing.T) {
@@ -592,7 +626,7 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 		t.Fatalf("new command missing from %#v", view.Commands)
 	}
 	settings, ok := findCommandView(view.Commands, "settings")
-	if !ok || settings.InputHint != "[run <action-id> [confirm]]" {
+	if !ok || settings.InputHint != "[set <field-id> <value>|run <action-id> [confirm]]" {
 		t.Fatalf("settings command = %#v ok=%v, want settings panel hint", settings, ok)
 	}
 }
@@ -787,6 +821,53 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 	}
 	if rt.prepareCalls != 1 || !strings.Contains(ran.Output, "settings action completed: sandbox.prepare") {
 		t.Fatalf("settings action output=%q prepareCalls=%d, want prepared panel", ran.Output, rt.prepareCalls)
+	}
+}
+
+func TestCommandServiceExecuteSettingsSetField(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, appsettings.NewFileStore(t.TempDir()), appsettings.Document{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Sandbox: config.Sandbox{
+				Backend: "host",
+				Network: "inherit",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings set sandbox.network disabled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "settings" || !strings.Contains(view.Output, "settings field updated: sandbox.network") {
+		t.Fatalf("settings set output = %#v, want handled update", view)
+	}
+	view, err = svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings set compaction.max_source_chars 1234"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(view.Output, "settings field updated: compaction.max_source_chars") {
+		t.Fatalf("settings set compaction output = %q, want updated field", view.Output)
+	}
+	doc, err := manager.Document(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Runtime.Sandbox.Network != "disabled" || doc.Compaction.MaxSourceChars != 1234 {
+		t.Fatalf("settings document = %#v, want disabled network and max source chars", doc)
 	}
 }
 

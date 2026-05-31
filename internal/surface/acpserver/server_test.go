@@ -1092,17 +1092,29 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if newResp.Modes == nil || newResp.Modes.CurrentModeID != coreruntime.SessionModeAutoReview || len(newResp.Modes.AvailableModes) != 2 {
 		t.Fatalf("new session modes = %#v, want auto-review with two modes", newResp.Modes)
 	}
-	if len(newResp.ConfigOptions) != 6 {
-		t.Fatalf("new session config options = %#v, want mode/model/reasoning plus settings options", newResp.ConfigOptions)
+	if len(newResp.ConfigOptions) != 10 {
+		t.Fatalf("new session config options = %#v, want mode/model/reasoning plus expanded settings options", newResp.ConfigOptions)
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "skill_loading_mode"); option.CurrentValue != appsettings.SkillLoadingModeExplicit {
 		t.Fatalf("skill loading option = %#v, want explicit default", option)
 	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "skill_max_expansion_chars"); option.CurrentValue != float64(64000) {
+		t.Fatalf("skill budget option = %#v, want default budget", option)
+	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "auto_compaction"); option.CurrentValue != "enabled" {
 		t.Fatalf("auto compaction option = %#v, want enabled default", option)
 	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "auto_compaction_watermark"); option.CurrentValue != float64(0) {
+		t.Fatalf("auto compaction watermark option = %#v, want default zero", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "compaction_max_source_chars"); option.CurrentValue != float64(0) {
+		t.Fatalf("compaction max source option = %#v, want default zero", option)
+	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "auto" {
 		t.Fatalf("sandbox backend option = %#v, want auto default", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "sandbox_network"); option.CurrentValue != "inherit" {
+		t.Fatalf("sandbox network option = %#v, want inherit default", option)
 	}
 
 	var setModeResp schema.SetSessionModeResponse
@@ -1136,8 +1148,8 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}, &setConfigResp); err != nil {
 		t.Fatalf("session/set_config_option call error = %v", err)
 	}
-	if len(setConfigResp.ConfigOptions) != 6 {
-		t.Fatalf("set config response = %#v, want six config options", setConfigResp.ConfigOptions)
+	if len(setConfigResp.ConfigOptions) != 10 {
+		t.Fatalf("set config response = %#v, want ten config options", setConfigResp.ConfigOptions)
 	}
 	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "reasoning_effort"); option.CurrentValue != "high" {
 		t.Fatalf("reasoning option = %#v, want high", option)
@@ -1161,6 +1173,16 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
+		ConfigID:  "skill_max_expansion_chars",
+		Value:     2048,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(skill_max_expansion_chars) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "skill_max_expansion_chars"); option.CurrentValue != float64(2048) {
+		t.Fatalf("skill budget option = %#v, want 2048", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
 		ConfigID:  "auto_compaction",
 		Value:     "disabled",
 	}, &setConfigResp); err != nil {
@@ -1168,6 +1190,26 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "auto_compaction"); option.CurrentValue != "disabled" {
 		t.Fatalf("auto compaction option = %#v, want disabled", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "auto_compaction_watermark",
+		Value:     0.72,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(auto_compaction_watermark) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "auto_compaction_watermark"); option.CurrentValue != 0.72 {
+		t.Fatalf("auto compaction watermark option = %#v, want 0.72", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "compaction_max_source_chars",
+		Value:     4096,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(compaction_max_source_chars) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "compaction_max_source_chars"); option.CurrentValue != float64(4096) {
+		t.Fatalf("compaction max source option = %#v, want 4096", option)
 	}
 	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
@@ -1179,12 +1221,24 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "auto" {
 		t.Fatalf("sandbox backend option = %#v, want auto", option)
 	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "sandbox_network",
+		Value:     "disabled",
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(sandbox_network) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "sandbox_network"); option.CurrentValue != "disabled" {
+		t.Fatalf("sandbox network option = %#v, want disabled", option)
+	}
 	doc, err := manager.Document(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Compaction.Auto.Mode != "disabled" || doc.Runtime.Sandbox.Backend != "auto" {
-		t.Fatalf("settings document = %#v, want metadata_only/disabled/auto", doc)
+	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Skills.MaxExpansionChars != 2048 ||
+		doc.Compaction.Auto.Mode != "disabled" || doc.Compaction.Auto.WatermarkRatio != 0.72 || doc.Compaction.MaxSourceChars != 4096 ||
+		doc.Runtime.Sandbox.Backend != "auto" || doc.Runtime.Sandbox.Network != "disabled" {
+		t.Fatalf("settings document = %#v, want metadata_only/budget/compaction/sandbox settings", doc)
 	}
 	if runtime := stack.Services().Runtime(); runtime.Sandbox.Backend != "auto" {
 		t.Fatalf("service runtime sandbox = %#v, want auto", runtime.Sandbox)

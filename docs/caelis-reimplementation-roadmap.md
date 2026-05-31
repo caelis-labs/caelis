@@ -1538,11 +1538,18 @@ be migrated before retiring the old stack:
      now renders this panel and can run guarded panel actions through
      `CommandService`, so TUI/ACP command surfaces can inspect the same
      diagnostics without owning settings-panel composition.
+   - Migrated baseline: `SettingsService.SetPanelField` now provides a
+     surface-neutral editable settings contract for runtime workspace/default
+     model, store backend/URI, sandbox backend/network/roots/helper,
+     compaction policy, and skill policy fields. `CommandService` exposes the
+     same path as `/settings set <field-id> <value>`, so TUI, ACP, and future
+     APP surfaces can mutate panel fields without editing raw settings
+     documents.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
      terminal sessions without reaching into sandbox runtimes directly.
-   - Still pending: transcript actions, richer editable settings panels, and
+   - Still pending: transcript actions, richer visual settings editors, and
      concrete future APP settings rendering remain unmigrated. Durable async
      task control and output storage remain kernel/runtime work rather than
      APP-only view-model work.
@@ -1594,10 +1601,12 @@ be migrated before retiring the old stack:
    - The new ACP server now exposes `session/set_mode`, session mode metadata,
      and the non-model `mode` config option through `internal/app/services.Modes()`.
    - Migrated baseline: the new ACP server now exposes settings-backed
-     non-model config options for skill loading mode, automatic compaction, and
-     requested sandbox backend. These options read and mutate the shared
-     `SettingsService` contract, so ACP clients such as Zed see the same prompt
-     policy, context policy, and sandbox request state as TUI and the future APP.
+     non-model config options for skill loading mode, skill expansion budget,
+     automatic compaction mode, compaction watermark/source limit, requested
+     sandbox backend, and sandbox network policy. These options read and mutate
+     the shared `SettingsService.SetPanelField` contract, so ACP clients such
+     as Zed see the same prompt policy, context policy, and sandbox request
+     state as TUI and the future APP.
    - Migrated baseline: ACP initialize prompt capabilities now come from the
      shared model catalog and configured model set, and the new ACP server
      publishes standard `available_commands_update` notifications after
@@ -1636,9 +1645,8 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: richer `/connect` rendering/panel parity, durable live
-     remote controller process reconnect/lifecycle, and richer non-model config
-     providers beyond prompt/context/sandbox backend settings.
+   - Still pending: richer `/connect` rendering/panel parity and durable live
+     remote controller process reconnect/lifecycle.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1689,7 +1697,8 @@ be migrated before retiring the old stack:
      subcommands now use the new local stack and shared app services for the
      currently constructed backend instead of constructing `app/gatewayapp`.
    - Migrated baseline: ACP `session/set_config_option` now reaches shared
-     settings for skill loading, auto-compaction mode, and sandbox backend
+     settings for skill loading, skill expansion budget, auto-compaction
+     mode/watermark/source limit, sandbox backend, and sandbox network
      selection instead of limiting ACP clients to model/mode controls.
    - Migrated baseline: ACP prompt capability projection now uses
      `ModelService.PromptCapabilities`, so configured multimodal model support
@@ -1704,8 +1713,9 @@ be migrated before retiring the old stack:
      in `core/model`, so TUI/APP/ACP-facing turn and participant prompt
      requests can share one input contract instead of converting image/file
      attachments through `ports/model`.
-   - Still pending: remaining TUI command integration and additional non-model
-     ACP config providers beyond the first settings-backed set.
+   - Still pending: remaining TUI command integration and any future
+     store/runtime ACP config providers whose hot-swap semantics are not yet
+     ready for safe exposure.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
@@ -2270,7 +2280,7 @@ Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
    especially richer `/connect` rendering/panel parity, live remote controller
-   process lifecycle, and settings/diagnostics panel parity.
+   process lifecycle, and visual settings/diagnostics editors.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
 3. Finish sandbox backend cleanup and remaining permission-policy diagnostics
@@ -2280,8 +2290,8 @@ Recommended sequence:
    app-service command/control path is now a baseline, so this milestone should
    focus on real async process/subagent lifecycle and durable output storage.
 5. Port the remaining TUI panels and richer interactive flows to
-   `internal/app/services`, especially richer `/connect`, task, and settings
-   panels, preserving existing rendering as surface-local code.
+   `internal/app/services`, especially richer `/connect`, task, and visual
+   settings panels, preserving existing rendering as surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff

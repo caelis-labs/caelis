@@ -194,8 +194,8 @@ func sandboxPanelFields(settings appviewmodel.SandboxSettings, status appviewmod
 		textSettingsField("sandbox.resolved_backend", "Resolved backend", status.ResolvedBackend, false),
 		textSettingsField("sandbox.route", "Route", status.Route, false),
 		textSettingsField("sandbox.network", "Network", settings.Network, true),
-		textSettingsField("sandbox.readable_roots", "Readable roots", strconv.Itoa(len(settings.ReadableRoots)), true),
-		textSettingsField("sandbox.writable_roots", "Writable roots", strconv.Itoa(len(settings.WritableRoots)), true),
+		pathListSettingsField("sandbox.readable_roots", "Readable roots", settings.ReadableRoots),
+		pathListSettingsField("sandbox.writable_roots", "Writable roots", settings.WritableRoots),
 		textSettingsField("sandbox.helper_path", "Helper path", settings.HelperPath, true),
 	}
 }
@@ -352,6 +352,13 @@ func selectSettingsField(id string, label string, value string, editable bool, o
 		Editable: editable,
 		Options:  append([]appviewmodel.SettingsPanelFieldOption(nil), options...),
 	}
+}
+
+func pathListSettingsField(id string, label string, values []string) appviewmodel.SettingsPanelField {
+	clean := commandNonEmpty(values)
+	field := textSettingsField(id, label, strings.Join(clean, ", "), true)
+	field.Detail = strconv.Itoa(len(clean)) + " roots"
+	return field
 }
 
 func currentModelPanelValue(status appviewmodel.ModelStatus) string {
