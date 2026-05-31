@@ -1584,6 +1584,12 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	if currentMode.Output != "approval mode: auto-review" {
 		t.Fatalf("approval output = %q, want auto-review", currentMode.Output)
 	}
+	if currentMode.ApprovalPanel == nil || currentMode.ApprovalPanel.Scope != "session" || currentMode.ApprovalPanel.CurrentMode != coreruntime.SessionModeAutoReview {
+		t.Fatalf("approval panel = %#v, want session auto-review panel", currentMode.ApprovalPanel)
+	}
+	if len(currentMode.ApprovalPanel.ModeOptions) != 2 || currentMode.ApprovalPanel.ModeOptions[0].Command != "/approval auto-review" {
+		t.Fatalf("approval modes = %#v, want shared mode commands", currentMode.ApprovalPanel.ModeOptions)
+	}
 	manual, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-command"},
 		Input:      "/approval manual",
@@ -1593,6 +1599,9 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	}
 	if manual.Output != "approval mode: manual" || engine.state[StateSessionMode] != coreruntime.SessionModeManual {
 		t.Fatalf("approval manual = %#v state=%#v, want manual", manual, engine.state)
+	}
+	if manual.ApprovalPanel == nil || manual.ApprovalPanel.CurrentMode != coreruntime.SessionModeManual {
+		t.Fatalf("manual approval panel = %#v, want manual mode", manual.ApprovalPanel)
 	}
 	toggled, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-command"},
@@ -1729,6 +1738,9 @@ func TestCommandServiceModelAndApprovalUseACPControllerState(t *testing.T) {
 	}
 	if manual.Output != "approval mode: manual" || engine.state[StateControllerMode] != "manual" {
 		t.Fatalf("controller approval output/state = %#v state=%#v, want manual", manual, engine.state)
+	}
+	if manual.ApprovalPanel == nil || manual.ApprovalPanel.Scope != "controller" || manual.ApprovalPanel.CurrentMode != "manual" {
+		t.Fatalf("controller approval panel = %#v, want controller manual panel", manual.ApprovalPanel)
 	}
 	if _, ok := engine.state[StateSessionMode]; ok {
 		t.Fatalf("local session mode state = %#v, want unchanged under ACP controller", engine.state)
@@ -3887,6 +3899,16 @@ func TestApprovalServiceProjectsActionsAndSubmitsDecision(t *testing.T) {
 	}
 	if len(pending[0].Actions) != 2 || !pending[0].Actions[0].Approved || !pending[0].Actions[0].Primary || pending[0].Actions[1].Approved {
 		t.Fatalf("approval actions = %#v, want allow primary and reject secondary", pending[0].Actions)
+	}
+	panel, err := svc.Approvals().Panel(context.Background(), ApprovalPanelRequest{SessionRef: session.Ref{SessionID: "sess-approve"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Scope != "session" || panel.CurrentMode != coreruntime.SessionModeAutoReview || len(panel.Pending) != 1 {
+		t.Fatalf("approval panel = %#v, want session auto-review with one pending approval", panel)
+	}
+	if len(panel.Actions) < 3 || panel.Actions[0].Command != "/approval toggle" {
+		t.Fatalf("approval panel actions = %#v, want toggle and mode commands", panel.Actions)
 	}
 	pending[0].Actions[0].Name = "mutated"
 	again, err := svc.Approvals().Pending(context.Background(), session.Ref{SessionID: "sess-approve"})

@@ -6,6 +6,34 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 )
 
+type ApprovalPanelView struct {
+	SessionRef      session.Ref           `json:"session_ref,omitempty"`
+	Scope           string                `json:"scope,omitempty"`
+	CurrentMode     string                `json:"current_mode,omitempty"`
+	CurrentModeName string                `json:"current_mode_name,omitempty"`
+	ControllerAgent string                `json:"controller_agent,omitempty"`
+	RemoteSessionID string                `json:"remote_session_id,omitempty"`
+	ModeOptions     []ApprovalModeChoice  `json:"mode_options,omitempty"`
+	Pending         []ApprovalItem        `json:"pending,omitempty"`
+	Actions         []ApprovalPanelAction `json:"actions,omitempty"`
+}
+
+type ApprovalModeChoice struct {
+	ID          string `json:"id,omitempty"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Current     bool   `json:"current,omitempty"`
+	Command     string `json:"command,omitempty"`
+}
+
+type ApprovalPanelAction struct {
+	ID      string `json:"id,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Label   string `json:"label,omitempty"`
+	Command string `json:"command,omitempty"`
+	Enabled bool   `json:"enabled"`
+}
+
 type ApprovalAction struct {
 	ID       string `json:"id,omitempty"`
 	Name     string `json:"name,omitempty"`

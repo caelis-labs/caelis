@@ -14,12 +14,55 @@ type ApprovalService struct {
 	services Services
 }
 
+type ApprovalPanelRequest struct {
+	SessionRef session.Ref `json:"session_ref,omitempty"`
+}
+
 type ApprovalDecisionRequest struct {
 	Approval appviewmodel.ApprovalItem `json:"approval,omitempty"`
 	Outcome  string                    `json:"outcome,omitempty"`
 	OptionID string                    `json:"option_id,omitempty"`
 	Approved bool                      `json:"approved,omitempty"`
 	Reason   string                    `json:"reason,omitempty"`
+}
+
+func (s ApprovalService) Panel(ctx context.Context, req ApprovalPanelRequest) (appviewmodel.ApprovalPanelView, error) {
+	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
+	panel := appviewmodel.ApprovalPanelView{SessionRef: ref}
+	if status, active, err := s.services.Controllers().Status(ctx, ref); err != nil {
+		return appviewmodel.ApprovalPanelView{}, err
+	} else if active {
+		panel.Scope = "controller"
+		panel.CurrentMode = firstNonEmpty(status.Mode, coreruntime.SessionModeAutoReview)
+		panel.ControllerAgent = strings.TrimSpace(status.Agent)
+		panel.RemoteSessionID = strings.TrimSpace(status.RemoteSessionID)
+		panel.ModeOptions = approvalModeChoicesFromController(status.ModeOptions, panel.CurrentMode)
+	} else {
+		current, err := s.services.Modes().Current(ctx, ref)
+		if err != nil {
+			return appviewmodel.ApprovalPanelView{}, err
+		}
+		choices, err := s.services.Modes().List(ctx)
+		if err != nil {
+			return appviewmodel.ApprovalPanelView{}, err
+		}
+		panel.Scope = "session"
+		panel.CurrentMode = firstNonEmpty(current.ID, coreruntime.SessionModeAutoReview)
+		panel.CurrentModeName = strings.TrimSpace(current.Name)
+		panel.ModeOptions = approvalModeChoicesFromSession(choices, panel.CurrentMode)
+	}
+	if panel.CurrentModeName == "" {
+		panel.CurrentModeName = approvalModeName(panel.ModeOptions, panel.CurrentMode)
+	}
+	if strings.TrimSpace(ref.SessionID) != "" {
+		pending, err := s.Pending(ctx, ref)
+		if err != nil {
+			return appviewmodel.ApprovalPanelView{}, err
+		}
+		panel.Pending = pending
+	}
+	panel.Actions = approvalPanelActions(panel)
+	return panel, nil
 }
 
 func (s ApprovalService) Pending(ctx context.Context, ref session.Ref) ([]appviewmodel.ApprovalItem, error) {
@@ -70,6 +113,75 @@ func (s ApprovalService) Submit(ctx context.Context, turn coreruntime.Turn, req 
 		return appviewmodel.ApprovalDecisionView{}, err
 	}
 	return decision, nil
+}
+
+func approvalModeChoicesFromSession(choices []ModeChoice, current string) []appviewmodel.ApprovalModeChoice {
+	out := make([]appviewmodel.ApprovalModeChoice, 0, len(choices))
+	for _, choice := range choices {
+		id := strings.TrimSpace(choice.ID)
+		if id == "" {
+			continue
+		}
+		out = append(out, appviewmodel.ApprovalModeChoice{
+			ID:          id,
+			Name:        strings.TrimSpace(choice.Name),
+			Description: strings.TrimSpace(choice.Description),
+			Current:     strings.EqualFold(id, strings.TrimSpace(current)),
+			Command:     "/approval " + id,
+		})
+	}
+	return out
+}
+
+func approvalModeChoicesFromController(choices []ControllerMode, current string) []appviewmodel.ApprovalModeChoice {
+	out := make([]appviewmodel.ApprovalModeChoice, 0, len(choices))
+	for _, choice := range choices {
+		id := strings.TrimSpace(choice.ID)
+		if id == "" {
+			continue
+		}
+		out = append(out, appviewmodel.ApprovalModeChoice{
+			ID:          id,
+			Name:        strings.TrimSpace(choice.Name),
+			Description: strings.TrimSpace(choice.Description),
+			Current:     strings.EqualFold(id, strings.TrimSpace(current)) || strings.EqualFold(strings.TrimSpace(choice.Name), strings.TrimSpace(current)),
+			Command:     "/approval " + id,
+		})
+	}
+	return out
+}
+
+func approvalPanelActions(panel appviewmodel.ApprovalPanelView) []appviewmodel.ApprovalPanelAction {
+	actions := []appviewmodel.ApprovalPanelAction{{
+		ID:      "approval.mode.toggle",
+		Kind:    "toggle",
+		Label:   "Toggle mode",
+		Command: "/approval toggle",
+		Enabled: true,
+	}}
+	for _, choice := range panel.ModeOptions {
+		if strings.TrimSpace(choice.ID) == "" || strings.TrimSpace(choice.Command) == "" {
+			continue
+		}
+		actions = append(actions, appviewmodel.ApprovalPanelAction{
+			ID:      "approval.mode." + strings.TrimSpace(choice.ID),
+			Kind:    "mode",
+			Label:   firstNonEmpty(choice.Name, choice.ID),
+			Command: choice.Command,
+			Enabled: !choice.Current,
+		})
+	}
+	return actions
+}
+
+func approvalModeName(choices []appviewmodel.ApprovalModeChoice, current string) string {
+	current = strings.TrimSpace(current)
+	for _, choice := range choices {
+		if strings.EqualFold(strings.TrimSpace(choice.ID), current) || strings.EqualFold(strings.TrimSpace(choice.Name), current) {
+			return firstNonEmpty(choice.Name, choice.ID)
+		}
+	}
+	return current
 }
 
 func normalizeApprovalOutcome(outcome string, optionID string, approved bool) string {

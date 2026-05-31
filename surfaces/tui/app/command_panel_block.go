@@ -59,6 +59,7 @@ func commandExecutionHasPanel(view appviewmodel.CommandExecutionView) bool {
 	return view.SettingsPanel != nil ||
 		view.TaskPanel != nil ||
 		view.ResumePanel != nil ||
+		view.ApprovalPanel != nil ||
 		view.ControllerPanel != nil ||
 		view.ModelConnectPanel != nil ||
 		view.AgentManagement != nil
@@ -115,6 +116,8 @@ func commandPanelClickHints(view appviewmodel.CommandExecutionView) []commandPan
 		return taskPanelClickHints(*view.TaskPanel)
 	case view.ResumePanel != nil:
 		return resumePanelClickHints(*view.ResumePanel)
+	case view.ApprovalPanel != nil:
+		return approvalPanelClickHints(*view.ApprovalPanel)
 	case view.ControllerPanel != nil:
 		return controllerPanelClickHints(*view.ControllerPanel)
 	case view.ModelConnectPanel != nil:
@@ -155,6 +158,8 @@ func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme 
 		return "tasks", "Async Work", taskPanelState(*view.TaskPanel), taskPanelBody(*view.TaskPanel, width, theme), commandPanelFooterForCommand("task")
 	case view.ResumePanel != nil:
 		return "sessions", "Resume Session", resumePanelState(*view.ResumePanel), resumePanelBody(*view.ResumePanel, width, theme), commandPanelFooterForCommand("resume")
+	case view.ApprovalPanel != nil:
+		return "approval", "Approval", approvalPanelState(*view.ApprovalPanel), approvalPanelBody(*view.ApprovalPanel, width, theme), commandPanelFooterForCommand("approval")
 	case view.ControllerPanel != nil:
 		return "controller", "ACP Controller", controllerPanelState(*view.ControllerPanel), controllerPanelBody(*view.ControllerPanel, width, theme), commandPanelFooterForCommand("controller")
 	case view.ModelConnectPanel != nil:
@@ -266,6 +271,37 @@ func resumePanelBody(panel appviewmodel.ResumePanelView, width int, theme tuikit
 	body = append(body, "", tok.ChromeMeta.Render("Recent"))
 	for _, item := range panel.Sessions {
 		body = append(body, resumePanelSessionLine(item, contentWidth, theme))
+	}
+	return body
+}
+
+func approvalPanelBody(panel appviewmodel.ApprovalPanelView, width int, theme tuikit.Theme) []string {
+	contentWidth := commandPanelContentWidth(width)
+	tok := theme.Tokens()
+	body := []string{
+		commandPanelKV(theme, contentWidth, "scope", firstNonEmpty(panel.Scope, "session")),
+		commandPanelKV(theme, contentWidth, "mode", approvalPanelModeLabel(panel)),
+	}
+	if strings.EqualFold(strings.TrimSpace(panel.Scope), "controller") {
+		body = append(body, commandPanelKV(theme, contentWidth, "controller", firstNonEmpty(panel.ControllerAgent, panel.RemoteSessionID, "-")))
+	}
+	if len(panel.ModeOptions) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Modes"))
+		for _, mode := range panel.ModeOptions {
+			body = append(body, approvalPanelModeLine(mode, contentWidth, theme))
+		}
+	}
+	if len(panel.Pending) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Pending"))
+		for _, item := range panel.Pending {
+			body = append(body, approvalPanelPendingLine(item, contentWidth, theme))
+		}
+	}
+	if len(panel.Actions) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Actions"))
+		for _, action := range panel.Actions {
+			body = append(body, approvalPanelActionLine(action, contentWidth, theme))
+		}
 	}
 	return body
 }
@@ -461,6 +497,29 @@ func resumePanelClickHints(panel appviewmodel.ResumePanelView) []commandPanelCli
 	return hints
 }
 
+func approvalPanelClickHints(panel appviewmodel.ApprovalPanelView) []commandPanelClickHint {
+	var hints []commandPanelClickHint
+	for _, mode := range panel.ModeOptions {
+		if strings.TrimSpace(mode.Command) == "" || mode.Current {
+			continue
+		}
+		hints = append(hints, commandPanelClickHint{
+			Needle: firstNonEmpty(mode.Name, mode.ID),
+			Input:  mode.Command,
+		})
+	}
+	for _, action := range panel.Actions {
+		if !action.Enabled || strings.TrimSpace(action.Command) == "" {
+			continue
+		}
+		hints = append(hints, commandPanelClickHint{
+			Needle: firstNonEmpty(action.ID, action.Label),
+			Input:  action.Command,
+		})
+	}
+	return hints
+}
+
 func controllerPanelClickHints(panel appviewmodel.ControllerPanelView) []commandPanelClickHint {
 	if !panel.Active {
 		return nil
@@ -604,6 +663,8 @@ func commandPanelFooterForCommand(command string) string {
 		return "actions: /task tail|wait|write|cancel|release <id>"
 	case "resume":
 		return "open: /resume <session-id>"
+	case "approval":
+		return "mode: /approval auto-review|manual|toggle"
 	case "controller":
 		return "handoff: /agent use local  config: /model use <model>, /approval <mode>, /controller set <option-id> <value>"
 	case "connect":
@@ -716,6 +777,13 @@ func resumePanelState(panel appviewmodel.ResumePanelView) string {
 		return "empty"
 	}
 	return "ready"
+}
+
+func approvalPanelState(panel appviewmodel.ApprovalPanelView) string {
+	if len(panel.Pending) > 0 {
+		return "waiting"
+	}
+	return firstNonEmpty(panel.CurrentMode, "ready")
 }
 
 func controllerPanelState(panel appviewmodel.ControllerPanelView) string {
@@ -925,6 +993,56 @@ func resumePanelTimestamp(item appviewmodel.ResumeSessionItem) string {
 		return ""
 	}
 	return updatedAt.UTC().Format("2006-01-02 15:04")
+}
+
+func approvalPanelModeLabel(panel appviewmodel.ApprovalPanelView) string {
+	mode := firstNonEmpty(panel.CurrentModeName, panel.CurrentMode, "auto-review")
+	if panel.CurrentModeName != "" && panel.CurrentMode != "" && !strings.EqualFold(panel.CurrentModeName, panel.CurrentMode) {
+		return panel.CurrentMode + " (" + panel.CurrentModeName + ")"
+	}
+	return mode
+}
+
+func approvalPanelModeLine(mode appviewmodel.ApprovalModeChoice, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	state := "available"
+	style := tok.TextPrimary
+	if mode.Current {
+		state = "current"
+		style = tok.Success
+	}
+	plain := fmt.Sprintf("  %s  %s", mode.ID, state)
+	if name := strings.TrimSpace(mode.Name); name != "" && !strings.EqualFold(name, mode.ID) {
+		plain += "  " + name
+	}
+	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func approvalPanelPendingLine(item appviewmodel.ApprovalItem, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	parts := []string{firstNonEmpty(item.ID, item.EventID), firstNonEmpty(item.Tool, "approval")}
+	if item.Command != "" {
+		parts = append(parts, item.Command)
+	} else if item.Reason != "" {
+		parts = append(parts, item.Reason)
+	}
+	if len(item.Actions) > 0 {
+		parts = append(parts, fmt.Sprintf("%d actions", len(item.Actions)))
+	}
+	plain := "  " + strings.Join(compactNonEmpty(parts), "  ")
+	return tok.Warning.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func approvalPanelActionLine(action appviewmodel.ApprovalPanelAction, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	state := "disabled"
+	style := tok.TextMuted
+	if action.Enabled {
+		state = "enabled"
+		style = tok.TextPrimary
+	}
+	plain := fmt.Sprintf("  %s - %s (%s)", firstNonEmpty(action.ID, action.Label, action.Kind), firstNonEmpty(action.Label, action.Kind), state)
+	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
 }
 
 func controllerPanelFieldLine(field appviewmodel.ControllerPanelField, width int, theme tuikit.Theme) string {

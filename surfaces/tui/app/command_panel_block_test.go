@@ -154,6 +154,65 @@ func TestCommandPanelBlockRendersResumePanelActions(t *testing.T) {
 	}
 }
 
+func TestCommandPanelBlockRendersApprovalPanelActions(t *testing.T) {
+	panel := appviewmodel.ApprovalPanelView{
+		Scope:           "session",
+		CurrentMode:     "manual",
+		CurrentModeName: "Manual",
+		ModeOptions: []appviewmodel.ApprovalModeChoice{{
+			ID:      "auto-review",
+			Name:    "Auto Review",
+			Command: "/approval auto-review",
+		}, {
+			ID:      "manual",
+			Name:    "Manual",
+			Current: true,
+			Command: "/approval manual",
+		}},
+		Pending: []appviewmodel.ApprovalItem{{
+			ID:      "approval-1",
+			Tool:    "run_command",
+			Command: "printf hi",
+			Actions: []appviewmodel.ApprovalAction{{
+				ID:       "allow_once",
+				Name:     "Allow once",
+				Approved: true,
+			}, {
+				ID:   "reject_once",
+				Name: "Reject once",
+			}},
+		}},
+		Actions: []appviewmodel.ApprovalPanelAction{{
+			ID:      "approval.mode.toggle",
+			Kind:    "toggle",
+			Label:   "Toggle mode",
+			Command: "/approval toggle",
+			Enabled: true,
+		}},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command:       "approval",
+		ApprovalPanel: &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"APPROVAL", "Approval", "manual", "approval-1", "run_command", "approval.mode.toggle"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered approval panel = %q, missing %q", plain, want)
+		}
+	}
+	if !rowsContainCommandPanelInput(rows, "/approval auto-review") {
+		t.Fatalf("approval mode row missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if !rowsContainCommandPanelInput(rows, "/approval toggle") {
+		t.Fatalf("approval action row missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ApprovalPanel: &panel}, "/approval toggle"); action.line != "/approval toggle" {
+		t.Fatalf("approval panel action = %#v, want immediate submit", action)
+	}
+}
+
 func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 	panel := appviewmodel.ControllerPanelView{
 		Active: true,

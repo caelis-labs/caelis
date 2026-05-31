@@ -512,11 +512,7 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 		return appviewmodel.CommandExecutionView{}, err
 	} else if active {
 		if mode == "" {
-			return appviewmodel.CommandExecutionView{
-				Handled: true,
-				Command: "approval",
-				Output:  "approval mode: " + firstNonEmpty(status.Mode, "auto-review"),
-			}, nil
+			return s.approvalCommandView(ctx, ref, "approval mode: "+firstNonEmpty(status.Mode, "auto-review"))
 		}
 		fields := strings.Fields(mode)
 		if len(fields) != 1 {
@@ -527,32 +523,20 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 			if err != nil {
 				return appviewmodel.CommandExecutionView{}, err
 			}
-			return appviewmodel.CommandExecutionView{
-				Handled: true,
-				Command: "approval",
-				Output:  "approval mode: " + firstNonEmpty(next.Mode, fields[0]),
-			}, nil
+			return s.approvalCommandView(ctx, ref, "approval mode: "+firstNonEmpty(next.Mode, fields[0]))
 		}
 		next, err := s.services.Controllers().SetMode(ctx, ref, fields[0])
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "approval",
-			Output:  "approval mode: " + firstNonEmpty(next.Mode, fields[0]),
-		}, nil
+		return s.approvalCommandView(ctx, ref, "approval mode: "+firstNonEmpty(next.Mode, fields[0]))
 	}
 	if mode == "" {
 		current, err := s.services.Modes().Current(ctx, ref)
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "approval",
-			Output:  "approval mode: " + firstNonEmpty(current.ID, "auto-review"),
-		}, nil
+		return s.approvalCommandView(ctx, ref, "approval mode: "+firstNonEmpty(current.ID, "auto-review"))
 	}
 	fields := strings.Fields(mode)
 	if len(fields) != 1 {
@@ -563,20 +547,25 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "approval",
-			Output:  "approval mode: " + next.ID,
-		}, nil
+		return s.approvalCommandView(ctx, ref, "approval mode: "+next.ID)
 	}
 	next, err := s.services.Modes().Set(ctx, ref, fields[0])
 	if err != nil {
 		return appviewmodel.CommandExecutionView{}, err
 	}
+	return s.approvalCommandView(ctx, ref, "approval mode: "+next.ID)
+}
+
+func (s CommandService) approvalCommandView(ctx context.Context, ref session.Ref, output string) (appviewmodel.CommandExecutionView, error) {
+	panel, err := s.services.Approvals().Panel(ctx, ApprovalPanelRequest{SessionRef: ref})
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
 	return appviewmodel.CommandExecutionView{
-		Handled: true,
-		Command: "approval",
-		Output:  "approval mode: " + next.ID,
+		Handled:       true,
+		Command:       "approval",
+		Output:        output,
+		ApprovalPanel: &panel,
 	}, nil
 }
 

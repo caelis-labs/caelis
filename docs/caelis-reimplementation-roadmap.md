@@ -2099,6 +2099,10 @@ be migrated before retiring the old stack:
      Later review calls replay the prior approved review messages, then submit
      only the transcript delta and next planned action when the model and policy
      prompt are unchanged.
+   - Migrated baseline: `/approval` now returns a shared `ApprovalPanelView`
+     with the active scope, current mode, mode commands, and pending approval
+     summaries. TUI command-panel rendering consumes this APP-ready payload
+     instead of treating approval mode as text-only command output.
 
 10. Agents, subagents, and controller handoff
     - Migrated baseline: the new external ACP path covers participant
@@ -2538,7 +2542,7 @@ Recommended sequence:
    controller, or resume panel payloads while preserving rendering as
    surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
-   selection, approvals, tasks, resume, and transcript actions.
+   selection, tasks, resume, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.
