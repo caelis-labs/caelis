@@ -852,6 +852,9 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 		"model.connect - Connect model",
 		"sandbox.prepare - Prepare",
 		"sections:",
+		"runtime.workspace_key: repo",
+		"sandbox.backend: host",
+		"readonly",
 	} {
 		if !strings.Contains(view.Output, want) {
 			t.Fatalf("settings output = %q, missing %q", view.Output, want)

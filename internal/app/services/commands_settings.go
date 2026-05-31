@@ -122,7 +122,7 @@ func formatCommandSettingsPanel(panel appviewmodel.SettingsPanelView) string {
 	if len(panel.Sections) > 0 {
 		lines = append(lines, "  sections:")
 		for _, section := range panel.Sections {
-			lines = append(lines, "    "+settingsPanelSectionLine(section))
+			lines = append(lines, settingsPanelSectionLines(section)...)
 		}
 	}
 	return strings.Join(commandNonEmpty(lines), "\n")
@@ -191,19 +191,67 @@ func settingsPanelActionLine(action appviewmodel.SettingsPanelAction) string {
 	return line + " (" + strings.Join(traits, ", ") + ")"
 }
 
-func settingsPanelSectionLine(section appviewmodel.SettingsPanelSection) string {
+func settingsPanelSectionLines(section appviewmodel.SettingsPanelSection) []string {
 	title := firstNonEmpty(section.Title, section.ID, "section")
-	counts := []string{}
-	if len(section.Fields) > 0 {
-		counts = append(counts, fmt.Sprintf("%d fields", len(section.Fields)))
+	lines := []string{"    " + title}
+	for _, field := range section.Fields {
+		lines = append(lines, "      "+settingsPanelFieldLine(field))
 	}
 	if len(section.Actions) > 0 {
-		counts = append(counts, fmt.Sprintf("%d actions", len(section.Actions)))
+		actionIDs := make([]string, 0, len(section.Actions))
+		for _, action := range section.Actions {
+			if strings.TrimSpace(action.ID) != "" {
+				actionIDs = append(actionIDs, action.ID)
+			}
+		}
+		if len(actionIDs) > 0 {
+			lines = append(lines, "      actions: "+strings.Join(actionIDs, ", "))
+		}
 	}
-	if len(counts) == 0 {
-		return title
+	return lines
+}
+
+func settingsPanelFieldLine(field appviewmodel.SettingsPanelField) string {
+	id := firstNonEmpty(field.ID, field.Label, "field")
+	value := settingsPanelFieldValue(field)
+	traits := []string{firstNonEmpty(field.Kind, "text")}
+	if field.Editable {
+		traits = append(traits, "editable")
+	} else {
+		traits = append(traits, "readonly")
 	}
-	return title + " (" + strings.Join(counts, ", ") + ")"
+	if field.ConfigID != "" {
+		traits = append(traits, "config="+field.ConfigID)
+	}
+	if len(field.Options) > 0 {
+		traits = append(traits, "options="+settingsPanelFieldOptions(field.Options))
+	}
+	if detail := strings.TrimSpace(field.Detail); detail != "" {
+		traits = append(traits, detail)
+	}
+	return id + ": " + value + " (" + strings.Join(traits, ", ") + ")"
+}
+
+func settingsPanelFieldValue(field appviewmodel.SettingsPanelField) string {
+	if field.Sensitive {
+		return "[redacted]"
+	}
+	if value := strings.TrimSpace(field.Value); value != "" {
+		return value
+	}
+	return "-"
+}
+
+func settingsPanelFieldOptions(options []appviewmodel.SettingsPanelFieldOption) string {
+	values := make([]string, 0, len(options))
+	for _, option := range options {
+		value := strings.TrimSpace(option.Value)
+		if value == "" {
+			value = "default"
+		}
+		values = append(values, value)
+	}
+	return strings.Join(values, "|")
 }
 
 func findSettingsAction(actions []appviewmodel.SettingsPanelAction, id string) (appviewmodel.SettingsPanelAction, bool) {

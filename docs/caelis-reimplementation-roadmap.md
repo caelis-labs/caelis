@@ -1486,7 +1486,7 @@ be migrated before retiring the old stack:
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
      attachment UI/rendering are not ported to `internal/app/services`.
-   - Slash commands and panels such as editable settings panels, rich
+   - Visual panels such as interactive settings editors, rich
      task/controller panels, and some transcript actions still have old
      driver/app assumptions or missing service-native feature parity, so the
      old TUI stack cannot be removed yet.
@@ -1569,6 +1569,11 @@ be migrated before retiring the old stack:
      config projection and future APP settings editors can render prompt,
      context, and sandbox controls from the same field metadata instead of
      maintaining surface-local option catalogs.
+   - Migrated baseline: shared `/settings` command output now renders
+     field-level section details, including field ids, values, input kinds,
+     editability, select options, and linked config option ids. TUI and ACP
+     command surfaces therefore expose the same settings editor contract
+     without embedding field catalogs in surface code.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
