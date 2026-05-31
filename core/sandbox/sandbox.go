@@ -135,6 +135,42 @@ type SetupCheck struct {
 	Counts    map[string]int    `json:"counts,omitempty"`
 }
 
+type PrepareProgress struct {
+	Phase   string `json:"phase,omitempty"`
+	Message string `json:"message,omitempty"`
+	Step    int    `json:"step,omitempty"`
+	Total   int    `json:"total,omitempty"`
+	Done    bool   `json:"done,omitempty"`
+	Debug   bool   `json:"debug,omitempty"`
+}
+
+type PrepareProgressFunc func(PrepareProgress)
+
+type prepareProgressContextKey struct{}
+
+func ContextWithPrepareProgress(ctx context.Context, fn PrepareProgressFunc) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if fn == nil {
+		return ctx
+	}
+	return context.WithValue(ctx, prepareProgressContextKey{}, fn)
+}
+
+func ReportPrepareProgress(ctx context.Context, progress PrepareProgress) {
+	if ctx == nil {
+		return
+	}
+	fn, ok := ctx.Value(prepareProgressContextKey{}).(PrepareProgressFunc)
+	if !ok || fn == nil {
+		return
+	}
+	progress.Phase = strings.TrimSpace(progress.Phase)
+	progress.Message = strings.TrimSpace(progress.Message)
+	fn(progress)
+}
+
 type SetupStatus struct {
 	Required bool              `json:"required,omitempty"`
 	Error    string            `json:"error,omitempty"`
@@ -264,6 +300,26 @@ type Runtime interface {
 	Start(context.Context, CommandRequest) (Session, error)
 	Open(context.Context, SessionRef) (Session, error)
 	Close() error
+}
+
+type PreparableRuntime interface {
+	Prepare(context.Context) error
+}
+
+type RepairableRuntime interface {
+	Repair(context.Context) error
+}
+
+type PreflightOptions struct {
+	AllowNonElevatedRepair bool `json:"allow_non_elevated_repair,omitempty"`
+}
+
+type PreflightRuntime interface {
+	Preflight(context.Context, PreflightOptions) error
+}
+
+type ResettableRuntime interface {
+	Reset(context.Context) error
 }
 
 type BackendFactory interface {

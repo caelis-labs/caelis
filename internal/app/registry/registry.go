@@ -24,6 +24,7 @@ import (
 	modelollama "github.com/OnslaughtSnail/caelis/internal/adapters/model/ollama"
 	modelopenai "github.com/OnslaughtSnail/caelis/internal/adapters/model/openai"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
+	sandboxportadapter "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/portadapter"
 	storejsonl "github.com/OnslaughtSnail/caelis/internal/adapters/store/jsonl"
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	storesqlite "github.com/OnslaughtSnail/caelis/internal/adapters/store/sqlite"
@@ -119,6 +120,21 @@ func RegisterDefaults(r *Registry) error {
 	}
 	if err := r.RegisterSandboxBackend("host", sandboxhost.Factory{}); err != nil {
 		return err
+	}
+	for _, item := range []struct {
+		name    string
+		backend sandbox.Backend
+	}{
+		{"seatbelt", sandbox.BackendSeatbelt},
+		{"bwrap", sandbox.BackendBwrap},
+		{"landlock", sandbox.BackendLandlock},
+		{"windows", sandbox.BackendWindows},
+		{"windows-restricted-token", sandbox.BackendWindows},
+		{"windows-elevated", sandbox.BackendWindows},
+	} {
+		if err := r.RegisterSandboxBackend(item.name, sandboxportadapter.Factory{Backend: item.backend}); err != nil {
+			return err
+		}
 	}
 	for _, item := range []struct {
 		name    string

@@ -2497,6 +2497,70 @@ func TestSandboxServiceHostLifecycleIsNoop(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceRunsRuntimeLifecycle(t *testing.T) {
+	rt := &recordingLifecycleSandboxRuntime{
+		fakeSandboxRuntime: fakeSandboxRuntime{
+			descriptor: sandbox.Descriptor{
+				Backend: sandbox.BackendWindows,
+				DefaultConstraints: sandbox.Constraints{
+					Route:   sandbox.RouteSandbox,
+					Backend: sandbox.BackendWindows,
+				},
+			},
+			status: sandbox.Status{
+				RequestedBackend: sandbox.BackendWindows,
+				ResolvedBackend:  sandbox.BackendWindows,
+				Setup: sandbox.SetupStatus{
+					Required: true,
+					Error:    "workspace setup required",
+					Checks: []sandbox.SetupCheck{{
+						Scope:    sandbox.SetupWorkspace,
+						Required: true,
+						Reason:   "policy changed",
+					}},
+				},
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			Sandbox: config.Sandbox{Backend: "windows"},
+		},
+		Engine:  &recordingEngine{},
+		Sandbox: rt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var progress []sandbox.PrepareProgress
+	ctx := sandbox.ContextWithPrepareProgress(context.Background(), func(update sandbox.PrepareProgress) {
+		progress = append(progress, update)
+	})
+	status, err := svc.Sandbox().Prepare(ctx)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if rt.prepareCalls != 1 || len(progress) != 1 || progress[0].Message != "preparing sandbox" {
+		t.Fatalf("prepareCalls/progress = %d/%#v, want lifecycle call and progress", rt.prepareCalls, progress)
+	}
+	if status.RequestedBackend != "windows" || status.ResolvedBackend != "windows" || !status.SetupRequired || status.SetupError != "workspace setup required" {
+		t.Fatalf("Prepare() status = %#v, want windows setup projection", status)
+	}
+
+	if _, err := svc.Sandbox().Repair(context.Background()); err != nil {
+		t.Fatalf("Repair() error = %v", err)
+	}
+	if _, err := svc.Sandbox().Preflight(context.Background(), true); err != nil {
+		t.Fatalf("Preflight() error = %v", err)
+	}
+	if _, err := svc.Sandbox().Reset(context.Background()); err != nil {
+		t.Fatalf("Reset() error = %v", err)
+	}
+	if rt.repairCalls != 1 || !rt.preflightAllow || rt.resetCalls != 1 {
+		t.Fatalf("lifecycle calls repair=%d preflightAllow=%t reset=%d, want all invoked", rt.repairCalls, rt.preflightAllow, rt.resetCalls)
+	}
+}
+
 func TestTaskServiceListsAndControlsSandboxTasks(t *testing.T) {
 	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
 	taskSession := &recordingTaskSession{
@@ -3412,6 +3476,14 @@ type fakeSandboxRuntime struct {
 	status     sandbox.Status
 }
 
+type recordingLifecycleSandboxRuntime struct {
+	fakeSandboxRuntime
+	prepareCalls   int
+	repairCalls    int
+	preflightAllow bool
+	resetCalls     int
+}
+
 type catalogProvider struct {
 	models []model.ModelInfo
 }
@@ -3566,6 +3638,27 @@ func (fakeSandboxRuntime) Open(context.Context, sandbox.SessionRef) (sandbox.Ses
 }
 
 func (fakeSandboxRuntime) Close() error {
+	return nil
+}
+
+func (r *recordingLifecycleSandboxRuntime) Prepare(ctx context.Context) error {
+	r.prepareCalls++
+	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{Message: "preparing sandbox", Step: 1, Total: 1})
+	return nil
+}
+
+func (r *recordingLifecycleSandboxRuntime) Repair(context.Context) error {
+	r.repairCalls++
+	return nil
+}
+
+func (r *recordingLifecycleSandboxRuntime) Preflight(_ context.Context, opts sandbox.PreflightOptions) error {
+	r.preflightAllow = opts.AllowNonElevatedRepair
+	return nil
+}
+
+func (r *recordingLifecycleSandboxRuntime) Reset(context.Context) error {
+	r.resetCalls++
 	return nil
 }
 

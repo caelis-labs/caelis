@@ -646,26 +646,65 @@ func (s SandboxService) Status(ctx context.Context) (SandboxStatus, error) {
 }
 
 func (s SandboxService) Prepare(ctx context.Context) (SandboxStatus, error) {
-	return s.noopHostLifecycle(ctx, "prepare")
+	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+		preparer, ok := runtime.(sandbox.PreparableRuntime)
+		if !ok {
+			return nil
+		}
+		return preparer.Prepare(ctx)
+	})
 }
 
 func (s SandboxService) Repair(ctx context.Context) (SandboxStatus, error) {
-	return s.noopHostLifecycle(ctx, "repair")
+	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+		if repairer, ok := runtime.(sandbox.RepairableRuntime); ok {
+			return repairer.Repair(ctx)
+		}
+		preparer, ok := runtime.(sandbox.PreparableRuntime)
+		if !ok {
+			return nil
+		}
+		return preparer.Prepare(ctx)
+	})
+}
+
+func (s SandboxService) Preflight(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
+	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+		preflight, ok := runtime.(sandbox.PreflightRuntime)
+		if !ok {
+			return nil
+		}
+		return preflight.Preflight(ctx, sandbox.PreflightOptions{AllowNonElevatedRepair: allowNonElevatedRepair})
+	})
 }
 
 func (s SandboxService) Reset(ctx context.Context) (SandboxStatus, error) {
-	return s.noopHostLifecycle(ctx, "reset")
+	return s.lifecycle(ctx, func(ctx context.Context, runtime sandbox.Runtime) error {
+		resetter, ok := runtime.(sandbox.ResettableRuntime)
+		if !ok {
+			return nil
+		}
+		return resetter.Reset(ctx)
+	})
 }
 
-func (s SandboxService) noopHostLifecycle(ctx context.Context, action string) (SandboxStatus, error) {
-	status, err := s.Status(ctx)
-	if err != nil {
-		return status, err
+func (s SandboxService) lifecycle(ctx context.Context, run func(context.Context, sandbox.Runtime) error) (SandboxStatus, error) {
+	if ctx == nil {
+		ctx = context.Background()
 	}
-	if strings.EqualFold(strings.TrimSpace(status.ResolvedBackend), string(sandbox.BackendHost)) {
-		return status, nil
+	if err := ctx.Err(); err != nil {
+		return SandboxStatus{}, err
 	}
-	return status, fmt.Errorf("app/services: sandbox %q does not support %s through app services", status.ResolvedBackend, strings.TrimSpace(action))
+	if s.services.sandbox == nil {
+		status := s.statusFromRuntime()
+		return status, errors.New("app/services: sandbox runtime is not configured")
+	}
+	if run != nil {
+		if err := run(ctx, s.services.sandbox); err != nil {
+			return s.statusFromRuntime(), err
+		}
+	}
+	return s.statusFromRuntime(), nil
 }
 
 func (s SandboxService) statusFromRuntime() SandboxStatus {

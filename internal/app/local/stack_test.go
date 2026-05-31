@@ -1707,6 +1707,9 @@ func TestStackAddsSkillRootsToSandboxConfig(t *testing.T) {
 	if stack.Sandbox() == nil {
 		t.Fatal("stack sandbox = nil, want configured capture runtime")
 	}
+	if factory.cfg.RequestedBackend != sandbox.Backend("capture") {
+		t.Fatalf("sandbox requested backend = %q, want capture", factory.cfg.RequestedBackend)
+	}
 	for _, root := range []string{
 		"/configured-write",
 		filepath.Join(home, ".caelis", "skills", ".system"),

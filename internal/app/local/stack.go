@@ -721,18 +721,30 @@ func storeFromConfig(ctx context.Context, reg *appregistry.Registry, cfg config.
 }
 
 func sandboxFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeCfg config.Runtime) (sandbox.Runtime, error) {
-	backend := strings.ToLower(firstNonEmpty(runtimeCfg.Sandbox.Backend, "host"))
+	backend := normalizeSandboxBackendName(runtimeCfg.Sandbox.Backend)
 	factory, ok := reg.SandboxBackend(backend)
 	if !ok {
 		return nil, fmt.Errorf("app/local: unsupported sandbox backend %q", runtimeCfg.Sandbox.Backend)
 	}
 	return factory.NewRuntime(ctx, sandbox.Config{
-		CWD:           runtimeCfg.WorkspaceCWD,
-		StateDir:      sandboxStateDir(runtimeCfg.Store),
-		ReadableRoots: slices.Clone(runtimeCfg.Sandbox.ReadableRoots),
-		WritableRoots: effectiveSandboxWritableRoots(runtimeCfg),
-		HelperPath:    runtimeCfg.Sandbox.HelperPath,
+		CWD:              runtimeCfg.WorkspaceCWD,
+		RequestedBackend: sandbox.Backend(backend),
+		StateDir:         sandboxStateDir(runtimeCfg.Store),
+		ReadableRoots:    slices.Clone(runtimeCfg.Sandbox.ReadableRoots),
+		WritableRoots:    effectiveSandboxWritableRoots(runtimeCfg),
+		HelperPath:       runtimeCfg.Sandbox.HelperPath,
 	})
+}
+
+func normalizeSandboxBackendName(backend string) string {
+	switch strings.ToLower(strings.TrimSpace(backend)) {
+	case "", "auto", "default":
+		return string(sandbox.BackendHost)
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		return string(sandbox.BackendWindows)
+	default:
+		return strings.ToLower(strings.TrimSpace(backend))
+	}
 }
 
 func effectiveSandboxWritableRoots(runtimeCfg config.Runtime) []string {

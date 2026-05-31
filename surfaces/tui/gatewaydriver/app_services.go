@@ -161,8 +161,8 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		status, err := svc.Sandbox().Repair(ctx)
 		return sandboxStatusFromApp(status), err
 	}
-	stack.PreflightSandboxFn = func(ctx context.Context, _ bool) (SandboxStatus, error) {
-		status, err := svc.Sandbox().Status(ctx)
+	stack.PreflightSandboxFn = func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
+		status, err := svc.Sandbox().Preflight(ctx, allowNonElevatedRepair)
 		return sandboxStatusFromApp(status), err
 	}
 	stack.ResetSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
