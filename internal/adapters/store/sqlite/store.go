@@ -398,6 +398,100 @@ func (s *Store) Events(ctx context.Context, query session.EventQuery) (session.E
 	}, nil
 }
 
+func (s *Store) IndexedEvents(ctx context.Context, query session.EventIndexQuery) (session.EventPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return session.EventPage{}, err
+	}
+	if s == nil || s.db == nil {
+		return session.EventPage{}, session.ErrNotFound
+	}
+	id, err := normalizedSessionID(query.Ref)
+	if err != nil {
+		return session.EventPage{}, err
+	}
+	after, err := parseCursor(query.After)
+	if err != nil {
+		return session.EventPage{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, err := s.loadSession(ctx, id); err != nil {
+		return session.EventPage{}, err
+	}
+	conditions := []string{"session_id = ?"}
+	args := []any{id}
+	if after > 0 {
+		if query.Descending {
+			conditions = append(conditions, "seq < ?")
+		} else {
+			conditions = append(conditions, "seq > ?")
+		}
+		args = append(args, after)
+	}
+	if !query.IncludeTransient {
+		conditions = append(conditions, "visibility NOT IN (?, ?)")
+		args = append(args, string(session.VisibilityUIOnly), string(session.VisibilityOverlay))
+	}
+	types := normalizedEventTypes(query.Types)
+	if len(types) > 0 {
+		placeholders := make([]string, len(types))
+		for i, eventType := range types {
+			placeholders[i] = "?"
+			args = append(args, string(eventType))
+		}
+		conditions = append(conditions, "event_type IN ("+strings.Join(placeholders, ", ")+")")
+	}
+	order := "ASC"
+	if query.Descending {
+		order = "DESC"
+	}
+	limitClause := ""
+	if query.Limit > 0 {
+		limitClause = " LIMIT ?"
+		args = append(args, query.Limit)
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT seq, event_json
+FROM events
+WHERE `+strings.Join(conditions, " AND ")+`
+ORDER BY seq `+order+limitClause, args...)
+	if err != nil {
+		return session.EventPage{}, err
+	}
+	defer rows.Close()
+
+	out := make([]session.Event, 0)
+	nextCursor := after
+	for rows.Next() {
+		var seq int
+		var raw string
+		if err := rows.Scan(&seq, &raw); err != nil {
+			return session.EventPage{}, err
+		}
+		nextCursor = seq
+		var event session.Event
+		if err := json.Unmarshal([]byte(raw), &event); err != nil {
+			return session.EventPage{}, err
+		}
+		if !query.IncludeTransient && session.IsTransient(event) {
+			continue
+		}
+		out = append(out, session.CloneEvent(event))
+	}
+	if err := rows.Err(); err != nil {
+		return session.EventPage{}, err
+	}
+	return session.EventPage{
+		Events:     out,
+		NextCursor: session.Cursor(strconv.Itoa(nextCursor)),
+	}, nil
+}
+
 func (s *Store) UpdateState(ctx context.Context, ref session.Ref, patch session.StatePatch) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -480,6 +574,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS events_session_seq_idx ON events(session_id, seq);
+CREATE INDEX IF NOT EXISTS events_session_type_seq_idx ON events(session_id, event_type, seq);
 `)
 	return err
 }
@@ -612,6 +707,26 @@ func decodeState(raw string) (session.State, error) {
 	return cloneState(state), nil
 }
 
+func normalizedEventTypes(in []session.EventType) []session.EventType {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]session.EventType, 0, len(in))
+	seen := map[session.EventType]struct{}{}
+	for _, eventType := range in {
+		eventType = session.EventType(strings.TrimSpace(string(eventType)))
+		if eventType == "" {
+			continue
+		}
+		if _, ok := seen[eventType]; ok {
+			continue
+		}
+		seen[eventType] = struct{}{}
+		out = append(out, eventType)
+	}
+	return out
+}
+
 func normalizedSessionID(ref session.Ref) (string, error) {
 	id := strings.TrimSpace(ref.SessionID)
 	if id == "" {
@@ -675,3 +790,4 @@ func parseStoredTime(raw string) time.Time {
 }
 
 var _ session.Store = (*Store)(nil)
+var _ session.EventIndexer = (*Store)(nil)

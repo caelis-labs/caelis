@@ -176,6 +176,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		WorkspaceDir: runtimeCfg.WorkspaceCWD,
 		BasePrompt:   firstNonEmpty(cfg.SystemPrompt, runtimeMetaString(runtimeCfg.Meta, "system_prompt")),
 		Catalog:      resourceCatalog,
+		PromptPolicy: promptPolicyFromSettings(cfg.Settings),
 		SkillPolicy:  skillPolicyFromSettings(cfg.Settings),
 		ACPAgents:    spawnAgentDescriptors,
 	})
@@ -213,6 +214,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	svc, err := services.New(services.Config{
 		Runtime:        runtimeCfg,
 		Engine:         engine,
+		HistoryIndex:   historyIndexFromStore(store),
 		Sandbox:        sandboxRuntime,
 		TaskResolver:   spawnTasks,
 		ControllerRuns: controllerRuns,
@@ -242,6 +244,11 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		engine:   engine,
 		services: svc,
 	}, nil
+}
+
+func historyIndexFromStore(store session.Store) session.EventIndexer {
+	index, _ := store.(session.EventIndexer)
+	return index
 }
 
 func sandboxRuntimeApplier(reg *appregistry.Registry, live *liveSandboxRuntime) services.RuntimeApplier {
@@ -837,6 +844,13 @@ func skillPolicyFromSettings(manager *appsettings.Manager) appsettings.SkillPoli
 		return appsettings.SkillPolicy{}
 	}
 	return manager.SkillPolicy()
+}
+
+func promptPolicyFromSettings(manager *appsettings.Manager) appsettings.PromptPolicy {
+	if manager == nil {
+		return appsettings.PromptPolicy{}
+	}
+	return manager.PromptPolicy()
 }
 
 func dedupeRootPaths(paths []string) []string {

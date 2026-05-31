@@ -12,6 +12,7 @@ const (
 	UpdateToolCall     = "tool_call"
 	UpdateToolCallInfo = "tool_call_update"
 	UpdatePlan         = "plan"
+	UpdateSurface      = "caelis_surface"
 )
 
 const (
@@ -118,6 +119,16 @@ type PlanUpdate struct {
 }
 
 func (u PlanUpdate) SessionUpdateType() string { return u.SessionUpdate }
+
+type SurfaceUpdate struct {
+	SessionUpdate string         `json:"sessionUpdate"`
+	Surface       string         `json:"surface,omitempty"`
+	Kind          string         `json:"kind,omitempty"`
+	Payload       any            `json:"payload,omitempty"`
+	Meta          map[string]any `json:"_meta,omitempty"`
+}
+
+func (u SurfaceUpdate) SessionUpdateType() string { return u.SessionUpdate }
 
 type PermissionOption struct {
 	OptionID string `json:"optionId"`

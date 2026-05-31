@@ -94,6 +94,22 @@ func (s SettingsService) setPanelFieldValue(ctx context.Context, fieldID string,
 			return runtime
 		})
 		return err
+	case "prompt.agent_instructions", "prompt.plugin_prompts", "prompt.environment":
+		doc, err := s.Document(ctx)
+		if err != nil {
+			return err
+		}
+		policy := appsettings.NormalizePromptPolicy(doc.Prompt)
+		switch fieldID {
+		case "prompt.agent_instructions":
+			policy.AgentInstructions = normalizeSettingsPromptAgentInstructions(value)
+		case "prompt.plugin_prompts":
+			policy.PluginPrompts = normalizeSettingsPromptToggle(value)
+		case "prompt.environment":
+			policy.Environment = normalizeSettingsPromptToggle(value)
+		}
+		_, err = s.SetPromptPolicy(ctx, policy)
+		return err
 	case "compaction.auto_mode", "compaction.watermark", "compaction.max_source_chars", "compaction.prompt", "compaction.retention.task_index_limit", "compaction.retention.controller_index_limit":
 		doc, err := s.Document(ctx)
 		if err != nil {
@@ -161,6 +177,14 @@ func (s SettingsService) setPanelFieldValue(ctx context.Context, fieldID string,
 	default:
 		return fmt.Errorf("app/services: settings field %q is not editable", fieldID)
 	}
+}
+
+func normalizeSettingsPromptAgentInstructions(value string) string {
+	return appsettings.NormalizePromptPolicy(appsettings.PromptPolicy{AgentInstructions: value}).AgentInstructions
+}
+
+func normalizeSettingsPromptToggle(value string) string {
+	return appsettings.NormalizePromptPolicy(appsettings.PromptPolicy{PluginPrompts: value}).PluginPrompts
 }
 
 func parseSettingsPathList(value string) []string {

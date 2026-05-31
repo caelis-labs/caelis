@@ -4,6 +4,7 @@ type SettingsView struct {
 	Runtime    RuntimeSettings    `json:"runtime"`
 	Store      StoreSettings      `json:"store"`
 	Sandbox    SandboxSettings    `json:"sandbox"`
+	Prompt     PromptSettings     `json:"prompt,omitempty"`
 	Compaction CompactionSettings `json:"compaction,omitempty"`
 	Skills     SkillSettings      `json:"skills,omitempty"`
 }
@@ -138,6 +139,12 @@ type SandboxSettings struct {
 	WritableRoots []string `json:"writable_roots,omitempty"`
 	Network       string   `json:"network,omitempty"`
 	HelperPath    string   `json:"helper_path,omitempty"`
+}
+
+type PromptSettings struct {
+	AgentInstructions string `json:"agent_instructions,omitempty"`
+	PluginPrompts     string `json:"plugin_prompts,omitempty"`
+	Environment       string `json:"environment,omitempty"`
 }
 
 type CompactionSettings struct {

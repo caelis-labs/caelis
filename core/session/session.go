@@ -120,6 +120,15 @@ type EventQuery struct {
 	IncludeTransient bool   `json:"include_transient,omitempty"`
 }
 
+type EventIndexQuery struct {
+	Ref              Ref         `json:"ref"`
+	Types            []EventType `json:"types,omitempty"`
+	After            Cursor      `json:"after,omitempty"`
+	Limit            int         `json:"limit,omitempty"`
+	Descending       bool        `json:"descending,omitempty"`
+	IncludeTransient bool        `json:"include_transient,omitempty"`
+}
+
 type EventPage struct {
 	Events     []Event `json:"events,omitempty"`
 	NextCursor Cursor  `json:"next_cursor,omitempty"`
@@ -153,6 +162,10 @@ type Store interface {
 	Append(context.Context, Ref, []Event) (Cursor, error)
 	Events(context.Context, EventQuery) (EventPage, error)
 	UpdateState(context.Context, Ref, StatePatch) error
+}
+
+type EventIndexer interface {
+	IndexedEvents(context.Context, EventIndexQuery) (EventPage, error)
 }
 
 type EventType string

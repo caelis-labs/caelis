@@ -278,6 +278,67 @@ func (s *Store) Events(ctx context.Context, query session.EventQuery) (session.E
 	}, nil
 }
 
+func (s *Store) IndexedEvents(ctx context.Context, query session.EventIndexQuery) (session.EventPage, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return session.EventPage{}, err
+	}
+	if s == nil {
+		return session.EventPage{}, session.ErrNotFound
+	}
+	after, err := parseCursor(query.After)
+	if err != nil {
+		return session.EventPage{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events, err := s.loadEventsLocked(query.Ref)
+	if err != nil {
+		return session.EventPage{}, err
+	}
+	typeSet := eventTypeSet(query.Types)
+	limit := query.Limit
+	out := make([]session.Event, 0)
+	nextCursor := after
+	if query.Descending {
+		start := len(events)
+		if after > 0 {
+			start = after - 1
+			if start > len(events) {
+				start = len(events)
+			}
+		}
+		for i := start - 1; i >= 0; i-- {
+			event := events[i]
+			if !indexedEventMatches(event, typeSet, query.IncludeTransient) {
+				continue
+			}
+			nextCursor = i + 1
+			out = append(out, session.CloneEvent(event))
+			if limit > 0 && len(out) >= limit {
+				break
+			}
+		}
+		return session.EventPage{Events: out, NextCursor: session.Cursor(strconv.Itoa(nextCursor))}, nil
+	}
+	if after > len(events) {
+		after = len(events)
+	}
+	for i, event := range events[after:] {
+		if !indexedEventMatches(event, typeSet, query.IncludeTransient) {
+			continue
+		}
+		nextCursor = after + i + 1
+		out = append(out, session.CloneEvent(event))
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return session.EventPage{Events: out, NextCursor: session.Cursor(strconv.Itoa(nextCursor))}, nil
+}
+
 func (s *Store) UpdateState(ctx context.Context, ref session.Ref, patch session.StatePatch) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -488,4 +549,30 @@ func cloneState(in session.State) session.State {
 	return session.State(maps.Clone(in))
 }
 
+func eventTypeSet(in []session.EventType) map[session.EventType]struct{} {
+	if len(in) == 0 {
+		return nil
+	}
+	out := map[session.EventType]struct{}{}
+	for _, eventType := range in {
+		eventType = session.EventType(strings.TrimSpace(string(eventType)))
+		if eventType != "" {
+			out[eventType] = struct{}{}
+		}
+	}
+	return out
+}
+
+func indexedEventMatches(event session.Event, types map[session.EventType]struct{}, includeTransient bool) bool {
+	if !includeTransient && session.IsTransient(event) {
+		return false
+	}
+	if len(types) == 0 {
+		return true
+	}
+	_, ok := types[event.Type]
+	return ok
+}
+
 var _ session.Store = (*Store)(nil)
+var _ session.EventIndexer = (*Store)(nil)

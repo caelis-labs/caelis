@@ -1273,6 +1273,68 @@ func TestCommandServiceRecordsTaskLifecycleHistory(t *testing.T) {
 	}
 }
 
+func TestTaskServiceUsesIndexedHistoryWhenAvailable(t *testing.T) {
+	ctx := context.Background()
+	index := &fakeHistoryIndex{page: session.EventPage{Events: []session.Event{
+		{
+			Type:      session.EventLifecycle,
+			Time:      time.Unix(200, 0).UTC(),
+			Lifecycle: &session.LifecycleEvent{Status: session.LifecycleCompleted},
+			Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+				"task_id":    "indexed-task",
+				"source":     "history-index",
+				"action":     "finish",
+				"state":      "completed",
+				"running":    false,
+				"command":    "npm test",
+				"updated_at": time.Unix(200, 0).UTC().Format(time.RFC3339Nano),
+			}),
+		},
+		{
+			Type:      session.EventLifecycle,
+			Time:      time.Unix(100, 0).UTC(),
+			Lifecycle: &session.LifecycleEvent{Status: session.LifecycleRunning},
+			Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+				"task_id":    "indexed-task",
+				"source":     "history-index",
+				"action":     "start",
+				"state":      "running",
+				"running":    true,
+				"command":    "npm test",
+				"updated_at": time.Unix(100, 0).UTC().Format(time.RFC3339Nano),
+			}),
+		},
+	}}}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-indexed"}},
+	}}
+	svc, err := New(Config{
+		Runtime:      config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:       engine,
+		HistoryIndex: index,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := svc.Tasks().List(ctx, ListTasksRequest{
+		SessionRef:     session.Ref{SessionID: "sess-indexed"},
+		IncludeHistory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if index.query.Ref.SessionID != "sess-indexed" || !index.query.Descending {
+		t.Fatalf("index query = %#v, want session scoped descending query", index.query)
+	}
+	task, ok := findTaskItem(history.Tasks, "indexed-task")
+	if !ok || task.Source != "history-index" || task.Command != "npm test" || task.Running || task.State != "completed" || task.Action != "finish" {
+		t.Fatalf("history tasks = %#v, want latest indexed task state restored", history.Tasks)
+	}
+	if engine.loadRef.SessionID != "" {
+		t.Fatalf("engine load ref = %#v, want indexed history without full snapshot load", engine.loadRef)
+	}
+}
+
 func TestCommandServiceExecuteConnectConfiguresAndUsesModel(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -5774,6 +5836,20 @@ type recordingEngine struct {
 	loadRef      session.Ref
 	state        session.State
 	snapshot     session.Snapshot
+}
+
+type fakeHistoryIndex struct {
+	query session.EventIndexQuery
+	page  session.EventPage
+	err   error
+}
+
+func (f *fakeHistoryIndex) IndexedEvents(_ context.Context, query session.EventIndexQuery) (session.EventPage, error) {
+	f.query = query
+	return session.EventPage{
+		Events:     cloneTestEvents(f.page.Events),
+		NextCursor: f.page.NextCursor,
+	}, f.err
 }
 
 type fakeSandboxRuntime struct {

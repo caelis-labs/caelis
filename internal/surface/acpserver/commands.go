@@ -68,6 +68,9 @@ func (s *Server) executeCommandPrompt(ctx context.Context, ref session.Ref, inpu
 	if err := s.publishCommandOutput(ref.SessionID, result.Output); err != nil {
 		return true, err
 	}
+	if err := s.publishCommandSurfacePayloads(ref.SessionID, result); err != nil {
+		return true, err
+	}
 	for _, event := range result.Events {
 		if err := s.publishEvent(ctx, nil, event); err != nil {
 			return true, err
@@ -83,6 +86,73 @@ func (s *Server) executeCommandPrompt(ctx context.Context, ref session.Ref, inpu
 		}
 	}
 	return true, nil
+}
+
+func (s *Server) publishCommandSurfacePayloads(sessionID string, result appviewmodel.CommandExecutionView) error {
+	if s.conn == nil {
+		return nil
+	}
+	updates := acpSurfaceUpdatesFromCommand(result)
+	for _, update := range updates {
+		if err := s.conn.Notify(schema.MethodSessionUpdate, schema.SessionNotification{
+			SessionID: strings.TrimSpace(sessionID),
+			Update:    update,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func acpSurfaceUpdatesFromCommand(result appviewmodel.CommandExecutionView) []schema.SurfaceUpdate {
+	command := strings.TrimSpace(result.Command)
+	out := make([]schema.SurfaceUpdate, 0, 4)
+	add := func(kind string, payload any) {
+		if payload == nil {
+			return
+		}
+		out = append(out, schema.SurfaceUpdate{
+			SessionUpdate: schema.UpdateSurface,
+			Surface:       "acp",
+			Kind:          strings.TrimSpace(kind),
+			Payload:       payload,
+			Meta: map[string]any{
+				"source":  "app-services",
+				"command": command,
+			},
+		})
+	}
+	if result.Status != nil {
+		add("status", result.Status)
+	}
+	if result.Doctor != nil {
+		add("doctor", result.Doctor)
+	}
+	if result.SettingsPanel != nil {
+		add("settings_panel", result.SettingsPanel)
+	}
+	if result.TaskPanel != nil {
+		add("task_panel", result.TaskPanel)
+	}
+	if result.ResumePanel != nil {
+		add("resume_panel", result.ResumePanel)
+	}
+	if result.ApprovalPanel != nil {
+		add("approval_panel", result.ApprovalPanel)
+	}
+	if result.ModelSelection != nil {
+		add("model_selection", result.ModelSelection)
+	}
+	if result.ControllerPanel != nil {
+		add("controller_panel", result.ControllerPanel)
+	}
+	if result.ModelConnectPanel != nil {
+		add("model_connect_panel", result.ModelConnectPanel)
+	}
+	if result.AgentManagement != nil {
+		add("agent_management", result.AgentManagement)
+	}
+	return out
 }
 
 func (s *Server) publishCommandOutput(sessionID string, text string) error {

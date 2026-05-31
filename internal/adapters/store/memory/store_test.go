@@ -43,6 +43,50 @@ func TestStoreEventsSkipsTransientByDefault(t *testing.T) {
 	}
 }
 
+func TestStoreIndexedEventsDescendingCursor(t *testing.T) {
+	ctx := context.Background()
+	store := New()
+	active, err := store.Create(ctx, session.StartRequest{AppName: "caelis", UserID: "tester"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.Append(ctx, active.Ref, []session.Event{
+		{Type: session.EventUser, Message: &model.Message{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("first user")}}},
+		{Type: session.EventToolCall, Tool: &session.ToolEvent{ID: "call-1", Name: "run_command"}},
+		{Type: session.EventNotice, Visibility: session.VisibilityUIOnly},
+		{Type: session.EventToolResult, Tool: &session.ToolEvent{ID: "call-1", Name: "run_command", Status: session.ToolCompleted}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := store.IndexedEvents(ctx, session.EventIndexQuery{
+		Ref:        active.Ref,
+		Types:      []session.EventType{session.EventToolCall, session.EventToolResult},
+		Descending: true,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 || page.Events[0].Type != session.EventToolResult || page.NextCursor != "4" {
+		t.Fatalf("indexed page = %#v, want latest tool result at cursor 4", page)
+	}
+	page, err = store.IndexedEvents(ctx, session.EventIndexQuery{
+		Ref:        active.Ref,
+		Types:      []session.EventType{session.EventToolCall, session.EventToolResult},
+		After:      page.NextCursor,
+		Descending: true,
+		Limit:      1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 || page.Events[0].Type != session.EventToolCall || page.NextCursor != "2" {
+		t.Fatalf("indexed second page = %#v, want previous tool call at cursor 2", page)
+	}
+}
+
 func TestStoreListFiltersAndSummarizesSessions(t *testing.T) {
 	ctx := context.Background()
 	store := New()

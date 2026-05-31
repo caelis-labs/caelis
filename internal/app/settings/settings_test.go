@@ -230,6 +230,51 @@ func TestManagerSkillPolicyPersistsNormalizedSettings(t *testing.T) {
 	}
 }
 
+func TestManagerPromptPolicyPersistsNormalizedSettings(t *testing.T) {
+	ctx := context.Background()
+	store := NewFileStore(t.TempDir())
+	manager, err := NewManager(ctx, store, Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := manager.SetPromptPolicy(ctx, PromptPolicy{
+		AgentInstructions: "workspace-only",
+		PluginPrompts:     "off",
+		Environment:       "disabled",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if policy.AgentInstructions != PromptAgentInstructionsWorkspaceOnly ||
+		policy.PluginPrompts != PromptPluginPromptsDisabled ||
+		policy.Environment != PromptEnvironmentDisabled {
+		t.Fatalf("policy = %#v, want normalized prompt policy", policy)
+	}
+	if got := manager.PromptPolicy(); got != policy {
+		t.Fatalf("PromptPolicy() = %#v, want %#v", got, policy)
+	}
+	raw, err := os.ReadFile(store.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc Document
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Prompt != policy {
+		t.Fatalf("persisted prompt policy = %#v, want %#v", doc.Prompt, policy)
+	}
+	loaded, err := NewManager(ctx, store, Document{
+		Prompt: PromptPolicy{AgentInstructions: PromptAgentInstructionsAll, PluginPrompts: PromptPluginPromptsEnabled, Environment: PromptEnvironmentEnabled},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.PromptPolicy(); got != policy {
+		t.Fatalf("loaded prompt policy = %#v, want persisted override", got)
+	}
+}
+
 func TestManagerModelToolsPersistNormalizedSettings(t *testing.T) {
 	ctx := context.Background()
 	store := NewFileStore(t.TempDir())

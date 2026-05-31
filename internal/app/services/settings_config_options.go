@@ -59,6 +59,43 @@ var settingsConfigOptionSpecs = []settingsConfigOptionSpec{
 		NumberKind:  "int",
 	},
 	{
+		ID:          "prompt_agent_instructions",
+		FieldID:     "prompt.agent_instructions",
+		Type:        "select",
+		Name:        "Agent Instructions",
+		Description: "Choose which AGENTS.md instruction scopes are included in the model prompt",
+		Category:    "prompt",
+		Options: []appviewmodel.SettingsConfigOptionChoice{
+			{Value: appsettings.PromptAgentInstructionsAll, Name: "All", Description: "Include session, workspace, and global instructions"},
+			{Value: appsettings.PromptAgentInstructionsWorkspaceOnly, Name: "Workspace Only", Description: "Include session and workspace instructions, but omit global instructions"},
+			{Value: appsettings.PromptAgentInstructionsDisabled, Name: "Disabled", Description: "Do not include AGENTS.md instruction content"},
+		},
+	},
+	{
+		ID:          "prompt_plugin_prompts",
+		FieldID:     "prompt.plugin_prompts",
+		Type:        "select",
+		Name:        "Plugin Prompts",
+		Description: "Choose whether plugin prompt fragments are included in the model prompt",
+		Category:    "prompt",
+		Options: []appviewmodel.SettingsConfigOptionChoice{
+			{Value: appsettings.PromptPluginPromptsEnabled, Name: "Enabled"},
+			{Value: appsettings.PromptPluginPromptsDisabled, Name: "Disabled"},
+		},
+	},
+	{
+		ID:          "prompt_environment",
+		FieldID:     "prompt.environment",
+		Type:        "select",
+		Name:        "Environment Context",
+		Description: "Choose whether cwd, OS, and shell context are included in the model prompt",
+		Category:    "prompt",
+		Options: []appviewmodel.SettingsConfigOptionChoice{
+			{Value: appsettings.PromptEnvironmentEnabled, Name: "Enabled"},
+			{Value: appsettings.PromptEnvironmentDisabled, Name: "Disabled"},
+		},
+	},
+	{
 		ID:           "auto_compaction",
 		FieldID:      "compaction.auto_mode",
 		Type:         "select",

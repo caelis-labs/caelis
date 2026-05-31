@@ -1,271 +1,74 @@
-# caelis
+# Caelis
 
-`caelis` is a terminal-first agent runtime. The active local path is:
-`cmd/caelis -> internal/cli -> internal/app/local -> internal/app/services`.
+Caelis is an ACP-native agent runtime and gateway. It runs as an interactive TUI,
+a headless CLI, or an ACP stdio server that can be used by clients such as Zed.
 
-The project treats a session workspace plus ACP-native event semantics as the
-stable product boundary. Public `core/*` packages name the durable contracts;
-`internal/engine/*` owns local orchestration; `internal/adapters/*` holds
-concrete implementations; surface adapters project the shared app-service state
-into the Bubble Tea TUI, ACP stdio, and the headless one-shot runner.
+The project keeps a small core around canonical session events, runtime
+orchestration, approval policy, prompt materialization, and ACP projection.
+Providers, stores, sandboxes, tools, skills, prompts, and external ACP agents are
+replaceable adapters or registry contributions.
 
-## What It Does
+## Why Caelis
 
-- Starts an interactive TUI when launched from a TTY with no prompt input.
-- Runs a headless single-shot turn when given `-p` or piped stdin.
-- Persists sessions, provider config, and app config under `~/.caelis` by default.
-- Supports approval-aware tool execution; sandbox route, status, and doctor
-  output report whether execution is isolated or using the host.
-- Connects external agents through the Agent Client Protocol (ACP) as
-  participants, subagents, or main-controller handoffs.
-- Keeps async `RUN_COMMAND` and `SPAWN` work addressable through `TASK wait`,
-  `TASK write`, and `TASK cancel`, including stdin writes to interactive shell
-  commands.
-- Projects built-in and ACP tools through one transcript renderer so `Ran`,
-  `Read`, `Search`, `Wrote`, `Patched`, `SPAWN`, `TASK`, and approval states stay
-  visually consistent.
-- Adapts TUI colors to dark and light terminal backgrounds, terminal color
-  profile, `NO_COLOR`, explicit theme selection, and optional accent overrides.
-- Assembles prompts from built-in instructions, workspace `AGENTS.md`, global
-  `~/.agents/AGENTS.md`, and discovered local skills.
+- ACP-native by design: Caelis can orchestrate external ACP agents and expose
+  itself as an ACP agent.
+- One shared product kernel: TUI, future APP, CLI, and ACP surfaces consume the
+  same app services and view-model payloads.
+- Durable canonical state: replay and resume are based on model-visible session
+  semantics, not UI transcript cache.
+- Replaceable infrastructure: model providers, sandbox backends, JSONL/SQLite
+  stores, tools, prompt sources, and skills can evolve independently.
+- Practical local workflow: interactive turns, headless prompts, approvals,
+  sandbox diagnostics, async tasks, and external agent delegation live in one
+  binary.
 
-## Current Layout
+## Quick Start
 
-- `cmd/caelis`: the single binary entrypoint. It delegates immediately to the
-  internal CLI runner.
-- `internal/cli`: flat-flag CLI runner. It routes doctor, ACP stdio, headless,
-  and interactive TUI modes through the local app stack.
-- `core/`: stable runtime, session, model, tool, sandbox, plugin, and config
-  contracts.
-- `internal/adapters`: concrete model, store, sandbox, tool, and ACP-agent
-  adapters wired by the app registry.
-- `internal/engine`: concrete local runtime orchestration for sessions, turns,
-  replay, approvals, context reconstruction, controller routing, and tasks.
-- `internal/app/local`: local composition root that wires runtime config,
-  registries, providers, stores, sandbox runtime, tools, external ACP agents,
-  and app services.
-- `internal/app/services`: shared product facade consumed by TUI, headless CLI,
-  ACP server, and future APP surfaces.
-- `internal/surface/headless`: core-native one-shot CLI surface over shared app
-  services.
-- `surfaces/tui`: terminal UI surface facades for the app, gateway driver, and
-  driver contract.
-- `protocol/acp`: ACP schema, JSON-RPC, client, server, transport, terminal, and
-  projector packages.
-- `internal/surface/acpserver`: core-native ACP stdio agent surface used by the
-  production `caelis acp` entrypoint.
-- `eval/`: build-tagged cross-stack and live evaluation tests for engine, app,
-  ACP, CLI, local-config model, and TUI gateway-driver flows.
-- `npm/`: npm wrapper package plus platform-specific binary packages.
-
-Architecture plans:
-
-- [Agent SDK and ACP architecture plan](docs/agent-sdk-acp-architecture-plan.md)
-- [Caelis reimplementation architecture roadmap](docs/caelis-reimplementation-roadmap.md)
-
-## Install
-
-From npm:
+Install from npm:
 
 ```bash
 npm i -g @onslaughtsnail/caelis
 ```
 
-or without a global install:
+Run the interactive TUI:
 
 ```bash
-npx @onslaughtsnail/caelis --help
+caelis
 ```
 
-Supported npm platforms: macOS/Linux/Windows (`x64`, `arm64`).
+If no model is configured, start the TUI and use `/connect`.
 
-From source:
+Run a one-shot prompt:
+
+```bash
+caelis -p "Summarize this repository."
+```
+
+Serve Caelis as an ACP stdio agent:
+
+```bash
+caelis acp
+```
+
+Print diagnostics:
+
+```bash
+caelis doctor
+```
+
+Run from source:
+
+```bash
+go run ./cmd/caelis -h
+go run ./cmd/caelis
+go run ./cmd/caelis -p "Summarize this repository."
+go run ./cmd/caelis acp
+```
+
+Build from source:
 
 ```bash
 go install ./cmd/caelis
 ```
 
-The binary name is `caelis` in release artifacts and npm packages. Local source
-builds can also be run with `go run ./cmd/caelis`.
-
-## CLI Entry
-
-`cmd/caelis` uses one flat flag set. Run `go run ./cmd/caelis -h` to inspect the
-current flags.
-
-Subcommands:
-
-- `caelis acp`: serve the local stack as an ACP stdio agent.
-- `caelis doctor`: print runtime, session, model, and sandbox diagnostics.
-
-Common flags:
-
-- `-p`: single-shot prompt text
-- `-format`: `text` or `json` for headless output
-- `-interactive`: force the TUI path even when stdin is piped
-- `-session`, `-store-dir`, `-workspace-key`, `-workspace-cwd`
-- `-permission-mode`: `auto-review` or `manual`
-- `-provider`, `-api`, `-model`, `-base-url`, `-token`, `-token-env`
-- `-auth-type`, `-header-key`
-- `-model-alias`, `-context-window`, `-max-output-tokens`
-- `-system-prompt`: append session-specific system guidance
-- `-doctor`: print runtime, session, and sandbox diagnostics
-
-Interactive TUI:
-
-```bash
-caelis \
-  -provider openai \
-  -model gpt-5 \
-  -permission-mode auto-review
-```
-
-Headless single-shot:
-
-```bash
-caelis \
-  -provider openai \
-  -model gpt-5 \
-  -permission-mode auto-review \
-  -p "Summarize the repository layout."
-```
-
-Headless from stdin:
-
-```bash
-printf '%s\n' "Summarize the repository layout." | caelis \
-  -provider openai \
-  -model gpt-5 \
-  -format text
-```
-
-If no model is configured yet, start the TUI and use `/connect`.
-
-## TUI And ACP Agents
-
-The TUI is the primary local interface. It keeps prompt turns, external ACP
-participants, subagent tasks, tool calls, output panels, approvals, plans, and
-usage updates in one transcript pipeline.
-
-Current built-in slash commands:
-
-- `/help`
-- `/agent list`
-- `/agent add <builtin>`
-- `/agent install <adapter>`
-- `/agent use <agent|local>`
-- `/agent remove <agent>`
-- dynamic ACP child commands for registered agents, for example `/codex <prompt>`
-  and follow-up `@handle <prompt>`
-- `/connect`
-- `/model use <alias>` or `/model del <alias>`
-- `/approval [auto-review|manual]`
-- `/status`
-- `/doctor`
-- `/new`
-- `/resume [session-id]`
-- `/compact`
-- `/exit`
-- `/quit`
-
-Notes:
-
-- `/agent` manages ACP-backed participants and main-controller handoff without
-  bypassing the gateway control plane.
-- ACP tool identity keeps the protocol `kind` and `title` separate. The TUI maps
-  known kinds into existing display verbs, such as `execute -> Ran`, `read ->
-  Read`, `search/fetch -> Search`, and `edit/delete/move -> Patched`.
-- Exploration-style tools are compact when safe; terminal and mutation tools stay
-  prominent and use condensed output panels for long-running work.
-- Completion is available for slash commands, `/agent` arguments, `#path`,
-  `$skill`, and `/resume` session ids.
-- The default theme auto-detects terminal background and color depth. Set
-  `CAELIS_THEME=dark|light|nord|solarized|dracula` to force a theme,
-  `CAELIS_THEME=auto` to return to background-aware defaults, `CAELIS_ACCENT`
-  to override the focus/accent color, or `NO_COLOR=1` to disable styling.
-
-## Runtime And Permissions
-
-`caelis` exposes one CLI permission switch:
-
-- `-permission-mode auto-review`: use model-backed approval review for
-  sensitive requests when the sandbox route requires escalation.
-- `-permission-mode manual`: require an explicit user decision for sensitive
-  requests.
-
-Sandbox backend selection is resolved by the local runtime: macOS uses seatbelt,
-Linux prefers bubblewrap and falls back to Landlock when available, and Windows
-uses the current-user workspace-write sandbox by default. The TUI reports
-sandbox readiness in `/status`; Windows workspace ACL state is repaired lazily
-before sandboxed commands run. The CLI keeps `caelis sandbox reset` and
-`caelis sandbox clean` for sandbox state cleanup. Sandbox permission failures
-are surfaced with backend-neutral denial metadata and the raw path-bearing error
-needed for recovery.
-
-## Sessions
-
-Interactive sessions are stored under `~/.caelis/sessions` by default. The TUI
-starts a fresh session unless `-session` is provided. Resume state is projected
-through the same gateway event stream used by live turns, including ACP
-participants, child tasks, plan updates, and tool panels.
-
-## Development
-
-Caelis currently requires Go `1.25.1` as declared in `go.mod`.
-
-```bash
-make quality
-make test
-make build
-make arch-lint
-make size-report
-```
-
-- `make quality`: runs formatting check, `golangci-lint`, tests, `go vet`, and
-  `go build ./...`
-- `make test`: runs `go test ./...`
-- `make arch-lint`: checks the repository layer boundaries.
-- `make size-report`: prints code size, package, embedded resource, binary, npm,
-  and dependency metrics.
-- `make build`: runs `go build ./...`
-
-The Makefile defaults Go and lint caches to `.tmp/cache` so local quality checks
-do not need writable global Go cache directories. Override the cache roots only
-when you need to share or relocate them:
-
-```bash
-CACHE_ROOT=/tmp/caelis-cache \
-make quality
-```
-
-## Release And Packaging
-
-- Release identity comes from the annotated git tag, such as `vX.Y.Z`.
-- Binary version metadata is injected from the git tag at build/release time.
-- npm package manifests are rewritten from the tag inside the release workflow.
-- Go release archives are produced from `./cmd/caelis` by GoReleaser.
-- npm publishes a thin launcher package from `npm/` plus platform-specific binary
-  packages from `npm/packages/*`.
-- The npm wrapper is file-whitelisted so published artifacts do not include
-  workspace files such as `.env`, `.git`, `.superpowers`, caches, or temporary
-  build outputs.
-
-Local release dry run:
-
-```bash
-make release-dry-run
-```
-
-Release hygiene checklist:
-
-- Keep commit messages descriptive; release notes are generated from git history.
-- Keep README stable and update it only when the architecture or public usage
-  contract changes.
-- Run `make quality`, `git diff --check`, and a release dry run before
-  publishing.
-- Push `main` before creating a tag.
-- For a published release, verify the tag workflow, GitHub Release, and npm
-  package versions after publication.
-
-Tagged releases are driven by annotated `vX.Y.Z` tags pushed at the exact `main`
-commit intended for publication.
+Caelis currently requires the Go version declared in `go.mod`.

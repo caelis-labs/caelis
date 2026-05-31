@@ -26,6 +26,7 @@ import (
 type Document struct {
 	Runtime        config.Runtime              `json:"runtime,omitempty"`
 	Models         ModelCatalog                `json:"models,omitempty"`
+	Prompt         PromptPolicy                `json:"prompt,omitempty"`
 	Compaction     CompactionPolicy            `json:"compaction,omitempty"`
 	Skills         SkillPolicy                 `json:"skills,omitempty"`
 	ModelTools     []model.ToolSpec            `json:"model_tools,omitempty"`
@@ -99,6 +100,24 @@ type CompactionPolicy struct {
 type AutoCompactionPolicy struct {
 	Mode           string  `json:"mode,omitempty"`
 	WatermarkRatio float64 `json:"watermark_ratio,omitempty"`
+}
+
+const (
+	PromptAgentInstructionsAll           = "all"
+	PromptAgentInstructionsWorkspaceOnly = "workspace_only"
+	PromptAgentInstructionsDisabled      = "disabled"
+
+	PromptPluginPromptsEnabled  = "enabled"
+	PromptPluginPromptsDisabled = "disabled"
+
+	PromptEnvironmentEnabled  = "enabled"
+	PromptEnvironmentDisabled = "disabled"
+)
+
+type PromptPolicy struct {
+	AgentInstructions string `json:"agent_instructions,omitempty"`
+	PluginPrompts     string `json:"plugin_prompts,omitempty"`
+	Environment       string `json:"environment,omitempty"`
 }
 
 type CompactionRetentionPolicy struct {
@@ -354,6 +373,30 @@ func (m *Manager) CompactionPolicy() CompactionPolicy {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return NormalizeCompactionPolicy(m.doc.Compaction)
+}
+
+func (m *Manager) PromptPolicy() PromptPolicy {
+	if m == nil {
+		return PromptPolicy{}
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return NormalizePromptPolicy(m.doc.Prompt)
+}
+
+func (m *Manager) SetPromptPolicy(ctx context.Context, policy PromptPolicy) (PromptPolicy, error) {
+	if m == nil {
+		return PromptPolicy{}, errors.New("app/settings: manager is nil")
+	}
+	policy = NormalizePromptPolicy(policy)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	doc := CloneDocument(m.doc)
+	doc.Prompt = policy
+	if err := m.saveDocumentLocked(ctx, doc); err != nil {
+		return PromptPolicy{}, err
+	}
+	return policy, nil
 }
 
 func (m *Manager) SetCompactionPolicy(ctx context.Context, policy CompactionPolicy) (CompactionPolicy, error) {
@@ -759,6 +802,7 @@ func (i *modelIndex) profileReferenced(profileID string) bool {
 func NormalizeDocument(doc Document) Document {
 	doc.Runtime = NormalizeRuntime(doc.Runtime)
 	doc.Models = NormalizeModelCatalog(doc.Models)
+	doc.Prompt = NormalizePromptPolicy(doc.Prompt)
 	doc.Compaction = NormalizeCompactionPolicy(doc.Compaction)
 	doc.Skills = NormalizeSkillPolicy(doc.Skills)
 	doc.ModelTools = NormalizeModelTools(doc.ModelTools)
@@ -806,6 +850,49 @@ func NormalizeCompactionPolicy(policy CompactionPolicy) CompactionPolicy {
 	policy.Auto = NormalizeAutoCompactionPolicy(policy.Auto)
 	policy.Retention = NormalizeCompactionRetentionPolicy(policy.Retention)
 	return policy
+}
+
+func NormalizePromptPolicy(policy PromptPolicy) PromptPolicy {
+	policy.AgentInstructions = normalizePromptAgentInstructions(policy.AgentInstructions)
+	policy.PluginPrompts = normalizePromptToggle(policy.PluginPrompts)
+	policy.Environment = normalizePromptToggle(policy.Environment)
+	return policy
+}
+
+func normalizePromptAgentInstructions(value string) string {
+	switch strings.ToLower(strings.TrimSpace(strings.ReplaceAll(value, "-", "_"))) {
+	case "", "default", "all", "enabled", "enable", "on", "true", "yes":
+		return PromptAgentInstructionsAll
+	case "workspace", "workspace_only", "workspace-only":
+		return PromptAgentInstructionsWorkspaceOnly
+	case "disabled", "disable", "off", "false", "no", "none":
+		return PromptAgentInstructionsDisabled
+	default:
+		return PromptAgentInstructionsAll
+	}
+}
+
+func normalizePromptToggle(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "default", "enabled", "enable", "on", "true", "yes":
+		return PromptPluginPromptsEnabled
+	case "disabled", "disable", "off", "false", "no", "none":
+		return PromptPluginPromptsDisabled
+	default:
+		return PromptPluginPromptsEnabled
+	}
+}
+
+func PromptAgentInstructionsMode(policy PromptPolicy) string {
+	return NormalizePromptPolicy(policy).AgentInstructions
+}
+
+func PromptPluginPromptsAreEnabled(policy PromptPolicy) bool {
+	return NormalizePromptPolicy(policy).PluginPrompts != PromptPluginPromptsDisabled
+}
+
+func PromptEnvironmentIsEnabled(policy PromptPolicy) bool {
+	return NormalizePromptPolicy(policy).Environment != PromptEnvironmentDisabled
 }
 
 func NormalizeCompactionRetentionPolicy(policy CompactionRetentionPolicy) CompactionRetentionPolicy {
@@ -1135,6 +1222,9 @@ func mergeDocuments(defaults Document, loaded Document) Document {
 	if len(loaded.Models.Configs) > 0 || len(loaded.Models.Profiles) > 0 || strings.TrimSpace(loaded.Models.DefaultID) != "" {
 		out.Models = loaded.Models
 	}
+	if promptPolicyConfigured(loaded.Prompt) {
+		out.Prompt = loaded.Prompt
+	}
 	if compactionPolicyConfigured(loaded.Compaction) {
 		out.Compaction = loaded.Compaction
 	}
@@ -1164,6 +1254,13 @@ func compactionPolicyConfigured(policy CompactionPolicy) bool {
 		policy.Auto.WatermarkRatio > 0 ||
 		policy.Retention.TaskIndexLimit > 0 ||
 		policy.Retention.ControllerIndexLimit > 0
+}
+
+func promptPolicyConfigured(policy PromptPolicy) bool {
+	policy = NormalizePromptPolicy(policy)
+	return policy.AgentInstructions != PromptAgentInstructionsAll ||
+		policy.PluginPrompts != PromptPluginPromptsEnabled ||
+		policy.Environment != PromptEnvironmentEnabled
 }
 
 func skillPolicyConfigured(policy SkillPolicy) bool {

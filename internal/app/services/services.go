@@ -39,6 +39,7 @@ const (
 type Services struct {
 	state          *serviceState
 	engine         coreruntime.Engine
+	history        session.EventIndexer
 	sandbox        sandbox.Runtime
 	tasks          TaskResolver
 	controllerRuns ControllerRunSource
@@ -65,6 +66,7 @@ type Config struct {
 	AppName        string
 	UserID         string
 	Engine         coreruntime.Engine
+	HistoryIndex   session.EventIndexer
 	Sandbox        sandbox.Runtime
 	TaskResolver   TaskResolver
 	ControllerRuns ControllerRunSource
@@ -92,6 +94,7 @@ func New(cfg Config) (Services, error) {
 	return Services{
 		state:          &serviceState{runtime: runtimeCfg},
 		engine:         cfg.Engine,
+		history:        cfg.HistoryIndex,
 		sandbox:        cfg.Sandbox,
 		tasks:          cfg.TaskResolver,
 		controllerRuns: cfg.ControllerRuns,
@@ -201,6 +204,20 @@ func (s Services) Events() EventService {
 
 func (s Services) Commands() CommandService {
 	return CommandService{services: s}
+}
+
+func (s Services) promptPolicy() appsettings.PromptPolicy {
+	if s.settings == nil {
+		return appsettings.PromptPolicy{}
+	}
+	return s.settings.PromptPolicy()
+}
+
+func (s Services) skillPolicy() appsettings.SkillPolicy {
+	if s.settings == nil {
+		return appsettings.SkillPolicy{}
+	}
+	return s.settings.SkillPolicy()
 }
 
 type SettingsService struct {
@@ -357,6 +374,16 @@ func (s SettingsService) SetCompaction(ctx context.Context, policy appsettings.C
 	return s.View(ctx)
 }
 
+func (s SettingsService) SetPromptPolicy(ctx context.Context, policy appsettings.PromptPolicy) (appviewmodel.SettingsView, error) {
+	if s.services.settings == nil {
+		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
+	}
+	if _, err := s.services.settings.SetPromptPolicy(ctx, policy); err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
+	return s.View(ctx)
+}
+
 func (s SettingsService) SetSkillPolicy(ctx context.Context, policy appsettings.SkillPolicy) (appviewmodel.SettingsView, error) {
 	if s.services.settings == nil {
 		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
@@ -443,6 +470,7 @@ func normalizeSettingsSandboxBackend(backend string) (string, error) {
 
 func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsView {
 	runtime := appsettings.NormalizeRuntime(doc.Runtime)
+	prompt := appsettings.NormalizePromptPolicy(doc.Prompt)
 	compaction := appsettings.NormalizeCompactionPolicy(doc.Compaction)
 	skills := appsettings.NormalizeSkillPolicy(doc.Skills)
 	return appviewmodel.SettingsView{
@@ -463,6 +491,11 @@ func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsVie
 			WritableRoots: slices.Clone(runtime.Sandbox.WritableRoots),
 			Network:       runtime.Sandbox.Network,
 			HelperPath:    runtime.Sandbox.HelperPath,
+		},
+		Prompt: appviewmodel.PromptSettings{
+			AgentInstructions: prompt.AgentInstructions,
+			PluginPrompts:     prompt.PluginPrompts,
+			Environment:       prompt.Environment,
 		},
 		Compaction: appviewmodel.CompactionSettings{
 			Prompt:               compaction.Prompt,
@@ -1706,6 +1739,10 @@ func (s SessionService) enrichListTitles(ctx context.Context, page session.Sessi
 		if strings.TrimSpace(out.Sessions[i].Session.Title) != "" {
 			continue
 		}
+		if title := s.titleFromHistoryIndex(ctx, out.Sessions[i].Session.Ref); title != "" {
+			out.Sessions[i].Session.Title = title
+			continue
+		}
 		snapshot, err := s.Load(ctx, out.Sessions[i].Session.Ref)
 		if err != nil {
 			continue
@@ -1713,6 +1750,21 @@ func (s SessionService) enrichListTitles(ctx context.Context, page session.Sessi
 		out.Sessions[i].Session.Title = deriveSessionTitle(snapshot, 96)
 	}
 	return out
+}
+
+func (s SessionService) titleFromHistoryIndex(ctx context.Context, ref session.Ref) string {
+	if s.services.history == nil {
+		return ""
+	}
+	page, err := s.services.history.IndexedEvents(ctx, session.EventIndexQuery{
+		Ref:   s.withDefaults(ref),
+		Types: []session.EventType{session.EventUser},
+		Limit: 1,
+	})
+	if err != nil || len(page.Events) == 0 {
+		return ""
+	}
+	return compactSessionTitle(session.EventText(page.Events[0]), 96)
 }
 
 func deriveSessionTitle(snapshot session.Snapshot, limit int) string {

@@ -150,6 +150,25 @@ func settingsPanelSections(view appviewmodel.SettingsPanelView, doc appsettings.
 			Actions: append([]appviewmodel.SettingsPanelAction(nil), view.Sandbox.Actions...),
 		},
 		{
+			ID:    "prompt",
+			Title: "Prompt",
+			Fields: []appviewmodel.SettingsPanelField{
+				selectSettingsField("prompt.agent_instructions", "Agent instructions", settings.Prompt.AgentInstructions, editable, []appviewmodel.SettingsPanelFieldOption{
+					{Value: appsettings.PromptAgentInstructionsAll, Label: "All"},
+					{Value: appsettings.PromptAgentInstructionsWorkspaceOnly, Label: "Workspace only"},
+					{Value: appsettings.PromptAgentInstructionsDisabled, Label: "Disabled"},
+				}),
+				selectSettingsField("prompt.plugin_prompts", "Plugin prompts", settings.Prompt.PluginPrompts, editable, []appviewmodel.SettingsPanelFieldOption{
+					{Value: appsettings.PromptPluginPromptsEnabled, Label: "Enabled"},
+					{Value: appsettings.PromptPluginPromptsDisabled, Label: "Disabled"},
+				}),
+				selectSettingsField("prompt.environment", "Environment context", settings.Prompt.Environment, editable, []appviewmodel.SettingsPanelFieldOption{
+					{Value: appsettings.PromptEnvironmentEnabled, Label: "Enabled"},
+					{Value: appsettings.PromptEnvironmentDisabled, Label: "Disabled"},
+				}),
+			},
+		},
+		{
 			ID:    "compaction",
 			Title: "Compaction",
 			Fields: []appviewmodel.SettingsPanelField{

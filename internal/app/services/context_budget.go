@@ -141,8 +141,10 @@ func (s Services) contextBudgetLimits(cfg appsettings.ModelConfig, configured bo
 func (s Services) estimatedPromptPrefixTokens(ctx context.Context) (int, error) {
 	runtimeCfg := s.Runtime()
 	instructions, err := appprompt.BuildInstructions(ctx, appprompt.Config{
-		AppName: runtimeCfg.AppName,
-		Catalog: s.resources,
+		AppName:      runtimeCfg.AppName,
+		Catalog:      s.resources,
+		PromptPolicy: s.promptPolicy(),
+		SkillPolicy:  s.skillPolicy(),
 	})
 	if err != nil {
 		return 0, err

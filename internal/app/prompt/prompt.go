@@ -26,6 +26,7 @@ type Config struct {
 	WorkspaceDir string
 	BasePrompt   string
 	Catalog      appresources.Catalog
+	PromptPolicy appsettings.PromptPolicy
 	SkillPolicy  appsettings.SkillPolicy
 	ACPAgents    []plugin.ACPAgentDescriptor
 }
@@ -50,23 +51,27 @@ func BuildInstructions(ctx context.Context, cfg Config) ([]string, error) {
 		instructions = append(instructions, renderInstructionBlock("system_instructions", system))
 	}
 	agentPromptIDs := agentFilePromptIDs(cfg.Catalog.AgentFiles)
-	if user := userCustomInstructions(cfg.BasePrompt, cfg.Catalog.AgentFiles); user != "" {
+	if user := userCustomInstructions(cfg.BasePrompt, cfg.Catalog.AgentFiles, cfg.PromptPolicy); user != "" {
 		instructions = append(instructions, renderInstructionBlock("user_custom_instructions", user))
 	}
-	prompts, err := promptInstructions(ctx, cfg.Catalog.Prompts, agentPromptIDs)
-	if err != nil {
-		return nil, err
+	if appsettings.PromptPluginPromptsAreEnabled(cfg.PromptPolicy) {
+		prompts, err := promptInstructions(ctx, cfg.Catalog.Prompts, agentPromptIDs)
+		if err != nil {
+			return nil, err
+		}
+		instructions = append(instructions, prompts...)
 	}
-	instructions = append(instructions, prompts...)
 	if skills := skillsInstruction(cfg.Catalog.Skills, cfg.SkillPolicy); skills != "" {
 		instructions = append(instructions, skills)
 	}
-	env, err := environmentContext(cfg.WorkspaceDir)
-	if err != nil {
-		return nil, err
-	}
-	if env != "" {
-		instructions = append(instructions, env)
+	if appsettings.PromptEnvironmentIsEnabled(cfg.PromptPolicy) {
+		env, err := environmentContext(cfg.WorkspaceDir)
+		if err != nil {
+			return nil, err
+		}
+		if env != "" {
+			instructions = append(instructions, env)
+		}
 	}
 	return compactInstructions(instructions), nil
 }
@@ -227,16 +232,21 @@ func runtimePermissionInstructions() string {
 - Do not repair permission or lock errors by deleting lock files, resetting state, changing ACLs/modes, or requesting write access to protected control directories. If the original operation is necessary, rerun only that operation with escalation.`)
 }
 
-func userCustomInstructions(basePrompt string, agentFiles []appresources.AgentFile) string {
+func userCustomInstructions(basePrompt string, agentFiles []appresources.AgentFile, policy appsettings.PromptPolicy) string {
+	mode := appsettings.PromptAgentInstructionsMode(policy)
 	sections := make([]string, 0, 3)
 	if text := normalizePromptText(basePrompt); text != "" {
 		sections = append(sections, strings.Join([]string{"## Session Overrides", "", text}, "\n"))
 	}
-	if text := normalizePromptText(agentFileText(agentFiles, "agents.workspace")); text != "" {
-		sections = append(sections, strings.Join([]string{"## Workspace Instructions", "", text}, "\n"))
+	if mode != appsettings.PromptAgentInstructionsDisabled {
+		if text := normalizePromptText(agentFileText(agentFiles, "agents.workspace")); text != "" {
+			sections = append(sections, strings.Join([]string{"## Workspace Instructions", "", text}, "\n"))
+		}
 	}
-	if text := normalizePromptText(agentFileText(agentFiles, "agents.global")); text != "" {
-		sections = append(sections, strings.Join([]string{"## Global Instructions", "", text}, "\n"))
+	if mode == appsettings.PromptAgentInstructionsAll {
+		if text := normalizePromptText(agentFileText(agentFiles, "agents.global")); text != "" {
+			sections = append(sections, strings.Join([]string{"## Global Instructions", "", text}, "\n"))
+		}
 	}
 	if len(sections) == 0 {
 		return ""

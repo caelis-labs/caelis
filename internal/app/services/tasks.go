@@ -66,12 +66,21 @@ func (s TaskService) List(ctx context.Context, req ListTasksRequest) (appviewmod
 	supported := false
 
 	if req.IncludeHistory && strings.TrimSpace(req.SessionRef.SessionID) != "" {
-		snapshot, err := s.services.Sessions().Load(ctx, req.SessionRef)
+		indexed, ok, err := s.indexedHistoryItems(ctx, req)
 		if err != nil {
 			return appviewmodel.TaskListView{}, err
 		}
-		items = mergeTaskItemSlices(items, durableTaskItemsFromEvents(snapshot.Events))
-		supported = true
+		if ok {
+			items = mergeTaskItemSlices(items, indexed)
+			supported = true
+		} else {
+			snapshot, err := s.services.Sessions().Load(ctx, req.SessionRef)
+			if err != nil {
+				return appviewmodel.TaskListView{}, err
+			}
+			items = mergeTaskItemSlices(items, durableTaskItemsFromEvents(snapshot.Events))
+			supported = true
+		}
 	}
 
 	lister, ok := s.services.sandbox.(sandbox.SessionLister)
@@ -113,6 +122,50 @@ func (s TaskService) List(ctx context.Context, req ListTasksRequest) (appviewmod
 		Count:     len(items),
 		Tasks:     items,
 	}, nil
+}
+
+func (s TaskService) indexedHistoryItems(ctx context.Context, req ListTasksRequest) ([]appviewmodel.TaskItem, bool, error) {
+	if s.services.history == nil {
+		return nil, false, nil
+	}
+	ref := defaultSessionRef(s.services.Runtime(), req.SessionRef)
+	if strings.TrimSpace(ref.SessionID) == "" {
+		return nil, false, nil
+	}
+	limit := 0
+	if req.Limit > 0 {
+		limit = req.Limit * 8
+		if limit < 32 {
+			limit = 32
+		}
+	}
+	page, err := s.services.history.IndexedEvents(ctx, session.EventIndexQuery{
+		Ref: ref,
+		Types: []session.EventType{
+			session.EventCompact,
+			session.EventToolCall,
+			session.EventToolResult,
+			session.EventLifecycle,
+			session.EventParticipant,
+		},
+		Limit:      limit,
+		Descending: true,
+	})
+	if err != nil {
+		return nil, true, err
+	}
+	return durableTaskItemsFromEvents(reverseEvents(page.Events)), true, nil
+}
+
+func reverseEvents(events []session.Event) []session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	out := make([]session.Event, len(events))
+	for i := range events {
+		out[len(events)-1-i] = events[i]
+	}
+	return out
 }
 
 func (s TaskService) Tail(ctx context.Context, req TaskOutputRequest) (appviewmodel.TaskOutputView, error) {

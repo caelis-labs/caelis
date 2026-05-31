@@ -18,6 +18,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/app/local"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/engine/approval"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
@@ -225,6 +226,34 @@ func TestServeStdioPublishesAvailableCommandsFromAppServices(t *testing.T) {
 	case <-serverErr:
 	case <-time.After(time.Second):
 		t.Fatal("server did not stop")
+	}
+}
+
+func TestACPCommandSurfaceUpdatesUseSharedViewModels(t *testing.T) {
+	updates := acpSurfaceUpdatesFromCommand(appviewmodel.CommandExecutionView{
+		Command: "/task list",
+		TaskPanel: &appviewmodel.TaskPanelView{
+			Supported: true,
+			Summary:   appviewmodel.TaskPanelSummary{Total: 1, Running: 1},
+		},
+		ControllerPanel: &appviewmodel.ControllerPanelView{
+			Active: true,
+			Summary: appviewmodel.ControllerPanelSummary{
+				Agent: "reviewer",
+			},
+		},
+	})
+	if len(updates) != 2 {
+		t.Fatalf("updates = %#v, want task and controller surface updates", updates)
+	}
+	if updates[0].SessionUpdate != schema.UpdateSurface || updates[0].Kind != "task_panel" || updates[0].Surface != "acp" {
+		t.Fatalf("task surface update = %#v", updates[0])
+	}
+	if updates[1].Kind != "controller_panel" {
+		t.Fatalf("controller surface update = %#v", updates[1])
+	}
+	if updates[0].Meta["source"] != "app-services" || updates[0].Meta["command"] != "/task list" {
+		t.Fatalf("surface meta = %#v, want app-service command source", updates[0].Meta)
 	}
 }
 
@@ -1092,7 +1121,7 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if newResp.Modes == nil || newResp.Modes.CurrentModeID != coreruntime.SessionModeAutoReview || len(newResp.Modes.AvailableModes) != 2 {
 		t.Fatalf("new session modes = %#v, want auto-review with two modes", newResp.Modes)
 	}
-	if len(newResp.ConfigOptions) != 12 {
+	if len(newResp.ConfigOptions) != 15 {
 		t.Fatalf("new session config options = %#v, want mode/model/reasoning plus expanded settings options", newResp.ConfigOptions)
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "skill_loading_mode"); option.CurrentValue != appsettings.SkillLoadingModeExplicit {
@@ -1100,6 +1129,15 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "skill_max_expansion_chars"); option.CurrentValue != float64(64000) {
 		t.Fatalf("skill budget option = %#v, want default budget", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "prompt_agent_instructions"); option.CurrentValue != appsettings.PromptAgentInstructionsAll {
+		t.Fatalf("prompt agent instructions option = %#v, want all", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "prompt_plugin_prompts"); option.CurrentValue != appsettings.PromptPluginPromptsEnabled {
+		t.Fatalf("prompt plugin prompts option = %#v, want enabled", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "prompt_environment"); option.CurrentValue != appsettings.PromptEnvironmentEnabled {
+		t.Fatalf("prompt environment option = %#v, want enabled", option)
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "auto_compaction"); option.CurrentValue != "enabled" {
 		t.Fatalf("auto compaction option = %#v, want enabled default", option)
@@ -1154,8 +1192,8 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}, &setConfigResp); err != nil {
 		t.Fatalf("session/set_config_option call error = %v", err)
 	}
-	if len(setConfigResp.ConfigOptions) != 12 {
-		t.Fatalf("set config response = %#v, want twelve config options", setConfigResp.ConfigOptions)
+	if len(setConfigResp.ConfigOptions) != 15 {
+		t.Fatalf("set config response = %#v, want fifteen config options", setConfigResp.ConfigOptions)
 	}
 	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "reasoning_effort"); option.CurrentValue != "high" {
 		t.Fatalf("reasoning option = %#v, want high", option)
@@ -1186,6 +1224,36 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "skill_max_expansion_chars"); option.CurrentValue != float64(2048) {
 		t.Fatalf("skill budget option = %#v, want 2048", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "prompt_agent_instructions",
+		Value:     appsettings.PromptAgentInstructionsWorkspaceOnly,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(prompt_agent_instructions) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "prompt_agent_instructions"); option.CurrentValue != appsettings.PromptAgentInstructionsWorkspaceOnly {
+		t.Fatalf("prompt agent option = %#v, want workspace_only", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "prompt_plugin_prompts",
+		Value:     appsettings.PromptPluginPromptsDisabled,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(prompt_plugin_prompts) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "prompt_plugin_prompts"); option.CurrentValue != appsettings.PromptPluginPromptsDisabled {
+		t.Fatalf("prompt plugin option = %#v, want disabled", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "prompt_environment",
+		Value:     appsettings.PromptEnvironmentDisabled,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(prompt_environment) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "prompt_environment"); option.CurrentValue != appsettings.PromptEnvironmentDisabled {
+		t.Fatalf("prompt environment option = %#v, want disabled", option)
 	}
 	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
@@ -1262,6 +1330,9 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Skills.MaxExpansionChars != 2048 ||
+		doc.Prompt.AgentInstructions != appsettings.PromptAgentInstructionsWorkspaceOnly ||
+		doc.Prompt.PluginPrompts != appsettings.PromptPluginPromptsDisabled ||
+		doc.Prompt.Environment != appsettings.PromptEnvironmentDisabled ||
 		doc.Compaction.Auto.Mode != "disabled" || doc.Compaction.Auto.WatermarkRatio != 0.72 || doc.Compaction.MaxSourceChars != 4096 ||
 		doc.Compaction.Retention.TaskIndexLimit != 17 || doc.Compaction.Retention.ControllerIndexLimit != 6 ||
 		doc.Runtime.Sandbox.Backend != "auto" || doc.Runtime.Sandbox.Network != "disabled" {

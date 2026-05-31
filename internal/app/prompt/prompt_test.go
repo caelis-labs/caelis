@@ -96,6 +96,66 @@ func TestBuildInstructionsCanDisableSkillMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildInstructionsAppliesPromptPolicy(t *testing.T) {
+	instructions, err := BuildInstructions(context.Background(), Config{
+		BasePrompt: "session rule",
+		PromptPolicy: appsettings.PromptPolicy{
+			AgentInstructions: appsettings.PromptAgentInstructionsWorkspaceOnly,
+			PluginPrompts:     appsettings.PromptPluginPromptsDisabled,
+			Environment:       appsettings.PromptEnvironmentDisabled,
+		},
+		Catalog: appresources.Catalog{
+			AgentFiles: []appresources.AgentFile{
+				{ID: "agents.global", Text: "global rule"},
+				{ID: "agents.workspace", Text: "workspace rule"},
+			},
+			Prompts: []plugin.PromptFragment{{ID: "plugin", Scope: "system", Text: "plugin rule"}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(instructions, "\n\n")
+	for _, want := range []string{"session rule", "workspace rule"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("instructions = %q, missing %q", joined, want)
+		}
+	}
+	for _, forbidden := range []string{"global rule", "plugin rule", "<environment_context>"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("instructions = %q, want %q excluded by prompt policy", joined, forbidden)
+		}
+	}
+}
+
+func TestBuildInstructionsPromptPolicyKeepsSessionOverrideWhenAgentFilesDisabled(t *testing.T) {
+	instructions, err := BuildInstructions(context.Background(), Config{
+		BasePrompt: "session rule",
+		PromptPolicy: appsettings.PromptPolicy{
+			AgentInstructions: appsettings.PromptAgentInstructionsDisabled,
+			Environment:       appsettings.PromptEnvironmentDisabled,
+		},
+		Catalog: appresources.Catalog{
+			AgentFiles: []appresources.AgentFile{
+				{ID: "agents.global", Text: "global rule"},
+				{ID: "agents.workspace", Text: "workspace rule"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(instructions, "\n\n")
+	if !strings.Contains(joined, "session rule") {
+		t.Fatalf("instructions = %q, want session override retained", joined)
+	}
+	for _, forbidden := range []string{"global rule", "workspace rule"} {
+		if strings.Contains(joined, forbidden) {
+			t.Fatalf("instructions = %q, want %q excluded by prompt policy", joined, forbidden)
+		}
+	}
+}
+
 func TestBuildInstructionsRejectsMissingPromptPathWithoutInlineFallback(t *testing.T) {
 	_, err := BuildInstructions(context.Background(), Config{
 		Catalog: appresources.Catalog{
