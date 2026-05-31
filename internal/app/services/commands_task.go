@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -56,6 +57,9 @@ func (s CommandService) executeTask(ctx context.Context, ref session.Ref, args s
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
+		if err := s.recordTaskLifecycle(ctx, ref, "wait", view.Task); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
 		return commandTaskOutputView(view), nil
 	case "write":
 		taskID, input, ok := splitCommandArg(rest)
@@ -69,6 +73,9 @@ func (s CommandService) executeTask(ctx context.Context, ref session.Ref, args s
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
+		if err := s.recordTaskLifecycle(ctx, ref, "write", view.Task); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
 		return commandTaskOutputView(view), nil
 	case "cancel":
 		taskID, _, ok := splitCommandArg(rest)
@@ -77,6 +84,9 @@ func (s CommandService) executeTask(ctx context.Context, ref session.Ref, args s
 		}
 		view, err := s.services.Tasks().Cancel(ctx, TaskCancelRequest{TaskOutputRequest: TaskOutputRequest{TaskID: taskID}})
 		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		if err := s.recordTaskLifecycle(ctx, ref, "cancel", view.Task); err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return commandTaskOutputView(view), nil
@@ -102,10 +112,114 @@ func (s CommandService) executeTask(ctx context.Context, ref session.Ref, args s
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
+		if err := s.recordTaskLifecycle(ctx, ref, "start", view.Task); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
 		return commandTaskOutputView(view), nil
 	default:
 		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /task list|tail|wait|write|cancel|release|start")
 	}
+}
+
+func (s CommandService) recordTaskLifecycle(ctx context.Context, ref session.Ref, action string, task appviewmodel.TaskItem) error {
+	ref = defaultSessionRef(s.services.Runtime(), ref)
+	if s.services.engine == nil || strings.TrimSpace(ref.SessionID) == "" || strings.TrimSpace(task.ID) == "" {
+		return nil
+	}
+	now := time.Now().UTC()
+	status := taskLifecycleStatus(task)
+	event := session.Event{
+		Type:       session.EventLifecycle,
+		Visibility: session.VisibilityCanonical,
+		Time:       now,
+		Actor:      session.ActorRef{Kind: session.ActorSystem, ID: "caelis", Name: "caelis"},
+		Scope:      &session.EventScope{Source: "task"},
+		Lifecycle: &session.LifecycleEvent{
+			Status: status,
+			Reason: taskLifecycleReason(action, task, status),
+			Meta: map[string]any{
+				"action":  strings.TrimSpace(action),
+				"task_id": strings.TrimSpace(task.ID),
+			},
+		},
+		Meta: coretool.WithRuntimeTaskMeta(nil, taskLifecycleMeta(action, task)),
+	}
+	if _, err := s.services.engine.RecordEvents(ctx, ref, []session.Event{event}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func taskLifecycleMeta(action string, task appviewmodel.TaskItem) map[string]any {
+	meta := map[string]any{
+		"source":         "command",
+		"action":         strings.TrimSpace(action),
+		"task_id":        strings.TrimSpace(task.ID),
+		"task_kind":      strings.TrimSpace(task.Kind),
+		"state":          commandTaskState(task),
+		"running":        task.Running,
+		"supports_input": task.SupportsInput,
+		"backend":        strings.TrimSpace(task.Backend),
+	}
+	for key, value := range map[string]any{
+		"title":             task.Title,
+		"command":           task.Command,
+		"cwd":               task.CWD,
+		"terminal_id":       task.TerminalID,
+		"agent":             task.Agent,
+		"remote_session_id": task.RemoteSessionID,
+		"output_preview":    task.OutputPreview,
+		"error":             task.Error,
+	} {
+		if text := strings.TrimSpace(fmt.Sprint(value)); text != "" {
+			meta[key] = text
+		}
+	}
+	if task.OutputTruncated {
+		meta["output_truncated"] = true
+	}
+	if task.StdoutCursor > 0 {
+		meta["stdout_cursor"] = task.StdoutCursor
+	}
+	if task.StderrCursor > 0 {
+		meta["stderr_cursor"] = task.StderrCursor
+	}
+	if task.ExitCode != 0 {
+		meta["exit_code"] = task.ExitCode
+	}
+	if !task.StartedAt.IsZero() {
+		meta["started_at"] = task.StartedAt.Format(time.RFC3339Nano)
+	}
+	if !task.UpdatedAt.IsZero() {
+		meta["updated_at"] = task.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	return meta
+}
+
+func taskLifecycleStatus(task appviewmodel.TaskItem) session.LifecycleStatus {
+	state := strings.ToLower(commandTaskState(task))
+	switch state {
+	case "waiting_approval":
+		return session.LifecycleWaitingApproval
+	case "cancelled", "canceled":
+		return session.LifecycleCancelled
+	case "failed":
+		return session.LifecycleFailed
+	case "completed", "complete", "done":
+		return session.LifecycleCompleted
+	}
+	if task.Running || taskStateRunning(state) {
+		return session.LifecycleRunning
+	}
+	if strings.TrimSpace(task.Error) != "" {
+		return session.LifecycleFailed
+	}
+	return session.LifecycleCompleted
+}
+
+func taskLifecycleReason(action string, task appviewmodel.TaskItem, status session.LifecycleStatus) string {
+	parts := []string{"task", strings.TrimSpace(action), strings.TrimSpace(task.ID), string(status)}
+	return strings.Join(commandNonEmpty(parts), " ")
 }
 
 func commandTaskOutputView(view appviewmodel.TaskOutputView) appviewmodel.CommandExecutionView {

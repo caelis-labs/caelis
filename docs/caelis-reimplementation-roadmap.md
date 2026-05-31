@@ -1933,6 +1933,11 @@ be migrated before retiring the old stack:
      `SPAWN` is now recoverable through shared app-service history projection
      from canonical `session.ToolEvent` / subagent participant events, so
      task-panel reload does not depend on TUI-only caches.
+   - Migrated baseline: app-command `/task start|wait|write|cancel` now records
+     canonical `session.EventLifecycle` snapshots with
+     `caelis.runtime.task` metadata. `TaskService` can restore command task
+     history from these events, while TUI transcript replay filters these
+     lifecycle-only task events out of chat rendering.
    - Migrated baseline: bounded terminal previews are now part of the shared
      runtime contracts. Host async sessions and SPAWN journals persist
      `SessionSnapshot.OutputPreview`; shell/TASK results emit the canonical
@@ -1965,8 +1970,8 @@ be migrated before retiring the old stack:
      argument parsing packages have been removed; built-in tool execution now
      has a single core-native implementation path through
      `internal/adapters/tools/*`.
-   - Still pending: richer task lifecycle stores beyond local journals and
-     compact/rich tool-panel display metadata still need core-native adapters.
+   - Still pending: task lifecycle retention/compaction policy and compact/rich
+     tool-panel display metadata still need core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -2222,6 +2227,10 @@ be migrated before retiring the old stack:
       now consume the shared app task service through the gatewaydriver binding,
       while app `CommandService` exposes the same task actions for ACP/APP
       command execution.
+    - Migrated baseline: app command `/task start|wait|write|cancel` persists
+      task action snapshots as canonical lifecycle events with runtime task
+      metadata, so command-driven task history can be rebuilt from the session
+      store without a live sandbox journal or TUI transcript cache.
     - Migrated baseline: host subprocess sessions now have durable output files
       and pid-backed recovery across local runtime restarts. Reopened live host
       sessions are read-only for stdin, but can still be tailed, waited, listed,
@@ -2230,8 +2239,9 @@ be migrated before retiring the old stack:
       bounded terminal preview data with cursors and truncation state, and the
       model-facing TASK output plus shared app task views consume the same
       runtime preview contract.
-    - Still pending: richer visual TUI/APP task panels and task lifecycle
-      stores beyond local journals remain incomplete.
+    - Still pending: richer visual TUI/APP task panels, task lifecycle
+      retention/compaction policy, and optional indexed history stores remain
+      incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -2373,16 +2383,17 @@ Recommended sequence:
    especially visual settings/diagnostics/controller panels.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
-3. Finish richer task lifecycle stores and visual task-panel behavior behind
-   shared app/view-model contracts; host process recovery, SPAWN continuation,
-   and bounded terminal preview metadata are now baseline runtime capabilities.
+3. Finish visual task-panel behavior and task lifecycle retention/indexing
+   behind shared app/view-model contracts; host process recovery, SPAWN
+   continuation, bounded terminal preview metadata, and app-command lifecycle
+   events are now baseline runtime capabilities.
 4. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially task and visual settings panels,
    preserving existing rendering as surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
-7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
-   to canonical events.
+7. Finish remaining canonical-event round trips for compaction edge cases, task
+   retention, subagent lifecycle, and controller handoff diagnostics.
 8. Add full store round-trip and ACP projection parity tests for product flows.
 9. Continue deleting residual surface-compatibility runtime paths once each has
    a service/core-native replacement. The former `app/gatewayapp`, old

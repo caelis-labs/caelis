@@ -6,6 +6,7 @@ import (
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
@@ -161,6 +162,9 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 			})
 		}
 	case coresession.EventLifecycle:
+		if len(coretool.RuntimeTaskMeta(meta)) > 0 {
+			break
+		}
 		if event.Lifecycle != nil {
 			if state := strings.ToLower(strings.TrimSpace(string(event.Lifecycle.Status))); state != "" {
 				out = append(out, TranscriptEvent{

@@ -1042,6 +1042,62 @@ func TestCommandServiceExecuteTaskCommands(t *testing.T) {
 	}
 }
 
+func TestCommandServiceRecordsTaskLifecycleHistory(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+		Sandbox: &recordingTaskRuntime{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-task-history"},
+		Input:      "/task start -- make quality",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(started.Output, "task task-start: running") {
+		t.Fatalf("task start output = %q, want running task", started.Output)
+	}
+	if len(engine.events) != 1 || engine.events[0].Type != session.EventLifecycle {
+		t.Fatalf("recorded events = %#v, want one task lifecycle event", engine.events)
+	}
+	taskMeta := taskRuntimeMeta(engine.events[0].Meta)
+	if taskMeta["task_id"] != "task-start" || taskMeta["action"] != "start" || taskMeta["command"] != "make quality" {
+		t.Fatalf("task lifecycle meta = %#v, want start command metadata", taskMeta)
+	}
+	if engine.events[0].Lifecycle == nil || engine.events[0].Lifecycle.Status != session.LifecycleRunning {
+		t.Fatalf("lifecycle = %#v, want running", engine.events[0].Lifecycle)
+	}
+
+	engine.snapshot = session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-task-history"}},
+		Events:  cloneTestEvents(engine.events),
+	}
+	historySvc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := historySvc.Tasks().List(ctx, ListTasksRequest{
+		SessionRef:     session.Ref{SessionID: "sess-task-history"},
+		IncludeHistory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := findTaskItem(history.Tasks, "task-start")
+	if !ok || task.Source != "command" || task.Action != "start" || task.Command != "make quality" || !task.Running {
+		t.Fatalf("history tasks = %#v, want command task lifecycle restored", history.Tasks)
+	}
+}
+
 func TestCommandServiceExecuteConnectConfiguresAndUsesModel(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -4830,8 +4886,30 @@ func (*recordingTaskRuntime) Run(context.Context, sandbox.CommandRequest) (sandb
 	return sandbox.CommandResult{}, errors.New("not implemented")
 }
 
-func (*recordingTaskRuntime) Start(context.Context, sandbox.CommandRequest) (sandbox.Session, error) {
-	return nil, errors.New("not implemented")
+func (r *recordingTaskRuntime) Start(_ context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
+	if r.sessions == nil {
+		r.sessions = map[string]*recordingTaskSession{}
+	}
+	id := "task-start"
+	for idx := 2; r.sessions[id] != nil; idx++ {
+		id = fmt.Sprintf("task-start-%d", idx)
+	}
+	now := time.Date(2026, 5, 30, 12, 30, 0, 0, time.UTC)
+	session := &recordingTaskSession{
+		snapshot: sandbox.SessionSnapshot{
+			Ref:           sandbox.SessionRef{ID: id, Backend: sandbox.BackendHost},
+			Command:       strings.TrimSpace(req.Command),
+			Dir:           strings.TrimSpace(req.Dir),
+			State:         sandbox.SessionRunning,
+			Running:       true,
+			SupportsInput: true,
+			StartedAt:     now,
+			UpdatedAt:     now,
+			Terminal:      sandbox.TerminalRef{ID: "term-" + id, SessionID: id},
+		},
+	}
+	r.sessions[id] = session
+	return session, nil
 }
 
 func (r *recordingTaskRuntime) Open(_ context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {

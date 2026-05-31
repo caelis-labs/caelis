@@ -326,6 +326,9 @@ func durableTaskItemsFromEvents(events []session.Event) []appviewmodel.TaskItem 
 		if item, ok := durableTaskItemFromParticipantEvent(event); ok {
 			items = mergeTaskItemSlices(items, []appviewmodel.TaskItem{item})
 		}
+		if item, ok := durableTaskItemFromLifecycleEvent(event); ok {
+			items = mergeTaskItemSlices(items, []appviewmodel.TaskItem{item})
+		}
 	}
 	sortTaskItems(items)
 	return items
@@ -421,6 +424,66 @@ func durableTaskItemFromToolEvent(event session.Event) (appviewmodel.TaskItem, b
 		TurnID:          eventTurnID(event),
 		ExitCode:        firstInt(taskMeta["exit_code"], tool.Output["exit_code"]),
 		Error:           firstNonEmpty(stringFromAny(taskMeta["error"]), stringFromAny(tool.Output["error"])),
+		StartedAt:       startedAt,
+		UpdatedAt:       updatedAt,
+	}, true
+}
+
+func durableTaskItemFromLifecycleEvent(event session.Event) (appviewmodel.TaskItem, bool) {
+	if event.Type != session.EventLifecycle || event.Lifecycle == nil {
+		return appviewmodel.TaskItem{}, false
+	}
+	taskMeta := taskRuntimeMeta(event.Meta)
+	taskID := stringFromAny(taskMeta["task_id"])
+	if strings.TrimSpace(taskID) == "" {
+		return appviewmodel.TaskItem{}, false
+	}
+	state := firstNonEmpty(
+		stringFromAny(taskMeta["state"]),
+		strings.TrimSpace(string(event.Lifecycle.Status)),
+	)
+	running, ok := firstBool(taskMeta["running"])
+	if !ok {
+		running = taskStateRunning(state)
+	}
+	updatedAt := firstTime(taskMeta["updated_at"])
+	if updatedAt.IsZero() {
+		updatedAt = event.Time
+	}
+	startedAt := firstTime(taskMeta["started_at"])
+	if startedAt.IsZero() {
+		startedAt = updatedAt
+	}
+	kind := firstNonEmpty(stringFromAny(taskMeta["task_kind"]), stringFromAny(taskMeta["kind"]))
+	command := stringFromAny(taskMeta["command"])
+	agent := stringFromAny(taskMeta["agent"])
+	outputPreview := firstNonEmpty(
+		stringFromAny(taskMeta["output_preview"]),
+		coretool.RuntimeTaskOutputText(event.Meta),
+	)
+	return appviewmodel.TaskItem{
+		ID:              strings.TrimSpace(taskID),
+		Kind:            kind,
+		Source:          firstNonEmpty(stringFromAny(taskMeta["source"]), "history"),
+		Title:           firstNonEmpty(stringFromAny(taskMeta["title"]), taskTitle(session.ToolEvent{Name: "task"}, kind, agent, command)),
+		Backend:         stringFromAny(taskMeta["backend"]),
+		Action:          stringFromAny(taskMeta["action"]),
+		State:           state,
+		Running:         running,
+		SupportsInput:   boolFromAny(taskMeta["supports_input"]),
+		Command:         command,
+		CWD:             stringFromAny(taskMeta["cwd"]),
+		TerminalID:      stringFromAny(taskMeta["terminal_id"]),
+		Agent:           agent,
+		RemoteSessionID: stringFromAny(taskMeta["remote_session_id"]),
+		StdoutCursor:    firstInt64(taskMeta["stdout_cursor"]),
+		StderrCursor:    firstInt64(taskMeta["stderr_cursor"]),
+		OutputPreview:   outputPreview,
+		OutputTruncated: boolFromAny(taskMeta["output_truncated"]),
+		EventID:         strings.TrimSpace(event.ID),
+		TurnID:          eventTurnID(event),
+		ExitCode:        firstInt(taskMeta["exit_code"]),
+		Error:           stringFromAny(taskMeta["error"]),
 		StartedAt:       startedAt,
 		UpdatedAt:       updatedAt,
 	}, true

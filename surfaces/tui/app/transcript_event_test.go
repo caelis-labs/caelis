@@ -6,6 +6,7 @@ import (
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -154,6 +155,25 @@ func TestProjectCoreSessionEventToTranscriptEvents_ProjectsAutoReviewApproval(t 
 	}
 	if !strings.Contains(got.ApprovalText, "Automatic approval review denied") || !strings.Contains(got.ApprovalText, "not narrow enough") {
 		t.Fatalf("approval text = %q, want compact auto-review text with rationale", got.ApprovalText)
+	}
+}
+
+func TestProjectCoreSessionEventToTranscriptEvents_IgnoresTaskLifecycle(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "task-lifecycle",
+		SessionID: "root-session",
+		Type:      coresession.EventLifecycle,
+		Lifecycle: &coresession.LifecycleEvent{Status: coresession.LifecycleRunning, Reason: "task start task-1 running"},
+		Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+			"task_id": "task-1",
+			"action":  "start",
+			"state":   "running",
+		}),
+	})
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want task lifecycle kept out of transcript rendering", events)
 	}
 }
 
