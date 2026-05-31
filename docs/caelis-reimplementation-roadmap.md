@@ -495,7 +495,7 @@ Good reuse candidates:
 
 - ACP schema, JSON-RPC, client, server, and projection ideas from
   `protocol/acp`.
-- Provider implementation details from `impl/model/providers`.
+- Provider behavior already ported into `internal/adapters/model/*`.
 - Sandbox backend implementation details from `impl/sandbox/*`.
 - Built-in tool behavior from `impl/tool/builtin/*`.
 - Canonical message and event ideas from `ports/model` and `ports/session`.
@@ -918,7 +918,11 @@ The completed work is intentionally limited to the reusable skeleton:
 - App provider configuration baseline: provider endpoint API/auth semantics now
   live in `core/model`; `internal/cli`, `internal/app/services`, and the
   service-bound TUI connect/model config path no longer import
-  `impl/model/providers` or `ports/model` for those settings contracts.
+  the old provider stack or `ports/model` for those settings contracts.
+- Legacy provider/catalog stack removal: the old provider factory, old layered
+  model catalog, embedded models.dev snapshot, and the generator that wrote
+  that snapshot have been deleted. Provider implementation now lives only in
+  core-native adapters plus the shared app model catalog.
 - App model selection baseline: `ModelService.Selection` now projects current
   configured model, provider options, plugin provider aliases, discovered
   remote models, built-in catalog candidates, and capability/reasoning metadata
@@ -1432,7 +1436,7 @@ be migrated before retiring the old stack:
      `core/model`, and `ports/model` only re-exports them for residual bridge
      code. Production CLI config normalization, shared connect catalog data,
      and the app-service-bound TUI connect/model shell now depend on the core
-     contract instead of `impl/model/providers` or broad model ports for
+     contract instead of the old provider stack or broad model ports for
      provider setup semantics.
    - Still pending: remaining TUI command integration and additional non-model
      ACP config providers beyond the first settings-backed set.
@@ -1496,11 +1500,12 @@ be migrated before retiring the old stack:
      preserve streamed text/reasoning/tool-call state in canonical model
      messages, carry usage and raw finish metadata into the final response, and
      keep JSON fallbacks for compatible mocks or non-SSE responses.
+   - Migrated baseline: the old provider factory package, old model catalog
+     package, embedded dynamic catalog snapshot, and old snapshot generator
+     have been removed now that production provider setup and runtime requests
+     use `core/model`, core-native adapters, and the shared app model catalog.
    - Still pending: provider-specific tool/argument behavior beyond the
-     migrated profiles and removal of the corresponding old
-     `impl/model/providers` code. The old package should now be treated as a
-     removable implementation asset for residual bridge paths, not as the owner
-     of provider configuration semantics.
+     migrated profiles.
 
 7. Sandbox backends and policy
    - The new stack has a core-native host sandbox adapter plus a thin internal
@@ -1961,9 +1966,8 @@ Recommended sequence:
 1. Finish the remaining large TUI command migrations against app services,
    especially the remaining `/connect` wizard UI rendering shell, live remote
    controller process lifecycle, and settings/diagnostics panel parity.
-2. Finish deleting the residual old `impl/model/providers` stack after any
-   remaining bridge paths are migrated, while preserving only the high-cohesion
-   provider behavior already ported behind `core/model.Provider`.
+2. Close the remaining provider-specific behavior gaps in core-native adapters
+   without reintroducing a parallel provider factory/catalog stack.
 3. Port sandbox router/backends and permission policy before moving mutating
    tools.
 4. Finish durable async SPAWN task control and durable task runtime behavior
