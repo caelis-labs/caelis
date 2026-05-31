@@ -36,9 +36,6 @@ Key issues:
   model registry, sandbox routing, prompt assembly, runtime rebuild, ACP agent
   management, and app services all lived together. That package is now deleted;
   remaining cleanup should prevent the same shape from reappearing elsewhere.
-- `impl/agent/local` directly knows ACP controller and subagent concrete
-  implementations, which weakens the idea that built-in agents and external ACP
-  agents meet only at the gateway/runtime boundary.
 - `surfaces/tui/app` and `surfaces/tui/gatewaydriver` are large enough that UI
   state, driver API, rendering, and product commands are difficult to evolve
   independently.
@@ -512,8 +509,6 @@ Rewrite, heavily reshape, or remove:
 - The old giant `app/gatewayapp` composition root has been removed; do not
   recreate it as another broad facade.
 - Global `ports/*` package taxonomy.
-- `impl/agent/local` directly coupling to concrete ACP controller/subagent
-  implementations.
 - `surfaces/tui/gatewaydriver` as a duplicated product API layer.
 - Legacy event compatibility fallbacks and heuristic replay reconstruction.
 
@@ -1024,9 +1019,14 @@ The completed work is intentionally limited to the reusable skeleton:
   serves ACP through `internal/app/local` and `internal/surface/acpserver` with
   a small core-native scripted provider, allowing the old
   `impl/agent/acp` root runtime adapter plus its assembly, loader, and terminal
-  helper packages to be deleted. The remaining `impl/agent/acp/controller` and
-  `impl/agent/acp/subagent` packages are still the consumed-external-ACP client
-  assets used by the local runtime.
+  helper packages to be deleted.
+- Legacy agent runtime/client removal: after participant invocation,
+  controller handoff, SPAWN, async subagent tasks, terminal callbacks,
+  compaction, approval policy, and app-service turn routing all moved onto
+  `internal/app/local`, `internal/engine/*`, and
+  `internal/adapters/acpagent/external`, the orphaned `impl/agent/local` stack
+  and the remaining old `impl/agent/acp/{controller,subagent}` client packages
+  were deleted instead of being kept as a parallel agent runtime.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and

@@ -656,6 +656,95 @@ func TestStackRunsAsyncSpawnThroughTaskWait(t *testing.T) {
 	}
 }
 
+func TestStackAsyncSpawnTaskSurvivesCallerContextCancelAfterYield(t *testing.T) {
+	rawSpawnInput, err := json.Marshal(map[string]any{"agent": "helper", "prompt": "delegate", "yield_time_ms": 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &scriptedProvider{responses: []model.Message{
+		{
+			Role: model.RoleAssistant,
+			Parts: []model.Part{{
+				Kind: model.PartToolUse,
+				ToolUse: &model.ToolCall{
+					ID:    "spawn-call",
+					Name:  toolspawn.ToolName,
+					Input: rawSpawnInput,
+				},
+			}},
+		},
+		{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("spawn yielded")},
+		},
+	}}
+	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stack, err := New(Config{
+		Runtime:      config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceCWD: t.TempDir()},
+		Provider:     provider,
+		Sandbox:      rt,
+		BuiltinTools: true,
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "helper",
+			AgentName: "helper",
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:       []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1", "CAELIS_TEST_EXTERNAL_ACP_DELAY_MS=150"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	active, err := stack.Services().Sessions().Start(context.Background(), services.StartSessionRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	turnCtx, cancelTurn := context.WithCancel(context.Background())
+	turn, err := stack.Services().Turns().Begin(turnCtx, services.BeginTurnRequest{
+		SessionRef: session.Ref{SessionID: active.SessionID},
+		Input:      "spawn helper async",
+	})
+	if err != nil {
+		cancelTurn()
+		t.Fatal(err)
+	}
+	var liveEvents []session.Event
+	for env := range turn.Events() {
+		if env.Err != "" {
+			cancelTurn()
+			t.Fatal(env.Err)
+		}
+		liveEvents = append(liveEvents, env.Event)
+	}
+	cancelTurn()
+
+	spawnResult := findToolResult(liveEvents, toolspawn.ToolName)
+	if spawnResult == nil || spawnResult.Tool.Output["state"] != "running" {
+		t.Fatalf("spawn result = %#v, want yielded running task", spawnResult)
+	}
+	waited, err := stack.Services().Tasks().Wait(context.Background(), services.TaskWaitRequest{
+		TaskOutputRequest: services.TaskOutputRequest{TaskID: "spawn-call"},
+		YieldTimeMS:       2000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if waited.Task.Running || waited.Task.State != "completed" || !strings.Contains(waited.Stdout, "external helper response") {
+		t.Fatalf("waited task = %#v, want completed helper response", waited)
+	}
+	snapshot, err := stack.Services().Sessions().Load(context.Background(), session.Ref{SessionID: active.SessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childEvent := findSubagentEvent(snapshot.Events, "spawn-call")
+	if childEvent == nil || session.EventText(*childEvent) != "external helper response" {
+		t.Fatalf("stored events = %#v, want canonical async subagent response after caller cancel", snapshot.Events)
+	}
+}
+
 func TestStackRestoresCompletedAsyncSpawnTaskFromJournal(t *testing.T) {
 	rawSpawnInput, err := json.Marshal(map[string]any{"agent": "helper", "prompt": "delegate", "yield_time_ms": 1})
 	if err != nil {
