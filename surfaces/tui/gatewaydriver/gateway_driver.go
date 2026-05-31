@@ -859,8 +859,15 @@ func (t gatewayTurn) Submit(ctx context.Context, submission coreruntime.Submissi
 	}
 	return t.handle.Submit(ctx, kernelSubmitRequestFromCoreSubmission(submission))
 }
-func (t gatewayTurn) Cancel() kernel.CancelResult { return t.handle.Cancel() }
-func (t gatewayTurn) Close() error                { return t.handle.Close() }
+func (t gatewayTurn) Cancel() coreruntime.CancelResult {
+	result := t.handle.Cancel()
+	status := coreruntime.CancelAlreadyCancelled
+	if result.Status == kernel.CancelStatusCancelled {
+		status = coreruntime.CancelCancelled
+	}
+	return coreruntime.CancelResult{Status: status, Err: result.Err}
+}
+func (t gatewayTurn) Close() error { return t.handle.Close() }
 
 func kernelSubmitRequestFromCoreSubmission(in coreruntime.Submission) kernel.SubmitRequest {
 	out := kernel.SubmitRequest{

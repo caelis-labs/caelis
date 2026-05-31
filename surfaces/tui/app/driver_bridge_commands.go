@@ -198,8 +198,7 @@ func dispatchMentionCommandWithContext(ctx context.Context, driver tuidriver.Dri
 	if send != nil {
 		forwardGatewayTurnEvents(ctx, driver, turn, sender)
 	} else {
-		for range turn.Events() {
-		}
+		drainTurnEvents(ctx, turn)
 	}
 	return TaskResultMsg{}
 }
@@ -292,6 +291,10 @@ type sessionEventReplayDriver interface {
 	ReplaySessionEvents(context.Context) ([]appviewmodel.SessionEventEnvelope, error)
 }
 
+type legacyGatewayReplayDriver interface {
+	ReplayEvents(context.Context) ([]kernel.EventEnvelope, error)
+}
+
 func replayResumeTranscriptEvents(ctx context.Context, driver tuidriver.Driver) ([]TranscriptEvent, error) {
 	if appReplay, ok := driver.(sessionEventReplayDriver); ok {
 		events, err := appReplay.ReplaySessionEvents(ctx)
@@ -299,7 +302,11 @@ func replayResumeTranscriptEvents(ctx context.Context, driver tuidriver.Driver) 
 			return resumeSessionEventReplayTranscriptEvents(events), nil
 		}
 	}
-	events, err := driver.ReplayEvents(ctx)
+	legacyReplay, ok := driver.(legacyGatewayReplayDriver)
+	if !ok {
+		return nil, nil
+	}
+	events, err := legacyReplay.ReplayEvents(ctx)
 	if err != nil {
 		return nil, err
 	}

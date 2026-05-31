@@ -2137,8 +2137,8 @@ func (t *bridgeTestTurn) Submit(_ context.Context, submission coreruntime.Submis
 	t.submissions = append(t.submissions, submission)
 	return nil
 }
-func (t *bridgeTestTurn) Cancel() kernel.CancelResult {
-	return kernel.CancelResult{Status: kernel.CancelStatusAlreadyCancelled}
+func (t *bridgeTestTurn) Cancel() coreruntime.CancelResult {
+	return coreruntime.CancelResult{Status: coreruntime.CancelAlreadyCancelled}
 }
 func (t *bridgeTestTurn) Close() error { return nil }
 

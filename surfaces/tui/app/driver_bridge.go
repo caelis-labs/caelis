@@ -476,8 +476,7 @@ func executeLineViaDriverWithContext(ctx context.Context, driver tuidriver.Drive
 	if send != nil {
 		forwardGatewayTurnEvents(ctx, driver, turn, sender)
 	} else {
-		for range turn.Events() {
-		}
+		drainTurnEvents(ctx, turn)
 	}
 
 	return TaskResultMsg{}

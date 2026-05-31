@@ -1388,13 +1388,19 @@ func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []kernel.EventEnvelope 
 	if turn == nil {
 		t.Fatal("turn = nil")
 	}
+	legacyTurn, ok := turn.(interface {
+		Events() <-chan kernel.EventEnvelope
+	})
+	if !ok {
+		t.Fatal("turn does not expose legacy gateway events")
+	}
 	defer turn.Close()
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	var out []kernel.EventEnvelope
 	for {
 		select {
-		case env, ok := <-turn.Events():
+		case env, ok := <-legacyTurn.Events():
 			if !ok {
 				return out
 			}

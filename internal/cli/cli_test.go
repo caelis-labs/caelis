@@ -513,13 +513,19 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 		t.Fatal("Submit() turn = nil, want core turn")
 	}
 	defer turn.Close()
+	legacyTurn, ok := turn.(interface {
+		Events() <-chan kernel.EventEnvelope
+	})
+	if !ok {
+		t.Fatal("turn does not expose legacy gateway events")
+	}
 
 	var assistantText string
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case env, ok := <-turn.Events():
+		case env, ok := <-legacyTurn.Events():
 			if !ok {
 				if assistantText != "core tui pong" {
 					t.Fatalf("assistant text = %q, want core tui pong", assistantText)

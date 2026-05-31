@@ -1403,6 +1403,11 @@ be migrated before retiring the old stack:
    - Migrated baseline: the TUI driver session contract now returns
      `core/session` session/ref values; old `ports/session` session conversion
      is contained in the gatewaydriver compatibility boundary.
+   - Migrated baseline: the public TUI driver contract no longer exposes old
+     `kernel.EventEnvelope` live/replay streams or `kernel.CancelResult`.
+     App-service turns use core submissions, core sessions, and core cancel
+     results; legacy gateway event stream/replay support is now an internal
+     Bubble Tea bridge fallback for non app-service drivers.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1411,8 +1416,8 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: the current TUI driver/gateway bridge still imports the old
-     `ports/session`, `ports/stream`, and public `kernel` event contracts for
+   - Still pending: the current TUI app/gatewaydriver bridge still imports the
+     old `ports/session`, `ports/stream`, and public `kernel` event contracts for
      terminal stream subscriptions, approval payloads, non app-service
      replay fallback, participants, internal session bookkeeping, and
      historical usage extraction. Retiring

@@ -29,6 +29,10 @@ type sessionEventTurn interface {
 	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 }
 
+type legacyGatewayEventTurn interface {
+	Events() <-chan kernel.EventEnvelope
+}
+
 func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender) {
 	ctx = contextOrBackground(ctx)
 	if sender != nil {
@@ -44,7 +48,11 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn
 			return
 		}
 	}
-	events := turn.Events()
+	legacyTurn, ok := turn.(legacyGatewayEventTurn)
+	if !ok {
+		return
+	}
+	events := legacyTurn.Events()
 	if events == nil {
 		return
 	}
@@ -68,6 +76,48 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn
 		}
 	}
 	batcher.flush(send)
+}
+
+func drainTurnEvents(ctx context.Context, turn tuidriver.Turn) {
+	ctx = contextOrBackground(ctx)
+	if turn == nil {
+		return
+	}
+	if appTurn, ok := turn.(sessionEventTurn); ok {
+		if events := appTurn.SessionEvents(); events != nil {
+			drainAppSessionTurnEvents(ctx, events)
+			return
+		}
+	}
+	if legacyTurn, ok := turn.(legacyGatewayEventTurn); ok {
+		drainLegacyGatewayTurnEvents(ctx, legacyTurn.Events())
+	}
+}
+
+func drainAppSessionTurnEvents(ctx context.Context, events <-chan appviewmodel.SessionEventEnvelope) {
+	for events != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-events:
+			if !ok {
+				events = nil
+			}
+		}
+	}
+}
+
+func drainLegacyGatewayTurnEvents(ctx context.Context, events <-chan kernel.EventEnvelope) {
+	for events != nil {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-events:
+			if !ok {
+				events = nil
+			}
+		}
+	}
 }
 
 func forwardAppSessionTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), events <-chan appviewmodel.SessionEventEnvelope) {

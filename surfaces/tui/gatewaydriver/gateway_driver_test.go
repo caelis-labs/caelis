@@ -73,12 +73,18 @@ func closeGatewayDriverTestTurn(t *testing.T, turn Turn) {
 	if turn == nil {
 		return
 	}
+	legacyTurn, ok := turn.(interface {
+		Events() <-chan kernel.EventEnvelope
+	})
+	if !ok {
+		t.Fatal("turn does not expose legacy gateway events")
+	}
 	turn.Cancel()
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case _, ok := <-turn.Events():
+		case _, ok := <-legacyTurn.Events():
 			if !ok {
 				if err := turn.Close(); err != nil {
 					t.Fatalf("Close() error = %v", err)
