@@ -659,6 +659,9 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if !ok || agent.InputHint != "list|use|add|install|update|remove" {
 		t.Fatalf("agent command = %#v ok=%v, want management hint", agent, ok)
 	}
+	if got := commandArgValues(agent); !slices.Equal(got, []string{"use", "add", "install", "update", "list", "remove"}) {
+		t.Fatalf("agent arg candidates = %#v, want shared root actions", agent.ArgCandidates)
+	}
 	controller, ok := findCommandView(view.Commands, "controller")
 	if !ok || controller.InputHint != "[set <option-id> <value>]" {
 		t.Fatalf("controller command = %#v ok=%v, want controller config hint", controller, ok)
@@ -671,6 +674,9 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if !ok || task.InputHint != "list|tail|wait|write|cancel|release|start" {
 		t.Fatalf("task command = %#v ok=%v, want task management hint", task, ok)
 	}
+	if got := commandArgValues(task); !slices.Equal(got, []string{"list", "tail", "wait", "write", "cancel", "release", "start"}) {
+		t.Fatalf("task arg candidates = %#v, want shared task actions", task.ArgCandidates)
+	}
 	doctor, ok := findCommandView(view.Commands, "doctor")
 	if !ok || doctor.InputHint != "[fix]" {
 		t.Fatalf("doctor command = %#v ok=%v, want doctor hint", doctor, ok)
@@ -681,6 +687,9 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	settings, ok := findCommandView(view.Commands, "settings")
 	if !ok || settings.InputHint != "[set <field-id> <value>|run <action-id> [confirm]]" {
 		t.Fatalf("settings command = %#v ok=%v, want settings panel hint", settings, ok)
+	}
+	if got := commandArgValues(settings); !slices.Equal(got, []string{"set", "run"}) {
+		t.Fatalf("settings arg candidates = %#v, want shared settings actions", settings.ArgCandidates)
 	}
 }
 
@@ -5896,6 +5905,14 @@ func findCommandView(commands []appviewmodel.CommandView, name string) (appviewm
 		}
 	}
 	return appviewmodel.CommandView{}, false
+}
+
+func commandArgValues(command appviewmodel.CommandView) []string {
+	out := make([]string, 0, len(command.ArgCandidates))
+	for _, candidate := range command.ArgCandidates {
+		out = append(out, candidate.Value)
+	}
+	return out
 }
 
 func doctorCheckSeverity(checks []appviewmodel.DoctorCheck, id string, severity string) bool {

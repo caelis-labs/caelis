@@ -23,15 +23,15 @@ type CommandExecutionRequest struct {
 
 func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) (appviewmodel.CommandCatalogView, error) {
 	commands := []appviewmodel.CommandView{
-		{Name: "agent", Description: "Manage ACP agents", InputHint: "list|use|add|install|update|remove"},
+		{Name: "agent", Description: "Manage ACP agents", InputHint: "list|use|add|install|update|remove", ArgCandidates: commandAgentArgCandidates()},
 		{Name: "connect", Description: "Configure a model provider", InputHint: "provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]"},
 		{Name: "controller", Description: "Show or configure the active ACP controller", InputHint: "[set <option-id> <value>]"},
-		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
-		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual|toggle]"},
+		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>", ArgCandidates: commandModelArgCandidates()},
+		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual|toggle]", ArgCandidates: commandApprovalArgCandidates()},
 		{Name: "status", Description: "Show current runtime status"},
-		{Name: "settings", Description: "Show shared settings and diagnostics panel", InputHint: "[set <field-id> <value>|run <action-id> [confirm]]"},
-		{Name: "doctor", Description: "Diagnose model, session store, resources, and sandbox readiness", InputHint: "[fix]"},
-		{Name: "task", Description: "Inspect and control live or durable tasks", InputHint: "list|tail|wait|write|cancel|release|start"},
+		{Name: "settings", Description: "Show shared settings and diagnostics panel", InputHint: "[set <field-id> <value>|run <action-id> [confirm]]", ArgCandidates: commandSettingsArgCandidates()},
+		{Name: "doctor", Description: "Diagnose model, session store, resources, and sandbox readiness", InputHint: "[fix]", ArgCandidates: commandDoctorArgCandidates()},
+		{Name: "task", Description: "Inspect and control live or durable tasks", InputHint: "list|tail|wait|write|cancel|release|start", ArgCandidates: commandTaskArgCandidates()},
 		{Name: "new", Description: "Start a fresh session"},
 		{Name: "resume", Description: "Resume a previous session", InputHint: "[session id]"},
 		{Name: "compact", Description: "Compact the current conversation"},
@@ -67,6 +67,56 @@ func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) 
 		})
 	}
 	return appviewmodel.CommandCatalogView{Commands: commands}, nil
+}
+
+func commandAgentArgCandidates() []appviewmodel.CommandArgCandidate {
+	return []appviewmodel.CommandArgCandidate{
+		{Value: "use", Display: "use", Detail: "Switch the main controller"},
+		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
+		{Value: "install", Display: "install", Detail: "Install and register an external ACP adapter"},
+		{Value: "update", Display: "update", Detail: "Update and register an external ACP adapter"},
+		{Value: "list", Display: "list", Detail: "List registered ACP agents"},
+		{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
+	}
+}
+
+func commandModelArgCandidates() []appviewmodel.CommandArgCandidate {
+	return []appviewmodel.CommandArgCandidate{
+		{Value: "use", Display: "use", Detail: "Switch current model alias"},
+		{Value: "del", Display: "del", Detail: "Delete stored model alias"},
+	}
+}
+
+func commandApprovalArgCandidates() []appviewmodel.CommandArgCandidate {
+	return []appviewmodel.CommandArgCandidate{
+		{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
+		{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
+	}
+}
+
+func commandSettingsArgCandidates() []appviewmodel.CommandArgCandidate {
+	return []appviewmodel.CommandArgCandidate{
+		{Value: "set", Display: "set", Detail: "Edit a settings field"},
+		{Value: "run", Display: "run", Detail: "Run a settings panel action"},
+	}
+}
+
+func commandTaskArgCandidates() []appviewmodel.CommandArgCandidate {
+	return []appviewmodel.CommandArgCandidate{
+		{Value: "list", Display: "list", Detail: "List live and durable tasks"},
+		{Value: "tail", Display: "tail", Detail: "Read task output"},
+		{Value: "wait", Display: "wait", Detail: "Wait briefly and read output"},
+		{Value: "write", Display: "write", Detail: "Send input to a task"},
+		{Value: "cancel", Display: "cancel", Detail: "Cancel a running task"},
+		{Value: "release", Display: "release", Detail: "Close a completed task handle"},
+		{Value: "start", Display: "start", Detail: "Start a sandbox task"},
+	}
+}
+
+func commandDoctorArgCandidates() []appviewmodel.CommandArgCandidate {
+	return []appviewmodel.CommandArgCandidate{
+		{Value: "fix", Display: "fix", Detail: "Repair Windows sandbox ACLs"},
+	}
 }
 
 func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest) (appviewmodel.CommandExecutionView, error) {

@@ -2,8 +2,6 @@ package commands
 
 import (
 	"strings"
-
-	driver "github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
 // CommandSpec describes one slash command exposed by the TUI command registry.
@@ -14,7 +12,6 @@ type CommandSpec struct {
 	Details          []string
 	Hidden           bool
 	LocalDuringACP   bool
-	ArgCandidates    []driver.SlashArgCandidate
 	DynamicCompleter bool
 }
 
@@ -22,15 +19,15 @@ type CommandSpec struct {
 func DefaultSpecs() []CommandSpec {
 	specs := []CommandSpec{
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
-		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install/update <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
+		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install/update <adapter>, use <agent|local>, remove <agent>"}, DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
 		{Name: "controller", Usage: "/controller <action>", Description: "Show or configure the active ACP controller", LocalDuringACP: true, Details: []string{"actions: set <option-id> <value>"}},
-		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
-		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
+		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, DynamicCompleter: true},
+		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
-		{Name: "settings", Usage: "/settings <action>", Description: "Show or edit shared settings", LocalDuringACP: true, Details: []string{"actions: set <field-id> <value>, run <action-id> [confirm]"}, ArgCandidates: settingsRootCandidates(), DynamicCompleter: true},
-		{Name: "task", Usage: "/task <action>", Description: "Inspect and control live or durable tasks", LocalDuringACP: true, Details: []string{"actions: list, tail <id>, wait <id>, write <id>, cancel <id>, release <id>, start <command>"}, ArgCandidates: taskRootCandidates(), DynamicCompleter: true},
-		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
+		{Name: "settings", Usage: "/settings <action>", Description: "Show or edit shared settings", LocalDuringACP: true, Details: []string{"actions: set <field-id> <value>, run <action-id> [confirm]"}, DynamicCompleter: true},
+		{Name: "task", Usage: "/task <action>", Description: "Inspect and control live or durable tasks", LocalDuringACP: true, Details: []string{"actions: list, tail <id>, wait <id>, write <id>, cancel <id>, release <id>, start <command>"}, DynamicCompleter: true},
+		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
 		{Name: "resume", Usage: "/resume [session-id]", Description: "List recent sessions or resume one by id", LocalDuringACP: true, DynamicCompleter: true},
 		{Name: "compact", Usage: "/compact", Description: "Compact the current session transcript"},
@@ -158,69 +155,6 @@ func padRight(value string, width int) string {
 		return value
 	}
 	return value + strings.Repeat(" ", width-count)
-}
-
-// RootArgCandidates returns static first-level argument candidates for command.
-// Dynamic completions such as model aliases, agent catalogs, and connect wizard
-// values remain owned by the driver.
-func RootArgCandidates(command string) []driver.SlashArgCandidate {
-	spec, ok := Lookup(command)
-	if !ok || len(spec.ArgCandidates) == 0 {
-		return nil
-	}
-	out := make([]driver.SlashArgCandidate, len(spec.ArgCandidates))
-	copy(out, spec.ArgCandidates)
-	return out
-}
-
-func agentRootCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "use", Display: "use", Detail: "Switch the main controller"},
-		{Value: "add", Display: "add", Detail: "Register a built-in ACP agent"},
-		{Value: "install", Display: "install", Detail: "Install and register an external ACP adapter"},
-		{Value: "update", Display: "update", Detail: "Update and register an external ACP adapter"},
-		{Value: "list", Display: "list", Detail: "List registered ACP agents"},
-		{Value: "remove", Display: "remove", Detail: "Unregister an ACP agent"},
-	}
-}
-
-func modelRootCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "use", Display: "use", Detail: "Switch current model alias"},
-		{Value: "del", Display: "del", Detail: "Delete stored model alias"},
-	}
-}
-
-func approvalCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
-		{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
-	}
-}
-
-func settingsRootCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "set", Display: "set", Detail: "Edit a settings field"},
-		{Value: "run", Display: "run", Detail: "Run a settings panel action"},
-	}
-}
-
-func taskRootCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "list", Display: "list", Detail: "List live and durable tasks"},
-		{Value: "tail", Display: "tail", Detail: "Read task output"},
-		{Value: "wait", Display: "wait", Detail: "Wait briefly and read output"},
-		{Value: "write", Display: "write", Detail: "Send input to a task"},
-		{Value: "cancel", Display: "cancel", Detail: "Cancel a running task"},
-		{Value: "release", Display: "release", Detail: "Close a completed task handle"},
-		{Value: "start", Display: "start", Detail: "Start a sandbox task"},
-	}
-}
-
-func doctorCandidates() []driver.SlashArgCandidate {
-	return []driver.SlashArgCandidate{
-		{Value: "fix", Display: "fix", Detail: "Repair Windows sandbox ACLs"},
-	}
 }
 
 func normalizeName(name string) string {

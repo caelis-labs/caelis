@@ -7,9 +7,16 @@ type CommandCatalogView struct {
 }
 
 type CommandView struct {
-	Name        string `json:"name,omitempty"`
-	Description string `json:"description,omitempty"`
-	InputHint   string `json:"input_hint,omitempty"`
+	Name          string                `json:"name,omitempty"`
+	Description   string                `json:"description,omitempty"`
+	InputHint     string                `json:"input_hint,omitempty"`
+	ArgCandidates []CommandArgCandidate `json:"arg_candidates,omitempty"`
+}
+
+type CommandArgCandidate struct {
+	Value   string `json:"value,omitempty"`
+	Display string `json:"display,omitempty"`
+	Detail  string `json:"detail,omitempty"`
 }
 
 type CommandExecutionView struct {

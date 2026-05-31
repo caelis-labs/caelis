@@ -53,27 +53,3 @@ func TestLocalDuringACPMatchesLegacyLocalCommands(t *testing.T) {
 		}
 	}
 }
-
-func TestRootArgCandidatesReturnsCopies(t *testing.T) {
-	first := RootArgCandidates("model")
-	if len(first) == 0 {
-		t.Fatal("RootArgCandidates(model) returned no candidates")
-	}
-	first[0].Value = "mutated"
-	second := RootArgCandidates("model")
-	if second[0].Value == "mutated" {
-		t.Fatalf("RootArgCandidates(model) leaked mutable backing slice: %#v", second)
-	}
-}
-
-func TestRootArgCandidatesExposeSettingsActions(t *testing.T) {
-	got := RootArgCandidates("settings")
-	values := make([]string, 0, len(got))
-	for _, candidate := range got {
-		values = append(values, candidate.Value)
-	}
-	want := []string{"set", "run"}
-	if !reflect.DeepEqual(values, want) {
-		t.Fatalf("RootArgCandidates(settings) = %#v, want %#v", values, want)
-	}
-}

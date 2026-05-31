@@ -2081,6 +2081,15 @@ func TestGatewayDriverCompleteSlashArgSettingsUsesSharedPanel(t *testing.T) {
 		SettingsPanelFn: func(context.Context, coresession.Ref) (appviewmodel.SettingsPanelView, error) {
 			return panel, nil
 		},
+		CommandCatalogFn: func(context.Context) (appviewmodel.CommandCatalogView, error) {
+			return appviewmodel.CommandCatalogView{Commands: []appviewmodel.CommandView{{
+				Name: "settings",
+				ArgCandidates: []appviewmodel.CommandArgCandidate{
+					{Value: "set", Display: "set", Detail: "Edit a settings field"},
+					{Value: "run", Display: "run", Detail: "Run a settings panel action"},
+				},
+			}}}, nil
+		},
 	}, "", "surface", "")
 	if err != nil {
 		t.Fatal(err)

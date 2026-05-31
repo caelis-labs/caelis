@@ -1406,6 +1406,10 @@ be migrated before retiring the old stack:
      command refresh path prefers that catalog for service-owned and dynamic
      external-ACP commands, while keeping help/exit/quit and ACP-controller
      filtering as surface-local behavior.
+   - Migrated baseline: service-owned root argument candidates for `/agent`,
+     `/model`, `/approval`, `/settings`, `/task`, and `/doctor` now come from
+     `CommandService.Available()` instead of the TUI command registry. The TUI
+     registry now only describes terminal-local commands/help behavior.
    - Migrated baseline: TUI approval-mode keyboard toggling now executes the
      shared `/approval toggle` command instead of calling gatewaydriver session
      mode methods directly. Local mode toggle and ACP-controller mode cycling
@@ -1876,9 +1880,8 @@ be migrated before retiring the old stack:
      in `core/model`, so TUI/APP/ACP-facing turn and participant prompt
      requests can share one input contract instead of converting image/file
      attachments through `ports/model`.
-   - Still pending: remaining TUI command integration and any future
-     store/runtime ACP config providers whose hot-swap semantics are not yet
-     ready for safe exposure.
+   - Still pending: future store/runtime ACP config providers whose hot-swap
+     semantics are not yet ready for safe exposure.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
@@ -2611,9 +2614,10 @@ be migrated before retiring the old stack:
       `impl/task/file` task store have been removed; new product paths use
       `core/session.Store` adapters and core-native task journals instead of
       retaining a parallel old persistence implementation.
-    - Still pending: current on-disk legacy session layout import remains an
-      explicit one-time migration concern; it should not become a runtime
-      compatibility fallback in the new session replay path.
+    - Migrated baseline: current memory/JSONL/SQLite stores only load the
+      canonical `core/session` layout. There is no runtime legacy session
+      import fallback in the replay path; any future old-layout importer must
+      remain an explicit offline migration tool.
 
 ### Next Migration Milestones
 

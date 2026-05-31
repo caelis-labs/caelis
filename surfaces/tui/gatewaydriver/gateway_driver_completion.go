@@ -7,7 +7,6 @@ import (
 
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
 func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
@@ -170,18 +169,39 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 	if alias, ok := strings.CutPrefix(normalizedCommand, "model use "); ok {
 		return d.completeModelReasoningLevels(ctx, alias, query, limit)
 	}
-	candidates := tuicommands.RootArgCandidates(command)
-	out := make([]SlashArgCandidate, 0, min(limit, len(candidates)))
-	for _, candidate := range candidates {
-		if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
+	return d.completeCommandCatalogRootArgs(ctx, normalizedCommand, query, limit)
+}
+
+func (d *GatewayDriver) completeCommandCatalogRootArgs(ctx context.Context, command string, query string, limit int) ([]SlashArgCandidate, error) {
+	catalog, ok, err := d.stack.CommandCatalog(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	command = strings.TrimSpace(strings.ToLower(strings.TrimPrefix(command, "/")))
+	for _, item := range catalog.Commands {
+		if !strings.EqualFold(strings.TrimSpace(item.Name), command) || len(item.ArgCandidates) == 0 {
 			continue
 		}
-		out = append(out, candidate)
-		if len(out) >= limit {
-			break
+		out := make([]SlashArgCandidate, 0, min(limit, len(item.ArgCandidates)))
+		for _, candidate := range item.ArgCandidates {
+			value := strings.TrimSpace(candidate.Value)
+			display := strings.TrimSpace(candidate.Display)
+			detail := strings.TrimSpace(candidate.Detail)
+			if query != "" && !hasSlashArgPrefix(query, value, display, detail) {
+				continue
+			}
+			out = append(out, SlashArgCandidate{
+				Value:   value,
+				Display: display,
+				Detail:  detail,
+			})
+			if len(out) >= limit {
+				break
+			}
 		}
+		return out, nil
 	}
-	return out, nil
+	return nil, nil
 }
 
 func (d *GatewayDriver) settingsPanelForCompletion(ctx context.Context) (appviewmodel.SettingsPanelView, bool, error) {

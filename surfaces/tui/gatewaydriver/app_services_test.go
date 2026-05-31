@@ -460,16 +460,23 @@ func TestBindAppServicesCommandCatalogUsesSharedCommandService(t *testing.T) {
 		t.Fatal("CommandCatalog() ok = false, want shared catalog binding")
 	}
 	var sawModel, sawTask bool
+	var modelArgs []string
 	for _, command := range catalog.Commands {
 		switch command.Name {
 		case "model":
 			sawModel = true
+			for _, candidate := range command.ArgCandidates {
+				modelArgs = append(modelArgs, candidate.Value)
+			}
 		case "task":
 			sawTask = true
 		}
 	}
 	if !sawModel || !sawTask {
 		t.Fatalf("catalog commands = %#v, want shared model and task commands", catalog.Commands)
+	}
+	if !equalStrings(modelArgs, []string{"use", "del"}) {
+		t.Fatalf("model arg candidates = %#v, want shared model root actions", modelArgs)
 	}
 }
 
