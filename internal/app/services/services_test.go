@@ -569,8 +569,8 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Commands) != 10 {
-		t.Fatalf("commands = %#v, want ten core commands", view.Commands)
+	if len(view.Commands) != 11 {
+		t.Fatalf("commands = %#v, want eleven core commands", view.Commands)
 	}
 	agent, ok := findCommandView(view.Commands, "agent")
 	if !ok || agent.InputHint != "use|add|install|list|remove" {
@@ -590,6 +590,10 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	}
 	if _, ok := findCommandView(view.Commands, "new"); !ok {
 		t.Fatalf("new command missing from %#v", view.Commands)
+	}
+	settings, ok := findCommandView(view.Commands, "settings")
+	if !ok || settings.InputHint != "[run <action-id> [confirm]]" {
+		t.Fatalf("settings command = %#v ok=%v, want settings panel hint", settings, ok)
 	}
 }
 
@@ -708,6 +712,81 @@ func TestCommandServiceExecuteNewStartsSession(t *testing.T) {
 	}
 	if !strings.Contains(view.Output, "new session: sess-1") {
 		t.Fatalf("new output = %q, want session id", view.Output)
+	}
+}
+
+func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
+	ctx := context.Background()
+	rt := &recordingLifecycleSandboxRuntime{
+		fakeSandboxRuntime: fakeSandboxRuntime{
+			descriptor: sandbox.Descriptor{
+				Backend: sandbox.BackendHost,
+				DefaultConstraints: sandbox.Constraints{
+					Route:   sandbox.RouteHost,
+					Backend: sandbox.BackendHost,
+				},
+			},
+			status: sandbox.Status{
+				RequestedBackend: sandbox.BackendHost,
+				ResolvedBackend:  sandbox.BackendHost,
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+			Store:        config.Store{Backend: "sqlite", URI: "/tmp/caelis.sqlite"},
+			Sandbox:      config.Sandbox{Backend: "host"},
+		},
+		Engine:  &recordingEngine{},
+		Sandbox: rt,
+		Resources: appresources.Catalog{
+			Diagnostics: []appresources.Diagnostic{{
+				Severity: appresources.DiagnosticWarning,
+				Kind:     "plugin",
+				ID:       "plugin-a",
+				Message:  "plugin skipped",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "settings" {
+		t.Fatalf("settings execution = %#v, want handled settings", view)
+	}
+	for _, want := range []string{
+		"settings:",
+		"configured: false",
+		"workspace: /repo",
+		"store: sqlite /tmp/caelis.sqlite",
+		"model: not configured",
+		"[warning] model/configuration: no model is configured",
+		"[warning] resources/plugin: plugin skipped",
+		"model.connect - Connect model",
+		"sandbox.prepare - Prepare",
+		"sections:",
+	} {
+		if !strings.Contains(view.Output, want) {
+			t.Fatalf("settings output = %q, missing %q", view.Output, want)
+		}
+	}
+	if _, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings run sandbox.reset"}); err == nil {
+		t.Fatal("settings reset without confirmation error = nil, want confirmation error")
+	}
+	ran, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings run sandbox.prepare"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.prepareCalls != 1 || !strings.Contains(ran.Output, "settings action completed: sandbox.prepare") {
+		t.Fatalf("settings action output=%q prepareCalls=%d, want prepared panel", ran.Output, rt.prepareCalls)
 	}
 }
 

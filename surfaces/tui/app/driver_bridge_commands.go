@@ -39,6 +39,8 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 		return slashResumeWithContext(ctx, driver, send, args)
 	case "status":
 		return slashStatusWithContext(ctx, driver, send)
+	case "settings":
+		return slashSharedCommandWithContext(ctx, driver, send, strings.TrimSpace("/settings "+args), sharedCommandOptions{})
 	case "task":
 		return slashSharedCommandWithContext(ctx, driver, send, strings.TrimSpace("/task "+args), sharedCommandOptions{})
 	case "doctor":

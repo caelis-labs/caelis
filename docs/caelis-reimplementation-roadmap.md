@@ -724,10 +724,11 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   service-native command execution contract. The current execution baseline
   handles `/agent` management/handoff, dynamic `/<agent> <prompt>`
   participant invocation, direct `/connect` configuration, and non-wizard
-  `/status`, `/compact`, `/model`, `/approval`, and `/resume`, so ACP clients,
-  TUI, and the future APP can share command semantics instead of reimplementing
-  agent registry/controller handoff, provider setup, status, model selection,
-  approval mode, compaction, and resume behavior in each surface.
+  `/status`, `/settings`, `/compact`, `/model`, `/approval`, and `/resume`, so
+  ACP clients, TUI, and the future APP can share command semantics instead of
+  reimplementing agent registry/controller handoff, provider setup, status,
+  settings diagnostics, model selection, approval mode, compaction, and resume
+  behavior in each surface.
 - `internal/app/services.SandboxService`: shared sandbox status and lifecycle
   surface. The current migrated baseline exposes core-native sandbox status
   from the composed runtime, treats host setup/fix/reset/clean as explicit
@@ -1311,9 +1312,9 @@ be migrated before retiring the old stack:
      import the old agent or approval ports directly for cancel and approval
      DTOs; they consume the public kernel aliases while the remaining old
      ownership stays contained in the legacy kernel bridge.
-   - Migrated baseline: `/new`, `/doctor`, and `/task` now run through the
-     same service-backed TUI command executor instead of TUI-owned command
-     logic. The gatewaydriver converts TUI command submissions into core
+   - Migrated baseline: `/new`, `/settings`, `/doctor`, and `/task` now run
+     through the same service-backed TUI command executor instead of TUI-owned
+     command logic. The gatewaydriver converts TUI command submissions into core
      content parts, calls `internal/app/services.CommandService`, adopts any
      returned canonical session ref, and leaves task-id completion on the
      shared live/durable task list instead of surface-local task state.
@@ -1321,10 +1322,10 @@ be migrated before retiring the old stack:
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and
     attachment UI/rendering are not ported to `internal/app/services`.
-  - Slash commands and panels such as richer `/connect` rendering, settings
-    panels, and live remote ACP process reconnect/lifecycle behavior still have
-    old driver/app assumptions or missing service-native feature parity, so the
-    old TUI stack cannot be removed yet.
+  - Slash commands and panels such as richer `/connect` rendering, editable
+    settings panels, and live remote ACP process reconnect/lifecycle behavior
+    still have old driver/app assumptions or missing service-native feature
+    parity, so the old TUI stack cannot be removed yet.
   - Still pending: the current TUI driver/gateway bridge still imports the old
     `ports/session`, `ports/controller`, `ports/stream`, and public `kernel`
     event contracts for live turn streaming, replay, participants, and usage
@@ -1382,23 +1383,28 @@ be migrated before retiring the old stack:
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
      `/connect`, `/status`, `/doctor`, `/compact`, `/model`, `/approval`,
-     `/new`, `/resume`, `/task`, and dynamic `/<agent> <prompt>` participant
-     invocation now share app-service behavior; remaining interactive commands
-     can be added without making ACP, TUI, or APP surfaces own command
+     `/settings`, `/new`, `/resume`, `/task`, and dynamic
+     `/<agent> <prompt>` participant invocation now share app-service behavior;
+     remaining interactive commands can be added without making ACP, TUI, or
+     APP surfaces own command
      semantics.
    - Migrated baseline: `SettingsService.Panel` now provides an APP-ready
      settings composition contract that combines normalized settings, runtime
      status, model/agent counts, sandbox lifecycle status/actions, resource
      diagnostics, and actionable diagnostic hints. `RunPanelAction` executes
      shared sandbox prepare/repair/preflight/reset actions without surfaces
-     calling backend-specific methods directly.
+     calling backend-specific methods directly. The shared `/settings` command
+     now renders this panel and can run guarded panel actions through
+     `CommandService`, so TUI/ACP command surfaces can inspect the same
+     diagnostics without owning settings-panel composition.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
      terminal sessions without reaching into sandbox runtimes directly.
-   - Still pending: transcript actions and concrete TUI/APP settings-panel
-     rendering remain unmigrated. Durable async task control and output storage
-     remain kernel/runtime work rather than APP-only view-model work.
+   - Still pending: transcript actions, richer editable settings panels, and
+     concrete future APP settings rendering remain unmigrated. Durable async
+     task control and output storage remain kernel/runtime work rather than
+     APP-only view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
@@ -1457,7 +1463,7 @@ be migrated before retiring the old stack:
      session new/load/resume using the shared command catalog.
    - Migrated baseline: ACP `session/prompt` now executes service-native
      `/agent`, `/connect`, `/status`, `/doctor`, `/compact`, `/model`,
-     `/approval`, `/new`, `/resume`, `/task`, and dynamic
+     `/approval`, `/settings`, `/new`, `/resume`, `/task`, and dynamic
      `/<agent> <prompt>` commands through
      `CommandService`; handled commands return `end_turn`, publish standard
      `agent_message_chunk` output or canonical event projections, mutate

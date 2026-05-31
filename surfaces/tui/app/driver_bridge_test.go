@@ -385,6 +385,30 @@ func TestSlashTaskControlsUseSharedCommandExecutor(t *testing.T) {
 	}
 }
 
+func TestSlashSettingsUsesSharedCommandExecutor(t *testing.T) {
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "settings", Output: "settings:\n  diagnostics:\n    [warning] model/configuration: no model is configured\n  actions:\n    model.connect - Connect model (enabled)"},
+	}
+	var msgs []tea.Msg
+	send := func(msg tea.Msg) { msgs = append(msgs, msg) }
+
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/settings")
+	if result.Err != nil || !result.SuppressTurnDivider {
+		t.Fatalf("settings result = %#v, want handled shared command", result)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/settings" {
+		t.Fatalf("settings command calls=%d input=%q, want shared /settings command", driver.commandCalls, driver.lastCommandInput)
+	}
+	if !noticeMessagesContain(msgs, "settings:") || !noticeMessagesContain(msgs, "model.connect") {
+		t.Fatalf("settings messages = %#v, want shared settings output", msgs)
+	}
+
+	result = dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/settings run sandbox.prepare")
+	if result.Err != nil || driver.commandCalls != 2 || driver.lastCommandInput != "/settings run sandbox.prepare" {
+		t.Fatalf("settings action result=%#v calls=%d input=%q, want shared settings action", result, driver.commandCalls, driver.lastCommandInput)
+	}
+}
+
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
