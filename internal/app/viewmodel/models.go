@@ -10,6 +10,49 @@ type ModelSelectionView struct {
 	RemoteEnabled bool                  `json:"remote_enabled,omitempty"`
 }
 
+type ModelConnectView struct {
+	Current     *ModelChoice             `json:"current,omitempty"`
+	Configured  []ModelChoice            `json:"configured,omitempty"`
+	Providers   []ModelConnectProvider   `json:"providers,omitempty"`
+	Wizard      WizardFlowView           `json:"wizard,omitempty"`
+	Diagnostics []ModelConnectDiagnostic `json:"diagnostics,omitempty"`
+}
+
+type ModelConnectProvider struct {
+	ID                   string                 `json:"id,omitempty"`
+	Label                string                 `json:"label,omitempty"`
+	Provider             string                 `json:"provider,omitempty"`
+	API                  string                 `json:"api,omitempty"`
+	Description          string                 `json:"description,omitempty"`
+	DefaultBaseURL       string                 `json:"default_base_url,omitempty"`
+	DefaultEndpointID    string                 `json:"default_endpoint_id,omitempty"`
+	TokenEnv             string                 `json:"token_env,omitempty"`
+	NoAuthRequired       bool                   `json:"no_auth_required,omitempty"`
+	Configured           bool                   `json:"configured,omitempty"`
+	ConfiguredModelCount int                    `json:"configured_model_count,omitempty"`
+	CatalogModelCount    int                    `json:"catalog_model_count,omitempty"`
+	CommonModels         []string               `json:"common_models,omitempty"`
+	Endpoints            []ModelConnectEndpoint `json:"endpoints,omitempty"`
+}
+
+type ModelConnectEndpoint struct {
+	ID           string `json:"id,omitempty"`
+	BaseURL      string `json:"base_url,omitempty"`
+	Display      string `json:"display,omitempty"`
+	Detail       string `json:"detail,omitempty"`
+	API          string `json:"api,omitempty"`
+	TokenEnv     string `json:"token_env,omitempty"`
+	NoAuth       bool   `json:"no_auth,omitempty"`
+	ReusableAuth bool   `json:"reusable_auth,omitempty"`
+}
+
+type ModelConnectDiagnostic struct {
+	Severity string `json:"severity,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Message  string `json:"message,omitempty"`
+}
+
 type ModelProviderOption struct {
 	ID                   string `json:"id,omitempty"`
 	Name                 string `json:"name,omitempty"`

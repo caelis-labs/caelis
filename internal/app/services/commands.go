@@ -354,6 +354,17 @@ func parseCommandCustomAgent(args string) (AgentDescriptor, error) {
 }
 
 func (s CommandService) executeConnect(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
+	if strings.TrimSpace(args) == "" {
+		panel, err := s.services.Models().ConnectPanel(ctx, ModelConnectRequest{SessionRef: ref})
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "connect",
+			Output:  formatCommandConnectPanel(panel),
+		}, nil
+	}
 	cfg, err := s.commandConnectConfig(args)
 	if err != nil {
 		return appviewmodel.CommandExecutionView{}, err

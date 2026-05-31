@@ -911,6 +911,20 @@ func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 	}
 }
 
+func TestSlashConnectWithoutArgsUsesSharedConnectPanel(t *testing.T) {
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "connect", Output: "connect:\n  current: not configured\n  providers:"},
+	}
+	var msgs []tea.Msg
+	slashConnect(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/connect" {
+		t.Fatalf("command calls=%d input=%q, want shared /connect panel command", driver.commandCalls, driver.lastCommandInput)
+	}
+	if !noticeMessagesContain(msgs, "connect:") || !noticeMessagesContain(msgs, "providers:") {
+		t.Fatalf("slashConnect() messages = %#v, want shared connect panel notice", msgs)
+	}
+}
+
 func TestFormatContextUsageStatus(t *testing.T) {
 	if got := formatContextUsageStatus(12600, 88000); got != "12.6k / 88k · 14%" {
 		t.Fatalf("formatContextUsageStatus() = %q, want %q", got, "12.6k / 88k · 14%")

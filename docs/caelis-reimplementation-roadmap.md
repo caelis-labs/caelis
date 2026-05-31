@@ -1318,6 +1318,12 @@ be migrated before retiring the old stack:
      `internal/app/viewmodel` contracts. TUI now adapts that service flow into
      its Bubble Tea wizard runtime; future APP surfaces can reuse the same
      provider setup shell contract without copying TUI step tables.
+   - Migrated baseline: model connection setup now has a shared
+     `ModelConnectView` panel contract with current/configured model state,
+     provider defaults, endpoint/auth hints, reusable-auth status, wizard flow,
+     and diagnostics. `/connect` without arguments and
+     `/settings run model.connect` render this service-native panel for TUI,
+     ACP command clients, CLI, and future APP consumers.
    - Migrated baseline: the old formal `surfaces/tui/gatewaydriver/local`
      adapter package has been deleted, and the remaining broad gatewaydriver
      regression coverage now uses a test-local `internal/app/local` stack plus
@@ -1480,10 +1486,10 @@ be migrated before retiring the old stack:
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
      attachment UI/rendering are not ported to `internal/app/services`.
-   - Slash commands and panels such as richer `/connect` rendering, editable
-     settings panels, and live remote ACP process reconnect/lifecycle behavior
-     still have old driver/app assumptions or missing service-native feature
-     parity, so the old TUI stack cannot be removed yet.
+   - Slash commands and panels such as editable settings panels, rich
+     task/controller panels, and some transcript actions still have old
+     driver/app assumptions or missing service-native feature parity, so the
+     old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1658,8 +1664,8 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: richer `/connect` rendering/panel parity and visual
-     controller diagnostics panels.
+   - Still pending: visual controller diagnostics panels and richer ACP
+     surface behavior.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1669,11 +1675,11 @@ be migrated before retiring the old stack:
      fields, request-time model router, session reasoning override propagation,
      session mode service, compaction prompt policy, and ACP stdio
      model/config/mode projection backed by shared app services. Direct
-     `/connect` command execution and the guided wizard's flow definition now
-     land in shared model setup contracts for ACP clients, TUI, and future APP
-     consumers. The TUI still owns Bubble Tea rendering/input mechanics, but
-     its final model connect/list/use/delete operations use the same shared app
-     services.
+     `/connect` command execution, guided wizard flow, and connection setup
+     panel now land in shared model setup contracts for ACP clients, TUI, and
+     future APP consumers. The TUI still owns Bubble Tea rendering/input
+     mechanics, but its final model connect/list/use/delete operations use the
+     same shared app services.
    - Migrated baseline: shared model catalog data now provides configured
      provider models, built-in provider model presets, capability defaults, and
      reasoning levels to TUI/future APP setup flows through `ModelService`.
@@ -2364,16 +2370,15 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially richer `/connect` rendering/panel parity and visual
-   settings/diagnostics/controller panels.
+   especially visual settings/diagnostics/controller panels.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
 3. Finish richer task lifecycle stores and visual task-panel behavior behind
    shared app/view-model contracts; host process recovery, SPAWN continuation,
    and bounded terminal preview metadata are now baseline runtime capabilities.
 4. Port the remaining TUI panels and richer interactive flows to
-   `internal/app/services`, especially richer `/connect`, task, and visual
-   settings panels, preserving existing rendering as surface-local code.
+   `internal/app/services`, especially task and visual settings panels,
+   preserving existing rendering as surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff

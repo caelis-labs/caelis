@@ -45,6 +45,9 @@ func (s CommandService) executeSettings(ctx context.Context, ref session.Ref, ar
 		if (action.Destructive || action.RequiresConfirmation) && !settingsActionConfirmed(actionArgs) {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: settings action %q requires confirmation", action.ID)
 		}
+		if strings.EqualFold(action.ID, settingsActionModelConnect) {
+			return s.executeConnect(ctx, ref, "")
+		}
 		panel, err := s.services.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{SessionRef: ref, ActionID: action.ID})
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err

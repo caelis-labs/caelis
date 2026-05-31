@@ -393,8 +393,7 @@ func slashConnectWithContext(ctx context.Context, driver tuidriver.Driver, send 
 	ctx = contextOrBackground(ctx)
 	args = strings.TrimSpace(args)
 	if args == "" {
-		sendNotice(send, "usage: /connect\nrun /connect to open the guided setup wizard")
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return slashSharedCommandWithContext(ctx, driver, send, "/connect", sharedCommandOptions{})
 	}
 	provider, _ := splitFirst(args)
 	if strings.EqualFold(strings.TrimSpace(provider), "codefree") {

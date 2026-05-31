@@ -823,6 +823,13 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 	if rt.prepareCalls != 1 || !strings.Contains(ran.Output, "settings action completed: sandbox.prepare") {
 		t.Fatalf("settings action output=%q prepareCalls=%d, want prepared panel", ran.Output, rt.prepareCalls)
 	}
+	connectPanel, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings run model.connect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connectPanel.Command != "connect" || !strings.Contains(connectPanel.Output, "connect:") || !strings.Contains(connectPanel.Output, "providers:") {
+		t.Fatalf("settings model.connect output = %#v, want shared connect panel", connectPanel)
+	}
 }
 
 func TestCommandServiceExecuteSettingsSetField(t *testing.T) {
@@ -1086,6 +1093,33 @@ func TestCommandServiceExecuteConnectConfiguresAndUsesModel(t *testing.T) {
 	}
 	if engine.state[StateCurrentModelID] != cfg.ID {
 		t.Fatalf("state after connect = %#v, want current model %q", engine.state, cfg.ID)
+	}
+}
+
+func TestCommandServiceExecuteConnectWithoutArgsRendersPanel(t *testing.T) {
+	ctx := context.Background()
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  &recordingEngine{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/connect"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"connect:",
+		"current: not configured",
+		"providers:",
+		"openai-compatible",
+		"wizard: /connect",
+		"[warning] model_configuration: no model is configured",
+	} {
+		if !strings.Contains(view.Output, want) {
+			t.Fatalf("connect panel output = %q, missing %q", view.Output, want)
+		}
 	}
 }
 
@@ -4376,6 +4410,52 @@ func TestModelServiceSelectionViewProjectsProvidersAndCandidates(t *testing.T) {
 	}
 }
 
+func TestModelServiceConnectPanelProjectsSharedSetup(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  ConnectXiaomiTokenPlanCNBaseURL,
+		TokenEnv: "MIMO_TOKEN_PLAN_API_KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine: &recordingEngine{snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{SessionID: "sess-connect-panel"}},
+			State:   session.State{StateCurrentModelID: cfg.ID},
+		}},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	panel, err := svc.Models().ConnectPanel(ctx, ModelConnectRequest{SessionRef: session.Ref{SessionID: "sess-connect-panel"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Current == nil || panel.Current.ID != cfg.ID || len(panel.Configured) != 1 || len(panel.Wizard.Steps) == 0 {
+		t.Fatalf("connect panel current/configured/wizard = %#v/%#v/%#v, want shared setup view", panel.Current, panel.Configured, panel.Wizard)
+	}
+	xiaomi, ok := findConnectProvider(panel.Providers, "xiaomi")
+	if !ok || !xiaomi.Configured || xiaomi.ConfiguredModelCount != 1 || xiaomi.TokenEnv != "XIAOMI_API_KEY" || len(xiaomi.Endpoints) != 2 {
+		t.Fatalf("xiaomi provider = %#v ok=%v, want configured provider with endpoints", xiaomi, ok)
+	}
+	tokenPlan, ok := findConnectEndpoint(xiaomi.Endpoints, "token-plan-cn")
+	if !ok || tokenPlan.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" || !tokenPlan.ReusableAuth {
+		t.Fatalf("token plan endpoint = %#v ok=%v, want reusable auth endpoint", tokenPlan, ok)
+	}
+	if len(panel.Diagnostics) != 0 {
+		t.Fatalf("connect diagnostics = %#v, want none for configured current model", panel.Diagnostics)
+	}
+}
+
 func TestModelServiceCodeFreeAuthDelegatesToConfiguredAuthenticator(t *testing.T) {
 	ctx := context.Background()
 	auth := &recordingCodeFreeAuth{
@@ -4563,6 +4643,24 @@ func findModelCandidate(candidates []appviewmodel.ModelCandidate, modelName stri
 		}
 	}
 	return appviewmodel.ModelCandidate{}, false
+}
+
+func findConnectProvider(providers []appviewmodel.ModelConnectProvider, id string) (appviewmodel.ModelConnectProvider, bool) {
+	for _, provider := range providers {
+		if provider.ID == id || provider.Provider == id || provider.Label == id {
+			return provider, true
+		}
+	}
+	return appviewmodel.ModelConnectProvider{}, false
+}
+
+func findConnectEndpoint(endpoints []appviewmodel.ModelConnectEndpoint, id string) (appviewmodel.ModelConnectEndpoint, bool) {
+	for _, endpoint := range endpoints {
+		if endpoint.ID == id {
+			return endpoint, true
+		}
+	}
+	return appviewmodel.ModelConnectEndpoint{}, false
 }
 
 func findCommandView(commands []appviewmodel.CommandView, name string) (appviewmodel.CommandView, bool) {
