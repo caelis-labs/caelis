@@ -414,6 +414,111 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 }
 
+func TestSettingsServicePanelComposesDiagnosticsAndActions(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, appsettings.NewFileStore(t.TempDir()), appsettings.Document{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+			Sandbox: config.Sandbox{
+				Backend: "windows",
+				Network: "disabled",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := &recordingLifecycleSandboxRuntime{
+		fakeSandboxRuntime: fakeSandboxRuntime{
+			descriptor: sandbox.Descriptor{
+				Backend: sandbox.BackendWindows,
+				DefaultConstraints: sandbox.Constraints{
+					Route:   sandbox.RouteSandbox,
+					Backend: sandbox.BackendWindows,
+				},
+			},
+			status: sandbox.Status{
+				RequestedBackend:    sandbox.BackendWindows,
+				ResolvedBackend:     sandbox.BackendWindows,
+				FallbackToHost:      true,
+				FallbackReason:      "helper missing",
+				FallbackInstallHint: "install helper",
+				Setup: sandbox.SetupStatus{
+					Required: true,
+					Error:    "workspace setup required",
+				},
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		Sandbox:  rt,
+		Resources: appresources.Catalog{
+			Diagnostics: []appresources.Diagnostic{{
+				Severity: appresources.DiagnosticWarning,
+				Kind:     "plugin",
+				ID:       "plugin-a",
+				Path:     "/plugins/a",
+				Message:  "plugin skipped",
+				Meta:     map[string]string{"scope": "workspace"},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	panel, err := svc.Settings().Panel(ctx, SettingsPanelRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panel.Configured || panel.Settings.Sandbox.Backend != "windows" || panel.Sandbox.Status.ResolvedBackend != "windows" {
+		t.Fatalf("panel runtime/sandbox = %#v/%#v, want configured windows sandbox", panel.Settings, panel.Sandbox.Status)
+	}
+	if !panelActionEnabled(panel.Actions, "sandbox.repair") || !panelActionEnabled(panel.Sandbox.Actions, "sandbox.reset") {
+		t.Fatalf("panel actions = %#v/%#v, want enabled sandbox actions", panel.Actions, panel.Sandbox.Actions)
+	}
+	reset, _ := findSettingsPanelAction(panel.Actions, "sandbox.reset")
+	if !reset.Destructive || !reset.RequiresConfirmation {
+		t.Fatalf("reset action = %#v, want guarded destructive action", reset)
+	}
+	if _, ok := findSettingsPanelSection(panel.Sections, "sandbox"); !ok {
+		t.Fatalf("panel sections = %#v, missing sandbox section", panel.Sections)
+	}
+	if !panelDiagnostic(panel.Diagnostics, "model", "configuration") ||
+		!panelDiagnostic(panel.Diagnostics, "sandbox", "setup") ||
+		!panelDiagnostic(panel.Diagnostics, "resources", "plugin") {
+		t.Fatalf("panel diagnostics = %#v, want model, sandbox, and resource diagnostics", panel.Diagnostics)
+	}
+	if !slices.Contains(panelDiagnosticActions(panel.Diagnostics, "model", "configuration"), "model.connect") {
+		t.Fatalf("model diagnostic actions = %#v, want model.connect", panel.Diagnostics)
+	}
+
+	if _, err := svc.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{ActionID: "sandbox.prepare"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{ActionID: "sandbox.preflight", AllowNonElevatedRepair: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{ActionID: "sandbox.repair"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{ActionID: "sandbox.reset"}); err != nil {
+		t.Fatal(err)
+	}
+	if rt.prepareCalls != 1 || !rt.preflightAllow || rt.repairCalls != 1 || rt.resetCalls != 1 {
+		t.Fatalf("panel action calls prepare=%d preflight=%t repair=%d reset=%d, want all invoked", rt.prepareCalls, rt.preflightAllow, rt.repairCalls, rt.resetCalls)
+	}
+	if _, err := svc.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{ActionID: "model.connect"}); err == nil {
+		t.Fatal("RunPanelAction(model.connect) error = nil, want surface navigation action rejected")
+	}
+}
+
 func TestSettingsServiceRollsBackRuntimeWhenApplyFails(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
@@ -3674,6 +3779,47 @@ func findTaskItem(items []appviewmodel.TaskItem, id string) (appviewmodel.TaskIt
 		}
 	}
 	return appviewmodel.TaskItem{}, false
+}
+
+func findSettingsPanelSection(sections []appviewmodel.SettingsPanelSection, id string) (appviewmodel.SettingsPanelSection, bool) {
+	for _, section := range sections {
+		if section.ID == id {
+			return section, true
+		}
+	}
+	return appviewmodel.SettingsPanelSection{}, false
+}
+
+func findSettingsPanelAction(actions []appviewmodel.SettingsPanelAction, id string) (appviewmodel.SettingsPanelAction, bool) {
+	for _, action := range actions {
+		if action.ID == id {
+			return action, true
+		}
+	}
+	return appviewmodel.SettingsPanelAction{}, false
+}
+
+func panelActionEnabled(actions []appviewmodel.SettingsPanelAction, id string) bool {
+	action, ok := findSettingsPanelAction(actions, id)
+	return ok && action.Enabled
+}
+
+func panelDiagnostic(items []appviewmodel.SettingsPanelDiagnostic, source string, kind string) bool {
+	for _, item := range items {
+		if item.Source == source && item.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+func panelDiagnosticActions(items []appviewmodel.SettingsPanelDiagnostic, source string, kind string) []string {
+	for _, item := range items {
+		if item.Source == source && item.Kind == kind {
+			return item.ActionIDs
+		}
+	}
+	return nil
 }
 
 func agentActionEnabled(actions []appviewmodel.AgentManagementAction, id string) bool {

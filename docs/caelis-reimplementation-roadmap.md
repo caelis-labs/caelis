@@ -1196,10 +1196,15 @@ be migrated before retiring the old stack:
      dynamic `/<agent> <prompt>` participant invocation now share app-service
      behavior; remaining interactive commands can be added without making ACP,
      TUI, or APP surfaces own command semantics.
-   - Still pending: transcript actions and richer settings-panel composition
-     still need APP-ready service/view-model contracts. Durable async task
-     control and output storage remain kernel/runtime work rather than APP-only
-     view-model work.
+   - Migrated baseline: `SettingsService.Panel` now provides an APP-ready
+     settings composition contract that combines normalized settings, runtime
+     status, model/agent counts, sandbox lifecycle status/actions, resource
+     diagnostics, and actionable diagnostic hints. `RunPanelAction` executes
+     shared sandbox prepare/repair/preflight/reset actions without surfaces
+     calling backend-specific methods directly.
+   - Still pending: transcript actions and concrete TUI/APP settings-panel
+     rendering remain unmigrated. Durable async task control and output storage
+     remain kernel/runtime work rather than APP-only view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
@@ -1741,6 +1746,11 @@ be migrated before retiring the old stack:
       skill override decisions. `ResourceService` and the shared status view
       expose those diagnostics with severity counters for TUI and future APP
       consumers.
+    - Migrated baseline: diagnostic display/repair intent now has a shared
+      settings-panel contract. Resource diagnostics and sandbox setup/fallback
+      status are projected as surface-neutral `SettingsPanelDiagnostic` rows with
+      action ids, and sandbox lifecycle actions execute through
+      `SettingsService.RunPanelAction`.
     - Migrated baseline: the app-service TUI binding now uses the shared
       resource catalog for `$skill` completion, removing another interactive
       path that previously had to call old gateway prompt/skill discovery
@@ -1751,9 +1761,9 @@ be migrated before retiring the old stack:
       `DefaultSkillDiscoveryDirs` / `DiscoverSkillMeta` wrappers have been
       removed from `app/gatewayapp`.
     - Still pending: finer-grained prompt policy controls beyond skill loading
-      and compaction, diagnostic rendering/repair actions, and removal of the
-      remaining old gateway prompt assembly/token-estimation helper once old
-      stack tests and production entrypoints no longer need it.
+      and compaction, concrete diagnostic rendering/repair UI wiring, and
+      removal of the remaining old gateway prompt assembly/token-estimation
+      helper once old stack tests and production entrypoints no longer need it.
 
 14. Rendering and display semantics
     - The new view model is intentionally small.
