@@ -475,6 +475,15 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	if panel.Settings.Skills.MaxExpansionChars != 2048 {
 		t.Fatalf("panel skill budget = %#v, want 2048", panel.Settings.Skills)
 	}
+	if option, ok := findSettingsConfigOption(panel.ConfigOptions, "skill_max_expansion_chars"); !ok || option.FieldID != "skills.max_expansion_chars" || option.CurrentValue != 2048 {
+		t.Fatalf("skill budget config option = %#v ok=%v, want shared option for settings field", option, ok)
+	}
+	if option, ok := findSettingsConfigOption(panel.ConfigOptions, "compaction_task_index_limit"); !ok || option.FieldID != "compaction.retention.task_index_limit" || option.CurrentValue != 5 {
+		t.Fatalf("task retention config option = %#v ok=%v, want shared compaction retention option", option, ok)
+	}
+	if option, ok := findSettingsConfigOption(panel.ConfigOptions, "sandbox_network"); !ok || option.FieldID != "sandbox.network" || len(option.Options) != 3 {
+		t.Fatalf("sandbox network config option = %#v ok=%v, want select option from settings panel", option, ok)
+	}
 	if _, err := svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{FieldID: "runtime.app_name", Value: "changed"}); err == nil {
 		t.Fatal("SetPanelField(runtime.app_name) error = nil, want non-editable error")
 	}
@@ -5584,6 +5593,15 @@ func findSettingsPanelAction(actions []appviewmodel.SettingsPanelAction, id stri
 		}
 	}
 	return appviewmodel.SettingsPanelAction{}, false
+}
+
+func findSettingsConfigOption(options []appviewmodel.SettingsConfigOption, id string) (appviewmodel.SettingsConfigOption, bool) {
+	for _, option := range options {
+		if option.ID == id {
+			return option, true
+		}
+	}
+	return appviewmodel.SettingsConfigOption{}, false
 }
 
 func panelActionEnabled(actions []appviewmodel.SettingsPanelAction, id string) bool {

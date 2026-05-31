@@ -1092,7 +1092,7 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if newResp.Modes == nil || newResp.Modes.CurrentModeID != coreruntime.SessionModeAutoReview || len(newResp.Modes.AvailableModes) != 2 {
 		t.Fatalf("new session modes = %#v, want auto-review with two modes", newResp.Modes)
 	}
-	if len(newResp.ConfigOptions) != 10 {
+	if len(newResp.ConfigOptions) != 12 {
 		t.Fatalf("new session config options = %#v, want mode/model/reasoning plus expanded settings options", newResp.ConfigOptions)
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "skill_loading_mode"); option.CurrentValue != appsettings.SkillLoadingModeExplicit {
@@ -1109,6 +1109,12 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "compaction_max_source_chars"); option.CurrentValue != float64(0) {
 		t.Fatalf("compaction max source option = %#v, want default zero", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "compaction_task_index_limit"); option.CurrentValue != float64(appsettings.DefaultCompactionTaskIndexLimit) {
+		t.Fatalf("compaction task retention option = %#v, want default task retention", option)
+	}
+	if option := requireACPConfigOption(t, newResp.ConfigOptions, "compaction_controller_index_limit"); option.CurrentValue != float64(appsettings.DefaultCompactionControllerIndexLimit) {
+		t.Fatalf("compaction controller retention option = %#v, want default controller retention", option)
 	}
 	if option := requireACPConfigOption(t, newResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "auto" {
 		t.Fatalf("sandbox backend option = %#v, want auto default", option)
@@ -1148,8 +1154,8 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}, &setConfigResp); err != nil {
 		t.Fatalf("session/set_config_option call error = %v", err)
 	}
-	if len(setConfigResp.ConfigOptions) != 10 {
-		t.Fatalf("set config response = %#v, want ten config options", setConfigResp.ConfigOptions)
+	if len(setConfigResp.ConfigOptions) != 12 {
+		t.Fatalf("set config response = %#v, want twelve config options", setConfigResp.ConfigOptions)
 	}
 	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "reasoning_effort"); option.CurrentValue != "high" {
 		t.Fatalf("reasoning option = %#v, want high", option)
@@ -1213,6 +1219,26 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
+		ConfigID:  "compaction_task_index_limit",
+		Value:     17,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(compaction_task_index_limit) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "compaction_task_index_limit"); option.CurrentValue != float64(17) {
+		t.Fatalf("compaction task retention option = %#v, want 17", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
+		ConfigID:  "compaction_controller_index_limit",
+		Value:     6,
+	}, &setConfigResp); err != nil {
+		t.Fatalf("session/set_config_option(compaction_controller_index_limit) call error = %v", err)
+	}
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "compaction_controller_index_limit"); option.CurrentValue != float64(6) {
+		t.Fatalf("compaction controller retention option = %#v, want 6", option)
+	}
+	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: newResp.SessionID,
 		ConfigID:  "sandbox_backend",
 		Value:     "auto",
 	}, &setConfigResp); err != nil {
@@ -1237,6 +1263,7 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	}
 	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Skills.MaxExpansionChars != 2048 ||
 		doc.Compaction.Auto.Mode != "disabled" || doc.Compaction.Auto.WatermarkRatio != 0.72 || doc.Compaction.MaxSourceChars != 4096 ||
+		doc.Compaction.Retention.TaskIndexLimit != 17 || doc.Compaction.Retention.ControllerIndexLimit != 6 ||
 		doc.Runtime.Sandbox.Backend != "auto" || doc.Runtime.Sandbox.Network != "disabled" {
 		t.Fatalf("settings document = %#v, want metadata_only/budget/compaction/sandbox settings", doc)
 	}

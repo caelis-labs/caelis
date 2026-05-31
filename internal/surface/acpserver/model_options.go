@@ -13,16 +13,9 @@ import (
 )
 
 const (
-	acpConfigModeID                = "mode"
-	acpConfigModelID               = "model"
-	acpConfigReasoningID           = "reasoning_effort"
-	acpConfigSkillLoadingID        = "skill_loading_mode"
-	acpConfigSkillBudgetID         = "skill_max_expansion_chars"
-	acpConfigAutoCompactionID      = "auto_compaction"
-	acpConfigCompactionWatermarkID = "auto_compaction_watermark"
-	acpConfigCompactionMaxSourceID = "compaction_max_source_chars"
-	acpConfigSandboxBackendID      = "sandbox_backend"
-	acpConfigSandboxNetworkID      = "sandbox_network"
+	acpConfigModeID      = "mode"
+	acpConfigModelID     = "model"
+	acpConfigReasoningID = "reasoning_effort"
 )
 
 func (s *Server) setSessionModel(ctx context.Context, req schema.SetSessionModelRequest) (schema.SetSessionModelResponse, error) {

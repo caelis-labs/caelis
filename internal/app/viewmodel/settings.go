@@ -9,16 +9,17 @@ type SettingsView struct {
 }
 
 type SettingsPanelView struct {
-	Configured  bool                      `json:"configured"`
-	Settings    SettingsView              `json:"settings"`
-	Runtime     RuntimeStatus             `json:"runtime"`
-	Model       ModelStatus               `json:"model"`
-	Agents      AgentStatus               `json:"agents"`
-	Sandbox     SandboxPanel              `json:"sandbox"`
-	Resources   ResourceStatus            `json:"resources"`
-	Sections    []SettingsPanelSection    `json:"sections,omitempty"`
-	Diagnostics []SettingsPanelDiagnostic `json:"diagnostics,omitempty"`
-	Actions     []SettingsPanelAction     `json:"actions,omitempty"`
+	Configured    bool                      `json:"configured"`
+	Settings      SettingsView              `json:"settings"`
+	Runtime       RuntimeStatus             `json:"runtime"`
+	Model         ModelStatus               `json:"model"`
+	Agents        AgentStatus               `json:"agents"`
+	Sandbox       SandboxPanel              `json:"sandbox"`
+	Resources     ResourceStatus            `json:"resources"`
+	Sections      []SettingsPanelSection    `json:"sections,omitempty"`
+	ConfigOptions []SettingsConfigOption    `json:"config_options,omitempty"`
+	Diagnostics   []SettingsPanelDiagnostic `json:"diagnostics,omitempty"`
+	Actions       []SettingsPanelAction     `json:"actions,omitempty"`
 }
 
 type SandboxPanel struct {
@@ -58,19 +59,39 @@ type SettingsPanelSection struct {
 }
 
 type SettingsPanelField struct {
-	ID        string                     `json:"id,omitempty"`
-	Label     string                     `json:"label,omitempty"`
-	Kind      string                     `json:"kind,omitempty"`
-	Value     string                     `json:"value,omitempty"`
-	Detail    string                     `json:"detail,omitempty"`
-	Editable  bool                       `json:"editable,omitempty"`
-	Sensitive bool                       `json:"sensitive,omitempty"`
-	Options   []SettingsPanelFieldOption `json:"options,omitempty"`
+	ID          string                     `json:"id,omitempty"`
+	ConfigID    string                     `json:"config_id,omitempty"`
+	Label       string                     `json:"label,omitempty"`
+	Kind        string                     `json:"kind,omitempty"`
+	Category    string                     `json:"category,omitempty"`
+	Description string                     `json:"description,omitempty"`
+	Value       string                     `json:"value,omitempty"`
+	Detail      string                     `json:"detail,omitempty"`
+	Editable    bool                       `json:"editable,omitempty"`
+	Sensitive   bool                       `json:"sensitive,omitempty"`
+	Options     []SettingsPanelFieldOption `json:"options,omitempty"`
 }
 
 type SettingsPanelFieldOption struct {
 	Value       string `json:"value,omitempty"`
 	Label       string `json:"label,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+type SettingsConfigOption struct {
+	Type         string                       `json:"type,omitempty"`
+	ID           string                       `json:"id,omitempty"`
+	FieldID      string                       `json:"field_id,omitempty"`
+	Name         string                       `json:"name,omitempty"`
+	Description  string                       `json:"description,omitempty"`
+	Category     string                       `json:"category,omitempty"`
+	CurrentValue any                          `json:"current_value,omitempty"`
+	Options      []SettingsConfigOptionChoice `json:"options,omitempty"`
+}
+
+type SettingsConfigOptionChoice struct {
+	Value       string `json:"value,omitempty"`
+	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
 }
 

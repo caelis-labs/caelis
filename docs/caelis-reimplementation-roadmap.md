@@ -1564,14 +1564,19 @@ be migrated before retiring the old stack:
      same path as `/settings set <field-id> <value>`, so TUI, ACP, and future
      APP surfaces can mutate panel fields without editing raw settings
      documents.
+   - Migrated baseline: `SettingsService.Panel` now also exposes shared
+     settings config-option view models linked back to editable field ids. ACP
+     config projection and future APP settings editors can render prompt,
+     context, and sandbox controls from the same field metadata instead of
+     maintaining surface-local option catalogs.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
      terminal sessions without reaching into sandbox runtimes directly.
-   - Still pending: transcript actions, richer visual settings editors, and
-     concrete future APP settings rendering remain unmigrated. Durable async
-     task control and output storage remain kernel/runtime work rather than
-     APP-only view-model work.
+   - Still pending: transcript actions, surface-specific visual settings
+     editors, and concrete future APP settings rendering remain unmigrated.
+     Durable async task control and output storage remain kernel/runtime work
+     rather than APP-only view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
@@ -1605,8 +1610,8 @@ be migrated before retiring the old stack:
    - Migrated baseline: the unused old `surfaces/acpserver` wrapper around
      `gatewayapp.Stack.ACPAgent()` has been removed; the remaining ACP stdio
      path is the core-native `internal/surface/acpserver` entrypoint.
-   - Still pending: production settings/config parity and richer ACP surface
-     behavior.
+   - Still pending: richer ACP surface behavior plus any future store/runtime
+     config providers whose hot-swap semantics are not yet finalized.
    - The new ACP server now exposes session list/load/resume over the
      core-native session store and canonical ACP projector.
    - The new ACP server now exposes session model metadata, `session/set_model`,
@@ -1621,11 +1626,13 @@ be migrated before retiring the old stack:
      and the non-model `mode` config option through `internal/app/services.Modes()`.
    - Migrated baseline: the new ACP server now exposes settings-backed
      non-model config options for skill loading mode, skill expansion budget,
-     automatic compaction mode, compaction watermark/source limit, requested
-     sandbox backend, and sandbox network policy. These options read and mutate
-     the shared `SettingsService.SetPanelField` contract, so ACP clients such
-     as Zed see the same prompt policy, context policy, and sandbox request
-     state as TUI and the future APP.
+     automatic compaction mode, compaction watermark/source limit, compaction
+     task/controller retention limits, requested sandbox backend, and sandbox
+     network policy. ACP derives these options from the shared
+     `SettingsService` config-option contract and mutates the linked
+     `SettingsService.SetPanelField` fields, so clients such as Zed see the
+     same prompt policy, context policy, and sandbox request state as TUI and
+     the future APP.
    - Migrated baseline: ACP initialize prompt capabilities now come from the
      shared model catalog and configured model set, and the new ACP server
      publishes standard `available_commands_update` notifications after
@@ -1717,8 +1724,9 @@ be migrated before retiring the old stack:
      currently constructed backend instead of constructing `app/gatewayapp`.
    - Migrated baseline: ACP `session/set_config_option` now reaches shared
      settings for skill loading, skill expansion budget, auto-compaction
-     mode/watermark/source limit, sandbox backend, and sandbox network
-     selection instead of limiting ACP clients to model/mode controls.
+     mode/watermark/source limit, compaction task/controller retention limits,
+     sandbox backend, and sandbox network selection instead of limiting ACP
+     clients to model/mode controls.
    - Migrated baseline: ACP prompt capability projection now uses
      `ModelService.PromptCapabilities`, so configured multimodal model support
      is reported through the same model catalog used by TUI and APP setup.
@@ -2330,7 +2338,7 @@ be migrated before retiring the old stack:
       longer scanned directly.
     - Migrated baseline: compaction retention policy now exposes configurable
       task and controller index limits through app settings, shared settings
-      view models, `/settings set`, and compact metadata.
+      view models, ACP config options, `/settings set`, and compact metadata.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill
@@ -2449,7 +2457,8 @@ Recommended sequence:
 4. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially visual settings panels and richer
    task/controller panel rendering, preserving existing rendering as
-   surface-local code.
+   surface-local code; shared settings config-option metadata is now available
+   for those visual settings editors.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and

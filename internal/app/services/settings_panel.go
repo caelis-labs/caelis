@@ -38,10 +38,11 @@ func (s SettingsService) Panel(ctx context.Context, req SettingsPanelRequest) (a
 	if err := ctx.Err(); err != nil {
 		return appviewmodel.SettingsPanelView{}, err
 	}
-	settingsView, err := s.View(ctx)
+	doc, err := s.Document(ctx)
 	if err != nil {
 		return appviewmodel.SettingsPanelView{}, err
 	}
+	settingsView := settingsViewFromDocument(doc)
 	status, err := s.services.Status().View(ctx, StatusRequest{SessionRef: req.SessionRef})
 	if err != nil {
 		return appviewmodel.SettingsPanelView{}, err
@@ -67,7 +68,8 @@ func (s SettingsService) Panel(ctx context.Context, req SettingsPanelRequest) (a
 	if !view.Model.Configured {
 		view.Actions = append(view.Actions, modelConnectAction())
 	}
-	view.Sections = settingsPanelSections(view)
+	view.Sections = settingsPanelSections(view, doc)
+	view.ConfigOptions = settingsConfigOptionsFromPanel(view)
 	view.Diagnostics = settingsPanelDiagnostics(view, sandboxStatus)
 	return view, nil
 }
@@ -101,8 +103,13 @@ func (s SettingsService) RunPanelAction(ctx context.Context, req SettingsPanelAc
 	return s.Panel(ctx, SettingsPanelRequest{SessionRef: req.SessionRef})
 }
 
-func settingsPanelSections(view appviewmodel.SettingsPanelView) []appviewmodel.SettingsPanelSection {
+func settingsPanelSections(view appviewmodel.SettingsPanelView, doc appsettings.Document) []appviewmodel.SettingsPanelSection {
 	settings := view.Settings
+	editable := view.Configured
+	skillBudget := appsettings.NormalizeSkillPolicy(doc.Skills).MaxExpansionChars
+	if skillBudget <= 0 {
+		skillBudget = appsettings.DefaultSkillExpansionChars
+	}
 	return []appviewmodel.SettingsPanelSection{
 		{
 			ID:    "runtime",
@@ -110,9 +117,9 @@ func settingsPanelSections(view appviewmodel.SettingsPanelView) []appviewmodel.S
 			Fields: []appviewmodel.SettingsPanelField{
 				textSettingsField("runtime.app_name", "App", settings.Runtime.AppName, false),
 				textSettingsField("runtime.user_id", "User", settings.Runtime.UserID, false),
-				textSettingsField("runtime.workspace_key", "Workspace key", settings.Runtime.WorkspaceKey, true),
-				textSettingsField("runtime.workspace_cwd", "Workspace path", settings.Runtime.WorkspaceCWD, true),
-				textSettingsField("runtime.model", "Default model", settings.Runtime.Model, true),
+				textSettingsField("runtime.workspace_key", "Workspace key", settings.Runtime.WorkspaceKey, editable),
+				textSettingsField("runtime.workspace_cwd", "Workspace path", settings.Runtime.WorkspaceCWD, editable),
+				textSettingsField("runtime.model", "Default model", settings.Runtime.Model, editable),
 			},
 		},
 		{
@@ -128,46 +135,46 @@ func settingsPanelSections(view appviewmodel.SettingsPanelView) []appviewmodel.S
 			ID:    "store",
 			Title: "Store",
 			Fields: []appviewmodel.SettingsPanelField{
-				selectSettingsField("store.backend", "Backend", settings.Store.Backend, true, []appviewmodel.SettingsPanelFieldOption{
+				selectSettingsField("store.backend", "Backend", settings.Store.Backend, editable, []appviewmodel.SettingsPanelFieldOption{
 					{Value: "jsonl", Label: "JSONL"},
 					{Value: "sqlite", Label: "SQLite"},
 					{Value: "memory", Label: "Memory"},
 				}),
-				textSettingsField("store.uri", "URI", settings.Store.URI, true),
+				textSettingsField("store.uri", "URI", settings.Store.URI, editable),
 			},
 		},
 		{
 			ID:      "sandbox",
 			Title:   "Sandbox",
-			Fields:  sandboxPanelFields(settings.Sandbox, view.Sandbox.Status),
+			Fields:  sandboxPanelFields(settings.Sandbox, view.Sandbox.Status, editable),
 			Actions: append([]appviewmodel.SettingsPanelAction(nil), view.Sandbox.Actions...),
 		},
 		{
 			ID:    "compaction",
 			Title: "Compaction",
 			Fields: []appviewmodel.SettingsPanelField{
-				selectSettingsField("compaction.auto_mode", "Automatic compaction", settings.Compaction.AutoMode, true, []appviewmodel.SettingsPanelFieldOption{
+				selectSettingsField("compaction.auto_mode", "Automatic compaction", settings.Compaction.AutoMode, editable, []appviewmodel.SettingsPanelFieldOption{
 					{Value: "", Label: "Default"},
 					{Value: "enabled", Label: "Enabled"},
 					{Value: "disabled", Label: "Disabled"},
 				}),
-				textSettingsField("compaction.watermark", "Watermark", strconv.FormatFloat(settings.Compaction.AutoWatermarkRatio, 'f', -1, 64), true),
-				textSettingsField("compaction.max_source_chars", "Max source chars", strconv.Itoa(settings.Compaction.MaxSourceChars), true),
-				textSettingsField("compaction.retention.task_index_limit", "Task index limit", strconv.Itoa(settings.Compaction.TaskIndexLimit), true),
-				textSettingsField("compaction.retention.controller_index_limit", "Controller index limit", strconv.Itoa(settings.Compaction.ControllerIndexLimit), true),
-				textSettingsField("compaction.prompt", "Prompt", settings.Compaction.Prompt, true),
+				numberSettingsField("compaction.watermark", "Watermark", strconv.FormatFloat(settings.Compaction.AutoWatermarkRatio, 'f', -1, 64), editable),
+				numberSettingsField("compaction.max_source_chars", "Max source chars", strconv.Itoa(settings.Compaction.MaxSourceChars), editable),
+				numberSettingsField("compaction.retention.task_index_limit", "Task index limit", strconv.Itoa(settings.Compaction.TaskIndexLimit), editable),
+				numberSettingsField("compaction.retention.controller_index_limit", "Controller index limit", strconv.Itoa(settings.Compaction.ControllerIndexLimit), editable),
+				textSettingsField("compaction.prompt", "Prompt", settings.Compaction.Prompt, editable),
 			},
 		},
 		{
 			ID:    "skills",
 			Title: "Skills",
 			Fields: []appviewmodel.SettingsPanelField{
-				selectSettingsField("skills.loading_mode", "Loading mode", settings.Skills.LoadingMode, true, []appviewmodel.SettingsPanelFieldOption{
+				selectSettingsField("skills.loading_mode", "Loading mode", settings.Skills.LoadingMode, editable, []appviewmodel.SettingsPanelFieldOption{
 					{Value: appsettings.SkillLoadingModeExplicit, Label: "Explicit"},
 					{Value: appsettings.SkillLoadingModeMetadataOnly, Label: "Metadata only"},
 					{Value: appsettings.SkillLoadingModeDisabled, Label: "Disabled"},
 				}),
-				textSettingsField("skills.max_expansion_chars", "Max expansion chars", strconv.Itoa(settings.Skills.MaxExpansionChars), true),
+				numberSettingsField("skills.max_expansion_chars", "Max expansion chars", strconv.Itoa(skillBudget), editable),
 			},
 		},
 		{
@@ -184,9 +191,9 @@ func settingsPanelSections(view appviewmodel.SettingsPanelView) []appviewmodel.S
 	}
 }
 
-func sandboxPanelFields(settings appviewmodel.SandboxSettings, status appviewmodel.SandboxPanelStatus) []appviewmodel.SettingsPanelField {
+func sandboxPanelFields(settings appviewmodel.SandboxSettings, status appviewmodel.SandboxPanelStatus, editable bool) []appviewmodel.SettingsPanelField {
 	return []appviewmodel.SettingsPanelField{
-		selectSettingsField("sandbox.backend", "Requested backend", firstNonEmpty(settings.Backend, status.RequestedBackend), true, []appviewmodel.SettingsPanelFieldOption{
+		selectSettingsField("sandbox.backend", "Requested backend", firstNonEmpty(settings.Backend, status.RequestedBackend), editable, []appviewmodel.SettingsPanelFieldOption{
 			{Value: "auto", Label: "Auto"},
 			{Value: "host", Label: "Host"},
 			{Value: "seatbelt", Label: "Seatbelt"},
@@ -196,10 +203,14 @@ func sandboxPanelFields(settings appviewmodel.SandboxSettings, status appviewmod
 		}),
 		textSettingsField("sandbox.resolved_backend", "Resolved backend", status.ResolvedBackend, false),
 		textSettingsField("sandbox.route", "Route", status.Route, false),
-		textSettingsField("sandbox.network", "Network", settings.Network, true),
-		pathListSettingsField("sandbox.readable_roots", "Readable roots", settings.ReadableRoots),
-		pathListSettingsField("sandbox.writable_roots", "Writable roots", settings.WritableRoots),
-		textSettingsField("sandbox.helper_path", "Helper path", settings.HelperPath, true),
+		selectSettingsField("sandbox.network", "Network", settings.Network, editable, []appviewmodel.SettingsPanelFieldOption{
+			{Value: "inherit", Label: "Inherit"},
+			{Value: "enabled", Label: "Enabled"},
+			{Value: "disabled", Label: "Disabled"},
+		}),
+		pathListSettingsField("sandbox.readable_roots", "Readable roots", settings.ReadableRoots, editable),
+		pathListSettingsField("sandbox.writable_roots", "Writable roots", settings.WritableRoots, editable),
+		textSettingsField("sandbox.helper_path", "Helper path", settings.HelperPath, editable),
 	}
 }
 
@@ -210,7 +221,7 @@ func settingsPanelDiagnostics(view appviewmodel.SettingsPanelView, sandboxStatus
 			Severity: appresources.DiagnosticWarning,
 			Source:   "settings",
 			Kind:     "store",
-			Message:  "settings manager is not configured; changes are runtime-only",
+			Message:  "settings manager is not configured; changes are unavailable",
 		})
 	}
 	if !view.Model.Configured {
@@ -347,29 +358,40 @@ func modelConnectAction() appviewmodel.SettingsPanelAction {
 }
 
 func textSettingsField(id string, label string, value string, editable bool) appviewmodel.SettingsPanelField {
-	return appviewmodel.SettingsPanelField{
+	return decorateSettingsPanelField(appviewmodel.SettingsPanelField{
 		ID:       id,
 		Label:    label,
 		Kind:     "text",
 		Value:    strings.TrimSpace(value),
 		Editable: editable,
-	}
+	})
+}
+
+func numberSettingsField(id string, label string, value string, editable bool) appviewmodel.SettingsPanelField {
+	return decorateSettingsPanelField(appviewmodel.SettingsPanelField{
+		ID:       id,
+		Label:    label,
+		Kind:     "number",
+		Value:    strings.TrimSpace(value),
+		Editable: editable,
+	})
 }
 
 func selectSettingsField(id string, label string, value string, editable bool, options []appviewmodel.SettingsPanelFieldOption) appviewmodel.SettingsPanelField {
-	return appviewmodel.SettingsPanelField{
+	return decorateSettingsPanelField(appviewmodel.SettingsPanelField{
 		ID:       id,
 		Label:    label,
 		Kind:     "select",
 		Value:    strings.TrimSpace(value),
 		Editable: editable,
 		Options:  append([]appviewmodel.SettingsPanelFieldOption(nil), options...),
-	}
+	})
 }
 
-func pathListSettingsField(id string, label string, values []string) appviewmodel.SettingsPanelField {
+func pathListSettingsField(id string, label string, values []string, editable bool) appviewmodel.SettingsPanelField {
 	clean := commandNonEmpty(values)
-	field := textSettingsField(id, label, strings.Join(clean, ", "), true)
+	field := textSettingsField(id, label, strings.Join(clean, ", "), editable)
+	field.Kind = "path_list"
 	field.Detail = strconv.Itoa(len(clean)) + " roots"
 	return field
 }
