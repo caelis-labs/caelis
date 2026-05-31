@@ -96,7 +96,7 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 	case view.ModelConnectPanel != nil:
 		return commandPanelAction{fillInput: input + " "}
 	case view.AgentManagement != nil:
-		return commandPanelAction{line: input}
+		return agentCommandPanelAction(*view.AgentManagement, input)
 	default:
 		return commandPanelAction{fillInput: input}
 	}
@@ -214,6 +214,42 @@ func modelSelectionCommandPanelAction(panel appviewmodel.ModelSelectionView, inp
 	}
 	if strings.EqualFold(input, "/connect") {
 		return commandPanelAction{line: "/connect"}
+	}
+	return commandPanelAction{fillInput: input}
+}
+
+func agentCommandPanelAction(panel appviewmodel.AgentManagementView, input string) commandPanelAction {
+	for _, action := range agentPanelAllActions(panel) {
+		command := strings.TrimSpace(action.Command)
+		if !action.Enabled || command == "" || command != input {
+			continue
+		}
+		if action.Destructive {
+			return commandPanelAction{prompt: confirmCommandPanelPrompt(
+				"Remove agent?",
+				"Confirm agent removal",
+				[]PromptDetail{
+					{Label: "Agent", Value: firstNonEmpty(action.AgentID, strings.TrimPrefix(command, "/agent remove ")), Emphasis: true},
+					{Label: "Action", Value: firstNonEmpty(action.Name, action.ID)},
+				},
+				command,
+			)}
+		}
+		if action.RequiresInput {
+			return commandPanelAction{fillInput: command + " "}
+		}
+		return commandPanelAction{line: command}
+	}
+	if target, ok := strings.CutPrefix(input, "/agent remove "); ok {
+		target = strings.TrimSpace(target)
+		if target != "" {
+			return commandPanelAction{prompt: confirmCommandPanelPrompt(
+				"Remove agent?",
+				"Confirm agent removal",
+				[]PromptDetail{{Label: "Agent", Value: target, Emphasis: true}},
+				"/agent remove "+target,
+			)}
+		}
 	}
 	return commandPanelAction{fillInput: input}
 }
@@ -520,6 +556,21 @@ func findModelSelectionChoice(panel appviewmodel.ModelSelectionView, id string) 
 		}
 	}
 	return appviewmodel.ModelChoice{}, false
+}
+
+func agentPanelAllActions(panel appviewmodel.AgentManagementView) []appviewmodel.AgentManagementAction {
+	var actions []appviewmodel.AgentManagementAction
+	actions = append(actions, panel.Actions...)
+	for _, item := range panel.Registered {
+		actions = append(actions, item.Actions...)
+	}
+	for _, item := range panel.Builtins {
+		actions = append(actions, item.Actions...)
+	}
+	for _, item := range panel.Installable {
+		actions = append(actions, item.Actions...)
+	}
+	return actions
 }
 
 func findControllerPanelField(panel appviewmodel.ControllerPanelView, id string) (appviewmodel.ControllerPanelField, bool) {

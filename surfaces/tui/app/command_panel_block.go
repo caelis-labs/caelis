@@ -170,7 +170,7 @@ func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme 
 	case view.ModelConnectPanel != nil:
 		return "connect", "Model Setup", connectPanelState(*view.ModelConnectPanel), connectPanelBody(*view.ModelConnectPanel, width, theme), commandPanelFooterForCommand("connect")
 	case view.AgentManagement != nil:
-		return "agents", "Agent Registry", "ready", agentPanelBody(*view.AgentManagement, width, theme), commandPanelFooterForCommand("agent")
+		return "agents", "Agent Registry", agentPanelState(*view.AgentManagement), agentPanelBody(*view.AgentManagement, width, theme), commandPanelFooterForCommand("agent")
 	default:
 		command := strings.ToUpper(strings.TrimSpace(view.Command))
 		if command == "" {
@@ -415,17 +415,39 @@ func agentPanelBody(panel appviewmodel.AgentManagementView, width int, theme tui
 		commandPanelKV(theme, contentWidth, "registered", fmt.Sprintf("%d", len(panel.Registered))),
 		commandPanelKV(theme, contentWidth, "builtins", fmt.Sprintf("%d", len(panel.Builtins))),
 		commandPanelKV(theme, contentWidth, "installable", fmt.Sprintf("%d", len(panel.Installable))),
+		commandPanelKV(theme, contentWidth, "custom", fmt.Sprintf("%t", panel.CanRegisterCustom)),
 	}
 	if len(panel.Registered) > 0 {
 		body = append(body, "", tok.ChromeMeta.Render("Registered"))
 		for _, item := range panel.Registered {
-			body = append(body, agentPanelItemLine(item.Agent, contentWidth, theme))
+			body = append(body, agentPanelItemLine(item, contentWidth, theme))
+			for _, action := range item.Actions {
+				body = append(body, agentPanelActionLine(action, contentWidth, theme))
+			}
 		}
 	}
 	if len(panel.Builtins) > 0 {
 		body = append(body, "", tok.ChromeMeta.Render("Built-ins"))
 		for _, item := range panel.Builtins {
-			body = append(body, agentPanelItemLine(item.Agent, contentWidth, theme))
+			body = append(body, agentPanelItemLine(item, contentWidth, theme))
+			for _, action := range item.Actions {
+				body = append(body, agentPanelActionLine(action, contentWidth, theme))
+			}
+		}
+	}
+	if len(panel.Installable) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Installable"))
+		for _, item := range panel.Installable {
+			body = append(body, agentPanelInstallLine(item, contentWidth, theme))
+			for _, action := range item.Actions {
+				body = append(body, agentPanelActionLine(action, contentWidth, theme))
+			}
+		}
+	}
+	if len(panel.Actions) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Actions"))
+		for _, action := range panel.Actions {
+			body = append(body, agentPanelActionLine(action, contentWidth, theme))
 		}
 	}
 	return body
@@ -663,41 +685,39 @@ func connectPanelClickHints(panel appviewmodel.ModelConnectView) []commandPanelC
 
 func agentPanelClickHints(panel appviewmodel.AgentManagementView) []commandPanelClickHint {
 	var hints []commandPanelClickHint
+	for _, action := range panel.Actions {
+		hints = append(hints, agentPanelActionClickHint(action)...)
+	}
 	for _, item := range panel.Registered {
-		name := firstNonEmpty(item.Agent.Name, item.Agent.ID)
-		if name == "" {
-			continue
+		for _, action := range item.Actions {
+			hints = append(hints, agentPanelActionClickHint(action)...)
 		}
-		hints = append(hints, commandPanelClickHint{
-			Needle: name,
-			Input:  "/agent use " + name,
-		})
 	}
 	for _, item := range panel.Builtins {
-		name := firstNonEmpty(item.Agent.Name, item.Agent.ID)
-		if name == "" {
-			continue
+		for _, action := range item.Actions {
+			hints = append(hints, agentPanelActionClickHint(action)...)
 		}
-		input := "/agent add " + name
-		if item.Installable {
-			input = "/agent install " + name
-		}
-		hints = append(hints, commandPanelClickHint{
-			Needle: name,
-			Input:  input,
-		})
 	}
 	for _, item := range panel.Installable {
-		name := firstNonEmpty(item.Name, item.ID)
-		if name == "" {
-			continue
+		for _, action := range item.Actions {
+			hints = append(hints, agentPanelActionClickHint(action)...)
 		}
-		hints = append(hints, commandPanelClickHint{
-			Needle: name,
-			Input:  "/agent install " + name,
-		})
 	}
 	return hints
+}
+
+func agentPanelActionClickHint(action appviewmodel.AgentManagementAction) []commandPanelClickHint {
+	if !action.Enabled {
+		return nil
+	}
+	command := strings.TrimSpace(action.Command)
+	if command == "" {
+		return nil
+	}
+	return []commandPanelClickHint{{
+		Needle: firstNonEmpty(command, action.ID, action.Name, action.AgentID),
+		Input:  agentPanelActionInput(action),
+	}}
 }
 
 func commandPanelContentWidth(width int) int {
@@ -866,6 +886,13 @@ func modelSelectionState(panel appviewmodel.ModelSelectionView) string {
 	}
 	if panel.Current == nil {
 		return "select"
+	}
+	return "ready"
+}
+
+func agentPanelState(panel appviewmodel.AgentManagementView) string {
+	if len(panel.Registered) == 0 && len(panel.Builtins) == 0 && len(panel.Installable) == 0 {
+		return "empty"
 	}
 	return "ready"
 }
@@ -1267,13 +1294,71 @@ func connectPanelProviderLine(provider appviewmodel.ModelConnectProvider, width 
 	return theme.Tokens().TextPrimary.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
 }
 
-func agentPanelItemLine(agent appviewmodel.AgentItem, width int, theme tuikit.Theme) string {
+func agentPanelItemLine(item appviewmodel.AgentManagementItem, width int, theme tuikit.Theme) string {
+	agent := item.Agent
 	plain := "  " + firstNonEmpty(agent.Name, agent.ID, agent.Command)
-	details := compactNonEmpty([]string{agent.Kind, agent.Command})
+	details := compactNonEmpty([]string{item.Source, agent.Kind, agent.Command})
+	if item.Registered {
+		details = append(details, "registered")
+	}
+	if item.Builtin {
+		details = append(details, "builtin")
+	}
+	if item.Installable {
+		details = append(details, "installable")
+	}
 	if len(details) > 0 {
 		plain += "  [" + strings.Join(details, ", ") + "]"
 	}
 	return theme.Tokens().TextPrimary.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func agentPanelInstallLine(item appviewmodel.AgentInstallItem, width int, theme tuikit.Theme) string {
+	plain := "  " + firstNonEmpty(item.Name, item.ID)
+	if detail := strings.TrimSpace(item.Detail); detail != "" {
+		plain += "  [" + detail + "]"
+	}
+	return theme.Tokens().TextPrimary.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func agentPanelActionLine(action appviewmodel.AgentManagementAction, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	state := "disabled"
+	style := tok.TextMuted
+	if action.Enabled {
+		state = "enabled"
+		style = tok.TextPrimary
+	}
+	if action.Enabled && action.Destructive {
+		style = tok.Danger
+	}
+	parts := []string{firstNonEmpty(action.ID, action.Name, action.Kind)}
+	if name := strings.TrimSpace(action.Name); name != "" && !strings.EqualFold(name, parts[0]) {
+		parts = append(parts, name)
+	}
+	parts = append(parts, state)
+	if action.RequiresInput {
+		parts = append(parts, "input")
+	}
+	if action.Destructive {
+		parts = append(parts, "destructive")
+	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		parts = append(parts, command)
+	}
+	plain := "    " + strings.Join(compactNonEmpty(parts), "  ")
+	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func agentPanelActionInput(action appviewmodel.AgentManagementAction) string {
+	command := strings.TrimSpace(action.Command)
+	if command == "" {
+		return ""
+	}
+	if action.RequiresInput {
+		return command + " "
+	}
+	return command
 }
 
 func settingsDiagnosticsAsRows(items []appviewmodel.SettingsPanelDiagnostic) []commandPanelDiagnosticRow {

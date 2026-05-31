@@ -27,11 +27,14 @@ type AgentInstallItem struct {
 }
 
 type AgentManagementAction struct {
-	ID          string `json:"id,omitempty"`
-	Name        string `json:"name,omitempty"`
-	Kind        string `json:"kind,omitempty"`
-	Enabled     bool   `json:"enabled,omitempty"`
-	Destructive bool   `json:"destructive,omitempty"`
+	ID            string `json:"id,omitempty"`
+	Name          string `json:"name,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	AgentID       string `json:"agent_id,omitempty"`
+	Command       string `json:"command,omitempty"`
+	Enabled       bool   `json:"enabled,omitempty"`
+	Destructive   bool   `json:"destructive,omitempty"`
+	RequiresInput bool   `json:"requires_input,omitempty"`
 }
 
 func CloneAgentManagementView(in AgentManagementView) AgentManagementView {

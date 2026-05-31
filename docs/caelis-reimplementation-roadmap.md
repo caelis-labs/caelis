@@ -1046,6 +1046,10 @@ The completed work is intentionally limited to the reusable skeleton:
 - Service-native `/agent use <agent|local>` baseline for registered external
   ACP agents, using canonical handoff events and controller-scoped ACP prompt
   execution through shared app services.
+- Shared `/agent` panel action baseline: `AgentService.Management` now attaches
+  stable invoke/use/remove/register/install/update/custom command actions, and
+  `/agent` mutations return the refreshed management view so TUI and future APP
+  surfaces can consume one service-owned agent contract.
 - Service-native ACP controller config-intent baseline: active controller
   model/reasoning/mode choices are persisted in shared session state, exposed
   through `internal/app/services.ControllerService`, injected into
@@ -2168,6 +2172,11 @@ be migrated before retiring the old stack:
       `AgentService.Management`, covering registered agents, built-in catalog
       entries, installable adapters, and surface-neutral actions for TUI and
       future APP panels.
+    - Migrated baseline: agent management actions now include stable command
+      strings and input/destructive flags for invoke/use/remove/register/install/
+      update/custom flows. `/agent add|install|update|remove|use` returns the
+      refreshed shared management panel, while TUI keeps only rendering and
+      destructive confirmation behavior.
     - Migrated baseline: shared command execution now covers `/agent list`,
       `/agent add <builtin>`, `/agent add custom <name> -- <command> [args...]`,
       `/agent install|update <builtin>`, `/agent remove <agent>`, and
@@ -2549,8 +2558,8 @@ Recommended sequence:
    especially any product actions not yet represented by shared settings, task,
    controller, or resume panel payloads while preserving rendering as
    surface-local code.
-5. Expand shared APP view models for settings, agent management, tasks, resume,
-   and transcript actions.
+5. Expand shared APP view models for settings, tasks, resume, and transcript
+   actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.

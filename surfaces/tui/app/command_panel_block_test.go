@@ -288,6 +288,110 @@ func TestCommandPanelBlockRendersModelSelectionActions(t *testing.T) {
 	}
 }
 
+func TestCommandPanelBlockRendersAgentManagementActions(t *testing.T) {
+	panel := appviewmodel.AgentManagementView{
+		CanRegisterCustom: true,
+		Registered: []appviewmodel.AgentManagementItem{{
+			Agent:      appviewmodel.AgentItem{ID: "reviewer", Name: "reviewer", Kind: "external_acp", Command: "reviewer-acp"},
+			Source:     "registered",
+			Registered: true,
+			Actions: []appviewmodel.AgentManagementAction{{
+				ID:            "invoke",
+				Name:          "Invoke",
+				Kind:          "invoke",
+				AgentID:       "reviewer",
+				Command:       "/reviewer ",
+				Enabled:       true,
+				RequiresInput: true,
+			}, {
+				ID:      "use_controller",
+				Name:    "Use as controller",
+				Kind:    "controller",
+				AgentID: "reviewer",
+				Command: "/agent use reviewer",
+				Enabled: true,
+			}, {
+				ID:          "remove",
+				Name:        "Remove",
+				Kind:        "remove",
+				AgentID:     "reviewer",
+				Command:     "/agent remove reviewer",
+				Enabled:     true,
+				Destructive: true,
+			}},
+		}},
+		Builtins: []appviewmodel.AgentManagementItem{{
+			Agent:       appviewmodel.AgentItem{ID: "codex", Name: "codex", Kind: "external_acp", Command: "npx"},
+			Source:      "builtin",
+			Builtin:     true,
+			Installable: true,
+			Actions: []appviewmodel.AgentManagementAction{{
+				ID:      "register",
+				Name:    "Register",
+				Kind:    "register",
+				AgentID: "codex",
+				Command: "/agent add codex",
+				Enabled: true,
+			}, {
+				ID:      "install",
+				Name:    "Install",
+				Kind:    "install",
+				AgentID: "codex",
+				Command: "/agent install codex",
+				Enabled: true,
+			}},
+		}},
+		Installable: []appviewmodel.AgentInstallItem{{
+			ID:     "claude",
+			Name:   "claude",
+			Detail: "Claude Code ACP",
+			Actions: []appviewmodel.AgentManagementAction{{
+				ID:      "install",
+				Name:    "Install",
+				Kind:    "install",
+				AgentID: "claude",
+				Command: "/agent install claude",
+				Enabled: true,
+			}},
+		}},
+		Actions: []appviewmodel.AgentManagementAction{{
+			ID:            "register_custom",
+			Name:          "Register custom agent",
+			Kind:          "register_custom",
+			Command:       "/agent add custom ",
+			Enabled:       true,
+			RequiresInput: true,
+		}},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command:         "agent",
+		AgentManagement: &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 112, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"AGENTS", "Agent Registry", "reviewer", "use_controller", "remove", "codex", "claude", "register_custom"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered agent panel = %q, missing %q", plain, want)
+		}
+	}
+	for _, input := range []string{"/reviewer ", "/agent use reviewer", "/agent remove reviewer", "/agent add codex", "/agent install claude", "/agent add custom "} {
+		if !rowsContainCommandPanelInput(rows, input) {
+			t.Fatalf("agent action missing command-panel input %q: %#v", input, renderedPlainRows(rows))
+		}
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{AgentManagement: &panel}, "/reviewer "); action.fillInput != "/reviewer " {
+		t.Fatalf("agent invoke action = %#v, want input fill", action)
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{AgentManagement: &panel}, "/agent use reviewer"); action.line != "/agent use reviewer" {
+		t.Fatalf("agent use action = %#v, want immediate submit", action)
+	}
+	action := commandPanelActionForInput(appviewmodel.CommandExecutionView{AgentManagement: &panel}, "/agent remove reviewer")
+	if action.prompt == nil || action.prompt.buildLine("run") != "/agent remove reviewer" {
+		t.Fatalf("agent remove action = %#v, want confirmation prompt", action)
+	}
+}
+
 func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 	panel := appviewmodel.ControllerPanelView{
 		Active: true,

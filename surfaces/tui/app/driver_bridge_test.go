@@ -1022,6 +1022,46 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	}
 }
 
+func TestSlashAgentEmitsStructuredCommandPanel(t *testing.T) {
+	panel := appviewmodel.AgentManagementView{
+		Registered: []appviewmodel.AgentManagementItem{{
+			Agent:      appviewmodel.AgentItem{ID: "reviewer", Name: "reviewer", Kind: "external_acp", Command: "reviewer-acp"},
+			Registered: true,
+			Actions: []appviewmodel.AgentManagementAction{{
+				ID:      "use_controller",
+				Name:    "Use as controller",
+				Kind:    "controller",
+				AgentID: "reviewer",
+				Command: "/agent use reviewer",
+				Enabled: true,
+			}},
+		}},
+	}
+	driver := &bridgeTestDriver{
+		commandCatalog: tuidriver.CommandCatalogView{Commands: []tuidriver.CommandView{{Name: "agent"}}},
+		commandView: tuidriver.CommandExecutionView{
+			Handled:         true,
+			Command:         "agent",
+			AgentManagement: &panel,
+		},
+	}
+	var msgs []tea.Msg
+	result := slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "list")
+	if result.Err != nil || !result.SuppressTurnDivider {
+		t.Fatalf("agent result = %#v, want handled structured panel", result)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/agent list" {
+		t.Fatalf("command calls=%d input=%q, want shared /agent list command", driver.commandCalls, driver.lastCommandInput)
+	}
+	for _, msg := range msgs {
+		panelMsg, ok := msg.(CommandPanelMsg)
+		if ok && panelMsg.View.AgentManagement != nil {
+			return
+		}
+	}
+	t.Fatalf("agent messages = %#v, want CommandPanelMsg with agent management payload", msgs)
+}
+
 func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentList: []tuidriver.AgentCandidate{{

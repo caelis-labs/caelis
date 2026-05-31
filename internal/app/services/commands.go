@@ -260,22 +260,13 @@ func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args 
 		}
 		event := controllerHandoffEvent(result.Controller, "app_command_agent", "slash command handoff")
 		event.SessionID = strings.TrimSpace(ref.SessionID)
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "agent",
-			Output:  output,
-			Events:  []session.Event{event},
-		}, nil
+		return s.agentCommandView(ctx, ref, output, []session.Event{event})
 	case "add", "register":
 		agent, err := s.executeAgentAdd(ctx, rest)
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "agent",
-			Output:  "agent registered: " + firstNonEmpty(agent.Name, agent.ID),
-		}, nil
+		return s.agentCommandView(ctx, ref, "agent registered: "+firstNonEmpty(agent.Name, agent.ID), nil)
 	case "install", "update":
 		target := strings.TrimSpace(rest)
 		if target == "" || strings.ContainsAny(target, " \t\n") {
@@ -289,11 +280,7 @@ func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args 
 		if strings.EqualFold(sub, "update") {
 			action = "updated"
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "agent",
-			Output:  "agent " + action + ": " + firstNonEmpty(agent.Name, agent.ID),
-		}, nil
+		return s.agentCommandView(ctx, ref, "agent "+action+": "+firstNonEmpty(agent.Name, agent.ID), nil)
 	case "remove", "rm", "delete", "del":
 		target := strings.TrimSpace(rest)
 		if target == "" || strings.ContainsAny(target, " \t\n") {
@@ -307,14 +294,24 @@ func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args 
 		if err := s.services.Agents().Remove(ctx, target); err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "agent",
-			Output:  "agent removed: " + target,
-		}, nil
+		return s.agentCommandView(ctx, ref, "agent removed: "+target, nil)
 	default:
 		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /agent list|use <agent|local>|add <builtin>|add custom <name> -- <command> [args...]|install <builtin>|update <builtin>|remove <agent>")
 	}
+}
+
+func (s CommandService) agentCommandView(ctx context.Context, ref session.Ref, output string, events []session.Event) (appviewmodel.CommandExecutionView, error) {
+	view, err := s.services.Agents().Management(ctx)
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	return appviewmodel.CommandExecutionView{
+		Handled:         true,
+		Command:         "agent",
+		Output:          output,
+		Events:          events,
+		AgentManagement: &view,
+	}, nil
 }
 
 func (s CommandService) executeAgentAdd(ctx context.Context, args string) (AgentDescriptor, error) {

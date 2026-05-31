@@ -1332,6 +1332,20 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 			t.Fatalf("agent list output = %q, missing %q", listed.Output, want)
 		}
 	}
+	if listed.AgentManagement == nil {
+		t.Fatal("agent list management panel = nil, want shared agent panel")
+	}
+	reviewer, ok := findAgentManagementItem(listed.AgentManagement.Registered, "reviewer")
+	if !ok || agentActionCommand(reviewer.Actions, agentActionInvoke) != "/reviewer " || agentActionCommand(reviewer.Actions, agentActionUseController) != "/agent use reviewer" || agentActionCommand(reviewer.Actions, agentActionRemove) != "/agent remove reviewer" {
+		t.Fatalf("reviewer management actions = %#v ok=%v, want invoke/use/remove commands", reviewer.Actions, ok)
+	}
+	copilot, ok := findAgentManagementItem(listed.AgentManagement.Builtins, "copilot")
+	if !ok || agentActionCommand(copilot.Actions, agentActionRegister) != "/agent add copilot" {
+		t.Fatalf("copilot builtin actions = %#v ok=%v, want register command", copilot.Actions, ok)
+	}
+	if action := agentActionCommand(listed.AgentManagement.Actions, agentActionRegisterCustom); action != "/agent add custom " {
+		t.Fatalf("top-level custom action command = %q, want custom registration prefix", action)
+	}
 
 	added, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent add copilot"})
 	if err != nil {
@@ -1343,6 +1357,12 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" {
 		t.Fatalf("settings agents after builtin add = %#v, want copilot", agents)
 	}
+	if added.AgentManagement == nil {
+		t.Fatal("agent add management panel = nil, want updated shared agent panel")
+	}
+	if _, ok := findAgentManagementItem(added.AgentManagement.Registered, "copilot"); !ok {
+		t.Fatalf("agent add management registered = %#v, want copilot", added.AgentManagement.Registered)
+	}
 
 	custom, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent add custom helper -- helper-acp --stdio"})
 	if err != nil {
@@ -1350,6 +1370,12 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	}
 	if custom.Output != "agent registered: helper" {
 		t.Fatalf("custom add output = %q, want helper", custom.Output)
+	}
+	if custom.AgentManagement == nil {
+		t.Fatal("custom add management panel = nil, want updated shared agent panel")
+	}
+	if helper, ok := findAgentManagementItem(custom.AgentManagement.Registered, "helper"); !ok || agentActionCommand(helper.Actions, agentActionRemove) != "/agent remove helper" {
+		t.Fatalf("custom add helper actions = %#v ok=%v, want remove command", helper.Actions, ok)
 	}
 	handoff, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-agent"},
@@ -1367,6 +1393,9 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	if len(engine.events) != 1 || engine.events[0].Type != session.EventHandoff || engine.events[0].Scope == nil || engine.events[0].Scope.Controller.ID != "reviewer" {
 		t.Fatalf("handoff events = %#v, want reviewer handoff event", engine.events)
 	}
+	if handoff.AgentManagement == nil {
+		t.Fatal("handoff management panel = nil, want shared agent panel")
+	}
 	local, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-agent"},
 		Input:      "/agent use local",
@@ -1380,6 +1409,9 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	if len(local.Events) != 1 || local.Events[0].Type != session.EventHandoff || local.Events[0].Scope == nil || local.Events[0].Scope.Controller.Kind != session.ControllerBuiltin {
 		t.Fatalf("local command events = %#v, want local handoff projection", local.Events)
 	}
+	if local.AgentManagement == nil {
+		t.Fatal("local handoff management panel = nil, want shared agent panel")
+	}
 	removed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/agent remove helper"})
 	if err != nil {
 		t.Fatal(err)
@@ -1389,6 +1421,12 @@ func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	}
 	if agents := manager.ListACPAgents(); len(agents) != 1 || agents[0].Name != "copilot" {
 		t.Fatalf("settings agents after remove = %#v, want only copilot", agents)
+	}
+	if removed.AgentManagement == nil {
+		t.Fatal("remove management panel = nil, want updated shared agent panel")
+	}
+	if _, ok := findAgentManagementItem(removed.AgentManagement.Registered, "helper"); ok {
+		t.Fatalf("remove management registered = %#v, want helper removed", removed.AgentManagement.Registered)
 	}
 }
 
@@ -2198,13 +2236,22 @@ func TestAgentServiceManagementViewProjectsActions(t *testing.T) {
 	if !ok || !helper.Registered || !agentActionEnabled(helper.Actions, agentActionInvoke) || !agentActionEnabled(helper.Actions, agentActionRemove) {
 		t.Fatalf("registered helper = %#v ok=%v, want invoke/remove actions", helper, ok)
 	}
+	if agentActionCommand(helper.Actions, agentActionInvoke) != "/helper " || agentActionCommand(helper.Actions, agentActionRemove) != "/agent remove helper" {
+		t.Fatalf("registered helper action commands = %#v, want invoke/remove commands", helper.Actions)
+	}
 	codex, ok := findAgentManagementItem(view.Builtins, "codex")
 	if !ok || !codex.Builtin || codex.Registered || !codex.Installable || !agentActionEnabled(codex.Actions, agentActionRegister) || !agentActionEnabled(codex.Actions, agentActionInstall) {
 		t.Fatalf("builtin codex = %#v ok=%v, want register/install actions", codex, ok)
 	}
+	if agentActionCommand(codex.Actions, agentActionRegister) != "/agent add codex" || agentActionCommand(codex.Actions, agentActionInstall) != "/agent install codex" {
+		t.Fatalf("builtin codex action commands = %#v, want add/install commands", codex.Actions)
+	}
 	builtinHelper, ok := findAgentManagementItem(view.Builtins, "helper")
 	if !ok || !builtinHelper.Registered || agentActionEnabled(builtinHelper.Actions, agentActionRegister) || !agentActionEnabled(builtinHelper.Actions, agentActionUpdate) {
 		t.Fatalf("builtin helper = %#v ok=%v, want registered helper with update action", builtinHelper, ok)
+	}
+	if agentActionCommand(builtinHelper.Actions, agentActionUpdate) != "/agent update helper" {
+		t.Fatalf("builtin helper action commands = %#v, want update command", builtinHelper.Actions)
 	}
 	view.Registered[0].Agent.Name = "mutated"
 	again, err := svc.Agents().Management(ctx)
@@ -5809,6 +5856,15 @@ func agentActionEnabled(actions []appviewmodel.AgentManagementAction, id string)
 		}
 	}
 	return false
+}
+
+func agentActionCommand(actions []appviewmodel.AgentManagementAction, id string) string {
+	for _, action := range actions {
+		if action.ID == id {
+			return action.Command
+		}
+	}
+	return ""
 }
 
 func (p catalogProvider) ID() string {

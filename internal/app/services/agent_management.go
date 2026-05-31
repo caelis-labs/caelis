@@ -39,10 +39,12 @@ func (s AgentService) Management(ctx context.Context) (appviewmodel.AgentManagem
 		Builtins:          agentManagementBuiltinItems(builtins, registeredKeys, installable),
 		Installable:       agentManagementInstallItems(installable),
 		Actions: []appviewmodel.AgentManagementAction{{
-			ID:      agentActionRegisterCustom,
-			Name:    "Register custom agent",
-			Kind:    "register_custom",
-			Enabled: s.services.settings != nil,
+			ID:            agentActionRegisterCustom,
+			Name:          "Register custom agent",
+			Kind:          "register_custom",
+			Command:       "/agent add custom ",
+			Enabled:       s.services.settings != nil,
+			RequiresInput: true,
 		}},
 	}
 	return appviewmodel.CloneAgentManagementView(view), nil
@@ -55,14 +57,15 @@ func agentManagementRegisteredItems(agents []AgentDescriptor) []appviewmodel.Age
 	})
 	out := make([]appviewmodel.AgentManagementItem, 0, len(agents))
 	for _, agent := range agents {
+		target := agentManagementTarget(agent)
 		out = append(out, appviewmodel.AgentManagementItem{
 			Agent:      agentItemFromDescriptor(agent),
 			Source:     "registered",
 			Registered: true,
 			Actions: []appviewmodel.AgentManagementAction{
-				{ID: agentActionInvoke, Name: "Invoke", Kind: "invoke", Enabled: true},
-				{ID: agentActionUseController, Name: "Use as controller", Kind: "controller", Enabled: true},
-				{ID: agentActionRemove, Name: "Remove", Kind: "remove", Enabled: true, Destructive: true},
+				{ID: agentActionInvoke, Name: "Invoke", Kind: "invoke", AgentID: target, Command: "/" + target + " ", Enabled: true, RequiresInput: true},
+				{ID: agentActionUseController, Name: "Use as controller", Kind: "controller", AgentID: target, Command: "/agent use " + target, Enabled: true},
+				{ID: agentActionRemove, Name: "Remove", Kind: "remove", AgentID: target, Command: "/agent remove " + target, Enabled: true, Destructive: true},
 			},
 		})
 	}
@@ -83,25 +86,32 @@ func agentManagementBuiltinItems(builtins []AgentDescriptor, registeredKeys map[
 	out := make([]appviewmodel.AgentManagementItem, 0, len(builtins))
 	for _, agent := range builtins {
 		key := strings.ToLower(firstNonEmpty(agent.Name, agent.ID))
+		target := agentManagementTarget(agent)
 		_, registered := registeredKeys[key]
 		_, installable := installableKeys[key]
 		actions := []appviewmodel.AgentManagementAction{{
 			ID:      agentActionRegister,
 			Name:    "Register",
 			Kind:    "register",
+			AgentID: target,
+			Command: "/agent add " + target,
 			Enabled: !registered,
 		}}
 		if installable {
 			actionID := agentActionInstall
 			actionName := "Install"
+			command := "/agent install " + target
 			if registered {
 				actionID = agentActionUpdate
 				actionName = "Update"
+				command = "/agent update " + target
 			}
 			actions = append(actions, appviewmodel.AgentManagementAction{
 				ID:      actionID,
 				Name:    actionName,
 				Kind:    "install",
+				AgentID: target,
+				Command: command,
 				Enabled: true,
 			})
 		}
@@ -139,11 +149,17 @@ func agentManagementInstallItems(options []AgentInstallOption) []appviewmodel.Ag
 				ID:      agentActionInstall,
 				Name:    "Install",
 				Kind:    "install",
+				AgentID: id,
+				Command: "/agent install " + id,
 				Enabled: true,
 			}},
 		})
 	}
 	return out
+}
+
+func agentManagementTarget(agent AgentDescriptor) string {
+	return firstNonEmpty(agent.Name, agent.ID, agent.Command)
 }
 
 func agentRegisteredKeys(agents []AgentDescriptor) map[string]struct{} {
