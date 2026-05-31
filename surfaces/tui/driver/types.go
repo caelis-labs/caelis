@@ -142,20 +142,6 @@ type AgentStatusSnapshot struct {
 	DelegatedParticipants     []AgentParticipantSnapshot
 }
 
-type CustomAgentConfig struct {
-	Name        string
-	Description string
-	Command     string
-	Args        []string
-	Env         map[string]string
-	WorkDir     string
-}
-
-type AgentAddOptions struct {
-	Install bool
-	Custom  *CustomAgentConfig
-}
-
 type CommandExecutionOptions struct {
 	Input       string
 	Attachments []Attachment
@@ -192,11 +178,6 @@ type Driver interface {
 
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
-	AddAgent(context.Context, string) (AgentStatusSnapshot, error)
-	AddAgentWithOptions(context.Context, string, AgentAddOptions) (AgentStatusSnapshot, error)
-	RemoveAgent(context.Context, string) (AgentStatusSnapshot, error)
-	HandoffAgent(context.Context, string) (AgentStatusSnapshot, error)
-	StartAgentSubagent(context.Context, string, string, []Attachment) (Turn, error)
 	ContinueSubagent(context.Context, string, string, []Attachment) (Turn, error)
 
 	CompleteMention(context.Context, string, int) ([]CompletionCandidate, error)

@@ -573,7 +573,7 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 		t.Fatalf("commands = %#v, want eleven core commands", view.Commands)
 	}
 	agent, ok := findCommandView(view.Commands, "agent")
-	if !ok || agent.InputHint != "use|add|install|list|remove" {
+	if !ok || agent.InputHint != "list|use|add|install|update|remove" {
 		t.Fatalf("agent command = %#v ok=%v, want management hint", agent, ok)
 	}
 	compact, ok := findCommandView(view.Commands, "compact")

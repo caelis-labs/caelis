@@ -1337,6 +1337,15 @@ be migrated before retiring the old stack:
      live in `ModeService` / `ControllerService`, and the Bubble Tea driver
      contract no longer declares migrated direct config methods such as
      connect/model/delete/compact/session-mode/sandbox lifecycle controls.
+   - Migrated baseline: TUI `/agent` management and dynamic `/<agent>` slash
+     invocation now execute through `CommandService`. The TUI surface keeps
+     help text, command refresh, `@handle` continuation, and transcript
+     rendering, while agent register/install/update/remove/controller handoff
+     and dynamic participant invocation live behind the shared app-service
+     command contract. `CommandExecutionView.Events` are projected back into
+     the existing TUI event stream during the transition, and the Bubble Tea
+     driver contract no longer exposes agent mutation or dynamic slash-start
+     methods.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and

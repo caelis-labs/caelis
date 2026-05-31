@@ -2,16 +2,12 @@ package tuiapp
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"strconv"
 	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -132,29 +128,22 @@ func slashDynamicAgentWithContext(ctx context.Context, driver tuidriver.Driver, 
 	send := sender.sendFunc()
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	prompt = strings.TrimSpace(prompt)
+	if !isRegisteredAgentCommandWithContext(ctx, driver, agent) {
+		sendNotice(send, fmt.Sprintf("unknown command: /%s\nrun /help to see supported commands", agent))
+		return TaskResultMsg{SuppressTurnDivider: true}
+	}
 	if prompt == "" && len(attachments) == 0 {
-		if isRegisteredAgentCommand(driver, agent) {
-			sendNotice(send, fmt.Sprintf("usage: /%s <prompt>", agent))
-		} else {
-			sendNotice(send, fmt.Sprintf("unknown command: /%s\nrun /help to see supported commands", agent))
-		}
+		sendNotice(send, fmt.Sprintf("usage: /%s <prompt>", agent))
 		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-	turn, err := driver.StartAgentSubagent(ctx, agent, prompt, convertAttachments(attachments))
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("/"+agent, err)}
+	input := "/" + agent
+	if prompt != "" {
+		input += " " + prompt
 	}
-	if turn == nil {
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	defer turn.Close()
-	if send != nil {
-		forwardGatewayTurnEvents(ctx, driver, turn, sender)
-	} else {
-		for range turn.Events() {
-		}
-	}
-	return TaskResultMsg{}
+	return slashSharedCommandWithContext(ctx, driver, send, input, sharedCommandOptions{
+		Attachments:     attachments,
+		KeepTurnDivider: true,
+	})
 }
 
 func isRegisteredAgentCommand(driver tuidriver.Driver, agent string) bool {
@@ -219,203 +208,19 @@ func slashAgent(driver tuidriver.Driver, send func(tea.Msg), args string) TaskRe
 
 func slashAgentWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
-	sub, rest := splitFirst(strings.TrimSpace(args))
+	sub, _ := splitFirst(strings.TrimSpace(args))
 	switch sub {
 	case "", "help":
 		sendNotice(send, agentHelpText())
 		return TaskResultMsg{SuppressTurnDivider: true}
-	case "list":
-		agents, err := driver.ListAgents(ctx, 20)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("agent list", err)}
-		}
-		status, _ := driver.AgentStatus(ctx)
-		sendNotice(send, formatAgentList(agents, status))
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "status":
-		sendNotice(send, "usage: /agent list | add <builtin> | install/update <adapter> | use <agent|local> | remove <agent>")
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "add":
-		addArgs, ok := parseAgentAddArgs(rest)
-		if !ok || addArgs.Target == "" {
-			sendNotice(send, "usage: /agent add <name> | /agent add custom <name> -- <command> [args...]")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		status, err := driver.AddAgentWithOptions(ctx, addArgs.Target, tuidriver.AgentAddOptions{
-			Install: addArgs.Install,
-			Custom:  addArgs.Custom,
-		})
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("agent add", err)}
-		}
-		if addArgs.Custom != nil {
-			sendNotice(send, fmt.Sprintf("custom agent registered: %s", addArgs.Target))
-		} else if addArgs.Install {
-			sendNotice(send, fmt.Sprintf("agent registered with local adapter: %s", addArgs.Target))
-		} else {
-			sendNotice(send, fmt.Sprintf("agent registered: %s", addArgs.Target))
-		}
-		sendNotice(send, formatAgentStatusSnapshot(status))
-		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "install", "update":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			sendNotice(send, fmt.Sprintf("usage: /agent %s <adapter>", sub))
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		command := agentInstallCommandForDisplay(ctx, driver, sub, target)
-		callID := sendAgentInstallToolCall(send, target, command)
-		status, err := driver.AddAgentWithOptions(ctx, target, tuidriver.AgentAddOptions{Install: true})
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				sendAgentInstallToolResult(send, callID, command, kernel.ToolStatusInterrupted, false, agentInstallErrorOutput(err))
-				return TaskResultMsg{Interrupted: true, SuppressTurnDivider: true}
-			}
-			sendAgentInstallToolResult(send, callID, command, kernel.ToolStatusFailed, true, agentInstallErrorOutput(err))
-			return TaskResultMsg{Err: friendlyCommandError("agent "+sub, err)}
-		}
-		sendAgentInstallToolResult(send, callID, command, kernel.ToolStatusCompleted, false, "")
-		if sub == "update" {
-			sendNotice(send, fmt.Sprintf("agent updated and registered: %s", target))
-		} else {
-			sendNotice(send, fmt.Sprintf("agent installed and registered: %s", target))
-		}
-		sendNotice(send, formatAgentStatusSnapshot(status))
-		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "remove":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			sendNotice(send, "usage: /agent remove <agent>\nrun /agent list to inspect registered agents")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		status, err := driver.RemoveAgent(ctx, target)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("agent remove", err)}
-		}
-		sendNotice(send, fmt.Sprintf("agent unregistered: %s", target))
-		sendNotice(send, formatAgentStatusSnapshot(status))
-		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	case "use":
-		target := strings.TrimSpace(rest)
-		if target == "" {
-			sendNotice(send, "usage: /agent use <agent|local>\nrun /agent list for registered agents")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		status, err := driver.HandoffAgent(ctx, target)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("agent use", err)}
-		}
-		sendNotice(send, formatAgentStatusSnapshot(status))
-		if current, err := driver.Status(ctx); err == nil {
-			sendStatusUpdate(send, current)
-		}
-		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
-		return TaskResultMsg{SuppressTurnDivider: true}
-	default:
-		sendNotice(send, "usage: /agent list | add <builtin> | install/update <adapter> | use <agent|local> | remove <agent>")
-		return TaskResultMsg{SuppressTurnDivider: true}
 	}
-}
-
-func agentInstallCommandForDisplay(ctx context.Context, driver tuidriver.Driver, action string, target string) string {
-	action = strings.TrimSpace(strings.ToLower(action))
-	if action == "" {
-		action = "install"
+	opts := sharedCommandOptions{}
+	switch strings.ToLower(strings.TrimSpace(sub)) {
+	case "add", "register", "install", "update", "remove", "rm", "delete", "del", "use":
+		opts.RefreshStatus = true
+		opts.RefreshCommands = true
 	}
-	target = strings.TrimSpace(target)
-	if driver != nil {
-		if candidates, err := driver.CompleteSlashArg(ctx, "agent "+action, target, 20); err == nil {
-			for _, candidate := range candidates {
-				if !strings.EqualFold(strings.TrimSpace(candidate.Value), target) {
-					continue
-				}
-				if detail := strings.TrimSpace(candidate.Detail); detail != "" {
-					return detail
-				}
-			}
-		}
-	}
-	if target == "" {
-		return "npm install"
-	}
-	return "npm install " + target
-}
-
-func sendAgentInstallToolCall(send func(tea.Msg), target string, command string) string {
-	if send == nil {
-		return ""
-	}
-	callID := "agent-install-" + strings.ToLower(strings.ReplaceAll(strings.TrimSpace(target), " ", "-")) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
-	send(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolCall,
-		OccurredAt: time.Now(),
-		ToolCall: &kernel.ToolCallPayload{
-			CallID:   callID,
-			ToolName: "RUN_COMMAND",
-			Status:   kernel.ToolStatusRunning,
-			Scope:    kernel.EventScopeMain,
-			RawInput: map[string]any{"command": strings.TrimSpace(command)},
-		},
-	}})
-	return callID
-}
-
-func sendAgentInstallToolResult(send func(tea.Msg), callID string, command string, status kernel.ToolStatus, isErr bool, output string) {
-	if send == nil || strings.TrimSpace(callID) == "" {
-		return
-	}
-	rawOutput := map[string]any{
-		"running": false,
-		"state":   string(status),
-	}
-	if renderableTextHasContent(output) {
-		if isErr {
-			rawOutput["stderr"] = output
-		} else {
-			rawOutput["stdout"] = output
-		}
-	}
-	contentText := output
-	content := []session.ProtocolToolCallContent{}
-	if renderableTextHasContent(contentText) {
-		content = []session.ProtocolToolCallContent{{
-			Type:    "terminal",
-			Content: session.ProtocolTextContent(contentText),
-		}}
-	}
-	send(kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindToolResult,
-		OccurredAt: time.Now(),
-		ToolResult: &kernel.ToolResultPayload{
-			CallID:    callID,
-			ToolName:  "RUN_COMMAND",
-			Status:    status,
-			Scope:     kernel.EventScopeMain,
-			RawInput:  map[string]any{"command": strings.TrimSpace(command)},
-			RawOutput: rawOutput,
-			Content:   content,
-			Error:     isErr,
-		},
-	}})
-}
-
-func agentInstallErrorOutput(err error) string {
-	if err == nil {
-		return ""
-	}
-	if errors.Is(err, context.Canceled) {
-		return "User interrupt"
-	}
-	text := strings.TrimSpace(err.Error())
-	if idx := strings.Index(text, "\n"); idx >= 0 {
-		if out := strings.TrimSpace(text[idx+1:]); out != "" {
-			return out
-		}
-	}
-	return text
+	return slashSharedCommandWithContext(ctx, driver, send, strings.TrimSpace("/agent "+args), opts)
 }
 
 func slashNew(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {

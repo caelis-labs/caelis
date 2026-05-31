@@ -10,6 +10,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -1019,19 +1020,12 @@ func TestFormatContextUsageStatus(t *testing.T) {
 
 func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList: []tuidriver.AgentCandidate{{
-			Name:        "copilot",
-			Description: "ACP sidecar",
-		}},
-		agentStatus: tuidriver.AgentStatusSnapshot{
-			SessionID:       "sess-1",
-			ControllerKind:  "acp",
-			ControllerLabel: "copilot",
-			Participants: []tuidriver.AgentParticipantSnapshot{{
-				ID:    "participant-1",
-				Label: "copilot",
-				Role:  "sidecar",
-			}},
+		commandCatalog: tuidriver.CommandCatalogView{Commands: []tuidriver.CommandView{{Name: "agent"}}},
+		commandViews: map[string]tuidriver.CommandExecutionView{
+			"/agent list":           {Handled: true, Command: "agent", Output: "agents:\n  copilot"},
+			"/agent add copilot":    {Handled: true, Command: "agent", Output: "agent registered: copilot"},
+			"/agent remove copilot": {Handled: true, Command: "agent", Output: "agent removed: copilot"},
+			"/agent use copilot":    {Handled: true, Command: "agent", Output: "agent controller: copilot"},
 		},
 	}
 	var msgs []tea.Msg
@@ -1039,11 +1033,9 @@ func TestSlashAgentDispatchesPrimarySubcommands(t *testing.T) {
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "add copilot")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "remove copilot")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use copilot")
-	if driver.listAgentCalls != 1 || driver.agentStatusCalls != 4 || driver.addAgentCalls != 1 || driver.removeAgentCalls != 1 || driver.handoffAgentCalls != 1 {
-		t.Fatalf("agent calls = list:%d status:%d add:%d remove:%d use:%d", driver.listAgentCalls, driver.agentStatusCalls, driver.addAgentCalls, driver.removeAgentCalls, driver.handoffAgentCalls)
-	}
-	if driver.lastAddedAgent != "copilot" || driver.lastRemovedAgent != "copilot" || driver.lastHandoffAgent != "copilot" {
-		t.Fatalf("agent targets = add:%q remove:%q handoff:%q", driver.lastAddedAgent, driver.lastRemovedAgent, driver.lastHandoffAgent)
+	wantInputs := []string{"/agent list", "/agent add copilot", "/agent remove copilot", "/agent use copilot"}
+	if got := strings.Join(driver.commandInputs, "\n"); got != strings.Join(wantInputs, "\n") {
+		t.Fatalf("agent command inputs = %#v, want %#v", driver.commandInputs, wantInputs)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashAgent() emitted no messages")
@@ -1130,17 +1122,16 @@ func stringSliceContains(items []string, want string) bool {
 }
 
 func TestSlashAgentInstallPassesOptions(t *testing.T) {
-	driver := &bridgeTestDriver{}
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "agent", Output: "agent installed: claude"},
+	}
 	var msgs []tea.Msg
 	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "install claude")
 	if result.Err != nil {
 		t.Fatalf("slashAgentWithContext(install) error = %v", result.Err)
 	}
-	if driver.lastAddedAgent != "claude" {
-		t.Fatalf("lastAddedAgent = %q, want claude", driver.lastAddedAgent)
-	}
-	if !driver.lastAddOptions.Install {
-		t.Fatal("AddAgentWithOptions Install = false, want true")
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/agent install claude" {
+		t.Fatalf("agent install command calls=%d input=%q, want shared command", driver.commandCalls, driver.lastCommandInput)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashAgentWithContext(install) emitted no messages")
@@ -1148,89 +1139,53 @@ func TestSlashAgentInstallPassesOptions(t *testing.T) {
 }
 
 func TestSlashAgentUpdatePassesInstallOptions(t *testing.T) {
-	driver := &bridgeTestDriver{}
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "agent", Output: "agent updated: claude"},
+	}
 	var msgs []tea.Msg
 	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "update claude")
 	if result.Err != nil {
 		t.Fatalf("slashAgentWithContext(update) error = %v", result.Err)
 	}
-	if driver.lastAddedAgent != "claude" {
-		t.Fatalf("lastAddedAgent = %q, want claude", driver.lastAddedAgent)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/agent update claude" {
+		t.Fatalf("agent update command calls=%d input=%q, want shared command", driver.commandCalls, driver.lastCommandInput)
 	}
-	if !driver.lastAddOptions.Install {
-		t.Fatal("AddAgentWithOptions Install = false, want true")
-	}
-	if !noticeMessagesContain(msgs, "agent updated and registered: claude") {
+	if !noticeMessagesContain(msgs, "agent updated: claude") {
 		t.Fatalf("slashAgentWithContext(update) messages = %#v, want update notice", msgs)
 	}
 }
 
 func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
-	driver := &bridgeTestDriver{}
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "agent", Output: "agent registered: helper"},
+	}
 	var msgs []tea.Msg
 	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "add custom helper -- helper-acp --stdio --model test")
 	if result.Err != nil {
 		t.Fatalf("slashAgentWithContext(add custom) error = %v", result.Err)
 	}
-	if driver.lastAddedAgent != "helper" {
-		t.Fatalf("lastAddedAgent = %q, want helper", driver.lastAddedAgent)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/agent add custom helper -- helper-acp --stdio --model test" {
+		t.Fatalf("agent add custom command calls=%d input=%q, want shared command", driver.commandCalls, driver.lastCommandInput)
 	}
-	if driver.lastAddOptions.Custom == nil {
-		t.Fatal("AddAgentWithOptions Custom = nil, want config")
-	}
-	cfg := driver.lastAddOptions.Custom
-	if cfg.Name != "helper" || cfg.Command != "helper-acp" {
-		t.Fatalf("custom config = %#v, want helper/helper-acp", cfg)
-	}
-	if got, want := strings.Join(cfg.Args, " "), "--stdio --model test"; got != want {
-		t.Fatalf("custom args = %q, want %q", got, want)
-	}
-	if len(msgs) == 0 || !noticeMessagesContain(msgs, "custom agent registered: helper") {
+	if len(msgs) == 0 || !noticeMessagesContain(msgs, "agent registered: helper") {
 		t.Fatalf("slashAgentWithContext(add custom) messages = %#v, want registration notice", msgs)
 	}
 }
 
-func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
+func TestSlashAgentInstallFailureComesFromSharedCommand(t *testing.T) {
 	driver := &bridgeTestDriver{
-		addAgentErr: fmt.Errorf("app/services: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
-		slashArgCandidates: map[string][]tuidriver.SlashArgCandidate{
-			"agent install": {{
-				Value:  "claude",
-				Detail: "npm install --prefix /tmp/caelis/acp-agents/npm @agentclientprotocol/claude-agent-acp@latest",
-			}},
-		},
+		commandErr: fmt.Errorf("app/services: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
 	}
 	var msgs []tea.Msg
 	result := slashAgentWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "install claude")
 	if result.Err == nil {
 		t.Fatal("slashAgentWithContext(install failure) error = nil, want failure")
 	}
-	var sawCall, sawResult bool
-	for _, msg := range msgs {
-		env, ok := msg.(kernel.EventEnvelope)
-		if !ok {
-			continue
-		}
-		switch {
-		case env.Event.ToolCall != nil:
-			call := env.Event.ToolCall
-			if call.ToolName == "RUN_COMMAND" &&
-				call.Status == kernel.ToolStatusRunning &&
-				strings.Contains(fmt.Sprint(call.RawInput["command"]), "npm install --prefix") {
-				sawCall = true
-			}
-		case env.Event.ToolResult != nil:
-			toolResult := env.Event.ToolResult
-			if toolResult.ToolName == "RUN_COMMAND" &&
-				toolResult.Status == kernel.ToolStatusFailed &&
-				toolResult.Error &&
-				strings.Contains(fmt.Sprint(toolResult.RawOutput["stderr"]), "npm ERR install failed") {
-				sawResult = true
-			}
-		}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/agent install claude" {
+		t.Fatalf("agent install command calls=%d input=%q, want shared command", driver.commandCalls, driver.lastCommandInput)
 	}
-	if !sawCall || !sawResult {
-		t.Fatalf("install failure messages sawCall=%v sawResult=%v msgs=%#v", sawCall, sawResult, msgs)
+	if len(msgs) != 0 {
+		t.Fatalf("install failure messages = %#v, want no TUI-owned tool-call wrapper", msgs)
 	}
 }
 
@@ -1275,7 +1230,7 @@ func TestAgentInstallSlashArgFallbackIsExecutable(t *testing.T) {
 }
 
 func TestSlashAgentHelpAndRecovery(t *testing.T) {
-	driver := &bridgeTestDriver{}
+	driver := &bridgeTestDriver{commandErr: fmt.Errorf("app/services: usage: /agent remove <agent>")}
 	var msgs []tea.Msg
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
 	slashAgent(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "remove")
@@ -1471,6 +1426,7 @@ func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
+		commandView:  dynamicAgentCommandView("copilot", participantAssistantCoreEvent("task-1", "@jeff", "child ok")),
 		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@jeff", "child ok")),
 	}
 	var msgs []tea.Msg
@@ -1478,8 +1434,8 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash error = %v", result.Err)
 	}
-	if driver.lastStartedAgent != "copilot" || driver.lastStartedPrompt != "inspect" {
-		t.Fatalf("started agent=%q prompt=%q", driver.lastStartedAgent, driver.lastStartedPrompt)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/copilot inspect" {
+		t.Fatalf("dynamic slash command calls=%d input=%q, want shared command", driver.commandCalls, driver.lastCommandInput)
 	}
 	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "@jeff continue"})
 	if result.Err != nil {
@@ -1495,8 +1451,8 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	if result.Err != nil {
 		t.Fatalf("dynamic slash with attachment error = %v", result.Err)
 	}
-	if len(driver.lastStartedAttachments) != 1 || driver.lastStartedAttachments[0].Name != "shot.png" || driver.lastStartedAttachments[0].Offset != len([]rune("see ")) {
-		t.Fatalf("started attachments = %#v, want prompt-relative image attachment", driver.lastStartedAttachments)
+	if len(driver.lastCommandAttachments) != 1 || driver.lastCommandAttachments[0].Name != "shot.png" || driver.lastCommandAttachments[0].Offset != len([]rune("see ")) {
+		t.Fatalf("command attachments = %#v, want prompt-relative image attachment", driver.lastCommandAttachments)
 	}
 	result = executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{
 		Text:        "@jeff continue",
@@ -1515,8 +1471,8 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 
 func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
-		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@mike", "我是 copilot 子代理")),
+		agentList:   []tuidriver.AgentCandidate{{Name: "copilot"}},
+		commandView: dynamicAgentCommandView("copilot", participantAssistantCoreEvent("task-1", "@mike", "我是 copilot 子代理")),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/copilot 介绍一下你自己")
@@ -1546,8 +1502,8 @@ func TestDynamicAgentSlashStreamsParticipantTurnOutput(t *testing.T) {
 
 func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "codex"}},
-		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@iris", "上海今天阴有小雨。")),
+		agentList:   []tuidriver.AgentCandidate{{Name: "codex"}},
+		commandView: dynamicAgentCommandView("codex", participantAssistantCoreEvent("task-1", "@iris", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/codex 查询上海天气")
@@ -1579,8 +1535,8 @@ func TestDynamicAgentSlashDoesNotRenderRunningOutputPreviewAsAssistantText(t *te
 
 func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "codex"}},
-		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@kate", "上海今天阴有小雨。")),
+		agentList:   []tuidriver.AgentCandidate{{Name: "codex"}},
+		commandView: dynamicAgentCommandView("codex", participantAssistantCoreEvent("task-1", "@kate", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 8)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/codex 查询上海天气")
@@ -1601,8 +1557,8 @@ func TestDynamicAgentSlashCompletedTurnKeepsDivider(t *testing.T) {
 
 func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "codex"}},
-		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1:1", "@kate", "上海今天阴有小雨。")),
+		agentList:   []tuidriver.AgentCandidate{{Name: "codex"}},
+		commandView: dynamicAgentCommandView("codex", participantAssistantCoreEvent("task-1:1", "@kate", "上海今天阴有小雨。")),
 	}
 	msgs := make(chan tea.Msg, 8)
 	sender := &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}
@@ -1636,27 +1592,9 @@ func TestDynamicAgentSlashParticipantTurnCompletionKeepsDivider(t *testing.T) {
 }
 
 func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
-	env := kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Origin: &kernel.EventOrigin{
-				Scope:   kernel.EventScopeParticipant,
-				ScopeID: "child-1",
-				Actor:   "copilot",
-			},
-			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				RawInput: map[string]any{"command": "go test ./surfaces/tui/app/..."},
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeParticipant,
-			},
-		},
-	}
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
-		subagentTurn: bridgeTurnWithEvents(env),
+		agentList:   []tuidriver.AgentCandidate{{Name: "copilot"}},
+		commandView: dynamicAgentCommandView("copilot", participantToolCallCoreEvent("child-1", "RUN_COMMAND", map[string]any{"command": "go test ./surfaces/tui/app/..."})),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/copilot run tests")
@@ -1689,8 +1627,8 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 
 func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 	driver := &bridgeTestDriver{
-		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
-		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@mike", "fallback side output")),
+		agentList:   []tuidriver.AgentCandidate{{Name: "copilot"}},
+		commandView: dynamicAgentCommandView("copilot", participantAssistantCoreEvent("task-1", "@mike", "fallback side output")),
 	}
 	msgs := make(chan tea.Msg, 16)
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs <- msg }}, "/copilot run tests")
@@ -1987,29 +1925,20 @@ type bridgeTestDriver struct {
 	replay                   []kernel.EventEnvelope
 	listAgentCalls           int
 	agentStatusCalls         int
-	addAgentCalls            int
-	removeAgentCalls         int
-	handoffAgentCalls        int
-	lastAddedAgent           string
-	lastAddOptions           tuidriver.AgentAddOptions
-	lastRemovedAgent         string
-	lastHandoffAgent         string
-	lastStartedAgent         string
-	lastStartedPrompt        string
-	lastStartedAttachments   []tuidriver.Attachment
 	lastContinuedHandle      string
 	lastContinuedPrompt      string
 	lastContinuedAttachments []tuidriver.Attachment
 	subagentTurn             tuidriver.Turn
 	agentList                []tuidriver.AgentCandidate
 	agentStatus              tuidriver.AgentStatusSnapshot
-	addAgentErr              error
 	slashArgCandidates       map[string][]tuidriver.SlashArgCandidate
 	commandView              tuidriver.CommandExecutionView
 	commandViews             map[string]tuidriver.CommandExecutionView
 	commandErr               error
 	commandCalls             int
+	commandInputs            []string
 	lastCommandInput         string
+	lastCommandAttachments   []tuidriver.Attachment
 	commandCatalog           tuidriver.CommandCatalogView
 	commandCatalogErr        error
 	commandCatalogCalls      int
@@ -2076,6 +2005,69 @@ func participantAssistantEnvelope(scopeID string, actor string, text string) ker
 	}}
 }
 
+func dynamicAgentCommandView(command string, events ...coresession.Event) tuidriver.CommandExecutionView {
+	return tuidriver.CommandExecutionView{
+		Handled: true,
+		Command: command,
+		Events:  events,
+	}
+}
+
+func participantAssistantCoreEvent(scopeID string, actor string, text string) coresession.Event {
+	return coresession.Event{
+		ID:        "event-" + strings.TrimSpace(scopeID),
+		SessionID: "root-session",
+		Type:      coresession.EventAssistant,
+		Actor: coresession.ActorRef{
+			Kind: coresession.ActorParticipant,
+			ID:   strings.TrimPrefix(strings.TrimSpace(actor), "@"),
+			Name: strings.TrimSpace(actor),
+		},
+		Scope: participantCoreScope(scopeID, actor),
+		Message: &coremodel.Message{
+			Role:  coremodel.RoleAssistant,
+			Parts: []coremodel.Part{coremodel.NewTextPart(text)},
+		},
+	}
+}
+
+func participantToolCallCoreEvent(scopeID string, name string, input map[string]any) coresession.Event {
+	return coresession.Event{
+		ID:        "tool-" + strings.TrimSpace(scopeID),
+		SessionID: "root-session",
+		Type:      coresession.EventToolCall,
+		Actor: coresession.ActorRef{
+			Kind: coresession.ActorTool,
+			ID:   "call-1",
+			Name: strings.TrimSpace(name),
+		},
+		Scope: participantCoreScope(scopeID, "@copilot"),
+		Tool: &coresession.ToolEvent{
+			ID:     "call-1",
+			Name:   strings.TrimSpace(name),
+			Status: coresession.ToolRunning,
+			Input:  input,
+		},
+	}
+}
+
+func participantCoreScope(scopeID string, actor string) *coresession.EventScope {
+	agent := strings.TrimPrefix(strings.TrimSpace(actor), "@")
+	if agent == "" {
+		agent = strings.TrimSpace(scopeID)
+	}
+	return &coresession.EventScope{
+		Source: "slash_" + agent,
+		Participant: coresession.ParticipantBinding{
+			ID:        strings.TrimSpace(scopeID),
+			Kind:      coresession.ParticipantACP,
+			Role:      coresession.ParticipantSidecar,
+			AgentName: agent,
+			Label:     strings.TrimSpace(actor),
+		},
+	}
+}
+
 type bridgeSubmitDriver struct {
 	turn                   tuidriver.Turn
 	terminalEvents         <-chan kernel.EventEnvelope
@@ -2121,21 +2113,6 @@ func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]tuidriver.Agent
 }
 func (d *bridgeSubmitDriver) AgentStatus(context.Context) (tuidriver.AgentStatusSnapshot, error) {
 	return tuidriver.AgentStatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) AddAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) AddAgentWithOptions(context.Context, string, tuidriver.AgentAddOptions) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) RemoveAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) HandoffAgent(context.Context, string) (tuidriver.AgentStatusSnapshot, error) {
-	return tuidriver.AgentStatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) StartAgentSubagent(context.Context, string, string, []tuidriver.Attachment) (tuidriver.Turn, error) {
-	return nil, nil
 }
 func (d *bridgeSubmitDriver) ContinueSubagent(context.Context, string, string, []tuidriver.Attachment) (tuidriver.Turn, error) {
 	return nil, nil
@@ -2183,6 +2160,8 @@ func (d *bridgeTestDriver) Interrupt(context.Context) error { return nil }
 func (d *bridgeTestDriver) ExecuteCommand(_ context.Context, opts tuidriver.CommandExecutionOptions) (tuidriver.CommandExecutionView, error) {
 	d.commandCalls++
 	d.lastCommandInput = strings.TrimSpace(opts.Input)
+	d.commandInputs = append(d.commandInputs, d.lastCommandInput)
+	d.lastCommandAttachments = cloneTUIDriverAttachments(opts.Attachments)
 	if d.commandErr != nil {
 		return tuidriver.CommandExecutionView{}, d.commandErr
 	}
@@ -2237,37 +2216,6 @@ func (d *bridgeTestDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCa
 func (d *bridgeTestDriver) AgentStatus(context.Context) (tuidriver.AgentStatusSnapshot, error) {
 	d.agentStatusCalls++
 	return d.agentStatus, nil
-}
-func (d *bridgeTestDriver) AddAgent(_ context.Context, target string) (tuidriver.AgentStatusSnapshot, error) {
-	return d.AddAgentWithOptions(context.Background(), target, tuidriver.AgentAddOptions{})
-}
-func (d *bridgeTestDriver) AddAgentWithOptions(_ context.Context, target string, opts tuidriver.AgentAddOptions) (tuidriver.AgentStatusSnapshot, error) {
-	d.addAgentCalls++
-	d.lastAddedAgent = target
-	d.lastAddOptions = opts
-	if d.addAgentErr != nil {
-		return tuidriver.AgentStatusSnapshot{}, d.addAgentErr
-	}
-	return d.agentStatus, nil
-}
-func (d *bridgeTestDriver) RemoveAgent(_ context.Context, target string) (tuidriver.AgentStatusSnapshot, error) {
-	d.removeAgentCalls++
-	d.lastRemovedAgent = target
-	return d.agentStatus, nil
-}
-func (d *bridgeTestDriver) HandoffAgent(_ context.Context, target string) (tuidriver.AgentStatusSnapshot, error) {
-	d.handoffAgentCalls++
-	d.lastHandoffAgent = target
-	return d.agentStatus, nil
-}
-func (d *bridgeTestDriver) StartAgentSubagent(_ context.Context, agent string, prompt string, attachments []tuidriver.Attachment) (tuidriver.Turn, error) {
-	d.lastStartedAgent = agent
-	d.lastStartedPrompt = prompt
-	d.lastStartedAttachments = cloneTUIDriverAttachments(attachments)
-	if d.subagentTurn != nil {
-		return d.subagentTurn, nil
-	}
-	return bridgeTurnWithEvents(), nil
 }
 func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, prompt string, attachments []tuidriver.Attachment) (tuidriver.Turn, error) {
 	d.lastContinuedHandle = handle

@@ -6,13 +6,18 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/OnslaughtSnail/caelis/core/session"
+	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 type sharedCommandOptions struct {
-	ClearHistory  bool
-	RefreshStatus bool
-	Attachments   []Attachment
+	ClearHistory    bool
+	RefreshStatus   bool
+	RefreshCommands bool
+	Attachments     []Attachment
+	KeepTurnDivider bool
 }
 
 func slashSharedCommandWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), input string, opts sharedCommandOptions) TaskResultMsg {
@@ -38,10 +43,14 @@ func slashSharedCommandWithContext(ctx context.Context, driver tuidriver.Driver,
 	if output := strings.TrimSpace(view.Output); output != "" {
 		sendNotice(send, output)
 	}
+	sendSharedCommandEvents(send, view.Events)
 	if opts.RefreshStatus {
 		refreshStatusViaSendWithContext(ctx, driver, send)
 	}
-	return TaskResultMsg{SuppressTurnDivider: true}
+	if opts.RefreshCommands {
+		refreshAgentSlashCommandsViaSendWithContext(ctx, driver, send)
+	}
+	return TaskResultMsg{SuppressTurnDivider: !opts.KeepTurnDivider}
 }
 
 func commandUsageMessage(err error) string {
@@ -57,4 +66,19 @@ func commandUsageMessage(err error) string {
 		return ""
 	}
 	return strings.TrimSpace(raw[idx:])
+}
+
+func sendSharedCommandEvents(send func(tea.Msg), events []session.Event) {
+	if send == nil || len(events) == 0 {
+		return
+	}
+	for _, event := range events {
+		if event.Type == "" {
+			continue
+		}
+		send(kernel.EventEnvelope{
+			Cursor: strings.TrimSpace(event.ID),
+			Event:  eventbridge.KernelEventFromCore(event),
+		})
+	}
 }

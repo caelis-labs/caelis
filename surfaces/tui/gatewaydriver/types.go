@@ -34,9 +34,19 @@ type AgentParticipantSnapshot = tuidriver.AgentParticipantSnapshot
 
 type AgentStatusSnapshot = tuidriver.AgentStatusSnapshot
 
-type AgentAddOptions = tuidriver.AgentAddOptions
+type CustomAgentConfig struct {
+	Name        string
+	Description string
+	Command     string
+	Args        []string
+	Env         map[string]string
+	WorkDir     string
+}
 
-type CustomAgentConfig = tuidriver.CustomAgentConfig
+type AgentAddOptions struct {
+	Install bool
+	Custom  *CustomAgentConfig
+}
 
 type ConnectConfig struct {
 	Provider            string

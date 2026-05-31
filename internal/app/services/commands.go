@@ -25,7 +25,7 @@ type CommandExecutionRequest struct {
 
 func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) (appviewmodel.CommandCatalogView, error) {
 	commands := []appviewmodel.CommandView{
-		{Name: "agent", Description: "Manage ACP agents", InputHint: "use|add|install|list|remove"},
+		{Name: "agent", Description: "Manage ACP agents", InputHint: "list|use|add|install|update|remove"},
 		{Name: "connect", Description: "Configure a model provider", InputHint: "provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]"},
 		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
 		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual|toggle]"},
@@ -277,10 +277,14 @@ func (s CommandService) executeAgent(ctx context.Context, ref session.Ref, args 
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
+		action := "installed"
+		if strings.EqualFold(sub, "update") {
+			action = "updated"
+		}
 		return appviewmodel.CommandExecutionView{
 			Handled: true,
 			Command: "agent",
-			Output:  "agent installed: " + firstNonEmpty(agent.Name, agent.ID),
+			Output:  "agent " + action + ": " + firstNonEmpty(agent.Name, agent.ID),
 		}, nil
 	case "remove", "rm", "delete", "del":
 		target := strings.TrimSpace(rest)
