@@ -140,6 +140,14 @@ func TestCommandPanelBlockRendersResumePanelActions(t *testing.T) {
 			EventCount: 3,
 			UpdatedAt:  time.Date(2026, 5, 31, 10, 30, 0, 0, time.UTC),
 			Command:    "/resume sess-alpha",
+			Actions: []appviewmodel.ResumeSessionAction{{
+				ID:        "resume.open:sess-alpha",
+				Kind:      "open",
+				Label:     "Resume",
+				Command:   "/resume sess-alpha",
+				SessionID: "sess-alpha",
+				Enabled:   true,
+			}},
 		}},
 	}
 	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
@@ -159,6 +167,9 @@ func TestCommandPanelBlockRendersResumePanelActions(t *testing.T) {
 	}
 	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ResumePanel: &panel}, "/resume sess-alpha"); action.line != "/resume sess-alpha" {
 		t.Fatalf("resume panel action = %#v, want immediate submit", action)
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ResumePanel: &panel}, "/resume missing"); action.line != "" || action.fillInput != "/resume missing" {
+		t.Fatalf("unknown resume panel action = %#v, want fill input instead of broad submit", action)
 	}
 }
 

@@ -32,14 +32,24 @@ type ResumePanelView struct {
 }
 
 type ResumeSessionItem struct {
-	Ref         session.Ref `json:"ref"`
-	SessionID   string      `json:"session_id,omitempty"`
-	Title       string      `json:"title,omitempty"`
-	Workspace   string      `json:"workspace,omitempty"`
-	EventCount  int         `json:"event_count,omitempty"`
-	UpdatedAt   time.Time   `json:"updated_at,omitempty"`
-	LastEventAt time.Time   `json:"last_event_at,omitempty"`
-	Command     string      `json:"command,omitempty"`
+	Ref         session.Ref           `json:"ref"`
+	SessionID   string                `json:"session_id,omitempty"`
+	Title       string                `json:"title,omitempty"`
+	Workspace   string                `json:"workspace,omitempty"`
+	EventCount  int                   `json:"event_count,omitempty"`
+	UpdatedAt   time.Time             `json:"updated_at,omitempty"`
+	LastEventAt time.Time             `json:"last_event_at,omitempty"`
+	Command     string                `json:"command,omitempty"`
+	Actions     []ResumeSessionAction `json:"actions,omitempty"`
+}
+
+type ResumeSessionAction struct {
+	ID        string `json:"id,omitempty"`
+	Kind      string `json:"kind,omitempty"`
+	Label     string `json:"label,omitempty"`
+	Command   string `json:"command,omitempty"`
+	SessionID string `json:"session_id,omitempty"`
+	Enabled   bool   `json:"enabled,omitempty"`
 }
 
 type TranscriptItem struct {

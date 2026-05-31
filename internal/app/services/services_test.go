@@ -1925,6 +1925,8 @@ func TestCommandServiceExecuteResumeListsAndTargetsSession(t *testing.T) {
 	}
 	if item := listed.ResumePanel.Sessions[0]; item.SessionID != "sess-alpha" || item.Command != "/resume sess-alpha" {
 		t.Fatalf("resume panel item = %#v, want resumable sess-alpha command", item)
+	} else if len(item.Actions) != 1 || item.Actions[0].ID != "resume.open:sess-alpha" || item.Actions[0].Command != "/resume sess-alpha" || !item.Actions[0].Enabled {
+		t.Fatalf("resume panel item actions = %#v, want shared resume action", item.Actions)
 	}
 	target, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/resume sess-alpha"})
 	if err != nil {

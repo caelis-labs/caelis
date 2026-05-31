@@ -546,17 +546,19 @@ func taskPanelActionClickHint(action appviewmodel.TaskPanelAction) []commandPane
 func resumePanelClickHints(panel appviewmodel.ResumePanelView) []commandPanelClickHint {
 	hints := make([]commandPanelClickHint, 0, len(panel.Sessions))
 	for _, item := range panel.Sessions {
-		input := strings.TrimSpace(item.Command)
-		if input == "" && strings.TrimSpace(item.SessionID) != "" {
-			input = "/resume " + strings.TrimSpace(item.SessionID)
+		for _, action := range item.Actions {
+			if !action.Enabled {
+				continue
+			}
+			input := strings.TrimSpace(action.Command)
+			if input == "" {
+				continue
+			}
+			hints = append(hints, commandPanelClickHint{
+				Needle: firstNonEmpty(item.SessionID, item.Title, action.ID, input),
+				Input:  input,
+			})
 		}
-		if input == "" {
-			continue
-		}
-		hints = append(hints, commandPanelClickHint{
-			Needle: firstNonEmpty(item.SessionID, item.Title),
-			Input:  input,
-		})
 	}
 	return hints
 }

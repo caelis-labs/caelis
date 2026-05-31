@@ -2541,6 +2541,10 @@ be migrated before retiring the old stack:
       `ResumePanelView` with stable session rows and `/resume <session-id>`
       commands, so TUI and future APP surfaces consume the same app-service
       resume contract instead of parsing surface-local text.
+    - Migrated baseline: resume panel rows now carry explicit shared action
+      descriptors for opening sessions. TUI click handling consumes those
+      actions instead of accepting any resume-panel input as an immediate
+      command submission.
     - Migrated baseline: the old `impl/session/{file,memory}` session stores and
       `impl/task/file` task store have been removed; new product paths use
       `core/session.Store` adapters and core-native task journals instead of
@@ -2567,7 +2571,8 @@ Recommended sequence:
    especially any product actions not yet represented by shared settings, task,
    controller, or resume panel payloads while preserving rendering as
    surface-local code.
-5. Expand shared APP view models for resume and transcript actions.
+5. Expand shared APP view models for transcript actions beyond the current
+   task-backed command descriptors.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.

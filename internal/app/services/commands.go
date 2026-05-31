@@ -766,6 +766,7 @@ func resumeSessionItem(summary session.SessionSummary) appviewmodel.ResumeSessio
 	if workspace == "" {
 		workspace = strings.TrimSpace(active.Workspace.Key)
 	}
+	command := "/resume " + sessionID
 	return appviewmodel.ResumeSessionItem{
 		Ref:         session.NormalizeRef(active.Ref),
 		SessionID:   sessionID,
@@ -774,7 +775,15 @@ func resumeSessionItem(summary session.SessionSummary) appviewmodel.ResumeSessio
 		EventCount:  summary.EventCount,
 		UpdatedAt:   updatedAt,
 		LastEventAt: summary.LastEventAt,
-		Command:     "/resume " + sessionID,
+		Command:     command,
+		Actions: []appviewmodel.ResumeSessionAction{{
+			ID:        "resume.open:" + sessionID,
+			Kind:      "open",
+			Label:     "Resume",
+			Command:   command,
+			SessionID: sessionID,
+			Enabled:   true,
+		}},
 	}
 }
 

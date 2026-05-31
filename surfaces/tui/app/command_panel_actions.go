@@ -86,7 +86,7 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 	case view.TaskPanel != nil:
 		return taskCommandPanelAction(*view.TaskPanel, input)
 	case view.ResumePanel != nil:
-		return commandPanelAction{line: input}
+		return resumeCommandPanelAction(*view.ResumePanel, input)
 	case view.ApprovalPanel != nil:
 		return commandPanelAction{line: input}
 	case view.ModelSelection != nil:
@@ -291,6 +291,19 @@ func agentCommandPanelAction(panel appviewmodel.AgentManagementView, input strin
 				[]PromptDetail{{Label: "Agent", Value: target, Emphasis: true}},
 				"/agent remove "+target,
 			)}
+		}
+	}
+	return commandPanelAction{fillInput: input}
+}
+
+func resumeCommandPanelAction(panel appviewmodel.ResumePanelView, input string) commandPanelAction {
+	for _, item := range panel.Sessions {
+		for _, action := range item.Actions {
+			command := strings.TrimSpace(action.Command)
+			if !action.Enabled || command == "" || command != input {
+				continue
+			}
+			return commandPanelAction{line: command}
 		}
 	}
 	return commandPanelAction{fillInput: input}
