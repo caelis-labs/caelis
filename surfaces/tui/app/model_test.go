@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -29,7 +30,7 @@ func TestModelViewShowsWelcomeCard(t *testing.T) {
 	if !strings.Contains(view, "CAELIS") {
 		t.Fatalf("expected CAELIS in welcome card, got %q", view)
 	}
-	// The transplanted legacy TUI should show model info and the workspace
+	// The TUI home card should show model info and the workspace.
 	if !strings.Contains(view, "/tmp/workspace") {
 		t.Fatalf("expected workspace in view, got %q", view)
 	}
@@ -107,6 +108,37 @@ func TestWelcomeCardUpdatesWhenStatusChanges(t *testing.T) {
 	}
 	if strings.Contains(view, "not configured (/connect)") {
 		t.Fatalf("welcome card still shows not configured after status update: %q", view)
+	}
+}
+
+func TestWelcomeCardUsesSharedHomeView(t *testing.T) {
+	model := NewModel(Config{
+		ShowWelcomeCard: true,
+		RefreshHomeView: func() appviewmodel.HomeView {
+			return appviewmodel.HomeView{
+				AppName:        "caelis",
+				VersionLabel:   "v9.9.9",
+				Workspace:      "/tmp/workspace",
+				WorkspaceLabel: "/tmp/workspace",
+				ModelAlias:     "openai/gpt-shared",
+				Mode:           "Manual",
+				Diagnostics: []appviewmodel.HomeDiagnostic{{
+					Severity: "warn",
+					Kind:     "sandbox",
+					Message:  "sandbox setup required",
+				}},
+			}
+		},
+		Commands: DefaultCommands(),
+		Wizards:  DefaultWizards(),
+	})
+
+	updated, _ := model.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	view := updated.View().Content
+	for _, want := range []string{"CAELIS", "v9.9.9", "openai/gpt-shared", "/tmp/workspace", "Manual", "sandbox setup required"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("shared home view render = %q, missing %q", view, want)
+		}
 	}
 }
 

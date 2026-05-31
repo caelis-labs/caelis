@@ -1,20 +1,16 @@
 package tuiapp
 
-import "github.com/OnslaughtSnail/caelis/surfaces/tui/displaymodel"
+import appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 
 type WelcomeBlock struct {
-	id        string
-	Version   string
-	Workspace string
-	ModelName string
+	id   string
+	Home appviewmodel.HomeView
 }
 
-func NewWelcomeBlock(version, workspace, modelName string) *WelcomeBlock {
+func NewWelcomeBlock(home appviewmodel.HomeView) *WelcomeBlock {
 	return &WelcomeBlock{
-		id:        nextBlockID(),
-		Version:   version,
-		Workspace: workspace,
-		ModelName: modelName,
+		id:   nextBlockID(),
+		Home: cloneHomeView(home),
 	}
 }
 
@@ -22,7 +18,7 @@ func (b *WelcomeBlock) BlockID() string { return b.id }
 func (b *WelcomeBlock) Kind() BlockKind { return BlockWelcome }
 func (b *WelcomeBlock) Render(ctx BlockRenderContext) []RenderedRow {
 	vm := buildWelcomePanelViewModel(
-		displaymodel.BuildWelcomeViewModel(b.Version, b.Workspace, b.ModelName),
+		b.Home,
 		maxInt(30, minInt(68, maxInt(30, ctx.Width-6))),
 		ctx.Theme,
 	)

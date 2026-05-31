@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
@@ -133,6 +134,7 @@ type Config struct {
 	RefreshWorkspace       func() string
 	RefreshStatus          func() (string, string)
 	RefreshStatusView      func() StatusViewModel
+	RefreshHomeView        func() appviewmodel.HomeView
 	MentionComplete        func(string, int) ([]CompletionCandidate, error)
 	FileComplete           func(string, int) ([]CompletionCandidate, error)
 	SkillComplete          func(string, int) ([]CompletionCandidate, error)

@@ -1,7 +1,7 @@
 package tuiapp
 
-// driver_bridge.go bridges the TUI driver contract into the legacy Config
-// callback fields. This is the key migration adapter.
+// driver_bridge.go bridges the TUI driver contract into Config callbacks while
+// the Bubble Tea shell keeps presentation ownership.
 
 import (
 	"context"
@@ -217,7 +217,11 @@ type commandCatalogDriver interface {
 	CommandCatalog(context.Context) (tuidriver.CommandCatalogView, error)
 }
 
-// ConfigFromDriver populates legacy Config callbacks from a TUI driver.
+type homeViewDriver interface {
+	HomeView(context.Context, string) (appviewmodel.HomeView, error)
+}
+
+// ConfigFromDriver populates Config callbacks from a TUI driver.
 // sender must be non-nil; its Send field is populated after Program creation
 // but before the user can trigger ExecuteLine.
 func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Config) Config {
@@ -275,6 +279,17 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 			statusCacheMu.Lock()
 			defer statusCacheMu.Unlock()
 			return cachedStatusView
+		}
+	}
+	if base.RefreshHomeView == nil {
+		if provider, ok := driver.(homeViewDriver); ok {
+			base.RefreshHomeView = func() appviewmodel.HomeView {
+				home, err := provider.HomeView(ctx, base.Version)
+				if err != nil {
+					return appviewmodel.HomeView{}
+				}
+				return home
+			}
 		}
 	}
 	if base.ModeLabel == nil {

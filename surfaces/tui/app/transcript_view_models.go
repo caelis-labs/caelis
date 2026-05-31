@@ -3,6 +3,7 @@ package tuiapp
 import (
 	"strings"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/displaymodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
@@ -16,8 +17,6 @@ type PanelViewModel struct {
 }
 
 type ToolEventViewModel = displaymodel.ToolEventViewModel
-
-type WelcomeViewModel = displaymodel.WelcomeViewModel
 
 type renderedSegment struct {
 	Plain  string
@@ -44,13 +43,13 @@ func renderPanelViewModel(theme tuikit.Theme, vm PanelViewModel) []string {
 	})
 }
 
-func buildWelcomePanelViewModel(w WelcomeViewModel, width int, theme tuikit.Theme) PanelViewModel {
+func buildWelcomePanelViewModel(w appviewmodel.HomeView, width int, theme tuikit.Theme) PanelViewModel {
 	tok := theme.Tokens()
 	contentWidth := maxInt(1, width-4)
 	valueWidth := maxInt(8, contentWidth-11)
 	titleLine := theme.PromptStyle().Render(">_") +
-		" " + tok.ChromeTitle.Render("CAELIS") +
-		" " + tok.ChromeMeta.Render("("+w.VersionLabel+")")
+		" " + tok.ChromeTitle.Render(firstNonEmpty(strings.ToUpper(strings.TrimSpace(w.AppName)), "CAELIS")) +
+		" " + tok.ChromeMeta.Render("("+firstNonEmpty(w.VersionLabel, "vunknown")+")")
 	renderField := func(label string, value string, style func(...string) string) string {
 		labelText := tok.ComposerLabel.Render(label + ":")
 		padding := maxInt(0, 11-displayColumns(label+":"))
@@ -65,14 +64,35 @@ func buildWelcomePanelViewModel(w WelcomeViewModel, width int, theme tuikit.Them
 		titleLine,
 		"",
 		renderField("model", w.ModelAlias, tok.TextPrimary.Render),
-		renderField("workspace", w.Workspace, tok.TextSecondary.Render),
-		renderField("tip", "type / for command list", tok.TextMuted.Render),
+		renderField("workspace", firstNonEmpty(w.WorkspaceLabel, w.Workspace), tok.TextSecondary.Render),
 	}
+	if mode := strings.TrimSpace(w.Mode); mode != "" {
+		body = append(body, renderField("mode", mode, tok.TextSecondary.Render))
+	}
+	if diagnostic := welcomePrimaryDiagnostic(w.Diagnostics); diagnostic != "" {
+		body = append(body, renderField("diagnostic", diagnostic, tok.Warning.Render))
+	}
+	body = append(body,
+		renderField("tip", "type / for command list", tok.TextMuted.Render),
+	)
 	return PanelViewModel{
 		Variant: tuikit.PanelShellVariantCard,
 		Width:   width,
 		Body:    body,
 	}
+}
+
+func welcomePrimaryDiagnostic(diagnostics []appviewmodel.HomeDiagnostic) string {
+	for _, diagnostic := range diagnostics {
+		severity := strings.ToLower(strings.TrimSpace(diagnostic.Severity))
+		if severity != "error" && severity != "warn" && severity != "warning" {
+			continue
+		}
+		if message := strings.TrimSpace(diagnostic.Message); message != "" {
+			return message
+		}
+	}
+	return ""
 }
 
 func truncateTailDisplay(text string, width int) string {

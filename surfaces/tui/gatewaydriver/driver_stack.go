@@ -238,6 +238,7 @@ type DriverStack struct {
 	ACPControllerStatusFn              func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
 	DefaultModelAliasFn                func() string
 	AppStatusViewFn                    func(context.Context, coresession.Ref) (appviewmodel.StatusView, error)
+	HomeViewFn                         func(context.Context, coresession.Ref, string) (appviewmodel.HomeView, error)
 	SettingsPanelFn                    func(context.Context, coresession.Ref) (appviewmodel.SettingsPanelView, error)
 	ReplaySessionEventsFn              func(context.Context, coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error)
 	SandboxStatusFn                    func() SandboxStatus
@@ -384,6 +385,14 @@ func (s *DriverStack) AppStatusView(ctx context.Context, ref coresession.Ref) (a
 		return appviewmodel.StatusView{}, false, nil
 	}
 	view, err := s.AppStatusViewFn(ctx, ref)
+	return view, true, err
+}
+
+func (s *DriverStack) HomeView(ctx context.Context, ref coresession.Ref, version string) (appviewmodel.HomeView, bool, error) {
+	if s == nil || s.HomeViewFn == nil {
+		return appviewmodel.HomeView{}, false, nil
+	}
+	view, err := s.HomeViewFn(ctx, ref, version)
 	return view, true, err
 }
 

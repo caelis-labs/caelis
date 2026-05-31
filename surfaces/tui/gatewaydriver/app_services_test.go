@@ -82,6 +82,16 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if engine.start.PreferredSessionID != "sess-app" {
 		t.Fatalf("StartSession() preferred id = %q, want sess-app", engine.start.PreferredSessionID)
 	}
+	home, err := driver.HomeView(ctx, "1.2.3")
+	if err != nil {
+		t.Fatalf("HomeView() error = %v", err)
+	}
+	if home.VersionLabel != "v1.2.3" || home.Workspace != workspaceCWD || home.AppName != "caelis" {
+		t.Fatalf("HomeView() = %#v, want app-service home projection", home)
+	}
+	if !homeViewHasCommand(home, "doctor") || !homeViewHasAction(home, "/status") {
+		t.Fatalf("HomeView() commands=%#v actions=%#v, want shared command/action projection", home.Commands, home.Actions)
+	}
 	choices, err := stack.ListModelChoices(ctx, coresession.Ref{SessionID: "sess-app"})
 	if err != nil {
 		t.Fatal(err)
@@ -1306,6 +1316,24 @@ func (i *appServiceDriverAgentInstaller) InstallableBuiltinACPAgentOptions(_ con
 		})
 	}
 	return out, nil
+}
+
+func homeViewHasCommand(home appviewmodel.HomeView, name string) bool {
+	for _, command := range home.Commands {
+		if strings.EqualFold(strings.TrimSpace(command.Name), strings.TrimSpace(name)) {
+			return true
+		}
+	}
+	return false
+}
+
+func homeViewHasAction(home appviewmodel.HomeView, command string) bool {
+	for _, action := range home.Actions {
+		if strings.EqualFold(strings.TrimSpace(action.Command), strings.TrimSpace(command)) {
+			return true
+		}
+	}
+	return false
 }
 
 func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []appviewmodel.SessionEventEnvelope {

@@ -190,7 +190,8 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) appendWelcomeCard() {
-	m.doc.Append(NewWelcomeBlock(m.cfg.Version, m.cfg.Workspace, m.currentWelcomeModelName()))
+	home := m.currentHomeView()
+	m.doc.Append(NewWelcomeBlock(home))
 	m.hasCommittedLine = true
 	m.lastCommittedStyle = tuikit.LineStyleDefault
 }
@@ -218,13 +219,11 @@ func (m *Model) syncWelcomeCardBlock() bool {
 	if !ok {
 		return false
 	}
-	workspace := strings.TrimSpace(m.cfg.Workspace)
-	modelName := m.currentWelcomeModelName()
-	if welcome.Workspace == workspace && welcome.ModelName == modelName {
+	home := m.currentHomeView()
+	if sameWelcomeHome(welcome.Home, home) {
 		return false
 	}
-	welcome.Workspace = workspace
-	welcome.ModelName = modelName
+	welcome.Home = cloneHomeView(home)
 	m.markViewportBlockDirty(welcome.BlockID())
 	return true
 }

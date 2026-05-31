@@ -653,9 +653,16 @@ func viewportBlockRenderKey(block Block, ctx BlockRenderContext) string {
 		writeToolPanelScrollStates(builder, b.ToolPanelScroll)
 		writeSubagentEvents(builder, b.Events, ctx)
 	case *WelcomeBlock:
-		builder.addString(b.Version)
-		builder.addString(b.Workspace)
-		builder.addString(b.ModelName)
+		builder.addString(b.Home.AppName)
+		builder.addString(b.Home.VersionLabel)
+		builder.addString(b.Home.WorkspaceLabel)
+		builder.addString(b.Home.ModelAlias)
+		builder.addString(b.Home.Mode)
+		for _, diagnostic := range b.Home.Diagnostics {
+			builder.addString(diagnostic.Severity)
+			builder.addString(diagnostic.Kind)
+			builder.addString(diagnostic.Message)
+		}
 	}
 
 	return builder.String()

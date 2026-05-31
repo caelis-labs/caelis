@@ -1221,9 +1221,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: the old `kernel.TurnHandle` streaming helper has been
      removed from `internal/cli`; production CLI code no longer imports the old
      public `kernel` facade.
-   - Still pending: default home layout, deeper setup diagnostics outside the
-     shared `/doctor` panel, and several command dispatch paths still depend on
-     old TUI/gateway compatibility packages or `kernel.Service`.
+   - Still pending: deeper setup diagnostics outside the shared `/doctor` and
+     home panels, and several command dispatch paths still depend on transitional
+     TUI/gatewaydriver compatibility packages.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1521,6 +1521,11 @@ be migrated before retiring the old stack:
      `caelis.runtime.task` metadata, giving TUI and future APP surfaces the
      same command/action contract for tail/wait/write/cancel/release around
      task transcript entries.
+   - Migrated baseline: the default TUI welcome/home card now consumes shared
+     `HomeView` data from `internal/app/services.Views().Home()` through the
+     gatewaydriver binding. Startup model, workspace, mode, command catalog,
+     readiness diagnostics, and suggested actions are now APP-ready view-model
+     data instead of a TUI-only displaymodel.
    - Migrated baseline: TUI transcript/tool rows now project those shared
      task action descriptors into row-level click tokens. Tail/wait/release
      actions submit through the shared command path, write actions use the
@@ -1534,6 +1539,12 @@ be migrated before retiring the old stack:
      panel payloads instead of growing new surface-local product semantics.
 
 3. Future APP surface
+   - Migrated baseline: `internal/app/viewmodel.HomeView` and
+     `internal/app/services.Views().Home()` provide a shared default home
+     contract for app name/version, workspace, current model, mode, command
+     catalog, readiness diagnostics, and suggested setup actions. TUI now
+     renders its welcome card from this contract, and a future APP can use the
+     same payload for its start screen.
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
      `internal/app/services.Status().View()` provide a service-native,
      surface-neutral status contract for runtime identity, current session
@@ -1622,7 +1633,8 @@ be migrated before retiring the old stack:
      The command registry and completion shell no longer need a TUI-local
      settings field catalog.
    - Migrated baseline: `CommandExecutionView` now carries structured settings,
-     status, settings, task, controller, model-connect, and agent-management panel payloads in
+     status, doctor, task, controller, resume, approval, model-selection,
+     model-connect, and agent-management panel payloads in
      addition to text output. This gives the future APP a direct render input
      for command-driven panels without scraping CLI-style output, and lets TUI
      keep its panel chrome surface-local.

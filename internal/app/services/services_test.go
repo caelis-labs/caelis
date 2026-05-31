@@ -1044,6 +1044,68 @@ func TestCommandServiceExecuteDoctorAndFix(t *testing.T) {
 	}
 }
 
+func TestViewServiceHomeBuildsSharedHomeView(t *testing.T) {
+	ctx := context.Background()
+	ref := session.Ref{SessionID: "sess-home"}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref: ref,
+			Workspace: session.Workspace{
+				Key: "repo",
+				CWD: "/tmp/repo",
+			},
+		},
+	}}
+	rt := &fakeSandboxRuntime{
+		descriptor: sandbox.Descriptor{
+			Backend: sandbox.BackendWindows,
+			DefaultConstraints: sandbox.Constraints{
+				Route: sandbox.RouteSandbox,
+			},
+		},
+		status: sandbox.Status{
+			RequestedBackend: sandbox.BackendWindows,
+			ResolvedBackend:  sandbox.BackendWindows,
+			Setup: sandbox.SetupStatus{
+				Required: true,
+				Error:    "workspace setup required",
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/tmp/repo",
+		},
+		Engine:  engine,
+		Sandbox: rt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home, err := svc.Views().Home(ctx, HomeRequest{SessionRef: ref, Version: "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if home.VersionLabel != "v1.2.3" || home.Workspace != "/tmp/repo" || home.ModelAlias != "not configured (/connect)" {
+		t.Fatalf("home view = %#v, want normalized version/workspace/model", home)
+	}
+	if !homeDiagnostic(home.Diagnostics, "model", "warn") || !homeDiagnostic(home.Diagnostics, "sandbox", "warn") {
+		t.Fatalf("home diagnostics = %#v, want model and sandbox warnings", home.Diagnostics)
+	}
+	for _, command := range []string{"/status", "/settings", "/doctor", "/connect", "/doctor fix"} {
+		if !homeActionCommand(home.Actions, command) {
+			t.Fatalf("home actions = %#v, missing %q", home.Actions, command)
+		}
+	}
+	if _, ok := findCommandView(home.Commands, "doctor"); !ok {
+		t.Fatalf("home commands = %#v, want shared command catalog", home.Commands)
+	}
+}
+
 func TestCommandServiceExecuteCompactRecordsCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	engine := &recordingEngine{snapshot: session.Snapshot{
@@ -5763,6 +5825,25 @@ func doctorCheckSeverity(checks []appviewmodel.DoctorCheck, id string, severity 
 }
 
 func doctorActionCommand(actions []appviewmodel.DoctorAction, command string) bool {
+	command = strings.TrimSpace(command)
+	for _, action := range actions {
+		if strings.TrimSpace(action.Command) == command {
+			return true
+		}
+	}
+	return false
+}
+
+func homeDiagnostic(items []appviewmodel.HomeDiagnostic, kind string, severity string) bool {
+	for _, item := range items {
+		if item.Kind == kind && strings.EqualFold(strings.TrimSpace(item.Severity), severity) {
+			return true
+		}
+	}
+	return false
+}
+
+func homeActionCommand(actions []appviewmodel.HomeAction, command string) bool {
 	command = strings.TrimSpace(command)
 	for _, action := range actions {
 		if strings.TrimSpace(action.Command) == command {

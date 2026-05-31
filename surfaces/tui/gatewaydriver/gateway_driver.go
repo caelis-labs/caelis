@@ -142,6 +142,24 @@ func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
 	return d.status(ctx, true)
 }
 
+func (d *GatewayDriver) HomeView(ctx context.Context, version string) (appviewmodel.HomeView, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if d == nil || d.stack == nil {
+		return appviewmodel.HomeView{}, fmt.Errorf("surfaces/tui/gatewaydriver: stack is unavailable")
+	}
+	ref := coresession.Ref{}
+	if activeSession, ok := d.currentSession(); ok {
+		ref = activeSession.Ref
+	}
+	view, ok, err := d.stack.HomeView(ctx, ref, version)
+	if err != nil || ok {
+		return view, err
+	}
+	return appviewmodel.HomeView{}, ErrMigrationPending
+}
+
 func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (StatusSnapshot, error) {
 	if ctx == nil {
 		ctx = context.Background()
