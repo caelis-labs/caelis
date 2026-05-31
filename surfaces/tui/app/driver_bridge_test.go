@@ -413,65 +413,55 @@ func TestSlashSettingsUsesSharedCommandExecutor(t *testing.T) {
 }
 
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
-	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
-		replay: []kernel.EventEnvelope{
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindUserMessage,
-					TurnID: "turn-complete",
-					Narrative: &kernel.NarrativePayload{
-						Role: kernel.NarrativeRoleUser,
-						Text: "history prompt",
-					},
+	driver := &bridgeAppReplayDriver{
+		bridgeTestDriver: bridgeTestDriver{
+			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+			resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
+		},
+		appReplay: []appviewmodel.SessionEventEnvelope{
+			appviewmodel.EventEnvelopeFromSession("history-user", coresession.Event{
+				ID:        "history-user",
+				SessionID: "resumed-session",
+				Type:      coresession.EventUser,
+				Scope:     &coresession.EventScope{TurnID: "turn-complete"},
+				Message:   coreTextMessage(coremodel.RoleUser, "history prompt"),
+			}),
+			appviewmodel.EventEnvelopeFromSession("tool-call", coresession.Event{
+				ID:        "tool-call",
+				SessionID: "resumed-session",
+				Type:      coresession.EventToolCall,
+				Scope:     &coresession.EventScope{TurnID: "turn-complete"},
+				Tool: &coresession.ToolEvent{
+					ID:     "command-1",
+					Name:   "RUN_COMMAND",
+					Status: coresession.ToolRunning,
 				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindToolCall,
-					TurnID: "turn-complete",
-					ToolCall: &kernel.ToolCallPayload{
-						CallID:   "command-1",
-						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusRunning,
-					},
+			}),
+			appviewmodel.EventEnvelopeFromSession("plan", coresession.Event{
+				ID:        "plan",
+				SessionID: "resumed-session",
+				Type:      coresession.EventPlan,
+				Scope:     &coresession.EventScope{TurnID: "turn-complete"},
+				Plan: []coresession.PlanEntry{
+					{Content: "Inspect stored session", Status: "completed"},
+					{Content: "Continue migration", Status: "in_progress"},
 				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindPlanUpdate,
-					TurnID: "turn-complete",
-					Plan: &kernel.PlanPayload{Entries: []kernel.PlanEntryPayload{
-						{Content: "Inspect stored session", Status: "completed"},
-						{Content: "Continue migration", Status: "in_progress"},
-					}},
-				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
-					TurnID: "turn-complete",
-					Narrative: &kernel.NarrativePayload{
-						Role:       kernel.NarrativeRoleAssistant,
-						Text:       "stream chunk",
-						Final:      false,
-						Visibility: string(session.VisibilityUIOnly),
-					},
-				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
-					TurnID: "turn-complete",
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleAssistant,
-						Text:  "history reply",
-						Final: true,
-						Scope: kernel.EventScopeMain,
-					},
-				},
-			},
+			}),
+			appviewmodel.EventEnvelopeFromSession("stream-chunk", coresession.Event{
+				ID:         "stream-chunk",
+				SessionID:  "resumed-session",
+				Type:       coresession.EventAssistant,
+				Visibility: coresession.VisibilityUIOnly,
+				Scope:      &coresession.EventScope{TurnID: "turn-complete"},
+				Message:    coreTextMessage(coremodel.RoleAssistant, "stream chunk"),
+			}),
+			appviewmodel.EventEnvelopeFromSession("history-assistant", coresession.Event{
+				ID:        "history-assistant",
+				SessionID: "resumed-session",
+				Type:      coresession.EventAssistant,
+				Scope:     &coresession.EventScope{TurnID: "turn-complete"},
+				Message:   coreTextMessage(coremodel.RoleAssistant, "history reply"),
+			}),
 		},
 	}
 	var msgs []tea.Msg
@@ -522,20 +512,11 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 }
 
-func TestSlashResumePrefersAppSessionEventReplay(t *testing.T) {
+func TestSlashResumeUsesAppSessionEventReplay(t *testing.T) {
 	driver := &bridgeAppReplayDriver{
 		bridgeTestDriver: bridgeTestDriver{
 			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
 			resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
-			replay: []kernel.EventEnvelope{{
-				Event: kernel.Event{
-					Kind: kernel.EventKindUserMessage,
-					Narrative: &kernel.NarrativePayload{
-						Role: kernel.NarrativeRoleUser,
-						Text: "legacy prompt",
-					},
-				},
-			}},
 		},
 		appReplay: []appviewmodel.SessionEventEnvelope{
 			appviewmodel.EventEnvelopeFromSession("app-user", coresession.Event{
@@ -559,95 +540,61 @@ func TestSlashResumePrefersAppSessionEventReplay(t *testing.T) {
 	if driver.appReplayCalls != 1 {
 		t.Fatalf("ReplaySessionEvents calls = %d, want 1", driver.appReplayCalls)
 	}
-	if driver.replayCalls != 0 {
-		t.Fatalf("ReplayEvents calls = %d, want 0 when app replay succeeds", driver.replayCalls)
-	}
 	if !transcriptBatchContainsText(msgs, "app prompt") || !transcriptBatchContainsText(msgs, "app reply") {
 		t.Fatalf("slashResume() messages = %#v, want app replay transcript", msgs)
-	}
-	if transcriptBatchContainsText(msgs, "legacy prompt") {
-		t.Fatalf("slashResume() messages = %#v, should not use legacy replay fallback", msgs)
 	}
 }
 
 func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T) {
-	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
-		replay: []kernel.EventEnvelope{
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindUserMessage,
+	driver := &bridgeAppReplayDriver{
+		bridgeTestDriver: bridgeTestDriver{
+			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+			resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
+		},
+		appReplay: []appviewmodel.SessionEventEnvelope{
+			appviewmodel.EventEnvelopeFromSession("side-user", coresession.Event{
+				ID:        "side-user",
+				SessionID: "resumed-session",
+				Type:      coresession.EventUser,
+				Actor:     coresession.ActorRef{Kind: coresession.ActorUser, Name: "user"},
+				Scope:     participantCoreScope("participant-turn-1", "@codex"),
+				Message:   coreTextMessage(coremodel.RoleUser, "review this change"),
+			}),
+			appviewmodel.EventEnvelopeFromSession("side-command", coresession.Event{
+				ID:        "side-command",
+				SessionID: "resumed-session",
+				Type:      coresession.EventToolCall,
+				Actor:     coresession.ActorRef{Kind: coresession.ActorTool, ID: "side-command", Name: "RUN_COMMAND"},
+				Scope:     participantCoreScope("participant-turn-1", "@codex"),
+				Tool: &coresession.ToolEvent{
+					ID:     "side-command",
+					Name:   "RUN_COMMAND",
+					Status: coresession.ToolCompleted,
+				},
+			}),
+			appviewmodel.EventEnvelopeFromSession("side-assistant", participantAssistantCoreEvent("participant-turn-1", "@codex", "review final message")),
+			appviewmodel.EventEnvelopeFromSession("subagent-assistant", coresession.Event{
+				ID:        "subagent-assistant",
+				SessionID: "resumed-session",
+				Type:      coresession.EventAssistant,
+				Actor: coresession.ActorRef{
+					Kind: coresession.ActorParticipant,
+					ID:   "reviewer",
+					Name: "@reviewer",
+				},
+				Scope: &coresession.EventScope{
 					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
-						Source:  "acp_participant",
-						Scope:   kernel.EventScopeParticipant,
-						ScopeID: "participant-turn-1",
-						Actor:   "@codex",
-					},
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleUser,
-						Text:  "review this change",
-						Scope: kernel.EventScopeParticipant,
+					Source: "side_subagent",
+					Participant: coresession.ParticipantBinding{
+						ID:        "participant-turn-1",
+						Kind:      coresession.ParticipantSubagent,
+						Role:      coresession.ParticipantSidecar,
+						AgentName: "reviewer",
+						Label:     "@reviewer",
 					},
 				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindToolCall,
-					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
-						Source:  "acp_participant",
-						Scope:   kernel.EventScopeParticipant,
-						ScopeID: "participant-turn-1",
-						Actor:   "@codex",
-					},
-					ToolCall: &kernel.ToolCallPayload{
-						CallID:   "side-command",
-						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusCompleted,
-						Scope:    kernel.EventScopeParticipant,
-					},
-				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
-					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
-						Source:  "acp_participant",
-						Scope:   kernel.EventScopeParticipant,
-						ScopeID: "participant-turn-1",
-						Actor:   "@codex",
-					},
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleAssistant,
-						Actor: "@codex",
-						Text:  "review final message",
-						Final: true,
-						Scope: kernel.EventScopeParticipant,
-					},
-				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
-					TurnID: "participant-turn-1",
-					Origin: &kernel.EventOrigin{
-						Source:  "side_subagent",
-						Scope:   kernel.EventScopeSubagent,
-						ScopeID: "participant-turn-1",
-						Actor:   "@reviewer",
-					},
-					Narrative: &kernel.NarrativePayload{
-						Role:  kernel.NarrativeRoleAssistant,
-						Actor: "@reviewer",
-						Text:  "scoped final message",
-						Final: true,
-						Scope: kernel.EventScopeSubagent,
-					},
-				},
-			},
+				Message: coreTextMessage(coremodel.RoleAssistant, "scoped final message"),
+			}),
 		},
 	}
 	var msgs []tea.Msg
@@ -681,44 +628,37 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 }
 
 func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
-	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
-		replay: []kernel.EventEnvelope{
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindUserMessage,
-					TurnID: "turn-interrupted",
-					Narrative: &kernel.NarrativePayload{
-						Role: kernel.NarrativeRoleUser,
-						Text: "history prompt",
-					},
+	driver := &bridgeAppReplayDriver{
+		bridgeTestDriver: bridgeTestDriver{
+			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+			resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
+		},
+		appReplay: []appviewmodel.SessionEventEnvelope{
+			appviewmodel.EventEnvelopeFromSession("history-user", coresession.Event{
+				ID:        "history-user",
+				SessionID: "resumed-session",
+				Type:      coresession.EventUser,
+				Scope:     &coresession.EventScope{TurnID: "turn-interrupted"},
+				Message:   coreTextMessage(coremodel.RoleUser, "history prompt"),
+			}),
+			appviewmodel.EventEnvelopeFromSession("tool-call", coresession.Event{
+				ID:        "tool-call",
+				SessionID: "resumed-session",
+				Type:      coresession.EventToolCall,
+				Scope:     &coresession.EventScope{TurnID: "turn-interrupted"},
+				Tool: &coresession.ToolEvent{
+					ID:     "command-1",
+					Name:   "RUN_COMMAND",
+					Status: coresession.ToolRunning,
 				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindToolCall,
-					TurnID: "turn-interrupted",
-					ToolCall: &kernel.ToolCallPayload{
-						CallID:   "command-1",
-						ToolName: "RUN_COMMAND",
-						Status:   kernel.ToolStatusRunning,
-					},
-				},
-			},
-			{
-				Event: kernel.Event{
-					Kind:   kernel.EventKindAssistantMessage,
-					TurnID: "turn-interrupted",
-					Narrative: &kernel.NarrativePayload{
-						Role:       kernel.NarrativeRoleAssistant,
-						Text:       "partial answer",
-						Final:      true,
-						Visibility: string(session.VisibilityMirror),
-						Scope:      kernel.EventScopeMain,
-					},
-				},
-			},
+			}),
+			appviewmodel.EventEnvelopeFromSession("partial-answer", coresession.Event{
+				ID:        "partial-answer",
+				SessionID: "resumed-session",
+				Type:      coresession.EventAssistant,
+				Scope:     &coresession.EventScope{TurnID: "turn-interrupted"},
+				Message:   coreTextMessage(coremodel.RoleAssistant, "partial answer"),
+			}),
 		},
 	}
 	var msgs []tea.Msg
@@ -741,59 +681,15 @@ func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	}
 }
 
-func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
-	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 1),
-	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:  kernel.NarrativeRoleAssistant,
-				Text:  "direct gateway event",
-				Final: true,
-				Scope: kernel.EventScopeMain,
-			},
-		},
-	}
-	close(turn.events)
-
-	driver := &bridgeSubmitDriver{turn: turn}
-	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
-	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1", len(msgs))
-	}
-	if _, ok := msgs[0].(kernel.EventEnvelope); !ok {
-		t.Fatalf("first msg = %#v, want kernel.EventEnvelope", msgs[0])
-	}
-}
-
-func TestExecuteLineViaDriverPrefersAppSessionEventStream(t *testing.T) {
-	legacyEvents := make(chan kernel.EventEnvelope, 1)
-	legacyEvents <- kernel.EventEnvelope{Event: kernel.Event{
-		Kind: kernel.EventKindUserMessage,
-		Narrative: &kernel.NarrativePayload{
-			Role: kernel.NarrativeRoleUser,
-			Text: "legacy stream",
-		},
-	}}
-	close(legacyEvents)
-	appEvents := make(chan appviewmodel.SessionEventEnvelope, 1)
-	appEvents <- appviewmodel.EventEnvelopeFromSession("app-stream", coresession.Event{
-		ID:        "app-stream",
-		SessionID: "root-session",
-		Type:      coresession.EventAssistant,
-		Message:   coreTextMessage(coremodel.RoleAssistant, "app stream"),
-	})
-	close(appEvents)
+func TestExecuteLineViaDriverStreamsAppSessionEvents(t *testing.T) {
 	turn := &bridgeAppEventTurn{
-		bridgeTestTurn: &bridgeTestTurn{events: legacyEvents},
-		appEvents:      appEvents,
+		bridgeTestTurn: &bridgeTestTurn{},
+		appEvents: appEventStream(appviewmodel.EventEnvelopeFromSession("assistant", coresession.Event{
+			ID:        "assistant",
+			SessionID: "root-session",
+			Type:      coresession.EventAssistant,
+			Message:   coreTextMessage(coremodel.RoleAssistant, "direct app event"),
+		})),
 	}
 
 	driver := &bridgeSubmitDriver{turn: turn}
@@ -801,25 +697,18 @@ func TestExecuteLineViaDriverPrefersAppSessionEventStream(t *testing.T) {
 	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
 		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
-	}
-	if turn.eventsCalls != 0 {
-		t.Fatalf("legacy Events() calls = %d, want 0 when app event stream is available", turn.eventsCalls)
 	}
 	if len(msgs) != 1 {
 		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1", len(msgs))
 	}
 	transcript, ok := msgs[0].(TranscriptEventsMsg)
-	if !ok || !transcriptEventsContainText(transcript.Events, "app stream") {
-		t.Fatalf("first msg = %#v, want app session event projected to transcript", msgs[0])
-	}
-	if transcriptEventsContainText(transcript.Events, "legacy stream") {
-		t.Fatalf("executeLineViaDriver() used legacy event stream transcript")
+	if !ok || !transcriptEventsContainText(transcript.Events, "direct app event") {
+		t.Fatalf("first msg = %#v, want app session transcript", msgs[0])
 	}
 }
 
 func TestExecuteLineViaDriverProjectsAppToolEventOnce(t *testing.T) {
-	appEvents := make(chan appviewmodel.SessionEventEnvelope, 1)
-	appEvents <- appviewmodel.EventEnvelopeFromSession("tool-result", coresession.Event{
+	appEvents := appEventStream(appviewmodel.EventEnvelopeFromSession("tool-result", coresession.Event{
 		ID:        "tool-result",
 		SessionID: "root-session",
 		Type:      coresession.EventToolResult,
@@ -834,8 +723,7 @@ func TestExecuteLineViaDriverProjectsAppToolEventOnce(t *testing.T) {
 				Text: "ok\n",
 			}},
 		},
-	})
-	close(appEvents)
+	}))
 	turn := &bridgeAppEventTurn{
 		bridgeTestTurn: &bridgeTestTurn{},
 		appEvents:      appEvents,
@@ -860,16 +748,7 @@ func TestExecuteLineViaDriverProjectsAppToolEventOnce(t *testing.T) {
 }
 
 func TestExecuteLineViaDriverUsesAppApprovalPrompt(t *testing.T) {
-	legacyEvents := make(chan kernel.EventEnvelope, 1)
-	legacyEvents <- kernel.EventEnvelope{Event: kernel.Event{
-		Kind: kernel.EventKindApprovalRequested,
-		ApprovalPayload: &kernel.ApprovalPayload{
-			ToolName: "legacy",
-		},
-	}}
-	close(legacyEvents)
-	appEvents := make(chan appviewmodel.SessionEventEnvelope, 1)
-	appEvents <- appviewmodel.EventEnvelopeFromSession("approval-1", coresession.Event{
+	appEvents := appEventStream(appviewmodel.EventEnvelopeFromSession("approval-1", coresession.Event{
 		ID:        "approval-1",
 		SessionID: "root-session",
 		Type:      coresession.EventApproval,
@@ -887,10 +766,9 @@ func TestExecuteLineViaDriverUsesAppApprovalPrompt(t *testing.T) {
 				{ID: "deny", Name: "Deny", Kind: "deny"},
 			},
 		},
-	})
-	close(appEvents)
+	}))
 	turn := &bridgeAppEventTurn{
-		bridgeTestTurn: &bridgeTestTurn{events: legacyEvents},
+		bridgeTestTurn: &bridgeTestTurn{},
 		appEvents:      appEvents,
 	}
 
@@ -899,9 +777,6 @@ func TestExecuteLineViaDriverUsesAppApprovalPrompt(t *testing.T) {
 	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
 	if result.Err != nil {
 		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
-	}
-	if turn.eventsCalls != 0 {
-		t.Fatalf("legacy Events() calls = %d, want 0 when app approval event is available", turn.eventsCalls)
 	}
 	if len(msgs) != 1 {
 		t.Fatalf("executeLineViaDriver() emitted %d msgs, want one prompt: %#v", len(msgs), msgs)
@@ -941,37 +816,30 @@ func TestExecuteLineViaDriverUsesAppApprovalPrompt(t *testing.T) {
 }
 
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.T) {
-	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 4),
+	var events []appviewmodel.SessionEventEnvelope
+	for i, text := range []string{"think ", "fast ", "now"} {
+		events = append(events, appviewmodel.EventEnvelopeFromSession(fmt.Sprintf("reasoning-%d", i), coresession.Event{
+			ID:         fmt.Sprintf("reasoning-%d", i),
+			SessionID:  "root-session",
+			Type:       coresession.EventAssistant,
+			Visibility: coresession.VisibilityUIOnly,
+			Message:    coreReasoningMessage(text),
+		}))
 	}
-	for _, text := range []string{"think ", "fast ", "now"} {
-		turn.events <- kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
-				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
-					ReasoningText: text,
-					Visibility:    "ui_only",
-					UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-					Scope:         kernel.EventScopeMain,
-				},
-			},
-		}
-	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolCall,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "READ",
-				Status:   kernel.ToolStatusRunning,
-				Scope:    kernel.EventScopeMain,
-			},
+	events = append(events, appviewmodel.EventEnvelopeFromSession("tool-call", coresession.Event{
+		ID:        "tool-call",
+		SessionID: "root-session",
+		Type:      coresession.EventToolCall,
+		Tool: &coresession.ToolEvent{
+			ID:     "call-1",
+			Name:   "READ",
+			Status: coresession.ToolRunning,
 		},
+	}))
+	turn := &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{},
+		appEvents:      appEventStream(events...),
 	}
-	close(turn.events)
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
@@ -982,39 +850,34 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.
 	if got := len(msgs); got != 2 {
 		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 2: %#v", got, msgs)
 	}
-	reasoning, ok := msgs[0].(kernel.EventEnvelope)
-	if !ok || reasoning.Event.Narrative == nil {
-		t.Fatalf("first msg = %#v, want coalesced reasoning EventEnvelope", msgs[0])
+	reasoning, ok := msgs[0].(TranscriptEventsMsg)
+	if !ok || len(reasoning.Events) != 1 || reasoning.Events[0].NarrativeKind != TranscriptNarrativeReasoning {
+		t.Fatalf("first msg = %#v, want coalesced reasoning transcript", msgs[0])
 	}
-	if got := reasoning.Event.Narrative.ReasoningText; got != "think fast now" {
+	if got := reasoning.Events[0].Text; got != "think fast now" {
 		t.Fatalf("coalesced reasoning = %q, want %q", got, "think fast now")
 	}
-	tool, ok := msgs[1].(kernel.EventEnvelope)
-	if !ok || tool.Event.Kind != kernel.EventKindToolCall {
+	tool, ok := msgs[1].(TranscriptEventsMsg)
+	if !ok || len(tool.Events) != 1 || tool.Events[0].Kind != TranscriptEventTool {
 		t.Fatalf("second msg = %#v, want tool event after reasoning flush", msgs[1])
 	}
 }
 
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *testing.T) {
-	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 7),
+	var events []appviewmodel.SessionEventEnvelope
+	for i, text := range []string{"Now", " let", " me", " verify", " the", " DDL", " matches"} {
+		events = append(events, appviewmodel.EventEnvelopeFromSession(fmt.Sprintf("reasoning-%d", i), coresession.Event{
+			ID:         fmt.Sprintf("reasoning-%d", i),
+			SessionID:  "root-session",
+			Type:       coresession.EventAssistant,
+			Visibility: coresession.VisibilityUIOnly,
+			Message:    coreReasoningMessage(text),
+		}))
 	}
-	for _, text := range []string{"Now", " let", " me", " verify", " the", " DDL", " matches"} {
-		turn.events <- kernel.EventEnvelope{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
-				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:          kernel.NarrativeRoleAssistant,
-					ReasoningText: text,
-					Visibility:    "ui_only",
-					UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-					Scope:         kernel.EventScopeMain,
-				},
-			},
-		}
+	turn := &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{},
+		appEvents:      appEventStream(events...),
 	}
-	close(turn.events)
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
@@ -1025,46 +888,35 @@ func TestExecuteLineViaDriverCoalescesUIOnlyReasoningPreservesLeadingSpaces(t *t
 	if got := len(msgs); got != 1 {
 		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1: %#v", got, msgs)
 	}
-	reasoning, ok := msgs[0].(kernel.EventEnvelope)
-	if !ok || reasoning.Event.Narrative == nil {
-		t.Fatalf("first msg = %#v, want coalesced reasoning EventEnvelope", msgs[0])
+	reasoning, ok := msgs[0].(TranscriptEventsMsg)
+	if !ok || len(reasoning.Events) != 1 || reasoning.Events[0].NarrativeKind != TranscriptNarrativeReasoning {
+		t.Fatalf("first msg = %#v, want coalesced reasoning transcript", msgs[0])
 	}
-	if got := reasoning.Event.Narrative.ReasoningText; got != "Now let me verify the DDL matches" {
+	if got := reasoning.Events[0].Text; got != "Now let me verify the DDL matches" {
 		t.Fatalf("coalesced reasoning = %q, want boundary spaces preserved", got)
 	}
 }
 
 func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.T) {
-	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 2),
+	turn := &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{},
+		appEvents: appEventStream(
+			appviewmodel.EventEnvelopeFromSession("reasoning", coresession.Event{
+				ID:         "reasoning",
+				SessionID:  "root-session",
+				Type:       coresession.EventAssistant,
+				Visibility: coresession.VisibilityUIOnly,
+				Message:    coreReasoningMessage("think"),
+			}),
+			appviewmodel.EventEnvelopeFromSession("answer", coresession.Event{
+				ID:         "answer",
+				SessionID:  "root-session",
+				Type:       coresession.EventAssistant,
+				Visibility: coresession.VisibilityUIOnly,
+				Message:    coreTextMessage(coremodel.RoleAssistant, "answer"),
+			}),
+		),
 	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
-				ReasoningText: "think",
-				Visibility:    "ui_only",
-				UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-				Scope:         kernel.EventScopeMain,
-			},
-		},
-	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
-				Text:       "answer",
-				Visibility: "ui_only",
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
-			},
-		},
-	}
-	close(turn.events)
 
 	driver := &bridgeSubmitDriver{turn: turn}
 	var msgs []tea.Msg
@@ -1075,13 +927,13 @@ func TestExecuteLineViaDriverDoesNotCoalesceReasoningWithAnswerDelta(t *testing.
 	if got := len(msgs); got != 2 {
 		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 2: %#v", got, msgs)
 	}
-	first := msgs[0].(kernel.EventEnvelope)
-	second := msgs[1].(kernel.EventEnvelope)
-	if first.Event.Narrative == nil || first.Event.Narrative.ReasoningText != "think" {
-		t.Fatalf("first narrative = %#v, want reasoning", first.Event.Narrative)
+	first := msgs[0].(TranscriptEventsMsg)
+	second := msgs[1].(TranscriptEventsMsg)
+	if len(first.Events) != 1 || first.Events[0].NarrativeKind != TranscriptNarrativeReasoning || first.Events[0].Text != "think" {
+		t.Fatalf("first transcript = %#v, want reasoning", first.Events)
 	}
-	if second.Event.Narrative == nil || second.Event.Narrative.Text != "answer" {
-		t.Fatalf("second narrative = %#v, want answer", second.Event.Narrative)
+	if len(second.Events) != 1 || second.Events[0].NarrativeKind != TranscriptNarrativeAssistant || second.Events[0].Text != "answer" {
+		t.Fatalf("second transcript = %#v, want answer", second.Events)
 	}
 }
 
@@ -1100,22 +952,20 @@ func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
 	}
 }
 
-func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
-	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
-		replay: []kernel.EventEnvelope{{
-			Event: kernel.Event{
-				Kind:       kernel.EventKindAssistantMessage,
-				SessionRef: session.SessionRef{SessionID: "root-session"},
-				Narrative: &kernel.NarrativePayload{
-					Role:  kernel.NarrativeRoleAssistant,
-					Text:  "history reply",
-					Final: true,
-					Scope: kernel.EventScopeMain,
-				},
-			},
-		}},
+func TestSlashResumeReplaysAppSessionEventsDirectly(t *testing.T) {
+	driver := &bridgeAppReplayDriver{
+		bridgeTestDriver: bridgeTestDriver{
+			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+			resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
+		},
+		appReplay: []appviewmodel.SessionEventEnvelope{
+			appviewmodel.EventEnvelopeFromSession("history-assistant", coresession.Event{
+				ID:        "history-assistant",
+				SessionID: "resumed-session",
+				Type:      coresession.EventAssistant,
+				Message:   coreTextMessage(coremodel.RoleAssistant, "history reply"),
+			}),
+		},
 	}
 	var msgs []tea.Msg
 	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
@@ -1130,7 +980,7 @@ func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 		}
 	}
 	if !sawReplay {
-		t.Fatalf("slashResume() messages = %#v, want replayed gateway envelope", msgs)
+		t.Fatalf("slashResume() messages = %#v, want replayed app session event", msgs)
 	}
 }
 
@@ -1567,7 +1417,7 @@ func TestDynamicAgentSlashAndHandleContinuation(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentList:    []tuidriver.AgentCandidate{{Name: "copilot"}},
 		commandView:  dynamicAgentCommandView("copilot", participantAssistantCoreEvent("task-1", "@jeff", "child ok")),
-		subagentTurn: bridgeTurnWithEvents(participantAssistantEnvelope("task-1", "@jeff", "child ok")),
+		subagentTurn: bridgeTurnWithAppEvents(appviewmodel.EventEnvelopeFromSession("child-ok", participantAssistantCoreEvent("task-1", "@jeff", "child ok"))),
 	}
 	var msgs []tea.Msg
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/copilot inspect")
@@ -2084,7 +1934,6 @@ type bridgeTestDriver struct {
 	status                   tuidriver.StatusSnapshot
 	newSession               coresession.Session
 	resumedSession           coresession.Session
-	replay                   []kernel.EventEnvelope
 	listAgentCalls           int
 	agentStatusCalls         int
 	lastContinuedHandle      string
@@ -2111,7 +1960,6 @@ type bridgeAppReplayDriver struct {
 	appReplay      []appviewmodel.SessionEventEnvelope
 	appReplayErr   error
 	appReplayCalls int
-	replayCalls    int
 }
 
 type bridgeLightweightStatusDriver struct {
@@ -2122,14 +1970,12 @@ type bridgeLightweightStatusDriver struct {
 }
 
 type bridgeTestTurn struct {
-	events      chan kernel.EventEnvelope
 	submissions []coreruntime.Submission
 }
 
 type bridgeAppEventTurn struct {
 	*bridgeTestTurn
-	appEvents   <-chan appviewmodel.SessionEventEnvelope
-	eventsCalls int
+	appEvents <-chan appviewmodel.SessionEventEnvelope
 }
 
 func (t *bridgeTestTurn) HandleID() string { return "handle-1" }
@@ -2137,11 +1983,6 @@ func (t *bridgeTestTurn) RunID() string    { return "run-1" }
 func (t *bridgeTestTurn) TurnID() string   { return "turn-1" }
 func (t *bridgeTestTurn) SessionRef() coresession.Ref {
 	return coresession.Ref{SessionID: "root-session"}
-}
-func (t *bridgeTestTurn) Events() <-chan kernel.EventEnvelope { return t.events }
-func (t *bridgeAppEventTurn) Events() <-chan kernel.EventEnvelope {
-	t.eventsCalls++
-	return t.bridgeTestTurn.Events()
 }
 func (t *bridgeAppEventTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
 	return t.appEvents
@@ -2155,13 +1996,11 @@ func (t *bridgeTestTurn) Cancel() coreruntime.CancelResult {
 }
 func (t *bridgeTestTurn) Close() error { return nil }
 
-func bridgeTurnWithEvents(envs ...kernel.EventEnvelope) tuidriver.Turn {
-	events := make(chan kernel.EventEnvelope, len(envs))
-	for _, env := range envs {
-		events <- env
+func bridgeTurnWithAppEvents(events ...appviewmodel.SessionEventEnvelope) tuidriver.Turn {
+	return &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{},
+		appEvents:      appEventStream(events...),
 	}
-	close(events)
-	return &bridgeTestTurn{events: events}
 }
 
 func cloneTUIDriverAttachments(items []tuidriver.Attachment) []tuidriver.Attachment {
@@ -2169,25 +2008,6 @@ func cloneTUIDriverAttachments(items []tuidriver.Attachment) []tuidriver.Attachm
 		return nil
 	}
 	return append([]tuidriver.Attachment(nil), items...)
-}
-
-func participantAssistantEnvelope(scopeID string, actor string, text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{Event: kernel.Event{
-		Kind:       kernel.EventKindAssistantMessage,
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		Origin: &kernel.EventOrigin{
-			Scope:   kernel.EventScopeParticipant,
-			ScopeID: scopeID,
-			Actor:   actor,
-		},
-		Narrative: &kernel.NarrativePayload{
-			Role:  kernel.NarrativeRoleAssistant,
-			Actor: actor,
-			Text:  text,
-			Final: true,
-			Scope: kernel.EventScopeParticipant,
-		},
-	}}
 }
 
 func dynamicAgentCommandView(command string, events ...coresession.Event) tuidriver.CommandExecutionView {
@@ -2198,8 +2018,28 @@ func dynamicAgentCommandView(command string, events ...coresession.Event) tuidri
 	}
 }
 
+func appEventStream(events ...appviewmodel.SessionEventEnvelope) <-chan appviewmodel.SessionEventEnvelope {
+	out := make(chan appviewmodel.SessionEventEnvelope, len(events))
+	for _, event := range events {
+		out <- event
+	}
+	close(out)
+	return out
+}
+
 func coreTextMessage(role coremodel.Role, text string) *coremodel.Message {
 	message := coremodel.Message{Role: role, Parts: []coremodel.Part{coremodel.NewTextPart(text)}}
+	return &message
+}
+
+func coreReasoningMessage(text string) *coremodel.Message {
+	message := coremodel.Message{Role: coremodel.RoleAssistant, Parts: []coremodel.Part{{
+		Kind: coremodel.PartReasoning,
+		Reasoning: &coremodel.ReasoningPart{
+			VisibleText: text,
+			Visibility:  coremodel.ReasoningVisible,
+		},
+	}}}
 	return &message
 }
 
@@ -2284,9 +2124,6 @@ func (d *bridgeSubmitDriver) ResumeSession(context.Context, string) (coresession
 	return coresession.Session{}, nil
 }
 func (d *bridgeSubmitDriver) ListSessions(context.Context, int) ([]tuidriver.ResumeCandidate, error) {
-	return nil, nil
-}
-func (d *bridgeSubmitDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
 	return nil, nil
 }
 func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
@@ -2387,13 +2224,6 @@ func (d *bridgeTestDriver) ResumeSession(context.Context, string) (coresession.S
 func (d *bridgeTestDriver) ListSessions(context.Context, int) ([]tuidriver.ResumeCandidate, error) {
 	return nil, nil
 }
-func (d *bridgeTestDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
-	return d.replay, nil
-}
-func (d *bridgeAppReplayDriver) ReplayEvents(ctx context.Context) ([]kernel.EventEnvelope, error) {
-	d.replayCalls++
-	return d.bridgeTestDriver.ReplayEvents(ctx)
-}
 func (d *bridgeAppReplayDriver) ReplaySessionEvents(context.Context) ([]appviewmodel.SessionEventEnvelope, error) {
 	d.appReplayCalls++
 	if d.appReplayErr != nil {
@@ -2416,7 +2246,7 @@ func (d *bridgeTestDriver) ContinueSubagent(_ context.Context, handle string, pr
 	if d.subagentTurn != nil {
 		return d.subagentTurn, nil
 	}
-	return bridgeTurnWithEvents(), nil
+	return bridgeTurnWithAppEvents(), nil
 }
 func (d *bridgeTestDriver) CompleteMention(context.Context, string, int) ([]tuidriver.CompletionCandidate, error) {
 	return nil, nil

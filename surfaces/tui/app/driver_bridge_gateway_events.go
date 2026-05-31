@@ -18,19 +18,20 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
-const gatewayNarrativeBatchInterval = 16 * time.Millisecond
+const appTranscriptBatchInterval = 16 * time.Millisecond
 
 type gatewayNarrativeBatcher struct {
 	pending *kernel.EventEnvelope
 	key     string
 }
 
-type sessionEventTurn interface {
-	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
+type appTranscriptNarrativeBatcher struct {
+	pending *TranscriptEvent
+	key     string
 }
 
-type legacyGatewayEventTurn interface {
-	Events() <-chan kernel.EventEnvelope
+type sessionEventTurn interface {
+	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 }
 
 func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender) {
@@ -42,40 +43,13 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn
 	if turn == nil || send == nil {
 		return
 	}
-	if appTurn, ok := turn.(sessionEventTurn); ok {
-		if appEvents := appTurn.SessionEvents(); appEvents != nil {
-			forwardAppSessionTurnEvents(ctx, driver, turn, sender, send, appEvents)
-			return
-		}
-	}
-	legacyTurn, ok := turn.(legacyGatewayEventTurn)
+	appTurn, ok := turn.(sessionEventTurn)
 	if !ok {
 		return
 	}
-	events := legacyTurn.Events()
-	if events == nil {
-		return
+	if appEvents := appTurn.SessionEvents(); appEvents != nil {
+		forwardAppSessionTurnEvents(ctx, driver, turn, sender, send, appEvents)
 	}
-	ticker := time.NewTicker(gatewayNarrativeBatchInterval)
-	defer ticker.Stop()
-
-	var batcher gatewayNarrativeBatcher
-	for events != nil {
-		select {
-		case <-ctx.Done():
-			batcher.flush(send)
-			return
-		case <-ticker.C:
-			batcher.flush(send)
-		case env, ok := <-events:
-			if !ok {
-				events = nil
-				continue
-			}
-			forwardGatewayEnvelope(ctx, driver, turn, sender, send, &batcher, env)
-		}
-	}
-	batcher.flush(send)
 }
 
 func drainTurnEvents(ctx context.Context, turn tuidriver.Turn) {
@@ -88,9 +62,6 @@ func drainTurnEvents(ctx context.Context, turn tuidriver.Turn) {
 			drainAppSessionTurnEvents(ctx, events)
 			return
 		}
-	}
-	if legacyTurn, ok := turn.(legacyGatewayEventTurn); ok {
-		drainLegacyGatewayTurnEvents(ctx, legacyTurn.Events())
 	}
 }
 
@@ -107,36 +78,34 @@ func drainAppSessionTurnEvents(ctx context.Context, events <-chan appviewmodel.S
 	}
 }
 
-func drainLegacyGatewayTurnEvents(ctx context.Context, events <-chan kernel.EventEnvelope) {
-	for events != nil {
-		select {
-		case <-ctx.Done():
-			return
-		case _, ok := <-events:
-			if !ok {
-				events = nil
-			}
-		}
-	}
-}
-
 func forwardAppSessionTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), events <-chan appviewmodel.SessionEventEnvelope) {
+	ticker := time.NewTicker(appTranscriptBatchInterval)
+	defer ticker.Stop()
+
+	var batcher appTranscriptNarrativeBatcher
 	for events != nil {
 		select {
 		case <-ctx.Done():
+			batcher.flush(send)
 			return
+		case <-ticker.C:
+			batcher.flush(send)
 		case env, ok := <-events:
 			if !ok {
 				events = nil
 				continue
 			}
-			forwardAppSessionEnvelope(ctx, driver, turn, sender, send, env)
+			forwardAppSessionEnvelope(ctx, driver, turn, sender, send, &batcher, env)
 		}
 	}
+	batcher.flush(send)
 }
 
-func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), env appviewmodel.SessionEventEnvelope) {
+func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), batcher *appTranscriptNarrativeBatcher, env appviewmodel.SessionEventEnvelope) {
 	if strings.TrimSpace(env.Error) != "" {
+		if batcher != nil {
+			batcher.flush(send)
+		}
 		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
 		if ok && converted.Err != nil {
 			send(converted)
@@ -144,9 +113,14 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 		return
 	}
 	if transcriptEvents := ProjectSessionEventEnvelopeToTranscriptEvents(env); len(transcriptEvents) > 0 {
-		send(TranscriptEventsMsg{Events: transcriptEvents})
+		if batcher == nil || !batcher.enqueue(transcriptEvents, send) {
+			send(TranscriptEventsMsg{Events: transcriptEvents})
+		}
 	}
 	if env.Approval != nil {
+		if batcher != nil {
+			batcher.flush(send)
+		}
 		sendApprovalItemPrompt(ctx, turn, env.Approval, send)
 		return
 	}
@@ -158,18 +132,30 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 		return
 	}
 	if converted.Err != nil {
+		if batcher != nil {
+			batcher.flush(send)
+		}
 		send(converted)
 		return
 	}
 	if msg, ok := gatewayApprovalReviewHintMsg(converted.Event); ok {
+		if batcher != nil {
+			batcher.flush(send)
+		}
 		send(msg)
 	}
 	if appSessionEnvelopeNeedsGatewayTranscriptFallback(env) {
+		if batcher != nil {
+			batcher.flush(send)
+		}
 		if transcriptEvents := ProjectGatewayEventToTranscriptEvents(converted.Event); len(transcriptEvents) > 0 {
 			send(TranscriptEventsMsg{Events: transcriptEvents})
 		}
 	}
 	if isApprovalGatewayEvent(converted.Event.Kind) && !isAutomaticApprovalEvent(converted.Event.ApprovalPayload) {
+		if batcher != nil {
+			batcher.flush(send)
+		}
 		sendApprovalPrompt(ctx, turn, converted.Event.ApprovalPayload, send)
 	}
 }
@@ -193,16 +179,6 @@ func appSessionEnvelopeNeedsGatewayCompatibility(env appviewmodel.SessionEventEn
 		return true
 	default:
 		return false
-	}
-}
-
-func forwardGatewayEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), batcher *gatewayNarrativeBatcher, env kernel.EventEnvelope) {
-	if batcher != nil && batcher.enqueue(env, send) {
-		return
-	}
-	send(env)
-	if isApprovalGatewayEvent(env.Event.Kind) && !isAutomaticApprovalEvent(env.Event.ApprovalPayload) {
-		sendApprovalPrompt(ctx, turn, env.Event.ApprovalPayload, send)
 	}
 }
 
@@ -273,6 +249,65 @@ func gatewayNarrativeBatchKey(env kernel.EventEnvelope) (string, bool) {
 		strings.TrimSpace(payload.Actor),
 		strings.TrimSpace(payload.UpdateType),
 		stream,
+	}, "\x00"), true
+}
+
+func (b *appTranscriptNarrativeBatcher) enqueue(events []TranscriptEvent, send func(tea.Msg)) bool {
+	if len(events) != 1 {
+		b.flush(send)
+		return false
+	}
+	event := events[0]
+	key, ok := appTranscriptNarrativeBatchKey(event)
+	if !ok {
+		b.flush(send)
+		return false
+	}
+	if b.pending == nil {
+		copy := event
+		b.pending = &copy
+		b.key = key
+		return true
+	}
+	if b.key != key {
+		b.flush(send)
+		copy := event
+		b.pending = &copy
+		b.key = key
+		return true
+	}
+	b.pending.Text += event.Text
+	b.pending.OccurredAt = event.OccurredAt
+	return true
+}
+
+func (b *appTranscriptNarrativeBatcher) flush(send func(tea.Msg)) {
+	if b == nil || b.pending == nil {
+		return
+	}
+	if send != nil {
+		send(TranscriptEventsMsg{Events: []TranscriptEvent{*b.pending}})
+	}
+	b.pending = nil
+	b.key = ""
+}
+
+func appTranscriptNarrativeBatchKey(event TranscriptEvent) (string, bool) {
+	if event.Kind != TranscriptEventNarrative || event.Final || event.Text == "" {
+		return "", false
+	}
+	switch event.NarrativeKind {
+	case TranscriptNarrativeAssistant, TranscriptNarrativeReasoning:
+	default:
+		return "", false
+	}
+	return strings.Join([]string{
+		strings.TrimSpace(string(event.Scope)),
+		strings.TrimSpace(event.ScopeID),
+		strings.TrimSpace(event.Actor),
+		strings.TrimSpace(string(event.NarrativeKind)),
+		strings.TrimSpace(event.AnchorToolCallID),
+		strings.TrimSpace(event.AnchorToolName),
 	}, "\x00"), true
 }
 

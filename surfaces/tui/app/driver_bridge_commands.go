@@ -9,7 +9,6 @@ import (
 
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -291,26 +290,15 @@ type sessionEventReplayDriver interface {
 	ReplaySessionEvents(context.Context) ([]appviewmodel.SessionEventEnvelope, error)
 }
 
-type legacyGatewayReplayDriver interface {
-	ReplayEvents(context.Context) ([]kernel.EventEnvelope, error)
-}
-
 func replayResumeTranscriptEvents(ctx context.Context, driver tuidriver.Driver) ([]TranscriptEvent, error) {
 	if appReplay, ok := driver.(sessionEventReplayDriver); ok {
 		events, err := appReplay.ReplaySessionEvents(ctx)
 		if err == nil {
 			return resumeSessionEventReplayTranscriptEvents(events), nil
 		}
-	}
-	legacyReplay, ok := driver.(legacyGatewayReplayDriver)
-	if !ok {
-		return nil, nil
-	}
-	events, err := legacyReplay.ReplayEvents(ctx)
-	if err != nil {
 		return nil, err
 	}
-	return resumeTranscriptReplayTranscriptEvents(events), nil
+	return nil, nil
 }
 
 func resumeSessionEventReplayTranscriptEvents(events []appviewmodel.SessionEventEnvelope) []TranscriptEvent {
@@ -335,90 +323,6 @@ func resumeSessionEventReplayTranscriptEvents(events []appviewmodel.SessionEvent
 		out = append(out, projected...)
 	}
 	return out
-}
-
-func resumeTranscriptReplayTranscriptEvents(events []kernel.EventEnvelope) []TranscriptEvent {
-	envelopes := resumeTranscriptReplayEvents(events)
-	if len(envelopes) == 0 {
-		return nil
-	}
-	out := make([]TranscriptEvent, 0, len(envelopes))
-	for _, env := range envelopes {
-		projected := ProjectGatewayEventToTranscriptEvents(env.Event)
-		if len(projected) == 0 {
-			if event, ok := resumeParticipantUserTranscriptEvent(env.Event); ok {
-				projected = append(projected, event)
-			}
-		}
-		out = append(out, projected...)
-	}
-	return out
-}
-
-func resumeParticipantUserTranscriptEvent(event kernel.Event) (TranscriptEvent, bool) {
-	if event.Kind != kernel.EventKindUserMessage || gatewayEventScope(event) != ACPProjectionParticipant {
-		return TranscriptEvent{}, false
-	}
-	text := strings.TrimSpace(gatewayUserText(event))
-	if text == "" {
-		return TranscriptEvent{}, false
-	}
-	label := firstNonEmpty(
-		kernel.EventMetaString(event.Meta, "mention"),
-		kernel.EventMetaString(event.Meta, "handle"),
-	)
-	if label != "" && !strings.HasPrefix(label, "@") {
-		label = "@" + label
-	}
-	if event.Origin != nil {
-		label = firstNonEmpty(label, event.Origin.ParticipantID, event.Origin.Actor)
-	}
-	label = firstNonEmpty(label, "side ACP")
-	return TranscriptEvent{
-		Kind:          TranscriptEventNarrative,
-		Scope:         ACPProjectionMain,
-		NarrativeKind: TranscriptNarrativeUser,
-		Text:          fmt.Sprintf("User to %s: %s", label, text),
-		Final:         true,
-		OccurredAt:    event.OccurredAt,
-	}, true
-}
-
-func resumeTranscriptReplayEvents(events []kernel.EventEnvelope) []kernel.EventEnvelope {
-	if len(events) == 0 {
-		return nil
-	}
-	out := make([]kernel.EventEnvelope, 0, len(events))
-	for _, env := range events {
-		if shouldReplayEventInTUIResume(env.Event) {
-			out = append(out, env)
-		}
-	}
-	return out
-}
-
-func shouldReplayEventInTUIResume(event kernel.Event) bool {
-	switch event.Kind {
-	case kernel.EventKindUserMessage:
-		return strings.TrimSpace(gatewayUserText(event)) != ""
-	case kernel.EventKindPlanUpdate:
-		return event.Plan != nil && len(event.Plan.Entries) > 0
-	case kernel.EventKindAssistantMessage:
-		payload := event.Narrative
-		if payload == nil {
-			return false
-		}
-		switch payload.Role {
-		case kernel.NarrativeRoleUser:
-			return strings.TrimSpace(payload.Text) != ""
-		case kernel.NarrativeRoleAssistant:
-			return replayableResumeAssistant(event)
-		default:
-			return false
-		}
-	default:
-		return false
-	}
 }
 
 func shouldReplaySessionEventInTUIResume(event coresession.Event) bool {
@@ -461,23 +365,6 @@ func resumeParticipantUserSessionTranscriptEvent(event coresession.Event) (Trans
 		Final:         true,
 		OccurredAt:    event.Time,
 	}, true
-}
-
-func replayableResumeAssistant(event kernel.Event) bool {
-	payload := event.Narrative
-	if payload == nil || payload.Role != kernel.NarrativeRoleAssistant {
-		return false
-	}
-	if !payload.Final {
-		return false
-	}
-	if strings.TrimSpace(payload.Text) == "" && strings.TrimSpace(payload.ReasoningText) == "" {
-		return false
-	}
-	if strings.EqualFold(strings.TrimSpace(payload.Visibility), "ui_only") {
-		return false
-	}
-	return true
 }
 
 func slashStatus(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {

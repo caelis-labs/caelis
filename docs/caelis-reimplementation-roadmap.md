@@ -982,7 +982,10 @@ The completed work is intentionally limited to the reusable skeleton:
 - TUI app-service event bridge cleanup: core/app event to current transcript
   gateway projection now lives in `surfaces/tui/eventbridge`, and core
   `session.ToolEvent.Content` is preserved as ACP-compatible tool content for
-  existing TUI transcript and tool-panel rendering.
+  existing TUI transcript and tool-panel rendering. The current Bubble Tea
+  live-turn and `/resume` bridge now consumes
+  `internal/app/viewmodel.SessionEventEnvelope` directly instead of keeping
+  `kernel.EventEnvelope` live/replay fallback entrypoints.
 - Core-native ACP server for initialize, session/new, session/prompt,
   session/list, session/load, session/resume, session/close, cancel,
   `session/update`, and permission request bridging. It also exposes configured
@@ -1387,17 +1390,17 @@ be migrated before retiring the old stack:
    - Migrated baseline: app-service-bound TUI `/resume` now replays history
      from `internal/app/viewmodel.SessionEventEnvelope` through a
      service-native gatewaydriver hook before adapting to the existing
-     transcript renderer. Old `kernel.EventEnvelope` replay remains only as the
-     fallback path for non app-service driver implementations during the
-     transition.
+     transcript renderer. The old `kernel.EventEnvelope` replay fallback has
+     been removed from the Bubble Tea bridge, so TUI resume now depends on the
+     same app view-model event contract that the future APP will consume.
    - Migrated baseline: app-service TUI live turns now expose
      `internal/app/viewmodel.SessionEventEnvelope` streams for both local model
      turns and dynamic external-ACP participant turns. The Bubble Tea bridge
-     prefers that app event stream and projects canonical `core/session.Event`
-     values directly into `TranscriptEventsMsg`; conversion to the current
-     gateway envelope shape is now limited to boundary helpers such as terminal
-     stream follow-up, approval prompts, errors, and non app-service fallback
-     drivers.
+     projects canonical `core/session.Event` values directly into
+     `TranscriptEventsMsg`, with transcript-level batching for UI-only
+     reasoning/assistant deltas. Conversion to the current gateway envelope
+     shape is now limited to residual boundary helpers such as errors and
+     approval-review/tool compatibility hints.
    - Migrated baseline: app-service-bound TUI `/resume` replay now uses the
      same core-session transcript projector as live app turns, including
      participant prompt restoration, instead of first adapting replayed app
@@ -1413,12 +1416,13 @@ be migrated before retiring the old stack:
    - Migrated baseline: the public TUI driver contract no longer exposes old
      `kernel.EventEnvelope` live/replay streams or `kernel.CancelResult`.
      App-service turns use core submissions, core sessions, and core cancel
-     results; legacy gateway event stream/replay support is now an internal
-     Bubble Tea bridge fallback for non app-service drivers.
+     results; the Bubble Tea bridge no longer falls back to old live/replay
+     gateway streams.
    - Migrated baseline: app-service TUI approval prompts now consume
      `internal/app/viewmodel.ApprovalItem` directly and submit
      `core/runtime` approval decisions. Converting core approval events into
-     old `kernel.ApprovalPayload` is limited to legacy gateway fallback paths.
+     old `kernel.ApprovalPayload` is limited to residual gateway-envelope
+     compatibility helpers.
    - Migrated baseline: the gatewaydriver app-service callback facade now uses
      `core/session.Ref` and `core/session.Session` for session-bound status,
      command, model, mode, compaction, replay, and task hooks. Conversion to
@@ -1441,11 +1445,12 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: the current TUI app/gatewaydriver bridge still imports the
-     old `ports/session` and public `kernel` event contracts for approval
-     payload fallback, non app-service replay fallback, participants, and
-     internal session bookkeeping. Retiring those imports requires moving the
-     remaining TUI bridge protocol to
+   - Still pending: `surfaces/tui/gatewaydriver` still carries old
+     `kernel.TurnHandle` and `ports/session` compatibility for the legacy
+     `GatewayService` adapter, and `surfaces/tui/app` still imports old
+     gateway event/protocol types for transcript renderer compatibility,
+     terminal/tool formatting, and participant projections. Retiring those
+     imports requires moving the remaining TUI bridge protocol to
      `core/runtime`, `core/session`, and `internal/app/viewmodel` in one larger
      slice.
 
