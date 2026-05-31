@@ -23,6 +23,7 @@ const defaultMaxToolSteps = 8
 type Config struct {
 	Provider     model.Provider
 	Tools        tool.Registry
+	ModelTools   []model.ToolSpec
 	Approval     approval.Policy
 	Spawner      Spawner
 	Instructions []string
@@ -33,6 +34,7 @@ type Config struct {
 type Loop struct {
 	provider     model.Provider
 	tools        tool.Registry
+	modelTools   []model.ToolSpec
 	approval     approval.Policy
 	spawner      Spawner
 	instructions []string
@@ -66,6 +68,7 @@ type Request struct {
 	Instructions  []string
 	Model         string
 	Reasoning     model.ReasoningConfig
+	ModelTools    []model.ToolSpec
 	Mode          string
 	TurnID        string
 	Surface       string
@@ -87,6 +90,7 @@ func New(cfg Config) (*Loop, error) {
 	return &Loop{
 		provider:     cfg.Provider,
 		tools:        cfg.Tools,
+		modelTools:   model.CloneToolSpecs(cfg.ModelTools),
 		approval:     cfg.Approval,
 		spawner:      cfg.Spawner,
 		instructions: cloneStrings(cfg.Instructions),
@@ -139,7 +143,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 		response, err := l.complete(ctx, model.Request{
 			Model:        strings.TrimSpace(req.Model),
 			Messages:     cloneMessages(messages),
-			Tools:        tool.ModelSpecs(tools),
+			Tools:        modelToolSpecs(tool.ModelSpecs(tools), l.modelTools, req.ModelTools),
 			Instructions: requestInstructions(l.instructions, req.Instructions),
 			Reasoning:    req.Reasoning,
 			Stream:       true,
@@ -504,6 +508,19 @@ func cloneMessages(in []model.Message) []model.Message {
 	out := make([]model.Message, 0, len(in))
 	for _, message := range in {
 		out = append(out, model.CloneMessage(message))
+	}
+	return out
+}
+
+func modelToolSpecs(groups ...[]model.ToolSpec) []model.ToolSpec {
+	var out []model.ToolSpec
+	for _, group := range groups {
+		for _, spec := range group {
+			out = append(out, model.CloneToolSpec(spec))
+		}
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

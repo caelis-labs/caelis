@@ -89,6 +89,48 @@ func TestLoopPassesReasoningConfigToProvider(t *testing.T) {
 	}
 }
 
+func TestLoopPassesProviderModelToolsAlongsideLocalTools(t *testing.T) {
+	providerTool := model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+		"openai": json.RawMessage(`{"type":"web_search_preview"}`),
+	})
+	turnTool := model.NewMCPToolSpec("docs", map[string]json.RawMessage{
+		"openai": json.RawMessage(`{"type":"mcp","server_label":"docs"}`),
+	})
+	provider := &capturingProvider{message: model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{model.NewTextPart("pong")},
+	}}
+	runner, err := New(Config{
+		Provider:   provider,
+		Tools:      staticRegistry{tools: []tool.Tool{fakeJSONTool{name: "read_file"}}},
+		ModelTools: []model.ToolSpec{providerTool},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = runner.Run(context.Background(), Request{
+		Session:    session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:      "ping",
+		TurnID:     "turn-1",
+		ModelTools: []model.ToolSpec{turnTool},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(provider.request.Tools) != 3 {
+		t.Fatalf("provider tools = %#v, want local, configured provider, and turn provider tools", provider.request.Tools)
+	}
+	if provider.request.Tools[0].Kind != model.ToolSpecFunction || provider.request.Tools[0].Name != "read_file" {
+		t.Fatalf("local tool spec = %#v, want function read_file", provider.request.Tools[0])
+	}
+	if provider.request.Tools[1].Kind != model.ToolSpecProviderExecuted || provider.request.Tools[1].Name != "web_search" {
+		t.Fatalf("configured provider tool = %#v, want provider-executed web_search", provider.request.Tools[1])
+	}
+	if provider.request.Tools[2].Kind != model.ToolSpecMCP || provider.request.Tools[2].Name != "docs" {
+		t.Fatalf("turn provider tool = %#v, want mcp docs", provider.request.Tools[2])
+	}
+}
+
 func TestLoopPassesSessionModeToApprovalPolicy(t *testing.T) {
 	rawInput := json.RawMessage(`{"content":"review"}`)
 	provider := &scriptedProvider{responses: []model.Message{
@@ -390,7 +432,7 @@ func (p *capturingProvider) Stream(_ context.Context, req model.Request) (model.
 	p.request = model.Request{
 		Model:        req.Model,
 		Messages:     cloneTestMessages(req.Messages),
-		Tools:        req.Tools,
+		Tools:        model.CloneToolSpecs(req.Tools),
 		Instructions: append([]string(nil), req.Instructions...),
 		Reasoning:    req.Reasoning,
 		Stream:       req.Stream,
@@ -548,7 +590,7 @@ func (p *scriptedProvider) Stream(_ context.Context, req model.Request) (model.S
 	p.requests = append(p.requests, model.Request{
 		Model:        req.Model,
 		Messages:     cloneTestMessages(req.Messages),
-		Tools:        append([]model.ToolSpec(nil), req.Tools...),
+		Tools:        model.CloneToolSpecs(req.Tools),
 		Instructions: append([]string(nil), req.Instructions...),
 		Reasoning:    req.Reasoning,
 		Stream:       req.Stream,

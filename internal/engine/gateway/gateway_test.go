@@ -625,6 +625,6 @@ func cloneModelRequest(in model.Request) model.Request {
 	for _, message := range in.Messages {
 		out.Messages = append(out.Messages, model.CloneMessage(message))
 	}
-	out.Tools = append([]model.ToolSpec(nil), in.Tools...)
+	out.Tools = model.CloneToolSpecs(in.Tools)
 	return out
 }

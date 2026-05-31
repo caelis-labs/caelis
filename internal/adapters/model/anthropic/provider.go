@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -399,9 +400,22 @@ type sourceBlock struct {
 }
 
 type toolParam struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema,omitempty"`
+	Raw         json.RawMessage `json:"-"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	InputSchema map[string]any  `json:"input_schema,omitempty"`
+}
+
+func (t toolParam) MarshalJSON() ([]byte, error) {
+	if len(t.Raw) > 0 {
+		return slices.Clone(t.Raw), nil
+	}
+	type payload struct {
+		Name        string         `json:"name"`
+		Description string         `json:"description,omitempty"`
+		InputSchema map[string]any `json:"input_schema,omitempty"`
+	}
+	return json.Marshal(payload{Name: t.Name, Description: t.Description, InputSchema: t.InputSchema})
 }
 
 type thinkingConfig struct {
@@ -911,6 +925,10 @@ func toolParams(specs []model.ToolSpec) []toolParam {
 	}
 	out := make([]toolParam, 0, len(specs))
 	for _, spec := range specs {
+		if raw, ok := model.ProviderToolPayload(spec, "anthropic"); ok {
+			out = append(out, toolParam{Raw: raw})
+			continue
+		}
 		if spec.Kind != "" && spec.Kind != model.ToolSpecFunction {
 			continue
 		}

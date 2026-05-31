@@ -212,6 +212,26 @@ func TestProviderStreamParsesSSE(t *testing.T) {
 	}
 }
 
+func TestChatToolsPassProviderToolPayloads(t *testing.T) {
+	tools := chatTools([]model.ToolSpec{
+		model.NewFunctionToolSpec("run_command", "run shell", map[string]any{"type": "object"}),
+		model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+			"codefree": json.RawMessage(`{"type":"web_search_preview"}`),
+		}),
+	})
+	body, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 2 || decoded[0]["type"] != "function" || decoded[1]["type"] != "web_search_preview" {
+		t.Fatalf("tools = %#v, want function and provider payload", decoded)
+	}
+}
+
 func TestProviderNormalizesQuotedToolArguments(t *testing.T) {
 	message := coreMessageFromChat(chatMessage{ToolCalls: []chatToolCall{{
 		ID: "call-1",

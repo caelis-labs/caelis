@@ -11,6 +11,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -396,8 +397,20 @@ type chatMessage struct {
 }
 
 type chatTool struct {
-	Type     string       `json:"type"`
-	Function chatFunction `json:"function"`
+	Raw      json.RawMessage `json:"-"`
+	Type     string          `json:"type"`
+	Function chatFunction    `json:"function"`
+}
+
+func (t chatTool) MarshalJSON() ([]byte, error) {
+	if len(t.Raw) > 0 {
+		return slices.Clone(t.Raw), nil
+	}
+	type payload struct {
+		Type     string       `json:"type"`
+		Function chatFunction `json:"function"`
+	}
+	return json.Marshal(payload{Type: t.Type, Function: t.Function})
 }
 
 type chatFunction struct {
@@ -572,6 +585,10 @@ func chatTools(specs []model.ToolSpec) []chatTool {
 	}
 	out := make([]chatTool, 0, len(specs))
 	for _, spec := range specs {
+		if raw, ok := model.ProviderToolPayload(spec, "ollama"); ok {
+			out = append(out, chatTool{Raw: raw})
+			continue
+		}
 		if spec.Kind != "" && spec.Kind != model.ToolSpecFunction {
 			continue
 		}

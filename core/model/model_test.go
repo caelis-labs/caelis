@@ -43,6 +43,30 @@ func TestStaticStreamEOF(t *testing.T) {
 	}
 }
 
+func TestProviderToolPayloadUsesProviderFallbackAndClones(t *testing.T) {
+	openaiPayload := json.RawMessage(`{"type":"web_search_preview"}`)
+	defaultPayload := json.RawMessage(`{"type":"generic_tool"}`)
+	spec := NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+		"openai":  openaiPayload,
+		"default": defaultPayload,
+	})
+	openaiPayload[0] = '['
+
+	raw, ok := ProviderToolPayload(spec, "OPENAI")
+	if !ok || string(raw) != `{"type":"web_search_preview"}` {
+		t.Fatalf("openai payload = %q ok=%v, want cloned provider payload", string(raw), ok)
+	}
+	raw[0] = '['
+	again, ok := ProviderToolPayload(spec, "openai")
+	if !ok || string(again) != `{"type":"web_search_preview"}` {
+		t.Fatalf("provider payload was not cloned: %q ok=%v", string(again), ok)
+	}
+	fallback, ok := ProviderToolPayload(spec, "anthropic")
+	if !ok || string(fallback) != `{"type":"generic_tool"}` {
+		t.Fatalf("fallback payload = %q ok=%v, want default payload", string(fallback), ok)
+	}
+}
+
 func TestCloneContentPartsNormalizesAndDetaches(t *testing.T) {
 	parts := []ContentPart{{Type: ContentPartText, Text: " hello ", URI: " file://a "}}
 	clone := CloneContentParts(parts)

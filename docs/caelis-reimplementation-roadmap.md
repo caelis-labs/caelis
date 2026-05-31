@@ -1791,8 +1791,14 @@ be migrated before retiring the old stack:
      null, and invalid tool arguments normalize into the canonical JSON object
      consumed by `core/tool` execution instead of each adapter carrying its own
      partial parser.
-   - Still pending: provider-defined, provider-executed, and MCP tool
-     declarations beyond function tools.
+   - Migrated baseline: provider-defined, provider-executed, and MCP tool
+     declarations now have a provider-neutral `core/model.ToolSpec` payload
+     contract. The runtime loop can carry non-local model tools alongside
+     local executable function tools, and the OpenAI-compatible, CodeFree,
+     Anthropic, Gemini, and Ollama adapters pass through provider-native
+     declarations without per-tool compatibility branches.
+   - Still pending: settings/plugin catalog sources for enabling
+     provider-native tool specs in product flows where they are needed.
 
 7. Sandbox backends and policy
    - The new stack has a core-native host sandbox adapter plus a thin internal
@@ -2334,8 +2340,9 @@ Recommended sequence:
 1. Finish the remaining large TUI surface migrations against app services,
    especially richer `/connect` rendering/panel parity, remote controller
    diagnostics, and visual settings/diagnostics editors.
-2. Close the remaining provider-specific tool declaration gaps in core-native
-   adapters without reintroducing a parallel provider factory/catalog stack.
+2. Wire provider-native tool declarations from settings/plugin catalog sources
+   where needed, without reintroducing a parallel provider factory/catalog
+   stack.
 3. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
 4. Finish richer durable task metadata and terminal preview behavior behind

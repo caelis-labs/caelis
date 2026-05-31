@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -384,7 +385,18 @@ type thinkingConfigPayload struct {
 }
 
 type toolParam struct {
+	Raw                  json.RawMessage       `json:"-"`
 	FunctionDeclarations []functionDeclaration `json:"functionDeclarations,omitempty"`
+}
+
+func (t toolParam) MarshalJSON() ([]byte, error) {
+	if len(t.Raw) > 0 {
+		return slices.Clone(t.Raw), nil
+	}
+	type payload struct {
+		FunctionDeclarations []functionDeclaration `json:"functionDeclarations,omitempty"`
+	}
+	return json.Marshal(payload{FunctionDeclarations: t.FunctionDeclarations})
 }
 
 type functionDeclaration struct {
@@ -731,7 +743,12 @@ func toolParams(specs []model.ToolSpec) []toolParam {
 		return nil
 	}
 	declarations := make([]functionDeclaration, 0, len(specs))
+	var rawTools []toolParam
 	for _, spec := range specs {
+		if raw, ok := model.ProviderToolPayload(spec, "gemini", "google"); ok {
+			rawTools = append(rawTools, toolParam{Raw: raw})
+			continue
+		}
 		if spec.Kind != "" && spec.Kind != model.ToolSpecFunction {
 			continue
 		}
@@ -749,10 +766,15 @@ func toolParams(specs []model.ToolSpec) []toolParam {
 			ParametersJSONSchema: schema,
 		})
 	}
-	if len(declarations) == 0 {
+	out := make([]toolParam, 0, 1+len(rawTools))
+	if len(declarations) > 0 {
+		out = append(out, toolParam{FunctionDeclarations: declarations})
+	}
+	out = append(out, rawTools...)
+	if len(out) == 0 {
 		return nil
 	}
-	return []toolParam{{FunctionDeclarations: declarations}}
+	return out
 }
 
 func functionResponsePayload(result model.ToolResultPart) map[string]any {

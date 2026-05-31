@@ -400,7 +400,7 @@ func (p *reloadScriptedProvider) Requests() []model.Request {
 func cloneReloadRequest(in model.Request) model.Request {
 	out := in
 	out.Messages = cloneReloadMessages(in.Messages)
-	out.Tools = append([]model.ToolSpec(nil), in.Tools...)
+	out.Tools = model.CloneToolSpecs(in.Tools)
 	out.Instructions = append([]string(nil), in.Instructions...)
 	return out
 }

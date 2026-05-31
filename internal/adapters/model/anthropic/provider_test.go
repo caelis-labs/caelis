@@ -166,6 +166,59 @@ func TestProviderNormalizesQuotedToolArguments(t *testing.T) {
 	}
 }
 
+func TestProviderStreamPassesProviderToolPayloads(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"msg-1",
+			"type":"message",
+			"role":"assistant",
+			"model":"claude-test",
+			"stop_reason":"end_turn",
+			"content":[{"type":"text","text":"ok"}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{
+		BaseURL: server.URL,
+		APIKey:  "test-key",
+		Model:   "claude-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("search")}}},
+		Tools: []model.ToolSpec{
+			model.NewFunctionToolSpec("run_command", "run shell", map[string]any{"type": "object"}),
+			model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+				"anthropic": json.RawMessage(`{"type":"web_search_20250305","name":"web_search","max_uses":2}`),
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatal(err)
+	}
+	tools, ok := captured["tools"].([]any)
+	if !ok || len(tools) != 2 {
+		t.Fatalf("captured tools = %#v, want function and provider tool", captured["tools"])
+	}
+	if first, _ := tools[0].(map[string]any); first["name"] != "run_command" || first["input_schema"] == nil {
+		t.Fatalf("first tool = %#v, want function declaration", tools[0])
+	}
+	if second, _ := tools[1].(map[string]any); second["type"] != "web_search_20250305" || second["name"] != "web_search" {
+		t.Fatalf("second tool = %#v, want provider-executed payload", tools[1])
+	}
+}
+
 func TestProviderStreamParsesSSE(t *testing.T) {
 	var captured messagesRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

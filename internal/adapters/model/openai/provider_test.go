@@ -110,6 +110,66 @@ func TestProviderStreamSendsChatCompletionRequestAndParsesToolCall(t *testing.T)
 	}
 }
 
+func TestProviderStreamPassesProviderToolPayloads(t *testing.T) {
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"id":"chatcmpl-1",
+			"model":"gpt-test",
+			"choices":[{
+				"index":0,
+				"message":{"role":"assistant","content":"ok"},
+				"finish_reason":"stop"
+			}]
+		}`))
+	}))
+	defer server.Close()
+
+	provider, err := New(Config{
+		BaseURL: server.URL + "/v1",
+		APIKey:  "test-token",
+		Model:   "gpt-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	stream, err := provider.Stream(context.Background(), model.Request{
+		Messages: []model.Message{{Role: model.RoleUser, Parts: []model.Part{model.NewTextPart("search")}}},
+		Tools: []model.ToolSpec{
+			model.NewFunctionToolSpec("run_command", "run shell", map[string]any{"type": "object"}),
+			model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
+				"openai": json.RawMessage(`{"type":"web_search_preview"}`),
+			}),
+			model.NewMCPToolSpec("docs", map[string]json.RawMessage{
+				"openai": json.RawMessage(`{"type":"mcp","server_label":"docs","server_url":"https://mcp.example/sse"}`),
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		t.Fatal(err)
+	}
+	tools, ok := captured["tools"].([]any)
+	if !ok || len(tools) != 3 {
+		t.Fatalf("captured tools = %#v, want three declarations", captured["tools"])
+	}
+	if first, _ := tools[0].(map[string]any); first["type"] != "function" {
+		t.Fatalf("first tool = %#v, want function declaration", tools[0])
+	}
+	if second, _ := tools[1].(map[string]any); second["type"] != "web_search_preview" {
+		t.Fatalf("second tool = %#v, want provider-executed payload", tools[1])
+	}
+	if third, _ := tools[2].(map[string]any); third["type"] != "mcp" || third["server_label"] != "docs" {
+		t.Fatalf("third tool = %#v, want MCP payload", tools[2])
+	}
+}
+
 func TestProviderStreamParsesChatCompletionSSE(t *testing.T) {
 	var captured chatCompletionRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

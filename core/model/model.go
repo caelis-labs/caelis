@@ -233,11 +233,12 @@ const (
 
 // ToolSpec is the model-facing declaration produced by tool registries.
 type ToolSpec struct {
-	Kind        ToolSpecKind   `json:"kind,omitempty"`
-	Name        string         `json:"name,omitempty"`
-	Description string         `json:"description,omitempty"`
-	InputSchema map[string]any `json:"input_schema,omitempty"`
-	Meta        map[string]any `json:"meta,omitempty"`
+	Kind             ToolSpecKind               `json:"kind,omitempty"`
+	Name             string                     `json:"name,omitempty"`
+	Description      string                     `json:"description,omitempty"`
+	InputSchema      map[string]any             `json:"input_schema,omitempty"`
+	ProviderPayloads map[string]json.RawMessage `json:"provider_payloads,omitempty"`
+	Meta             map[string]any             `json:"meta,omitempty"`
 }
 
 type OutputMode string
@@ -383,6 +384,101 @@ func NewFunctionToolSpec(name string, description string, inputSchema map[string
 		Description: strings.TrimSpace(description),
 		InputSchema: maps.Clone(inputSchema),
 	}
+}
+
+func NewProviderDefinedToolSpec(name string, payloads map[string]json.RawMessage) ToolSpec {
+	return NewProviderToolSpec(ToolSpecProviderDefined, name, payloads)
+}
+
+func NewProviderExecutedToolSpec(name string, payloads map[string]json.RawMessage) ToolSpec {
+	return NewProviderToolSpec(ToolSpecProviderExecuted, name, payloads)
+}
+
+func NewMCPToolSpec(name string, payloads map[string]json.RawMessage) ToolSpec {
+	return NewProviderToolSpec(ToolSpecMCP, name, payloads)
+}
+
+func NewProviderToolSpec(kind ToolSpecKind, name string, payloads map[string]json.RawMessage) ToolSpec {
+	if kind == "" {
+		kind = ToolSpecProviderDefined
+	}
+	return ToolSpec{
+		Kind:             kind,
+		Name:             strings.TrimSpace(name),
+		ProviderPayloads: cloneProviderPayloads(payloads),
+	}
+}
+
+func ProviderToolPayload(spec ToolSpec, providers ...string) (json.RawMessage, bool) {
+	if len(spec.ProviderPayloads) == 0 {
+		return nil, false
+	}
+	for _, provider := range providers {
+		if raw, ok := providerPayload(spec.ProviderPayloads, provider); ok {
+			return raw, true
+		}
+	}
+	for _, provider := range []string{"default", "*"} {
+		if raw, ok := providerPayload(spec.ProviderPayloads, provider); ok {
+			return raw, true
+		}
+	}
+	return nil, false
+}
+
+func CloneToolSpec(in ToolSpec) ToolSpec {
+	out := in
+	out.Name = strings.TrimSpace(in.Name)
+	out.Description = strings.TrimSpace(in.Description)
+	out.InputSchema = maps.Clone(in.InputSchema)
+	out.ProviderPayloads = cloneProviderPayloads(in.ProviderPayloads)
+	out.Meta = maps.Clone(in.Meta)
+	return out
+}
+
+func CloneToolSpecs(in []ToolSpec) []ToolSpec {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ToolSpec, 0, len(in))
+	for _, spec := range in {
+		out = append(out, CloneToolSpec(spec))
+	}
+	return out
+}
+
+func providerPayload(payloads map[string]json.RawMessage, provider string) (json.RawMessage, bool) {
+	key := normalizeProviderPayloadKey(provider)
+	if key == "" {
+		return nil, false
+	}
+	raw, ok := payloads[key]
+	if !ok || len(raw) == 0 {
+		return nil, false
+	}
+	return slices.Clone(raw), true
+}
+
+func cloneProviderPayloads(in map[string]json.RawMessage) map[string]json.RawMessage {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]json.RawMessage, len(in))
+	for provider, raw := range in {
+		key := normalizeProviderPayloadKey(provider)
+		if key == "" || len(raw) == 0 {
+			continue
+		}
+		out[key] = slices.Clone(raw)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeProviderPayloadKey(provider string) string {
+	return strings.ToLower(strings.TrimSpace(provider))
 }
 
 func (m Message) TextContent() string {

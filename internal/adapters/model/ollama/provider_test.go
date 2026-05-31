@@ -121,6 +121,26 @@ func TestProviderStreamSendsChatRequestAndParsesToolCall(t *testing.T) {
 	}
 }
 
+func TestChatToolsPassProviderToolPayloads(t *testing.T) {
+	tools := chatTools([]model.ToolSpec{
+		model.NewFunctionToolSpec("run_command", "run shell", map[string]any{"type": "object"}),
+		model.NewProviderDefinedToolSpec("native_tool", map[string]json.RawMessage{
+			"ollama": json.RawMessage(`{"type":"native_tool","native_tool":{"name":"search"}}`),
+		}),
+	})
+	body, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded []map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded) != 2 || decoded[0]["type"] != "function" || decoded[1]["type"] != "native_tool" {
+		t.Fatalf("tools = %#v, want function and provider payload", decoded)
+	}
+}
+
 func TestProviderStreamsChatResponse(t *testing.T) {
 	var captured chatRequest
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

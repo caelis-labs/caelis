@@ -45,6 +45,7 @@ type Config struct {
 	Sandbox           sandbox.Runtime
 	Tools             tool.Registry
 	ToolList          []tool.Tool
+	ModelTools        []model.ToolSpec
 	Approval          approval.Policy
 	ExternalACPAgents []acpexternal.Config
 	Contributions     []plugin.Contribution
@@ -192,6 +193,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	runner, err := loop.New(loop.Config{
 		Provider:     provider,
 		Tools:        tools,
+		ModelTools:   cfg.ModelTools,
 		Approval:     approvalPolicy,
 		Spawner:      newSpawnDelegator(externalAgents, spawnTasks),
 		Instructions: instructions,
