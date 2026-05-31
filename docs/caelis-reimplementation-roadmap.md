@@ -2090,9 +2090,14 @@ be migrated before retiring the old stack:
       the configured ACP adapter, calls `session/resume`, continues the pending
       controller prompt, and appends the recovered controller output to the
       canonical session store.
-    - Still pending: durable host subprocess lifecycle state beyond archived
-      snapshots, richer persisted terminal preview metadata, and richer remote
-      controller lifecycle diagnostics remain incomplete.
+    - Migrated baseline: host async command sessions now persist process id and
+      durable stdout/stderr stream files when a sandbox `StateDir` is
+      available. A restarted host sandbox can reopen a still-running process as
+      a recovered read-only session, continue reading output from the inherited
+      stream files, wait for completion, and cancel the recovered process by
+      pid/process group.
+    - Still pending: richer persisted terminal preview metadata and richer
+      remote controller lifecycle diagnostics remain incomplete.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2149,9 +2154,12 @@ be migrated before retiring the old stack:
       now consume the shared app task service through the gatewaydriver binding,
       while app `CommandService` exposes the same task actions for ACP/APP
       command execution.
-    - Still pending: durable host subprocess lifecycle continuation across
-      restarts, richer persisted terminal previews, and richer visual TUI/APP
-      task panels remain incomplete.
+    - Migrated baseline: host subprocess sessions now have durable output files
+      and pid-backed recovery across local runtime restarts. Reopened live host
+      sessions are read-only for stdin, but can still be tailed, waited, listed,
+      and cancelled through the same `core/sandbox.Session` and TASK paths.
+    - Still pending: richer persisted terminal previews and richer visual
+      TUI/APP task panels remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -2296,10 +2304,9 @@ Recommended sequence:
    without reintroducing a parallel provider factory/catalog stack.
 3. Finish sandbox backend cleanup and remaining permission-policy diagnostics
    without reintroducing the removed router/preset/tool stacks.
-4. Finish durable async SPAWN task control and durable task runtime behavior
-   behind `core/tool.Registry` and `internal/engine/tasks`; the shared
-   app-service command/control path is now a baseline, so this milestone should
-   focus on real async process/subagent lifecycle and durable output storage.
+4. Finish richer durable task metadata and terminal preview behavior behind
+   `core/tool.Registry`; host process and SPAWN continuation are now baseline
+   runtime capabilities.
 5. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially richer `/connect`, task, and visual
    settings panels, preserving existing rendering as surface-local code.

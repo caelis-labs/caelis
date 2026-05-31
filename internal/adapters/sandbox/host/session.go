@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/procutil"
 )
 
 const sessionOutputBufferCap = 1024 * 1024
@@ -29,9 +30,11 @@ type commandSession struct {
 	cancel context.CancelFunc
 	cmd    *exec.Cmd
 	stdin  io.WriteCloser
+	pid    int
 
 	stdout *sessionOutputBuffer
 	stderr *sessionOutputBuffer
+	files  sessionStreamFiles
 
 	mu        sync.RWMutex
 	readers   sync.WaitGroup
@@ -79,6 +82,7 @@ func (s *commandSession) start() error {
 	}
 	cmd := exec.CommandContext(s.ctx, shellName(), shellArgs(s.command)...)
 	cmd.Dir = s.dir
+	procutil.SetProcessGroup(cmd)
 	if len(s.req.Env) > 0 {
 		cmd.Env = os.Environ()
 		for key, value := range s.req.Env {
@@ -94,32 +98,63 @@ func (s *commandSession) start() error {
 		s.cancel()
 		return fmt.Errorf("sandbox/host: create stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		_ = stdin.Close()
-		s.cancel()
-		return fmt.Errorf("sandbox/host: create stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		_ = stdin.Close()
-		s.cancel()
-		return fmt.Errorf("sandbox/host: create stderr pipe: %w", err)
+	var stdout io.ReadCloser
+	var stderr io.ReadCloser
+	var streamWriters []io.Closer
+	if s.journal != nil {
+		files, closers, err := s.journal.createStreamFiles(s.ref.ID)
+		if err != nil {
+			_ = stdin.Close()
+			s.cancel()
+			return err
+		}
+		s.files = files
+		streamWriters = closers
+		cmd.Stdout = files.stdoutWriter
+		cmd.Stderr = files.stderrWriter
+	} else {
+		stdout, err = cmd.StdoutPipe()
+		if err != nil {
+			_ = stdin.Close()
+			s.cancel()
+			return fmt.Errorf("sandbox/host: create stdout pipe: %w", err)
+		}
+		stderr, err = cmd.StderrPipe()
+		if err != nil {
+			_ = stdin.Close()
+			s.cancel()
+			return fmt.Errorf("sandbox/host: create stderr pipe: %w", err)
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		_ = stdin.Close()
+		for _, closer := range streamWriters {
+			_ = closer.Close()
+		}
 		s.cancel()
 		return fmt.Errorf("sandbox/host: start async command: %w", err)
+	}
+	for _, closer := range streamWriters {
+		_ = closer.Close()
 	}
 	s.mu.Lock()
 	s.cmd = cmd
 	s.stdin = stdin
+	if cmd.Process != nil {
+		s.pid = cmd.Process.Pid
+	}
 	s.touchLocked()
 	s.mu.Unlock()
 
-	s.readers.Add(2)
-	go s.copyOutput(stdout, "stdout", s.stdout)
-	go s.copyOutput(stderr, "stderr", s.stderr)
+	if s.files.enabled() {
+		s.readers.Add(2)
+		go s.tailOutputFile(s.files.stdoutPath, "stdout", s.stdout)
+		go s.tailOutputFile(s.files.stderrPath, "stderr", s.stderr)
+	} else {
+		s.readers.Add(2)
+		go s.copyOutput(stdout, "stdout", s.stdout)
+		go s.copyOutput(stderr, "stderr", s.stderr)
+	}
 	go s.waitForExit()
 
 	if len(s.req.Stdin) > 0 {
@@ -148,6 +183,7 @@ func (s *commandSession) Read(ctx context.Context, cursor sandbox.OutputCursor) 
 	if err := contextErr(ctx); err != nil {
 		return sandbox.OutputSnapshot{}, err
 	}
+	s.syncOutputFiles()
 	stdout, nextStdout, stdoutDropped := s.stdout.readSince(cursor.Stdout)
 	stderr, nextStderr, stderrDropped := s.stderr.readSince(cursor.Stderr)
 	return sandbox.OutputSnapshot{
@@ -205,7 +241,7 @@ func (s *commandSession) Cancel(ctx context.Context) error {
 		cancel()
 	}
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		_ = procutil.KillProcess(cmd)
 	}
 	_ = s.persist(context.Background())
 	return nil
@@ -253,9 +289,73 @@ func (s *commandSession) copyOutput(reader io.Reader, stream string, buffer *ses
 	}
 }
 
+func (s *commandSession) tailOutputFile(path string, stream string, buffer *sessionOutputBuffer) {
+	defer s.readers.Done()
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		_ = s.syncOutputFile(path, stream, buffer)
+		s.mu.RLock()
+		running := s.running
+		s.mu.RUnlock()
+		if !running {
+			_ = s.syncOutputFile(path, stream, buffer)
+			return
+		}
+		<-ticker.C
+	}
+}
+
+func (s *commandSession) syncOutputFiles() {
+	if !s.files.enabled() {
+		return
+	}
+	_ = s.syncOutputFile(s.files.stdoutPath, "stdout", s.stdout)
+	_ = s.syncOutputFile(s.files.stderrPath, "stderr", s.stderr)
+}
+
+func (s *commandSession) syncOutputFile(path string, stream string, buffer *sessionOutputBuffer) error {
+	path = strings.TrimSpace(path)
+	if path == "" || buffer == nil {
+		return nil
+	}
+	offset := buffer.totalBytes()
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	defer file.Close()
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return err
+	}
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+	if len(data) == 0 {
+		return nil
+	}
+	buffer.write(data)
+	s.mu.Lock()
+	s.touchLocked()
+	s.mu.Unlock()
+	if s.req.OnOutput != nil {
+		s.req.OnOutput(sandbox.OutputChunk{Stream: stream, Text: string(data)})
+	}
+	_ = s.persist(context.Background())
+	return nil
+}
+
 func (s *commandSession) waitForExit() {
 	err := s.cmd.Wait()
-	s.readers.Wait()
+	if s.files.enabled() {
+		s.syncOutputFiles()
+	} else {
+		s.readers.Wait()
+	}
 	s.mu.Lock()
 	s.running = false
 	if s.stdin != nil {
@@ -295,6 +395,7 @@ func (s *commandSession) waitForExit() {
 }
 
 func (s *commandSession) result() sandbox.CommandResult {
+	s.syncOutputFiles()
 	s.mu.RLock()
 	exitCode := s.exitCode
 	errText := s.errText
@@ -310,6 +411,13 @@ func (s *commandSession) result() sandbox.CommandResult {
 }
 
 func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
+	metadata := map[string]any{}
+	if s.pid > 0 {
+		metadata["pid"] = s.pid
+	}
+	if s.files.enabled() {
+		metadata["durable_output"] = true
+	}
 	return sandbox.SessionSnapshot{
 		Ref:           s.ref,
 		Command:       s.command,
@@ -322,6 +430,7 @@ func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
 		Terminal:      s.terminal,
+		Metadata:      metadata,
 	}
 }
 
@@ -344,6 +453,7 @@ func (s *commandSession) journalRecord() sessionJournalRecord {
 	stderr, stderrTotal, stderrDropped := s.stderr.snapshot()
 	return sessionJournalRecord{
 		Snapshot:           snapshot,
+		PID:                s.pid,
 		Stdout:             string(stdout),
 		Stderr:             string(stderr),
 		StdoutTotalBytes:   stdoutTotal,
@@ -420,6 +530,12 @@ func (b *sessionOutputBuffer) readAll() []byte {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return append([]byte(nil), b.data...)
+}
+
+func (b *sessionOutputBuffer) totalBytes() int64 {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.total
 }
 
 func (b *sessionOutputBuffer) snapshot() ([]byte, int64, int64) {

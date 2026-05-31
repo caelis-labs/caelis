@@ -157,6 +157,67 @@ func TestRuntimeReopensArchivedAsyncSessionFromStateDir(t *testing.T) {
 	}
 }
 
+func TestRuntimeRecoversLiveAsyncSessionFromStateDir(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("live process recovery test uses POSIX shell timing")
+	}
+	dir := t.TempDir()
+	stateDir := filepath.Join(dir, "state")
+	rt, err := New(context.Background(), sandbox.Config{CWD: dir, StateDir: stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rt.Close()
+	session, err := rt.Start(context.Background(), sandbox.CommandRequest{Command: "printf before; sleep 1; printf after"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := session.Ref()
+
+	reopened, err := New(context.Background(), sandbox.Config{CWD: dir, StateDir: stateDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	recovered, err := reopened.Open(context.Background(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := recovered.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Running || snapshot.State != sandbox.SessionRunning || snapshot.SupportsInput {
+		t.Fatalf("recovered snapshot = %#v, want running read-only recovered session", snapshot)
+	}
+	var recoveredOutput sandbox.OutputSnapshot
+	for range 50 {
+		recoveredOutput, err = recovered.Read(context.Background(), sandbox.OutputCursor{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(recoveredOutput.Stdout, "before") {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !strings.Contains(recoveredOutput.Stdout, "before") {
+		t.Fatalf("recovered output before wait = %#v, want durable prefix", recoveredOutput)
+	}
+	waitCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	result, err := recovered.Wait(waitCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result.Stdout, "beforeafter") {
+		t.Fatalf("recovered result stdout = %q, want beforeafter", result.Stdout)
+	}
+	if result.Backend != sandbox.BackendHost || result.Route != sandbox.RouteHost {
+		t.Fatalf("recovered route/backend = %q/%q, want host/host", result.Route, result.Backend)
+	}
+}
+
 func TestRuntimeFileSystemResolvesRelativePaths(t *testing.T) {
 	dir := t.TempDir()
 	rt, err := New(context.Background(), sandbox.Config{CWD: dir})
