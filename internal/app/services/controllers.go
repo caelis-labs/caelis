@@ -349,17 +349,163 @@ func (s ControllerService) statusFromSnapshot(ctx context.Context, snapshot sess
 			status.EffortOptions = efforts
 		}
 	}
+	runs := controllerLifecycleRunsFromEvents(snapshot.Events, controller)
 	if s.services.controllerRuns != nil {
-		runs, err := s.services.controllerRuns.ControllerRuns(ctx, ControllerRunQuery{
+		sourceRuns, err := s.services.controllerRuns.ControllerRuns(ctx, ControllerRunQuery{
 			SessionRef: snapshot.Session.Ref,
 			Controller: controller,
 		})
 		if err != nil {
 			return ControllerStatus{}, err
 		}
+		runs = append(runs, sourceRuns...)
+	}
+	if len(runs) > 0 {
 		status = applyControllerRuns(status, runs)
 	}
 	return status, nil
+}
+
+func controllerLifecycleRunsFromEvents(events []session.Event, controller session.ControllerBinding) []ControllerRunStatus {
+	if len(events) == 0 {
+		return nil
+	}
+	byID := map[string]ControllerRunStatus{}
+	for _, event := range events {
+		run, ok := controllerRunStatusFromLifecycleEvent(event, controller)
+		if !ok {
+			continue
+		}
+		existing, exists := byID[run.ID]
+		if !exists {
+			byID[run.ID] = run
+			continue
+		}
+		byID[run.ID] = mergeControllerRunHistory(existing, run)
+	}
+	if len(byID) == 0 {
+		return nil
+	}
+	out := make([]ControllerRunStatus, 0, len(byID))
+	for _, run := range byID {
+		out = append(out, run)
+	}
+	return out
+}
+
+func controllerRunStatusFromLifecycleEvent(event session.Event, controller session.ControllerBinding) (ControllerRunStatus, bool) {
+	if event.Type != session.EventLifecycle || event.Lifecycle == nil {
+		return ControllerRunStatus{}, false
+	}
+	meta := session.RuntimeControllerMeta(event.Meta)
+	if len(meta) == 0 {
+		return ControllerRunStatus{}, false
+	}
+	eventController := controllerBindingFromLifecycleMeta(meta)
+	if event.Scope != nil {
+		eventController = mergeControllerBinding(eventController, event.Scope.Controller)
+	}
+	if !controllerLifecycleMatches(controller, eventController) {
+		return ControllerRunStatus{}, false
+	}
+	runID := firstNonEmpty(
+		stringFromAny(meta["run_id"]),
+		eventTurnID(event),
+		strings.TrimSpace(event.ID),
+	)
+	if runID == "" {
+		return ControllerRunStatus{}, false
+	}
+	phase := control.ControllerInvocationPhase(firstNonEmpty(
+		stringFromAny(meta["phase"]),
+		controllerPhaseFromLifecycleStatus(event.Lifecycle.Status),
+	))
+	running, ok := firstBool(meta["running"])
+	if !ok {
+		running = event.Lifecycle.Status == session.LifecycleRunning
+	}
+	updatedAt := firstTime(meta["updated_at"])
+	if updatedAt.IsZero() {
+		updatedAt = event.Time
+	}
+	startedAt := firstTime(meta["started_at"])
+	if startedAt.IsZero() {
+		startedAt = updatedAt
+	}
+	return normalizeControllerRunStatus(ControllerRunStatus{
+		ID:              runID,
+		Phase:           phase,
+		SessionRef:      session.Ref{SessionID: strings.TrimSpace(event.SessionID)},
+		TurnID:          firstNonEmpty(stringFromAny(meta["turn_id"]), eventTurnID(event)),
+		Controller:      eventController,
+		RemoteSessionID: firstNonEmpty(stringFromAny(meta["remote_session_id"]), eventController.RemoteSessionID, eventACPRemoteSessionID(event)),
+		Running:         running,
+		Active:          boolFromAny(meta["active"]),
+		Recovering:      boolFromAny(meta["recovering"]),
+		Error:           stringFromAny(meta["error"]),
+		StartedAt:       startedAt,
+		UpdatedAt:       updatedAt,
+	}), true
+}
+
+func mergeControllerRunHistory(existing ControllerRunStatus, next ControllerRunStatus) ControllerRunStatus {
+	existing = normalizeControllerRunStatus(existing)
+	next = normalizeControllerRunStatus(next)
+	startedAt := existing.StartedAt
+	if startedAt.IsZero() || (!next.StartedAt.IsZero() && next.StartedAt.Before(startedAt)) {
+		startedAt = next.StartedAt
+	}
+	latest := existing
+	if existing.UpdatedAt.IsZero() || (!next.UpdatedAt.IsZero() && !next.UpdatedAt.Before(existing.UpdatedAt)) {
+		latest = next
+	}
+	latest.StartedAt = startedAt
+	if latest.RemoteSessionID == "" {
+		latest.RemoteSessionID = firstNonEmpty(next.RemoteSessionID, existing.RemoteSessionID)
+	}
+	if latest.Controller.RemoteSessionID == "" {
+		latest.Controller.RemoteSessionID = latest.RemoteSessionID
+	}
+	return normalizeControllerRunStatus(latest)
+}
+
+func controllerBindingFromLifecycleMeta(meta map[string]any) session.ControllerBinding {
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerKind(stringFromAny(meta["controller_kind"])),
+		ID:              stringFromAny(meta["controller_id"]),
+		AgentName:       stringFromAny(meta["agent"]),
+		Label:           stringFromAny(meta["label"]),
+		EpochID:         stringFromAny(meta["epoch_id"]),
+		RemoteSessionID: stringFromAny(meta["remote_session_id"]),
+	}
+	return normalizeControllerBinding(controller)
+}
+
+func controllerLifecycleMatches(active session.ControllerBinding, eventController session.ControllerBinding) bool {
+	active = normalizeControllerBinding(active)
+	eventController = normalizeControllerBinding(eventController)
+	if active.EpochID != "" {
+		return eventController.EpochID == active.EpochID
+	}
+	return sameControllerBinding(active, eventController)
+}
+
+func controllerPhaseFromLifecycleStatus(status session.LifecycleStatus) string {
+	switch status {
+	case session.LifecycleFailed:
+		return string(control.ControllerInvocationFailed)
+	case session.LifecycleCompleted:
+		return string(control.ControllerInvocationCompleted)
+	default:
+		return string(control.ControllerInvocationStarted)
+	}
+}
+
+func eventACPRemoteSessionID(event session.Event) string {
+	if event.Scope == nil {
+		return ""
+	}
+	return strings.TrimSpace(event.Scope.ACP.SessionID)
 }
 
 func applyControllerRuns(status ControllerStatus, runs []ControllerRunStatus) ControllerStatus {

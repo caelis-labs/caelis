@@ -177,6 +177,25 @@ func TestProjectCoreSessionEventToTranscriptEvents_IgnoresTaskLifecycle(t *testi
 	}
 }
 
+func TestProjectCoreSessionEventToTranscriptEvents_IgnoresControllerLifecycle(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "controller-lifecycle",
+		SessionID: "root-session",
+		Type:      coresession.EventLifecycle,
+		Lifecycle: &coresession.LifecycleEvent{Status: coresession.LifecycleRunning, Reason: "controller started"},
+		Meta: coresession.WithRuntimeControllerMeta(nil, map[string]any{
+			"run_id":        "turn-controller",
+			"phase":         "started",
+			"controller_id": "reviewer",
+		}),
+	})
+	if len(events) != 0 {
+		t.Fatalf("events = %#v, want controller lifecycle kept out of transcript rendering", events)
+	}
+}
+
 func TestResumeSessionEventReplayTranscriptEventsUsesCoreEvents(t *testing.T) {
 	t.Parallel()
 

@@ -2522,6 +2522,89 @@ func TestControllerServiceStatusIncludesLifecycleDiagnostics(t *testing.T) {
 	}
 }
 
+func TestControllerServiceStatusRestoresCanonicalLifecycleHistory(t *testing.T) {
+	ctx := context.Background()
+	startedAt := time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)
+	completedAt := startedAt.Add(2 * time.Second)
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		Label:           "Reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	lifecycleEvent := func(phase control.ControllerInvocationPhase, status session.LifecycleStatus, at time.Time) session.Event {
+		return session.Event{
+			ID:        "evt-" + string(phase),
+			SessionID: "sess-controller",
+			Type:      session.EventLifecycle,
+			Time:      at,
+			Scope: &session.EventScope{
+				TurnID:     "turn-controller",
+				Source:     "controller",
+				Controller: controller,
+				ACP:        session.ACPRef{SessionID: "remote-reviewer"},
+			},
+			Lifecycle: &session.LifecycleEvent{Status: status, Reason: "controller " + string(phase)},
+			Meta: session.WithRuntimeControllerMeta(nil, map[string]any{
+				"run_id":            "turn-controller",
+				"phase":             string(phase),
+				"running":           status == session.LifecycleRunning,
+				"active":            status == session.LifecycleRunning,
+				"turn_id":           "turn-controller",
+				"controller_kind":   string(session.ControllerACP),
+				"controller_id":     "reviewer",
+				"agent":             "reviewer",
+				"label":             "Reviewer",
+				"epoch_id":          "controller-1",
+				"remote_session_id": "remote-reviewer",
+				"started_at":        startedAt.Format(time.RFC3339Nano),
+				"updated_at":        at.Format(time.RFC3339Nano),
+			}),
+		}
+	}
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			Events: []session.Event{
+				lifecycleEvent(control.ControllerInvocationStarted, session.LifecycleRunning, startedAt),
+				lifecycleEvent(control.ControllerInvocationCompleted, session.LifecycleCompleted, completedAt),
+			},
+			State: session.State{},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, ok, err := svc.Controllers().Status(ctx, session.Ref{SessionID: "sess-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || status.Lifecycle == nil {
+		t.Fatalf("controller status = %#v ok=%v, want lifecycle from canonical events", status, ok)
+	}
+	if status.Lifecycle.RunID != "turn-controller" || status.Lifecycle.Phase != string(control.ControllerInvocationCompleted) || status.Lifecycle.Running {
+		t.Fatalf("controller lifecycle = %#v, want completed canonical lifecycle", status.Lifecycle)
+	}
+	if !status.Lifecycle.StartedAt.Equal(startedAt) || !status.Lifecycle.UpdatedAt.Equal(completedAt) {
+		t.Fatalf("controller lifecycle times = %#v, want started/updated from event history", status.Lifecycle)
+	}
+	if status.RemoteSessionID != "remote-reviewer" {
+		t.Fatalf("controller remote session = %q, want restored remote-reviewer", status.RemoteSessionID)
+	}
+	if len(status.Diagnostics) != 0 {
+		t.Fatalf("controller diagnostics = %#v, want no diagnostics for completed lifecycle", status.Diagnostics)
+	}
+}
+
 func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	engine := &recordingEngine{
 		snapshot: session.Snapshot{

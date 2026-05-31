@@ -55,10 +55,24 @@ func TestControllerRunnerInvokesAgentAndStoresCanonicalEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Events) != 1 {
-		t.Fatalf("stored events = %d, want 1", len(snapshot.Events))
+	if len(snapshot.Events) != 4 {
+		t.Fatalf("stored events = %d, want lifecycle start/remote, response, lifecycle completed", len(snapshot.Events))
 	}
-	event := snapshot.Events[0]
+	started := snapshot.Events[0]
+	if started.Type != session.EventLifecycle || started.Lifecycle == nil || started.Lifecycle.Status != session.LifecycleRunning {
+		t.Fatalf("started lifecycle = %#v, want running lifecycle event", started)
+	}
+	if meta := session.RuntimeControllerMeta(started.Meta); meta["phase"] != string(ControllerInvocationStarted) || meta["run_id"] == "" {
+		t.Fatalf("started lifecycle meta = %#v, want controller start metadata", meta)
+	}
+	remote := snapshot.Events[1]
+	if remote.Type != session.EventLifecycle || remote.Lifecycle == nil || remote.Lifecycle.Status != session.LifecycleRunning {
+		t.Fatalf("remote lifecycle = %#v, want running lifecycle event", remote)
+	}
+	if meta := session.RuntimeControllerMeta(remote.Meta); meta["phase"] != string(ControllerInvocationRemoteSession) || meta["remote_session_id"] != "remote-1" {
+		t.Fatalf("remote lifecycle meta = %#v, want remote session metadata", meta)
+	}
+	event := snapshot.Events[2]
 	if event.Scope == nil || event.Scope.Controller.Kind != session.ControllerACP || event.Scope.Controller.ID != "reviewer" || event.Scope.ACP.SessionID != "remote-1" {
 		t.Fatalf("stored event scope = %#v, want controller and remote ACP session", event.Scope)
 	}
@@ -67,6 +81,13 @@ func TestControllerRunnerInvokesAgentAndStoresCanonicalEvents(t *testing.T) {
 	}
 	if event.Time != clock {
 		t.Fatalf("event time = %s, want %s", event.Time, clock)
+	}
+	completed := snapshot.Events[3]
+	if completed.Type != session.EventLifecycle || completed.Lifecycle == nil || completed.Lifecycle.Status != session.LifecycleCompleted {
+		t.Fatalf("completed lifecycle = %#v, want completed lifecycle event", completed)
+	}
+	if meta := session.RuntimeControllerMeta(completed.Meta); meta["phase"] != string(ControllerInvocationCompleted) || meta["remote_session_id"] != "remote-1" {
+		t.Fatalf("completed lifecycle meta = %#v, want completed controller metadata", meta)
 	}
 }
 

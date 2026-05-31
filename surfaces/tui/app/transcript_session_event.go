@@ -162,7 +162,7 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 			})
 		}
 	case coresession.EventLifecycle:
-		if len(coretool.RuntimeTaskMeta(meta)) > 0 {
+		if len(coretool.RuntimeTaskMeta(meta)) > 0 || len(coresession.RuntimeControllerMeta(meta)) > 0 {
 			break
 		}
 		if event.Lifecycle != nil {

@@ -71,3 +71,20 @@ func TestSessionMatchesListQuerySearchesMetadata(t *testing.T) {
 		t.Fatal("unrelated search matched session metadata")
 	}
 }
+
+func TestRuntimeControllerMetaRoundTripsUnderCanonicalNamespace(t *testing.T) {
+	meta := WithRuntimeControllerMeta(map[string]any{"surface": "test"}, map[string]any{
+		"run_id": "run-1",
+		"phase":  "remote_session",
+	})
+	controller := RuntimeControllerMeta(meta)
+	if controller["schema"] != RuntimeControllerMetaName || controller["schema_version"] != RuntimeControllerMetaVersion {
+		t.Fatalf("controller meta = %#v, want schema marker", controller)
+	}
+	if controller["run_id"] != "run-1" || controller["phase"] != "remote_session" {
+		t.Fatalf("controller meta = %#v, want lifecycle fields", controller)
+	}
+	if meta["surface"] != "test" {
+		t.Fatalf("meta = %#v, want existing metadata preserved", meta)
+	}
+}

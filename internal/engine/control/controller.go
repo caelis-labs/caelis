@@ -116,6 +116,10 @@ func (r ControllerRunner) Invoke(ctx context.Context, req ControllerRequest) (Co
 		workspace = snapshot.Session.Workspace
 	}
 	state := r.invocationState(ref, workspace, req, ControllerInvocationStarted)
+	state.SessionRef = snapshot.Session.Ref
+	if _, err := r.recordLifecycle(ctx, state); err != nil {
+		return ControllerResult{}, err
+	}
 	if err := r.track(ctx, state); err != nil {
 		return ControllerResult{}, err
 	}
@@ -136,7 +140,11 @@ func (r ControllerRunner) Invoke(ctx context.Context, req ControllerRequest) (Co
 		}
 	}
 	state.ConfigOptions = cloneConfigOptions(configOptions)
-	if err := r.track(ctx, withControllerPhase(state, ControllerInvocationRemoteSession, r.now())); err != nil {
+	remoteState := withControllerPhase(state, ControllerInvocationRemoteSession, r.now())
+	if _, err := r.recordLifecycle(ctx, remoteState); err != nil {
+		return ControllerResult{}, err
+	}
+	if err := r.track(ctx, remoteState); err != nil {
 		return ControllerResult{}, err
 	}
 	parts := model.CloneContentParts(req.ContentParts)
@@ -152,7 +160,13 @@ func (r ControllerRunner) Invoke(ctx context.Context, req ControllerRequest) (Co
 	if err != nil {
 		return r.fail(ctx, state, err)
 	}
-	if err := r.track(ctx, withControllerPhase(state, ControllerInvocationCompleted, r.now())); err != nil {
+	completedState := withControllerPhase(state, ControllerInvocationCompleted, r.now())
+	if completedCursor, err := r.recordLifecycle(ctx, completedState); err != nil {
+		return ControllerResult{}, err
+	} else if completedCursor != "" {
+		cursor = completedCursor
+	}
+	if err := r.track(ctx, completedState); err != nil {
 		return ControllerResult{}, err
 	}
 	return ControllerResult{
@@ -185,7 +199,11 @@ func (r ControllerRunner) fail(ctx context.Context, state ControllerInvocationSt
 		return ControllerResult{}, nil
 	}
 	state.Error = strings.TrimSpace(cause.Error())
-	if err := r.track(ctx, withControllerPhase(state, ControllerInvocationFailed, r.now())); err != nil {
+	failedState := withControllerPhase(state, ControllerInvocationFailed, r.now())
+	if _, err := r.recordLifecycle(ctx, failedState); err != nil {
+		cause = errors.Join(cause, err)
+	}
+	if err := r.track(ctx, failedState); err != nil {
 		return ControllerResult{}, errors.Join(cause, err)
 	}
 	return ControllerResult{}, cause
@@ -195,12 +213,29 @@ func (r ControllerRunner) track(ctx context.Context, state ControllerInvocationS
 	if r.Tracker == nil {
 		return nil
 	}
+	state = r.normalizeInvocationState(state)
+	return r.Tracker.ControllerInvocationChanged(ctx, state)
+}
+
+func (r ControllerRunner) recordLifecycle(ctx context.Context, state ControllerInvocationState) (session.Cursor, error) {
+	if r.Store == nil {
+		return "", nil
+	}
+	state = r.normalizeInvocationState(state)
+	if strings.TrimSpace(state.SessionRef.SessionID) == "" {
+		return "", nil
+	}
+	return r.Store.Append(ctx, state.SessionRef, []session.Event{controllerLifecycleEvent(state)})
+}
+
+func (r ControllerRunner) normalizeInvocationState(state ControllerInvocationState) ControllerInvocationState {
 	state.SessionRef = session.NormalizeRef(state.SessionRef)
 	state.Workspace.Key = strings.TrimSpace(state.Workspace.Key)
 	state.Workspace.CWD = strings.TrimSpace(state.Workspace.CWD)
 	state.TurnID = strings.TrimSpace(state.TurnID)
 	state.Controller = normalizeControllerBinding(state.Controller)
-	state.RemoteSessionID = strings.TrimSpace(state.RemoteSessionID)
+	state.RemoteSessionID = firstNonEmpty(strings.TrimSpace(state.RemoteSessionID), strings.TrimSpace(state.Controller.RemoteSessionID))
+	state.Controller.RemoteSessionID = firstNonEmpty(strings.TrimSpace(state.Controller.RemoteSessionID), state.RemoteSessionID)
 	state.ControllerModel = strings.TrimSpace(state.ControllerModel)
 	state.ControllerReasoningEffort = strings.TrimSpace(state.ControllerReasoningEffort)
 	state.ControllerMode = strings.TrimSpace(state.ControllerMode)
@@ -211,13 +246,135 @@ func (r ControllerRunner) track(ctx context.Context, state ControllerInvocationS
 	if state.Time.IsZero() {
 		state.Time = r.now()
 	}
-	return r.Tracker.ControllerInvocationChanged(ctx, state)
+	return state
 }
 
 func withControllerPhase(state ControllerInvocationState, phase ControllerInvocationPhase, at time.Time) ControllerInvocationState {
 	state.Phase = phase
 	state.Time = at
 	return state
+}
+
+func controllerLifecycleEvent(state ControllerInvocationState) session.Event {
+	controller := normalizeControllerBinding(state.Controller)
+	controller.RemoteSessionID = firstNonEmpty(controller.RemoteSessionID, state.RemoteSessionID)
+	status := controllerLifecycleStatus(state)
+	actorID := firstNonEmpty(controller.ID, controller.AgentName, controller.Label, "controller")
+	return session.Event{
+		Type:       session.EventLifecycle,
+		Visibility: session.VisibilityCanonical,
+		Time:       state.Time,
+		Actor: session.ActorRef{
+			Kind: session.ActorController,
+			ID:   actorID,
+			Name: firstNonEmpty(controller.Label, controller.AgentName, controller.ID, "controller"),
+		},
+		Scope: &session.EventScope{
+			TurnID:     strings.TrimSpace(state.TurnID),
+			Source:     "controller",
+			Controller: controller,
+			ACP:        session.ACPRef{SessionID: strings.TrimSpace(state.RemoteSessionID)},
+		},
+		Lifecycle: &session.LifecycleEvent{
+			Status: status,
+			Reason: controllerLifecycleReason(state, status),
+			Meta: map[string]any{
+				"run_id": ControllerInvocationRunID(state),
+				"phase":  strings.TrimSpace(string(state.Phase)),
+			},
+		},
+		Meta: session.WithRuntimeControllerMeta(nil, controllerLifecycleMeta(state, status)),
+	}
+}
+
+func controllerLifecycleStatus(state ControllerInvocationState) session.LifecycleStatus {
+	switch state.Phase {
+	case ControllerInvocationFailed:
+		return session.LifecycleFailed
+	case ControllerInvocationCompleted:
+		return session.LifecycleCompleted
+	default:
+		return session.LifecycleRunning
+	}
+}
+
+func controllerLifecycleReason(state ControllerInvocationState, status session.LifecycleStatus) string {
+	parts := []string{
+		"controller",
+		strings.TrimSpace(string(state.Phase)),
+		ControllerInvocationRunID(state),
+		string(status),
+	}
+	return strings.Join(nonEmpty(parts), " ")
+}
+
+func controllerLifecycleMeta(state ControllerInvocationState, status session.LifecycleStatus) map[string]any {
+	controller := normalizeControllerBinding(state.Controller)
+	controller.RemoteSessionID = firstNonEmpty(controller.RemoteSessionID, state.RemoteSessionID)
+	meta := map[string]any{
+		"source":          "controller_runner",
+		"run_id":          ControllerInvocationRunID(state),
+		"phase":           strings.TrimSpace(string(state.Phase)),
+		"status":          string(status),
+		"running":         status == session.LifecycleRunning,
+		"active":          status == session.LifecycleRunning,
+		"turn_id":         strings.TrimSpace(state.TurnID),
+		"controller_kind": strings.TrimSpace(string(controller.Kind)),
+		"controller_id":   strings.TrimSpace(controller.ID),
+		"agent":           strings.TrimSpace(firstNonEmpty(controller.AgentName, controller.Label, controller.ID)),
+		"label":           strings.TrimSpace(controller.Label),
+		"epoch_id":        strings.TrimSpace(controller.EpochID),
+		"updated_at":      state.Time.Format(time.RFC3339Nano),
+	}
+	if remote := strings.TrimSpace(firstNonEmpty(state.RemoteSessionID, controller.RemoteSessionID)); remote != "" {
+		meta["remote_session_id"] = remote
+	}
+	if model := strings.TrimSpace(state.ControllerModel); model != "" {
+		meta["controller_model"] = model
+	}
+	if effort := strings.TrimSpace(state.ControllerReasoningEffort); effort != "" {
+		meta["controller_reasoning_effort"] = effort
+	}
+	if mode := strings.TrimSpace(state.ControllerMode); mode != "" {
+		meta["controller_mode"] = mode
+	}
+	if state.Phase == ControllerInvocationStarted {
+		meta["started_at"] = state.Time.Format(time.RFC3339Nano)
+	}
+	if errText := strings.TrimSpace(state.Error); errText != "" {
+		meta["error"] = errText
+	}
+	return meta
+}
+
+func ControllerInvocationRunID(state ControllerInvocationState) string {
+	state.SessionRef = session.NormalizeRef(state.SessionRef)
+	state.Controller = normalizeControllerBinding(state.Controller)
+	return firstNonEmpty(
+		strings.TrimSpace(state.TurnID),
+		controllerInvocationCompositeID(state.SessionRef.SessionID, state.Controller.EpochID),
+		controllerInvocationCompositeID(state.SessionRef.SessionID, firstNonEmpty(state.Controller.ID, state.Controller.AgentName, state.Controller.Label)),
+		state.SessionRef.SessionID,
+	)
+}
+
+func controllerInvocationCompositeID(prefix string, suffix string) string {
+	prefix = strings.TrimSpace(prefix)
+	suffix = strings.TrimSpace(suffix)
+	if prefix == "" || suffix == "" {
+		return ""
+	}
+	return prefix + "-" + suffix
+}
+
+func nonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text := strings.TrimSpace(value); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
 }
 
 func (r ControllerRunner) startControllerSession(ctx context.Context, agent AgentSession, controller session.ControllerBinding, workspace session.Workspace) (string, []ConfigOption, error) {

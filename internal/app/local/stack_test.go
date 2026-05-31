@@ -353,11 +353,23 @@ func TestStackInvokesExternalACPAgentAsControllerThroughServices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Events) != 1 || snapshot.Events[0].Scope == nil || snapshot.Events[0].Scope.Controller.ID != "helper" {
-		t.Fatalf("stored events = %#v, want helper controller event", snapshot.Events)
+	if len(snapshot.Events) != 4 {
+		t.Fatalf("stored events = %#v, want controller lifecycle and helper response events", snapshot.Events)
 	}
-	if snapshot.Events[0].Actor.Kind != session.ActorController {
-		t.Fatalf("stored event actor = %#v, want controller", snapshot.Events[0].Actor)
+	if snapshot.Events[0].Type != session.EventLifecycle || session.RuntimeControllerMeta(snapshot.Events[0].Meta)["phase"] != "started" {
+		t.Fatalf("stored start lifecycle = %#v, want controller started event", snapshot.Events[0])
+	}
+	if snapshot.Events[1].Type != session.EventLifecycle || session.RuntimeControllerMeta(snapshot.Events[1].Meta)["phase"] != "remote_session" {
+		t.Fatalf("stored remote lifecycle = %#v, want controller remote-session event", snapshot.Events[1])
+	}
+	if snapshot.Events[2].Scope == nil || snapshot.Events[2].Scope.Controller.ID != "helper" || session.EventText(snapshot.Events[2]) != "external helper response" {
+		t.Fatalf("stored response event = %#v, want helper controller response", snapshot.Events[2])
+	}
+	if snapshot.Events[2].Actor.Kind != session.ActorController {
+		t.Fatalf("stored event actor = %#v, want controller", snapshot.Events[2].Actor)
+	}
+	if snapshot.Events[3].Type != session.EventLifecycle || session.RuntimeControllerMeta(snapshot.Events[3].Meta)["phase"] != "completed" {
+		t.Fatalf("stored completed lifecycle = %#v, want controller completed event", snapshot.Events[3])
 	}
 }
 

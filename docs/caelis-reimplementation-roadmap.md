@@ -2163,14 +2163,20 @@ be migrated before retiring the old stack:
       services and `internal/app/viewmodel`, so CLI, TUI, and future APP
       consumers can render phase, active/recovering state, remote session id,
       and failure diagnostics without importing local recovery/journal code.
+    - Migrated baseline: remote ACP controller invocations now also persist
+      canonical `session.EventLifecycle` records with
+      `caelis.runtime.controller` metadata for started, remote-session,
+      completed, and failed phases. `ControllerService` rebuilds the latest
+      lifecycle from durable session events and overlays live/recovery journal
+      state when present.
     - Migrated baseline: host async command sessions now persist process id and
       durable stdout/stderr stream files when a sandbox `StateDir` is
       available. A restarted host sandbox can reopen a still-running process as
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: richer visual controller panels and long-term lifecycle
-      history are not implemented.
+    - Still pending: richer visual controller panels plus lifecycle
+      retention/compaction policy are not implemented.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2393,7 +2399,7 @@ Recommended sequence:
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases, task
-   retention, subagent lifecycle, and controller handoff diagnostics.
+   retention, subagent lifecycle, and controller lifecycle retention.
 8. Add full store round-trip and ACP projection parity tests for product flows.
 9. Continue deleting residual surface-compatibility runtime paths once each has
    a service/core-native replacement. The former `app/gatewayapp`, old

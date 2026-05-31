@@ -293,12 +293,7 @@ func normalizeControllerBinding(in session.ControllerBinding) session.Controller
 }
 
 func controllerRunStateID(state control.ControllerInvocationState) string {
-	return firstNonEmpty(
-		state.TurnID,
-		controllerRunCompositeID(state.SessionRef.SessionID, state.Controller.EpochID),
-		controllerRunCompositeID(state.SessionRef.SessionID, firstNonEmpty(state.Controller.ID, state.Controller.AgentName, state.Controller.Label)),
-		state.SessionRef.SessionID,
-	)
+	return control.ControllerInvocationRunID(state)
 }
 
 func controllerRunRecordFromState(id string, state control.ControllerInvocationState) controllerRunJournalRecord {
