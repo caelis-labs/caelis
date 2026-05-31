@@ -414,6 +414,44 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 }
 
+func TestSettingsServiceRollsBackRuntimeWhenApplyFails(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Sandbox: config.Sandbox{
+				Backend: "host",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("sandbox rebuild failed")
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester", Sandbox: config.Sandbox{Backend: "host"}},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+		ApplyRuntime: func(context.Context, config.Runtime) (config.Runtime, error) {
+			return config.Runtime{}, wantErr
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Settings().SetSandbox(ctx, config.Sandbox{Backend: "capture"}); !errors.Is(err, wantErr) {
+		t.Fatalf("SetSandbox() error = %v, want apply failure", err)
+	}
+	doc, err := manager.Document(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Runtime.Sandbox.Backend != "host" || svc.Runtime().Sandbox.Backend != "host" {
+		t.Fatalf("runtime after failed apply = doc:%#v service:%#v, want rollback to host", doc.Runtime.Sandbox, svc.Runtime().Sandbox)
+	}
+}
+
 func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	svc, err := New(Config{
 		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},

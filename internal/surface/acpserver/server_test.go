@@ -1057,22 +1057,22 @@ func TestServeStdioExposesAndSetsModelOptions(t *testing.T) {
 	if err := conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
 		SessionID: newResp.SessionID,
 		ConfigID:  "sandbox_backend",
-		Value:     "bwrap",
+		Value:     "auto",
 	}, &setConfigResp); err != nil {
 		t.Fatalf("session/set_config_option(sandbox_backend) call error = %v", err)
 	}
-	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "bwrap" {
-		t.Fatalf("sandbox backend option = %#v, want bwrap", option)
+	if option := requireACPConfigOption(t, setConfigResp.ConfigOptions, "sandbox_backend"); option.CurrentValue != "auto" {
+		t.Fatalf("sandbox backend option = %#v, want auto", option)
 	}
 	doc, err := manager.Document(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Compaction.Auto.Mode != "disabled" || doc.Runtime.Sandbox.Backend != "bwrap" {
-		t.Fatalf("settings document = %#v, want metadata_only/disabled/bwrap", doc)
+	if doc.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || doc.Compaction.Auto.Mode != "disabled" || doc.Runtime.Sandbox.Backend != "auto" {
+		t.Fatalf("settings document = %#v, want metadata_only/disabled/auto", doc)
 	}
-	if runtime := stack.Services().Runtime(); runtime.Sandbox.Backend != "bwrap" {
-		t.Fatalf("service runtime sandbox = %#v, want bwrap", runtime.Sandbox)
+	if runtime := stack.Services().Runtime(); runtime.Sandbox.Backend != "auto" {
+		t.Fatalf("service runtime sandbox = %#v, want auto", runtime.Sandbox)
 	}
 
 	cancel()

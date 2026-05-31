@@ -1003,6 +1003,12 @@ be migrated before retiring the old stack:
      internal adapter, so CLI sandbox lifecycle commands can reach the
      currently constructed non-host backend instead of being host-only service
      stubs.
+   - Migrated baseline: settings-backed runtime changes now flow through a
+     local-stack runtime applier. Sandbox backend changes rebuild the concrete
+     sandbox runtime and hot-swap the shared live runtime used by tools,
+     `SandboxService`, TUI, ACP, and CLI; failed rebuilds roll settings and
+     service runtime state back instead of leaving display/config ahead of the
+     actual tool runtime.
    - Migrated baseline: one-shot headless CLI now applies the normalized
      `-permission-mode` value through `internal/app/services.Modes()` before
      beginning the turn, so approval policy selection is no longer only a
@@ -1019,10 +1025,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: the old `kernel.TurnHandle` streaming helper has been
      removed from `internal/cli`; production CLI code no longer imports the old
      public `kernel` facade.
-   - Still pending: default home layout, rich setup diagnostics, live sandbox
-     runtime rebuild after settings-backed backend changes, and several command
-     dispatch paths still depend on old TUI/gateway compatibility packages or
-     `kernel.Service`.
+   - Still pending: default home layout, rich setup diagnostics, and several
+     command dispatch paths still depend on old TUI/gateway compatibility
+     packages or `kernel.Service`.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1104,8 +1109,10 @@ be migrated before retiring the old stack:
    - Migrated baseline: TUI sandbox backend selection now routes through
      `internal/app/services.SettingsService.SetSandboxBackend`, persists the
      normalized backend in shared app settings, and reflects the requested
-     backend through the shared sandbox status view instead of returning a
-     not-migrated gatewaydriver branch.
+     backend through the shared sandbox status view. In the local stack this
+     now also rebuilds and hot-swaps the live sandbox runtime, so subsequent
+     tool execution and `/doctor fix` use the selected backend rather than a
+     display-only setting.
    - Migrated baseline: `/connect` model completion and default
      context/output/reasoning values now come from
      `internal/app/services.Models()` through `BindAppServices`, including
@@ -1118,10 +1125,10 @@ be migrated before retiring the old stack:
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell, live remote ACP
-     process reconnect/lifecycle behavior, and live sandbox runtime
-     reconfiguration still have old driver/app assumptions or missing
-     service-native feature parity, so the old TUI stack cannot be removed yet.
+   - Slash commands such as the `/connect` wizard shell and live remote ACP
+     process reconnect/lifecycle behavior still have old driver/app
+     assumptions or missing service-native feature parity, so the old TUI stack
+     cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1290,8 +1297,7 @@ be migrated before retiring the old stack:
      `ModelService.PromptCapabilities`, so configured multimodal model support
      is reported through the same model catalog used by TUI and APP setup.
    - Still pending: remaining TUI command integration, additional non-model ACP
-     config providers beyond the first settings-backed set, live sandbox
-     runtime reconfiguration after backend settings changes, and removal of the
+     config providers beyond the first settings-backed set, and removal of the
      old `app/gatewayapp` config/model services once compatibility entrypoints
      are gone.
 
@@ -1388,11 +1394,15 @@ be migrated before retiring the old stack:
      `internal/app/services.SandboxService` now invokes prepare, repair,
      preflight, and reset when the runtime supports them, preserving Windows
      setup/ACL repair behavior through the service-native TUI/CLI paths.
-   - Still pending: live runtime rebuild when a surface changes the requested
-     sandbox backend in settings, network policy, writable/readable root policy
-     beyond skill roots, rich route diagnostics, production doctor repair
-     reporting, and replacing the reused `ports/sandbox` implementation assets
-     with fully core-native non-host adapters once the old stack can retire.
+   - Migrated baseline: the local stack now wraps the concrete sandbox runtime
+     in a live runtime proxy and wires `SettingsService` runtime mutations to a
+     sandbox rebuild path. Backend setting changes therefore affect subsequent
+     tool calls and sandbox lifecycle commands, while failed rebuilds roll back
+     the persisted setting.
+   - Still pending: network policy, writable/readable root policy beyond skill
+     roots, rich route diagnostics, production doctor repair reporting, and
+     replacing the reused `ports/sandbox` implementation assets with fully
+     core-native non-host adapters once the old stack can retire.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
@@ -1754,7 +1764,7 @@ Recommended sequence:
 
 1. Finish the remaining large TUI command migrations against app services,
    especially the `/connect` wizard shell, live remote controller process
-   lifecycle, and live sandbox runtime reconfiguration.
+   lifecycle, and settings/diagnostics panel parity.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating

@@ -119,12 +119,20 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		}
 	}
 	sandboxRuntime := cfg.Sandbox
+	var liveSandbox *liveSandboxRuntime
 	if sandboxRuntime == nil && (cfg.BuiltinTools || strings.TrimSpace(runtimeCfg.Sandbox.Backend) != "") {
 		var err error
 		sandboxRuntime, err = sandboxFromConfig(ctx, reg, runtimeCfg)
 		if err != nil {
 			return nil, err
 		}
+	}
+	if sandboxRuntime != nil {
+		liveSandbox, err = newLiveSandboxRuntime(sandboxRuntime)
+		if err != nil {
+			return nil, err
+		}
+		sandboxRuntime = liveSandbox
 	}
 	spawnTasks := newSpawnTaskManager(store, externalAgents, taskStateDir(runtimeCfg.Store))
 	tools := cfg.Tools
@@ -210,6 +218,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Resources:      resourceCatalog,
 		Settings:       cfg.Settings,
 		CodeFree:       codeFreeAuthAdapter{},
+		ApplyRuntime:   sandboxRuntimeApplier(reg, liveSandbox),
 	})
 	if err != nil {
 		return nil, err
@@ -223,6 +232,24 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		engine:   engine,
 		services: svc,
 	}, nil
+}
+
+func sandboxRuntimeApplier(reg *appregistry.Registry, live *liveSandboxRuntime) services.RuntimeApplier {
+	if reg == nil || live == nil {
+		return nil
+	}
+	return func(ctx context.Context, runtimeCfg config.Runtime) (config.Runtime, error) {
+		runtimeCfg = normalizeRuntimeConfig(runtimeCfg)
+		next, err := sandboxFromConfig(ctx, reg, runtimeCfg)
+		if err != nil {
+			return config.Runtime{}, err
+		}
+		if err := live.replace(next); err != nil {
+			_ = next.Close()
+			return config.Runtime{}, err
+		}
+		return runtimeCfg, nil
+	}
 }
 
 func agentInvokers(store session.Store, configs []acpexternal.Config) map[string]services.AgentInvoker {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"net/http/httptest"
@@ -1724,6 +1725,76 @@ func TestStackAddsSkillRootsToSandboxConfig(t *testing.T) {
 	}
 }
 
+func TestStackRebuildsLiveSandboxRuntimeFromSettings(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Sandbox: config.Sandbox{
+				Backend: "host",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory := &switchingSandboxFactory{}
+	stack, err := NewWithContext(ctx, Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceCWD: t.TempDir(),
+			Sandbox: config.Sandbox{
+				Backend: "host",
+			},
+		},
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("unused")},
+		}},
+		Contributions: []plugin.Contribution{
+			contributionFunc(func(_ context.Context, registry plugin.Registry) error {
+				return registry.RegisterSandboxBackend("capture", factory)
+			}),
+		},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := stack.Services().Sandbox().Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.ResolvedBackend != "host" {
+		t.Fatalf("initial sandbox status = %#v, want host", status)
+	}
+	if _, err := stack.Services().Settings().SetSandbox(ctx, config.Sandbox{Backend: "capture"}); err != nil {
+		t.Fatalf("SetSandbox(capture) error = %v", err)
+	}
+	if factory.calls != 1 || factory.cfg.RequestedBackend != sandbox.Backend("capture") {
+		t.Fatalf("factory calls/cfg = %d/%#v, want capture rebuild", factory.calls, factory.cfg)
+	}
+	status, err = stack.Services().Sandbox().Status(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.RequestedBackend != "capture" || status.ResolvedBackend != "capture" || status.Route != "sandbox" {
+		t.Fatalf("reconfigured sandbox status = %#v, want live capture runtime", status)
+	}
+	if stack.Sandbox().Status().ResolvedBackend != sandbox.Backend("capture") {
+		t.Fatalf("stack sandbox status = %#v, want capture", stack.Sandbox().Status())
+	}
+	result, err := stack.Sandbox().Run(ctx, sandbox.CommandRequest{Command: "echo after-rebuild"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Backend != sandbox.Backend("capture") || result.Route != sandbox.RouteSandbox {
+		t.Fatalf("sandbox run result = %#v, want capture sandbox route", result)
+	}
+}
+
 func TestStackInvokesPluginDeclaredACPAgent(t *testing.T) {
 	pluginDir := filepath.Join(t.TempDir(), "plugin")
 	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
@@ -2263,6 +2334,63 @@ func (f *capturingSandboxFactory) NewRuntime(ctx context.Context, cfg sandbox.Co
 		ReadOnlySubpaths:    append([]string(nil), cfg.ReadOnlySubpaths...),
 	}
 	return sandboxhost.New(ctx, cfg)
+}
+
+type switchingSandboxFactory struct {
+	calls int
+	cfg   sandbox.Config
+}
+
+func (f *switchingSandboxFactory) NewRuntime(_ context.Context, cfg sandbox.Config) (sandbox.Runtime, error) {
+	f.calls++
+	f.cfg = sandbox.Config{
+		CWD:              cfg.CWD,
+		RequestedBackend: cfg.RequestedBackend,
+		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
+		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
+	}
+	return fakeLocalSandboxRuntime{backend: cfg.RequestedBackend}, nil
+}
+
+type fakeLocalSandboxRuntime struct {
+	backend sandbox.Backend
+}
+
+func (r fakeLocalSandboxRuntime) Descriptor() sandbox.Descriptor {
+	return sandbox.Descriptor{
+		Backend: r.backend,
+		DefaultConstraints: sandbox.Constraints{
+			Route:   sandbox.RouteSandbox,
+			Backend: r.backend,
+		},
+	}
+}
+
+func (r fakeLocalSandboxRuntime) Status() sandbox.Status {
+	return sandbox.Status{
+		RequestedBackend: r.backend,
+		ResolvedBackend:  r.backend,
+	}
+}
+
+func (fakeLocalSandboxRuntime) FileSystem() sandbox.FileSystem {
+	return nil
+}
+
+func (r fakeLocalSandboxRuntime) Run(context.Context, sandbox.CommandRequest) (sandbox.CommandResult, error) {
+	return sandbox.CommandResult{Route: sandbox.RouteSandbox, Backend: r.backend}, nil
+}
+
+func (fakeLocalSandboxRuntime) Start(context.Context, sandbox.CommandRequest) (sandbox.Session, error) {
+	return nil, fmt.Errorf("fake sandbox does not start sessions")
+}
+
+func (fakeLocalSandboxRuntime) Open(context.Context, sandbox.SessionRef) (sandbox.Session, error) {
+	return nil, fmt.Errorf("fake sandbox does not open sessions")
+}
+
+func (fakeLocalSandboxRuntime) Close() error {
+	return nil
 }
 
 func (p *capturingProvider) ID() string {

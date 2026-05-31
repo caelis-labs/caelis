@@ -51,6 +51,7 @@ type Services struct {
 	resources     appresources.Catalog
 	settings      *appsettings.Manager
 	codefree      CodeFreeAuthenticator
+	applyRuntime  RuntimeApplier
 }
 
 type serviceState struct {
@@ -74,7 +75,10 @@ type Config struct {
 	Resources      appresources.Catalog
 	Settings       *appsettings.Manager
 	CodeFree       CodeFreeAuthenticator
+	ApplyRuntime   RuntimeApplier
 }
+
+type RuntimeApplier func(context.Context, config.Runtime) (config.Runtime, error)
 
 func New(cfg Config) (Services, error) {
 	if cfg.Engine == nil {
@@ -98,6 +102,7 @@ func New(cfg Config) (Services, error) {
 		resources:     appresources.CloneCatalog(cfg.Resources),
 		settings:      cfg.Settings,
 		codefree:      cfg.CodeFree,
+		applyRuntime:  cfg.ApplyRuntime,
 	}, nil
 }
 
@@ -291,11 +296,14 @@ func (s SettingsService) SetRuntime(ctx context.Context, runtime config.Runtime)
 	if s.services.settings == nil {
 		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
 	}
+	previous := s.services.Runtime()
 	stored, err := s.services.settings.SetRuntime(ctx, runtime)
 	if err != nil {
 		return appviewmodel.SettingsView{}, err
 	}
-	s.services.setRuntime(stored)
+	if err := s.services.applyRuntimeUpdate(ctx, previous, stored); err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
 	return s.View(ctx)
 }
 
@@ -348,10 +356,20 @@ func (s SettingsService) Save(ctx context.Context, doc appsettings.Document) err
 	if s.services.settings == nil {
 		return errors.New("app/services: settings manager is not configured")
 	}
+	previousDoc, err := s.services.settings.Document(ctx)
+	if err != nil {
+		return err
+	}
 	if err := s.services.settings.Save(ctx, doc); err != nil {
 		return err
 	}
-	s.services.setRuntime(appsettings.NormalizeRuntime(doc.Runtime))
+	if err := s.services.applyRuntimeUpdate(ctx, previousDoc.Runtime, appsettings.NormalizeRuntime(doc.Runtime)); err != nil {
+		rollbackErr := s.services.settings.Save(ctx, previousDoc)
+		if rollbackErr == nil {
+			s.services.setRuntime(previousDoc.Runtime)
+		}
+		return errors.Join(err, rollbackErr)
+	}
 	return nil
 }
 
@@ -359,13 +377,40 @@ func (s SettingsService) updateRuntime(ctx context.Context, update func(config.R
 	if s.services.settings == nil {
 		return appviewmodel.SettingsView{}, errors.New("app/services: settings manager is not configured")
 	}
+	previous := s.services.Runtime()
 	runtime := appsettings.NormalizeRuntime(update(s.services.Runtime()))
 	stored, err := s.services.settings.SetRuntime(ctx, runtime)
 	if err != nil {
 		return appviewmodel.SettingsView{}, err
 	}
-	s.services.setRuntime(stored)
+	if err := s.services.applyRuntimeUpdate(ctx, previous, stored); err != nil {
+		return appviewmodel.SettingsView{}, err
+	}
 	return s.View(ctx)
+}
+
+func (s Services) applyRuntimeUpdate(ctx context.Context, previous config.Runtime, next config.Runtime) error {
+	next = appsettings.NormalizeRuntime(next)
+	if s.applyRuntime == nil {
+		s.setRuntime(next)
+		return nil
+	}
+	applied, err := s.applyRuntime(ctx, next)
+	if err != nil {
+		if s.settings != nil {
+			rollback, rollbackErr := s.settings.SetRuntime(ctx, previous)
+			if rollbackErr == nil {
+				s.setRuntime(rollback)
+			} else {
+				s.setRuntime(previous)
+			}
+			return errors.Join(err, rollbackErr)
+		}
+		s.setRuntime(previous)
+		return err
+	}
+	s.setRuntime(applied)
+	return nil
 }
 
 func normalizeSettingsSandboxBackend(backend string) (string, error) {
