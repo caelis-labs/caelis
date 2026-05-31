@@ -116,6 +116,8 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	}
 	target := strings.TrimPrefix(importPath, modulePath+"/")
 	switch {
+	case strings.HasPrefix(rel, "surfaces/tui/gatewaydriver/") && target == "ports/controller":
+		return "surfaces/tui/gatewaydriver must use app view-model controller contracts instead of ports/controller"
 	case strings.HasPrefix(rel, "core/"):
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
 			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"

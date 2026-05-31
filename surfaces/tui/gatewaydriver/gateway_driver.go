@@ -12,8 +12,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -174,24 +174,24 @@ func (d *GatewayDriver) currentSession() (session.Session, bool) {
 	return d.session, true
 }
 
-func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (controller.ControllerStatus, bool, error) {
+func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (appviewmodel.ControllerStatus, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if d == nil || d.stack == nil {
-		return controller.ControllerStatus{}, false, nil
+		return appviewmodel.ControllerStatus{}, false, nil
 	}
 	activeSession, ok := d.currentSession()
 	if !ok || activeSession.Controller.Kind != session.ControllerKindACP {
-		return controller.ControllerStatus{}, false, nil
+		return appviewmodel.ControllerStatus{}, false, nil
 	}
 	status, found, err := d.stack.ACPControllerStatus(ctx, activeSession.SessionRef)
 	if err != nil {
-		return controller.ControllerStatus{}, false, err
+		return appviewmodel.ControllerStatus{}, false, err
 	}
 	if !found {
-		status = controller.ControllerStatus{
-			SessionRef:      activeSession.SessionRef,
+		status = appviewmodel.ControllerStatus{
+			SessionRef:      coreRefFromPort(activeSession.SessionRef),
 			Agent:           firstNonEmpty(strings.TrimSpace(activeSession.Controller.AgentName), strings.TrimSpace(activeSession.Controller.Label), strings.TrimSpace(activeSession.Controller.ControllerID)),
 			RemoteSessionID: strings.TrimSpace(activeSession.Controller.RemoteSessionID),
 		}

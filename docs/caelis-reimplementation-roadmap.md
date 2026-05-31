@@ -1031,6 +1031,11 @@ The completed work is intentionally limited to the reusable skeleton:
   through `internal/app/services.ControllerService`, injected into
   controller invocations, and projected through the existing TUI status/model
   hooks without TUI-owned controller state.
+- Shared controller status view-model baseline: remote ACP controller status,
+  config choices, declared modes, and slash-command metadata now use
+  `internal/app/viewmodel.ControllerStatus` in the gatewaydriver stack instead
+  of the old `ports/controller` DTOs. The architecture lint now rejects
+  reintroducing `ports/controller` into `surfaces/tui/gatewaydriver`.
 - Core-native remote ACP controller config baseline: controller invocations
   now resume an existing remote ACP session before prompting, discover
   remote-declared config options from `session/new` or `session/resume`, apply
@@ -1257,6 +1262,10 @@ be migrated before retiring the old stack:
      model, reasoning effort, and mode are stored as controller-scoped session
      state, projected into `/status`, and injected into subsequent controller
      invocations as a surface-neutral config intent.
+   - Migrated baseline: gatewaydriver no longer imports `ports/controller` for
+     active ACP controller status, model/effort completion, mode cycling, or
+     status projection. Those flows now use shared app view-model DTOs so TUI
+     and future APP surfaces do not depend on the old controller port taxonomy.
    - Migrated baseline: `/doctor` without repair now reads the same app-service
      status view as `/status`, including configured store URI, so the diagnostic
      display no longer needs the old gatewayapp doctor path for basic readiness
@@ -1371,7 +1380,7 @@ be migrated before retiring the old stack:
     still have old driver/app assumptions or missing service-native feature
     parity, so the old TUI stack cannot be removed yet.
   - Still pending: the current TUI driver/gateway bridge still imports the old
-    `ports/session`, `ports/controller`, `ports/stream`, and public `kernel`
+    `ports/session`, `ports/stream`, and public `kernel`
     event contracts for live turn streaming, replay, participants, and usage
     accounting. Retiring those imports requires moving the remaining TUI
     bridge protocol to `core/runtime`, `core/session`, and

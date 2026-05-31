@@ -24,7 +24,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -726,13 +725,13 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
 	driver := &GatewayDriver{}
-	status := controller.ControllerStatus{
-		ModelOptions: []controller.ControllerConfigChoice{{
+	status := appviewmodel.ControllerStatus{
+		ModelOptions: []appviewmodel.ControllerConfigChoice{{
 			Value:       "claude-sonnet",
 			Name:        "Claude Sonnet",
 			Description: "remote model",
 		}},
-		EffortOptions: []controller.ControllerConfigChoice{{
+		EffortOptions: []appviewmodel.ControllerConfigChoice{{
 			Value: "high",
 			Name:  "High",
 		}},
@@ -757,12 +756,12 @@ func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 	driver := &GatewayDriver{}
-	status := controller.ControllerStatus{
-		ModelOptions: []controller.ControllerConfigChoice{
+	status := appviewmodel.ControllerStatus{
+		ModelOptions: []appviewmodel.ControllerConfigChoice{
 			{Value: "gpt-5.5", Name: "GPT-5.5"},
 			{Value: "gpt-5.4", Name: "gpt-5.4"},
 		},
-		EffortOptions: []controller.ControllerConfigChoice{
+		EffortOptions: []appviewmodel.ControllerConfigChoice{
 			{Value: "low", Name: "Low"},
 			{Value: "high", Name: "High"},
 		},
@@ -779,12 +778,12 @@ func TestGatewayDriverCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
 	driver := &GatewayDriver{}
-	status := controller.ControllerStatus{
-		ModelOptions: []controller.ControllerConfigChoice{
+	status := appviewmodel.ControllerStatus{
+		ModelOptions: []appviewmodel.ControllerConfigChoice{
 			{Value: "gpt-5.5", Name: "GPT-5.5"},
 			{Value: "gpt-5.4", Name: "gpt-5.4"},
 		},
-		EffortOptionsByModel: map[string][]controller.ControllerConfigChoice{
+		EffortOptionsByModel: map[string][]appviewmodel.ControllerConfigChoice{
 			"gpt-5.4": {
 				{Value: "low", Name: "Low"},
 				{Value: "xhigh", Name: "Xhigh"},
@@ -1964,12 +1963,12 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 			RemoteSessionID: "remote-1",
 		},
 	}
-	remoteStatus := controller.ControllerStatus{
-		SessionRef: activeSession.SessionRef,
+	remoteStatus := appviewmodel.ControllerStatus{
+		SessionRef: coreRefFromPort(activeSession.SessionRef),
 		Agent:      "codex",
 		Model:      "remote-model",
 		Mode:       "auto-review",
-		ModeOptions: []controller.ControllerMode{
+		ModeOptions: []appviewmodel.ControllerMode{
 			{ID: "auto-review", Name: "Auto Review"},
 			{ID: "manual", Name: "Manual"},
 		},
@@ -1985,14 +1984,14 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
 				return remoteStatus, true, nil
 			},
 			SetSessionModeFn: func(context.Context, session.SessionRef, string) (string, error) {
 				localSetCalled = true
 				return "manual", nil
 			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
+			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
 				if ref.SessionID != activeSession.SessionID {
 					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
 				}
@@ -2038,12 +2037,12 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 			RemoteSessionID: "remote-1",
 		},
 	}
-	remoteStatus := controller.ControllerStatus{
-		SessionRef: activeSession.SessionRef,
+	remoteStatus := appviewmodel.ControllerStatus{
+		SessionRef: coreRefFromPort(activeSession.SessionRef),
 		Agent:      "codex",
 		Model:      "remote-model",
 		Mode:       "ask",
-		ModeOptions: []controller.ControllerMode{
+		ModeOptions: []appviewmodel.ControllerMode{
 			{ID: "ask", Name: "Ask"},
 			{ID: "code", Name: "Code"},
 		},
@@ -2059,14 +2058,14 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
 				return remoteStatus, true, nil
 			},
 			CycleSessionModeFn: func(context.Context, session.SessionRef) (string, error) {
 				localCycleCalled = true
 				return "manual", nil
 			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
+			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
 				if ref.SessionID != activeSession.SessionID {
 					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
 				}
@@ -2101,9 +2100,9 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 }
 
 func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
-	status := controller.ControllerStatus{
+	status := appviewmodel.ControllerStatus{
 		Mode: "default",
-		ModeOptions: []controller.ControllerMode{
+		ModeOptions: []appviewmodel.ControllerMode{
 			{ID: "default", Name: "Default"},
 			{ID: "review", Name: "Review"},
 			{ID: "plan", Name: "Plan"},
@@ -2128,9 +2127,9 @@ func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
 }
 
 func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
-	status := controller.ControllerStatus{
+	status := appviewmodel.ControllerStatus{
 		Mode: "review",
-		ModeOptions: []controller.ControllerMode{
+		ModeOptions: []appviewmodel.ControllerMode{
 			{ID: "review", Name: "Review"},
 		},
 	}
@@ -2165,11 +2164,11 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
-				return controller.ControllerStatus{
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
+				return appviewmodel.ControllerStatus{
 					Model: "remote-model",
 					Mode:  "code",
-					ModeOptions: []controller.ControllerMode{
+					ModeOptions: []appviewmodel.ControllerMode{
 						{ID: "code", Name: "Code"},
 					},
 				}, true, nil

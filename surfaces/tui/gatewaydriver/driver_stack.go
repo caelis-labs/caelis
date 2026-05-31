@@ -11,7 +11,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
@@ -180,7 +179,7 @@ type DriverStack struct {
 	Workspace session.WorkspaceRef
 
 	StartSessionFn                     func(context.Context, string, string) (session.Session, error)
-	ACPControllerStatusFn              func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error)
+	ACPControllerStatusFn              func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error)
 	DefaultModelAliasFn                func() string
 	AppStatusViewFn                    func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
 	SandboxStatusFn                    func() SandboxStatus
@@ -199,14 +198,14 @@ type DriverStack struct {
 	ConnectFn                          func(ModelConfig) (string, error)
 	UseModelFn                         func(context.Context, session.SessionRef, string, ...string) error
 	DeleteModelFn                      func(context.Context, session.SessionRef, string) error
-	SetACPControllerModelFn            func(context.Context, session.SessionRef, string, string) (controller.ControllerStatus, error)
+	SetACPControllerModelFn            func(context.Context, session.SessionRef, string, string) (appviewmodel.ControllerStatus, error)
 	CycleSessionModeFn                 func(context.Context, session.SessionRef) (string, error)
 	SetSandboxBackendFn                func(context.Context, string) (SandboxStatus, error)
 	PrepareSandboxFn                   func(context.Context) (SandboxStatus, error)
 	RepairSandboxFn                    func(context.Context) (SandboxStatus, error)
 	PreflightSandboxFn                 func(context.Context, bool) (SandboxStatus, error)
 	ResetSandboxFn                     func(context.Context) (SandboxStatus, error)
-	SetACPControllerModeFn             func(context.Context, session.SessionRef, string) (controller.ControllerStatus, error)
+	SetACPControllerModeFn             func(context.Context, session.SessionRef, string) (appviewmodel.ControllerStatus, error)
 	SetSessionModeFn                   func(context.Context, session.SessionRef, string) (string, error)
 	ListModelAliasesFn                 func(context.Context, session.SessionRef) ([]string, error)
 	ListModelChoicesFn                 func(context.Context, session.SessionRef) ([]ModelChoice, error)
@@ -249,9 +248,9 @@ func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID strin
 	return s.StartSessionFn(ctx, preferredSessionID, bindingKey)
 }
 
-func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (controller.ControllerStatus, bool, error) {
+func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
 	if s == nil || s.ACPControllerStatusFn == nil {
-		return controller.ControllerStatus{}, false, nil
+		return appviewmodel.ControllerStatus{}, false, nil
 	}
 	return s.ACPControllerStatusFn(ctx, ref)
 }
@@ -390,9 +389,9 @@ func (s *DriverStack) DeleteModel(ctx context.Context, ref session.SessionRef, a
 	return s.DeleteModelFn(ctx, ref, alias)
 }
 
-func (s *DriverStack) SetACPControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoning string) (controller.ControllerStatus, error) {
+func (s *DriverStack) SetACPControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoning string) (appviewmodel.ControllerStatus, error) {
 	if s == nil || s.SetACPControllerModelFn == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: ACP controller model dependency is unavailable")
+		return appviewmodel.ControllerStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: ACP controller model dependency is unavailable")
 	}
 	return s.SetACPControllerModelFn(ctx, ref, model, reasoning)
 }
@@ -439,9 +438,9 @@ func (s *DriverStack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
 	return s.ResetSandboxFn(ctx)
 }
 
-func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
+func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
 	if s == nil || s.SetACPControllerModeFn == nil {
-		return controller.ControllerStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: ACP controller mode dependency is unavailable")
+		return appviewmodel.ControllerStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: ACP controller mode dependency is unavailable")
 	}
 	return s.SetACPControllerModeFn(ctx, ref, mode)
 }

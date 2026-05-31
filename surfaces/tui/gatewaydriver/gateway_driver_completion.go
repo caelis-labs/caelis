@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
@@ -219,7 +219,7 @@ func taskCompletionDetail(task TaskItem) string {
 	return strings.Join(parts, " ")
 }
 
-func (d *GatewayDriver) completeACPControllerSlashArg(status controller.ControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {
+func (d *GatewayDriver) completeACPControllerSlashArg(status appviewmodel.ControllerStatus, command string, query string, limit int) ([]SlashArgCandidate, bool) {
 	normalized := strings.TrimSpace(strings.ToLower(command))
 	switch normalized {
 	case "model":
@@ -312,7 +312,7 @@ func modelReasoningLevelDetail(level string) string {
 	}
 }
 
-func controllerCommandNames(commands []controller.ControllerCommand) []string {
+func controllerCommandNames(commands []appviewmodel.ControllerCommand) []string {
 	if len(commands) == 0 {
 		return nil
 	}
@@ -335,7 +335,7 @@ func controllerCommandNames(commands []controller.ControllerCommand) []string {
 	return out
 }
 
-func acpControllerModelText(status controller.ControllerStatus, activeSession session.Session) string {
+func acpControllerModelText(status appviewmodel.ControllerStatus, activeSession session.Session) string {
 	return firstNonEmpty(
 		strings.TrimSpace(status.Model),
 		strings.TrimSpace(status.Agent),
@@ -345,7 +345,7 @@ func acpControllerModelText(status controller.ControllerStatus, activeSession se
 	)
 }
 
-func acpControllerModeDisplay(status controller.ControllerStatus) string {
+func acpControllerModeDisplay(status appviewmodel.ControllerStatus) string {
 	current := strings.TrimSpace(status.Mode)
 	if current == "" {
 		return ""
@@ -356,10 +356,10 @@ func acpControllerModeDisplay(status controller.ControllerStatus) string {
 	return current
 }
 
-func nextACPControllerMode(status controller.ControllerStatus) (controller.ControllerMode, error) {
+func nextACPControllerMode(status appviewmodel.ControllerStatus) (appviewmodel.ControllerMode, error) {
 	modes := compactACPControllerModes(status.ModeOptions)
 	if len(modes) == 0 {
-		return controller.ControllerMode{}, fmt.Errorf("surfaces/tui/gatewaydriver: remote ACP controller did not declare session modes")
+		return appviewmodel.ControllerMode{}, fmt.Errorf("surfaces/tui/gatewaydriver: remote ACP controller did not declare session modes")
 	}
 	current := strings.TrimSpace(status.Mode)
 	if current == "" {
@@ -373,11 +373,11 @@ func nextACPControllerMode(status controller.ControllerStatus) (controller.Contr
 	return modes[0], nil
 }
 
-func compactACPControllerModes(modes []controller.ControllerMode) []controller.ControllerMode {
+func compactACPControllerModes(modes []appviewmodel.ControllerMode) []appviewmodel.ControllerMode {
 	if len(modes) == 0 {
 		return nil
 	}
-	out := make([]controller.ControllerMode, 0, len(modes))
+	out := make([]appviewmodel.ControllerMode, 0, len(modes))
 	seen := map[string]struct{}{}
 	for _, mode := range modes {
 		id := strings.TrimSpace(mode.ID)
@@ -389,7 +389,7 @@ func compactACPControllerModes(modes []controller.ControllerMode) []controller.C
 			continue
 		}
 		seen[key] = struct{}{}
-		out = append(out, controller.ControllerMode{
+		out = append(out, appviewmodel.ControllerMode{
 			ID:          id,
 			Name:        strings.TrimSpace(mode.Name),
 			Description: strings.TrimSpace(mode.Description),
@@ -398,10 +398,10 @@ func compactACPControllerModes(modes []controller.ControllerMode) []controller.C
 	return out
 }
 
-func matchACPControllerMode(modes []controller.ControllerMode, requested string) (controller.ControllerMode, bool) {
+func matchACPControllerMode(modes []appviewmodel.ControllerMode, requested string) (appviewmodel.ControllerMode, bool) {
 	requested = strings.TrimSpace(requested)
 	if requested == "" {
-		return controller.ControllerMode{}, false
+		return appviewmodel.ControllerMode{}, false
 	}
 	for _, mode := range modes {
 		id := strings.TrimSpace(mode.ID)
@@ -412,14 +412,14 @@ func matchACPControllerMode(modes []controller.ControllerMode, requested string)
 			return mode, true
 		}
 	}
-	return controller.ControllerMode{}, false
+	return appviewmodel.ControllerMode{}, false
 }
 
-func acpControllerModeLabel(mode controller.ControllerMode) string {
+func acpControllerModeLabel(mode appviewmodel.ControllerMode) string {
 	return firstNonEmpty(strings.TrimSpace(mode.Name), strings.TrimSpace(mode.ID))
 }
 
-func acpControllerEffortsForModel(status controller.ControllerStatus, model string) []controller.ControllerConfigChoice {
+func acpControllerEffortsForModel(status appviewmodel.ControllerStatus, model string) []appviewmodel.ControllerConfigChoice {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model != "" {
 		for key, efforts := range status.EffortOptionsByModel {
@@ -431,7 +431,7 @@ func acpControllerEffortsForModel(status controller.ControllerStatus, model stri
 	return status.EffortOptions
 }
 
-func controllerChoicesToSlashCandidates(choices []controller.ControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
+func controllerChoicesToSlashCandidates(choices []appviewmodel.ControllerConfigChoice, detail string, query string, limit int) []SlashArgCandidate {
 	if len(choices) == 0 {
 		return nil
 	}

@@ -13,7 +13,6 @@ import (
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	portscontroller "github.com/OnslaughtSnail/caelis/ports/controller"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -159,15 +158,15 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		_, err := svc.Models().Use(ctx, coreRefFromPort(ref), modelRef, effort)
 		return err
 	}
-	stack.ACPControllerStatusFn = func(ctx context.Context, ref portsession.SessionRef) (portscontroller.ControllerStatus, bool, error) {
+	stack.ACPControllerStatusFn = func(ctx context.Context, ref portsession.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
 		status, ok, err := svc.Controllers().Status(ctx, coreRefFromPort(ref))
 		return controllerStatusFromApp(status), ok, err
 	}
-	stack.SetACPControllerModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning string) (portscontroller.ControllerStatus, error) {
+	stack.SetACPControllerModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning string) (appviewmodel.ControllerStatus, error) {
 		status, err := svc.Controllers().SetModel(ctx, coreRefFromPort(ref), modelRef, reasoning)
 		return controllerStatusFromApp(status), err
 	}
-	stack.SetACPControllerModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (portscontroller.ControllerStatus, error) {
+	stack.SetACPControllerModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
 		status, err := svc.Controllers().SetMode(ctx, coreRefFromPort(ref), mode)
 		return controllerStatusFromApp(status), err
 	}
@@ -366,9 +365,9 @@ func portSessionFromCore(active coresession.Session) portsession.Session {
 	}
 }
 
-func controllerStatusFromApp(status appservices.ControllerStatus) portscontroller.ControllerStatus {
-	return portscontroller.ControllerStatus{
-		SessionRef:      portRefFromCore(status.SessionRef),
+func controllerStatusFromApp(status appservices.ControllerStatus) appviewmodel.ControllerStatus {
+	return appviewmodel.ControllerStatus{
+		SessionRef:      coresession.NormalizeRef(status.SessionRef),
 		Agent:           strings.TrimSpace(status.Agent),
 		RemoteSessionID: strings.TrimSpace(status.RemoteSessionID),
 		Model:           strings.TrimSpace(status.Model),
@@ -380,13 +379,13 @@ func controllerStatusFromApp(status appservices.ControllerStatus) portscontrolle
 	}
 }
 
-func controllerConfigChoicesFromApp(choices []appservices.ControllerConfigChoice) []portscontroller.ControllerConfigChoice {
+func controllerConfigChoicesFromApp(choices []appservices.ControllerConfigChoice) []appviewmodel.ControllerConfigChoice {
 	if len(choices) == 0 {
 		return nil
 	}
-	out := make([]portscontroller.ControllerConfigChoice, 0, len(choices))
+	out := make([]appviewmodel.ControllerConfigChoice, 0, len(choices))
 	for _, choice := range choices {
-		out = append(out, portscontroller.ControllerConfigChoice{
+		out = append(out, appviewmodel.ControllerConfigChoice{
 			Value:       strings.TrimSpace(choice.Value),
 			Name:        strings.TrimSpace(choice.Name),
 			Description: strings.TrimSpace(choice.Description),
@@ -395,13 +394,13 @@ func controllerConfigChoicesFromApp(choices []appservices.ControllerConfigChoice
 	return out
 }
 
-func controllerModesFromApp(modes []appservices.ControllerMode) []portscontroller.ControllerMode {
+func controllerModesFromApp(modes []appservices.ControllerMode) []appviewmodel.ControllerMode {
 	if len(modes) == 0 {
 		return nil
 	}
-	out := make([]portscontroller.ControllerMode, 0, len(modes))
+	out := make([]appviewmodel.ControllerMode, 0, len(modes))
 	for _, mode := range modes {
-		out = append(out, portscontroller.ControllerMode{
+		out = append(out, appviewmodel.ControllerMode{
 			ID:          strings.TrimSpace(mode.ID),
 			Name:        strings.TrimSpace(mode.Name),
 			Description: strings.TrimSpace(mode.Description),
