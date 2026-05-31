@@ -105,6 +105,7 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 				ToolTitle:  tool.Title,
 				Status:     string(tool.Status),
 				RawInput:   tool.Input,
+				Actions:    appviewmodel.TranscriptActionsFromEvent(event),
 			}))
 		}
 	case coresession.EventToolResult:
@@ -128,6 +129,7 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 				RawOutput:  tool.Output,
 				Content:    coreSessionToolContent(tool.Content),
 				Error:      tool.Status == coresession.ToolFailed,
+				Actions:    appviewmodel.TranscriptActionsFromEvent(event),
 			}, transcriptToolStatusCompleted)
 			if ok {
 				out = append(out, projected)
@@ -338,6 +340,21 @@ func projectViewModelTranscriptItem(item appviewmodel.TranscriptItem) []Transcri
 			NarrativeKind: TranscriptNarrativeAssistant,
 			Text:          text,
 			Final:         true,
+		}}
+	case string(coresession.EventToolCall), string(coresession.EventToolResult):
+		if strings.TrimSpace(item.ToolName) == "" && len(item.Actions) == 0 {
+			return nil
+		}
+		return []TranscriptEvent{{
+			Kind:        TranscriptEventTool,
+			Scope:       scope,
+			ScopeID:     scopeID,
+			Actor:       strings.TrimSpace(item.Actor),
+			OccurredAt:  item.Time,
+			ToolName:    strings.TrimSpace(item.ToolName),
+			ToolStatus:  strings.TrimSpace(item.ToolStatus),
+			ToolActions: cloneTranscriptActions(item.Actions),
+			Final:       true,
 		}}
 	default:
 		return nil

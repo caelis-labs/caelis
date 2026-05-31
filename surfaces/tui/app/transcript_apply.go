@@ -456,5 +456,6 @@ func transcriptToolUpdateMeta(event TranscriptEvent) ToolUpdateMeta {
 		ToolKind:        event.ToolKind,
 		FullArgs:        event.ToolFullArgs,
 		OutputSynthetic: event.ToolOutputSynthetic,
+		Actions:         cloneTranscriptActions(event.ToolActions),
 	}
 }

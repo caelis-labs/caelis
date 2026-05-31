@@ -728,6 +728,17 @@ func writeSubagentEvents(builder *blockKeyBuilder, events []SubagentEvent, ctx B
 		builder.addString(event.TaskAction)
 		builder.addString(event.TaskInput)
 		builder.addString(event.TaskTargetKind)
+		builder.addInt(len(event.Actions))
+		for _, action := range event.Actions {
+			builder.addString(action.ID)
+			builder.addString(action.Kind)
+			builder.addString(action.Label)
+			builder.addString(action.Command)
+			builder.addString(action.TargetID)
+			builder.addBool(action.Enabled)
+			builder.addBool(action.Destructive)
+			builder.addBool(action.RequiresInput)
+		}
 		builder.addBool(event.Done)
 		builder.addBool(event.Err)
 		builder.addString(event.ApprovalTool)

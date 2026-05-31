@@ -230,6 +230,79 @@ func TestCommandPanelTaskCancelClickRequiresConfirmation(t *testing.T) {
 	}
 }
 
+func TestTranscriptTaskActionClickPromptsAndSubmits(t *testing.T) {
+	var called string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(sub Submission) TaskResultMsg {
+			called = sub.Text
+			return TaskResultMsg{}
+		},
+	})
+	action := appviewmodel.TranscriptAction{
+		ID:            "task.write:task-1",
+		Kind:          "write",
+		Label:         "Write",
+		Command:       "/task write task-1 -- ",
+		TargetID:      "task-1",
+		Enabled:       true,
+		RequiresInput: true,
+	}
+
+	handled, cmd := model.tryTranscriptActionClickToken(transcriptActionClickToken(action))
+	if !handled || cmd == nil {
+		t.Fatalf("tryTranscriptActionClickToken() handled=%v cmd nil=%v, want prompt command", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || model.activePrompt.title != "Write" {
+		t.Fatalf("active prompt = %#v, want transcript action prompt", model.activePrompt)
+	}
+	model.finishPrompt("continue", nil)
+	submit, ok := cmd().(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatal("prompt command did not submit transcript action")
+	}
+	if submit.Line != "/task write task-1 -- continue" {
+		t.Fatalf("submit line = %q", submit.Line)
+	}
+	updated, submitCmd := model.Update(submit)
+	model = updated.(*Model)
+	if !findAndRunTaskResult(submitCmd(), model) {
+		t.Fatal("expected TaskResultMsg from submitted transcript action")
+	}
+	if called != "/task write task-1 -- continue" {
+		t.Fatalf("ExecuteLine called = %q", called)
+	}
+}
+
+func TestTranscriptDestructiveTaskActionClickConfirms(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands(), ExecuteLine: func(Submission) TaskResultMsg { return TaskResultMsg{} }})
+	action := appviewmodel.TranscriptAction{
+		ID:          "task.cancel:task-1",
+		Kind:        "cancel",
+		Label:       "Cancel",
+		Command:     "/task cancel task-1",
+		TargetID:    "task-1",
+		Enabled:     true,
+		Destructive: true,
+	}
+
+	handled, cmd := model.tryTranscriptActionClickToken(transcriptActionClickToken(action))
+	if !handled || cmd == nil {
+		t.Fatalf("tryTranscriptActionClickToken() handled=%v cmd nil=%v, want confirm command", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || len(model.activePrompt.choices) == 0 || model.activePrompt.choices[model.activePrompt.choiceIndex].value != "cancel" {
+		t.Fatalf("active prompt = %#v, want cancel-default confirmation", model.activePrompt)
+	}
+	model.finishPrompt("run", nil)
+	submit, ok := cmd().(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatal("confirmation did not submit transcript action")
+	}
+	if submit.Line != "/task cancel task-1" {
+		t.Fatalf("submit line = %q", submit.Line)
+	}
+}
+
 func TestViewportSelectionMotionDedupesSameEndpoint(t *testing.T) {
 	model := NewModel(Config{})
 	updated, _ := model.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

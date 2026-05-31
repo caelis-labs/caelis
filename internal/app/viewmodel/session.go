@@ -137,7 +137,7 @@ func transcriptItem(event session.Event) (TranscriptItem, bool) {
 		item.ToolName = strings.TrimSpace(event.Tool.Name)
 		item.ToolStatus = strings.TrimSpace(string(event.Tool.Status))
 	}
-	item.Actions = transcriptActions(event)
+	item.Actions = TranscriptActionsFromEvent(event)
 	switch event.Type {
 	case session.EventUser, session.EventAssistant, session.EventSystem, session.EventToolCall, session.EventToolResult, session.EventApproval, session.EventPlan, session.EventLifecycle, session.EventParticipant, session.EventHandoff, session.EventNotice:
 		return item, item.Text != "" || item.ToolName != "" || event.Approval != nil || len(event.Plan) > 0 || event.Lifecycle != nil
@@ -146,7 +146,7 @@ func transcriptItem(event session.Event) (TranscriptItem, bool) {
 	}
 }
 
-func transcriptActions(event session.Event) []TranscriptAction {
+func TranscriptActionsFromEvent(event session.Event) []TranscriptAction {
 	if event.Type != session.EventToolCall && event.Type != session.EventToolResult {
 		return nil
 	}

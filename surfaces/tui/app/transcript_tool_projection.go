@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/acpprojector"
 )
@@ -32,6 +33,7 @@ type transcriptToolProjection struct {
 	RawOutput map[string]any
 	Content   []schema.ToolCallContent
 	Error     bool
+	Actions   []appviewmodel.TranscriptAction
 }
 
 func projectTranscriptToolCall(input transcriptToolProjection) TranscriptEvent {
@@ -72,6 +74,7 @@ func projectTranscriptToolCall(input transcriptToolProjection) TranscriptEvent {
 		ToolTaskAction:     toolDisplayTaskAction(rawInput, nil, input.Meta),
 		ToolTaskInput:      toolDisplayTaskInput(rawInput, nil, input.Meta),
 		ToolTaskTargetKind: toolDisplayTaskTargetKind(rawInput, nil, input.Meta),
+		ToolActions:        cloneTranscriptActions(input.Actions),
 	}
 }
 
@@ -167,6 +170,14 @@ func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessS
 		ToolTaskAction:      toolDisplayTaskAction(rawInput, displayOutput, input.Meta),
 		ToolTaskInput:       toolDisplayTaskInput(rawInput, displayOutput, input.Meta),
 		ToolTaskTargetKind:  toolDisplayTaskTargetKind(rawInput, displayOutput, input.Meta),
+		ToolActions:         cloneTranscriptActions(input.Actions),
 		Final:               transcriptToolStatusFinal(status, toolErr),
 	}, true
+}
+
+func cloneTranscriptActions(actions []appviewmodel.TranscriptAction) []appviewmodel.TranscriptAction {
+	if len(actions) == 0 {
+		return nil
+	}
+	return append([]appviewmodel.TranscriptAction(nil), actions...)
 }

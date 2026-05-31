@@ -5,6 +5,7 @@ import (
 	"time"
 
 	coretool "github.com/OnslaughtSnail/caelis/core/tool"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -57,6 +58,7 @@ type TranscriptEvent struct {
 	ToolTaskAction      string
 	ToolTaskInput       string
 	ToolTaskTargetKind  string
+	ToolActions         []appviewmodel.TranscriptAction
 
 	PlanEntries []PlanEntry
 

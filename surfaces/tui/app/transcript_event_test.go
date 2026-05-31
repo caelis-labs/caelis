@@ -67,6 +67,38 @@ func TestProjectCoreSessionEventToTranscriptEvents_ToolResultUsesCoreContent(t *
 	}
 }
 
+func TestProjectCoreSessionEventToTranscriptEvents_ProjectsTaskActions(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "core-tool-task",
+		SessionID: "root-session",
+		Type:      coresession.EventToolResult,
+		Tool: &coresession.ToolEvent{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Kind:   "execute",
+			Status: coresession.ToolRunning,
+			Input:  map[string]any{"command": "npm run dev"},
+			Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+				"task_id":        "task-dev",
+				"state":          "running",
+				"supports_input": true,
+			}),
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool transcript event", events)
+	}
+	actions := events[0].ToolActions
+	if !hasTranscriptToolAction(actions, "task.tail:task-dev", "/task tail task-dev") ||
+		!hasTranscriptToolAction(actions, "task.write:task-dev", "/task write task-dev -- ") ||
+		!hasTranscriptToolAction(actions, "task.cancel:task-dev", "/task cancel task-dev") {
+		t.Fatalf("actions = %#v, want task tail/write/cancel descriptors", actions)
+	}
+}
+
 func TestProjectCoreSessionEventToTranscriptEvents_MergesToolRuntimeMeta(t *testing.T) {
 	t.Parallel()
 
@@ -113,6 +145,15 @@ func TestProjectCoreSessionEventToTranscriptEvents_MergesToolRuntimeMeta(t *test
 	if got.ToolTaskID != "maya" || got.ToolTaskAction != "write" || got.ToolTaskTargetKind != "subagent" || got.ToolTaskInput != "continue" {
 		t.Fatalf("task fields = id:%q action:%q target:%q input:%q, want tool runtime meta fields", got.ToolTaskID, got.ToolTaskAction, got.ToolTaskTargetKind, got.ToolTaskInput)
 	}
+}
+
+func hasTranscriptToolAction(actions []appviewmodel.TranscriptAction, id string, command string) bool {
+	for _, action := range actions {
+		if action.ID == id && action.Command == command && action.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 func TestProjectCoreSessionEventToTranscriptEvents_ProjectsAutoReviewApproval(t *testing.T) {

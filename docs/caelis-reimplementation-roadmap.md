@@ -1508,13 +1508,17 @@ be migrated before retiring the old stack:
      `caelis.runtime.task` metadata, giving TUI and future APP surfaces the
      same command/action contract for tail/wait/write/cancel/release around
      task transcript entries.
+   - Migrated baseline: TUI transcript/tool rows now project those shared
+     task action descriptors into row-level click tokens. Tail/wait/release
+     actions submit through the shared command path, write actions use the
+     existing prompt input widget, and destructive cancel actions use the same
+     confirmation prompt pattern as command panels.
    - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
      transcript reducer, tool panels, approval UI, theme system, and attachment
      UI/rendering remain TUI-owned presentation code by design.
-   - Still pending: transcript action rendering/execution in each surface,
-     future APP visual panel rendering, and deeper surface-specific panel
-     interactions need to build on the shared panel payloads instead of growing
-     new surface-local product semantics.
+   - Still pending: future APP visual panel/transcript-action rendering and
+     deeper surface-specific panel interactions need to build on the shared
+     panel payloads instead of growing new surface-local product semantics.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1621,10 +1625,13 @@ be migrated before retiring the old stack:
    - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
      transcript action descriptors for task-backed tool entries, derived from
      canonical runtime task metadata and expressed as shared slash commands.
-   - Still pending: concrete transcript action rendering/execution and future
-     APP settings/task/controller rendering remain unmigrated. Durable async
-     task control and output storage remain kernel/runtime work rather than
-     APP-only view-model work.
+   - Migrated baseline: the TUI consumes the same transcript action
+     descriptors for task-backed tool rows and keeps execution routed through
+     `CommandService` via shared slash commands, giving the future APP a clear
+     reference contract without sharing Bubble Tea widgets.
+   - Still pending: future APP settings/task/controller and transcript-action
+     rendering remain unmigrated. Durable async task control and output storage
+     remain kernel/runtime work rather than APP-only view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`

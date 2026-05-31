@@ -83,6 +83,7 @@ func CloneSessionEventEnvelope(in SessionEventEnvelope) SessionEventEnvelope {
 	}
 	if in.Transcript != nil {
 		transcript := *in.Transcript
+		transcript.Actions = append([]TranscriptAction(nil), in.Transcript.Actions...)
 		out.Transcript = &transcript
 	}
 	if in.Approval != nil {

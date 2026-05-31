@@ -247,6 +247,9 @@ func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) (bool, tea.Cmd) {
 	}
 	if contentLine >= 0 && contentLine < len(m.viewportClickTokens) {
 		if token := strings.TrimSpace(m.viewportClickTokens[contentLine]); token != "" {
+			if handled, cmd := m.tryTranscriptActionClickToken(token); handled {
+				return true, cmd
+			}
 			if handled, cmd := m.tryCommandPanelClickToken(bid, token); handled {
 				return true, cmd
 			}

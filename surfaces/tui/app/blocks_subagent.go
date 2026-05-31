@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"charm.land/lipgloss/v2"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/x/ansi"
 )
@@ -41,6 +42,7 @@ type SubagentEvent struct {
 	TaskAction      string
 	TaskInput       string
 	TaskTargetKind  string
+	Actions         []appviewmodel.TranscriptAction
 	Done            bool
 	Err             bool
 	// Plan fields.

@@ -78,7 +78,8 @@ func renderParticipantTurnNarrativeRows(blockID string, raw string, lineStyle tu
 }
 
 func renderParticipantTurnToolRows(blockID string, ev SubagentEvent, width int, ctx BlockRenderContext) []RenderedRow {
-	return renderToolEventViewModelLines(blockID, buildToolEventViewModel(ev), width, ctx.Theme)
+	rows := renderToolEventViewModelLines(blockID, buildToolEventViewModel(ev), width, ctx.Theme)
+	return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 }
 
 func collapseRepeatedNarrativeText(text string) string {

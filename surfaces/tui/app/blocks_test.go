@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 )
@@ -172,6 +173,52 @@ func TestTaskWaitResultDoesNotCompleteLinkedRunCommandTool(t *testing.T) {
 	if got := block.Events[0].Output; got != "late running output" {
 		t.Fatalf("late running update output = %q, want RUN_COMMAND stream to update original panel", got)
 	}
+}
+
+func TestToolRenderIncludesTranscriptActionRows(t *testing.T) {
+	block := NewMainACPTurnBlock("session-1")
+	block.UpdateToolWithMeta("command-1", "RUN_COMMAND", "npm run dev", "ready\n", false, false, ToolUpdateMeta{
+		TaskID: "task-dev",
+		Actions: []appviewmodel.TranscriptAction{{
+			ID:       "task.tail:task-dev",
+			Kind:     "tail",
+			Label:    "Tail",
+			Command:  "/task tail task-dev",
+			TargetID: "task-dev",
+			Enabled:  true,
+		}, {
+			ID:          "task.cancel:task-dev",
+			Kind:        "cancel",
+			Label:       "Cancel",
+			Command:     "/task cancel task-dev",
+			TargetID:    "task-dev",
+			Enabled:     true,
+			Destructive: true,
+		}},
+	})
+
+	rows := block.Render(BlockRenderContext{
+		Width:     100,
+		TermWidth: 120,
+		Theme:     tuikit.ResolveThemeFromOptions(true, colorprofile.NoTTY),
+	})
+	plain := renderedPlainText(rows)
+	if !strings.Contains(plain, "action: Tail task-dev") || !strings.Contains(plain, "action: Cancel task-dev") {
+		t.Fatalf("rendered rows = %q, want transcript action rows", plain)
+	}
+	if !rowsContainTranscriptAction(rows, "/task tail task-dev") || !rowsContainTranscriptAction(rows, "/task cancel task-dev") {
+		t.Fatalf("rows missing transcript action click tokens: %#v", renderedPlainRows(rows))
+	}
+}
+
+func rowsContainTranscriptAction(rows []RenderedRow, command string) bool {
+	for _, row := range rows {
+		action, ok := transcriptActionFromClickToken(row.ClickToken)
+		if ok && action.Command == command {
+			return true
+		}
+	}
+	return false
 }
 
 func TestTaskCancelShowsLinkedCommandWithoutCompletingCommand(t *testing.T) {

@@ -174,10 +174,11 @@ func renderACPStandaloneFinalToolRows(blockID string, ev SubagentEvent, width in
 		return renderParticipantTurnToolRows(blockID, ev, width, ctx)
 	}
 	header := SubagentEvent{
-		Kind: SEToolCall,
-		Name: ev.Name,
-		Done: true,
-		Err:  ev.Err,
+		Kind:    SEToolCall,
+		Name:    ev.Name,
+		Done:    true,
+		Err:     ev.Err,
+		Actions: cloneTranscriptActions(ev.Actions),
 	}
 	rows := renderParticipantTurnToolRows(blockID, header, width, ctx)
 	prefix := "✓ "
@@ -224,6 +225,9 @@ func toolLifecycleHeaderEvent(start SubagentEvent, final SubagentEvent, hasFinal
 		if targetKind := strings.TrimSpace(final.TaskTargetKind); targetKind != "" {
 			header.TaskTargetKind = targetKind
 		}
+		if len(final.Actions) > 0 {
+			header.Actions = cloneTranscriptActions(final.Actions)
+		}
 		if args := strings.TrimSpace(final.Args); args != "" {
 			if isTerminalPanelToolEvent(header) {
 				header.Args = normalizeACPToolInline(args)
@@ -261,7 +265,7 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 	}
 	if !renderableTextHasContent(text) {
 		if !final || err {
-			return rows
+			return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 		}
 		text = "completed"
 	}
@@ -270,12 +274,13 @@ func renderACPStandardToolLifecycleRows(blockID string, ev SubagentEvent, callID
 		style = ctx.Theme.ToolErrorStyle()
 	}
 	rows = append(rows, renderACPToolOutputRowsWithToken(blockID, "  └ ", text, width, ctx, style, token)...)
-	return rows
+	return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 }
 
 func renderACPStandardToolCollapsedRows(blockID string, ev SubagentEvent, callID string, width int, ctx BlockRenderContext, err bool, token string) []RenderedRow {
 	header := standardToolLifecycleHeader(ev, err)
-	return []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
+	rows := []RenderedRow{renderACPTranscriptHeaderRow(blockID, header, width, ctx, token)}
+	return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 }
 
 func acpStandardCollapsedClickToken(callID string, ev SubagentEvent, text string, err bool) string {
@@ -463,11 +468,11 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 		text = "(wait subagent output)"
 	}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
-		return rows
+		return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 	}
 	if final && fullOutput {
 		rows = append(rows, renderACPFullTerminalPanelRows(blockID, callID, text, width, ctx, err, token)...)
-		return rows
+		return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 	}
 	if strings.EqualFold(strings.TrimSpace(toolSemanticName(ev.Name, ev.ToolKind)), "SPAWN") {
 		text = displayText
@@ -477,7 +482,7 @@ func renderACPTerminalLifecycleRows(blockID string, ev SubagentEvent, callID str
 	}
 	text = summarizeACPToolPanelText(text, final)
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, toolSemanticName(ev.Name, ev.ToolKind), text, width, ctx, err, token, opts)...)
-	return rows
+	return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 }
 
 func terminalLifecycleHeader(ev SubagentEvent) string {
@@ -566,16 +571,16 @@ func renderACPMutationLifecycleRows(blockID string, ev SubagentEvent, callID str
 		if msg := sanitizeRenderableText(text); renderableTextHasContent(msg) && msg != sanitizeRenderableText(ev.Args) {
 			rows = append(rows, renderACPToolDetailRows(blockID, "  └ ", msg, width, ctx, ctx.Theme.ToolErrorStyle())...)
 		}
-		return rows
+		return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 	}
 	if !expanded || !shouldRenderACPToolPanel(text, err) {
-		return rows
+		return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 	}
 	if mutationPanelTextIsHeaderOnly(ev, text) {
-		return rows
+		return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 	}
 	rows = append(rows, renderACPToolPanelRows(blockID, callID, ev.Name, text, width, ctx, err, token, opts)...)
-	return rows
+	return appendTranscriptActionRows(rows, blockID, ev.Actions, width, ctx)
 }
 
 func mutationPanelTextIsHeaderOnly(ev SubagentEvent, text string) bool {

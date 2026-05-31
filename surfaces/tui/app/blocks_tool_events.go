@@ -1,6 +1,10 @@
 package tuiapp
 
-import "strings"
+import (
+	"strings"
+
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+)
 
 type ToolUpdateMeta struct {
 	TaskID          string
@@ -10,6 +14,7 @@ type ToolUpdateMeta struct {
 	ToolKind        string
 	FullArgs        string
 	OutputSynthetic bool
+	Actions         []appviewmodel.TranscriptAction
 }
 
 type toolEventUpdate struct {
@@ -34,6 +39,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	taskAction := strings.ToLower(strings.TrimSpace(update.Meta.TaskAction))
 	taskInput := strings.TrimSpace(update.Meta.TaskInput)
 	taskTargetKind := strings.ToLower(strings.TrimSpace(update.Meta.TaskTargetKind))
+	actions := cloneTranscriptActions(update.Meta.Actions)
 	semanticName := toolSemanticName(name, toolKind)
 	output := update.Output
 	if strings.EqualFold(semanticName, "TASK") && taskAction == "cancel" {
@@ -58,7 +64,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 	if !update.Final {
 		if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 			ev := &out[i]
-			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, semanticName)
+			mergeOpenToolEvent(ev, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind, semanticName, actions)
 			return out, true, false
 		}
 		out = append(out, SubagentEvent{
@@ -74,6 +80,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 			TaskAction:      taskAction,
 			TaskInput:       taskInput,
 			TaskTargetKind:  taskTargetKind,
+			Actions:         cloneTranscriptActions(actions),
 		})
 		return out, true, false
 	}
@@ -93,6 +100,7 @@ func applyToolEventUpdate(events []SubagentEvent, update toolEventUpdate, toolIn
 		TaskAction:      taskAction,
 		TaskInput:       taskInput,
 		TaskTargetKind:  taskTargetKind,
+		Actions:         cloneTranscriptActions(actions),
 	}
 	if i := openToolEventIndexForUpdate(out, update, toolIndex); i >= 0 {
 		ev := &out[i]
@@ -169,7 +177,7 @@ func updateToolEventIndex(index map[string]int, events []SubagentEvent, callID s
 	delete(index, callID)
 }
 
-func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind string, semanticName string) {
+func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, output, taskID, taskAction, taskInput, taskTargetKind string, semanticName string, actions []appviewmodel.TranscriptAction) {
 	if ev == nil {
 		return
 	}
@@ -204,6 +212,9 @@ func mergeOpenToolEvent(ev *SubagentEvent, name, toolKind, args, fullArgs, outpu
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = taskTargetKind
 	}
+	if len(actions) > 0 {
+		ev.Actions = cloneTranscriptActions(actions)
+	}
 	if renderableTextHasContent(output) {
 		ev.Output = mergeSubagentStreamChunk(ev.Output, output)
 		ev.OutputSynthetic = false
@@ -226,6 +237,9 @@ func fillFinalToolEventFromExisting(finalEvent *SubagentEvent, existing Subagent
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
 	}
+	if len(finalEvent.Actions) == 0 && len(existing.Actions) > 0 {
+		finalEvent.Actions = cloneTranscriptActions(existing.Actions)
+	}
 }
 
 func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing SubagentEvent) {
@@ -243,6 +257,9 @@ func fillMissingFinalToolEventFromExisting(finalEvent *SubagentEvent, existing S
 	}
 	if strings.TrimSpace(finalEvent.ToolKind) == "" {
 		finalEvent.ToolKind = strings.TrimSpace(existing.ToolKind)
+	}
+	if len(finalEvent.Actions) == 0 && len(existing.Actions) > 0 {
+		finalEvent.Actions = cloneTranscriptActions(existing.Actions)
 	}
 }
 
@@ -270,6 +287,9 @@ func mergeFinalToolEvent(ev *SubagentEvent, finalEvent *SubagentEvent) {
 	}
 	if ev.TaskTargetKind == "" {
 		ev.TaskTargetKind = finalEvent.TaskTargetKind
+	}
+	if len(finalEvent.Actions) > 0 {
+		ev.Actions = cloneTranscriptActions(finalEvent.Actions)
 	}
 }
 
