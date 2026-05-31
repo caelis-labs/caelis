@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
@@ -158,135 +159,24 @@ func DefaultCommands() []string {
 // DefaultWizards returns the set of multi-step wizard flows for the TUI.
 func DefaultWizards() []WizardDef {
 	return []WizardDef{
-		connectWizard(),
+		connectWizardFromFlow(appservices.DefaultConnectWizardFlow()),
 	}
 }
 
-func connectWizard() WizardDef {
+func connectWizardFromFlow(flow appviewmodel.WizardFlowView) WizardDef {
 	return WizardDef{
-		Command:     "connect",
-		DisplayLine: "/connect",
-		Steps: []WizardStepDef{
-			{
-				Key:              "provider",
-				HintLabel:        "/connect provider",
-				FreeformHint:     "/connect provider: choose a provider; compatible endpoints may ask for a custom base URL",
-				RequireCandidate: true,
-				CompletionCommand: func(state map[string]string) string {
-					return "connect"
-				},
-			},
-			{
-				Key:          "endpoint",
-				HintLabel:    "/connect endpoint",
-				FreeformHint: "/connect endpoint: choose a provider endpoint, or paste a custom base URL",
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-baseurl:" + state["provider"]
-				},
-				ShouldSkip: func(state map[string]string) bool {
-					return !connectWizardProviderHasEndpointStep(state["provider"])
-				},
-			},
-			{
-				Key:          "baseurl",
-				HintLabel:    "/connect base_url",
-				FreeformHint: "/connect base_url: choose the default compatible API root or paste your own full base URL",
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-baseurl:" + state["provider"]
-				},
-				ShouldSkip: func(state map[string]string) bool {
-					return !connectWizardProviderHasBaseURLStep(state["provider"])
-				},
-			},
-			{
-				Key:       "apikey",
-				HintLabel: "/connect api_key",
-				HideInput: true,
-				FreeformHintFunc: func(state map[string]string) string {
-					return "/connect api_key: paste a key, or type env:" + connectWizardTokenEnvHint(state) + " to use an environment variable"
-				},
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-apikey:" + state["provider"]
-				},
-				ShouldSkip: func(state map[string]string) bool {
-					return state["_noauth"] == "true" || state["_reuseauth"] == "true"
-				},
-			},
-			{
-				Key:          "model",
-				HintLabel:    "/connect model",
-				FreeformHint: "/connect model: choose a suggested model or type a custom model name and press enter",
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-model:" + buildConnectWizardPayload(state)
-				},
-			},
-			{
-				Key:          "context_window_tokens",
-				HintLabel:    "/connect context_window_tokens",
-				Validate:     ValidateInt,
-				FreeformHint: "/connect context_window_tokens: type integer and press enter",
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-context:" + buildConnectWizardPayload(state)
-				},
-				ShouldSkip: func(state map[string]string) bool {
-					return state["_known_model"] == "true"
-				},
-			},
-			{
-				Key:          "max_output_tokens",
-				HintLabel:    "/connect max_output_tokens",
-				Validate:     ValidateInt,
-				FreeformHint: "/connect max_output_tokens: type integer and press enter",
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-maxout:" + buildConnectWizardPayload(state)
-				},
-				ShouldSkip: func(state map[string]string) bool {
-					return state["_known_model"] == "true"
-				},
-			},
-			{
-				Key:          "reasoning_levels",
-				HintLabel:    "/connect reasoning_levels(csv)",
-				FreeformHint: "/connect reasoning_levels(csv): e.g. low,medium (use - for empty)",
-				CompletionCommand: func(state map[string]string) string {
-					return "connect-reasoning-levels:" + buildConnectWizardPayload(state)
-				},
-				ShouldSkip: func(state map[string]string) bool {
-					return state["_known_model"] == "true"
-				},
-			},
-		},
+		Command:     flow.Command,
+		DisplayLine: flow.DisplayLine,
+		Steps:       connectWizardStepsFromFlow(flow),
 		OnStepConfirm: func(stepKey string, value string, candidate *SlashArgCandidate, state map[string]string) {
-			if stepKey == "provider" {
-				state["provider"] = strings.ToLower(strings.TrimSpace(value))
-				delete(state, "_reuseauth")
-				delete(state, "_noauth")
-			}
-			if stepKey == "provider" && candidate != nil && candidate.NoAuth {
-				state["_noauth"] = "true"
-			}
-			if stepKey == "endpoint" {
-				state["baseurl"] = strings.TrimSpace(value)
-				if candidate != nil && candidate.NoAuth {
-					state["_reuseauth"] = "true"
-				} else {
-					delete(state, "_reuseauth")
+			var sharedCandidate *appservices.ConnectWizardConfirmCandidate
+			if candidate != nil {
+				sharedCandidate = &appservices.ConnectWizardConfirmCandidate{
+					Value:  candidate.Value,
+					NoAuth: candidate.NoAuth,
 				}
 			}
-			if stepKey == "baseurl" {
-				if candidate != nil && candidate.NoAuth {
-					state["_reuseauth"] = "true"
-				} else {
-					delete(state, "_reuseauth")
-				}
-			}
-			if stepKey == "model" {
-				if candidate != nil && strings.TrimSpace(candidate.Value) != "" && !strings.EqualFold(strings.TrimSpace(candidate.Value), "__custom_model__") {
-					state["_known_model"] = "true"
-				} else {
-					delete(state, "_known_model")
-				}
-			}
+			appservices.ConfirmConnectWizardStep(stepKey, value, sharedCandidate, state)
 		},
 		BuildExecLine: func(state map[string]string) string {
 			return appservices.BuildConnectWizardExecLine(state)
@@ -294,18 +184,40 @@ func connectWizard() WizardDef {
 	}
 }
 
-func connectWizardTokenEnvHint(state map[string]string) string {
-	return appservices.ConnectWizardTokenEnvHint(state)
+func connectWizardStepsFromFlow(flow appviewmodel.WizardFlowView) []WizardStepDef {
+	steps := make([]WizardStepDef, 0, len(flow.Steps))
+	for _, shared := range flow.Steps {
+		shared := shared
+		step := WizardStepDef{
+			Key:              shared.Key,
+			HintLabel:        shared.HintLabel,
+			FreeformHint:     shared.FreeformHint,
+			HideInput:        shared.HideInput,
+			NoCompletion:     shared.NoCompletion,
+			RequireCandidate: shared.RequireCandidate,
+			Validate:         connectWizardValidator(shared.Validator),
+			CompletionCommand: func(state map[string]string) string {
+				return appservices.ConnectWizardCompletionCommand(shared.Key, state)
+			},
+			ShouldSkip: func(state map[string]string) bool {
+				return appservices.ConnectWizardShouldSkip(shared.Key, state)
+			},
+		}
+		if shared.DynamicFreeformHint {
+			step.FreeformHintFunc = func(state map[string]string) string {
+				return appservices.ConnectWizardFreeformHint(shared.Key, state)
+			}
+		}
+		steps = append(steps, step)
+	}
+	return steps
 }
 
-func connectWizardProviderHasEndpointStep(provider string) bool {
-	return appservices.ConnectWizardProviderHasEndpointStep(provider)
-}
-
-func connectWizardProviderHasBaseURLStep(provider string) bool {
-	return appservices.ConnectWizardProviderHasBaseURLStep(provider)
-}
-
-func buildConnectWizardPayload(state map[string]string) string {
-	return appservices.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+func connectWizardValidator(name string) func(string) error {
+	switch strings.TrimSpace(name) {
+	case appviewmodel.WizardValidatorInt:
+		return ValidateInt
+	default:
+		return nil
+	}
 }

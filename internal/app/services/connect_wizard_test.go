@@ -1,6 +1,12 @@
 package services
 
-import "testing"
+import (
+	"context"
+	"reflect"
+	"testing"
+
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+)
 
 func TestConnectWizardStateEncodesCompletionPayload(t *testing.T) {
 	state := ConnectWizardState{
@@ -53,6 +59,71 @@ func TestConnectWizardFlowHelpersUseSharedProviderCatalog(t *testing.T) {
 		"baseurl":  "https://token-plan-cn.xiaomimimo.com/custom/path",
 	}); got != "MIMO_TOKEN_PLAN_API_KEY" {
 		t.Fatalf("ConnectWizardTokenEnvHint() = %q, want token-plan env", got)
+	}
+}
+
+func TestDefaultConnectWizardFlowDefinesSharedShellShape(t *testing.T) {
+	flow := DefaultConnectWizardFlow()
+	if flow.Command != "connect" || flow.DisplayLine != "/connect" {
+		t.Fatalf("flow = %#v, want connect display flow", flow)
+	}
+	keys := make([]string, 0, len(flow.Steps))
+	validators := map[string]string{}
+	for _, step := range flow.Steps {
+		keys = append(keys, step.Key)
+		validators[step.Key] = step.Validator
+	}
+	want := []string{"provider", "endpoint", "baseurl", "apikey", "model", "context_window_tokens", "max_output_tokens", "reasoning_levels"}
+	if !reflect.DeepEqual(keys, want) {
+		t.Fatalf("connect wizard keys = %#v, want %#v", keys, want)
+	}
+	if validators["context_window_tokens"] != appviewmodel.WizardValidatorInt || validators["max_output_tokens"] != appviewmodel.WizardValidatorInt {
+		t.Fatalf("validators = %#v, want int validation for token fields", validators)
+	}
+	if !flow.Steps[0].RequireCandidate || !flow.Steps[3].HideInput || !flow.Steps[3].DynamicFreeformHint {
+		t.Fatalf("flow steps = %#v, want provider picker and hidden dynamic API key step", flow.Steps)
+	}
+}
+
+func TestModelServiceConnectWizardExposesSharedFlow(t *testing.T) {
+	svc, err := New(Config{Engine: &recordingEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	flow, err := svc.Models().ConnectWizard(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(flow, DefaultConnectWizardFlow()) {
+		t.Fatalf("ConnectWizard() = %#v, want default shared flow", flow)
+	}
+}
+
+func TestConnectWizardSharedStepBehavior(t *testing.T) {
+	state := map[string]string{"provider": "xiaomi"}
+	if !ConnectWizardShouldSkip("baseurl", state) || ConnectWizardShouldSkip("endpoint", state) {
+		t.Fatalf("xiaomi skip behavior wrong for state %#v", state)
+	}
+	ConfirmConnectWizardStep("endpoint", ConnectXiaomiTokenPlanCNBaseURL, &ConnectWizardConfirmCandidate{NoAuth: true}, state)
+	if state["baseurl"] != ConnectXiaomiTokenPlanCNBaseURL || state["_reuseauth"] != "true" {
+		t.Fatalf("endpoint confirm state = %#v, want baseurl plus reuse auth", state)
+	}
+	if !ConnectWizardShouldSkip("apikey", state) {
+		t.Fatalf("apikey should be skipped after reusable endpoint auth: %#v", state)
+	}
+	state["model"] = "mimo-v2.5-pro"
+	got := ConnectWizardCompletionCommand("model", state)
+	want := "connect-model:xiaomi|https%3A%2F%2Ftoken-plan-cn.xiaomimimo.com%2Fv1|60||mimo-v2.5-pro"
+	if got != want {
+		t.Fatalf("model completion command = %q, want %q", got, want)
+	}
+	ConfirmConnectWizardStep("model", "mimo-v2.5-pro", &ConnectWizardConfirmCandidate{Value: "mimo-v2.5-pro"}, state)
+	if state["_known_model"] != "true" || !ConnectWizardShouldSkip("context_window_tokens", state) {
+		t.Fatalf("model confirm state = %#v, want known model and token fields skipped", state)
+	}
+	ConfirmConnectWizardStep("provider", " OLLAMA ", &ConnectWizardConfirmCandidate{NoAuth: true}, state)
+	if state["provider"] != "ollama" || state["_noauth"] != "true" || state["_reuseauth"] != "" {
+		t.Fatalf("provider confirm state = %#v, want normalized no-auth provider", state)
 	}
 }
 

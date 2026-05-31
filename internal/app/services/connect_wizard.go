@@ -1,9 +1,12 @@
 package services
 
 import (
+	"context"
 	"net/url"
 	"strconv"
 	"strings"
+
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
 type ConnectWizardState struct {
@@ -16,6 +19,68 @@ type ConnectWizardState struct {
 	ContextWindowTokens int
 	MaxOutputTokens     int
 	ReasoningLevels     []string
+}
+
+type ConnectWizardConfirmCandidate struct {
+	Value  string
+	NoAuth bool
+}
+
+func (s ModelService) ConnectWizard(context.Context) (appviewmodel.WizardFlowView, error) {
+	return DefaultConnectWizardFlow(), nil
+}
+
+func DefaultConnectWizardFlow() appviewmodel.WizardFlowView {
+	return appviewmodel.WizardFlowView{
+		Command:     "connect",
+		DisplayLine: "/connect",
+		Steps: []appviewmodel.WizardStepView{
+			{
+				Key:              "provider",
+				HintLabel:        "/connect provider",
+				FreeformHint:     "/connect provider: choose a provider; compatible endpoints may ask for a custom base URL",
+				RequireCandidate: true,
+			},
+			{
+				Key:          "endpoint",
+				HintLabel:    "/connect endpoint",
+				FreeformHint: "/connect endpoint: choose a provider endpoint, or paste a custom base URL",
+			},
+			{
+				Key:          "baseurl",
+				HintLabel:    "/connect base_url",
+				FreeformHint: "/connect base_url: choose the default compatible API root or paste your own full base URL",
+			},
+			{
+				Key:                 "apikey",
+				HintLabel:           "/connect api_key",
+				HideInput:           true,
+				DynamicFreeformHint: true,
+			},
+			{
+				Key:          "model",
+				HintLabel:    "/connect model",
+				FreeformHint: "/connect model: choose a suggested model or type a custom model name and press enter",
+			},
+			{
+				Key:          "context_window_tokens",
+				HintLabel:    "/connect context_window_tokens",
+				FreeformHint: "/connect context_window_tokens: type integer and press enter",
+				Validator:    appviewmodel.WizardValidatorInt,
+			},
+			{
+				Key:          "max_output_tokens",
+				HintLabel:    "/connect max_output_tokens",
+				FreeformHint: "/connect max_output_tokens: type integer and press enter",
+				Validator:    appviewmodel.WizardValidatorInt,
+			},
+			{
+				Key:          "reasoning_levels",
+				HintLabel:    "/connect reasoning_levels(csv)",
+				FreeformHint: "/connect reasoning_levels(csv): e.g. low,medium (use - for empty)",
+			},
+		},
+	}
 }
 
 func ConnectWizardStateFromMap(state map[string]string) ConnectWizardState {
@@ -72,6 +137,88 @@ func BuildConnectWizardExecLine(state map[string]string) string {
 		reasoningLevels,
 	}
 	return strings.Join(connectNonEmpty(parts), " ")
+}
+
+func ConnectWizardCompletionCommand(stepKey string, state map[string]string) string {
+	switch strings.TrimSpace(stepKey) {
+	case "provider":
+		return "connect"
+	case "endpoint", "baseurl":
+		return "connect-baseurl:" + connectWizardStateValue(state, "provider")
+	case "apikey":
+		return "connect-apikey:" + connectWizardStateValue(state, "provider")
+	case "model":
+		return "connect-model:" + ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+	case "context_window_tokens":
+		return "connect-context:" + ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+	case "max_output_tokens":
+		return "connect-maxout:" + ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+	case "reasoning_levels":
+		return "connect-reasoning-levels:" + ConnectWizardStateFromMap(state).EncodeCompletionPayload()
+	default:
+		return ""
+	}
+}
+
+func ConnectWizardShouldSkip(stepKey string, state map[string]string) bool {
+	switch strings.TrimSpace(stepKey) {
+	case "endpoint":
+		return !ConnectWizardProviderHasEndpointStep(connectWizardStateValue(state, "provider"))
+	case "baseurl":
+		return !ConnectWizardProviderHasBaseURLStep(connectWizardStateValue(state, "provider"))
+	case "apikey":
+		return connectWizardStateValue(state, "_noauth") == "true" || connectWizardStateValue(state, "_reuseauth") == "true"
+	case "context_window_tokens", "max_output_tokens", "reasoning_levels":
+		return connectWizardStateValue(state, "_known_model") == "true"
+	default:
+		return false
+	}
+}
+
+func ConnectWizardFreeformHint(stepKey string, state map[string]string) string {
+	if strings.TrimSpace(stepKey) == "apikey" {
+		return "/connect api_key: paste a key, or type env:" + ConnectWizardTokenEnvHint(state) + " to use an environment variable"
+	}
+	for _, step := range DefaultConnectWizardFlow().Steps {
+		if step.Key == strings.TrimSpace(stepKey) {
+			return step.FreeformHint
+		}
+	}
+	return ""
+}
+
+func ConfirmConnectWizardStep(stepKey string, value string, candidate *ConnectWizardConfirmCandidate, state map[string]string) {
+	if state == nil {
+		return
+	}
+	switch strings.TrimSpace(stepKey) {
+	case "provider":
+		state["provider"] = strings.ToLower(strings.TrimSpace(value))
+		delete(state, "_reuseauth")
+		delete(state, "_noauth")
+		if candidate != nil && candidate.NoAuth {
+			state["_noauth"] = "true"
+		}
+	case "endpoint":
+		state["baseurl"] = strings.TrimSpace(value)
+		if candidate != nil && candidate.NoAuth {
+			state["_reuseauth"] = "true"
+		} else {
+			delete(state, "_reuseauth")
+		}
+	case "baseurl":
+		if candidate != nil && candidate.NoAuth {
+			state["_reuseauth"] = "true"
+		} else {
+			delete(state, "_reuseauth")
+		}
+	case "model":
+		if candidate != nil && strings.TrimSpace(candidate.Value) != "" && !strings.EqualFold(strings.TrimSpace(candidate.Value), "__custom_model__") {
+			state["_known_model"] = "true"
+		} else {
+			delete(state, "_known_model")
+		}
+	}
 }
 
 func ParseConnectWizardPayload(raw string) ConnectWizardState {
@@ -144,6 +291,13 @@ func parseConnectReasoningLevels(raw string) []string {
 		}
 	}
 	return out
+}
+
+func connectWizardStateValue(state map[string]string, key string) string {
+	if state == nil {
+		return ""
+	}
+	return strings.TrimSpace(state[key])
 }
 
 func decodeConnectWizardPart(value string) string {

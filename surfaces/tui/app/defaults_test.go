@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 )
 
 func TestDefaultCommandsExposeCanonicalCoreCommandsOnly(t *testing.T) {
@@ -35,7 +37,7 @@ func TestDefaultWizardsCoverCoreConfigFlows(t *testing.T) {
 	}
 }
 
-func TestDefaultConnectWizardMatchesLegacyStepShape(t *testing.T) {
+func TestDefaultConnectWizardAdaptsSharedStepShape(t *testing.T) {
 	wizards := DefaultWizards()
 	var connect *WizardDef
 	for i := range wizards {
@@ -58,7 +60,11 @@ func TestDefaultConnectWizardMatchesLegacyStepShape(t *testing.T) {
 	for _, step := range connect.Steps {
 		keys = append(keys, step.Key)
 	}
-	want := []string{"provider", "endpoint", "baseurl", "apikey", "model", "context_window_tokens", "max_output_tokens", "reasoning_levels"}
+	flow := appservices.DefaultConnectWizardFlow()
+	want := make([]string, 0, len(flow.Steps))
+	for _, step := range flow.Steps {
+		want = append(want, step.Key)
+	}
 	if !reflect.DeepEqual(keys, want) {
 		t.Fatalf("connect wizard steps = %#v, want %#v", keys, want)
 	}

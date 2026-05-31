@@ -1275,12 +1275,13 @@ be migrated before retiring the old stack:
      delegates app-service-bound `/connect` submissions through the shared
      prepare/connect contract, so a future APP can reuse the same provider
      setup semantics without importing TUI wizard code.
-   - Migrated baseline: `/connect` wizard state, completion payload encoding,
-     final command-line shape, default timeout, provider step rules, and
-     token-env hint logic have moved out of `surfaces/tui/commands` into
-     `internal/app/services`. TUI now only adapts those shared flow helpers
-     into its Bubble Tea wizard runtime; the remaining `/connect` work is
-     UI-shell extraction/rendering parity rather than provider/setup semantics.
+   - Migrated baseline: `/connect` wizard state, shared flow/step definition,
+     completion payload encoding, final command-line shape, default timeout,
+     provider step rules, token-env hint logic, skip rules, and step-confirm
+     state mutation have moved into `internal/app/services` and shared
+     `internal/app/viewmodel` contracts. TUI now adapts that service flow into
+     its Bubble Tea wizard runtime; future APP surfaces can reuse the same
+     provider setup shell contract without copying TUI step tables.
    - Migrated baseline: the old formal `surfaces/tui/gatewaydriver/local`
      adapter package has been deleted, and the remaining broad gatewaydriver
      regression coverage now uses a test-local `internal/app/local` stack plus
@@ -1320,10 +1321,10 @@ be migrated before retiring the old stack:
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and
     attachment UI/rendering are not ported to `internal/app/services`.
-  - Slash commands such as the remaining `/connect` wizard UI rendering shell
-    and live remote ACP process reconnect/lifecycle behavior still have old
-    driver/app assumptions or missing service-native feature parity, so the old
-    TUI stack cannot be removed yet.
+  - Slash commands and panels such as richer `/connect` rendering, settings
+    panels, and live remote ACP process reconnect/lifecycle behavior still have
+    old driver/app assumptions or missing service-native feature parity, so the
+    old TUI stack cannot be removed yet.
   - Still pending: the current TUI driver/gateway bridge still imports the old
     `ports/session`, `ports/controller`, `ports/stream`, and public `kernel`
     event contracts for live turn streaming, replay, participants, and usage
@@ -1488,8 +1489,8 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: the TUI `/connect` wizard shell, durable live remote
-     controller process reconnect/lifecycle, and richer non-model config
+   - Still pending: richer `/connect` rendering/panel parity, durable live
+     remote controller process reconnect/lifecycle, and richer non-model config
      providers beyond prompt/context/sandbox backend settings.
 
 5. Settings, config, and model catalog
@@ -1500,10 +1501,11 @@ be migrated before retiring the old stack:
      fields, request-time model router, session reasoning override propagation,
      session mode service, compaction prompt policy, and ACP stdio
      model/config/mode projection backed by shared app services. Direct
-     `/connect` command execution now also lands in the shared model settings
-     contract for ACP clients and future APP consumers. The TUI gateway driver
-     still has its own wizard shell, but its final model connect/list/use/delete
-     operations use the same shared app services.
+     `/connect` command execution and the guided wizard's flow definition now
+     land in shared model setup contracts for ACP clients, TUI, and future APP
+     consumers. The TUI still owns Bubble Tea rendering/input mechanics, but
+     its final model connect/list/use/delete operations use the same shared app
+     services.
    - Migrated baseline: shared model catalog data now provides configured
      provider models, built-in provider model presets, capability defaults, and
      reasoning levels to TUI/future APP setup flows through `ModelService`.
@@ -2102,7 +2104,7 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially the `/connect` wizard UI rendering shell, live remote controller
+   especially richer `/connect` rendering/panel parity, live remote controller
    process lifecycle, and settings/diagnostics panel parity.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
@@ -2113,8 +2115,8 @@ Recommended sequence:
    app-service command/control path is now a baseline, so this milestone should
    focus on real async process/subagent lifecycle and durable output storage.
 5. Port the remaining TUI driver command shells and panels to
-   `internal/app/services`, especially `/connect` UI-shell parity and richer
-   task/settings panels, preserving existing rendering as surface-local code.
+   `internal/app/services`, especially richer `/connect`, task, and settings
+   panels, preserving existing rendering as surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
