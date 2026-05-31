@@ -27,6 +27,16 @@ type ControllerMode struct {
 	Description string `json:"description,omitempty"`
 }
 
+type ControllerConfigOption struct {
+	ID           string                   `json:"id,omitempty"`
+	Name         string                   `json:"name,omitempty"`
+	Type         string                   `json:"type,omitempty"`
+	Category     string                   `json:"category,omitempty"`
+	Description  string                   `json:"description,omitempty"`
+	CurrentValue string                   `json:"current_value,omitempty"`
+	Options      []ControllerConfigChoice `json:"options,omitempty"`
+}
+
 type ControllerLifecycle struct {
 	RunID           string    `json:"run_id,omitempty"`
 	Phase           string    `json:"phase,omitempty"`
@@ -57,6 +67,7 @@ type ControllerStatus struct {
 	EffortOptions   []ControllerConfigChoice `json:"effort_options,omitempty"`
 	Mode            string                   `json:"mode,omitempty"`
 	ModeOptions     []ControllerMode         `json:"mode_options,omitempty"`
+	ConfigOptions   []ControllerConfigOption `json:"config_options,omitempty"`
 	Lifecycle       *ControllerLifecycle     `json:"lifecycle,omitempty"`
 	Diagnostics     []ControllerDiagnostic   `json:"diagnostics,omitempty"`
 }
@@ -342,6 +353,7 @@ func (s ControllerService) statusFromSnapshot(ctx context.Context, snapshot sess
 		status.Mode = strings.TrimSpace(stateString(snapshot.State, StateControllerMode))
 	}
 	if len(remoteOptions) > 0 {
+		status.ConfigOptions = controllerConfigOptions(remoteOptions)
 		status = applyRemoteControllerConfigOptions(status, remoteOptions)
 	}
 	status.EffortOptions = s.controllerEffortOptions(ctx, status.Model)
@@ -799,6 +811,7 @@ func controllerStatusView(status ControllerStatus) *appviewmodel.ControllerStatu
 		EffortOptions:   controllerStatusViewChoices(status.EffortOptions),
 		Mode:            strings.TrimSpace(status.Mode),
 		ModeOptions:     controllerStatusViewModes(status.ModeOptions),
+		ConfigOptions:   controllerStatusViewConfigOptions(status.ConfigOptions),
 		Diagnostics:     controllerStatusViewDiagnostics(status.Diagnostics),
 	}
 	if status.Lifecycle != nil {
@@ -844,6 +857,25 @@ func controllerStatusViewModes(in []ControllerMode) []appviewmodel.ControllerMod
 			ID:          strings.TrimSpace(mode.ID),
 			Name:        strings.TrimSpace(mode.Name),
 			Description: strings.TrimSpace(mode.Description),
+		})
+	}
+	return out
+}
+
+func controllerStatusViewConfigOptions(in []ControllerConfigOption) []appviewmodel.ControllerConfigOption {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ControllerConfigOption, 0, len(in))
+	for _, option := range in {
+		out = append(out, appviewmodel.ControllerConfigOption{
+			ID:           strings.TrimSpace(option.ID),
+			Name:         strings.TrimSpace(option.Name),
+			Type:         strings.TrimSpace(option.Type),
+			Category:     strings.TrimSpace(option.Category),
+			Description:  strings.TrimSpace(option.Description),
+			CurrentValue: strings.TrimSpace(option.CurrentValue),
+			Options:      controllerStatusViewChoices(option.Options),
 		})
 	}
 	return out
@@ -1048,6 +1080,7 @@ func cloneControllerConfigOptions(in []control.ConfigOption) []control.ConfigOpt
 }
 
 func cloneControllerConfigOption(option control.ConfigOption) control.ConfigOption {
+	option.Type = strings.TrimSpace(option.Type)
 	option.ID = strings.TrimSpace(option.ID)
 	option.Name = strings.TrimSpace(option.Name)
 	option.Description = strings.TrimSpace(option.Description)
@@ -1055,6 +1088,50 @@ func cloneControllerConfigOption(option control.ConfigOption) control.ConfigOpti
 	option.CurrentValue = strings.TrimSpace(option.CurrentValue)
 	option.Options = append([]control.ConfigChoice(nil), option.Options...)
 	return option
+}
+
+func controllerConfigOptions(options []control.ConfigOption) []ControllerConfigOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]ControllerConfigOption, 0, len(options))
+	for _, option := range options {
+		option = cloneControllerConfigOption(option)
+		if option.ID == "" {
+			continue
+		}
+		out = append(out, ControllerConfigOption{
+			ID:           option.ID,
+			Name:         option.Name,
+			Type:         option.Type,
+			Category:     option.Category,
+			Description:  option.Description,
+			CurrentValue: option.CurrentValue,
+			Options:      controllerConfigChoicesFromControl(option.Options),
+		})
+	}
+	return out
+}
+
+func controllerConfigChoicesFromControl(choices []control.ConfigChoice) []ControllerConfigChoice {
+	if len(choices) == 0 {
+		return nil
+	}
+	out := make([]ControllerConfigChoice, 0, len(choices))
+	for _, choice := range choices {
+		value := strings.TrimSpace(choice.Value)
+		name := strings.TrimSpace(choice.Name)
+		description := strings.TrimSpace(choice.Description)
+		if value == "" && name == "" {
+			continue
+		}
+		out = append(out, ControllerConfigChoice{
+			Value:       value,
+			Name:        name,
+			Description: description,
+		})
+	}
+	return out
 }
 
 func currentControllerConfigValue(options []control.ConfigOption, kind string) (string, bool) {

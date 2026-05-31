@@ -1664,8 +1664,8 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: visual controller diagnostics panels and richer ACP
-     surface behavior.
+   - Still pending: richer ACP surface behavior and surface-specific rendering
+     for controller diagnostics.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -2186,13 +2186,19 @@ be migrated before retiring the old stack:
     - Migrated baseline: controller lifecycle retention limits now live in the
       shared compaction settings policy and are editable through the
       service-native settings panel/command path.
+    - Migrated baseline: `ControllerService.Panel` now exposes an APP-ready
+      controller panel contract with lifecycle summary, remote config fields,
+      available controller actions, and normalized diagnostics. The shared
+      `/controller` command and TUI dispatch use this service-native projection
+      instead of rendering controller state from scattered status fields.
     - Migrated baseline: host async command sessions now persist process id and
       durable stdout/stderr stream files when a sandbox `StateDir` is
       available. A restarted host sandbox can reopen a still-running process as
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: richer visual controller panels are not implemented.
+    - Still pending: surface-specific visual controller panel rendering remains
+      incomplete.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2431,7 +2437,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially visual settings/diagnostics/controller panels.
+   especially visual settings/diagnostics panels and surface-specific
+   controller rendering.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
 3. Finish surface-specific visual task-panel rendering and optional persistent
@@ -2440,9 +2447,9 @@ Recommended sequence:
    lifecycle events, compact retention indexes, and task-panel summaries are
    now baseline runtime capabilities.
 4. Port the remaining TUI panels and richer interactive flows to
-   `internal/app/services`, especially visual settings/controller panels and
-   richer task-panel rendering, preserving existing rendering as surface-local
-   code.
+   `internal/app/services`, especially visual settings panels and richer
+   task/controller panel rendering, preserving existing rendering as
+   surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and

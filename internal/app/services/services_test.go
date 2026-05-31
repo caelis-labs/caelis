@@ -635,12 +635,16 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Commands) != 11 {
-		t.Fatalf("commands = %#v, want eleven core commands", view.Commands)
+	if len(view.Commands) != 12 {
+		t.Fatalf("commands = %#v, want twelve core commands", view.Commands)
 	}
 	agent, ok := findCommandView(view.Commands, "agent")
 	if !ok || agent.InputHint != "list|use|add|install|update|remove" {
 		t.Fatalf("agent command = %#v ok=%v, want management hint", agent, ok)
+	}
+	controller, ok := findCommandView(view.Commands, "controller")
+	if !ok || controller.InputHint != "" {
+		t.Fatalf("controller command = %#v ok=%v, want controller panel command", controller, ok)
 	}
 	compact, ok := findCommandView(view.Commands, "compact")
 	if !ok || compact.InputHint != "" {
@@ -2557,6 +2561,127 @@ func TestControllerServiceStatusIncludesLifecycleDiagnostics(t *testing.T) {
 	}
 	if !strings.Contains(formatCommandStatus(view), "controller: reviewer remote=remote-reviewer phase=remote_session") {
 		t.Fatalf("formatted status = %q, want controller lifecycle", formatCommandStatus(view))
+	}
+}
+
+func TestControllerServicePanelProjectsSharedLifecycleConfigAndActions(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	state := session.State{
+		StateControllerConfigRef: "controller-1",
+		StateControllerConfigOptions: []control.ConfigOption{
+			{
+				ID:           "model",
+				Type:         "select",
+				Name:         "Model",
+				CurrentValue: "gpt-remote",
+				Options: []control.ConfigChoice{
+					{Value: "gpt-remote", Name: "GPT Remote"},
+					{Value: "gpt-next", Name: "GPT Next"},
+				},
+			},
+			{
+				ID:           "reasoning",
+				Type:         "select",
+				Name:         "Reasoning",
+				CurrentValue: "high",
+				Options: []control.ConfigChoice{
+					{Value: "low", Name: "Low"},
+					{Value: "high", Name: "High"},
+				},
+			},
+			{
+				ID:           "mode",
+				Type:         "select",
+				Name:         "Mode",
+				CurrentValue: "code",
+				Options: []control.ConfigChoice{
+					{Value: "plan", Name: "Plan"},
+					{Value: "code", Name: "Code"},
+				},
+			},
+		},
+	}
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: state,
+		},
+	}
+	runs := &recordingControllerRunSource{runs: []ControllerRunStatus{{
+		ID:              "run-1",
+		Phase:           control.ControllerInvocationRemoteSession,
+		SessionRef:      session.Ref{SessionID: "sess-controller"},
+		TurnID:          "turn-1",
+		Controller:      controller,
+		RemoteSessionID: "remote-reviewer",
+		Running:         true,
+		Active:          true,
+		StartedAt:       now,
+		UpdatedAt:       now.Add(time.Second),
+	}}}
+	svc, err := New(Config{
+		Runtime:        config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:         engine,
+		ControllerRuns: runs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	panel, err := svc.Controllers().Panel(ctx, ControllerPanelRequest{SessionRef: session.Ref{SessionID: "sess-controller"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panel.Active || panel.Status == nil || panel.Summary.Agent != "reviewer" || panel.Summary.RemoteSessionID != "remote-reviewer" || panel.Summary.Model != "gpt-remote" || panel.Summary.ReasoningEffort != "high" || panel.Summary.Mode != "code" || panel.Summary.Phase != string(control.ControllerInvocationRemoteSession) || !panel.Summary.Running {
+		t.Fatalf("controller panel summary = %#v status=%#v, want active controller config/lifecycle", panel.Summary, panel.Status)
+	}
+	if len(panel.Status.ConfigOptions) != 3 || panel.Status.ConfigOptions[0].CurrentValue != "gpt-remote" {
+		t.Fatalf("controller panel config options = %#v, want remote config options projected", panel.Status.ConfigOptions)
+	}
+	config, ok := findControllerPanelSection(panel.Sections, "configuration")
+	if !ok {
+		t.Fatalf("controller panel sections = %#v, want configuration section", panel.Sections)
+	}
+	modelField, ok := findControllerPanelField(config.Fields, "controller.model")
+	if !ok || modelField.Value != "gpt-remote" || !modelField.Editable || len(modelField.Options) != 2 {
+		t.Fatalf("model field = %#v ok=%v, want editable remote model field", modelField, ok)
+	}
+	modeField, ok := findControllerPanelField(config.Fields, "controller.mode")
+	if !ok || modeField.Value != "code" || !modeField.Editable || len(modeField.Options) != 2 {
+		t.Fatalf("mode field = %#v ok=%v, want editable remote mode field", modeField, ok)
+	}
+	if _, ok := findControllerPanelField(config.Fields, "controller.config.model"); ok {
+		t.Fatalf("config fields = %#v, should not duplicate canonical model field", config.Fields)
+	}
+	if action, ok := findControllerPanelAction(panel.Actions, "controller.mode.cycle"); !ok || !action.Enabled {
+		t.Fatalf("controller actions = %#v, want enabled mode cycle action", panel.Actions)
+	}
+	if !controllerPanelDiagnostic(panel.Diagnostics, "controller_lifecycle") {
+		t.Fatalf("controller diagnostics = %#v, want lifecycle diagnostic", panel.Diagnostics)
+	}
+
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "/controller",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"controller:", "agent=reviewer", "remote=remote-reviewer", "model=gpt-remote", "Mode: code"} {
+		if !strings.Contains(view.Output, want) {
+			t.Fatalf("controller output = %q, missing %q", view.Output, want)
+		}
 	}
 }
 
@@ -5401,6 +5526,42 @@ func findTaskPanelAction(actions []appviewmodel.TaskPanelAction, id string) (app
 func taskPanelDiagnostic(items []appviewmodel.TaskPanelDiagnostic, kind string, taskID string) bool {
 	for _, item := range items {
 		if item.Kind == kind && item.TaskID == taskID {
+			return true
+		}
+	}
+	return false
+}
+
+func findControllerPanelSection(sections []appviewmodel.ControllerPanelSection, id string) (appviewmodel.ControllerPanelSection, bool) {
+	for _, section := range sections {
+		if section.ID == id {
+			return section, true
+		}
+	}
+	return appviewmodel.ControllerPanelSection{}, false
+}
+
+func findControllerPanelField(fields []appviewmodel.ControllerPanelField, id string) (appviewmodel.ControllerPanelField, bool) {
+	for _, field := range fields {
+		if field.ID == id {
+			return field, true
+		}
+	}
+	return appviewmodel.ControllerPanelField{}, false
+}
+
+func findControllerPanelAction(actions []appviewmodel.ControllerPanelAction, id string) (appviewmodel.ControllerPanelAction, bool) {
+	for _, action := range actions {
+		if action.ID == id {
+			return action, true
+		}
+	}
+	return appviewmodel.ControllerPanelAction{}, false
+}
+
+func controllerPanelDiagnostic(items []appviewmodel.ControllerPanelDiagnostic, kind string) bool {
+	for _, item := range items {
+		if item.Kind == kind {
 			return true
 		}
 	}

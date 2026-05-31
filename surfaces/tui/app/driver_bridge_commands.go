@@ -44,6 +44,8 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 		return slashDoctorWithContext(ctx, driver, send, args)
 	case "connect":
 		return slashConnectWithContext(ctx, driver, send, args)
+	case "controller":
+		return slashSharedCommandWithContext(ctx, driver, send, strings.TrimSpace("/controller "+args), sharedCommandOptions{})
 	case "model":
 		return slashModelWithContext(ctx, driver, send, args)
 	case "approval":

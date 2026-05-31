@@ -399,6 +399,7 @@ func controllerStatusFromApp(status appservices.ControllerStatus) appviewmodel.C
 		EffortOptions:   controllerConfigChoicesFromApp(status.EffortOptions),
 		Mode:            strings.TrimSpace(status.Mode),
 		ModeOptions:     controllerModesFromApp(status.ModeOptions),
+		ConfigOptions:   controllerConfigOptionsFromApp(status.ConfigOptions),
 		Lifecycle:       controllerLifecycleFromApp(status.Lifecycle),
 		Diagnostics:     controllerDiagnosticsFromApp(status.Diagnostics),
 	}
@@ -463,6 +464,25 @@ func controllerModesFromApp(modes []appservices.ControllerMode) []appviewmodel.C
 			ID:          strings.TrimSpace(mode.ID),
 			Name:        strings.TrimSpace(mode.Name),
 			Description: strings.TrimSpace(mode.Description),
+		})
+	}
+	return out
+}
+
+func controllerConfigOptionsFromApp(options []appservices.ControllerConfigOption) []appviewmodel.ControllerConfigOption {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ControllerConfigOption, 0, len(options))
+	for _, option := range options {
+		out = append(out, appviewmodel.ControllerConfigOption{
+			ID:           strings.TrimSpace(option.ID),
+			Name:         strings.TrimSpace(option.Name),
+			Type:         strings.TrimSpace(option.Type),
+			Category:     strings.TrimSpace(option.Category),
+			Description:  strings.TrimSpace(option.Description),
+			CurrentValue: strings.TrimSpace(option.CurrentValue),
+			Options:      controllerConfigChoicesFromApp(option.Options),
 		})
 	}
 	return out

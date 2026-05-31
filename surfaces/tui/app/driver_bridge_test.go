@@ -324,6 +324,23 @@ func TestSlashSettingsUsesSharedCommandExecutor(t *testing.T) {
 	}
 }
 
+func TestSlashControllerUsesSharedCommandExecutor(t *testing.T) {
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "controller", Output: "controller:\n  summary: agent=reviewer  remote=remote-1  mode=manual"},
+	}
+	var msgs []tea.Msg
+	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/controller")
+	if result.Err != nil || !result.SuppressTurnDivider {
+		t.Fatalf("controller result = %#v, want handled shared command", result)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/controller" {
+		t.Fatalf("controller command calls=%d input=%q, want shared /controller command", driver.commandCalls, driver.lastCommandInput)
+	}
+	if !noticeMessagesContain(msgs, "controller:") || !noticeMessagesContain(msgs, "agent=reviewer") {
+		t.Fatalf("controller messages = %#v, want shared controller output", msgs)
+	}
+}
+
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeAppReplayDriver{
 		bridgeTestDriver: bridgeTestDriver{
@@ -970,7 +987,7 @@ func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 		},
 	}
 	commands := appendAgentSlashCommandsWithContext(context.Background(), driver, DefaultCommands())
-	for _, want := range []string{"help", "agent", "status", "resume", "model", "search", "draft"} {
+	for _, want := range []string{"help", "agent", "controller", "status", "resume", "model", "search", "draft"} {
 		if !stringSliceContains(commands, want) {
 			t.Fatalf("ACP commands = %#v, missing %q", commands, want)
 		}
@@ -982,6 +999,9 @@ func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 	}
 	if !isDispatchableSlashCommandWithContext(context.Background(), driver, "/status") {
 		t.Fatal("/status should remain locally dispatchable under ACP")
+	}
+	if !isDispatchableSlashCommandWithContext(context.Background(), driver, "/controller") {
+		t.Fatal("/controller should remain locally dispatchable under ACP")
 	}
 	for _, remoteOrDisabled := range []string{"/search docs", "/draft note", "/connect"} {
 		if isDispatchableSlashCommandWithContext(context.Background(), driver, remoteOrDisabled) {

@@ -559,7 +559,7 @@ func appendCommandCatalogSlashCommands(commands []string, catalog tuidriver.Comm
 }
 
 func acpSlashCommands(status tuidriver.AgentStatusSnapshot) []string {
-	out := []string{"help", "agent", "status", "resume", "model", "exit", "quit"}
+	out := []string{"help", "agent", "controller", "status", "resume", "model", "exit", "quit"}
 	seen := map[string]struct{}{}
 	for _, command := range out {
 		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
