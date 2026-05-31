@@ -8,6 +8,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -21,13 +22,39 @@ type GatewayService interface {
 	Interrupt(context.Context, kernel.InterruptRequest) error
 	ResumeSession(context.Context, kernel.ResumeSessionRequest) (session.LoadedSession, error)
 	ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error)
-	ReplayEvents(context.Context, kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error)
 	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
 	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
 	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
 	PromptParticipant(context.Context, kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error)
 	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
 	ActiveTurns() []kernel.ActiveTurnState
+}
+
+type BeginTurnRequest struct {
+	SessionRef   coresession.Ref
+	Input        string
+	ContentParts []model.ContentPart
+	Model        string
+	Surface      string
+	Meta         map[string]any
+}
+
+type BeginTurnResult struct {
+	Session coresession.Session
+	Turn    Turn
+}
+
+type SubmitActiveTurnRequest struct {
+	SessionRef coresession.Ref
+	Submission coreruntime.Submission
+}
+
+type PromptParticipantRequest struct {
+	SessionRef    coresession.Ref
+	ParticipantID string
+	Input         string
+	ContentParts  []model.ContentPart
+	Source        string
 }
 
 type ModelConfig struct {
@@ -178,6 +205,9 @@ type DriverStack struct {
 	Workspace session.WorkspaceRef
 
 	StartSessionFn                     func(context.Context, string, string) (coresession.Session, error)
+	BeginTurnFn                        func(context.Context, BeginTurnRequest) (BeginTurnResult, error)
+	SubmitActiveTurnFn                 func(context.Context, SubmitActiveTurnRequest) error
+	PromptParticipantFn                func(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
 	ACPControllerStatusFn              func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
 	DefaultModelAliasFn                func() string
 	AppStatusViewFn                    func(context.Context, coresession.Ref) (appviewmodel.StatusView, error)

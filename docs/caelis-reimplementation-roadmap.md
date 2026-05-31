@@ -1401,6 +1401,12 @@ be migrated before retiring the old stack:
      reasoning/assistant deltas. Conversion to the current gateway envelope
      shape is now limited to residual boundary helpers such as errors and
      approval-review/tool compatibility hints.
+   - Migrated baseline: the production app-service TUI submit and side-agent
+     continuation paths now bypass the old `GatewayService` turn envelope and
+     return core-native `tuidriver.Turn` handles directly. These handles keep
+     only app view-model session events and core runtime submissions/cancel
+     results, without maintaining parallel `kernel.EventEnvelope`
+     channel/history state.
    - Migrated baseline: app-service-bound TUI `/resume` replay now uses the
      same core-session transcript projector as live app turns, including
      participant prompt restoration, instead of first adapting replayed app
@@ -1445,14 +1451,13 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: `surfaces/tui/gatewaydriver` still carries old
-     `kernel.TurnHandle` and `ports/session` compatibility for the legacy
-     `GatewayService` adapter, and `surfaces/tui/app` still imports old
-     gateway event/protocol types for transcript renderer compatibility,
-     terminal/tool formatting, and participant projections. Retiring those
-     imports requires moving the remaining TUI bridge protocol to
-     `core/runtime`, `core/session`, and `internal/app/viewmodel` in one larger
-     slice.
+   - Still pending: `surfaces/tui/gatewaydriver` still carries a small old
+     `kernel.TurnHandle` wrapper for the legacy `GatewayService` adapter, and
+     `surfaces/tui/app` still imports old gateway event/protocol types for
+     transcript renderer compatibility, terminal/tool formatting, and
+     participant projections. Retiring those imports requires moving the
+     remaining TUI bridge protocol to `core/runtime`, `core/session`, and
+     `internal/app/viewmodel`.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

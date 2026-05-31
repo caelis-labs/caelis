@@ -20,8 +20,8 @@ import (
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
@@ -513,11 +513,11 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 		t.Fatal("Submit() turn = nil, want core turn")
 	}
 	defer turn.Close()
-	legacyTurn, ok := turn.(interface {
-		Events() <-chan kernel.EventEnvelope
+	appTurn, ok := turn.(interface {
+		SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 	})
 	if !ok {
-		t.Fatal("turn does not expose legacy gateway events")
+		t.Fatal("turn does not expose app session events")
 	}
 
 	var assistantText string
@@ -525,7 +525,7 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 	defer timer.Stop()
 	for {
 		select {
-		case env, ok := <-legacyTurn.Events():
+		case env, ok := <-appTurn.SessionEvents():
 			if !ok {
 				if assistantText != "core tui pong" {
 					t.Fatalf("assistant text = %q, want core tui pong", assistantText)
@@ -535,11 +535,11 @@ func TestCoreTUIDriverUsesCoreLocalStack(t *testing.T) {
 				}
 				return
 			}
-			if env.Err != nil {
-				t.Fatalf("turn event error = %v", env.Err)
+			if strings.TrimSpace(env.Error) != "" {
+				t.Fatalf("turn event error = %v", env.Error)
 			}
-			if env.Event.Narrative != nil && env.Event.Narrative.Role == kernel.NarrativeRoleAssistant {
-				assistantText += env.Event.Narrative.Text
+			if env.Transcript != nil && env.Transcript.Type == "assistant" {
+				assistantText += env.Transcript.Text
 			}
 		case <-timer.C:
 			turn.Cancel()

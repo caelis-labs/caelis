@@ -17,6 +17,7 @@ import (
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
@@ -322,13 +323,6 @@ func TestAppServiceTurnHandlePublishesSessionEvents(t *testing.T) {
 	if appEnv.Transcript == nil || appEnv.Transcript.Text != "live answer" {
 		t.Fatalf("SessionEvents() event = %#v, want app transcript event", appEnv)
 	}
-	kernelEnv, ok := <-handle.Events()
-	if !ok {
-		t.Fatal("Events() closed before compatibility event")
-	}
-	if kernelEnv.Event.Narrative == nil || kernelEnv.Event.Narrative.Text != "live answer" {
-		t.Fatalf("Events() event = %#v, want compatibility gateway event", kernelEnv)
-	}
 }
 
 func TestAppServiceAgentTurnHandlePublishesSessionEvents(t *testing.T) {
@@ -364,9 +358,8 @@ func TestAppServiceAgentTurnHandlePublishesSessionEvents(t *testing.T) {
 	if appEnv.Transcript == nil || appEnv.Transcript.Text != "participant answer" {
 		t.Fatalf("SessionEvents() event = %#v, want participant app transcript event", appEnv)
 	}
-	kernelEnv := <-handle.Events()
-	if kernelEnv.Event.Origin == nil || kernelEnv.Event.Origin.ParticipantID != "reviewer" {
-		t.Fatalf("Events() event = %#v, want compatibility participant origin", kernelEnv)
+	if appEnv.Participant == nil || appEnv.Participant.ID != "reviewer" {
+		t.Fatalf("SessionEvents() participant = %#v, want reviewer", appEnv.Participant)
 	}
 }
 
@@ -1383,28 +1376,28 @@ func (i *appServiceDriverAgentInstaller) InstallableBuiltinACPAgentOptions(_ con
 	return out, nil
 }
 
-func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []kernel.EventEnvelope {
+func drainGatewayDriverTestTurn(t *testing.T, turn Turn) []appviewmodel.SessionEventEnvelope {
 	t.Helper()
 	if turn == nil {
 		t.Fatal("turn = nil")
 	}
-	legacyTurn, ok := turn.(interface {
-		Events() <-chan kernel.EventEnvelope
+	appTurn, ok := turn.(interface {
+		SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 	})
 	if !ok {
-		t.Fatal("turn does not expose legacy gateway events")
+		t.Fatal("turn does not expose app session events")
 	}
 	defer turn.Close()
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
-	var out []kernel.EventEnvelope
+	var out []appviewmodel.SessionEventEnvelope
 	for {
 		select {
-		case env, ok := <-legacyTurn.Events():
+		case env, ok := <-appTurn.SessionEvents():
 			if !ok {
 				return out
 			}
-			out = append(out, env)
+			out = append(out, appviewmodel.CloneSessionEventEnvelope(env))
 		case <-timer.C:
 			_ = turn.Close()
 			t.Fatal("turn did not close")

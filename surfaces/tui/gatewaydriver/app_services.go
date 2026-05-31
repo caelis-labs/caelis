@@ -24,6 +24,9 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	gateway := newAppServiceGateway(svc)
 	applyRuntimeDefaults(stack, runtimeCfg)
 	stack.GatewayFn = func() GatewayService { return gateway }
+	stack.BeginTurnFn = gateway.BeginCoreTurn
+	stack.SubmitActiveTurnFn = gateway.SubmitCoreActiveTurn
+	stack.PromptParticipantFn = gateway.PromptCoreParticipant
 	stack.StartSessionFn = func(ctx context.Context, preferredSessionID string, _ string) (coresession.Session, error) {
 		active, err := svc.Sessions().Start(ctx, appservices.StartSessionRequest{
 			PreferredSessionID: strings.TrimSpace(preferredSessionID),

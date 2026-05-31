@@ -370,22 +370,55 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 		return nil, err
 	}
 	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
-		err := gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
-			SessionRef:   activeSession.SessionRef,
-			Kind:         kernel.SubmissionKindConversation,
+		coreSub := coreruntime.Submission{
+			Kind:         coreruntime.SubmissionConversation,
 			Text:         input,
 			ContentParts: contentParts,
-			Metadata: map[string]any{
+			Meta: map[string]any{
 				"submission_mode": string(submission.Mode),
 				"display_text":    strings.TrimSpace(submission.DisplayText),
 			},
-		})
+		}
+		if d.stack != nil && d.stack.SubmitActiveTurnFn != nil {
+			err = d.stack.SubmitActiveTurnFn(ctx, SubmitActiveTurnRequest{
+				SessionRef: coreRefFromPort(activeSession.SessionRef),
+				Submission: coreSub,
+			})
+		} else {
+			err = gw.SubmitActiveTurn(ctx, kernel.SubmitActiveTurnRequest{
+				SessionRef:   activeSession.SessionRef,
+				Kind:         kernel.SubmissionKindConversation,
+				Text:         input,
+				ContentParts: contentParts,
+				Metadata:     maps.Clone(coreSub.Meta),
+			})
+		}
 		if err == nil {
 			return nil, nil
 		}
 		if !isNoActiveRunError(err) {
 			return nil, err
 		}
+	}
+	if d.stack != nil && d.stack.BeginTurnFn != nil {
+		result, err := d.stack.BeginTurnFn(ctx, BeginTurnRequest{
+			SessionRef:   coreRefFromPort(activeSession.SessionRef),
+			Input:        input,
+			ContentParts: contentParts,
+			Surface:      d.bindingKey,
+			Meta: map[string]any{
+				"submission_mode": string(submission.Mode),
+				"display_text":    strings.TrimSpace(submission.DisplayText),
+			},
+		})
+		if err != nil {
+			return nil, err
+		}
+		d.mu.Lock()
+		d.session = portSessionFromCore(result.Session)
+		d.hasSession = true
+		d.mu.Unlock()
+		return result.Turn, nil
 	}
 	result, err := gw.BeginTurn(ctx, kernel.BeginTurnRequest{
 		SessionRef:   activeSession.SessionRef,
@@ -572,25 +605,6 @@ func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCa
 	return out, nil
 }
 
-func (d *GatewayDriver) ReplayEvents(ctx context.Context) ([]kernel.EventEnvelope, error) {
-	activeSession, ok := d.currentSession()
-	if !ok {
-		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
-	}
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, err
-	}
-	result, err := gw.ReplayEvents(ctx, kernel.ReplayEventsRequest{
-		SessionRef: activeSession.SessionRef,
-		BindingKey: d.bindingKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return result.Events, nil
-}
-
 func (d *GatewayDriver) ReplaySessionEvents(ctx context.Context) ([]appviewmodel.SessionEventEnvelope, error) {
 	activeSession, ok := d.currentSession()
 	if !ok {
@@ -695,6 +709,25 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 	if err != nil {
 		return nil, err
 	}
+	if d.stack != nil && d.stack.PromptParticipantFn != nil {
+		result, err := d.stack.PromptParticipantFn(ctx, PromptParticipantRequest{
+			SessionRef:    coreRefFromPort(activeSession.SessionRef),
+			ParticipantID: participantID,
+			Input:         prompt,
+			ContentParts:  contentParts,
+			Source:        "user_side_agent",
+		})
+		if err != nil {
+			return nil, err
+		}
+		if result.Session.Ref.SessionID != "" {
+			d.mu.Lock()
+			d.session = portSessionFromCore(result.Session)
+			d.hasSession = true
+			d.mu.Unlock()
+		}
+		return result.Turn, nil
+	}
 	result, err := gw.PromptParticipant(ctx, kernel.PromptParticipantRequest{
 		SessionRef:    activeSession.SessionRef,
 		BindingKey:    d.bindingKey,
@@ -775,9 +808,6 @@ func (t gatewayTurn) HandleID() string            { return t.handle.HandleID() }
 func (t gatewayTurn) RunID() string               { return t.handle.RunID() }
 func (t gatewayTurn) TurnID() string              { return t.handle.TurnID() }
 func (t gatewayTurn) SessionRef() coresession.Ref { return coreRefFromPort(t.handle.SessionRef()) }
-func (t gatewayTurn) Events() <-chan kernel.EventEnvelope {
-	return t.handle.Events()
-}
 func (t gatewayTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
 	if handle, ok := t.handle.(sessionEventTurnHandle); ok {
 		return handle.SessionEvents()

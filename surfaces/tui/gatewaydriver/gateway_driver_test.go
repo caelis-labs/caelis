@@ -52,18 +52,18 @@ func closeGatewayDriverTestTurn(t *testing.T, turn Turn) {
 	if turn == nil {
 		return
 	}
-	legacyTurn, ok := turn.(interface {
-		Events() <-chan kernel.EventEnvelope
+	appTurn, ok := turn.(interface {
+		SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 	})
 	if !ok {
-		t.Fatal("turn does not expose legacy gateway events")
+		t.Fatal("turn does not expose app session events")
 	}
 	turn.Cancel()
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	for {
 		select {
-		case _, ok := <-legacyTurn.Events():
+		case _, ok := <-appTurn.SessionEvents():
 			if !ok {
 				if err := turn.Close(); err != nil {
 					t.Fatalf("Close() error = %v", err)
@@ -3128,10 +3128,6 @@ func (g *activeSubmitGatewayService) ResumeSession(context.Context, kernel.Resum
 
 func (g *activeSubmitGatewayService) ListSessions(context.Context, kernel.ListSessionsRequest) (session.SessionList, error) {
 	return session.SessionList{}, nil
-}
-
-func (g *activeSubmitGatewayService) ReplayEvents(context.Context, kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error) {
-	return kernel.ReplayEventsResult{}, nil
 }
 
 func (g *activeSubmitGatewayService) ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {

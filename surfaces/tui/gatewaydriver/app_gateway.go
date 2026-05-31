@@ -15,7 +15,6 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 type appServiceGateway struct {
@@ -25,7 +24,8 @@ type appServiceGateway struct {
 }
 
 type appServiceActiveTurn interface {
-	kernel.TurnHandle
+	Turn
+	CreatedAt() time.Time
 	state() kernel.ActiveTurnState
 }
 
@@ -37,15 +37,8 @@ func newAppServiceGateway(svc appservices.Services) *appServiceGateway {
 }
 
 func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {
-	ref := coreRefFromPort(req.SessionRef)
-	snapshot, err := g.services.Sessions().Load(ctx, ref)
-	if err != nil {
-		return kernel.BeginTurnResult{}, err
-	}
-	controller := controllerFromCoreSnapshot(snapshot)
-	snapshot.Session.Controller = controller
-	turn, err := g.services.Turns().Begin(ctx, appservices.BeginTurnRequest{
-		SessionRef:   ref,
+	result, err := g.BeginCoreTurn(ctx, BeginTurnRequest{
+		SessionRef:   coreRefFromPort(req.SessionRef),
 		Input:        req.Input,
 		ContentParts: coremodel.CloneContentParts(req.ContentParts),
 		Model:        req.ModelHint,
@@ -55,16 +48,54 @@ func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnR
 	if err != nil {
 		return kernel.BeginTurnResult{}, err
 	}
+	return kernel.BeginTurnResult{
+		Session: portSessionFromCore(result.Session),
+		Handle:  kernelTurnHandleCompat{turn: result.Turn},
+	}, nil
+}
+
+func (g *appServiceGateway) BeginCoreTurn(ctx context.Context, req BeginTurnRequest) (BeginTurnResult, error) {
+	ref := coresession.NormalizeRef(req.SessionRef)
+	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	if err != nil {
+		return BeginTurnResult{}, err
+	}
+	controller := controllerFromCoreSnapshot(snapshot)
+	snapshot.Session.Controller = controller
+	turn, err := g.services.Turns().Begin(ctx, appservices.BeginTurnRequest{
+		SessionRef:   ref,
+		Input:        req.Input,
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
+		Model:        req.Model,
+		Surface:      req.Surface,
+		Meta:         maps.Clone(req.Meta),
+	})
+	if err != nil {
+		return BeginTurnResult{}, err
+	}
 	handle := newAppServiceTurnHandle(g.services, turn)
 	g.register(handle)
 	go g.forward(handle)
-	return kernel.BeginTurnResult{
-		Session: portSessionFromCore(snapshot.Session),
-		Handle:  handle,
+	return BeginTurnResult{
+		Session: snapshot.Session,
+		Turn:    handle,
 	}, nil
 }
 
 func (g *appServiceGateway) SubmitActiveTurn(ctx context.Context, req kernel.SubmitActiveTurnRequest) error {
+	return g.SubmitCoreActiveTurn(ctx, SubmitActiveTurnRequest{
+		SessionRef: coreRefFromPort(req.SessionRef),
+		Submission: coreSubmissionFromKernelSubmit(kernel.SubmitRequest{
+			Kind:         req.Kind,
+			Text:         req.Text,
+			ContentParts: coremodel.CloneContentParts(req.ContentParts),
+			Metadata:     maps.Clone(req.Metadata),
+			Approval:     req.Approval,
+		}),
+	})
+}
+
+func (g *appServiceGateway) SubmitCoreActiveTurn(ctx context.Context, req SubmitActiveTurnRequest) error {
 	handle := g.activeForSession(req.SessionRef.SessionID)
 	if handle == nil {
 		return &kernel.Error{
@@ -80,13 +111,7 @@ func (g *appServiceGateway) SubmitActiveTurn(ctx context.Context, req kernel.Sub
 			Message: "no active core turn for session",
 		}
 	}
-	return handle.Submit(ctx, kernel.SubmitRequest{
-		Kind:         req.Kind,
-		Text:         req.Text,
-		ContentParts: coremodel.CloneContentParts(req.ContentParts),
-		Metadata:     maps.Clone(req.Metadata),
-		Approval:     req.Approval,
-	})
+	return handle.Submit(ctx, cloneCoreSubmission(req.Submission))
 }
 
 func coreSubmissionFromKernelSubmit(req kernel.SubmitRequest) coreruntime.Submission {
@@ -139,25 +164,6 @@ func (g *appServiceGateway) ListSessions(ctx context.Context, req kernel.ListSes
 		return portsession.SessionList{}, err
 	}
 	return g.sessionListFromCore(ctx, page), nil
-}
-
-func (g *appServiceGateway) ReplayEvents(ctx context.Context, req kernel.ReplayEventsRequest) (kernel.ReplayEventsResult, error) {
-	events, err := g.services.Events().Replay(ctx, appservices.EventReplayRequest{
-		SessionRef:       coreRefFromPort(req.SessionRef),
-		After:            coresession.Cursor(req.Cursor),
-		Limit:            req.Limit,
-		IncludeTransient: req.IncludeTransient,
-	})
-	if err != nil {
-		return kernel.ReplayEventsResult{}, err
-	}
-	out := make([]kernel.EventEnvelope, 0)
-	for env := range events {
-		if converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env); ok {
-			out = append(out, converted)
-		}
-	}
-	return kernel.ReplayEventsResult{Events: out}, nil
 }
 
 func (g *appServiceGateway) ControlPlaneState(ctx context.Context, req kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
@@ -225,15 +231,32 @@ func (g *appServiceGateway) AttachParticipant(ctx context.Context, req kernel.At
 }
 
 func (g *appServiceGateway) PromptParticipant(ctx context.Context, req kernel.PromptParticipantRequest) (kernel.BeginTurnResult, error) {
-	ref := coreRefFromPort(req.SessionRef)
-	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	result, err := g.PromptCoreParticipant(ctx, PromptParticipantRequest{
+		SessionRef:    coreRefFromPort(req.SessionRef),
+		ParticipantID: req.ParticipantID,
+		Input:         req.Input,
+		ContentParts:  coremodel.CloneContentParts(req.ContentParts),
+		Source:        req.Source,
+	})
 	if err != nil {
 		return kernel.BeginTurnResult{}, err
+	}
+	return kernel.BeginTurnResult{
+		Session: portSessionFromCore(result.Session),
+		Handle:  kernelTurnHandleCompat{turn: result.Turn},
+	}, nil
+}
+
+func (g *appServiceGateway) PromptCoreParticipant(ctx context.Context, req PromptParticipantRequest) (BeginTurnResult, error) {
+	ref := coresession.NormalizeRef(req.SessionRef)
+	snapshot, err := g.services.Sessions().Load(ctx, ref)
+	if err != nil {
+		return BeginTurnResult{}, err
 	}
 	participants := participantsFromCoreSnapshot(snapshot)
 	participant, ok := findCoreParticipant(participants, req.ParticipantID)
 	if !ok {
-		return kernel.BeginTurnResult{}, fmt.Errorf("core app-service TUI gateway: participant %q is not attached", strings.TrimSpace(req.ParticipantID))
+		return BeginTurnResult{}, fmt.Errorf("core app-service TUI gateway: participant %q is not attached", strings.TrimSpace(req.ParticipantID))
 	}
 	snapshot.Session.Participants = participants
 	handle := newAppServiceAgentTurnHandle(g.services, snapshot.Session.Ref, participant, req.Input, coremodel.CloneContentParts(req.ContentParts), req.Source)
@@ -242,9 +265,9 @@ func (g *appServiceGateway) PromptParticipant(ctx context.Context, req kernel.Pr
 		defer g.unregister(handle)
 		handle.run(ctx)
 	}()
-	return kernel.BeginTurnResult{
-		Session: portSessionFromCore(snapshot.Session),
-		Handle:  handle,
+	return BeginTurnResult{
+		Session: snapshot.Session,
+		Turn:    handle,
 	}, nil
 }
 
@@ -307,18 +330,14 @@ func (g *appServiceGateway) forward(handle *appServiceTurnHandle) {
 type appServiceTurnHandle struct {
 	services  appservices.Services
 	turn      coreruntime.Turn
-	events    chan kernel.EventEnvelope
 	appEvents chan appviewmodel.SessionEventEnvelope
 	done      chan struct{}
-	mu        sync.Mutex
-	history   []kernel.EventEnvelope
 }
 
 func newAppServiceTurnHandle(services appservices.Services, turn coreruntime.Turn) *appServiceTurnHandle {
 	return &appServiceTurnHandle{
 		services:  services,
 		turn:      turn,
-		events:    make(chan kernel.EventEnvelope, 32),
 		appEvents: make(chan appviewmodel.SessionEventEnvelope, 32),
 		done:      make(chan struct{}),
 	}
@@ -336,48 +355,19 @@ func (h *appServiceTurnHandle) TurnID() string {
 	return h.turn.ID()
 }
 
-func (h *appServiceTurnHandle) SessionRef() portsession.SessionRef {
-	return portRefFromCore(h.turn.SessionRef())
+func (h *appServiceTurnHandle) SessionRef() coresession.Ref {
+	return h.turn.SessionRef()
 }
 
 func (h *appServiceTurnHandle) CreatedAt() time.Time {
 	return h.turn.StartedAt()
 }
 
-func (h *appServiceTurnHandle) Events() <-chan kernel.EventEnvelope {
-	return h.events
-}
-
 func (h *appServiceTurnHandle) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
 	return h.appEvents
 }
 
-func (h *appServiceTurnHandle) EventsAfter(cursor string) ([]kernel.EventEnvelope, string, error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	cursor = strings.TrimSpace(cursor)
-	start := 0
-	if cursor != "" {
-		for i, env := range h.history {
-			if strings.TrimSpace(env.Cursor) == cursor {
-				start = i + 1
-				break
-			}
-		}
-	}
-	out := append([]kernel.EventEnvelope(nil), h.history[start:]...)
-	next := cursor
-	if len(out) > 0 {
-		next = out[len(out)-1].Cursor
-	}
-	return out, next, nil
-}
-
-func (h *appServiceTurnHandle) Submit(ctx context.Context, req kernel.SubmitRequest) error {
-	return h.SubmitCore(ctx, coreSubmissionFromKernelSubmit(req))
-}
-
-func (h *appServiceTurnHandle) SubmitCore(ctx context.Context, submission coreruntime.Submission) error {
+func (h *appServiceTurnHandle) Submit(ctx context.Context, submission coreruntime.Submission) error {
 	submission = cloneCoreSubmission(submission)
 	if submission.Kind == coreruntime.SubmissionApproval && submission.Approval != nil {
 		_, err := h.services.Approvals().Submit(ctx, h.turn, appservices.ApprovalDecisionRequest{
@@ -402,7 +392,81 @@ func cloneCoreSubmission(in coreruntime.Submission) coreruntime.Submission {
 	return out
 }
 
-func (h *appServiceTurnHandle) Cancel() kernel.CancelResult {
+type kernelTurnHandleCompat struct {
+	turn Turn
+}
+
+func (h kernelTurnHandleCompat) HandleID() string {
+	if h.turn == nil {
+		return ""
+	}
+	return h.turn.HandleID()
+}
+
+func (h kernelTurnHandleCompat) RunID() string {
+	if h.turn == nil {
+		return ""
+	}
+	return h.turn.RunID()
+}
+
+func (h kernelTurnHandleCompat) TurnID() string {
+	if h.turn == nil {
+		return ""
+	}
+	return h.turn.TurnID()
+}
+
+func (h kernelTurnHandleCompat) SessionRef() portsession.SessionRef {
+	if h.turn == nil {
+		return portsession.SessionRef{}
+	}
+	return portRefFromCore(h.turn.SessionRef())
+}
+
+func (h kernelTurnHandleCompat) CreatedAt() time.Time {
+	if h.turn == nil {
+		return time.Time{}
+	}
+	if created, ok := h.turn.(interface{ CreatedAt() time.Time }); ok {
+		return created.CreatedAt()
+	}
+	return time.Time{}
+}
+
+func (h kernelTurnHandleCompat) Events() <-chan kernel.EventEnvelope {
+	out := make(chan kernel.EventEnvelope)
+	close(out)
+	return out
+}
+
+func (h kernelTurnHandleCompat) EventsAfter(cursor string) ([]kernel.EventEnvelope, string, error) {
+	return nil, strings.TrimSpace(cursor), nil
+}
+
+func (h kernelTurnHandleCompat) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
+	if h.turn == nil {
+		return nil
+	}
+	if appTurn, ok := h.turn.(interface {
+		SessionEvents() <-chan appviewmodel.SessionEventEnvelope
+	}); ok {
+		return appTurn.SessionEvents()
+	}
+	return nil
+}
+
+func (h kernelTurnHandleCompat) Submit(ctx context.Context, req kernel.SubmitRequest) error {
+	if h.turn == nil {
+		return nil
+	}
+	return h.turn.Submit(ctx, coreSubmissionFromKernelSubmit(req))
+}
+
+func (h kernelTurnHandleCompat) Cancel() kernel.CancelResult {
+	if h.turn == nil {
+		return kernel.CancelResult{Status: kernel.CancelStatusAlreadyCancelled}
+	}
 	result := h.turn.Cancel()
 	status := kernel.CancelStatusAlreadyCancelled
 	if result.Status == coreruntime.CancelCancelled {
@@ -411,37 +475,32 @@ func (h *appServiceTurnHandle) Cancel() kernel.CancelResult {
 	return kernel.CancelResult{Status: status, Err: result.Err}
 }
 
+func (h kernelTurnHandleCompat) Close() error {
+	if h.turn == nil {
+		return nil
+	}
+	return h.turn.Close()
+}
+
+func (h *appServiceTurnHandle) Cancel() coreruntime.CancelResult {
+	return h.turn.Cancel()
+}
+
 func (h *appServiceTurnHandle) Close() error {
 	return h.turn.Close()
 }
 
 func (h *appServiceTurnHandle) forward() {
-	defer close(h.events)
 	defer close(h.appEvents)
 	defer close(h.done)
 	stream, err := h.services.Events().SubscribeTurn(context.Background(), h.turn)
 	if err != nil {
 		h.publishAppEvent(appviewmodel.EventEnvelopeFromError(err.Error()))
-		h.publishKernelEvent(kernel.EventEnvelope{Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: err.Error()}})
 		return
 	}
 	for env := range stream {
 		appEnv := appviewmodel.CloneSessionEventEnvelope(env)
-		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
-		if !ok {
-			h.publishAppEvent(appEnv)
-			continue
-		}
-		converted.Event.HandleID = h.HandleID()
-		converted.Event.RunID = h.RunID()
-		if converted.Event.TurnID == "" {
-			converted.Event.TurnID = h.TurnID()
-		}
-		h.mu.Lock()
-		h.history = append(h.history, converted)
-		h.mu.Unlock()
 		h.publishAppEvent(appEnv)
-		h.publishKernelEvent(converted)
 	}
 }
 
@@ -449,16 +508,9 @@ func (h *appServiceTurnHandle) publishAppEvent(env appviewmodel.SessionEventEnve
 	h.appEvents <- appviewmodel.CloneSessionEventEnvelope(env)
 }
 
-func (h *appServiceTurnHandle) publishKernelEvent(env kernel.EventEnvelope) {
-	select {
-	case h.events <- env:
-	default:
-	}
-}
-
 func (h *appServiceTurnHandle) state() kernel.ActiveTurnState {
 	return kernel.ActiveTurnState{
-		SessionRef: h.SessionRef(),
+		SessionRef: portRefFromCore(h.SessionRef()),
 		Kind:       kernel.ActiveTurnKindKernel,
 		HandleID:   h.HandleID(),
 		RunID:      h.RunID(),
