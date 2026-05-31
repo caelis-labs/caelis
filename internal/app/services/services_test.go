@@ -1002,6 +1002,52 @@ func TestCommandServiceExecuteConnectConfiguresAndUsesModel(t *testing.T) {
 	}
 }
 
+func TestCommandServiceExecuteConnectUsesPreparedCodeFreeConfig(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	auth := &recordingCodeFreeAuth{
+		ensureResult: CodeFreeAuthResult{CredentialPath: "/tmp/codefree.json", UserID: "user-1", HasRefreshToken: true},
+	}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-connect"}},
+	}}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   engine,
+		Settings: manager,
+		CodeFree: auth,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-connect"},
+		Input:      "/connect codefree GLM-4.7",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(view.Output, "connected: codefree/glm-4.7") || !strings.Contains(view.Output, "base_url: https://www.srdcloud.cn") {
+		t.Fatalf("connect output = %q, want prepared CodeFree config", view.Output)
+	}
+	if !auth.ensureReq.OpenBrowser || auth.ensureReq.BaseURL != "https://www.srdcloud.cn" {
+		t.Fatalf("codefree auth req = %#v, want browser auth at default base URL", auth.ensureReq)
+	}
+	cfg, err := manager.ResolveModel("codefree/glm-4.7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AuthType != string(model.AuthNone) || cfg.BaseURL != "https://www.srdcloud.cn" {
+		t.Fatalf("codefree cfg = %#v, want no-auth prepared config", cfg)
+	}
+	if engine.state[StateCurrentModelID] != cfg.ID {
+		t.Fatalf("state after codefree connect = %#v, want current model %q", engine.state, cfg.ID)
+	}
+}
+
 func TestCommandServiceExecuteAgentManagementAndHandoff(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
@@ -1278,6 +1324,127 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	}
 	if _, err := manager.ResolveModel("alpha"); err == nil {
 		t.Fatal("ResolveModel(alpha) error = nil, want deleted model")
+	}
+}
+
+func TestCommandServiceModelDeleteClearsCurrentSessionModel(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:    "beta",
+		Provider: "openai-compatible",
+		Model:    "gpt-beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := session.State{StateCurrentModelID: beta.ID, StateCurrentReasoningEffort: "high"}
+	engine := &recordingEngine{
+		state: state,
+		snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{SessionID: "sess-command"}},
+			State:   state,
+		},
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/model del beta",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.Output != "model deleted: beta" {
+		t.Fatalf("delete output = %q, want deleted beta", deleted.Output)
+	}
+	if _, ok := engine.state[StateCurrentModelID]; ok {
+		t.Fatalf("session model state after delete = %#v, want current model cleared", engine.state)
+	}
+	if _, ok := engine.state[StateCurrentReasoningEffort]; ok {
+		t.Fatalf("session reasoning state after delete = %#v, want reasoning cleared", engine.state)
+	}
+}
+
+func TestCommandServiceModelAndApprovalUseACPControllerState(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Alias:           "remote-model",
+		Provider:        "openai-compatible",
+		Model:           "gpt-remote",
+		ReasoningMode:   "fixed",
+		ReasoningLevels: []string{"low", "high"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	controller := session.ControllerBinding{
+		Kind:      session.ControllerACP,
+		ID:        "reviewer",
+		AgentName: "reviewer",
+		EpochID:   "controller-1",
+	}
+	engine := &recordingEngine{
+		state: session.State{},
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{SessionID: "sess-controller"},
+				Controller: controller,
+			},
+			State: session.State{},
+		},
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   engine,
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	switched, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "/model use remote-model high",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if switched.Output != "model switched to: remote-model (reasoning: high)" {
+		t.Fatalf("model switch output = %q, want controller model switch", switched.Output)
+	}
+	if engine.state[StateControllerModel] != "remote-model" || engine.state[StateControllerReasoning] != "high" {
+		t.Fatalf("controller model state = %#v, want remote-model/high", engine.state)
+	}
+	manual, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "/approval manual",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manual.Output != "approval mode: manual" || engine.state[StateControllerMode] != "manual" {
+		t.Fatalf("controller approval output/state = %#v state=%#v, want manual", manual, engine.state)
+	}
+	if _, ok := engine.state[StateSessionMode]; ok {
+		t.Fatalf("local session mode state = %#v, want unchanged under ACP controller", engine.state)
+	}
+	if _, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "/model del remote-model",
+	}); err == nil {
+		t.Fatal("/model del under ACP controller error = nil, want usage error")
 	}
 }
 

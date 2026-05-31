@@ -1318,6 +1318,14 @@ be migrated before retiring the old stack:
      content parts, calls `internal/app/services.CommandService`, adopts any
      returned canonical session ref, and leaves task-id completion on the
      shared live/durable task list instead of surface-local task state.
+   - Migrated baseline: TUI `/connect`, `/model`, `/approval`, and `/compact`
+     direct command shells now also enter `CommandService`. The service owns
+     non-interactive model configuration, model selection/deletion, approval
+     mode changes, and compaction command semantics for TUI, ACP command
+     clients, and future APP surfaces. ACP-controller `/model use` and
+     `/approval` update controller-scoped config intent in shared session state
+     instead of local model/session state, and local `/model del` clears a
+     deleted current session model through the shared service path.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -2120,7 +2128,7 @@ Recommended sequence:
    behind `core/tool.Registry` and `internal/engine/tasks`; the shared
    app-service command/control path is now a baseline, so this milestone should
    focus on real async process/subagent lifecycle and durable output storage.
-5. Port the remaining TUI driver command shells and panels to
+5. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially richer `/connect`, task, and settings
    panels, preserving existing rendering as surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model

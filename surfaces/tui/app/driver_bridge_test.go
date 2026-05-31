@@ -995,28 +995,16 @@ func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 
 func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:        tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
-		connectStatus: tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:      tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "connect", Output: "connected: minimax/MiniMax-M2"},
 	}
 	var msgs []tea.Msg
 	slashConnect(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "minimax MiniMax-M2 - 60 sk-test 204800 8192 low,medium")
-	if driver.connectCalls != 1 {
-		t.Fatalf("connectCalls = %d, want 1", driver.connectCalls)
+	if driver.connectCalls != 0 {
+		t.Fatalf("connectCalls = %d, want 0 with shared command executor", driver.connectCalls)
 	}
-	if got := driver.lastConnect.Provider; got != "minimax" {
-		t.Fatalf("lastConnect.Provider = %q, want minimax", got)
-	}
-	if got := driver.lastConnect.Model; got != "MiniMax-M2" {
-		t.Fatalf("lastConnect.Model = %q, want MiniMax-M2", got)
-	}
-	if got := driver.lastConnect.APIKey; got != "sk-test" {
-		t.Fatalf("lastConnect.APIKey = %q, want sk-test", got)
-	}
-	if got := driver.lastConnect.ContextWindowTokens; got != 204800 {
-		t.Fatalf("lastConnect.ContextWindowTokens = %d, want 204800", got)
-	}
-	if got := driver.lastConnect.MaxOutputTokens; got != 8192 {
-		t.Fatalf("lastConnect.MaxOutputTokens = %d, want 8192", got)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/connect minimax MiniMax-M2 - 60 sk-test 204800 8192 low,medium" {
+		t.Fatalf("command calls=%d input=%q, want shared /connect command", driver.commandCalls, driver.lastCommandInput)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashConnect() emitted no messages")
@@ -1100,11 +1088,15 @@ func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 func TestSlashModelDeleteDisabledForACPController(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentStatus: tuidriver.AgentStatusSnapshot{ControllerKind: "acp"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "model", Output: "usage: /model use <model> [effort]"},
 	}
 	var msgs []tea.Msg
 	slashModelWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
 	if driver.deleteModelCalls != 0 {
 		t.Fatalf("deleteModelCalls = %d, want 0 under ACP controller", driver.deleteModelCalls)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/model del minimax/MiniMax-M1" {
+		t.Fatalf("command calls=%d input=%q, want shared /model command", driver.commandCalls, driver.lastCommandInput)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashModel(del) emitted no usage message")
@@ -1706,34 +1698,32 @@ func TestDynamicAgentSlashParticipantTurnEmitsGatewayNarrative(t *testing.T) {
 	}
 }
 
-func TestSlashConnectParsesEnvironmentVariableSecret(t *testing.T) {
+func TestSlashConnectPassesEnvironmentVariableSecretToSharedCommand(t *testing.T) {
 	driver := &bridgeTestDriver{
-		connectStatus: tuidriver.StatusSnapshot{Model: "openai/gpt-4o"},
+		status:      tuidriver.StatusSnapshot{Model: "openai/gpt-4o"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "connect", Output: "connected: openai/gpt-4o"},
 	}
 	slashConnect(driver, func(tea.Msg) {}, "openai gpt-4o - 60 env:OPENAI_API_KEY")
-	if got := driver.lastConnect.TokenEnv; got != "OPENAI_API_KEY" {
-		t.Fatalf("lastConnect.TokenEnv = %q, want OPENAI_API_KEY", got)
+	if driver.connectCalls != 0 {
+		t.Fatalf("connectCalls = %d, want 0 with shared command executor", driver.connectCalls)
 	}
-	if got := driver.lastConnect.APIKey; got != "" {
-		t.Fatalf("lastConnect.APIKey = %q, want empty when env:... is used", got)
+	if got := driver.lastCommandInput; got != "/connect openai gpt-4o - 60 env:OPENAI_API_KEY" {
+		t.Fatalf("lastCommandInput = %q, want env secret preserved for shared command", got)
 	}
 }
 
 func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
-		useModelStatus: tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:      tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "model", Output: "model switched to: minimax/MiniMax-M2"},
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use minimax/MiniMax-M2")
-	if driver.useModelCalls != 1 {
-		t.Fatalf("useModelCalls = %d, want 1", driver.useModelCalls)
+	if driver.useModelCalls != 0 {
+		t.Fatalf("useModelCalls = %d, want 0 with shared command executor", driver.useModelCalls)
 	}
-	if got := driver.lastModelAlias; got != "minimax/MiniMax-M2" {
-		t.Fatalf("lastModelAlias = %q, want minimax/MiniMax-M2", got)
-	}
-	if got := driver.lastReasoningEffort; got != "" {
-		t.Fatalf("lastReasoningEffort = %q, want empty", got)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/model use minimax/MiniMax-M2" {
+		t.Fatalf("command calls=%d input=%q, want shared /model use command", driver.commandCalls, driver.lastCommandInput)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashModel(use) emitted no messages")
@@ -1742,32 +1732,30 @@ func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 
 func TestSlashModelUsePassesReasoningLevel(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status:         tuidriver.StatusSnapshot{Model: "deepseek/deepseek-v4-pro", ModeLabel: "default", Workspace: "/tmp/ws"},
-		useModelStatus: tuidriver.StatusSnapshot{Model: "deepseek/deepseek-v4-pro [high]", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:      tuidriver.StatusSnapshot{Model: "deepseek/deepseek-v4-pro [high]", ModeLabel: "default", Workspace: "/tmp/ws"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "model", Output: "model switched to: deepseek/deepseek-v4-pro (reasoning: high)"},
 	}
 	slashModel(driver, func(tea.Msg) {}, "use deepseek/deepseek-v4-pro high")
-	if driver.useModelCalls != 1 {
-		t.Fatalf("useModelCalls = %d, want 1", driver.useModelCalls)
+	if driver.useModelCalls != 0 {
+		t.Fatalf("useModelCalls = %d, want 0 with shared command executor", driver.useModelCalls)
 	}
-	if got := driver.lastModelAlias; got != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("lastModelAlias = %q, want deepseek/deepseek-v4-pro", got)
-	}
-	if got := driver.lastReasoningEffort; got != "high" {
-		t.Fatalf("lastReasoningEffort = %q, want high", got)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/model use deepseek/deepseek-v4-pro high" {
+		t.Fatalf("command calls=%d input=%q, want shared /model use command with reasoning", driver.commandCalls, driver.lastCommandInput)
 	}
 }
 
 func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
+		status:      tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M1", ModeLabel: "default", Workspace: "/tmp/ws"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "model", Output: "model deleted: minimax/MiniMax-M1"},
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
-	if driver.deleteModelCalls != 1 {
-		t.Fatalf("deleteModelCalls = %d, want 1", driver.deleteModelCalls)
+	if driver.deleteModelCalls != 0 {
+		t.Fatalf("deleteModelCalls = %d, want 0 with shared command executor", driver.deleteModelCalls)
 	}
-	if got := driver.lastDeletedAlias; got != "minimax/MiniMax-M1" {
-		t.Fatalf("lastDeletedAlias = %q, want minimax/MiniMax-M1", got)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/model del minimax/MiniMax-M1" {
+		t.Fatalf("command calls=%d input=%q, want shared /model del command", driver.commandCalls, driver.lastCommandInput)
 	}
 	if len(msgs) == 0 {
 		t.Fatal("slashModel(del) emitted no messages")
@@ -1776,10 +1764,14 @@ func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 
 func TestSlashModelDeleteClearsStatusWhenNoModelRemains(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{Workspace: "/tmp/ws"},
+		status:      tuidriver.StatusSnapshot{Workspace: "/tmp/ws"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "model", Output: "model deleted: codefree/glm-5.1"},
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del codefree/glm-5.1")
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/model del codefree/glm-5.1" {
+		t.Fatalf("command calls=%d input=%q, want shared /model del command", driver.commandCalls, driver.lastCommandInput)
+	}
 	for _, msg := range msgs {
 		status, ok := msg.(SetStatusMsg)
 		if !ok {
@@ -1879,6 +1871,44 @@ func TestFriendlyCommandErrorMakesResumeActionable(t *testing.T) {
 	}
 }
 
+func TestSlashApprovalUsesSharedCommandExecutor(t *testing.T) {
+	driver := &bridgeTestDriver{
+		status:      tuidriver.StatusSnapshot{ModeLabel: "manual", SessionMode: "manual"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "approval", Output: "approval mode: manual"},
+	}
+	var msgs []tea.Msg
+	result := slashApprovalWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "manual")
+	if result.Err != nil {
+		t.Fatalf("slashApprovalWithContext() error = %v", result.Err)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/approval manual" {
+		t.Fatalf("approval command calls=%d input=%q, want shared /approval command", driver.commandCalls, driver.lastCommandInput)
+	}
+	if !noticeMessagesContain(msgs, "approval mode: manual") {
+		t.Fatalf("slashApprovalWithContext() messages = %#v, want shared approval output", msgs)
+	}
+}
+
+func TestSlashCompactUsesSharedCommandExecutor(t *testing.T) {
+	driver := &bridgeTestDriver{
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "compact", Output: "compaction completed"},
+	}
+	var msgs []tea.Msg
+	result := slashCompact(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
+	if result.Err != nil {
+		t.Fatalf("slashCompact() error = %v", result.Err)
+	}
+	if driver.compactCalls != 0 {
+		t.Fatalf("compactCalls = %d, want 0 with shared command executor", driver.compactCalls)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/compact" {
+		t.Fatalf("compact command calls=%d input=%q, want shared /compact command", driver.commandCalls, driver.lastCommandInput)
+	}
+	if !noticeMessagesContain(msgs, "compaction completed") {
+		t.Fatalf("slashCompact() messages = %#v, want shared compact output", msgs)
+	}
+}
+
 func TestSlashCompactRejectsArguments(t *testing.T) {
 	driver := &bridgeTestDriver{}
 	var msgs []tea.Msg
@@ -1888,6 +1918,9 @@ func TestSlashCompactRejectsArguments(t *testing.T) {
 	}
 	if driver.compactCalls != 0 {
 		t.Fatalf("compactCalls = %d, want 0", driver.compactCalls)
+	}
+	if driver.commandCalls != 0 {
+		t.Fatalf("commandCalls = %d, want 0 for invalid /compact args", driver.commandCalls)
 	}
 	if len(msgs) != 1 {
 		t.Fatalf("slashCompact() emitted %d messages, want 1", len(msgs))

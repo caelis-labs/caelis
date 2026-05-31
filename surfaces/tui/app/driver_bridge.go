@@ -867,52 +867,6 @@ func parseAgentAddArgs(args string) (agentAddArgs, bool) {
 	return out, true
 }
 
-func parseConnectArgs(args string) tuidriver.ConnectConfig {
-	parts := strings.Fields(args)
-	cfg := tuidriver.ConnectConfig{}
-	if len(parts) >= 1 {
-		cfg.Provider = parts[0]
-	}
-	if len(parts) >= 2 {
-		cfg.Model = parts[1]
-	}
-	if len(parts) >= 3 {
-		cfg.BaseURL = dashAsEmpty(parts[2])
-	}
-	if len(parts) >= 4 {
-		if timeout, err := strconv.Atoi(dashAsEmpty(parts[3])); err == nil {
-			cfg.TimeoutSeconds = timeout
-		}
-	}
-	if len(parts) >= 5 {
-		secret := dashAsEmpty(parts[4])
-		if strings.HasPrefix(strings.ToLower(secret), "env:") {
-			cfg.TokenEnv = strings.TrimSpace(secret[len("env:"):])
-		} else if strings.HasPrefix(secret, "$") {
-			cfg.TokenEnv = strings.TrimSpace(strings.TrimPrefix(secret, "$"))
-		} else {
-			cfg.APIKey = secret
-		}
-	}
-	if len(parts) >= 6 {
-		if contextWindow, err := strconv.Atoi(dashAsEmpty(parts[5])); err == nil {
-			cfg.ContextWindowTokens = contextWindow
-		}
-	}
-	if len(parts) >= 7 {
-		if maxOutput, err := strconv.Atoi(dashAsEmpty(parts[6])); err == nil {
-			cfg.MaxOutputTokens = maxOutput
-		}
-	}
-	if len(parts) >= 8 {
-		cfg.ReasoningLevels = parseReasoningLevels(parts[7])
-	}
-	if len(parts) == 4 && cfg.TimeoutSeconds == 0 && cfg.APIKey == "" && cfg.TokenEnv == "" {
-		cfg.TokenEnv = dashAsEmpty(parts[3])
-	}
-	return cfg
-}
-
 func agentHelpText() string {
 	lines := []string{
 		"/agent commands:",
@@ -1127,31 +1081,6 @@ func friendlyCommandError(action string, err error) error {
 	default:
 		return fmt.Errorf("%s: %w", action, err)
 	}
-}
-
-func dashAsEmpty(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "-" {
-		return ""
-	}
-	return value
-}
-
-func parseReasoningLevels(raw string) []string {
-	raw = dashAsEmpty(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := strings.Split(raw, ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.ToLower(strings.TrimSpace(part))
-		if trimmed == "" {
-			continue
-		}
-		out = append(out, trimmed)
-	}
-	return out
 }
 
 func convertAttachments(items []Attachment) []tuidriver.Attachment {

@@ -26,6 +26,10 @@ func slashSharedCommandWithContext(ctx context.Context, driver tuidriver.Driver,
 		Attachments: convertAttachments(opts.Attachments),
 	})
 	if err != nil {
+		if usage := commandUsageMessage(err); usage != "" {
+			sendNotice(send, usage)
+			return TaskResultMsg{SuppressTurnDivider: true}
+		}
 		return TaskResultMsg{Err: friendlyCommandError(strings.TrimPrefix(input, "/"), err)}
 	}
 	if opts.ClearHistory && send != nil {
@@ -38,4 +42,19 @@ func slashSharedCommandWithContext(ctx context.Context, driver tuidriver.Driver,
 		refreshStatusViaSendWithContext(ctx, driver, send)
 	}
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+func commandUsageMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	raw := strings.TrimSpace(err.Error())
+	if raw == "" {
+		return ""
+	}
+	idx := strings.Index(strings.ToLower(raw), "usage:")
+	if idx < 0 {
+		return ""
+	}
+	return strings.TrimSpace(raw[idx:])
 }

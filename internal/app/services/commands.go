@@ -350,7 +350,11 @@ func (s CommandService) executeConnect(ctx context.Context, ref session.Ref, arg
 	if err != nil {
 		return appviewmodel.CommandExecutionView{}, err
 	}
-	connected, err := s.services.Models().Connect(ctx, cfg)
+	prepared, err := s.services.Models().PrepareConnectConfig(ctx, cfg)
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	connected, err := s.services.Models().Connect(ctx, prepared)
 	if err != nil {
 		return appviewmodel.CommandExecutionView{}, err
 	}
@@ -480,6 +484,30 @@ func applyCommandConnectToken(cfg *appsettings.ModelConfig, raw string) {
 
 func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
 	mode := strings.TrimSpace(args)
+	if status, active, err := s.services.Controllers().Status(ctx, ref); err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	} else if active {
+		if mode == "" {
+			return appviewmodel.CommandExecutionView{
+				Handled: true,
+				Command: "approval",
+				Output:  "approval mode: " + firstNonEmpty(status.Mode, "auto-review"),
+			}, nil
+		}
+		fields := strings.Fields(mode)
+		if len(fields) != 1 {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /approval [mode]")
+		}
+		next, err := s.services.Controllers().SetMode(ctx, ref, fields[0])
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "approval",
+			Output:  "approval mode: " + firstNonEmpty(next.Mode, fields[0]),
+		}, nil
+	}
 	if mode == "" {
 		current, err := s.services.Modes().Current(ctx, ref)
 		if err != nil {
@@ -508,6 +536,11 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 
 func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
 	sub, rest, hasSub := splitCommandArg(args)
+	if status, active, err := s.services.Controllers().Status(ctx, ref); err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	} else if active {
+		return s.executeControllerModel(ctx, ref, status, sub, rest, hasSub)
+	}
 	if !hasSub || strings.EqualFold(sub, "list") || strings.EqualFold(sub, "ls") {
 		if strings.TrimSpace(rest) != "" {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model [list]")
@@ -554,8 +587,14 @@ func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args 
 		if modelRef == "" || strings.ContainsAny(modelRef, " \t\n") {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model del <alias>")
 		}
+		deleted, resolveErr := s.services.Models().Resolve(ctx, modelRef)
 		if err := s.services.Models().Delete(ctx, modelRef); err != nil {
 			return appviewmodel.CommandExecutionView{}, err
+		}
+		if resolveErr == nil {
+			if err := s.clearDeletedSessionModel(ctx, ref, deleted); err != nil {
+				return appviewmodel.CommandExecutionView{}, err
+			}
 		}
 		return appviewmodel.CommandExecutionView{
 			Handled: true,
@@ -565,6 +604,59 @@ func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args 
 	default:
 		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model [list|use <alias> [reasoning]|del <alias>]")
 	}
+}
+
+func (s CommandService) executeControllerModel(ctx context.Context, ref session.Ref, status ControllerStatus, sub string, rest string, hasSub bool) (appviewmodel.CommandExecutionView, error) {
+	if !hasSub || strings.EqualFold(sub, "list") || strings.EqualFold(sub, "ls") {
+		if strings.TrimSpace(rest) != "" {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model [list]")
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "model",
+			Output:  formatCommandControllerModels(status),
+		}, nil
+	}
+	switch strings.ToLower(sub) {
+	case "use":
+		modelRef, reasoning := parseCommandModelUse(rest)
+		if modelRef == "" {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model use <model> [reasoning]")
+		}
+		next, err := s.services.Controllers().SetModel(ctx, ref, modelRef, reasoning)
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		output := "model switched to: " + firstNonEmpty(next.Model, modelRef)
+		if effort := firstNonEmpty(next.ReasoningEffort, reasoning); effort != "" {
+			output += " (reasoning: " + effort + ")"
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "model",
+			Output:  output,
+		}, nil
+	case "del", "delete", "rm":
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model use <model> [reasoning]")
+	default:
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model [list|use <model> [reasoning]]")
+	}
+}
+
+func (s CommandService) clearDeletedSessionModel(ctx context.Context, ref session.Ref, deleted appsettings.ModelConfig) error {
+	if s.services.engine == nil || strings.TrimSpace(ref.SessionID) == "" || strings.TrimSpace(deleted.ID) == "" {
+		return nil
+	}
+	ref = defaultSessionRef(s.services.Runtime(), ref)
+	snapshot, err := s.services.engine.LoadSession(ctx, ref)
+	if err != nil {
+		return nil
+	}
+	currentID := strings.TrimSpace(stateString(snapshot.State, StateCurrentModelID))
+	if currentID == "" || !strings.EqualFold(currentID, strings.TrimSpace(deleted.ID)) {
+		return nil
+	}
+	return s.services.Models().ClearSession(ctx, ref)
 }
 
 func (s CommandService) executeResume(ctx context.Context, args string) (appviewmodel.CommandExecutionView, error) {
@@ -932,6 +1024,36 @@ func formatCommandModels(choices []appsettings.ModelChoice, currentID string) st
 			name += " (" + strings.Join(markers, ", ") + ")"
 		}
 		lines = append(lines, "  "+name)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatCommandControllerModels(status ControllerStatus) string {
+	lines := []string{"models:"}
+	current := strings.TrimSpace(status.Model)
+	if len(status.ModelOptions) == 0 {
+		if current == "" {
+			lines = append(lines, "  none declared")
+		} else {
+			lines = append(lines, "  "+current+" (current)")
+		}
+		return strings.Join(lines, "\n")
+	}
+	for _, option := range status.ModelOptions {
+		name := firstNonEmpty(strings.TrimSpace(option.Name), strings.TrimSpace(option.Value))
+		if name == "" {
+			continue
+		}
+		if current != "" && (strings.EqualFold(current, strings.TrimSpace(option.Value)) || strings.EqualFold(current, strings.TrimSpace(option.Name))) {
+			name += " (current)"
+		}
+		if detail := strings.TrimSpace(option.Description); detail != "" {
+			name += "  " + detail
+		}
+		lines = append(lines, "  "+name)
+	}
+	if len(lines) == 1 {
+		lines = append(lines, "  none declared")
 	}
 	return strings.Join(lines, "\n")
 }
