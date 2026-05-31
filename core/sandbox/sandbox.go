@@ -370,12 +370,55 @@ func CloneStatus(in Status) Status {
 
 func CloneSetupStatus(in SetupStatus) SetupStatus {
 	out := in
-	out.Details = maps.Clone(in.Details)
+	out.Error = strings.TrimSpace(in.Error)
+	out.Details = cloneTrimmedStringMap(in.Details)
 	out.Counts = maps.Clone(in.Counts)
-	out.Checks = slices.Clone(in.Checks)
-	for i := range out.Checks {
-		out.Checks[i].Details = maps.Clone(out.Checks[i].Details)
-		out.Checks[i].Counts = maps.Clone(out.Checks[i].Counts)
+	if len(in.Checks) > 0 {
+		out.Checks = make([]SetupCheck, len(in.Checks))
+		for i, check := range in.Checks {
+			out.Checks[i] = CloneSetupCheck(check)
+		}
+	}
+	return out
+}
+
+func CloneSetupCheck(in SetupCheck) SetupCheck {
+	out := in
+	out.Name = strings.TrimSpace(in.Name)
+	out.Scope = SetupScope(strings.TrimSpace(string(in.Scope)))
+	out.Reason = strings.TrimSpace(in.Reason)
+	out.Error = strings.TrimSpace(in.Error)
+	out.Root = strings.TrimSpace(in.Root)
+	out.Details = cloneTrimmedStringMap(in.Details)
+	out.Counts = maps.Clone(in.Counts)
+	return out
+}
+
+func (s SetupStatus) Check(name string) (SetupCheck, bool) {
+	name = strings.TrimSpace(name)
+	for _, check := range s.Checks {
+		if strings.TrimSpace(check.Name) == name {
+			return CloneSetupCheck(check), true
+		}
+	}
+	return SetupCheck{}, false
+}
+
+func cloneTrimmedStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" && value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

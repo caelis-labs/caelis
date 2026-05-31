@@ -14,9 +14,9 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/plugin"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
-	porttool "github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 const WindowsSandboxTLSNoteLine = "  <sandbox_tls>Windows restricted-token sandbox: SChannel/.NET TLS may fail; prefer Python/Node HTTPS or git -c http.sslBackend=openssl.</sandbox_tls>"
@@ -367,7 +367,7 @@ func ResolvePath(path string) (string, error) {
 	return filepath.Clean(path), nil
 }
 
-func EstimateModelPromptPrefixTokens(metadata map[string]any, tools []porttool.Tool) int {
+func EstimateModelPromptPrefixTokens(metadata map[string]any, tools []coretool.Tool) int {
 	total := EstimateTextTokens(stringFromMap(metadata, "system_prompt"))
 	total += EstimateToolPromptTokens(tools)
 	if total > 0 {
@@ -376,8 +376,8 @@ func EstimateModelPromptPrefixTokens(metadata map[string]any, tools []porttool.T
 	return total
 }
 
-func EstimateToolPromptTokens(tools []porttool.Tool) int {
-	specs := porttool.ModelSpecs(tools)
+func EstimateToolPromptTokens(tools []coretool.Tool) int {
+	specs := coretool.ModelSpecs(tools)
 	if len(specs) == 0 {
 		return 0
 	}

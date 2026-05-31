@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -45,21 +44,6 @@ type PromptCallbacks interface {
 
 type SessionLoader interface {
 	LoadSession(context.Context, LoadSessionRequest, PromptCallbacks) (LoadSessionResponse, error)
-}
-
-type ModeProvider interface {
-	SessionModes(context.Context, session.Session) (*SessionModeState, error)
-	SetSessionMode(context.Context, SetSessionModeRequest) (SetSessionModeResponse, error)
-}
-
-type ConfigProvider interface {
-	SessionConfigOptions(context.Context, session.Session) ([]SessionConfigOption, error)
-	SetSessionConfigOption(context.Context, SetSessionConfigOptionRequest) (SetSessionConfigOptionResponse, error)
-}
-
-type ModelProvider interface {
-	SessionModels(context.Context, session.Session) (*SessionModelState, error)
-	SetSessionModel(context.Context, SetSessionModelRequest) (SetSessionModelResponse, error)
 }
 
 type PromptCapabilitiesProvider interface {

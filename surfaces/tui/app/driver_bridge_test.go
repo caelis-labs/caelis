@@ -10,8 +10,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -1359,7 +1359,7 @@ func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
 		Workspace:              "D:\\xue\\code\\cmpctl",
 		SandboxSetup: sandbox.SetupStatus{Checks: []sandbox.SetupCheck{{
 			Name:     "workspace",
-			Scope:    sandbox.SetupScopeWorkspace,
+			Scope:    sandbox.SetupWorkspace,
 			Required: true,
 			Error:    "acl: write D:\\xue\\code\\cmpctl DACL: Access is denied.",
 		}}},

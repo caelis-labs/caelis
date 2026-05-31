@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 

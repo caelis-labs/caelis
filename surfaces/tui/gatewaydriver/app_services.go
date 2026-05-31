@@ -15,7 +15,6 @@ import (
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	portscontroller "github.com/OnslaughtSnail/caelis/ports/controller"
-	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -550,9 +549,9 @@ func codeFreeAuthRequestToApp(req CodeFreeAuthRequest) appservices.CodeFreeAuthR
 }
 
 func sandboxStatusFromApp(status appservices.SandboxStatus) SandboxStatus {
-	setup := sandboxSetupStatusFromApp(status.Setup)
-	global, hasGlobal := sandboxSetupCheckByScope(setup, portsandbox.SetupScopeGlobal)
-	workspace, hasWorkspace := sandboxSetupCheckByScope(setup, portsandbox.SetupScopeWorkspace)
+	setup := coresandbox.CloneSetupStatus(status.Setup)
+	global, hasGlobal := sandboxSetupCheckByScope(setup, coresandbox.SetupGlobal)
+	workspace, hasWorkspace := sandboxSetupCheckByScope(setup, coresandbox.SetupWorkspace)
 	return SandboxStatus{
 		RequestedBackend:         strings.TrimSpace(status.RequestedBackend),
 		ResolvedBackend:          strings.TrimSpace(status.ResolvedBackend),
@@ -578,39 +577,13 @@ func sandboxStatusFromApp(status appservices.SandboxStatus) SandboxStatus {
 	}
 }
 
-func sandboxSetupStatusFromApp(status coresandbox.SetupStatus) portsandbox.SetupStatus {
-	out := portsandbox.SetupStatus{
-		Required: status.Required,
-		Error:    strings.TrimSpace(status.Error),
-		Details:  maps.Clone(status.Details),
-		Counts:   maps.Clone(status.Counts),
-		Checks:   make([]portsandbox.SetupCheck, 0, len(status.Checks)),
-	}
-	for _, check := range status.Checks {
-		out.Checks = append(out.Checks, portsandbox.SetupCheck{
-			Name:      strings.TrimSpace(check.Name),
-			Scope:     portsandbox.SetupScope(strings.TrimSpace(string(check.Scope))),
-			Current:   check.Current,
-			Required:  check.Required,
-			Reason:    strings.TrimSpace(check.Reason),
-			Error:     strings.TrimSpace(check.Error),
-			Version:   check.Version,
-			Root:      strings.TrimSpace(check.Root),
-			UpdatedAt: check.UpdatedAt,
-			Details:   maps.Clone(check.Details),
-			Counts:    maps.Clone(check.Counts),
-		})
-	}
-	return out
-}
-
-func sandboxSetupCheckByScope(status portsandbox.SetupStatus, scope portsandbox.SetupScope) (portsandbox.SetupCheck, bool) {
+func sandboxSetupCheckByScope(status coresandbox.SetupStatus, scope coresandbox.SetupScope) (coresandbox.SetupCheck, bool) {
 	for _, check := range status.Checks {
 		if check.Scope == scope {
-			return check, true
+			return coresandbox.CloneSetupCheck(check), true
 		}
 	}
-	return portsandbox.SetupCheck{}, false
+	return coresandbox.SetupCheck{}, false
 }
 
 func sandboxSecuritySummary(status appservices.SandboxStatus) string {
@@ -628,28 +601,28 @@ func sandboxSecuritySummary(status appservices.SandboxStatus) string {
 	}
 }
 
-func setupReason(check portsandbox.SetupCheck, ok bool) string {
+func setupReason(check coresandbox.SetupCheck, ok bool) string {
 	if !ok {
 		return ""
 	}
 	return firstNonEmpty(check.Error, check.Reason)
 }
 
-func setupRoot(check portsandbox.SetupCheck, ok bool) string {
+func setupRoot(check coresandbox.SetupCheck, ok bool) string {
 	if !ok {
 		return ""
 	}
 	return strings.TrimSpace(check.Root)
 }
 
-func setupDetail(check portsandbox.SetupCheck, ok bool, key string) string {
+func setupDetail(check coresandbox.SetupCheck, ok bool, key string) string {
 	if !ok {
 		return ""
 	}
 	return strings.TrimSpace(check.Details[strings.TrimSpace(key)])
 }
 
-func setupCount(check portsandbox.SetupCheck, ok bool, key string) int {
+func setupCount(check coresandbox.SetupCheck, ok bool, key string) int {
 	if !ok {
 		return 0
 	}

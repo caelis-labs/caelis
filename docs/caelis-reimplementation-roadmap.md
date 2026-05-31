@@ -1096,6 +1096,12 @@ The completed work is intentionally limited to the reusable skeleton:
 - Legacy sandbox router removal: the unused `internal/sandboxrouter` package
   was deleted. Sandbox backend selection now stays in the shared app registry
   and local composition root instead of a second routing layer.
+- Core-native contract cleanup: prompt token estimation now consumes
+  `core/tool` declarations, `protocol/acp` no longer exposes unused
+  provider interfaces tied to the old session port, and reusable sandbox
+  setup clone/check helpers live in `core/sandbox`. The current TUI driver and
+  gateway status DTOs now use that core sandbox setup contract instead of
+  importing the old sandbox port for display-only state.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1273,20 +1279,31 @@ be migrated before retiring the old stack:
      those parts without converting through `ports/model`. Attachment UI and
      rendering remain surface-local, but the model-visible prompt content
      contract is no longer owned by the old port package.
-   - Migrated baseline: core/app session event projection for the app-service
-     TUI binding has been centralized in `surfaces/tui/eventbridge` instead of
-     living inside `surfaces/tui/gatewaydriver`. The bridge now carries
-     canonical core tool content into the existing transcript/tool-panel
-     renderer, so service-native shell/task/filesystem results do not depend on
-     gatewaydriver-local projection details.
-   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
-     completion shell, connect wizard Bubble Tea runtime, status bar,
-     renderer, transcript reducer, tool panels, approval UI, theme system, and
-     attachment UI/rendering are not ported to `internal/app/services`.
-   - Slash commands such as the remaining `/connect` wizard UI rendering shell
-     and live remote ACP process reconnect/lifecycle behavior still have old
-     driver/app assumptions or missing service-native feature parity, so the old
-     TUI stack cannot be removed yet.
+  - Migrated baseline: core/app session event projection for the app-service
+    TUI binding has been centralized in `surfaces/tui/eventbridge` instead of
+    living inside `surfaces/tui/gatewaydriver`. The bridge now carries
+    canonical core tool content into the existing transcript/tool-panel
+    renderer, so service-native shell/task/filesystem results do not depend on
+    gatewaydriver-local projection details.
+  - Migrated baseline: TUI sandbox setup display state now uses
+    `core/sandbox.SetupStatus` through the driver and gatewaydriver status
+    path. This removes a display-only dependency on the old sandbox port while
+    keeping setup diagnostics, `/status`, and `/doctor` rendering behavior
+    unchanged.
+  - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
+    completion shell, connect wizard Bubble Tea runtime, status bar,
+    renderer, transcript reducer, tool panels, approval UI, theme system, and
+    attachment UI/rendering are not ported to `internal/app/services`.
+  - Slash commands such as the remaining `/connect` wizard UI rendering shell
+    and live remote ACP process reconnect/lifecycle behavior still have old
+    driver/app assumptions or missing service-native feature parity, so the old
+    TUI stack cannot be removed yet.
+  - Still pending: the current TUI driver/gateway bridge still imports the old
+    `ports/session`, `ports/controller`, `ports/stream`, and public `kernel`
+    event contracts for live turn streaming, replay, participants, and usage
+    accounting. Retiring those imports requires moving the remaining TUI
+    bridge protocol to `core/runtime`, `core/session`, and
+    `internal/app/viewmodel` in one larger slice.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

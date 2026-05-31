@@ -8,9 +8,9 @@ import (
 	"testing"
 
 	"github.com/OnslaughtSnail/caelis/core/plugin"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
-	porttool "github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
 func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
@@ -108,7 +108,7 @@ func TestBuildInstructionsRejectsMissingPromptPathWithoutInlineFallback(t *testi
 }
 
 func TestPromptUtilitiesEstimateAndDecorateSharedSystemPrompt(t *testing.T) {
-	tools := []porttool.Tool{porttool.NamedTool{Def: porttool.Definition{
+	tools := []coretool.Tool{coretool.NamedTool{Def: coretool.Definition{
 		Name:        "read",
 		Description: "Read a file",
 		InputSchema: map[string]any{"type": "object"},
