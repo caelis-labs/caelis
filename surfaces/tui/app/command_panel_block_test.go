@@ -3,7 +3,9 @@ package tuiapp
 import (
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -116,6 +118,39 @@ func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 	}
 	if !rowsContainCommandPanelInput(rows, "/task cancel task-1") {
 		t.Fatalf("task cancel action missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+}
+
+func TestCommandPanelBlockRendersResumePanelActions(t *testing.T) {
+	panel := appviewmodel.ResumePanelView{
+		Workspace: session.Workspace{CWD: "/repo"},
+		Sessions: []appviewmodel.ResumeSessionItem{{
+			Ref:        session.Ref{SessionID: "sess-alpha"},
+			SessionID:  "sess-alpha",
+			Title:      "alpha work",
+			Workspace:  "/repo",
+			EventCount: 3,
+			UpdatedAt:  time.Date(2026, 5, 31, 10, 30, 0, 0, time.UTC),
+			Command:    "/resume sess-alpha",
+		}},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command:     "resume",
+		ResumePanel: &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"SESSIONS", "Resume Session", "sess-alpha", "alpha work", "/repo"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered resume panel = %q, missing %q", plain, want)
+		}
+	}
+	if !rowsContainCommandPanelInput(rows, "/resume sess-alpha") {
+		t.Fatalf("resume row missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ResumePanel: &panel}, "/resume sess-alpha"); action.line != "/resume sess-alpha" {
+		t.Fatalf("resume panel action = %#v, want immediate submit", action)
 	}
 }
 

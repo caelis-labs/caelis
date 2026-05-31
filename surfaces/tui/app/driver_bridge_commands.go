@@ -244,29 +244,7 @@ func slashResumeWithContext(ctx context.Context, driver tuidriver.Driver, send f
 	ctx = contextOrBackground(ctx)
 	sessionID := strings.TrimSpace(args)
 	if sessionID == "" {
-		// List available sessions.
-		candidates, err := driver.ListSessions(ctx, 10)
-		if err != nil {
-			return TaskResultMsg{Err: friendlyCommandError("list sessions", err)}
-		}
-		if len(candidates) == 0 {
-			sendNotice(send, "no sessions available to resume")
-			return TaskResultMsg{SuppressTurnDivider: true}
-		}
-		var lines []string
-		lines = append(lines, "available sessions:")
-		for _, c := range candidates {
-			line := fmt.Sprintf("  %s", c.SessionID)
-			if c.Prompt != "" {
-				line += fmt.Sprintf("  %s", c.Prompt)
-			}
-			if c.Age != "" {
-				line += fmt.Sprintf("  (%s)", c.Age)
-			}
-			lines = append(lines, line)
-		}
-		sendNotice(send, strings.Join(lines, "\n"))
-		return TaskResultMsg{SuppressTurnDivider: true}
+		return slashSharedCommandWithContext(ctx, driver, send, "/resume", sharedCommandOptions{})
 	}
 
 	// Resume specific session.

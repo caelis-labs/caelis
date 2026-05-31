@@ -58,6 +58,7 @@ func (m *Model) handleCommandPanelMsg(msg CommandPanelMsg) (tea.Model, tea.Cmd) 
 func commandExecutionHasPanel(view appviewmodel.CommandExecutionView) bool {
 	return view.SettingsPanel != nil ||
 		view.TaskPanel != nil ||
+		view.ResumePanel != nil ||
 		view.ControllerPanel != nil ||
 		view.ModelConnectPanel != nil ||
 		view.AgentManagement != nil
@@ -112,6 +113,8 @@ func commandPanelClickHints(view appviewmodel.CommandExecutionView) []commandPan
 		return settingsPanelClickHints(*view.SettingsPanel)
 	case view.TaskPanel != nil:
 		return taskPanelClickHints(*view.TaskPanel)
+	case view.ResumePanel != nil:
+		return resumePanelClickHints(*view.ResumePanel)
 	case view.ControllerPanel != nil:
 		return controllerPanelClickHints(*view.ControllerPanel)
 	case view.ModelConnectPanel != nil:
@@ -150,6 +153,8 @@ func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme 
 		return "settings", "Configuration", settingsPanelState(*view.SettingsPanel), settingsPanelBody(*view.SettingsPanel, view.Output, width, theme), commandPanelFooterForCommand("settings")
 	case view.TaskPanel != nil:
 		return "tasks", "Async Work", taskPanelState(*view.TaskPanel), taskPanelBody(*view.TaskPanel, width, theme), commandPanelFooterForCommand("task")
+	case view.ResumePanel != nil:
+		return "sessions", "Resume Session", resumePanelState(*view.ResumePanel), resumePanelBody(*view.ResumePanel, width, theme), commandPanelFooterForCommand("resume")
 	case view.ControllerPanel != nil:
 		return "controller", "ACP Controller", controllerPanelState(*view.ControllerPanel), controllerPanelBody(*view.ControllerPanel, width, theme), commandPanelFooterForCommand("controller")
 	case view.ModelConnectPanel != nil:
@@ -241,6 +246,27 @@ func taskPanelBody(panel appviewmodel.TaskPanelView, width int, theme tuikit.The
 		}
 	}
 	body = appendCommandPanelDiagnostics(body, taskDiagnosticsAsRows(panel.Diagnostics), contentWidth, theme)
+	return body
+}
+
+func resumePanelBody(panel appviewmodel.ResumePanelView, width int, theme tuikit.Theme) []string {
+	contentWidth := commandPanelContentWidth(width)
+	tok := theme.Tokens()
+	body := []string{
+		commandPanelKV(theme, contentWidth, "workspace", firstNonEmpty(panel.Workspace.CWD, panel.Workspace.Key, "-")),
+		commandPanelKV(theme, contentWidth, "sessions", fmt.Sprintf("%d", len(panel.Sessions))),
+	}
+	if search := strings.TrimSpace(panel.Search); search != "" {
+		body = append(body, commandPanelKV(theme, contentWidth, "search", search))
+	}
+	if len(panel.Sessions) == 0 {
+		body = append(body, "", tok.TextSecondary.Render("No sessions available"))
+		return body
+	}
+	body = append(body, "", tok.ChromeMeta.Render("Recent"))
+	for _, item := range panel.Sessions {
+		body = append(body, resumePanelSessionLine(item, contentWidth, theme))
+	}
 	return body
 }
 
@@ -417,6 +443,24 @@ func taskPanelActionClickHint(action appviewmodel.TaskPanelAction) []commandPane
 	return []commandPanelClickHint{{Needle: firstNonEmpty(actionID, action.Label, taskID), Input: input}}
 }
 
+func resumePanelClickHints(panel appviewmodel.ResumePanelView) []commandPanelClickHint {
+	hints := make([]commandPanelClickHint, 0, len(panel.Sessions))
+	for _, item := range panel.Sessions {
+		input := strings.TrimSpace(item.Command)
+		if input == "" && strings.TrimSpace(item.SessionID) != "" {
+			input = "/resume " + strings.TrimSpace(item.SessionID)
+		}
+		if input == "" {
+			continue
+		}
+		hints = append(hints, commandPanelClickHint{
+			Needle: firstNonEmpty(item.SessionID, item.Title),
+			Input:  input,
+		})
+	}
+	return hints
+}
+
 func controllerPanelClickHints(panel appviewmodel.ControllerPanelView) []commandPanelClickHint {
 	if !panel.Active {
 		return nil
@@ -558,6 +602,8 @@ func commandPanelFooterForCommand(command string) string {
 		return "edit: /settings set <field-id> <value>  run: /settings run <action-id> [confirm]"
 	case "task":
 		return "actions: /task tail|wait|write|cancel|release <id>"
+	case "resume":
+		return "open: /resume <session-id>"
 	case "controller":
 		return "handoff: /agent use local  config: /model use <model>, /approval <mode>, /controller set <option-id> <value>"
 	case "connect":
@@ -661,6 +707,13 @@ func taskPanelState(panel appviewmodel.TaskPanelView) string {
 	}
 	if panel.Summary.Running > 0 {
 		return "running"
+	}
+	return "ready"
+}
+
+func resumePanelState(panel appviewmodel.ResumePanelView) string {
+	if len(panel.Sessions) == 0 {
+		return "empty"
 	}
 	return "ready"
 }
@@ -846,6 +899,32 @@ func taskPanelActionLine(action appviewmodel.TaskPanelAction, width int, theme t
 	}
 	plain := "  " + strings.Join(compactNonEmpty(parts), "  ")
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func resumePanelSessionLine(item appviewmodel.ResumeSessionItem, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	sessionID := firstNonEmpty(item.SessionID, item.Ref.SessionID)
+	title := firstNonEmpty(item.Title, "untitled")
+	details := compactNonEmpty([]string{resumePanelTimestamp(item), item.Workspace})
+	plain := "  " + strings.Join(compactNonEmpty([]string{sessionID, title}), "  ")
+	if item.EventCount > 0 {
+		details = append(details, fmt.Sprintf("%d events", item.EventCount))
+	}
+	if len(details) > 0 {
+		plain += "  [" + strings.Join(details, ", ") + "]"
+	}
+	return tok.TextPrimary.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func resumePanelTimestamp(item appviewmodel.ResumeSessionItem) string {
+	updatedAt := item.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = item.LastEventAt
+	}
+	if updatedAt.IsZero() {
+		return ""
+	}
+	return updatedAt.UTC().Format("2006-01-02 15:04")
 }
 
 func controllerPanelFieldLine(field appviewmodel.ControllerPanelField, width int, theme tuikit.Theme) string {

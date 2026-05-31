@@ -85,6 +85,8 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 		return settingsCommandPanelAction(*view.SettingsPanel, input)
 	case view.TaskPanel != nil:
 		return taskCommandPanelAction(*view.TaskPanel, input)
+	case view.ResumePanel != nil:
+		return commandPanelAction{line: input}
 	case view.ControllerPanel != nil:
 		return controllerCommandPanelAction(*view.ControllerPanel, input)
 	case view.ModelConnectPanel != nil:

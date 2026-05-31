@@ -2500,12 +2500,17 @@ be migrated before retiring the old stack:
     - Migrated baseline: TUI resume/reload replay now restores canonical plan
       updates alongside durable user and final assistant messages, while still
       filtering transient chunks and process-level tool trace events.
+    - Migrated baseline: `/resume` session listing now returns a shared
+      `ResumePanelView` with stable session rows and `/resume <session-id>`
+      commands, so TUI and future APP surfaces consume the same app-service
+      resume contract instead of parsing surface-local text.
     - Migrated baseline: the old `impl/session/{file,memory}` session stores and
       `impl/task/file` task store have been removed; new product paths use
       `core/session.Store` adapters and core-native task journals instead of
       retaining a parallel old persistence implementation.
-    - Still pending: current on-disk legacy session layout migration and
-      remaining reload UX polish are not implemented.
+    - Still pending: current on-disk legacy session layout import remains an
+      explicit one-time migration concern; it should not become a runtime
+      compatibility fallback in the new session replay path.
 
 ### Next Migration Milestones
 
@@ -2523,9 +2528,10 @@ Recommended sequence:
    now baseline runtime capabilities.
 4. Port the remaining richer interactive flows to `internal/app/services`,
    especially any product actions not yet represented by shared settings, task,
-   or controller panel payloads while preserving rendering as surface-local code.
+   controller, or resume panel payloads while preserving rendering as
+   surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
-   selection, approvals, tasks, and transcript actions.
+   selection, approvals, tasks, resume, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.

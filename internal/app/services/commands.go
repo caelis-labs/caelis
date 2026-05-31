@@ -717,14 +717,17 @@ func (s CommandService) clearDeletedSessionModel(ctx context.Context, ref sessio
 func (s CommandService) executeResume(ctx context.Context, args string) (appviewmodel.CommandExecutionView, error) {
 	sessionID := strings.TrimSpace(args)
 	if sessionID == "" {
-		page, err := s.services.Sessions().List(ctx, ListSessionsRequest{Limit: 10})
+		req := ListSessionsRequest{Limit: 10}
+		page, err := s.services.Sessions().List(ctx, req)
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
+		panel := resumePanelFromPage(page, s.services.Sessions().workspaceWithDefaults(req.Workspace), req.Search)
 		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "resume",
-			Output:  formatCommandSessions(page),
+			Handled:     true,
+			Command:     "resume",
+			Output:      formatCommandSessions(page),
+			ResumePanel: &panel,
 		}, nil
 	}
 	if strings.ContainsAny(sessionID, " \t\n") {
@@ -741,6 +744,51 @@ func (s CommandService) executeResume(ctx context.Context, args string) (appview
 		Output:     formatCommandResume(snapshot),
 		SessionRef: &ref,
 	}, nil
+}
+
+func resumePanelFromPage(page session.SessionPage, workspace session.Workspace, search string) appviewmodel.ResumePanelView {
+	panel := appviewmodel.ResumePanelView{
+		Workspace:  workspace,
+		Search:     strings.TrimSpace(search),
+		Count:      len(page.Sessions),
+		NextCursor: page.NextCursor,
+		Sessions:   make([]appviewmodel.ResumeSessionItem, 0, len(page.Sessions)),
+	}
+	for _, summary := range page.Sessions {
+		item := resumeSessionItem(summary)
+		if strings.TrimSpace(item.SessionID) == "" {
+			continue
+		}
+		panel.Sessions = append(panel.Sessions, item)
+	}
+	panel.Count = len(panel.Sessions)
+	return panel
+}
+
+func resumeSessionItem(summary session.SessionSummary) appviewmodel.ResumeSessionItem {
+	active := session.CloneSession(summary.Session)
+	sessionID := strings.TrimSpace(active.SessionID)
+	if sessionID == "" {
+		sessionID = strings.TrimSpace(active.Ref.SessionID)
+	}
+	updatedAt := active.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = summary.LastEventAt
+	}
+	workspace := strings.TrimSpace(active.Workspace.CWD)
+	if workspace == "" {
+		workspace = strings.TrimSpace(active.Workspace.Key)
+	}
+	return appviewmodel.ResumeSessionItem{
+		Ref:         session.NormalizeRef(active.Ref),
+		SessionID:   sessionID,
+		Title:       strings.TrimSpace(active.Title),
+		Workspace:   workspace,
+		EventCount:  summary.EventCount,
+		UpdatedAt:   updatedAt,
+		LastEventAt: summary.LastEventAt,
+		Command:     "/resume " + sessionID,
+	}
 }
 
 func parseSlashCommand(input string) (string, string, bool) {

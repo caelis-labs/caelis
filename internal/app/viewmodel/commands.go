@@ -20,6 +20,7 @@ type CommandExecutionView struct {
 	SessionRef        *session.Ref         `json:"session_ref,omitempty"`
 	SettingsPanel     *SettingsPanelView   `json:"settings_panel,omitempty"`
 	TaskPanel         *TaskPanelView       `json:"task_panel,omitempty"`
+	ResumePanel       *ResumePanelView     `json:"resume_panel,omitempty"`
 	ControllerPanel   *ControllerPanelView `json:"controller_panel,omitempty"`
 	ModelConnectPanel *ModelConnectView    `json:"model_connect_panel,omitempty"`
 	AgentManagement   *AgentManagementView `json:"agent_management,omitempty"`

@@ -1821,6 +1821,12 @@ func TestCommandServiceExecuteResumeListsAndTargetsSession(t *testing.T) {
 	if !listed.Handled || listed.Command != "resume" || !strings.Contains(listed.Output, "sess-alpha") || !strings.Contains(listed.Output, "alpha work") {
 		t.Fatalf("resume list = %#v, want listed session", listed)
 	}
+	if listed.ResumePanel == nil || len(listed.ResumePanel.Sessions) != 1 {
+		t.Fatalf("resume panel = %#v, want one listed session", listed.ResumePanel)
+	}
+	if item := listed.ResumePanel.Sessions[0]; item.SessionID != "sess-alpha" || item.Command != "/resume sess-alpha" {
+		t.Fatalf("resume panel item = %#v, want resumable sess-alpha command", item)
+	}
 	target, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/resume sess-alpha"})
 	if err != nil {
 		t.Fatal(err)

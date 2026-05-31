@@ -23,6 +23,25 @@ type SessionView struct {
 	Participants     []ParticipantItem   `json:"participants,omitempty"`
 }
 
+type ResumePanelView struct {
+	Workspace  session.Workspace   `json:"workspace,omitempty"`
+	Search     string              `json:"search,omitempty"`
+	Count      int                 `json:"count,omitempty"`
+	Sessions   []ResumeSessionItem `json:"sessions,omitempty"`
+	NextCursor session.Cursor      `json:"next_cursor,omitempty"`
+}
+
+type ResumeSessionItem struct {
+	Ref         session.Ref `json:"ref"`
+	SessionID   string      `json:"session_id,omitempty"`
+	Title       string      `json:"title,omitempty"`
+	Workspace   string      `json:"workspace,omitempty"`
+	EventCount  int         `json:"event_count,omitempty"`
+	UpdatedAt   time.Time   `json:"updated_at,omitempty"`
+	LastEventAt time.Time   `json:"last_event_at,omitempty"`
+	Command     string      `json:"command,omitempty"`
+}
+
 type TranscriptItem struct {
 	ID          string             `json:"id,omitempty"`
 	Type        string             `json:"type,omitempty"`
