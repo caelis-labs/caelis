@@ -361,6 +361,108 @@ func TestStackInvokesExternalACPAgentAsControllerThroughServices(t *testing.T) {
 	}
 }
 
+func TestStackRecoversRunningExternalACPControllerPrompt(t *testing.T) {
+	ctx := context.Background()
+	store := storememory.New()
+	stateDir := t.TempDir()
+	workspace := t.TempDir()
+	runtimeCfg := config.Runtime{
+		AppName:      "caelis",
+		UserID:       "tester",
+		WorkspaceKey: "repo",
+		WorkspaceCWD: workspace,
+		Store:        config.Store{Backend: "jsonl", URI: stateDir},
+	}
+	active, err := store.Create(ctx, session.StartRequest{
+		AppName: runtimeCfg.AppName,
+		UserID:  runtimeCfg.UserID,
+		Workspace: session.Workspace{
+			Key: runtimeCfg.WorkspaceKey,
+			CWD: runtimeCfg.WorkspaceCWD,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := newControllerRunJournal(controllerStateDir(runtimeCfg.Store))
+	if err := journal.write(ctx, controllerRunJournalRecord{
+		ID:         "turn-controller-recover",
+		SessionRef: active.Ref,
+		Workspace:  active.Workspace,
+		TurnID:     "turn-controller-recover",
+		Controller: session.ControllerBinding{
+			Kind:            session.ControllerACP,
+			ID:              "helper",
+			AgentName:       "helper",
+			Label:           "Helper",
+			EpochID:         "controller-epoch",
+			RemoteSessionID: "remote-helper-session",
+			Source:          "test",
+		},
+		RemoteSessionID: "remote-helper-session",
+		Input:           "recover controller prompt",
+		Running:         true,
+		StartedAt:       time.Now().UTC(),
+		UpdatedAt:       time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := New(Config{
+		Runtime: runtimeCfg,
+		Store:   store,
+		Provider: &capturingProvider{message: model.Message{
+			Role:  model.RoleAssistant,
+			Parts: []model.Part{model.NewTextPart("local baseline")},
+		}},
+		ExternalACPAgents: []acpexternal.Config{{
+			AgentID:   "helper",
+			AgentName: "Helper",
+			Command:   os.Args[0],
+			Args:      []string{"-test.run=TestExternalACPHelperProcess", "--"},
+			Env:       []string{"CAELIS_TEST_EXTERNAL_ACP_HELPER=1"},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var recovered *session.Event
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		snapshot, err := store.Load(ctx, active.Ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := range snapshot.Events {
+			event := snapshot.Events[i]
+			if session.EventText(event) == "external helper response" {
+				recovered = &event
+				break
+			}
+		}
+		records, err := journal.readRunning(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if recovered != nil && len(records) == 0 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if recovered == nil {
+		snapshot, _ := store.Load(ctx, active.Ref)
+		t.Fatalf("recovered controller event not found; events = %#v", snapshot.Events)
+	}
+	if recovered.Scope == nil || recovered.Scope.Controller.RemoteSessionID != "remote-helper-session" || recovered.Scope.Controller.ID != "helper" {
+		t.Fatalf("recovered event scope = %#v, want resumed helper controller", recovered.Scope)
+	}
+	records, err := journal.readRunning(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("running controller journal records = %#v, want cleared after recovery", records)
+	}
+}
+
 func TestStackLetsExternalACPAgentUseCoreTerminalCallbacks(t *testing.T) {
 	rt, err := sandboxhost.New(context.Background(), sandbox.Config{CWD: t.TempDir()})
 	if err != nil {

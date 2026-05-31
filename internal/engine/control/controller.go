@@ -11,13 +11,15 @@ import (
 )
 
 type ControllerRunner struct {
-	Store session.Store
-	Now   func() time.Time
+	Store   session.Store
+	Now     func() time.Time
+	Tracker ControllerInvocationTracker
 }
 
 type ControllerRequest struct {
 	SessionRef                session.Ref
 	Workspace                 session.Workspace
+	TurnID                    string
 	Controller                session.ControllerBinding
 	ControllerModel           string
 	ControllerReasoningEffort string
@@ -32,6 +34,36 @@ type ControllerResult struct {
 	Events          []session.Event
 	Cursor          session.Cursor
 	ConfigOptions   []ConfigOption
+}
+
+type ControllerInvocationPhase string
+
+const (
+	ControllerInvocationStarted       ControllerInvocationPhase = "started"
+	ControllerInvocationRemoteSession ControllerInvocationPhase = "remote_session"
+	ControllerInvocationCompleted     ControllerInvocationPhase = "completed"
+	ControllerInvocationFailed        ControllerInvocationPhase = "failed"
+)
+
+type ControllerInvocationState struct {
+	Phase                     ControllerInvocationPhase `json:"phase,omitempty"`
+	SessionRef                session.Ref               `json:"session_ref,omitempty"`
+	Workspace                 session.Workspace         `json:"workspace,omitempty"`
+	TurnID                    string                    `json:"turn_id,omitempty"`
+	Controller                session.ControllerBinding `json:"controller,omitempty"`
+	RemoteSessionID           string                    `json:"remote_session_id,omitempty"`
+	ControllerModel           string                    `json:"controller_model,omitempty"`
+	ControllerReasoningEffort string                    `json:"controller_reasoning_effort,omitempty"`
+	ControllerMode            string                    `json:"controller_mode,omitempty"`
+	Input                     string                    `json:"input,omitempty"`
+	ContentParts              []model.ContentPart       `json:"content_parts,omitempty"`
+	ConfigOptions             []ConfigOption            `json:"config_options,omitempty"`
+	Error                     string                    `json:"error,omitempty"`
+	Time                      time.Time                 `json:"time,omitempty"`
+}
+
+type ControllerInvocationTracker interface {
+	ControllerInvocationChanged(context.Context, ControllerInvocationState) error
 }
 
 type ConfigChoice struct {
@@ -83,18 +115,29 @@ func (r ControllerRunner) Invoke(ctx context.Context, req ControllerRequest) (Co
 	if strings.TrimSpace(workspace.Key) == "" && strings.TrimSpace(workspace.CWD) == "" {
 		workspace = snapshot.Session.Workspace
 	}
-	if err := req.Agent.Initialize(ctx); err != nil {
+	state := r.invocationState(ref, workspace, req, ControllerInvocationStarted)
+	if err := r.track(ctx, state); err != nil {
 		return ControllerResult{}, err
+	}
+	if err := req.Agent.Initialize(ctx); err != nil {
+		return r.fail(ctx, state, err)
 	}
 	remoteSessionID, configOptions, err := r.startControllerSession(ctx, req.Agent, req.Controller, workspace)
 	if err != nil {
-		return ControllerResult{}, err
+		return r.fail(ctx, state, err)
 	}
+	state.RemoteSessionID = remoteSessionID
+	state.Controller.RemoteSessionID = remoteSessionID
+	state.ConfigOptions = cloneConfigOptions(configOptions)
 	if configurable, ok := req.Agent.(ConfigurableAgentSession); ok {
 		configOptions, err = applyControllerConfigIntent(ctx, configurable, remoteSessionID, configOptions, req)
 		if err != nil {
-			return ControllerResult{}, err
+			return r.fail(ctx, state, err)
 		}
+	}
+	state.ConfigOptions = cloneConfigOptions(configOptions)
+	if err := r.track(ctx, withControllerPhase(state, ControllerInvocationRemoteSession, r.now())); err != nil {
+		return ControllerResult{}, err
 	}
 	parts := model.CloneContentParts(req.ContentParts)
 	if len(parts) == 0 && strings.TrimSpace(req.Input) != "" {
@@ -102,11 +145,14 @@ func (r ControllerRunner) Invoke(ctx context.Context, req ControllerRequest) (Co
 	}
 	events, err := req.Agent.Prompt(ctx, remoteSessionID, parts)
 	if err != nil {
-		return ControllerResult{}, err
+		return r.fail(ctx, state, err)
 	}
 	events = normalizeControllerEvents(snapshot.Session.Ref.SessionID, remoteSessionID, req.Controller, events, configOptions, r.now())
 	cursor, err := r.Store.Append(ctx, snapshot.Session.Ref, events)
 	if err != nil {
+		return r.fail(ctx, state, err)
+	}
+	if err := r.track(ctx, withControllerPhase(state, ControllerInvocationCompleted, r.now())); err != nil {
 		return ControllerResult{}, err
 	}
 	return ControllerResult{
@@ -115,6 +161,63 @@ func (r ControllerRunner) Invoke(ctx context.Context, req ControllerRequest) (Co
 		Cursor:          cursor,
 		ConfigOptions:   cloneConfigOptions(configOptions),
 	}, nil
+}
+
+func (r ControllerRunner) invocationState(ref session.Ref, workspace session.Workspace, req ControllerRequest, phase ControllerInvocationPhase) ControllerInvocationState {
+	return ControllerInvocationState{
+		Phase:                     phase,
+		SessionRef:                ref,
+		Workspace:                 workspace,
+		TurnID:                    strings.TrimSpace(req.TurnID),
+		Controller:                req.Controller,
+		RemoteSessionID:           strings.TrimSpace(req.Controller.RemoteSessionID),
+		ControllerModel:           strings.TrimSpace(req.ControllerModel),
+		ControllerReasoningEffort: strings.TrimSpace(req.ControllerReasoningEffort),
+		ControllerMode:            strings.TrimSpace(req.ControllerMode),
+		Input:                     strings.TrimSpace(req.Input),
+		ContentParts:              model.CloneContentParts(req.ContentParts),
+		Time:                      r.now(),
+	}
+}
+
+func (r ControllerRunner) fail(ctx context.Context, state ControllerInvocationState, cause error) (ControllerResult, error) {
+	if cause == nil {
+		return ControllerResult{}, nil
+	}
+	state.Error = strings.TrimSpace(cause.Error())
+	if err := r.track(ctx, withControllerPhase(state, ControllerInvocationFailed, r.now())); err != nil {
+		return ControllerResult{}, errors.Join(cause, err)
+	}
+	return ControllerResult{}, cause
+}
+
+func (r ControllerRunner) track(ctx context.Context, state ControllerInvocationState) error {
+	if r.Tracker == nil {
+		return nil
+	}
+	state.SessionRef = session.NormalizeRef(state.SessionRef)
+	state.Workspace.Key = strings.TrimSpace(state.Workspace.Key)
+	state.Workspace.CWD = strings.TrimSpace(state.Workspace.CWD)
+	state.TurnID = strings.TrimSpace(state.TurnID)
+	state.Controller = normalizeControllerBinding(state.Controller)
+	state.RemoteSessionID = strings.TrimSpace(state.RemoteSessionID)
+	state.ControllerModel = strings.TrimSpace(state.ControllerModel)
+	state.ControllerReasoningEffort = strings.TrimSpace(state.ControllerReasoningEffort)
+	state.ControllerMode = strings.TrimSpace(state.ControllerMode)
+	state.Input = strings.TrimSpace(state.Input)
+	state.ContentParts = model.CloneContentParts(state.ContentParts)
+	state.ConfigOptions = cloneConfigOptions(state.ConfigOptions)
+	state.Error = strings.TrimSpace(state.Error)
+	if state.Time.IsZero() {
+		state.Time = r.now()
+	}
+	return r.Tracker.ControllerInvocationChanged(ctx, state)
+}
+
+func withControllerPhase(state ControllerInvocationState, phase ControllerInvocationPhase, at time.Time) ControllerInvocationState {
+	state.Phase = phase
+	state.Time = at
+	return state
 }
 
 func (r ControllerRunner) startControllerSession(ctx context.Context, agent AgentSession, controller session.ControllerBinding, workspace session.Workspace) (string, []ConfigOption, error) {
@@ -139,6 +242,16 @@ func (r ControllerRunner) startControllerSession(ctx context.Context, agent Agen
 		return "", nil, err
 	}
 	return strings.TrimSpace(state.RemoteSessionID), cloneConfigOptions(state.ConfigOptions), nil
+}
+
+func normalizeControllerBinding(in session.ControllerBinding) session.ControllerBinding {
+	in.ID = strings.TrimSpace(in.ID)
+	in.AgentName = strings.TrimSpace(in.AgentName)
+	in.Label = strings.TrimSpace(in.Label)
+	in.EpochID = strings.TrimSpace(in.EpochID)
+	in.RemoteSessionID = strings.TrimSpace(in.RemoteSessionID)
+	in.Source = strings.TrimSpace(in.Source)
+	return in
 }
 
 func applyControllerConfigIntent(ctx context.Context, agent ConfigurableAgentSession, remoteSessionID string, options []ConfigOption, req ControllerRequest) ([]ConfigOption, error) {

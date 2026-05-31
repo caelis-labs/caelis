@@ -136,6 +136,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 	}
 	terminalHandler := newExternalTerminalHandler(sandboxRuntime, runtimeCfg.WorkspaceCWD)
 	externalAgents = withExternalTerminalHandler(externalAgents, terminalHandler)
+	controllerRuns := newControllerRunManager(store, externalAgents, controllerStateDir(runtimeCfg.Store))
 	spawnTasks := newSpawnTaskManager(store, externalAgents, taskStateDir(runtimeCfg.Store))
 	tools := cfg.Tools
 	if tools == nil {
@@ -214,8 +215,8 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		ModelProvider:  modelProviderFactory(reg),
 		Agents:         agentDescriptors(externalAgents),
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),
-		Invokers:       agentInvokers(store, externalAgents),
-		InvokerFactory: externalAgentInvokerFactory(store, terminalHandler),
+		Invokers:       agentInvokers(store, externalAgents, controllerRuns),
+		InvokerFactory: externalAgentInvokerFactory(store, terminalHandler, controllerRuns),
 		AgentInstaller: newBuiltinAgentInstaller(runtimeCfg),
 		Resources:      resourceCatalog,
 		Settings:       cfg.Settings,
@@ -223,6 +224,9 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		ApplyRuntime:   sandboxRuntimeApplier(reg, liveSandbox),
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := controllerRuns.StartRecovery(ctx); err != nil {
 		return nil, err
 	}
 	return &Stack{
@@ -267,7 +271,7 @@ func withExternalTerminalHandler(configs []acpexternal.Config, handler acpextern
 	return out
 }
 
-func agentInvokers(store session.Store, configs []acpexternal.Config) map[string]services.AgentInvoker {
+func agentInvokers(store session.Store, configs []acpexternal.Config, controllerRuns *controllerRunManager) map[string]services.AgentInvoker {
 	if len(configs) == 0 {
 		return nil
 	}
@@ -278,12 +282,12 @@ func agentInvokers(store session.Store, configs []acpexternal.Config) map[string
 		if id == "" {
 			continue
 		}
-		out[id] = externalAgentInvoker(store, cfg)
+		out[id] = externalAgentInvoker(store, cfg, controllerRuns)
 	}
 	return out
 }
 
-func externalAgentInvokerFactory(store session.Store, terminal acpexternal.TerminalHandler) services.AgentInvokerFactory {
+func externalAgentInvokerFactory(store session.Store, terminal acpexternal.TerminalHandler, controllerRuns *controllerRunManager) services.AgentInvokerFactory {
 	return func(agent services.AgentDescriptor) (services.AgentInvoker, error) {
 		cfg := acpexternal.Config{
 			AgentID:   firstNonEmpty(agent.ID, agent.Name, agent.Command),
@@ -297,7 +301,7 @@ func externalAgentInvokerFactory(store session.Store, terminal acpexternal.Termi
 		if strings.TrimSpace(cfg.AgentID) == "" || strings.TrimSpace(cfg.Command) == "" {
 			return nil, fmt.Errorf("app/local: external ACP agent id and command are required")
 		}
-		return externalAgentInvoker(store, cfg), nil
+		return externalAgentInvoker(store, cfg, controllerRuns), nil
 	}
 }
 
@@ -328,7 +332,7 @@ func modelProviderFactory(reg *appregistry.Registry) services.ModelProviderFacto
 	}
 }
 
-func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.AgentInvoker {
+func externalAgentInvoker(store session.Store, cfg acpexternal.Config, controllerRuns *controllerRunManager) services.AgentInvoker {
 	id := firstNonEmpty(cfg.AgentID, cfg.AgentName, cfg.Command)
 	return services.AgentInvokerFunc(func(ctx context.Context, req services.AgentInvokeRequest) (services.AgentInvokeResult, error) {
 		client, err := acpexternal.StartProcess(ctx, cfg)
@@ -338,7 +342,7 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.
 		defer client.Close()
 		adapter := externalAgentSession{client: client}
 		if req.Controller.Kind == session.ControllerACP || strings.TrimSpace(req.Controller.ID) != "" {
-			runner := control.ControllerRunner{Store: store}
+			runner := control.ControllerRunner{Store: store, Tracker: controllerRuns.tracker()}
 			controller := req.Controller
 			if strings.TrimSpace(controller.ID) == "" {
 				controller.ID = id
@@ -351,6 +355,7 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.
 			controller.Source = firstNonEmpty(controller.Source, "external_acp")
 			result, err := runner.Invoke(ctx, control.ControllerRequest{
 				SessionRef:                req.SessionRef,
+				TurnID:                    req.TurnID,
 				Input:                     req.Input,
 				ContentParts:              req.ContentParts,
 				Controller:                controller,
@@ -832,21 +837,30 @@ func dedupeRootPaths(paths []string) []string {
 }
 
 func sandboxStateDir(store config.Store) string {
-	backend := strings.ToLower(strings.TrimSpace(store.Backend))
-	if backend == "memory" {
+	root := storeStateRoot(store)
+	if root == "" {
 		return ""
 	}
-	uri := strings.TrimSpace(store.URI)
-	if uri == "" {
-		return ""
-	}
-	if backend == "sqlite" {
-		return filepath.Join(filepath.Dir(uri), "sandbox")
-	}
-	return filepath.Join(uri, "sandbox")
+	return filepath.Join(root, "sandbox")
 }
 
 func taskStateDir(store config.Store) string {
+	root := storeStateRoot(store)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "tasks")
+}
+
+func controllerStateDir(store config.Store) string {
+	root := storeStateRoot(store)
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, "controllers")
+}
+
+func storeStateRoot(store config.Store) string {
 	backend := strings.ToLower(firstNonEmpty(store.Backend, "memory"))
 	if backend == "memory" {
 		return ""
@@ -855,10 +869,19 @@ func taskStateDir(store config.Store) string {
 	if uri == "" {
 		return ""
 	}
-	if backend == "sqlite" {
-		return filepath.Join(filepath.Dir(uri), "tasks")
+	if strings.Contains(backend, "sqlite") || storeURILooksLikeFile(uri) {
+		return filepath.Dir(uri)
 	}
-	return filepath.Join(uri, "tasks")
+	return uri
+}
+
+func storeURILooksLikeFile(uri string) bool {
+	switch strings.ToLower(filepath.Ext(strings.TrimSpace(uri))) {
+	case ".db", ".sqlite", ".sqlite3", ".jsonl":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Stack) Services() services.Services {

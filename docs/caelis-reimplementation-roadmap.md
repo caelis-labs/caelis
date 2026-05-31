@@ -1645,8 +1645,8 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: richer `/connect` rendering/panel parity and durable live
-     remote controller process reconnect/lifecycle.
+   - Still pending: richer `/connect` rendering/panel parity and richer remote
+     controller lifecycle diagnostics.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -2083,10 +2083,16 @@ be migrated before retiring the old stack:
       core sandbox async sessions. This applies to participant, controller, and
       SPAWN invocation paths because they share the same external ACP client
       configuration.
-    - Still pending: true live remote ACP controller reconnect for prompts that
-      were actively running during a process restart, durable host subprocess
-      lifecycle state beyond archived snapshots, and richer persisted terminal
-      preview metadata remain incomplete.
+    - Migrated baseline: live remote ACP controller prompts now write a durable
+      local running journal before invoking the external controller, update it
+      once the remote ACP session id is known, and clear it after completion or
+      failure. A restarted local stack scans those running records, restarts
+      the configured ACP adapter, calls `session/resume`, continues the pending
+      controller prompt, and appends the recovered controller output to the
+      canonical session store.
+    - Still pending: durable host subprocess lifecycle state beyond archived
+      snapshots, richer persisted terminal preview metadata, and richer remote
+      controller lifecycle diagnostics remain incomplete.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2284,8 +2290,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially richer `/connect` rendering/panel parity, live remote controller
-   process lifecycle, and visual settings/diagnostics editors.
+   especially richer `/connect` rendering/panel parity, remote controller
+   diagnostics, and visual settings/diagnostics editors.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
 3. Finish sandbox backend cleanup and remaining permission-policy diagnostics
