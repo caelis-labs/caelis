@@ -308,6 +308,7 @@ func sandboxPanelActions(status SandboxStatus) []appviewmodel.SettingsPanelActio
 			Description: "Prepare the selected sandbox backend.",
 			Target:      "sandbox",
 			Kind:        "lifecycle",
+			Command:     "/settings run " + settingsActionSandboxPrepare,
 			Enabled:     enabled,
 		},
 		{
@@ -316,6 +317,7 @@ func sandboxPanelActions(status SandboxStatus) []appviewmodel.SettingsPanelActio
 			Description: "Repair or prepare the selected sandbox backend.",
 			Target:      "sandbox",
 			Kind:        "lifecycle",
+			Command:     "/settings run " + settingsActionSandboxRepair,
 			Enabled:     enabled,
 		},
 		{
@@ -324,6 +326,7 @@ func sandboxPanelActions(status SandboxStatus) []appviewmodel.SettingsPanelActio
 			Description: "Run sandbox preflight checks.",
 			Target:      "sandbox",
 			Kind:        "diagnostic",
+			Command:     "/settings run " + settingsActionSandboxPreflight,
 			Enabled:     enabled,
 		},
 		{
@@ -332,6 +335,7 @@ func sandboxPanelActions(status SandboxStatus) []appviewmodel.SettingsPanelActio
 			Description:          "Reset sandbox setup state when the backend supports it.",
 			Target:               "sandbox",
 			Kind:                 "lifecycle",
+			Command:              "/settings run " + settingsActionSandboxReset,
 			Enabled:              enabled,
 			Destructive:          true,
 			RequiresConfirmation: true,
@@ -353,6 +357,7 @@ func modelConnectAction() appviewmodel.SettingsPanelAction {
 		Description: "Open the shared model connection flow.",
 		Target:      "model",
 		Kind:        "navigation",
+		Command:     "/connect",
 		Enabled:     true,
 	}
 }

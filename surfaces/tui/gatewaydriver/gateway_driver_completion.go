@@ -352,6 +352,10 @@ func settingsCompletionActions(panel appviewmodel.SettingsPanelView) []appviewmo
 		if id == "" || !action.Enabled {
 			return
 		}
+		command := strings.TrimSpace(action.Command)
+		if command != "" && !strings.HasPrefix(strings.ToLower(command), "/settings run ") {
+			return
+		}
 		key := strings.ToLower(id)
 		if _, exists := seen[key]; exists {
 			return

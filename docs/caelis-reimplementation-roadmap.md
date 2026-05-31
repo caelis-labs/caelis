@@ -1632,6 +1632,11 @@ be migrated before retiring the old stack:
      reasoning changes keep using `/model use <model> <effort>`. This is the
      reference interaction pattern for a future APP surface: UI owns widgets,
      app services own semantics.
+   - Migrated baseline: settings fields and actions now carry stable command
+     strings in the shared settings panel contract. Editable fields expose
+     `/settings set <field-id> ` prefixes, sandbox lifecycle actions expose
+     `/settings run <action-id>`, and model setup navigation exposes `/connect`
+     rather than requiring surfaces to infer command syntax from ids.
    - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
      transcript action descriptors for task-backed tool entries, derived from
      canonical runtime task metadata and expressed as shared slash commands.
@@ -2558,8 +2563,7 @@ Recommended sequence:
    especially any product actions not yet represented by shared settings, task,
    controller, or resume panel payloads while preserving rendering as
    surface-local code.
-5. Expand shared APP view models for settings, tasks, resume, and transcript
-   actions.
+5. Expand shared APP view models for tasks, resume, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.

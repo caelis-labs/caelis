@@ -464,9 +464,16 @@ func settingsPanelClickHints(panel appviewmodel.SettingsPanelView) []commandPane
 			if fieldID == "" {
 				continue
 			}
+			input := strings.TrimSpace(field.Command)
+			if input == "" {
+				input = "/settings set " + fieldID + " "
+			}
+			if strings.HasPrefix(input, "/settings set ") {
+				input = commandPanelEnsureTrailingSpace(input)
+			}
 			hints = append(hints, commandPanelClickHint{
 				Needle: fieldID,
-				Input:  "/settings set " + fieldID + " ",
+				Input:  input,
 			})
 		}
 	}
@@ -478,9 +485,13 @@ func settingsPanelClickHints(panel appviewmodel.SettingsPanelView) []commandPane
 		if actionID == "" {
 			continue
 		}
+		input := settingsPanelActionCommand(action)
+		if input == "" {
+			continue
+		}
 		hints = append(hints, commandPanelClickHint{
 			Needle: actionID,
-			Input:  "/settings run " + actionID,
+			Input:  input,
 		})
 	}
 	return hints
@@ -742,6 +753,14 @@ func commandPanelOneLine(value string) string {
 	value = strings.ReplaceAll(value, "\n", " ")
 	value = strings.Join(strings.Fields(value), " ")
 	return value
+}
+
+func commandPanelEnsureTrailingSpace(value string) string {
+	value = strings.TrimRight(strings.TrimSpace(value), " ")
+	if value == "" {
+		return ""
+	}
+	return value + " "
 }
 
 func commandPanelFooterForCommand(command string) string {
@@ -1015,6 +1034,9 @@ func settingsPanelActionLine(action appviewmodel.SettingsPanelAction, width int,
 	plain := fmt.Sprintf("  %s - %s (%s)", firstNonEmpty(action.ID, action.Label), firstNonEmpty(action.Label, action.Kind), state)
 	if action.Destructive || action.RequiresConfirmation {
 		plain += " confirm"
+	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		plain += "  " + command
 	}
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
 }

@@ -29,6 +29,7 @@ func TestCommandPanelBlockRendersSettingsPanelPayload(t *testing.T) {
 				ID:       "sandbox.backend",
 				Label:    "Requested backend",
 				Kind:     "select",
+				Command:  "/settings set sandbox.backend ",
 				Value:    "host",
 				Editable: true,
 				Options: []appviewmodel.SettingsPanelFieldOption{{
@@ -40,6 +41,7 @@ func TestCommandPanelBlockRendersSettingsPanelPayload(t *testing.T) {
 		Actions: []appviewmodel.SettingsPanelAction{{
 			ID:      "model.connect",
 			Label:   "Connect model",
+			Command: "/connect",
 			Enabled: true,
 		}},
 	}
@@ -58,8 +60,11 @@ func TestCommandPanelBlockRendersSettingsPanelPayload(t *testing.T) {
 	if !rowsContainCommandPanelInput(rows, "/settings set sandbox.backend ") {
 		t.Fatalf("settings field row missing command-panel input token: %#v", renderedPlainRows(rows))
 	}
-	if !rowsContainCommandPanelInput(rows, "/settings run model.connect") {
+	if !rowsContainCommandPanelInput(rows, "/connect") {
 		t.Fatalf("settings action row missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{SettingsPanel: &panel}, "/connect"); action.line != "/connect" {
+		t.Fatalf("settings connect action = %#v, want immediate /connect submit", action)
 	}
 }
 

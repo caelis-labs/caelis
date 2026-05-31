@@ -110,12 +110,11 @@ func settingsCommandPanelAction(panel appviewmodel.SettingsPanelView, input stri
 		}
 		return settingsFieldCommandPanelAction(field)
 	}
-	if actionID, ok := strings.CutPrefix(input, "/settings run "); ok {
-		action, ok := findSettingsPanelAction(panel.Actions, strings.TrimSpace(actionID))
-		if !ok || !action.Enabled {
-			return commandPanelAction{fillInput: input}
+	for _, action := range panel.Actions {
+		command := settingsPanelActionCommand(action)
+		if !action.Enabled || command == "" || command != input {
+			continue
 		}
-		line := "/settings run " + strings.TrimSpace(action.ID)
 		if action.Destructive || action.RequiresConfirmation {
 			return commandPanelAction{prompt: confirmCommandPanelPrompt(
 				"Run "+strings.TrimSpace(action.ID)+"?",
@@ -124,7 +123,29 @@ func settingsCommandPanelAction(panel appviewmodel.SettingsPanelView, input stri
 					{Label: "Action", Value: strings.TrimSpace(action.ID), Emphasis: true},
 					{Label: "Description", Value: strings.TrimSpace(action.Description)},
 				},
-				line+" confirm",
+				settingsPanelConfirmedActionCommand(action),
+			)}
+		}
+		return commandPanelAction{line: command}
+	}
+	if actionID, ok := strings.CutPrefix(input, "/settings run "); ok {
+		action, ok := findSettingsPanelAction(panel.Actions, strings.TrimSpace(actionID))
+		if !ok || !action.Enabled {
+			return commandPanelAction{fillInput: input}
+		}
+		line := settingsPanelActionCommand(action)
+		if line == "" || !strings.HasPrefix(strings.ToLower(line), "/settings run ") {
+			return commandPanelAction{fillInput: input}
+		}
+		if action.Destructive || action.RequiresConfirmation {
+			return commandPanelAction{prompt: confirmCommandPanelPrompt(
+				"Run "+strings.TrimSpace(action.ID)+"?",
+				"Confirm settings action",
+				[]PromptDetail{
+					{Label: "Action", Value: strings.TrimSpace(action.ID), Emphasis: true},
+					{Label: "Description", Value: strings.TrimSpace(action.Description)},
+				},
+				settingsPanelConfirmedActionCommand(action),
 			)}
 		}
 		return commandPanelAction{line: line}
@@ -134,6 +155,11 @@ func settingsCommandPanelAction(panel appviewmodel.SettingsPanelView, input stri
 
 func settingsFieldCommandPanelAction(field appviewmodel.SettingsPanelField) commandPanelAction {
 	fieldID := strings.TrimSpace(field.ID)
+	command := strings.TrimSpace(field.Command)
+	if command == "" {
+		command = "/settings set " + fieldID + " "
+	}
+	command = commandPanelEnsureTrailingSpace(command)
 	details := []PromptDetail{
 		{Label: "Field", Value: fieldID, Emphasis: true},
 		{Label: "Current", Value: strings.TrimSpace(field.Value)},
@@ -152,7 +178,7 @@ func settingsFieldCommandPanelAction(field appviewmodel.SettingsPanelField) comm
 				if value == "" {
 					return ""
 				}
-				return "/settings set " + fieldID + " " + value
+				return command + value
 			},
 		}}
 	}
@@ -166,9 +192,25 @@ func settingsFieldCommandPanelAction(field appviewmodel.SettingsPanelField) comm
 			if value == "" && strings.TrimSpace(field.Value) == "" {
 				return ""
 			}
-			return "/settings set " + fieldID + " " + value
+			return command + value
 		},
 	}}
+}
+
+func settingsPanelActionCommand(action appviewmodel.SettingsPanelAction) string {
+	command := strings.TrimSpace(action.Command)
+	if command == "" && strings.TrimSpace(action.ID) != "" {
+		command = "/settings run " + strings.TrimSpace(action.ID)
+	}
+	return command
+}
+
+func settingsPanelConfirmedActionCommand(action appviewmodel.SettingsPanelAction) string {
+	command := settingsPanelActionCommand(action)
+	if strings.HasPrefix(strings.ToLower(command), "/settings run ") {
+		return command + " confirm"
+	}
+	return command
 }
 
 func modelSelectionCommandPanelAction(panel appviewmodel.ModelSelectionView, input string) commandPanelAction {

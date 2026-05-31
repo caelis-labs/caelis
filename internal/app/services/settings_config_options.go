@@ -138,6 +138,10 @@ func settingsPanelFieldConfigMeta(fieldID string) (settingsConfigOptionSpec, boo
 }
 
 func decorateSettingsPanelField(field appviewmodel.SettingsPanelField) appviewmodel.SettingsPanelField {
+	fieldID := strings.ToLower(strings.TrimSpace(field.ID))
+	if field.Editable && fieldID != "" && strings.TrimSpace(field.Command) == "" {
+		field.Command = "/settings set " + fieldID + " "
+	}
 	spec, ok := settingsPanelFieldConfigMeta(field.ID)
 	if !ok {
 		return field

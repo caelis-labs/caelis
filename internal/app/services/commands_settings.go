@@ -36,7 +36,7 @@ func (s CommandService) executeSettings(ctx context.Context, ref session.Ref, ar
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
-		action, ok := findSettingsAction(before.Actions, actionID)
+		action, ok := findSettingsRunAction(before.Actions, actionID)
 		if !ok {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: settings action %q is unavailable", strings.TrimSpace(actionID))
 		}
@@ -45,9 +45,6 @@ func (s CommandService) executeSettings(ctx context.Context, ref session.Ref, ar
 		}
 		if (action.Destructive || action.RequiresConfirmation) && !settingsActionConfirmed(actionArgs) {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: settings action %q requires confirmation", action.ID)
-		}
-		if strings.EqualFold(action.ID, settingsActionModelConnect) {
-			return s.executeConnect(ctx, ref, "")
 		}
 		panel, err := s.services.Settings().RunPanelAction(ctx, SettingsPanelActionRequest{SessionRef: ref, ActionID: action.ID})
 		if err != nil {
@@ -191,6 +188,9 @@ func settingsPanelActionLine(action appviewmodel.SettingsPanelAction) string {
 	if action.RequiresConfirmation {
 		traits = append(traits, "confirm")
 	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		traits = append(traits, "command="+command)
+	}
 	return line + " (" + strings.Join(traits, ", ") + ")"
 }
 
@@ -268,6 +268,21 @@ func findSettingsAction(actions []appviewmodel.SettingsPanelAction, id string) (
 		}
 	}
 	return appviewmodel.SettingsPanelAction{}, false
+}
+
+func findSettingsRunAction(actions []appviewmodel.SettingsPanelAction, id string) (appviewmodel.SettingsPanelAction, bool) {
+	action, ok := findSettingsAction(actions, id)
+	if !ok {
+		return appviewmodel.SettingsPanelAction{}, false
+	}
+	command := strings.TrimSpace(action.Command)
+	if command == "" {
+		command = "/settings run " + strings.TrimSpace(action.ID)
+	}
+	if !strings.HasPrefix(strings.ToLower(command), "/settings run ") {
+		return appviewmodel.SettingsPanelAction{}, false
+	}
+	return action, true
 }
 
 func settingsActionConfirmed(args string) bool {

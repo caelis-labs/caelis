@@ -559,8 +559,16 @@ func TestSettingsServicePanelComposesDiagnosticsAndActions(t *testing.T) {
 		t.Fatalf("panel actions = %#v/%#v, want enabled sandbox actions", panel.Actions, panel.Sandbox.Actions)
 	}
 	reset, _ := findSettingsPanelAction(panel.Actions, "sandbox.reset")
-	if !reset.Destructive || !reset.RequiresConfirmation {
-		t.Fatalf("reset action = %#v, want guarded destructive action", reset)
+	if !reset.Destructive || !reset.RequiresConfirmation || reset.Command != "/settings run sandbox.reset" {
+		t.Fatalf("reset action = %#v, want guarded destructive action with command", reset)
+	}
+	connect, _ := findSettingsPanelAction(panel.Actions, "model.connect")
+	if connect.Command != "/connect" {
+		t.Fatalf("model connect action = %#v, want /connect command", connect)
+	}
+	backendField, ok := findSettingsPanelFieldInView(panel, "sandbox.backend")
+	if !ok || backendField.Command != "/settings set sandbox.backend " {
+		t.Fatalf("settings backend field = %#v ok=%v, want settings set command", backendField, ok)
 	}
 	if _, ok := findSettingsPanelSection(panel.Sections, "sandbox"); !ok {
 		t.Fatalf("panel sections = %#v, missing sandbox section", panel.Sections)
@@ -844,6 +852,14 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 	if view.SettingsPanel == nil || len(view.SettingsPanel.Sections) == 0 {
 		t.Fatalf("settings execution SettingsPanel = %#v, want shared panel payload", view.SettingsPanel)
 	}
+	connectAction, _ := findSettingsPanelAction(view.SettingsPanel.Actions, "model.connect")
+	if connectAction.Command != "/connect" {
+		t.Fatalf("settings model.connect action = %#v, want /connect command", connectAction)
+	}
+	prepareAction, _ := findSettingsPanelAction(view.SettingsPanel.Actions, "sandbox.prepare")
+	if prepareAction.Command != "/settings run sandbox.prepare" {
+		t.Fatalf("settings prepare action = %#v, want settings run command", prepareAction)
+	}
 	for _, want := range []string{
 		"settings:",
 		"configured: false",
@@ -873,12 +889,15 @@ func TestCommandServiceExecuteSettingsPanelAndAction(t *testing.T) {
 	if rt.prepareCalls != 1 || !strings.Contains(ran.Output, "settings action completed: sandbox.prepare") || ran.SettingsPanel == nil {
 		t.Fatalf("settings action output=%q prepareCalls=%d, want prepared panel", ran.Output, rt.prepareCalls)
 	}
-	connectPanel, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings run model.connect"})
+	if _, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings run model.connect"}); err == nil {
+		t.Fatal("settings run model.connect error = nil, want navigation action outside settings run")
+	}
+	connectPanel, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/connect"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if connectPanel.Command != "connect" || !strings.Contains(connectPanel.Output, "connect:") || !strings.Contains(connectPanel.Output, "providers:") || connectPanel.ModelConnectPanel == nil {
-		t.Fatalf("settings model.connect output = %#v, want shared connect panel", connectPanel)
+		t.Fatalf("connect output = %#v, want shared connect panel", connectPanel)
 	}
 }
 
@@ -5815,6 +5834,17 @@ func findSettingsConfigOption(options []appviewmodel.SettingsConfigOption, id st
 		}
 	}
 	return appviewmodel.SettingsConfigOption{}, false
+}
+
+func findSettingsPanelFieldInView(panel appviewmodel.SettingsPanelView, id string) (appviewmodel.SettingsPanelField, bool) {
+	for _, section := range panel.Sections {
+		for _, field := range section.Fields {
+			if field.ID == id {
+				return field, true
+			}
+		}
+	}
+	return appviewmodel.SettingsPanelField{}, false
 }
 
 func panelActionEnabled(actions []appviewmodel.SettingsPanelAction, id string) bool {

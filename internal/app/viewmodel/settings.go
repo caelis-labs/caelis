@@ -65,6 +65,7 @@ type SettingsPanelField struct {
 	Kind        string                     `json:"kind,omitempty"`
 	Category    string                     `json:"category,omitempty"`
 	Description string                     `json:"description,omitempty"`
+	Command     string                     `json:"command,omitempty"`
 	Value       string                     `json:"value,omitempty"`
 	Detail      string                     `json:"detail,omitempty"`
 	Editable    bool                       `json:"editable,omitempty"`
@@ -101,6 +102,7 @@ type SettingsPanelAction struct {
 	Description          string `json:"description,omitempty"`
 	Target               string `json:"target,omitempty"`
 	Kind                 string `json:"kind,omitempty"`
+	Command              string `json:"command,omitempty"`
 	Enabled              bool   `json:"enabled"`
 	Destructive          bool   `json:"destructive,omitempty"`
 	RequiresConfirmation bool   `json:"requires_confirmation,omitempty"`
