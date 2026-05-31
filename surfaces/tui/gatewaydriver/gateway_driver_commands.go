@@ -4,8 +4,20 @@ import (
 	"context"
 	"strings"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
+
+func (d *GatewayDriver) CommandCatalog(ctx context.Context) (appviewmodel.CommandCatalogView, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	view, ok, err := d.stack.CommandCatalog(ctx)
+	if !ok || err != nil {
+		return view, err
+	}
+	return view, nil
+}
 
 func (d *GatewayDriver) ExecuteCommand(ctx context.Context, opts CommandExecutionOptions) (CommandExecutionView, error) {
 	if ctx == nil {

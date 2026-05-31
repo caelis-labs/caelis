@@ -365,6 +365,36 @@ func TestBindAppServicesExecuteCommandUsesSharedCommandService(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesCommandCatalogUsesSharedCommandService(t *testing.T) {
+	ctx := context.Background()
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "user-1"},
+		Engine:  &appServiceDriverEngine{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, ok, err := BindAppServices(&DriverStack{}, svc).CommandCatalog(ctx)
+	if err != nil {
+		t.Fatalf("CommandCatalog() error = %v", err)
+	}
+	if !ok {
+		t.Fatal("CommandCatalog() ok = false, want shared catalog binding")
+	}
+	var sawModel, sawTask bool
+	for _, command := range catalog.Commands {
+		switch command.Name {
+		case "model":
+			sawModel = true
+		case "task":
+			sawTask = true
+		}
+	}
+	if !sawModel || !sawTask {
+		t.Fatalf("catalog commands = %#v, want shared model and task commands", catalog.Commands)
+	}
+}
+
 func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{}

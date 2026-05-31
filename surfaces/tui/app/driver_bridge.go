@@ -210,6 +210,10 @@ type lightweightStatusDriver interface {
 	LightweightStatus(context.Context) (tuidriver.StatusSnapshot, error)
 }
 
+type commandCatalogDriver interface {
+	CommandCatalog(context.Context) (tuidriver.CommandCatalogView, error)
+}
+
 // ConfigFromDriver populates legacy Config callbacks from a TUI driver.
 // sender must be non-nil; its Send field is populated after Program creation
 // but before the user can trigger ExecuteLine.
@@ -494,6 +498,12 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuidriver.D
 		return acpSlashCommands(status)
 	}
 	out := append([]string(nil), commands...)
+	if catalogDriver, ok := driver.(commandCatalogDriver); ok {
+		catalog, err := catalogDriver.CommandCatalog(ctx)
+		if err == nil && len(catalog.Commands) > 0 {
+			return appendCommandCatalogSlashCommands(out, catalog)
+		}
+	}
 	seen := map[string]struct{}{}
 	for _, command := range out {
 		seen[strings.ToLower(strings.TrimSpace(command))] = struct{}{}
@@ -504,6 +514,29 @@ func appendAgentSlashCommandsWithContext(ctx context.Context, driver tuidriver.D
 	}
 	for _, agent := range agents {
 		name := strings.ToLower(strings.TrimSpace(agent.Name))
+		if name == "" {
+			continue
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		out = append(out, name)
+		seen[name] = struct{}{}
+	}
+	return out
+}
+
+func appendCommandCatalogSlashCommands(commands []string, catalog tuidriver.CommandCatalogView) []string {
+	out := append([]string(nil), commands...)
+	seen := map[string]struct{}{}
+	for _, command := range out {
+		name := strings.ToLower(strings.TrimSpace(command))
+		if name != "" {
+			seen[name] = struct{}{}
+		}
+	}
+	for _, command := range catalog.Commands {
+		name := strings.ToLower(strings.TrimSpace(command.Name))
 		if name == "" {
 			continue
 		}

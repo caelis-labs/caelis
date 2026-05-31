@@ -1326,6 +1326,11 @@ be migrated before retiring the old stack:
      `/approval` update controller-scoped config intent in shared session state
      instead of local model/session state, and local `/model del` clears a
      deleted current session model through the shared service path.
+   - Migrated baseline: the app-service TUI binding now exposes
+     `CommandService.Available()` as a shared command catalog. The TUI slash
+     command refresh path prefers that catalog for service-owned and dynamic
+     external-ACP commands, while keeping help/exit/quit and ACP-controller
+     filtering as surface-local behavior.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and

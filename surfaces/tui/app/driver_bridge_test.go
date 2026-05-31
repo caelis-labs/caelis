@@ -1085,6 +1085,29 @@ func TestACPControllerSlashCommandsUseRemoteSurface(t *testing.T) {
 	}
 }
 
+func TestSlashCommandsPreferSharedCommandCatalog(t *testing.T) {
+	driver := &bridgeTestDriver{
+		commandCatalog: tuidriver.CommandCatalogView{Commands: []tuidriver.CommandView{
+			{Name: "status"},
+			{Name: "reviewer"},
+		}},
+		agentList: []tuidriver.AgentCandidate{{Name: "legacy-agent"}},
+	}
+	commands := appendAgentSlashCommandsWithContext(context.Background(), driver, []string{"help", "status"})
+	if !stringSliceContains(commands, "reviewer") {
+		t.Fatalf("commands = %#v, want command from shared catalog", commands)
+	}
+	if stringSliceContains(commands, "legacy-agent") {
+		t.Fatalf("commands = %#v, should not fall back to TUI agent list when catalog is available", commands)
+	}
+	if driver.commandCatalogCalls != 1 {
+		t.Fatalf("commandCatalogCalls = %d, want 1", driver.commandCatalogCalls)
+	}
+	if driver.listAgentCalls != 0 {
+		t.Fatalf("listAgentCalls = %d, want 0 with shared command catalog", driver.listAgentCalls)
+	}
+}
+
 func TestSlashModelDeleteDisabledForACPController(t *testing.T) {
 	driver := &bridgeTestDriver{
 		agentStatus: tuidriver.AgentStatusSnapshot{ControllerKind: "acp"},
@@ -2003,6 +2026,9 @@ type bridgeTestDriver struct {
 	commandErr               error
 	commandCalls             int
 	lastCommandInput         string
+	commandCatalog           tuidriver.CommandCatalogView
+	commandCatalogErr        error
+	commandCatalogCalls      int
 }
 
 type bridgeLightweightStatusDriver struct {
@@ -2223,6 +2249,13 @@ func (d *bridgeTestDriver) ExecuteCommand(_ context.Context, opts tuidriver.Comm
 		}, nil
 	}
 	return d.commandView, nil
+}
+func (d *bridgeTestDriver) CommandCatalog(context.Context) (tuidriver.CommandCatalogView, error) {
+	d.commandCatalogCalls++
+	if d.commandCatalogErr != nil {
+		return tuidriver.CommandCatalogView{}, d.commandCatalogErr
+	}
+	return d.commandCatalog, nil
 }
 func (d *bridgeTestDriver) NewSession(context.Context) (session.Session, error) {
 	return d.newSession, nil

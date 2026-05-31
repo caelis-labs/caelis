@@ -188,6 +188,7 @@ type DriverStack struct {
 	DefaultModelAliasFn                  func() string
 	AppStatusViewFn                      func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
 	SandboxStatusFn                      func() SandboxStatus
+	CommandCatalogFn                     func(context.Context) (appviewmodel.CommandCatalogView, error)
 	ExecuteCommandFn                     func(context.Context, session.SessionRef, string, []model.ContentPart) (CommandExecutionView, error)
 	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
@@ -282,6 +283,14 @@ func (s *DriverStack) SandboxStatus() SandboxStatus {
 		return SandboxStatus{}
 	}
 	return s.SandboxStatusFn()
+}
+
+func (s *DriverStack) CommandCatalog(ctx context.Context) (appviewmodel.CommandCatalogView, bool, error) {
+	if s == nil || s.CommandCatalogFn == nil {
+		return appviewmodel.CommandCatalogView{}, false, nil
+	}
+	view, err := s.CommandCatalogFn(ctx)
+	return view, true, err
 }
 
 func (s *DriverStack) ExecuteCommand(ctx context.Context, ref session.SessionRef, input string, parts []model.ContentPart) (CommandExecutionView, error) {

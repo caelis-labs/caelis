@@ -176,6 +176,8 @@ type CommandExecutionOptions struct {
 	Attachments []Attachment
 }
 
+type CommandCatalogView = appviewmodel.CommandCatalogView
+type CommandView = appviewmodel.CommandView
 type CommandExecutionView = appviewmodel.CommandExecutionView
 
 type Turn interface {
