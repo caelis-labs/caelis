@@ -499,17 +499,32 @@ func settingsPanelClickHints(panel appviewmodel.SettingsPanelView) []commandPane
 
 func taskPanelClickHints(panel appviewmodel.TaskPanelView) []commandPanelClickHint {
 	hints := make([]commandPanelClickHint, 0, len(panel.Tasks))
+	tailInputs := make(map[string]string, len(panel.Actions))
 	for _, action := range panel.Actions {
 		hints = append(hints, taskPanelActionClickHint(action)...)
+		if !action.Enabled {
+			continue
+		}
+		switch taskPanelActionKind(action) {
+		case "tail", "show":
+			taskID := strings.TrimSpace(action.TaskID)
+			if taskID != "" {
+				tailInputs[taskID] = taskPanelActionInput(action)
+			}
+		}
 	}
 	for _, task := range panel.Tasks {
 		taskID := strings.TrimSpace(task.ID)
 		if taskID == "" {
 			continue
 		}
+		input := strings.TrimSpace(tailInputs[taskID])
+		if input == "" {
+			continue
+		}
 		hints = append(hints, commandPanelClickHint{
 			Needle: taskID,
-			Input:  "/task tail " + taskID,
+			Input:  input,
 		})
 	}
 	return hints
@@ -521,39 +536,11 @@ func taskPanelActionClickHint(action appviewmodel.TaskPanelAction) []commandPane
 	}
 	actionID := strings.TrimSpace(action.ID)
 	taskID := strings.TrimSpace(action.TaskID)
-	kind := strings.ToLower(strings.TrimSpace(action.Kind))
-	if kind == "" {
-		kind, _, _ = strings.Cut(strings.TrimPrefix(actionID, "task."), ":")
-	}
-	var input string
-	switch kind {
-	case "start", "run":
-		input = "/task start -- "
-	case "tail", "show":
-		if taskID != "" {
-			input = "/task tail " + taskID
-		}
-	case "wait":
-		if taskID != "" {
-			input = "/task wait " + taskID
-		}
-	case "write":
-		if taskID != "" {
-			input = "/task write " + taskID + " -- "
-		}
-	case "cancel":
-		if taskID != "" {
-			input = "/task cancel " + taskID
-		}
-	case "release", "close":
-		if taskID != "" {
-			input = "/task release " + taskID
-		}
-	}
+	input := taskPanelActionInput(action)
 	if strings.TrimSpace(input) == "" {
 		return nil
 	}
-	return []commandPanelClickHint{{Needle: firstNonEmpty(actionID, action.Label, taskID), Input: input}}
+	return []commandPanelClickHint{{Needle: firstNonEmpty(actionID, action.Label, strings.TrimSpace(action.Command), taskID), Input: input}}
 }
 
 func resumePanelClickHints(panel appviewmodel.ResumePanelView) []commandPanelClickHint {
@@ -1097,6 +1084,9 @@ func taskPanelActionLine(action appviewmodel.TaskPanelAction, width int, theme t
 	}
 	if action.Destructive {
 		parts = append(parts, "destructive")
+	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		parts = append(parts, command)
 	}
 	plain := "  " + strings.Join(compactNonEmpty(parts), "  ")
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))

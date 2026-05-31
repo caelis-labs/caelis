@@ -127,6 +127,7 @@ func taskPanelActions(items []appviewmodel.TaskItem, canStart bool, canOpen bool
 		ID:            "task.start",
 		Kind:          "start",
 		Label:         "Start task",
+		Command:       "/task start -- ",
 		Enabled:       canStart,
 		RequiresInput: true,
 	}}
@@ -143,6 +144,7 @@ func taskPanelActions(items []appviewmodel.TaskItem, canStart bool, canOpen bool
 			ID:      taskPanelActionID("tail", taskID),
 			Kind:    "tail",
 			Label:   "Tail",
+			Command: "/task tail " + taskID,
 			TaskID:  taskID,
 			Enabled: true,
 		})
@@ -151,6 +153,7 @@ func taskPanelActions(items []appviewmodel.TaskItem, canStart bool, canOpen bool
 				ID:      taskPanelActionID("wait", taskID),
 				Kind:    "wait",
 				Label:   "Wait",
+				Command: "/task wait " + taskID,
 				TaskID:  taskID,
 				Enabled: true,
 			})
@@ -158,6 +161,7 @@ func taskPanelActions(items []appviewmodel.TaskItem, canStart bool, canOpen bool
 				ID:          taskPanelActionID("cancel", taskID),
 				Kind:        "cancel",
 				Label:       "Cancel",
+				Command:     "/task cancel " + taskID,
 				TaskID:      taskID,
 				Enabled:     true,
 				Destructive: true,
@@ -167,6 +171,7 @@ func taskPanelActions(items []appviewmodel.TaskItem, canStart bool, canOpen bool
 					ID:            taskPanelActionID("write", taskID),
 					Kind:          "write",
 					Label:         "Write",
+					Command:       "/task write " + taskID + " -- ",
 					TaskID:        taskID,
 					Enabled:       true,
 					RequiresInput: true,
@@ -178,6 +183,7 @@ func taskPanelActions(items []appviewmodel.TaskItem, canStart bool, canOpen bool
 			ID:      taskPanelActionID("release", taskID),
 			Kind:    "release",
 			Label:   "Release",
+			Command: "/task release " + taskID,
 			TaskID:  taskID,
 			Enabled: true,
 		})

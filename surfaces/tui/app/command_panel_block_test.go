@@ -85,12 +85,14 @@ func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 			ID:      "task.tail:task-1",
 			Kind:    "tail",
 			Label:   "Tail",
+			Command: "/task tail task-1",
 			TaskID:  "task-1",
 			Enabled: true,
 		}, {
 			ID:            "task.write:task-1",
 			Kind:          "write",
 			Label:         "Write",
+			Command:       "/task write task-1 -- ",
 			TaskID:        "task-1",
 			Enabled:       true,
 			RequiresInput: true,
@@ -98,6 +100,7 @@ func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 			ID:          "task.cancel:task-1",
 			Kind:        "cancel",
 			Label:       "Cancel",
+			Command:     "/task cancel task-1",
 			TaskID:      "task-1",
 			Enabled:     true,
 			Destructive: true,
@@ -110,7 +113,7 @@ func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 	model := NewModel(Config{})
 	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
 	plain := renderedPlainText(rows)
-	for _, want := range []string{"TASKS", "Actions", "task.write:task-1", "task.cancel:task-1"} {
+	for _, want := range []string{"TASKS", "Actions", "task.write:task-1", "task.cancel:task-1", "/task write task-1 --", "/task cancel task-1"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered task panel = %q, missing %q", plain, want)
 		}

@@ -2394,6 +2394,10 @@ be migrated before retiring the old stack:
       diagnostics.
       TUI `/task list` consumes this panel projection through the shared command
       path instead of rebuilding task status locally.
+    - Migrated baseline: task panel actions now carry stable shared command
+      strings for start, tail, wait, write, cancel, and release. TUI click and
+      prompt handling consumes these shared action commands instead of deriving
+      task syntax from surface-local kind/task-id rules.
     - Still pending: surface-specific visual TUI/APP task rendering and optional
       persistent indexed history stores remain incomplete.
 
@@ -2563,7 +2567,7 @@ Recommended sequence:
    especially any product actions not yet represented by shared settings, task,
    controller, or resume panel payloads while preserving rendering as
    surface-local code.
-5. Expand shared APP view models for tasks, resume, and transcript actions.
+5. Expand shared APP view models for resume and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.

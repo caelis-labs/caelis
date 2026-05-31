@@ -301,10 +301,9 @@ func taskCommandPanelAction(panel appviewmodel.TaskPanelView, input string) comm
 		if !action.Enabled {
 			continue
 		}
-		for _, hint := range taskPanelActionClickHint(action) {
-			if strings.TrimSpace(hint.Input) == input {
-				return taskPanelActionCommand(action, taskByID(panel.Tasks, action.TaskID))
-			}
+		command := taskPanelActionInput(action)
+		if command != "" && strings.TrimSpace(command) == input {
+			return taskPanelActionCommand(action, taskByID(panel.Tasks, action.TaskID))
 		}
 	}
 	if taskID, ok := strings.CutPrefix(input, "/task tail "); ok {
@@ -318,9 +317,10 @@ func taskCommandPanelAction(panel appviewmodel.TaskPanelView, input string) comm
 
 func taskPanelActionCommand(action appviewmodel.TaskPanelAction, task appviewmodel.TaskItem) commandPanelAction {
 	taskID := strings.TrimSpace(action.TaskID)
-	kind := strings.ToLower(strings.TrimSpace(action.Kind))
-	if kind == "" {
-		kind, _, _ = strings.Cut(strings.TrimPrefix(strings.TrimSpace(action.ID), "task."), ":")
+	kind := taskPanelActionKind(action)
+	command := taskPanelActionInput(action)
+	if command == "" {
+		return commandPanelAction{}
 	}
 	details := []PromptDetail{
 		{Label: "Task", Value: firstNonEmpty(taskID, task.ID), Emphasis: true},
@@ -328,6 +328,7 @@ func taskPanelActionCommand(action appviewmodel.TaskPanelAction, task appviewmod
 	}
 	switch kind {
 	case "start", "run":
+		prefix := commandPanelEnsureTrailingSpace(command)
 		return commandPanelAction{prompt: &commandPanelPrompt{
 			title:  "Start task",
 			prompt: "Command",
@@ -336,13 +337,14 @@ func taskPanelActionCommand(action appviewmodel.TaskPanelAction, task appviewmod
 				if value == "" {
 					return ""
 				}
-				return "/task start -- " + value
+				return prefix + value
 			},
 		}}
 	case "write":
 		if taskID == "" {
 			return commandPanelAction{}
 		}
+		prefix := commandPanelEnsureTrailingSpace(command)
 		return commandPanelAction{prompt: &commandPanelPrompt{
 			title:   "Write to task",
 			prompt:  "Input",
@@ -352,33 +354,54 @@ func taskPanelActionCommand(action appviewmodel.TaskPanelAction, task appviewmod
 				if value == "" {
 					return ""
 				}
-				return "/task write " + taskID + " -- " + value
+				return prefix + value
 			},
 		}}
 	case "cancel":
 		if taskID == "" {
 			return commandPanelAction{}
 		}
+		line := strings.TrimSpace(command)
 		return commandPanelAction{prompt: confirmCommandPanelPrompt(
 			"Cancel task?",
 			"Confirm task cancel",
 			details,
-			"/task cancel "+taskID,
+			line,
 		)}
 	case "tail", "show":
-		if taskID != "" {
-			return commandPanelAction{line: "/task tail " + taskID}
+		if line := strings.TrimSpace(command); line != "" {
+			return commandPanelAction{line: line}
 		}
 	case "wait":
-		if taskID != "" {
-			return commandPanelAction{line: "/task wait " + taskID}
+		if line := strings.TrimSpace(command); line != "" {
+			return commandPanelAction{line: line}
 		}
 	case "release", "close":
-		if taskID != "" {
-			return commandPanelAction{line: "/task release " + taskID}
+		if line := strings.TrimSpace(command); line != "" {
+			return commandPanelAction{line: line}
 		}
 	}
 	return commandPanelAction{}
+}
+
+func taskPanelActionInput(action appviewmodel.TaskPanelAction) string {
+	command := strings.TrimSpace(action.Command)
+	if command == "" {
+		return ""
+	}
+	if action.RequiresInput {
+		return commandPanelEnsureTrailingSpace(command)
+	}
+	return command
+}
+
+func taskPanelActionKind(action appviewmodel.TaskPanelAction) string {
+	kind := strings.ToLower(strings.TrimSpace(action.Kind))
+	if kind != "" {
+		return kind
+	}
+	kind, _, _ = strings.Cut(strings.TrimPrefix(strings.TrimSpace(action.ID), "task."), ":")
+	return strings.ToLower(strings.TrimSpace(kind))
 }
 
 func controllerCommandPanelAction(panel appviewmodel.ControllerPanelView, input string) commandPanelAction {

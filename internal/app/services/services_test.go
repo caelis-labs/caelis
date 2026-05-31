@@ -1106,6 +1106,10 @@ func TestCommandServiceExecuteTaskCommands(t *testing.T) {
 	if listed.TaskPanel == nil || listed.TaskPanel.Summary.Total != 1 {
 		t.Fatalf("task list TaskPanel = %#v, want shared panel payload", listed.TaskPanel)
 	}
+	writeAction, ok := findTaskPanelAction(listed.TaskPanel.Actions, "task.write:task-1")
+	if !ok || writeAction.Command != "/task write task-1 -- " {
+		t.Fatalf("task list write action = %#v ok=%v, want shared write command", writeAction, ok)
+	}
 
 	wrote, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/task write task-1 -- ping"})
 	if err != nil {
@@ -4660,20 +4664,20 @@ func TestTaskServicePanelBuildsSharedSummarySectionsActionsAndDiagnostics(t *tes
 		}
 	}
 	write, ok := findTaskPanelAction(panel.Actions, "task.write:task-running")
-	if !ok || !write.Enabled || !write.RequiresInput {
-		t.Fatalf("write action = %#v ok=%v, want enabled input action", write, ok)
+	if !ok || !write.Enabled || !write.RequiresInput || write.Command != "/task write task-running -- " {
+		t.Fatalf("write action = %#v ok=%v, want enabled input command action", write, ok)
 	}
 	cancel, ok := findTaskPanelAction(panel.Actions, "task.cancel:task-running")
-	if !ok || !cancel.Enabled || !cancel.Destructive {
-		t.Fatalf("cancel action = %#v ok=%v, want destructive action", cancel, ok)
+	if !ok || !cancel.Enabled || !cancel.Destructive || cancel.Command != "/task cancel task-running" {
+		t.Fatalf("cancel action = %#v ok=%v, want destructive command action", cancel, ok)
 	}
 	release, ok := findTaskPanelAction(panel.Actions, "task.release:task-completed")
-	if !ok || !release.Enabled {
-		t.Fatalf("release action = %#v ok=%v, want completed task release action", release, ok)
+	if !ok || !release.Enabled || release.Command != "/task release task-completed" {
+		t.Fatalf("release action = %#v ok=%v, want completed task release command action", release, ok)
 	}
 	start, ok := findTaskPanelAction(panel.Actions, "task.start")
-	if !ok || !start.Enabled || !start.RequiresInput {
-		t.Fatalf("start action = %#v ok=%v, want enabled start action", start, ok)
+	if !ok || !start.Enabled || !start.RequiresInput || start.Command != "/task start -- " {
+		t.Fatalf("start action = %#v ok=%v, want enabled start command action", start, ok)
 	}
 	if !taskPanelDiagnostic(panel.Diagnostics, "task_failed", "task-failed") || !taskPanelDiagnostic(panel.Diagnostics, "task_output_truncated", "task-running") {
 		t.Fatalf("panel diagnostics = %#v, want failed and truncation diagnostics", panel.Diagnostics)
@@ -4964,8 +4968,8 @@ func TestTaskServiceListsDurableTaskHistoryWithoutSandboxLister(t *testing.T) {
 		t.Fatalf("history task panel actions = %#v, should not expose live tail without task runtime", panel.Actions)
 	}
 	start, ok := findTaskPanelAction(panel.Actions, "task.start")
-	if !ok || start.Enabled {
-		t.Fatalf("history task panel start action = %#v ok=%v, want disabled start without sandbox runtime", start, ok)
+	if !ok || start.Enabled || start.Command != "/task start -- " {
+		t.Fatalf("history task panel start action = %#v ok=%v, want disabled start command without sandbox runtime", start, ok)
 	}
 }
 

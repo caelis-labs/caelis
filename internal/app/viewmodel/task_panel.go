@@ -34,6 +34,7 @@ type TaskPanelAction struct {
 	ID            string `json:"id,omitempty"`
 	Kind          string `json:"kind,omitempty"`
 	Label         string `json:"label,omitempty"`
+	Command       string `json:"command,omitempty"`
 	TaskID        string `json:"task_id,omitempty"`
 	Enabled       bool   `json:"enabled,omitempty"`
 	Destructive   bool   `json:"destructive,omitempty"`
