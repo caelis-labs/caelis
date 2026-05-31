@@ -1088,6 +1088,11 @@ The completed work is intentionally limited to the reusable skeleton:
   `core/plugin.SkillDescriptor`, allowing the old `impl/skill` implementation
   packages and the unused `ports/skill` / `ports/prompt` contracts to be
   deleted.
+- Legacy orphaned port contract removal: `ports/config`, `ports/policy`, and
+  `ports/task` no longer have production or test ownership after settings,
+  approval policy, sandbox task control, and durable task history moved onto
+  `core/*`, `internal/app/services`, and `internal/adapters/tools/*`, so those
+  old public contracts were deleted instead of kept as extension points.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
