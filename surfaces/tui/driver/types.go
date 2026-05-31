@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -157,7 +158,7 @@ type Turn interface {
 	TurnID() string
 	SessionRef() session.SessionRef
 	Events() <-chan kernel.EventEnvelope
-	Submit(context.Context, kernel.SubmitRequest) error
+	Submit(context.Context, coreruntime.Submission) error
 	Cancel() kernel.CancelResult
 	Close() error
 }

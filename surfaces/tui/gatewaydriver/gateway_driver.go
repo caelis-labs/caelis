@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -833,6 +835,10 @@ type sessionEventTurnHandle interface {
 	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 }
 
+type coreSubmissionTurnHandle interface {
+	SubmitCore(context.Context, coreruntime.Submission) error
+}
+
 func (t gatewayTurn) HandleID() string               { return t.handle.HandleID() }
 func (t gatewayTurn) RunID() string                  { return t.handle.RunID() }
 func (t gatewayTurn) TurnID() string                 { return t.handle.TurnID() }
@@ -846,11 +852,33 @@ func (t gatewayTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
 	}
 	return nil
 }
-func (t gatewayTurn) Submit(ctx context.Context, req kernel.SubmitRequest) error {
-	return t.handle.Submit(ctx, req)
+func (t gatewayTurn) Submit(ctx context.Context, submission coreruntime.Submission) error {
+	if handle, ok := t.handle.(coreSubmissionTurnHandle); ok {
+		return handle.SubmitCore(ctx, submission)
+	}
+	return t.handle.Submit(ctx, kernelSubmitRequestFromCoreSubmission(submission))
 }
 func (t gatewayTurn) Cancel() kernel.CancelResult { return t.handle.Cancel() }
 func (t gatewayTurn) Close() error                { return t.handle.Close() }
+
+func kernelSubmitRequestFromCoreSubmission(in coreruntime.Submission) kernel.SubmitRequest {
+	out := kernel.SubmitRequest{
+		Kind:         kernel.SubmissionKindConversation,
+		Text:         in.Text,
+		ContentParts: model.CloneContentParts(in.ContentParts),
+		Metadata:     maps.Clone(in.Meta),
+	}
+	if in.Kind == coreruntime.SubmissionApproval && in.Approval != nil {
+		out.Kind = kernel.SubmissionKindApproval
+		out.Approval = &kernel.ApprovalDecision{
+			Outcome:  strings.TrimSpace(in.Approval.Outcome),
+			OptionID: strings.TrimSpace(in.Approval.OptionID),
+			Approved: in.Approval.Approved,
+			Reason:   strings.TrimSpace(in.Approval.Reason),
+		}
+	}
+	return out
+}
 
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {

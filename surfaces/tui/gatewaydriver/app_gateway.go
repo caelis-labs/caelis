@@ -94,6 +94,25 @@ func (g *appServiceGateway) SubmitActiveTurn(ctx context.Context, req kernel.Sub
 	})
 }
 
+func coreSubmissionFromKernelSubmit(req kernel.SubmitRequest) coreruntime.Submission {
+	out := coreruntime.Submission{
+		Kind:         coreruntime.SubmissionConversation,
+		Text:         req.Text,
+		ContentParts: coremodel.CloneContentParts(req.ContentParts),
+		Meta:         maps.Clone(req.Metadata),
+	}
+	if req.Kind == kernel.SubmissionKindApproval && req.Approval != nil {
+		out.Kind = coreruntime.SubmissionApproval
+		out.Approval = &coreruntime.ApprovalDecision{
+			Outcome:  strings.TrimSpace(req.Approval.Outcome),
+			OptionID: strings.TrimSpace(req.Approval.OptionID),
+			Approved: req.Approval.Approved,
+			Reason:   strings.TrimSpace(req.Approval.Reason),
+		}
+	}
+	return out
+}
+
 func (g *appServiceGateway) Interrupt(ctx context.Context, req kernel.InterruptRequest) error {
 	return g.services.Turns().Interrupt(ctx, coreRefFromPort(req.SessionRef))
 }
@@ -360,22 +379,32 @@ func (h *appServiceTurnHandle) EventsAfter(cursor string) ([]kernel.EventEnvelop
 }
 
 func (h *appServiceTurnHandle) Submit(ctx context.Context, req kernel.SubmitRequest) error {
-	submission := coreruntime.Submission{
-		Kind:         coreruntime.SubmissionConversation,
-		Text:         req.Text,
-		ContentParts: coremodel.CloneContentParts(req.ContentParts),
-		Meta:         maps.Clone(req.Metadata),
-	}
-	if req.Kind == kernel.SubmissionKindApproval && req.Approval != nil {
+	return h.SubmitCore(ctx, coreSubmissionFromKernelSubmit(req))
+}
+
+func (h *appServiceTurnHandle) SubmitCore(ctx context.Context, submission coreruntime.Submission) error {
+	submission = cloneCoreSubmission(submission)
+	if submission.Kind == coreruntime.SubmissionApproval && submission.Approval != nil {
 		_, err := h.services.Approvals().Submit(ctx, h.turn, appservices.ApprovalDecisionRequest{
-			Outcome:  strings.TrimSpace(req.Approval.Outcome),
-			OptionID: strings.TrimSpace(req.Approval.OptionID),
-			Approved: req.Approval.Approved,
-			Reason:   strings.TrimSpace(req.Approval.Reason),
+			Outcome:  strings.TrimSpace(submission.Approval.Outcome),
+			OptionID: strings.TrimSpace(submission.Approval.OptionID),
+			Approved: submission.Approval.Approved,
+			Reason:   strings.TrimSpace(submission.Approval.Reason),
 		})
 		return err
 	}
 	return h.turn.Submit(ctx, submission)
+}
+
+func cloneCoreSubmission(in coreruntime.Submission) coreruntime.Submission {
+	out := in
+	out.ContentParts = coremodel.CloneContentParts(in.ContentParts)
+	out.Meta = maps.Clone(in.Meta)
+	if in.Approval != nil {
+		approval := *in.Approval
+		out.Approval = &approval
+	}
+	return out
 }
 
 func (h *appServiceTurnHandle) Cancel() kernel.CancelResult {

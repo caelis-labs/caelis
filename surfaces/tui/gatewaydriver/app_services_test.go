@@ -370,6 +370,28 @@ func TestAppServiceAgentTurnHandlePublishesSessionEvents(t *testing.T) {
 	}
 }
 
+func TestGatewayTurnSubmitsCoreSubmissionDirectlyWhenAvailable(t *testing.T) {
+	handle := &coreSubmitTestHandle{}
+	turn := gatewayTurn{handle: handle}
+	err := turn.Submit(context.Background(), coreruntime.Submission{
+		Kind: coreruntime.SubmissionApproval,
+		Approval: &coreruntime.ApprovalDecision{
+			Outcome:  "selected",
+			OptionID: "allow_once",
+			Approved: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Submit() error = %v", err)
+	}
+	if handle.kernelSubmitCalls != 0 {
+		t.Fatalf("kernel Submit() calls = %d, want direct core submission", handle.kernelSubmitCalls)
+	}
+	if handle.coreSubmission == nil || handle.coreSubmission.Kind != coreruntime.SubmissionApproval || handle.coreSubmission.Approval == nil || handle.coreSubmission.Approval.OptionID != "allow_once" {
+		t.Fatalf("core submission = %#v, want approval submission", handle.coreSubmission)
+	}
+}
+
 func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{
@@ -1237,6 +1259,66 @@ func (t appServiceDriverTurn) Cancel() coreruntime.CancelResult {
 }
 
 func (t appServiceDriverTurn) Close() error {
+	return nil
+}
+
+type coreSubmitTestHandle struct {
+	coreSubmission    *coreruntime.Submission
+	kernelSubmitCalls int
+}
+
+func (h *coreSubmitTestHandle) HandleID() string {
+	return "handle"
+}
+
+func (h *coreSubmitTestHandle) RunID() string {
+	return "run"
+}
+
+func (h *coreSubmitTestHandle) TurnID() string {
+	return "turn"
+}
+
+func (h *coreSubmitTestHandle) SessionRef() portsession.SessionRef {
+	return portsession.SessionRef{SessionID: "sess-app"}
+}
+
+func (h *coreSubmitTestHandle) CreatedAt() time.Time {
+	return time.Time{}
+}
+
+func (h *coreSubmitTestHandle) Events() <-chan kernel.EventEnvelope {
+	ch := make(chan kernel.EventEnvelope)
+	close(ch)
+	return ch
+}
+
+func (h *coreSubmitTestHandle) EventsAfter(string) ([]kernel.EventEnvelope, string, error) {
+	return nil, "", nil
+}
+
+func (h *coreSubmitTestHandle) Submit(context.Context, kernel.SubmitRequest) error {
+	h.kernelSubmitCalls++
+	return nil
+}
+
+func (h *coreSubmitTestHandle) SubmitCore(_ context.Context, submission coreruntime.Submission) error {
+	clone := submission
+	clone.ContentParts = coremodel.CloneContentParts(submission.ContentParts)
+	clone.Meta = maps.Clone(submission.Meta)
+	if submission.Approval != nil {
+		approval := *submission.Approval
+		clone.Approval = &approval
+	}
+	h.coreSubmission = &clone
+	return nil
+}
+
+func (h *coreSubmitTestHandle) Cancel() kernel.CancelResult {
+	return kernel.CancelResult{Status: kernel.CancelStatusAlreadyCancelled}
+}
+
+func (h *coreSubmitTestHandle) Close() error {
 	return nil
 }
 

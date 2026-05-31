@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -2108,7 +2109,8 @@ type bridgeLightweightStatusDriver struct {
 }
 
 type bridgeTestTurn struct {
-	events chan kernel.EventEnvelope
+	events      chan kernel.EventEnvelope
+	submissions []coreruntime.Submission
 }
 
 type bridgeAppEventTurn struct {
@@ -2131,7 +2133,8 @@ func (t *bridgeAppEventTurn) Events() <-chan kernel.EventEnvelope {
 func (t *bridgeAppEventTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
 	return t.appEvents
 }
-func (t *bridgeTestTurn) Submit(context.Context, kernel.SubmitRequest) error {
+func (t *bridgeTestTurn) Submit(_ context.Context, submission coreruntime.Submission) error {
+	t.submissions = append(t.submissions, submission)
 	return nil
 }
 func (t *bridgeTestTurn) Cancel() kernel.CancelResult {

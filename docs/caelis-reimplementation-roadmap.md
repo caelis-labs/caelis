@@ -1397,6 +1397,9 @@ be migrated before retiring the old stack:
      events into `kernel.EventEnvelope`. TUI tool-content formatting also
      consumes the ACP schema content shape, with old protocol content converted
      only at the legacy gateway boundary.
+   - Migrated baseline: TUI active-turn submission now uses
+     `core/runtime.Submission`; old `kernel.SubmitRequest` conversion is
+     contained in the gatewaydriver compatibility boundary.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1407,7 +1410,7 @@ be migrated before retiring the old stack:
      parity, so the old TUI stack cannot be removed yet.
    - Still pending: the current TUI driver/gateway bridge still imports the old
      `ports/session`, `ports/stream`, and public `kernel` event contracts for
-     terminal stream subscriptions, approval prompt submission, non app-service
+     terminal stream subscriptions, approval payloads, non app-service
      replay fallback, participants, and historical usage extraction. Retiring
      those imports requires moving the remaining TUI bridge protocol to
      `core/runtime`, `core/session`, and `internal/app/viewmodel` in one larger

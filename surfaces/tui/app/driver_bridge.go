@@ -16,6 +16,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -723,9 +724,14 @@ func awaitApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *kernel.A
 		response = next
 	}
 	decision := approvalDecisionFromPrompt(req, response)
-	if err := turn.Submit(ctx, kernel.SubmitRequest{
-		Kind:     kernel.SubmissionKindApproval,
-		Approval: &decision,
+	if err := turn.Submit(ctx, coreruntime.Submission{
+		Kind: coreruntime.SubmissionApproval,
+		Approval: &coreruntime.ApprovalDecision{
+			Outcome:  decision.Outcome,
+			OptionID: decision.OptionID,
+			Approved: decision.Approved,
+			Reason:   decision.Reason,
+		},
 	}); err != nil {
 		sendNotice(send, fmt.Sprintf("approval submit failed: %v", err))
 	}

@@ -1,8 +1,10 @@
 package tuiapp
 
 import (
+	"context"
 	"testing"
 
+	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
@@ -34,6 +36,30 @@ func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	}
 	if msg.DefaultChoice != "allow_once" {
 		t.Fatalf("DefaultChoice = %q, want allow_once", msg.DefaultChoice)
+	}
+}
+
+func TestAwaitApprovalPromptSubmitsCoreApprovalDecision(t *testing.T) {
+	t.Parallel()
+
+	turn := &bridgeTestTurn{}
+	responses := make(chan PromptResponse, 1)
+	responses <- PromptResponse{Line: "allow_once"}
+	awaitApprovalPrompt(context.Background(), turn, &kernel.ApprovalPayload{
+		Options: []kernel.ApprovalOption{
+			{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
+		},
+	}, responses, nil)
+
+	if len(turn.submissions) != 1 {
+		t.Fatalf("submissions = %#v, want one approval submission", turn.submissions)
+	}
+	got := turn.submissions[0]
+	if got.Kind != coreruntime.SubmissionApproval || got.Approval == nil {
+		t.Fatalf("submission = %#v, want core approval submission", got)
+	}
+	if got.Approval.OptionID != "allow_once" || !got.Approval.Approved {
+		t.Fatalf("approval = %#v, want selected allow_once", got.Approval)
 	}
 }
 
