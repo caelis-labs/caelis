@@ -219,31 +219,8 @@ func settingsPanelDiagnostics(view appviewmodel.SettingsPanelView, sandboxStatus
 			ActionIDs: []string{settingsActionModelConnect},
 		})
 	}
-	if sandboxStatus.FallbackToHost {
-		out = append(out, appviewmodel.SettingsPanelDiagnostic{
-			Severity:  appresources.DiagnosticWarning,
-			Source:    "sandbox",
-			Kind:      "fallback",
-			Message:   firstNonEmpty(sandboxStatus.FallbackReason, "sandbox backend fell back to host"),
-			ActionIDs: []string{settingsActionSandboxRepair, settingsActionSandboxPreflight},
-		})
-	}
-	if sandboxStatus.SetupRequired || sandboxStatus.SetupError != "" {
-		severity := appresources.DiagnosticWarning
-		if sandboxStatus.SetupError != "" {
-			severity = appresources.DiagnosticError
-		}
-		out = append(out, appviewmodel.SettingsPanelDiagnostic{
-			Severity: severity,
-			Source:   "sandbox",
-			Kind:     "setup",
-			Message:  firstNonEmpty(sandboxStatus.SetupError, sandboxStatus.SetupMarkerReason, "sandbox setup is required"),
-			ActionIDs: []string{
-				settingsActionSandboxPrepare,
-				settingsActionSandboxRepair,
-				settingsActionSandboxPreflight,
-			},
-		})
+	for _, diagnostic := range sandboxStatus.Diagnostics {
+		out = append(out, settingsPanelDiagnosticFromSandbox(diagnostic))
 	}
 	for _, diagnostic := range view.Resources.Diagnostics {
 		out = append(out, appviewmodel.SettingsPanelDiagnostic{
@@ -259,11 +236,44 @@ func settingsPanelDiagnostics(view appviewmodel.SettingsPanelView, sandboxStatus
 	return out
 }
 
+func settingsPanelDiagnosticFromSandbox(in SandboxDiagnostic) appviewmodel.SettingsPanelDiagnostic {
+	kind := strings.TrimSpace(in.Kind)
+	return appviewmodel.SettingsPanelDiagnostic{
+		Severity:  strings.TrimSpace(in.Severity),
+		Source:    "sandbox",
+		Kind:      kind,
+		Message:   strings.TrimSpace(in.Message),
+		ActionIDs: sandboxDiagnosticActionIDs(kind),
+		Meta:      maps.Clone(in.Meta),
+	}
+}
+
+func sandboxDiagnosticActionIDs(kind string) []string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "setup":
+		return []string{settingsActionSandboxPrepare, settingsActionSandboxRepair, settingsActionSandboxPreflight}
+	case "fallback":
+		return []string{settingsActionSandboxRepair, settingsActionSandboxPreflight}
+	case "network", "roots":
+		return []string{settingsActionSandboxPreflight}
+	default:
+		return nil
+	}
+}
+
 func sandboxPanelStatus(in SandboxStatus) appviewmodel.SandboxPanelStatus {
 	return appviewmodel.SandboxPanelStatus{
 		RequestedBackend:         strings.TrimSpace(in.RequestedBackend),
 		ResolvedBackend:          strings.TrimSpace(in.ResolvedBackend),
 		Route:                    strings.TrimSpace(in.Route),
+		Isolation:                strings.TrimSpace(in.Isolation),
+		DefaultPermission:        strings.TrimSpace(in.DefaultPermission),
+		Network:                  strings.TrimSpace(in.Network),
+		DefaultNetwork:           strings.TrimSpace(in.DefaultNetwork),
+		NetworkControl:           in.NetworkControl,
+		PathPolicy:               in.PathPolicy,
+		ReadableRootCount:        in.ReadableRootCount,
+		WritableRootCount:        in.WritableRootCount,
 		FallbackToHost:           in.FallbackToHost,
 		FallbackReason:           strings.TrimSpace(in.FallbackReason),
 		FallbackInstallHint:      strings.TrimSpace(in.FallbackInstallHint),

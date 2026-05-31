@@ -30,6 +30,14 @@ type SandboxPanelStatus struct {
 	RequestedBackend         string `json:"requested_backend,omitempty"`
 	ResolvedBackend          string `json:"resolved_backend,omitempty"`
 	Route                    string `json:"route,omitempty"`
+	Isolation                string `json:"isolation,omitempty"`
+	DefaultPermission        string `json:"default_permission,omitempty"`
+	Network                  string `json:"network,omitempty"`
+	DefaultNetwork           string `json:"default_network,omitempty"`
+	NetworkControl           bool   `json:"network_control,omitempty"`
+	PathPolicy               bool   `json:"path_policy,omitempty"`
+	ReadableRootCount        int    `json:"readable_root_count,omitempty"`
+	WritableRootCount        int    `json:"writable_root_count,omitempty"`
 	FallbackToHost           bool   `json:"fallback_to_host,omitempty"`
 	FallbackReason           string `json:"fallback_reason,omitempty"`
 	FallbackInstallHint      string `json:"fallback_install_hint,omitempty"`

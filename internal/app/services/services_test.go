@@ -3290,6 +3290,62 @@ func TestSandboxServiceHostLifecycleIsNoop(t *testing.T) {
 	}
 }
 
+func TestSandboxServiceProjectsPolicyDiagnostics(t *testing.T) {
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			Sandbox: config.Sandbox{
+				Backend:       "host",
+				Network:       "disabled",
+				ReadableRoots: []string{"/repo"},
+				WritableRoots: []string{"/repo/out"},
+			},
+		},
+		Engine: &recordingEngine{},
+		Sandbox: fakeSandboxRuntime{
+			descriptor: sandbox.Descriptor{
+				Backend:   sandbox.BackendHost,
+				Isolation: sandbox.IsolationHost,
+				Capabilities: sandbox.CapabilitySet{
+					FileSystem:    true,
+					CommandExec:   true,
+					AsyncSessions: true,
+				},
+				DefaultConstraints: sandbox.Constraints{
+					Route:      sandbox.RouteHost,
+					Backend:    sandbox.BackendHost,
+					Permission: sandbox.PermissionFullAccess,
+					Isolation:  sandbox.IsolationHost,
+					Network:    sandbox.NetworkInherit,
+				},
+			},
+			status: sandbox.Status{
+				RequestedBackend: sandbox.BackendHost,
+				ResolvedBackend:  sandbox.BackendHost,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := svc.Sandbox().Status(context.Background())
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.Network != "disabled" || status.DefaultNetwork != "inherit" ||
+		status.DefaultPermission != "danger_full_access" || status.Isolation != "host" {
+		t.Fatalf("sandbox policy status = %#v, want configured policy details", status)
+	}
+	if status.NetworkControl || status.PathPolicy || status.ReadableRootCount != 1 || status.WritableRootCount != 1 {
+		t.Fatalf("sandbox capability/root status = %#v, want host policy diagnostics", status)
+	}
+	for _, kind := range []string{"route", "network", "roots"} {
+		if !sandboxStatusDiagnostic(status.Diagnostics, kind) {
+			t.Fatalf("sandbox diagnostics = %#v, missing %s", status.Diagnostics, kind)
+		}
+	}
+}
+
 func TestSandboxServiceRunsRuntimeLifecycle(t *testing.T) {
 	rt := &recordingLifecycleSandboxRuntime{
 		fakeSandboxRuntime: fakeSandboxRuntime{
@@ -4470,6 +4526,15 @@ func panelDiagnosticActions(items []appviewmodel.SettingsPanelDiagnostic, source
 		}
 	}
 	return nil
+}
+
+func sandboxStatusDiagnostic(items []SandboxDiagnostic, kind string) bool {
+	for _, item := range items {
+		if item.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func agentActionEnabled(actions []appviewmodel.AgentManagementAction, id string) bool {

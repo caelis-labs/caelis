@@ -1151,6 +1151,10 @@ func TestRunSandboxSetupSubcommandTextOutput(t *testing.T) {
 		"sandbox_requested_backend: host",
 		"sandbox_resolved_backend: host",
 		"sandbox_route: host",
+		"sandbox_default_permission: danger_full_access",
+		"sandbox_network: inherit",
+		"sandbox_readable_roots: 0",
+		"sandbox_writable_roots: 0",
 		"sandbox_setup_required: false",
 	} {
 		if !strings.Contains(text, want) {

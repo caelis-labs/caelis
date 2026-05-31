@@ -677,10 +677,25 @@ type SandboxService struct {
 	services Services
 }
 
+type SandboxDiagnostic struct {
+	Severity string            `json:"severity,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
 type SandboxStatus struct {
 	RequestedBackend         string              `json:"requested_backend,omitempty"`
 	ResolvedBackend          string              `json:"resolved_backend,omitempty"`
 	Route                    string              `json:"route,omitempty"`
+	Isolation                string              `json:"isolation,omitempty"`
+	DefaultPermission        string              `json:"default_permission,omitempty"`
+	Network                  string              `json:"network,omitempty"`
+	DefaultNetwork           string              `json:"default_network,omitempty"`
+	NetworkControl           bool                `json:"network_control,omitempty"`
+	PathPolicy               bool                `json:"path_policy,omitempty"`
+	ReadableRootCount        int                 `json:"readable_root_count,omitempty"`
+	WritableRootCount        int                 `json:"writable_root_count,omitempty"`
 	FallbackToHost           bool                `json:"fallback_to_host,omitempty"`
 	FallbackReason           string              `json:"fallback_reason,omitempty"`
 	FallbackInstallHint      string              `json:"fallback_install_hint,omitempty"`
@@ -690,6 +705,7 @@ type SandboxStatus struct {
 	SetupMarkerCurrent       bool                `json:"setup_marker_current,omitempty"`
 	SetupMarkerReason        string              `json:"setup_marker_reason,omitempty"`
 	SandboxRuntimeConfigured bool                `json:"sandbox_runtime_configured,omitempty"`
+	Diagnostics              []SandboxDiagnostic `json:"diagnostics,omitempty"`
 }
 
 func (s SandboxService) Status(ctx context.Context) (SandboxStatus, error) {
@@ -767,8 +783,12 @@ func (s SandboxService) lifecycle(ctx context.Context, run func(context.Context,
 func (s SandboxService) statusFromRuntime() SandboxStatus {
 	runtimeCfg := s.services.Runtime()
 	configuredBackend := strings.TrimSpace(runtimeCfg.Sandbox.Backend)
+	configuredNetwork := sandbox.NormalizeNetwork(sandbox.Network(runtimeCfg.Sandbox.Network))
 	out := SandboxStatus{
-		RequestedBackend: configuredBackend,
+		RequestedBackend:  configuredBackend,
+		Network:           string(configuredNetwork),
+		ReadableRootCount: countConfiguredPaths(runtimeCfg.Sandbox.ReadableRoots),
+		WritableRootCount: countConfiguredPaths(runtimeCfg.Sandbox.WritableRoots),
 	}
 	if s.services.sandbox == nil {
 		return out
@@ -779,6 +799,11 @@ func (s SandboxService) statusFromRuntime() SandboxStatus {
 	out.RequestedBackend = firstNonEmpty(configuredBackend, string(status.RequestedBackend), string(descriptor.Backend))
 	out.ResolvedBackend = firstNonEmpty(string(status.ResolvedBackend), string(descriptor.Backend), out.RequestedBackend)
 	out.Route = firstNonEmpty(string(descriptor.DefaultConstraints.Route), sandboxRouteForBackend(out.ResolvedBackend))
+	out.Isolation = firstNonEmpty(string(descriptor.Isolation), string(descriptor.DefaultConstraints.Isolation))
+	out.DefaultPermission = strings.TrimSpace(string(descriptor.DefaultConstraints.Permission))
+	out.DefaultNetwork = strings.TrimSpace(string(descriptor.DefaultConstraints.Network))
+	out.NetworkControl = descriptor.Capabilities.NetworkControl
+	out.PathPolicy = descriptor.Capabilities.PathPolicy
 	out.FallbackToHost = status.FallbackToHost
 	out.FallbackReason = strings.TrimSpace(status.FallbackReason)
 	out.FallbackInstallHint = strings.TrimSpace(status.FallbackInstallHint)
@@ -795,6 +820,7 @@ func (s SandboxService) statusFromRuntime() SandboxStatus {
 			out.SetupRequired = global.Required && !global.Current
 		}
 	}
+	out.Diagnostics = sandboxDiagnostics(runtimeCfg.Sandbox, descriptor, out)
 	return out
 }
 
@@ -815,6 +841,100 @@ func sandboxSetupCheck(status sandbox.SetupStatus, scope sandbox.SetupScope) (sa
 		}
 	}
 	return sandbox.SetupCheck{}, false
+}
+
+func sandboxDiagnostics(cfg config.Sandbox, descriptor sandbox.Descriptor, status SandboxStatus) []SandboxDiagnostic {
+	var out []SandboxDiagnostic
+	if status.FallbackToHost {
+		out = append(out, SandboxDiagnostic{
+			Severity: appresources.DiagnosticWarning,
+			Kind:     "fallback",
+			Message:  firstNonEmpty(status.FallbackReason, "sandbox backend fell back to host"),
+			Meta: sandboxDiagnosticMeta(map[string]string{
+				"requested_backend": status.RequestedBackend,
+				"resolved_backend":  status.ResolvedBackend,
+				"route":             status.Route,
+			}),
+		})
+	}
+	if status.SetupRequired || status.SetupError != "" {
+		severity := appresources.DiagnosticWarning
+		if status.SetupError != "" {
+			severity = appresources.DiagnosticError
+		}
+		out = append(out, SandboxDiagnostic{
+			Severity: severity,
+			Kind:     "setup",
+			Message:  firstNonEmpty(status.SetupError, status.SetupMarkerReason, "sandbox setup is required"),
+			Meta: sandboxDiagnosticMeta(map[string]string{
+				"requested_backend": status.RequestedBackend,
+				"resolved_backend":  status.ResolvedBackend,
+			}),
+		})
+	}
+	if strings.EqualFold(strings.TrimSpace(status.Route), string(sandbox.RouteHost)) {
+		out = append(out, SandboxDiagnostic{
+			Severity: appresources.DiagnosticWarning,
+			Kind:     "route",
+			Message:  "sandbox commands use host execution",
+			Meta: sandboxDiagnosticMeta(map[string]string{
+				"backend":    status.ResolvedBackend,
+				"isolation":  status.Isolation,
+				"permission": status.DefaultPermission,
+			}),
+		})
+	}
+	configuredNetwork := sandbox.NormalizeNetwork(sandbox.Network(cfg.Network))
+	if configuredNetwork != sandbox.NetworkInherit && !descriptor.Capabilities.NetworkControl {
+		out = append(out, SandboxDiagnostic{
+			Severity: appresources.DiagnosticWarning,
+			Kind:     "network",
+			Message:  "sandbox network policy is configured but this backend does not enforce network control",
+			Meta: sandboxDiagnosticMeta(map[string]string{
+				"configured_network": string(configuredNetwork),
+				"default_network":    status.DefaultNetwork,
+				"backend":            status.ResolvedBackend,
+			}),
+		})
+	}
+	if countConfiguredPaths(cfg.ReadableRoots)+countConfiguredPaths(cfg.WritableRoots) > 0 && !descriptor.Capabilities.PathPolicy {
+		out = append(out, SandboxDiagnostic{
+			Severity: appresources.DiagnosticWarning,
+			Kind:     "roots",
+			Message:  "sandbox root policy is configured but this backend does not enforce command path policy",
+			Meta: sandboxDiagnosticMeta(map[string]string{
+				"readable_roots": fmt.Sprint(countConfiguredPaths(cfg.ReadableRoots)),
+				"writable_roots": fmt.Sprint(countConfiguredPaths(cfg.WritableRoots)),
+				"backend":        status.ResolvedBackend,
+			}),
+		})
+	}
+	return out
+}
+
+func sandboxDiagnosticMeta(in map[string]string) map[string]string {
+	out := map[string]string{}
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key != "" && value != "" {
+			out[key] = value
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func countConfiguredPaths(paths []string) int {
+	count := 0
+	for _, path := range paths {
+		if strings.TrimSpace(path) != "" {
+			count++
+		}
+	}
+	return count
 }
 
 type ViewService struct {

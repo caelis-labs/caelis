@@ -1838,10 +1838,18 @@ be migrated before retiring the old stack:
      enforced by the same `policyfs` adapter used by other core-native file
      tool paths, so settings-backed roots affect host `FileSystem()` operations
      instead of only non-host backends or skill install roots.
-   - Still pending: richer per-command network/root diagnostics, rich route
-     diagnostics, production doctor repair reporting, and cross-platform
-     validation of the Windows restricted-token async session API after the
-     core-native session contract migration.
+   - Migrated baseline: shared app sandbox status now carries policy and route
+     diagnostics for TUI, CLI, and future APP consumers. The service projects
+     resolved route, isolation, default permission, configured/effective
+     network policy, root counts, backend network/path-policy capabilities, and
+     normalized diagnostics for host fallback, setup, host execution, network
+     policy gaps, and root-policy gaps. Settings-panel diagnostics and CLI
+     `/doctor`/`sandbox` output now consume that single service contract instead
+     of recomputing sandbox warnings per surface.
+   - Still pending: command-result-level network/root diagnostics, production
+     doctor repair reporting, and cross-platform validation of the Windows
+     restricted-token async session API after the core-native session contract
+     migration.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
@@ -2307,8 +2315,8 @@ Recommended sequence:
    diagnostics, and visual settings/diagnostics editors.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
-3. Finish sandbox backend cleanup and remaining permission-policy diagnostics
-   without reintroducing the removed router/preset/tool stacks.
+3. Finish sandbox backend cleanup and remaining command-level permission-policy
+   diagnostics without reintroducing the removed router/preset/tool stacks.
 4. Finish richer durable task metadata and terminal preview behavior behind
    `core/tool.Registry`; host process and SPAWN continuation are now baseline
    runtime capabilities.
