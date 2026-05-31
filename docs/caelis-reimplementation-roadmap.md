@@ -1291,6 +1291,12 @@ be migrated before retiring the old stack:
      options, plugin provider aliases, built-in catalog candidates, remote
      provider discovery, and model capability/reasoning metadata into one
      surface-neutral view.
+   - Migrated baseline: built-in provider model presets, provider counts,
+     capability matching, remote `core/model.ModelInfo` capability normalization,
+     and reasoning-level derivation now live in the pure app-domain
+     `internal/app/modelcatalog` package. `ModelService` composes that catalog
+     with settings and `core/model.Provider` discovery instead of owning
+     catalog tables and matching rules inline.
    - Migrated baseline: the new CLI/local stack now hydrates models and ACP
      agents from the default app settings file under the configured store
      directory, so normal TUI `/connect` changes persist through the shared

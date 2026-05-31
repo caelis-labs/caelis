@@ -11,35 +11,19 @@ import (
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	"github.com/OnslaughtSnail/caelis/internal/app/modelcatalog"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
 const (
-	ReasoningModeNone   = "none"
-	ReasoningModeToggle = "toggle"
-	ReasoningModeEffort = "effort"
-	ReasoningModeFixed  = "fixed"
+	ReasoningModeNone   = modelcatalog.ReasoningModeNone
+	ReasoningModeToggle = modelcatalog.ReasoningModeToggle
+	ReasoningModeEffort = modelcatalog.ReasoningModeEffort
+	ReasoningModeFixed  = modelcatalog.ReasoningModeFixed
 )
 
-type ModelCapabilityInfo struct {
-	ContextWindowTokens    int      `json:"context_window_tokens,omitempty"`
-	MaxOutputTokens        int      `json:"max_output_tokens,omitempty"`
-	DefaultMaxOutputTokens int      `json:"default_max_output_tokens,omitempty"`
-	SupportsImages         bool     `json:"supports_images,omitempty"`
-	SupportsToolCalls      bool     `json:"supports_tool_calls,omitempty"`
-	SupportsReasoning      bool     `json:"supports_reasoning,omitempty"`
-	ReasoningMode          string   `json:"reasoning_mode,omitempty"`
-	ReasoningEfforts       []string `json:"reasoning_efforts,omitempty"`
-	DefaultReasoningEffort string   `json:"default_reasoning_effort,omitempty"`
-	SupportsJSONOutput     bool     `json:"supports_json_output,omitempty"`
-}
-
-type modelCatalogEntry struct {
-	provider string
-	pattern  string
-	caps     ModelCapabilityInfo
-}
+type ModelCapabilityInfo = modelcatalog.CapabilityInfo
 
 type ModelSelectionRequest struct {
 	SessionRef session.Ref             `json:"session_ref,omitempty"`
@@ -47,50 +31,8 @@ type ModelSelectionRequest struct {
 	Discovery  appsettings.ModelConfig `json:"discovery,omitempty"`
 }
 
-var catalogModels = map[string][]string{
-	"anthropic":              {"claude-sonnet-4-20250514", "claude-opus-4-20250514"},
-	"anthropic-compatible":   {"claude-sonnet-4-20250514", "claude-opus-4-20250514"},
-	"codefree":               {"DeepSeek-V3.1-Terminus", "GLM-4.7", "GLM-5.1", "Qwen3.5-122B-A10B"},
-	"deepseek":               {"deepseek-v4-flash", "deepseek-v4-pro"},
-	"gemini":                 {"gemini-2.5-flash", "gemini-2.5-pro"},
-	"minimax":                {"MiniMax-M2", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"},
-	"ollama":                 {"deepseek-r1:7b", "gemma3:4b", "llama3.1:8b", "qwen2.5:7b"},
-	"openai":                 {"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"},
-	"openai-compatible":      {"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"},
-	"openrouter":             {"anthropic/claude-sonnet-4", "google/gemini-2.5-flash", "openai/gpt-4o-mini"},
-	"volcengine":             {"doubao-seed-2.0-code", "doubao-seed-2.0-pro"},
-	"volcengine-coding-plan": {"doubao-seed-2.0-code"},
-	"xiaomi":                 {"mimo-v2-flash", "mimo-v2-omni", "mimo-v2-pro", "mimo-v2.5", "mimo-v2.5-pro"},
-}
-
-var builtinCapabilities = []modelCatalogEntry{
-	{provider: "deepseek", pattern: "deepseek-v4", caps: ModelCapabilityInfo{ContextWindowTokens: 1048576, MaxOutputTokens: 393216, DefaultMaxOutputTokens: 32768, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, ReasoningEfforts: []string{"high", "max"}, DefaultReasoningEffort: "high", SupportsJSONOutput: true}},
-	{provider: "gemini", pattern: "gemini-2.5", caps: ModelCapabilityInfo{ContextWindowTokens: 1048576, MaxOutputTokens: 65536, DefaultMaxOutputTokens: 8192, SupportsImages: true, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "medium", "high"}, SupportsJSONOutput: true}},
-	{provider: "minimax", pattern: "MiniMax-M2.7", caps: ModelCapabilityInfo{ContextWindowTokens: 204800, MaxOutputTokens: 32768, DefaultMaxOutputTokens: 8192, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeFixed, SupportsJSONOutput: true}},
-	{provider: "minimax", pattern: "MiniMax-M2.5", caps: ModelCapabilityInfo{ContextWindowTokens: 204800, MaxOutputTokens: 32768, DefaultMaxOutputTokens: 8192, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeFixed, SupportsJSONOutput: true}},
-	{provider: "minimax", pattern: "MiniMax-M2.1", caps: ModelCapabilityInfo{ContextWindowTokens: 204800, MaxOutputTokens: 32768, DefaultMaxOutputTokens: 8192, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeFixed, SupportsJSONOutput: true}},
-	{provider: "minimax", pattern: "MiniMax-M2", caps: ModelCapabilityInfo{ContextWindowTokens: 204800, MaxOutputTokens: 8192, DefaultMaxOutputTokens: 8192, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeFixed, SupportsJSONOutput: true}},
-	{provider: "openai", pattern: "o", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 100000, DefaultMaxOutputTokens: 32768, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "medium", "high"}, DefaultReasoningEffort: "medium", SupportsJSONOutput: true}},
-	{provider: "openai-compatible", pattern: "o", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 100000, DefaultMaxOutputTokens: 32768, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "medium", "high"}, DefaultReasoningEffort: "medium", SupportsJSONOutput: true}},
-	{provider: "openai", pattern: "gpt-4o", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 16384, DefaultMaxOutputTokens: 4096, SupportsImages: true, SupportsToolCalls: true, SupportsJSONOutput: true}},
-	{provider: "openai-compatible", pattern: "gpt-4o", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 16384, DefaultMaxOutputTokens: 4096, SupportsImages: true, SupportsToolCalls: true, SupportsJSONOutput: true}},
-	{provider: "anthropic", pattern: "claude", caps: ModelCapabilityInfo{ContextWindowTokens: 200000, MaxOutputTokens: 32000, DefaultMaxOutputTokens: 4096, SupportsImages: true, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "medium", "high"}, SupportsJSONOutput: true}},
-	{provider: "anthropic-compatible", pattern: "claude", caps: ModelCapabilityInfo{ContextWindowTokens: 200000, MaxOutputTokens: 32000, DefaultMaxOutputTokens: 4096, SupportsImages: true, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "medium", "high"}, SupportsJSONOutput: true}},
-	{provider: "codefree", pattern: "", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 8000, DefaultMaxOutputTokens: 8000, SupportsToolCalls: true, SupportsJSONOutput: true}},
-	{provider: "openrouter", pattern: "", caps: ModelCapabilityInfo{ContextWindowTokens: 262144, MaxOutputTokens: 32768, DefaultMaxOutputTokens: 8192, SupportsImages: true, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeEffort, ReasoningEfforts: []string{"low", "medium", "high"}, SupportsJSONOutput: true}},
-	{provider: "volcengine", pattern: "doubao-seed-2.0", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 32768, DefaultMaxOutputTokens: 8192, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, SupportsJSONOutput: true}},
-	{provider: "volcengine-coding-plan", pattern: "doubao-seed-2.0-code", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 32768, DefaultMaxOutputTokens: 8192, SupportsToolCalls: true, SupportsJSONOutput: true}},
-	{provider: "xiaomi", pattern: "mimo-v2.5-pro", caps: ModelCapabilityInfo{ContextWindowTokens: 1048576, MaxOutputTokens: 131072, DefaultMaxOutputTokens: 32768, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, SupportsJSONOutput: true}},
-	{provider: "xiaomi", pattern: "mimo-v2-pro", caps: ModelCapabilityInfo{ContextWindowTokens: 1048576, MaxOutputTokens: 131072, DefaultMaxOutputTokens: 32768, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, SupportsJSONOutput: true}},
-	{provider: "xiaomi", pattern: "mimo-v2.5", caps: ModelCapabilityInfo{ContextWindowTokens: 1048576, MaxOutputTokens: 131072, DefaultMaxOutputTokens: 32768, SupportsImages: true, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, SupportsJSONOutput: true}},
-	{provider: "xiaomi", pattern: "mimo-v2-omni", caps: ModelCapabilityInfo{ContextWindowTokens: 262144, MaxOutputTokens: 131072, DefaultMaxOutputTokens: 32768, SupportsImages: true, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, SupportsJSONOutput: true}},
-	{provider: "xiaomi", pattern: "mimo-v2-flash", caps: ModelCapabilityInfo{ContextWindowTokens: 262144, MaxOutputTokens: 65536, DefaultMaxOutputTokens: 16384, SupportsToolCalls: true, SupportsReasoning: true, ReasoningMode: ReasoningModeToggle, SupportsJSONOutput: true}},
-	{provider: "ollama", pattern: "", caps: ModelCapabilityInfo{ContextWindowTokens: 128000, MaxOutputTokens: 8192, DefaultMaxOutputTokens: 4096, SupportsToolCalls: true, SupportsJSONOutput: true}},
-}
-
 func (s ModelService) ListCatalogModels(provider string) []string {
-	models := catalogModels[normalizeModelCatalogKey(provider)]
-	return slices.Clone(models)
+	return modelcatalog.Models(provider)
 }
 
 func (s ModelService) ConfiguredProviderModels(ctx context.Context, provider string) ([]string, error) {
@@ -181,27 +123,14 @@ func (s ModelService) ProviderModelInfos(ctx context.Context, cfg appsettings.Mo
 }
 
 func (s ModelService) DefaultCapabilities() ModelCapabilityInfo {
-	return ModelCapabilityInfo{
-		ContextWindowTokens:    128000,
-		MaxOutputTokens:        32768,
-		DefaultMaxOutputTokens: 4096,
-		SupportsToolCalls:      true,
-		ReasoningMode:          ReasoningModeNone,
-		SupportsJSONOutput:     true,
-	}
+	return modelcatalog.DefaultCapabilities()
 }
 
 func (s ModelService) LookupCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
 	provider = normalizeModelCatalogKey(provider)
 	modelName = strings.ToLower(strings.TrimSpace(modelName))
-	for _, entry := range builtinCapabilities {
-		if normalizeModelCatalogKey(entry.provider) != provider {
-			continue
-		}
-		pattern := strings.ToLower(strings.TrimSpace(entry.pattern))
-		if pattern == "" || modelName == pattern || strings.HasPrefix(modelName, pattern) {
-			return normalizeModelCapabilityInfo(entry.caps), true
-		}
+	if caps, ok := modelcatalog.LookupCapabilities(provider, modelName); ok {
+		return caps, true
 	}
 	if caps, ok := s.lookupCachedCapabilities(provider, modelName); ok {
 		return caps, true
@@ -306,14 +235,14 @@ func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) 
 
 func (s ModelService) modelProviderOptions(choices []appsettings.ModelChoice) []appviewmodel.ModelProviderOption {
 	providers := map[string]appviewmodel.ModelProviderOption{}
-	for provider, models := range catalogModels {
-		key := normalizeModelCatalogKey(provider)
+	for _, provider := range modelcatalog.Providers() {
+		key := normalizeModelCatalogKey(provider.ID)
 		providers[key] = appviewmodel.ModelProviderOption{
 			ID:                key,
 			Name:              key,
 			Builtin:           true,
 			RemoteDiscovery:   s.services.modelProvider != nil,
-			CatalogModelCount: len(models),
+			CatalogModelCount: provider.ModelCount,
 		}
 	}
 	for _, alias := range s.services.resources.ModelProviders {
@@ -341,7 +270,7 @@ func (s ModelService) modelProviderOptions(choices []appsettings.ModelChoice) []
 		option.Configured = true
 		option.RemoteDiscovery = s.services.modelProvider != nil
 		option.ConfiguredModelCount++
-		option.CatalogModelCount = len(s.ListCatalogModels(key))
+		option.CatalogModelCount = modelcatalog.ModelCount(key)
 		providers[key] = option
 	}
 	out := make([]appviewmodel.ModelProviderOption, 0, len(providers))
@@ -445,7 +374,7 @@ func modelCapabilityView(in ModelCapabilityInfo) appviewmodel.ModelCapability {
 }
 
 func normalizeModelCatalogKey(value string) string {
-	return strings.ToLower(strings.TrimSpace(value))
+	return modelcatalog.NormalizeKey(value)
 }
 
 func modelInfoNames(models []coremodel.ModelInfo) []string {
@@ -493,31 +422,7 @@ func cloneModelInfos(models []coremodel.ModelInfo) []coremodel.ModelInfo {
 }
 
 func modelInfoCapabilities(info coremodel.ModelInfo) (ModelCapabilityInfo, bool) {
-	caps := ModelCapabilityInfo{
-		ContextWindowTokens:    info.ContextWindowTokens,
-		MaxOutputTokens:        info.MaxOutputTokens,
-		DefaultMaxOutputTokens: info.MaxOutputTokens,
-		SupportsImages:         info.SupportsImages,
-		SupportsToolCalls:      info.SupportsToolCalls,
-		ReasoningEfforts:       slices.Clone(info.ReasoningEfforts),
-		DefaultReasoningEffort: strings.ToLower(strings.TrimSpace(info.DefaultReasoningEffort)),
-		SupportsJSONOutput:     info.SupportsJSON,
-	}
-	if len(caps.ReasoningEfforts) == 0 && caps.DefaultReasoningEffort != "" {
-		caps.ReasoningEfforts = []string{caps.DefaultReasoningEffort}
-	}
-	caps.SupportsReasoning = len(caps.ReasoningEfforts) > 0 || caps.DefaultReasoningEffort != ""
-	if caps.SupportsReasoning {
-		caps.ReasoningMode = ReasoningModeEffort
-	}
-	caps = normalizeModelCapabilityInfo(caps)
-	known := caps.ContextWindowTokens > 0 ||
-		caps.MaxOutputTokens > 0 ||
-		caps.SupportsImages ||
-		caps.SupportsToolCalls ||
-		caps.SupportsReasoning ||
-		caps.SupportsJSONOutput
-	return caps, known
+	return modelcatalog.CapabilitiesFromModelInfo(info)
 }
 
 func uniqueSortedModelNames(models []string) []string {
@@ -545,43 +450,11 @@ func uniqueSortedModelNames(models []string) []string {
 }
 
 func normalizeModelCapabilityInfo(in ModelCapabilityInfo) ModelCapabilityInfo {
-	out := in
-	out.ReasoningMode = strings.ToLower(strings.TrimSpace(out.ReasoningMode))
-	if out.ReasoningMode == "" {
-		if out.SupportsReasoning {
-			out.ReasoningMode = ReasoningModeToggle
-		} else {
-			out.ReasoningMode = ReasoningModeNone
-		}
-	}
-	out.ReasoningEfforts = normalizeReasoningEfforts(out.ReasoningEfforts)
-	out.DefaultReasoningEffort = strings.ToLower(strings.TrimSpace(out.DefaultReasoningEffort))
-	if out.DefaultMaxOutputTokens <= 0 && out.MaxOutputTokens > 0 {
-		out.DefaultMaxOutputTokens = out.MaxOutputTokens
-	}
-	if out.MaxOutputTokens <= 0 && out.DefaultMaxOutputTokens > 0 {
-		out.MaxOutputTokens = out.DefaultMaxOutputTokens
-	}
-	return out
+	return modelcatalog.NormalizeCapabilities(in)
 }
 
 func reasoningLevelsFromCapabilities(caps ModelCapabilityInfo) []string {
-	caps = normalizeModelCapabilityInfo(caps)
-	if !caps.SupportsReasoning {
-		return nil
-	}
-	switch strings.ToLower(strings.TrimSpace(caps.ReasoningMode)) {
-	case ReasoningModeFixed, ReasoningModeNone:
-		return nil
-	}
-	levels := normalizeReasoningEfforts(caps.ReasoningEfforts)
-	if len(levels) == 0 {
-		return []string{"none"}
-	}
-	out := make([]string, 0, len(levels)+1)
-	out = append(out, "none")
-	out = append(out, levels...)
-	return out
+	return modelcatalog.ReasoningLevelsFromCapabilities(caps)
 }
 
 func reasoningLevelsFromCapabilityView(caps appviewmodel.ModelCapability) []string {
@@ -600,20 +473,7 @@ func reasoningLevelsFromCapabilityView(caps appviewmodel.ModelCapability) []stri
 }
 
 func normalizeReasoningEfforts(levels []string) []string {
-	seen := map[string]struct{}{}
-	out := make([]string, 0, len(levels))
-	for _, level := range levels {
-		level = strings.ToLower(strings.TrimSpace(level))
-		if level == "" || level == "none" || level == "-" {
-			continue
-		}
-		if _, ok := seen[level]; ok {
-			continue
-		}
-		seen[level] = struct{}{}
-		out = append(out, level)
-	}
-	return out
+	return modelcatalog.NormalizeReasoningEfforts(levels)
 }
 
 func (s ModelService) lookupCachedCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
