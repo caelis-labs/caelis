@@ -3,8 +3,12 @@ package services
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -62,6 +66,53 @@ func TestConnectWizardFlowHelpersUseSharedProviderCatalog(t *testing.T) {
 	}
 }
 
+func TestConnectProviderCatalogSupportsCompatibleAndXiaomiTokenPlan(t *testing.T) {
+	openAICompatible, ok := FindConnectProviderTemplate("openai-compatible")
+	if !ok {
+		t.Fatal("FindConnectProviderTemplate(openai-compatible) = false, want true")
+	}
+	if openAICompatible.Provider != "openai-compatible" || openAICompatible.DefaultBaseURL == "" {
+		t.Fatalf("openai-compatible template = %#v, want provider plus default base URL", openAICompatible)
+	}
+	xiaomiTokenPlan, ok := FindConnectProviderTemplate(ConnectXiaomiTokenPlanCNAlias)
+	if !ok {
+		t.Fatalf("FindConnectProviderTemplate(%q) = false, want true", ConnectXiaomiTokenPlanCNAlias)
+	}
+	if xiaomiTokenPlan.Provider != "xiaomi" || xiaomiTokenPlan.API != coremodel.APIMimo || xiaomiTokenPlan.DefaultBaseURL != ConnectXiaomiTokenPlanCNBaseURL {
+		t.Fatalf("xiaomi token-plan template = %#v, want xiaomi mimo token-plan defaults", xiaomiTokenPlan)
+	}
+	for _, provider := range []string{"mimo", "mimo-token-plan-cn"} {
+		if tpl, ok := FindConnectProviderTemplate(provider); ok {
+			t.Fatalf("FindConnectProviderTemplate(%q) = %#v, want unsupported", provider, tpl)
+		}
+	}
+}
+
+func TestConnectModelConfigFromWizardStateUsesCatalogSemantics(t *testing.T) {
+	cfg, ok := ConnectModelConfigFromWizardState(ConnectWizardState{
+		Provider:            "xiaomi",
+		BaseURL:             ConnectXiaomiTokenPlanCNBaseURL,
+		TimeoutSeconds:      90,
+		TokenRef:            "env:MIMO_TOKEN_PLAN_API_KEY",
+		Model:               "mimo-v2.5-pro",
+		ContextWindowTokens: 1048576,
+		MaxOutputTokens:     32768,
+		ReasoningLevels:     []string{"high", "max"},
+	})
+	if !ok {
+		t.Fatal("ConnectModelConfigFromWizardState() ok = false, want true")
+	}
+	if cfg.Provider != "xiaomi" || cfg.EndpointID != "token-plan-cn" || cfg.BaseURL != ConnectXiaomiTokenPlanCNBaseURL {
+		t.Fatalf("wizard cfg endpoint = %#v, want xiaomi token-plan endpoint", cfg)
+	}
+	if cfg.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" || cfg.Token != "" || cfg.AuthType != string(coremodel.AuthAPIKey) {
+		t.Fatalf("wizard cfg auth = %#v, want env api-key auth", cfg)
+	}
+	if cfg.Timeout != 90*time.Second || cfg.ContextWindowTokens != 1048576 || cfg.MaxOutputTokens != 32768 || !reflect.DeepEqual(cfg.ReasoningLevels, []string{"high", "max"}) {
+		t.Fatalf("wizard cfg model defaults = %#v, want carried wizard defaults", cfg)
+	}
+}
+
 func TestDefaultConnectWizardFlowDefinesSharedShellShape(t *testing.T) {
 	flow := DefaultConnectWizardFlow()
 	if flow.Command != "connect" || flow.DisplayLine != "/connect" {
@@ -96,6 +147,44 @@ func TestModelServiceConnectWizardExposesSharedFlow(t *testing.T) {
 	}
 	if !reflect.DeepEqual(flow, DefaultConnectWizardFlow()) {
 		t.Fatalf("ConnectWizard() = %#v, want default shared flow", flow)
+	}
+}
+
+func TestModelServicePrepareConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{Engine: &recordingEngine{}, Settings: manager})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.Models().PrepareConnectConfig(ctx, appsettings.ModelConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2.5-pro",
+		BaseURL:  ConnectXiaomiTokenPlanCNBaseURL,
+	})
+	if err == nil || !strings.Contains(err.Error(), "env:MIMO_TOKEN_PLAN_API_KEY") {
+		t.Fatalf("PrepareConnectConfig() error = %v, want MIMO_TOKEN_PLAN_API_KEY hint", err)
+	}
+}
+
+func TestModelServiceConnectDefaultsOpenAICompatibleCustomBaseURL(t *testing.T) {
+	svc, err := New(Config{Engine: &recordingEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := svc.Models().ConnectDefaults(context.Background(), appsettings.ModelConfig{
+		Provider: "openai-compatible",
+		Model:    "gpt-4o-mini",
+		BaseURL:  "https://proxy.example.test/v1",
+	})
+	if err != nil {
+		t.Fatalf("ConnectDefaults() error = %v", err)
+	}
+	if defaults.ContextWindow <= 0 || defaults.MaxOutput <= 0 {
+		t.Fatalf("ConnectDefaults() = %#v, want positive context and max output defaults", defaults)
 	}
 }
 

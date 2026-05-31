@@ -116,8 +116,8 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if providerDiscovery.Provider != "openai-compatible" || providerDiscovery.BaseURL != "https://api.example.test/v1" || providerDiscovery.Token != "secret" {
 		t.Fatalf("provider discovery cfg = %#v, want connect wizard provider config", providerDiscovery)
 	}
-	defaults, err := connectDefaultsForConfigWithStack(ctx, stack, ConnectConfig{Provider: "deepseek", Model: "deepseek-v4-pro"})
-	if err != nil {
+	defaults, handled, err := stack.ConnectDefaults(ctx, ModelConfig{Provider: "deepseek", Model: "deepseek-v4-pro"})
+	if err != nil || !handled {
 		t.Fatalf("connect defaults error = %v", err)
 	}
 	if defaults.ContextWindow != 1048576 || defaults.MaxOutput != 32768 || !equalStrings(defaults.ReasoningLevels, []string{"none", "high", "max"}) {

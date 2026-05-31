@@ -34,21 +34,6 @@ type AgentParticipantSnapshot = tuidriver.AgentParticipantSnapshot
 
 type AgentStatusSnapshot = tuidriver.AgentStatusSnapshot
 
-type ConnectConfig struct {
-	Provider            string
-	EndpointID          string
-	Model               string
-	BaseURL             string
-	TimeoutSeconds      int
-	APIKey              string
-	TokenEnv            string
-	AuthType            string
-	ContextWindowTokens int
-	MaxOutputTokens     int
-	ReasoningEffort     string
-	ReasoningLevels     []string
-}
-
 type CommandExecutionOptions = tuidriver.CommandExecutionOptions
 
 type CommandExecutionView = tuidriver.CommandExecutionView

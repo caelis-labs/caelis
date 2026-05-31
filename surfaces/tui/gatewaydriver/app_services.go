@@ -127,36 +127,8 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return modelChoicesFromApp(choices), nil
 	}
-	stack.ListProviderModelsFn = func(provider string) []string {
-		models, err := svc.Models().ConfiguredProviderModels(context.Background(), provider)
-		if err != nil {
-			return nil
-		}
-		return models
-	}
-	stack.ListProviderModelsForConfigFn = func(ctx context.Context, cfg ModelConfig) ([]string, error) {
-		return svc.Models().ProviderModels(ctx, modelConfigToApp(cfg))
-	}
-	stack.ListCatalogModelsFn = func(provider string) []string {
-		return svc.Models().ListCatalogModels(provider)
-	}
-	stack.DefaultModelCapabilitiesFn = func() ModelCapabilityInfo {
-		return modelCapabilityInfoFromApp(svc.Models().DefaultCapabilities())
-	}
-	stack.LookupModelCapabilitiesFn = func(provider string, modelName string) (ModelCapabilityInfo, bool) {
-		caps, ok := svc.Models().LookupCapabilities(provider, modelName)
-		return modelCapabilityInfoFromApp(caps), ok
-	}
 	stack.ReasoningLevelsForModelFn = func(provider string, modelName string) []string {
 		return svc.Models().ReasoningLevels(provider, modelName)
-	}
-	stack.EnsureCodeFreeAuthFn = func(ctx context.Context, req CodeFreeAuthRequest) error {
-		_, err := svc.Models().EnsureCodeFreeAuth(ctx, codeFreeAuthRequestToApp(req))
-		return err
-	}
-	stack.EnsureCodeFreeModelSelectionAuthFn = func(ctx context.Context, req CodeFreeAuthRequest) error {
-		_, err := svc.Models().EnsureCodeFreeModelSelectionAuth(ctx, codeFreeAuthRequestToApp(req))
-		return err
 	}
 	stack.DiscoverSkillsFn = func(ctx context.Context, _ string) ([]plugin.SkillDescriptor, error) {
 		catalog, err := svc.Resources().Catalog(ctx)
@@ -178,9 +150,8 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		candidates, err := svc.Models().ConnectModelCandidates(ctx, modelConfigToApp(cfg), query, limit)
 		return slashCandidatesFromAppConnect(candidates), err
 	}
-	stack.ConnectDefaultsFn = func(ctx context.Context, cfg ModelConfig) (connectModelDefaults, error) {
-		defaults, err := svc.Models().ConnectDefaults(ctx, modelConfigToApp(cfg))
-		return connectModelDefaultsFromApp(defaults), err
+	stack.ConnectDefaultsFn = func(ctx context.Context, cfg ModelConfig) (appservices.ConnectModelDefaults, error) {
+		return svc.Models().ConnectDefaults(ctx, modelConfigToApp(cfg))
 	}
 	stack.ACPControllerStatusFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 		status, ok, err := svc.Controllers().Status(ctx, ref)
@@ -493,37 +464,6 @@ func slashCandidatesFromAppConnect(candidates []appservices.ConnectCandidate) []
 		})
 	}
 	return out
-}
-
-func connectModelDefaultsFromApp(defaults appservices.ConnectModelDefaults) connectModelDefaults {
-	return connectModelDefaults{
-		ContextWindow:          defaults.ContextWindow,
-		MaxOutput:              defaults.MaxOutput,
-		ReasoningLevels:        append([]string(nil), defaults.ReasoningLevels...),
-		DefaultReasoningEffort: strings.TrimSpace(defaults.DefaultReasoningEffort),
-	}
-}
-
-func modelCapabilityInfoFromApp(caps appservices.ModelCapabilityInfo) ModelCapabilityInfo {
-	return ModelCapabilityInfo{
-		ContextWindowTokens:    caps.ContextWindowTokens,
-		DefaultMaxOutputTokens: caps.DefaultMaxOutputTokens,
-		MaxOutputTokens:        caps.MaxOutputTokens,
-		ReasoningEfforts:       append([]string(nil), caps.ReasoningEfforts...),
-		DefaultReasoningEffort: strings.TrimSpace(caps.DefaultReasoningEffort),
-		SupportsReasoning:      caps.SupportsReasoning,
-		SupportsToolCalls:      caps.SupportsToolCalls,
-		SupportsImages:         caps.SupportsImages,
-		SupportsJSON:           caps.SupportsJSONOutput,
-	}
-}
-
-func codeFreeAuthRequestToApp(req CodeFreeAuthRequest) appservices.CodeFreeAuthRequest {
-	return appservices.CodeFreeAuthRequest{
-		BaseURL:         strings.TrimSpace(req.BaseURL),
-		OpenBrowser:     req.OpenBrowser,
-		CallbackTimeout: req.CallbackTimeout,
-	}
 }
 
 func sandboxStatusFromApp(status appservices.SandboxStatus) SandboxStatus {

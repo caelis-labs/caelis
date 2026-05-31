@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -12,7 +11,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
-	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -471,53 +469,6 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 		return result.Turn, nil
 	}
 	return nil, fmt.Errorf("surfaces/tui/gatewaydriver: participant prompt dependency is unavailable")
-}
-
-func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {
-	if strings.TrimSpace(cfg.Model) == "" {
-		return fmt.Errorf("model is required; use /connect and choose or type a model name")
-	}
-	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
-		parsed, err := url.Parse(baseURL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("base URL is invalid; use a full URL such as %s", tpl.DefaultBaseURL)
-		}
-	}
-	if tpl.NoAuthRequired {
-		return nil
-	}
-	if strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.TokenEnv) != "" {
-		return nil
-	}
-	envHint := defaultTokenEnvNameForConnect(tpl.Provider, cfg.BaseURL)
-	if envHint == "" {
-		envHint = "YOUR_API_KEY"
-	}
-	return fmt.Errorf("API key is missing; paste a key or enter env:%s in /connect", envHint)
-}
-
-func parseTokenEnvSpec(value string) (string, bool) {
-	return appservices.ParseConnectTokenEnvSpec(value)
-}
-
-func defaultTokenEnvName(provider string) string {
-	return appservices.DefaultConnectTokenEnvName(provider, "")
-}
-
-func defaultTokenEnvNameForConnect(provider string, baseURL string) string {
-	return appservices.DefaultConnectTokenEnvName(provider, baseURL)
-}
-
-func defaultConnectAuthType(provider string) model.AuthType {
-	return appservices.DefaultConnectAuthType(provider)
-}
-
-func isXiaomiTokenPlanProvider(provider string) bool {
-	return appservices.IsXiaomiTokenPlanProvider(provider)
-}
-
-func isXiaomiTokenPlanBaseURL(baseURL string) bool {
-	return appservices.IsXiaomiTokenPlanBaseURL(baseURL)
 }
 
 func firstNonEmpty(values ...string) string {

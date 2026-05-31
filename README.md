@@ -37,8 +37,6 @@ into the Bubble Tea TUI, ACP stdio, and the headless one-shot runner.
   and interactive TUI modes through the local app stack.
 - `core/`: stable runtime, session, model, tool, sandbox, plugin, and config
   contracts.
-- `kernel/` and `ports/`: older public contracts still present while the
-  remaining surfaces are migrated to `core/*` and app services.
 - `internal/adapters`: concrete model, store, sandbox, tool, and ACP-agent
   adapters wired by the app registry.
 - `internal/engine`: concrete local runtime orchestration for sessions, turns,
@@ -56,7 +54,7 @@ into the Bubble Tea TUI, ACP stdio, and the headless one-shot runner.
   projector packages.
 - `internal/surface/acpserver`: core-native ACP stdio agent surface used by the
   production `caelis acp` entrypoint.
-- `eval/`: build-tagged cross-stack and live evaluation tests for kernel, app,
+- `eval/`: build-tagged cross-stack and live evaluation tests for engine, app,
   ACP, CLI, local-config model, and TUI gateway-driver flows.
 - `npm/`: npm wrapper package plus platform-specific binary packages.
 

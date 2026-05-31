@@ -698,9 +698,9 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   surface for configured models, provider model presets, capability defaults,
   and reasoning-level choices used by TUI/future APP connect flows.
 - `core/model`: shared model-facing contracts now also own provider endpoint
-  API/auth configuration enums. `ports/model` only re-exports those config
-  enums for remaining bridge code while production CLI, app services, and the
-  TUI app-service connect shell consume the core contract directly.
+  API/auth configuration enums. Production CLI, app services, and the TUI
+  app-service connect shell consume the core contract directly; the old
+  `ports/model` bridge has been removed.
 - `surfaces/tui/gatewaydriver.BindAppServices`: service-native TUI `/agent`
   list and dynamic `/<agent> <prompt>` baseline for configured external ACP
   agents, recording participant attach/user/assistant activity as canonical
@@ -947,6 +947,11 @@ The completed work is intentionally limited to the reusable skeleton:
   provider models, built-in provider model presets, capability defaults, and
   reasoning levels so TUI and future APP connect/setup flows do not need to own
   provider capability tables.
+- App connect completion baseline: shared `ModelService` owns provider
+  candidates, endpoint candidates, timeout candidates, remote/catalog model
+  candidates, model defaults, CodeFree model-selection auth, and wizard-state
+  to model-config normalization so TUI and future APP setup flows do not need
+  provider-specific fallback logic.
 - Shared task command baseline: `TaskService` is now reachable from both
   app-level command execution and the production TUI driver path for
   list/tail/wait/write/cancel/release/start task operations.
@@ -961,13 +966,13 @@ The completed work is intentionally limited to the reusable skeleton:
   text or importing backend-specific sandbox methods.
 - App provider configuration baseline: provider endpoint API/auth semantics now
   live in `core/model`; `internal/cli`, `internal/app/services`, and the
-  service-bound TUI connect/model config path no longer import
-  the old provider stack or `ports/model` for those settings contracts.
+  service-bound TUI connect/model config path no longer import the old provider
+  stack or broad model ports for those settings contracts.
 - Prompt content input baseline: `core/model.ContentPart` is now the canonical
-  user-input contract for text/image/file prompt parts. The old `ports/model`
-  package only re-exports that type for residual bridge code, while kernel turn
-  requests, agent/controller run requests, app-service submissions, and the TUI
-  attachment parser all pass core content parts directly.
+  user-input contract for text/image/file prompt parts. Runtime turn requests,
+  agent/controller run requests, app-service submissions, and the TUI attachment
+  parser all pass core content parts directly; the old `ports/model` bridge has
+  been removed.
 - Legacy provider/catalog stack removal: the old provider factory, old layered
   model catalog, embedded models.dev snapshot, and the generator that wrote
   that snapshot have been deleted. Provider implementation now lives only in
@@ -1328,6 +1333,11 @@ be migrated before retiring the old stack:
      delegates app-service-bound `/connect` submissions through the shared
      prepare/connect contract, so a future APP can reuse the same provider
      setup semantics without importing TUI wizard code.
+   - Migrated baseline: TUI gatewaydriver no longer keeps its own `/connect`
+     provider catalog, model-choice fallback, default-capability fallback, or
+     CodeFree auth hooks. The remaining gatewaydriver `/connect` path is a
+     thin completion adapter over shared app-service candidates/defaults plus a
+     service-owned wizard-state-to-model-config contract.
    - Migrated baseline: `/connect` wizard state, shared flow/step definition,
      completion payload encoding, final command-line shape, default timeout,
      provider step rules, token-env hint logic, skip rules, and step-confirm
@@ -1858,11 +1868,10 @@ be migrated before retiring the old stack:
      `ModelService.PromptCapabilities`, so configured multimodal model support
      is reported through the same model catalog used by TUI and APP setup.
    - Migrated baseline: provider endpoint API/auth config enums have moved into
-     `core/model`, and `ports/model` only re-exports them for residual bridge
-     code. Production CLI config normalization, shared connect catalog data,
-     and the app-service-bound TUI connect/model shell now depend on the core
-     contract instead of the old provider stack or broad model ports for
-     provider setup semantics.
+     `core/model`. Production CLI config normalization, shared connect catalog
+     data, and the app-service-bound TUI connect/model shell now depend on the
+     core contract instead of the old provider stack or broad model ports for
+     provider setup semantics; the old `ports/model` bridge has been removed.
    - Migrated baseline: prompt content parts for multimodal input now also live
      in `core/model`, so TUI/APP/ACP-facing turn and participant prompt
      requests can share one input contract instead of converting image/file

@@ -686,12 +686,12 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
 	}
-	if !slashCandidatesHaveValue(xiaomiEndpoints, connectXiaomiAPIBaseURL) {
+	if !slashCandidatesHaveValue(xiaomiEndpoints, appservices.ConnectXiaomiAPIBaseURL) {
 		t.Fatalf("xiaomi endpoint candidates = %#v, missing api cn", xiaomiEndpoints)
 	}
 	var foundTokenPlan bool
 	for _, item := range xiaomiEndpoints {
-		if strings.EqualFold(strings.TrimSpace(item.Value), connectXiaomiTokenPlanCNBaseURL) &&
+		if strings.EqualFold(strings.TrimSpace(item.Value), appservices.ConnectXiaomiTokenPlanCNBaseURL) &&
 			strings.Contains(item.Detail, "MIMO_TOKEN_PLAN_API_KEY") {
 			foundTokenPlan = true
 		}
@@ -2270,66 +2270,6 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	}
 }
 
-func TestFindProviderTemplateSupportsOpenAICompatible(t *testing.T) {
-	t.Parallel()
-
-	tpl, ok := findProviderTemplate("openai-compatible")
-	if !ok {
-		t.Fatal("findProviderTemplate(openai-compatible) = false, want true")
-	}
-	if tpl.Provider != "openai-compatible" {
-		t.Fatalf("provider = %q, want openai-compatible", tpl.Provider)
-	}
-	if tpl.DefaultBaseURL == "" {
-		t.Fatal("defaultBaseURL = empty, want non-empty")
-	}
-}
-
-func TestFindProviderTemplateSupportsXiaomiTokenPlanCN(t *testing.T) {
-	t.Parallel()
-
-	tpl, ok := findProviderTemplate(connectXiaomiTokenPlanCNAlias)
-	if !ok {
-		t.Fatalf("findProviderTemplate(%q) = false, want true", connectXiaomiTokenPlanCNAlias)
-	}
-	if tpl.Provider != "xiaomi" {
-		t.Fatalf("provider = %q, want xiaomi", tpl.Provider)
-	}
-	if tpl.API != coremodel.APIMimo {
-		t.Fatalf("api = %q, want %q", tpl.API, coremodel.APIMimo)
-	}
-	if tpl.DefaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
-		t.Fatalf("defaultBaseURL = %q, want %q", tpl.DefaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
-	}
-}
-
-func TestFindProviderTemplateRejectsMimoProviderAliases(t *testing.T) {
-	t.Parallel()
-
-	for _, provider := range []string{"mimo", "mimo-token-plan-cn"} {
-		if tpl, ok := findProviderTemplate(provider); ok {
-			t.Fatalf("findProviderTemplate(%q) = %#v, want unsupported", provider, tpl)
-		}
-	}
-}
-
-func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T) {
-	t.Parallel()
-
-	tpl, ok := findProviderTemplate("xiaomi")
-	if !ok {
-		t.Fatal("findProviderTemplate(xiaomi) = false, want true")
-	}
-	err := validateConnectConfig(tpl, ConnectConfig{
-		Provider: "xiaomi",
-		Model:    "mimo-v2.5-pro",
-		BaseURL:  connectXiaomiTokenPlanCNBaseURL,
-	})
-	if err == nil || !strings.Contains(err.Error(), "env:MIMO_TOKEN_PLAN_API_KEY") {
-		t.Fatalf("validateConnectConfig() error = %v, want MIMO_TOKEN_PLAN_API_KEY hint", err)
-	}
-}
-
 func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
@@ -2348,7 +2288,7 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2.5-pro "+connectXiaomiTokenPlanCNBaseURL+" 60 env:MIMO_TOKEN_PLAN_API_KEY")
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2.5-pro "+appservices.ConnectXiaomiTokenPlanCNBaseURL+" 60 env:MIMO_TOKEN_PLAN_API_KEY")
 
 	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
@@ -2383,8 +2323,8 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 	if profile.Provider != "xiaomi" {
 		t.Fatalf("profile provider = %q, want xiaomi", profile.Provider)
 	}
-	if profile.BaseURL != connectXiaomiTokenPlanCNBaseURL {
-		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, connectXiaomiTokenPlanCNBaseURL)
+	if profile.BaseURL != appservices.ConnectXiaomiTokenPlanCNBaseURL {
+		t.Fatalf("profile base_url = %q, want %q", profile.BaseURL, appservices.ConnectXiaomiTokenPlanCNBaseURL)
 	}
 	if profile.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" {
 		t.Fatalf("profile token_env = %q, want MIMO_TOKEN_PLAN_API_KEY", profile.TokenEnv)
@@ -2410,8 +2350,8 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	for _, input := range []string{
-		"/connect xiaomi mimo-v2.5-pro " + connectXiaomiAPIBaseURL + " 60 env:XIAOMI_API_KEY",
-		"/connect xiaomi mimo-v2.5-pro " + connectXiaomiTokenPlanCNBaseURL + " 60 env:MIMO_TOKEN_PLAN_API_KEY",
+		"/connect xiaomi mimo-v2.5-pro " + appservices.ConnectXiaomiAPIBaseURL + " 60 env:XIAOMI_API_KEY",
+		"/connect xiaomi mimo-v2.5-pro " + appservices.ConnectXiaomiTokenPlanCNBaseURL + " 60 env:MIMO_TOKEN_PLAN_API_KEY",
 	} {
 		runGatewayDriverTestCommand(t, ctx, driver, input)
 	}
@@ -2482,14 +2422,14 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2.5-pro "+connectXiaomiAPIBaseURL+" 60 env:XIAOMI_API_KEY")
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2.5-pro "+appservices.ConnectXiaomiAPIBaseURL+" 60 env:XIAOMI_API_KEY")
 	endpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:xiaomi", "", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
 	}
 	var foundReusable bool
 	for _, endpoint := range endpoints {
-		if endpoint.Value == connectXiaomiAPIBaseURL && endpoint.NoAuth && strings.Contains(endpoint.Detail, "configured auth") {
+		if endpoint.Value == appservices.ConnectXiaomiAPIBaseURL && endpoint.NoAuth && strings.Contains(endpoint.Detail, "configured auth") {
 			foundReusable = true
 			break
 		}
@@ -2497,7 +2437,7 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	if !foundReusable {
 		t.Fatalf("endpoint candidates = %#v, want reusable auth marker for api cn", endpoints)
 	}
-	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2-pro "+connectXiaomiAPIBaseURL+" 60 -")
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2-pro "+appservices.ConnectXiaomiAPIBaseURL+" 60 -")
 	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
@@ -2507,25 +2447,6 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	}
 	if got := doc.Models.Profiles[0].TokenEnv; got != "XIAOMI_API_KEY" {
 		t.Fatalf("shared profile token_env = %q, want XIAOMI_API_KEY", got)
-	}
-}
-
-func TestConnectDefaultsForConfigOpenAICompatibleCustomBaseURL(t *testing.T) {
-	t.Parallel()
-
-	defaults, err := connectDefaultsForConfig(context.Background(), ConnectConfig{
-		Provider: "openai-compatible",
-		Model:    "gpt-4o-mini",
-		BaseURL:  "https://proxy.example.test/v1",
-	})
-	if err != nil {
-		t.Fatalf("connectDefaultsForConfig() error = %v", err)
-	}
-	if defaults.ContextWindow <= 0 {
-		t.Fatalf("ContextWindow = %d, want > 0", defaults.ContextWindow)
-	}
-	if defaults.MaxOutput <= 0 {
-		t.Fatalf("MaxOutput = %d, want > 0", defaults.MaxOutput)
 	}
 }
 

@@ -141,6 +141,46 @@ func ConnectEndpointForBaseURL(tpl ConnectProviderTemplate, baseURL string) (Con
 	return ConnectEndpointTemplate{}, false
 }
 
+func ConnectModelConfigFromWizardState(state ConnectWizardState) (appsettings.ModelConfig, bool) {
+	tpl, ok := FindConnectProviderTemplate(state.Provider)
+	if !ok {
+		return appsettings.ModelConfig{}, false
+	}
+	baseURL := strings.TrimSpace(state.BaseURL)
+	if baseURL == "" {
+		baseURL = tpl.DefaultBaseURL
+	}
+	timeoutSeconds := state.TimeoutSeconds
+	if timeoutSeconds <= 0 {
+		timeoutSeconds = ConnectDefaultTimeoutSeconds
+	}
+	endpoint, hasEndpoint := ConnectEndpointForBaseURL(tpl, baseURL)
+	authType := DefaultConnectAuthType(tpl.Provider)
+	if tpl.NoAuthRequired {
+		authType = model.AuthNone
+	}
+	cfg := appsettings.ModelConfig{
+		Provider:            tpl.Provider,
+		Model:               strings.TrimSpace(state.Model),
+		BaseURL:             baseURL,
+		AuthType:            string(authType),
+		ContextWindowTokens: state.ContextWindowTokens,
+		MaxOutputTokens:     state.MaxOutputTokens,
+		ReasoningLevels:     append([]string(nil), state.ReasoningLevels...),
+		Timeout:             time.Duration(timeoutSeconds) * time.Second,
+	}
+	if hasEndpoint {
+		cfg.EndpointID = strings.TrimSpace(endpoint.ID)
+	}
+	tokenRef := strings.TrimSpace(state.TokenRef)
+	if env, ok := ParseConnectTokenEnvSpec(tokenRef); ok {
+		cfg.TokenEnv = env
+	} else {
+		cfg.Token = tokenRef
+	}
+	return appsettings.NormalizeModelConfig(cfg), true
+}
+
 func NormalizeConnectBaseURL(baseURL string) string {
 	return strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
 }

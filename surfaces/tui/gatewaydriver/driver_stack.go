@@ -12,6 +12,7 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
@@ -105,18 +106,6 @@ type ModelConfig struct {
 	Timeout                time.Duration
 }
 
-type ModelCapabilityInfo struct {
-	ContextWindowTokens    int
-	DefaultMaxOutputTokens int
-	MaxOutputTokens        int
-	ReasoningEfforts       []string
-	DefaultReasoningEffort string
-	SupportsReasoning      bool
-	SupportsToolCalls      bool
-	SupportsImages         bool
-	SupportsJSON           bool
-}
-
 type ModelChoice struct {
 	ID         string
 	Alias      string
@@ -163,64 +152,51 @@ type ACPAgentAddOption struct {
 	Detail  string
 }
 
-type CodeFreeAuthRequest struct {
-	BaseURL         string
-	OpenBrowser     bool
-	CallbackTimeout time.Duration
-}
-
 type DriverStack struct {
 	AppName   string
 	UserID    string
 	Workspace coresession.Workspace
 
-	StartSessionFn                     func(context.Context, string, string) (coresession.Session, error)
-	ResumeSessionFn                    func(context.Context, ResumeSessionRequest) (coresession.Session, error)
-	ListSessionCandidatesFn            func(context.Context, ListSessionCandidatesRequest) ([]ResumeCandidate, error)
-	BeginTurnFn                        func(context.Context, BeginTurnRequest) (BeginTurnResult, error)
-	SubmitActiveTurnFn                 func(context.Context, SubmitActiveTurnRequest) error
-	InterruptFn                        func(context.Context, InterruptRequest) error
-	ActiveTurnsFn                      func() []ActiveTurnState
-	ControlPlaneStateFn                func(context.Context, coresession.Ref) (ControlPlaneState, error)
-	PromptParticipantFn                func(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
-	ACPControllerStatusFn              func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
-	AppStatusViewFn                    func(context.Context, coresession.Ref, bool) (appviewmodel.StatusView, error)
-	HomeViewFn                         func(context.Context, coresession.Ref, string) (appviewmodel.HomeView, error)
-	SettingsPanelFn                    func(context.Context, coresession.Ref) (appviewmodel.SettingsPanelView, error)
-	ReplaySessionEventsFn              func(context.Context, coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error)
-	CommandCatalogFn                   func(context.Context) (appviewmodel.CommandCatalogView, error)
-	ExecuteCommandFn                   func(context.Context, coresession.Ref, string, []model.ContentPart) (CommandExecutionView, error)
-	ModelConfigFn                      func(string) (ModelConfig, bool)
-	CompactSessionFn                   func(context.Context, coresession.Ref) error
-	ConnectProviderCandidatesFn        func(context.Context, string, int) ([]SlashArgCandidate, error)
-	ConnectBaseURLCandidatesFn         func(context.Context, string, string, int) ([]SlashArgCandidate, error)
-	ConnectTimeoutCandidatesFn         func(context.Context, string, int) ([]SlashArgCandidate, error)
-	ConnectModelCandidatesFn           func(context.Context, ModelConfig, string, int) ([]SlashArgCandidate, error)
-	ConnectDefaultsFn                  func(context.Context, ModelConfig) (connectModelDefaults, error)
-	SetACPControllerModelFn            func(context.Context, coresession.Ref, string, string) (appviewmodel.ControllerStatus, error)
-	PreflightSandboxFn                 func(context.Context, bool) (SandboxStatus, error)
-	SetACPControllerModeFn             func(context.Context, coresession.Ref, string) (appviewmodel.ControllerStatus, error)
-	ListModelAliasesFn                 func(context.Context, coresession.Ref) ([]string, error)
-	ListModelChoicesFn                 func(context.Context, coresession.Ref) ([]ModelChoice, error)
-	ListProviderModelsFn               func(string) []string
-	ListProviderModelsForConfigFn      func(context.Context, ModelConfig) ([]string, error)
-	ListCatalogModelsFn                func(string) []string
-	DefaultModelCapabilitiesFn         func() ModelCapabilityInfo
-	LookupModelCapabilitiesFn          func(string, string) (ModelCapabilityInfo, bool)
-	ReasoningLevelsForModelFn          func(string, string) []string
-	EnsureCodeFreeAuthFn               func(context.Context, CodeFreeAuthRequest) error
-	EnsureCodeFreeModelSelectionAuthFn func(context.Context, CodeFreeAuthRequest) error
-	DiscoverSkillsFn                   func(context.Context, string) ([]plugin.SkillDescriptor, error)
-	ListBuiltinACPAgentAddOptionsFn    func() []ACPAgentAddOption
-	ListInstallableACPAgentOptionsFn   func() []ACPAgentAddOption
-	ListACPAgentsFn                    func() []ACPAgentInfo
-	ListTasksFn                        func(context.Context, coresession.Ref, TaskListOptions) (TaskListView, error)
-	TailTaskFn                         func(context.Context, TaskOutputOptions) (TaskOutputView, error)
-	StartTaskFn                        func(context.Context, TaskStartOptions) (TaskOutputView, error)
-	WaitTaskFn                         func(context.Context, TaskWaitOptions) (TaskOutputView, error)
-	WriteTaskFn                        func(context.Context, TaskWriteOptions) (TaskOutputView, error)
-	CancelTaskFn                       func(context.Context, TaskOutputOptions) (TaskOutputView, error)
-	ReleaseTaskFn                      func(context.Context, TaskOutputOptions) error
+	StartSessionFn                   func(context.Context, string, string) (coresession.Session, error)
+	ResumeSessionFn                  func(context.Context, ResumeSessionRequest) (coresession.Session, error)
+	ListSessionCandidatesFn          func(context.Context, ListSessionCandidatesRequest) ([]ResumeCandidate, error)
+	BeginTurnFn                      func(context.Context, BeginTurnRequest) (BeginTurnResult, error)
+	SubmitActiveTurnFn               func(context.Context, SubmitActiveTurnRequest) error
+	InterruptFn                      func(context.Context, InterruptRequest) error
+	ActiveTurnsFn                    func() []ActiveTurnState
+	ControlPlaneStateFn              func(context.Context, coresession.Ref) (ControlPlaneState, error)
+	PromptParticipantFn              func(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
+	ACPControllerStatusFn            func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
+	AppStatusViewFn                  func(context.Context, coresession.Ref, bool) (appviewmodel.StatusView, error)
+	HomeViewFn                       func(context.Context, coresession.Ref, string) (appviewmodel.HomeView, error)
+	SettingsPanelFn                  func(context.Context, coresession.Ref) (appviewmodel.SettingsPanelView, error)
+	ReplaySessionEventsFn            func(context.Context, coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error)
+	CommandCatalogFn                 func(context.Context) (appviewmodel.CommandCatalogView, error)
+	ExecuteCommandFn                 func(context.Context, coresession.Ref, string, []model.ContentPart) (CommandExecutionView, error)
+	ModelConfigFn                    func(string) (ModelConfig, bool)
+	CompactSessionFn                 func(context.Context, coresession.Ref) error
+	ConnectProviderCandidatesFn      func(context.Context, string, int) ([]SlashArgCandidate, error)
+	ConnectBaseURLCandidatesFn       func(context.Context, string, string, int) ([]SlashArgCandidate, error)
+	ConnectTimeoutCandidatesFn       func(context.Context, string, int) ([]SlashArgCandidate, error)
+	ConnectModelCandidatesFn         func(context.Context, ModelConfig, string, int) ([]SlashArgCandidate, error)
+	ConnectDefaultsFn                func(context.Context, ModelConfig) (appservices.ConnectModelDefaults, error)
+	SetACPControllerModelFn          func(context.Context, coresession.Ref, string, string) (appviewmodel.ControllerStatus, error)
+	PreflightSandboxFn               func(context.Context, bool) (SandboxStatus, error)
+	SetACPControllerModeFn           func(context.Context, coresession.Ref, string) (appviewmodel.ControllerStatus, error)
+	ListModelAliasesFn               func(context.Context, coresession.Ref) ([]string, error)
+	ListModelChoicesFn               func(context.Context, coresession.Ref) ([]ModelChoice, error)
+	ReasoningLevelsForModelFn        func(string, string) []string
+	DiscoverSkillsFn                 func(context.Context, string) ([]plugin.SkillDescriptor, error)
+	ListBuiltinACPAgentAddOptionsFn  func() []ACPAgentAddOption
+	ListInstallableACPAgentOptionsFn func() []ACPAgentAddOption
+	ListACPAgentsFn                  func() []ACPAgentInfo
+	ListTasksFn                      func(context.Context, coresession.Ref, TaskListOptions) (TaskListView, error)
+	TailTaskFn                       func(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	StartTaskFn                      func(context.Context, TaskStartOptions) (TaskOutputView, error)
+	WaitTaskFn                       func(context.Context, TaskWaitOptions) (TaskOutputView, error)
+	WriteTaskFn                      func(context.Context, TaskWriteOptions) (TaskOutputView, error)
+	CancelTaskFn                     func(context.Context, TaskOutputOptions) (TaskOutputView, error)
+	ReleaseTaskFn                    func(context.Context, TaskOutputOptions) error
 }
 
 func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (coresession.Session, error) {
@@ -392,9 +368,9 @@ func (s *DriverStack) ConnectModelCandidates(ctx context.Context, cfg ModelConfi
 	return candidates, true, err
 }
 
-func (s *DriverStack) ConnectDefaults(ctx context.Context, cfg ModelConfig) (connectModelDefaults, bool, error) {
+func (s *DriverStack) ConnectDefaults(ctx context.Context, cfg ModelConfig) (appservices.ConnectModelDefaults, bool, error) {
 	if s == nil || s.ConnectDefaultsFn == nil {
-		return connectModelDefaults{}, false, nil
+		return appservices.ConnectModelDefaults{}, false, nil
 	}
 	defaults, err := s.ConnectDefaultsFn(ctx, cfg)
 	return defaults, true, err
@@ -443,64 +419,11 @@ func (s *DriverStack) ListModelChoices(ctx context.Context, ref coresession.Ref)
 	return s.ListModelChoicesFn(ctx, ref)
 }
 
-func (s *DriverStack) ListProviderModels(provider string) []string {
-	if s == nil || s.ListProviderModelsFn == nil {
-		return nil
-	}
-	return s.ListProviderModelsFn(provider)
-}
-
-func (s *DriverStack) ListProviderModelsForConfig(ctx context.Context, cfg ModelConfig) ([]string, error) {
-	if s == nil || s.ListProviderModelsForConfigFn == nil {
-		return nil, nil
-	}
-	return s.ListProviderModelsForConfigFn(ctx, cfg)
-}
-
-func (s *DriverStack) ListCatalogModels(provider string) []string {
-	if s == nil || s.ListCatalogModelsFn == nil {
-		return nil
-	}
-	return s.ListCatalogModelsFn(provider)
-}
-
-func (s *DriverStack) DefaultModelCapabilities() ModelCapabilityInfo {
-	if s == nil || s.DefaultModelCapabilitiesFn == nil {
-		return ModelCapabilityInfo{
-			ContextWindowTokens:    128000,
-			DefaultMaxOutputTokens: 4096,
-			MaxOutputTokens:        4096,
-		}
-	}
-	return s.DefaultModelCapabilitiesFn()
-}
-
-func (s *DriverStack) LookupModelCapabilities(provider string, modelName string) (ModelCapabilityInfo, bool) {
-	if s == nil || s.LookupModelCapabilitiesFn == nil {
-		return ModelCapabilityInfo{}, false
-	}
-	return s.LookupModelCapabilitiesFn(provider, modelName)
-}
-
 func (s *DriverStack) ReasoningLevelsForModel(provider string, modelName string) []string {
 	if s == nil || s.ReasoningLevelsForModelFn == nil {
 		return nil
 	}
 	return s.ReasoningLevelsForModelFn(provider, modelName)
-}
-
-func (s *DriverStack) EnsureCodeFreeAuth(ctx context.Context, req CodeFreeAuthRequest) error {
-	if s == nil || s.EnsureCodeFreeAuthFn == nil {
-		return fmt.Errorf("surfaces/tui/gatewaydriver: codefree auth dependency is unavailable")
-	}
-	return s.EnsureCodeFreeAuthFn(ctx, req)
-}
-
-func (s *DriverStack) EnsureCodeFreeModelSelectionAuth(ctx context.Context, req CodeFreeAuthRequest) error {
-	if s == nil || s.EnsureCodeFreeModelSelectionAuthFn == nil {
-		return fmt.Errorf("surfaces/tui/gatewaydriver: codefree model auth dependency is unavailable")
-	}
-	return s.EnsureCodeFreeModelSelectionAuthFn(ctx, req)
 }
 
 func (s *DriverStack) DiscoverSkills(ctx context.Context, workspaceDir string) ([]plugin.SkillDescriptor, error) {
