@@ -35,6 +35,7 @@ type spawnTaskJournalRecord struct {
 	TurnID           string                  `json:"turn_id,omitempty"`
 	Agent            string                  `json:"agent,omitempty"`
 	RemoteSessionID  string                  `json:"remote_session_id,omitempty"`
+	PendingPrompt    string                  `json:"pending_prompt,omitempty"`
 	Snapshot         sandbox.SessionSnapshot `json:"snapshot"`
 	Stdout           string                  `json:"stdout,omitempty"`
 	StdoutTotalBytes int64                   `json:"stdout_total_bytes,omitempty"`
@@ -178,6 +179,7 @@ func normalizeSpawnTaskJournalRecord(record spawnTaskJournalRecord) spawnTaskJou
 	record.TurnID = strings.TrimSpace(record.TurnID)
 	record.Agent = strings.TrimSpace(record.Agent)
 	record.RemoteSessionID = strings.TrimSpace(record.RemoteSessionID)
+	record.PendingPrompt = strings.TrimSpace(record.PendingPrompt)
 	record.Snapshot.Ref.ID = strings.TrimSpace(record.Snapshot.Ref.ID)
 	record.Snapshot.Ref.Backend = sandbox.BackendCustom
 	record.Snapshot.Command = strings.TrimSpace(record.Snapshot.Command)
@@ -212,6 +214,9 @@ func normalizeSpawnTaskJournalRecord(record spawnTaskJournalRecord) spawnTaskJou
 	}
 	if record.RemoteSessionID != "" {
 		record.Snapshot.Metadata["remote_session_id"] = record.RemoteSessionID
+	}
+	if record.Snapshot.Running && record.PendingPrompt != "" {
+		record.Snapshot.Metadata["pending_prompt"] = true
 	}
 	record.Snapshot.Metadata["state"] = string(record.Snapshot.State)
 	record.Snapshot.Metadata["running"] = record.Snapshot.Running

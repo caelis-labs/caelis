@@ -1632,10 +1632,16 @@ be migrated before retiring the old stack:
       upgrades journal records that still carry an agent descriptor and remote
       session id into writable recovered sessions, so follow-up `task write`
       uses `session/resume` instead of starting a fresh child.
+    - Migrated baseline: running delegated SPAWN prompts now persist their
+      pending prompt in the local task journal. After a process restart, task
+      list/open can restart the configured ACP adapter, resume the recorded
+      remote ACP session, continue the interrupted prompt automatically, and
+      append the result as canonical participant events without waiting for a
+      follow-up `task write`.
     - Still pending: true live remote ACP controller reconnect for prompts that
-      were actively running during a process restart, durable process lifecycle
-      state beyond the local journal/resume descriptor, and terminal previews
-      remain old-stack or unmigrated.
+      were actively running during a process restart, durable host subprocess
+      lifecycle state beyond archived snapshots, and terminal previews remain
+      old-stack or unmigrated.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -1679,10 +1685,13 @@ be migrated before retiring the old stack:
       still-registered agent descriptor. They are exposed as reconnectable task
       sessions with `supports_input`, and `task write` resumes the remote ACP
       child session before appending new canonical participant events.
-    - Still pending: a durable live process store capable of continuing
-      in-flight subprocess/subagent prompts across restarts without a follow-up
-      write, terminal previews, and full production TUI/APP task-panel wiring
-      remain incomplete.
+    - Migrated baseline: running SPAWN journal records now retain the pending
+      prompt while the task is in flight. Reopened task lists can recover that
+      live record, call ACP `session/resume`, continue the original prompt, and
+      clear the pending prompt after completion.
+    - Still pending: durable host subprocess lifecycle continuation across
+      restarts, terminal previews, and full production TUI/APP task-panel
+      wiring remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`

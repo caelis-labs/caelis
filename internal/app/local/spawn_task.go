@@ -45,6 +45,7 @@ type spawnTaskSession struct {
 	exitCode        int
 	errText         string
 	output          string
+	pendingPrompt   string
 	events          []session.Event
 	recordAsync     bool
 	startedAt       time.Time
@@ -219,11 +220,19 @@ func (m *spawnTaskManager) openJournalTask(ctx context.Context, ref sandbox.Sess
 		}
 		return m.journal.open(ctx, ref)
 	}
-	record = m.recoveredJournalRecord(record)
+	record = normalizeSpawnTaskJournalRecord(record)
 	if ref.Backend != "" && ref.Backend != record.Snapshot.Ref.Backend {
 		return nil, false, fmt.Errorf("app/local: archived SPAWN task backend mismatch: %s", ref.Backend)
 	}
 	cfg, ok := m.configForAgent(record.Agent)
+	if ok {
+		if task, resumed, err := m.recoverLiveJournalTask(ctx, record, cfg); err != nil {
+			return nil, false, err
+		} else if resumed {
+			return task, true, nil
+		}
+	}
+	record = m.recoveredJournalRecord(record)
 	if !ok || strings.TrimSpace(record.RemoteSessionID) == "" {
 		return archivedSpawnTaskSession{record: record}, true, nil
 	}
@@ -247,12 +256,86 @@ func (m *spawnTaskManager) listJournalTasks(ctx context.Context) ([]sandbox.Sess
 	}
 	out := make([]sandbox.SessionSnapshot, 0, len(records))
 	for _, record := range records {
+		if cfg, ok := m.configForAgent(record.Agent); ok {
+			task, resumed, err := m.recoverLiveJournalTask(ctx, normalizeSpawnTaskJournalRecord(record), cfg)
+			if err != nil {
+				return nil, err
+			}
+			if resumed {
+				snapshot, err := task.Snapshot(ctx)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, snapshot)
+				continue
+			}
+		}
 		out = append(out, m.recoveredJournalRecord(record).Snapshot)
 	}
 	sort.SliceStable(out, func(i int, j int) bool {
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
 	return out, nil
+}
+
+func (m *spawnTaskManager) recoverLiveJournalTask(ctx context.Context, record spawnTaskJournalRecord, cfg acpexternal.Config) (*spawnTaskSession, bool, error) {
+	if err := contextErr(ctx); err != nil {
+		return nil, false, err
+	}
+	record = normalizeSpawnTaskJournalRecord(record)
+	if !record.Snapshot.Running || strings.TrimSpace(record.PendingPrompt) == "" || strings.TrimSpace(cfg.Command) == "" {
+		return nil, false, nil
+	}
+	taskID := strings.TrimSpace(record.Snapshot.Ref.ID)
+	if taskID == "" {
+		return nil, false, errors.New("app/local: SPAWN task id is required")
+	}
+	m.mu.RLock()
+	if existing := m.tasks[taskID]; existing != nil {
+		m.mu.RUnlock()
+		return existing, true, nil
+	}
+	m.mu.RUnlock()
+	parent := m.parentSessionForRecord(ctx, record)
+	startedAt := record.Snapshot.StartedAt
+	if startedAt.IsZero() {
+		startedAt = record.Snapshot.UpdatedAt
+	}
+	if startedAt.IsZero() {
+		startedAt = m.clock()
+	}
+	updatedAt := record.Snapshot.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = startedAt
+	}
+	task := &spawnTaskSession{
+		manager:         m,
+		cfg:             cfg,
+		parent:          parent,
+		turnID:          record.TurnID,
+		taskID:          taskID,
+		agent:           firstNonEmpty(record.Agent, cfg.AgentName, cfg.AgentID),
+		remoteSessionID: record.RemoteSessionID,
+		done:            make(chan struct{}),
+		running:         true,
+		state:           sandbox.SessionRunning,
+		exitCode:        -1,
+		output:          record.Stdout,
+		pendingPrompt:   record.PendingPrompt,
+		recordAsync:     true,
+		startedAt:       startedAt,
+		updatedAt:       updatedAt,
+	}
+	m.mu.Lock()
+	if existing := m.tasks[taskID]; existing != nil {
+		m.mu.Unlock()
+		return existing, true, nil
+	}
+	m.tasks[taskID] = task
+	m.mu.Unlock()
+	task.persist(context.Background())
+	task.startPrompt(record.PendingPrompt, true)
+	return task, true, nil
 }
 
 func (m *spawnTaskManager) recoverJournalTask(ctx context.Context, record spawnTaskJournalRecord, cfg acpexternal.Config) (*spawnTaskSession, error) {
@@ -432,6 +515,7 @@ func (s *spawnTaskSession) Cancel(ctx context.Context) error {
 	s.state = sandbox.SessionCancelled
 	s.exitCode = -1
 	s.errText = "cancelled"
+	s.pendingPrompt = ""
 	s.touchLocked()
 	done := s.done
 	s.mu.Unlock()
@@ -511,13 +595,16 @@ func (s *spawnTaskSession) Events() []session.Event {
 
 func (s *spawnTaskSession) startPrompt(prompt string, recordEvents bool) {
 	ctx, cancel := context.WithCancel(context.Background())
+	prompt = strings.TrimSpace(prompt)
 	s.mu.Lock()
 	s.cancel = cancel
+	s.pendingPrompt = prompt
 	if recordEvents {
 		s.recordAsync = true
 	}
 	s.touchLocked()
 	s.mu.Unlock()
+	s.persist(context.Background())
 	go s.runPrompt(ctx, prompt)
 }
 
@@ -547,6 +634,7 @@ func (s *spawnTaskSession) runPrompt(ctx context.Context, prompt string) {
 	}
 	recordAsync := s.recordAsync
 	done := s.done
+	s.pendingPrompt = ""
 	s.touchLocked()
 	s.mu.Unlock()
 	if recordAsync && len(events) > 0 && s.manager != nil && s.manager.store != nil {
@@ -639,6 +727,8 @@ func (s *spawnTaskSession) snapshotLocked() sandbox.SessionSnapshot {
 	}
 	if !s.running {
 		metadata["exit_code"] = s.exitCode
+	} else if s.pendingPrompt != "" {
+		metadata["pending_prompt"] = true
 	}
 	return sandbox.SessionSnapshot{
 		Ref:           s.Ref(),
@@ -669,6 +759,7 @@ func (s *spawnTaskSession) persist(ctx context.Context) {
 		TurnID:           s.turnID,
 		Agent:            s.agent,
 		RemoteSessionID:  s.remoteSessionID,
+		PendingPrompt:    pendingPromptForJournal(s.running, s.pendingPrompt),
 		Snapshot:         s.snapshotLocked(),
 		Stdout:           s.output,
 		StdoutTotalBytes: int64(len([]byte(s.output))),
@@ -683,6 +774,13 @@ func (s *spawnTaskSession) supportsInputLocked() bool {
 		return false
 	}
 	return strings.TrimSpace(s.remoteSessionID) != "" && strings.TrimSpace(s.cfg.Command) != ""
+}
+
+func pendingPromptForJournal(running bool, prompt string) string {
+	if !running {
+		return ""
+	}
+	return strings.TrimSpace(prompt)
 }
 
 func (s *spawnTaskSession) appendOutputLocked(text string) {
