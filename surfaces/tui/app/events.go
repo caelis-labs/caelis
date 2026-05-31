@@ -97,6 +97,7 @@ type PromptRequestMsg struct {
 	Secret             bool
 	Choices            []PromptChoice
 	DefaultChoice      string
+	DefaultInput       string
 	SelectedChoices    []string
 	Filterable         bool
 	MultiSelect        bool
@@ -120,6 +121,10 @@ type PromptDetail struct {
 	Label    string
 	Value    string
 	Emphasis bool
+}
+
+type commandPanelSubmitMsg struct {
+	Line string
 }
 
 const (

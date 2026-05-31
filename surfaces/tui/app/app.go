@@ -236,6 +236,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	m.flushPendingDeferredBatches()
 
 	switch typed := msg.(type) {
+	case commandPanelSubmitMsg:
+		line := strings.TrimSpace(typed.Line)
+		if line == "" {
+			return m, nil
+		}
+		return m.submitLine(line)
+
 	case tea.WindowSizeMsg:
 		m.width = typed.Width
 		m.height = typed.Height

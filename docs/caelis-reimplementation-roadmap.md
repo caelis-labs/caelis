@@ -1497,13 +1497,18 @@ be migrated before retiring the old stack:
      fields, settings actions, task tailing, connect provider setup, and agent
      management. Execution still goes through `CommandService`; the panel click
      layer only prepares input and does not own product semantics.
+   - Migrated baseline: TUI command panel clicks now promote core settings,
+     task, and controller viewmodel fields/actions into prompt-assisted local
+     widgets. Select/text settings fields, guarded settings actions, task
+     start/write/cancel controls, and controller model/mode choices all return
+     to the same `ExecuteLine` shared command entry point instead of calling
+     app services directly.
    - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
      transcript reducer, tool panels, approval UI, theme system, and attachment
      UI/rendering remain TUI-owned presentation code by design.
-   - Still pending: interactive settings/task/controller input widgets,
-     transcript actions, and deeper surface-specific panel interactions need to
-     build on the shared panel payloads instead of growing new surface-local
-     product semantics.
+   - Still pending: transcript actions, future APP visual panel rendering, and
+     deeper surface-specific panel interactions need to build on the shared
+     panel payloads instead of growing new surface-local product semantics.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1602,10 +1607,15 @@ be migrated before retiring the old stack:
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
      terminal sessions without reaching into sandbox runtimes directly.
-   - Still pending: transcript actions, surface-specific visual settings
-     editor input widgets, and concrete future APP settings rendering remain
-     unmigrated. Durable async task control and output storage remain
-     kernel/runtime work rather than APP-only view-model work.
+   - Migrated baseline: TUI settings/task/controller command panels now use
+     the shared app viewmodels as input-widget descriptors and submit the
+     resulting mutations/actions through shared slash commands. This is the
+     reference interaction pattern for a future APP surface: UI owns widgets,
+     app services own semantics.
+   - Still pending: transcript actions and concrete future APP settings/task/
+     controller rendering remain unmigrated. Durable async task control and
+     output storage remain kernel/runtime work rather than APP-only view-model
+     work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`

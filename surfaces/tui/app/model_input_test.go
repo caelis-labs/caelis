@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 )
 
@@ -69,6 +70,163 @@ func TestCommandPanelClickTokenFillsInput(t *testing.T) {
 	}
 	if got := model.cursor; got != len(model.input) {
 		t.Fatalf("cursor = %d, want end of input %d", got, len(model.input))
+	}
+}
+
+func TestCommandPanelSettingsSelectClickPromptsAndSubmits(t *testing.T) {
+	var called string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(sub Submission) TaskResultMsg {
+			called = sub.Text
+			return TaskResultMsg{}
+		},
+	})
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		SettingsPanel: &appviewmodel.SettingsPanelView{
+			Sections: []appviewmodel.SettingsPanelSection{{
+				Fields: []appviewmodel.SettingsPanelField{{
+					ID:       "sandbox.backend",
+					Label:    "Requested backend",
+					Value:    "host",
+					Editable: true,
+					Options: []appviewmodel.SettingsPanelFieldOption{{
+						Value: "host",
+						Label: "Host",
+					}, {
+						Value: "macos-seatbelt",
+						Label: "macOS Seatbelt",
+					}},
+				}},
+			}},
+		},
+	})
+	model.doc.Append(block)
+
+	handled, cmd := model.tryCommandPanelClickToken(block.BlockID(), commandPanelInputClickToken("/settings set sandbox.backend "))
+	if !handled || cmd == nil {
+		t.Fatalf("tryCommandPanelClickToken() handled=%v cmd nil=%v, want prompt command", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || len(model.activePrompt.choices) != 2 {
+		t.Fatalf("active prompt = %#v, want two settings choices", model.activePrompt)
+	}
+	if got := model.activePrompt.choices[model.activePrompt.choiceIndex].value; got != "host" {
+		t.Fatalf("default choice = %q, want host", got)
+	}
+	model.finishPrompt("macos-seatbelt", nil)
+	msg := cmd()
+	submit, ok := msg.(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatalf("prompt command msg = %T, want commandPanelSubmitMsg", msg)
+	}
+	if submit.Line != "/settings set sandbox.backend macos-seatbelt" {
+		t.Fatalf("submit line = %q", submit.Line)
+	}
+	updated, submitCmd := model.Update(submit)
+	model = updated.(*Model)
+	if !findAndRunTaskResult(submitCmd(), model) {
+		t.Fatal("expected TaskResultMsg from submitted panel command")
+	}
+	if called != "/settings set sandbox.backend macos-seatbelt" {
+		t.Fatalf("ExecuteLine called = %q", called)
+	}
+}
+
+func TestCommandPanelTaskWriteClickPromptsAndSubmits(t *testing.T) {
+	var called string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(sub Submission) TaskResultMsg {
+			called = sub.Text
+			return TaskResultMsg{}
+		},
+	})
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		TaskPanel: &appviewmodel.TaskPanelView{
+			Supported: true,
+			Tasks: []appviewmodel.TaskItem{{
+				ID:            "task-1",
+				Title:         "interactive command",
+				SupportsInput: true,
+			}},
+			Actions: []appviewmodel.TaskPanelAction{{
+				ID:            "task.write:task-1",
+				Kind:          "write",
+				Label:         "Write",
+				TaskID:        "task-1",
+				Enabled:       true,
+				RequiresInput: true,
+			}},
+		},
+	})
+	model.doc.Append(block)
+
+	handled, cmd := model.tryCommandPanelClickToken(block.BlockID(), commandPanelInputClickToken("/task write task-1 -- "))
+	if !handled || cmd == nil {
+		t.Fatalf("tryCommandPanelClickToken() handled=%v cmd nil=%v, want prompt command", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || model.activePrompt.title != "Write to task" {
+		t.Fatalf("active prompt = %#v, want task write prompt", model.activePrompt)
+	}
+	model.finishPrompt("continue", nil)
+	submit, ok := cmd().(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatal("prompt command did not submit task write line")
+	}
+	if submit.Line != "/task write task-1 -- continue" {
+		t.Fatalf("submit line = %q", submit.Line)
+	}
+	updated, submitCmd := model.Update(submit)
+	model = updated.(*Model)
+	if !findAndRunTaskResult(submitCmd(), model) {
+		t.Fatal("expected TaskResultMsg from submitted task write")
+	}
+	if called != "/task write task-1 -- continue" {
+		t.Fatalf("ExecuteLine called = %q", called)
+	}
+}
+
+func TestCommandPanelTaskCancelClickRequiresConfirmation(t *testing.T) {
+	model := NewModel(Config{})
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		TaskPanel: &appviewmodel.TaskPanelView{
+			Supported: true,
+			Tasks:     []appviewmodel.TaskItem{{ID: "task-1", Title: "long command"}},
+			Actions: []appviewmodel.TaskPanelAction{{
+				ID:          "task.cancel:task-1",
+				Kind:        "cancel",
+				Label:       "Cancel",
+				TaskID:      "task-1",
+				Enabled:     true,
+				Destructive: true,
+			}},
+		},
+	})
+	model.doc.Append(block)
+
+	handled, cmd := model.tryCommandPanelClickToken(block.BlockID(), commandPanelInputClickToken("/task cancel task-1"))
+	if !handled || cmd == nil {
+		t.Fatalf("tryCommandPanelClickToken() handled=%v cmd nil=%v, want confirmation command", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || len(model.activePrompt.choices) == 0 || model.activePrompt.choices[model.activePrompt.choiceIndex].value != "cancel" {
+		t.Fatalf("active prompt = %#v, want cancel-default confirmation", model.activePrompt)
+	}
+	model.finishPrompt("cancel", nil)
+	if msg := cmd(); msg != nil {
+		t.Fatalf("cancel confirmation msg = %#v, want nil", msg)
+	}
+
+	handled, cmd = model.tryCommandPanelClickToken(block.BlockID(), commandPanelInputClickToken("/task cancel task-1"))
+	if !handled || cmd == nil {
+		t.Fatalf("second confirmation handled=%v cmd nil=%v", handled, cmd == nil)
+	}
+	model.finishPrompt("run", nil)
+	submit, ok := cmd().(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatal("run confirmation did not submit")
+	}
+	if submit.Line != "/task cancel task-1" {
+		t.Fatalf("submit line = %q", submit.Line)
 	}
 }
 

@@ -213,8 +213,10 @@ func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	m.selecting = false
 	if !hadSelectionRange {
 		// No text selected — treat as a click; check for panel/header toggles.
-		if m.tryTogglePanelAtClick(mouse) {
+		if handled, cmd := m.tryTogglePanelAtClick(mouse); handled {
 			m.syncViewportContent()
+			m.clearSelection()
+			return cmd
 		}
 		m.clearSelection()
 		return nil
@@ -233,45 +235,48 @@ func (m *Model) handleViewportMouseRelease(mouse tea.Mouse) tea.Cmd {
 	return cmd
 }
 
-// tryTogglePanelAtClick checks if the click hit a block-local expand toggle.
-func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) bool {
+// tryTogglePanelAtClick checks if the click hit a block-local action or expand toggle.
+func (m *Model) tryTogglePanelAtClick(mouse tea.Mouse) (bool, tea.Cmd) {
 	contentLine, ok := m.contentLineAtViewportY(mouse.Y)
 	if !ok {
-		return false
+		return false, nil
 	}
 	bid := m.viewportBlockIDs[contentLine]
 	if bid == "" {
-		return false
+		return false, nil
 	}
 	if contentLine >= 0 && contentLine < len(m.viewportClickTokens) {
 		if token := strings.TrimSpace(m.viewportClickTokens[contentLine]); token != "" {
+			if handled, cmd := m.tryCommandPanelClickToken(bid, token); handled {
+				return true, cmd
+			}
 			if m.tryToggleFoldToken(bid, token) {
-				return true
+				return true, nil
 			}
 		}
 	}
 	blk := m.doc.Find(bid)
 	if blk == nil {
-		return false
+		return false, nil
 	}
 	if _, ok := blk.(*TranscriptBlock); ok {
 		if panel := m.findInlineSubagentPanelByAnchorBlockID(bid); panel != nil {
 			m.toggleInlineSubagentPanel(panel)
-			return true
+			return true, nil
 		}
 	}
 	if turn, ok := blk.(*ParticipantTurnBlock); ok {
 		if contentLine > 0 && m.viewportBlockIDs[contentLine-1] == bid {
-			return false
+			return false, nil
 		}
 		turn.Expanded = !turn.Expanded
-		return true
+		return true, nil
 	}
 	if sp, ok := blk.(*SubagentPanelBlock); ok {
 		// Inline subagent panels toggle from the tool call line only.
 		_ = sp
 	}
-	return false
+	return false, nil
 }
 
 func (m *Model) handleInputAreaMouse(mouse tea.Mouse, phase mousePhase) (bool, tea.Cmd) {

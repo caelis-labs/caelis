@@ -451,6 +451,10 @@ func controllerPanelActionClickHint(action appviewmodel.ControllerPanelAction) [
 	switch strings.TrimSpace(action.ID) {
 	case "controller.handoff.local":
 		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/agent use local"}}
+	case "controller.model.set":
+		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/model use "}}
+	case "controller.mode.set":
+		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/approval "}}
 	case "controller.mode.cycle":
 		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/approval toggle"}}
 	default:

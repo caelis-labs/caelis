@@ -189,6 +189,10 @@ func newPromptState(req PromptRequestMsg) *promptState {
 		clampPromptChoiceWindow(state, len(state.choices))
 		return state
 	}
+	if req.DefaultInput != "" {
+		state.input = []rune(req.DefaultInput)
+		state.cursor = len(state.input)
+	}
 	if choices, idx, ok := parsePromptChoices(req.Prompt); ok {
 		state.choices = choices
 		state.choiceIndex = idx
