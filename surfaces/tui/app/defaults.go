@@ -1,45 +1,14 @@
 package tuiapp
 
 import (
-	"net/url"
 	"runtime"
-	"strconv"
 	"strings"
 
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
 // defaults.go provides DefaultCommands and DefaultWizards for the TUI shell.
-
-var connectWizardEndpointProviders = map[string]struct{}{
-	"volcengine": {},
-	"xiaomi":     {},
-}
-
-var connectWizardBaseURLProviders = map[string]struct{}{
-	"openai-compatible":    {},
-	"anthropic-compatible": {},
-}
-
-var connectWizardTokenEnvByProvider = map[string]string{
-	"minimax":              "MINIMAX_API_KEY",
-	"openai":               "OPENAI_API_KEY",
-	"openai-compatible":    "OPENAI_COMPATIBLE_API_KEY",
-	"openrouter":           "OPENROUTER_API_KEY",
-	"gemini":               "GEMINI_API_KEY",
-	"anthropic":            "ANTHROPIC_API_KEY",
-	"anthropic-compatible": "ANTHROPIC_COMPATIBLE_API_KEY",
-	"deepseek":             "DEEPSEEK_API_KEY",
-	"xiaomi":               "XIAOMI_API_KEY",
-	"volcengine":           "VOLCENGINE_API_KEY",
-}
-
-var connectWizardTokenEnvByEndpoint = map[string]string{
-	"xiaomi|https://api.xiaomimimo.com/v1":                       "XIAOMI_API_KEY",
-	"xiaomi|https://token-plan-cn.xiaomimimo.com/v1":             "MIMO_TOKEN_PLAN_API_KEY",
-	"volcengine|https://ark.cn-beijing.volces.com/api/v3":        "VOLCENGINE_API_KEY",
-	"volcengine|https://ark.cn-beijing.volces.com/api/coding/v3": "VOLCENGINE_API_KEY",
-}
 
 func lookupSlashCommandSpec(name string) (tuicommands.CommandSpec, bool) {
 	return tuicommands.Lookup(name)
@@ -320,92 +289,23 @@ func connectWizard() WizardDef {
 			}
 		},
 		BuildExecLine: func(state map[string]string) string {
-			apiKey := strings.TrimSpace(state["apikey"])
-			if apiKey == "" {
-				apiKey = "-"
-			}
-			reasoningLevels := strings.TrimSpace(state["reasoning_levels"])
-			if reasoningLevels == "" {
-				reasoningLevels = "-"
-			}
-			parts := []string{
-				"/connect",
-				state["provider"],
-				state["model"],
-				emptyAsDash(state["baseurl"]),
-				connectWizardTimeout(),
-				apiKey,
-				emptyAsDash(state["context_window_tokens"]),
-				emptyAsDash(state["max_output_tokens"]),
-				reasoningLevels,
-			}
-			return joinNonEmpty(parts, " ")
+			return appservices.BuildConnectWizardExecLine(state)
 		},
 	}
 }
 
 func connectWizardTokenEnvHint(state map[string]string) string {
-	provider := strings.ToLower(strings.TrimSpace(state["provider"]))
-	baseURL := strings.ToLower(strings.TrimRight(strings.TrimSpace(state["baseurl"]), "/"))
-	if env := connectWizardTokenEnvByEndpoint[provider+"|"+baseURL]; env != "" {
-		return env
-	}
-	if env := connectWizardTokenEnvForKnownEndpoint(provider, baseURL); env != "" {
-		return env
-	}
-	if env := connectWizardTokenEnvByProvider[provider]; env != "" {
-		return env
-	}
-	return "YOUR_API_KEY"
-}
-
-func connectWizardTokenEnvForKnownEndpoint(provider string, baseURL string) string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	host := ""
-	if parsed, err := url.Parse(strings.TrimSpace(baseURL)); err == nil {
-		host = strings.ToLower(strings.TrimSpace(parsed.Host))
-	}
-	if host == "" {
-		host = strings.ToLower(strings.TrimSpace(strings.Split(strings.TrimPrefix(baseURL, "//"), "/")[0]))
-	}
-	switch provider {
-	case "xiaomi":
-		switch host {
-		case "api.xiaomimimo.com":
-			return "XIAOMI_API_KEY"
-		case "token-plan-cn.xiaomimimo.com":
-			return "MIMO_TOKEN_PLAN_API_KEY"
-		}
-	case "volcengine":
-		if host == "ark.cn-beijing.volces.com" {
-			return "VOLCENGINE_API_KEY"
-		}
-	}
-	return ""
+	return appservices.ConnectWizardTokenEnvHint(state)
 }
 
 func connectWizardProviderHasEndpointStep(provider string) bool {
-	_, ok := connectWizardEndpointProviders[strings.ToLower(strings.TrimSpace(provider))]
-	return ok
+	return appservices.ConnectWizardProviderHasEndpointStep(provider)
 }
 
 func connectWizardProviderHasBaseURLStep(provider string) bool {
-	_, ok := connectWizardBaseURLProviders[strings.ToLower(strings.TrimSpace(provider))]
-	return ok
+	return appservices.ConnectWizardProviderHasBaseURLStep(provider)
 }
 
 func buildConnectWizardPayload(state map[string]string) string {
-	return tuicommands.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
-}
-
-func connectWizardTimeout() string {
-	return strconv.Itoa(tuicommands.DefaultConnectTimeoutSeconds)
-}
-
-func emptyAsDash(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "-"
-	}
-	return value
+	return appservices.ConnectWizardStateFromMap(state).EncodeCompletionPayload()
 }

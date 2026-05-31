@@ -10,7 +10,6 @@ import (
 
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/ports/model"
-	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
 const (
@@ -39,7 +38,7 @@ type connectModelDefaults struct {
 	DefaultReasoningEffort string
 }
 
-type connectWizardPayload = tuicommands.ConnectWizardState
+type connectWizardPayload = appservices.ConnectWizardState
 
 var providerTemplates = appservices.ConnectProviderTemplates()
 
@@ -63,13 +62,13 @@ func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command str
 	case strings.HasPrefix(command, "connect-apikey:"):
 		return nil, nil
 	case strings.HasPrefix(command, "connect-model:"):
-		return completeConnectModels(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
+		return completeConnectModels(ctx, driver, appservices.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-model:")), query, limit)
 	case strings.HasPrefix(command, "connect-context:"):
-		return completeConnectContext(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
+		return completeConnectContext(ctx, driver, appservices.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-context:")), query, limit)
 	case strings.HasPrefix(command, "connect-maxout:"):
-		return completeConnectMaxOutput(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
+		return completeConnectMaxOutput(ctx, driver, appservices.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-maxout:")), query, limit)
 	case strings.HasPrefix(command, "connect-reasoning-levels:"):
-		return completeConnectReasoningLevels(ctx, driver, tuicommands.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
+		return completeConnectReasoningLevels(ctx, driver, appservices.ParseConnectWizardPayload(strings.TrimPrefix(command, "connect-reasoning-levels:")), query, limit)
 	default:
 		return nil, nil
 	}
@@ -233,7 +232,7 @@ func connectDefaultsForConfigWithStack(ctx context.Context, stack *DriverStack, 
 	}); handled || err != nil {
 		return defaults, err
 	}
-	payload := tuicommands.ConnectWizardState{
+	payload := appservices.ConnectWizardState{
 		Provider:       strings.ToLower(strings.TrimSpace(cfg.Provider)),
 		BaseURL:        strings.TrimSpace(cfg.BaseURL),
 		TimeoutSeconds: cfg.TimeoutSeconds,
@@ -244,7 +243,7 @@ func connectDefaultsForConfigWithStack(ctx context.Context, stack *DriverStack, 
 		payload.BaseURL = tpl.DefaultBaseURL
 	}
 	if payload.TimeoutSeconds <= 0 {
-		payload.TimeoutSeconds = tuicommands.DefaultConnectTimeoutSeconds
+		payload.TimeoutSeconds = appservices.ConnectDefaultTimeoutSeconds
 	}
 	return connectDefaultsForPayload(ctx, stack, payload)
 }
@@ -406,7 +405,7 @@ func connectModelConfigFromPayload(tpl providerTemplate, payload connectWizardPa
 	}
 	timeoutSeconds := payload.TimeoutSeconds
 	if timeoutSeconds <= 0 {
-		timeoutSeconds = tuicommands.DefaultConnectTimeoutSeconds
+		timeoutSeconds = appservices.ConnectDefaultTimeoutSeconds
 	}
 	endpoint, hasEndpoint := connectEndpointForBaseURL(tpl, baseURL)
 	api := tpl.API

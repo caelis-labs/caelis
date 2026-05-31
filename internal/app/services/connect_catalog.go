@@ -160,6 +160,10 @@ func ParseConnectTokenEnvSpec(value string) (string, bool) {
 }
 
 func DefaultConnectTokenEnvName(provider string, baseURL string) string {
+	endpoint, endpointOK := connectEndpointForProviderAndBaseURL(provider, baseURL)
+	if endpointOK && strings.TrimSpace(endpoint.TokenEnv) != "" {
+		return strings.TrimSpace(endpoint.TokenEnv)
+	}
 	if IsXiaomiTokenPlanProvider(provider) || IsXiaomiTokenPlanBaseURL(baseURL) {
 		return "MIMO_TOKEN_PLAN_API_KEY"
 	}
@@ -205,7 +209,25 @@ func IsXiaomiTokenPlanProvider(provider string) bool {
 }
 
 func IsXiaomiTokenPlanBaseURL(baseURL string) bool {
-	return NormalizeConnectBaseURL(baseURL) == NormalizeConnectBaseURL(ConnectXiaomiTokenPlanCNBaseURL)
+	if NormalizeConnectBaseURL(baseURL) == NormalizeConnectBaseURL(ConnectXiaomiTokenPlanCNBaseURL) {
+		return true
+	}
+	host := ""
+	if parsed, err := url.Parse(strings.TrimSpace(baseURL)); err == nil {
+		host = strings.ToLower(strings.TrimSpace(parsed.Host))
+	}
+	if host == "" {
+		host = strings.ToLower(strings.TrimSpace(strings.Split(strings.TrimPrefix(baseURL, "//"), "/")[0]))
+	}
+	return host == "token-plan-cn.xiaomimimo.com"
+}
+
+func connectEndpointForProviderAndBaseURL(provider string, baseURL string) (ConnectEndpointTemplate, bool) {
+	tpl, ok := FindConnectProviderTemplate(provider)
+	if !ok {
+		return ConnectEndpointTemplate{}, false
+	}
+	return ConnectEndpointForBaseURL(tpl, baseURL)
 }
 
 func (s ModelService) ConnectProviderCandidates(query string, limit int) []ConnectCandidate {

@@ -1124,18 +1124,24 @@ be migrated before retiring the old stack:
      delegates app-service-bound `/connect` submissions through the shared
      prepare/connect contract, so a future APP can reuse the same provider
      setup semantics without importing TUI wizard code.
+   - Migrated baseline: `/connect` wizard state, completion payload encoding,
+     final command-line shape, default timeout, provider step rules, and
+     token-env hint logic have moved out of `surfaces/tui/commands` into
+     `internal/app/services`. TUI now only adapts those shared flow helpers
+     into its Bubble Tea wizard runtime; the remaining `/connect` work is
+     UI-shell extraction/rendering parity rather than provider/setup semantics.
    - Migrated baseline: the old formal `surfaces/tui/gatewaydriver/local`
      adapter package has been deleted. Remaining gatewayapp driver coverage is
      test-local under `eval`, which keeps old-stack validation available
      without preserving the bridge as production architecture.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
-     completion shell, connect wizard UI runtime, status bar, renderer,
-     transcript reducer, tool panels, approval UI, theme system, and
+     completion shell, connect wizard Bubble Tea runtime, status bar,
+     renderer, transcript reducer, tool panels, approval UI, theme system, and
      attachment handling are not ported to `internal/app/services`.
-   - Slash commands such as the remaining `/connect` wizard UI shell and live
-     remote ACP process reconnect/lifecycle behavior still have old driver/app
-     assumptions or missing service-native feature parity, so the old TUI stack
-     cannot be removed yet.
+   - Slash commands such as the remaining `/connect` wizard UI rendering shell
+     and live remote ACP process reconnect/lifecycle behavior still have old
+     driver/app assumptions or missing service-native feature parity, so the old
+     TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1770,8 +1776,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI command migrations against app services,
-   especially the remaining `/connect` wizard UI shell, live remote controller
-   process lifecycle, and settings/diagnostics panel parity.
+   especially the remaining `/connect` wizard UI rendering shell, live remote
+   controller process lifecycle, and settings/diagnostics panel parity.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating
