@@ -430,8 +430,19 @@ func controllerPanelClickHints(panel appviewmodel.ControllerPanelView) []command
 			switch strings.TrimSpace(field.ID) {
 			case "controller.model":
 				hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/model use "})
+			case "controller.reasoning":
+				if model := controllerPanelCurrentModel(panel); model != "" {
+					hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/model use " + model + " "})
+				}
 			case "controller.mode":
 				hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/approval "})
+			default:
+				if optionID, ok := strings.CutPrefix(strings.TrimSpace(field.ID), "controller.config."); ok {
+					optionID = strings.TrimSpace(optionID)
+					if optionID != "" && field.Editable {
+						hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/controller set " + optionID + " "})
+					}
+				}
 			}
 		}
 		for _, action := range section.Actions {
@@ -548,7 +559,7 @@ func commandPanelFooterForCommand(command string) string {
 	case "task":
 		return "actions: /task tail|wait|write|cancel|release <id>"
 	case "controller":
-		return "handoff: /agent use local  config: /model use <model>, /approval <mode>"
+		return "handoff: /agent use local  config: /model use <model>, /approval <mode>, /controller set <option-id> <value>"
 	case "connect":
 		return "connect: /connect provider model [base-url] [timeout] [token]"
 	case "agent":

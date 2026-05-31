@@ -119,6 +119,87 @@ func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 	}
 }
 
+func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
+	panel := appviewmodel.ControllerPanelView{
+		Active: true,
+		Summary: appviewmodel.ControllerPanelSummary{
+			Agent:           "reviewer",
+			RemoteSessionID: "remote-1",
+			Model:           "gpt-remote",
+			ReasoningEffort: "high",
+			Mode:            "code",
+		},
+		Sections: []appviewmodel.ControllerPanelSection{{
+			ID:    "configuration",
+			Title: "Configuration",
+			Fields: []appviewmodel.ControllerPanelField{{
+				ID:       "controller.model",
+				Label:    "Model",
+				Kind:     "select",
+				Value:    "gpt-remote",
+				Editable: true,
+				Options: []appviewmodel.ControllerConfigChoice{{
+					Value: "gpt-remote",
+					Name:  "GPT Remote",
+				}},
+			}, {
+				ID:       "controller.reasoning",
+				Label:    "Reasoning",
+				Kind:     "select",
+				Value:    "high",
+				Editable: true,
+				Options: []appviewmodel.ControllerConfigChoice{{
+					Value: "low",
+					Name:  "Low",
+				}, {
+					Value: "high",
+					Name:  "High",
+				}},
+			}, {
+				ID:       "controller.config.theme",
+				Label:    "Theme",
+				Kind:     "select",
+				Value:    "light",
+				Editable: true,
+				Options: []appviewmodel.ControllerConfigChoice{{
+					Value: "light",
+					Name:  "Light",
+				}, {
+					Value: "dark",
+					Name:  "Dark",
+				}},
+			}},
+		}},
+		Actions: []appviewmodel.ControllerPanelAction{{
+			ID:      "controller.handoff.local",
+			Kind:    "handoff",
+			Label:   "Return to local",
+			Enabled: true,
+		}},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command:         "controller",
+		ControllerPanel: &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"CONTROLLER", "ACP Controller", "reviewer", "Reasoning", "Theme", "controller.handoff.local"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered controller panel = %q, missing %q", plain, want)
+		}
+	}
+	if !rowsContainCommandPanelInput(rows, "/model use gpt-remote ") {
+		t.Fatalf("controller reasoning row missing model-use input token: %#v", renderedPlainRows(rows))
+	}
+	if !rowsContainCommandPanelInput(rows, "/controller set theme ") {
+		t.Fatalf("controller config row missing controller-set input token: %#v", renderedPlainRows(rows))
+	}
+	if !rowsContainCommandPanelInput(rows, "/agent use local") {
+		t.Fatalf("controller local handoff action missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+}
+
 func renderedPlainText(rows []RenderedRow) string {
 	parts := make([]string, 0, len(rows))
 	for _, row := range rows {

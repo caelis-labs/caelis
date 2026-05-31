@@ -3,6 +3,7 @@ package control
 import (
 	"context"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type ControllerRequest struct {
 	ControllerModel           string
 	ControllerReasoningEffort string
 	ControllerMode            string
+	ControllerConfigIntent    map[string]string
 	Input                     string
 	ContentParts              []model.ContentPart
 	Agent                     AgentSession
@@ -55,6 +57,7 @@ type ControllerInvocationState struct {
 	ControllerModel           string                    `json:"controller_model,omitempty"`
 	ControllerReasoningEffort string                    `json:"controller_reasoning_effort,omitempty"`
 	ControllerMode            string                    `json:"controller_mode,omitempty"`
+	ControllerConfigIntent    map[string]string         `json:"controller_config_intent,omitempty"`
 	Input                     string                    `json:"input,omitempty"`
 	ContentParts              []model.ContentPart       `json:"content_parts,omitempty"`
 	ConfigOptions             []ConfigOption            `json:"config_options,omitempty"`
@@ -188,6 +191,7 @@ func (r ControllerRunner) invocationState(ref session.Ref, workspace session.Wor
 		ControllerModel:           strings.TrimSpace(req.ControllerModel),
 		ControllerReasoningEffort: strings.TrimSpace(req.ControllerReasoningEffort),
 		ControllerMode:            strings.TrimSpace(req.ControllerMode),
+		ControllerConfigIntent:    cloneStringMap(req.ControllerConfigIntent),
 		Input:                     strings.TrimSpace(req.Input),
 		ContentParts:              model.CloneContentParts(req.ContentParts),
 		Time:                      r.now(),
@@ -239,6 +243,7 @@ func (r ControllerRunner) normalizeInvocationState(state ControllerInvocationSta
 	state.ControllerModel = strings.TrimSpace(state.ControllerModel)
 	state.ControllerReasoningEffort = strings.TrimSpace(state.ControllerReasoningEffort)
 	state.ControllerMode = strings.TrimSpace(state.ControllerMode)
+	state.ControllerConfigIntent = cloneStringMap(state.ControllerConfigIntent)
 	state.Input = strings.TrimSpace(state.Input)
 	state.ContentParts = model.CloneContentParts(state.ContentParts)
 	state.ConfigOptions = cloneConfigOptions(state.ConfigOptions)
@@ -338,6 +343,9 @@ func controllerLifecycleMeta(state ControllerInvocationState, status session.Lif
 	if mode := strings.TrimSpace(state.ControllerMode); mode != "" {
 		meta["controller_mode"] = mode
 	}
+	if len(state.ControllerConfigIntent) > 0 {
+		meta["controller_config_intent"] = cloneStringMap(state.ControllerConfigIntent)
+	}
 	if state.Phase == ControllerInvocationStarted {
 		meta["started_at"] = state.Time.Format(time.RFC3339Nano)
 	}
@@ -432,6 +440,17 @@ func applyControllerConfigIntent(ctx context.Context, agent ConfigurableAgentSes
 			return nil, err
 		}
 	}
+	intent := cloneStringMap(req.ControllerConfigIntent)
+	for _, id := range sortedStringMapKeys(intent) {
+		value := strings.TrimSpace(intent[id])
+		if id == "" || value == "" {
+			continue
+		}
+		options, err = applyControllerConfigOptionByID(ctx, agent, remoteSessionID, options, id, value)
+		if err != nil {
+			return nil, err
+		}
+	}
 	return options, nil
 }
 
@@ -462,9 +481,50 @@ func applyControllerConfigOption(ctx context.Context, agent ConfigurableAgentSes
 	return mergeConfigOptions(options, state.ConfigOptions), nil
 }
 
+func applyControllerConfigOptionByID(ctx context.Context, agent ConfigurableAgentSession, remoteSessionID string, options []ConfigOption, id string, requested string) ([]ConfigOption, error) {
+	option, ok := findControllerConfigOptionByID(options, id)
+	if !ok {
+		return options, nil
+	}
+	kind := ConfigOptionKind(option)
+	if kind == "model" || kind == "reasoning" || kind == "mode" {
+		return options, nil
+	}
+	remoteSessionID = strings.TrimSpace(remoteSessionID)
+	if remoteSessionID == "" {
+		return nil, errors.New("engine/control: remote controller session id is required to apply config")
+	}
+	value, ok := matchControllerConfigChoice(option, requested)
+	if !ok {
+		return nil, errors.New("engine/control: remote controller config option " + option.ID + " does not support value " + requested)
+	}
+	if strings.EqualFold(strings.TrimSpace(option.CurrentValue), value) {
+		return options, nil
+	}
+	state, err := agent.SetConfigOption(ctx, strings.TrimSpace(remoteSessionID), option.ID, value)
+	if err != nil {
+		return nil, err
+	}
+	if len(state.ConfigOptions) == 0 {
+		option.CurrentValue = value
+		return mergeConfigOptions(options, []ConfigOption{option}), nil
+	}
+	return mergeConfigOptions(options, state.ConfigOptions), nil
+}
+
 func findControllerConfigOption(options []ConfigOption, kind string) (ConfigOption, bool) {
 	for _, option := range options {
 		if ConfigOptionKind(option) == kind {
+			return cloneConfigOption(option), true
+		}
+	}
+	return ConfigOption{}, false
+}
+
+func findControllerConfigOptionByID(options []ConfigOption, id string) (ConfigOption, bool) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	for _, option := range options {
+		if strings.ToLower(strings.TrimSpace(option.ID)) == id {
 			return cloneConfigOption(option), true
 		}
 	}
@@ -509,6 +569,39 @@ func matchControllerConfigChoice(option ConfigOption, requested string) (string,
 		}
 	}
 	return "", false
+}
+
+func cloneStringMap(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func sortedStringMapKeys(in map[string]string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(in))
+	for key := range in {
+		if strings.TrimSpace(key) != "" {
+			keys = append(keys, strings.TrimSpace(key))
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (r ControllerRunner) now() time.Time {

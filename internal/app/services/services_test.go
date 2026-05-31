@@ -652,8 +652,8 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 		t.Fatalf("agent command = %#v ok=%v, want management hint", agent, ok)
 	}
 	controller, ok := findCommandView(view.Commands, "controller")
-	if !ok || controller.InputHint != "" {
-		t.Fatalf("controller command = %#v ok=%v, want controller panel command", controller, ok)
+	if !ok || controller.InputHint != "[set <option-id> <value>]" {
+		t.Fatalf("controller command = %#v ok=%v, want controller config hint", controller, ok)
 	}
 	compact, ok := findCommandView(view.Commands, "compact")
 	if !ok || compact.InputHint != "" {
@@ -2238,6 +2238,15 @@ func TestAgentServiceInvokeControllerIncludesConfigIntent(t *testing.T) {
 		StateControllerModel:     "remote-model",
 		StateControllerReasoning: "high",
 		StateControllerMode:      "manual",
+		StateControllerConfigOptions: []control.ConfigOption{{
+			ID:           "theme",
+			Name:         "Theme",
+			CurrentValue: "light",
+			Options: []control.ConfigChoice{
+				{Value: "light", Name: "Light"},
+				{Value: "dark", Name: "Dark"},
+			},
+		}},
 	}
 	engine := &recordingEngine{
 		state: state,
@@ -2257,6 +2266,9 @@ func TestAgentServiceInvokeControllerIncludesConfigIntent(t *testing.T) {
 				if req.ControllerModel != "remote-model" || req.ControllerReasoningEffort != "high" || req.ControllerMode != "manual" {
 					t.Fatalf("controller config intent = model:%q reasoning:%q mode:%q, want remote-model/high/manual", req.ControllerModel, req.ControllerReasoningEffort, req.ControllerMode)
 				}
+				if req.ControllerConfigIntent["theme"] != "light" {
+					t.Fatalf("controller generic config intent = %#v, want theme=light", req.ControllerConfigIntent)
+				}
 				return AgentInvokeResult{}, nil
 			}),
 		},
@@ -2271,6 +2283,72 @@ func TestAgentServiceInvokeControllerIncludesConfigIntent(t *testing.T) {
 		Input:      "inspect",
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestControllerServiceSetConfigOptionPersistsGenericIntent(t *testing.T) {
+	ctx := context.Background()
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	state := session.State{
+		StateControllerConfigRef: "controller-1",
+		StateControllerConfigOptions: []control.ConfigOption{{
+			ID:           "theme",
+			Type:         "select",
+			Name:         "Theme",
+			CurrentValue: "light",
+			Options: []control.ConfigChoice{
+				{Value: "light", Name: "Light"},
+				{Value: "dark", Name: "Dark"},
+			},
+		}},
+	}
+	engine := &recordingEngine{
+		state: state,
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: state,
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := svc.Controllers().SetConfigOption(ctx, session.Ref{SessionID: "sess-controller"}, "controller.config.theme", "Dark")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(status.ConfigOptions) != 1 || status.ConfigOptions[0].CurrentValue != "dark" {
+		t.Fatalf("status config options = %#v, want theme=dark", status.ConfigOptions)
+	}
+	options := controllerConfigOptionsFromState(engine.state)
+	if len(options) != 1 || options[0].CurrentValue != "dark" {
+		t.Fatalf("engine state = %#v, want persisted theme=dark", engine.state)
+	}
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "/controller set theme light",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.ControllerPanel == nil || !strings.Contains(view.Output, "controller option updated: theme") {
+		t.Fatalf("controller command view = %#v output=%q, want updated panel", view.ControllerPanel, view.Output)
+	}
+	options = controllerConfigOptionsFromState(engine.state)
+	if len(options) != 1 || options[0].CurrentValue != "light" {
+		t.Fatalf("engine state after command = %#v, want theme=light", engine.state)
 	}
 }
 

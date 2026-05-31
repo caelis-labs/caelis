@@ -1500,9 +1500,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: TUI command panel clicks now promote core settings,
      task, and controller viewmodel fields/actions into prompt-assisted local
      widgets. Select/text settings fields, guarded settings actions, task
-     start/write/cancel controls, and controller model/mode choices all return
-     to the same `ExecuteLine` shared command entry point instead of calling
-     app services directly.
+     start/write/cancel controls, and controller model/reasoning/mode plus
+     remote config choices all return to the same `ExecuteLine` shared command
+     entry point instead of calling app services directly.
    - Migrated baseline: shared session transcript DTOs now include
      task-control action descriptors rebuilt from canonical
      `caelis.runtime.task` metadata, giving TUI and future APP surfaces the
@@ -1531,8 +1531,8 @@ be migrated before retiring the old stack:
    - Migrated baseline: `internal/app/services.ControllerService` gives both
      TUI and the future APP the same controller config-intent contract for an
      active ACP controller, including persisted remote-declared option state,
-     keeping controller model/reasoning/mode state out of surface-specific UI
-     state.
+     generic remote config option edits, and controller model/reasoning/mode
+     state outside surface-specific UI state.
    - Migrated baseline: `internal/app/services.SettingsService` now exposes a
      surface-neutral settings view plus typed runtime, store, sandbox,
      sandbox-backend, and compaction mutation paths, so TUI and the future APP
@@ -1619,7 +1619,9 @@ be migrated before retiring the old stack:
      terminal sessions without reaching into sandbox runtimes directly.
    - Migrated baseline: TUI settings/task/controller command panels now use
      the shared app viewmodels as input-widget descriptors and submit the
-     resulting mutations/actions through shared slash commands. This is the
+     resulting mutations/actions through shared slash commands. Controller
+     remote config fields use `/controller set <option-id> <value>`, while
+     reasoning changes keep using `/model use <model> <effort>`. This is the
      reference interaction pattern for a future APP surface: UI owns widgets,
      app services own semantics.
    - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
@@ -2207,9 +2209,10 @@ be migrated before retiring the old stack:
       protocol session level by calling `session/resume` when a canonical
       remote session id exists. New or resumed controller sessions contribute
       remote-declared config options, stored controller
-      model/reasoning/mode intent is applied through `session/set_config_option`
-      before prompting, and the resulting option state is persisted for shared
-      status/model/mode projection.
+      model/reasoning/mode intent plus generic remote config option intent is
+      applied through `session/set_config_option` before prompting, and the
+      resulting option state is persisted for shared status/model/mode/config
+      projection.
     - Migrated baseline: delegated SPAWN child sessions now have a remote ACP
       process continuation path after local restart. The local task resolver
       upgrades journal records that still carry an agent descriptor and remote
@@ -2257,6 +2260,12 @@ be migrated before retiring the old stack:
       available controller actions, and normalized diagnostics. The shared
       `/controller` command and TUI dispatch use this service-native projection
       instead of rendering controller state from scattered status fields.
+    - Migrated baseline: shared `/controller set <option-id> <value>` now
+      persists remote-declared controller config choices into session state and
+      carries them as controller config intent on later ACP controller
+      invocations and recovery. ACP command clients, TUI, and the future APP can
+      therefore edit controller-specific options without adding surface-local
+      config handlers.
     - Migrated baseline: host async command sessions now persist process id and
       durable stdout/stderr stream files when a sandbox `StateDir` is
       available. A restarted host sandbox can reopen a still-running process as
@@ -2503,8 +2512,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially interactive settings/task/controller panel input widgets and
-   surface-specific controller rendering.
+   especially surface-specific controller rendering beyond the shared command
+   panel baseline.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
 3. Finish surface-specific visual task-panel rendering and optional persistent
@@ -2513,9 +2522,8 @@ Recommended sequence:
    lifecycle events, compact retention indexes, and task-panel summaries are
    now baseline runtime capabilities.
 4. Port the remaining richer interactive flows to `internal/app/services`,
-   especially field editors, action runners, and transcript actions around the
-   shared settings/task/controller panel payloads while preserving rendering as
-   surface-local code.
+   especially any product actions not yet represented by shared settings, task,
+   or controller panel payloads while preserving rendering as surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and

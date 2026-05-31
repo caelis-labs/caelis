@@ -180,6 +180,12 @@ func TestControllerRunnerResumesAndAppliesRemoteConfigOptions(t *testing.T) {
 			Category:     "mode",
 			CurrentValue: "ask",
 			Options:      []ConfigChoice{{Value: "ask", Name: "Ask"}, {Value: "code", Name: "Code"}},
+		}, {
+			Type:         "select",
+			ID:           "theme",
+			Name:         "Theme",
+			CurrentValue: "light",
+			Options:      []ConfigChoice{{Value: "light", Name: "Light"}, {Value: "dark", Name: "Dark"}},
 		}},
 	}
 	runner := ControllerRunner{Store: store}
@@ -193,6 +199,7 @@ func TestControllerRunnerResumesAndAppliesRemoteConfigOptions(t *testing.T) {
 		ControllerModel:           "gpt-next",
 		ControllerReasoningEffort: "high",
 		ControllerMode:            "code",
+		ControllerConfigIntent:    map[string]string{"theme": "dark"},
 		Input:                     "continue",
 		Agent:                     agent,
 	})
@@ -202,7 +209,7 @@ func TestControllerRunnerResumesAndAppliesRemoteConfigOptions(t *testing.T) {
 	if agent.resumedSessionID != "remote-existing" || agent.newSessions != 0 {
 		t.Fatalf("resume/new = %q/%d, want resume existing without new session", agent.resumedSessionID, agent.newSessions)
 	}
-	wantSets := []string{"model=gpt-next", "reasoning_effort=high", "mode=code"}
+	wantSets := []string{"model=gpt-next", "reasoning_effort=high", "mode=code", "theme=dark"}
 	if len(agent.sets) != len(wantSets) {
 		t.Fatalf("set config calls = %#v, want %#v", agent.sets, wantSets)
 	}
@@ -211,7 +218,7 @@ func TestControllerRunnerResumesAndAppliesRemoteConfigOptions(t *testing.T) {
 			t.Fatalf("set config call %d = %q, want %q", i, agent.sets[i], want)
 		}
 	}
-	if len(result.ConfigOptions) != 3 || result.ConfigOptions[0].CurrentValue != "gpt-next" || result.ConfigOptions[1].CurrentValue != "high" || result.ConfigOptions[2].CurrentValue != "code" {
+	if len(result.ConfigOptions) != 4 || result.ConfigOptions[0].CurrentValue != "gpt-next" || result.ConfigOptions[1].CurrentValue != "high" || result.ConfigOptions[2].CurrentValue != "code" || result.ConfigOptions[3].CurrentValue != "dark" {
 		t.Fatalf("result config options = %#v, want applied current values", result.ConfigOptions)
 	}
 	if len(result.Events) != 1 || result.Events[0].Meta["controller_config_options"] == nil {

@@ -24,7 +24,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "help", Usage: "/help", Description: "Show commands and shortcuts", LocalDuringACP: true},
 		{Name: "agent", Usage: "/agent <action>", Description: "Manage ACP agents and controller switching", LocalDuringACP: true, Details: []string{"actions: list, add <builtin>, install/update <adapter>, use <agent|local>, remove <agent>"}, ArgCandidates: agentRootCandidates(), DynamicCompleter: true},
 		{Name: "connect", Usage: "/connect", Description: "Open the guided model/provider setup wizard", DynamicCompleter: true},
-		{Name: "controller", Usage: "/controller", Description: "Show active ACP controller panel", LocalDuringACP: true},
+		{Name: "controller", Usage: "/controller <action>", Description: "Show or configure the active ACP controller", LocalDuringACP: true, Details: []string{"actions: set <option-id> <value>"}},
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},

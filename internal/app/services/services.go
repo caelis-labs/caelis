@@ -1375,6 +1375,7 @@ type AgentInvokeRequest struct {
 	ControllerModel           string
 	ControllerReasoningEffort string
 	ControllerMode            string
+	ControllerConfigIntent    map[string]string
 	Participant               session.ParticipantBinding
 	Input                     string
 	ContentParts              []model.ContentPart
@@ -1421,6 +1422,7 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 	req.SessionRef = ref
 	req.AgentID = agentID
 	req.ContentParts = model.CloneContentParts(req.ContentParts)
+	req.ControllerConfigIntent = cloneStringMap(req.ControllerConfigIntent)
 	controllerMode := req.Controller.Kind != "" || strings.TrimSpace(req.Controller.ID) != "" || strings.TrimSpace(req.Controller.AgentName) != ""
 	if controllerMode {
 		req.Controller = normalizeAgentController(req.Controller, agentID)
@@ -1430,6 +1432,7 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 			req.ControllerModel = firstNonEmpty(strings.TrimSpace(req.ControllerModel), strings.TrimSpace(status.Model))
 			req.ControllerReasoningEffort = firstNonEmpty(strings.TrimSpace(req.ControllerReasoningEffort), strings.TrimSpace(status.ReasoningEffort))
 			req.ControllerMode = firstNonEmpty(strings.TrimSpace(req.ControllerMode), strings.TrimSpace(status.Mode))
+			req.ControllerConfigIntent = mergeStringMaps(controllerConfigIntent(status.ConfigOptions), req.ControllerConfigIntent)
 		}
 	} else {
 		req.Participant = normalizeAgentParticipant(req.Participant, agentID)

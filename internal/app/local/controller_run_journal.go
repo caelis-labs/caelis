@@ -38,6 +38,7 @@ type controllerRunJournalRecord struct {
 	ControllerModel           string                            `json:"controller_model,omitempty"`
 	ControllerReasoningEffort string                            `json:"controller_reasoning_effort,omitempty"`
 	ControllerMode            string                            `json:"controller_mode,omitempty"`
+	ControllerConfigIntent    map[string]string                 `json:"controller_config_intent,omitempty"`
 	Input                     string                            `json:"input,omitempty"`
 	ContentParts              []model.ContentPart               `json:"content_parts,omitempty"`
 	ConfigOptions             []control.ConfigOption            `json:"config_options,omitempty"`
@@ -188,6 +189,7 @@ func normalizeControllerRunJournalRecord(record controllerRunJournalRecord) cont
 	record.ControllerModel = strings.TrimSpace(record.ControllerModel)
 	record.ControllerReasoningEffort = strings.TrimSpace(record.ControllerReasoningEffort)
 	record.ControllerMode = strings.TrimSpace(record.ControllerMode)
+	record.ControllerConfigIntent = cloneControllerConfigIntent(record.ControllerConfigIntent)
 	record.Input = strings.TrimSpace(record.Input)
 	record.ContentParts = model.CloneContentParts(record.ContentParts)
 	record.ConfigOptions = cloneControlConfigOptions(record.ConfigOptions)
@@ -204,6 +206,25 @@ func normalizeControllerRunJournalRecord(record controllerRunJournalRecord) cont
 		record.ID = controllerRunRecordID(record)
 	}
 	return record
+}
+
+func cloneControllerConfigIntent(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 func controllerRunRecordID(record controllerRunJournalRecord) string {

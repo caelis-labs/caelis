@@ -10,19 +10,42 @@ import (
 )
 
 func (s CommandService) executeController(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {
-	if strings.TrimSpace(args) != "" {
-		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /controller")
+	args = strings.TrimSpace(args)
+	if args == "" {
+		panel, err := s.services.Controllers().Panel(ctx, ControllerPanelRequest{SessionRef: ref})
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled:         true,
+			Command:         "controller",
+			Output:          formatCommandControllerPanel(panel),
+			ControllerPanel: &panel,
+		}, nil
 	}
-	panel, err := s.services.Controllers().Panel(ctx, ControllerPanelRequest{SessionRef: ref})
-	if err != nil {
-		return appviewmodel.CommandExecutionView{}, err
+	sub, rest, _ := strings.Cut(args, " ")
+	switch strings.ToLower(strings.TrimSpace(sub)) {
+	case "set":
+		optionID, value, ok := strings.Cut(strings.TrimSpace(rest), " ")
+		if !ok || strings.TrimSpace(optionID) == "" || strings.TrimSpace(value) == "" {
+			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /controller set <option-id> <value>")
+		}
+		if _, err := s.services.Controllers().SetConfigOption(ctx, ref, optionID, value); err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		panel, err := s.services.Controllers().Panel(ctx, ControllerPanelRequest{SessionRef: ref})
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled:         true,
+			Command:         "controller",
+			Output:          "controller option updated: " + normalizeControllerConfigOptionID(optionID) + "\n\n" + formatCommandControllerPanel(panel),
+			ControllerPanel: &panel,
+		}, nil
+	default:
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /controller [set <option-id> <value>]")
 	}
-	return appviewmodel.CommandExecutionView{
-		Handled:         true,
-		Command:         "controller",
-		Output:          formatCommandControllerPanel(panel),
-		ControllerPanel: &panel,
-	}, nil
 }
 
 func formatCommandControllerPanel(panel appviewmodel.ControllerPanelView) string {

@@ -230,6 +230,105 @@ func TestCommandPanelTaskCancelClickRequiresConfirmation(t *testing.T) {
 	}
 }
 
+func TestCommandPanelControllerConfigClickPromptsAndSubmits(t *testing.T) {
+	var called string
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		ExecuteLine: func(sub Submission) TaskResultMsg {
+			called = sub.Text
+			return TaskResultMsg{}
+		},
+	})
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		ControllerPanel: &appviewmodel.ControllerPanelView{
+			Active:  true,
+			Summary: appviewmodel.ControllerPanelSummary{Model: "gpt-remote"},
+			Sections: []appviewmodel.ControllerPanelSection{{
+				Fields: []appviewmodel.ControllerPanelField{{
+					ID:       "controller.config.theme",
+					Label:    "Theme",
+					Value:    "light",
+					Editable: true,
+					Options: []appviewmodel.ControllerConfigChoice{{
+						Value: "light",
+						Name:  "Light",
+					}, {
+						Value: "dark",
+						Name:  "Dark",
+					}},
+				}},
+			}},
+		},
+	})
+	model.doc.Append(block)
+
+	handled, cmd := model.tryCommandPanelClickToken(block.BlockID(), commandPanelInputClickToken("/controller set theme "))
+	if !handled || cmd == nil {
+		t.Fatalf("tryCommandPanelClickToken() handled=%v cmd nil=%v, want controller config prompt", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || model.activePrompt.title != "Set controller.config.theme" || len(model.activePrompt.choices) != 2 {
+		t.Fatalf("active prompt = %#v, want controller config prompt", model.activePrompt)
+	}
+	model.finishPrompt("dark", nil)
+	submit, ok := cmd().(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatal("prompt command did not submit controller config line")
+	}
+	if submit.Line != "/controller set theme dark" {
+		t.Fatalf("submit line = %q", submit.Line)
+	}
+	updated, submitCmd := model.Update(submit)
+	model = updated.(*Model)
+	if !findAndRunTaskResult(submitCmd(), model) {
+		t.Fatal("expected TaskResultMsg from submitted controller config")
+	}
+	if called != "/controller set theme dark" {
+		t.Fatalf("ExecuteLine called = %q", called)
+	}
+}
+
+func TestCommandPanelControllerReasoningClickUsesCurrentModel(t *testing.T) {
+	model := NewModel(Config{Commands: DefaultCommands(), ExecuteLine: func(Submission) TaskResultMsg { return TaskResultMsg{} }})
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		ControllerPanel: &appviewmodel.ControllerPanelView{
+			Active:  true,
+			Summary: appviewmodel.ControllerPanelSummary{Model: "gpt-remote", ReasoningEffort: "low"},
+			Sections: []appviewmodel.ControllerPanelSection{{
+				Fields: []appviewmodel.ControllerPanelField{{
+					ID:       "controller.reasoning",
+					Label:    "Reasoning",
+					Value:    "low",
+					Editable: true,
+					Options: []appviewmodel.ControllerConfigChoice{{
+						Value: "low",
+						Name:  "Low",
+					}, {
+						Value: "high",
+						Name:  "High",
+					}},
+				}},
+			}},
+		},
+	})
+	model.doc.Append(block)
+
+	handled, cmd := model.tryCommandPanelClickToken(block.BlockID(), commandPanelInputClickToken("/model use gpt-remote "))
+	if !handled || cmd == nil {
+		t.Fatalf("tryCommandPanelClickToken() handled=%v cmd nil=%v, want controller reasoning prompt", handled, cmd == nil)
+	}
+	if model.activePrompt == nil || model.activePrompt.title != "Set controller.reasoning" {
+		t.Fatalf("active prompt = %#v, want reasoning prompt", model.activePrompt)
+	}
+	model.finishPrompt("high", nil)
+	submit, ok := cmd().(commandPanelSubmitMsg)
+	if !ok {
+		t.Fatal("prompt command did not submit controller reasoning line")
+	}
+	if submit.Line != "/model use gpt-remote high" {
+		t.Fatalf("submit line = %q", submit.Line)
+	}
+}
+
 func TestTranscriptTaskActionClickPromptsAndSubmits(t *testing.T) {
 	var called string
 	model := NewModel(Config{

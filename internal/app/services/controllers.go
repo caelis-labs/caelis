@@ -301,6 +301,55 @@ func (s ControllerService) SetMode(ctx context.Context, ref session.Ref, mode st
 	return s.statusFromSnapshot(ctx, snapshot, controller)
 }
 
+func (s ControllerService) SetConfigOption(ctx context.Context, ref session.Ref, optionID string, value string) (ControllerStatus, error) {
+	optionID = normalizeControllerConfigOptionID(optionID)
+	value = strings.TrimSpace(value)
+	if optionID == "" {
+		return ControllerStatus{}, errors.New("app/services: controller config option is required")
+	}
+	if value == "" {
+		return ControllerStatus{}, errors.New("app/services: controller config value is required")
+	}
+	snapshot, controller, ok, err := s.activeControllerSnapshot(ctx, ref)
+	if err != nil {
+		return ControllerStatus{}, err
+	}
+	if !ok {
+		return ControllerStatus{}, errors.New("app/services: no active ACP controller")
+	}
+	options := controllerConfigOptionsFromState(snapshot.State)
+	option, ok := findControllerConfigOptionByID(options, optionID)
+	if !ok {
+		return ControllerStatus{}, fmt.Errorf("app/services: controller config option %q is not declared", optionID)
+	}
+	matched, ok := matchControllerConfigOptionChoice(option, value)
+	if !ok {
+		return ControllerStatus{}, fmt.Errorf("app/services: controller config option %q does not support value %q", optionID, value)
+	}
+	options = mergeControllerConfigOptionValue(options, optionID, matched)
+	configRef := controllerConfigRef(controller)
+	if err := s.services.engine.UpdateSessionState(ctx, snapshot.Session.Ref, func(state session.State) (session.State, error) {
+		next := cloneState(state)
+		if next == nil {
+			next = session.State{}
+		}
+		next[StateControllerConfigRef] = configRef
+		next[StateControllerConfigOptions] = cloneControllerConfigOptions(options)
+		applyControllerConfigOptionState(next, options)
+		return next, nil
+	}); err != nil {
+		return ControllerStatus{}, err
+	}
+	snapshot.State = cloneState(snapshot.State)
+	if snapshot.State == nil {
+		snapshot.State = session.State{}
+	}
+	snapshot.State[StateControllerConfigRef] = configRef
+	snapshot.State[StateControllerConfigOptions] = cloneControllerConfigOptions(options)
+	applyControllerConfigOptionState(snapshot.State, options)
+	return s.statusFromSnapshot(ctx, snapshot, controller)
+}
+
 func (s ControllerService) CycleMode(ctx context.Context, ref session.Ref) (ControllerStatus, error) {
 	status, ok, err := s.Status(ctx, ref)
 	if err != nil {
@@ -1193,6 +1242,107 @@ func findControllerConfigOption(options []control.ConfigOption, kind string) (co
 		}
 	}
 	return control.ConfigOption{}, false
+}
+
+func findControllerConfigOptionByID(options []control.ConfigOption, id string) (control.ConfigOption, bool) {
+	id = strings.ToLower(normalizeControllerConfigOptionID(id))
+	for _, option := range options {
+		if strings.ToLower(strings.TrimSpace(option.ID)) == id {
+			return cloneControllerConfigOption(option), true
+		}
+	}
+	return control.ConfigOption{}, false
+}
+
+func normalizeControllerConfigOptionID(id string) string {
+	id = strings.TrimSpace(id)
+	id = strings.TrimPrefix(id, "controller.config.")
+	id = strings.TrimPrefix(id, "config.")
+	return strings.TrimSpace(id)
+}
+
+func matchControllerConfigOptionChoice(option control.ConfigOption, requested string) (string, bool) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" {
+		return "", false
+	}
+	if len(option.Options) == 0 {
+		return requested, true
+	}
+	for _, choice := range option.Options {
+		for _, candidate := range []string{choice.Value, choice.Name} {
+			if strings.EqualFold(strings.TrimSpace(candidate), requested) {
+				return firstNonEmpty(choice.Value, choice.Name, requested), true
+			}
+		}
+	}
+	return "", false
+}
+
+func mergeControllerConfigOptionValue(options []control.ConfigOption, id string, value string) []control.ConfigOption {
+	id = strings.ToLower(normalizeControllerConfigOptionID(id))
+	out := cloneControllerConfigOptions(options)
+	for idx := range out {
+		if strings.ToLower(strings.TrimSpace(out[idx].ID)) == id {
+			out[idx].CurrentValue = strings.TrimSpace(value)
+			return out
+		}
+	}
+	return out
+}
+
+func applyControllerConfigOptionState(state session.State, options []control.ConfigOption) {
+	if state == nil {
+		return
+	}
+	if value, ok := currentControllerConfigValue(options, "model"); ok {
+		state[StateControllerModel] = value
+	}
+	if value, ok := currentControllerConfigValue(options, "reasoning"); ok {
+		state[StateControllerReasoning] = value
+	}
+	if value, ok := currentControllerConfigValue(options, "mode"); ok {
+		state[StateControllerMode] = value
+	}
+}
+
+func controllerConfigIntent(options []ControllerConfigOption) map[string]string {
+	if len(options) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(options))
+	for _, option := range options {
+		id := normalizeControllerConfigOptionID(option.ID)
+		value := strings.TrimSpace(option.CurrentValue)
+		if id == "" || value == "" {
+			continue
+		}
+		switch strings.ToLower(id) {
+		case "model", "reasoning", "reasoning_effort", "mode":
+			continue
+		}
+		out[id] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func mergeStringMaps(base map[string]string, overlay map[string]string) map[string]string {
+	if len(base) == 0 {
+		return cloneStringMap(overlay)
+	}
+	out := cloneStringMap(base)
+	for key, value := range overlay {
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" || value == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func controllerFromSnapshot(snapshot session.Snapshot) session.ControllerBinding {

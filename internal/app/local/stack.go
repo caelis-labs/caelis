@@ -366,6 +366,7 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config, controlle
 				ControllerModel:           req.ControllerModel,
 				ControllerReasoningEffort: req.ControllerReasoningEffort,
 				ControllerMode:            req.ControllerMode,
+				ControllerConfigIntent:    req.ControllerConfigIntent,
 				Agent:                     adapter,
 			})
 			if err != nil {

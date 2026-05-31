@@ -27,7 +27,7 @@ func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) 
 	commands := []appviewmodel.CommandView{
 		{Name: "agent", Description: "Manage ACP agents", InputHint: "list|use|add|install|update|remove"},
 		{Name: "connect", Description: "Configure a model provider", InputHint: "provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]"},
-		{Name: "controller", Description: "Show active ACP controller panel"},
+		{Name: "controller", Description: "Show or configure the active ACP controller", InputHint: "[set <option-id> <value>]"},
 		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
 		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual|toggle]"},
 		{Name: "status", Description: "Show current runtime status"},
