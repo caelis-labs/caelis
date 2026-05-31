@@ -5,6 +5,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 )
 
 func TestFromSnapshotProjectsTranscriptApprovalsAndParticipants(t *testing.T) {
@@ -100,4 +101,79 @@ func TestFromSnapshotProjectsTranscriptApprovalsAndParticipants(t *testing.T) {
 	if len(view.Participants) != 1 || view.Participants[0].ID != "reviewer" || view.Participants[0].Name != "Reviewer" {
 		t.Fatalf("participants = %#v, want reviewer", view.Participants)
 	}
+}
+
+func TestFromSnapshotProjectsTranscriptTaskActions(t *testing.T) {
+	view := FromSnapshot(session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-tasks"}},
+		Events: []session.Event{{
+			ID:   "tool-1",
+			Type: session.EventToolResult,
+			Tool: &session.ToolEvent{
+				ID:     "call-1",
+				Name:   "run_command",
+				Status: session.ToolRunning,
+				Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+					"task_id":        "task-1",
+					"state":          "running",
+					"running":        true,
+					"supports_input": true,
+				}),
+			},
+		}},
+	})
+
+	if len(view.Transcript) != 1 {
+		t.Fatalf("transcript = %#v, want one tool item", view.Transcript)
+	}
+	actions := view.Transcript[0].Actions
+	if len(actions) != 4 {
+		t.Fatalf("actions = %#v, want tail/wait/cancel/write", actions)
+	}
+	if !hasTranscriptAction(actions, "task.tail:task-1", "/task tail task-1", false, false) ||
+		!hasTranscriptAction(actions, "task.wait:task-1", "/task wait task-1", false, false) ||
+		!hasTranscriptAction(actions, "task.cancel:task-1", "/task cancel task-1", true, false) ||
+		!hasTranscriptAction(actions, "task.write:task-1", "/task write task-1 -- ", false, true) {
+		t.Fatalf("actions = %#v, want shared task command descriptors", actions)
+	}
+}
+
+func TestFromSnapshotProjectsTerminalTranscriptTaskReleaseAction(t *testing.T) {
+	view := FromSnapshot(session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-tasks"}},
+		Events: []session.Event{{
+			ID:   "tool-1",
+			Type: session.EventToolResult,
+			Tool: &session.ToolEvent{
+				ID:     "call-1",
+				Name:   "run_command",
+				Status: session.ToolCompleted,
+				Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+					"task_id": "task-1",
+					"state":   "completed",
+				}),
+			},
+		}},
+	})
+
+	if len(view.Transcript) != 1 {
+		t.Fatalf("transcript = %#v, want one tool item", view.Transcript)
+	}
+	actions := view.Transcript[0].Actions
+	if len(actions) != 2 {
+		t.Fatalf("actions = %#v, want tail/release", actions)
+	}
+	if !hasTranscriptAction(actions, "task.tail:task-1", "/task tail task-1", false, false) ||
+		!hasTranscriptAction(actions, "task.release:task-1", "/task release task-1", false, false) {
+		t.Fatalf("actions = %#v, want terminal shared task commands", actions)
+	}
+}
+
+func hasTranscriptAction(actions []TranscriptAction, id string, command string, destructive bool, requiresInput bool) bool {
+	for _, action := range actions {
+		if action.ID == id && action.Command == command && action.Destructive == destructive && action.RequiresInput == requiresInput && action.Enabled {
+			return true
+		}
+	}
+	return false
 }

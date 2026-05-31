@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 )
 
 type SessionView struct {
@@ -23,16 +24,28 @@ type SessionView struct {
 }
 
 type TranscriptItem struct {
-	ID          string    `json:"id,omitempty"`
-	Type        string    `json:"type,omitempty"`
-	Actor       string    `json:"actor,omitempty"`
-	Text        string    `json:"text,omitempty"`
-	Time        time.Time `json:"time,omitempty"`
-	TurnID      string    `json:"turn_id,omitempty"`
-	ToolName    string    `json:"tool_name,omitempty"`
-	ToolStatus  string    `json:"tool_status,omitempty"`
-	Participant string    `json:"participant,omitempty"`
-	Controller  string    `json:"controller,omitempty"`
+	ID          string             `json:"id,omitempty"`
+	Type        string             `json:"type,omitempty"`
+	Actor       string             `json:"actor,omitempty"`
+	Text        string             `json:"text,omitempty"`
+	Time        time.Time          `json:"time,omitempty"`
+	TurnID      string             `json:"turn_id,omitempty"`
+	ToolName    string             `json:"tool_name,omitempty"`
+	ToolStatus  string             `json:"tool_status,omitempty"`
+	Participant string             `json:"participant,omitempty"`
+	Controller  string             `json:"controller,omitempty"`
+	Actions     []TranscriptAction `json:"actions,omitempty"`
+}
+
+type TranscriptAction struct {
+	ID            string `json:"id,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	Label         string `json:"label,omitempty"`
+	Command       string `json:"command,omitempty"`
+	TargetID      string `json:"target_id,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	Destructive   bool   `json:"destructive,omitempty"`
+	RequiresInput bool   `json:"requires_input,omitempty"`
 }
 
 type ApprovalItem struct {
@@ -124,12 +137,75 @@ func transcriptItem(event session.Event) (TranscriptItem, bool) {
 		item.ToolName = strings.TrimSpace(event.Tool.Name)
 		item.ToolStatus = strings.TrimSpace(string(event.Tool.Status))
 	}
+	item.Actions = transcriptActions(event)
 	switch event.Type {
 	case session.EventUser, session.EventAssistant, session.EventSystem, session.EventToolCall, session.EventToolResult, session.EventApproval, session.EventPlan, session.EventLifecycle, session.EventParticipant, session.EventHandoff, session.EventNotice:
 		return item, item.Text != "" || item.ToolName != "" || event.Approval != nil || len(event.Plan) > 0 || event.Lifecycle != nil
 	default:
 		return TranscriptItem{}, false
 	}
+}
+
+func transcriptActions(event session.Event) []TranscriptAction {
+	if event.Type != session.EventToolCall && event.Type != session.EventToolResult {
+		return nil
+	}
+	taskMeta := coretool.RuntimeTaskMeta(transcriptEventMeta(event))
+	if len(taskMeta) == 0 {
+		return nil
+	}
+	taskID := firstNonEmpty(anyString(taskMeta["task_id"]), anyString(taskMeta["id"]), anyString(taskMeta["target_id"]))
+	if taskID == "" {
+		return nil
+	}
+	running := anyBool(taskMeta["running"]) || taskStateRunning(anyString(taskMeta["state"]))
+	actions := []TranscriptAction{
+		transcriptTaskAction("tail", "Tail", taskID, "/task tail "+taskID, false, false),
+	}
+	if running {
+		actions = append(actions,
+			transcriptTaskAction("wait", "Wait", taskID, "/task wait "+taskID, false, false),
+			transcriptTaskAction("cancel", "Cancel", taskID, "/task cancel "+taskID, true, false),
+		)
+		if anyBool(taskMeta["supports_input"]) || anyBool(taskMeta["input_supported"]) {
+			actions = append(actions, transcriptTaskAction("write", "Write", taskID, "/task write "+taskID+" -- ", false, true))
+		}
+		return actions
+	}
+	return append(actions, transcriptTaskAction("release", "Release", taskID, "/task release "+taskID, false, false))
+}
+
+func transcriptTaskAction(kind string, label string, taskID string, command string, destructive bool, requiresInput bool) TranscriptAction {
+	return TranscriptAction{
+		ID:            "task." + strings.TrimSpace(kind) + ":" + strings.TrimSpace(taskID),
+		Kind:          strings.TrimSpace(kind),
+		Label:         strings.TrimSpace(label),
+		Command:       command,
+		TargetID:      strings.TrimSpace(taskID),
+		Enabled:       true,
+		Destructive:   destructive,
+		RequiresInput: requiresInput,
+	}
+}
+
+func taskStateRunning(state string) bool {
+	switch strings.ToLower(strings.TrimSpace(state)) {
+	case "running", "waiting":
+		return true
+	default:
+		return false
+	}
+}
+
+func transcriptEventMeta(event session.Event) map[string]any {
+	out := cloneStringAnyMap(event.Meta)
+	if event.Tool == nil || len(event.Tool.Meta) == 0 {
+		return out
+	}
+	for key, value := range event.Tool.Meta {
+		out[key] = value
+	}
+	return out
 }
 
 func pendingApproval(event session.Event) *ApprovalItem {
@@ -188,6 +264,34 @@ func commandText(input map[string]any) string {
 		return ""
 	}
 	return string(raw)
+}
+
+func anyString(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	default:
+		return ""
+	}
+}
+
+func anyBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		return strings.EqualFold(strings.TrimSpace(typed), "true")
+	default:
+		return false
+	}
+}
+
+func cloneStringAnyMap(values map[string]any) map[string]any {
+	out := map[string]any{}
+	for key, value := range values {
+		out[key] = value
+	}
+	return out
 }
 
 func inputString(input map[string]any, key string) string {

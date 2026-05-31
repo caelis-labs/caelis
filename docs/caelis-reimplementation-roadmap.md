@@ -1503,12 +1503,18 @@ be migrated before retiring the old stack:
      start/write/cancel controls, and controller model/mode choices all return
      to the same `ExecuteLine` shared command entry point instead of calling
      app services directly.
+   - Migrated baseline: shared session transcript DTOs now include
+     task-control action descriptors rebuilt from canonical
+     `caelis.runtime.task` metadata, giving TUI and future APP surfaces the
+     same command/action contract for tail/wait/write/cancel/release around
+     task transcript entries.
    - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
      transcript reducer, tool panels, approval UI, theme system, and attachment
      UI/rendering remain TUI-owned presentation code by design.
-   - Still pending: transcript actions, future APP visual panel rendering, and
-     deeper surface-specific panel interactions need to build on the shared
-     panel payloads instead of growing new surface-local product semantics.
+   - Still pending: transcript action rendering/execution in each surface,
+     future APP visual panel rendering, and deeper surface-specific panel
+     interactions need to build on the shared panel payloads instead of growing
+     new surface-local product semantics.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1612,10 +1618,13 @@ be migrated before retiring the old stack:
      resulting mutations/actions through shared slash commands. This is the
      reference interaction pattern for a future APP surface: UI owns widgets,
      app services own semantics.
-   - Still pending: transcript actions and concrete future APP settings/task/
-     controller rendering remain unmigrated. Durable async task control and
-     output storage remain kernel/runtime work rather than APP-only view-model
-     work.
+   - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
+     transcript action descriptors for task-backed tool entries, derived from
+     canonical runtime task metadata and expressed as shared slash commands.
+   - Still pending: concrete transcript action rendering/execution and future
+     APP settings/task/controller rendering remain unmigrated. Durable async
+     task control and output storage remain kernel/runtime work rather than
+     APP-only view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
