@@ -31,6 +31,7 @@ type spawnTaskJournalRecord struct {
 	Kind             string                  `json:"kind"`
 	Version          int                     `json:"version"`
 	Parent           session.Ref             `json:"parent,omitempty"`
+	Workspace        session.Workspace       `json:"workspace,omitempty"`
 	TurnID           string                  `json:"turn_id,omitempty"`
 	Agent            string                  `json:"agent,omitempty"`
 	RemoteSessionID  string                  `json:"remote_session_id,omitempty"`
@@ -171,6 +172,9 @@ func readSpawnTaskJournalFile(path string) (spawnTaskJournalRecord, error) {
 func normalizeSpawnTaskJournalRecord(record spawnTaskJournalRecord) spawnTaskJournalRecord {
 	record.Kind = spawnTaskJournalKind
 	record.Version = spawnTaskJournalVersion
+	record.Parent = session.NormalizeRef(record.Parent)
+	record.Workspace.Key = strings.TrimSpace(record.Workspace.Key)
+	record.Workspace.CWD = strings.TrimSpace(record.Workspace.CWD)
 	record.TurnID = strings.TrimSpace(record.TurnID)
 	record.Agent = strings.TrimSpace(record.Agent)
 	record.RemoteSessionID = strings.TrimSpace(record.RemoteSessionID)
@@ -190,6 +194,16 @@ func normalizeSpawnTaskJournalRecord(record spawnTaskJournalRecord) spawnTaskJou
 	record.Snapshot.Metadata = maps.Clone(record.Snapshot.Metadata)
 	if record.Snapshot.Metadata == nil {
 		record.Snapshot.Metadata = map[string]any{}
+	}
+	if record.Agent == "" {
+		if agent, ok := record.Snapshot.Metadata["agent"].(string); ok {
+			record.Agent = strings.TrimSpace(agent)
+		}
+	}
+	if record.RemoteSessionID == "" {
+		if remoteSessionID, ok := record.Snapshot.Metadata["remote_session_id"].(string); ok {
+			record.RemoteSessionID = strings.TrimSpace(remoteSessionID)
+		}
 	}
 	record.Snapshot.Metadata["task_kind"] = "subagent"
 	record.Snapshot.Metadata["source"] = "spawn"

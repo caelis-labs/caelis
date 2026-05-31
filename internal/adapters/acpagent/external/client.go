@@ -169,6 +169,17 @@ func (c *Client) NewCoreSession(ctx context.Context, workspace session.Workspace
 	return strings.TrimSpace(resp.SessionID), nil
 }
 
+func (c *Client) ResumeCoreSession(ctx context.Context, sessionID string, workspace session.Workspace) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", errors.New("acpagent/external: remote session id is required")
+	}
+	if _, err := c.ResumeSession(ctx, sessionID, workspace.CWD); err != nil {
+		return "", err
+	}
+	return sessionID, nil
+}
+
 func (c *Client) Prompt(ctx context.Context, sessionID string, parts []model.ContentPart) (PromptResult, error) {
 	c.Start(ctx)
 	req := schema.PromptRequest{

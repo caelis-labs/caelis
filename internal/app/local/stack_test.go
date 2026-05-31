@@ -734,12 +734,22 @@ func TestExternalACPHelperProcess(t *testing.T) {
 			return schema.InitializeResponse{
 				ProtocolVersion: schema.CurrentProtocolVersion,
 				AgentCapabilities: schema.AgentCapabilities{
-					PromptCapabilities: schema.PromptCapabilities{Image: true},
+					PromptCapabilities:  schema.PromptCapabilities{Image: true},
+					SessionCapabilities: map[string]json.RawMessage{"resume": json.RawMessage("{}")},
 				},
 				AgentInfo: &schema.Implementation{Name: "helper", Version: "test"},
 			}, nil
 		case schema.MethodSessionNew:
 			return schema.NewSessionResponse{SessionID: "remote-helper-session"}, nil
+		case schema.MethodSessionResume:
+			var req schema.ResumeSessionRequest
+			if err := json.Unmarshal(msg.Params, &req); err != nil {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+			}
+			if strings.TrimSpace(req.SessionID) == "" {
+				return nil, &jsonrpc.RPCError{Code: -32602, Message: "session id is required"}
+			}
+			return schema.ResumeSessionResponse{}, nil
 		case schema.MethodSessionPrompt:
 			var req schema.PromptRequest
 			if err := json.Unmarshal(msg.Params, &req); err != nil {

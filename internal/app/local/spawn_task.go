@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strings"
 	"sync"
@@ -136,7 +137,7 @@ func (m *spawnTaskManager) OpenTask(ctx context.Context, ref sandbox.SessionRef)
 	task := m.tasks[taskID]
 	m.mu.RUnlock()
 	if task == nil {
-		return m.journal.open(ctx, ref)
+		return m.openJournalTask(ctx, ref)
 	}
 	return task, true, nil
 }
@@ -163,7 +164,7 @@ func (m *spawnTaskManager) ListTasks(ctx context.Context, query sandbox.SessionL
 		out = append(out, snapshot)
 	}
 	if m.journal != nil {
-		archived, err := m.journal.list(ctx)
+		archived, err := m.listJournalTasks(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -198,6 +199,165 @@ func (m *spawnTaskManager) clock() time.Time {
 		return m.now()
 	}
 	return time.Now().UTC()
+}
+
+func (m *spawnTaskManager) openJournalTask(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, bool, error) {
+	if m == nil || m.journal == nil {
+		return nil, false, nil
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, false, err
+	}
+	taskID := strings.TrimSpace(ref.ID)
+	if taskID == "" {
+		return nil, false, nil
+	}
+	record, err := m.journal.read(taskID)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nil, false, err
+		}
+		return m.journal.open(ctx, ref)
+	}
+	record = m.recoveredJournalRecord(record)
+	if ref.Backend != "" && ref.Backend != record.Snapshot.Ref.Backend {
+		return nil, false, fmt.Errorf("app/local: archived SPAWN task backend mismatch: %s", ref.Backend)
+	}
+	cfg, ok := m.configForAgent(record.Agent)
+	if !ok || strings.TrimSpace(record.RemoteSessionID) == "" {
+		return archivedSpawnTaskSession{record: record}, true, nil
+	}
+	task, err := m.recoverJournalTask(ctx, record, cfg)
+	if err != nil {
+		return nil, false, err
+	}
+	return task, true, nil
+}
+
+func (m *spawnTaskManager) listJournalTasks(ctx context.Context) ([]sandbox.SessionSnapshot, error) {
+	if m == nil || m.journal == nil {
+		return nil, nil
+	}
+	if err := contextErr(ctx); err != nil {
+		return nil, err
+	}
+	records, err := m.journal.readAll()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]sandbox.SessionSnapshot, 0, len(records))
+	for _, record := range records {
+		out = append(out, m.recoveredJournalRecord(record).Snapshot)
+	}
+	sort.SliceStable(out, func(i int, j int) bool {
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+func (m *spawnTaskManager) recoverJournalTask(ctx context.Context, record spawnTaskJournalRecord, cfg acpexternal.Config) (*spawnTaskSession, error) {
+	taskID := strings.TrimSpace(record.Snapshot.Ref.ID)
+	if taskID == "" {
+		return nil, errors.New("app/local: SPAWN task id is required")
+	}
+	m.mu.RLock()
+	if existing := m.tasks[taskID]; existing != nil {
+		m.mu.RUnlock()
+		return existing, nil
+	}
+	m.mu.RUnlock()
+	parent := m.parentSessionForRecord(ctx, record)
+	done := make(chan struct{})
+	close(done)
+	state := record.Snapshot.State
+	if state == "" {
+		state = sandbox.SessionFailed
+	}
+	startedAt := record.Snapshot.StartedAt
+	if startedAt.IsZero() {
+		startedAt = record.Snapshot.UpdatedAt
+	}
+	task := &spawnTaskSession{
+		manager:         m,
+		cfg:             cfg,
+		parent:          parent,
+		turnID:          record.TurnID,
+		taskID:          taskID,
+		agent:           firstNonEmpty(record.Agent, cfg.AgentName, cfg.AgentID),
+		remoteSessionID: record.RemoteSessionID,
+		done:            done,
+		running:         false,
+		state:           state,
+		exitCode:        record.Snapshot.ExitCode,
+		errText:         strings.TrimSpace(record.Snapshot.Error),
+		output:          record.Stdout,
+		startedAt:       startedAt,
+		updatedAt:       record.Snapshot.UpdatedAt,
+	}
+	if task.updatedAt.IsZero() {
+		task.updatedAt = m.clock()
+	}
+	m.mu.Lock()
+	if existing := m.tasks[taskID]; existing != nil {
+		m.mu.Unlock()
+		return existing, nil
+	}
+	m.tasks[taskID] = task
+	m.mu.Unlock()
+	task.persist(context.Background())
+	return task, nil
+}
+
+func (m *spawnTaskManager) recoveredJournalRecord(record spawnTaskJournalRecord) spawnTaskJournalRecord {
+	record = recoveredSpawnTaskJournalRecord(record)
+	reconnectable := strings.TrimSpace(record.RemoteSessionID) != ""
+	if reconnectable {
+		_, reconnectable = m.configForAgent(record.Agent)
+	}
+	record.Snapshot.Metadata = maps.Clone(record.Snapshot.Metadata)
+	record.Snapshot.Metadata["reconnectable"] = reconnectable
+	if reconnectable {
+		record.Snapshot.SupportsInput = true
+		record.Snapshot.Metadata["supports_input"] = true
+		if record.Snapshot.Error == "app/local: SPAWN task recovered without a live controller" {
+			record.Snapshot.Error = "app/local: SPAWN task recovered without a live controller; remote session can be continued"
+		}
+	} else {
+		record.Snapshot.Metadata["supports_input"] = record.Snapshot.SupportsInput
+	}
+	return record
+}
+
+func (m *spawnTaskManager) parentSessionForRecord(ctx context.Context, record spawnTaskJournalRecord) session.Session {
+	if m != nil && m.store != nil && strings.TrimSpace(record.Parent.SessionID) != "" {
+		snapshot, err := m.store.Load(ctx, record.Parent)
+		if err == nil {
+			return session.CloneSession(snapshot.Session)
+		}
+	}
+	return session.Session{
+		Ref:       session.NormalizeRef(record.Parent),
+		Workspace: record.Workspace,
+	}
+}
+
+func (m *spawnTaskManager) configForAgent(agent string) (acpexternal.Config, bool) {
+	if m == nil {
+		return acpexternal.Config{}, false
+	}
+	agent = strings.ToLower(strings.TrimSpace(agent))
+	if agent == "" {
+		return acpexternal.Config{}, false
+	}
+	for _, cfg := range m.configs {
+		candidates := []string{cfg.AgentID, cfg.AgentName, cfg.Command}
+		for _, candidate := range candidates {
+			if strings.EqualFold(strings.TrimSpace(candidate), agent) {
+				return cfg, strings.TrimSpace(cfg.Command) != ""
+			}
+		}
+	}
+	return acpexternal.Config{}, false
 }
 
 func (s *spawnTaskSession) Ref() sandbox.SessionRef {
@@ -241,7 +401,7 @@ func (s *spawnTaskSession) Write(ctx context.Context, input []byte) error {
 		s.mu.Unlock()
 		return fmt.Errorf("app/local: SPAWN task %q is still running; use TASK wait before TASK write", s.taskID)
 	}
-	if s.state != sandbox.SessionCompleted {
+	if !s.supportsInputLocked() {
 		s.mu.Unlock()
 		return fmt.Errorf("app/local: SPAWN task %q is %s and cannot be continued", s.taskID, s.state)
 	}
@@ -411,12 +571,21 @@ func (s *spawnTaskSession) prompt(ctx context.Context, prompt string) ([]session
 			_ = client.Close()
 			return nil, err
 		}
-		remote, err := client.NewCoreSession(ctx, s.parent.Workspace)
-		if err != nil {
-			_ = client.Close()
-			return nil, err
+		if strings.TrimSpace(remoteSessionID) != "" {
+			remote, err := client.ResumeCoreSession(ctx, remoteSessionID, s.parent.Workspace)
+			if err != nil {
+				_ = client.Close()
+				return nil, err
+			}
+			remoteSessionID = remote
+		} else {
+			remote, err := client.NewCoreSession(ctx, s.parent.Workspace)
+			if err != nil {
+				_ = client.Close()
+				return nil, err
+			}
+			remoteSessionID = remote
 		}
-		remoteSessionID = remote
 		s.mu.Lock()
 		s.client = client
 		s.remoteSessionID = remoteSessionID
@@ -455,16 +624,18 @@ func (s *spawnTaskSession) prompt(ctx context.Context, prompt string) ([]session
 }
 
 func (s *spawnTaskSession) snapshotLocked() sandbox.SessionSnapshot {
+	supportsInput := s.supportsInputLocked()
 	metadata := map[string]any{
 		"task_kind":      "subagent",
 		"source":         "spawn",
 		"agent":          s.agent,
 		"state":          string(s.state),
 		"running":        s.running,
-		"supports_input": !s.running && s.state == sandbox.SessionCompleted && s.client != nil,
+		"supports_input": supportsInput,
 	}
 	if s.remoteSessionID != "" {
 		metadata["remote_session_id"] = s.remoteSessionID
+		metadata["reconnectable"] = supportsInput
 	}
 	if !s.running {
 		metadata["exit_code"] = s.exitCode
@@ -474,7 +645,7 @@ func (s *spawnTaskSession) snapshotLocked() sandbox.SessionSnapshot {
 		Command:       strings.TrimSpace("SPAWN " + s.agent),
 		State:         s.state,
 		Running:       s.running,
-		SupportsInput: !s.running && s.state == sandbox.SessionCompleted && s.client != nil,
+		SupportsInput: supportsInput,
 		ExitCode:      s.exitCode,
 		Error:         s.errText,
 		StartedAt:     s.startedAt,
@@ -494,6 +665,7 @@ func (s *spawnTaskSession) persist(ctx context.Context) {
 	s.mu.RLock()
 	record := spawnTaskJournalRecord{
 		Parent:           s.parent.Ref,
+		Workspace:        s.parent.Workspace,
 		TurnID:           s.turnID,
 		Agent:            s.agent,
 		RemoteSessionID:  s.remoteSessionID,
@@ -504,6 +676,13 @@ func (s *spawnTaskSession) persist(ctx context.Context) {
 	}
 	s.mu.RUnlock()
 	_ = s.manager.journal.write(ctx, record)
+}
+
+func (s *spawnTaskSession) supportsInputLocked() bool {
+	if s == nil || s.running {
+		return false
+	}
+	return strings.TrimSpace(s.remoteSessionID) != "" && strings.TrimSpace(s.cfg.Command) != ""
 }
 
 func (s *spawnTaskSession) appendOutputLocked(text string) {
