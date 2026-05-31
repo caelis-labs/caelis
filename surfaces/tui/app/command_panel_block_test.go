@@ -311,6 +311,47 @@ func TestCommandPanelBlockRendersModelSelectionActions(t *testing.T) {
 	if action.prompt == nil || action.prompt.buildLine("run") != "/model del alpha" {
 		t.Fatalf("model delete action = %#v, want confirmation prompt", action)
 	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ModelSelection: &panel}, "/model use gamma"); action.line != "" || action.fillInput != "/model use gamma" {
+		t.Fatalf("unknown model use action = %#v, want fill input instead of broad submit", action)
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ModelSelection: &panel}, "/connect missing"); action.line != "" || action.fillInput != "/connect missing" {
+		t.Fatalf("unknown connect action = %#v, want fill input instead of broad submit", action)
+	}
+}
+
+func TestCommandPanelBlockRendersConnectProviderActions(t *testing.T) {
+	panel := appviewmodel.ModelConnectView{
+		Providers: []appviewmodel.ModelConnectProvider{{
+			ID:                   "xiaomi",
+			Label:                "xiaomi",
+			Provider:             "xiaomi",
+			Command:              "/connect xiaomi ",
+			TokenEnv:             "XIAOMI_API_KEY",
+			ConfiguredModelCount: 1,
+			CatalogModelCount:    5,
+		}},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command:           "connect",
+		ModelConnectPanel: &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"CONNECT", "Model Setup", "xiaomi", "/connect xiaomi"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered connect panel = %q, missing %q", plain, want)
+		}
+	}
+	if !rowsContainCommandPanelInput(rows, "/connect xiaomi ") {
+		t.Fatalf("connect provider row missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ModelConnectPanel: &panel}, "/connect xiaomi "); action.fillInput != "/connect xiaomi " {
+		t.Fatalf("connect provider action = %#v, want provider command fill input", action)
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ModelConnectPanel: &panel}, "/connect unknown"); action.fillInput != "/connect unknown" {
+		t.Fatalf("unknown connect provider action = %#v, want fill input without surface-local command expansion", action)
+	}
 }
 
 func TestCommandPanelBlockRendersAgentManagementActions(t *testing.T) {

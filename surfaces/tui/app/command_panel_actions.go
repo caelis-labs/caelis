@@ -94,7 +94,7 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 	case view.ControllerPanel != nil:
 		return controllerCommandPanelAction(*view.ControllerPanel, input)
 	case view.ModelConnectPanel != nil:
-		return commandPanelAction{fillInput: input + " "}
+		return connectCommandPanelAction(*view.ModelConnectPanel, input)
 	case view.AgentManagement != nil:
 		return agentCommandPanelAction(*view.AgentManagement, input)
 	default:
@@ -233,29 +233,16 @@ func modelSelectionCommandPanelAction(panel appviewmodel.ModelSelectionView, inp
 		}
 		return commandPanelAction{line: command}
 	}
-	if modelRef, ok := strings.CutPrefix(input, "/model use "); ok {
-		modelRef = strings.TrimSpace(modelRef)
-		if modelRef != "" {
-			return commandPanelAction{line: "/model use " + modelRef}
+	return commandPanelAction{fillInput: input}
+}
+
+func connectCommandPanelAction(panel appviewmodel.ModelConnectView, input string) commandPanelAction {
+	for _, provider := range panel.Providers {
+		command := strings.TrimSpace(provider.Command)
+		if command == "" || command != input {
+			continue
 		}
-	}
-	if modelRef, ok := strings.CutPrefix(input, "/model del "); ok {
-		modelRef = strings.TrimSpace(modelRef)
-		if modelRef != "" {
-			choice, _ := findModelSelectionChoice(panel, modelRef)
-			return commandPanelAction{prompt: confirmCommandPanelPrompt(
-				"Delete model?",
-				"Confirm model delete",
-				[]PromptDetail{
-					{Label: "Model", Value: firstNonEmpty(modelRef, modelChoiceLabel(choice)), Emphasis: true},
-					{Label: "Provider", Value: strings.TrimSpace(choice.Provider)},
-				},
-				"/model del "+modelRef,
-			)}
-		}
-	}
-	if strings.EqualFold(input, "/connect") {
-		return commandPanelAction{line: "/connect"}
+		return commandPanelAction{fillInput: commandPanelEnsureTrailingSpace(command)}
 	}
 	return commandPanelAction{fillInput: input}
 }
@@ -629,18 +616,6 @@ func findSettingsPanelAction(actions []appviewmodel.SettingsPanelAction, id stri
 		}
 	}
 	return appviewmodel.SettingsPanelAction{}, false
-}
-
-func findModelSelectionChoice(panel appviewmodel.ModelSelectionView, id string) (appviewmodel.ModelChoice, bool) {
-	id = strings.TrimSpace(id)
-	for _, choice := range panel.Configured {
-		for _, candidate := range []string{choice.ID, choice.Alias, choice.Model} {
-			if modelSelectionIDsMatch(candidate, id) {
-				return choice, true
-			}
-		}
-	}
-	return appviewmodel.ModelChoice{}, false
 }
 
 func agentPanelAllActions(panel appviewmodel.AgentManagementView) []appviewmodel.AgentManagementAction {

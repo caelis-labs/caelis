@@ -1644,6 +1644,11 @@ be migrated before retiring the old stack:
    - Migrated baseline: approval panel mode choices and actions expose shared
      command strings, and TUI approval panels now submit only commands present
      in that payload instead of accepting arbitrary approval-panel input.
+   - Migrated baseline: model selection and model-connect panels now expose
+     stable shared command strings for configured-model actions and provider
+     setup rows. TUI click handling consumes those commands from the
+     view-model payload instead of deriving `/model use`, `/model del`, or
+     `/connect <provider>` syntax from row ids.
    - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
      transcript action descriptors for task-backed tool entries, derived from
      canonical runtime task metadata and expressed as shared slash commands.
@@ -2576,8 +2581,8 @@ Recommended sequence:
    now baseline runtime capabilities.
 4. Port the remaining richer interactive flows to `internal/app/services`,
    especially any product actions not yet represented by shared settings, task,
-   controller, or resume panel payloads while preserving rendering as
-   surface-local code.
+   controller, resume, model-selection, or model-connect panel payloads while
+   preserving rendering as surface-local code.
 5. Expand shared APP view models for transcript actions beyond the current
    task-backed command descriptors.
 7. Finish remaining canonical-event round trips for compaction edge cases and

@@ -55,6 +55,7 @@ func (s ModelService) connectProviderViews(ctx context.Context, choices []appset
 			Label:                label,
 			Provider:             provider,
 			API:                  strings.TrimSpace(string(tpl.API)),
+			Command:              connectProviderCommand(provider),
 			Description:          strings.TrimSpace(tpl.Description),
 			DefaultBaseURL:       strings.TrimSpace(tpl.DefaultBaseURL),
 			DefaultEndpointID:    strings.TrimSpace(tpl.DefaultEndpointID),
@@ -68,6 +69,14 @@ func (s ModelService) connectProviderViews(ctx context.Context, choices []appset
 		})
 	}
 	return out
+}
+
+func connectProviderCommand(provider string) string {
+	provider = strings.TrimSpace(provider)
+	if provider == "" {
+		return ""
+	}
+	return "/connect " + provider + " "
 }
 
 func (s ModelService) connectEndpointViews(ctx context.Context, tpl ConnectProviderTemplate) []appviewmodel.ModelConnectEndpoint {
@@ -177,6 +186,9 @@ func formatConnectProviderLine(provider appviewmodel.ModelConnectProvider) strin
 	}
 	if provider.CatalogModelCount > 0 {
 		details = append(details, fmt.Sprintf("%d suggested", provider.CatalogModelCount))
+	}
+	if command := strings.TrimSpace(provider.Command); command != "" {
+		details = append(details, command)
 	}
 	if len(details) > 0 {
 		parts = append(parts, "("+strings.Join(details, " · ")+")")

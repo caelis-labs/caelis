@@ -35,6 +35,7 @@ type ModelConnectProvider struct {
 	Label                string                 `json:"label,omitempty"`
 	Provider             string                 `json:"provider,omitempty"`
 	API                  string                 `json:"api,omitempty"`
+	Command              string                 `json:"command,omitempty"`
 	Description          string                 `json:"description,omitempty"`
 	DefaultBaseURL       string                 `json:"default_base_url,omitempty"`
 	DefaultEndpointID    string                 `json:"default_endpoint_id,omitempty"`

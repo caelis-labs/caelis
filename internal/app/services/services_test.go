@@ -5497,6 +5497,9 @@ func TestModelServiceConnectPanelProjectsSharedSetup(t *testing.T) {
 	if !ok || !xiaomi.Configured || xiaomi.ConfiguredModelCount != 1 || xiaomi.TokenEnv != "XIAOMI_API_KEY" || len(xiaomi.Endpoints) != 2 {
 		t.Fatalf("xiaomi provider = %#v ok=%v, want configured provider with endpoints", xiaomi, ok)
 	}
+	if xiaomi.Command != "/connect xiaomi " {
+		t.Fatalf("xiaomi command = %q, want shared provider setup command", xiaomi.Command)
+	}
 	tokenPlan, ok := findConnectEndpoint(xiaomi.Endpoints, "token-plan-cn")
 	if !ok || tokenPlan.TokenEnv != "MIMO_TOKEN_PLAN_API_KEY" || !tokenPlan.ReusableAuth {
 		t.Fatalf("token plan endpoint = %#v ok=%v, want reusable auth endpoint", tokenPlan, ok)

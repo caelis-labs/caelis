@@ -588,14 +588,19 @@ func approvalPanelClickHints(panel appviewmodel.ApprovalPanelView) []commandPane
 
 func modelSelectionClickHints(panel appviewmodel.ModelSelectionView) []commandPanelClickHint {
 	var hints []commandPanelClickHint
+	useCommands := map[string]string{}
 	for _, action := range panel.Actions {
-		if !action.Enabled || strings.TrimSpace(action.Command) == "" {
+		command := strings.TrimSpace(action.Command)
+		if !action.Enabled || command == "" {
 			continue
 		}
 		hints = append(hints, commandPanelClickHint{
 			Needle: firstNonEmpty(action.ID, action.Label, action.ModelID),
-			Input:  strings.TrimSpace(action.Command),
+			Input:  command,
 		})
+		if strings.EqualFold(strings.TrimSpace(action.Kind), "use") && strings.TrimSpace(action.ModelID) != "" {
+			useCommands[strings.ToLower(strings.TrimSpace(action.ModelID))] = command
+		}
 	}
 	currentID := modelSelectionCurrentID(panel)
 	for _, choice := range panel.Configured {
@@ -603,12 +608,29 @@ func modelSelectionClickHints(panel appviewmodel.ModelSelectionView) []commandPa
 		if modelID == "" || modelSelectionIDsMatch(modelID, currentID) {
 			continue
 		}
+		input := modelSelectionChoiceInput(choice, useCommands)
+		if strings.TrimSpace(input) == "" {
+			continue
+		}
 		hints = append(hints, commandPanelClickHint{
 			Needle: firstNonEmpty(choice.ID, choice.Alias, choice.Model),
-			Input:  "/model use " + modelID,
+			Input:  input,
 		})
 	}
 	return hints
+}
+
+func modelSelectionChoiceInput(choice appviewmodel.ModelChoice, useCommands map[string]string) string {
+	for _, id := range []string{choice.ID, choice.Alias, choice.Model} {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id == "" {
+			continue
+		}
+		if command := strings.TrimSpace(useCommands[id]); command != "" {
+			return command
+		}
+	}
+	return ""
 }
 
 func controllerPanelClickHints(panel appviewmodel.ControllerPanelView) []commandPanelClickHint {
@@ -651,14 +673,14 @@ func controllerPanelActionClickHint(action appviewmodel.ControllerPanelAction) [
 func connectPanelClickHints(panel appviewmodel.ModelConnectView) []commandPanelClickHint {
 	hints := make([]commandPanelClickHint, 0, len(panel.Providers))
 	for _, provider := range panel.Providers {
-		providerID := firstNonEmpty(provider.Provider, provider.ID)
+		command := provider.Command
 		label := firstNonEmpty(provider.Label, provider.Provider, provider.ID)
-		if providerID == "" || label == "" {
+		if strings.TrimSpace(command) == "" || label == "" {
 			continue
 		}
 		hints = append(hints, commandPanelClickHint{
 			Needle: label,
-			Input:  "/connect " + providerID + " ",
+			Input:  command,
 		})
 	}
 	return hints
@@ -1293,6 +1315,9 @@ func connectPanelProviderLine(provider appviewmodel.ModelConnectProvider, width 
 		details = append(details, "env:"+provider.TokenEnv)
 	} else if provider.NoAuthRequired {
 		details = append(details, "no auth")
+	}
+	if command := strings.TrimSpace(provider.Command); command != "" {
+		details = append(details, command)
 	}
 	plain := "  " + label
 	if len(details) > 0 {
