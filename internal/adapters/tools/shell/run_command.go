@@ -118,6 +118,7 @@ func (t *RunCommandTool) Call(ctx context.Context, call tool.Call) (tool.Result,
 		},
 		Content: []model.Part{model.NewTextPart(formatCommandResult(result, runErr))},
 	}
+	addSandboxExecutionMeta(out.Meta, t.Sandbox, constraints, result)
 	addPermissionMeta(out.Meta, permission, input.Justification)
 	if runErr != nil && ctx.Err() != nil {
 		return out, runErr
@@ -137,6 +138,7 @@ func (t *RunCommandTool) callAsync(ctx context.Context, call tool.Call, input ru
 		return tool.Result{}, err
 	}
 	result, err := SessionResult(ctx, call, RunCommandToolName, "start", session, sandbox.OutputCursor{}, time.Duration(input.YieldTimeMS)*time.Millisecond)
+	addSandboxExecutionMeta(result.Meta, t.Sandbox, constraints, sandbox.CommandResult{Backend: session.Ref().Backend})
 	addPermissionMeta(result.Meta, permission, input.Justification)
 	return result, err
 }

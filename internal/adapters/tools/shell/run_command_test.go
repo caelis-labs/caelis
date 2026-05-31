@@ -41,6 +41,14 @@ func TestRunCommandToolExecutesThroughSandbox(t *testing.T) {
 	if len(result.Content) != 1 || result.Content[0].Text == nil || !strings.Contains(result.Content[0].Text.Text, "hello") {
 		t.Fatalf("result content = %#v, want stdout text", result.Content)
 	}
+	sandboxMeta := runtimeSandboxMeta(t, result.Meta)
+	if sandboxMeta["route"] != "host" || sandboxMeta["backend"] != "host" ||
+		sandboxMeta["permission"] != "danger_full_access" || sandboxMeta["network"] != "inherit" {
+		t.Fatalf("sandbox meta = %#v, want host execution policy", sandboxMeta)
+	}
+	if !sandboxDiagnosticKind(sandboxMeta, "route") {
+		t.Fatalf("sandbox meta = %#v, want host route diagnostic", sandboxMeta)
+	}
 }
 
 func TestRunCommandToolReturnsModelVisibleCommandFailures(t *testing.T) {
@@ -97,6 +105,11 @@ func TestRunCommandToolMapsEscalationToHostConstraints(t *testing.T) {
 	if result.Meta["sandbox_permissions"] != string(sandbox.PermissionRequestRequireEscalated) ||
 		result.Meta["justification"] != "create the requested commit" {
 		t.Fatalf("result meta = %#v, want escalation metadata", result.Meta)
+	}
+	sandboxMeta := runtimeSandboxMeta(t, result.Meta)
+	if sandboxMeta["route"] != "host" || sandboxMeta["backend"] != "host" ||
+		sandboxMeta["permission"] != "danger_full_access" || sandboxMeta["isolation"] != "host" {
+		t.Fatalf("sandbox meta = %#v, want escalated host policy", sandboxMeta)
 	}
 }
 
@@ -158,4 +171,34 @@ func (r *recordingRuntime) Open(context.Context, sandbox.SessionRef) (sandbox.Se
 
 func (r *recordingRuntime) Close() error {
 	return nil
+}
+
+func runtimeSandboxMeta(t *testing.T, meta map[string]any) map[string]any {
+	t.Helper()
+	caelis, ok := meta["caelis"].(map[string]any)
+	if !ok {
+		t.Fatalf("meta = %#v, missing caelis runtime metadata", meta)
+	}
+	runtimeMeta, ok := caelis["runtime"].(map[string]any)
+	if !ok {
+		t.Fatalf("caelis meta = %#v, missing runtime metadata", caelis)
+	}
+	sandboxMeta, ok := runtimeMeta["sandbox"].(map[string]any)
+	if !ok {
+		t.Fatalf("runtime meta = %#v, missing sandbox metadata", runtimeMeta)
+	}
+	return sandboxMeta
+}
+
+func sandboxDiagnosticKind(meta map[string]any, kind string) bool {
+	items, ok := meta["diagnostics"].([]map[string]string)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		if item["kind"] == kind {
+			return true
+		}
+	}
+	return false
 }

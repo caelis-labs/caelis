@@ -1846,10 +1846,9 @@ be migrated before retiring the old stack:
      policy gaps, and root-policy gaps. Settings-panel diagnostics and CLI
      `/doctor`/`sandbox` output now consume that single service contract instead
      of recomputing sandbox warnings per surface.
-   - Still pending: command-result-level network/root diagnostics, production
-     doctor repair reporting, and cross-platform validation of the Windows
-     restricted-token async session API after the core-native session contract
-     migration.
+   - Still pending: production doctor repair reporting and cross-platform
+     validation of the Windows restricted-token async session API after the
+     core-native session contract migration.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
@@ -1869,6 +1868,14 @@ be migrated before retiring the old stack:
      maps that request to `core/sandbox.HostExecutionConstraints`, and records
      the escalation metadata in the tool result instead of relying on old
      policy-preset command parsing.
+   - Migrated baseline: `run_command` and async task session results now carry
+     command-level sandbox policy metadata under `caelis.runtime.sandbox` and
+     session snapshot metadata. Results include route, backend, permission,
+     isolation, network, backend network/path-policy capabilities, requested
+     path-rule counts, and normalized diagnostics for host execution, network
+     control gaps, and path-policy gaps. The `task` tool receives that metadata
+     through restored host session snapshots instead of recomputing policy
+     details in the surface.
    - Migrated baseline: `task list/tail/wait` can operate on host async command
      sessions restored from the sandbox journal after a runtime restart, giving
      shell tasks a durable output-buffer baseline without reintroducing the old
@@ -2315,8 +2322,8 @@ Recommended sequence:
    diagnostics, and visual settings/diagnostics editors.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
-3. Finish sandbox backend cleanup and remaining command-level permission-policy
-   diagnostics without reintroducing the removed router/preset/tool stacks.
+3. Finish sandbox backend cleanup and production doctor repair reporting
+   without reintroducing the removed router/preset/tool stacks.
 4. Finish richer durable task metadata and terminal preview behavior behind
    `core/tool.Registry`; host process and SPAWN continuation are now baseline
    runtime capabilities.

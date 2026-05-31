@@ -74,6 +74,12 @@ func TestRuntimeStartSupportsAsyncOutputInputAndCancel(t *testing.T) {
 	if !snapshot.Running || !snapshot.SupportsInput || snapshot.State != sandbox.SessionRunning {
 		t.Fatalf("snapshot = %#v, want running input-capable session", snapshot)
 	}
+	if snapshot.Metadata["sandbox_route"] != string(sandbox.RouteHost) ||
+		snapshot.Metadata["sandbox_backend"] != string(sandbox.BackendHost) ||
+		snapshot.Metadata["sandbox_permission"] != string(sandbox.PermissionFullAccess) ||
+		snapshot.Metadata["sandbox_network"] != string(sandbox.NetworkInherit) {
+		t.Fatalf("snapshot metadata = %#v, want host sandbox policy metadata", snapshot.Metadata)
+	}
 	if err := session.Cancel(context.Background()); err != nil {
 		t.Fatal(err)
 	}

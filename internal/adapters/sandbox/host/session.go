@@ -411,7 +411,7 @@ func (s *commandSession) result() sandbox.CommandResult {
 }
 
 func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
-	metadata := map[string]any{}
+	metadata := hostSessionSandboxMetadata(s.req)
 	if s.pid > 0 {
 		metadata["pid"] = s.pid
 	}
@@ -431,6 +431,37 @@ func (s *commandSession) snapshotLocked() sandbox.SessionSnapshot {
 		UpdatedAt:     s.updatedAt,
 		Terminal:      s.terminal,
 		Metadata:      metadata,
+	}
+}
+
+func hostSessionSandboxMetadata(req sandbox.CommandRequest) map[string]any {
+	constraints := sandbox.NormalizeConstraints(req.Constraints)
+	permission := constraints.Permission
+	if permission == "" {
+		permission = sandbox.PermissionFullAccess
+	}
+	network := constraints.Network
+	if network == "" {
+		network = sandbox.NetworkInherit
+	}
+	isolation := constraints.Isolation
+	if isolation == "" {
+		isolation = sandbox.IsolationHost
+	}
+	route := constraints.Route
+	if route == "" {
+		route = sandbox.RouteHost
+	}
+	backend := constraints.Backend
+	if backend == "" {
+		backend = sandbox.BackendHost
+	}
+	return map[string]any{
+		"sandbox_route":      string(route),
+		"sandbox_backend":    string(backend),
+		"sandbox_permission": string(permission),
+		"sandbox_isolation":  string(isolation),
+		"sandbox_network":    string(network),
 	}
 }
 
