@@ -272,6 +272,72 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverExecuteCommandRoutesThroughStackAndAdoptsReturnedSession(t *testing.T) {
+	ctx := context.Background()
+	workspace := t.TempDir()
+	commandSession := coresession.Ref{
+		AppName:      "caelis",
+		UserID:       "user-1",
+		SessionID:    "cmd-session",
+		WorkspaceKey: "ws",
+	}
+	type commandCall struct {
+		ref   session.SessionRef
+		input string
+		parts []model.ContentPart
+	}
+	var calls []commandCall
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		Workspace: session.WorkspaceRef{Key: "ws", CWD: workspace},
+		ExecuteCommandFn: func(_ context.Context, ref session.SessionRef, input string, parts []model.ContentPart) (CommandExecutionView, error) {
+			calls = append(calls, commandCall{
+				ref:   ref,
+				input: input,
+				parts: append([]model.ContentPart(nil), parts...),
+			})
+			view := CommandExecutionView{
+				Handled: true,
+				Command: strings.TrimPrefix(input, "/"),
+				Output:  "ok",
+			}
+			if len(calls) == 1 {
+				view.SessionRef = &commandSession
+			}
+			return view, nil
+		},
+	}, "", "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "  /new  "}); err != nil {
+		t.Fatalf("ExecuteCommand(/new) error = %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("command calls = %d, want 1", len(calls))
+	}
+	if calls[0].input != "/new" || calls[0].ref.SessionID != "" || len(calls[0].parts) != 0 {
+		t.Fatalf("first command call = %#v, want trimmed /new without active session or parts", calls[0])
+	}
+	status, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.SessionID != "cmd-session" {
+		t.Fatalf("Status().SessionID = %q, want command-returned session", status.SessionID)
+	}
+
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/doctor"}); err != nil {
+		t.Fatalf("ExecuteCommand(/doctor) error = %v", err)
+	}
+	if len(calls) != 2 {
+		t.Fatalf("command calls = %d, want 2", len(calls))
+	}
+	if calls[1].input != "/doctor" || calls[1].ref.SessionID != "cmd-session" {
+		t.Fatalf("second command call = %#v, want active command session", calls[1])
+	}
+}
+
 func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	ctx := context.Background()
 	statusCalls := 0

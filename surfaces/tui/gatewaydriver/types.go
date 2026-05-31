@@ -3,6 +3,7 @@ package gatewaydriver
 import (
 	"errors"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
@@ -39,21 +40,44 @@ type CustomAgentConfig = tuidriver.CustomAgentConfig
 
 type ConnectConfig = tuidriver.ConnectConfig
 
-type TaskListView = tuidriver.TaskListView
+type CommandExecutionOptions = tuidriver.CommandExecutionOptions
 
-type TaskItem = tuidriver.TaskItem
+type CommandExecutionView = tuidriver.CommandExecutionView
 
-type TaskOutputView = tuidriver.TaskOutputView
+type TaskListView = appviewmodel.TaskListView
 
-type TaskListOptions = tuidriver.TaskListOptions
+type TaskItem = appviewmodel.TaskItem
 
-type TaskOutputOptions = tuidriver.TaskOutputOptions
+type TaskOutputView = appviewmodel.TaskOutputView
 
-type TaskStartOptions = tuidriver.TaskStartOptions
+type TaskListOptions struct {
+	Limit          int
+	IncludeHistory bool
+}
 
-type TaskWaitOptions = tuidriver.TaskWaitOptions
+type TaskOutputOptions struct {
+	TaskID       string
+	StdoutCursor int64
+	StderrCursor int64
+}
 
-type TaskWriteOptions = tuidriver.TaskWriteOptions
+type TaskStartOptions struct {
+	Command string
+	Args    []string
+	Dir     string
+	Env     map[string]string
+}
+
+type TaskWaitOptions struct {
+	TaskOutputOptions
+	YieldTimeMS int
+}
+
+type TaskWriteOptions struct {
+	TaskOutputOptions
+	Input       string
+	YieldTimeMS int
+}
 
 type Turn = tuidriver.Turn
 

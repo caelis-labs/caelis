@@ -42,6 +42,13 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.AppStatusViewFn = func(ctx context.Context, ref portsession.SessionRef) (appviewmodel.StatusView, error) {
 		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: coreRefFromPort(ref)})
 	}
+	stack.ExecuteCommandFn = func(ctx context.Context, ref portsession.SessionRef, input string, parts []coremodel.ContentPart) (CommandExecutionView, error) {
+		return svc.Commands().Execute(ctx, appservices.CommandExecutionRequest{
+			SessionRef:   coreRefFromPort(ref),
+			Input:        input,
+			ContentParts: coremodel.CloneContentParts(parts),
+		})
+	}
 	stack.SandboxStatusFn = func() SandboxStatus {
 		status, err := svc.Sandbox().Status(context.Background())
 		if err != nil {

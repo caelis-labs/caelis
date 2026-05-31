@@ -171,50 +171,12 @@ type ConnectConfig struct {
 	ReasoningLevels     []string
 }
 
-type TaskListView = appviewmodel.TaskListView
-
-type TaskItem = appviewmodel.TaskItem
-
-type TaskOutputView = appviewmodel.TaskOutputView
-
-type TaskListOptions struct {
-	Limit          int
-	IncludeHistory bool
-}
-
-type TaskOutputOptions struct {
-	TaskID       string
-	StdoutCursor int64
-	StderrCursor int64
-}
-
-type TaskStartOptions struct {
-	Command string
-	Args    []string
-	Dir     string
-	Env     map[string]string
-}
-
-type TaskWaitOptions struct {
-	TaskOutputOptions
-	YieldTimeMS int
-}
-
-type TaskWriteOptions struct {
-	TaskOutputOptions
+type CommandExecutionOptions struct {
 	Input       string
-	YieldTimeMS int
+	Attachments []Attachment
 }
 
-type TaskController interface {
-	ListTasks(context.Context, TaskListOptions) (TaskListView, error)
-	TailTask(context.Context, TaskOutputOptions) (TaskOutputView, error)
-	StartTask(context.Context, TaskStartOptions) (TaskOutputView, error)
-	WaitTask(context.Context, TaskWaitOptions) (TaskOutputView, error)
-	WriteTask(context.Context, TaskWriteOptions) (TaskOutputView, error)
-	CancelTask(context.Context, TaskOutputOptions) (TaskOutputView, error)
-	ReleaseTask(context.Context, TaskOutputOptions) error
-}
+type CommandExecutionView = appviewmodel.CommandExecutionView
 
 type Turn interface {
 	HandleID() string
@@ -234,6 +196,7 @@ type Driver interface {
 
 	Submit(context.Context, Submission) (Turn, error)
 	Interrupt(context.Context) error
+	ExecuteCommand(context.Context, CommandExecutionOptions) (CommandExecutionView, error)
 
 	NewSession(context.Context) (session.Session, error)
 	ResumeSession(context.Context, string) (session.Session, error)

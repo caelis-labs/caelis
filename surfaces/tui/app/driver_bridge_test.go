@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
@@ -346,57 +347,38 @@ func TestDefaultCommandsAreRecognizedByDispatch(t *testing.T) {
 	}
 }
 
-func TestSlashTaskListUsesTaskController(t *testing.T) {
+func TestSlashTaskListUsesSharedCommandExecutor(t *testing.T) {
 	driver := &bridgeTestDriver{
-		taskList: tuidriver.TaskListView{
-			Supported: true,
-			Count:     1,
-			Tasks: []tuidriver.TaskItem{{
-				ID:      "task-1",
-				Kind:    "subagent",
-				Source:  "history",
-				Title:   "SPAWN reviewer",
-				State:   "running",
-				Running: true,
-			}},
-		},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "task", Output: "tasks:\n  task-1  running  SPAWN reviewer  source=history"},
 	}
 	var msgs []tea.Msg
 	result := dispatchSlashCommand(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, "/task list")
-	if !result.SuppressTurnDivider || driver.taskListCalls != 1 || !driver.taskListOptions.IncludeHistory {
-		t.Fatalf("task list result = %#v calls=%d opts=%#v, want handled history-aware list", result, driver.taskListCalls, driver.taskListOptions)
+	if !result.SuppressTurnDivider || driver.commandCalls != 1 || driver.lastCommandInput != "/task list" {
+		t.Fatalf("task list result = %#v calls=%d input=%q, want shared command execution", result, driver.commandCalls, driver.lastCommandInput)
 	}
 	if !noticeMessagesContain(msgs, "task-1") || !noticeMessagesContain(msgs, "SPAWN reviewer") || !noticeMessagesContain(msgs, "source=history") {
 		t.Fatalf("task list messages = %#v, want task summary", msgs)
 	}
 }
 
-func TestSlashTaskControlsUseTaskController(t *testing.T) {
+func TestSlashTaskControlsUseSharedCommandExecutor(t *testing.T) {
 	driver := &bridgeTestDriver{
-		taskOutput: tuidriver.TaskOutputView{
-			Task: tuidriver.TaskItem{
-				ID:      "task-1",
-				Title:   "Echo Task",
-				State:   "running",
-				Running: true,
-			},
-			Stdout: "ready\n",
-		},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "task", Output: "task task-1: running\n  title: Echo Task\n  stdout:\n    ready"},
 	}
 	var msgs []tea.Msg
 	send := func(msg tea.Msg) { msgs = append(msgs, msg) }
 
 	waited := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/task wait task-1 2s")
-	if waited.Err != nil || driver.taskWaitCalls != 1 || driver.taskWaitOptions.TaskID != "task-1" || driver.taskWaitOptions.YieldTimeMS != 2000 {
-		t.Fatalf("task wait result=%#v calls=%d opts=%#v, want wait task-1 2s", waited, driver.taskWaitCalls, driver.taskWaitOptions)
+	if waited.Err != nil || driver.commandCalls != 1 || driver.lastCommandInput != "/task wait task-1 2s" {
+		t.Fatalf("task wait result=%#v calls=%d input=%q, want shared task wait command", waited, driver.commandCalls, driver.lastCommandInput)
 	}
 	wrote := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/task write task-1 -- ping")
-	if wrote.Err != nil || driver.taskWriteCalls != 1 || driver.taskWriteOptions.TaskID != "task-1" || driver.taskWriteOptions.Input != "ping" {
-		t.Fatalf("task write result=%#v calls=%d opts=%#v, want write ping", wrote, driver.taskWriteCalls, driver.taskWriteOptions)
+	if wrote.Err != nil || driver.commandCalls != 2 || driver.lastCommandInput != "/task write task-1 -- ping" {
+		t.Fatalf("task write result=%#v calls=%d input=%q, want shared task write command", wrote, driver.commandCalls, driver.lastCommandInput)
 	}
 	cancelled := dispatchSlashCommand(driver, &ProgramSender{Send: send}, "/task cancel task-1")
-	if cancelled.Err != nil || driver.taskCancelCalls != 1 || driver.taskOutputOptions.TaskID != "task-1" {
-		t.Fatalf("task cancel result=%#v calls=%d opts=%#v, want cancel task-1", cancelled, driver.taskCancelCalls, driver.taskOutputOptions)
+	if cancelled.Err != nil || driver.commandCalls != 3 || driver.lastCommandInput != "/task cancel task-1" {
+		t.Fatalf("task cancel result=%#v calls=%d input=%q, want shared task cancel command", cancelled, driver.commandCalls, driver.lastCommandInput)
 	}
 	if !noticeMessagesContain(msgs, "ready") || !noticeMessagesContain(msgs, "Echo Task") {
 		t.Fatalf("task control messages = %#v, want task output", msgs)
@@ -1825,17 +1807,7 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 
 func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
-			SessionID:               "sess-1",
-			Provider:                "openai",
-			ModelName:               "gpt-5.5",
-			StoreDir:                "/tmp/.caelis",
-			SandboxRequestedBackend: "seatbelt",
-			SandboxResolvedBackend:  "host",
-			Route:                   "host",
-			HostExecution:           true,
-			MissingAPIKey:           true,
-		},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "doctor", Output: "doctor:\n  warn provider key missing - run /connect\n  ok session store: /tmp/.caelis\n  ok session: sess-1\n  warn sandbox: host"},
 	}
 	var msgs []tea.Msg
 	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
@@ -1844,6 +1816,9 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 	}
 	if len(msgs) != 1 {
 		t.Fatalf("slashDoctorWithContext() emitted %d messages, want 1", len(msgs))
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/doctor" {
+		t.Fatalf("doctor command calls=%d input=%q, want shared /doctor command", driver.commandCalls, driver.lastCommandInput)
 	}
 	log, ok := msgs[0].(LogChunkMsg)
 	if !ok {
@@ -1858,22 +1833,18 @@ func TestSlashDoctorShowsReadinessChecklist(t *testing.T) {
 
 func TestSlashDoctorFixRepairsSandbox(t *testing.T) {
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
-			SandboxRequestedBackend: "windows",
-			SandboxResolvedBackend:  "windows",
-			Route:                   "sandbox",
-		},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "doctor", Output: "sandbox repair complete\n\ndoctor:\n  ok sandbox: windows"},
 	}
 	var msgs []tea.Msg
 	result := slashDoctorWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "fix")
 	if result.Err != nil {
 		t.Fatalf("slashDoctorWithContext(fix) error = %v", result.Err)
 	}
-	if driver.repairSandboxCalls != 1 {
-		t.Fatalf("repairSandboxCalls = %d, want 1", driver.repairSandboxCalls)
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/doctor fix" {
+		t.Fatalf("doctor fix command calls=%d input=%q, want shared /doctor fix command", driver.commandCalls, driver.lastCommandInput)
 	}
-	if !noticeMessagesContain(msgs, "Windows sandbox repair started") || !noticeMessagesContain(msgs, "Windows sandbox repair complete") {
-		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want start and complete notices", msgs)
+	if !noticeMessagesContain(msgs, "sandbox repair complete") || !noticeMessagesContain(msgs, "ok sandbox: windows") {
+		t.Fatalf("slashDoctorWithContext(fix) messages = %#v, want shared doctor output", msgs)
 	}
 }
 
@@ -1970,20 +1941,11 @@ type bridgeTestDriver struct {
 	agentStatus              tuidriver.AgentStatusSnapshot
 	addAgentErr              error
 	slashArgCandidates       map[string][]tuidriver.SlashArgCandidate
-	taskList                 tuidriver.TaskListView
-	taskOutput               tuidriver.TaskOutputView
-	taskListOptions          tuidriver.TaskListOptions
-	taskOutputOptions        tuidriver.TaskOutputOptions
-	taskStartOptions         tuidriver.TaskStartOptions
-	taskWaitOptions          tuidriver.TaskWaitOptions
-	taskWriteOptions         tuidriver.TaskWriteOptions
-	taskListCalls            int
-	taskTailCalls            int
-	taskStartCalls           int
-	taskWaitCalls            int
-	taskWriteCalls           int
-	taskCancelCalls          int
-	taskReleaseCalls         int
+	commandView              tuidriver.CommandExecutionView
+	commandViews             map[string]tuidriver.CommandExecutionView
+	commandErr               error
+	commandCalls             int
+	lastCommandInput         string
 }
 
 type bridgeLightweightStatusDriver struct {
@@ -2072,6 +2034,9 @@ func (d *bridgeSubmitDriver) SubscribeStream(context.Context, kernel.EventEnvelo
 	return d.terminalEvents, true
 }
 func (d *bridgeSubmitDriver) Interrupt(context.Context) error { return nil }
+func (d *bridgeSubmitDriver) ExecuteCommand(context.Context, tuidriver.CommandExecutionOptions) (tuidriver.CommandExecutionView, error) {
+	return tuidriver.CommandExecutionView{}, nil
+}
 func (d *bridgeSubmitDriver) NewSession(context.Context) (session.Session, error) {
 	return session.Session{}, nil
 }
@@ -2171,6 +2136,37 @@ func (d *bridgeTestDriver) Submit(context.Context, tuidriver.Submission) (tuidri
 	return nil, nil
 }
 func (d *bridgeTestDriver) Interrupt(context.Context) error { return nil }
+func (d *bridgeTestDriver) ExecuteCommand(_ context.Context, opts tuidriver.CommandExecutionOptions) (tuidriver.CommandExecutionView, error) {
+	d.commandCalls++
+	d.lastCommandInput = strings.TrimSpace(opts.Input)
+	if d.commandErr != nil {
+		return tuidriver.CommandExecutionView{}, d.commandErr
+	}
+	if d.commandViews != nil {
+		if view, ok := d.commandViews[d.lastCommandInput]; ok {
+			return view, nil
+		}
+	}
+	if strings.EqualFold(d.lastCommandInput, "/new") {
+		active, err := d.NewSession(context.Background())
+		if err != nil {
+			return tuidriver.CommandExecutionView{}, err
+		}
+		ref := coresession.Ref{
+			AppName:      active.AppName,
+			UserID:       active.UserID,
+			SessionID:    active.SessionID,
+			WorkspaceKey: active.WorkspaceKey,
+		}
+		return tuidriver.CommandExecutionView{
+			Handled:    true,
+			Command:    "new",
+			Output:     "new session: " + strings.TrimSpace(ref.SessionID),
+			SessionRef: &ref,
+		}, nil
+	}
+	return d.commandView, nil
+}
 func (d *bridgeTestDriver) NewSession(context.Context) (session.Session, error) {
 	return d.newSession, nil
 }
@@ -2320,46 +2316,4 @@ func (d *bridgeTestDriver) CompleteSlashArg(_ context.Context, command string, _
 		return d.slashArgCandidates[strings.TrimSpace(command)], nil
 	}
 	return nil, nil
-}
-
-func (d *bridgeTestDriver) ListTasks(_ context.Context, opts tuidriver.TaskListOptions) (tuidriver.TaskListView, error) {
-	d.taskListCalls++
-	d.taskListOptions = opts
-	return d.taskList, nil
-}
-
-func (d *bridgeTestDriver) TailTask(_ context.Context, opts tuidriver.TaskOutputOptions) (tuidriver.TaskOutputView, error) {
-	d.taskTailCalls++
-	d.taskOutputOptions = opts
-	return d.taskOutput, nil
-}
-
-func (d *bridgeTestDriver) StartTask(_ context.Context, opts tuidriver.TaskStartOptions) (tuidriver.TaskOutputView, error) {
-	d.taskStartCalls++
-	d.taskStartOptions = opts
-	return d.taskOutput, nil
-}
-
-func (d *bridgeTestDriver) WaitTask(_ context.Context, opts tuidriver.TaskWaitOptions) (tuidriver.TaskOutputView, error) {
-	d.taskWaitCalls++
-	d.taskWaitOptions = opts
-	return d.taskOutput, nil
-}
-
-func (d *bridgeTestDriver) WriteTask(_ context.Context, opts tuidriver.TaskWriteOptions) (tuidriver.TaskOutputView, error) {
-	d.taskWriteCalls++
-	d.taskWriteOptions = opts
-	return d.taskOutput, nil
-}
-
-func (d *bridgeTestDriver) CancelTask(_ context.Context, opts tuidriver.TaskOutputOptions) (tuidriver.TaskOutputView, error) {
-	d.taskCancelCalls++
-	d.taskOutputOptions = opts
-	return d.taskOutput, nil
-}
-
-func (d *bridgeTestDriver) ReleaseTask(_ context.Context, opts tuidriver.TaskOutputOptions) error {
-	d.taskReleaseCalls++
-	d.taskOutputOptions = opts
-	return nil
 }

@@ -569,8 +569,8 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Commands) != 9 {
-		t.Fatalf("commands = %#v, want nine core commands", view.Commands)
+	if len(view.Commands) != 10 {
+		t.Fatalf("commands = %#v, want ten core commands", view.Commands)
 	}
 	agent, ok := findCommandView(view.Commands, "agent")
 	if !ok || agent.InputHint != "use|add|install|list|remove" {
@@ -587,6 +587,9 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	doctor, ok := findCommandView(view.Commands, "doctor")
 	if !ok || doctor.InputHint != "[fix]" {
 		t.Fatalf("doctor command = %#v ok=%v, want doctor hint", doctor, ok)
+	}
+	if _, ok := findCommandView(view.Commands, "new"); !ok {
+		t.Fatalf("new command missing from %#v", view.Commands)
 	}
 }
 
@@ -675,6 +678,36 @@ func TestCommandServiceExecuteStatus(t *testing.T) {
 	}
 	if unhandled.Handled {
 		t.Fatalf("non-slash execution = %#v, want unhandled", unhandled)
+	}
+}
+
+func TestCommandServiceExecuteNewStartsSession(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/tmp/repo",
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/new"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Handled || view.Command != "new" || view.SessionRef == nil || view.SessionRef.SessionID != "sess-1" {
+		t.Fatalf("new execution = %#v, want started session ref", view)
+	}
+	if engine.start.AppName != "caelis" || engine.start.UserID != "tester" || engine.start.Workspace.Key != "repo" || engine.start.Workspace.CWD != "/tmp/repo" {
+		t.Fatalf("start request = %#v, want runtime identity/workspace", engine.start)
+	}
+	if !strings.Contains(view.Output, "new session: sess-1") {
+		t.Fatalf("new output = %q, want session id", view.Output)
 	}
 }
 

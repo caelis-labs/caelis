@@ -173,7 +173,11 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 }
 
 func (d *GatewayDriver) completeTaskIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	tasks, err := d.ListTasks(ctx, TaskListOptions{Limit: max(limit*4, limit), IncludeHistory: true})
+	var ref session.SessionRef
+	if active, ok := d.currentSession(); ok {
+		ref = active.SessionRef
+	}
+	tasks, err := d.stack.ListTasks(ctx, ref, TaskListOptions{Limit: max(limit*4, limit), IncludeHistory: true})
 	if err != nil || !tasks.Supported {
 		return nil, err
 	}

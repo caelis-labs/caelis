@@ -935,6 +935,10 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared task command baseline: `TaskService` is now reachable from both
   app-level command execution and the production TUI driver path for
   list/tail/wait/write/cancel/release/start task operations.
+- Shared session command baseline: `CommandService` now exposes `/new`, starts
+  sessions through the shared session service, and returns the canonical session
+  ref so TUI, ACP, CLI, and the future APP can adopt the same active session
+  transition without surface-local session-start semantics.
 - Shared doctor command baseline: `CommandService` now exposes `/doctor` and
   `/doctor fix` on top of shared status and sandbox lifecycle services, so APP,
   ACP, and CLI command surfaces can reuse diagnostics without importing TUI
@@ -1306,10 +1310,11 @@ be migrated before retiring the old stack:
      import the old agent or approval ports directly for cancel and approval
      DTOs; they consume the public kernel aliases while the remaining old
      ownership stays contained in the legacy kernel bridge.
-   - Migrated baseline: `/task` is now a service-native TUI command backed by a
-     narrow optional task-controller interface on the driver. The gatewaydriver
-     binds list/tail/wait/write/cancel/release/start to
-     `internal/app/services.TaskService`, and task-id completion reads the
+   - Migrated baseline: `/new`, `/doctor`, and `/task` now run through the
+     same service-backed TUI command executor instead of TUI-owned command
+     logic. The gatewaydriver converts TUI command submissions into core
+     content parts, calls `internal/app/services.CommandService`, adopts any
+     returned canonical session ref, and leaves task-id completion on the
      shared live/durable task list instead of surface-local task state.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
@@ -1376,7 +1381,7 @@ be migrated before retiring the old stack:
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
      `/connect`, `/status`, `/doctor`, `/compact`, `/model`, `/approval`,
-     `/resume`, `/task`, and dynamic `/<agent> <prompt>` participant
+     `/new`, `/resume`, `/task`, and dynamic `/<agent> <prompt>` participant
      invocation now share app-service behavior; remaining interactive commands
      can be added without making ACP, TUI, or APP surfaces own command
      semantics.
@@ -1450,8 +1455,9 @@ be migrated before retiring the old stack:
      publishes standard `available_commands_update` notifications after
      session new/load/resume using the shared command catalog.
    - Migrated baseline: ACP `session/prompt` now executes service-native
-     `/agent`, `/connect`, `/status`, `/compact`, `/model`, `/approval`,
-     `/resume`, and dynamic `/<agent> <prompt>` commands through
+     `/agent`, `/connect`, `/status`, `/doctor`, `/compact`, `/model`,
+     `/approval`, `/new`, `/resume`, `/task`, and dynamic
+     `/<agent> <prompt>` commands through
      `CommandService`; handled commands return `end_turn`, publish standard
      `agent_message_chunk` output or canonical event projections, mutate
      settings/agent/model/mode/session state through shared app services, and
@@ -2095,9 +2101,9 @@ be migrated before retiring the old stack:
 
 Recommended sequence:
 
-1. Finish the remaining large TUI command migrations against app services,
-   especially the remaining `/connect` wizard UI rendering shell, live remote
-   controller process lifecycle, and settings/diagnostics panel parity.
+1. Finish the remaining large TUI surface migrations against app services,
+   especially the `/connect` wizard UI rendering shell, live remote controller
+   process lifecycle, and settings/diagnostics panel parity.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
 3. Finish sandbox backend cleanup and remaining permission-policy diagnostics

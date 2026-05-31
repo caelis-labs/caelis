@@ -338,6 +338,33 @@ func TestBindAppServicesListSessionsPreservesAllWorkspaceRequest(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesExecuteCommandUsesSharedCommandService(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/repo",
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := BindAppServices(&DriverStack{}, svc).ExecuteCommand(ctx, portsession.SessionRef{}, " /new ", nil)
+	if err != nil {
+		t.Fatalf("ExecuteCommand(/new) error = %v", err)
+	}
+	if !view.Handled || view.Command != "new" || view.SessionRef == nil || view.SessionRef.SessionID != "sess-app" {
+		t.Fatalf("command view = %#v, want shared /new session view", view)
+	}
+	if engine.start.AppName != "caelis" || engine.start.UserID != "user-1" || engine.start.Workspace.Key != "repo" || engine.start.Workspace.CWD != "/repo" {
+		t.Fatalf("start request = %#v, want runtime identity/workspace", engine.start)
+	}
+}
+
 func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{}

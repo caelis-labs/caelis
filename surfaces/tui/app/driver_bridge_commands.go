@@ -40,7 +40,7 @@ func dispatchSlashCommandWithContext(ctx context.Context, driver tuidriver.Drive
 	case "status":
 		return slashStatusWithContext(ctx, driver, send)
 	case "task":
-		return slashTaskWithContext(ctx, driver, send, args)
+		return slashSharedCommandWithContext(ctx, driver, send, strings.TrimSpace("/task "+args), sharedCommandOptions{})
 	case "doctor":
 		return slashDoctorWithContext(ctx, driver, send, args)
 	case "connect":
@@ -421,17 +421,10 @@ func slashNew(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 }
 
 func slashNewWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
-	ctx = contextOrBackground(ctx)
-	session, err := driver.NewSession(ctx)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("new session", err)}
-	}
-	if send != nil {
-		send(ClearHistoryMsg{})
-	}
-	sendNotice(send, fmt.Sprintf("new session: %s", session.SessionID))
-	refreshStatusViaSendWithContext(ctx, driver, send)
-	return TaskResultMsg{SuppressTurnDivider: true}
+	return slashSharedCommandWithContext(ctx, driver, send, "/new", sharedCommandOptions{
+		ClearHistory:  true,
+		RefreshStatus: true,
+	})
 }
 
 func slashResume(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
@@ -605,103 +598,7 @@ func slashStatusWithContext(ctx context.Context, driver tuidriver.Driver, send f
 }
 
 func slashDoctorWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {
-	ctx = contextOrBackground(ctx)
-	switch strings.ToLower(strings.TrimSpace(args)) {
-	case "":
-	case "fix":
-		return slashDoctorFixWithContext(ctx, driver, send)
-	default:
-		sendNotice(send, "usage: /doctor [fix]")
-		return TaskResultMsg{SuppressTurnDivider: true}
-	}
-	status, err := driver.Status(ctx)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("doctor", err)}
-	}
-	sendNotice(send, formatDoctorSnapshot(status))
-	return TaskResultMsg{SuppressTurnDivider: true}
-}
-
-func slashDoctorFixWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
-	if driver == nil {
-		return TaskResultMsg{Err: friendlyCommandError("doctor fix", fmt.Errorf("driver unavailable"))}
-	}
-	sendNotice(send, "Windows sandbox repair started. Approve the UAC prompt if shown.")
-	status, err := driver.RepairSandbox(ctx)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("doctor fix", err)}
-	}
-	if sandboxSetupStillRequired(status) {
-		sendNotice(send, "Windows sandbox repair still needs attention. Run /doctor for details.")
-	} else {
-		sendNotice(send, "Windows sandbox repair complete.")
-	}
-	return TaskResultMsg{SuppressTurnDivider: true}
-}
-
-func sandboxSetupStillRequired(status tuidriver.StatusSnapshot) bool {
-	global, hasGlobal := status.SandboxSetup.Check("global")
-	workspace, hasWorkspace := status.SandboxSetup.Check("workspace")
-	return status.SandboxSetupRequired ||
-		status.SandboxGlobalSetupRequired ||
-		status.SandboxWorkspaceSetupRequired ||
-		(hasGlobal && global.Required) ||
-		(hasWorkspace && workspace.Required)
-}
-
-func formatDoctorSnapshot(status tuidriver.StatusSnapshot) string {
-	lines := []string{"doctor:"}
-	provider := strings.TrimSpace(firstNonEmpty(status.Provider, status.Model))
-	modelName := strings.TrimSpace(firstNonEmpty(status.ModelName, status.Model))
-	switch {
-	case status.MissingAPIKey:
-		lines = append(lines, "  warn provider key missing - run /connect")
-	case provider == "" && modelName == "":
-		lines = append(lines, "  warn model not configured - run /connect")
-	default:
-		lines = append(lines, "  ok provider/model: "+joinNonEmpty([]string{provider, modelName}, " / "))
-	}
-	if storeDir := strings.TrimSpace(status.StoreDir); storeDir != "" {
-		lines = append(lines, "  ok session store: "+storeDir)
-	} else {
-		lines = append(lines, "  warn session store path unavailable")
-	}
-	if sessionID := strings.TrimSpace(status.SessionID); sessionID != "" {
-		lines = append(lines, "  ok session: "+sessionID)
-	}
-	sandbox := strings.TrimSpace(firstNonEmpty(status.SandboxResolvedBackend, status.SandboxRequestedBackend, status.SandboxType))
-	globalSetup, hasGlobalSetup := status.SandboxSetup.Check("global")
-	workspaceSetup, hasWorkspaceSetup := status.SandboxSetup.Check("workspace")
-	globalSetupRequired := status.SandboxGlobalSetupRequired || (hasGlobalSetup && globalSetup.Required)
-	workspaceSetupRequired := status.SandboxWorkspaceSetupRequired || (hasWorkspaceSetup && workspaceSetup.Required)
-	switch {
-	case status.HostExecution || status.FullAccessMode:
-		detail := strings.TrimSpace(firstNonEmpty(status.SecuritySummary, sandbox, "host execution"))
-		lines = append(lines, "  warn sandbox: "+detail)
-	case globalSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, globalSetup.Error, globalSetup.Reason, status.SandboxGlobalSetupReason, status.SandboxSetupMarkerReason, "global setup required"))
-		lines = append(lines, "  warn sandbox global repair pending: "+compactStatusDetail(detail, 180))
-		if strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, globalSetup.Error)) != "" {
-			lines = append(lines, "  info fix: /doctor fix")
-		}
-	case workspaceSetupRequired:
-		detail := strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, workspaceSetup.Error, workspaceSetup.Reason, status.SandboxWorkspaceSetupReason, "workspace ACL setup required"))
-		lines = append(lines, "  warn sandbox workspace repair pending: "+compactStatusDetail(detail, 180))
-		if strings.TrimSpace(firstNonEmpty(status.SandboxSetupError, workspaceSetup.Error)) != "" {
-			lines = append(lines, "  info fix: /doctor fix")
-		}
-	case sandbox != "":
-		lines = append(lines, "  ok sandbox: "+sandbox)
-	default:
-		lines = append(lines, "  warn sandbox status unavailable")
-	}
-	if route := strings.TrimSpace(status.Route); route != "" {
-		lines = append(lines, "  ok route: "+route)
-	}
-	if status.ActiveJobs > 0 || status.Running {
-		lines = append(lines, fmt.Sprintf("  info active jobs: %d", status.ActiveJobs))
-	}
-	return strings.Join(lines, "\n")
+	return slashSharedCommandWithContext(ctx, driver, send, strings.TrimSpace("/doctor "+args), sharedCommandOptions{})
 }
 
 func slashConnect(driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

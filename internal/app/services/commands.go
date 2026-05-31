@@ -32,6 +32,7 @@ func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) 
 		{Name: "status", Description: "Show current runtime status"},
 		{Name: "doctor", Description: "Diagnose model, session store, resources, and sandbox readiness", InputHint: "[fix]"},
 		{Name: "task", Description: "Inspect and control live or durable tasks", InputHint: "list|tail|wait|write|cancel|release|start"},
+		{Name: "new", Description: "Start a fresh session"},
 		{Name: "resume", Description: "Resume a previous session", InputHint: "[session id]"},
 		{Name: "compact", Description: "Compact the current conversation"},
 	}
@@ -84,6 +85,8 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 		return s.executeDoctor(ctx, req.SessionRef, args)
 	case "model":
 		return s.executeModel(ctx, req.SessionRef, args)
+	case "new":
+		return s.executeNew(ctx, args)
 	case "resume":
 		return s.executeResume(ctx, args)
 	case "task":
@@ -119,6 +122,29 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 	default:
 		return s.executeAgentPrompt(ctx, req, command, args)
 	}
+}
+
+func (s CommandService) executeNew(ctx context.Context, args string) (appviewmodel.CommandExecutionView, error) {
+	if strings.TrimSpace(args) != "" {
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /new")
+	}
+	runtimeCfg := s.services.Runtime()
+	active, err := s.services.Sessions().Start(ctx, StartSessionRequest{
+		Workspace: session.Workspace{
+			Key: runtimeCfg.WorkspaceKey,
+			CWD: runtimeCfg.WorkspaceCWD,
+		},
+	})
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	ref := active.Ref
+	return appviewmodel.CommandExecutionView{
+		Handled:    true,
+		Command:    "new",
+		Output:     "new session: " + strings.TrimSpace(ref.SessionID),
+		SessionRef: &ref,
+	}, nil
 }
 
 func (s CommandService) executeAgentPrompt(ctx context.Context, req CommandExecutionRequest, command string, args string) (appviewmodel.CommandExecutionView, error) {

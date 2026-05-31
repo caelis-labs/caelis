@@ -188,6 +188,7 @@ type DriverStack struct {
 	DefaultModelAliasFn                  func() string
 	AppStatusViewFn                      func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
 	SandboxStatusFn                      func() SandboxStatus
+	ExecuteCommandFn                     func(context.Context, session.SessionRef, string, []model.ContentPart) (CommandExecutionView, error)
 	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
 	ModelConfigFn                        func(string) (ModelConfig, bool)
@@ -281,6 +282,13 @@ func (s *DriverStack) SandboxStatus() SandboxStatus {
 		return SandboxStatus{}
 	}
 	return s.SandboxStatusFn()
+}
+
+func (s *DriverStack) ExecuteCommand(ctx context.Context, ref session.SessionRef, input string, parts []model.ContentPart) (CommandExecutionView, error) {
+	if s == nil || s.ExecuteCommandFn == nil {
+		return CommandExecutionView{}, fmt.Errorf("surfaces/tui/gatewaydriver: command dependency is unavailable")
+	}
+	return s.ExecuteCommandFn(ctx, ref, input, parts)
 }
 
 func (s *DriverStack) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
