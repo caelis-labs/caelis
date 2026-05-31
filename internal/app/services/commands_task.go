@@ -22,14 +22,14 @@ func (s CommandService) executeTask(ctx context.Context, ref session.Ref, args s
 		if strings.TrimSpace(rest) != "" {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /task list")
 		}
-		view, err := s.services.Tasks().List(ctx, ListTasksRequest{SessionRef: ref, Limit: 30, IncludeHistory: true})
+		view, err := s.services.Tasks().Panel(ctx, TaskPanelRequest{SessionRef: ref, Limit: 30, IncludeHistory: true})
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
 		}
 		return appviewmodel.CommandExecutionView{
 			Handled: true,
 			Command: "task",
-			Output:  formatCommandTaskList(view),
+			Output:  formatCommandTaskPanel(view),
 		}, nil
 	case "tail", "show":
 		taskID, _, ok := splitCommandArg(rest)
@@ -266,7 +266,7 @@ func trimCommandTaskSeparator(input string) string {
 	return trimCommandTaskWriteInput(input)
 }
 
-func formatCommandTaskList(view appviewmodel.TaskListView) string {
+func formatCommandTaskPanel(view appviewmodel.TaskPanelView) string {
 	if !view.Supported {
 		return "tasks: not available"
 	}
@@ -275,10 +275,82 @@ func formatCommandTaskList(view appviewmodel.TaskListView) string {
 		lines = append(lines, "  none")
 		return strings.Join(lines, "\n")
 	}
-	for _, task := range view.Tasks {
-		lines = append(lines, "  "+formatCommandTaskItem(task))
+	if summary := formatCommandTaskPanelSummary(view.Summary); summary != "" {
+		lines = append(lines, "  summary: "+summary)
+	}
+	tasksByID := commandTaskPanelTaskIndex(view.Tasks)
+	if len(view.Sections) > 0 {
+		for _, section := range view.Sections {
+			if len(section.TaskIDs) == 0 {
+				continue
+			}
+			lines = append(lines, "  "+strings.ToLower(strings.TrimSpace(section.Title))+":")
+			for _, taskID := range section.TaskIDs {
+				task, ok := tasksByID[taskID]
+				if !ok {
+					continue
+				}
+				lines = append(lines, "    "+formatCommandTaskItem(task))
+			}
+		}
+	} else {
+		for _, task := range view.Tasks {
+			lines = append(lines, "  "+formatCommandTaskItem(task))
+		}
+	}
+	for _, diagnostic := range view.Diagnostics {
+		if strings.EqualFold(strings.TrimSpace(diagnostic.Severity), "info") {
+			continue
+		}
+		if line := formatCommandTaskDiagnostic(diagnostic); line != "" {
+			lines = append(lines, "  "+line)
+		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+func formatCommandTaskPanelSummary(summary appviewmodel.TaskPanelSummary) string {
+	var parts []string
+	if summary.Total > 0 {
+		parts = append(parts, fmt.Sprintf("%d total", summary.Total))
+	}
+	for _, item := range []struct {
+		label string
+		value int
+	}{
+		{label: "running", value: summary.Running},
+		{label: "waiting", value: summary.Waiting},
+		{label: "completed", value: summary.Completed},
+		{label: "failed", value: summary.Failed},
+		{label: "cancelled", value: summary.Cancelled},
+		{label: "subagent", value: summary.Subagents},
+	} {
+		if item.value > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", item.value, item.label))
+		}
+	}
+	return strings.Join(parts, ", ")
+}
+
+func commandTaskPanelTaskIndex(tasks []appviewmodel.TaskItem) map[string]appviewmodel.TaskItem {
+	out := make(map[string]appviewmodel.TaskItem, len(tasks))
+	for _, task := range tasks {
+		if taskID := strings.TrimSpace(task.ID); taskID != "" {
+			out[taskID] = task
+		}
+	}
+	return out
+}
+
+func formatCommandTaskDiagnostic(diagnostic appviewmodel.TaskPanelDiagnostic) string {
+	parts := []string{strings.TrimSpace(diagnostic.Severity), strings.TrimSpace(diagnostic.Kind)}
+	if taskID := strings.TrimSpace(diagnostic.TaskID); taskID != "" {
+		parts = append(parts, "task="+taskID)
+	}
+	if message := strings.TrimSpace(diagnostic.Message); message != "" {
+		parts = append(parts, message)
+	}
+	return strings.Join(commandNonEmpty(parts), "  ")
 }
 
 func formatCommandTaskItem(task appviewmodel.TaskItem) string {

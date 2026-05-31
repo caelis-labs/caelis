@@ -4242,6 +4242,97 @@ func TestTaskServiceListsAndControlsResolvedTasksWithoutSandbox(t *testing.T) {
 	}
 }
 
+func TestTaskServicePanelBuildsSharedSummarySectionsActionsAndDiagnostics(t *testing.T) {
+	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  &recordingEngine{},
+		Sandbox: &recordingTaskRuntime{sessions: map[string]*recordingTaskSession{
+			"task-running": {
+				snapshot: sandbox.SessionSnapshot{
+					Ref:           sandbox.SessionRef{ID: "task-running", Backend: sandbox.BackendHost},
+					Command:       "go test ./...",
+					State:         sandbox.SessionRunning,
+					Running:       true,
+					SupportsInput: true,
+					StartedAt:     now,
+					UpdatedAt:     now.Add(3 * time.Second),
+					OutputPreview: &sandbox.OutputSnapshot{
+						Stdout:             "latest output\n",
+						StdoutDroppedBytes: 128,
+					},
+				},
+			},
+			"task-failed": {
+				snapshot: sandbox.SessionSnapshot{
+					Ref:       sandbox.SessionRef{ID: "task-failed", Backend: sandbox.BackendCustom},
+					Command:   "SPAWN reviewer",
+					State:     sandbox.SessionFailed,
+					Error:     "remote failed",
+					StartedAt: now.Add(time.Second),
+					UpdatedAt: now.Add(2 * time.Second),
+					Metadata: map[string]any{
+						"task_kind": "subagent",
+						"agent":     "reviewer",
+					},
+				},
+			},
+			"task-completed": {
+				snapshot: sandbox.SessionSnapshot{
+					Ref:       sandbox.SessionRef{ID: "task-completed", Backend: sandbox.BackendHost},
+					Command:   "make quality",
+					State:     sandbox.SessionCompleted,
+					StartedAt: now.Add(2 * time.Second),
+					UpdatedAt: now.Add(time.Second),
+				},
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	panel, err := svc.Tasks().Panel(context.Background(), TaskPanelRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panel.Supported || panel.Summary.Total != 3 || panel.Summary.Running != 1 || panel.Summary.Completed != 1 || panel.Summary.Failed != 1 || panel.Summary.Subagents != 1 || panel.Summary.Commands != 2 {
+		t.Fatalf("panel summary = %#v, want shared task counts", panel.Summary)
+	}
+	if panel.Summary.UpdatedAt != now.Add(3*time.Second) {
+		t.Fatalf("panel updated_at = %s, want newest task timestamp", panel.Summary.UpdatedAt)
+	}
+	for sectionID, taskID := range map[string]string{
+		"active":    "task-running",
+		"attention": "task-failed",
+		"recent":    "task-completed",
+	} {
+		section, ok := findTaskPanelSection(panel.Sections, sectionID)
+		if !ok || !taskPanelSectionHasTask(section, taskID) {
+			t.Fatalf("panel sections = %#v, want %s in %s", panel.Sections, taskID, sectionID)
+		}
+	}
+	write, ok := findTaskPanelAction(panel.Actions, "task.write:task-running")
+	if !ok || !write.Enabled || !write.RequiresInput {
+		t.Fatalf("write action = %#v ok=%v, want enabled input action", write, ok)
+	}
+	cancel, ok := findTaskPanelAction(panel.Actions, "task.cancel:task-running")
+	if !ok || !cancel.Enabled || !cancel.Destructive {
+		t.Fatalf("cancel action = %#v ok=%v, want destructive action", cancel, ok)
+	}
+	release, ok := findTaskPanelAction(panel.Actions, "task.release:task-completed")
+	if !ok || !release.Enabled {
+		t.Fatalf("release action = %#v ok=%v, want completed task release action", release, ok)
+	}
+	start, ok := findTaskPanelAction(panel.Actions, "task.start")
+	if !ok || !start.Enabled || !start.RequiresInput {
+		t.Fatalf("start action = %#v ok=%v, want enabled start action", start, ok)
+	}
+	if !taskPanelDiagnostic(panel.Diagnostics, "task_failed", "task-failed") || !taskPanelDiagnostic(panel.Diagnostics, "task_output_truncated", "task-running") {
+		t.Fatalf("panel diagnostics = %#v, want failed and truncation diagnostics", panel.Diagnostics)
+	}
+}
+
 func TestTaskServiceListsLiveAndDurableTaskHistory(t *testing.T) {
 	now := time.Date(2026, 5, 30, 12, 0, 0, 0, time.UTC)
 	engine := &recordingEngine{
@@ -4511,6 +4602,23 @@ func TestTaskServiceListsDurableTaskHistoryWithoutSandboxLister(t *testing.T) {
 	}
 	if !history.Supported || history.Count != 1 || history.Tasks[0].ID != "task-history" || history.Tasks[0].Command != "make quality" {
 		t.Fatalf("history task list = %#v, want durable task without live sandbox", history)
+	}
+	panel, err := svc.Tasks().Panel(context.Background(), TaskPanelRequest{
+		SessionRef:     session.Ref{SessionID: "sess-history"},
+		IncludeHistory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !panel.Supported || panel.Summary.Total != 1 {
+		t.Fatalf("history task panel = %#v, want durable read-only task panel", panel)
+	}
+	if _, ok := findTaskPanelAction(panel.Actions, "task.tail:task-history"); ok {
+		t.Fatalf("history task panel actions = %#v, should not expose live tail without task runtime", panel.Actions)
+	}
+	start, ok := findTaskPanelAction(panel.Actions, "task.start")
+	if !ok || start.Enabled {
+		t.Fatalf("history task panel start action = %#v ok=%v, want disabled start without sandbox runtime", start, ok)
 	}
 }
 
@@ -5261,6 +5369,42 @@ func findTaskItem(items []appviewmodel.TaskItem, id string) (appviewmodel.TaskIt
 		}
 	}
 	return appviewmodel.TaskItem{}, false
+}
+
+func findTaskPanelSection(sections []appviewmodel.TaskPanelSection, id string) (appviewmodel.TaskPanelSection, bool) {
+	for _, section := range sections {
+		if section.ID == id {
+			return section, true
+		}
+	}
+	return appviewmodel.TaskPanelSection{}, false
+}
+
+func taskPanelSectionHasTask(section appviewmodel.TaskPanelSection, id string) bool {
+	for _, taskID := range section.TaskIDs {
+		if taskID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func findTaskPanelAction(actions []appviewmodel.TaskPanelAction, id string) (appviewmodel.TaskPanelAction, bool) {
+	for _, action := range actions {
+		if action.ID == id {
+			return action, true
+		}
+	}
+	return appviewmodel.TaskPanelAction{}, false
+}
+
+func taskPanelDiagnostic(items []appviewmodel.TaskPanelDiagnostic, kind string, taskID string) bool {
+	for _, item := range items {
+		if item.Kind == kind && item.TaskID == taskID {
+			return true
+		}
+	}
+	return false
 }
 
 func findSettingsPanelSection(sections []appviewmodel.SettingsPanelSection, id string) (appviewmodel.SettingsPanelSection, bool) {

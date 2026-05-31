@@ -2274,8 +2274,14 @@ be migrated before retiring the old stack:
       bounded terminal preview data with cursors and truncation state, and the
       model-facing TASK output plus shared app task views consume the same
       runtime preview contract.
-    - Still pending: richer visual TUI/APP task panels and optional persistent
-      indexed history stores remain incomplete.
+    - Migrated baseline: `TaskService.Panel` now projects the task list into an
+      APP-ready task panel contract with status summary counts, active,
+      attention, and recent sections, available task actions, and normalized
+      diagnostics.
+      TUI `/task list` consumes this panel projection through the shared command
+      path instead of rebuilding task status locally.
+    - Still pending: surface-specific visual TUI/APP task rendering and optional
+      persistent indexed history stores remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -2428,13 +2434,15 @@ Recommended sequence:
    especially visual settings/diagnostics/controller panels.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
-3. Finish visual task-panel behavior and optional persistent indexed history
-   stores behind shared app/view-model contracts; host process recovery, SPAWN
-   continuation, bounded terminal preview metadata, app-command lifecycle
-   events, and compact retention indexes are now baseline runtime capabilities.
+3. Finish surface-specific visual task-panel rendering and optional persistent
+   indexed history stores behind the shared task panel contract; host process
+   recovery, SPAWN continuation, bounded terminal preview metadata, app-command
+   lifecycle events, compact retention indexes, and task-panel summaries are
+   now baseline runtime capabilities.
 4. Port the remaining TUI panels and richer interactive flows to
-   `internal/app/services`, especially task and visual settings panels,
-   preserving existing rendering as surface-local code.
+   `internal/app/services`, especially visual settings/controller panels and
+   richer task-panel rendering, preserving existing rendering as surface-local
+   code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
