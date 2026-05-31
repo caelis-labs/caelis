@@ -7,9 +7,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 func dispatchSlashCommand(driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
@@ -275,18 +277,48 @@ func slashResumeWithContext(ctx context.Context, driver tuidriver.Driver, send f
 		send(ClearHistoryMsg{})
 	}
 
-	// Replay historical events into transcript.
-	events, err := driver.ReplayEvents(ctx)
+	transcriptEvents, err := replayResumeTranscriptEvents(ctx, driver)
 	if err != nil {
 		sendNotice(send, fmt.Sprintf("warning: replay failed: %v", err))
-	} else if len(events) > 0 {
-		if transcriptEvents := resumeTranscriptReplayTranscriptEvents(events); len(transcriptEvents) > 0 && send != nil {
-			send(TranscriptEventsMsg{Events: transcriptEvents})
-		}
+	} else if len(transcriptEvents) > 0 && send != nil {
+		send(TranscriptEventsMsg{Events: transcriptEvents})
 	}
 
 	refreshStatusViaSendWithContext(ctx, driver, send)
 	return TaskResultMsg{SuppressTurnDivider: true}
+}
+
+type sessionEventReplayDriver interface {
+	ReplaySessionEvents(context.Context) ([]appviewmodel.SessionEventEnvelope, error)
+}
+
+func replayResumeTranscriptEvents(ctx context.Context, driver tuidriver.Driver) ([]TranscriptEvent, error) {
+	if appReplay, ok := driver.(sessionEventReplayDriver); ok {
+		events, err := appReplay.ReplaySessionEvents(ctx)
+		if err == nil {
+			return resumeSessionEventReplayTranscriptEvents(events), nil
+		}
+	}
+	events, err := driver.ReplayEvents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return resumeTranscriptReplayTranscriptEvents(events), nil
+}
+
+func resumeSessionEventReplayTranscriptEvents(events []appviewmodel.SessionEventEnvelope) []TranscriptEvent {
+	if len(events) == 0 {
+		return nil
+	}
+	envelopes := make([]kernel.EventEnvelope, 0, len(events))
+	for _, env := range events {
+		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
+		if !ok {
+			continue
+		}
+		envelopes = append(envelopes, converted)
+	}
+	return resumeTranscriptReplayTranscriptEvents(envelopes)
 }
 
 func resumeTranscriptReplayTranscriptEvents(events []kernel.EventEnvelope) []TranscriptEvent {

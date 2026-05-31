@@ -657,6 +657,17 @@ func (d *GatewayDriver) ReplayEvents(ctx context.Context) ([]kernel.EventEnvelop
 	return result.Events, nil
 }
 
+func (d *GatewayDriver) ReplaySessionEvents(ctx context.Context) ([]appviewmodel.SessionEventEnvelope, error) {
+	activeSession, ok := d.currentSession()
+	if !ok {
+		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
+	}
+	if d == nil || d.stack == nil || d.stack.ReplaySessionEventsFn == nil {
+		return nil, ErrMigrationPending
+	}
+	return d.stack.ReplaySessionEventsFn(ctx, activeSession.SessionRef)
+}
+
 func (d *GatewayDriver) Compact(ctx context.Context) error {
 	activeSession, ok := d.currentSession()
 	if !ok {

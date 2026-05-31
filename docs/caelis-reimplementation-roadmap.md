@@ -1377,6 +1377,12 @@ be migrated before retiring the old stack:
      driver status contract. The remaining legacy session-event usage parser is
      contained at the gatewaydriver bridge boundary while status rendering and
      tests consume the shared app view model used by future APP surfaces.
+   - Migrated baseline: app-service-bound TUI `/resume` now replays history
+     from `internal/app/viewmodel.SessionEventEnvelope` through a
+     service-native gatewaydriver hook before adapting to the existing
+     transcript renderer. Old `kernel.EventEnvelope` replay remains only as the
+     fallback path for non app-service driver implementations during the
+     transition.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and

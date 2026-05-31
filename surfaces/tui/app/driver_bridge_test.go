@@ -521,6 +521,54 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	}
 }
 
+func TestSlashResumePrefersAppSessionEventReplay(t *testing.T) {
+	driver := &bridgeAppReplayDriver{
+		bridgeTestDriver: bridgeTestDriver{
+			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
+			resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+			replay: []kernel.EventEnvelope{{
+				Event: kernel.Event{
+					Kind: kernel.EventKindUserMessage,
+					Narrative: &kernel.NarrativePayload{
+						Role: kernel.NarrativeRoleUser,
+						Text: "legacy prompt",
+					},
+				},
+			}},
+		},
+		appReplay: []appviewmodel.SessionEventEnvelope{
+			appviewmodel.EventEnvelopeFromSession("app-user", coresession.Event{
+				ID:        "app-user",
+				SessionID: "resumed-session",
+				Type:      coresession.EventUser,
+				Message:   coreTextMessage(coremodel.RoleUser, "app prompt"),
+			}),
+			appviewmodel.EventEnvelopeFromSession("app-assistant", coresession.Event{
+				ID:        "app-assistant",
+				SessionID: "resumed-session",
+				Type:      coresession.EventAssistant,
+				Message:   coreTextMessage(coremodel.RoleAssistant, "app reply"),
+			}),
+		},
+	}
+
+	var msgs []tea.Msg
+	slashResume(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "resumed-session")
+
+	if driver.appReplayCalls != 1 {
+		t.Fatalf("ReplaySessionEvents calls = %d, want 1", driver.appReplayCalls)
+	}
+	if driver.replayCalls != 0 {
+		t.Fatalf("ReplayEvents calls = %d, want 0 when app replay succeeds", driver.replayCalls)
+	}
+	if !transcriptBatchContainsText(msgs, "app prompt") || !transcriptBatchContainsText(msgs, "app reply") {
+		t.Fatalf("slashResume() messages = %#v, want app replay transcript", msgs)
+	}
+	if transcriptBatchContainsText(msgs, "legacy prompt") {
+		t.Fatalf("slashResume() messages = %#v, should not use legacy replay fallback", msgs)
+	}
+}
+
 func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
@@ -1909,6 +1957,19 @@ func noticeMessagesContain(messages []tea.Msg, text string) bool {
 	return false
 }
 
+func transcriptBatchContainsText(messages []tea.Msg, text string) bool {
+	for _, msg := range messages {
+		batch, ok := msg.(TranscriptEventsMsg)
+		if !ok {
+			continue
+		}
+		if transcriptEventsContainText(batch.Events, text) {
+			return true
+		}
+	}
+	return false
+}
+
 func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
 	for _, msg := range messages {
 		progress, ok := msg.(SandboxProgressMsg)
@@ -1943,6 +2004,14 @@ type bridgeTestDriver struct {
 	commandCatalog           tuidriver.CommandCatalogView
 	commandCatalogErr        error
 	commandCatalogCalls      int
+}
+
+type bridgeAppReplayDriver struct {
+	bridgeTestDriver
+	appReplay      []appviewmodel.SessionEventEnvelope
+	appReplayErr   error
+	appReplayCalls int
+	replayCalls    int
 }
 
 type bridgeLightweightStatusDriver struct {
@@ -2012,6 +2081,11 @@ func dynamicAgentCommandView(command string, events ...coresession.Event) tuidri
 		Command: command,
 		Events:  events,
 	}
+}
+
+func coreTextMessage(role coremodel.Role, text string) *coremodel.Message {
+	message := coremodel.Message{Role: role, Parts: []coremodel.Part{coremodel.NewTextPart(text)}}
+	return &message
 }
 
 func participantAssistantCoreEvent(scopeID string, actor string, text string) coresession.Event {
@@ -2209,6 +2283,17 @@ func (d *bridgeTestDriver) ListSessions(context.Context, int) ([]tuidriver.Resum
 }
 func (d *bridgeTestDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
 	return d.replay, nil
+}
+func (d *bridgeAppReplayDriver) ReplayEvents(ctx context.Context) ([]kernel.EventEnvelope, error) {
+	d.replayCalls++
+	return d.bridgeTestDriver.ReplayEvents(ctx)
+}
+func (d *bridgeAppReplayDriver) ReplaySessionEvents(context.Context) ([]appviewmodel.SessionEventEnvelope, error) {
+	d.appReplayCalls++
+	if d.appReplayErr != nil {
+		return nil, d.appReplayErr
+	}
+	return d.appReplay, nil
 }
 func (d *bridgeTestDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
 	d.listAgentCalls++

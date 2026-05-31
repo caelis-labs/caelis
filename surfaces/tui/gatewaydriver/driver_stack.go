@@ -182,6 +182,7 @@ type DriverStack struct {
 	ACPControllerStatusFn              func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error)
 	DefaultModelAliasFn                func() string
 	AppStatusViewFn                    func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
+	ReplaySessionEventsFn              func(context.Context, session.SessionRef) ([]appviewmodel.SessionEventEnvelope, error)
 	SandboxStatusFn                    func() SandboxStatus
 	CommandCatalogFn                   func(context.Context) (appviewmodel.CommandCatalogView, error)
 	ExecuteCommandFn                   func(context.Context, session.SessionRef, string, []model.ContentPart) (CommandExecutionView, error)

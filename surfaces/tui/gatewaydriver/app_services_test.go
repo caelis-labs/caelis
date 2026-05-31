@@ -251,6 +251,48 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesReplaySessionEventsUsesAppViewModel(t *testing.T) {
+	ctx := context.Background()
+	engine := &appServiceDriverEngine{
+		events: []coresession.Event{{
+			ID:        "stored-assistant",
+			SessionID: "sess-app",
+			Type:      coresession.EventAssistant,
+			Message: &coremodel.Message{
+				Role:  coremodel.RoleAssistant,
+				Parts: []coremodel.Part{coremodel.NewTextPart("stored answer")},
+			},
+		}},
+	}
+	svc, err := appservices.New(appservices.Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "user-1",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: t.TempDir(),
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "sess-app", "surface", "")
+	if err != nil {
+		t.Fatalf("NewGatewayDriver() error = %v", err)
+	}
+
+	events, err := driver.ReplaySessionEvents(ctx)
+	if err != nil {
+		t.Fatalf("ReplaySessionEvents() error = %v", err)
+	}
+	if len(events) != 1 || events[0].Transcript == nil || events[0].Transcript.Text != "stored answer" {
+		t.Fatalf("ReplaySessionEvents() = %#v, want app transcript event", events)
+	}
+	if events[0].Canonical == nil || events[0].Canonical.Type != coresession.EventAssistant {
+		t.Fatalf("ReplaySessionEvents() canonical = %#v, want assistant event", events[0].Canonical)
+	}
+}
+
 func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{
@@ -1073,7 +1115,14 @@ func (e *appServiceDriverEngine) Interrupt(context.Context, coresession.Ref) err
 }
 
 func (e *appServiceDriverEngine) Replay(context.Context, coreruntime.ReplayRequest) (<-chan coreruntime.EventEnvelope, error) {
-	events := make(chan coreruntime.EventEnvelope)
+	events := make(chan coreruntime.EventEnvelope, len(e.events))
+	for _, event := range e.events {
+		cursor := coresession.Cursor(event.ID)
+		if cursor == "" {
+			cursor = coresession.Cursor("test-cursor")
+		}
+		events <- coreruntime.EventEnvelope{Cursor: cursor, Event: coresession.CloneEvent(event)}
+	}
 	close(events)
 	return events, nil
 }
