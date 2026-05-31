@@ -2,6 +2,7 @@ package gatewaydriver
 
 import (
 	"context"
+	"fmt"
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
@@ -9,18 +10,24 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
-func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, bool, error) {
+func (d *GatewayDriver) statusFromAppView(ctx context.Context, includeDiagnostics bool) (StatusSnapshot, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if d == nil || d.stack == nil {
-		return StatusSnapshot{}, false, nil
+		return StatusSnapshot{}, fmt.Errorf("surfaces/tui/gatewaydriver: stack is unavailable")
 	}
 	activeSession, hasSession := d.currentSession()
 	ref := coresession.Ref{}
 	if hasSession {
 		ref = activeSession.Ref
 	}
-	view, ok, err := d.stack.AppStatusView(ctx, ref)
-	if !ok || err != nil {
-		return StatusSnapshot{}, ok, err
+	view, ok, err := d.stack.AppStatusView(ctx, ref, includeDiagnostics)
+	if err != nil {
+		return StatusSnapshot{}, err
+	}
+	if !ok {
+		return StatusSnapshot{}, fmt.Errorf("surfaces/tui/gatewaydriver: app status view dependency is unavailable")
 	}
 	d.mu.Lock()
 	bindingKey := d.bindingKey
@@ -79,38 +86,20 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		SessionOutputTokens:      view.Usage.Total.OutputTokens,
 		SessionReasoningTokens:   view.Usage.Total.ReasoningTokens,
 		SessionTotalTokens:       view.Usage.Total.TotalTokens,
+		PermissionGrantCount:     view.Permissions.GrantCount,
+		PermissionReadRootCount:  view.Permissions.ReadRootCount,
+		PermissionWriteRootCount: view.Permissions.WriteRootCount,
 		PromptTokens:             inputTokens,
 		TotalTokens:              inputTokens,
 		ContextWindowTokens:      view.Usage.ContextBudget.ContextWindowTokens,
 	}
-	if sandboxStatus := d.stack.SandboxStatus(); sandboxStatus.RequestedBackend != "" || sandboxStatus.ResolvedBackend != "" || sandboxStatus.Route != "" {
-		status.SandboxRequestedBackend = firstNonEmpty(sandboxStatus.RequestedBackend, status.SandboxRequestedBackend)
-		status.SandboxResolvedBackend = firstNonEmpty(sandboxStatus.ResolvedBackend, status.SandboxResolvedBackend)
-		status.Route = firstNonEmpty(sandboxStatus.Route, status.Route)
-		status.FallbackReason = firstNonEmpty(strings.TrimSpace(sandboxStatus.FallbackReason), status.FallbackReason)
-		status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(sandboxStatus.InstallHint), status.SandboxInstallHint)
-		status.SandboxSetup = sandbox.CloneSetupStatus(sandboxStatus.Setup)
-		status.SandboxSetupRequired = sandboxStatus.SetupRequired
-		status.SandboxSetupError = strings.TrimSpace(sandboxStatus.SetupError)
-		status.SandboxSetupMarkerCurrent = sandboxStatus.SetupMarkerCurrent
-		status.SandboxSetupMarkerReason = strings.TrimSpace(sandboxStatus.SetupMarkerReason)
-		status.SandboxGlobalSetupCurrent = sandboxStatus.GlobalSetupCurrent
-		status.SandboxGlobalSetupRequired = sandboxStatus.GlobalSetupRequired
-		status.SandboxGlobalSetupReason = strings.TrimSpace(sandboxStatus.GlobalSetupReason)
-		status.SandboxWorkspaceSetupCurrent = sandboxStatus.WorkspaceSetupCurrent
-		status.SandboxWorkspaceSetupRequired = sandboxStatus.WorkspaceSetupRequired
-		status.SandboxWorkspaceSetupReason = strings.TrimSpace(sandboxStatus.WorkspaceSetupReason)
-		status.SandboxWorkspaceSetupRoot = strings.TrimSpace(sandboxStatus.WorkspaceSetupRoot)
-		status.SandboxWorkspaceSetupWriteRoots = sandboxStatus.WorkspaceSetupWriteRoots
-		status.SandboxWorkspaceSetupPolicyHash = strings.TrimSpace(sandboxStatus.WorkspaceSetupPolicyHash)
-		status.SandboxWorkspaceSetupUpdatedAt = sandboxStatus.WorkspaceSetupUpdatedAt
-		status.SecuritySummary = firstNonEmpty(strings.TrimSpace(sandboxStatus.SecuritySummary), status.SecuritySummary)
-		status.HostExecution = strings.EqualFold(strings.TrimSpace(status.Route), "host")
+	if view.Sandbox != nil {
+		applyAppSandboxStatus(&status, *view.Sandbox)
 	}
 	if hasSession && activeSession.Controller.Kind == coresession.ControllerACP {
 		acpStatus, activeACP, err := d.activeACPControllerStatus(ctx)
 		if err != nil {
-			return StatusSnapshot{}, false, err
+			return StatusSnapshot{}, err
 		}
 		if activeACP {
 			acpModelText := acpControllerModelText(acpStatus, activeSession)
@@ -141,7 +130,7 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 	if kind, ok := activeTurnKindForSession(active, activeSession.Ref); ok {
 		status.ActiveTurnKind = string(kind)
 	}
-	return status, true, nil
+	return status, nil
 }
 
 func appStatusModelText(status appviewmodel.ModelStatus) (string, string, string) {
@@ -167,4 +156,52 @@ func appStatusModelText(status appviewmodel.ModelStatus) (string, string, string
 		modelText = provider + "/" + modelName
 	}
 	return modelText, provider, modelName
+}
+
+func applyAppSandboxStatus(status *StatusSnapshot, sandboxStatus appviewmodel.SandboxStatus) {
+	if status == nil {
+		return
+	}
+	status.SandboxRequestedBackend = firstNonEmpty(strings.TrimSpace(sandboxStatus.RequestedBackend), status.SandboxRequestedBackend)
+	status.SandboxResolvedBackend = firstNonEmpty(strings.TrimSpace(sandboxStatus.ResolvedBackend), status.SandboxResolvedBackend)
+	status.SandboxType = firstNonEmpty(status.SandboxResolvedBackend, status.SandboxRequestedBackend, status.SandboxType)
+	status.Route = firstNonEmpty(strings.TrimSpace(sandboxStatus.Route), status.Route)
+	status.FallbackReason = firstNonEmpty(strings.TrimSpace(sandboxStatus.FallbackReason), status.FallbackReason)
+	status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(sandboxStatus.FallbackInstallHint), status.SandboxInstallHint)
+	status.SandboxSetup = sandbox.CloneSetupStatus(sandboxStatus.Setup)
+	status.SandboxSetupRequired = sandboxStatus.SetupRequired
+	status.SandboxSetupError = strings.TrimSpace(sandboxStatus.SetupError)
+	status.SandboxSetupMarkerCurrent = sandboxStatus.SetupMarkerCurrent
+	status.SandboxSetupMarkerReason = strings.TrimSpace(sandboxStatus.SetupMarkerReason)
+	status.SecuritySummary = firstNonEmpty(sandboxSecuritySummaryFromView(sandboxStatus), status.SecuritySummary)
+	status.HostExecution = strings.EqualFold(strings.TrimSpace(status.Route), "host")
+	global, hasGlobal := sandboxSetupCheckByScope(status.SandboxSetup, sandbox.SetupGlobal)
+	workspace, hasWorkspace := sandboxSetupCheckByScope(status.SandboxSetup, sandbox.SetupWorkspace)
+	status.SandboxGlobalSetupCurrent = hasGlobal && global.Current
+	status.SandboxGlobalSetupRequired = hasGlobal && global.Required
+	status.SandboxGlobalSetupReason = setupReason(global, hasGlobal)
+	status.SandboxWorkspaceSetupCurrent = hasWorkspace && workspace.Current
+	status.SandboxWorkspaceSetupRequired = hasWorkspace && workspace.Required
+	status.SandboxWorkspaceSetupReason = setupReason(workspace, hasWorkspace)
+	status.SandboxWorkspaceSetupRoot = setupRoot(workspace, hasWorkspace)
+	status.SandboxWorkspaceSetupWriteRoots = setupCount(workspace, hasWorkspace, "write_roots")
+	status.SandboxWorkspaceSetupPolicyHash = setupDetail(workspace, hasWorkspace, "policy_hash")
+	status.SandboxWorkspaceSetupUpdatedAt = workspace.UpdatedAt
+}
+
+func sandboxSecuritySummaryFromView(status appviewmodel.SandboxStatus) string {
+	parts := make([]string, 0, 4)
+	if isolation := strings.TrimSpace(status.Isolation); isolation != "" {
+		parts = append(parts, "isolation="+isolation)
+	}
+	if permission := strings.TrimSpace(status.DefaultPermission); permission != "" {
+		parts = append(parts, "permission="+permission)
+	}
+	if network := strings.TrimSpace(status.Network); network != "" {
+		parts = append(parts, "network="+network)
+	}
+	if status.PathPolicy {
+		parts = append(parts, "path_policy=on")
+	}
+	return strings.Join(parts, " ")
 }

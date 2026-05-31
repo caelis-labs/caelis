@@ -1033,7 +1033,8 @@ func (s ViewService) Session(ctx context.Context, ref session.Ref) (appviewmodel
 }
 
 type StatusRequest struct {
-	SessionRef session.Ref `json:"session_ref,omitempty"`
+	SessionRef         session.Ref `json:"session_ref,omitempty"`
+	IncludeDiagnostics bool        `json:"include_diagnostics,omitempty"`
 }
 
 type StatusService struct {
@@ -1049,6 +1050,13 @@ func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmode
 	view := appviewmodel.StatusView{
 		Runtime:   appviewmodel.RuntimeStatusFromConfig(runtimeCfg),
 		Resources: statusResourceView(s.services.resources),
+	}
+	if req.IncludeDiagnostics {
+		sandboxStatus, err := s.services.Sandbox().Status(ctx)
+		if err != nil {
+			return appviewmodel.StatusView{}, err
+		}
+		view.Sandbox = statusSandboxView(sandboxStatus)
 	}
 	agents, err := s.services.Agents().List(ctx)
 	if err != nil {
@@ -1066,6 +1074,7 @@ func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmode
 		sessionStatus := appviewmodel.SessionStatusFromView(sessionView)
 		view.Session = &sessionStatus
 		view.Usage = statusUsageView(snapshot)
+		view.Permissions = statusPermissionView(snapshot)
 		budget, err := s.contextBudget(ctx, snapshot)
 		if err != nil {
 			return appviewmodel.StatusView{}, err

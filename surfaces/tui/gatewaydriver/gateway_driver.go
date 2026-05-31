@@ -11,7 +11,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
-	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -135,11 +134,11 @@ func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (appviewm
 }
 
 func (d *GatewayDriver) LightweightStatus(ctx context.Context) (StatusSnapshot, error) {
-	return d.status(ctx, false)
+	return d.statusFromAppView(ctx, false)
 }
 
 func (d *GatewayDriver) Status(ctx context.Context) (StatusSnapshot, error) {
-	return d.status(ctx, true)
+	return d.statusFromAppView(ctx, true)
 }
 
 func (d *GatewayDriver) HomeView(ctx context.Context, version string) (appviewmodel.HomeView, error) {
@@ -158,205 +157,6 @@ func (d *GatewayDriver) HomeView(ctx context.Context, version string) (appviewmo
 		return view, err
 	}
 	return appviewmodel.HomeView{}, fmt.Errorf("surfaces/tui/gatewaydriver: home view dependency is unavailable")
-}
-
-func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (StatusSnapshot, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if status, ok, err := d.statusFromAppView(ctx); ok || err != nil {
-		return status, err
-	}
-	modelText, sessionMode, sandboxType := d.defaultDisplays()
-	reasoningEffort := ""
-	if d.stack != nil {
-		if alias := strings.TrimSpace(d.stack.DefaultModelAlias()); alias != "" {
-			modelText = alias
-		}
-	}
-	sandboxStatus := SandboxStatus{}
-	if includeDiagnostics && d.stack != nil {
-		sandboxStatus = d.stack.SandboxStatus()
-	}
-	activeSession, ok := d.currentSession()
-	if ok && d.stack != nil {
-		if state, err := d.stack.SessionRuntimeState(context.Background(), activeSession.Ref); err == nil {
-			if strings.TrimSpace(state.ModelAlias) != "" {
-				modelText = strings.TrimSpace(state.ModelAlias)
-			}
-			if strings.TrimSpace(state.ReasoningEffort) != "" {
-				reasoningEffort = strings.TrimSpace(state.ReasoningEffort)
-			}
-			if strings.TrimSpace(state.SessionMode) != "" {
-				sessionMode = strings.TrimSpace(state.SessionMode)
-			}
-		}
-	}
-	acpStatus, activeACP, acpStatusErr := d.activeACPControllerStatus(ctx)
-	if acpStatusErr != nil {
-		return StatusSnapshot{}, acpStatusErr
-	}
-	acpModeID := ""
-	acpModeLabel := ""
-	acpModelText := ""
-	if activeACP {
-		acpModelText = acpControllerModelText(acpStatus, activeSession)
-		modelText = acpModelText
-		reasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-		acpModeID = strings.TrimSpace(acpStatus.Mode)
-		acpModeLabel = acpControllerModeDisplay(acpStatus)
-	}
-	sandboxType = firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, sandboxType)
-	route := sandboxStatus.Route
-	securitySummary := sandboxStatus.SecuritySummary
-	d.mu.Lock()
-	sessionID := ""
-	if ok {
-		sessionID = activeSession.SessionID
-	}
-	liveModelText := d.modelText
-	liveSessionMode := d.sessionMode
-	liveSandboxType := d.sandboxType
-	bindingKey := d.bindingKey
-	d.mu.Unlock()
-	rawModelText := firstNonEmpty(modelText, liveModelText)
-	workspaceCWD := strings.TrimSpace(d.stack.Workspace.CWD)
-
-	status := StatusSnapshot{
-		SessionID:                       sessionID,
-		Workspace:                       workspaceStatusDisplay(ctx, workspaceCWD),
-		Model:                           formatReasoningModelDisplay(rawModelText, reasoningEffort),
-		ReasoningEffort:                 reasoningEffort,
-		ModeLabel:                       firstNonEmpty(sessionMode, liveSessionMode),
-		SessionMode:                     firstNonEmpty(sessionMode, liveSessionMode),
-		SandboxType:                     firstNonEmpty(sandboxType, liveSandboxType),
-		SandboxRequestedBackend:         firstNonEmpty(sandboxStatus.RequestedBackend, "auto"),
-		SandboxResolvedBackend:          firstNonEmpty(sandboxStatus.ResolvedBackend, sandboxStatus.RequestedBackend, liveSandboxType),
-		Route:                           route,
-		FallbackReason:                  sandboxStatus.FallbackReason,
-		SandboxInstallHint:              sandboxStatus.InstallHint,
-		SandboxSetup:                    sandbox.CloneSetupStatus(sandboxStatus.Setup),
-		SandboxSetupRequired:            sandboxStatus.SetupRequired,
-		SandboxSetupError:               sandboxStatus.SetupError,
-		SandboxSetupMarkerCurrent:       sandboxStatus.SetupMarkerCurrent,
-		SandboxSetupMarkerReason:        sandboxStatus.SetupMarkerReason,
-		SandboxGlobalSetupCurrent:       sandboxStatus.GlobalSetupCurrent,
-		SandboxGlobalSetupRequired:      sandboxStatus.GlobalSetupRequired,
-		SandboxGlobalSetupReason:        sandboxStatus.GlobalSetupReason,
-		SandboxWorkspaceSetupCurrent:    sandboxStatus.WorkspaceSetupCurrent,
-		SandboxWorkspaceSetupRequired:   sandboxStatus.WorkspaceSetupRequired,
-		SandboxWorkspaceSetupReason:     sandboxStatus.WorkspaceSetupReason,
-		SandboxWorkspaceSetupRoot:       sandboxStatus.WorkspaceSetupRoot,
-		SandboxWorkspaceSetupWriteRoots: sandboxStatus.WorkspaceSetupWriteRoots,
-		SandboxWorkspaceSetupPolicyHash: sandboxStatus.WorkspaceSetupPolicyHash,
-		SandboxWorkspaceSetupUpdatedAt:  sandboxStatus.WorkspaceSetupUpdatedAt,
-		SecuritySummary:                 securitySummary,
-		HostExecution:                   strings.EqualFold(strings.TrimSpace(route), "host"),
-		FullAccessMode:                  false,
-		Surface:                         bindingKey,
-	}
-	if d.stack != nil {
-		req := DoctorRequest{}
-		if ok {
-			req.SessionRef = activeSession.Ref
-		}
-		if includeDiagnostics {
-			if report, err := d.stack.Doctor(context.Background(), req); err == nil {
-				status.StoreDir = strings.TrimSpace(report.StoreDir)
-				status.Provider = strings.TrimSpace(report.ActiveProvider)
-				status.ModelName = strings.TrimSpace(report.ActiveModel)
-				status.MissingAPIKey = report.MissingAPIKey
-				status.HostExecution = report.HostExecution
-				status.FullAccessMode = report.FullAccessMode
-				status.PermissionGrantCount = report.PermissionGrantCount
-				status.PermissionReadRootCount = report.PermissionReadRootCount
-				status.PermissionWriteRootCount = report.PermissionWriteRootCount
-				status.SandboxRequestedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxRequestedBackend), status.SandboxRequestedBackend)
-				status.SandboxResolvedBackend = firstNonEmpty(strings.TrimSpace(report.SandboxResolvedBackend), status.SandboxResolvedBackend)
-				status.Route = firstNonEmpty(strings.TrimSpace(report.SandboxRoute), status.Route)
-				status.FallbackReason = firstNonEmpty(strings.TrimSpace(report.SandboxFallbackReason), status.FallbackReason)
-				status.SandboxInstallHint = firstNonEmpty(strings.TrimSpace(report.SandboxInstallHint), status.SandboxInstallHint)
-				if report.SandboxSetup != nil {
-					status.SandboxSetup = sandbox.CloneSetupStatus(*report.SandboxSetup)
-				}
-				status.SandboxSetupRequired = report.SandboxSetupRequired || status.SandboxSetupRequired
-				status.SandboxSetupError = firstNonEmpty(strings.TrimSpace(report.SandboxSetupError), status.SandboxSetupError)
-				status.SandboxSetupMarkerCurrent = report.SandboxSetupMarkerCurrent || status.SandboxSetupMarkerCurrent
-				status.SandboxSetupMarkerReason = firstNonEmpty(strings.TrimSpace(report.SandboxSetupMarkerReason), status.SandboxSetupMarkerReason)
-				status.SandboxGlobalSetupCurrent = report.SandboxGlobalSetupCurrent || status.SandboxGlobalSetupCurrent
-				status.SandboxGlobalSetupRequired = report.SandboxGlobalSetupRequired || status.SandboxGlobalSetupRequired
-				status.SandboxGlobalSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxGlobalSetupReason), status.SandboxGlobalSetupReason)
-				status.SandboxWorkspaceSetupCurrent = report.SandboxWorkspaceSetupCurrent || status.SandboxWorkspaceSetupCurrent
-				status.SandboxWorkspaceSetupRequired = report.SandboxWorkspaceSetupRequired || status.SandboxWorkspaceSetupRequired
-				status.SandboxWorkspaceSetupReason = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupReason), status.SandboxWorkspaceSetupReason)
-				status.SandboxWorkspaceSetupRoot = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupRoot), status.SandboxWorkspaceSetupRoot)
-				if report.SandboxWorkspaceSetupWriteRoots > 0 {
-					status.SandboxWorkspaceSetupWriteRoots = report.SandboxWorkspaceSetupWriteRoots
-				}
-				status.SandboxWorkspaceSetupPolicyHash = firstNonEmpty(strings.TrimSpace(report.SandboxWorkspaceSetupPolicyHash), status.SandboxWorkspaceSetupPolicyHash)
-				if !report.SandboxWorkspaceSetupUpdatedAt.IsZero() {
-					status.SandboxWorkspaceSetupUpdatedAt = report.SandboxWorkspaceSetupUpdatedAt
-				}
-				status.SecuritySummary = firstNonEmpty(strings.TrimSpace(report.SandboxSecuritySummary), status.SecuritySummary)
-				if alias := strings.TrimSpace(report.ActiveModelAlias); alias != "" {
-					rawModelText = alias
-					status.Model = formatReasoningModelDisplay(alias, status.ReasoningEffort)
-				}
-				if mode := strings.TrimSpace(report.SessionMode); mode != "" {
-					status.ModeLabel = mode
-					status.SessionMode = mode
-				}
-				if id := strings.TrimSpace(report.SessionID); id != "" {
-					status.SessionID = id
-				}
-			}
-		}
-		if status.ReasoningEffort == "" {
-			if activeACP {
-				status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-				status.Model = formatReasoningModelDisplay(firstNonEmpty(strings.TrimSpace(acpStatus.Model), rawModelText), status.ReasoningEffort)
-			} else if cfg, ok := d.stack.ModelConfig(rawModelText); ok {
-				status.ReasoningEffort = firstNonEmpty(cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
-				status.Model = formatReasoningModelDisplay(rawModelText, status.ReasoningEffort)
-			}
-		}
-	}
-	if activeACP {
-		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
-		status.Model = formatReasoningModelDisplay(rawModelText, strings.TrimSpace(acpStatus.ReasoningEffort))
-		status.ReasoningEffort = strings.TrimSpace(acpStatus.ReasoningEffort)
-		if acpModeID != "" {
-			status.SessionMode = acpModeID
-		}
-		if acpModeLabel != "" || acpModeID != "" {
-			status.ModeLabel = firstNonEmpty(acpModeLabel, acpModeID)
-		}
-		status.Provider = "acp"
-		status.ModelName = strings.TrimSpace(acpStatus.Model)
-		status.MissingAPIKey = false
-		status.FullAccessMode = false
-		status.PromptTokens = 0
-		status.CompletionTokens = 0
-		status.TotalTokens = 0
-		status.ContextWindowTokens = 0
-	}
-	if status.TotalTokens > 0 {
-		status.PromptTokens = status.TotalTokens
-	}
-	if status.FullAccessMode {
-		status.HostExecution = true
-		status.Route = firstNonEmpty(strings.TrimSpace(status.Route), "host")
-		if strings.TrimSpace(status.Route) != "host" {
-			status.Route = "host"
-		}
-	}
-	active := d.stack.ActiveTurns()
-	status.ActiveJobs = len(active)
-	status.Running = len(active) > 0
-	if kind, ok := activeTurnKindForSession(active, activeSession.Ref); ok {
-		status.ActiveTurnKind = string(kind)
-	}
-	return status, nil
 }
 
 func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn, error) {
@@ -780,32 +580,14 @@ func min(a, b int) int {
 	return b
 }
 
-func (d *GatewayDriver) defaultDisplays() (string, string, string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.defaultModelText, d.defaultSessionMode, d.defaultSandboxType
-}
-
 func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession coresession.Session) {
 	if d == nil || d.stack == nil {
 		return
 	}
-	modelText, sessionMode, sandboxType := d.defaultDisplays()
-	if alias := strings.TrimSpace(d.stack.DefaultModelAlias()); alias != "" {
-		modelText = alias
-	}
-	if state, err := d.stack.SessionRuntimeState(ctx, activeSession.Ref); err == nil {
-		if strings.TrimSpace(state.ModelAlias) != "" {
-			modelText = strings.TrimSpace(state.ModelAlias)
-		}
-		if strings.TrimSpace(state.SessionMode) != "" {
-			sessionMode = strings.TrimSpace(state.SessionMode)
-		}
-	}
 	d.mu.Lock()
-	d.modelText = modelText
-	d.sessionMode = sessionMode
-	d.sandboxType = sandboxType
+	d.modelText = d.defaultModelText
+	d.sessionMode = d.defaultSessionMode
+	d.sandboxType = d.defaultSandboxType
 	d.mu.Unlock()
 }
 

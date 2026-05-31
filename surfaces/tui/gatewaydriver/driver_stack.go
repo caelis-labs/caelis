@@ -128,14 +128,6 @@ type ModelChoice struct {
 	Detail     string
 }
 
-type SessionRuntimeState struct {
-	ModelID         string
-	ModelAlias      string
-	ReasoningEffort string
-	SessionMode     string
-	SandboxMode     string
-}
-
 type SandboxStatus struct {
 	RequestedBackend         string
 	ResolvedBackend          string
@@ -158,50 +150,6 @@ type SandboxStatus struct {
 	WorkspaceSetupWriteRoots int
 	WorkspaceSetupPolicyHash string
 	WorkspaceSetupUpdatedAt  time.Time
-}
-
-type DoctorRequest struct {
-	SessionRef coresession.Ref
-	SessionID  string
-	BindingKey string
-}
-
-type DoctorReport struct {
-	StoreDir                        string
-	SessionID                       string
-	SessionMode                     string
-	ActiveModelAlias                string
-	ActiveProvider                  string
-	ActiveModel                     string
-	MissingAPIKey                   bool
-	SandboxRequestedBackend         string
-	SandboxResolvedBackend          string
-	SandboxRoute                    string
-	SandboxFallbackReason           string
-	SandboxInstallHint              string
-	SandboxSetup                    *sandbox.SetupStatus
-	SandboxSetupRequired            bool
-	SandboxSetupError               string
-	SandboxSetupMarkerCurrent       bool
-	SandboxSetupMarkerReason        string
-	SandboxSecuritySummary          string
-	SandboxGlobalSetupCurrent       bool
-	SandboxGlobalSetupRequired      bool
-	SandboxGlobalSetupReason        string
-	SandboxWorkspaceSetupCurrent    bool
-	SandboxWorkspaceSetupRequired   bool
-	SandboxWorkspaceSetupReason     string
-	SandboxWorkspaceSetupRoot       string
-	SandboxWorkspaceSetupWriteRoots int
-	SandboxWorkspaceSetupPolicyHash string
-	SandboxWorkspaceSetupUpdatedAt  time.Time
-	HostExecution                   bool
-	FullAccessMode                  bool
-	PermissionGrantCount            int
-	PermissionReadRootCount         int
-	PermissionWriteRootCount        int
-	ConfigPermissionsSecure         bool
-	Warnings                        []string
 }
 
 type ACPAgentInfo struct {
@@ -236,16 +184,12 @@ type DriverStack struct {
 	ControlPlaneStateFn                func(context.Context, coresession.Ref) (ControlPlaneState, error)
 	PromptParticipantFn                func(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
 	ACPControllerStatusFn              func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
-	DefaultModelAliasFn                func() string
-	AppStatusViewFn                    func(context.Context, coresession.Ref) (appviewmodel.StatusView, error)
+	AppStatusViewFn                    func(context.Context, coresession.Ref, bool) (appviewmodel.StatusView, error)
 	HomeViewFn                         func(context.Context, coresession.Ref, string) (appviewmodel.HomeView, error)
 	SettingsPanelFn                    func(context.Context, coresession.Ref) (appviewmodel.SettingsPanelView, error)
 	ReplaySessionEventsFn              func(context.Context, coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error)
-	SandboxStatusFn                    func() SandboxStatus
 	CommandCatalogFn                   func(context.Context) (appviewmodel.CommandCatalogView, error)
 	ExecuteCommandFn                   func(context.Context, coresession.Ref, string, []model.ContentPart) (CommandExecutionView, error)
-	SessionRuntimeStateFn              func(context.Context, coresession.Ref) (SessionRuntimeState, error)
-	DoctorFn                           func(context.Context, DoctorRequest) (DoctorReport, error)
 	ModelConfigFn                      func(string) (ModelConfig, bool)
 	CompactSessionFn                   func(context.Context, coresession.Ref) error
 	ConnectProviderCandidatesFn        func(context.Context, string, int) ([]SlashArgCandidate, error)
@@ -363,18 +307,11 @@ func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref coresession.R
 	return s.ACPControllerStatusFn(ctx, ref)
 }
 
-func (s *DriverStack) DefaultModelAlias() string {
-	if s == nil || s.DefaultModelAliasFn == nil {
-		return ""
-	}
-	return s.DefaultModelAliasFn()
-}
-
-func (s *DriverStack) AppStatusView(ctx context.Context, ref coresession.Ref) (appviewmodel.StatusView, bool, error) {
+func (s *DriverStack) AppStatusView(ctx context.Context, ref coresession.Ref, includeDiagnostics bool) (appviewmodel.StatusView, bool, error) {
 	if s == nil || s.AppStatusViewFn == nil {
 		return appviewmodel.StatusView{}, false, nil
 	}
-	view, err := s.AppStatusViewFn(ctx, ref)
+	view, err := s.AppStatusViewFn(ctx, ref, includeDiagnostics)
 	return view, true, err
 }
 
@@ -394,13 +331,6 @@ func (s *DriverStack) SettingsPanel(ctx context.Context, ref coresession.Ref) (a
 	return view, true, err
 }
 
-func (s *DriverStack) SandboxStatus() SandboxStatus {
-	if s == nil || s.SandboxStatusFn == nil {
-		return SandboxStatus{}
-	}
-	return s.SandboxStatusFn()
-}
-
 func (s *DriverStack) CommandCatalog(ctx context.Context) (appviewmodel.CommandCatalogView, bool, error) {
 	if s == nil || s.CommandCatalogFn == nil {
 		return appviewmodel.CommandCatalogView{}, false, nil
@@ -414,20 +344,6 @@ func (s *DriverStack) ExecuteCommand(ctx context.Context, ref coresession.Ref, i
 		return CommandExecutionView{}, fmt.Errorf("surfaces/tui/gatewaydriver: command dependency is unavailable")
 	}
 	return s.ExecuteCommandFn(ctx, ref, input, parts)
-}
-
-func (s *DriverStack) SessionRuntimeState(ctx context.Context, ref coresession.Ref) (SessionRuntimeState, error) {
-	if s == nil || s.SessionRuntimeStateFn == nil {
-		return SessionRuntimeState{}, fmt.Errorf("surfaces/tui/gatewaydriver: session runtime state dependency is unavailable")
-	}
-	return s.SessionRuntimeStateFn(ctx, ref)
-}
-
-func (s *DriverStack) Doctor(ctx context.Context, req DoctorRequest) (DoctorReport, error) {
-	if s == nil || s.DoctorFn == nil {
-		return DoctorReport{}, fmt.Errorf("surfaces/tui/gatewaydriver: doctor dependency is unavailable")
-	}
-	return s.DoctorFn(ctx, req)
 }
 
 func (s *DriverStack) ModelConfig(alias string) (ModelConfig, bool) {
@@ -493,7 +409,7 @@ func (s *DriverStack) SetACPControllerModel(ctx context.Context, ref coresession
 
 func (s *DriverStack) PreflightSandbox(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
 	if s == nil || s.PreflightSandboxFn == nil {
-		return s.SandboxStatus(), nil
+		return SandboxStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: sandbox preflight dependency is unavailable")
 	}
 	return s.PreflightSandboxFn(ctx, allowNonElevatedRepair)
 }

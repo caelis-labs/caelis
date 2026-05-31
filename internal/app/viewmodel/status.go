@@ -4,18 +4,21 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/config"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
 )
 
 type StatusView struct {
-	Runtime    RuntimeStatus     `json:"runtime"`
-	Session    *SessionStatus    `json:"session,omitempty"`
-	Model      ModelStatus       `json:"model"`
-	Mode       ModeStatus        `json:"mode"`
-	Controller *ControllerStatus `json:"controller,omitempty"`
-	Agents     AgentStatus       `json:"agents"`
-	Resources  ResourceStatus    `json:"resources"`
-	Usage      UsageStatus       `json:"usage,omitempty"`
+	Runtime     RuntimeStatus     `json:"runtime"`
+	Session     *SessionStatus    `json:"session,omitempty"`
+	Sandbox     *SandboxStatus    `json:"sandbox,omitempty"`
+	Model       ModelStatus       `json:"model"`
+	Mode        ModeStatus        `json:"mode"`
+	Controller  *ControllerStatus `json:"controller,omitempty"`
+	Agents      AgentStatus       `json:"agents"`
+	Resources   ResourceStatus    `json:"resources"`
+	Permissions PermissionStatus  `json:"permissions,omitempty"`
+	Usage       UsageStatus       `json:"usage,omitempty"`
 }
 
 type RuntimeStatus struct {
@@ -30,6 +33,37 @@ type RuntimeStatus struct {
 	SandboxNetwork           string `json:"sandbox_network,omitempty"`
 	SandboxReadableRootCount int    `json:"sandbox_readable_root_count,omitempty"`
 	SandboxWritableRootCount int    `json:"sandbox_writable_root_count,omitempty"`
+}
+
+type SandboxStatus struct {
+	RequestedBackend         string              `json:"requested_backend,omitempty"`
+	ResolvedBackend          string              `json:"resolved_backend,omitempty"`
+	Route                    string              `json:"route,omitempty"`
+	Isolation                string              `json:"isolation,omitempty"`
+	DefaultPermission        string              `json:"default_permission,omitempty"`
+	Network                  string              `json:"network,omitempty"`
+	DefaultNetwork           string              `json:"default_network,omitempty"`
+	NetworkControl           bool                `json:"network_control,omitempty"`
+	PathPolicy               bool                `json:"path_policy,omitempty"`
+	ReadableRootCount        int                 `json:"readable_root_count,omitempty"`
+	WritableRootCount        int                 `json:"writable_root_count,omitempty"`
+	FallbackToHost           bool                `json:"fallback_to_host,omitempty"`
+	FallbackReason           string              `json:"fallback_reason,omitempty"`
+	FallbackInstallHint      string              `json:"fallback_install_hint,omitempty"`
+	Setup                    sandbox.SetupStatus `json:"setup,omitempty"`
+	SetupRequired            bool                `json:"setup_required,omitempty"`
+	SetupError               string              `json:"setup_error,omitempty"`
+	SetupMarkerCurrent       bool                `json:"setup_marker_current,omitempty"`
+	SetupMarkerReason        string              `json:"setup_marker_reason,omitempty"`
+	SandboxRuntimeConfigured bool                `json:"sandbox_runtime_configured,omitempty"`
+	Diagnostics              []SandboxDiagnostic `json:"diagnostics,omitempty"`
+}
+
+type SandboxDiagnostic struct {
+	Severity string            `json:"severity,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
 }
 
 type SessionStatus struct {
@@ -118,6 +152,12 @@ type ResourceDiagnostic struct {
 	Path     string            `json:"path,omitempty"`
 	Message  string            `json:"message,omitempty"`
 	Meta     map[string]string `json:"meta,omitempty"`
+}
+
+type PermissionStatus struct {
+	GrantCount     int `json:"grant_count,omitempty"`
+	ReadRootCount  int `json:"read_root_count,omitempty"`
+	WriteRootCount int `json:"write_root_count,omitempty"`
 }
 
 type UsageStatus struct {

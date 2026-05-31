@@ -57,6 +57,37 @@ func cloneTestState(state map[string]any) map[string]any {
 	return next
 }
 
+func testGatewayStatusView(ref coresession.Ref, workspace coresession.Workspace, modelAlias string, modeID string) appviewmodel.StatusView {
+	modelAlias = strings.TrimSpace(modelAlias)
+	modeID = firstNonEmpty(strings.TrimSpace(modeID), "auto-review")
+	return appviewmodel.StatusView{
+		Runtime: appviewmodel.RuntimeStatus{
+			AppName:        firstNonEmpty(ref.AppName, "caelis"),
+			UserID:         ref.UserID,
+			WorkspaceKey:   firstNonEmpty(ref.WorkspaceKey, workspace.Key),
+			WorkspaceCWD:   workspace.CWD,
+			DefaultModel:   modelAlias,
+			SandboxBackend: "host",
+		},
+		Session: &appviewmodel.SessionStatus{
+			Ref:       ref,
+			Workspace: workspace,
+			Status:    "idle",
+		},
+		Model: appviewmodel.ModelStatus{
+			Configured: modelAlias != "",
+			Current: &appviewmodel.ModelChoice{
+				ID:      modelAlias,
+				Alias:   modelAlias,
+				Default: true,
+			},
+		},
+		Mode: appviewmodel.ModeStatus{
+			Current: appviewmodel.ModeChoice{ID: modeID, Name: modeID},
+		},
+	}
+}
+
 var errGatewayDriverTestActiveRunConflict = errors.New("active participant run already in progress")
 
 type gatewayDriverTestTurn struct {
@@ -251,9 +282,8 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}}
 	var activeSubmits []SubmitActiveTurnRequest
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace:       activeSession.Workspace,
-		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
-		ActiveTurnsFn:   func() []ActiveTurnState { return active },
+		Workspace:     activeSession.Workspace,
+		ActiveTurnsFn: func() []ActiveTurnState { return active },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return activeSession, nil
 		},
@@ -301,6 +331,9 @@ func TestGatewayDriverExecuteCommandRoutesThroughStackAndAdoptsReturnedSession(t
 	var calls []commandCall
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		Workspace: coresession.Workspace{Key: "ws", CWD: workspace},
+		AppStatusViewFn: func(_ context.Context, ref coresession.Ref, _ bool) (appviewmodel.StatusView, error) {
+			return testGatewayStatusView(ref, coresession.Workspace{Key: "ws", CWD: workspace}, "cmd-model", "auto-review"), nil
+		},
 		ExecuteCommandFn: func(_ context.Context, ref coresession.Ref, input string, parts []coremodel.ContentPart) (CommandExecutionView, error) {
 			calls = append(calls, commandCall{
 				ref:   ref,
@@ -352,7 +385,7 @@ func TestGatewayDriverExecuteCommandRoutesThroughStackAndAdoptsReturnedSession(t
 
 func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	ctx := context.Background()
-	statusCalls := 0
+	diagnosticStatusCalls := 0
 	activeSession := coresession.Session{
 		Ref: coresession.Ref{
 			AppName: "caelis", UserID: "user-1", SessionID: "startup-session", WorkspaceKey: "ws",
@@ -361,9 +394,13 @@ func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	}
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		Workspace: activeSession.Workspace,
-		SandboxStatusFn: func() SandboxStatus {
-			statusCalls++
-			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
+		AppStatusViewFn: func(_ context.Context, ref coresession.Ref, includeDiagnostics bool) (appviewmodel.StatusView, error) {
+			if includeDiagnostics {
+				diagnosticStatusCalls++
+			}
+			view := testGatewayStatusView(ref, activeSession.Workspace, "startup-model", "auto-review")
+			view.Runtime.SandboxBackend = ""
+			return view, nil
 		},
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return activeSession, nil
@@ -375,27 +412,22 @@ func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 	if driver.sandboxType != "auto" {
 		t.Fatalf("startup sandbox type = %q, want lightweight default", driver.sandboxType)
 	}
-	if statusCalls != 0 {
-		t.Fatalf("SandboxStatus() calls during startup = %d, want 0", statusCalls)
+	if diagnosticStatusCalls != 0 {
+		t.Fatalf("diagnostic status calls during startup = %d, want 0", diagnosticStatusCalls)
 	}
 }
 
 func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	ctx := context.Background()
-	sandboxCalls := 0
-	doctorCalls := 0
+	diagnosticStatusCalls := 0
+	workspace := coresession.Workspace{Key: "ws", CWD: t.TempDir()}
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
-		DefaultModelAliasFn: func() string {
-			return "gpt-light"
-		},
-		SandboxStatusFn: func() SandboxStatus {
-			sandboxCalls++
-			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
-		},
-		DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
-			doctorCalls++
-			return DoctorReport{ActiveModelAlias: "doctor-model"}, nil
+		Workspace: workspace,
+		AppStatusViewFn: func(_ context.Context, ref coresession.Ref, includeDiagnostics bool) (appviewmodel.StatusView, error) {
+			if includeDiagnostics {
+				diagnosticStatusCalls++
+			}
+			return testGatewayStatusView(ref, workspace, "gpt-light", "auto-review"), nil
 		},
 	}, "", "surface", "")
 	if err != nil {
@@ -408,11 +440,8 @@ func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	if status.Model != "gpt-light" {
 		t.Fatalf("LightweightStatus().Model = %q, want default alias", status.Model)
 	}
-	if sandboxCalls != 0 {
-		t.Fatalf("SandboxStatus() calls = %d, want 0", sandboxCalls)
-	}
-	if doctorCalls != 0 {
-		t.Fatalf("Doctor() calls = %d, want 0", doctorCalls)
+	if diagnosticStatusCalls != 0 {
+		t.Fatalf("diagnostic status calls = %d, want 0", diagnosticStatusCalls)
 	}
 }
 
@@ -429,15 +458,17 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 		Workspace: coresession.Workspace{Key: "repo", CWD: workspace},
 	}
 	var seenRef coresession.Ref
+	var seenDiagnostics bool
 	statusCalls := 0
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		Workspace: activeSession.Workspace,
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return activeSession, nil
 		},
-		AppStatusViewFn: func(_ context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
+		AppStatusViewFn: func(_ context.Context, ref coresession.Ref, includeDiagnostics bool) (appviewmodel.StatusView, error) {
 			statusCalls++
 			seenRef = ref
+			seenDiagnostics = includeDiagnostics
 			return appviewmodel.StatusView{
 				Runtime: appviewmodel.RuntimeStatus{
 					AppName:        "caelis",
@@ -467,6 +498,11 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 				Mode: appviewmodel.ModeStatus{
 					Current: appviewmodel.ModeChoice{ID: "manual", Name: "Manual"},
 				},
+				Sandbox: &appviewmodel.SandboxStatus{
+					RequestedBackend: "host",
+					ResolvedBackend:  "host",
+					Route:            "host",
+				},
 			}, nil
 		},
 	}, activeSession.SessionID, "surface", "")
@@ -480,6 +516,9 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 	}
 	if statusCalls != 1 {
 		t.Fatalf("AppStatusView() calls = %d, want 1", statusCalls)
+	}
+	if !seenDiagnostics {
+		t.Fatal("AppStatusView() includeDiagnostics = false, want true for full status")
 	}
 	if seenRef.SessionID != activeSession.SessionID || seenRef.AppName != activeSession.AppName {
 		t.Fatalf("AppStatusView() ref = %#v, want active session ref", seenRef)
@@ -522,9 +561,8 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 	var activeSubmits []SubmitActiveTurnRequest
 	var beginCalls int
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace:       activeSession.Workspace,
-		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
-		ActiveTurnsFn:   func() []ActiveTurnState { return active },
+		Workspace:     activeSession.Workspace,
+		ActiveTurnsFn: func() []ActiveTurnState { return active },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return activeSession, nil
 		},
@@ -1797,10 +1835,9 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 	}
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace:           activeSession.Workspace,
-			DefaultModelAliasFn: func() string { return "local/model" },
-			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
-				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
+			Workspace: activeSession.Workspace,
+			AppStatusViewFn: func(_ context.Context, ref coresession.Ref, _ bool) (appviewmodel.StatusView, error) {
+				return testGatewayStatusView(ref, activeSession.Workspace, "local/model", "local-default"), nil
 			},
 			ACPControllerStatusFn: func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 				return appviewmodel.ControllerStatus{
@@ -2902,17 +2939,21 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 
 func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	ctx := context.Background()
-	activeSession := coresession.Session{Ref: coresession.Ref{SessionID: "grant-session"}}
+	activeSession := coresession.Session{
+		Ref:       coresession.Ref{SessionID: "grant-session"},
+		Workspace: coresession.Workspace{CWD: "/workspace"},
+	}
 	driver := &GatewayDriver{
 		stack: &DriverStack{
 			Workspace: coresession.Workspace{CWD: "/workspace"},
-			DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
-				return DoctorReport{
-					SessionID:                "grant-session",
-					PermissionGrantCount:     2,
-					PermissionReadRootCount:  3,
-					PermissionWriteRootCount: 1,
-				}, nil
+			AppStatusViewFn: func(_ context.Context, ref coresession.Ref, _ bool) (appviewmodel.StatusView, error) {
+				view := testGatewayStatusView(ref, activeSession.Workspace, "grant-model", "auto-review")
+				view.Permissions = appviewmodel.PermissionStatus{
+					GrantCount:     2,
+					ReadRootCount:  3,
+					WriteRootCount: 1,
+				}
+				return view, nil
 			},
 		},
 		session:    activeSession,

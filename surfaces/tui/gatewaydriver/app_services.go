@@ -78,8 +78,11 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return out, nil
 	}
-	stack.AppStatusViewFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
-		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: ref})
+	stack.AppStatusViewFn = func(ctx context.Context, ref coresession.Ref, includeDiagnostics bool) (appviewmodel.StatusView, error) {
+		return svc.Status().View(ctx, appservices.StatusRequest{
+			SessionRef:         ref,
+			IncludeDiagnostics: includeDiagnostics,
+		})
 	}
 	stack.HomeViewFn = func(ctx context.Context, ref coresession.Ref, version string) (appviewmodel.HomeView, error) {
 		return svc.Views().Home(ctx, appservices.HomeRequest{SessionRef: ref, Version: version})
@@ -109,20 +112,6 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 			Input:        input,
 			ContentParts: coremodel.CloneContentParts(parts),
 		})
-	}
-	stack.SandboxStatusFn = func() SandboxStatus {
-		status, err := svc.Sandbox().Status(context.Background())
-		if err != nil {
-			return SandboxStatus{}
-		}
-		return sandboxStatusFromApp(status)
-	}
-	stack.DefaultModelAliasFn = func() string {
-		cfg, ok, err := svc.Models().Current(context.Background(), coresession.Ref{})
-		if err != nil || !ok {
-			return strings.TrimSpace(runtimeCfg.Model)
-		}
-		return firstNonEmpty(cfg.Alias, cfg.ID)
 	}
 	stack.ModelConfigFn = func(ref string) (ModelConfig, bool) {
 		cfg, err := svc.Models().Resolve(context.Background(), ref)

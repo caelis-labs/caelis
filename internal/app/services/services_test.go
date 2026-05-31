@@ -4371,6 +4371,89 @@ func TestStatusServiceViewProjectsSharedAppState(t *testing.T) {
 	}
 }
 
+func TestStatusServiceViewIncludesDiagnosticsAndPermissionSummary(t *testing.T) {
+	ctx := context.Background()
+	ref := session.Ref{AppName: "caelis-app", UserID: "tester", SessionID: "sess-permissions", WorkspaceKey: "repo"}
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{
+			Ref:       ref,
+			Workspace: session.Workspace{Key: "repo", CWD: "/tmp/repo"},
+		},
+		Events: []session.Event{{
+			ID:   "approval-1",
+			Type: session.EventApproval,
+			Approval: &session.ApprovalEvent{
+				Status: session.ApprovalApproved,
+				Tool: &session.ToolEvent{
+					Input: map[string]any{
+						"permissions": map[string]any{
+							"read":  []any{"/tmp/repo", "/tmp/docs"},
+							"write": []any{"/tmp/repo"},
+						},
+					},
+				},
+			},
+		}, {
+			ID:   "approval-2",
+			Type: session.EventApproval,
+			Approval: &session.ApprovalEvent{
+				Status: session.ApprovalApproved,
+				Tool: &session.ToolEvent{
+					Input: map[string]any{
+						"file_system": map[string]any{
+							"read_roots":  []string{"/tmp/cache"},
+							"write_roots": []string{"/tmp/output"},
+						},
+					},
+				},
+			},
+		}, {
+			ID:   "approval-3",
+			Type: session.EventApproval,
+			Approval: &session.ApprovalEvent{
+				Status: session.ApprovalRejected,
+				Tool:   &session.ToolEvent{Input: map[string]any{"write": []string{"/tmp/rejected"}}},
+			},
+		}},
+	}}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis-app",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/tmp/repo",
+			Model:        "fallback-model",
+			Sandbox: config.Sandbox{
+				Backend:       "host",
+				ReadableRoots: []string{"/tmp/repo"},
+				WritableRoots: []string{"/tmp/repo"},
+			},
+		},
+		Engine: engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err := svc.Status().View(ctx, StatusRequest{SessionRef: ref, IncludeDiagnostics: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Sandbox == nil || status.Sandbox.RequestedBackend == "" {
+		t.Fatalf("sandbox diagnostics = %#v, want included status", status.Sandbox)
+	}
+	if status.Permissions.GrantCount != 2 || status.Permissions.ReadRootCount != 3 || status.Permissions.WriteRootCount != 2 {
+		t.Fatalf("permission summary = %#v, want grants/read/write 2/3/2", status.Permissions)
+	}
+
+	lightweight, err := svc.Status().View(ctx, StatusRequest{SessionRef: ref})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lightweight.Sandbox != nil {
+		t.Fatalf("lightweight sandbox diagnostics = %#v, want omitted", lightweight.Sandbox)
+	}
+}
+
 func TestSandboxServiceHostLifecycleIsNoop(t *testing.T) {
 	svc, err := New(Config{
 		Runtime: config.Runtime{

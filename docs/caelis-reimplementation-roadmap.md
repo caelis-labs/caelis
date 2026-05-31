@@ -1544,6 +1544,12 @@ be migrated before retiring the old stack:
      Missing driver hooks now fail with explicit dependency errors, and the
      TUI status bar no longer keeps a runtime cleanup branch for old `ctx`
      context labels.
+   - Migrated baseline: gatewaydriver status is now fully backed by the
+     shared app `StatusView`. The parallel hand-built status/doctor/session
+     runtime fallback hooks have been removed, optional sandbox diagnostics are
+     requested through the shared status request, and permission grant counts
+     are projected from canonical approval events instead of a TUI-only doctor
+     report.
    - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
      transcript reducer, tool panels, approval UI, theme system, and attachment
      UI/rendering remain TUI-owned presentation code by design.
@@ -1562,9 +1568,10 @@ be migrated before retiring the old stack:
      `internal/app/services.Status().View()` provide a service-native,
      surface-neutral status contract for runtime identity, current session
      summary, model selection, session mode, agents, resource counts, resource
-     diagnostics, and store identity. This gives TUI and the future APP a
-     shared status/diagnostics panel input without importing `gatewayapp` or
-     any TUI package.
+     diagnostics, store identity, optional sandbox diagnostics, and canonical
+     permission grant summaries. This gives TUI and the future APP a shared
+     status/diagnostics panel input without importing `gatewayapp` or any TUI
+     package.
    - Migrated baseline: `internal/app/services.ControllerService` gives both
      TUI and the future APP the same controller config-intent contract for an
      active ACP controller, including persisted remote-declared option state,
