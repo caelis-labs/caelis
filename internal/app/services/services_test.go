@@ -272,6 +272,10 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 				Mode:           "on",
 				WatermarkRatio: 0.8,
 			},
+			Retention: appsettings.CompactionRetentionPolicy{
+				TaskIndexLimit:       12,
+				ControllerIndexLimit: 4,
+			},
 		},
 		Skills: appsettings.SkillPolicy{
 			LoadingMode:       "metadata-only",
@@ -331,7 +335,8 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	if view.Sandbox.ReadableRoots[0] != "/read" || view.Sandbox.WritableRoots[0] != "/write" {
 		t.Fatalf("sandbox roots = %#v/%#v, want trimmed roots", view.Sandbox.ReadableRoots, view.Sandbox.WritableRoots)
 	}
-	if view.Compaction.Prompt != "keep durable facts" || view.Compaction.AutoMode != "enabled" || view.Compaction.AutoWatermarkRatio != 0.8 {
+	if view.Compaction.Prompt != "keep durable facts" || view.Compaction.AutoMode != "enabled" || view.Compaction.AutoWatermarkRatio != 0.8 ||
+		view.Compaction.TaskIndexLimit != 12 || view.Compaction.ControllerIndexLimit != 4 {
 		t.Fatalf("compaction view = %#v, want normalized compaction settings", view.Compaction)
 	}
 	if view.Skills.LoadingMode != appsettings.SkillLoadingModeMetadataOnly || view.Skills.MaxExpansionChars != 0 {
@@ -396,11 +401,16 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 			Mode:           "off",
 			WatermarkRatio: 0.5,
 		},
+		Retention: appsettings.CompactionRetentionPolicy{
+			TaskIndexLimit:       8,
+			ControllerIndexLimit: 3,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if compactionView.Compaction.Prompt != "summarize durable state" || compactionView.Compaction.AutoMode != "disabled" || compactionView.Compaction.AutoWatermarkRatio != 0.5 {
+	if compactionView.Compaction.Prompt != "summarize durable state" || compactionView.Compaction.AutoMode != "disabled" || compactionView.Compaction.AutoWatermarkRatio != 0.5 ||
+		compactionView.Compaction.TaskIndexLimit != 8 || compactionView.Compaction.ControllerIndexLimit != 3 {
 		t.Fatalf("compaction mutation view = %#v, want normalized compaction settings", compactionView.Compaction)
 	}
 
@@ -434,6 +444,26 @@ func TestSettingsServiceViewAndRuntimeMutation(t *testing.T) {
 	}
 	if panel.Settings.Compaction.AutoWatermarkRatio != 0.66 {
 		t.Fatalf("panel compaction watermark = %#v, want 0.66", panel.Settings.Compaction)
+	}
+	panel, err = svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{
+		FieldID: "compaction.retention.task_index_limit",
+		Value:   "5",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Settings.Compaction.TaskIndexLimit != 5 {
+		t.Fatalf("panel task retention limit = %#v, want 5", panel.Settings.Compaction)
+	}
+	panel, err = svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{
+		FieldID: "compaction.retention.controller_index_limit",
+		Value:   "2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if panel.Settings.Compaction.ControllerIndexLimit != 2 {
+		t.Fatalf("panel controller retention limit = %#v, want 2", panel.Settings.Compaction)
 	}
 	panel, err = svc.Settings().SetPanelField(ctx, SettingsPanelFieldUpdateRequest{
 		FieldID: "skills.max_expansion_chars",
@@ -871,12 +901,19 @@ func TestCommandServiceExecuteSettingsSetField(t *testing.T) {
 	if !strings.Contains(view.Output, "settings field updated: compaction.max_source_chars") {
 		t.Fatalf("settings set compaction output = %q, want updated field", view.Output)
 	}
+	view, err = svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/settings set compaction.retention.task_index_limit 9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(view.Output, "settings field updated: compaction.retention.task_index_limit") {
+		t.Fatalf("settings set retention output = %q, want updated field", view.Output)
+	}
 	doc, err := manager.Document(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if doc.Runtime.Sandbox.Network != "disabled" || doc.Compaction.MaxSourceChars != 1234 {
-		t.Fatalf("settings document = %#v, want disabled network and max source chars", doc)
+	if doc.Runtime.Sandbox.Network != "disabled" || doc.Compaction.MaxSourceChars != 1234 || doc.Compaction.Retention.TaskIndexLimit != 9 {
+		t.Fatalf("settings document = %#v, want disabled network and compaction policy", doc)
 	}
 }
 
@@ -2854,6 +2891,35 @@ func TestCompactionRetainsTaskHistoryIndex(t *testing.T) {
 	if len(secondIndex) != 3 || secondMeta["task_index_count"] != 3 {
 		t.Fatalf("second task index = %#v meta=%#v, want retained prior tasks plus task-2", secondIndex, secondMeta)
 	}
+
+	limitedManager, err := appsettings.NewManager(context.Background(), nil, appsettings.Document{
+		Compaction: appsettings.CompactionPolicy{
+			Retention: appsettings.CompactionRetentionPolicy{TaskIndexLimit: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedSvc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   secondEngine,
+		Settings: limitedManager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited, err := limitedSvc.Compaction().Compact(context.Background(), CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-compact-tasks"}})
+	if err != nil {
+		t.Fatalf("limited Compact() error = %v", err)
+	}
+	limitedMeta, ok := limited.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("limited compact meta = %#v, want compact metadata", limited.Meta)
+	}
+	limitedIndex := compactTaskIndexEntries(limitedMeta[compactTaskIndexKey])
+	if len(limitedIndex) != 1 || limitedMeta["task_index_limit"] != 1 {
+		t.Fatalf("limited task index = %#v meta=%#v, want settings-backed limit", limitedIndex, limitedMeta)
+	}
 }
 
 func TestCompactionRetainsControllerLifecycleIndex(t *testing.T) {
@@ -3010,6 +3076,35 @@ func TestCompactionRetainsControllerLifecycleIndex(t *testing.T) {
 	}
 	if len(secondStatus.Diagnostics) != 1 || secondStatus.Diagnostics[0].Severity != "error" || !strings.Contains(secondStatus.Diagnostics[0].Message, "remote controller failed") {
 		t.Fatalf("second controller diagnostics = %#v, want retained failed diagnostic", secondStatus.Diagnostics)
+	}
+
+	limitedManager, err := appsettings.NewManager(context.Background(), nil, appsettings.Document{
+		Compaction: appsettings.CompactionPolicy{
+			Retention: appsettings.CompactionRetentionPolicy{ControllerIndexLimit: 1},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limitedSvc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:   secondEngine,
+		Settings: limitedManager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limited, err := limitedSvc.Compaction().Compact(context.Background(), CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-compact-controller"}})
+	if err != nil {
+		t.Fatalf("limited Compact() error = %v", err)
+	}
+	limitedMeta, ok := limited.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("limited compact meta = %#v, want compact metadata", limited.Meta)
+	}
+	limitedIndex := compactControllerIndexEntries(limitedMeta[compactControllerIndexKey])
+	if len(limitedIndex) != 1 || limitedMeta["controller_index_limit"] != 1 {
+		t.Fatalf("limited controller index = %#v meta=%#v, want settings-backed limit", limitedIndex, limitedMeta)
 	}
 }
 

@@ -145,12 +145,20 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 			Mode:           "off",
 			WatermarkRatio: -0.5,
 		},
+		Retention: CompactionRetentionPolicy{
+			TaskIndexLimit:       -10,
+			ControllerIndexLimit: 7,
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if policy.Prompt != "Write a terse checkpoint." || policy.MaxSourceChars != 0 || policy.Auto.Mode != "disabled" || policy.Auto.WatermarkRatio != 0 {
+	if policy.Prompt != "Write a terse checkpoint." || policy.MaxSourceChars != 0 || policy.Auto.Mode != "disabled" || policy.Auto.WatermarkRatio != 0 ||
+		policy.Retention.TaskIndexLimit != 0 || policy.Retention.ControllerIndexLimit != 7 {
 		t.Fatalf("policy = %#v, want normalized prompt and non-negative max chars", policy)
+	}
+	if CompactionTaskIndexLimit(policy) != DefaultCompactionTaskIndexLimit || CompactionControllerIndexLimit(policy) != 7 {
+		t.Fatalf("effective retention = task:%d controller:%d, want defaults/controller override", CompactionTaskIndexLimit(policy), CompactionControllerIndexLimit(policy))
 	}
 	if got := manager.CompactionPolicy(); got != policy {
 		t.Fatalf("CompactionPolicy() = %#v, want %#v", got, policy)
@@ -163,7 +171,7 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatal(err)
 	}
-	if doc.Compaction.Prompt != "Write a terse checkpoint." || doc.Compaction.Auto.Mode != "disabled" {
+	if doc.Compaction.Prompt != "Write a terse checkpoint." || doc.Compaction.Auto.Mode != "disabled" || doc.Compaction.Retention.ControllerIndexLimit != 7 {
 		t.Fatalf("persisted compaction policy = %#v, want prompt", doc.Compaction)
 	}
 	loaded, err := NewManager(ctx, store, Document{
@@ -172,7 +180,7 @@ func TestManagerCompactionPolicyPersistsNormalizedSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := loaded.CompactionPolicy(); got.Prompt != "Write a terse checkpoint." || got.MaxSourceChars != 0 || got.Auto.Mode != "disabled" {
+	if got := loaded.CompactionPolicy(); got.Prompt != "Write a terse checkpoint." || got.MaxSourceChars != 0 || got.Auto.Mode != "disabled" || got.Retention.ControllerIndexLimit != 7 {
 		t.Fatalf("loaded compaction policy = %#v, want persisted override", got)
 	}
 }

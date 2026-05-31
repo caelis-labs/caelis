@@ -153,6 +153,8 @@ func settingsPanelSections(view appviewmodel.SettingsPanelView) []appviewmodel.S
 				}),
 				textSettingsField("compaction.watermark", "Watermark", strconv.FormatFloat(settings.Compaction.AutoWatermarkRatio, 'f', -1, 64), true),
 				textSettingsField("compaction.max_source_chars", "Max source chars", strconv.Itoa(settings.Compaction.MaxSourceChars), true),
+				textSettingsField("compaction.retention.task_index_limit", "Task index limit", strconv.Itoa(settings.Compaction.TaskIndexLimit), true),
+				textSettingsField("compaction.retention.controller_index_limit", "Controller index limit", strconv.Itoa(settings.Compaction.ControllerIndexLimit), true),
 				textSettingsField("compaction.prompt", "Prompt", settings.Compaction.Prompt, true),
 			},
 		},

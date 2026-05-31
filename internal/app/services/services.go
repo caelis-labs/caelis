@@ -465,10 +465,12 @@ func settingsViewFromDocument(doc appsettings.Document) appviewmodel.SettingsVie
 			HelperPath:    runtime.Sandbox.HelperPath,
 		},
 		Compaction: appviewmodel.CompactionSettings{
-			Prompt:             compaction.Prompt,
-			MaxSourceChars:     compaction.MaxSourceChars,
-			AutoMode:           compaction.Auto.Mode,
-			AutoWatermarkRatio: compaction.Auto.WatermarkRatio,
+			Prompt:               compaction.Prompt,
+			MaxSourceChars:       compaction.MaxSourceChars,
+			AutoMode:             compaction.Auto.Mode,
+			AutoWatermarkRatio:   compaction.Auto.WatermarkRatio,
+			TaskIndexLimit:       appsettings.CompactionTaskIndexLimit(compaction),
+			ControllerIndexLimit: appsettings.CompactionControllerIndexLimit(compaction),
 		},
 		Skills: appviewmodel.SkillSettings{
 			LoadingMode:       appsettings.SkillLoadingMode(skills),

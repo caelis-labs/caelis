@@ -94,7 +94,7 @@ func (s SettingsService) setPanelFieldValue(ctx context.Context, fieldID string,
 			return runtime
 		})
 		return err
-	case "compaction.auto_mode", "compaction.watermark", "compaction.max_source_chars", "compaction.prompt":
+	case "compaction.auto_mode", "compaction.watermark", "compaction.max_source_chars", "compaction.prompt", "compaction.retention.task_index_limit", "compaction.retention.controller_index_limit":
 		doc, err := s.Document(ctx)
 		if err != nil {
 			return err
@@ -121,6 +121,18 @@ func (s SettingsService) setPanelFieldValue(ctx context.Context, fieldID string,
 			policy.MaxSourceChars = maxChars
 		case "compaction.prompt":
 			policy.Prompt = value
+		case "compaction.retention.task_index_limit":
+			limit, err := parseSettingsNonNegativeInt(value, "compaction task index limit")
+			if err != nil {
+				return err
+			}
+			policy.Retention.TaskIndexLimit = limit
+		case "compaction.retention.controller_index_limit":
+			limit, err := parseSettingsNonNegativeInt(value, "compaction controller index limit")
+			if err != nil {
+				return err
+			}
+			policy.Retention.ControllerIndexLimit = limit
 		}
 		_, err = s.SetCompaction(ctx, policy)
 		return err

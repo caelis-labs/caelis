@@ -90,15 +90,26 @@ type ModelChoice struct {
 }
 
 type CompactionPolicy struct {
-	Prompt         string               `json:"prompt,omitempty"`
-	MaxSourceChars int                  `json:"max_source_chars,omitempty"`
-	Auto           AutoCompactionPolicy `json:"auto,omitempty"`
+	Prompt         string                    `json:"prompt,omitempty"`
+	MaxSourceChars int                       `json:"max_source_chars,omitempty"`
+	Auto           AutoCompactionPolicy      `json:"auto,omitempty"`
+	Retention      CompactionRetentionPolicy `json:"retention,omitempty"`
 }
 
 type AutoCompactionPolicy struct {
 	Mode           string  `json:"mode,omitempty"`
 	WatermarkRatio float64 `json:"watermark_ratio,omitempty"`
 }
+
+type CompactionRetentionPolicy struct {
+	TaskIndexLimit       int `json:"task_index_limit,omitempty"`
+	ControllerIndexLimit int `json:"controller_index_limit,omitempty"`
+}
+
+const (
+	DefaultCompactionTaskIndexLimit       = 100
+	DefaultCompactionControllerIndexLimit = 50
+)
 
 const (
 	SkillLoadingModeExplicit     = "explicit"
@@ -793,7 +804,34 @@ func NormalizeCompactionPolicy(policy CompactionPolicy) CompactionPolicy {
 		policy.MaxSourceChars = 0
 	}
 	policy.Auto = NormalizeAutoCompactionPolicy(policy.Auto)
+	policy.Retention = NormalizeCompactionRetentionPolicy(policy.Retention)
 	return policy
+}
+
+func NormalizeCompactionRetentionPolicy(policy CompactionRetentionPolicy) CompactionRetentionPolicy {
+	if policy.TaskIndexLimit < 0 {
+		policy.TaskIndexLimit = 0
+	}
+	if policy.ControllerIndexLimit < 0 {
+		policy.ControllerIndexLimit = 0
+	}
+	return policy
+}
+
+func CompactionTaskIndexLimit(policy CompactionPolicy) int {
+	policy = NormalizeCompactionPolicy(policy)
+	if policy.Retention.TaskIndexLimit > 0 {
+		return policy.Retention.TaskIndexLimit
+	}
+	return DefaultCompactionTaskIndexLimit
+}
+
+func CompactionControllerIndexLimit(policy CompactionPolicy) int {
+	policy = NormalizeCompactionPolicy(policy)
+	if policy.Retention.ControllerIndexLimit > 0 {
+		return policy.Retention.ControllerIndexLimit
+	}
+	return DefaultCompactionControllerIndexLimit
 }
 
 func NormalizeAutoCompactionPolicy(policy AutoCompactionPolicy) AutoCompactionPolicy {
@@ -1123,7 +1161,9 @@ func compactionPolicyConfigured(policy CompactionPolicy) bool {
 	return policy.Prompt != "" ||
 		policy.MaxSourceChars > 0 ||
 		policy.Auto.Mode != "" ||
-		policy.Auto.WatermarkRatio > 0
+		policy.Auto.WatermarkRatio > 0 ||
+		policy.Retention.TaskIndexLimit > 0 ||
+		policy.Retention.ControllerIndexLimit > 0
 }
 
 func skillPolicyConfigured(policy SkillPolicy) bool {

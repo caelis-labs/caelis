@@ -1975,8 +1975,8 @@ be migrated before retiring the old stack:
      argument parsing packages have been removed; built-in tool execution now
      has a single core-native implementation path through
      `internal/adapters/tools/*`.
-   - Still pending: configurable task retention policy plus compact/rich
-     tool-panel display metadata still need core-native adapters.
+   - Still pending: compact/rich tool-panel display metadata still needs
+     core-native adapters.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response
@@ -2183,14 +2183,16 @@ be migrated before retiring the old stack:
       latest controller run and diagnostics from compacted history, and repeated
       compactions merge prior controller index entries with post-compact
       lifecycle events.
+    - Migrated baseline: controller lifecycle retention limits now live in the
+      shared compaction settings policy and are editable through the
+      service-native settings panel/command path.
     - Migrated baseline: host async command sessions now persist process id and
       durable stdout/stderr stream files when a sandbox `StateDir` is
       available. A restarted host sandbox can reopen a still-running process as
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: richer visual controller panels and configurable
-      controller lifecycle retention policy are not implemented.
+    - Still pending: richer visual controller panels are not implemented.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2261,6 +2263,9 @@ be migrated before retiring the old stack:
       index in compact metadata. `TaskService` can rebuild task-panel history
       from the latest compact event plus post-compact lifecycle/tool/subagent
       events, giving future physical retention a canonical restore point.
+    - Migrated baseline: task history retention limits now live in the shared
+      compaction settings policy and are editable through the service-native
+      settings panel/command path.
     - Migrated baseline: host subprocess sessions now have durable output files
       and pid-backed recovery across local runtime restarts. Reopened live host
       sessions are read-only for stdin, but can still be tailed, waited, listed,
@@ -2269,9 +2274,8 @@ be migrated before retiring the old stack:
       bounded terminal preview data with cursors and truncation state, and the
       model-facing TASK output plus shared app task views consume the same
       runtime preview contract.
-    - Still pending: richer visual TUI/APP task panels, configurable task
-      retention policies, and optional persistent indexed history stores remain
-      incomplete.
+    - Still pending: richer visual TUI/APP task panels and optional persistent
+      indexed history stores remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`
@@ -2312,6 +2316,9 @@ be migrated before retiring the old stack:
       lifecycle index. Controller status and diagnostics can be restored from a
       compact checkpoint even after earlier controller lifecycle events are no
       longer scanned directly.
+    - Migrated baseline: compaction retention policy now exposes configurable
+      task and controller index limits through app settings, shared settings
+      view models, `/settings set`, and compact metadata.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill
@@ -2421,17 +2428,17 @@ Recommended sequence:
    especially visual settings/diagnostics/controller panels.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
-3. Finish visual task-panel behavior and task lifecycle retention/indexing
-   behind shared app/view-model contracts; host process recovery, SPAWN
-   continuation, bounded terminal preview metadata, and app-command lifecycle
-   events are now baseline runtime capabilities.
+3. Finish visual task-panel behavior and optional persistent indexed history
+   stores behind shared app/view-model contracts; host process recovery, SPAWN
+   continuation, bounded terminal preview metadata, app-command lifecycle
+   events, and compact retention indexes are now baseline runtime capabilities.
 4. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially task and visual settings panels,
    preserving existing rendering as surface-local code.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
-7. Finish remaining canonical-event round trips for compaction edge cases, task
-   retention, subagent lifecycle, and controller lifecycle retention.
+7. Finish remaining canonical-event round trips for compaction edge cases and
+   any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.
 9. Continue deleting residual surface-compatibility runtime paths once each has
    a service/core-native replacement. The former `app/gatewayapp`, old

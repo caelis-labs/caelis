@@ -118,10 +118,12 @@ type SandboxSettings struct {
 }
 
 type CompactionSettings struct {
-	Prompt             string  `json:"prompt,omitempty"`
-	MaxSourceChars     int     `json:"max_source_chars,omitempty"`
-	AutoMode           string  `json:"auto_mode,omitempty"`
-	AutoWatermarkRatio float64 `json:"auto_watermark_ratio,omitempty"`
+	Prompt               string  `json:"prompt,omitempty"`
+	MaxSourceChars       int     `json:"max_source_chars,omitempty"`
+	AutoMode             string  `json:"auto_mode,omitempty"`
+	AutoWatermarkRatio   float64 `json:"auto_watermark_ratio,omitempty"`
+	TaskIndexLimit       int     `json:"task_index_limit,omitempty"`
+	ControllerIndexLimit int     `json:"controller_index_limit,omitempty"`
 }
 
 type SkillSettings struct {

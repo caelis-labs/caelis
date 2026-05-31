@@ -14,13 +14,11 @@ import (
 )
 
 const (
-	compactMetaKey                     = "compact"
-	compactTaskIndexKey                = "task_index"
-	compactControllerIndexKey          = "controller_index"
-	compactContractVersion             = 1
-	defaultCompactMaxChars             = 12000
-	defaultCompactTaskIndexLimit       = 100
-	defaultCompactControllerIndexLimit = 50
+	compactMetaKey            = "compact"
+	compactTaskIndexKey       = "task_index"
+	compactControllerIndexKey = "controller_index"
+	compactContractVersion    = 1
+	defaultCompactMaxChars    = 12000
 )
 
 var errCompactNoModelResponse = errors.New("app/services: compaction model stream ended without response")
@@ -40,6 +38,12 @@ type CompactPromptPolicy struct {
 	Prompt         string `json:"prompt,omitempty"`
 	MaxSourceChars int    `json:"max_source_chars,omitempty"`
 	Source         string `json:"source,omitempty"`
+}
+
+type CompactRetentionPolicy struct {
+	TaskIndexLimit       int    `json:"task_index_limit,omitempty"`
+	ControllerIndexLimit int    `json:"controller_index_limit,omitempty"`
+	Source               string `json:"source,omitempty"`
 }
 
 func (s CompactionService) Compact(ctx context.Context, req CompactSessionRequest) (session.Event, error) {
@@ -63,7 +67,7 @@ func (s CompactionService) Compact(ctx context.Context, req CompactSessionReques
 	if err != nil {
 		return session.Event{}, err
 	}
-	event := compactEvent(snapshot.Session, source, retention, req, text, usage, meta)
+	event := compactEvent(snapshot.Session, source, retention, req, text, usage, meta, s.retentionPolicy())
 	if _, err := s.services.engine.RecordEvents(ctx, snapshot.Session.Ref, []session.Event{event}); err != nil {
 		return session.Event{}, err
 	}
@@ -131,6 +135,16 @@ func (s CompactionService) compactText(ctx context.Context, snapshot session.Sna
 		meta["usage"] = modelUsageMeta(*usage)
 	}
 	return text, usage, meta, nil
+}
+
+func (s CompactionService) retentionPolicy() CompactRetentionPolicy {
+	settingsPolicy := appsettings.CompactionPolicy{}
+	source := "default"
+	if s.services.settings != nil {
+		settingsPolicy = s.services.settings.CompactionPolicy()
+		source = "settings"
+	}
+	return compactRetentionPolicy(settingsPolicy, source)
 }
 
 func compactProviderResponse(ctx context.Context, provider model.Provider, modelID string, prompt string) (model.Response, error) {
@@ -219,6 +233,19 @@ func compactPromptPolicy(req CompactSessionRequest, settingsPolicy appsettings.C
 	return out
 }
 
+func compactRetentionPolicy(settingsPolicy appsettings.CompactionPolicy, source string) CompactRetentionPolicy {
+	settingsPolicy = appsettings.NormalizeCompactionPolicy(settingsPolicy)
+	out := CompactRetentionPolicy{
+		TaskIndexLimit:       appsettings.CompactionTaskIndexLimit(settingsPolicy),
+		ControllerIndexLimit: appsettings.CompactionControllerIndexLimit(settingsPolicy),
+		Source:               strings.TrimSpace(source),
+	}
+	if out.Source == "" {
+		out.Source = "default"
+	}
+	return out
+}
+
 func compactPolicyMeta(policy CompactPromptPolicy) map[string]any {
 	out := map[string]any{}
 	source := strings.TrimSpace(policy.Source)
@@ -242,7 +269,7 @@ func normalizeCompactModelText(text string, fallback string) string {
 	return "CONTEXT CHECKPOINT\n\n" + text
 }
 
-func compactEvent(active session.Session, source []session.Event, retention []session.Event, req CompactSessionRequest, text string, usage *model.Usage, modelMeta map[string]any) session.Event {
+func compactEvent(active session.Session, source []session.Event, retention []session.Event, req CompactSessionRequest, text string, usage *model.Usage, modelMeta map[string]any, retentionPolicy CompactRetentionPolicy) session.Event {
 	message := model.Message{
 		Role: model.RoleUser,
 		Parts: []model.Part{
@@ -256,16 +283,17 @@ func compactEvent(active session.Session, source []session.Event, retention []se
 		message.Usage = cloneModelUsage(usage)
 	}
 	compact := compactMeta(source, req, modelMeta)
-	if taskIndex := compactTaskIndex(retention); len(taskIndex) > 0 {
+	if taskIndex := compactTaskIndex(retention, retentionPolicy.TaskIndexLimit); len(taskIndex) > 0 {
 		compact[compactTaskIndexKey] = taskIndex
 		compact["task_index_count"] = len(taskIndex)
-		compact["task_index_limit"] = defaultCompactTaskIndexLimit
+		compact["task_index_limit"] = retentionPolicy.TaskIndexLimit
 	}
-	if controllerIndex := compactControllerIndex(retention); len(controllerIndex) > 0 {
+	if controllerIndex := compactControllerIndex(retention, retentionPolicy.ControllerIndexLimit); len(controllerIndex) > 0 {
 		compact[compactControllerIndexKey] = controllerIndex
 		compact["controller_index_count"] = len(controllerIndex)
-		compact["controller_index_limit"] = defaultCompactControllerIndexLimit
+		compact["controller_index_limit"] = retentionPolicy.ControllerIndexLimit
 	}
+	compact["retention_policy"] = strings.TrimSpace(retentionPolicy.Source)
 	meta := map[string]any{
 		compactMetaKey: compact,
 	}
@@ -396,16 +424,19 @@ func compactRetentionEvents(events []session.Event) []session.Event {
 	return out
 }
 
-func compactTaskIndex(events []session.Event) []map[string]any {
+func compactTaskIndex(events []session.Event, limit int) []map[string]any {
 	if len(events) == 0 {
 		return nil
+	}
+	if limit <= 0 {
+		limit = appsettings.DefaultCompactionTaskIndexLimit
 	}
 	items := durableTaskItemsFromEvents(events)
 	if len(items) == 0 {
 		return nil
 	}
-	if len(items) > defaultCompactTaskIndexLimit {
-		items = items[:defaultCompactTaskIndexLimit]
+	if len(items) > limit {
+		items = items[:limit]
 	}
 	out := make([]map[string]any, 0, len(items))
 	for _, item := range items {
@@ -417,17 +448,20 @@ func compactTaskIndex(events []session.Event) []map[string]any {
 	return out
 }
 
-func compactControllerIndex(events []session.Event) []map[string]any {
+func compactControllerIndex(events []session.Event, limit int) []map[string]any {
 	if len(events) == 0 {
 		return nil
+	}
+	if limit <= 0 {
+		limit = appsettings.DefaultCompactionControllerIndexLimit
 	}
 	runs := controllerRunStatusesFromEvents(events)
 	if len(runs) == 0 {
 		return nil
 	}
 	sortControllerRuns(runs)
-	if len(runs) > defaultCompactControllerIndexLimit {
-		runs = runs[:defaultCompactControllerIndexLimit]
+	if len(runs) > limit {
+		runs = runs[:limit]
 	}
 	out := make([]map[string]any, 0, len(runs))
 	for _, run := range runs {
