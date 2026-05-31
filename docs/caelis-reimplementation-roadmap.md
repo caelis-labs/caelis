@@ -1371,20 +1371,26 @@ be migrated before retiring the old stack:
      such as built-in ACP adapter install. `/agent use` returns a canonical
      handoff projection so the driver updates its current controller from the
      same event stream consumed by TUI and future APP surfaces.
-  - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
-    completion shell, connect wizard Bubble Tea runtime, status bar,
-    renderer, transcript reducer, tool panels, approval UI, theme system, and
-    attachment UI/rendering are not ported to `internal/app/services`.
-  - Slash commands and panels such as richer `/connect` rendering, editable
-    settings panels, and live remote ACP process reconnect/lifecycle behavior
-    still have old driver/app assumptions or missing service-native feature
-    parity, so the old TUI stack cannot be removed yet.
-  - Still pending: the current TUI driver/gateway bridge still imports the old
-    `ports/session`, `ports/stream`, and public `kernel`
-    event contracts for live turn streaming, replay, participants, and usage
-    accounting. Retiring those imports requires moving the remaining TUI
-    bridge protocol to `core/runtime`, `core/session`, and
-    `internal/app/viewmodel` in one larger slice.
+   - Migrated baseline: TUI session-usage status DTOs now use
+     `internal/app/viewmodel.TokenUsage` plus shared normalization and
+     aggregation helpers instead of exposing `kernel.UsageSnapshot` through the
+     driver status contract. The remaining legacy session-event usage parser is
+     contained at the gatewaydriver bridge boundary while status rendering and
+     tests consume the shared app view model used by future APP surfaces.
+   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
+     completion shell, connect wizard Bubble Tea runtime, status bar,
+     renderer, transcript reducer, tool panels, approval UI, theme system, and
+     attachment UI/rendering are not ported to `internal/app/services`.
+   - Slash commands and panels such as richer `/connect` rendering, editable
+     settings panels, and live remote ACP process reconnect/lifecycle behavior
+     still have old driver/app assumptions or missing service-native feature
+     parity, so the old TUI stack cannot be removed yet.
+   - Still pending: the current TUI driver/gateway bridge still imports the old
+     `ports/session`, `ports/stream`, and public `kernel` event contracts for
+     live turn streaming, replay, participants, transcript projection, and
+     historical usage extraction. Retiring those imports requires moving the
+     remaining TUI bridge protocol to `core/runtime`, `core/session`, and
+     `internal/app/viewmodel` in one larger slice.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
@@ -147,34 +147,34 @@ func formatStatusSandbox(status tuidriver.StatusSnapshot) string {
 }
 
 func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
-	total := normalizedUsageSnapshot(status.SessionUsageTotal)
-	if usageSnapshotZero(total) {
-		total = normalizedUsageSnapshot(kernel.UsageSnapshot{
-			PromptTokens:      status.SessionInputTokens,
+	total := normalizedTokenUsage(status.SessionUsageTotal)
+	if tokenUsageZero(total) {
+		total = normalizedTokenUsage(appviewmodel.TokenUsage{
+			InputTokens:       status.SessionInputTokens,
 			CachedInputTokens: status.SessionCachedInputTokens,
-			CompletionTokens:  status.SessionOutputTokens,
+			OutputTokens:      status.SessionOutputTokens,
 			ReasoningTokens:   status.SessionReasoningTokens,
 			TotalTokens:       status.SessionTotalTokens,
 		})
 	}
-	if usageSnapshotZero(total) {
+	if tokenUsageZero(total) {
 		return ""
 	}
 	rows := []tokenUsageStatusRow{{scope: "total", usage: total}}
-	main := normalizedUsageSnapshot(status.SessionUsageMain)
-	subagents := normalizedUsageSnapshot(status.SessionUsageSubagents)
-	autoReview := normalizedUsageSnapshot(status.SessionUsageAutoReview)
-	compaction := normalizedUsageSnapshot(status.SessionUsageCompaction)
-	if !usageSnapshotZero(main) {
+	main := normalizedTokenUsage(status.SessionUsageMain)
+	subagents := normalizedTokenUsage(status.SessionUsageSubagents)
+	autoReview := normalizedTokenUsage(status.SessionUsageAutoReview)
+	compaction := normalizedTokenUsage(status.SessionUsageCompaction)
+	if !tokenUsageZero(main) {
 		rows = append(rows, tokenUsageStatusRow{scope: "main", usage: main})
 	}
-	if !usageSnapshotZero(subagents) {
+	if !tokenUsageZero(subagents) {
 		rows = append(rows, tokenUsageStatusRow{scope: "sub-agent", usage: subagents})
 	}
-	if !usageSnapshotZero(autoReview) {
+	if !tokenUsageZero(autoReview) {
 		rows = append(rows, tokenUsageStatusRow{scope: "auto-review", usage: autoReview})
 	}
-	if !usageSnapshotZero(compaction) {
+	if !tokenUsageZero(compaction) {
 		rows = append(rows, tokenUsageStatusRow{scope: "compaction", usage: compaction})
 	}
 	return formatTokenUsageTable(rows)
@@ -182,7 +182,7 @@ func formatSessionTokenUsageStatus(status tuidriver.StatusSnapshot) string {
 
 type tokenUsageStatusRow struct {
 	scope string
-	usage kernel.UsageSnapshot
+	usage appviewmodel.TokenUsage
 }
 
 func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
@@ -192,13 +192,13 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 	table := make([][]string, 0, len(rows)+2)
 	table = append(table, []string{"Scope", "Total", "Input", "Cached", "Output", "Reasoning"})
 	for _, row := range rows {
-		usage := normalizedUsageSnapshot(row.usage)
+		usage := normalizedTokenUsage(row.usage)
 		table = append(table, []string{
 			row.scope,
 			formatTokenUsageNumber(usage.TotalTokens),
-			formatTokenUsageNumber(usage.PromptTokens),
+			formatTokenUsageNumber(usage.InputTokens),
 			formatTokenUsageNumber(usage.CachedInputTokens),
-			formatTokenUsageNumber(usage.CompletionTokens),
+			formatTokenUsageNumber(usage.OutputTokens),
 			formatTokenUsageNumber(usage.ReasoningTokens),
 		})
 	}
@@ -238,34 +238,12 @@ func formatTokenUsageTable(rows []tokenUsageStatusRow) string {
 	return b.String()
 }
 
-func normalizedUsageSnapshot(usage kernel.UsageSnapshot) kernel.UsageSnapshot {
-	if usage.PromptTokens < 0 {
-		usage.PromptTokens = 0
-	}
-	if usage.CachedInputTokens < 0 {
-		usage.CachedInputTokens = 0
-	}
-	if usage.CompletionTokens < 0 {
-		usage.CompletionTokens = 0
-	}
-	if usage.ReasoningTokens < 0 {
-		usage.ReasoningTokens = 0
-	}
-	if usage.TotalTokens < 0 {
-		usage.TotalTokens = 0
-	}
-	if usage.TotalTokens == 0 && (usage.PromptTokens != 0 || usage.CompletionTokens != 0) {
-		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
-	}
-	return usage
+func normalizedTokenUsage(usage appviewmodel.TokenUsage) appviewmodel.TokenUsage {
+	return appviewmodel.NormalizeTokenUsage(usage)
 }
 
-func usageSnapshotZero(usage kernel.UsageSnapshot) bool {
-	return usage.PromptTokens == 0 &&
-		usage.CachedInputTokens == 0 &&
-		usage.CompletionTokens == 0 &&
-		usage.ReasoningTokens == 0 &&
-		usage.TotalTokens == 0
+func tokenUsageZero(usage appviewmodel.TokenUsage) bool {
+	return appviewmodel.TokenUsageZero(usage)
 }
 
 func formatTokenUsageNumber(tokens int) string {

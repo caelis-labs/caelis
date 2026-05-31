@@ -118,6 +118,10 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 	switch {
 	case strings.HasPrefix(rel, "surfaces/tui/gatewaydriver/") && target == "ports/controller":
 		return "surfaces/tui/gatewaydriver must use app view-model controller contracts instead of ports/controller"
+	case rel == "surfaces/tui/gatewaydriver/app_status.go" && target == "kernel":
+		return "surfaces/tui/gatewaydriver app-status projection must use app view-model contracts instead of public kernel usage DTOs"
+	case rel == "surfaces/tui/app/driver_bridge_status.go" && target == "kernel":
+		return "surfaces/tui/app status rendering must use app view-model contracts instead of public kernel usage DTOs"
 	case strings.HasPrefix(rel, "core/"):
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
 			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"

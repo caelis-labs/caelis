@@ -72,11 +72,11 @@ type StatusSnapshot struct {
 	CompletionTokens                int
 	TotalTokens                     int
 	ContextWindowTokens             int
-	SessionUsageTotal               kernel.UsageSnapshot
-	SessionUsageMain                kernel.UsageSnapshot
-	SessionUsageSubagents           kernel.UsageSnapshot
-	SessionUsageAutoReview          kernel.UsageSnapshot
-	SessionUsageCompaction          kernel.UsageSnapshot
+	SessionUsageTotal               appviewmodel.TokenUsage
+	SessionUsageMain                appviewmodel.TokenUsage
+	SessionUsageSubagents           appviewmodel.TokenUsage
+	SessionUsageAutoReview          appviewmodel.TokenUsage
+	SessionUsageCompaction          appviewmodel.TokenUsage
 	SessionInputTokens              int
 	SessionCachedInputTokens        int
 	SessionOutputTokens             int

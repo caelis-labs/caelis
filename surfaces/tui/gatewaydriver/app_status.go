@@ -6,7 +6,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -70,11 +69,11 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		Route:                    route,
 		HostExecution:            route == "host",
 		Surface:                  bindingKey,
-		SessionUsageTotal:        appStatusUsageSnapshot(view.Usage.Total),
-		SessionUsageMain:         appStatusUsageSnapshot(view.Usage.Main),
-		SessionUsageSubagents:    appStatusUsageSnapshot(view.Usage.Subagents),
-		SessionUsageAutoReview:   appStatusUsageSnapshot(view.Usage.AutoReview),
-		SessionUsageCompaction:   appStatusUsageSnapshot(view.Usage.Compaction),
+		SessionUsageTotal:        view.Usage.Total,
+		SessionUsageMain:         view.Usage.Main,
+		SessionUsageSubagents:    view.Usage.Subagents,
+		SessionUsageAutoReview:   view.Usage.AutoReview,
+		SessionUsageCompaction:   view.Usage.Compaction,
 		SessionInputTokens:       view.Usage.Total.InputTokens,
 		SessionCachedInputTokens: view.Usage.Total.CachedInputTokens,
 		SessionOutputTokens:      view.Usage.Total.OutputTokens,
@@ -145,16 +144,6 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		}
 	}
 	return status, true, nil
-}
-
-func appStatusUsageSnapshot(usage appviewmodel.TokenUsage) kernel.UsageSnapshot {
-	return kernel.UsageSnapshot{
-		PromptTokens:      usage.InputTokens,
-		CachedInputTokens: usage.CachedInputTokens,
-		CompletionTokens:  usage.OutputTokens,
-		ReasoningTokens:   usage.ReasoningTokens,
-		TotalTokens:       usage.TotalTokens,
-	}
 }
 
 func appStatusModelText(status appviewmodel.ModelStatus) (string, string, string) {

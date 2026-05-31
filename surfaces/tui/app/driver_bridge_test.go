@@ -13,6 +13,7 @@ import (
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
@@ -1315,10 +1316,10 @@ func TestFormatStatusSnapshotUsesFriendlyThemeableLines(t *testing.T) {
 		MissingAPIKey:            true,
 		HostExecution:            true,
 		FullAccessMode:           true,
-		SessionUsageTotal:        kernel.UsageSnapshot{PromptTokens: 12600, CachedInputTokens: 9000, CompletionTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
-		SessionUsageMain:         kernel.UsageSnapshot{PromptTokens: 10000, CachedInputTokens: 7000, CompletionTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
-		SessionUsageSubagents:    kernel.UsageSnapshot{PromptTokens: 2000, CachedInputTokens: 1800, CompletionTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
-		SessionUsageAutoReview:   kernel.UsageSnapshot{PromptTokens: 600, CachedInputTokens: 200, CompletionTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
+		SessionUsageTotal:        appviewmodel.TokenUsage{InputTokens: 12600, CachedInputTokens: 9000, OutputTokens: 200, ReasoningTokens: 50, TotalTokens: 12800},
+		SessionUsageMain:         appviewmodel.TokenUsage{InputTokens: 10000, CachedInputTokens: 7000, OutputTokens: 150, ReasoningTokens: 30, TotalTokens: 10150},
+		SessionUsageSubagents:    appviewmodel.TokenUsage{InputTokens: 2000, CachedInputTokens: 1800, OutputTokens: 40, ReasoningTokens: 15, TotalTokens: 2040},
+		SessionUsageAutoReview:   appviewmodel.TokenUsage{InputTokens: 600, CachedInputTokens: 200, OutputTokens: 10, ReasoningTokens: 5, TotalTokens: 610},
 		SessionInputTokens:       12600,
 		SessionCachedInputTokens: 9000,
 		SessionOutputTokens:      200,
@@ -1405,8 +1406,8 @@ func TestFormatStatusSnapshotShowsExplicitSandboxRepairFailure(t *testing.T) {
 
 func TestFormatSessionTokenUsageStatusOmitsEmptyBreakdownBuckets(t *testing.T) {
 	got := formatSessionTokenUsageStatus(tuidriver.StatusSnapshot{
-		SessionUsageTotal: kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
-		SessionUsageMain:  kernel.UsageSnapshot{PromptTokens: 100, CachedInputTokens: 20, CompletionTokens: 10, TotalTokens: 110},
+		SessionUsageTotal: appviewmodel.TokenUsage{InputTokens: 100, CachedInputTokens: 20, OutputTokens: 10, TotalTokens: 110},
+		SessionUsageMain:  appviewmodel.TokenUsage{InputTokens: 100, CachedInputTokens: 20, OutputTokens: 10, TotalTokens: 110},
 	})
 	for _, want := range []string{"Scope", "Total", "Cached", "total", "main", "110", "100", "20"} {
 		if !strings.Contains(got, want) {

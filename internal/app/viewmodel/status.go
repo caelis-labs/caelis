@@ -136,6 +136,55 @@ type TokenUsage struct {
 	ContextWindowTokens int `json:"context_window_tokens,omitempty"`
 }
 
+func NormalizeTokenUsage(usage TokenUsage) TokenUsage {
+	if usage.InputTokens < 0 {
+		usage.InputTokens = 0
+	}
+	if usage.CachedInputTokens < 0 {
+		usage.CachedInputTokens = 0
+	}
+	if usage.OutputTokens < 0 {
+		usage.OutputTokens = 0
+	}
+	if usage.ReasoningTokens < 0 {
+		usage.ReasoningTokens = 0
+	}
+	if usage.TotalTokens < 0 {
+		usage.TotalTokens = 0
+	}
+	if usage.ContextWindowTokens < 0 {
+		usage.ContextWindowTokens = 0
+	}
+	if usage.TotalTokens == 0 && (usage.InputTokens != 0 || usage.OutputTokens != 0) {
+		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
+	}
+	return usage
+}
+
+func TokenUsageZero(usage TokenUsage) bool {
+	return usage.InputTokens == 0 &&
+		usage.CachedInputTokens == 0 &&
+		usage.OutputTokens == 0 &&
+		usage.ReasoningTokens == 0 &&
+		usage.TotalTokens == 0 &&
+		usage.ContextWindowTokens == 0
+}
+
+func AddTokenUsage(total *TokenUsage, usage TokenUsage) {
+	if total == nil {
+		return
+	}
+	usage = NormalizeTokenUsage(usage)
+	total.InputTokens += usage.InputTokens
+	total.CachedInputTokens += usage.CachedInputTokens
+	total.OutputTokens += usage.OutputTokens
+	total.ReasoningTokens += usage.ReasoningTokens
+	total.TotalTokens += usage.TotalTokens
+	if usage.ContextWindowTokens > total.ContextWindowTokens {
+		total.ContextWindowTokens = usage.ContextWindowTokens
+	}
+}
+
 type ContextBudget struct {
 	Source                    string `json:"source,omitempty"`
 	ModelID                   string `json:"model_id,omitempty"`

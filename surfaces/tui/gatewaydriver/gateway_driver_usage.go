@@ -6,24 +6,25 @@ import (
 	"maps"
 	"strings"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
-func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (kernel.UsageSnapshot, error) {
+func (d *GatewayDriver) sessionTokenUsage(ctx context.Context, ref session.SessionRef) (appviewmodel.TokenUsage, error) {
 	breakdown, err := d.sessionTokenUsageBreakdown(ctx, ref)
 	if err != nil {
-		return kernel.UsageSnapshot{}, err
+		return appviewmodel.TokenUsage{}, err
 	}
 	return breakdown.Total, nil
 }
 
 type sessionTokenUsageBreakdown struct {
-	Total      kernel.UsageSnapshot
-	Main       kernel.UsageSnapshot
-	Subagents  kernel.UsageSnapshot
-	AutoReview kernel.UsageSnapshot
-	Compaction kernel.UsageSnapshot
+	Total      appviewmodel.TokenUsage
+	Main       appviewmodel.TokenUsage
+	Subagents  appviewmodel.TokenUsage
+	AutoReview appviewmodel.TokenUsage
+	Compaction appviewmodel.TokenUsage
 }
 
 const (
@@ -76,11 +77,12 @@ func sessionTokenUsageBreakdownFromEvents(events []*session.Event, fallbackCateg
 			continue
 		}
 		isToolCall := session.EventTypeOf(event) == session.EventTypeToolCall
-		usageKey := usageSnapshotDedupeKey(*one)
+		usage := tokenUsageFromKernel(*one)
+		usageKey := usageSnapshotDedupeKey(usage)
 		if isToolCall && lastUsageWasToolCall && usageKey != "" && usageKey == lastToolCallUsageKey {
 			continue
 		}
-		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), *one)
+		breakdown.add(usageCategoryFromSessionEvent(event, fallbackCategory), usage)
 		if isToolCall {
 			lastToolCallUsageKey = usageKey
 			lastUsageWasToolCall = true
@@ -96,25 +98,25 @@ func sessionTokenUsageBreakdownFromState(state map[string]any) sessionTokenUsage
 	var breakdown sessionTokenUsageBreakdown
 	accounting := mapAnyValue(state[kernel.StateUsageAccounting])
 	if usage := kernel.UsageSnapshotFromMap(mapAnyValue(accounting[tokenUsageCategoryAutoReview])); usage != nil {
-		breakdown.add(tokenUsageCategoryAutoReview, *usage)
+		breakdown.add(tokenUsageCategoryAutoReview, tokenUsageFromKernel(*usage))
 	}
 	return breakdown
 }
 
-func (u *sessionTokenUsageBreakdown) add(category string, usage kernel.UsageSnapshot) {
+func (u *sessionTokenUsageBreakdown) add(category string, usage appviewmodel.TokenUsage) {
 	if u == nil {
 		return
 	}
-	addUsageSnapshot(&u.Total, usage)
+	appviewmodel.AddTokenUsage(&u.Total, usage)
 	switch strings.TrimSpace(category) {
 	case tokenUsageCategoryAutoReview:
-		addUsageSnapshot(&u.AutoReview, usage)
+		appviewmodel.AddTokenUsage(&u.AutoReview, usage)
 	case tokenUsageCategorySubagent:
-		addUsageSnapshot(&u.Subagents, usage)
+		appviewmodel.AddTokenUsage(&u.Subagents, usage)
 	case tokenUsageCategoryCompaction:
-		addUsageSnapshot(&u.Compaction, usage)
+		appviewmodel.AddTokenUsage(&u.Compaction, usage)
 	default:
-		addUsageSnapshot(&u.Main, usage)
+		appviewmodel.AddTokenUsage(&u.Main, usage)
 	}
 }
 
@@ -122,22 +124,11 @@ func (u *sessionTokenUsageBreakdown) addBreakdown(other sessionTokenUsageBreakdo
 	if u == nil {
 		return
 	}
-	addUsageSnapshot(&u.Total, other.Total)
-	addUsageSnapshot(&u.Main, other.Main)
-	addUsageSnapshot(&u.Subagents, other.Subagents)
-	addUsageSnapshot(&u.AutoReview, other.AutoReview)
-	addUsageSnapshot(&u.Compaction, other.Compaction)
-}
-
-func addUsageSnapshot(total *kernel.UsageSnapshot, usage kernel.UsageSnapshot) {
-	if total == nil {
-		return
-	}
-	total.PromptTokens += usage.PromptTokens
-	total.CachedInputTokens += usage.CachedInputTokens
-	total.CompletionTokens += usage.CompletionTokens
-	total.ReasoningTokens += usage.ReasoningTokens
-	total.TotalTokens += usage.TotalTokens
+	appviewmodel.AddTokenUsage(&u.Total, other.Total)
+	appviewmodel.AddTokenUsage(&u.Main, other.Main)
+	appviewmodel.AddTokenUsage(&u.Subagents, other.Subagents)
+	appviewmodel.AddTokenUsage(&u.AutoReview, other.AutoReview)
+	appviewmodel.AddTokenUsage(&u.Compaction, other.Compaction)
 }
 
 func usageCategoryFromSessionEvent(event *session.Event, fallback string) string {
@@ -247,9 +238,19 @@ func (d *GatewayDriver) selfSubagentSessionRefs(ctx context.Context, ref session
 	return out
 }
 
-func usageSnapshotDedupeKey(usage kernel.UsageSnapshot) string {
-	if usage.PromptTokens == 0 && usage.CachedInputTokens == 0 && usage.CompletionTokens == 0 && usage.ReasoningTokens == 0 && usage.TotalTokens == 0 {
+func tokenUsageFromKernel(usage kernel.UsageSnapshot) appviewmodel.TokenUsage {
+	return appviewmodel.NormalizeTokenUsage(appviewmodel.TokenUsage{
+		InputTokens:       usage.PromptTokens,
+		CachedInputTokens: usage.CachedInputTokens,
+		OutputTokens:      usage.CompletionTokens,
+		ReasoningTokens:   usage.ReasoningTokens,
+		TotalTokens:       usage.TotalTokens,
+	})
+}
+
+func usageSnapshotDedupeKey(usage appviewmodel.TokenUsage) string {
+	if appviewmodel.TokenUsageZero(usage) {
 		return ""
 	}
-	return fmt.Sprintf("%d/%d/%d/%d/%d", usage.PromptTokens, usage.CachedInputTokens, usage.CompletionTokens, usage.ReasoningTokens, usage.TotalTokens)
+	return fmt.Sprintf("%d/%d/%d/%d/%d/%d", usage.InputTokens, usage.CachedInputTokens, usage.OutputTokens, usage.ReasoningTokens, usage.TotalTokens, usage.ContextWindowTokens)
 }

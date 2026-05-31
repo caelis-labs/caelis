@@ -32,33 +32,20 @@ func statusUsageView(snapshot session.Snapshot) appviewmodel.UsageStatus {
 }
 
 func addStatusUsage(status *appviewmodel.UsageStatus, category string, usage appviewmodel.TokenUsage) {
-	if status == nil || tokenUsageEmpty(usage) {
+	usage = appviewmodel.NormalizeTokenUsage(usage)
+	if status == nil || appviewmodel.TokenUsageZero(usage) {
 		return
 	}
-	addTokenUsage(&status.Total, usage)
+	appviewmodel.AddTokenUsage(&status.Total, usage)
 	switch category {
 	case usageCategorySubagent:
-		addTokenUsage(&status.Subagents, usage)
+		appviewmodel.AddTokenUsage(&status.Subagents, usage)
 	case usageCategoryAutoReview:
-		addTokenUsage(&status.AutoReview, usage)
+		appviewmodel.AddTokenUsage(&status.AutoReview, usage)
 	case usageCategoryCompaction:
-		addTokenUsage(&status.Compaction, usage)
+		appviewmodel.AddTokenUsage(&status.Compaction, usage)
 	default:
-		addTokenUsage(&status.Main, usage)
-	}
-}
-
-func addTokenUsage(total *appviewmodel.TokenUsage, usage appviewmodel.TokenUsage) {
-	if total == nil {
-		return
-	}
-	total.InputTokens += usage.InputTokens
-	total.CachedInputTokens += usage.CachedInputTokens
-	total.OutputTokens += usage.OutputTokens
-	total.ReasoningTokens += usage.ReasoningTokens
-	total.TotalTokens += usage.TotalTokens
-	if usage.ContextWindowTokens > total.ContextWindowTokens {
-		total.ContextWindowTokens = usage.ContextWindowTokens
+		appviewmodel.AddTokenUsage(&status.Main, usage)
 	}
 }
 
@@ -89,10 +76,8 @@ func tokenUsageFromModel(usage model.Usage) (appviewmodel.TokenUsage, bool) {
 		TotalTokens:         usage.TotalTokens,
 		ContextWindowTokens: usage.ContextWindowTokens,
 	}
-	if out.TotalTokens == 0 && (out.InputTokens != 0 || out.OutputTokens != 0) {
-		out.TotalTokens = out.InputTokens + out.OutputTokens
-	}
-	return out, !tokenUsageEmpty(out)
+	out = appviewmodel.NormalizeTokenUsage(out)
+	return out, !appviewmodel.TokenUsageZero(out)
 }
 
 func tokenUsageFromAny(value any) (appviewmodel.TokenUsage, bool) {
@@ -106,15 +91,15 @@ func tokenUsageFromAny(value any) (appviewmodel.TokenUsage, bool) {
 	if totalTokens == 0 && (inputTokens != 0 || outputTokens != 0) {
 		totalTokens = inputTokens + outputTokens
 	}
-	out := appviewmodel.TokenUsage{
+	out := appviewmodel.NormalizeTokenUsage(appviewmodel.TokenUsage{
 		InputTokens:         inputTokens,
 		CachedInputTokens:   firstNonZeroInt(anyInt(payload["cached_input_tokens"]), anyInt(payload["cached_prompt_tokens"]), anyInt(payload["cache_read_input_tokens"])),
 		OutputTokens:        outputTokens,
 		ReasoningTokens:     firstNonZeroInt(anyInt(payload["reasoning_tokens"]), anyInt(payload["reasoning_output_tokens"])),
 		TotalTokens:         totalTokens,
 		ContextWindowTokens: anyInt(payload["context_window_tokens"]),
-	}
-	return out, !tokenUsageEmpty(out)
+	})
+	return out, !appviewmodel.TokenUsageZero(out)
 }
 
 func usageCategoryFromCoreEvent(event session.Event) string {
@@ -155,15 +140,6 @@ func normalizeUsageCategory(category string) string {
 	default:
 		return ""
 	}
-}
-
-func tokenUsageEmpty(usage appviewmodel.TokenUsage) bool {
-	return usage.InputTokens == 0 &&
-		usage.CachedInputTokens == 0 &&
-		usage.OutputTokens == 0 &&
-		usage.ReasoningTokens == 0 &&
-		usage.TotalTokens == 0 &&
-		usage.ContextWindowTokens == 0
 }
 
 func mapAny(value any) (map[string]any, bool) {

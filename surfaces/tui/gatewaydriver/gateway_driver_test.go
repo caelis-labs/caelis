@@ -1203,7 +1203,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if status.SessionInputTokens != 12600 || status.SessionCachedInputTokens != 9000 || status.SessionOutputTokens != 200 || status.SessionReasoningTokens != 50 || status.SessionTotalTokens != 12800 {
 		t.Fatalf("session token usage = input %d cached %d output %d reasoning %d total %d", status.SessionInputTokens, status.SessionCachedInputTokens, status.SessionOutputTokens, status.SessionReasoningTokens, status.SessionTotalTokens)
 	}
-	if status.SessionUsageMain.PromptTokens != 12600 || status.SessionUsageMain.ReasoningTokens != 50 {
+	if status.SessionUsageMain.InputTokens != 12600 || status.SessionUsageMain.ReasoningTokens != 50 {
 		t.Fatalf("main usage = %+v, want assistant usage", status.SessionUsageMain)
 	}
 }
@@ -1259,7 +1259,7 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 	if err != nil {
 		t.Fatalf("sessionTokenUsage() error = %v", err)
 	}
-	if usage.PromptTokens != 10 || usage.CachedInputTokens != 3 || usage.CompletionTokens != 2 || usage.TotalTokens != 12 {
+	if usage.InputTokens != 10 || usage.CachedInputTokens != 3 || usage.OutputTokens != 2 || usage.TotalTokens != 12 {
 		t.Fatalf("usage = %+v, want one model response counted once", usage)
 	}
 }
@@ -1366,19 +1366,19 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 	if err != nil {
 		t.Fatalf("sessionTokenUsageBreakdown() error = %v", err)
 	}
-	if usage.Main.PromptTokens != 10 || usage.Main.ReasoningTokens != 1 || usage.Main.TotalTokens != 12 {
+	if usage.Main.InputTokens != 10 || usage.Main.ReasoningTokens != 1 || usage.Main.TotalTokens != 12 {
 		t.Fatalf("main usage = %+v, want parent model usage", usage.Main)
 	}
-	if usage.Subagents.PromptTokens != 20 || usage.Subagents.ReasoningTokens != 5 || usage.Subagents.TotalTokens != 26 {
+	if usage.Subagents.InputTokens != 20 || usage.Subagents.ReasoningTokens != 5 || usage.Subagents.TotalTokens != 26 {
 		t.Fatalf("subagent usage = %+v, want self child usage", usage.Subagents)
 	}
-	if usage.AutoReview.PromptTokens != 7 || usage.AutoReview.ReasoningTokens != 2 || usage.AutoReview.TotalTokens != 9 {
+	if usage.AutoReview.InputTokens != 7 || usage.AutoReview.ReasoningTokens != 2 || usage.AutoReview.TotalTokens != 9 {
 		t.Fatalf("auto-review usage = %+v, want review usage", usage.AutoReview)
 	}
-	if usage.Compaction.PromptTokens != 4 || usage.Compaction.CompletionTokens != 1 || usage.Compaction.TotalTokens != 5 {
+	if usage.Compaction.InputTokens != 4 || usage.Compaction.OutputTokens != 1 || usage.Compaction.TotalTokens != 5 {
 		t.Fatalf("compaction usage = %+v, want compact usage", usage.Compaction)
 	}
-	if usage.Total.PromptTokens != 41 || usage.Total.CachedInputTokens != 8 || usage.Total.CompletionTokens != 11 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 52 {
+	if usage.Total.InputTokens != 41 || usage.Total.CachedInputTokens != 8 || usage.Total.OutputTokens != 11 || usage.Total.ReasoningTokens != 8 || usage.Total.TotalTokens != 52 {
 		t.Fatalf("total usage = %+v, want all buckets", usage.Total)
 	}
 }
