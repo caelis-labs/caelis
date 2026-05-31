@@ -14,6 +14,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 type appServiceAgentTurnHandle struct {
@@ -254,7 +255,7 @@ func contentPartMessagePart(part coremodel.ContentPart) (coremodel.Part, bool) {
 }
 
 func (h *appServiceAgentTurnHandle) publishCore(cursor coresession.Cursor, event coresession.Event) {
-	env, ok := kernelEnvelopeFromCore(coreruntime.EventEnvelope{Cursor: cursor, Event: event})
+	env, ok := eventbridge.KernelEnvelopeFromCore(coreruntime.EventEnvelope{Cursor: cursor, Event: event})
 	if !ok {
 		return
 	}

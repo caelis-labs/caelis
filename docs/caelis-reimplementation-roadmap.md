@@ -611,6 +611,13 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   projection for TUI and future APP consumers. It wraps runtime replay and
   active-turn channels into surface-neutral event envelopes with transcript,
   approval, participant, lifecycle, and canonical event projections.
+- `surfaces/tui/eventbridge`: current TUI-local bridge from
+  `internal/app/viewmodel.SessionEventEnvelope` / `core/runtime.EventEnvelope`
+  to the existing gateway transcript event shape. This keeps the remaining
+  legacy TUI renderer adapter in one place, preserves core tool content when
+  projecting into transcript/tool-panel events, and prevents
+  `surfaces/tui/gatewaydriver` from owning canonical event semantics while the
+  full TUI surface split is still in progress.
 - `internal/app/services.SettingsService`: shared settings contract for
   runtime identity, store, sandbox, sandbox backend, and compaction policy
   mutations. It persists through the app settings manager and updates the
@@ -950,6 +957,10 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared TUI/APP view-model projection for transcript, current plan, pending
   approvals, participants, and runtime/session/model/mode/agent/resource status,
   including store identity for read-only diagnostic displays.
+- TUI app-service event bridge cleanup: core/app event to current transcript
+  gateway projection now lives in `surfaces/tui/eventbridge`, and core
+  `session.ToolEvent.Content` is preserved as ACP-compatible tool content for
+  existing TUI transcript and tool-panel rendering.
 - Core-native ACP server for initialize, session/new, session/prompt,
   session/list, session/load, session/resume, session/close, cancel,
   `session/update`, and permission request bridging. It also exposes configured
@@ -1221,6 +1232,12 @@ be migrated before retiring the old stack:
      those parts without converting through `ports/model`. Attachment UI and
      rendering remain surface-local, but the model-visible prompt content
      contract is no longer owned by the old port package.
+   - Migrated baseline: core/app session event projection for the app-service
+     TUI binding has been centralized in `surfaces/tui/eventbridge` instead of
+     living inside `surfaces/tui/gatewaydriver`. The bridge now carries
+     canonical core tool content into the existing transcript/tool-panel
+     renderer, so service-native shell/task/filesystem results do not depend on
+     gatewaydriver-local projection details.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and

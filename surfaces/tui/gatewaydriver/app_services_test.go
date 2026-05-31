@@ -19,10 +19,11 @@ import (
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 func TestCoreEventMetaMergesToolRuntimeMeta(t *testing.T) {
-	got := coreEventMeta(coresession.Event{
+	projected := eventbridge.KernelEventFromCore(coresession.Event{
 		Meta: map[string]any{
 			"caelis": map[string]any{
 				"runtime": map[string]any{
@@ -40,6 +41,7 @@ func TestCoreEventMetaMergesToolRuntimeMeta(t *testing.T) {
 			},
 		},
 	})
+	got := projected.Meta
 	runtimeMeta := got["caelis"].(map[string]any)["runtime"].(map[string]any)
 	if runtimeMeta["stream"] == nil || runtimeMeta["tool"] == nil {
 		t.Fatalf("meta = %#v, want stream and tool runtime metadata", got)
