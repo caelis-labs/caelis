@@ -1117,16 +1117,23 @@ be migrated before retiring the old stack:
      context/output/reasoning values now come from
      `internal/app/services.Models()` through `BindAppServices`, including
      configured provider models and shared provider capability presets.
+   - Migrated baseline: `/connect` provider catalog, endpoint candidates,
+     token/env hints, default config preparation, and reusable profile-auth
+     checks now live in `internal/app/services.ModelService`. The TUI
+     gatewaydriver maps these service candidates into slash-arg DTOs and
+     delegates app-service-bound `/connect` submissions through the shared
+     prepare/connect contract, so a future APP can reuse the same provider
+     setup semantics without importing TUI wizard code.
    - Migrated baseline: the old formal `surfaces/tui/gatewaydriver/local`
      adapter package has been deleted. Remaining gatewayapp driver coverage is
      test-local under `eval`, which keeps old-stack validation available
      without preserving the bridge as production architecture.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
-     completion, connect wizard, status bar, renderer, transcript reducer,
-     tool panels, approval UI, theme system, and attachment handling are not
-     ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell and live remote ACP
-     process reconnect/lifecycle behavior still have old driver/app
+     completion shell, connect wizard UI runtime, status bar, renderer,
+     transcript reducer, tool panels, approval UI, theme system, and
+     attachment handling are not ported to `internal/app/services`.
+   - Slash commands such as the remaining `/connect` wizard UI shell and live
+     remote ACP process reconnect/lifecycle behavior still have old driver/app
      assumptions or missing service-native feature parity, so the old TUI stack
      cannot be removed yet.
 
@@ -1763,8 +1770,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI command migrations against app services,
-   especially the `/connect` wizard shell, live remote controller process
-   lifecycle, and settings/diagnostics panel parity.
+   especially the remaining `/connect` wizard UI shell, live remote controller
+   process lifecycle, and settings/diagnostics panel parity.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating

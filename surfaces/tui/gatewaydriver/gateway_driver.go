@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
@@ -986,16 +987,16 @@ func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {
 	if baseURL := strings.TrimSpace(cfg.BaseURL); baseURL != "" {
 		parsed, err := url.Parse(baseURL)
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("base URL is invalid; use a full URL such as %s", tpl.defaultBaseURL)
+			return fmt.Errorf("base URL is invalid; use a full URL such as %s", tpl.DefaultBaseURL)
 		}
 	}
-	if tpl.noAuthRequired {
+	if tpl.NoAuthRequired {
 		return nil
 	}
 	if strings.TrimSpace(cfg.APIKey) != "" || strings.TrimSpace(cfg.TokenEnv) != "" {
 		return nil
 	}
-	envHint := defaultTokenEnvNameForConnect(tpl.provider, cfg.BaseURL)
+	envHint := defaultTokenEnvNameForConnect(tpl.Provider, cfg.BaseURL)
 	if envHint == "" {
 		envHint = "YOUR_API_KEY"
 	}
@@ -1003,80 +1004,27 @@ func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {
 }
 
 func parseTokenEnvSpec(value string) (string, bool) {
-	trimmed := strings.TrimSpace(value)
-	switch {
-	case strings.HasPrefix(strings.ToLower(trimmed), "env:"):
-		env := strings.TrimSpace(trimmed[len("env:"):])
-		return env, env != ""
-	case strings.HasPrefix(trimmed, "$"):
-		env := strings.TrimSpace(strings.TrimPrefix(trimmed, "$"))
-		return env, env != ""
-	default:
-		return "", false
-	}
+	return appservices.ParseConnectTokenEnvSpec(value)
 }
 
 func defaultTokenEnvName(provider string) string {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "minimax":
-		return "MINIMAX_API_KEY"
-	case "openai":
-		return "OPENAI_API_KEY"
-	case "openai-compatible":
-		return "OPENAI_COMPATIBLE_API_KEY"
-	case "openrouter":
-		return "OPENROUTER_API_KEY"
-	case "gemini":
-		return "GEMINI_API_KEY"
-	case "anthropic":
-		return "ANTHROPIC_API_KEY"
-	case "anthropic-compatible":
-		return "ANTHROPIC_COMPATIBLE_API_KEY"
-	case "deepseek":
-		return "DEEPSEEK_API_KEY"
-	case connectXiaomiTokenPlanCNAlias:
-		return "MIMO_TOKEN_PLAN_API_KEY"
-	case "xiaomi":
-		return "XIAOMI_API_KEY"
-	case "volcengine":
-		return "VOLCENGINE_API_KEY"
-	default:
-		return ""
-	}
+	return appservices.DefaultConnectTokenEnvName(provider, "")
 }
 
 func defaultTokenEnvNameForConnect(provider string, baseURL string) string {
-	if isXiaomiTokenPlanProvider(provider) || isXiaomiTokenPlanBaseURL(baseURL) {
-		return "MIMO_TOKEN_PLAN_API_KEY"
-	}
-	return defaultTokenEnvName(provider)
+	return appservices.DefaultConnectTokenEnvName(provider, baseURL)
 }
 
 func defaultConnectAuthType(provider string) model.AuthType {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "minimax":
-		return model.AuthBearerToken
-	default:
-		return model.AuthAPIKey
-	}
+	return appservices.DefaultConnectAuthType(provider)
 }
 
 func isXiaomiTokenPlanProvider(provider string) bool {
-	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case connectXiaomiTokenPlanCNAlias:
-		return true
-	default:
-		return false
-	}
+	return appservices.IsXiaomiTokenPlanProvider(provider)
 }
 
 func isXiaomiTokenPlanBaseURL(baseURL string) bool {
-	switch normalizedConnectBaseURL(baseURL) {
-	case normalizedConnectBaseURL(connectXiaomiTokenPlanCNBaseURL):
-		return true
-	default:
-		return false
-	}
+	return appservices.IsXiaomiTokenPlanBaseURL(baseURL)
 }
 
 type gatewayTurn struct {

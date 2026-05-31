@@ -8,53 +8,23 @@ import (
 	"strings"
 	"time"
 
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
 const (
-	connectVolcengineStandardValue = "standard"
-	connectVolcengineCodingValue   = "coding-plan"
+	connectVolcengineStandardValue = appservices.ConnectVolcengineStandardValue
+	connectVolcengineCodingValue   = appservices.ConnectVolcengineCodingValue
 
-	connectXiaomiAPIBaseURL         = "https://api.xiaomimimo.com/v1"
-	connectXiaomiTokenPlanCNBaseURL = "https://token-plan-cn.xiaomimimo.com/v1"
-	connectXiaomiTokenPlanCNAlias   = "xiaomi-token-plan-cn"
+	connectXiaomiAPIBaseURL         = appservices.ConnectXiaomiAPIBaseURL
+	connectXiaomiTokenPlanCNBaseURL = appservices.ConnectXiaomiTokenPlanCNBaseURL
+	connectXiaomiTokenPlanCNAlias   = appservices.ConnectXiaomiTokenPlanCNAlias
 )
 
-type providerTemplate struct {
-	label               string
-	api                 model.APIType
-	provider            string
-	description         string
-	defaultEndpointID   string
-	defaultBaseURL      string
-	defaultContextToken int
-	defaultMaxOutputTok int
-	noAuthRequired      bool
-	commonModels        []string
-	endpoints           []connectEndpointTemplate
-}
+type providerTemplate = appservices.ConnectProviderTemplate
 
-type connectEndpointTemplate struct {
-	id       string
-	baseURL  string
-	display  string
-	detail   string
-	api      model.APIType
-	tokenEnv string
-}
-
-var xiaomiMimoCommonModels = []string{"mimo-v2.5-pro", "mimo-v2-pro", "mimo-v2.5", "mimo-v2-omni", "mimo-v2-flash"}
-
-var connectXiaomiEndpoints = []connectEndpointTemplate{
-	{id: "api-cn", baseURL: connectXiaomiAPIBaseURL, display: "api cn", detail: "Xiaomi MiMo API CN · OpenAI-compatible", api: model.APIMimo, tokenEnv: "XIAOMI_API_KEY"},
-	{id: "token-plan-cn", baseURL: connectXiaomiTokenPlanCNBaseURL, display: "token plan cn", detail: "Xiaomi MiMo Token Plan CN · OpenAI-compatible", api: model.APIMimo, tokenEnv: "MIMO_TOKEN_PLAN_API_KEY"},
-}
-
-var connectVolcengineEndpoints = []connectEndpointTemplate{
-	{id: connectVolcengineStandardValue, baseURL: "https://ark.cn-beijing.volces.com/api/v3", display: "standard api", detail: "regular Ark endpoint", api: model.APIVolcengine, tokenEnv: "VOLCENGINE_API_KEY"},
-	{id: connectVolcengineCodingValue, baseURL: "https://ark.cn-beijing.volces.com/api/coding/v3", display: "coding plan", detail: "Ark coding-plan endpoint", api: model.APIVolcengineCoding, tokenEnv: "VOLCENGINE_API_KEY"},
-}
+type connectEndpointTemplate = appservices.ConnectEndpointTemplate
 
 type connectModelChoice struct {
 	Name    string
@@ -71,28 +41,24 @@ type connectModelDefaults struct {
 
 type connectWizardPayload = tuicommands.ConnectWizardState
 
-var providerTemplates = []providerTemplate{
-	{label: "openai", api: model.APIOpenAI, provider: "openai", description: "OpenAI-hosted models", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
-	{label: "openai-compatible", api: model.APIOpenAICompatible, provider: "openai-compatible", description: "OpenAI-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.openai.com/v1", defaultContextToken: 128000, commonModels: []string{"gpt-4o", "gpt-4o-mini", "o3", "o4-mini"}},
-	{label: "codefree", api: model.APICodeFree, provider: "codefree", description: "China Telecom SRD CodeFree models via browser OAuth", defaultBaseURL: "https://www.srdcloud.cn", defaultContextToken: 128000, defaultMaxOutputTok: 8000, noAuthRequired: true, commonModels: []string{"GLM-4.7", "DeepSeek-V3.1-Terminus", "Qwen3.5-122B-A10B", "GLM-5.1"}},
-	{label: "openrouter", api: model.APIOpenRouter, provider: "openrouter", description: "OpenRouter multi-provider routing", defaultBaseURL: "https://openrouter.ai/api/v1", defaultContextToken: 262144, commonModels: []string{"openai/gpt-4o-mini", "anthropic/claude-sonnet-4", "google/gemini-2.5-flash"}},
-	{label: "gemini", api: model.APIGemini, provider: "gemini", description: "Google Gemini API", defaultBaseURL: "https://generativelanguage.googleapis.com/v1beta", defaultContextToken: 128000, commonModels: []string{"gemini-2.5-flash", "gemini-2.5-pro"}},
-	{label: "anthropic", api: model.APIAnthropic, provider: "anthropic", description: "Anthropic Claude API", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024, commonModels: []string{"claude-sonnet-4-20250514", "claude-opus-4-20250514"}},
-	{label: "anthropic-compatible", api: model.APIAnthropicCompatible, provider: "anthropic-compatible", description: "Anthropic-compatible proxy or self-hosted endpoint", defaultBaseURL: "https://api.anthropic.com", defaultContextToken: 200000, defaultMaxOutputTok: 1024},
-	{label: "deepseek", api: model.APIDeepSeek, provider: "deepseek", description: "DeepSeek V4 models", defaultBaseURL: "https://api.deepseek.com/v1", defaultContextToken: 1048576, commonModels: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
-	{label: "xiaomi", api: model.APIMimo, provider: "xiaomi", description: "Xiaomi Mimo models", defaultEndpointID: "api-cn", defaultBaseURL: connectXiaomiAPIBaseURL, defaultContextToken: 262144, commonModels: xiaomiMimoCommonModels, endpoints: connectXiaomiEndpoints},
-	{label: "minimax", api: model.APIMiniMax, provider: "minimax", description: "MiniMax models over an Anthropic-compatible API", defaultBaseURL: "https://api.minimaxi.com/anthropic", defaultContextToken: 204800, defaultMaxOutputTok: 8192, commonModels: []string{"MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"}},
-	{label: "volcengine", api: model.APIVolcengine, provider: "volcengine", description: "Volcengine Ark standard or coding-plan endpoints", defaultEndpointID: connectVolcengineStandardValue, defaultBaseURL: "https://ark.cn-beijing.volces.com/api/v3", defaultContextToken: 128000, endpoints: connectVolcengineEndpoints},
-	{label: "ollama", api: model.APIOllama, provider: "ollama", description: "Local Ollama runtime", defaultBaseURL: "http://localhost:11434", defaultContextToken: 128000, noAuthRequired: true, commonModels: []string{"qwen2.5:7b", "llama3.1:8b", "deepseek-r1:7b", "gemma3:4b"}},
-}
+var providerTemplates = appservices.ConnectProviderTemplates()
 
 func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command string, query string, limit int) ([]SlashArgCandidate, error) {
 	switch {
 	case command == "connect":
+		if candidates, ok, err := stackForDriver(driver).ConnectProviderCandidates(ctx, query, limit); ok || err != nil {
+			return candidates, err
+		}
 		return completeConnectProviders(query, limit), nil
 	case strings.HasPrefix(command, "connect-baseurl:"):
+		if candidates, ok, err := stackForDriver(driver).ConnectBaseURLCandidates(ctx, strings.TrimPrefix(command, "connect-baseurl:"), query, limit); ok || err != nil {
+			return candidates, err
+		}
 		return completeConnectBaseURL(ctx, driver, strings.TrimPrefix(command, "connect-baseurl:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-timeout:"):
+		if candidates, ok, err := stackForDriver(driver).ConnectTimeoutCandidates(ctx, query, limit); ok || err != nil {
+			return candidates, err
+		}
 		return completeConnectTimeout(strings.TrimPrefix(command, "connect-timeout:"), query, limit), nil
 	case strings.HasPrefix(command, "connect-apikey:"):
 		return nil, nil
@@ -112,22 +78,22 @@ func completeConnectArgs(ctx context.Context, driver *GatewayDriver, command str
 func completeConnectProviders(query string, limit int) []SlashArgCandidate {
 	out := make([]SlashArgCandidate, 0, len(providerTemplates))
 	for _, tpl := range providerTemplates {
-		if query != "" && !strings.Contains(strings.ToLower(tpl.label+" "+tpl.defaultBaseURL), strings.ToLower(strings.TrimSpace(query))) {
+		if query != "" && !strings.Contains(strings.ToLower(tpl.Label+" "+tpl.DefaultBaseURL), strings.ToLower(strings.TrimSpace(query))) {
 			continue
 		}
-		detailParts := []string{strings.TrimSpace(tpl.description), strings.TrimSpace(tpl.defaultBaseURL)}
-		if tpl.provider == "codefree" {
+		detailParts := []string{strings.TrimSpace(tpl.Description), strings.TrimSpace(tpl.DefaultBaseURL)}
+		if tpl.Provider == "codefree" {
 			detailParts = append(detailParts, "browser oauth")
-		} else if tpl.noAuthRequired {
+		} else if tpl.NoAuthRequired {
 			detailParts = append(detailParts, "no auth")
-		} else if env := defaultTokenEnvName(tpl.provider); env != "" {
+		} else if env := defaultTokenEnvName(tpl.Provider); env != "" {
 			detailParts = append(detailParts, "env:"+env)
 		}
 		out = append(out, SlashArgCandidate{
-			Value:   tpl.label,
-			Display: tpl.label,
+			Value:   tpl.Label,
+			Display: tpl.Label,
 			Detail:  strings.Join(compactNonEmpty(detailParts), " · "),
-			NoAuth:  tpl.noAuthRequired,
+			NoAuth:  tpl.NoAuthRequired,
 		})
 		if len(out) >= limit {
 			break
@@ -143,10 +109,10 @@ func completeConnectBaseURL(ctx context.Context, driver *GatewayDriver, provider
 	}
 	candidates := connectEndpointCandidates(tpl)
 	if len(candidates) == 0 {
-		candidates = append(candidates, SlashArgCandidate{Value: tpl.defaultBaseURL, Display: tpl.defaultBaseURL, Detail: "default base URL"})
+		candidates = append(candidates, SlashArgCandidate{Value: tpl.DefaultBaseURL, Display: tpl.DefaultBaseURL, Detail: "default base URL"})
 	}
 	for i := range candidates {
-		if driver != nil && driver.hasReusableConnectAuth(ctx, tpl.provider, candidates[i].Value) {
+		if driver != nil && driver.hasReusableConnectAuth(ctx, tpl.Provider, candidates[i].Value) {
 			candidates[i].NoAuth = true
 			candidates[i].Detail = strings.Join(compactNonEmpty([]string{strings.TrimSpace(candidates[i].Detail), "configured auth"}), " · ")
 		}
@@ -155,18 +121,18 @@ func completeConnectBaseURL(ctx context.Context, driver *GatewayDriver, provider
 }
 
 func connectEndpointCandidates(tpl providerTemplate) []SlashArgCandidate {
-	if len(tpl.endpoints) == 0 {
+	if len(tpl.Endpoints) == 0 {
 		return nil
 	}
-	out := make([]SlashArgCandidate, 0, len(tpl.endpoints))
-	for _, endpoint := range tpl.endpoints {
-		detail := strings.TrimSpace(endpoint.detail)
-		if endpoint.tokenEnv != "" {
-			detail = strings.Join(compactNonEmpty([]string{detail, "env:" + endpoint.tokenEnv}), " · ")
+	out := make([]SlashArgCandidate, 0, len(tpl.Endpoints))
+	for _, endpoint := range tpl.Endpoints {
+		detail := strings.TrimSpace(endpoint.Detail)
+		if endpoint.TokenEnv != "" {
+			detail = strings.Join(compactNonEmpty([]string{detail, "env:" + endpoint.TokenEnv}), " · ")
 		}
 		out = append(out, SlashArgCandidate{
-			Value:   endpoint.baseURL,
-			Display: endpoint.display,
+			Value:   endpoint.BaseURL,
+			Display: endpoint.Display,
 			Detail:  detail,
 		})
 	}
@@ -188,10 +154,13 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 	if !ok {
 		return nil, nil
 	}
-	if tpl.provider == "codefree" {
+	if candidates, handled, err := stackForDriver(driver).ConnectModelCandidates(ctx, connectModelConfigFromPayload(tpl, payload), query, limit); handled || err != nil {
+		return candidates, err
+	}
+	if tpl.Provider == "codefree" {
 		baseURL := strings.TrimSpace(payload.BaseURL)
 		if baseURL == "" {
-			baseURL = tpl.defaultBaseURL
+			baseURL = tpl.DefaultBaseURL
 		}
 		if driver == nil || driver.stack == nil {
 			return nil, fmt.Errorf("surfaces/tui/gatewaydriver: codefree model auth dependency is unavailable")
@@ -210,11 +179,11 @@ func completeConnectModels(ctx context.Context, driver *GatewayDriver, payload c
 		defer cancel()
 		discovered, _ := driver.stack.ListProviderModelsForConfig(discoverCtx, connectModelConfigFromPayload(tpl, payload))
 		if len(discovered) == 0 {
-			discovered = driver.stack.ListProviderModels(tpl.provider)
+			discovered = driver.stack.ListProviderModels(tpl.Provider)
 		}
 		fallbackModels = append(fallbackModels, discovered...)
 	}
-	choices := buildConnectModelChoices(stackForDriver(driver), tpl.provider, fallbackModels)
+	choices := buildConnectModelChoices(stackForDriver(driver), tpl.Provider, fallbackModels)
 	out := make([]SlashArgCandidate, 0, len(choices))
 	for _, choice := range choices {
 		if query != "" && !strings.Contains(strings.ToLower(choice.Name+" "+choice.Display+" "+choice.Detail), strings.ToLower(strings.TrimSpace(query))) {
@@ -251,6 +220,19 @@ func connectDefaultsForConfigWithStack(ctx context.Context, stack *DriverStack, 
 	if !ok {
 		return connectModelDefaults{}, nil
 	}
+	if defaults, handled, err := stack.ConnectDefaults(ctx, ModelConfig{
+		Provider:            strings.ToLower(strings.TrimSpace(cfg.Provider)),
+		EndpointID:          strings.TrimSpace(cfg.EndpointID),
+		Model:               strings.TrimSpace(cfg.Model),
+		BaseURL:             strings.TrimSpace(cfg.BaseURL),
+		Token:               strings.TrimSpace(cfg.APIKey),
+		TokenEnv:            strings.TrimSpace(cfg.TokenEnv),
+		ContextWindowTokens: cfg.ContextWindowTokens,
+		MaxOutputTok:        cfg.MaxOutputTokens,
+		ReasoningLevels:     append([]string(nil), cfg.ReasoningLevels...),
+	}); handled || err != nil {
+		return defaults, err
+	}
 	payload := tuicommands.ConnectWizardState{
 		Provider:       strings.ToLower(strings.TrimSpace(cfg.Provider)),
 		BaseURL:        strings.TrimSpace(cfg.BaseURL),
@@ -259,7 +241,7 @@ func connectDefaultsForConfigWithStack(ctx context.Context, stack *DriverStack, 
 		Model:          strings.TrimSpace(cfg.Model),
 	}
 	if payload.BaseURL == "" {
-		payload.BaseURL = tpl.defaultBaseURL
+		payload.BaseURL = tpl.DefaultBaseURL
 	}
 	if payload.TimeoutSeconds <= 0 {
 		payload.TimeoutSeconds = tuicommands.DefaultConnectTimeoutSeconds
@@ -302,8 +284,11 @@ func connectDefaultsForPayload(ctx context.Context, stack *DriverStack, payload 
 	if !ok {
 		return connectModelDefaults{}, nil
 	}
+	if defaults, handled, err := stack.ConnectDefaults(ctx, connectModelConfigFromPayload(tpl, payload)); handled || err != nil {
+		return defaults, err
+	}
 	_ = ctx
-	baseCaps, baseKnown := lookupConnectModelCapabilities(stack, tpl.provider, payload.Model)
+	baseCaps, baseKnown := lookupConnectModelCapabilities(stack, tpl.Provider, payload.Model)
 	if !baseKnown {
 		baseCaps = defaultConnectCapabilities(stack)
 	}
@@ -316,7 +301,7 @@ func connectDefaultsForPayload(ctx context.Context, stack *DriverStack, payload 
 	if baseCaps.MaxOutputTokens <= 0 {
 		baseCaps.MaxOutputTokens = baseCaps.DefaultMaxOutputTokens
 	}
-	reasoningLevels := normalizeReasoningLevels(reasoningLevelsForModel(stack, tpl.provider, payload.Model))
+	reasoningLevels := normalizeReasoningLevels(reasoningLevelsForModel(stack, tpl.Provider, payload.Model))
 	if len(reasoningLevels) == 0 {
 		reasoningLevels = normalizeReasoningLevels(baseCaps.ReasoningEfforts)
 	}
@@ -372,48 +357,15 @@ func hasConnectCandidatePrefix(query string, values ...string) bool {
 }
 
 func findProviderTemplate(value string) (providerTemplate, bool) {
-	value = strings.ToLower(strings.TrimSpace(value))
-	for _, tpl := range providerTemplates {
-		if tpl.label == value || tpl.provider == value {
-			return tpl, true
-		}
-	}
-	switch value {
-	case connectXiaomiTokenPlanCNAlias:
-		return providerTemplate{
-			label:               connectXiaomiTokenPlanCNAlias,
-			api:                 model.APIMimo,
-			provider:            "xiaomi",
-			description:         "Xiaomi Mimo Token Plan CN over an OpenAI-compatible API",
-			defaultEndpointID:   "token-plan-cn",
-			defaultBaseURL:      connectXiaomiTokenPlanCNBaseURL,
-			defaultContextToken: 1048576,
-			commonModels:        xiaomiMimoCommonModels,
-			endpoints:           connectXiaomiEndpoints,
-		}, true
-	}
-	return providerTemplate{}, false
+	return appservices.FindConnectProviderTemplate(value)
 }
 
 func normalizedConnectBaseURL(baseURL string) string {
-	return strings.ToLower(strings.TrimRight(strings.TrimSpace(baseURL), "/"))
+	return appservices.NormalizeConnectBaseURL(baseURL)
 }
 
 func connectEndpointForBaseURL(tpl providerTemplate, baseURL string) (connectEndpointTemplate, bool) {
-	normalized := normalizedConnectBaseURL(baseURL)
-	for _, endpoint := range tpl.endpoints {
-		if normalized != "" && normalized == normalizedConnectBaseURL(endpoint.baseURL) {
-			return endpoint, true
-		}
-	}
-	if normalized == "" {
-		for _, endpoint := range tpl.endpoints {
-			if strings.EqualFold(strings.TrimSpace(endpoint.id), strings.TrimSpace(tpl.defaultEndpointID)) {
-				return endpoint, true
-			}
-		}
-	}
-	return connectEndpointTemplate{}, false
+	return appservices.ConnectEndpointForBaseURL(tpl, baseURL)
 }
 
 func buildConnectModelChoices(stack *DriverStack, provider string, fallbackModels []string) []connectModelChoice {
@@ -450,23 +402,23 @@ func buildConnectModelChoices(stack *DriverStack, provider string, fallbackModel
 func connectModelConfigFromPayload(tpl providerTemplate, payload connectWizardPayload) ModelConfig {
 	baseURL := strings.TrimSpace(payload.BaseURL)
 	if baseURL == "" {
-		baseURL = tpl.defaultBaseURL
+		baseURL = tpl.DefaultBaseURL
 	}
 	timeoutSeconds := payload.TimeoutSeconds
 	if timeoutSeconds <= 0 {
 		timeoutSeconds = tuicommands.DefaultConnectTimeoutSeconds
 	}
 	endpoint, hasEndpoint := connectEndpointForBaseURL(tpl, baseURL)
-	api := tpl.api
-	if hasEndpoint && strings.TrimSpace(string(endpoint.api)) != "" {
-		api = endpoint.api
+	api := tpl.API
+	if hasEndpoint && strings.TrimSpace(string(endpoint.API)) != "" {
+		api = endpoint.API
 	}
-	authType := defaultConnectAuthType(tpl.provider)
-	if tpl.noAuthRequired {
+	authType := defaultConnectAuthType(tpl.Provider)
+	if tpl.NoAuthRequired {
 		authType = model.AuthNone
 	}
 	cfg := ModelConfig{
-		Provider:            tpl.provider,
+		Provider:            tpl.Provider,
 		API:                 api,
 		Model:               strings.TrimSpace(payload.Model),
 		BaseURL:             baseURL,
@@ -476,7 +428,7 @@ func connectModelConfigFromPayload(tpl providerTemplate, payload connectWizardPa
 		Timeout:             time.Duration(timeoutSeconds) * time.Second,
 	}
 	if hasEndpoint {
-		cfg.EndpointID = strings.TrimSpace(endpoint.id)
+		cfg.EndpointID = strings.TrimSpace(endpoint.ID)
 	}
 	tokenRef := strings.TrimSpace(payload.TokenRef)
 	if env, ok := parseTokenEnvSpec(tokenRef); ok {
@@ -489,53 +441,36 @@ func connectModelConfigFromPayload(tpl providerTemplate, payload connectWizardPa
 
 func fallbackConnectModels(stack *DriverStack, tpl providerTemplate) []string {
 	if stack != nil {
-		if models := stack.ListCatalogModels(tpl.provider); len(models) > 0 {
+		if models := stack.ListCatalogModels(tpl.Provider); len(models) > 0 {
 			return models
 		}
 	}
-	if len(tpl.commonModels) > 0 {
-		return append([]string(nil), tpl.commonModels...)
+	if len(tpl.CommonModels) > 0 {
+		return append([]string(nil), tpl.CommonModels...)
 	}
-	return commonModelsForProvider(tpl.provider)
+	return commonModelsForProvider(tpl.Provider)
 }
 
 func connectDisplayModelRef(provider, modelName string) string {
-	provider = strings.TrimSpace(provider)
-	modelName = strings.TrimSpace(modelName)
-	if provider == "" {
-		return modelName
-	}
-	if modelName == "" {
-		return provider
-	}
-	if strings.HasPrefix(strings.ToLower(modelName), strings.ToLower(provider)+"/") {
-		return modelName
-	}
-	return provider + "/" + modelName
+	return appservices.ConnectDisplayModelRef(provider, modelName)
 }
 
 func defaultContextWindowForTemplate(tpl providerTemplate) int {
-	if tpl.defaultContextToken > 0 {
-		return tpl.defaultContextToken
+	if tpl.DefaultContextTokens > 0 {
+		return tpl.DefaultContextTokens
 	}
 	return 128000
 }
 
 func defaultMaxOutputForTemplate(tpl providerTemplate) int {
-	if tpl.defaultMaxOutputTok > 0 {
-		return tpl.defaultMaxOutputTok
+	if tpl.DefaultMaxOutput > 0 {
+		return tpl.DefaultMaxOutput
 	}
 	return 4096
 }
 
 func commonModelsForProvider(provider string) []string {
-	provider = strings.ToLower(strings.TrimSpace(provider))
-	for _, tpl := range providerTemplates {
-		if tpl.provider == provider || tpl.label == provider {
-			return append([]string(nil), tpl.commonModels...)
-		}
-	}
-	return nil
+	return appservices.CommonModelsForConnectProvider(provider)
 }
 
 func describeConnectModel(stack *DriverStack, provider string, modelName string) string {

@@ -2507,10 +2507,10 @@ func TestFindProviderTemplateSupportsOpenAICompatible(t *testing.T) {
 	if !ok {
 		t.Fatal("findProviderTemplate(openai-compatible) = false, want true")
 	}
-	if tpl.provider != "openai-compatible" {
-		t.Fatalf("provider = %q, want openai-compatible", tpl.provider)
+	if tpl.Provider != "openai-compatible" {
+		t.Fatalf("provider = %q, want openai-compatible", tpl.Provider)
 	}
-	if tpl.defaultBaseURL == "" {
+	if tpl.DefaultBaseURL == "" {
 		t.Fatal("defaultBaseURL = empty, want non-empty")
 	}
 }
@@ -2522,14 +2522,14 @@ func TestFindProviderTemplateSupportsXiaomiTokenPlanCN(t *testing.T) {
 	if !ok {
 		t.Fatalf("findProviderTemplate(%q) = false, want true", connectXiaomiTokenPlanCNAlias)
 	}
-	if tpl.provider != "xiaomi" {
-		t.Fatalf("provider = %q, want xiaomi", tpl.provider)
+	if tpl.Provider != "xiaomi" {
+		t.Fatalf("provider = %q, want xiaomi", tpl.Provider)
 	}
-	if tpl.api != model.APIMimo {
-		t.Fatalf("api = %q, want %q", tpl.api, model.APIMimo)
+	if tpl.API != model.APIMimo {
+		t.Fatalf("api = %q, want %q", tpl.API, model.APIMimo)
 	}
-	if tpl.defaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
-		t.Fatalf("defaultBaseURL = %q, want %q", tpl.defaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
+	if tpl.DefaultBaseURL != connectXiaomiTokenPlanCNBaseURL {
+		t.Fatalf("defaultBaseURL = %q, want %q", tpl.DefaultBaseURL, connectXiaomiTokenPlanCNBaseURL)
 	}
 }
 

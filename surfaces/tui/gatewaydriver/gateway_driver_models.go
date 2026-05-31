@@ -11,11 +11,17 @@ import (
 )
 
 func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapshot, error) {
+	if prepared, ok, err := d.prepareConnectModelConfig(ctx, cfg); ok || err != nil {
+		if err != nil {
+			return StatusSnapshot{}, err
+		}
+		return d.connectPreparedModelConfig(ctx, prepared)
+	}
 	tpl, ok := findProviderTemplate(cfg.Provider)
 	if !ok {
 		return StatusSnapshot{}, fmt.Errorf("provider %q is not supported", strings.TrimSpace(cfg.Provider))
 	}
-	cfg.Provider = tpl.provider
+	cfg.Provider = tpl.Provider
 	cfg.Model = strings.TrimSpace(cfg.Model)
 	cfg.BaseURL = strings.TrimSpace(cfg.BaseURL)
 	cfg.APIKey = strings.TrimSpace(cfg.APIKey)
@@ -25,14 +31,14 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		cfg.APIKey = ""
 	}
 	if cfg.BaseURL == "" {
-		cfg.BaseURL = tpl.defaultBaseURL
+		cfg.BaseURL = tpl.DefaultBaseURL
 	}
 	endpoint, hasEndpoint := connectEndpointForBaseURL(tpl, cfg.BaseURL)
 	if strings.TrimSpace(cfg.EndpointID) == "" && hasEndpoint {
-		cfg.EndpointID = endpoint.id
+		cfg.EndpointID = endpoint.ID
 	}
 	if err := validateConnectConfig(tpl, cfg); err != nil {
-		if !d.hasReusableConnectAuth(ctx, tpl.provider, cfg.BaseURL) {
+		if !d.hasReusableConnectAuth(ctx, tpl.Provider, cfg.BaseURL) {
 			return StatusSnapshot{}, err
 		}
 	}
@@ -51,11 +57,11 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		}
 	}
 	baseURL := strings.TrimSpace(cfg.BaseURL)
-	api := tpl.api
-	if hasEndpoint && strings.TrimSpace(string(endpoint.api)) != "" {
-		api = endpoint.api
+	api := tpl.API
+	if hasEndpoint && strings.TrimSpace(string(endpoint.API)) != "" {
+		api = endpoint.API
 	}
-	if tpl.provider == "codefree" {
+	if tpl.Provider == "codefree" {
 		if err := d.stack.EnsureCodeFreeAuth(ctx, CodeFreeAuthRequest{
 			BaseURL:         baseURL,
 			OpenBrowser:     true,
@@ -68,17 +74,17 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 	if cfg.TimeoutSeconds <= 0 {
 		timeout = 60 * time.Second
 	}
-	authType := defaultConnectAuthType(tpl.provider)
+	authType := defaultConnectAuthType(tpl.Provider)
 	if strings.TrimSpace(cfg.AuthType) != "" {
 		authType = authTypeFromString(strings.TrimSpace(cfg.AuthType))
 	}
-	if tpl.noAuthRequired {
+	if tpl.NoAuthRequired {
 		authType = model.AuthNone
 	}
 	persistToken := strings.TrimSpace(cfg.APIKey) != "" && strings.TrimSpace(cfg.TokenEnv) == ""
 	reasoningLevels := normalizeReasoningLevels(cfg.ReasoningLevels)
 	defaultReasoningEffort := strings.TrimSpace(cfg.ReasoningEffort)
-	alias, err := d.stack.Connect(ModelConfig{
+	return d.connectPreparedModelConfig(ctx, ModelConfig{
 		Provider:               strings.TrimSpace(cfg.Provider),
 		EndpointID:             strings.TrimSpace(cfg.EndpointID),
 		API:                    api,
@@ -95,6 +101,34 @@ func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusS
 		MaxOutputTok:           cfg.MaxOutputTokens,
 		Timeout:                timeout,
 	})
+}
+
+func (d *GatewayDriver) prepareConnectModelConfig(ctx context.Context, cfg ConnectConfig) (ModelConfig, bool, error) {
+	if d == nil || d.stack == nil {
+		return ModelConfig{}, false, nil
+	}
+	modelCfg := ModelConfig{
+		Provider:            strings.TrimSpace(cfg.Provider),
+		EndpointID:          strings.TrimSpace(cfg.EndpointID),
+		Model:               strings.TrimSpace(cfg.Model),
+		BaseURL:             strings.TrimSpace(cfg.BaseURL),
+		Token:               strings.TrimSpace(cfg.APIKey),
+		TokenEnv:            strings.TrimSpace(cfg.TokenEnv),
+		AuthType:            authTypeFromString(strings.TrimSpace(cfg.AuthType)),
+		ContextWindowTokens: cfg.ContextWindowTokens,
+		MaxOutputTok:        cfg.MaxOutputTokens,
+		ReasoningEffort:     strings.TrimSpace(cfg.ReasoningEffort),
+		ReasoningLevels:     append([]string(nil), cfg.ReasoningLevels...),
+	}
+	if cfg.TimeoutSeconds > 0 {
+		modelCfg.Timeout = time.Duration(cfg.TimeoutSeconds) * time.Second
+	}
+	modelCfg.PersistToken = modelCfg.Token != "" && modelCfg.TokenEnv == ""
+	return d.stack.PrepareConnectModelConfig(ctx, modelCfg)
+}
+
+func (d *GatewayDriver) connectPreparedModelConfig(ctx context.Context, cfg ModelConfig) (StatusSnapshot, error) {
+	alias, err := d.stack.Connect(cfg)
 	if err != nil {
 		return StatusSnapshot{}, err
 	}

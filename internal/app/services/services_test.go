@@ -3206,6 +3206,52 @@ func TestModelServiceCatalogSupportsConnectDefaults(t *testing.T) {
 	}
 }
 
+func TestModelServicePrepareConnectConfigReusesExistingProfileAuth(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := manager.UpsertModel(ctx, appsettings.ModelConfig{
+		Provider:     "xiaomi",
+		Model:        "mimo-v2.5-pro",
+		BaseURL:      ConnectXiaomiTokenPlanCNBaseURL,
+		Token:        "secret-token",
+		PersistToken: true,
+		AuthType:     "api_key",
+		Timeout:      45 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := New(Config{
+		Runtime:  config.Runtime{AppName: "caelis-app", UserID: "tester"},
+		Engine:   &recordingEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := svc.Models().PrepareConnectConfig(ctx, appsettings.ModelConfig{
+		Provider: "xiaomi",
+		Model:    "mimo-v2-pro",
+		BaseURL:  ConnectXiaomiTokenPlanCNBaseURL,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Token != "" || prepared.TokenEnv != "" || prepared.AuthType != "" || prepared.Timeout != 0 || prepared.PersistToken {
+		t.Fatalf("prepared reusable auth fields = %#v, want profile auth left untouched", prepared)
+	}
+	second, err := svc.Models().Connect(ctx, prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ProfileID != first.ProfileID || second.Token != "secret-token" || second.Timeout != 45*time.Second {
+		t.Fatalf("connected reusable profile = first:%#v second:%#v, want existing auth profile reused", first, second)
+	}
+}
+
 func TestModelServicePromptCapabilitiesReflectConfiguredModels(t *testing.T) {
 	ctx := context.Background()
 	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{})

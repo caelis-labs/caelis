@@ -116,6 +116,30 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return firstNonEmpty(connected.Alias, connected.ID), nil
 	}
+	stack.PrepareConnectModelConfigFn = func(ctx context.Context, cfg ModelConfig) (ModelConfig, error) {
+		prepared, err := svc.Models().PrepareConnectConfig(ctx, modelConfigToApp(cfg))
+		if err != nil {
+			return ModelConfig{}, err
+		}
+		return modelConfigFromApp(prepared), nil
+	}
+	stack.ConnectProviderCandidatesFn = func(_ context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+		return slashCandidatesFromAppConnect(svc.Models().ConnectProviderCandidates(query, limit)), nil
+	}
+	stack.ConnectBaseURLCandidatesFn = func(ctx context.Context, provider string, query string, limit int) ([]SlashArgCandidate, error) {
+		return slashCandidatesFromAppConnect(svc.Models().ConnectEndpointCandidates(ctx, provider, query, limit)), nil
+	}
+	stack.ConnectTimeoutCandidatesFn = func(_ context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+		return slashCandidatesFromAppConnect(svc.Models().ConnectTimeoutCandidates(query, limit)), nil
+	}
+	stack.ConnectModelCandidatesFn = func(ctx context.Context, cfg ModelConfig, query string, limit int) ([]SlashArgCandidate, error) {
+		candidates, err := svc.Models().ConnectModelCandidates(ctx, modelConfigToApp(cfg), query, limit)
+		return slashCandidatesFromAppConnect(candidates), err
+	}
+	stack.ConnectDefaultsFn = func(ctx context.Context, cfg ModelConfig) (connectModelDefaults, error) {
+		defaults, err := svc.Models().ConnectDefaults(ctx, modelConfigToApp(cfg))
+		return connectModelDefaultsFromApp(defaults), err
+	}
 	stack.UseModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning ...string) error {
 		effort := ""
 		if len(reasoning) > 0 {
@@ -435,6 +459,31 @@ func modelChoicesFromApp(choices []appsettings.ModelChoice) []ModelChoice {
 		})
 	}
 	return out
+}
+
+func slashCandidatesFromAppConnect(candidates []appservices.ConnectCandidate) []SlashArgCandidate {
+	if len(candidates) == 0 {
+		return nil
+	}
+	out := make([]SlashArgCandidate, 0, len(candidates))
+	for _, candidate := range candidates {
+		out = append(out, SlashArgCandidate{
+			Value:   strings.TrimSpace(candidate.Value),
+			Display: strings.TrimSpace(candidate.Display),
+			Detail:  strings.TrimSpace(candidate.Detail),
+			NoAuth:  candidate.NoAuth,
+		})
+	}
+	return out
+}
+
+func connectModelDefaultsFromApp(defaults appservices.ConnectModelDefaults) connectModelDefaults {
+	return connectModelDefaults{
+		ContextWindow:          defaults.ContextWindow,
+		MaxOutput:              defaults.MaxOutput,
+		ReasoningLevels:        append([]string(nil), defaults.ReasoningLevels...),
+		DefaultReasoningEffort: strings.TrimSpace(defaults.DefaultReasoningEffort),
+	}
 }
 
 func modelCapabilityInfoFromApp(caps appservices.ModelCapabilityInfo) ModelCapabilityInfo {

@@ -194,6 +194,12 @@ type DriverStack struct {
 	ModelConfigFn                        func(string) (ModelConfig, bool)
 	SessionUsageSnapshotFn               func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
 	CompactSessionFn                     func(context.Context, session.SessionRef) error
+	PrepareConnectModelConfigFn          func(context.Context, ModelConfig) (ModelConfig, error)
+	ConnectProviderCandidatesFn          func(context.Context, string, int) ([]SlashArgCandidate, error)
+	ConnectBaseURLCandidatesFn           func(context.Context, string, string, int) ([]SlashArgCandidate, error)
+	ConnectTimeoutCandidatesFn           func(context.Context, string, int) ([]SlashArgCandidate, error)
+	ConnectModelCandidatesFn             func(context.Context, ModelConfig, string, int) ([]SlashArgCandidate, error)
+	ConnectDefaultsFn                    func(context.Context, ModelConfig) (connectModelDefaults, error)
 	ConnectFn                            func(ModelConfig) (string, error)
 	UseModelFn                           func(context.Context, session.SessionRef, string, ...string) error
 	DeleteModelFn                        func(context.Context, session.SessionRef, string) error
@@ -312,6 +318,54 @@ func (s *DriverStack) Connect(cfg ModelConfig) (string, error) {
 		return "", fmt.Errorf("surfaces/tui/gatewaydriver: connect dependency is unavailable")
 	}
 	return s.ConnectFn(cfg)
+}
+
+func (s *DriverStack) PrepareConnectModelConfig(ctx context.Context, cfg ModelConfig) (ModelConfig, bool, error) {
+	if s == nil || s.PrepareConnectModelConfigFn == nil {
+		return ModelConfig{}, false, nil
+	}
+	prepared, err := s.PrepareConnectModelConfigFn(ctx, cfg)
+	return prepared, true, err
+}
+
+func (s *DriverStack) ConnectProviderCandidates(ctx context.Context, query string, limit int) ([]SlashArgCandidate, bool, error) {
+	if s == nil || s.ConnectProviderCandidatesFn == nil {
+		return nil, false, nil
+	}
+	candidates, err := s.ConnectProviderCandidatesFn(ctx, query, limit)
+	return candidates, true, err
+}
+
+func (s *DriverStack) ConnectBaseURLCandidates(ctx context.Context, provider string, query string, limit int) ([]SlashArgCandidate, bool, error) {
+	if s == nil || s.ConnectBaseURLCandidatesFn == nil {
+		return nil, false, nil
+	}
+	candidates, err := s.ConnectBaseURLCandidatesFn(ctx, provider, query, limit)
+	return candidates, true, err
+}
+
+func (s *DriverStack) ConnectTimeoutCandidates(ctx context.Context, query string, limit int) ([]SlashArgCandidate, bool, error) {
+	if s == nil || s.ConnectTimeoutCandidatesFn == nil {
+		return nil, false, nil
+	}
+	candidates, err := s.ConnectTimeoutCandidatesFn(ctx, query, limit)
+	return candidates, true, err
+}
+
+func (s *DriverStack) ConnectModelCandidates(ctx context.Context, cfg ModelConfig, query string, limit int) ([]SlashArgCandidate, bool, error) {
+	if s == nil || s.ConnectModelCandidatesFn == nil {
+		return nil, false, nil
+	}
+	candidates, err := s.ConnectModelCandidatesFn(ctx, cfg, query, limit)
+	return candidates, true, err
+}
+
+func (s *DriverStack) ConnectDefaults(ctx context.Context, cfg ModelConfig) (connectModelDefaults, bool, error) {
+	if s == nil || s.ConnectDefaultsFn == nil {
+		return connectModelDefaults{}, false, nil
+	}
+	defaults, err := s.ConnectDefaultsFn(ctx, cfg)
+	return defaults, true, err
 }
 
 func (s *DriverStack) UseModel(ctx context.Context, ref session.SessionRef, alias string, reasoning ...string) error {
