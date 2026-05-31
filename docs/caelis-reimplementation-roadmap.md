@@ -497,7 +497,8 @@ Good reuse candidates:
   `protocol/acp`.
 - Provider behavior already ported into `internal/adapters/model/*`.
 - Sandbox backend implementation details from `impl/sandbox/*`.
-- Built-in tool behavior from `impl/tool/builtin/*`.
+- Built-in tool behavior now owned by the core-native
+  `internal/adapters/tools/*` packages.
 - Canonical message and event ideas from `ports/model` and `ports/session`.
 - Store round-trip tests and replay validation tests.
 - TUI rendering components that are already cohesive, after moving them behind
@@ -664,6 +665,13 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   `sandbox_permissions=require_escalated` contract for host execution.
 - `internal/adapters/tools/task`: core-native wait/write/cancel control for
   yielded sandbox sessions.
+- `internal/adapters/tools/filesystem`: core-native file read/list/glob/search,
+  exact write, and patch tools built on `core/sandbox.FileSystem`.
+- `internal/adapters/tools/plan`: core-native `update_plan` tool that feeds
+  canonical plan events rather than surface-only display state.
+- `internal/adapters/tools/spawn`: core-native delegated participant tool that
+  invokes registered external ACP agents through runtime-provided spawner
+  interfaces.
 - `internal/adapters/acpagent/external`: core-native external ACP client that
   normalizes ACP `session/update` and `session/request_permission` traffic into
   canonical `core/session.Event` values, and can service external agent
@@ -1059,6 +1067,12 @@ The completed work is intentionally limited to the reusable skeleton:
   `internal/adapters/acpagent/external`, the orphaned `impl/agent/local` stack
   and the remaining old `impl/agent/acp/{controller,subagent}` client packages
   were deleted instead of being kept as a parallel agent runtime.
+- Legacy built-in tool stack removal: after `run_command`, `task`,
+  filesystem tools, `update_plan`, and `SPAWN` moved onto
+  `internal/adapters/tools/*` plus `core/tool` and `core/sandbox` contracts, the
+  orphaned old `impl/tool/builtin`, `impl/tool/registry`, and
+  `impl/tool/internal/argparse` packages were deleted instead of being kept as a
+  parallel tool runtime.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1641,6 +1655,10 @@ be migrated before retiring the old stack:
      handles. `task write` restarts the configured ACP agent process, calls
      `session/resume`, continues the same remote child session, and persists the
      resulting child output as canonical participant events.
+   - Migrated baseline: the old `impl/tool` implementation, registry, and
+     argument parsing packages have been removed; built-in tool execution now
+     has a single core-native implementation path through
+     `internal/adapters/tools/*`.
    - Still pending: true in-flight prompt continuation for already-running
      child processes, richer task lifecycle stores beyond local journals, and
      compact/rich tool-panel display metadata still need core-native adapters.
