@@ -1,13 +1,14 @@
 # caelis
 
 `caelis` is a terminal-first agent runtime. The active local path is:
-`cmd/caelis -> internal/cli -> app/gatewayapp -> kernel.Service`.
+`cmd/caelis -> internal/cli -> internal/app/local -> internal/app/services`.
 
 The project treats a session workspace plus ACP-native event semantics as the
-stable product boundary. Public `kernel/` and `ports/*` packages name the core
-contract and extension points; `impl/*` packages hold concrete local
-implementations; surface adapters project the shared state into the Bubble Tea
-TUI, ACP stdio, and the headless one-shot runner.
+stable product boundary. Public `core/*` packages name the durable contracts;
+`internal/engine/*` owns local orchestration; `internal/adapters/*` and selected
+`impl/*` packages hold concrete implementations; surface adapters project the
+shared app-service state into the Bubble Tea TUI, ACP stdio, and the headless
+one-shot runner.
 
 ## What It Does
 
@@ -35,19 +36,20 @@ TUI, ACP stdio, and the headless one-shot runner.
   internal CLI runner.
 - `internal/cli`: flat-flag CLI runner. It routes doctor, ACP stdio, headless,
   and interactive TUI modes through the local app stack.
-- `kernel/`: public product contract for sessions, turns, replay, active runs,
-  and control-plane operations.
-- `ports/`: public extension ports for agent orchestration, approval, assembly,
-  compaction, config, controller, delegation, model, policy, prompt, sandbox,
-  session storage, skill, stream, subagent, task, and tool contracts.
+- `core/`: stable runtime, session, model, tool, sandbox, plugin, and config
+  contracts.
+- `kernel/` and `ports/`: older public contracts still present while the
+  remaining surfaces are migrated to `core/*` and app services.
 - `impl/`: concrete implementations such as local agents, ACP-backed agents,
   session stores, model providers, sandbox backends, policy presets, tools,
   prompt/config/stream adapters, and approval strategies.
-- `internal/kernel`: concrete local kernel implementation for sessions, turns,
-  replay, active runs, and control-plane operations.
-- `app/gatewayapp`: local composition root that wires runtime, kernel resolver,
-  prompt assembly, config store, model catalog, sandbox, tools, approval, and
-  session storage.
+- `internal/engine`: concrete local runtime orchestration for sessions, turns,
+  replay, approvals, context reconstruction, controller routing, and tasks.
+- `internal/app/local`: local composition root that wires runtime config,
+  registries, providers, stores, sandbox runtime, tools, external ACP agents,
+  and app services.
+- `internal/app/services`: shared product facade consumed by TUI, headless CLI,
+  ACP server, and future APP surfaces.
 - `internal/surface/headless`: core-native one-shot CLI surface over shared app
   services.
 - `surfaces/tui`: terminal UI surface facades for the app, gateway driver, and

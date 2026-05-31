@@ -1120,7 +1120,7 @@ func TestSlashAgentAddCustomPassesConfig(t *testing.T) {
 
 func TestSlashAgentInstallFailureEmitsRunCommandToolResult(t *testing.T) {
 	driver := &bridgeTestDriver{
-		addAgentErr: fmt.Errorf("gatewayapp: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
+		addAgentErr: fmt.Errorf("app/services: install ACP agent %q: exit status 7\nnpm ERR install failed", "claude"),
 		slashArgCandidates: map[string][]tuidriver.SlashArgCandidate{
 			"agent install": {{
 				Value:  "claude",

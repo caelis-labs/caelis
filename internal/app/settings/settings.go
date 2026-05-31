@@ -1,5 +1,5 @@
 // Package settings owns product settings for the reimplemented app layer.
-// It is intentionally independent from the old gatewayapp config store.
+// It is intentionally independent from the deleted gateway config store.
 package settings
 
 import (

@@ -20,9 +20,11 @@ terminal UI and a future peer APP surface.
 
 ## Current Findings
 
-The current codebase already points in the right direction with `kernel`,
-`ports`, `impl`, `protocol`, `surfaces`, and `app/gatewayapp`. The problem is
-that those layers have grown into mirrored contracts and broad glue packages.
+The codebase already points in the right direction with `core`, `internal/app`,
+`internal/engine`, `protocol`, `surfaces`, and replaceable adapters. Earlier
+layers such as `kernel`, broad `ports`, and the old `impl` taxonomy still need
+to be reduced where they mirror newer contracts or keep compatibility-shaped
+glue alive.
 
 Key issues:
 
@@ -30,9 +32,10 @@ Key issues:
   the public contract inherit the internal implementation shape.
 - `ports/*` is split by many nouns, producing many global interfaces that are
   hard to keep minimal and local to their actual consumers.
-- `app/gatewayapp` has become a second kernel: config, model registry, sandbox
-  routing, prompt assembly, runtime rebuild, ACP agent management, and app
-  services all live together.
+- The old `app/gatewayapp` composition root had become a second kernel: config,
+  model registry, sandbox routing, prompt assembly, runtime rebuild, ACP agent
+  management, and app services all lived together. That package is now deleted;
+  remaining cleanup should prevent the same shape from reappearing elsewhere.
 - `impl/agent/local` directly knows ACP controller and subagent concrete
   implementations, which weakens the idea that built-in agents and external ACP
   agents meet only at the gateway/runtime boundary.
@@ -503,10 +506,11 @@ Good reuse candidates:
 - TUI rendering components that are already cohesive, after moving them behind
   surface-local boundaries.
 
-Rewrite or heavily reshape:
+Rewrite, heavily reshape, or remove:
 
 - `kernel/` and `internal/kernel` mirrored public/internal split.
-- `app/gatewayapp` as a giant composition root.
+- The old giant `app/gatewayapp` composition root has been removed; do not
+  recreate it as another broad facade.
 - Global `ports/*` package taxonomy.
 - `impl/agent/local` directly coupling to concrete ACP controller/subagent
   implementations.
@@ -565,8 +569,8 @@ reimplementation.
 
 ## Current Implementation Checkpoint
 
-The first baseline of this roadmap is now represented by new packages that sit
-alongside the old stack without importing it:
+The first baseline of this roadmap is now represented by new packages that have
+replaced the old `app/gatewayapp` stack for current entrypoints:
 
 - `core/*`: stable contracts for runtime, session, model, tool, sandbox, plugin,
   and config.
@@ -583,7 +587,7 @@ alongside the old stack without importing it:
   protocol surfaces.
 - `internal/app/settings`: shared product settings document for configured
   models and settings-backed custom external ACP agent descriptors, with
-  normalized upsert/list/delete operations independent of the old gatewayapp
+  normalized upsert/list/delete operations independent of the deleted gatewayapp
   config store.
 - `internal/app/agents`: small app-level catalog for registerable built-in
   external ACP agent descriptors. The catalog is data-only and stays separate
@@ -687,10 +691,10 @@ alongside the old stack without importing it:
   events, rebuilds active controller state from canonical handoff and
   controller-scoped events, and routes subsequent prompts to the active
   external ACP controller with the latest known remote ACP session id.
-- The old `surfaces/tui/gatewaydriver/local` package has been removed. The
-  remaining gatewayapp-to-gatewaydriver adapter needed by real ACP controller
-  e2e coverage now lives inside `eval` test helpers, so production packages no
-  longer expose this old-stack bridge as a reusable surface.
+- The old `surfaces/tui/gatewaydriver/local` package and the later
+  gatewayapp-backed gatewaydriver test adapter have been removed. Production,
+  eval, and broad driver regression coverage now bind through `internal/app/local`
+  and `BindAppServices`.
 - `internal/app/services.ResourceService`: shared TUI/APP-facing catalog
   surface for discovered plugins, prompt fragments, skills, ACP agents,
   renderer hints, and `AGENTS.md` prompt resources.
@@ -850,8 +854,9 @@ The migration is complete only when:
 - Reloaded model input is rebuilt from canonical durable events and validated
   against live runtime context for normal turns, tool turns, approvals,
   compaction, subagents, and ACP participants.
-- The old `kernel`, `ports`, `impl`, `app/gatewayapp`, and old `surfaces/*`
+- The old `kernel`, broad `ports`, old `impl` wiring, and old `surfaces/*`
   runtime paths can be deleted rather than bridged by compatibility layers.
+  The old `app/gatewayapp` runtime stack has already been removed.
 
 ### Completed In This Checkpoint
 
@@ -1003,6 +1008,10 @@ The completed work is intentionally limited to the reusable skeleton:
   handoff, participant mentions, resume metadata, sandbox mutation, and
   provider catalog regressions now exercise the same service-native contracts
   intended for the future APP surface.
+- Legacy gatewayapp package removal: after CLI, ACP, eval, and gatewaydriver
+  regression paths moved to `internal/app/local` plus shared services, the
+  orphaned `app/gatewayapp` package and its private config/model/sandbox
+  registries were deleted instead of kept as a compatibility layer.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1393,10 +1402,8 @@ be migrated before retiring the old stack:
    - Migrated baseline: ACP prompt capability projection now uses
      `ModelService.PromptCapabilities`, so configured multimodal model support
      is reported through the same model catalog used by TUI and APP setup.
-   - Still pending: remaining TUI command integration, additional non-model ACP
-     config providers beyond the first settings-backed set, and removal of the
-     old `app/gatewayapp` config/model services once compatibility entrypoints
-     are gone.
+   - Still pending: remaining TUI command integration and additional non-model
+     ACP config providers beyond the first settings-backed set.
 
 6. Model providers
    - Migrated baseline: OpenAI-compatible Chat Completions, Anthropic,
@@ -1935,8 +1942,10 @@ Recommended sequence:
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff
    to canonical events.
 8. Add full store round-trip and ACP projection parity tests for product flows.
-9. Delete the old runtime stack once the new entrypoints satisfy current CLI,
-    TUI, ACP, and eval behavior.
+9. Continue deleting residual old `kernel`, broad `ports`, `impl`, and
+   surface-compatibility runtime paths once each has a service/core-native
+   replacement. The former `app/gatewayapp` runtime stack has already been
+   deleted.
 
 ## Validation Gates
 

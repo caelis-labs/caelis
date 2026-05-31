@@ -34,7 +34,7 @@
 - `protocol/acp` owns ACP schema, JSON-RPC, client/server, terminal, and projector code.
 - `surfaces/*` adapt UI/CLI/ACP interactions to kernel or app services and must
   not own model, sandbox, tool, or persistence semantics.
-- `app/gatewayapp` is the default composition root for concrete implementations and config.
+- `internal/app/local` is the default composition root for concrete implementations and config.
 - Before `v1.0.0`, prefer clean schema and boundary fixes over compatibility
   fallbacks or legacy replay guesses.
 ## Validation

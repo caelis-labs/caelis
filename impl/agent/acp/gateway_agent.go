@@ -63,7 +63,7 @@ func NewGatewayAgent(cfg GatewayAgentConfig) (*RuntimeAgent, error) {
 		BuildAgentSpec: func(ctx context.Context, session session.Session, req acp.PromptRequest) (agent.AgentSpec, error) {
 			resolver := cfg.Gateway.Resolver()
 			if resolver == nil {
-				return agent.AgentSpec{}, fmt.Errorf("gatewayapp: resolver not available")
+				return agent.AgentSpec{}, fmt.Errorf("acp gateway agent: resolver not available")
 			}
 			resolved, err := resolver.ResolveTurn(ctx, kernel.TurnIntent{
 				SessionRef: session.SessionRef,
