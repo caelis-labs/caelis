@@ -456,7 +456,7 @@ func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 		if log, ok := msg.(LogChunkMsg); ok && (strings.Contains(log.Chunk, "resumed session") || strings.Contains(log.Chunk, "replayed")) {
 			t.Fatalf("slashResume() emitted noisy resume notice: %#v", log)
 		}
-		if legacyKernelEnvelopeMsg(msg) {
+		if oldKernelEnvelopeMsg(msg) {
 			t.Fatalf("slashResume() must batch historical replay, got per-envelope msg: %#v", msg)
 		}
 		if batch, ok := msg.(TranscriptEventsMsg); ok {
@@ -1103,13 +1103,13 @@ func TestSlashCommandsPreferSharedCommandCatalog(t *testing.T) {
 			{Name: "status"},
 			{Name: "reviewer"},
 		}},
-		agentList: []tuidriver.AgentCandidate{{Name: "legacy-agent"}},
+		agentList: []tuidriver.AgentCandidate{{Name: "driver-agent"}},
 	}
 	commands := appendAgentSlashCommandsWithContext(context.Background(), driver, []string{"help", "status"})
 	if !stringSliceContains(commands, "reviewer") {
 		t.Fatalf("commands = %#v, want command from shared catalog", commands)
 	}
-	if stringSliceContains(commands, "legacy-agent") {
+	if stringSliceContains(commands, "driver-agent") {
 		t.Fatalf("commands = %#v, should not fall back to TUI agent list when catalog is available", commands)
 	}
 	if driver.commandCatalogCalls != 1 {
@@ -1968,7 +1968,7 @@ func transcriptEventsContainText(events []TranscriptEvent, text string) bool {
 	return false
 }
 
-func legacyKernelEnvelopeMsg(msg tea.Msg) bool {
+func oldKernelEnvelopeMsg(msg tea.Msg) bool {
 	return strings.Contains(fmt.Sprintf("%T", msg), "kernel.EventEnvelope")
 }
 

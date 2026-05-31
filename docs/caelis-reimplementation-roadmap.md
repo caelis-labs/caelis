@@ -1539,6 +1539,11 @@ be migrated before retiring the old stack:
      actions submit through the shared command path, write actions use the
      existing prompt input widget, and destructive cancel actions use the same
      confirmation prompt pattern as command panels.
+   - Migrated baseline: the remaining migration-pending gatewaydriver sentinel
+     errors and empty-kind TUI frame tick broadcast path have been removed.
+     Missing driver hooks now fail with explicit dependency errors, and the
+     TUI status bar no longer keeps a runtime cleanup branch for old `ctx`
+     context labels.
    - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
      transcript reducer, tool panels, approval UI, theme system, and attachment
      UI/rendering remain TUI-owned presentation code by design.
@@ -2346,8 +2351,8 @@ be migrated before retiring the old stack:
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: surface-specific visual controller panel rendering remains
-      incomplete.
+    - Still pending: future APP controller panel rendering refinements beyond
+      the shared command-panel contract remain incomplete.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2439,8 +2444,8 @@ be migrated before retiring the old stack:
       strings for start, tail, wait, write, cancel, and release. TUI click and
       prompt handling consumes these shared action commands instead of deriving
       task syntax from surface-local kind/task-id rules.
-    - Still pending: surface-specific visual TUI/APP task rendering and optional
-      persistent indexed history stores remain incomplete.
+    - Still pending: future APP task rendering and optional persistent indexed
+      history stores remain incomplete.
 
 12. Compaction and replay validation
     - Migrated baseline: manual TUI compaction through `internal/app/services`

@@ -2644,15 +2644,15 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		t.Fatalf("PutParticipant(side) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, activeSession.Ref, coresession.ParticipantBinding{
-		ID:           "legacy-side-1",
+		ID:           "restored-side-1",
 		Kind:         coresession.ParticipantSubagent,
 		Role:         coresession.ParticipantSidecar,
-		AgentName:    "legacy",
+		AgentName:    "restored",
 		Label:        "@jill",
-		SessionID:    "legacy-child-1",
-		DelegationID: "task-legacy",
+		SessionID:    "restored-child-1",
+		DelegationID: "task-restored",
 	}); err != nil {
-		t.Fatalf("PutParticipant(legacy-side) error = %v", err)
+		t.Fatalf("PutParticipant(restored-side) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, activeSession.Ref, coresession.ParticipantBinding{
 		ID:           "task-1",
@@ -2686,7 +2686,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AgentStatus() error = %v", err)
 	}
-	if len(status.Participants) != 2 || status.Participants[0].ID != "side-1" || status.Participants[1].ID != "legacy-side-1" {
+	if len(status.Participants) != 2 || status.Participants[0].ID != "side-1" || status.Participants[1].ID != "restored-side-1" {
 		t.Fatalf("AgentStatus().Participants = %#v, want visible side participants", status.Participants)
 	}
 	if len(status.DelegatedParticipants) != 2 || status.DelegatedParticipants[0].ID != "task-1" || status.DelegatedParticipants[1].ID != "self-001" {

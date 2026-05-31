@@ -288,21 +288,21 @@ func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID strin
 
 func (s *DriverStack) ResumeSession(ctx context.Context, req ResumeSessionRequest) (coresession.Session, error) {
 	if s == nil || s.ResumeSessionFn == nil {
-		return coresession.Session{}, ErrMigrationPending
+		return coresession.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: resume session dependency is unavailable")
 	}
 	return s.ResumeSessionFn(ctx, req)
 }
 
 func (s *DriverStack) ListSessionCandidates(ctx context.Context, req ListSessionCandidatesRequest) ([]ResumeCandidate, error) {
 	if s == nil || s.ListSessionCandidatesFn == nil {
-		return nil, ErrMigrationPending
+		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: session listing dependency is unavailable")
 	}
 	return s.ListSessionCandidatesFn(ctx, req)
 }
 
 func (s *DriverStack) Interrupt(ctx context.Context, req InterruptRequest) error {
 	if s == nil || s.InterruptFn == nil {
-		return ErrMigrationPending
+		return fmt.Errorf("surfaces/tui/gatewaydriver: interrupt dependency is unavailable")
 	}
 	return s.InterruptFn(ctx, req)
 }
@@ -316,7 +316,7 @@ func (s *DriverStack) ActiveTurns() []ActiveTurnState {
 
 func (s *DriverStack) ControlPlaneState(ctx context.Context, ref coresession.Ref) (ControlPlaneState, error) {
 	if s == nil || s.ControlPlaneStateFn == nil {
-		return ControlPlaneState{}, ErrMigrationPending
+		return ControlPlaneState{}, fmt.Errorf("surfaces/tui/gatewaydriver: control-plane dependency is unavailable")
 	}
 	return cloneControlPlaneStateResult(s.ControlPlaneStateFn(ctx, ref))
 }

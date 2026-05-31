@@ -1,7 +1,6 @@
 package tuiapp
 
-// cliputil.go transplants WSL detection and clipboard utilities from the
-// legacy internal/cli/cliputil package.
+// cliputil.go owns WSL detection and clipboard utilities for the TUI surface.
 
 import (
 	"bytes"

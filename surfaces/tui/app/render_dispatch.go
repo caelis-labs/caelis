@@ -248,35 +248,34 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, policyCmd, true
 
 	case frameTickMsg:
-		legacyBroadcast := typed.kind == ""
 		var cmds []tea.Cmd
-		if legacyBroadcast || typed.kind == frameTickDeferredBatch {
+		if typed.kind == frameTickDeferredBatch {
 			m.deferredBatchTickScheduled = false
 		}
-		if legacyBroadcast || typed.kind == frameTickOffscreen {
+		if typed.kind == frameTickOffscreen {
 			hadOffscreenTick := m.offscreenViewportTickScheduled
 			m.offscreenViewportTickScheduled = false
 			if hadOffscreenTick {
 				cmds = append(cmds, m.flushPendingOffscreenViewportSync(typed.at))
 			}
 		}
-		if legacyBroadcast || typed.kind == frameTickViewportSync {
+		if typed.kind == frameTickViewportSync {
 			hadViewportSyncTick := m.viewportSyncTickScheduled
 			m.viewportSyncTickScheduled = false
 			if hadViewportSyncTick {
 				cmds = append(cmds, m.flushPendingViewportSync())
 			}
 		}
-		if legacyBroadcast || typed.kind == frameTickStreamSmoothing {
+		if typed.kind == frameTickStreamSmoothing {
 			cmds = append(cmds, m.drainPendingStreamSmoothing(typed.at))
 		}
-		if legacyBroadcast || typed.kind == frameTickRenderDrain {
+		if typed.kind == frameTickRenderDrain {
 			cmds = append(cmds, m.drainPendingRenderEvents(typed.at))
 		}
-		if legacyBroadcast || typed.kind == frameTickPanelAnimation {
+		if typed.kind == frameTickPanelAnimation {
 			cmds = append(cmds, m.advancePanelAnimations(typed.at))
 		}
-		if legacyBroadcast || typed.kind == frameTickScrollbarVisible {
+		if typed.kind == frameTickScrollbarVisible {
 			cmds = append(cmds, m.advanceScrollbarVisibility(typed.at))
 		}
 		return m, tea.Batch(append(cmds, policyCmd)...), true

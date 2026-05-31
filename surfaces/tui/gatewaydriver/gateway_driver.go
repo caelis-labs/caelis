@@ -157,7 +157,7 @@ func (d *GatewayDriver) HomeView(ctx context.Context, version string) (appviewmo
 	if err != nil || ok {
 		return view, err
 	}
-	return appviewmodel.HomeView{}, ErrMigrationPending
+	return appviewmodel.HomeView{}, fmt.Errorf("surfaces/tui/gatewaydriver: home view dependency is unavailable")
 }
 
 func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (StatusSnapshot, error) {
@@ -385,7 +385,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 				Submission: coreSub,
 			})
 		} else {
-			err = ErrMigrationPending
+			err = fmt.Errorf("surfaces/tui/gatewaydriver: active-turn submission dependency is unavailable")
 		}
 		if err == nil {
 			return nil, nil
@@ -414,7 +414,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 		d.mu.Unlock()
 		return result.Turn, nil
 	}
-	return nil, ErrMigrationPending
+	return nil, fmt.Errorf("surfaces/tui/gatewaydriver: begin turn dependency is unavailable")
 }
 
 func activeKernelTurnForSession(active []ActiveTurnState, ref coresession.Ref) bool {
@@ -553,7 +553,7 @@ func (d *GatewayDriver) ReplaySessionEvents(ctx context.Context) ([]appviewmodel
 		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
 	}
 	if d == nil || d.stack == nil || d.stack.ReplaySessionEventsFn == nil {
-		return nil, ErrMigrationPending
+		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: session replay dependency is unavailable")
 	}
 	return d.stack.ReplaySessionEventsFn(ctx, activeSession.Ref)
 }
@@ -670,7 +670,7 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 		}
 		return result.Turn, nil
 	}
-	return nil, ErrMigrationPending
+	return nil, fmt.Errorf("surfaces/tui/gatewaydriver: participant prompt dependency is unavailable")
 }
 
 func validateConnectConfig(tpl providerTemplate, cfg ConnectConfig) error {

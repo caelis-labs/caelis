@@ -52,8 +52,8 @@ type TextRenderRequest struct {
 	ThemeKey       string
 	StreamKey      string
 
-	// LineStyle lets legacy callers declare the existing transcript style while
-	// they migrate to semantic TextKind values.
+	// LineStyle lets callers reuse an existing transcript style when they do
+	// not need a semantic TextKind.
 	LineStyle tuikit.LineStyle
 
 	// StablePrefixRaw and TailRaw are optional fast-path inputs for active

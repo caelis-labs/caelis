@@ -969,7 +969,7 @@ func (m *Model) footerHelpText() string {
 }
 
 func (m *Model) footerContextText() string {
-	text := formatStatusContextDisplay(strings.TrimSpace(m.statusView.FooterContextText(m.statusContext)))
+	text := strings.TrimSpace(m.statusView.FooterContextText(m.statusContext))
 	if text == "0" {
 		return ""
 	}
@@ -1201,14 +1201,6 @@ func formatFooterBindingKeys(bindings []key.Binding) string {
 		parts = append(parts, keyLabel)
 	}
 	return strings.Join(parts, "  ")
-}
-
-func formatStatusContextDisplay(text string) string {
-	text = strings.TrimSpace(text)
-	if strings.HasPrefix(strings.ToLower(text), "ctx ") {
-		return strings.TrimSpace(text[4:])
-	}
-	return text
 }
 
 func (m *Model) adjustTextareaHeight() {

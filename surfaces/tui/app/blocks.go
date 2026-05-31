@@ -712,7 +712,7 @@ func (b *ParticipantTurnBlock) Render(ctx BlockRenderContext) []RenderedRow {
 type DividerBlock struct {
 	id    string
 	Label string
-	Text  string // legacy pre-rendered divider text
+	Text  string // optional pre-rendered divider text
 }
 
 func NewDividerBlock(label string) *DividerBlock {

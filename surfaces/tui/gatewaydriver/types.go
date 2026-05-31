@@ -7,8 +7,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
-var ErrMigrationPending = errors.New("surfaces/tui/gatewaydriver: driver wiring pending")
-
 var errNoActiveRun = errors.New("surfaces/tui/gatewaydriver: no active core turn for session")
 
 type SubmissionMode = tuidriver.SubmissionMode
