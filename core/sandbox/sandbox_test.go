@@ -42,6 +42,7 @@ func TestNormalizeConfigCanonicalizesBackendAndPaths(t *testing.T) {
 		CWD:              ".",
 		RequestedBackend: Backend("windows elevated"),
 		StateDir:         ".state",
+		Network:          Network(" off "),
 		ReadableRoots:    []string{" /tmp/read ", "/tmp/read", ""},
 		WritableRoots:    []string{" /tmp/write "},
 		BackendCandidates: []Backend{
@@ -60,6 +61,9 @@ func TestNormalizeConfigCanonicalizesBackendAndPaths(t *testing.T) {
 	}
 	if got := cfg.ReadableRoots; len(got) != 1 || got[0] != "/tmp/read" {
 		t.Fatalf("ReadableRoots = %#v, want deduped trimmed root", got)
+	}
+	if cfg.Network != NetworkDisabled {
+		t.Fatalf("Network = %q, want disabled", cfg.Network)
 	}
 	if got := cfg.BackendCandidates; len(got) != 2 || got[0] != BackendSeatbelt || got[1] != BackendBwrap {
 		t.Fatalf("BackendCandidates = %#v, want non-host deduped candidates", got)

@@ -114,6 +114,7 @@ type Config struct {
 	FallbackInstallHint string    `json:"fallback_install_hint,omitempty"`
 	HelperPath          string    `json:"helper_path,omitempty"`
 	StateDir            string    `json:"state_dir,omitempty"`
+	Network             Network   `json:"network,omitempty"`
 	ReadableRoots       []string  `json:"readable_roots,omitempty"`
 	WritableRoots       []string  `json:"writable_roots,omitempty"`
 	ReadOnlySubpaths    []string  `json:"read_only_subpaths,omitempty"`
@@ -373,6 +374,7 @@ func NormalizeConfig(cfg Config) Config {
 	cfg.FallbackInstallHint = strings.TrimSpace(cfg.FallbackInstallHint)
 	cfg.HelperPath = strings.TrimSpace(cfg.HelperPath)
 	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
+	cfg.Network = NormalizeNetwork(cfg.Network)
 	if cfg.StateDir != "" {
 		if abs, err := filepath.Abs(cfg.StateDir); err == nil {
 			cfg.StateDir = abs
@@ -382,6 +384,19 @@ func NormalizeConfig(cfg Config) Config {
 	cfg.WritableRoots = normalizeStringSlice(cfg.WritableRoots)
 	cfg.ReadOnlySubpaths = normalizeStringSlice(cfg.ReadOnlySubpaths)
 	return cfg
+}
+
+func NormalizeNetwork(network Network) Network {
+	switch strings.ToLower(strings.TrimSpace(string(network))) {
+	case "", "default", string(NetworkInherit):
+		return NetworkInherit
+	case "enable", "enabled", "on", "true", "yes":
+		return NetworkEnabled
+	case "disable", "disabled", "off", "false", "no":
+		return NetworkDisabled
+	default:
+		return Network(strings.TrimSpace(string(network)))
+	}
 }
 
 func CloneRequest(in CommandRequest) CommandRequest {

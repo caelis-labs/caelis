@@ -1828,10 +1828,15 @@ be migrated before retiring the old stack:
      retired `ports/sandbox` package have been deleted, the default registry
      registers backend factories directly, and architecture lint rejects any
      production import of the removed sandbox port.
-   - Still pending: network policy, writable/readable root policy beyond skill
-     roots, rich route diagnostics, production doctor repair reporting, and
-     cross-platform validation of the Windows restricted-token async session
-     API after the core-native session contract migration.
+   - Migrated baseline: settings-backed sandbox network policy now flows
+     through `core/sandbox.Config` into the shared backend policy. Local stack
+     rebuilds and backend runtime policy therefore receive enabled, disabled,
+     or inherit explicitly instead of keeping network as surface-only settings.
+   - Still pending: writable/readable root policy beyond skill roots, richer
+     per-command network diagnostics, rich route diagnostics, production doctor
+     repair reporting, and cross-platform validation of the Windows
+     restricted-token async session API after the core-native session contract
+     migration.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,

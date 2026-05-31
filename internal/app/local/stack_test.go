@@ -1874,6 +1874,7 @@ func TestStackAddsSkillRootsToSandboxConfig(t *testing.T) {
 			WorkspaceCWD: workspace,
 			Sandbox: config.Sandbox{
 				Backend:       "capture",
+				Network:       "disabled",
 				WritableRoots: []string{"/configured-write"},
 			},
 		},
@@ -1895,6 +1896,9 @@ func TestStackAddsSkillRootsToSandboxConfig(t *testing.T) {
 	}
 	if factory.cfg.RequestedBackend != sandbox.Backend("capture") {
 		t.Fatalf("sandbox requested backend = %q, want capture", factory.cfg.RequestedBackend)
+	}
+	if factory.cfg.Network != sandbox.NetworkDisabled {
+		t.Fatalf("sandbox network = %q, want disabled", factory.cfg.Network)
 	}
 	for _, root := range []string{
 		"/configured-write",
@@ -1955,11 +1959,11 @@ func TestStackRebuildsLiveSandboxRuntimeFromSettings(t *testing.T) {
 	if status.ResolvedBackend != "host" {
 		t.Fatalf("initial sandbox status = %#v, want host", status)
 	}
-	if _, err := stack.Services().Settings().SetSandbox(ctx, config.Sandbox{Backend: "capture"}); err != nil {
+	if _, err := stack.Services().Settings().SetSandbox(ctx, config.Sandbox{Backend: "capture", Network: "disabled"}); err != nil {
 		t.Fatalf("SetSandbox(capture) error = %v", err)
 	}
-	if factory.calls != 1 || factory.cfg.RequestedBackend != sandbox.Backend("capture") {
-		t.Fatalf("factory calls/cfg = %d/%#v, want capture rebuild", factory.calls, factory.cfg)
+	if factory.calls != 1 || factory.cfg.RequestedBackend != sandbox.Backend("capture") || factory.cfg.Network != sandbox.NetworkDisabled {
+		t.Fatalf("factory calls/cfg = %d/%#v, want capture rebuild with disabled network", factory.calls, factory.cfg)
 	}
 	status, err = stack.Services().Sandbox().Status(ctx)
 	if err != nil {
@@ -2514,6 +2518,7 @@ func (f *capturingSandboxFactory) NewRuntime(ctx context.Context, cfg sandbox.Co
 		FallbackInstallHint: cfg.FallbackInstallHint,
 		HelperPath:          cfg.HelperPath,
 		StateDir:            cfg.StateDir,
+		Network:             cfg.Network,
 		ReadableRoots:       append([]string(nil), cfg.ReadableRoots...),
 		WritableRoots:       append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths:    append([]string(nil), cfg.ReadOnlySubpaths...),
@@ -2531,6 +2536,7 @@ func (f *switchingSandboxFactory) NewRuntime(_ context.Context, cfg sandbox.Conf
 	f.cfg = sandbox.Config{
 		CWD:              cfg.CWD,
 		RequestedBackend: cfg.RequestedBackend,
+		Network:          cfg.Network,
 		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 	}

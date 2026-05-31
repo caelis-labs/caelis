@@ -775,6 +775,7 @@ func sandboxFromConfig(ctx context.Context, reg *appregistry.Registry, runtimeCf
 		CWD:              runtimeCfg.WorkspaceCWD,
 		RequestedBackend: sandbox.Backend(backend),
 		StateDir:         sandboxStateDir(runtimeCfg.Store),
+		Network:          sandbox.Network(runtimeCfg.Sandbox.Network),
 		ReadableRoots:    slices.Clone(runtimeCfg.Sandbox.ReadableRoots),
 		WritableRoots:    effectiveSandboxWritableRoots(runtimeCfg),
 		HelperPath:       runtimeCfg.Sandbox.HelperPath,

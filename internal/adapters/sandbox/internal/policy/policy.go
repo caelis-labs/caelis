@@ -28,9 +28,12 @@ type Policy struct {
 }
 
 func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
+	cfg = sandbox.NormalizeConfig(cfg)
+	constraints = sandbox.NormalizeConstraints(constraints)
+	network := effectiveNetworkPolicy(cfg.Network, constraints.Network)
 	p := Policy{
 		Type:             TypeWorkspaceWrite,
-		NetworkAccess:    constraints.Network != sandbox.NetworkDisabled,
+		NetworkAccess:    network != sandbox.NetworkDisabled,
 		ReadableRoots:    append([]string(nil), cfg.ReadableRoots...),
 		WritableRoots:    append([]string(nil), cfg.WritableRoots...),
 		ReadOnlySubpaths: append([]string(nil), cfg.ReadOnlySubpaths...),
@@ -50,9 +53,6 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 		if len(p.ReadOnlySubpaths) == 0 {
 			p.ReadOnlySubpaths = []string{".git"}
 		}
-		if constraints.Network == "" {
-			p.NetworkAccess = true
-		}
 		applyPathRules(&p, constraints.PathRules)
 		p.ReadOnlySubpaths = removeOverriddenReadOnlySubpaths(p.ReadOnlySubpaths, constraints.PathRules, cfg.CWD)
 	}
@@ -61,6 +61,17 @@ func Default(cfg sandbox.Config, constraints sandbox.Constraints) Policy {
 	p.HiddenRoots = normalizeStringList(p.HiddenRoots)
 	p.ReadOnlySubpaths = normalizeStringList(p.ReadOnlySubpaths)
 	return p
+}
+
+func effectiveNetworkPolicy(configured sandbox.Network, requested sandbox.Network) sandbox.Network {
+	if requested = sandbox.NormalizeNetwork(requested); requested != sandbox.NetworkInherit {
+		return requested
+	}
+	configured = sandbox.NormalizeNetwork(configured)
+	if configured == "" {
+		return sandbox.NetworkInherit
+	}
+	return configured
 }
 
 func removeOverriddenReadOnlySubpaths(subpaths []string, rules []sandbox.PathRule, cwd string) []string {

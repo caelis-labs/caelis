@@ -95,6 +95,28 @@ func TestDefaultMergesHiddenPathRules(t *testing.T) {
 	}
 }
 
+func TestDefaultUsesConfiguredNetworkPolicy(t *testing.T) {
+	t.Parallel()
+
+	p := Default(sandbox.Config{
+		CWD:     "/sandbox-cwd",
+		Network: sandbox.NetworkDisabled,
+	}, sandbox.Constraints{})
+	if p.NetworkAccess {
+		t.Fatalf("NetworkAccess = true, want configured disabled network to apply")
+	}
+
+	p = Default(sandbox.Config{
+		CWD:     "/sandbox-cwd",
+		Network: sandbox.NetworkDisabled,
+	}, sandbox.Constraints{
+		Network: sandbox.NetworkEnabled,
+	})
+	if !p.NetworkAccess {
+		t.Fatalf("NetworkAccess = false, want explicit request to override configured disabled network")
+	}
+}
+
 func TestDefaultFullAccessIgnoresConstraintPathRules(t *testing.T) {
 	t.Parallel()
 
