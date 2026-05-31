@@ -87,6 +87,47 @@ func TestModelUseSelectionOpensReasoningPicker(t *testing.T) {
 	}
 }
 
+func TestSettingsSelectionOpensFieldAndValuePickers(t *testing.T) {
+	model := NewModel(Config{
+		Commands: DefaultCommands(),
+		SlashArgComplete: func(command string, query string, limit int) ([]SlashArgCandidate, error) {
+			switch command {
+			case "settings":
+				return []SlashArgCandidate{{Value: "set", Display: "set"}, {Value: "run", Display: "run"}}, nil
+			case "settings set":
+				return []SlashArgCandidate{{Value: "sandbox.backend", Display: "sandbox.backend"}}, nil
+			case "settings set sandbox.backend":
+				return []SlashArgCandidate{{Value: "host", Display: "Host"}, {Value: "seatbelt", Display: "Seatbelt"}}, nil
+			default:
+				return nil, nil
+			}
+		},
+	})
+
+	model.openSlashArgPicker("settings")
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/settings set " {
+		t.Fatalf("input after settings action = %q, want /settings set ", got)
+	}
+	if got := model.slashArgCommand; got != "settings set" {
+		t.Fatalf("slashArgCommand = %q, want settings set", got)
+	}
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/settings set sandbox.backend " {
+		t.Fatalf("input after settings field = %q, want field plus trailing space", got)
+	}
+	if got := model.slashArgCommand; got != "settings set sandbox.backend" {
+		t.Fatalf("slashArgCommand = %q, want settings set sandbox.backend", got)
+	}
+	model.applySlashArgCompletion()
+	if got := string(model.input); got != "/settings set sandbox.backend host" {
+		t.Fatalf("input after settings value = %q, want selected value", got)
+	}
+	if model.slashArgActive {
+		t.Fatal("slashArgActive = true, want picker closed after settings value")
+	}
+}
+
 func TestModelUseExactAliasInputOpensReasoningPicker(t *testing.T) {
 	model := NewModel(Config{
 		Commands: DefaultCommands(),

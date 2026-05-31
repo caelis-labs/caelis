@@ -2177,6 +2177,110 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	}
 }
 
+func TestGatewayDriverCompleteSlashArgSettingsUsesSharedPanel(t *testing.T) {
+	ctx := context.Background()
+	panel := appviewmodel.SettingsPanelView{
+		Configured: true,
+		Sections: []appviewmodel.SettingsPanelSection{{
+			ID:    "runtime",
+			Title: "Runtime",
+			Fields: []appviewmodel.SettingsPanelField{{
+				ID:       "runtime.app_name",
+				Label:    "App",
+				Kind:     "text",
+				Value:    "caelis",
+				Editable: false,
+			}},
+		}, {
+			ID:    "sandbox",
+			Title: "Sandbox",
+			Fields: []appviewmodel.SettingsPanelField{{
+				ID:          "sandbox.backend",
+				ConfigID:    "sandbox_backend",
+				Label:       "Requested backend",
+				Kind:        "select",
+				Value:       "host",
+				Editable:    true,
+				Description: "Choose the requested sandbox backend",
+				Options: []appviewmodel.SettingsPanelFieldOption{
+					{Value: "host", Label: "Host"},
+					{Value: "seatbelt", Label: "Seatbelt"},
+				},
+			}},
+			Actions: []appviewmodel.SettingsPanelAction{{
+				ID:          "sandbox.prepare",
+				Label:       "Prepare",
+				Description: "Prepare sandbox",
+				Enabled:     true,
+			}, {
+				ID:                   "sandbox.reset",
+				Label:                "Reset",
+				Description:          "Reset sandbox",
+				Enabled:              true,
+				Destructive:          true,
+				RequiresConfirmation: true,
+			}},
+		}},
+		Actions: []appviewmodel.SettingsPanelAction{{
+			ID:          "sandbox.prepare",
+			Label:       "Prepare",
+			Description: "Prepare sandbox",
+			Enabled:     true,
+		}, {
+			ID:                   "sandbox.reset",
+			Label:                "Reset",
+			Description:          "Reset sandbox",
+			Enabled:              true,
+			Destructive:          true,
+			RequiresConfirmation: true,
+		}},
+	}
+	driver, err := NewGatewayDriver(ctx, &DriverStack{
+		SettingsPanelFn: func(context.Context, coresession.Ref) (appviewmodel.SettingsPanelView, error) {
+			return panel, nil
+		},
+	}, "", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	root, err := driver.CompleteSlashArg(ctx, "settings", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings) error = %v", err)
+	}
+	if got := candidateValues(root); !equalStrings(got, []string{"set", "run"}) {
+		t.Fatalf("settings root candidates = %#v, want set/run", root)
+	}
+	fields, err := driver.CompleteSlashArg(ctx, "settings set", "sand", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings set) error = %v", err)
+	}
+	if !slashCandidatesHaveValue(fields, "sandbox.backend") || slashCandidatesHaveValue(fields, "runtime.app_name") {
+		t.Fatalf("settings field candidates = %#v, want editable sandbox field only", fields)
+	}
+	values, err := driver.CompleteSlashArg(ctx, "settings set sandbox.backend", "sea", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings set sandbox.backend) error = %v", err)
+	}
+	if got := candidateValues(values); !equalStrings(got, []string{"seatbelt"}) {
+		t.Fatalf("settings value candidates = %#v, want seatbelt", values)
+	}
+	actions, err := driver.CompleteSlashArg(ctx, "settings run", "reset", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings run) error = %v", err)
+	}
+	if got := candidateValues(actions); !equalStrings(got, []string{"sandbox.reset"}) {
+		t.Fatalf("settings action candidates = %#v, want sandbox.reset", actions)
+	}
+	confirm, err := driver.CompleteSlashArg(ctx, "settings run sandbox.reset", "", 10)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings run sandbox.reset) error = %v", err)
+	}
+	if got := candidateValues(confirm); !equalStrings(got, []string{"confirm"}) {
+		t.Fatalf("settings confirm candidates = %#v, want confirm", confirm)
+	}
+}
+
 func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 	ctx := context.Background()
 	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{

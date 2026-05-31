@@ -486,6 +486,61 @@ func slashArgQueryAtCursor(input []rune, cursor int) (string, string, bool) {
 			return "agent add --install", strings.TrimSpace(fields[3]), true
 		}
 		return "", "", false
+	case "settings":
+		if len(fields) == 1 {
+			if !hasTrailingDelimiter {
+				return "", "", false
+			}
+			return command, "", true
+		}
+		action := strings.ToLower(strings.TrimSpace(fields[1]))
+		if len(fields) == 2 {
+			if hasTrailingDelimiter {
+				switch action {
+				case "set", "field", "run", "action":
+					return "settings " + action, "", true
+				default:
+					return "", "", false
+				}
+			}
+			if action == "" {
+				return "", "", false
+			}
+			switch action {
+			case "set", "field", "run", "action":
+			default:
+				return "settings", action, true
+			}
+			return "settings", action, true
+		}
+		switch action {
+		case "set", "field":
+			fieldID := strings.TrimSpace(fields[2])
+			if fieldID == "" {
+				return "", "", false
+			}
+			if len(fields) == 3 {
+				if hasTrailingDelimiter {
+					return "settings " + action + " " + fieldID, "", true
+				}
+				return "settings " + action, fieldID, true
+			}
+			return "settings " + action + " " + fieldID, strings.TrimSpace(strings.Join(fields[3:], " ")), true
+		case "run", "action":
+			actionID := strings.TrimSpace(fields[2])
+			if actionID == "" {
+				return "", "", false
+			}
+			if len(fields) == 3 {
+				if hasTrailingDelimiter {
+					return "settings " + action + " " + actionID, "", true
+				}
+				return "settings " + action, actionID, true
+			}
+			return "settings " + action + " " + actionID, strings.TrimSpace(strings.Join(fields[3:], " ")), true
+		default:
+			return "", "", false
+		}
 	case "sandbox":
 		if len(fields) == 1 {
 			if !hasTrailingDelimiter {

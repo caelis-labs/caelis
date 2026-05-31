@@ -122,6 +122,7 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		limit = 8
 	}
 	query = strings.TrimSpace(strings.ToLower(query))
+	normalizedCommand := strings.TrimSpace(strings.ToLower(command))
 	if acpStatus, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
 		return nil, err
 	} else if activeACP {
@@ -129,7 +130,7 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 			return candidates, nil
 		}
 	}
-	switch strings.TrimSpace(strings.ToLower(command)) {
+	switch normalizedCommand {
 	case "agent add":
 		return d.completeBuiltInAgentCatalog(query, limit), nil
 	case "agent install", "agent update":
@@ -142,15 +143,31 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		return d.completeRemovableAgentCatalog(query, limit), nil
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
+	case "settings set", "settings field":
+		return d.completeSettingsFields(ctx, query, limit)
+	case "settings run", "settings action":
+		return d.completeSettingsActions(ctx, query, limit)
 	case "task tail", "task wait", "task write", "task cancel", "task release":
 		return d.completeTaskIDs(ctx, query, limit)
 	case "connect":
 		return completeConnectArgs(ctx, d, "connect", query, limit)
 	}
-	if strings.HasPrefix(strings.TrimSpace(strings.ToLower(command)), "connect-") {
-		return completeConnectArgs(ctx, d, strings.TrimSpace(strings.ToLower(command)), query, limit)
+	if fieldID, ok := strings.CutPrefix(normalizedCommand, "settings set "); ok {
+		return d.completeSettingsFieldValues(ctx, fieldID, query, limit)
 	}
-	if alias, ok := strings.CutPrefix(strings.TrimSpace(strings.ToLower(command)), "model use "); ok {
+	if fieldID, ok := strings.CutPrefix(normalizedCommand, "settings field "); ok {
+		return d.completeSettingsFieldValues(ctx, fieldID, query, limit)
+	}
+	if actionID, ok := strings.CutPrefix(normalizedCommand, "settings run "); ok {
+		return d.completeSettingsActionConfirm(ctx, actionID, query, limit)
+	}
+	if actionID, ok := strings.CutPrefix(normalizedCommand, "settings action "); ok {
+		return d.completeSettingsActionConfirm(ctx, actionID, query, limit)
+	}
+	if strings.HasPrefix(normalizedCommand, "connect-") {
+		return completeConnectArgs(ctx, d, normalizedCommand, query, limit)
+	}
+	if alias, ok := strings.CutPrefix(normalizedCommand, "model use "); ok {
 		return d.completeModelReasoningLevels(ctx, alias, query, limit)
 	}
 	candidates := tuicommands.RootArgCandidates(command)
@@ -165,6 +182,216 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 		}
 	}
 	return out, nil
+}
+
+func (d *GatewayDriver) settingsPanelForCompletion(ctx context.Context) (appviewmodel.SettingsPanelView, bool, error) {
+	var ref coresession.Ref
+	if active, ok := d.currentSession(); ok {
+		ref = active.Ref
+	}
+	panel, ok, err := d.stack.SettingsPanel(ctx, ref)
+	if err != nil || !ok {
+		return appviewmodel.SettingsPanelView{}, ok, err
+	}
+	return panel, true, nil
+}
+
+func (d *GatewayDriver) completeSettingsFields(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+	panel, ok, err := d.settingsPanelForCompletion(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	fields := settingsCompletionFields(panel)
+	out := make([]SlashArgCandidate, 0, min(limit, len(fields)))
+	for _, field := range fields {
+		if query != "" && !hasSlashArgPrefix(query, field.ID, field.Label, field.ConfigID, field.Description) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   strings.TrimSpace(field.ID),
+			Display: strings.TrimSpace(field.ID),
+			Detail:  settingsFieldCompletionDetail(field),
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (d *GatewayDriver) completeSettingsFieldValues(ctx context.Context, fieldID string, query string, limit int) ([]SlashArgCandidate, error) {
+	panel, ok, err := d.settingsPanelForCompletion(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	field, ok := findSettingsCompletionField(panel, fieldID)
+	if !ok || !field.Editable || len(field.Options) == 0 {
+		return nil, nil
+	}
+	out := make([]SlashArgCandidate, 0, min(limit, len(field.Options)))
+	for _, option := range field.Options {
+		value := strings.TrimSpace(option.Value)
+		if value == "" {
+			value = "default"
+		}
+		display := firstNonEmpty(strings.TrimSpace(option.Label), value)
+		detail := strings.TrimSpace(option.Description)
+		if query != "" && !hasSlashArgPrefix(query, value, display, detail) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   value,
+			Display: display,
+			Detail:  detail,
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (d *GatewayDriver) completeSettingsActions(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
+	panel, ok, err := d.settingsPanelForCompletion(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	actions := settingsCompletionActions(panel)
+	out := make([]SlashArgCandidate, 0, min(limit, len(actions)))
+	for _, action := range actions {
+		if query != "" && !hasSlashArgPrefix(query, action.ID, action.Label, action.Description) {
+			continue
+		}
+		out = append(out, SlashArgCandidate{
+			Value:   strings.TrimSpace(action.ID),
+			Display: firstNonEmpty(strings.TrimSpace(action.Label), strings.TrimSpace(action.ID)),
+			Detail:  settingsActionCompletionDetail(action),
+		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
+func (d *GatewayDriver) completeSettingsActionConfirm(ctx context.Context, actionID string, query string, limit int) ([]SlashArgCandidate, error) {
+	panel, ok, err := d.settingsPanelForCompletion(ctx)
+	if err != nil || !ok {
+		return nil, err
+	}
+	action, ok := findSettingsCompletionAction(panel, actionID)
+	if !ok || (!action.Destructive && !action.RequiresConfirmation) {
+		return nil, nil
+	}
+	candidate := SlashArgCandidate{
+		Value:   "confirm",
+		Display: "confirm",
+		Detail:  "required for guarded settings actions",
+	}
+	if query != "" && !hasSlashArgPrefix(query, candidate.Value, candidate.Display, candidate.Detail) {
+		return nil, nil
+	}
+	return []SlashArgCandidate{candidate}, nil
+}
+
+func settingsCompletionFields(panel appviewmodel.SettingsPanelView) []appviewmodel.SettingsPanelField {
+	out := []appviewmodel.SettingsPanelField{}
+	seen := map[string]struct{}{}
+	for _, section := range panel.Sections {
+		for _, field := range section.Fields {
+			id := strings.TrimSpace(field.ID)
+			if id == "" || !field.Editable {
+				continue
+			}
+			key := strings.ToLower(id)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			out = append(out, field)
+		}
+	}
+	return out
+}
+
+func findSettingsCompletionField(panel appviewmodel.SettingsPanelView, fieldID string) (appviewmodel.SettingsPanelField, bool) {
+	fieldID = strings.TrimSpace(strings.ToLower(fieldID))
+	if fieldID == "" {
+		return appviewmodel.SettingsPanelField{}, false
+	}
+	for _, field := range settingsCompletionFields(panel) {
+		if strings.EqualFold(strings.TrimSpace(field.ID), fieldID) || strings.EqualFold(strings.TrimSpace(field.ConfigID), fieldID) {
+			return field, true
+		}
+	}
+	return appviewmodel.SettingsPanelField{}, false
+}
+
+func settingsFieldCompletionDetail(field appviewmodel.SettingsPanelField) string {
+	parts := []string{}
+	if label := strings.TrimSpace(field.Label); label != "" && !strings.EqualFold(label, strings.TrimSpace(field.ID)) {
+		parts = append(parts, label)
+	}
+	if kind := strings.TrimSpace(field.Kind); kind != "" {
+		parts = append(parts, kind)
+	}
+	if field.ConfigID != "" {
+		parts = append(parts, "config="+strings.TrimSpace(field.ConfigID))
+	}
+	if len(field.Options) > 0 {
+		parts = append(parts, "select")
+	}
+	return strings.Join(parts, " · ")
+}
+
+func settingsCompletionActions(panel appviewmodel.SettingsPanelView) []appviewmodel.SettingsPanelAction {
+	out := []appviewmodel.SettingsPanelAction{}
+	seen := map[string]struct{}{}
+	add := func(action appviewmodel.SettingsPanelAction) {
+		id := strings.TrimSpace(action.ID)
+		if id == "" || !action.Enabled {
+			return
+		}
+		key := strings.ToLower(id)
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		out = append(out, action)
+	}
+	for _, action := range panel.Actions {
+		add(action)
+	}
+	for _, section := range panel.Sections {
+		for _, action := range section.Actions {
+			add(action)
+		}
+	}
+	return out
+}
+
+func findSettingsCompletionAction(panel appviewmodel.SettingsPanelView, actionID string) (appviewmodel.SettingsPanelAction, bool) {
+	actionID = strings.TrimSpace(strings.ToLower(actionID))
+	if actionID == "" {
+		return appviewmodel.SettingsPanelAction{}, false
+	}
+	for _, action := range settingsCompletionActions(panel) {
+		if strings.EqualFold(strings.TrimSpace(action.ID), actionID) {
+			return action, true
+		}
+	}
+	return appviewmodel.SettingsPanelAction{}, false
+}
+
+func settingsActionCompletionDetail(action appviewmodel.SettingsPanelAction) string {
+	parts := []string{}
+	if description := strings.TrimSpace(action.Description); description != "" {
+		parts = append(parts, description)
+	}
+	if action.Destructive || action.RequiresConfirmation {
+		parts = append(parts, "requires confirm")
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (d *GatewayDriver) completeTaskIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {

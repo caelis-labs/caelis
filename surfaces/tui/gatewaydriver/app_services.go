@@ -81,6 +81,9 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.AppStatusViewFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
 		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: ref})
 	}
+	stack.SettingsPanelFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.SettingsPanelView, error) {
+		return svc.Settings().Panel(ctx, appservices.SettingsPanelRequest{SessionRef: ref})
+	}
 	stack.ReplaySessionEventsFn = func(ctx context.Context, ref coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error) {
 		events, err := svc.Events().Replay(ctx, appservices.EventReplayRequest{
 			SessionRef: ref,

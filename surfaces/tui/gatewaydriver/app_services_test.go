@@ -477,6 +477,50 @@ func TestBindAppServicesCommandCatalogUsesSharedCommandService(t *testing.T) {
 	}
 }
 
+func TestBindAppServicesSettingsSlashCompletionUsesSharedPanel(t *testing.T) {
+	ctx := context.Background()
+	manager, err := appsettings.NewManager(ctx, nil, appsettings.Document{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "user-1",
+			Sandbox: config.Sandbox{
+				Backend: "host",
+				Network: "inherit",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := appservices.New(appservices.Config{
+		Runtime:  config.Runtime{AppName: "caelis", UserID: "user-1"},
+		Engine:   &appServiceDriverEngine{},
+		Settings: manager,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	driver, err := NewGatewayDriver(ctx, BindAppServices(&DriverStack{}, svc), "", "surface", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fields, err := driver.CompleteSlashArg(ctx, "settings set", "sandbox.", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings set) error = %v", err)
+	}
+	if !slashCandidatesHaveValue(fields, "sandbox.backend") || !slashCandidatesHaveValue(fields, "sandbox.network") {
+		t.Fatalf("settings field candidates = %#v, want sandbox fields from shared panel", fields)
+	}
+	values, err := driver.CompleteSlashArg(ctx, "settings set sandbox.backend", "seat", 20)
+	if err != nil {
+		t.Fatalf("CompleteSlashArg(settings set sandbox.backend) error = %v", err)
+	}
+	if got := candidateValues(values); !equalStrings(got, []string{"seatbelt"}) {
+		t.Fatalf("settings backend candidates = %#v, want seatbelt", values)
+	}
+}
+
 func TestBindAppServicesAgentCatalogAndParticipantPrompt(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{}

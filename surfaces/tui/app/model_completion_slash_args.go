@@ -258,6 +258,26 @@ func (m *Model) applySlashArgCompletion() {
 		m.setInputText("/model use " + choice + " ")
 		m.clearSlashArg()
 		return
+	case "settings":
+		m.setInputText("/settings " + choice + " ")
+		m.syncTextareaFromInput()
+		switch choice {
+		case "set", "field", "run", "action":
+			m.activateSlashArgPickerFromInput("settings " + choice)
+		default:
+			m.clearSlashArg()
+		}
+		return
+	case "settings set", "settings field":
+		m.setInputText("/" + command + " " + choice + " ")
+		m.syncTextareaFromInput()
+		m.activateSlashArgPickerFromInput(command + " " + choice)
+		return
+	case "settings run", "settings action":
+		m.setInputText("/" + command + " " + choice + " ")
+		m.syncTextareaFromInput()
+		m.activateSlashArgPickerFromInput(command + " " + choice)
+		return
 	}
 	if strings.HasPrefix(command, "model use ") {
 		m.setInputText("/" + command + " " + choice)
@@ -265,6 +285,14 @@ func (m *Model) applySlashArgCompletion() {
 		return
 	}
 	if strings.HasPrefix(command, "model del ") {
+		m.setInputText("/" + command + " " + choice)
+		m.clearSlashArg()
+		return
+	}
+	if strings.HasPrefix(command, "settings set ") ||
+		strings.HasPrefix(command, "settings field ") ||
+		strings.HasPrefix(command, "settings run ") ||
+		strings.HasPrefix(command, "settings action ") {
 		m.setInputText("/" + command + " " + choice)
 		m.clearSlashArg()
 		return
@@ -297,8 +325,18 @@ func (m *Model) shouldExecuteSlashArgSelection(command string, choice string) bo
 		return false
 	case "model del":
 		return true
+	case "settings":
+		return false
+	case "settings set", "settings field", "settings run", "settings action":
+		return false
 	}
 	if strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		return true
+	}
+	if strings.HasPrefix(command, "settings set ") ||
+		strings.HasPrefix(command, "settings field ") ||
+		strings.HasPrefix(command, "settings run ") ||
+		strings.HasPrefix(command, "settings action ") {
 		return true
 	}
 	return true
@@ -331,6 +369,16 @@ func isExecutableSlashArgInput(line string) bool {
 		case "use":
 			return len(fields) >= 3
 		case "del":
+			return len(fields) >= 3
+		default:
+			return false
+		}
+	case "/settings":
+		action := strings.ToLower(strings.TrimSpace(fields[1]))
+		switch action {
+		case "set", "field":
+			return len(fields) >= 4
+		case "run", "action":
 			return len(fields) >= 3
 		default:
 			return false
@@ -399,7 +447,11 @@ func (m *Model) handleSlashArgKey(msg tea.KeyMsg) (bool, tea.Cmd) {
 			_, cmd := m.submitLine(line)
 			return true, cmd
 		}
-		if command == "agent" || command == "model" || command == "model use" || command == "model del" || strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") {
+		if command == "agent" || command == "model" || command == "model use" || command == "model del" ||
+			command == "settings" || command == "settings set" || command == "settings field" || command == "settings run" || command == "settings action" ||
+			strings.HasPrefix(command, "model use ") || strings.HasPrefix(command, "model del ") ||
+			strings.HasPrefix(command, "settings set ") || strings.HasPrefix(command, "settings field ") ||
+			strings.HasPrefix(command, "settings run ") || strings.HasPrefix(command, "settings action ") {
 			m.applySlashArgCompletion()
 			m.syncTextareaFromInput()
 			return true, nil

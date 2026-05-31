@@ -28,7 +28,7 @@ func DefaultSpecs() []CommandSpec {
 		{Name: "model", Usage: "/model <action>", Description: "Switch or delete a configured model alias", LocalDuringACP: true, Details: []string{"actions: use <alias>, del <alias>"}, ArgCandidates: modelRootCandidates(), DynamicCompleter: true},
 		{Name: "approval", Usage: "/approval [mode]", Description: "Inspect or change approval review mode", LocalDuringACP: true, Details: []string{"modes: auto-review, manual"}, ArgCandidates: approvalCandidates()},
 		{Name: "status", Usage: "/status", Description: "Show current provider, model, session, sandbox, and store info", LocalDuringACP: true},
-		{Name: "settings", Usage: "/settings", Description: "Show shared settings and diagnostics panel", LocalDuringACP: true, Details: []string{"actions: run <action-id> [confirm]"}},
+		{Name: "settings", Usage: "/settings <action>", Description: "Show or edit shared settings", LocalDuringACP: true, Details: []string{"actions: set <field-id> <value>, run <action-id> [confirm]"}, ArgCandidates: settingsRootCandidates(), DynamicCompleter: true},
 		{Name: "task", Usage: "/task <action>", Description: "Inspect and control live or durable tasks", LocalDuringACP: true, Details: []string{"actions: list, tail <id>, wait <id>, write <id>, cancel <id>, release <id>, start <command>"}, ArgCandidates: taskRootCandidates(), DynamicCompleter: true},
 		{Name: "doctor", Usage: "/doctor [fix]", Description: "Diagnose provider, model, session store, and sandbox readiness", LocalDuringACP: true, Details: []string{"fix: run explicit Windows sandbox ACL repair"}, ArgCandidates: doctorCandidates()},
 		{Name: "new", Usage: "/new", Description: "Start a fresh session"},
@@ -195,6 +195,13 @@ func approvalCandidates() []driver.SlashArgCandidate {
 	return []driver.SlashArgCandidate{
 		{Value: "auto-review", Display: "auto-review", Detail: "Use automatic AI approval review"},
 		{Value: "manual", Display: "manual", Detail: "Prompt before sensitive requests"},
+	}
+}
+
+func settingsRootCandidates() []driver.SlashArgCandidate {
+	return []driver.SlashArgCandidate{
+		{Value: "set", Display: "set", Detail: "Edit a settings field"},
+		{Value: "run", Display: "run", Detail: "Run a settings panel action"},
 	}
 }
 

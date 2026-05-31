@@ -65,3 +65,15 @@ func TestRootArgCandidatesReturnsCopies(t *testing.T) {
 		t.Fatalf("RootArgCandidates(model) leaked mutable backing slice: %#v", second)
 	}
 }
+
+func TestRootArgCandidatesExposeSettingsActions(t *testing.T) {
+	got := RootArgCandidates("settings")
+	values := make([]string, 0, len(got))
+	for _, candidate := range got {
+		values = append(values, candidate.Value)
+	}
+	want := []string{"set", "run"}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("RootArgCandidates(settings) = %#v, want %#v", values, want)
+	}
+}

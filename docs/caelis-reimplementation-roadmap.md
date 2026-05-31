@@ -1574,14 +1574,19 @@ be migrated before retiring the old stack:
      editability, select options, and linked config option ids. TUI and ACP
      command surfaces therefore expose the same settings editor contract
      without embedding field catalogs in surface code.
+   - Migrated baseline: the app-service TUI completion path now uses the
+     shared settings panel for `/settings set` field ids, select values,
+     `/settings run` action ids, and confirm prompts for guarded actions.
+     The command registry and completion shell no longer need a TUI-local
+     settings field catalog.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox
      terminal sessions without reaching into sandbox runtimes directly.
    - Still pending: transcript actions, surface-specific visual settings
-     editors, and concrete future APP settings rendering remain unmigrated.
-     Durable async task control and output storage remain kernel/runtime work
-     rather than APP-only view-model work.
+     editor layout/input widgets, and concrete future APP settings rendering
+     remain unmigrated. Durable async task control and output storage remain
+     kernel/runtime work rather than APP-only view-model work.
 
 4. Headless CLI and ACP serving
    - Migrated baseline: a new service-native `internal/surface/headless`
@@ -2462,8 +2467,8 @@ Recommended sequence:
 4. Port the remaining TUI panels and richer interactive flows to
    `internal/app/services`, especially visual settings panels and richer
    task/controller panel rendering, preserving existing rendering as
-   surface-local code; shared settings config-option metadata is now available
-   for those visual settings editors.
+   surface-local code; shared settings config-option metadata and TUI slash
+   completion are now available for those visual settings editors.
 5. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
