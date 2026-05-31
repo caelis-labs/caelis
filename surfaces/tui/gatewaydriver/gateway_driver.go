@@ -368,12 +368,6 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 				status.Model = formatReasoningModelDisplay(rawModelText, status.ReasoningEffort)
 			}
 		}
-		if ok && !activeACP {
-			if usage, err := d.stack.SessionUsageSnapshot(context.Background(), activeSession.SessionRef, rawModelText); err == nil {
-				status.TotalTokens = usage.TotalTokens
-				status.ContextWindowTokens = usage.ContextWindowTokens
-			}
-		}
 		if ok {
 			if usage, err := d.sessionTokenUsageBreakdown(context.Background(), activeSession.SessionRef); err == nil {
 				status.SessionUsageTotal = usage.Total

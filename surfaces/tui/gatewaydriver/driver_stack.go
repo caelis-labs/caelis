@@ -11,7 +11,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/compact"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -192,7 +191,6 @@ type DriverStack struct {
 	SessionRuntimeStateFn                func(context.Context, session.SessionRef) (SessionRuntimeState, error)
 	DoctorFn                             func(context.Context, DoctorRequest) (DoctorReport, error)
 	ModelConfigFn                        func(string) (ModelConfig, bool)
-	SessionUsageSnapshotFn               func(context.Context, session.SessionRef, string) (compact.UsageSnapshot, error)
 	CompactSessionFn                     func(context.Context, session.SessionRef) error
 	PrepareConnectModelConfigFn          func(context.Context, ModelConfig) (ModelConfig, error)
 	ConnectProviderCandidatesFn          func(context.Context, string, int) ([]SlashArgCandidate, error)
@@ -297,13 +295,6 @@ func (s *DriverStack) ModelConfig(alias string) (ModelConfig, bool) {
 		return ModelConfig{}, false
 	}
 	return s.ModelConfigFn(alias)
-}
-
-func (s *DriverStack) SessionUsageSnapshot(ctx context.Context, ref session.SessionRef, modelText string) (compact.UsageSnapshot, error) {
-	if s == nil || s.SessionUsageSnapshotFn == nil {
-		return compact.UsageSnapshot{}, fmt.Errorf("surfaces/tui/gatewaydriver: session usage dependency is unavailable")
-	}
-	return s.SessionUsageSnapshotFn(ctx, ref, modelText)
 }
 
 func (s *DriverStack) CompactSession(ctx context.Context, ref session.SessionRef) error {

@@ -1102,6 +1102,11 @@ The completed work is intentionally limited to the reusable skeleton:
   setup clone/check helpers live in `core/sandbox`. The current TUI driver and
   gateway status DTOs now use that core sandbox setup contract instead of
   importing the old sandbox port for display-only state.
+- Legacy compact port removal: manual compaction now enters the shared
+  `internal/app/services.Compaction()` path from TUI, headless, and ACP
+  command handling. The old `ports/compact` package and the unused TUI
+  `SessionUsageSnapshot` hook were deleted instead of kept as a second
+  compaction/event replay contract.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
