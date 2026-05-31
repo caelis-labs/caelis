@@ -136,6 +136,31 @@ func (c *Client) NewSession(ctx context.Context, cwd string) (schema.NewSessionR
 	return resp, nil
 }
 
+func (c *Client) ResumeSession(ctx context.Context, sessionID string, cwd string) (schema.ResumeSessionResponse, error) {
+	c.Start(ctx)
+	var resp schema.ResumeSessionResponse
+	if err := c.conn.Call(ctx, schema.MethodSessionResume, schema.ResumeSessionRequest{
+		SessionID: strings.TrimSpace(sessionID),
+		CWD:       strings.TrimSpace(cwd),
+	}, &resp); err != nil {
+		return schema.ResumeSessionResponse{}, err
+	}
+	return resp, nil
+}
+
+func (c *Client) SetConfigOption(ctx context.Context, sessionID string, configID string, value any) (schema.SetSessionConfigOptionResponse, error) {
+	c.Start(ctx)
+	var resp schema.SetSessionConfigOptionResponse
+	if err := c.conn.Call(ctx, schema.MethodSessionSetConfig, schema.SetSessionConfigOptionRequest{
+		SessionID: strings.TrimSpace(sessionID),
+		ConfigID:  strings.TrimSpace(configID),
+		Value:     value,
+	}, &resp); err != nil {
+		return schema.SetSessionConfigOptionResponse{}, err
+	}
+	return resp, nil
+}
+
 func (c *Client) NewCoreSession(ctx context.Context, workspace session.Workspace) (string, error) {
 	resp, err := c.NewSession(ctx, workspace.CWD)
 	if err != nil {

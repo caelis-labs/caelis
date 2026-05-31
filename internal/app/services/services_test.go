@@ -20,6 +20,7 @@ import (
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 )
 
 func TestNewRequiresEngine(t *testing.T) {
@@ -1394,6 +1395,106 @@ func TestAgentServiceInvokeControllerIncludesConfigIntent(t *testing.T) {
 		Input:      "inspect",
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAgentServicePersistsRemoteControllerConfigOptions(t *testing.T) {
+	ctx := context.Background()
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	engine := &recordingEngine{
+		state: session.State{},
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: session.State{},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:  engine,
+		Invokers: map[string]AgentInvoker{
+			"reviewer": AgentInvokerFunc(func(_ context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
+				return AgentInvokeResult{
+					Events: []session.Event{{
+						Type: session.EventAssistant,
+						Message: &model.Message{
+							Role:  model.RoleAssistant,
+							Parts: []model.Part{model.NewTextPart("remote controller response")},
+						},
+					}},
+					ControllerConfigOptions: []control.ConfigOption{{
+						Type:         "select",
+						ID:           "model",
+						Name:         "Model",
+						Category:     "model",
+						CurrentValue: "gpt-remote",
+						Options: []control.ConfigChoice{
+							{Value: "gpt-remote", Name: "Remote"},
+							{Value: "gpt-next", Name: "Next"},
+						},
+					}, {
+						Type:         "select",
+						ID:           "reasoning_effort",
+						Name:         "Reasoning",
+						Category:     "thought_level",
+						CurrentValue: "high",
+						Options: []control.ConfigChoice{
+							{Value: "low", Name: "Low"},
+							{Value: "high", Name: "High"},
+						},
+					}, {
+						Type:         "select",
+						ID:           "mode",
+						Name:         "Mode",
+						Category:     "mode",
+						CurrentValue: "code",
+						Options: []control.ConfigChoice{
+							{Value: "ask", Name: "Ask"},
+							{Value: "code", Name: "Code"},
+						},
+					}},
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agents().Invoke(ctx, AgentInvokeRequest{
+		AgentID:    "reviewer",
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Controller: controller,
+		Input:      "inspect",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if engine.state[StateControllerConfigRef] != "controller-1" || engine.state[StateControllerModel] != "gpt-remote" || engine.state[StateControllerReasoning] != "high" || engine.state[StateControllerMode] != "code" {
+		t.Fatalf("controller state = %#v, want remote current config values", engine.state)
+	}
+	engine.snapshot.State = cloneState(engine.state)
+	status, ok, err := svc.Controllers().Status(ctx, session.Ref{SessionID: "sess-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || status.Model != "gpt-remote" || status.ReasoningEffort != "high" || status.Mode != "code" {
+		t.Fatalf("controller status = %#v ok=%v, want remote config values", status, ok)
+	}
+	if len(status.ModelOptions) != 2 || status.ModelOptions[1].Value != "gpt-next" {
+		t.Fatalf("model options = %#v, want remote choices", status.ModelOptions)
+	}
+	if len(status.EffortOptions) != 2 || status.EffortOptions[1].Value != "high" {
+		t.Fatalf("effort options = %#v, want remote choices", status.EffortOptions)
+	}
+	if len(status.ModeOptions) != 2 || status.ModeOptions[1].ID != "code" {
+		t.Fatalf("mode options = %#v, want remote choices", status.ModeOptions)
 	}
 }
 

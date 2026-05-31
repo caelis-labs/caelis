@@ -961,6 +961,11 @@ The completed work is intentionally limited to the reusable skeleton:
   through `internal/app/services.ControllerService`, injected into
   controller invocations, and projected through the existing TUI status/model
   hooks without TUI-owned controller state.
+- Core-native remote ACP controller config baseline: controller invocations
+  now resume an existing remote ACP session before prompting, discover
+  remote-declared config options from `session/new` or `session/resume`, apply
+  stored model/reasoning/mode intent through `session/set_config_option`, and
+  persist the resulting option state for shared status/model projection.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1104,11 +1109,10 @@ be migrated before retiring the old stack:
      completion, connect wizard, status bar, renderer, transcript reducer,
      tool panels, approval UI, theme system, and attachment handling are not
      ported to `internal/app/services`.
-   - Slash commands such as the `/connect` wizard shell, live remote ACP config
-     RPC/reconnect behavior, remote-declared controller option discovery, and
-     non-host `/doctor fix` repair flows still have old driver/app assumptions
-     or missing service-native feature parity, so the old TUI stack cannot be
-     removed yet.
+   - Slash commands such as the `/connect` wizard shell, live remote ACP
+     process reconnect/lifecycle behavior, and non-host `/doctor fix` repair
+     flows still have old driver/app assumptions or missing service-native
+     feature parity, so the old TUI stack cannot be removed yet.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1120,8 +1124,9 @@ be migrated before retiring the old stack:
      any TUI package.
    - Migrated baseline: `internal/app/services.ControllerService` gives both
      TUI and the future APP the same controller config-intent contract for an
-     active ACP controller, keeping controller model/reasoning/mode state out
-     of surface-specific UI state.
+     active ACP controller, including persisted remote-declared option state,
+     keeping controller model/reasoning/mode state out of surface-specific UI
+     state.
    - Migrated baseline: `internal/app/services.SettingsService` now exposes a
      surface-neutral settings view plus typed runtime, store, sandbox,
      sandbox-backend, and compaction mutation paths, so TUI and the future APP
@@ -1223,9 +1228,10 @@ be migrated before retiring the old stack:
      `/resume` command execution can also replay the targeted canonical
      snapshot through the same ACP projection path as `session/load`.
    - Still pending: terminal integration, client mode flows, the TUI
-     `/connect` wizard shell, remote controller option discovery/reconnect,
-     richer non-model config providers beyond prompt/context/sandbox backend
-     settings, and the full behavior covered by current public ACP e2e tests.
+     `/connect` wizard shell, durable live remote controller process
+     reconnect/lifecycle, richer non-model config providers beyond
+     prompt/context/sandbox backend settings, and the full behavior covered by
+     current public ACP e2e tests.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -1556,11 +1562,16 @@ be migrated before retiring the old stack:
     - Migrated baseline: completed async delegated subagent tasks are now
       restored after local process restart from the SPAWN task journal, so task
       lists and task output do not depend on a still-live in-memory manager.
+    - Migrated baseline: remote ACP controller invocations now reconnect at the
+      protocol session level by calling `session/resume` when a canonical
+      remote session id exists. New or resumed controller sessions contribute
+      remote-declared config options, stored controller
+      model/reasoning/mode intent is applied through `session/set_config_option`
+      before prompting, and the resulting option state is persisted for shared
+      status/model/mode projection.
     - Still pending: live remote ACP controller reconnect for active child
-      processes, durable remote controller process/session lifecycle beyond
-      canonical remote session id reuse, live controller config RPC/reconnect
-      application, remote-declared controller option discovery, and terminal
-      previews remain old-stack or unmigrated.
+      processes, durable remote controller process lifecycle beyond protocol
+      session resume, and terminal previews remain old-stack or unmigrated.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -1723,9 +1734,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI command migrations against app services,
-   especially the `/connect` wizard shell, interactive remote controller
-   option discovery/reconnect/config flows, and non-host doctor/sandbox repair
-   flows.
+   especially the `/connect` wizard shell, live remote controller process
+   lifecycle, and non-host doctor/sandbox repair flows.
 2. Port provider catalog and at least the current configured providers behind
    `core/model.Provider`.
 3. Port sandbox router/backends and permission policy before moving mutating

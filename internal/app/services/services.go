@@ -22,16 +22,18 @@ import (
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
+	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 )
 
 const (
-	StateCurrentModelID         = "caelis.model.current_id"
-	StateCurrentReasoningEffort = "caelis.model.reasoning_effort"
-	StateSessionMode            = "caelis.session.mode"
-	StateControllerConfigRef    = "caelis.controller.config_ref"
-	StateControllerModel        = "caelis.controller.model"
-	StateControllerReasoning    = "caelis.controller.reasoning_effort"
-	StateControllerMode         = "caelis.controller.mode"
+	StateCurrentModelID          = "caelis.model.current_id"
+	StateCurrentReasoningEffort  = "caelis.model.reasoning_effort"
+	StateSessionMode             = "caelis.session.mode"
+	StateControllerConfigRef     = "caelis.controller.config_ref"
+	StateControllerModel         = "caelis.controller.model"
+	StateControllerReasoning     = "caelis.controller.reasoning_effort"
+	StateControllerMode          = "caelis.controller.mode"
+	StateControllerConfigOptions = "caelis.controller.config_options"
 )
 
 type Services struct {
@@ -1068,9 +1070,10 @@ type AgentInvokeRequest struct {
 }
 
 type AgentInvokeResult struct {
-	StopReason string
-	Events     []session.Event
-	Recorded   bool
+	StopReason              string
+	Events                  []session.Event
+	Recorded                bool
+	ControllerConfigOptions []control.ConfigOption
 }
 
 func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (AgentInvokeResult, error) {
@@ -1131,8 +1134,38 @@ func (s AgentService) Invoke(ctx context.Context, req AgentInvokeRequest) (Agent
 			return AgentInvokeResult{}, err
 		}
 	}
+	if controllerMode && len(result.ControllerConfigOptions) > 0 {
+		if err := s.persistControllerConfigOptions(ctx, ref, req.Controller, result.ControllerConfigOptions); err != nil {
+			return AgentInvokeResult{}, err
+		}
+	}
 	result.Events = events
 	return result, nil
+}
+
+func (s AgentService) persistControllerConfigOptions(ctx context.Context, ref session.Ref, controller session.ControllerBinding, options []control.ConfigOption) error {
+	if s.services.engine == nil || len(options) == 0 {
+		return nil
+	}
+	configRef := controllerConfigRef(controller)
+	return s.services.engine.UpdateSessionState(ctx, ref, func(state session.State) (session.State, error) {
+		next := cloneState(state)
+		if next == nil {
+			next = session.State{}
+		}
+		next[StateControllerConfigRef] = configRef
+		next[StateControllerConfigOptions] = cloneControllerConfigOptions(options)
+		if value, ok := currentControllerConfigValue(options, "model"); ok {
+			next[StateControllerModel] = value
+		}
+		if value, ok := currentControllerConfigValue(options, "reasoning"); ok {
+			next[StateControllerReasoning] = value
+		}
+		if value, ok := currentControllerConfigValue(options, "mode"); ok {
+			next[StateControllerMode] = value
+		}
+		return next, nil
+	})
 }
 
 func (s AgentService) invokerForAgent(ctx context.Context, agentID string) (AgentInvoker, error) {

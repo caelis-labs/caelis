@@ -189,8 +189,71 @@ func TestClientHandlesExternalPermissionRequest(t *testing.T) {
 	}
 }
 
+func TestClientResumeAndSetConfigOption(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	client, server, closePipes := newClientServer(t, Config{AgentID: "agent-1", AgentName: "reviewer"})
+	defer closePipes()
+
+	var resumed string
+	var setConfig schema.SetSessionConfigOptionRequest
+	serverErr := serveFakeAgent(ctx, server, fakeAgentBehavior{
+		OnResume: func(_ context.Context, req schema.ResumeSessionRequest) schema.ResumeSessionResponse {
+			resumed = req.SessionID
+			return schema.ResumeSessionResponse{ConfigOptions: []schema.SessionConfigOption{{
+				Type:         "select",
+				ID:           "model",
+				Name:         "Model",
+				Category:     "model",
+				CurrentValue: "gpt-old",
+				Options:      []schema.SessionConfigSelectOption{{Value: "gpt-old", Name: "Old"}, {Value: "gpt-next", Name: "Next"}},
+			}}}
+		},
+		OnSetConfig: func(_ context.Context, req schema.SetSessionConfigOptionRequest) schema.SetSessionConfigOptionResponse {
+			setConfig = req
+			return schema.SetSessionConfigOptionResponse{ConfigOptions: []schema.SessionConfigOption{{
+				Type:         "select",
+				ID:           "model",
+				Name:         "Model",
+				Category:     "model",
+				CurrentValue: req.Value,
+			}}}
+		},
+	})
+
+	if _, err := client.Initialize(ctx); err != nil {
+		t.Fatal(err)
+	}
+	resumedResp, err := client.ResumeSession(ctx, "remote-existing", "/tmp/project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed != "remote-existing" || len(resumedResp.ConfigOptions) != 1 || resumedResp.ConfigOptions[0].CurrentValue != "gpt-old" {
+		t.Fatalf("resume = %q %#v, want remote-existing model option", resumed, resumedResp)
+	}
+	setResp, err := client.SetConfigOption(ctx, "remote-existing", "model", "gpt-next")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if setConfig.SessionID != "remote-existing" || setConfig.ConfigID != "model" || setConfig.Value != "gpt-next" {
+		t.Fatalf("set config request = %#v, want model gpt-next", setConfig)
+	}
+	if len(setResp.ConfigOptions) != 1 || setResp.ConfigOptions[0].CurrentValue != "gpt-next" {
+		t.Fatalf("set config response = %#v, want updated model", setResp)
+	}
+
+	closePipes()
+	select {
+	case <-serverErr:
+	case <-time.After(time.Second):
+		t.Fatal("fake server did not stop")
+	}
+}
+
 type fakeAgentBehavior struct {
-	OnPrompt func(context.Context, *jsonrpc.Conn, schema.PromptRequest) schema.PromptResponse
+	OnPrompt    func(context.Context, *jsonrpc.Conn, schema.PromptRequest) schema.PromptResponse
+	OnResume    func(context.Context, schema.ResumeSessionRequest) schema.ResumeSessionResponse
+	OnSetConfig func(context.Context, schema.SetSessionConfigOptionRequest) schema.SetSessionConfigOptionResponse
 }
 
 func newClientServer(t *testing.T, cfg Config) (*Client, *jsonrpc.Conn, func()) {
@@ -223,6 +286,24 @@ func serveFakeAgent(ctx context.Context, conn *jsonrpc.Conn, behavior fakeAgentB
 				}, nil
 			case schema.MethodSessionNew:
 				return schema.NewSessionResponse{SessionID: "remote-session"}, nil
+			case schema.MethodSessionResume:
+				var req schema.ResumeSessionRequest
+				if err := json.Unmarshal(msg.Params, &req); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				if behavior.OnResume == nil {
+					return schema.ResumeSessionResponse{}, nil
+				}
+				return behavior.OnResume(ctx, req), nil
+			case schema.MethodSessionSetConfig:
+				var req schema.SetSessionConfigOptionRequest
+				if err := json.Unmarshal(msg.Params, &req); err != nil {
+					return nil, &jsonrpc.RPCError{Code: -32602, Message: err.Error()}
+				}
+				if behavior.OnSetConfig == nil {
+					return schema.SetSessionConfigOptionResponse{}, nil
+				}
+				return behavior.OnSetConfig(ctx, req), nil
 			case schema.MethodSessionPrompt:
 				var req schema.PromptRequest
 				if err := json.Unmarshal(msg.Params, &req); err != nil {

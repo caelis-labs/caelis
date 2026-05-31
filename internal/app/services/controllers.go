@@ -2,12 +2,14 @@ package services
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
+	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 )
 
 type ControllerConfigChoice struct {
@@ -262,6 +264,7 @@ func (s ControllerService) activeControllerSnapshot(ctx context.Context, ref ses
 }
 
 func (s ControllerService) statusFromSnapshot(ctx context.Context, snapshot session.Snapshot, controller session.ControllerBinding) (ControllerStatus, error) {
+	remoteOptions := controllerConfigOptionsFromState(snapshot.State)
 	status := ControllerStatus{
 		SessionRef:      snapshot.Session.Ref,
 		Agent:           firstNonEmpty(controller.AgentName, controller.Label, controller.ID),
@@ -274,7 +277,15 @@ func (s ControllerService) statusFromSnapshot(ctx context.Context, snapshot sess
 		status.ReasoningEffort = strings.TrimSpace(stateString(snapshot.State, StateControllerReasoning))
 		status.Mode = strings.TrimSpace(stateString(snapshot.State, StateControllerMode))
 	}
+	if len(remoteOptions) > 0 {
+		status = applyRemoteControllerConfigOptions(status, remoteOptions)
+	}
 	status.EffortOptions = s.controllerEffortOptions(ctx, status.Model)
+	if len(remoteOptions) > 0 {
+		if efforts := controllerConfigChoices(remoteOptions, "reasoning"); len(efforts) > 0 {
+			status.EffortOptions = efforts
+		}
+	}
 	return status, nil
 }
 
@@ -348,6 +359,145 @@ func controllerModeOptions() []ControllerMode {
 		})
 	}
 	return out
+}
+
+func applyRemoteControllerConfigOptions(status ControllerStatus, options []control.ConfigOption) ControllerStatus {
+	if models := controllerConfigChoices(options, "model"); len(models) > 0 {
+		status.ModelOptions = models
+		if status.Model == "" {
+			status.Model, _ = currentControllerConfigValue(options, "model")
+		}
+	}
+	if status.ReasoningEffort == "" {
+		status.ReasoningEffort, _ = currentControllerConfigValue(options, "reasoning")
+	}
+	if modes := controllerConfigModes(options); len(modes) > 0 {
+		status.ModeOptions = modes
+		if status.Mode == "" {
+			status.Mode, _ = currentControllerConfigValue(options, "mode")
+		}
+	}
+	return status
+}
+
+func controllerConfigOptionsFromState(state session.State) []control.ConfigOption {
+	if state == nil {
+		return nil
+	}
+	return parseControllerConfigOptions(state[StateControllerConfigOptions])
+}
+
+func parseControllerConfigOptions(raw any) []control.ConfigOption {
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case []control.ConfigOption:
+		return cloneControllerConfigOptions(typed)
+	case control.ConfigOption:
+		return []control.ConfigOption{cloneControllerConfigOption(typed)}
+	case json.RawMessage:
+		var out []control.ConfigOption
+		if err := json.Unmarshal(typed, &out); err == nil {
+			return cloneControllerConfigOptions(out)
+		}
+	case []byte:
+		var out []control.ConfigOption
+		if err := json.Unmarshal(typed, &out); err == nil {
+			return cloneControllerConfigOptions(out)
+		}
+	default:
+		rawJSON, err := json.Marshal(typed)
+		if err != nil {
+			return nil
+		}
+		var out []control.ConfigOption
+		if err := json.Unmarshal(rawJSON, &out); err == nil {
+			return cloneControllerConfigOptions(out)
+		}
+	}
+	return nil
+}
+
+func cloneControllerConfigOptions(in []control.ConfigOption) []control.ConfigOption {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]control.ConfigOption, 0, len(in))
+	for _, option := range in {
+		out = append(out, cloneControllerConfigOption(option))
+	}
+	return out
+}
+
+func cloneControllerConfigOption(option control.ConfigOption) control.ConfigOption {
+	option.ID = strings.TrimSpace(option.ID)
+	option.Name = strings.TrimSpace(option.Name)
+	option.Description = strings.TrimSpace(option.Description)
+	option.Category = strings.TrimSpace(option.Category)
+	option.CurrentValue = strings.TrimSpace(option.CurrentValue)
+	option.Options = append([]control.ConfigChoice(nil), option.Options...)
+	return option
+}
+
+func currentControllerConfigValue(options []control.ConfigOption, kind string) (string, bool) {
+	for _, option := range options {
+		if control.ConfigOptionKind(option) == kind {
+			value := strings.TrimSpace(option.CurrentValue)
+			return value, value != ""
+		}
+	}
+	return "", false
+}
+
+func controllerConfigChoices(options []control.ConfigOption, kind string) []ControllerConfigChoice {
+	option, ok := findControllerConfigOption(options, kind)
+	if !ok || len(option.Options) == 0 {
+		return nil
+	}
+	out := make([]ControllerConfigChoice, 0, len(option.Options))
+	for _, choice := range option.Options {
+		value := strings.TrimSpace(choice.Value)
+		name := strings.TrimSpace(choice.Name)
+		if value == "" && name == "" {
+			continue
+		}
+		out = append(out, ControllerConfigChoice{
+			Value:       firstNonEmpty(value, name),
+			Name:        firstNonEmpty(name, value),
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
+}
+
+func controllerConfigModes(options []control.ConfigOption) []ControllerMode {
+	option, ok := findControllerConfigOption(options, "mode")
+	if !ok || len(option.Options) == 0 {
+		return nil
+	}
+	out := make([]ControllerMode, 0, len(option.Options))
+	for _, choice := range option.Options {
+		id := strings.TrimSpace(choice.Value)
+		name := strings.TrimSpace(choice.Name)
+		if id == "" && name == "" {
+			continue
+		}
+		out = append(out, ControllerMode{
+			ID:          firstNonEmpty(id, name),
+			Name:        firstNonEmpty(name, id),
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
+}
+
+func findControllerConfigOption(options []control.ConfigOption, kind string) (control.ConfigOption, bool) {
+	for _, option := range options {
+		if control.ConfigOptionKind(option) == kind {
+			return cloneControllerConfigOption(option), true
+		}
+	}
+	return control.ConfigOption{}, false
 }
 
 func controllerFromSnapshot(snapshot session.Snapshot) session.ControllerBinding {

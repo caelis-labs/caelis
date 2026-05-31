@@ -34,6 +34,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 	enginegateway "github.com/OnslaughtSnail/caelis/internal/engine/gateway"
 	"github.com/OnslaughtSnail/caelis/internal/engine/loop"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type Config struct {
@@ -306,19 +307,23 @@ func externalAgentInvoker(store session.Store, cfg acpexternal.Config) services.
 			controller.Label = firstNonEmpty(controller.Label, cfg.AgentName, id)
 			controller.Source = firstNonEmpty(controller.Source, "external_acp")
 			result, err := runner.Invoke(ctx, control.ControllerRequest{
-				SessionRef:   req.SessionRef,
-				Input:        req.Input,
-				ContentParts: req.ContentParts,
-				Controller:   controller,
-				Agent:        adapter,
+				SessionRef:                req.SessionRef,
+				Input:                     req.Input,
+				ContentParts:              req.ContentParts,
+				Controller:                controller,
+				ControllerModel:           req.ControllerModel,
+				ControllerReasoningEffort: req.ControllerReasoningEffort,
+				ControllerMode:            req.ControllerMode,
+				Agent:                     adapter,
 			})
 			if err != nil {
 				return services.AgentInvokeResult{}, err
 			}
 			return services.AgentInvokeResult{
-				StopReason: "",
-				Events:     result.Events,
-				Recorded:   true,
+				StopReason:              "",
+				Events:                  result.Events,
+				Recorded:                true,
+				ControllerConfigOptions: result.ConfigOptions,
 			}, nil
 		}
 		runner := control.ParticipantRunner{Store: store}
@@ -415,12 +420,98 @@ func (s externalAgentSession) NewSession(ctx context.Context, workspace session.
 	return s.client.NewCoreSession(ctx, workspace)
 }
 
+func (s externalAgentSession) NewSessionState(ctx context.Context, workspace session.Workspace) (control.AgentSessionState, error) {
+	resp, err := s.client.NewSession(ctx, workspace.CWD)
+	if err != nil {
+		return control.AgentSessionState{}, err
+	}
+	return control.AgentSessionState{
+		RemoteSessionID: strings.TrimSpace(resp.SessionID),
+		ConfigOptions:   controlConfigOptions(resp.ConfigOptions),
+	}, nil
+}
+
+func (s externalAgentSession) ResumeSessionState(ctx context.Context, remoteSessionID string, workspace session.Workspace) (control.AgentSessionState, error) {
+	resp, err := s.client.ResumeSession(ctx, remoteSessionID, workspace.CWD)
+	if err != nil {
+		return control.AgentSessionState{}, err
+	}
+	return control.AgentSessionState{
+		RemoteSessionID: strings.TrimSpace(remoteSessionID),
+		ConfigOptions:   controlConfigOptions(resp.ConfigOptions),
+	}, nil
+}
+
+func (s externalAgentSession) SetConfigOption(ctx context.Context, remoteSessionID string, configID string, value any) (control.AgentSessionState, error) {
+	resp, err := s.client.SetConfigOption(ctx, remoteSessionID, configID, value)
+	if err != nil {
+		return control.AgentSessionState{}, err
+	}
+	return control.AgentSessionState{
+		RemoteSessionID: strings.TrimSpace(remoteSessionID),
+		ConfigOptions:   controlConfigOptions(resp.ConfigOptions),
+	}, nil
+}
+
 func (s externalAgentSession) Prompt(ctx context.Context, sessionID string, parts []model.ContentPart) ([]session.Event, error) {
 	return s.client.PromptCore(ctx, sessionID, parts)
 }
 
 func (s externalAgentSession) Close() error {
 	return s.client.Close()
+}
+
+func controlConfigOptions(in []schema.SessionConfigOption) []control.ConfigOption {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]control.ConfigOption, 0, len(in))
+	for _, option := range in {
+		item := control.ConfigOption{
+			Type:         strings.TrimSpace(option.Type),
+			ID:           strings.TrimSpace(option.ID),
+			Name:         strings.TrimSpace(option.Name),
+			Description:  strings.TrimSpace(option.Description),
+			Category:     strings.TrimSpace(option.Category),
+			CurrentValue: controlConfigCurrentValue(option.CurrentValue),
+			Options:      controlConfigChoices(option.Options),
+		}
+		if item.ID == "" {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func controlConfigCurrentValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func controlConfigChoices(in []schema.SessionConfigSelectOption) []control.ConfigChoice {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]control.ConfigChoice, 0, len(in))
+	for _, choice := range in {
+		value := strings.TrimSpace(choice.Value)
+		name := strings.TrimSpace(choice.Name)
+		if value == "" && name == "" {
+			continue
+		}
+		out = append(out, control.ConfigChoice{
+			Value:       value,
+			Name:        name,
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
 }
 
 func agentDescriptors(configs []acpexternal.Config) []services.AgentDescriptor {
