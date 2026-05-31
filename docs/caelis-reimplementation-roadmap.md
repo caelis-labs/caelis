@@ -1093,6 +1093,9 @@ The completed work is intentionally limited to the reusable skeleton:
   approval policy, sandbox task control, and durable task history moved onto
   `core/*`, `internal/app/services`, and `internal/adapters/tools/*`, so those
   old public contracts were deleted instead of kept as extension points.
+- Legacy sandbox router removal: the unused `internal/sandboxrouter` package
+  was deleted. Sandbox backend selection now stays in the shared app registry
+  and local composition root instead of a second routing layer.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -2054,8 +2057,8 @@ Recommended sequence:
    controller process lifecycle, and settings/diagnostics panel parity.
 2. Close the remaining provider-specific behavior gaps in core-native adapters
    without reintroducing a parallel provider factory/catalog stack.
-3. Finish sandbox router/backend cleanup and remaining permission-policy
-   diagnostics without reintroducing the removed preset/tool stacks.
+3. Finish sandbox backend cleanup and remaining permission-policy diagnostics
+   without reintroducing the removed router/preset/tool stacks.
 4. Finish durable async SPAWN task control and durable task runtime behavior
    behind `core/tool.Registry` and `internal/engine/tasks`; the shared
    app-service history projection is now a baseline, so this milestone should
