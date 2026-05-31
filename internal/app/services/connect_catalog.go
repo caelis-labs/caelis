@@ -378,6 +378,7 @@ func (s ModelService) PrepareConnectConfig(ctx context.Context, cfg appsettings.
 	if env, ok := ParseConnectTokenEnvSpec(cfg.Token); ok {
 		cfg.TokenEnv = env
 		cfg.Token = ""
+		cfg.PersistToken = false
 	}
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = tpl.DefaultBaseURL
@@ -420,9 +421,6 @@ func (s ModelService) PrepareConnectConfig(ctx context.Context, cfg appsettings.
 	}
 	if cfg.ReasoningEffort == "" {
 		cfg.ReasoningEffort = cfg.DefaultReasoningEffort
-	}
-	if cfg.Timeout <= 0 && !reusingProfileAuth {
-		cfg.Timeout = ConnectDefaultTimeoutSeconds * time.Second
 	}
 	if tpl.NoAuthRequired {
 		cfg.AuthType = string(model.AuthNone)

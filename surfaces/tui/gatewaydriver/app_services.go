@@ -14,6 +14,7 @@ import (
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	portscontroller "github.com/OnslaughtSnail/caelis/ports/controller"
+	portmodel "github.com/OnslaughtSnail/caelis/ports/model"
 	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	portskill "github.com/OnslaughtSnail/caelis/ports/skill"
@@ -114,6 +115,9 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		if err != nil {
 			return "", err
 		}
+		if modelAliasIsAmbiguous(context.Background(), svc, connected) {
+			return strings.TrimSpace(connected.ID), nil
+		}
 		return firstNonEmpty(connected.Alias, connected.ID), nil
 	}
 	stack.PrepareConnectModelConfigFn = func(ctx context.Context, cfg ModelConfig) (ModelConfig, error) {
@@ -160,8 +164,20 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		status, err := svc.Controllers().SetMode(ctx, coreRefFromPort(ref), mode)
 		return controllerStatusFromApp(status), err
 	}
-	stack.DeleteModelFn = func(ctx context.Context, _ portsession.SessionRef, modelRef string) error {
-		return svc.Models().Delete(ctx, modelRef)
+	stack.DeleteModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string) error {
+		deleted, resolveErr := svc.Models().Resolve(ctx, modelRef)
+		if err := svc.Models().Delete(ctx, modelRef); err != nil {
+			return err
+		}
+		if resolveErr == nil && strings.TrimSpace(ref.SessionID) != "" {
+			snapshot, err := svc.Sessions().Load(ctx, coreRefFromPort(ref))
+			if err == nil {
+				if currentID, _ := snapshot.State[appservices.StateCurrentModelID].(string); strings.EqualFold(strings.TrimSpace(currentID), strings.TrimSpace(deleted.ID)) {
+					_ = svc.Models().ClearSession(ctx, coreRefFromPort(ref))
+				}
+			}
+		}
+		return nil
 	}
 	stack.SetSandboxBackendFn = func(ctx context.Context, backend string) (SandboxStatus, error) {
 		if _, err := svc.Settings().SetSandboxBackend(ctx, backend); err != nil {
@@ -405,7 +421,7 @@ func modelConfigFromApp(cfg appsettings.ModelConfig) ModelConfig {
 		Token:                  strings.TrimSpace(cfg.Token),
 		TokenEnv:               strings.TrimSpace(cfg.TokenEnv),
 		PersistToken:           cfg.PersistToken,
-		AuthType:               authTypeFromString(cfg.AuthType),
+		AuthType:               modelAuthTypeFromApp(cfg.AuthType),
 		HeaderKey:              strings.TrimSpace(cfg.HeaderKey),
 		ContextWindowTokens:    cfg.ContextWindowTokens,
 		ReasoningEffort:        strings.TrimSpace(cfg.ReasoningEffort),
@@ -415,6 +431,14 @@ func modelConfigFromApp(cfg appsettings.ModelConfig) ModelConfig {
 		MaxOutputTok:           cfg.MaxOutputTokens,
 		Timeout:                cfg.Timeout,
 	}
+}
+
+func modelAuthTypeFromApp(value string) portmodel.AuthType {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	return authTypeFromString(value)
 }
 
 func modelConfigToApp(cfg ModelConfig) appsettings.ModelConfig {
@@ -459,6 +483,24 @@ func modelChoicesFromApp(choices []appsettings.ModelChoice) []ModelChoice {
 		})
 	}
 	return out
+}
+
+func modelAliasIsAmbiguous(ctx context.Context, svc appservices.Services, cfg appsettings.ModelConfig) bool {
+	alias := strings.TrimSpace(cfg.Alias)
+	if alias == "" {
+		return false
+	}
+	choices, err := svc.Models().List(ctx)
+	if err != nil {
+		return false
+	}
+	count := 0
+	for _, choice := range choices {
+		if strings.EqualFold(strings.TrimSpace(choice.Alias), alias) {
+			count++
+		}
+	}
+	return count > 1
 }
 
 func slashCandidatesFromAppConnect(candidates []appservices.ConnectCandidate) []SlashArgCandidate {

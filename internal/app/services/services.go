@@ -896,6 +896,9 @@ func (s StatusService) modelStatus(ctx context.Context, state session.State) (ap
 		current.ReasoningEffort,
 		current.DefaultReasoningEffort,
 	)
+	if tokenEnv := strings.TrimSpace(current.TokenEnv); tokenEnv != "" {
+		status.MissingAPIKey = strings.TrimSpace(os.Getenv(tokenEnv)) == ""
+	}
 	return status, nil
 }
 

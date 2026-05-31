@@ -143,7 +143,7 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 	case "agent use":
 		return d.completeAgentHandoffTargets(ctx, query, limit)
 	case "agent remove":
-		return d.completeAgentCatalog(query, limit), nil
+		return d.completeRemovableAgentCatalog(query, limit), nil
 	case "model use", "model del":
 		return d.completeModelAliases(ctx, query, limit)
 	case "connect":
@@ -479,6 +479,24 @@ func (d *GatewayDriver) completeBuiltInAgentCatalog(query string, limit int) []S
 			Display: option.Display,
 			Detail:  firstNonEmpty(option.Detail, "built-in ACP agent"),
 		})
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
+func (d *GatewayDriver) completeRemovableAgentCatalog(query string, limit int) []SlashArgCandidate {
+	agents := d.completeAgentCatalog(query, limit)
+	if len(agents) == 0 {
+		return nil
+	}
+	out := make([]SlashArgCandidate, 0, len(agents))
+	for _, agent := range agents {
+		if strings.EqualFold(strings.TrimSpace(agent.Value), "self") || strings.EqualFold(strings.TrimSpace(agent.Display), "self") {
+			continue
+		}
+		out = append(out, agent)
 		if len(out) >= limit {
 			break
 		}

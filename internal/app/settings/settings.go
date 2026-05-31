@@ -160,6 +160,7 @@ func (s *FileStore) Load(ctx context.Context) (Document, error) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		return Document{}, fmt.Errorf("app/settings: decode settings: %w", err)
 	}
+	doc = inferPersistTokenFromStoredTokens(doc)
 	return NormalizeDocument(doc), nil
 }
 
@@ -991,10 +992,43 @@ func sanitizeDocumentForSave(doc Document) Document {
 		if !doc.Models.Profiles[i].PersistToken {
 			doc.Models.Profiles[i].Token = ""
 		}
+		if doc.Models.Profiles[i].Token != "" {
+			doc.Models.Profiles[i].PersistToken = false
+		}
+		doc.Models.Profiles[i].AuthType = authTypeForSave(doc.Models.Profiles[i].Provider, doc.Models.Profiles[i].AuthType)
 	}
 	for i := range doc.Models.Configs {
 		if !doc.Models.Configs[i].PersistToken {
 			doc.Models.Configs[i].Token = ""
+		}
+		if doc.Models.Configs[i].Token != "" {
+			doc.Models.Configs[i].PersistToken = false
+		}
+		doc.Models.Configs[i].AuthType = authTypeForSave(doc.Models.Configs[i].Provider, doc.Models.Configs[i].AuthType)
+		if strings.EqualFold(strings.TrimSpace(doc.Models.Configs[i].DefaultReasoningEffort), strings.TrimSpace(doc.Models.Configs[i].ReasoningEffort)) {
+			doc.Models.Configs[i].DefaultReasoningEffort = ""
+		}
+	}
+	return doc
+}
+
+func authTypeForSave(provider string, authType string) string {
+	authType = strings.ToLower(strings.TrimSpace(authType))
+	if authType == "" || authType == defaultAuthType(provider, "") {
+		return ""
+	}
+	return authType
+}
+
+func inferPersistTokenFromStoredTokens(doc Document) Document {
+	for i := range doc.Models.Profiles {
+		if strings.TrimSpace(doc.Models.Profiles[i].Token) != "" {
+			doc.Models.Profiles[i].PersistToken = true
+		}
+	}
+	for i := range doc.Models.Configs {
+		if strings.TrimSpace(doc.Models.Configs[i].Token) != "" {
+			doc.Models.Configs[i].PersistToken = true
 		}
 	}
 	return doc

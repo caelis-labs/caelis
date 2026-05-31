@@ -49,6 +49,7 @@ type ModelStatus struct {
 	Current         *ModelChoice  `json:"current,omitempty"`
 	Choices         []ModelChoice `json:"choices,omitempty"`
 	ReasoningEffort string        `json:"reasoning_effort,omitempty"`
+	MissingAPIKey   bool          `json:"missing_api_key,omitempty"`
 }
 
 type ModelChoice struct {

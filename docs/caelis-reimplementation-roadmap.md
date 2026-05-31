@@ -996,6 +996,13 @@ The completed work is intentionally limited to the reusable skeleton:
   directly with shared services, settings-backed model config, `BindAppServices`,
   and `internal/surface/headless`. The eval package no longer imports the old
   `app/gatewayapp`, `kernel`, or `ports/session` product contracts.
+- Gatewaydriver regression-stack cleanup: the broad TUI driver regression suite
+  now constructs `internal/app/local` with shared app services and binds the
+  driver through `BindAppServices`, instead of using a gatewayapp-backed test
+  stack. Model connect/delete/status, token usage, ACP agent registry, controller
+  handoff, participant mentions, resume metadata, sandbox mutation, and
+  provider catalog regressions now exercise the same service-native contracts
+  intended for the future APP surface.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1160,9 +1167,14 @@ be migrated before retiring the old stack:
      into its Bubble Tea wizard runtime; the remaining `/connect` work is
      UI-shell extraction/rendering parity rather than provider/setup semantics.
    - Migrated baseline: the old formal `surfaces/tui/gatewaydriver/local`
-     adapter package has been deleted. Remaining gatewayapp driver coverage is
-     test-local under `eval`, which keeps old-stack validation available
-     without preserving the bridge as production architecture.
+     adapter package has been deleted, and the remaining broad gatewaydriver
+     regression coverage now uses a test-local `internal/app/local` stack plus
+     `BindAppServices` instead of importing `app/gatewayapp`.
+   - Migrated baseline: the app-service TUI binding now preserves reusable
+     endpoint auth as a model-profile contract, keeps settings JSON compact by
+     omitting inferred auth/default fields, projects missing API-key diagnostics
+     and context-budget status from shared app view models, and keeps removable
+     agent candidates separate from the built-in `self` ACP participant path.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1916,9 +1928,8 @@ Recommended sequence:
    behind `core/tool.Registry` and `internal/engine/tasks`; the shared
    app-service history projection is now a baseline, so this milestone should
    focus on real async process/subagent lifecycle and durable output storage.
-5. Port TUI driver commands, including the remaining built-in agent management
-   actions, to `internal/app/services`, preserving existing rendering as
-   surface-local code.
+5. Port the remaining TUI driver command shells and panels to
+   `internal/app/services`, preserving existing rendering as surface-local code.
 6. Expand shared APP view models for settings, agent management, richer model
    selection, approvals, tasks, and transcript actions.
 7. Migrate compaction, task runtime, subagent lifecycle, and controller handoff

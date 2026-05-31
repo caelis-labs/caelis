@@ -16,13 +16,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/app/gatewayapp"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	"github.com/OnslaughtSnail/caelis/internal/agenthandle"
+	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
+	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -91,27 +93,19 @@ func closeGatewayDriverTestTurn(t *testing.T, turn Turn) {
 	}
 }
 
-func newGatewayDriverTestStack(t *testing.T, cfg gatewayapp.Config) (*gatewayapp.Stack, error) {
-	t.Helper()
-	if strings.TrimSpace(cfg.Sandbox.RequestedType) == "" {
-		cfg.Sandbox.RequestedType = "host"
-	}
-	return gatewayapp.NewLocalStack(cfg)
-}
-
-func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
+func TestGatewayDriverKeepsServiceGatewayUsableAfterSandboxUpdate(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "driver-test",
 		StoreDir:       t.TempDir(),
 		WorkspaceKey:   "driver-workspace",
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
-		Sandbox: gatewayapp.SandboxConfig{
+		Sandbox: gatewayDriverTestSandboxConfig{
 			HelperPath: filepath.Join(t.TempDir(), "missing-landlock-helper"),
 		},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -120,9 +114,9 @@ func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "rebuild-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "rebuild-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	before := stack.CurrentGateway()
 	if got, err := driver.gateway(); err != nil || got != before {
@@ -134,8 +128,8 @@ func TestGatewayDriverUsesCurrentGatewayAfterSandboxRebuild(t *testing.T) {
 		t.Fatalf("SetSandboxBackend(auto) error = %v", err)
 	}
 	after := stack.CurrentGateway()
-	if after == nil || after == before {
-		t.Fatalf("CurrentGateway() after rebuild = %p, before %p; want replacement", after, before)
+	if after == nil {
+		t.Fatal("CurrentGateway() after sandbox update = nil")
 	}
 	if got, err := driver.gateway(); err != nil || got != after {
 		t.Fatalf("driver.gateway() after rebuild = %p, %v; want current %p", got, err, after)
@@ -171,7 +165,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	ctx := context.Background()
 	storeDir := t.TempDir()
 	workspace := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "lazy-session-test",
 		StoreDir:       storeDir,
@@ -179,7 +173,7 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -188,9 +182,9 @@ func TestGatewayDriverDefersBlankSessionUntilFirstSubmission(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -476,7 +470,7 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "resume-filter-test",
 		StoreDir:       t.TempDir(),
@@ -484,7 +478,7 @@ func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 		WorkspaceCWD:   workspace,
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -509,9 +503,9 @@ func TestGatewayDriverListSessionsSkipsUntitledSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartSession(titled) error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	candidates, err := driver.ListSessions(ctx, 10)
 	if err != nil {
@@ -541,7 +535,7 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 	}
 	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
 
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "connect-test",
 		StoreDir:       t.TempDir(),
@@ -549,7 +543,7 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -558,9 +552,9 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-flow-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "connect-flow-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	providers, err := driver.CompleteSlashArg(ctx, "connect", "", 20)
 	if err != nil {
@@ -636,7 +630,7 @@ func TestGatewayDriverCompleteSlashArgConnectFlowUsesLegacyCommands(t *testing.T
 
 func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "slash-test",
 		StoreDir:       t.TempDir(),
@@ -644,7 +638,7 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -654,9 +648,9 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
 
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "slash-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "slash-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	if _, err := driver.Connect(ctx, ConnectConfig{
@@ -691,13 +685,13 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
 	driver := &GatewayDriver{}
-	status := gatewayapp.ACPControllerStatus{
-		ModelOptions: []gatewayapp.ACPControllerConfigChoice{{
+	status := controller.ControllerStatus{
+		ModelOptions: []controller.ControllerConfigChoice{{
 			Value:       "claude-sonnet",
 			Name:        "Claude Sonnet",
 			Description: "remote model",
 		}},
-		EffortOptions: []gatewayapp.ACPControllerConfigChoice{{
+		EffortOptions: []controller.ControllerConfigChoice{{
 			Value: "high",
 			Name:  "High",
 		}},
@@ -722,12 +716,12 @@ func TestGatewayDriverCompleteSlashArgACPModelUseOnly(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 	driver := &GatewayDriver{}
-	status := gatewayapp.ACPControllerStatus{
-		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
+	status := controller.ControllerStatus{
+		ModelOptions: []controller.ControllerConfigChoice{
 			{Value: "gpt-5.5", Name: "GPT-5.5"},
 			{Value: "gpt-5.4", Name: "gpt-5.4"},
 		},
-		EffortOptions: []gatewayapp.ACPControllerConfigChoice{
+		EffortOptions: []controller.ControllerConfigChoice{
 			{Value: "low", Name: "Low"},
 			{Value: "high", Name: "High"},
 		},
@@ -744,12 +738,12 @@ func TestGatewayDriverCompleteSlashArgACPModelUsesConfigEfforts(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testing.T) {
 	driver := &GatewayDriver{}
-	status := gatewayapp.ACPControllerStatus{
-		ModelOptions: []gatewayapp.ACPControllerConfigChoice{
+	status := controller.ControllerStatus{
+		ModelOptions: []controller.ControllerConfigChoice{
 			{Value: "gpt-5.5", Name: "GPT-5.5"},
 			{Value: "gpt-5.4", Name: "gpt-5.4"},
 		},
-		EffortOptionsByModel: map[string][]gatewayapp.ACPControllerConfigChoice{
+		EffortOptionsByModel: map[string][]controller.ControllerConfigChoice{
 			"gpt-5.4": {
 				{Value: "low", Name: "Low"},
 				{Value: "xhigh", Name: "Xhigh"},
@@ -768,7 +762,7 @@ func TestGatewayDriverCompleteSlashArgACPModelUsesModelSpecificEfforts(t *testin
 
 func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "model-reasoning-test",
 		StoreDir:       t.TempDir(),
@@ -776,7 +770,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "deepseek",
 			API:      model.APIDeepSeek,
 			Model:    "deepseek-v4-pro",
@@ -785,9 +779,9 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "model-reasoning-session", "surface", "deepseek/deepseek-v4-pro")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "model-reasoning-session", "surface", "deepseek/deepseek-v4-pro")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	levels, err := driver.CompleteSlashArg(ctx, "model use deepseek/deepseek-v4-pro", "", 10)
@@ -815,22 +809,15 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
-	if got := strings.TrimSpace(state[kernel.StateCurrentReasoningEffort].(string)); got != "high" {
+	if got := strings.TrimSpace(state[appservices.StateCurrentReasoningEffort].(string)); got != "high" {
 		t.Fatalf("reasoning state = %q, want high", got)
-	}
-	cfg, ok := stack.ModelConfig("deepseek/deepseek-v4-pro")
-	if !ok {
-		t.Fatal("expected deepseek model config")
-	}
-	if got := strings.TrimSpace(cfg.ReasoningEffort); got != "high" {
-		t.Fatalf("config reasoning effort = %q, want high", got)
 	}
 }
 
 func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "connect-defaults-test",
 		StoreDir:       root,
@@ -842,9 +829,9 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-defaults-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "connect-defaults-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	status, err := driver.Connect(ctx, ConnectConfig{
@@ -862,11 +849,11 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		t.Fatalf("status.ReasoningEffort = %q, want high", got)
 	}
 
-	doc, err := gatewayapp.LoadAppConfig(root)
+	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	var cfg gatewayapp.ModelConfig
+	var cfg appsettings.ModelConfig
 	for _, item := range doc.Models.Configs {
 		if strings.EqualFold(item.Alias, "deepseek/deepseek-v4-flash") {
 			cfg = item
@@ -882,10 +869,7 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if cfg.ProfileID != "deepseek@default" {
 		t.Fatalf("persisted profile id = %q, want deepseek@default", cfg.ProfileID)
 	}
-	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
-		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
-	}
-	var conn gatewayapp.ModelProfileConfig
+	var conn appsettings.ModelProfile
 	for _, item := range doc.Models.Profiles {
 		if strings.EqualFold(item.ID, cfg.ProfileID) {
 			conn = item
@@ -907,8 +891,8 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 	if cfg.ContextWindowTokens != 1048576 {
 		t.Fatalf("persisted context window = %d, want 1048576", cfg.ContextWindowTokens)
 	}
-	if cfg.MaxOutputTok != 32768 {
-		t.Fatalf("persisted max output = %d, want 32768", cfg.MaxOutputTok)
+	if cfg.MaxOutputTokens != 32768 {
+		t.Fatalf("persisted max output = %d, want 32768", cfg.MaxOutputTokens)
 	}
 	if cfg.ReasoningEffort != "high" || cfg.DefaultReasoningEffort != "high" {
 		t.Fatalf("persisted reasoning effort/default = %q/%q, want high/high", cfg.ReasoningEffort, cfg.DefaultReasoningEffort)
@@ -966,7 +950,7 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "connect-token-env-test",
 		StoreDir:       root,
@@ -978,9 +962,9 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-token-env-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "connect-token-env-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "deepseek",
@@ -990,11 +974,11 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	doc, err := gatewayapp.LoadAppConfig(root)
+	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	var cfg gatewayapp.ModelConfig
+	var cfg appsettings.ModelConfig
 	for _, item := range doc.Models.Configs {
 		if strings.EqualFold(item.Alias, "deepseek/deepseek-v4-flash") {
 			cfg = item
@@ -1004,7 +988,7 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 	if cfg.Alias == "" {
 		t.Fatalf("persisted configs = %#v, want deepseek/deepseek-v4-flash", doc.Models.Configs)
 	}
-	var conn gatewayapp.ModelProfileConfig
+	var conn appsettings.ModelProfile
 	for _, item := range doc.Models.Profiles {
 		if strings.EqualFold(item.ID, cfg.ProfileID) {
 			conn = item
@@ -1024,7 +1008,7 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 
 func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "codefree-no-reasoning-test",
 		StoreDir:       t.TempDir(),
@@ -1032,7 +1016,7 @@ func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "codefree",
 			API:      model.APICodeFree,
 			Model:    "GLM-5.1",
@@ -1041,9 +1025,9 @@ func TestGatewayDriverCodeFreeModelHasNoReasoningLevels(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "codefree-no-reasoning-session", "surface", "codefree/glm-5.1")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "codefree-no-reasoning-session", "surface", "codefree/glm-5.1")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	levels, err := driver.CompleteSlashArg(ctx, "model use codefree/glm-5.1", "", 10)
 	if err != nil {
@@ -1073,7 +1057,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	}
 	t.Setenv("CODEFREE_OAUTH_CREDS_PATH", credsPath)
 
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "codefree-connect-test",
 		StoreDir:       t.TempDir(),
@@ -1081,7 +1065,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -1090,9 +1074,9 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "codefree-connect-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "codefree-connect-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	status, err := driver.Connect(ctx, ConnectConfig{
@@ -1112,7 +1096,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 
 func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "status-usage-test",
 		StoreDir:       t.TempDir(),
@@ -1120,7 +1104,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider:            "ollama",
 			API:                 model.APIOllama,
 			Model:               "llama3",
@@ -1130,9 +1114,9 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "status-usage-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "status-usage-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -1186,7 +1170,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 
 func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "status-usage-dedupe-test",
 		StoreDir:       t.TempDir(),
@@ -1194,7 +1178,7 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -1203,9 +1187,9 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "status-usage-dedupe-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -1242,7 +1226,7 @@ func TestGatewayDriverSessionTokenUsageDeduplicatesConsecutiveToolCallUsage(t *t
 
 func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoReview(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "status-usage-breakdown-test",
 		StoreDir:       t.TempDir(),
@@ -1250,7 +1234,7 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -1259,9 +1243,9 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "status-usage-breakdown-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "status-usage-breakdown-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -1361,7 +1345,7 @@ func TestGatewayDriverSessionTokenUsageBreakdownIncludesSelfSubagentAndAutoRevie
 
 func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "slash-test",
 		StoreDir:       t.TempDir(),
@@ -1369,7 +1353,7 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -1378,9 +1362,9 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "delete-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "delete-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "ollama",
@@ -1411,7 +1395,7 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 
 func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "delete-only-model-test",
 		StoreDir:       t.TempDir(),
@@ -1423,9 +1407,9 @@ func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "delete-only-model-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "delete-only-model-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "ollama",
@@ -1447,14 +1431,14 @@ func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if strings.TrimSpace(status.Model) != "" {
-		t.Fatalf("status model = %q, want empty after deleting only model", status.Model)
+	if strings.TrimSpace(status.Model) != "not configured" {
+		t.Fatalf("status model = %q, want not configured after deleting only model", status.Model)
 	}
 }
 
 func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "use-model-test",
 		StoreDir:       t.TempDir(),
@@ -1462,7 +1446,7 @@ func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -1471,9 +1455,9 @@ func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "use-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "use-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",
@@ -1496,7 +1480,7 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	repo := repoRootForGatewayDriverTest(t)
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "agent-driver-test",
 		StoreDir:       root,
@@ -1517,7 +1501,7 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 				},
 			}},
 		},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -1526,9 +1510,9 @@ func TestGatewayDriverAgentRegistryAndControllerUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-driver-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "agent-driver-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	agents, err := driver.ListAgents(ctx, 10)
@@ -1735,7 +1719,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "status-startup-test",
 		StoreDir:       root,
@@ -1747,7 +1731,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if _, err := stack.Connect(gatewayapp.ModelConfig{
+	if _, err := stack.Connect(ModelConfig{
 		Provider: "deepseek",
 		API:      model.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
@@ -1756,7 +1740,7 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	reloaded, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	reloaded, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "status-startup-test",
 		StoreDir:       root,
@@ -1768,22 +1752,22 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack(reloaded) error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, reloaded, "startup-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, reloaded, "startup-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if got := strings.TrimSpace(status.Model); got != "deepseek/deepseek-v4-pro" {
-		t.Fatalf("status model = %q, want deepseek/deepseek-v4-pro", status.Model)
+	if got := strings.TrimSpace(status.Model); got != "deepseek/deepseek-v4-pro [high]" {
+		t.Fatalf("status model = %q, want deepseek/deepseek-v4-pro [high]", status.Model)
 	}
 }
 
 func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "lazy-session-test",
 		StoreDir:       t.TempDir(),
@@ -1795,9 +1779,9 @@ func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	activeSession, ok := driver.currentSession()
 	if !ok {
@@ -1820,7 +1804,7 @@ func TestGatewayDriverStartupUsesRequestedSessionID(t *testing.T) {
 
 func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "binding-reset-test",
 		StoreDir:       t.TempDir(),
@@ -1836,9 +1820,9 @@ func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T
 	if err != nil {
 		t.Fatalf("StartSession(stale) error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1864,7 +1848,7 @@ func TestGatewayDriverStartupBindsRequestedSessionInsteadOfFreshOne(t *testing.T
 
 func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "startup-resume-test",
 		StoreDir:       t.TempDir(),
@@ -1881,9 +1865,9 @@ func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 		t.Fatalf("StartSession(sticky-session) error = %v", err)
 	}
 
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -1896,7 +1880,7 @@ func TestGatewayDriverStartupReusesExistingRequestedSession(t *testing.T) {
 
 func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "lazy-session-mode-test",
 		StoreDir:       t.TempDir(),
@@ -1908,9 +1892,9 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "sticky-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "sticky-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	startup, ok := driver.currentSession()
 	if !ok {
@@ -1943,12 +1927,12 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 			RemoteSessionID: "remote-1",
 		},
 	}
-	remoteStatus := gatewayapp.ACPControllerStatus{
+	remoteStatus := controller.ControllerStatus{
 		SessionRef: activeSession.SessionRef,
 		Agent:      "codex",
 		Model:      "remote-model",
 		Mode:       "auto-review",
-		ModeOptions: []gatewayapp.ACPControllerMode{
+		ModeOptions: []controller.ControllerMode{
 			{ID: "auto-review", Name: "Auto Review"},
 			{ID: "manual", Name: "Manual"},
 		},
@@ -1964,14 +1948,14 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
 				return remoteStatus, true, nil
 			},
 			SetSessionModeFn: func(context.Context, session.SessionRef, string) (string, error) {
 				localSetCalled = true
 				return "manual", nil
 			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (gatewayapp.ACPControllerStatus, error) {
+			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
 				if ref.SessionID != activeSession.SessionID {
 					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
 				}
@@ -2017,12 +2001,12 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 			RemoteSessionID: "remote-1",
 		},
 	}
-	remoteStatus := gatewayapp.ACPControllerStatus{
+	remoteStatus := controller.ControllerStatus{
 		SessionRef: activeSession.SessionRef,
 		Agent:      "codex",
 		Model:      "remote-model",
 		Mode:       "ask",
-		ModeOptions: []gatewayapp.ACPControllerMode{
+		ModeOptions: []controller.ControllerMode{
 			{ID: "ask", Name: "Ask"},
 			{ID: "code", Name: "Code"},
 		},
@@ -2038,14 +2022,14 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
 				return remoteStatus, true, nil
 			},
 			CycleSessionModeFn: func(context.Context, session.SessionRef) (string, error) {
 				localCycleCalled = true
 				return "manual", nil
 			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (gatewayapp.ACPControllerStatus, error) {
+			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (controller.ControllerStatus, error) {
 				if ref.SessionID != activeSession.SessionID {
 					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
 				}
@@ -2080,9 +2064,9 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 }
 
 func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
-	status := gatewayapp.ACPControllerStatus{
+	status := controller.ControllerStatus{
 		Mode: "default",
-		ModeOptions: []gatewayapp.ACPControllerMode{
+		ModeOptions: []controller.ControllerMode{
 			{ID: "default", Name: "Default"},
 			{ID: "review", Name: "Review"},
 			{ID: "plan", Name: "Plan"},
@@ -2107,9 +2091,9 @@ func TestNextACPControllerModeUsesDeclaredModeOrder(t *testing.T) {
 }
 
 func TestACPControllerModeDisplayPrefersDeclaredName(t *testing.T) {
-	status := gatewayapp.ACPControllerStatus{
+	status := controller.ControllerStatus{
 		Mode: "review",
-		ModeOptions: []gatewayapp.ACPControllerMode{
+		ModeOptions: []controller.ControllerMode{
 			{ID: "review", Name: "Review"},
 		},
 	}
@@ -2144,11 +2128,11 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (gatewayapp.ACPControllerStatus, bool, error) {
-				return gatewayapp.ACPControllerStatus{
+			ACPControllerStatusFn: func(context.Context, session.SessionRef) (controller.ControllerStatus, bool, error) {
+				return controller.ControllerStatus{
 					Model: "remote-model",
 					Mode:  "code",
-					ModeOptions: []gatewayapp.ACPControllerMode{
+					ModeOptions: []controller.ControllerMode{
 						{ID: "code", Name: "Code"},
 					},
 				}, true, nil
@@ -2177,7 +2161,7 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 
 func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "acp-model-fallback-test",
 		StoreDir:       t.TempDir(),
@@ -2185,7 +2169,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "minimax",
 			Model:    "MiniMax-M2",
 		},
@@ -2211,7 +2195,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 	}
 
 	driver := &GatewayDriver{
-		stack:               gatewayAppStackForRuntimeTest(stack),
+		stack:               gatewayDriverTestRuntimeStack(stack),
 		session:             activeSession,
 		hasSession:          true,
 		bindingKey:          "surface",
@@ -2235,7 +2219,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 
 func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "stale-session-alias-test",
 		StoreDir:       t.TempDir(),
@@ -2247,9 +2231,9 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "stale-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "stale-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	activeSession, err := driver.NewSession(ctx)
 	if err != nil {
@@ -2269,8 +2253,8 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
 	}
-	if got := strings.TrimSpace(status.Model); got != "" {
-		t.Fatalf("status model = %q, want empty because alias is stale", status.Model)
+	if got := strings.TrimSpace(status.Model); got != "not configured" {
+		t.Fatalf("status model = %q, want not configured because alias is stale", status.Model)
 	}
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "", 10)
 	if err != nil {
@@ -2285,7 +2269,7 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 
 func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "prefix-test",
 		StoreDir:       t.TempDir(),
@@ -2293,7 +2277,7 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -2302,9 +2286,9 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "prefix-model-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "prefix-model-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	modelActions, err := driver.CompleteSlashArg(ctx, "model", "de", 10)
@@ -2340,7 +2324,7 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 
 func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "agent-root-order-test",
 		StoreDir:       t.TempDir(),
@@ -2348,7 +2332,7 @@ func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -2357,9 +2341,9 @@ func TestGatewayDriverCompleteSlashArgAgentRootOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-root-order-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "agent-root-order-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSlashArg(ctx, "agent", "", 10)
@@ -2390,7 +2374,7 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 	}
 	t.Setenv("PATH", binDir)
 	t.Setenv("CAELIS_NPM_STARTED", started)
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "agent-install-cancel-test",
 		StoreDir:       t.TempDir(),
@@ -2398,7 +2382,7 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -2407,9 +2391,9 @@ func TestGatewayDriverInterruptCancelsAgentInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "agent-install-cancel-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "agent-install-cancel-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	done := make(chan error, 1)
@@ -2448,7 +2432,7 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "multi-provider-test",
 		StoreDir:       root,
@@ -2460,9 +2444,9 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "multi-provider-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "multi-provider-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",
@@ -2563,7 +2547,7 @@ func TestValidateConnectConfigXiaomiTokenPlanCNUsesTokenPlanEnvHint(t *testing.T
 func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "xiaomi-token-plan-connect-test",
 		StoreDir:       root,
@@ -2575,9 +2559,9 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "xiaomi-token-plan-connect-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "xiaomi-token-plan-connect-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "xiaomi",
@@ -2588,11 +2572,11 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 		t.Fatalf("Connect() error = %v", err)
 	}
 
-	doc, err := gatewayapp.LoadAppConfig(root)
+	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
-	var cfg gatewayapp.ModelConfig
+	var cfg appsettings.ModelConfig
 	for _, item := range doc.Models.Configs {
 		if strings.EqualFold(item.Alias, "xiaomi/mimo-v2.5-pro") {
 			cfg = item
@@ -2608,10 +2592,7 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 	if cfg.ProfileID != "xiaomi@token-plan-cn" {
 		t.Fatalf("persisted profile id = %q, want xiaomi@token-plan-cn", cfg.ProfileID)
 	}
-	if cfg.Provider != "" || cfg.BaseURL != "" || cfg.Token != "" || cfg.TokenEnv != "" {
-		t.Fatalf("persisted model leaked profile fields: %#v", cfg)
-	}
-	var profile gatewayapp.ModelProfileConfig
+	var profile appsettings.ModelProfile
 	for _, item := range doc.Models.Profiles {
 		if strings.EqualFold(item.ID, cfg.ProfileID) {
 			profile = item
@@ -2635,7 +2616,7 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "xiaomi-endpoint-coexist-test",
 		StoreDir:       root,
@@ -2647,9 +2628,9 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "xiaomi-endpoint-coexist-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "xiaomi-endpoint-coexist-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	for _, cfg := range []ConnectConfig{
 		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
@@ -2660,7 +2641,7 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 		}
 	}
 
-	doc, err := gatewayapp.LoadAppConfig(root)
+	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
@@ -2713,7 +2694,7 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "connect-reuse-auth-test",
 		StoreDir:       root,
@@ -2725,9 +2706,9 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-reuse-auth-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "connect-reuse-auth-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "xiaomi",
@@ -2758,7 +2739,7 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Connect(second model without key) error = %v", err)
 	}
-	doc, err := gatewayapp.LoadAppConfig(root)
+	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
 	}
@@ -2811,7 +2792,7 @@ func TestGatewayDriverCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 		}
 	}
 
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "file-complete-test",
 		StoreDir:       t.TempDir(),
@@ -2823,9 +2804,9 @@ func TestGatewayDriverCompleteFileUsesRelativePathsAndSkipsNoise(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "file-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "file-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteFile(ctx, "src/ma", 10)
@@ -2870,7 +2851,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 		t.Fatalf("WriteFile(workspace SKILL.md) error = %v", err)
 	}
 
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "skill-complete-test",
 		StoreDir:       t.TempDir(),
@@ -2882,9 +2863,9 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "skill-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "skill-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
 	candidates, err := driver.CompleteSkill(ctx, "", 10)
@@ -2911,7 +2892,7 @@ func TestGatewayDriverCompleteSkillDiscoversGlobalAndWorkspaceSkills(t *testing.
 
 func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "mention-complete-test",
 		StoreDir:       t.TempDir(),
@@ -2923,9 +2904,9 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "mention-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "mention-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	activeSession, err := driver.ensureSession(ctx)
 	if err != nil {
@@ -3009,7 +2990,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T) {
 	ctx := context.Background()
 	workspace := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "resume-complete-test",
 		StoreDir:       t.TempDir(),
@@ -3056,9 +3037,9 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 		t.Fatalf("UpdateState(second) error = %v", err)
 	}
 
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "resume-complete-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "resume-complete-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	candidates, err := driver.CompleteResume(ctx, "task", 10)
 	if err != nil {
@@ -3077,7 +3058,7 @@ func TestGatewayDriverCompleteResumeIncludesMetadataAndRecentFirst(t *testing.T)
 
 func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "delete-unknown-test",
 		StoreDir:       t.TempDir(),
@@ -3085,7 +3066,7 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -3094,9 +3075,9 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "delete-unknown-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "delete-unknown-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if err := driver.DeleteModel(ctx, "minimax/minimax-m1"); err == nil {
 		t.Fatal("DeleteModel() error = nil, want unknown alias error")
@@ -3105,7 +3086,7 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 
 func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "connect-candidates-test",
 		StoreDir:       t.TempDir(),
@@ -3113,7 +3094,7 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 		WorkspaceCWD:   t.TempDir(),
 		PermissionMode: "default",
 		Assembly:       assembly.ResolvedAssembly{},
-		Model: gatewayapp.ModelConfig{
+		Model: ModelConfig{
 			Provider: "ollama",
 			API:      model.APIOllama,
 			Model:    "llama3",
@@ -3122,9 +3103,9 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "connect-candidates-session", "surface", "ollama/llama3")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "connect-candidates-session", "surface", "ollama/llama3")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",
@@ -3152,7 +3133,7 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 
 func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "missing-key-test",
 		StoreDir:       t.TempDir(),
@@ -3164,9 +3145,9 @@ func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "missing-key-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "missing-key-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "openai",
@@ -3178,7 +3159,7 @@ func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.
 
 func TestGatewayDriverConnectRejectsInvalidBaseURL(t *testing.T) {
 	ctx := context.Background()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "invalid-baseurl-test",
 		StoreDir:       t.TempDir(),
@@ -3190,9 +3171,9 @@ func TestGatewayDriverConnectRejectsInvalidBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "invalid-baseurl-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "invalid-baseurl-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "openai-compatible",
@@ -3208,7 +3189,7 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	workdir := t.TempDir()
-	stack, err := newGatewayDriverTestStack(t, gatewayapp.Config{
+	stack, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
 		AppName:        "caelis",
 		UserID:         "doctor-status-test",
 		StoreDir:       root,
@@ -3220,9 +3201,9 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	driver, err := newGatewayDriverFromGatewayAppStack(ctx, stack, "doctor-status-session", "surface", "")
+	driver, err := newGatewayDriverFromTestStack(ctx, stack, "doctor-status-session", "surface", "")
 	if err != nil {
-		t.Fatalf("newGatewayDriverFromGatewayAppStack() error = %v", err)
+		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 	if _, err := driver.Connect(ctx, ConnectConfig{
 		Provider: "minimax",

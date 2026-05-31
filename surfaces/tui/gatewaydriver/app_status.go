@@ -45,6 +45,10 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 	modeID := firstNonEmpty(view.Mode.Current.ID, liveSessionMode, "auto-review")
 	modeLabel := firstNonEmpty(view.Mode.Current.Name, modeID)
 	sandboxType := firstNonEmpty(view.Runtime.SandboxBackend, liveSandboxType, "auto")
+	inputTokens := view.Usage.ContextBudget.EstimatedInputTokens
+	if inputTokens < view.Usage.Total.TotalTokens {
+		inputTokens = view.Usage.Total.TotalTokens
+	}
 	route := ""
 	if strings.EqualFold(strings.TrimSpace(sandboxType), "host") {
 		route = "host"
@@ -56,6 +60,7 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		ReasoningEffort:          reasoning,
 		Provider:                 provider,
 		ModelName:                modelName,
+		MissingAPIKey:            view.Model.MissingAPIKey,
 		ModeLabel:                modeLabel,
 		SessionMode:              modeID,
 		StoreDir:                 firstNonEmpty(view.Runtime.StoreURI, view.Runtime.StoreBackend),
@@ -75,6 +80,9 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		SessionOutputTokens:      view.Usage.Total.OutputTokens,
 		SessionReasoningTokens:   view.Usage.Total.ReasoningTokens,
 		SessionTotalTokens:       view.Usage.Total.TotalTokens,
+		PromptTokens:             inputTokens,
+		TotalTokens:              inputTokens,
+		ContextWindowTokens:      view.Usage.ContextBudget.ContextWindowTokens,
 	}
 	if sandboxStatus := d.stack.SandboxStatus(); sandboxStatus.RequestedBackend != "" || sandboxStatus.ResolvedBackend != "" || sandboxStatus.Route != "" {
 		status.SandboxRequestedBackend = firstNonEmpty(sandboxStatus.RequestedBackend, status.SandboxRequestedBackend)
