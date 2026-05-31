@@ -251,7 +251,7 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 	}}
 	var activeSubmits []SubmitActiveTurnRequest
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Workspace:       coresession.Workspace{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
 		ActiveTurnsFn:   func() []ActiveTurnState { return active },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
@@ -300,7 +300,7 @@ func TestGatewayDriverExecuteCommandRoutesThroughStackAndAdoptsReturnedSession(t
 	}
 	var calls []commandCall
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: workspace},
+		Workspace: coresession.Workspace{Key: "ws", CWD: workspace},
 		ExecuteCommandFn: func(_ context.Context, ref coresession.Ref, input string, parts []coremodel.ContentPart) (CommandExecutionView, error) {
 			calls = append(calls, commandCall{
 				ref:   ref,
@@ -360,7 +360,7 @@ func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 		CWD: t.TempDir(),
 	}
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Workspace: coresession.Workspace{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus {
 			statusCalls++
 			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
@@ -385,7 +385,7 @@ func TestGatewayDriverLightweightStatusSkipsSandboxDiagnostics(t *testing.T) {
 	sandboxCalls := 0
 	doctorCalls := 0
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: session.WorkspaceRef{Key: "ws", CWD: t.TempDir()},
+		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
 		DefaultModelAliasFn: func() string {
 			return "gpt-light"
 		},
@@ -431,7 +431,7 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 	var seenRef coresession.Ref
 	statusCalls := 0
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace: session.WorkspaceRef{Key: "repo", CWD: workspace},
+		Workspace: coresession.Workspace{Key: "repo", CWD: workspace},
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
 			return coreSessionFromPort(activeSession), nil
 		},
@@ -522,7 +522,7 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 	var activeSubmits []SubmitActiveTurnRequest
 	var beginCalls int
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
-		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
+		Workspace:       coresession.Workspace{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
 		ActiveTurnsFn:   func() []ActiveTurnState { return active },
 		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
@@ -897,7 +897,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if !ok {
 		t.Fatal("driver has no current session")
 	}
-	state, err := stack.Sessions.SnapshotState(ctx, activeSession.SessionRef)
+	state, err := stack.Sessions.SnapshotState(ctx, portRefFromCore(activeSession.Ref))
 	if err != nil {
 		t.Fatalf("SnapshotState() error = %v", err)
 	}
@@ -1215,7 +1215,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 		t.Fatal("expected active session")
 	}
 	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: activeSession.SessionRef,
+		SessionRef: portRefFromCore(activeSession.Ref),
 		Event: &session.Event{
 			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleUser, "hello")),
 			Text:    "hello",
@@ -1224,7 +1224,7 @@ func TestGatewayDriverStatusIncludesContextUsageSnapshot(t *testing.T) {
 		t.Fatalf("AppendEvent(user) error = %v", err)
 	}
 	if _, err := stack.Sessions.AppendEvent(ctx, session.AppendEventRequest{
-		SessionRef: activeSession.SessionRef,
+		SessionRef: portRefFromCore(activeSession.Ref),
 		Event: &session.Event{
 			Message: ptrRuntimeMessage(model.NewTextMessage(model.RoleAssistant, "world")),
 			Text:    "world",
@@ -1854,7 +1854,7 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 	var setRemoteMode string
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace: session.WorkspaceRef{CWD: activeSession.CWD},
+			Workspace: coresession.Workspace{CWD: activeSession.CWD},
 			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
@@ -1874,7 +1874,7 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 				return remoteStatus, nil
 			},
 		},
-		session:            activeSession,
+		session:            coreSessionFromPort(activeSession),
 		hasSession:         true,
 		bindingKey:         "surface",
 		defaultSessionMode: "auto-review",
@@ -1924,7 +1924,7 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 	var setRemoteMode string
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace: session.WorkspaceRef{CWD: activeSession.CWD},
+			Workspace: coresession.Workspace{CWD: activeSession.CWD},
 			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
@@ -1944,7 +1944,7 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 				return remoteStatus, nil
 			},
 		},
-		session:            activeSession,
+		session:            coreSessionFromPort(activeSession),
 		hasSession:         true,
 		bindingKey:         "surface",
 		defaultSessionMode: "auto-review",
@@ -2025,7 +2025,7 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 	}
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace:           session.WorkspaceRef{CWD: activeSession.CWD},
+			Workspace:           coresession.Workspace{CWD: activeSession.CWD},
 			DefaultModelAliasFn: func() string { return "local/model" },
 			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
@@ -2040,7 +2040,7 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 				}, true, nil
 			},
 		},
-		session:            activeSession,
+		session:            coreSessionFromPort(activeSession),
 		hasSession:         true,
 		defaultSessionMode: "local-default",
 		sessionMode:        "local-default",
@@ -2097,7 +2097,7 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 
 	driver := &GatewayDriver{
 		stack:              gatewayDriverTestRuntimeStack(stack),
-		session:            activeSession,
+		session:            coreSessionFromPort(activeSession),
 		hasSession:         true,
 		bindingKey:         "surface",
 		defaultSessionMode: "default",
@@ -2813,7 +2813,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		t.Fatalf("ensureSession() error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: activeSession.SessionRef,
+		SessionRef: portRefFromCore(activeSession.Ref),
 		Binding: session.ParticipantBinding{
 			ID:           "side-1",
 			Kind:         session.ParticipantKindACP,
@@ -2828,7 +2828,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		t.Fatalf("PutParticipant(side) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: activeSession.SessionRef,
+		SessionRef: portRefFromCore(activeSession.Ref),
 		Binding: session.ParticipantBinding{
 			ID:           "legacy-side-1",
 			Kind:         session.ParticipantKindSubagent,
@@ -2842,7 +2842,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		t.Fatalf("PutParticipant(legacy-side) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: activeSession.SessionRef,
+		SessionRef: portRefFromCore(activeSession.Ref),
 		Binding: session.ParticipantBinding{
 			ID:           "task-1",
 			Kind:         session.ParticipantKindSubagent,
@@ -2855,7 +2855,7 @@ func TestGatewayDriverCompleteMentionReturnsACPSidecarsOnly(t *testing.T) {
 		t.Fatalf("PutParticipant(delegated) error = %v", err)
 	}
 	if _, err := stack.Sessions.PutParticipant(ctx, session.PutParticipantRequest{
-		SessionRef: activeSession.SessionRef,
+		SessionRef: portRefFromCore(activeSession.Ref),
 		Binding: session.ParticipantBinding{
 			ID:           "self-001",
 			Kind:         session.ParticipantKindSubagent,
@@ -3138,7 +3138,7 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 	activeSession := session.Session{SessionRef: session.SessionRef{SessionID: "grant-session"}}
 	driver := &GatewayDriver{
 		stack: &DriverStack{
-			Workspace: session.WorkspaceRef{CWD: "/workspace"},
+			Workspace: coresession.Workspace{CWD: "/workspace"},
 			DoctorFn: func(context.Context, DoctorRequest) (DoctorReport, error) {
 				return DoctorReport{
 					SessionID:                "grant-session",
@@ -3148,7 +3148,7 @@ func TestGatewayDriverStatusIncludesPermissionGrantSummary(t *testing.T) {
 				}, nil
 			},
 		},
-		session:    activeSession,
+		session:    coreSessionFromPort(activeSession),
 		hasSession: true,
 	}
 	status, err := driver.Status(ctx)

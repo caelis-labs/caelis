@@ -9,13 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 const appTranscriptBatchInterval = 16 * time.Millisecond
@@ -106,10 +104,7 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 		if batcher != nil {
 			batcher.flush(send)
 		}
-		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
-		if ok && converted.Err != nil {
-			send(converted)
-		}
+		send(TaskResultMsg{Err: fmt.Errorf("%s", strings.TrimSpace(env.Error))})
 		return
 	}
 	if transcriptEvents := ProjectSessionEventEnvelopeToTranscriptEvents(env); len(transcriptEvents) > 0 {
@@ -123,62 +118,6 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 		}
 		sendApprovalItemPrompt(ctx, turn, env.Approval, send)
 		return
-	}
-	if !appSessionEnvelopeNeedsGatewayCompatibility(env) {
-		return
-	}
-	converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
-	if !ok {
-		return
-	}
-	if converted.Err != nil {
-		if batcher != nil {
-			batcher.flush(send)
-		}
-		send(converted)
-		return
-	}
-	if msg, ok := gatewayApprovalReviewHintMsg(converted.Event); ok {
-		if batcher != nil {
-			batcher.flush(send)
-		}
-		send(msg)
-	}
-	if appSessionEnvelopeNeedsGatewayTranscriptFallback(env) {
-		if batcher != nil {
-			batcher.flush(send)
-		}
-		if transcriptEvents := ProjectGatewayEventToTranscriptEvents(converted.Event); len(transcriptEvents) > 0 {
-			send(TranscriptEventsMsg{Events: transcriptEvents})
-		}
-	}
-	if isApprovalGatewayEvent(converted.Event.Kind) && !isAutomaticApprovalEvent(converted.Event.ApprovalPayload) {
-		if batcher != nil {
-			batcher.flush(send)
-		}
-		sendApprovalPrompt(ctx, turn, converted.Event.ApprovalPayload, send)
-	}
-}
-
-func appSessionEnvelopeNeedsGatewayTranscriptFallback(env appviewmodel.SessionEventEnvelope) bool {
-	if env.Canonical == nil {
-		return false
-	}
-	switch env.Canonical.Type {
-	default:
-		return false
-	}
-}
-
-func appSessionEnvelopeNeedsGatewayCompatibility(env appviewmodel.SessionEventEnvelope) bool {
-	if env.Canonical == nil {
-		return false
-	}
-	switch env.Canonical.Type {
-	case coresession.EventToolCall, coresession.EventToolResult:
-		return true
-	default:
-		return false
 	}
 }
 

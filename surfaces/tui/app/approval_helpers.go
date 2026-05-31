@@ -4,12 +4,7 @@ import (
 	"strings"
 
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
-
-func approvalToPromptRequest(req *kernel.ApprovalPayload, response chan PromptResponse) PromptRequestMsg {
-	return approvalPromptRequest(approvalPromptDataFromKernel(req), response)
-}
 
 func approvalItemToPromptRequest(req *appviewmodel.ApprovalItem, response chan PromptResponse) PromptRequestMsg {
 	return approvalPromptRequest(approvalPromptDataFromItem(req), response)
@@ -80,38 +75,18 @@ func approvalPromptRequest(data approvalPromptData, response chan PromptResponse
 	return msg
 }
 
-func approvalPromptDataFromKernel(req *kernel.ApprovalPayload) approvalPromptData {
-	if req == nil {
-		return approvalPromptData{}
-	}
-	data := approvalPromptData{
-		ToolName:           strings.TrimSpace(req.ToolName),
-		Command:            approvalCommandPreview(req.RawInput),
-		Reason:             strings.TrimSpace(req.Reason),
-		Justification:      strings.TrimSpace(req.Justification),
-		SandboxPermissions: strings.TrimSpace(req.SandboxPermissions),
-		Risk:               strings.TrimSpace(req.Risk),
-		Options:            make([]approvalPromptOption, 0, len(req.Options)),
-	}
-	for _, opt := range req.Options {
-		data.Options = append(data.Options, approvalPromptOption{
-			ID:   strings.TrimSpace(opt.ID),
-			Name: strings.TrimSpace(opt.Name),
-			Kind: strings.TrimSpace(opt.Kind),
-		})
-	}
-	return data
-}
-
 func approvalPromptDataFromItem(req *appviewmodel.ApprovalItem) approvalPromptData {
 	if req == nil {
 		return approvalPromptData{}
 	}
 	data := approvalPromptData{
-		ToolName: strings.TrimSpace(req.Tool),
-		Command:  strings.TrimSpace(req.Command),
-		Reason:   strings.TrimSpace(req.Reason),
-		Options:  make([]approvalPromptOption, 0, len(req.Options)),
+		ToolName:           strings.TrimSpace(req.Tool),
+		Command:            strings.TrimSpace(req.Command),
+		Reason:             strings.TrimSpace(req.Reason),
+		Justification:      strings.TrimSpace(req.Justification),
+		SandboxPermissions: strings.TrimSpace(req.SandboxPermissions),
+		Risk:               strings.TrimSpace(req.Risk),
+		Options:            make([]approvalPromptOption, 0, len(req.Options)),
 	}
 	for _, opt := range req.Options {
 		data.Options = append(data.Options, approvalPromptOption{

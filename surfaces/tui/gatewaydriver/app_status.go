@@ -7,7 +7,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, bool, error) {
@@ -17,7 +16,7 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 	activeSession, hasSession := d.currentSession()
 	ref := coresession.Ref{}
 	if hasSession {
-		ref = coreRefFromPort(activeSession.SessionRef)
+		ref = activeSession.Ref
 	}
 	view, ok, err := d.stack.AppStatusView(ctx, ref)
 	if !ok || err != nil {
@@ -108,7 +107,7 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		status.SecuritySummary = firstNonEmpty(strings.TrimSpace(sandboxStatus.SecuritySummary), status.SecuritySummary)
 		status.HostExecution = strings.EqualFold(strings.TrimSpace(status.Route), "host")
 	}
-	if hasSession && activeSession.Controller.Kind == session.ControllerKindACP {
+	if hasSession && activeSession.Controller.Kind == coresession.ControllerACP {
 		acpStatus, activeACP, err := d.activeACPControllerStatus(ctx)
 		if err != nil {
 			return StatusSnapshot{}, false, err
@@ -139,7 +138,7 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 	active := d.stack.ActiveTurns()
 	status.ActiveJobs = len(active)
 	status.Running = len(active) > 0
-	if kind, ok := activeTurnKindForSession(active, coreRefFromPort(activeSession.SessionRef)); ok {
+	if kind, ok := activeTurnKindForSession(active, activeSession.Ref); ok {
 		status.ActiveTurnKind = string(kind)
 	}
 	return status, true, nil

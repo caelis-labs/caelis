@@ -99,6 +99,49 @@ func TestProjectCoreSessionEventToTranscriptEvents_ToolResultUsesCoreContent(t *
 	}
 }
 
+func TestProjectCoreSessionEventToTranscriptEvents_ProjectsAutoReviewApproval(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "approval-1",
+		SessionID: "root-session",
+		Type:      coresession.EventApproval,
+		Tool: &coresession.ToolEvent{
+			ID:    "call-1",
+			Name:  "RUN_COMMAND",
+			Input: map[string]any{"command": "rm -rf tmp"},
+		},
+		Approval: &coresession.ApprovalEvent{
+			ID:     "approval-call-1",
+			Status: coresession.ApprovalRejected,
+			Reason: "not narrow enough",
+		},
+		Meta: map[string]any{
+			"usage_category": "auto_review",
+			"approval_review": map[string]any{
+				"outcome":            "deny",
+				"risk_level":         "high",
+				"user_authorization": "low",
+				"rationale":          "not narrow enough",
+			},
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one approval review transcript event", events)
+	}
+	got := events[0]
+	if got.Kind != TranscriptEventApproval || got.ApprovalStatus != "denied" || got.ApprovalRisk != "high" || got.ApprovalAuth != "low" {
+		t.Fatalf("approval transcript = %#v, want denied high/low auto-review event", got)
+	}
+	if got.ToolCallID != "call-1" || got.ApprovalTool != "RUN_COMMAND" || !strings.Contains(got.ApprovalCommand, "rm -rf tmp") {
+		t.Fatalf("approval tool = %#v, want tool call details", got)
+	}
+	if !strings.Contains(got.ApprovalText, "Automatic approval review denied") || !strings.Contains(got.ApprovalText, "not narrow enough") {
+		t.Fatalf("approval text = %q, want compact auto-review text with rationale", got.ApprovalText)
+	}
+}
+
 func TestResumeSessionEventReplayTranscriptEventsUsesCoreEvents(t *testing.T) {
 	t.Parallel()
 

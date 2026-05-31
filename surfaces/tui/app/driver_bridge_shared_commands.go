@@ -7,9 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 type sharedCommandOptions struct {
@@ -76,9 +74,8 @@ func sendSharedCommandEvents(send func(tea.Msg), events []session.Event) {
 		if event.Type == "" {
 			continue
 		}
-		send(kernel.EventEnvelope{
-			Cursor: strings.TrimSpace(event.ID),
-			Event:  eventbridge.KernelEventFromCore(event),
-		})
+		if transcriptEvents := ProjectCoreSessionEventToTranscriptEvents(event); len(transcriptEvents) > 0 {
+			send(TranscriptEventsMsg{Events: transcriptEvents})
+		}
 	}
 }

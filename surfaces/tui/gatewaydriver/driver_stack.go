@@ -13,7 +13,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type BeginTurnRequest struct {
@@ -223,10 +222,9 @@ type CodeFreeAuthRequest struct {
 }
 
 type DriverStack struct {
-	Sessions  session.Service
 	AppName   string
 	UserID    string
-	Workspace session.WorkspaceRef
+	Workspace coresession.Workspace
 
 	StartSessionFn                     func(context.Context, string, string) (coresession.Session, error)
 	ResumeSessionFn                    func(context.Context, ResumeSessionRequest) (coresession.Session, error)

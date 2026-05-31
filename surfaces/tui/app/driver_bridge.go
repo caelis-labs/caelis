@@ -670,15 +670,6 @@ func approvalRawInputFromJSON(raw string) map[string]any {
 	return decoded
 }
 
-func sendApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *kernel.ApprovalPayload, send func(tea.Msg)) {
-	if turn == nil || req == nil || send == nil {
-		return
-	}
-	responses := make(chan PromptResponse, 1)
-	send(approvalToPromptRequest(req, responses))
-	go awaitApprovalPrompt(ctx, turn, req, responses, send)
-}
-
 func sendApprovalItemPrompt(ctx context.Context, turn tuidriver.Turn, req *appviewmodel.ApprovalItem, send func(tea.Msg)) {
 	if turn == nil || req == nil || send == nil {
 		return
@@ -697,10 +688,6 @@ func isAutomaticApprovalEvent(req *kernel.ApprovalPayload) bool {
 		strings.TrimSpace(req.ReviewID) != ""
 }
 
-func isApprovalGatewayEvent(kind kernel.EventKind) bool {
-	return kind == kernel.EventKindApprovalRequested || kind == kernel.EventKindApprovalReview
-}
-
 func automaticApprovalReviewDisplayText(req *kernel.ApprovalPayload) string {
 	if req == nil {
 		return ""
@@ -713,27 +700,6 @@ func automaticApprovalReviewDisplayText(req *kernel.ApprovalPayload) string {
 			return text
 		}
 		return ""
-	}
-}
-
-func awaitApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *kernel.ApprovalPayload, responses <-chan PromptResponse, send func(tea.Msg)) {
-	ctx = contextOrBackground(ctx)
-	var response PromptResponse
-	select {
-	case <-ctx.Done():
-		return
-	case next, ok := <-responses:
-		if !ok {
-			return
-		}
-		response = next
-	}
-	decision := approvalDecisionFromPrompt(req, response)
-	if err := turn.Submit(ctx, coreruntime.Submission{
-		Kind:     coreruntime.SubmissionApproval,
-		Approval: &decision,
-	}); err != nil {
-		sendNotice(send, fmt.Sprintf("approval submit failed: %v", err))
 	}
 }
 
@@ -756,10 +722,6 @@ func awaitApprovalItemPrompt(ctx context.Context, turn tuidriver.Turn, req *appv
 	}); err != nil {
 		sendNotice(send, fmt.Sprintf("approval submit failed: %v", err))
 	}
-}
-
-func approvalDecisionFromPrompt(req *kernel.ApprovalPayload, response PromptResponse) coreruntime.ApprovalDecision {
-	return approvalDecisionFromPromptOptions(approvalPromptDataFromKernel(req).Options, response)
 }
 
 func approvalDecisionFromPromptOptions(options []approvalPromptOption, response PromptResponse) coreruntime.ApprovalDecision {
@@ -1106,6 +1068,3 @@ func convertAttachments(items []Attachment) []tuidriver.Attachment {
 	}
 	return out
 }
-
-// Ensure gateway import is used.
-var _ kernel.EventEnvelope

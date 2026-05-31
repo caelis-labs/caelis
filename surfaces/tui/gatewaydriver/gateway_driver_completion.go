@@ -7,7 +7,6 @@ import (
 
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
@@ -17,7 +16,7 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	if !ok {
 		return []CompletionCandidate{}, nil
 	}
-	state, err := d.stack.ControlPlaneState(ctx, coreRefFromPort(activeSession.SessionRef))
+	state, err := d.stack.ControlPlaneState(ctx, activeSession.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -171,7 +170,7 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 func (d *GatewayDriver) completeTaskIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
 	var ref coresession.Ref
 	if active, ok := d.currentSession(); ok {
-		ref = coreRefFromPort(active.SessionRef)
+		ref = active.Ref
 	}
 	tasks, err := d.stack.ListTasks(ctx, ref, TaskListOptions{Limit: max(limit*4, limit), IncludeHistory: true})
 	if err != nil || !tasks.Supported {
@@ -331,13 +330,13 @@ func controllerCommandNames(commands []appviewmodel.ControllerCommand) []string 
 	return out
 }
 
-func acpControllerModelText(status appviewmodel.ControllerStatus, activeSession portsession.Session) string {
+func acpControllerModelText(status appviewmodel.ControllerStatus, activeSession coresession.Session) string {
 	return firstNonEmpty(
 		strings.TrimSpace(status.Model),
 		strings.TrimSpace(status.Agent),
 		strings.TrimSpace(activeSession.Controller.AgentName),
 		strings.TrimSpace(activeSession.Controller.Label),
-		strings.TrimSpace(activeSession.Controller.ControllerID),
+		strings.TrimSpace(activeSession.Controller.ID),
 	)
 }
 
@@ -460,7 +459,7 @@ func controllerChoicesToSlashCandidates(choices []appviewmodel.ControllerConfigC
 func (d *GatewayDriver) completeModelAliases(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
 	ref := coresession.Ref{}
 	if activeSession, ok := d.currentSession(); ok {
-		ref = coreRefFromPort(activeSession.SessionRef)
+		ref = activeSession.Ref
 	}
 	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {
@@ -577,7 +576,7 @@ func (d *GatewayDriver) completeAgentParticipants(ctx context.Context, query str
 	if !ok {
 		return nil, nil
 	}
-	state, err := d.stack.ControlPlaneState(ctx, coreRefFromPort(activeSession.SessionRef))
+	state, err := d.stack.ControlPlaneState(ctx, activeSession.Ref)
 	if err != nil {
 		return nil, err
 	}
@@ -754,7 +753,7 @@ func (d *GatewayDriver) resolveStoredModelAlias(ctx context.Context, input strin
 	}
 	ref := coresession.Ref{}
 	if activeSession, ok := d.currentSession(); ok {
-		ref = coreRefFromPort(activeSession.SessionRef)
+		ref = activeSession.Ref
 	}
 	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {

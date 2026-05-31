@@ -6,7 +6,6 @@ import (
 
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func (d *GatewayDriver) CommandCatalog(ctx context.Context) (appviewmodel.CommandCatalogView, error) {
@@ -28,7 +27,7 @@ func (d *GatewayDriver) ExecuteCommand(ctx context.Context, opts CommandExecutio
 	defer finish()
 	var ref coresession.Ref
 	if active, ok := d.currentSession(); ok {
-		ref = coreRefFromPort(active.SessionRef)
+		ref = active.Ref
 	}
 	parts, err := contentPartsFromSubmission(opts.Input, opts.Attachments, d.WorkspaceDir())
 	if err != nil {
@@ -39,19 +38,19 @@ func (d *GatewayDriver) ExecuteCommand(ctx context.Context, opts CommandExecutio
 		return CommandExecutionView{}, err
 	}
 	if view.SessionRef != nil {
-		d.setCurrentCommandSession(ctx, portRefFromCore(*view.SessionRef))
+		d.setCurrentCommandSession(ctx, *view.SessionRef)
 	}
 	d.syncCurrentCommandSessionEvents(view.Events)
 	return view, nil
 }
 
-func (d *GatewayDriver) setCurrentCommandSession(ctx context.Context, ref portsession.SessionRef) {
+func (d *GatewayDriver) setCurrentCommandSession(ctx context.Context, ref coresession.Ref) {
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return
 	}
-	active := portsession.Session{
-		SessionRef: ref,
-		CWD:        strings.TrimSpace(d.stack.Workspace.CWD),
+	active := coresession.Session{
+		Ref:       coresession.NormalizeRef(ref),
+		Workspace: d.stack.Workspace,
 	}
 	d.mu.Lock()
 	d.session = active
@@ -78,7 +77,7 @@ func (d *GatewayDriver) syncCurrentCommandSessionEvents(events []coresession.Eve
 	d.mu.Lock()
 	if d.hasSession {
 		active := d.session
-		active.Controller = portControllerFromCore(controller)
+		active.Controller = controller
 		d.session = active
 	}
 	d.mu.Unlock()

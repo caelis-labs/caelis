@@ -5,26 +5,27 @@ import (
 	"testing"
 
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
-	"github.com/OnslaughtSnail/caelis/kernel"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
 func TestApprovalToPromptRequestIncludesSandboxDetails(t *testing.T) {
 	t.Parallel()
 
-	msg := approvalToPromptRequest(&kernel.ApprovalPayload{
-		ToolName:           "RUN_COMMAND",
-		RawInput:           map[string]any{"command": "git fetch"},
+	msg := approvalItemToPromptRequest(&appviewmodel.ApprovalItem{
+		Tool:               "RUN_COMMAND",
+		Command:            "git fetch",
 		Reason:             "host execution requires user approval",
 		Justification:      "Do you want to run git fetch on the host?",
 		SandboxPermissions: "require_escalated",
-		Options: []kernel.ApprovalOption{
+		Options: []coresession.ApprovalOption{
 			{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		},
 	}, make(chan PromptResponse, 1))
 
 	for _, want := range []PromptDetail{
 		{Label: "Action", Value: "execute"},
-		{Label: "Command", Value: "command: git fetch", Emphasis: true},
+		{Label: "Command", Value: "git fetch", Emphasis: true},
 		{Label: "Reason", Value: "host execution requires user approval"},
 		{Label: "Justification", Value: "Do you want to run git fetch on the host?"},
 		{Label: "Sandbox", Value: "require_escalated"},
@@ -45,8 +46,8 @@ func TestAwaitApprovalPromptSubmitsCoreApprovalDecision(t *testing.T) {
 	turn := &bridgeTestTurn{}
 	responses := make(chan PromptResponse, 1)
 	responses <- PromptResponse{Line: "allow_once"}
-	awaitApprovalPrompt(context.Background(), turn, &kernel.ApprovalPayload{
-		Options: []kernel.ApprovalOption{
+	awaitApprovalItemPrompt(context.Background(), turn, &appviewmodel.ApprovalItem{
+		Options: []coresession.ApprovalOption{
 			{ID: "allow_once", Name: "Allow once", Kind: "allow_once"},
 		},
 	}, responses, nil)

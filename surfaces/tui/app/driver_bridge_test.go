@@ -1595,18 +1595,22 @@ func TestDynamicAgentSlashPrefersStructuredParticipantEvents(t *testing.T) {
 	for {
 		select {
 		case msg := <-msgs:
-			if transcript, ok := msg.(TranscriptEventsMsg); ok && transcriptEventsContainText(transcript.Events, "working") {
-				t.Fatalf("structured frame emitted fallback transcript text: %#v", transcript)
-			}
-			envMsg, ok := msg.(kernel.EventEnvelope)
+			transcript, ok := msg.(TranscriptEventsMsg)
 			if !ok {
 				continue
 			}
-			if envMsg.Event.ToolCall == nil || envMsg.Event.ToolCall.ToolName != "RUN_COMMAND" {
-				t.Fatalf("event envelope = %#v, want RUN_COMMAND tool call", envMsg)
+			if transcriptEventsContainText(transcript.Events, "working") {
+				t.Fatalf("structured frame emitted fallback transcript text: %#v", transcript)
 			}
-			if envMsg.Event.Origin == nil || envMsg.Event.Origin.Scope != kernel.EventScopeParticipant {
-				t.Fatalf("event origin = %#v, want dynamic side ACP participant scope", envMsg.Event.Origin)
+			if len(transcript.Events) != 1 || transcript.Events[0].Kind != TranscriptEventTool {
+				t.Fatalf("transcript events = %#v, want one tool event", transcript.Events)
+			}
+			event := transcript.Events[0]
+			if event.ToolName != "RUN_COMMAND" {
+				t.Fatalf("tool transcript = %#v, want RUN_COMMAND tool call", event)
+			}
+			if event.Scope != ACPProjectionParticipant {
+				t.Fatalf("tool transcript scope = %#v, want dynamic side ACP participant scope", event)
 			}
 			return
 		case <-deadline:

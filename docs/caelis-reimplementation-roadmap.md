@@ -614,13 +614,10 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   projection for TUI and future APP consumers. It wraps runtime replay and
   active-turn channels into surface-neutral event envelopes with transcript,
   approval, participant, lifecycle, and canonical event projections.
-- `surfaces/tui/eventbridge`: current TUI-local bridge from
-  `internal/app/viewmodel.SessionEventEnvelope` / `core/runtime.EventEnvelope`
-  to the existing gateway transcript event shape. This keeps the remaining
-  legacy TUI renderer adapter in one place, preserves core tool content when
-  projecting into transcript/tool-panel events, and prevents
-  `surfaces/tui/gatewaydriver` from owning canonical event semantics while the
-  full TUI surface split is still in progress.
+- `surfaces/tui/eventbridge`: retired production bridge kept only for residual
+  tests while the final old `kernel.EventEnvelope` renderer paths are removed.
+  Live and replaying app-service TUI paths now project app view-model/core
+  session events directly.
 - `internal/app/services.SettingsService`: shared settings contract for
   runtime identity, store, sandbox, sandbox backend, and compaction policy
   mutations. It persists through the app settings manager and updates the
@@ -979,13 +976,12 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared TUI/APP view-model projection for transcript, current plan, pending
   approvals, participants, and runtime/session/model/mode/agent/resource status,
   including store identity for read-only diagnostic displays.
-- TUI app-service event bridge cleanup: core/app event to current transcript
-  gateway projection now lives in `surfaces/tui/eventbridge`, and core
-  `session.ToolEvent.Content` is preserved as ACP-compatible tool content for
-  existing TUI transcript and tool-panel rendering. The current Bubble Tea
-  live-turn and `/resume` bridge now consumes
-  `internal/app/viewmodel.SessionEventEnvelope` directly instead of keeping
-  `kernel.EventEnvelope` live/replay fallback entrypoints.
+- TUI app-service event bridge cleanup: Bubble Tea live-turn, dynamic
+  participant command, shared-command event, and `/resume` paths now consume
+  `internal/app/viewmodel.SessionEventEnvelope` or canonical
+  `core/session.Event` directly. Core `session.ToolEvent.Content` is preserved
+  for existing transcript/tool-panel rendering without routing through
+  gatewaydriver-local projection details.
 - Core-native ACP server for initialize, session/new, session/prompt,
   session/list, session/load, session/resume, session/close, cancel,
   `session/update`, and permission request bridging. It also exposes configured
@@ -1324,11 +1320,10 @@ be migrated before retiring the old stack:
      rendering remain surface-local, but the model-visible prompt content
      contract is no longer owned by the old port package.
    - Migrated baseline: core/app session event projection for the app-service
-     TUI binding has been centralized in `surfaces/tui/eventbridge` instead of
-     living inside `surfaces/tui/gatewaydriver`. The bridge now carries
-     canonical core tool content into the existing transcript/tool-panel
-     renderer, so service-native shell/task/filesystem results do not depend on
-     gatewaydriver-local projection details.
+     TUI binding now lives in the app view-model/core-session transcript
+     projector instead of inside `surfaces/tui/gatewaydriver`. Service-native
+     shell/task/filesystem, participant, and approval-review results no longer
+     depend on gatewaydriver-local projection details.
    - Migrated baseline: TUI sandbox setup display state now uses
      `core/sandbox.SetupStatus` through the driver and gatewaydriver status
      path. This removes a display-only dependency on the old sandbox port while
@@ -1397,9 +1392,10 @@ be migrated before retiring the old stack:
      turns and dynamic external-ACP participant turns. The Bubble Tea bridge
      projects canonical `core/session.Event` values directly into
      `TranscriptEventsMsg`, with transcript-level batching for UI-only
-     reasoning/assistant deltas. Conversion to the current gateway envelope
-     shape is now limited to residual boundary helpers such as errors and
-     approval-review/tool compatibility hints.
+     reasoning/assistant deltas. App-service live errors, manual approval
+     prompts, tool events, participant events, and automatic approval-review
+     results are now handled from the app view-model/core-session contract
+     without converting back through old gateway envelopes.
    - Migrated baseline: the production app-service TUI submit and side-agent
      continuation paths now bypass the old `GatewayService` turn envelope and
      return core-native `tuidriver.Turn` handles directly. These handles keep
@@ -1418,8 +1414,10 @@ be migrated before retiring the old stack:
      surface and `kernel.SubmitRequest` conversion have been removed from
      `surfaces/tui/gatewaydriver`.
    - Migrated baseline: the TUI driver session contract now returns
-     `core/session` session/ref values; old `ports/session` session conversion
-     is contained in the gatewaydriver compatibility boundary.
+     `core/session` session/ref values, and the production gatewaydriver keeps
+     its current session state as `core/session.Session`. Session-bound status,
+     command, model, mode, compaction, replay, task, and control-plane hooks no
+     longer convert through old `ports/session` structs.
    - Migrated baseline: TUI `/resume` and resume completion now use
      core-native driver hooks backed by `internal/app/services.Sessions()`.
      Session list candidates are built from `core/session.SessionPage` and
@@ -1436,14 +1434,9 @@ be migrated before retiring the old stack:
      gateway streams.
    - Migrated baseline: app-service TUI approval prompts now consume
      `internal/app/viewmodel.ApprovalItem` directly and submit
-     `core/runtime` approval decisions. Converting core approval events into
-     old `kernel.ApprovalPayload` is limited to residual gateway-envelope
-     compatibility helpers.
-   - Migrated baseline: the gatewaydriver app-service callback facade now uses
-     `core/session.Ref` and `core/session.Session` for session-bound status,
-     command, model, mode, compaction, replay, and task hooks. Conversion to
-     old `ports/session` structs is contained at the legacy gateway and driver
-     state boundary.
+     `core/runtime` approval decisions. The shared approval view model carries
+     command, sandbox-permission, justification, risk, and option data so TUI
+     and the future APP can render the same prompt without `kernel.ApprovalPayload`.
    - Migrated baseline: TUI status no longer has a parallel legacy
      `ports/session` usage replay parser in gatewaydriver. Session usage shown
      by the app-service path comes from the shared core-session status
@@ -1461,12 +1454,11 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: `surfaces/tui/gatewaydriver` still carries residual
-     `ports/session` state conversion around the current TUI shell, and
-     `surfaces/tui/app` still imports old gateway event/protocol types for
-     transcript renderer compatibility, terminal/tool formatting, and
-     participant projections. Retiring those imports requires moving the
-     remaining TUI bridge protocol to `core/runtime`, `core/session`, and
+   - Still pending: `surfaces/tui/app` still retains old
+     `kernel.EventEnvelope` dispatch/projection code for transcript renderer
+     compatibility and terminal/tool formatting tests. Retiring those imports
+     requires finishing the remaining renderer protocol move to
+     `core/runtime`, `core/session`, ACP schema content, and
      `internal/app/viewmodel`.
 
 3. Future APP surface

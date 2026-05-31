@@ -2,6 +2,7 @@ package tuiapp
 
 import (
 	"strings"
+	"time"
 
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
@@ -131,6 +132,10 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 				out = append(out, projected)
 			}
 		}
+	case coresession.EventApproval:
+		if projected, ok := projectCoreApprovalReview(event, scope, scopeID, actor, occurredAt, meta); ok {
+			out = append(out, projected)
+		}
 	case coresession.EventPlan:
 		entries := make([]PlanEntry, 0, len(event.Plan))
 		for _, entry := range event.Plan {
@@ -177,6 +182,118 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 		out[i].AnchorToolName = anchorToolName
 	}
 	return out
+}
+
+func projectCoreApprovalReview(event coresession.Event, scope ACPProjectionScope, scopeID string, actor string, occurredAt time.Time, meta map[string]any) (TranscriptEvent, bool) {
+	if event.Approval == nil {
+		return TranscriptEvent{}, false
+	}
+	status := coreApprovalReviewStatus(event)
+	if status == "" {
+		return TranscriptEvent{}, false
+	}
+	risk := firstNonEmpty(
+		coreSessionMetaString(meta, "approval_review", "risk_level"),
+		coreSessionMetaString(meta, "caelis", "approval_review", "risk_level"),
+	)
+	auth := firstNonEmpty(
+		coreSessionMetaString(meta, "approval_review", "user_authorization"),
+		coreSessionMetaString(meta, "caelis", "approval_review", "user_authorization"),
+	)
+	text := coreApprovalReviewText(status, risk, auth, event.Approval.Reason, meta)
+	tool := event.Approval.Tool
+	if tool == nil {
+		tool = event.Tool
+	}
+	return TranscriptEvent{
+		Kind:            TranscriptEventApproval,
+		Scope:           scope,
+		ScopeID:         scopeID,
+		Actor:           actor,
+		OccurredAt:      occurredAt,
+		ToolCallID:      coreApprovalToolID(tool),
+		ApprovalTool:    coreApprovalToolName(tool),
+		ApprovalCommand: coreApprovalToolCommand(tool),
+		ApprovalStatus:  status,
+		ApprovalRisk:    risk,
+		ApprovalAuth:    auth,
+		ApprovalText:    text,
+		Final:           true,
+	}, true
+}
+
+func coreApprovalReviewStatus(event coresession.Event) string {
+	if event.Approval == nil {
+		return ""
+	}
+	autoReview := strings.EqualFold(coreSessionMetaString(event.Meta, "usage_category"), "auto_review") ||
+		coreSessionMetaString(event.Meta, "approval_review", "outcome") != "" ||
+		coreSessionMetaString(event.Meta, "caelis", "approval_review", "outcome") != ""
+	if !autoReview {
+		return ""
+	}
+	switch event.Approval.Status {
+	case coresession.ApprovalApproved:
+		return "approved"
+	case coresession.ApprovalRejected:
+		return "denied"
+	default:
+		switch strings.ToLower(firstNonEmpty(
+			coreSessionMetaString(event.Meta, "approval_review", "outcome"),
+			coreSessionMetaString(event.Meta, "caelis", "approval_review", "outcome"),
+		)) {
+		case "allow", "approved":
+			return "approved"
+		case "deny", "denied", "reject", "rejected":
+			return "denied"
+		default:
+			return ""
+		}
+	}
+}
+
+func coreApprovalReviewText(status string, risk string, auth string, reason string, meta map[string]any) string {
+	text := "Automatic approval review " + strings.TrimSpace(status)
+	parts := make([]string, 0, 2)
+	if risk = strings.TrimSpace(risk); risk != "" {
+		parts = append(parts, "risk: "+risk)
+	}
+	if auth = strings.TrimSpace(auth); auth != "" {
+		parts = append(parts, "authorization: "+auth)
+	}
+	if len(parts) > 0 {
+		text += " (" + strings.Join(parts, ", ") + ")"
+	}
+	rationale := firstNonEmpty(
+		coreSessionMetaString(meta, "approval_review", "rationale"),
+		coreSessionMetaString(meta, "caelis", "approval_review", "rationale"),
+		strings.TrimSpace(reason),
+	)
+	if rationale != "" {
+		text += ": " + rationale
+	}
+	return text
+}
+
+func coreApprovalToolID(tool *coresession.ToolEvent) string {
+	if tool == nil {
+		return ""
+	}
+	return strings.TrimSpace(tool.ID)
+}
+
+func coreApprovalToolName(tool *coresession.ToolEvent) string {
+	if tool == nil {
+		return ""
+	}
+	return strings.TrimSpace(tool.Name)
+}
+
+func coreApprovalToolCommand(tool *coresession.ToolEvent) string {
+	if tool == nil {
+		return ""
+	}
+	return approvalCommandPreview(tool.Input)
 }
 
 func projectViewModelTranscriptItem(item appviewmodel.TranscriptItem) []TranscriptEvent {

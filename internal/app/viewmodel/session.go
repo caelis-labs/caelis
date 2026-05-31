@@ -36,15 +36,18 @@ type TranscriptItem struct {
 }
 
 type ApprovalItem struct {
-	ID      string                   `json:"id,omitempty"`
-	EventID string                   `json:"event_id,omitempty"`
-	TurnID  string                   `json:"turn_id,omitempty"`
-	Tool    string                   `json:"tool,omitempty"`
-	Command string                   `json:"command,omitempty"`
-	Status  string                   `json:"status,omitempty"`
-	Reason  string                   `json:"reason,omitempty"`
-	Options []session.ApprovalOption `json:"options,omitempty"`
-	Actions []ApprovalAction         `json:"actions,omitempty"`
+	ID                 string                   `json:"id,omitempty"`
+	EventID            string                   `json:"event_id,omitempty"`
+	TurnID             string                   `json:"turn_id,omitempty"`
+	Tool               string                   `json:"tool,omitempty"`
+	Command            string                   `json:"command,omitempty"`
+	Status             string                   `json:"status,omitempty"`
+	Reason             string                   `json:"reason,omitempty"`
+	Justification      string                   `json:"justification,omitempty"`
+	SandboxPermissions string                   `json:"sandbox_permissions,omitempty"`
+	Risk               string                   `json:"risk,omitempty"`
+	Options            []session.ApprovalOption `json:"options,omitempty"`
+	Actions            []ApprovalAction         `json:"actions,omitempty"`
 }
 
 type ParticipantItem struct {
@@ -151,6 +154,9 @@ func pendingApproval(event session.Event) *ApprovalItem {
 	if tool != nil {
 		item.Tool = strings.TrimSpace(tool.Name)
 		item.Command = commandText(tool.Input)
+		item.Justification = inputString(tool.Input, "justification")
+		item.SandboxPermissions = inputString(tool.Input, "sandbox_permissions")
+		item.Risk = firstNonEmpty(inputString(tool.Input, "risk"), inputString(tool.Input, "risk_level"))
 	}
 	return &item
 }
@@ -182,6 +188,14 @@ func commandText(input map[string]any) string {
 		return ""
 	}
 	return string(raw)
+}
+
+func inputString(input map[string]any, key string) string {
+	if len(input) == 0 {
+		return ""
+	}
+	value, _ := input[strings.TrimSpace(key)].(string)
+	return strings.TrimSpace(value)
 }
 
 func firstNonEmpty(values ...string) string {

@@ -15,13 +15,12 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type GatewayDriver struct {
 	mu                  sync.Mutex
 	stack               *DriverStack
-	session             session.Session
+	session             coresession.Session
 	hasSession          bool
 	bindingKey          string
 	defaultModelText    string
@@ -57,10 +56,9 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 		if err != nil {
 			return nil, err
 		}
-		activeSession := portSessionFromCore(activeCoreSession)
-		driver.session = activeSession
+		driver.session = activeCoreSession
 		driver.hasSession = true
-		driver.refreshSessionDisplay(ctx, activeSession)
+		driver.refreshSessionDisplay(ctx, activeCoreSession)
 	}
 	return driver, nil
 }
@@ -83,31 +81,30 @@ func (d *GatewayDriver) WorkspaceDir() string {
 	return strings.TrimSpace(d.stack.Workspace.CWD)
 }
 
-func (d *GatewayDriver) ensureSession(ctx context.Context) (session.Session, error) {
+func (d *GatewayDriver) ensureSession(ctx context.Context) (coresession.Session, error) {
 	if activeSession, ok := d.currentSession(); ok {
 		return activeSession, nil
 	}
 	if d == nil || d.stack == nil {
-		return session.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: stack is unavailable")
+		return coresession.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: stack is unavailable")
 	}
 	activeCoreSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
 	if err != nil {
-		return session.Session{}, err
+		return coresession.Session{}, err
 	}
-	activeSession := portSessionFromCore(activeCoreSession)
 	d.mu.Lock()
-	d.session = activeSession
+	d.session = activeCoreSession
 	d.hasSession = true
 	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, activeSession)
-	return activeSession, nil
+	d.refreshSessionDisplay(ctx, activeCoreSession)
+	return activeCoreSession, nil
 }
 
-func (d *GatewayDriver) currentSession() (session.Session, bool) {
+func (d *GatewayDriver) currentSession() (coresession.Session, bool) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if !d.hasSession {
-		return session.Session{}, false
+		return coresession.Session{}, false
 	}
 	return d.session, true
 }
@@ -120,17 +117,17 @@ func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (appviewm
 		return appviewmodel.ControllerStatus{}, false, nil
 	}
 	activeSession, ok := d.currentSession()
-	if !ok || activeSession.Controller.Kind != session.ControllerKindACP {
+	if !ok || activeSession.Controller.Kind != coresession.ControllerACP {
 		return appviewmodel.ControllerStatus{}, false, nil
 	}
-	status, found, err := d.stack.ACPControllerStatus(ctx, coreRefFromPort(activeSession.SessionRef))
+	status, found, err := d.stack.ACPControllerStatus(ctx, activeSession.Ref)
 	if err != nil {
 		return appviewmodel.ControllerStatus{}, false, err
 	}
 	if !found {
 		status = appviewmodel.ControllerStatus{
-			SessionRef:      coreRefFromPort(activeSession.SessionRef),
-			Agent:           firstNonEmpty(strings.TrimSpace(activeSession.Controller.AgentName), strings.TrimSpace(activeSession.Controller.Label), strings.TrimSpace(activeSession.Controller.ControllerID)),
+			SessionRef:      activeSession.Ref,
+			Agent:           firstNonEmpty(strings.TrimSpace(activeSession.Controller.AgentName), strings.TrimSpace(activeSession.Controller.Label), strings.TrimSpace(activeSession.Controller.ID)),
 			RemoteSessionID: strings.TrimSpace(activeSession.Controller.RemoteSessionID),
 		}
 	}
@@ -165,7 +162,7 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 	}
 	activeSession, ok := d.currentSession()
 	if ok && d.stack != nil {
-		if state, err := d.stack.SessionRuntimeState(context.Background(), coreRefFromPort(activeSession.SessionRef)); err == nil {
+		if state, err := d.stack.SessionRuntimeState(context.Background(), activeSession.Ref); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
 			}
@@ -243,7 +240,7 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 	if d.stack != nil {
 		req := DoctorRequest{}
 		if ok {
-			req.SessionRef = coreRefFromPort(activeSession.SessionRef)
+			req.SessionRef = activeSession.Ref
 		}
 		if includeDiagnostics {
 			if report, err := d.stack.Doctor(context.Background(), req); err == nil {
@@ -338,7 +335,7 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 	active := d.stack.ActiveTurns()
 	status.ActiveJobs = len(active)
 	status.Running = len(active) > 0
-	if kind, ok := activeTurnKindForSession(active, coreRefFromPort(activeSession.SessionRef)); ok {
+	if kind, ok := activeTurnKindForSession(active, activeSession.Ref); ok {
 		status.ActiveTurnKind = string(kind)
 	}
 	return status, nil
@@ -354,7 +351,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	if err != nil {
 		return nil, err
 	}
-	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(d.stack.ActiveTurns(), coreRefFromPort(activeSession.SessionRef)) {
+	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(d.stack.ActiveTurns(), activeSession.Ref) {
 		coreSub := coreruntime.Submission{
 			Kind:         coreruntime.SubmissionConversation,
 			Text:         input,
@@ -366,7 +363,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 		}
 		if d.stack != nil && d.stack.SubmitActiveTurnFn != nil {
 			err = d.stack.SubmitActiveTurnFn(ctx, SubmitActiveTurnRequest{
-				SessionRef: coreRefFromPort(activeSession.SessionRef),
+				SessionRef: activeSession.Ref,
 				Submission: coreSub,
 			})
 		} else {
@@ -381,7 +378,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	}
 	if d.stack != nil && d.stack.BeginTurnFn != nil {
 		result, err := d.stack.BeginTurnFn(ctx, BeginTurnRequest{
-			SessionRef:   coreRefFromPort(activeSession.SessionRef),
+			SessionRef:   activeSession.Ref,
 			Input:        input,
 			ContentParts: contentParts,
 			Surface:      d.bindingKey,
@@ -394,7 +391,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 			return nil, err
 		}
 		d.mu.Lock()
-		d.session = portSessionFromCore(result.Session)
+		d.session = result.Session
 		d.hasSession = true
 		d.mu.Unlock()
 		return result.Turn, nil
@@ -423,9 +420,9 @@ func activeTurnKindForSession(active []ActiveTurnState, ref coresession.Ref) (Ac
 	return "", false
 }
 
-func isBuiltInControllerSession(activeSession session.Session) bool {
+func isBuiltInControllerSession(activeSession coresession.Session) bool {
 	switch activeSession.Controller.Kind {
-	case "", session.ControllerKindKernel:
+	case "", coresession.ControllerBuiltin:
 		return true
 	default:
 		return false
@@ -449,7 +446,7 @@ func (d *GatewayDriver) Interrupt(ctx context.Context) error {
 		return fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
 	}
 	if err := d.stack.Interrupt(ctx, InterruptRequest{
-		SessionRef: coreRefFromPort(activeSession.SessionRef),
+		SessionRef: activeSession.Ref,
 		Surface:    d.bindingKey,
 		Reason:     "tui interrupt",
 	}); err != nil {
@@ -495,12 +492,11 @@ func (d *GatewayDriver) NewSession(ctx context.Context) (coresession.Session, er
 	if err != nil {
 		return coresession.Session{}, err
 	}
-	activeSession := portSessionFromCore(activeCoreSession)
 	d.mu.Lock()
-	d.session = activeSession
+	d.session = activeCoreSession
 	d.hasSession = true
 	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, activeSession)
+	d.refreshSessionDisplay(ctx, activeCoreSession)
 	return activeCoreSession, nil
 }
 
@@ -512,12 +508,11 @@ func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (co
 	if err != nil {
 		return coresession.Session{}, err
 	}
-	activeSession := portSessionFromCore(result)
 	d.mu.Lock()
-	d.session = activeSession
+	d.session = result
 	d.hasSession = true
 	d.mu.Unlock()
-	d.refreshSessionDisplay(ctx, activeSession)
+	d.refreshSessionDisplay(ctx, result)
 	return result, nil
 }
 
@@ -542,7 +537,7 @@ func (d *GatewayDriver) ReplaySessionEvents(ctx context.Context) ([]appviewmodel
 	if d == nil || d.stack == nil || d.stack.ReplaySessionEventsFn == nil {
 		return nil, ErrMigrationPending
 	}
-	return d.stack.ReplaySessionEventsFn(ctx, coreRefFromPort(activeSession.SessionRef))
+	return d.stack.ReplaySessionEventsFn(ctx, activeSession.Ref)
 }
 
 func (d *GatewayDriver) Compact(ctx context.Context) error {
@@ -550,7 +545,7 @@ func (d *GatewayDriver) Compact(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
 	}
-	return d.stack.CompactSession(ctx, coreRefFromPort(activeSession.SessionRef))
+	return d.stack.CompactSession(ctx, activeSession.Ref)
 }
 
 func (d *GatewayDriver) ListAgents(ctx context.Context, limit int) ([]AgentCandidate, error) {
@@ -566,7 +561,7 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	if !ok {
 		return status, nil
 	}
-	ref := coreRefFromPort(activeSession.SessionRef)
+	ref := activeSession.Ref
 	state, err := d.stack.ControlPlaneState(ctx, ref)
 	if err != nil {
 		return AgentStatusSnapshot{}, err
@@ -634,13 +629,13 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 	if err != nil {
 		return nil, err
 	}
-	participantID, err := d.resolveParticipantID(ctx, coreRefFromPort(activeSession.SessionRef), handle)
+	participantID, err := d.resolveParticipantID(ctx, activeSession.Ref, handle)
 	if err != nil {
 		return nil, err
 	}
 	if d.stack != nil && d.stack.PromptParticipantFn != nil {
 		result, err := d.stack.PromptParticipantFn(ctx, PromptParticipantRequest{
-			SessionRef:    coreRefFromPort(activeSession.SessionRef),
+			SessionRef:    activeSession.Ref,
 			ParticipantID: participantID,
 			Input:         prompt,
 			ContentParts:  contentParts,
@@ -651,7 +646,7 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 		}
 		if result.Session.Ref.SessionID != "" {
 			d.mu.Lock()
-			d.session = portSessionFromCore(result.Session)
+			d.session = result.Session
 			d.hasSession = true
 			d.mu.Unlock()
 		}
@@ -773,7 +768,7 @@ func (d *GatewayDriver) defaultDisplays() (string, string, string) {
 	return d.defaultModelText, d.defaultSessionMode, d.defaultSandboxType
 }
 
-func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession session.Session) {
+func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession coresession.Session) {
 	if d == nil || d.stack == nil {
 		return
 	}
@@ -781,7 +776,7 @@ func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession
 	if alias := strings.TrimSpace(d.stack.DefaultModelAlias()); alias != "" {
 		modelText = alias
 	}
-	if state, err := d.stack.SessionRuntimeState(ctx, coreRefFromPort(activeSession.SessionRef)); err == nil {
+	if state, err := d.stack.SessionRuntimeState(ctx, activeSession.Ref); err == nil {
 		if strings.TrimSpace(state.ModelAlias) != "" {
 			modelText = strings.TrimSpace(state.ModelAlias)
 		}

@@ -13,7 +13,6 @@ import (
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack {
@@ -389,99 +388,6 @@ func applyRuntimeDefaults(stack *DriverStack, runtimeCfg config.Runtime) {
 	}
 }
 
-func coreRefFromPort(ref portsession.SessionRef) coresession.Ref {
-	return coresession.Ref{
-		AppName:      strings.TrimSpace(ref.AppName),
-		UserID:       strings.TrimSpace(ref.UserID),
-		SessionID:    strings.TrimSpace(ref.SessionID),
-		WorkspaceKey: strings.TrimSpace(ref.WorkspaceKey),
-	}
-}
-
-func coreSessionFromPort(active portsession.Session) coresession.Session {
-	return coresession.Session{
-		Ref: coreRefFromPort(active.SessionRef),
-		Workspace: coresession.Workspace{
-			Key: strings.TrimSpace(active.SessionRef.WorkspaceKey),
-			CWD: strings.TrimSpace(active.CWD),
-		},
-		Title:        strings.TrimSpace(active.Title),
-		Meta:         maps.Clone(active.Metadata),
-		Controller:   coreControllerBindingFromPort(active.Controller),
-		Participants: coreParticipantBindingsFromPort(active.Participants),
-		CreatedAt:    active.CreatedAt,
-		UpdatedAt:    active.UpdatedAt,
-	}
-}
-
-func portRefFromCore(ref coresession.Ref) portsession.SessionRef {
-	return portsession.SessionRef{
-		AppName:      strings.TrimSpace(ref.AppName),
-		UserID:       strings.TrimSpace(ref.UserID),
-		SessionID:    strings.TrimSpace(ref.SessionID),
-		WorkspaceKey: strings.TrimSpace(ref.WorkspaceKey),
-	}
-}
-
-func coreControllerBindingFromPort(in portsession.ControllerBinding) coresession.ControllerBinding {
-	kind := coresession.ControllerKind(strings.TrimSpace(string(in.Kind)))
-	if kind == "" && strings.TrimSpace(in.AgentName) != "" {
-		kind = coresession.ControllerBuiltin
-	}
-	return coresession.ControllerBinding{
-		Kind:            kind,
-		ID:              strings.TrimSpace(in.ControllerID),
-		AgentName:       strings.TrimSpace(in.AgentName),
-		Label:           strings.TrimSpace(in.Label),
-		EpochID:         strings.TrimSpace(in.EpochID),
-		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
-		ContextSyncSeq:  in.ContextSyncSeq,
-		AttachedAt:      in.AttachedAt,
-		Source:          strings.TrimSpace(in.Source),
-	}
-}
-
-func coreParticipantBindingsFromPort(in []portsession.ParticipantBinding) []coresession.ParticipantBinding {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]coresession.ParticipantBinding, 0, len(in))
-	for _, participant := range in {
-		out = append(out, coreParticipantBindingFromPort(participant))
-	}
-	return out
-}
-
-func coreParticipantBindingFromPort(in portsession.ParticipantBinding) coresession.ParticipantBinding {
-	return coresession.ParticipantBinding{
-		ID:             strings.TrimSpace(in.ID),
-		Kind:           coresession.ParticipantKind(strings.TrimSpace(string(in.Kind))),
-		Role:           coresession.ParticipantRole(strings.TrimSpace(string(in.Role))),
-		AgentName:      strings.TrimSpace(in.AgentName),
-		Label:          strings.TrimSpace(in.Label),
-		SessionID:      strings.TrimSpace(in.SessionID),
-		Source:         strings.TrimSpace(in.Source),
-		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
-		DelegationID:   strings.TrimSpace(in.DelegationID),
-		ContextSyncSeq: in.ContextSyncSeq,
-		AttachedAt:     in.AttachedAt,
-		ControllerRef:  strings.TrimSpace(in.ControllerRef),
-	}
-}
-
-func portSessionFromCore(active coresession.Session) portsession.Session {
-	return portsession.Session{
-		SessionRef:   portRefFromCore(active.Ref),
-		CWD:          strings.TrimSpace(active.Workspace.CWD),
-		Title:        strings.TrimSpace(active.Title),
-		Metadata:     maps.Clone(active.Meta),
-		Controller:   portControllerFromCore(active.Controller),
-		Participants: portParticipantsFromCore(active.Participants),
-		CreatedAt:    active.CreatedAt,
-		UpdatedAt:    active.UpdatedAt,
-	}
-}
-
 func controllerStatusFromApp(status appservices.ControllerStatus) appviewmodel.ControllerStatus {
 	return appviewmodel.ControllerStatus{
 		SessionRef:      coresession.NormalizeRef(status.SessionRef),
@@ -524,52 +430,6 @@ func controllerModesFromApp(modes []appservices.ControllerMode) []appviewmodel.C
 		})
 	}
 	return out
-}
-
-func portControllerFromCore(in coresession.ControllerBinding) portsession.ControllerBinding {
-	kind := portsession.ControllerKind(in.Kind)
-	if in.Kind == coresession.ControllerBuiltin {
-		kind = portsession.ControllerKindKernel
-	}
-	return portsession.ControllerBinding{
-		Kind:            kind,
-		ControllerID:    strings.TrimSpace(in.ID),
-		AgentName:       strings.TrimSpace(in.AgentName),
-		Label:           strings.TrimSpace(in.Label),
-		EpochID:         strings.TrimSpace(in.EpochID),
-		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
-		ContextSyncSeq:  in.ContextSyncSeq,
-		AttachedAt:      in.AttachedAt,
-		Source:          strings.TrimSpace(in.Source),
-	}
-}
-
-func portParticipantsFromCore(in []coresession.ParticipantBinding) []portsession.ParticipantBinding {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]portsession.ParticipantBinding, 0, len(in))
-	for _, participant := range in {
-		out = append(out, portParticipantFromCore(participant))
-	}
-	return out
-}
-
-func portParticipantFromCore(in coresession.ParticipantBinding) portsession.ParticipantBinding {
-	return portsession.ParticipantBinding{
-		ID:             strings.TrimSpace(in.ID),
-		Kind:           portsession.ParticipantKind(in.Kind),
-		Role:           portsession.ParticipantRole(in.Role),
-		AgentName:      strings.TrimSpace(in.AgentName),
-		Label:          strings.TrimSpace(in.Label),
-		SessionID:      strings.TrimSpace(in.SessionID),
-		Source:         strings.TrimSpace(in.Source),
-		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
-		DelegationID:   strings.TrimSpace(in.DelegationID),
-		ContextSyncSeq: in.ContextSyncSeq,
-		AttachedAt:     in.AttachedAt,
-		ControllerRef:  strings.TrimSpace(in.ControllerRef),
-	}
 }
 
 func modelConfigFromApp(cfg appsettings.ModelConfig) ModelConfig {

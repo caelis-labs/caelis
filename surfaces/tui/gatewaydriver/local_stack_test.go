@@ -138,7 +138,6 @@ func newGatewayDriverTestStack(t *testing.T, cfg gatewayDriverTestConfig) (*gate
 	out.Gateway = &gatewayDriverTestGateway{stack: out, bindings: map[string]portsession.SessionRef{}}
 	out.Sessions = gatewayDriverTestSessionService{stack: out}
 	driverStack := BindAppServices(&DriverStack{}, stack.Services())
-	driverStack.Sessions = out.Sessions
 	baseStart := driverStack.StartSessionFn
 	driverStack.StartSessionFn = func(ctx context.Context, preferredSessionID string, bindingKey string) (coresession.Session, error) {
 		active, err := baseStart(ctx, preferredSessionID, bindingKey)
@@ -490,6 +489,110 @@ func (s gatewayDriverTestSessionService) load(ctx context.Context, ref portsessi
 		return coresession.Snapshot{}, fmt.Errorf("gatewaydriver test session service is unavailable")
 	}
 	return s.stack.services.Sessions().Load(ctx, coreRefFromPort(ref))
+}
+
+func coreRefFromPort(ref portsession.SessionRef) coresession.Ref {
+	return coresession.Ref{
+		AppName:      strings.TrimSpace(ref.AppName),
+		UserID:       strings.TrimSpace(ref.UserID),
+		SessionID:    strings.TrimSpace(ref.SessionID),
+		WorkspaceKey: strings.TrimSpace(ref.WorkspaceKey),
+	}
+}
+
+func portRefFromCore(ref coresession.Ref) portsession.SessionRef {
+	return portsession.SessionRef{
+		AppName:      strings.TrimSpace(ref.AppName),
+		UserID:       strings.TrimSpace(ref.UserID),
+		SessionID:    strings.TrimSpace(ref.SessionID),
+		WorkspaceKey: strings.TrimSpace(ref.WorkspaceKey),
+	}
+}
+
+func coreSessionFromPort(active portsession.Session) coresession.Session {
+	return coresession.Session{
+		Ref: coreRefFromPort(active.SessionRef),
+		Workspace: coresession.Workspace{
+			Key: strings.TrimSpace(active.SessionRef.WorkspaceKey),
+			CWD: strings.TrimSpace(active.CWD),
+		},
+		Title:        strings.TrimSpace(active.Title),
+		Meta:         maps.Clone(active.Metadata),
+		Controller:   coreControllerFromPort(active.Controller),
+		Participants: coreParticipantsFromPort(active.Participants),
+		CreatedAt:    active.CreatedAt,
+		UpdatedAt:    active.UpdatedAt,
+	}
+}
+
+func coreParticipantsFromPort(in []portsession.ParticipantBinding) []coresession.ParticipantBinding {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]coresession.ParticipantBinding, 0, len(in))
+	for _, participant := range in {
+		out = append(out, coreParticipantFromPort(participant))
+	}
+	return out
+}
+
+func portSessionFromCore(active coresession.Session) portsession.Session {
+	return portsession.Session{
+		SessionRef:   portRefFromCore(active.Ref),
+		CWD:          strings.TrimSpace(active.Workspace.CWD),
+		Title:        strings.TrimSpace(active.Title),
+		Metadata:     maps.Clone(active.Meta),
+		Controller:   portControllerFromCore(active.Controller),
+		Participants: portParticipantsFromCore(active.Participants),
+		CreatedAt:    active.CreatedAt,
+		UpdatedAt:    active.UpdatedAt,
+	}
+}
+
+func portControllerFromCore(in coresession.ControllerBinding) portsession.ControllerBinding {
+	kind := portsession.ControllerKind(in.Kind)
+	if in.Kind == coresession.ControllerBuiltin {
+		kind = portsession.ControllerKindKernel
+	}
+	return portsession.ControllerBinding{
+		Kind:            kind,
+		ControllerID:    strings.TrimSpace(in.ID),
+		AgentName:       strings.TrimSpace(in.AgentName),
+		Label:           strings.TrimSpace(in.Label),
+		EpochID:         strings.TrimSpace(in.EpochID),
+		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
+		ContextSyncSeq:  in.ContextSyncSeq,
+		AttachedAt:      in.AttachedAt,
+		Source:          strings.TrimSpace(in.Source),
+	}
+}
+
+func portParticipantsFromCore(in []coresession.ParticipantBinding) []portsession.ParticipantBinding {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]portsession.ParticipantBinding, 0, len(in))
+	for _, participant := range in {
+		out = append(out, portParticipantFromCore(participant))
+	}
+	return out
+}
+
+func portParticipantFromCore(in coresession.ParticipantBinding) portsession.ParticipantBinding {
+	return portsession.ParticipantBinding{
+		ID:             strings.TrimSpace(in.ID),
+		Kind:           portsession.ParticipantKind(in.Kind),
+		Role:           portsession.ParticipantRole(in.Role),
+		AgentName:      strings.TrimSpace(in.AgentName),
+		Label:          strings.TrimSpace(in.Label),
+		SessionID:      strings.TrimSpace(in.SessionID),
+		Source:         strings.TrimSpace(in.Source),
+		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
+		DelegationID:   strings.TrimSpace(in.DelegationID),
+		ContextSyncSeq: in.ContextSyncSeq,
+		AttachedAt:     in.AttachedAt,
+		ControllerRef:  strings.TrimSpace(in.ControllerRef),
+	}
 }
 
 func coreControllerFromPort(in portsession.ControllerBinding) coresession.ControllerBinding {
