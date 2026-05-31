@@ -26,9 +26,9 @@ func (d *GatewayDriver) ExecuteCommand(ctx context.Context, opts CommandExecutio
 	}
 	ctx, finish := d.beginInterruptibleCommand(ctx)
 	defer finish()
-	var ref portsession.SessionRef
+	var ref coresession.Ref
 	if active, ok := d.currentSession(); ok {
-		ref = active.SessionRef
+		ref = coreRefFromPort(active.SessionRef)
 	}
 	parts, err := contentPartsFromSubmission(opts.Input, opts.Attachments, d.WorkspaceDir())
 	if err != nil {

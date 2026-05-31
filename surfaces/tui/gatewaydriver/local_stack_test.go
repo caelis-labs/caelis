@@ -140,10 +140,10 @@ func newGatewayDriverTestStack(t *testing.T, cfg gatewayDriverTestConfig) (*gate
 	driverStack := BindAppServices(&DriverStack{}, stack.Services())
 	driverStack.Sessions = out.Sessions
 	baseStart := driverStack.StartSessionFn
-	driverStack.StartSessionFn = func(ctx context.Context, preferredSessionID string, bindingKey string) (portsession.Session, error) {
+	driverStack.StartSessionFn = func(ctx context.Context, preferredSessionID string, bindingKey string) (coresession.Session, error) {
 		active, err := baseStart(ctx, preferredSessionID, bindingKey)
 		if err == nil {
-			out.Gateway.remember(bindingKey, active.SessionRef)
+			out.Gateway.remember(bindingKey, portRefFromCore(active.Ref))
 		}
 		return active, err
 	}
@@ -155,7 +155,11 @@ func (s *gatewayDriverTestStack) StartSession(ctx context.Context, preferredSess
 	if s == nil || s.driverStack == nil {
 		return portsession.Session{}, fmt.Errorf("gatewaydriver test stack is unavailable")
 	}
-	return s.driverStack.StartSession(ctx, preferredSessionID, bindingKey)
+	active, err := s.driverStack.StartSession(ctx, preferredSessionID, bindingKey)
+	if err != nil {
+		return portsession.Session{}, err
+	}
+	return portSessionFromCore(active), nil
 }
 
 func (s *gatewayDriverTestStack) CurrentGateway() GatewayService {

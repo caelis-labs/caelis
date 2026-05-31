@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -111,7 +112,7 @@ type SandboxStatus struct {
 }
 
 type DoctorRequest struct {
-	SessionRef session.SessionRef
+	SessionRef coresession.Ref
 	SessionID  string
 	BindingKey string
 }
@@ -178,18 +179,18 @@ type DriverStack struct {
 	UserID    string
 	Workspace session.WorkspaceRef
 
-	StartSessionFn                     func(context.Context, string, string) (session.Session, error)
-	ACPControllerStatusFn              func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error)
+	StartSessionFn                     func(context.Context, string, string) (coresession.Session, error)
+	ACPControllerStatusFn              func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
 	DefaultModelAliasFn                func() string
-	AppStatusViewFn                    func(context.Context, session.SessionRef) (appviewmodel.StatusView, error)
-	ReplaySessionEventsFn              func(context.Context, session.SessionRef) ([]appviewmodel.SessionEventEnvelope, error)
+	AppStatusViewFn                    func(context.Context, coresession.Ref) (appviewmodel.StatusView, error)
+	ReplaySessionEventsFn              func(context.Context, coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error)
 	SandboxStatusFn                    func() SandboxStatus
 	CommandCatalogFn                   func(context.Context) (appviewmodel.CommandCatalogView, error)
-	ExecuteCommandFn                   func(context.Context, session.SessionRef, string, []model.ContentPart) (CommandExecutionView, error)
-	SessionRuntimeStateFn              func(context.Context, session.SessionRef) (SessionRuntimeState, error)
+	ExecuteCommandFn                   func(context.Context, coresession.Ref, string, []model.ContentPart) (CommandExecutionView, error)
+	SessionRuntimeStateFn              func(context.Context, coresession.Ref) (SessionRuntimeState, error)
 	DoctorFn                           func(context.Context, DoctorRequest) (DoctorReport, error)
 	ModelConfigFn                      func(string) (ModelConfig, bool)
-	CompactSessionFn                   func(context.Context, session.SessionRef) error
+	CompactSessionFn                   func(context.Context, coresession.Ref) error
 	PrepareConnectModelConfigFn        func(context.Context, ModelConfig) (ModelConfig, error)
 	ConnectProviderCandidatesFn        func(context.Context, string, int) ([]SlashArgCandidate, error)
 	ConnectBaseURLCandidatesFn         func(context.Context, string, string, int) ([]SlashArgCandidate, error)
@@ -197,19 +198,19 @@ type DriverStack struct {
 	ConnectModelCandidatesFn           func(context.Context, ModelConfig, string, int) ([]SlashArgCandidate, error)
 	ConnectDefaultsFn                  func(context.Context, ModelConfig) (connectModelDefaults, error)
 	ConnectFn                          func(ModelConfig) (string, error)
-	UseModelFn                         func(context.Context, session.SessionRef, string, ...string) error
-	DeleteModelFn                      func(context.Context, session.SessionRef, string) error
-	SetACPControllerModelFn            func(context.Context, session.SessionRef, string, string) (appviewmodel.ControllerStatus, error)
-	CycleSessionModeFn                 func(context.Context, session.SessionRef) (string, error)
+	UseModelFn                         func(context.Context, coresession.Ref, string, ...string) error
+	DeleteModelFn                      func(context.Context, coresession.Ref, string) error
+	SetACPControllerModelFn            func(context.Context, coresession.Ref, string, string) (appviewmodel.ControllerStatus, error)
+	CycleSessionModeFn                 func(context.Context, coresession.Ref) (string, error)
 	SetSandboxBackendFn                func(context.Context, string) (SandboxStatus, error)
 	PrepareSandboxFn                   func(context.Context) (SandboxStatus, error)
 	RepairSandboxFn                    func(context.Context) (SandboxStatus, error)
 	PreflightSandboxFn                 func(context.Context, bool) (SandboxStatus, error)
 	ResetSandboxFn                     func(context.Context) (SandboxStatus, error)
-	SetACPControllerModeFn             func(context.Context, session.SessionRef, string) (appviewmodel.ControllerStatus, error)
-	SetSessionModeFn                   func(context.Context, session.SessionRef, string) (string, error)
-	ListModelAliasesFn                 func(context.Context, session.SessionRef) ([]string, error)
-	ListModelChoicesFn                 func(context.Context, session.SessionRef) ([]ModelChoice, error)
+	SetACPControllerModeFn             func(context.Context, coresession.Ref, string) (appviewmodel.ControllerStatus, error)
+	SetSessionModeFn                   func(context.Context, coresession.Ref, string) (string, error)
+	ListModelAliasesFn                 func(context.Context, coresession.Ref) ([]string, error)
+	ListModelChoicesFn                 func(context.Context, coresession.Ref) ([]ModelChoice, error)
 	ListProviderModelsFn               func(string) []string
 	ListProviderModelsForConfigFn      func(context.Context, ModelConfig) ([]string, error)
 	ListCatalogModelsFn                func(string) []string
@@ -222,7 +223,7 @@ type DriverStack struct {
 	ListBuiltinACPAgentAddOptionsFn    func() []ACPAgentAddOption
 	ListInstallableACPAgentOptionsFn   func() []ACPAgentAddOption
 	ListACPAgentsFn                    func() []ACPAgentInfo
-	ListTasksFn                        func(context.Context, session.SessionRef, TaskListOptions) (TaskListView, error)
+	ListTasksFn                        func(context.Context, coresession.Ref, TaskListOptions) (TaskListView, error)
 	TailTaskFn                         func(context.Context, TaskOutputOptions) (TaskOutputView, error)
 	StartTaskFn                        func(context.Context, TaskStartOptions) (TaskOutputView, error)
 	WaitTaskFn                         func(context.Context, TaskWaitOptions) (TaskOutputView, error)
@@ -242,14 +243,14 @@ func (s *DriverStack) gateway() (GatewayService, error) {
 	return gw, nil
 }
 
-func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (session.Session, error) {
+func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (coresession.Session, error) {
 	if s == nil || s.StartSessionFn == nil {
-		return session.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: start session dependency is unavailable")
+		return coresession.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: start session dependency is unavailable")
 	}
 	return s.StartSessionFn(ctx, preferredSessionID, bindingKey)
 }
 
-func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
+func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 	if s == nil || s.ACPControllerStatusFn == nil {
 		return appviewmodel.ControllerStatus{}, false, nil
 	}
@@ -263,7 +264,7 @@ func (s *DriverStack) DefaultModelAlias() string {
 	return s.DefaultModelAliasFn()
 }
 
-func (s *DriverStack) AppStatusView(ctx context.Context, ref session.SessionRef) (appviewmodel.StatusView, bool, error) {
+func (s *DriverStack) AppStatusView(ctx context.Context, ref coresession.Ref) (appviewmodel.StatusView, bool, error) {
 	if s == nil || s.AppStatusViewFn == nil {
 		return appviewmodel.StatusView{}, false, nil
 	}
@@ -286,14 +287,14 @@ func (s *DriverStack) CommandCatalog(ctx context.Context) (appviewmodel.CommandC
 	return view, true, err
 }
 
-func (s *DriverStack) ExecuteCommand(ctx context.Context, ref session.SessionRef, input string, parts []model.ContentPart) (CommandExecutionView, error) {
+func (s *DriverStack) ExecuteCommand(ctx context.Context, ref coresession.Ref, input string, parts []model.ContentPart) (CommandExecutionView, error) {
 	if s == nil || s.ExecuteCommandFn == nil {
 		return CommandExecutionView{}, fmt.Errorf("surfaces/tui/gatewaydriver: command dependency is unavailable")
 	}
 	return s.ExecuteCommandFn(ctx, ref, input, parts)
 }
 
-func (s *DriverStack) SessionRuntimeState(ctx context.Context, ref session.SessionRef) (SessionRuntimeState, error) {
+func (s *DriverStack) SessionRuntimeState(ctx context.Context, ref coresession.Ref) (SessionRuntimeState, error) {
 	if s == nil || s.SessionRuntimeStateFn == nil {
 		return SessionRuntimeState{}, fmt.Errorf("surfaces/tui/gatewaydriver: session runtime state dependency is unavailable")
 	}
@@ -314,7 +315,7 @@ func (s *DriverStack) ModelConfig(alias string) (ModelConfig, bool) {
 	return s.ModelConfigFn(alias)
 }
 
-func (s *DriverStack) CompactSession(ctx context.Context, ref session.SessionRef) error {
+func (s *DriverStack) CompactSession(ctx context.Context, ref coresession.Ref) error {
 	if s == nil || s.CompactSessionFn == nil {
 		return fmt.Errorf("surfaces/tui/gatewaydriver: compact dependency is unavailable")
 	}
@@ -376,28 +377,28 @@ func (s *DriverStack) ConnectDefaults(ctx context.Context, cfg ModelConfig) (con
 	return defaults, true, err
 }
 
-func (s *DriverStack) UseModel(ctx context.Context, ref session.SessionRef, alias string, reasoning ...string) error {
+func (s *DriverStack) UseModel(ctx context.Context, ref coresession.Ref, alias string, reasoning ...string) error {
 	if s == nil || s.UseModelFn == nil {
 		return fmt.Errorf("surfaces/tui/gatewaydriver: use model dependency is unavailable")
 	}
 	return s.UseModelFn(ctx, ref, alias, reasoning...)
 }
 
-func (s *DriverStack) DeleteModel(ctx context.Context, ref session.SessionRef, alias string) error {
+func (s *DriverStack) DeleteModel(ctx context.Context, ref coresession.Ref, alias string) error {
 	if s == nil || s.DeleteModelFn == nil {
 		return fmt.Errorf("surfaces/tui/gatewaydriver: delete model dependency is unavailable")
 	}
 	return s.DeleteModelFn(ctx, ref, alias)
 }
 
-func (s *DriverStack) SetACPControllerModel(ctx context.Context, ref session.SessionRef, model string, reasoning string) (appviewmodel.ControllerStatus, error) {
+func (s *DriverStack) SetACPControllerModel(ctx context.Context, ref coresession.Ref, model string, reasoning string) (appviewmodel.ControllerStatus, error) {
 	if s == nil || s.SetACPControllerModelFn == nil {
 		return appviewmodel.ControllerStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: ACP controller model dependency is unavailable")
 	}
 	return s.SetACPControllerModelFn(ctx, ref, model, reasoning)
 }
 
-func (s *DriverStack) CycleSessionMode(ctx context.Context, ref session.SessionRef) (string, error) {
+func (s *DriverStack) CycleSessionMode(ctx context.Context, ref coresession.Ref) (string, error) {
 	if s == nil || s.CycleSessionModeFn == nil {
 		return "", fmt.Errorf("surfaces/tui/gatewaydriver: cycle mode dependency is unavailable")
 	}
@@ -439,28 +440,28 @@ func (s *DriverStack) ResetSandbox(ctx context.Context) (SandboxStatus, error) {
 	return s.ResetSandboxFn(ctx)
 }
 
-func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref session.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
+func (s *DriverStack) SetACPControllerMode(ctx context.Context, ref coresession.Ref, mode string) (appviewmodel.ControllerStatus, error) {
 	if s == nil || s.SetACPControllerModeFn == nil {
 		return appviewmodel.ControllerStatus{}, fmt.Errorf("surfaces/tui/gatewaydriver: ACP controller mode dependency is unavailable")
 	}
 	return s.SetACPControllerModeFn(ctx, ref, mode)
 }
 
-func (s *DriverStack) SetSessionMode(ctx context.Context, ref session.SessionRef, mode string) (string, error) {
+func (s *DriverStack) SetSessionMode(ctx context.Context, ref coresession.Ref, mode string) (string, error) {
 	if s == nil || s.SetSessionModeFn == nil {
 		return "", fmt.Errorf("surfaces/tui/gatewaydriver: session mode dependency is unavailable")
 	}
 	return s.SetSessionModeFn(ctx, ref, mode)
 }
 
-func (s *DriverStack) ListModelAliases(ctx context.Context, ref session.SessionRef) ([]string, error) {
+func (s *DriverStack) ListModelAliases(ctx context.Context, ref coresession.Ref) ([]string, error) {
 	if s == nil || s.ListModelAliasesFn == nil {
 		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: model alias dependency is unavailable")
 	}
 	return s.ListModelAliasesFn(ctx, ref)
 }
 
-func (s *DriverStack) ListModelChoices(ctx context.Context, ref session.SessionRef) ([]ModelChoice, error) {
+func (s *DriverStack) ListModelChoices(ctx context.Context, ref coresession.Ref) ([]ModelChoice, error) {
 	if s == nil || s.ListModelChoicesFn == nil {
 		aliases, err := s.ListModelAliases(ctx, ref)
 		if err != nil {
@@ -563,7 +564,7 @@ func (s *DriverStack) ListACPAgents() []ACPAgentInfo {
 	return s.ListACPAgentsFn()
 }
 
-func (s *DriverStack) ListTasks(ctx context.Context, ref session.SessionRef, opts TaskListOptions) (TaskListView, error) {
+func (s *DriverStack) ListTasks(ctx context.Context, ref coresession.Ref, opts TaskListOptions) (TaskListView, error) {
 	if s == nil || s.ListTasksFn == nil {
 		return TaskListView{}, fmt.Errorf("surfaces/tui/gatewaydriver: task list dependency is unavailable")
 	}

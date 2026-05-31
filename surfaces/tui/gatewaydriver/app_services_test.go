@@ -110,7 +110,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if engine.start.PreferredSessionID != "sess-app" {
 		t.Fatalf("StartSession() preferred id = %q, want sess-app", engine.start.PreferredSessionID)
 	}
-	choices, err := stack.ListModelChoices(ctx, portsession.SessionRef{SessionID: "sess-app"})
+	choices, err := stack.ListModelChoices(ctx, coresession.Ref{SessionID: "sess-app"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,10 +172,10 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if !codeFreeAuth.modelSelection.OpenBrowser || codeFreeAuth.modelSelection.BaseURL != "https://www.srdcloud.cn" {
 		t.Fatalf("codefree model auth req = %#v, want model-selection auth through app service", codeFreeAuth.modelSelection)
 	}
-	if err := stack.DeleteModel(ctx, portsession.SessionRef{SessionID: "sess-app"}, "next-model"); err != nil {
+	if err := stack.DeleteModel(ctx, coresession.Ref{SessionID: "sess-app"}, "next-model"); err != nil {
 		t.Fatalf("DeleteModel() error = %v", err)
 	}
-	if err := stack.CompactSession(ctx, portsession.SessionRef{SessionID: "sess-app"}); err != nil {
+	if err := stack.CompactSession(ctx, coresession.Ref{SessionID: "sess-app"}); err != nil {
 		t.Fatalf("CompactSession() error = %v", err)
 	}
 	if len(engine.events) != 1 || engine.events[0].Type != coresession.EventCompact {
@@ -494,7 +494,7 @@ func TestBindAppServicesExecuteCommandUsesSharedCommandService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	view, err := BindAppServices(&DriverStack{}, svc).ExecuteCommand(ctx, portsession.SessionRef{}, " /new ", nil)
+	view, err := BindAppServices(&DriverStack{}, svc).ExecuteCommand(ctx, coresession.Ref{}, " /new ", nil)
 	if err != nil {
 		t.Fatalf("ExecuteCommand(/new) error = %v", err)
 	}

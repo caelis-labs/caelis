@@ -24,7 +24,7 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	gateway := newAppServiceGateway(svc)
 	applyRuntimeDefaults(stack, runtimeCfg)
 	stack.GatewayFn = func() GatewayService { return gateway }
-	stack.StartSessionFn = func(ctx context.Context, preferredSessionID string, _ string) (portsession.Session, error) {
+	stack.StartSessionFn = func(ctx context.Context, preferredSessionID string, _ string) (coresession.Session, error) {
 		active, err := svc.Sessions().Start(ctx, appservices.StartSessionRequest{
 			PreferredSessionID: strings.TrimSpace(preferredSessionID),
 			Workspace: coresession.Workspace{
@@ -33,16 +33,16 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 			},
 		})
 		if err != nil {
-			return portsession.Session{}, err
+			return coresession.Session{}, err
 		}
-		return portSessionFromCore(active), nil
+		return active, nil
 	}
-	stack.AppStatusViewFn = func(ctx context.Context, ref portsession.SessionRef) (appviewmodel.StatusView, error) {
-		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: coreRefFromPort(ref)})
+	stack.AppStatusViewFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
+		return svc.Status().View(ctx, appservices.StatusRequest{SessionRef: ref})
 	}
-	stack.ReplaySessionEventsFn = func(ctx context.Context, ref portsession.SessionRef) ([]appviewmodel.SessionEventEnvelope, error) {
+	stack.ReplaySessionEventsFn = func(ctx context.Context, ref coresession.Ref) ([]appviewmodel.SessionEventEnvelope, error) {
 		events, err := svc.Events().Replay(ctx, appservices.EventReplayRequest{
-			SessionRef: coreRefFromPort(ref),
+			SessionRef: ref,
 		})
 		if err != nil {
 			return nil, err
@@ -56,9 +56,9 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 	stack.CommandCatalogFn = func(ctx context.Context) (appviewmodel.CommandCatalogView, error) {
 		return svc.Commands().Available(ctx, appservices.CommandCatalogRequest{})
 	}
-	stack.ExecuteCommandFn = func(ctx context.Context, ref portsession.SessionRef, input string, parts []coremodel.ContentPart) (CommandExecutionView, error) {
+	stack.ExecuteCommandFn = func(ctx context.Context, ref coresession.Ref, input string, parts []coremodel.ContentPart) (CommandExecutionView, error) {
 		return svc.Commands().Execute(ctx, appservices.CommandExecutionRequest{
-			SessionRef:   coreRefFromPort(ref),
+			SessionRef:   ref,
 			Input:        input,
 			ContentParts: coremodel.CloneContentParts(parts),
 		})
@@ -84,7 +84,7 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return modelConfigFromApp(cfg), true
 	}
-	stack.ListModelChoicesFn = func(ctx context.Context, _ portsession.SessionRef) ([]ModelChoice, error) {
+	stack.ListModelChoicesFn = func(ctx context.Context, _ coresession.Ref) ([]ModelChoice, error) {
 		choices, err := svc.Models().List(ctx)
 		if err != nil {
 			return nil, err
@@ -163,36 +163,36 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		defaults, err := svc.Models().ConnectDefaults(ctx, modelConfigToApp(cfg))
 		return connectModelDefaultsFromApp(defaults), err
 	}
-	stack.UseModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning ...string) error {
+	stack.UseModelFn = func(ctx context.Context, ref coresession.Ref, modelRef string, reasoning ...string) error {
 		effort := ""
 		if len(reasoning) > 0 {
 			effort = strings.TrimSpace(reasoning[0])
 		}
-		_, err := svc.Models().Use(ctx, coreRefFromPort(ref), modelRef, effort)
+		_, err := svc.Models().Use(ctx, ref, modelRef, effort)
 		return err
 	}
-	stack.ACPControllerStatusFn = func(ctx context.Context, ref portsession.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
-		status, ok, err := svc.Controllers().Status(ctx, coreRefFromPort(ref))
+	stack.ACPControllerStatusFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
+		status, ok, err := svc.Controllers().Status(ctx, ref)
 		return controllerStatusFromApp(status), ok, err
 	}
-	stack.SetACPControllerModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string, reasoning string) (appviewmodel.ControllerStatus, error) {
-		status, err := svc.Controllers().SetModel(ctx, coreRefFromPort(ref), modelRef, reasoning)
+	stack.SetACPControllerModelFn = func(ctx context.Context, ref coresession.Ref, modelRef string, reasoning string) (appviewmodel.ControllerStatus, error) {
+		status, err := svc.Controllers().SetModel(ctx, ref, modelRef, reasoning)
 		return controllerStatusFromApp(status), err
 	}
-	stack.SetACPControllerModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
-		status, err := svc.Controllers().SetMode(ctx, coreRefFromPort(ref), mode)
+	stack.SetACPControllerModeFn = func(ctx context.Context, ref coresession.Ref, mode string) (appviewmodel.ControllerStatus, error) {
+		status, err := svc.Controllers().SetMode(ctx, ref, mode)
 		return controllerStatusFromApp(status), err
 	}
-	stack.DeleteModelFn = func(ctx context.Context, ref portsession.SessionRef, modelRef string) error {
+	stack.DeleteModelFn = func(ctx context.Context, ref coresession.Ref, modelRef string) error {
 		deleted, resolveErr := svc.Models().Resolve(ctx, modelRef)
 		if err := svc.Models().Delete(ctx, modelRef); err != nil {
 			return err
 		}
 		if resolveErr == nil && strings.TrimSpace(ref.SessionID) != "" {
-			snapshot, err := svc.Sessions().Load(ctx, coreRefFromPort(ref))
+			snapshot, err := svc.Sessions().Load(ctx, ref)
 			if err == nil {
 				if currentID, _ := snapshot.State[appservices.StateCurrentModelID].(string); strings.EqualFold(strings.TrimSpace(currentID), strings.TrimSpace(deleted.ID)) {
-					_ = svc.Models().ClearSession(ctx, coreRefFromPort(ref))
+					_ = svc.Models().ClearSession(ctx, ref)
 				}
 			}
 		}
@@ -249,30 +249,30 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return installableAgentOptionsFromApp(options)
 	}
-	stack.CompactSessionFn = func(ctx context.Context, ref portsession.SessionRef) error {
+	stack.CompactSessionFn = func(ctx context.Context, ref coresession.Ref) error {
 		_, err := svc.Compaction().Compact(ctx, appservices.CompactSessionRequest{
-			SessionRef: coreRefFromPort(ref),
+			SessionRef: ref,
 			Trigger:    "manual",
 		})
 		return err
 	}
-	stack.SetSessionModeFn = func(ctx context.Context, ref portsession.SessionRef, mode string) (string, error) {
-		choice, err := svc.Modes().Set(ctx, coreRefFromPort(ref), mode)
+	stack.SetSessionModeFn = func(ctx context.Context, ref coresession.Ref, mode string) (string, error) {
+		choice, err := svc.Modes().Set(ctx, ref, mode)
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(choice.ID), nil
 	}
-	stack.CycleSessionModeFn = func(ctx context.Context, ref portsession.SessionRef) (string, error) {
-		choice, err := svc.Modes().Toggle(ctx, coreRefFromPort(ref))
+	stack.CycleSessionModeFn = func(ctx context.Context, ref coresession.Ref) (string, error) {
+		choice, err := svc.Modes().Toggle(ctx, ref)
 		if err != nil {
 			return "", err
 		}
 		return strings.TrimSpace(choice.ID), nil
 	}
-	stack.ListTasksFn = func(ctx context.Context, ref portsession.SessionRef, opts TaskListOptions) (TaskListView, error) {
+	stack.ListTasksFn = func(ctx context.Context, ref coresession.Ref, opts TaskListOptions) (TaskListView, error) {
 		return svc.Tasks().List(ctx, appservices.ListTasksRequest{
-			SessionRef:     coreRefFromPort(ref),
+			SessionRef:     ref,
 			Limit:          opts.Limit,
 			IncludeHistory: opts.IncludeHistory,
 		})

@@ -1412,6 +1412,11 @@ be migrated before retiring the old stack:
      `internal/app/viewmodel.ApprovalItem` directly and submit
      `core/runtime` approval decisions. Converting core approval events into
      old `kernel.ApprovalPayload` is limited to legacy gateway fallback paths.
+   - Migrated baseline: the gatewaydriver app-service callback facade now uses
+     `core/session.Ref` and `core/session.Session` for session-bound status,
+     command, model, mode, compaction, replay, and task hooks. Conversion to
+     old `ports/session` structs is contained at the legacy gateway and driver
+     state boundary.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and

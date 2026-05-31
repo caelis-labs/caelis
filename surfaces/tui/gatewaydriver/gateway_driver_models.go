@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 )
 
 func (d *GatewayDriver) Connect(ctx context.Context, cfg ConnectConfig) (StatusSnapshot, error) {
@@ -133,7 +133,7 @@ func (d *GatewayDriver) connectPreparedModelConfig(ctx context.Context, cfg Mode
 		return StatusSnapshot{}, err
 	}
 	if activeSession, ok := d.currentSession(); ok && alias != "" {
-		if err := d.stack.UseModel(ctx, activeSession.SessionRef, alias); err != nil {
+		if err := d.stack.UseModel(ctx, coreRefFromPort(activeSession.SessionRef), alias); err != nil {
 			return StatusSnapshot{}, err
 		}
 	}
@@ -154,9 +154,9 @@ func (d *GatewayDriver) hasReusableConnectAuth(ctx context.Context, provider str
 	if normalizedBaseURL == "" {
 		return false
 	}
-	ref := session.SessionRef{}
+	ref := coresession.Ref{}
 	if activeSession, ok := d.currentSession(); ok {
-		ref = activeSession.SessionRef
+		ref = coreRefFromPort(activeSession.SessionRef)
 	}
 	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {
@@ -185,7 +185,7 @@ func (d *GatewayDriver) UseModel(ctx context.Context, model string, reasoningEff
 		if len(reasoningEffort) > 0 {
 			reasoning = strings.TrimSpace(reasoningEffort[0])
 		}
-		status, err := d.stack.SetACPControllerModel(ctx, activeSession.SessionRef, strings.TrimSpace(model), reasoning)
+		status, err := d.stack.SetACPControllerModel(ctx, coreRefFromPort(activeSession.SessionRef), strings.TrimSpace(model), reasoning)
 		if err != nil {
 			return StatusSnapshot{}, err
 		}
@@ -208,7 +208,7 @@ func (d *GatewayDriver) UseModel(ctx context.Context, model string, reasoningEff
 			return StatusSnapshot{}, fmt.Errorf("surfaces/tui/gatewaydriver: model %q does not support reasoning level %q", alias, reasoning)
 		}
 	}
-	if err := d.stack.UseModel(ctx, activeSession.SessionRef, alias, reasoning); err != nil {
+	if err := d.stack.UseModel(ctx, coreRefFromPort(activeSession.SessionRef), alias, reasoning); err != nil {
 		return StatusSnapshot{}, err
 	}
 	d.mu.Lock()
@@ -226,7 +226,7 @@ func (d *GatewayDriver) DeleteModel(ctx context.Context, alias string) error {
 	if err != nil {
 		return err
 	}
-	if err := d.stack.DeleteModel(ctx, activeSession.SessionRef, resolved); err != nil {
+	if err := d.stack.DeleteModel(ctx, coreRefFromPort(activeSession.SessionRef), resolved); err != nil {
 		return err
 	}
 	d.mu.Lock()
@@ -248,12 +248,12 @@ func (d *GatewayDriver) CycleSessionMode(ctx context.Context) (StatusSnapshot, e
 		if err != nil {
 			return StatusSnapshot{}, err
 		}
-		if _, err := d.stack.SetACPControllerMode(ctx, activeSession.SessionRef, next.ID); err != nil {
+		if _, err := d.stack.SetACPControllerMode(ctx, coreRefFromPort(activeSession.SessionRef), next.ID); err != nil {
 			return StatusSnapshot{}, err
 		}
 		return d.Status(ctx)
 	}
-	normalized, err := d.stack.CycleSessionMode(ctx, activeSession.SessionRef)
+	normalized, err := d.stack.CycleSessionMode(ctx, coreRefFromPort(activeSession.SessionRef))
 	if err != nil {
 		return StatusSnapshot{}, err
 	}
@@ -315,12 +315,12 @@ func (d *GatewayDriver) SetSessionMode(ctx context.Context, mode string) (Status
 	if _, activeACP, err := d.activeACPControllerStatus(ctx); err != nil {
 		return StatusSnapshot{}, err
 	} else if activeACP {
-		if _, err := d.stack.SetACPControllerMode(ctx, activeSession.SessionRef, mode); err != nil {
+		if _, err := d.stack.SetACPControllerMode(ctx, coreRefFromPort(activeSession.SessionRef), mode); err != nil {
 			return StatusSnapshot{}, err
 		}
 		return d.Status(ctx)
 	}
-	normalized, err := d.stack.SetSessionMode(ctx, activeSession.SessionRef, mode)
+	normalized, err := d.stack.SetSessionMode(ctx, coreRefFromPort(activeSession.SessionRef), mode)
 	if err != nil {
 		return StatusSnapshot{}, err
 	}

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	coreconfig "github.com/OnslaughtSnail/caelis/core/config"
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
@@ -226,8 +227,8 @@ func TestGatewayDriverSubmitRoutesActiveSessionInputToActiveTurn(t *testing.T) {
 		GatewayFn:       func() GatewayService { return gw },
 		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
+		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
+			return coreSessionFromPort(activeSession), nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -262,18 +263,18 @@ func TestGatewayDriverExecuteCommandRoutesThroughStackAndAdoptsReturnedSession(t
 		WorkspaceKey: "ws",
 	}
 	type commandCall struct {
-		ref   session.SessionRef
+		ref   coresession.Ref
 		input string
-		parts []model.ContentPart
+		parts []coremodel.ContentPart
 	}
 	var calls []commandCall
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		Workspace: session.WorkspaceRef{Key: "ws", CWD: workspace},
-		ExecuteCommandFn: func(_ context.Context, ref session.SessionRef, input string, parts []model.ContentPart) (CommandExecutionView, error) {
+		ExecuteCommandFn: func(_ context.Context, ref coresession.Ref, input string, parts []coremodel.ContentPart) (CommandExecutionView, error) {
 			calls = append(calls, commandCall{
 				ref:   ref,
 				input: input,
-				parts: append([]model.ContentPart(nil), parts...),
+				parts: append([]coremodel.ContentPart(nil), parts...),
 			})
 			view := CommandExecutionView{
 				Handled: true,
@@ -333,8 +334,8 @@ func TestGatewayDriverStartupDoesNotQuerySandboxStatus(t *testing.T) {
 			statusCalls++
 			return SandboxStatus{RequestedBackend: "windows", ResolvedBackend: "windows"}
 		},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
+		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
+			return coreSessionFromPort(activeSession), nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -396,14 +397,14 @@ func TestGatewayDriverStatusCanUseSharedAppStatusView(t *testing.T) {
 		},
 		CWD: workspace,
 	}
-	var seenRef session.SessionRef
+	var seenRef coresession.Ref
 	statusCalls := 0
 	driver, err := NewGatewayDriver(ctx, &DriverStack{
 		Workspace: session.WorkspaceRef{Key: "repo", CWD: workspace},
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
+		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
+			return coreSessionFromPort(activeSession), nil
 		},
-		AppStatusViewFn: func(_ context.Context, ref session.SessionRef) (appviewmodel.StatusView, error) {
+		AppStatusViewFn: func(_ context.Context, ref coresession.Ref) (appviewmodel.StatusView, error) {
 			statusCalls++
 			seenRef = ref
 			return appviewmodel.StatusView{
@@ -493,8 +494,8 @@ func TestGatewayDriverSubmitDoesNotRouteParticipantActiveTurnInputToActiveTurn(t
 		GatewayFn:       func() GatewayService { return gw },
 		Workspace:       session.WorkspaceRef{Key: "ws", CWD: activeSession.CWD},
 		SandboxStatusFn: func() SandboxStatus { return SandboxStatus{RequestedBackend: "host"} },
-		StartSessionFn: func(context.Context, string, string) (session.Session, error) {
-			return activeSession, nil
+		StartSessionFn: func(context.Context, string, string) (coresession.Session, error) {
+			return coreSessionFromPort(activeSession), nil
 		},
 	}, activeSession.SessionID, "surface", "")
 	if err != nil {
@@ -1987,17 +1988,17 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 			GatewayFn: func() GatewayService {
 				return &activeSubmitGatewayService{}
 			},
-			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 				return remoteStatus, true, nil
 			},
-			SetSessionModeFn: func(context.Context, session.SessionRef, string) (string, error) {
+			SetSessionModeFn: func(context.Context, coresession.Ref, string) (string, error) {
 				localSetCalled = true
 				return "manual", nil
 			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
+			SetACPControllerModeFn: func(_ context.Context, ref coresession.Ref, mode string) (appviewmodel.ControllerStatus, error) {
 				if ref.SessionID != activeSession.SessionID {
 					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
 				}
@@ -2061,17 +2062,17 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 			GatewayFn: func() GatewayService {
 				return &activeSubmitGatewayService{}
 			},
-			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 				return remoteStatus, true, nil
 			},
-			CycleSessionModeFn: func(context.Context, session.SessionRef) (string, error) {
+			CycleSessionModeFn: func(context.Context, coresession.Ref) (string, error) {
 				localCycleCalled = true
 				return "manual", nil
 			},
-			SetACPControllerModeFn: func(_ context.Context, ref session.SessionRef, mode string) (appviewmodel.ControllerStatus, error) {
+			SetACPControllerModeFn: func(_ context.Context, ref coresession.Ref, mode string) (appviewmodel.ControllerStatus, error) {
 				if ref.SessionID != activeSession.SessionID {
 					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
 				}
@@ -2167,10 +2168,10 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 				return &activeSubmitGatewayService{}
 			},
 			DefaultModelAliasFn: func() string { return "local/model" },
-			SessionRuntimeStateFn: func(context.Context, session.SessionRef) (SessionRuntimeState, error) {
+			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
 				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "local-default"}, nil
 			},
-			ACPControllerStatusFn: func(context.Context, session.SessionRef) (appviewmodel.ControllerStatus, bool, error) {
+			ACPControllerStatusFn: func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 				return appviewmodel.ControllerStatus{
 					Model: "remote-model",
 					Mode:  "code",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
@@ -173,9 +174,9 @@ func (d *GatewayDriver) CompleteSlashArg(ctx context.Context, command string, qu
 }
 
 func (d *GatewayDriver) completeTaskIDs(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	var ref session.SessionRef
+	var ref coresession.Ref
 	if active, ok := d.currentSession(); ok {
-		ref = active.SessionRef
+		ref = coreRefFromPort(active.SessionRef)
 	}
 	tasks, err := d.stack.ListTasks(ctx, ref, TaskListOptions{Limit: max(limit*4, limit), IncludeHistory: true})
 	if err != nil || !tasks.Supported {
@@ -462,9 +463,9 @@ func controllerChoicesToSlashCandidates(choices []appviewmodel.ControllerConfigC
 }
 
 func (d *GatewayDriver) completeModelAliases(ctx context.Context, query string, limit int) ([]SlashArgCandidate, error) {
-	ref := session.SessionRef{}
+	ref := coresession.Ref{}
 	if activeSession, ok := d.currentSession(); ok {
-		ref = activeSession.SessionRef
+		ref = coreRefFromPort(activeSession.SessionRef)
 	}
 	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {
@@ -770,9 +771,9 @@ func (d *GatewayDriver) resolveStoredModelAlias(ctx context.Context, input strin
 	if input == "" {
 		return "", fmt.Errorf("surfaces/tui/gatewaydriver: model alias is required")
 	}
-	ref := session.SessionRef{}
+	ref := coresession.Ref{}
 	if activeSession, ok := d.currentSession(); ok {
-		ref = activeSession.SessionRef
+		ref = coreRefFromPort(activeSession.SessionRef)
 	}
 	choices, err := d.stack.ListModelChoices(ctx, ref)
 	if err != nil {

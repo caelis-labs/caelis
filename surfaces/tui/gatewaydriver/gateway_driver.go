@@ -58,10 +58,11 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 		streamSubscriptions: map[string]struct{}{},
 	}
 	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
-		activeSession, err := driver.stack.StartSession(ctx, preferredSessionID, driver.bindingKey)
+		activeCoreSession, err := driver.stack.StartSession(ctx, preferredSessionID, driver.bindingKey)
 		if err != nil {
 			return nil, err
 		}
+		activeSession := portSessionFromCore(activeCoreSession)
 		driver.session = activeSession
 		driver.hasSession = true
 		driver.refreshSessionDisplay(ctx, activeSession)
@@ -156,10 +157,11 @@ func (d *GatewayDriver) ensureSession(ctx context.Context) (session.Session, err
 	if d == nil || d.stack == nil {
 		return session.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: stack is unavailable")
 	}
-	activeSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
+	activeCoreSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
 	if err != nil {
 		return session.Session{}, err
 	}
+	activeSession := portSessionFromCore(activeCoreSession)
 	d.mu.Lock()
 	d.session = activeSession
 	d.hasSession = true
@@ -188,7 +190,7 @@ func (d *GatewayDriver) activeACPControllerStatus(ctx context.Context) (appviewm
 	if !ok || activeSession.Controller.Kind != session.ControllerKindACP {
 		return appviewmodel.ControllerStatus{}, false, nil
 	}
-	status, found, err := d.stack.ACPControllerStatus(ctx, activeSession.SessionRef)
+	status, found, err := d.stack.ACPControllerStatus(ctx, coreRefFromPort(activeSession.SessionRef))
 	if err != nil {
 		return appviewmodel.ControllerStatus{}, false, err
 	}
@@ -230,7 +232,7 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 	}
 	activeSession, ok := d.currentSession()
 	if ok && d.stack != nil {
-		if state, err := d.stack.SessionRuntimeState(context.Background(), activeSession.SessionRef); err == nil {
+		if state, err := d.stack.SessionRuntimeState(context.Background(), coreRefFromPort(activeSession.SessionRef)); err == nil {
 			if strings.TrimSpace(state.ModelAlias) != "" {
 				modelText = strings.TrimSpace(state.ModelAlias)
 			}
@@ -308,7 +310,7 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 	if d.stack != nil {
 		req := DoctorRequest{}
 		if ok {
-			req.SessionRef = activeSession.SessionRef
+			req.SessionRef = coreRefFromPort(activeSession.SessionRef)
 		}
 		if includeDiagnostics {
 			if report, err := d.stack.Doctor(context.Background(), req); err == nil {
@@ -574,16 +576,17 @@ func (d *GatewayDriver) activeCommandInterrupt() context.CancelFunc {
 }
 
 func (d *GatewayDriver) NewSession(ctx context.Context) (coresession.Session, error) {
-	activeSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
+	activeCoreSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
 	if err != nil {
 		return coresession.Session{}, err
 	}
+	activeSession := portSessionFromCore(activeCoreSession)
 	d.mu.Lock()
 	d.session = activeSession
 	d.hasSession = true
 	d.mu.Unlock()
 	d.refreshSessionDisplay(ctx, activeSession)
-	return coreSessionFromPort(activeSession), nil
+	return activeCoreSession, nil
 }
 
 func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (coresession.Session, error) {
@@ -668,7 +671,7 @@ func (d *GatewayDriver) ReplaySessionEvents(ctx context.Context) ([]appviewmodel
 	if d == nil || d.stack == nil || d.stack.ReplaySessionEventsFn == nil {
 		return nil, ErrMigrationPending
 	}
-	return d.stack.ReplaySessionEventsFn(ctx, activeSession.SessionRef)
+	return d.stack.ReplaySessionEventsFn(ctx, coreRefFromPort(activeSession.SessionRef))
 }
 
 func (d *GatewayDriver) Compact(ctx context.Context) error {
@@ -676,7 +679,7 @@ func (d *GatewayDriver) Compact(ctx context.Context) error {
 	if !ok {
 		return fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
 	}
-	return d.stack.CompactSession(ctx, activeSession.SessionRef)
+	return d.stack.CompactSession(ctx, coreRefFromPort(activeSession.SessionRef))
 }
 
 func (d *GatewayDriver) ListAgents(ctx context.Context, limit int) ([]AgentCandidate, error) {
@@ -962,7 +965,7 @@ func (d *GatewayDriver) refreshSessionDisplay(ctx context.Context, activeSession
 	if alias := strings.TrimSpace(d.stack.DefaultModelAlias()); alias != "" {
 		modelText = alias
 	}
-	if state, err := d.stack.SessionRuntimeState(ctx, activeSession.SessionRef); err == nil {
+	if state, err := d.stack.SessionRuntimeState(ctx, coreRefFromPort(activeSession.SessionRef)); err == nil {
 		if strings.TrimSpace(state.ModelAlias) != "" {
 			modelText = strings.TrimSpace(state.ModelAlias)
 		}

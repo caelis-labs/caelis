@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -14,9 +15,9 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 		return StatusSnapshot{}, false, nil
 	}
 	activeSession, hasSession := d.currentSession()
-	ref := session.SessionRef{}
+	ref := coresession.Ref{}
 	if hasSession {
-		ref = activeSession.SessionRef
+		ref = coreRefFromPort(activeSession.SessionRef)
 	}
 	view, ok, err := d.stack.AppStatusView(ctx, ref)
 	if !ok || err != nil {
