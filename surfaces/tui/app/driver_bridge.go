@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -682,6 +683,15 @@ func sendApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *kernel.Ap
 	go awaitApprovalPrompt(ctx, turn, req, responses, send)
 }
 
+func sendApprovalItemPrompt(ctx context.Context, turn tuidriver.Turn, req *appviewmodel.ApprovalItem, send func(tea.Msg)) {
+	if turn == nil || req == nil || send == nil {
+		return
+	}
+	responses := make(chan PromptResponse, 1)
+	send(approvalItemToPromptRequest(req, responses))
+	go awaitApprovalItemPrompt(ctx, turn, req, responses, send)
+}
+
 func isAutomaticApprovalEvent(req *kernel.ApprovalPayload) bool {
 	if req == nil {
 		return false
@@ -724,57 +734,73 @@ func awaitApprovalPrompt(ctx context.Context, turn tuidriver.Turn, req *kernel.A
 	}
 	decision := approvalDecisionFromPrompt(req, response)
 	if err := turn.Submit(ctx, coreruntime.Submission{
-		Kind: coreruntime.SubmissionApproval,
-		Approval: &coreruntime.ApprovalDecision{
-			Outcome:  decision.Outcome,
-			OptionID: decision.OptionID,
-			Approved: decision.Approved,
-			Reason:   decision.Reason,
-		},
+		Kind:     coreruntime.SubmissionApproval,
+		Approval: &decision,
 	}); err != nil {
 		sendNotice(send, fmt.Sprintf("approval submit failed: %v", err))
 	}
 }
 
-func approvalDecisionFromPrompt(req *kernel.ApprovalPayload, response PromptResponse) kernel.ApprovalDecision {
+func awaitApprovalItemPrompt(ctx context.Context, turn tuidriver.Turn, req *appviewmodel.ApprovalItem, responses <-chan PromptResponse, send func(tea.Msg)) {
+	ctx = contextOrBackground(ctx)
+	var response PromptResponse
+	select {
+	case <-ctx.Done():
+		return
+	case next, ok := <-responses:
+		if !ok {
+			return
+		}
+		response = next
+	}
+	decision := approvalDecisionFromPromptOptions(approvalPromptDataFromItem(req).Options, response)
+	if err := turn.Submit(ctx, coreruntime.Submission{
+		Kind:     coreruntime.SubmissionApproval,
+		Approval: &decision,
+	}); err != nil {
+		sendNotice(send, fmt.Sprintf("approval submit failed: %v", err))
+	}
+}
+
+func approvalDecisionFromPrompt(req *kernel.ApprovalPayload, response PromptResponse) coreruntime.ApprovalDecision {
+	return approvalDecisionFromPromptOptions(approvalPromptDataFromKernel(req).Options, response)
+}
+
+func approvalDecisionFromPromptOptions(options []approvalPromptOption, response PromptResponse) coreruntime.ApprovalDecision {
 	selected := strings.TrimSpace(response.Line)
 	if response.Err != nil || selected == "" {
-		return rejectionApprovalDecision(req)
+		return rejectionApprovalDecision(options)
 	}
-	if req != nil {
-		for _, opt := range req.Options {
-			if strings.TrimSpace(opt.ID) != selected {
-				continue
-			}
-			return kernel.ApprovalDecision{
-				Outcome:  string(kernel.ApprovalStatusSelected),
-				OptionID: selected,
-				Approved: approvalOptionAllows(opt.Kind, opt.Name, opt.ID),
-			}
+	for _, opt := range options {
+		if strings.TrimSpace(opt.ID) != selected {
+			continue
+		}
+		return coreruntime.ApprovalDecision{
+			Outcome:  string(kernel.ApprovalStatusSelected),
+			OptionID: selected,
+			Approved: approvalOptionAllows(opt.Kind, opt.Name, opt.ID),
 		}
 	}
 	switch strings.ToLower(selected) {
 	case "approve", "allow", "yes", "y":
-		return kernel.ApprovalDecision{Outcome: string(kernel.ApprovalStatusApproved), Approved: true}
+		return coreruntime.ApprovalDecision{Outcome: string(kernel.ApprovalStatusApproved), Approved: true}
 	default:
-		return rejectionApprovalDecision(req)
+		return rejectionApprovalDecision(options)
 	}
 }
 
-func rejectionApprovalDecision(req *kernel.ApprovalPayload) kernel.ApprovalDecision {
-	if req != nil {
-		for _, opt := range req.Options {
-			if approvalOptionAllows(opt.Kind, opt.Name, opt.ID) {
-				continue
-			}
-			return kernel.ApprovalDecision{
-				Outcome:  string(kernel.ApprovalStatusSelected),
-				OptionID: strings.TrimSpace(opt.ID),
-				Approved: false,
-			}
+func rejectionApprovalDecision(options []approvalPromptOption) coreruntime.ApprovalDecision {
+	for _, opt := range options {
+		if approvalOptionAllows(opt.Kind, opt.Name, opt.ID) {
+			continue
+		}
+		return coreruntime.ApprovalDecision{
+			Outcome:  string(kernel.ApprovalStatusSelected),
+			OptionID: strings.TrimSpace(opt.ID),
+			Approved: false,
 		}
 	}
-	return kernel.ApprovalDecision{Outcome: string(kernel.ApprovalStatusRejected), Approved: false}
+	return coreruntime.ApprovalDecision{Outcome: string(kernel.ApprovalStatusRejected), Approved: false}
 }
 
 func approvalOptionAllows(kind string, name string, id string) bool {

@@ -859,6 +859,87 @@ func TestExecuteLineViaDriverProjectsAppToolEventOnce(t *testing.T) {
 	}
 }
 
+func TestExecuteLineViaDriverUsesAppApprovalPrompt(t *testing.T) {
+	legacyEvents := make(chan kernel.EventEnvelope, 1)
+	legacyEvents <- kernel.EventEnvelope{Event: kernel.Event{
+		Kind: kernel.EventKindApprovalRequested,
+		ApprovalPayload: &kernel.ApprovalPayload{
+			ToolName: "legacy",
+		},
+	}}
+	close(legacyEvents)
+	appEvents := make(chan appviewmodel.SessionEventEnvelope, 1)
+	appEvents <- appviewmodel.EventEnvelopeFromSession("approval-1", coresession.Event{
+		ID:        "approval-1",
+		SessionID: "root-session",
+		Type:      coresession.EventApproval,
+		Approval: &coresession.ApprovalEvent{
+			ID:     "approval-call-1",
+			Status: coresession.ApprovalPending,
+			Reason: "command needs approval",
+			Tool: &coresession.ToolEvent{
+				ID:    "call-1",
+				Name:  "RUN_COMMAND",
+				Input: map[string]any{"command": "printf hi"},
+			},
+			Options: []coresession.ApprovalOption{
+				{ID: "allow_once", Name: "Allow once", Kind: "allow"},
+				{ID: "deny", Name: "Deny", Kind: "deny"},
+			},
+		},
+	})
+	close(appEvents)
+	turn := &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{events: legacyEvents},
+		appEvents:      appEvents,
+	}
+
+	driver := &bridgeSubmitDriver{turn: turn}
+	var msgs []tea.Msg
+	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	if result.Err != nil {
+		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+	}
+	if turn.eventsCalls != 0 {
+		t.Fatalf("legacy Events() calls = %d, want 0 when app approval event is available", turn.eventsCalls)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("executeLineViaDriver() emitted %d msgs, want one prompt: %#v", len(msgs), msgs)
+	}
+	prompt, ok := msgs[0].(PromptRequestMsg)
+	if !ok {
+		t.Fatalf("first msg = %#v, want PromptRequestMsg", msgs[0])
+	}
+	if prompt.Prompt != "RUN_COMMAND" || prompt.DefaultChoice != "allow_once" {
+		t.Fatalf("prompt = %#v, want app approval prompt", prompt)
+	}
+	if !promptDetailsContain(prompt.Details, "Command", "printf hi") || !promptDetailsContain(prompt.Details, "Reason", "command needs approval") {
+		t.Fatalf("prompt details = %#v, want command and reason", prompt.Details)
+	}
+	prompt.Response <- PromptResponse{Line: "allow_once"}
+
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	for {
+		if len(turn.submissions) > 0 {
+			got := turn.submissions[0]
+			if got.Kind != coreruntime.SubmissionApproval || got.Approval == nil {
+				t.Fatalf("submission = %#v, want approval decision", got)
+			}
+			if got.Approval.OptionID != "allow_once" || !got.Approval.Approved {
+				t.Fatalf("approval decision = %#v, want allowed allow_once", got.Approval)
+			}
+			return
+		}
+		select {
+		case <-timer.C:
+			t.Fatal("timed out waiting for approval submission")
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+}
+
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.T) {
 	turn := &bridgeTestTurn{
 		events: make(chan kernel.EventEnvelope, 4),
@@ -2038,6 +2119,15 @@ func noticeMessagesContain(messages []tea.Msg, text string) bool {
 	for _, msg := range messages {
 		log, ok := msg.(LogChunkMsg)
 		if ok && strings.Contains(log.Chunk, text) {
+			return true
+		}
+	}
+	return false
+}
+
+func promptDetailsContain(details []PromptDetail, label string, value string) bool {
+	for _, detail := range details {
+		if strings.EqualFold(strings.TrimSpace(detail.Label), strings.TrimSpace(label)) && strings.Contains(detail.Value, value) {
 			return true
 		}
 	}

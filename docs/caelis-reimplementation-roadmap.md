@@ -1408,6 +1408,10 @@ be migrated before retiring the old stack:
      App-service turns use core submissions, core sessions, and core cancel
      results; legacy gateway event stream/replay support is now an internal
      Bubble Tea bridge fallback for non app-service drivers.
+   - Migrated baseline: app-service TUI approval prompts now consume
+     `internal/app/viewmodel.ApprovalItem` directly and submit
+     `core/runtime` approval decisions. Converting core approval events into
+     old `kernel.ApprovalPayload` is limited to legacy gateway fallback paths.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and

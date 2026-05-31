@@ -146,6 +146,10 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 	if transcriptEvents := ProjectSessionEventEnvelopeToTranscriptEvents(env); len(transcriptEvents) > 0 {
 		send(TranscriptEventsMsg{Events: transcriptEvents})
 	}
+	if env.Approval != nil {
+		sendApprovalItemPrompt(ctx, turn, env.Approval, send)
+		return
+	}
 	if !appSessionEnvelopeNeedsGatewayCompatibility(env) {
 		return
 	}
@@ -176,8 +180,6 @@ func appSessionEnvelopeNeedsGatewayTranscriptFallback(env appviewmodel.SessionEv
 		return false
 	}
 	switch env.Canonical.Type {
-	case coresession.EventApproval:
-		return true
 	default:
 		return false
 	}
@@ -188,8 +190,6 @@ func appSessionEnvelopeNeedsGatewayCompatibility(env appviewmodel.SessionEventEn
 		return false
 	}
 	switch env.Canonical.Type {
-	case coresession.EventApproval:
-		return true
 	case coresession.EventToolCall, coresession.EventToolResult:
 		return true
 	default:
