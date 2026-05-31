@@ -213,6 +213,81 @@ func TestCommandPanelBlockRendersApprovalPanelActions(t *testing.T) {
 	}
 }
 
+func TestCommandPanelBlockRendersModelSelectionActions(t *testing.T) {
+	panel := appviewmodel.ModelSelectionView{
+		Current: &appviewmodel.ModelChoice{
+			ID:       "alpha",
+			Alias:    "alpha",
+			Provider: "openai-compatible",
+			Model:    "gpt-alpha",
+			Default:  true,
+		},
+		Configured: []appviewmodel.ModelChoice{{
+			ID:       "alpha",
+			Alias:    "alpha",
+			Provider: "openai-compatible",
+			Model:    "gpt-alpha",
+			Default:  true,
+		}, {
+			ID:       "beta",
+			Alias:    "beta",
+			Provider: "openai-compatible",
+			Model:    "gpt-beta",
+		}},
+		RemoteEnabled: true,
+		Actions: []appviewmodel.ModelSelectionAction{{
+			ID:      "model.connect",
+			Kind:    "connect",
+			Label:   "Connect model",
+			Command: "/connect",
+			Enabled: true,
+		}, {
+			ID:      "model.use:beta",
+			Kind:    "use",
+			Label:   "Use beta",
+			ModelID: "beta",
+			Command: "/model use beta",
+			Enabled: true,
+		}, {
+			ID:          "model.delete:alpha",
+			Kind:        "delete",
+			Label:       "Delete alpha",
+			ModelID:     "alpha",
+			Command:     "/model del alpha",
+			Enabled:     true,
+			Destructive: true,
+		}},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command:        "model",
+		ModelSelection: &panel,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"MODELS", "Model Selection", "alpha", "current", "default", "model.use:beta", "model.delete:alpha"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered model panel = %q, missing %q", plain, want)
+		}
+	}
+	if !rowsContainCommandPanelInput(rows, "/connect") {
+		t.Fatalf("model connect action missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if !rowsContainCommandPanelInput(rows, "/model use beta") {
+		t.Fatalf("model use action missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if !rowsContainCommandPanelInput(rows, "/model del alpha") {
+		t.Fatalf("model delete action missing command-panel input token: %#v", renderedPlainRows(rows))
+	}
+	if action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ModelSelection: &panel}, "/model use beta"); action.line != "/model use beta" {
+		t.Fatalf("model use action = %#v, want immediate submit", action)
+	}
+	action := commandPanelActionForInput(appviewmodel.CommandExecutionView{ModelSelection: &panel}, "/model del alpha")
+	if action.prompt == nil || action.prompt.buildLine("run") != "/model del alpha" {
+		t.Fatalf("model delete action = %#v, want confirmation prompt", action)
+	}
+}
+
 func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 	panel := appviewmodel.ControllerPanelView{
 		Active: true,

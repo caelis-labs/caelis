@@ -22,6 +22,7 @@ type CommandExecutionView struct {
 	TaskPanel         *TaskPanelView       `json:"task_panel,omitempty"`
 	ResumePanel       *ResumePanelView     `json:"resume_panel,omitempty"`
 	ApprovalPanel     *ApprovalPanelView   `json:"approval_panel,omitempty"`
+	ModelSelection    *ModelSelectionView  `json:"model_selection,omitempty"`
 	ControllerPanel   *ControllerPanelView `json:"controller_panel,omitempty"`
 	ModelConnectPanel *ModelConnectView    `json:"model_connect_panel,omitempty"`
 	AgentManagement   *AgentManagementView `json:"agent_management,omitempty"`

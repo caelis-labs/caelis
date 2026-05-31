@@ -1631,6 +1631,48 @@ func TestSlashConnectPassesEnvironmentVariableSecretToSharedCommand(t *testing.T
 	}
 }
 
+func TestSlashModelEmitsStructuredCommandPanel(t *testing.T) {
+	panel := appviewmodel.ModelSelectionView{
+		Current: &appviewmodel.ModelChoice{ID: "alpha", Alias: "alpha", Provider: "openai-compatible", Model: "gpt-alpha"},
+		Configured: []appviewmodel.ModelChoice{{
+			ID:       "alpha",
+			Alias:    "alpha",
+			Provider: "openai-compatible",
+			Model:    "gpt-alpha",
+		}},
+		Actions: []appviewmodel.ModelSelectionAction{{
+			ID:      "model.connect",
+			Kind:    "connect",
+			Label:   "Connect model",
+			Command: "/connect",
+			Enabled: true,
+		}},
+	}
+	driver := &bridgeTestDriver{
+		status: tuidriver.StatusSnapshot{Model: "alpha", ModeLabel: "default", Workspace: "/tmp/ws"},
+		commandView: tuidriver.CommandExecutionView{
+			Handled:        true,
+			Command:        "model",
+			ModelSelection: &panel,
+		},
+	}
+	var msgs []tea.Msg
+	result := slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
+	if result.Err != nil || !result.SuppressTurnDivider {
+		t.Fatalf("model result = %#v, want handled structured panel", result)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/model" {
+		t.Fatalf("command calls=%d input=%q, want shared /model command", driver.commandCalls, driver.lastCommandInput)
+	}
+	for _, msg := range msgs {
+		panelMsg, ok := msg.(CommandPanelMsg)
+		if ok && panelMsg.View.ModelSelection != nil {
+			return
+		}
+	}
+	t.Fatalf("model messages = %#v, want CommandPanelMsg with model selection payload", msgs)
+}
+
 func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:      tuidriver.StatusSnapshot{Model: "minimax/MiniMax-M2", ModeLabel: "default", Workspace: "/tmp/ws"},

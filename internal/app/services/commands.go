@@ -601,11 +601,7 @@ func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args 
 				currentID = current.ID
 			}
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "model",
-			Output:  formatCommandModels(choices, currentID),
-		}, nil
+		return s.modelCommandView(ctx, ref, formatCommandModels(choices, currentID))
 	}
 	switch strings.ToLower(sub) {
 	case "use":
@@ -621,11 +617,7 @@ func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args 
 		if reasoning != "" {
 			output += " (reasoning: " + reasoning + ")"
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "model",
-			Output:  output,
-		}, nil
+		return s.modelCommandView(ctx, ref, output)
 	case "del", "delete", "rm":
 		modelRef := strings.TrimSpace(rest)
 		if modelRef == "" || strings.ContainsAny(modelRef, " \t\n") {
@@ -640,14 +632,23 @@ func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args 
 				return appviewmodel.CommandExecutionView{}, err
 			}
 		}
-		return appviewmodel.CommandExecutionView{
-			Handled: true,
-			Command: "model",
-			Output:  "model deleted: " + modelRef,
-		}, nil
+		return s.modelCommandView(ctx, ref, "model deleted: "+modelRef)
 	default:
 		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /model [list|use <alias> [reasoning]|del <alias>]")
 	}
+}
+
+func (s CommandService) modelCommandView(ctx context.Context, ref session.Ref, output string) (appviewmodel.CommandExecutionView, error) {
+	panel, err := s.services.Models().Selection(ctx, ModelSelectionRequest{SessionRef: ref})
+	if err != nil {
+		return appviewmodel.CommandExecutionView{}, err
+	}
+	return appviewmodel.CommandExecutionView{
+		Handled:        true,
+		Command:        "model",
+		Output:         output,
+		ModelSelection: &panel,
+	}, nil
 }
 
 func (s CommandService) executeControllerModel(ctx context.Context, ref session.Ref, status ControllerStatus, sub string, rest string, hasSub bool) (appviewmodel.CommandExecutionView, error) {

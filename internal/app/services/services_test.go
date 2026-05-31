@@ -1559,6 +1559,21 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 			t.Fatalf("model list output = %q, missing %q", listed.Output, want)
 		}
 	}
+	if listed.ModelSelection == nil || listed.ModelSelection.Current == nil || listed.ModelSelection.Current.ID != alpha.ID || len(listed.ModelSelection.Configured) != 2 {
+		t.Fatalf("model selection panel = %#v, want current alpha and two configured models", listed.ModelSelection)
+	}
+	if action, ok := findModelSelectionActionByCommand(listed.ModelSelection.Actions, "/connect"); !ok || !action.Enabled {
+		t.Fatalf("connect action = %#v ok=%v, want enabled /connect", action, ok)
+	}
+	if action, ok := findModelSelectionActionByCommand(listed.ModelSelection.Actions, "/model use "+alpha.ID); !ok || action.Enabled {
+		t.Fatalf("current model use action = %#v ok=%v, want disabled current action", action, ok)
+	}
+	if action, ok := findModelSelectionActionByCommand(listed.ModelSelection.Actions, "/model use "+beta.ID); !ok || !action.Enabled {
+		t.Fatalf("beta use action = %#v ok=%v, want enabled use action", action, ok)
+	}
+	if action, ok := findModelSelectionActionByCommand(listed.ModelSelection.Actions, "/model del "+alpha.ID); !ok || !action.Enabled || !action.Destructive {
+		t.Fatalf("alpha delete action = %#v ok=%v, want destructive delete action", action, ok)
+	}
 
 	switched, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-command"},
@@ -1572,6 +1587,9 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	}
 	if engine.state[StateCurrentModelID] != beta.ID || engine.state[StateCurrentReasoningEffort] != "high" {
 		t.Fatalf("state after model use = %#v, want beta/high", engine.state)
+	}
+	if switched.ModelSelection == nil || switched.ModelSelection.Current == nil || switched.ModelSelection.Current.ID != beta.ID {
+		t.Fatalf("model selection after switch = %#v, want current beta", switched.ModelSelection)
 	}
 
 	currentMode, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
@@ -1623,6 +1641,14 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	}
 	if deleted.Output != "model deleted: alpha" {
 		t.Fatalf("delete output = %q, want deleted alpha", deleted.Output)
+	}
+	if deleted.ModelSelection == nil {
+		t.Fatal("delete model selection panel = nil, want updated panel")
+	}
+	for _, choice := range deleted.ModelSelection.Configured {
+		if choice.ID == alpha.ID {
+			t.Fatalf("deleted model still present in selection panel: %#v", deleted.ModelSelection.Configured)
+		}
 	}
 	if _, err := manager.ResolveModel("alpha"); err == nil {
 		t.Fatal("ResolveModel(alpha) error = nil, want deleted model")
@@ -5309,6 +5335,15 @@ func TestModelServiceSelectionViewProjectsProvidersAndCandidates(t *testing.T) {
 	if view.Current == nil || view.Current.ID != cfg.ID || len(view.Configured) != 2 {
 		t.Fatalf("selection current/configured = %#v/%#v, want selected model and two configured models", view.Current, view.Configured)
 	}
+	if action, ok := findModelSelectionActionByCommand(view.Actions, "/connect"); !ok || !action.Enabled {
+		t.Fatalf("connect action = %#v ok=%v, want enabled /connect action", action, ok)
+	}
+	if action, ok := findModelSelectionActionByCommand(view.Actions, "/model use "+cfg.ID); !ok || action.Enabled {
+		t.Fatalf("current use action = %#v ok=%v, want disabled current model action", action, ok)
+	}
+	if action, ok := findModelSelectionActionByCommand(view.Actions, "/model del "+cfg.ID); !ok || !action.Destructive {
+		t.Fatalf("delete action = %#v ok=%v, want destructive delete action", action, ok)
+	}
 	provider, ok := findModelProviderOption(view.Providers, "openai-compatible")
 	if !ok || !provider.Builtin || !provider.Configured || provider.ConfiguredModelCount != 1 || provider.CatalogModelCount == 0 || !provider.RemoteDiscovery {
 		t.Fatalf("openai-compatible provider option = %#v ok=%v, want builtin/configured/remote provider", provider, ok)
@@ -5579,6 +5614,16 @@ func findModelCandidate(candidates []appviewmodel.ModelCandidate, modelName stri
 		}
 	}
 	return appviewmodel.ModelCandidate{}, false
+}
+
+func findModelSelectionActionByCommand(actions []appviewmodel.ModelSelectionAction, command string) (appviewmodel.ModelSelectionAction, bool) {
+	command = strings.TrimSpace(command)
+	for _, action := range actions {
+		if strings.TrimSpace(action.Command) == command {
+			return action, true
+		}
+	}
+	return appviewmodel.ModelSelectionAction{}, false
 }
 
 func findConnectProvider(providers []appviewmodel.ModelConnectProvider, id string) (appviewmodel.ModelConnectProvider, bool) {

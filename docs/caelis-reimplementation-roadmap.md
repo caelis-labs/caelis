@@ -975,6 +975,10 @@ The completed work is intentionally limited to the reusable skeleton:
   configured model, provider options, plugin provider aliases, discovered
   remote models, built-in catalog candidates, and capability/reasoning metadata
   into a single surface-neutral view model for TUI and future APP setup flows.
+- Shared `/model` panel baseline: local `/model` command execution now returns
+  the same `ModelSelectionView` with current/configured model rows and stable
+  use/delete/connect actions, while TUI only renders the shared payload and maps
+  clicks to commands.
 - App session mode baseline: shared app services persist a per-session approval
   preset, ACP exposes it through `session/set_mode` and the `mode` config
   option, and the core approval policy receives the selected mode for each tool
@@ -1761,6 +1765,10 @@ be migrated before retiring the old stack:
      options, plugin provider aliases, built-in catalog candidates, remote
      provider discovery, and model capability/reasoning metadata into one
      surface-neutral view.
+   - Migrated baseline: `/model` list/use/delete now returns the shared
+     `ModelSelectionView` including current/configured rows and stable
+     use/delete/connect actions. TUI renders that payload as a command panel and
+     keeps destructive delete confirmation as surface-local interaction logic.
    - Migrated baseline: built-in provider model presets, provider counts,
      capability matching, remote `core/model.ModelInfo` capability normalization,
      and reasoning-level derivation now live in the pure app-domain
@@ -2541,8 +2549,8 @@ Recommended sequence:
    especially any product actions not yet represented by shared settings, task,
    controller, or resume panel payloads while preserving rendering as
    surface-local code.
-5. Expand shared APP view models for settings, agent management, richer model
-   selection, tasks, resume, and transcript actions.
+5. Expand shared APP view models for settings, agent management, tasks, resume,
+   and transcript actions.
 7. Finish remaining canonical-event round trips for compaction edge cases and
    any newly added lifecycle surfaces.
 8. Add full store round-trip and ACP projection parity tests for product flows.

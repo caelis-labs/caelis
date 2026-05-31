@@ -60,6 +60,7 @@ func commandExecutionHasPanel(view appviewmodel.CommandExecutionView) bool {
 		view.TaskPanel != nil ||
 		view.ResumePanel != nil ||
 		view.ApprovalPanel != nil ||
+		view.ModelSelection != nil ||
 		view.ControllerPanel != nil ||
 		view.ModelConnectPanel != nil ||
 		view.AgentManagement != nil
@@ -118,6 +119,8 @@ func commandPanelClickHints(view appviewmodel.CommandExecutionView) []commandPan
 		return resumePanelClickHints(*view.ResumePanel)
 	case view.ApprovalPanel != nil:
 		return approvalPanelClickHints(*view.ApprovalPanel)
+	case view.ModelSelection != nil:
+		return modelSelectionClickHints(*view.ModelSelection)
 	case view.ControllerPanel != nil:
 		return controllerPanelClickHints(*view.ControllerPanel)
 	case view.ModelConnectPanel != nil:
@@ -160,6 +163,8 @@ func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme 
 		return "sessions", "Resume Session", resumePanelState(*view.ResumePanel), resumePanelBody(*view.ResumePanel, width, theme), commandPanelFooterForCommand("resume")
 	case view.ApprovalPanel != nil:
 		return "approval", "Approval", approvalPanelState(*view.ApprovalPanel), approvalPanelBody(*view.ApprovalPanel, width, theme), commandPanelFooterForCommand("approval")
+	case view.ModelSelection != nil:
+		return "models", "Model Selection", modelSelectionState(*view.ModelSelection), modelSelectionBody(*view.ModelSelection, width, theme), commandPanelFooterForCommand("model")
 	case view.ControllerPanel != nil:
 		return "controller", "ACP Controller", controllerPanelState(*view.ControllerPanel), controllerPanelBody(*view.ControllerPanel, width, theme), commandPanelFooterForCommand("controller")
 	case view.ModelConnectPanel != nil:
@@ -301,6 +306,45 @@ func approvalPanelBody(panel appviewmodel.ApprovalPanelView, width int, theme tu
 		body = append(body, "", tok.ChromeMeta.Render("Actions"))
 		for _, action := range panel.Actions {
 			body = append(body, approvalPanelActionLine(action, contentWidth, theme))
+		}
+	}
+	return body
+}
+
+func modelSelectionBody(panel appviewmodel.ModelSelectionView, width int, theme tuikit.Theme) []string {
+	contentWidth := commandPanelContentWidth(width)
+	tok := theme.Tokens()
+	providerSummary := fmt.Sprintf("%d", len(panel.Providers))
+	if panel.RemoteEnabled {
+		providerSummary += "  remote enabled"
+	}
+	body := []string{
+		commandPanelKV(theme, contentWidth, "current", modelSelectionCurrentLabel(panel)),
+		commandPanelKV(theme, contentWidth, "configured", fmt.Sprintf("%d", len(panel.Configured))),
+		commandPanelKV(theme, contentWidth, "providers", providerSummary),
+	}
+	if provider := strings.TrimSpace(panel.Provider); provider != "" {
+		body = append(body, commandPanelKV(theme, contentWidth, "provider", provider))
+	}
+	if len(panel.Candidates) > 0 {
+		body = append(body, commandPanelKV(theme, contentWidth, "candidates", fmt.Sprintf("%d", len(panel.Candidates))))
+	}
+	if discoveryErr := strings.TrimSpace(panel.DiscoveryErr); discoveryErr != "" {
+		body = append(body, tok.Warning.Render(truncateTailDisplay("discovery: "+commandPanelOneLine(discoveryErr), contentWidth)))
+	}
+	if len(panel.Configured) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Configured"))
+		currentID := modelSelectionCurrentID(panel)
+		for _, choice := range panel.Configured {
+			body = append(body, modelSelectionChoiceLine(choice, currentID, contentWidth, theme))
+		}
+	} else {
+		body = append(body, "", tok.TextSecondary.Render("No configured models"))
+	}
+	if len(panel.Actions) > 0 {
+		body = append(body, "", tok.ChromeMeta.Render("Actions"))
+		for _, action := range panel.Actions {
+			body = append(body, modelSelectionActionLine(action, contentWidth, theme))
 		}
 	}
 	return body
@@ -520,6 +564,31 @@ func approvalPanelClickHints(panel appviewmodel.ApprovalPanelView) []commandPane
 	return hints
 }
 
+func modelSelectionClickHints(panel appviewmodel.ModelSelectionView) []commandPanelClickHint {
+	var hints []commandPanelClickHint
+	for _, action := range panel.Actions {
+		if !action.Enabled || strings.TrimSpace(action.Command) == "" {
+			continue
+		}
+		hints = append(hints, commandPanelClickHint{
+			Needle: firstNonEmpty(action.ID, action.Label, action.ModelID),
+			Input:  strings.TrimSpace(action.Command),
+		})
+	}
+	currentID := modelSelectionCurrentID(panel)
+	for _, choice := range panel.Configured {
+		modelID := firstNonEmpty(choice.ID, choice.Alias, choice.Model)
+		if modelID == "" || modelSelectionIDsMatch(modelID, currentID) {
+			continue
+		}
+		hints = append(hints, commandPanelClickHint{
+			Needle: firstNonEmpty(choice.ID, choice.Alias, choice.Model),
+			Input:  "/model use " + modelID,
+		})
+	}
+	return hints
+}
+
 func controllerPanelClickHints(panel appviewmodel.ControllerPanelView) []commandPanelClickHint {
 	if !panel.Active {
 		return nil
@@ -665,6 +734,8 @@ func commandPanelFooterForCommand(command string) string {
 		return "open: /resume <session-id>"
 	case "approval":
 		return "mode: /approval auto-review|manual|toggle"
+	case "model":
+		return "actions: /model use <alias>, /model del <alias>, /connect"
 	case "controller":
 		return "handoff: /agent use local  config: /model use <model>, /approval <mode>, /controller set <option-id> <value>"
 	case "connect":
@@ -784,6 +855,19 @@ func approvalPanelState(panel appviewmodel.ApprovalPanelView) string {
 		return "waiting"
 	}
 	return firstNonEmpty(panel.CurrentMode, "ready")
+}
+
+func modelSelectionState(panel appviewmodel.ModelSelectionView) string {
+	if strings.TrimSpace(panel.DiscoveryErr) != "" {
+		return "warning"
+	}
+	if len(panel.Configured) == 0 {
+		return "empty"
+	}
+	if panel.Current == nil {
+		return "select"
+	}
+	return "ready"
 }
 
 func controllerPanelState(panel appviewmodel.ControllerPanelView) string {
@@ -1043,6 +1127,88 @@ func approvalPanelActionLine(action appviewmodel.ApprovalPanelAction, width int,
 	}
 	plain := fmt.Sprintf("  %s - %s (%s)", firstNonEmpty(action.ID, action.Label, action.Kind), firstNonEmpty(action.Label, action.Kind), state)
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func modelSelectionCurrentLabel(panel appviewmodel.ModelSelectionView) string {
+	if panel.Current == nil {
+		return "not configured"
+	}
+	return modelChoiceLabel(*panel.Current)
+}
+
+func modelSelectionCurrentID(panel appviewmodel.ModelSelectionView) string {
+	if panel.Current == nil {
+		return ""
+	}
+	return firstNonEmpty(panel.Current.ID, panel.Current.Alias, panel.Current.Model)
+}
+
+func modelChoiceLabel(choice appviewmodel.ModelChoice) string {
+	name := firstNonEmpty(choice.Alias, choice.ID, choice.Model)
+	detail := strings.Trim(strings.TrimSpace(choice.Provider)+"/"+strings.TrimSpace(choice.Model), "/")
+	if detail != "" && name != "" && !strings.EqualFold(name, detail) {
+		return name + " (" + detail + ")"
+	}
+	return firstNonEmpty(name, detail, "model")
+}
+
+func modelSelectionChoiceLine(choice appviewmodel.ModelChoice, currentID string, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	modelID := firstNonEmpty(choice.ID, choice.Alias, choice.Model)
+	traits := []string{}
+	if modelSelectionIDsMatch(modelID, currentID) {
+		traits = append(traits, "current")
+	}
+	if choice.Default {
+		traits = append(traits, "default")
+	}
+	if detail := strings.TrimSpace(choice.Detail); detail != "" {
+		traits = append(traits, detail)
+	}
+	plain := "  " + strings.Join(compactNonEmpty([]string{modelID, modelChoiceLabel(choice)}), "  ")
+	if len(compactNonEmpty(traits)) > 0 {
+		plain += "  [" + strings.Join(compactNonEmpty(traits), ", ") + "]"
+	}
+	style := tok.TextPrimary
+	if modelSelectionIDsMatch(modelID, currentID) {
+		style = tok.Success
+	}
+	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func modelSelectionActionLine(action appviewmodel.ModelSelectionAction, width int, theme tuikit.Theme) string {
+	tok := theme.Tokens()
+	state := "disabled"
+	style := tok.TextMuted
+	if action.Enabled {
+		state = "enabled"
+		style = tok.TextPrimary
+	}
+	if action.Enabled && action.Destructive {
+		style = tok.Danger
+	}
+	parts := []string{firstNonEmpty(action.ID, action.Label, action.Kind)}
+	if label := strings.TrimSpace(action.Label); label != "" && !strings.EqualFold(label, parts[0]) {
+		parts = append(parts, label)
+	}
+	parts = append(parts, state)
+	if action.RequiresInput {
+		parts = append(parts, "input")
+	}
+	if action.Destructive {
+		parts = append(parts, "destructive")
+	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		parts = append(parts, command)
+	}
+	plain := "  " + strings.Join(compactNonEmpty(parts), "  ")
+	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
+}
+
+func modelSelectionIDsMatch(a string, b string) bool {
+	a = strings.TrimSpace(a)
+	b = strings.TrimSpace(b)
+	return a != "" && b != "" && strings.EqualFold(a, b)
 }
 
 func controllerPanelFieldLine(field appviewmodel.ControllerPanelField, width int, theme tuikit.Theme) string {

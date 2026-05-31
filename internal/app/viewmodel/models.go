@@ -1,13 +1,25 @@
 package viewmodel
 
 type ModelSelectionView struct {
-	Current       *ModelChoice          `json:"current,omitempty"`
-	Configured    []ModelChoice         `json:"configured,omitempty"`
-	Providers     []ModelProviderOption `json:"providers,omitempty"`
-	Candidates    []ModelCandidate      `json:"candidates,omitempty"`
-	Provider      string                `json:"provider,omitempty"`
-	DiscoveryErr  string                `json:"discovery_error,omitempty"`
-	RemoteEnabled bool                  `json:"remote_enabled,omitempty"`
+	Current       *ModelChoice           `json:"current,omitempty"`
+	Configured    []ModelChoice          `json:"configured,omitempty"`
+	Providers     []ModelProviderOption  `json:"providers,omitempty"`
+	Candidates    []ModelCandidate       `json:"candidates,omitempty"`
+	Actions       []ModelSelectionAction `json:"actions,omitempty"`
+	Provider      string                 `json:"provider,omitempty"`
+	DiscoveryErr  string                 `json:"discovery_error,omitempty"`
+	RemoteEnabled bool                   `json:"remote_enabled,omitempty"`
+}
+
+type ModelSelectionAction struct {
+	ID            string `json:"id,omitempty"`
+	Kind          string `json:"kind,omitempty"`
+	Label         string `json:"label,omitempty"`
+	ModelID       string `json:"model_id,omitempty"`
+	Command       string `json:"command,omitempty"`
+	Enabled       bool   `json:"enabled"`
+	Destructive   bool   `json:"destructive,omitempty"`
+	RequiresInput bool   `json:"requires_input,omitempty"`
 }
 
 type ModelConnectView struct {

@@ -89,6 +89,8 @@ func commandPanelActionForInput(view appviewmodel.CommandExecutionView, input st
 		return commandPanelAction{line: input}
 	case view.ApprovalPanel != nil:
 		return commandPanelAction{line: input}
+	case view.ModelSelection != nil:
+		return modelSelectionCommandPanelAction(*view.ModelSelection, input)
 	case view.ControllerPanel != nil:
 		return controllerCommandPanelAction(*view.ControllerPanel, input)
 	case view.ModelConnectPanel != nil:
@@ -167,6 +169,53 @@ func settingsFieldCommandPanelAction(field appviewmodel.SettingsPanelField) comm
 			return "/settings set " + fieldID + " " + value
 		},
 	}}
+}
+
+func modelSelectionCommandPanelAction(panel appviewmodel.ModelSelectionView, input string) commandPanelAction {
+	for _, action := range panel.Actions {
+		command := strings.TrimSpace(action.Command)
+		if !action.Enabled || command == "" || command != input {
+			continue
+		}
+		if action.Destructive {
+			modelID := firstNonEmpty(action.ModelID, strings.TrimPrefix(command, "/model del "))
+			return commandPanelAction{prompt: confirmCommandPanelPrompt(
+				"Delete model?",
+				"Confirm model delete",
+				[]PromptDetail{
+					{Label: "Model", Value: strings.TrimSpace(modelID), Emphasis: true},
+					{Label: "Action", Value: firstNonEmpty(action.Label, action.ID)},
+				},
+				command,
+			)}
+		}
+		return commandPanelAction{line: command}
+	}
+	if modelRef, ok := strings.CutPrefix(input, "/model use "); ok {
+		modelRef = strings.TrimSpace(modelRef)
+		if modelRef != "" {
+			return commandPanelAction{line: "/model use " + modelRef}
+		}
+	}
+	if modelRef, ok := strings.CutPrefix(input, "/model del "); ok {
+		modelRef = strings.TrimSpace(modelRef)
+		if modelRef != "" {
+			choice, _ := findModelSelectionChoice(panel, modelRef)
+			return commandPanelAction{prompt: confirmCommandPanelPrompt(
+				"Delete model?",
+				"Confirm model delete",
+				[]PromptDetail{
+					{Label: "Model", Value: firstNonEmpty(modelRef, modelChoiceLabel(choice)), Emphasis: true},
+					{Label: "Provider", Value: strings.TrimSpace(choice.Provider)},
+				},
+				"/model del "+modelRef,
+			)}
+		}
+	}
+	if strings.EqualFold(input, "/connect") {
+		return commandPanelAction{line: "/connect"}
+	}
+	return commandPanelAction{fillInput: input}
 }
 
 func taskCommandPanelAction(panel appviewmodel.TaskPanelView, input string) commandPanelAction {
@@ -459,6 +508,18 @@ func findSettingsPanelAction(actions []appviewmodel.SettingsPanelAction, id stri
 		}
 	}
 	return appviewmodel.SettingsPanelAction{}, false
+}
+
+func findModelSelectionChoice(panel appviewmodel.ModelSelectionView, id string) (appviewmodel.ModelChoice, bool) {
+	id = strings.TrimSpace(id)
+	for _, choice := range panel.Configured {
+		for _, candidate := range []string{choice.ID, choice.Alias, choice.Model} {
+			if modelSelectionIDsMatch(candidate, id) {
+				return choice, true
+			}
+		}
+	}
+	return appviewmodel.ModelChoice{}, false
 }
 
 func findControllerPanelField(panel appviewmodel.ControllerPanelView, id string) (appviewmodel.ControllerPanelField, bool) {

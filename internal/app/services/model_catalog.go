@@ -185,16 +185,19 @@ func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) 
 		Configured:    statusModelChoices(choices),
 		RemoteEnabled: s.services.modelProvider != nil,
 	}
+	currentID := ""
 	if len(choices) > 0 {
 		current, ok, err := s.Current(ctx, req.SessionRef)
 		if err != nil {
 			return appviewmodel.ModelSelectionView{}, err
 		}
 		if ok {
+			currentID = strings.TrimSpace(current.ID)
 			choice := statusModelChoice(appsettings.ModelChoiceFromConfig(current, modelChoiceIsDefault(choices, current.ID)))
 			view.Current = &choice
 		}
 	}
+	view.Actions = modelSelectionActions(view.Configured, currentID)
 	provider := firstNonEmpty(req.Provider, req.Discovery.Provider)
 	provider = normalizeModelCatalogKey(provider)
 	view.Provider = provider
@@ -231,6 +234,45 @@ func (s ModelService) Selection(ctx context.Context, req ModelSelectionRequest) 
 	})
 	view.Candidates = s.sortedModelCandidates(candidates)
 	return view, nil
+}
+
+func modelSelectionActions(configured []appviewmodel.ModelChoice, currentID string) []appviewmodel.ModelSelectionAction {
+	actions := []appviewmodel.ModelSelectionAction{{
+		ID:      "model.connect",
+		Kind:    "connect",
+		Label:   "Connect model",
+		Command: "/connect",
+		Enabled: true,
+	}}
+	currentID = strings.TrimSpace(currentID)
+	for _, choice := range configured {
+		modelID := firstNonEmpty(choice.ID, choice.Alias, choice.Model)
+		if modelID == "" {
+			continue
+		}
+		current := currentID != "" && strings.EqualFold(modelID, currentID)
+		label := firstNonEmpty(choice.Alias, choice.ID, choice.Model)
+		actions = append(actions,
+			appviewmodel.ModelSelectionAction{
+				ID:      "model.use:" + modelID,
+				Kind:    "use",
+				Label:   "Use " + label,
+				ModelID: modelID,
+				Command: "/model use " + modelID,
+				Enabled: !current,
+			},
+			appviewmodel.ModelSelectionAction{
+				ID:          "model.delete:" + modelID,
+				Kind:        "delete",
+				Label:       "Delete " + label,
+				ModelID:     modelID,
+				Command:     "/model del " + modelID,
+				Enabled:     true,
+				Destructive: true,
+			},
+		)
+	}
+	return actions
 }
 
 func (s ModelService) modelProviderOptions(choices []appsettings.ModelChoice) []appviewmodel.ModelProviderOption {
