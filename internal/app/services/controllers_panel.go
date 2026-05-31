@@ -102,31 +102,31 @@ func controllerPanelSections(status appviewmodel.ControllerStatus) []appviewmode
 
 func controllerLifecycleSection(status appviewmodel.ControllerStatus) appviewmodel.ControllerPanelSection {
 	fields := []appviewmodel.ControllerPanelField{
-		controllerPanelField("controller.agent", "Agent", "text", status.Agent, false, nil),
-		controllerPanelField("controller.remote_session", "Remote session", "text", firstNonEmpty(status.RemoteSessionID, controllerLifecycleRemoteSession(status)), false, nil),
+		controllerPanelField("controller.agent", "Agent", "text", status.Agent, "", false, nil),
+		controllerPanelField("controller.remote_session", "Remote session", "text", firstNonEmpty(status.RemoteSessionID, controllerLifecycleRemoteSession(status)), "", false, nil),
 	}
 	if status.Lifecycle != nil {
 		fields = append(fields,
-			controllerPanelField("controller.phase", "Phase", "text", status.Lifecycle.Phase, false, nil),
-			controllerPanelField("controller.turn", "Turn", "text", status.Lifecycle.TurnID, false, nil),
+			controllerPanelField("controller.phase", "Phase", "text", status.Lifecycle.Phase, "", false, nil),
+			controllerPanelField("controller.turn", "Turn", "text", status.Lifecycle.TurnID, "", false, nil),
 		)
 		if status.Lifecycle.Error != "" {
-			fields = append(fields, controllerPanelField("controller.error", "Error", "text", status.Lifecycle.Error, false, nil))
+			fields = append(fields, controllerPanelField("controller.error", "Error", "text", status.Lifecycle.Error, "", false, nil))
 		}
 	}
 	return appviewmodel.ControllerPanelSection{
 		ID:      "lifecycle",
 		Title:   "Lifecycle",
 		Fields:  compactControllerPanelFields(fields),
-		Actions: []appviewmodel.ControllerPanelAction{controllerPanelAction("controller.handoff.local", "handoff", "Return to local", true, false, false)},
+		Actions: []appviewmodel.ControllerPanelAction{controllerPanelAction("controller.handoff.local", "handoff", "Return to local", "/agent use local", true, false, false)},
 	}
 }
 
 func controllerConfigSection(status appviewmodel.ControllerStatus) appviewmodel.ControllerPanelSection {
 	fields := []appviewmodel.ControllerPanelField{
-		controllerPanelField("controller.model", "Model", "select", status.Model, len(status.ModelOptions) > 0, status.ModelOptions),
-		controllerPanelField("controller.reasoning", "Reasoning", "select", status.ReasoningEffort, len(status.EffortOptions) > 0, status.EffortOptions),
-		controllerPanelField("controller.mode", "Mode", "select", status.Mode, len(status.ModeOptions) > 0, controllerModeChoices(status.ModeOptions)),
+		controllerPanelField("controller.model", "Model", "select", status.Model, "/model use ", len(status.ModelOptions) > 0, status.ModelOptions),
+		controllerPanelField("controller.reasoning", "Reasoning", "select", status.ReasoningEffort, controllerReasoningCommand(status), len(status.EffortOptions) > 0, status.EffortOptions),
+		controllerPanelField("controller.mode", "Mode", "select", status.Mode, "/approval ", len(status.ModeOptions) > 0, controllerModeChoices(status.ModeOptions)),
 	}
 	for _, option := range status.ConfigOptions {
 		optionID := strings.TrimSpace(option.ID)
@@ -146,6 +146,7 @@ func controllerConfigSection(status appviewmodel.ControllerStatus) appviewmodel.
 			firstNonEmpty(option.Name, option.ID),
 			firstNonEmpty(option.Type, "text"),
 			option.CurrentValue,
+			"/controller set "+optionID+" ",
 			len(option.Options) > 0,
 			option.Options,
 		))
@@ -160,14 +161,14 @@ func controllerConfigSection(status appviewmodel.ControllerStatus) appviewmodel.
 
 func controllerConfigActions(status appviewmodel.ControllerStatus) []appviewmodel.ControllerPanelAction {
 	return []appviewmodel.ControllerPanelAction{
-		controllerPanelAction("controller.model.set", "set_model", "Set model", len(status.ModelOptions) > 0, true, false),
-		controllerPanelAction("controller.mode.set", "set_mode", "Set mode", len(status.ModeOptions) > 0, true, false),
-		controllerPanelAction("controller.mode.cycle", "cycle_mode", "Cycle mode", len(status.ModeOptions) > 1, false, false),
+		controllerPanelAction("controller.model.set", "set_model", "Set model", "/model use ", len(status.ModelOptions) > 0, true, false),
+		controllerPanelAction("controller.mode.set", "set_mode", "Set mode", "/approval ", len(status.ModeOptions) > 0, true, false),
+		controllerPanelAction("controller.mode.cycle", "cycle_mode", "Cycle mode", "/approval toggle", len(status.ModeOptions) > 1, false, false),
 	}
 }
 
 func controllerPanelActions(status appviewmodel.ControllerStatus) []appviewmodel.ControllerPanelAction {
-	actions := []appviewmodel.ControllerPanelAction{controllerPanelAction("controller.handoff.local", "handoff", "Return to local", true, false, false)}
+	actions := []appviewmodel.ControllerPanelAction{controllerPanelAction("controller.handoff.local", "handoff", "Return to local", "/agent use local", true, false, false)}
 	actions = append(actions, controllerConfigActions(status)...)
 	return actions
 }
@@ -188,26 +189,36 @@ func controllerPanelDiagnostics(in []appviewmodel.ControllerDiagnostic) []appvie
 	return out
 }
 
-func controllerPanelField(id string, label string, kind string, value string, editable bool, options []appviewmodel.ControllerConfigChoice) appviewmodel.ControllerPanelField {
+func controllerPanelField(id string, label string, kind string, value string, command string, editable bool, options []appviewmodel.ControllerConfigChoice) appviewmodel.ControllerPanelField {
 	return appviewmodel.ControllerPanelField{
 		ID:       strings.TrimSpace(id),
 		Label:    strings.TrimSpace(label),
 		Kind:     strings.TrimSpace(kind),
 		Value:    strings.TrimSpace(value),
+		Command:  command,
 		Editable: editable,
 		Options:  cloneControllerChoices(options),
 	}
 }
 
-func controllerPanelAction(id string, kind string, label string, enabled bool, requiresInput bool, destructive bool) appviewmodel.ControllerPanelAction {
+func controllerPanelAction(id string, kind string, label string, command string, enabled bool, requiresInput bool, destructive bool) appviewmodel.ControllerPanelAction {
 	return appviewmodel.ControllerPanelAction{
 		ID:            strings.TrimSpace(id),
 		Kind:          strings.TrimSpace(kind),
 		Label:         strings.TrimSpace(label),
+		Command:       command,
 		Enabled:       enabled,
 		RequiresInput: requiresInput,
 		Destructive:   destructive,
 	}
+}
+
+func controllerReasoningCommand(status appviewmodel.ControllerStatus) string {
+	model := strings.TrimSpace(status.Model)
+	if model == "" {
+		return ""
+	}
+	return "/model use " + model + " "
 }
 
 func compactControllerPanelFields(fields []appviewmodel.ControllerPanelField) []appviewmodel.ControllerPanelField {

@@ -250,6 +250,7 @@ func TestCommandPanelControllerConfigClickPromptsAndSubmits(t *testing.T) {
 					ID:       "controller.config.theme",
 					Label:    "Theme",
 					Value:    "light",
+					Command:  "/controller set theme ",
 					Editable: true,
 					Options: []appviewmodel.ControllerConfigChoice{{
 						Value: "light",
@@ -300,6 +301,7 @@ func TestCommandPanelControllerReasoningClickUsesCurrentModel(t *testing.T) {
 					ID:       "controller.reasoning",
 					Label:    "Reasoning",
 					Value:    "low",
+					Command:  "/model use gpt-remote ",
 					Editable: true,
 					Options: []appviewmodel.ControllerConfigChoice{{
 						Value: "low",

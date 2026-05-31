@@ -1637,6 +1637,10 @@ be migrated before retiring the old stack:
      `/settings set <field-id> ` prefixes, sandbox lifecycle actions expose
      `/settings run <action-id>`, and model setup navigation exposes `/connect`
      rather than requiring surfaces to infer command syntax from ids.
+   - Migrated baseline: controller panel fields and actions now also carry
+     stable shared command strings for model, reasoning, approval mode,
+     remote config updates, and local handoff. TUI prompts consume those
+     commands instead of deriving controller syntax from field/action ids.
    - Migrated baseline: `SessionView.Transcript` now carries surface-neutral
      transcript action descriptors for task-backed tool entries, derived from
      canonical runtime task metadata and expressed as shared slash commands.

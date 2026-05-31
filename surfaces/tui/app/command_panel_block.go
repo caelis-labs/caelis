@@ -621,23 +621,11 @@ func controllerPanelClickHints(panel appviewmodel.ControllerPanelView) []command
 			if !field.Editable {
 				continue
 			}
-			switch strings.TrimSpace(field.ID) {
-			case "controller.model":
-				hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/model use "})
-			case "controller.reasoning":
-				if model := controllerPanelCurrentModel(panel); model != "" {
-					hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/model use " + model + " "})
-				}
-			case "controller.mode":
-				hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/approval "})
-			default:
-				if optionID, ok := strings.CutPrefix(strings.TrimSpace(field.ID), "controller.config."); ok {
-					optionID = strings.TrimSpace(optionID)
-					if optionID != "" && field.Editable {
-						hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID), Input: "/controller set " + optionID + " "})
-					}
-				}
+			input := controllerPanelFieldInput(field)
+			if strings.TrimSpace(input) == "" {
+				continue
 			}
+			hints = append(hints, commandPanelClickHint{Needle: firstNonEmpty(field.Label, field.ID, field.Command), Input: input})
 		}
 		for _, action := range section.Actions {
 			hints = append(hints, controllerPanelActionClickHint(action)...)
@@ -653,18 +641,11 @@ func controllerPanelActionClickHint(action appviewmodel.ControllerPanelAction) [
 	if !action.Enabled {
 		return nil
 	}
-	switch strings.TrimSpace(action.ID) {
-	case "controller.handoff.local":
-		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/agent use local"}}
-	case "controller.model.set":
-		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/model use "}}
-	case "controller.mode.set":
-		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/approval "}}
-	case "controller.mode.cycle":
-		return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label), Input: "/approval toggle"}}
-	default:
+	input := controllerPanelActionInput(action)
+	if strings.TrimSpace(input) == "" {
 		return nil
 	}
+	return []commandPanelClickHint{{Needle: firstNonEmpty(action.ID, action.Label, action.Command), Input: input}}
 }
 
 func connectPanelClickHints(panel appviewmodel.ModelConnectView) []commandPanelClickHint {
@@ -1265,6 +1246,9 @@ func controllerPanelFieldLine(field appviewmodel.ControllerPanelField, width int
 	if len(compactNonEmpty(traits)) > 0 {
 		plain += "  [" + strings.Join(compactNonEmpty(traits), ", ") + "]"
 	}
+	if command := strings.TrimSpace(field.Command); command != "" {
+		plain += "  " + command
+	}
 	return theme.Tokens().TextPrimary.Render(truncateTailDisplay(commandPanelOneLine(plain), width))
 }
 
@@ -1282,6 +1266,9 @@ func controllerPanelActionLine(action appviewmodel.ControllerPanelAction, width 
 	}
 	if action.Destructive {
 		parts = append(parts, "destructive")
+	}
+	if command := strings.TrimSpace(action.Command); command != "" {
+		parts = append(parts, command)
 	}
 	plain := "  " + strings.Join(compactNonEmpty(parts), "  ")
 	return style.Render(truncateTailDisplay(commandPanelOneLine(plain), width))

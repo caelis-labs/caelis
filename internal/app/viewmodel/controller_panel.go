@@ -35,6 +35,7 @@ type ControllerPanelField struct {
 	Label    string                   `json:"label,omitempty"`
 	Kind     string                   `json:"kind,omitempty"`
 	Value    string                   `json:"value,omitempty"`
+	Command  string                   `json:"command,omitempty"`
 	Editable bool                     `json:"editable,omitempty"`
 	Options  []ControllerConfigChoice `json:"options,omitempty"`
 }
@@ -43,6 +44,7 @@ type ControllerPanelAction struct {
 	ID            string `json:"id,omitempty"`
 	Kind          string `json:"kind,omitempty"`
 	Label         string `json:"label,omitempty"`
+	Command       string `json:"command,omitempty"`
 	Enabled       bool   `json:"enabled,omitempty"`
 	RequiresInput bool   `json:"requires_input,omitempty"`
 	Destructive   bool   `json:"destructive,omitempty"`

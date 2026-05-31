@@ -421,90 +421,60 @@ func controllerCommandPanelAction(panel appviewmodel.ControllerPanelView, input 
 	if !panel.Active {
 		return commandPanelAction{fillInput: input}
 	}
-	switch input {
-	case "/model use":
-		field, ok := findControllerPanelField(panel, "controller.model")
-		if !ok || !field.Editable || len(field.Options) == 0 {
-			return commandPanelAction{fillInput: input + " "}
+	for _, section := range panel.Sections {
+		for _, field := range section.Fields {
+			command := controllerPanelFieldInput(field)
+			if !field.Editable || command == "" || strings.TrimSpace(command) != input {
+				continue
+			}
+			return controllerFieldCommandPanelAction(field)
 		}
-		return controllerFieldCommandPanelAction(field, "/model use ")
-	case "/approval":
-		field, ok := findControllerPanelField(panel, "controller.mode")
-		if !ok || !field.Editable || len(field.Options) == 0 {
-			return commandPanelAction{fillInput: input + " "}
+		for _, action := range section.Actions {
+			if result, ok := controllerPanelActionCommand(panel, action, input); ok {
+				return result
+			}
 		}
-		return controllerFieldCommandPanelAction(field, "/approval ")
-	case "/approval toggle", "/agent use local":
-		return commandPanelAction{line: input}
 	}
-	if modelRef, ok := strings.CutPrefix(input, "/model use "); ok {
-		modelRef = strings.TrimSpace(modelRef)
-		field, hasReasoning := findControllerPanelField(panel, "controller.reasoning")
-		if modelRef != "" && hasReasoning && field.Editable && len(field.Options) > 0 && strings.EqualFold(modelRef, controllerPanelCurrentModel(panel)) {
-			return controllerReasoningCommandPanelAction(field, modelRef)
+	for _, action := range panel.Actions {
+		if result, ok := controllerPanelActionCommand(panel, action, input); ok {
+			return result
 		}
-		return commandPanelAction{fillInput: input + " "}
-	}
-	if rest, ok := strings.CutPrefix(input, "/controller set "); ok {
-		optionID := strings.TrimSpace(rest)
-		field, ok := findControllerPanelField(panel, "controller.config."+optionID)
-		if !ok || !field.Editable {
-			return commandPanelAction{fillInput: input + " "}
-		}
-		return controllerConfigFieldCommandPanelAction(field, optionID)
 	}
 	return commandPanelAction{fillInput: input}
 }
 
-func controllerFieldCommandPanelAction(field appviewmodel.ControllerPanelField, prefix string) commandPanelAction {
-	fieldID := strings.TrimSpace(field.ID)
-	return commandPanelAction{prompt: &commandPanelPrompt{
-		title:         "Set " + fieldID,
-		prompt:        firstNonEmpty(field.Label, fieldID),
-		details:       []PromptDetail{{Label: "Field", Value: fieldID, Emphasis: true}, {Label: "Current", Value: strings.TrimSpace(field.Value)}},
-		choices:       controllerPromptChoices(field.Options),
-		defaultChoice: firstNonEmpty(field.Value, firstControllerOptionValue(field.Options)),
-		filterable:    true,
-		buildLine: func(value string) string {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				return ""
+func controllerPanelActionCommand(panel appviewmodel.ControllerPanelView, action appviewmodel.ControllerPanelAction, input string) (commandPanelAction, bool) {
+	command := controllerPanelActionInput(action)
+	if !action.Enabled || command == "" || strings.TrimSpace(command) != input {
+		return commandPanelAction{}, false
+	}
+	if action.RequiresInput {
+		switch strings.TrimSpace(action.ID) {
+		case "controller.model.set":
+			if field, ok := findControllerPanelField(panel, "controller.model"); ok && field.Editable {
+				return controllerFieldCommandPanelAction(field), true
 			}
-			return prefix + value
-		},
-	}}
+		case "controller.mode.set":
+			if field, ok := findControllerPanelField(panel, "controller.mode"); ok && field.Editable {
+				return controllerFieldCommandPanelAction(field), true
+			}
+		}
+		return commandPanelAction{fillInput: command}, true
+	}
+	return commandPanelAction{line: strings.TrimSpace(command)}, true
 }
 
-func controllerReasoningCommandPanelAction(field appviewmodel.ControllerPanelField, modelRef string) commandPanelAction {
+func controllerFieldCommandPanelAction(field appviewmodel.ControllerPanelField) commandPanelAction {
 	fieldID := strings.TrimSpace(field.ID)
-	return commandPanelAction{prompt: &commandPanelPrompt{
-		title:         "Set " + fieldID,
-		prompt:        firstNonEmpty(field.Label, fieldID),
-		details:       []PromptDetail{{Label: "Model", Value: modelRef, Emphasis: true}, {Label: "Current", Value: strings.TrimSpace(field.Value)}},
-		choices:       controllerPromptChoices(field.Options),
-		defaultChoice: firstNonEmpty(field.Value, firstControllerOptionValue(field.Options)),
-		filterable:    true,
-		buildLine: func(value string) string {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				return ""
-			}
-			return "/model use " + modelRef + " " + value
-		},
-	}}
-}
-
-func controllerConfigFieldCommandPanelAction(field appviewmodel.ControllerPanelField, optionID string) commandPanelAction {
-	optionID = strings.TrimSpace(optionID)
-	fieldID := strings.TrimSpace(field.ID)
+	prefix := commandPanelEnsureTrailingSpace(controllerPanelFieldInput(field))
 	details := []PromptDetail{
-		{Label: "Option", Value: optionID, Emphasis: true},
+		{Label: "Field", Value: fieldID, Emphasis: true},
 		{Label: "Current", Value: strings.TrimSpace(field.Value)},
 	}
 	if len(field.Options) > 0 {
 		return commandPanelAction{prompt: &commandPanelPrompt{
-			title:         "Set " + firstNonEmpty(fieldID, optionID),
-			prompt:        firstNonEmpty(field.Label, optionID),
+			title:         "Set " + fieldID,
+			prompt:        firstNonEmpty(field.Label, fieldID),
 			details:       details,
 			choices:       controllerPromptChoices(field.Options),
 			defaultChoice: firstNonEmpty(field.Value, firstControllerOptionValue(field.Options)),
@@ -514,13 +484,13 @@ func controllerConfigFieldCommandPanelAction(field appviewmodel.ControllerPanelF
 				if value == "" {
 					return ""
 				}
-				return "/controller set " + optionID + " " + value
+				return prefix + value
 			},
 		}}
 	}
 	return commandPanelAction{prompt: &commandPanelPrompt{
-		title:        "Set " + firstNonEmpty(fieldID, optionID),
-		prompt:       firstNonEmpty(field.Label, optionID),
+		title:        "Set " + fieldID,
+		prompt:       firstNonEmpty(field.Label, fieldID),
 		details:      details,
 		defaultInput: strings.TrimSpace(field.Value),
 		buildLine: func(value string) string {
@@ -528,9 +498,28 @@ func controllerConfigFieldCommandPanelAction(field appviewmodel.ControllerPanelF
 			if value == "" && strings.TrimSpace(field.Value) == "" {
 				return ""
 			}
-			return "/controller set " + optionID + " " + value
+			return prefix + value
 		},
 	}}
+}
+
+func controllerPanelFieldInput(field appviewmodel.ControllerPanelField) string {
+	command := strings.TrimSpace(field.Command)
+	if command == "" {
+		return ""
+	}
+	return commandPanelEnsureTrailingSpace(command)
+}
+
+func controllerPanelActionInput(action appviewmodel.ControllerPanelAction) string {
+	command := strings.TrimSpace(action.Command)
+	if command == "" {
+		return ""
+	}
+	if action.RequiresInput {
+		return commandPanelEnsureTrailingSpace(command)
+	}
+	return command
 }
 
 func confirmCommandPanelPrompt(title string, prompt string, details []PromptDetail, line string) *commandPanelPrompt {
@@ -661,19 +650,6 @@ func findControllerPanelField(panel appviewmodel.ControllerPanelView, id string)
 		}
 	}
 	return appviewmodel.ControllerPanelField{}, false
-}
-
-func controllerPanelCurrentModel(panel appviewmodel.ControllerPanelView) string {
-	if model := strings.TrimSpace(panel.Summary.Model); model != "" {
-		return model
-	}
-	if field, ok := findControllerPanelField(panel, "controller.model"); ok {
-		return strings.TrimSpace(field.Value)
-	}
-	if panel.Status != nil {
-		return strings.TrimSpace(panel.Status.Model)
-	}
-	return ""
 }
 
 func taskByID(tasks []appviewmodel.TaskItem, id string) appviewmodel.TaskItem {

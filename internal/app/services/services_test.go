@@ -2869,18 +2869,22 @@ func TestControllerServicePanelProjectsSharedLifecycleConfigAndActions(t *testin
 		t.Fatalf("controller panel sections = %#v, want configuration section", panel.Sections)
 	}
 	modelField, ok := findControllerPanelField(config.Fields, "controller.model")
-	if !ok || modelField.Value != "gpt-remote" || !modelField.Editable || len(modelField.Options) != 2 {
+	if !ok || modelField.Value != "gpt-remote" || modelField.Command != "/model use " || !modelField.Editable || len(modelField.Options) != 2 {
 		t.Fatalf("model field = %#v ok=%v, want editable remote model field", modelField, ok)
 	}
+	reasoningField, ok := findControllerPanelField(config.Fields, "controller.reasoning")
+	if !ok || reasoningField.Value != "high" || reasoningField.Command != "/model use gpt-remote " || !reasoningField.Editable || len(reasoningField.Options) != 2 {
+		t.Fatalf("reasoning field = %#v ok=%v, want editable remote reasoning command field", reasoningField, ok)
+	}
 	modeField, ok := findControllerPanelField(config.Fields, "controller.mode")
-	if !ok || modeField.Value != "code" || !modeField.Editable || len(modeField.Options) != 2 {
+	if !ok || modeField.Value != "code" || modeField.Command != "/approval " || !modeField.Editable || len(modeField.Options) != 2 {
 		t.Fatalf("mode field = %#v ok=%v, want editable remote mode field", modeField, ok)
 	}
 	if _, ok := findControllerPanelField(config.Fields, "controller.config.model"); ok {
 		t.Fatalf("config fields = %#v, should not duplicate canonical model field", config.Fields)
 	}
-	if action, ok := findControllerPanelAction(panel.Actions, "controller.mode.cycle"); !ok || !action.Enabled {
-		t.Fatalf("controller actions = %#v, want enabled mode cycle action", panel.Actions)
+	if action, ok := findControllerPanelAction(panel.Actions, "controller.mode.cycle"); !ok || !action.Enabled || action.Command != "/approval toggle" {
+		t.Fatalf("controller actions = %#v, want enabled mode cycle command action", panel.Actions)
 	}
 	if !controllerPanelDiagnostic(panel.Diagnostics, "controller_lifecycle") {
 		t.Fatalf("controller diagnostics = %#v, want lifecycle diagnostic", panel.Diagnostics)

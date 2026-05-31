@@ -429,6 +429,7 @@ func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 				Label:    "Model",
 				Kind:     "select",
 				Value:    "gpt-remote",
+				Command:  "/model use ",
 				Editable: true,
 				Options: []appviewmodel.ControllerConfigChoice{{
 					Value: "gpt-remote",
@@ -439,6 +440,7 @@ func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 				Label:    "Reasoning",
 				Kind:     "select",
 				Value:    "high",
+				Command:  "/model use gpt-remote ",
 				Editable: true,
 				Options: []appviewmodel.ControllerConfigChoice{{
 					Value: "low",
@@ -452,6 +454,7 @@ func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 				Label:    "Theme",
 				Kind:     "select",
 				Value:    "light",
+				Command:  "/controller set theme ",
 				Editable: true,
 				Options: []appviewmodel.ControllerConfigChoice{{
 					Value: "light",
@@ -466,6 +469,7 @@ func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 			ID:      "controller.handoff.local",
 			Kind:    "handoff",
 			Label:   "Return to local",
+			Command: "/agent use local",
 			Enabled: true,
 		}},
 	}
@@ -476,7 +480,7 @@ func TestCommandPanelBlockRendersControllerConfigActions(t *testing.T) {
 	model := NewModel(Config{})
 	rows := block.Render(BlockRenderContext{Width: 96, Theme: model.theme})
 	plain := renderedPlainText(rows)
-	for _, want := range []string{"CONTROLLER", "ACP Controller", "reviewer", "Reasoning", "Theme", "controller.handoff.local"} {
+	for _, want := range []string{"CONTROLLER", "ACP Controller", "reviewer", "Reasoning", "Theme", "controller.handoff.local", "/model use gpt-remote", "/controller set theme", "/agent use local"} {
 		if !strings.Contains(plain, want) {
 			t.Fatalf("rendered controller panel = %q, missing %q", plain, want)
 		}
