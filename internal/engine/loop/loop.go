@@ -140,7 +140,7 @@ func (l *Loop) Run(ctx context.Context, req Request) ([]session.Event, error) {
 		if err != nil {
 			return nil, err
 		}
-		response, err := l.complete(ctx, model.Request{
+		response, err := l.complete(ctx, req, model.Request{
 			Model:        strings.TrimSpace(req.Model),
 			Messages:     cloneMessages(messages),
 			Tools:        modelToolSpecs(tool.ModelSpecs(tools), l.modelTools, req.ModelTools),
@@ -256,7 +256,7 @@ func (l *Loop) record(ctx context.Context, req Request, out *[]session.Event, ev
 	return nil
 }
 
-func (l *Loop) complete(ctx context.Context, req model.Request) (model.Response, error) {
+func (l *Loop) complete(ctx context.Context, turnReq Request, req model.Request) (model.Response, error) {
 	stream, err := l.provider.Stream(ctx, req)
 	if err != nil {
 		return model.Response{}, err
@@ -269,6 +269,9 @@ func (l *Loop) complete(ctx context.Context, req model.Request) (model.Response,
 			break
 		}
 		if err != nil {
+			return model.Response{}, err
+		}
+		if err := l.emitStreamDelta(ctx, turnReq, event); err != nil {
 			return model.Response{}, err
 		}
 		if event.Response != nil {
@@ -284,6 +287,48 @@ func (l *Loop) complete(ctx context.Context, req model.Request) (model.Response,
 		return model.Response{}, errors.New("engine/loop: model stream ended without final response")
 	}
 	return *final, nil
+}
+
+func (l *Loop) emitStreamDelta(ctx context.Context, req Request, event model.StreamEvent) error {
+	if req.Emit == nil || event.Type != model.StreamPartDelta || event.Part == nil {
+		return nil
+	}
+	part, ok := streamNarrativePart(*event.Part)
+	if !ok {
+		return nil
+	}
+	message := model.Message{
+		Role:  model.RoleAssistant,
+		Parts: []model.Part{part},
+	}
+	return req.Emit(ctx, []session.Event{{
+		Type:       session.EventAssistant,
+		Visibility: session.VisibilityUIOnly,
+		Time:       l.now(),
+		Actor:      session.ActorRef{Kind: session.ActorController, ID: "builtin", Name: "assistant"},
+		Scope:      eventScope(req),
+		Message:    &message,
+	}})
+}
+
+func streamNarrativePart(part model.Part) (model.Part, bool) {
+	switch part.Kind {
+	case model.PartText:
+		if part.Text == nil || part.Text.Text == "" {
+			return model.Part{}, false
+		}
+	case model.PartReasoning:
+		if part.Reasoning == nil || part.Reasoning.VisibleText == "" {
+			return model.Part{}, false
+		}
+	default:
+		return model.Part{}, false
+	}
+	parts := model.CloneParts([]model.Part{part})
+	if len(parts) == 0 {
+		return model.Part{}, false
+	}
+	return parts[0], true
 }
 
 func (l *Loop) executeTool(ctx context.Context, req Request, call model.ToolCall, tools []tool.Tool) (model.Message, []session.Event, session.Event, tool.Result, error) {

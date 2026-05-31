@@ -309,14 +309,23 @@ func (m *Model) invalidateUserDisplayDedup() {
 
 func shouldInvalidateUserDisplayDedup(msg tea.Msg) bool {
 	switch msg.(type) {
-	case TranscriptEventsMsg,
-		ParticipantStatusMsg,
+	case ParticipantStatusMsg,
 		SubagentStatusMsg,
 		SubagentDoneMsg:
 		return true
 	default:
 		return false
 	}
+}
+
+func transcriptEventsInvalidateUserDisplayDedup(events []TranscriptEvent) bool {
+	for _, event := range events {
+		if event.Kind == TranscriptEventNarrative && event.NarrativeKind == TranscriptNarrativeUser {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 func (m *Model) handlePlanUpdateMsg(msg PlanUpdateMsg) tea.Model {

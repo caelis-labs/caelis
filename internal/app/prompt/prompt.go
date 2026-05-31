@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/plugin"
 	coretool "github.com/OnslaughtSnail/caelis/core/tool"
@@ -193,10 +194,11 @@ func systemIdentity(appName string) string {
 	return strings.Join([]string{
 		"## Core Stable Rules",
 		"",
-		"You are " + appName + ", an ACP-native coding agent runtime working in the user's workspace.",
-		"Drive toward the user's concrete goal: inspect enough context, make the smallest useful change, verify, then report.",
+		"You are " + appName + ", an ACP-native coding-oriented assistant working in the user's workspace.",
+		"Drive toward the user's concrete goal: inspect the minimum needed context, make the smallest useful change, verify, then report.",
 		"Preserve user work. Do not revert unrelated changes; adapt to the existing code, architecture, and project boundaries.",
-		"Prefer repository truth over assumptions. Read or search before editing, and use shell checks when they are the clearest verification path.",
+		"Prefer direct answers for direct conversational requests; do not inspect the repository unless the answer depends on local context.",
+		"Prefer repository truth over assumptions when changing or explaining code. Read or search before editing, and use shell checks when they are the clearest verification path.",
 		"Ask only when the answer cannot be discovered locally and would materially change the next action.",
 		"Keep responses concise, factual, and focused on what changed, what was verified, and what remains.",
 	}, "\n")
@@ -216,6 +218,7 @@ func capabilityGuidanceInstructions(agents []plugin.ACPAgentDescriptor) string {
 		"## Capability Guidance",
 		"",
 		"- Inspect with read, search, glob, and list tools; edit with write or patch tools; use run_command for shell work and task for yielded async work.",
+		"- Discovered AGENTS.md instructions are already included in the prompt when present; do not read AGENTS.md just to load standing instructions.",
 		"- Load a skill only when its description clearly matches the task; read only the needed parts of its `SKILL.md`.",
 		"- Obey the active approval mode; treat auto-review denials as concrete feedback to narrow or adjust the next step.",
 	}
@@ -288,7 +291,9 @@ func environmentContext(workspaceDir string) (string, error) {
 	return fmt.Sprintf(`<environment_context>
   <cwd>%s</cwd>
   <shell>%s</shell>
-</environment_context>`, filepath.Clean(cwd), currentShellName()), nil
+  <current_date>%s</current_date>
+  <timezone>%s</timezone>
+</environment_context>`, filepath.Clean(cwd), currentShellName(), time.Now().Format("2006-01-02"), currentTimezoneLabel()), nil
 }
 
 func currentShellName() string {
@@ -304,6 +309,23 @@ func currentShellName() string {
 		return shell
 	}
 	return base
+}
+
+func currentTimezoneLabel() string {
+	now := time.Now()
+	name, offsetSeconds := now.Zone()
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = now.Location().String()
+	}
+	sign := "+"
+	if offsetSeconds < 0 {
+		sign = "-"
+		offsetSeconds = -offsetSeconds
+	}
+	hours := offsetSeconds / 3600
+	minutes := (offsetSeconds % 3600) / 60
+	return fmt.Sprintf("%s %s%02d:%02d", name, sign, hours, minutes)
 }
 
 func normalizePromptText(text string) string {

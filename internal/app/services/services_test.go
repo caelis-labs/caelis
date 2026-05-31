@@ -1115,6 +1115,33 @@ func TestViewServiceHomeBuildsSharedHomeView(t *testing.T) {
 	}
 }
 
+func TestViewServiceHomeDoesNotWarnForMissingStartupSession(t *testing.T) {
+	ctx := context.Background()
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName:      "caelis",
+			UserID:       "tester",
+			WorkspaceKey: "repo",
+			WorkspaceCWD: "/tmp/repo",
+		},
+		Engine:  &recordingEngine{},
+		Sandbox: &fakeSandboxRuntime{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	home, err := svc.Views().Home(ctx, HomeRequest{Version: "1.2.3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, diagnostic := range home.Diagnostics {
+		if diagnostic.Kind == "session" || strings.Contains(diagnostic.Message, "session unavailable") {
+			t.Fatalf("home diagnostics = %#v, want no normal startup session warning", home.Diagnostics)
+		}
+	}
+}
+
 func TestCommandServiceExecuteCompactRecordsCheckpoint(t *testing.T) {
 	ctx := context.Background()
 	engine := &recordingEngine{snapshot: session.Snapshot{

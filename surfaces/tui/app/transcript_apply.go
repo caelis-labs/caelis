@@ -8,7 +8,12 @@ import (
 )
 
 func (m *Model) handleTranscriptEventsMsg(msg TranscriptEventsMsg) (tea.Model, tea.Cmd) {
-	return m.applyTranscriptEvents(msg.Events)
+	model, cmd := m.applyTranscriptEvents(msg.Events)
+	if next, ok := model.(*Model); ok && transcriptEventsInvalidateUserDisplayDedup(msg.Events) {
+		next.invalidateUserDisplayDedup()
+		model = next
+	}
+	return model, cmd
 }
 
 func (m *Model) applyTranscriptEvents(events []TranscriptEvent) (tea.Model, tea.Cmd) {

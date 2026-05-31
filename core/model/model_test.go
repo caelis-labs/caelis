@@ -31,6 +31,13 @@ func TestMessageTextAndToolCallsUseCanonicalParts(t *testing.T) {
 	}
 }
 
+func TestNewReasoningPartPreservesStreamWhitespace(t *testing.T) {
+	part := NewReasoningPart(" user", ReasoningVisible)
+	if part.Reasoning == nil || part.Reasoning.VisibleText != " user" {
+		t.Fatalf("reasoning part = %#v, want leading whitespace preserved", part)
+	}
+}
+
 func TestStaticStreamEOF(t *testing.T) {
 	stream := &StaticStream{Events: []StreamEvent{{Type: StreamTurnDone}}}
 	event, err := stream.Recv()

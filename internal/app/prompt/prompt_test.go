@@ -49,6 +49,8 @@ func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
 		"<system_instructions>",
 		"## Core Stable Rules",
 		"You are caelis-test",
+		"Prefer direct answers for direct conversational requests",
+		"do not read AGENTS.md just to load standing instructions",
 		"sandbox_permissions=require_escalated",
 		"<user_custom_instructions>",
 		"Session overrides workspace instructions",
@@ -65,6 +67,8 @@ func TestBuildInstructionsRendersResourceCatalog(t *testing.T) {
 		"- echo: Echo input",
 		"- review: Review code (/skills/review/SKILL.md)",
 		"<environment_context>",
+		"<current_date>",
+		"<timezone>",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Fatalf("instructions = %q, missing %q", joined, want)

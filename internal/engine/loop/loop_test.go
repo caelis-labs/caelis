@@ -89,6 +89,80 @@ func TestLoopPassesReasoningConfigToProvider(t *testing.T) {
 	}
 }
 
+func TestLoopEmitsTransientStreamDeltas(t *testing.T) {
+	final := model.Message{
+		Role: model.RoleAssistant,
+		Parts: []model.Part{
+			model.NewReasoningPart("The user", model.ReasoningVisible),
+			model.NewTextPart("你好"),
+		},
+	}
+	provider := &capturingProvider{events: []model.StreamEvent{
+		{
+			Type: model.StreamPartDelta,
+			Part: ptrModelPart(model.NewReasoningPart("The", model.ReasoningVisible)),
+		},
+		{
+			Type: model.StreamPartDelta,
+			Part: ptrModelPart(model.NewReasoningPart(" user", model.ReasoningVisible)),
+		},
+		{
+			Type: model.StreamPartDelta,
+			Part: ptrModelPart(model.NewTextPart("你")),
+		},
+		{
+			Type: model.StreamPartDelta,
+			Part: ptrModelPart(model.NewTextPart("好")),
+		},
+		{
+			Type: model.StreamTurnDone,
+			Response: &model.Response{
+				Status:  model.ResponseCompleted,
+				Message: final,
+			},
+		},
+	}}
+	runner, err := New(Config{Provider: provider})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var emitted []session.Event
+	events, err := runner.Run(context.Background(), Request{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-1"}},
+		Input:   "ping",
+		TurnID:  "turn-1",
+		Emit: func(_ context.Context, events []session.Event) error {
+			emitted = append(emitted, cloneEvents(events)...)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("returned events = %#v, want emitted path to own events", events)
+	}
+	if got, want := eventTypes(emitted), []session.EventType{
+		session.EventUser,
+		session.EventAssistant,
+		session.EventAssistant,
+		session.EventAssistant,
+		session.EventAssistant,
+		session.EventAssistant,
+	}; !equalEventTypes(got, want) {
+		t.Fatalf("emitted event types = %v, want %v", got, want)
+	}
+	if emitted[1].Visibility != session.VisibilityUIOnly || coreReasoningText(emitted[1].Message) != "The" {
+		t.Fatalf("first stream event = %#v, want UI-only reasoning delta", emitted[1])
+	}
+	if emitted[2].Visibility != session.VisibilityUIOnly || coreReasoningText(emitted[2].Message) != " user" {
+		t.Fatalf("second stream event = %#v, want leading-space reasoning delta", emitted[2])
+	}
+	if emitted[5].Visibility == session.VisibilityUIOnly || session.EventText(emitted[5]) != "你好" {
+		t.Fatalf("final event = %#v, want canonical assistant response", emitted[5])
+	}
+}
+
 func TestLoopPassesProviderModelToolsAlongsideLocalTools(t *testing.T) {
 	providerTool := model.NewProviderExecutedToolSpec("web_search", map[string]json.RawMessage{
 		"openai": json.RawMessage(`{"type":"web_search_preview"}`),
@@ -418,6 +492,7 @@ func TestLoopExecutesSpawnThroughRuntimeSpawner(t *testing.T) {
 type capturingProvider struct {
 	request model.Request
 	message model.Message
+	events  []model.StreamEvent
 }
 
 func (p *capturingProvider) ID() string {
@@ -437,6 +512,9 @@ func (p *capturingProvider) Stream(_ context.Context, req model.Request) (model.
 		Reasoning:    req.Reasoning,
 		Stream:       req.Stream,
 	}
+	if len(p.events) > 0 {
+		return &model.StaticStream{Events: append([]model.StreamEvent(nil), p.events...)}, nil
+	}
 	return &model.StaticStream{Events: []model.StreamEvent{{
 		Type: model.StreamTurnDone,
 		Response: &model.Response{
@@ -444,6 +522,10 @@ func (p *capturingProvider) Stream(_ context.Context, req model.Request) (model.
 			Message: model.CloneMessage(p.message),
 		},
 	}}}, nil
+}
+
+func ptrModelPart(part model.Part) *model.Part {
+	return &part
 }
 
 func cloneTestMessages(in []model.Message) []model.Message {
@@ -615,4 +697,29 @@ func eventTypes(events []session.Event) []session.EventType {
 		out = append(out, event.Type)
 	}
 	return out
+}
+
+func equalEventTypes(a, b []session.EventType) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func coreReasoningText(message *model.Message) string {
+	if message == nil {
+		return ""
+	}
+	var parts []string
+	for _, part := range message.Parts {
+		if part.Kind == model.PartReasoning && part.Reasoning != nil {
+			parts = append(parts, part.Reasoning.VisibleText)
+		}
+	}
+	return strings.Join(parts, "\n")
 }

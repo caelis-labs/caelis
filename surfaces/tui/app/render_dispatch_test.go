@@ -49,3 +49,44 @@ func TestRenderEventPolicyKeepsSmoothingForNonFinalNarrative(t *testing.T) {
 		t.Fatal("final transcript narrative should flush pending smoothing")
 	}
 }
+
+func TestTranscriptUserEchoDoesNotDuplicateSubmittedUserBlock(t *testing.T) {
+	model := NewModel(Config{})
+	updated, _ := model.submitLine("介绍一下你自己")
+	model = updated.(*Model)
+
+	updated, _ = model.Update(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		NarrativeKind: TranscriptNarrativeUser,
+		Text:          "介绍一下你自己",
+		Final:         true,
+	}, {
+		Kind:          TranscriptEventNarrative,
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          "你好",
+		Final:         true,
+	}}})
+	model = updated.(*Model)
+
+	count := 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && user.Raw == "介绍一下你自己" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("submitted user blocks = %d, want one", count)
+	}
+
+	updated, _ = model.submitLine("介绍一下你自己")
+	model = updated.(*Model)
+	count = 0
+	for _, block := range model.doc.Blocks() {
+		if user, ok := block.(*UserNarrativeBlock); ok && user.Raw == "介绍一下你自己" {
+			count++
+		}
+	}
+	if count != 2 {
+		t.Fatalf("second real submission user blocks = %d, want two", count)
+	}
+}

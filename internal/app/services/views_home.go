@@ -103,6 +103,9 @@ func homeModelAlias(status appviewmodel.ModelStatus) string {
 func homeDiagnosticsFromDoctor(doctor appviewmodel.DoctorView) []appviewmodel.HomeDiagnostic {
 	out := make([]appviewmodel.HomeDiagnostic, 0, len(doctor.Checks))
 	for _, check := range doctor.Checks {
+		if isNormalHomeSessionDiagnostic(check) {
+			continue
+		}
 		severity := strings.ToLower(strings.TrimSpace(check.Severity))
 		switch severity {
 		case "error", "failed", "warning", "warn":
@@ -118,6 +121,11 @@ func homeDiagnosticsFromDoctor(doctor appviewmodel.DoctorView) []appviewmodel.Ho
 		})
 	}
 	return out
+}
+
+func isNormalHomeSessionDiagnostic(check appviewmodel.DoctorCheck) bool {
+	return strings.EqualFold(strings.TrimSpace(check.ID), "session") &&
+		strings.EqualFold(strings.TrimSpace(check.Message), "session unavailable")
 }
 
 func homeActions(doctor appviewmodel.DoctorView) []appviewmodel.HomeAction {

@@ -372,7 +372,7 @@ func NewReasoningPart(text string, visibility ReasoningVisibility) Part {
 		visibility = ReasoningVisible
 	}
 	return Part{Kind: PartReasoning, Reasoning: &ReasoningPart{
-		VisibleText: strings.TrimSpace(text),
+		VisibleText: text,
 		Visibility:  visibility,
 	}}
 }
