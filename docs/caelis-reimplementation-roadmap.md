@@ -991,6 +991,11 @@ The completed work is intentionally limited to the reusable skeleton:
   constructs `internal/app/local` directly and binds the TUI driver through
   `BindAppServices`, allowing the old `eval/gatewaydriver_gatewayapp_test.go`
   adapter layer to be deleted.
+- Eval live-path cleanup: the Claude ACP sidecar/main-controller E2E and the
+  live provider reasoning-boundary E2E now construct `internal/app/local`
+  directly with shared services, settings-backed model config, `BindAppServices`,
+  and `internal/surface/headless`. The eval package no longer imports the old
+  `app/gatewayapp`, `kernel`, or `ports/session` product contracts.
 - Architecture lint rules for the new package boundaries.
 - End-to-end skeleton test covering plugin resources, SQLite, ACP server,
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
@@ -1244,8 +1249,9 @@ be migrated before retiring the old stack:
      `gatewayapp.Config`; CLI flags normalize into a local CLI config contract
      and are projected into `internal/app/local` plus shared app settings.
    - Migrated baseline: the unused old `surfaces/headless` package has been
-     removed. Remaining gatewayapp/e2e tests that still exercise the old kernel
-     use local test helpers instead of importing a product surface.
+     removed. Eval coverage that previously exercised gateway/headless behavior
+     now uses the new local stack, shared app services, or local protocol
+     helpers instead of importing an old product surface.
    - Migrated baseline: the ACP main-controller E2E formerly backed by
      `app/gatewayapp` now runs against `internal/app/local`,
      `ControllerService`, and `internal/surface/headless`, using a protocol-only
@@ -1254,6 +1260,14 @@ be migrated before retiring the old stack:
      builds the new `internal/app/local` stack with settings-backed model config
      and external ACP agent descriptors, then binds through `BindAppServices`.
      The old gatewaydriver-to-gatewayapp eval adapter has been removed.
+   - Migrated baseline: the Claude ACP sidecar and main-controller live E2E
+     now use `internal/app/local`, `AgentService`, `ControllerService`,
+     `BindAppServices`, and `internal/surface/headless`; the old
+     gatewayapp-backed Claude e2e has been replaced by `eval/local_claude_acp`.
+   - Migrated baseline: the live provider reasoning-boundary E2E now reads the
+     new app settings document, runs through `internal/app/local` and
+     `TurnService`, and verifies canonical core model events directly instead
+     of old kernel gateway envelopes.
    - Migrated baseline: the unused old `surfaces/acpserver` wrapper around
      `gatewayapp.Stack.ACPAgent()` has been removed; the remaining ACP stdio
      path is the core-native `internal/surface/acpserver` entrypoint.
