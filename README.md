@@ -5,10 +5,9 @@
 
 The project treats a session workspace plus ACP-native event semantics as the
 stable product boundary. Public `core/*` packages name the durable contracts;
-`internal/engine/*` owns local orchestration; `internal/adapters/*` and selected
-`impl/*` packages hold concrete implementations; surface adapters project the
-shared app-service state into the Bubble Tea TUI, ACP stdio, and the headless
-one-shot runner.
+`internal/engine/*` owns local orchestration; `internal/adapters/*` holds
+concrete implementations; surface adapters project the shared app-service state
+into the Bubble Tea TUI, ACP stdio, and the headless one-shot runner.
 
 ## What It Does
 
@@ -40,9 +39,8 @@ one-shot runner.
   contracts.
 - `kernel/` and `ports/`: older public contracts still present while the
   remaining surfaces are migrated to `core/*` and app services.
-- `impl/`: concrete implementations such as local agents, ACP-backed agents,
-  session stores, model providers, sandbox backends, policy presets, tools,
-  prompt/config/stream adapters, and approval strategies.
+- `internal/adapters`: concrete model, store, sandbox, tool, and ACP-agent
+  adapters wired by the app registry.
 - `internal/engine`: concrete local runtime orchestration for sessions, turns,
   replay, approvals, context reconstruction, controller routing, and tasks.
 - `internal/app/local`: local composition root that wires runtime config,

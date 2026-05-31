@@ -496,7 +496,7 @@ Good reuse candidates:
 - ACP schema, JSON-RPC, client, server, and projection ideas from
   `protocol/acp`.
 - Provider behavior already ported into `internal/adapters/model/*`.
-- Sandbox backend implementation details from `impl/sandbox/*`.
+- Sandbox backend implementation details from `internal/adapters/sandbox/*`.
 - Built-in tool behavior now owned by the core-native
   `internal/adapters/tools/*` packages.
 - Canonical message and event ideas from `ports/model` and `ports/session`.
@@ -1812,10 +1812,15 @@ be migrated before retiring the old stack:
      sandbox rebuild path. Backend setting changes therefore affect subsequent
      tool calls and sandbox lifecycle commands, while failed rebuilds roll back
      the persisted setting.
+   - Migrated baseline: the reused seatbelt, bubblewrap, Landlock, Windows, and
+     shared sandbox helper assets have moved out of the retired `impl/*`
+     taxonomy into `internal/adapters/sandbox/*`. Production code no longer
+     imports `impl/*`, and architecture lint now rejects reintroducing that
+     package family.
    - Still pending: network policy, writable/readable root policy beyond skill
      roots, rich route diagnostics, production doctor repair reporting, and
-     replacing the reused `ports/sandbox` implementation assets with fully
-     core-native non-host adapters once the old stack can retire.
+     replacing the remaining `ports/sandbox` backend contract inside these
+     non-host adapters with the fully core-native `core/sandbox` contract.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,

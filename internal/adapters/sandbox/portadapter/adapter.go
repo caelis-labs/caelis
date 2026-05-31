@@ -13,10 +13,10 @@ import (
 	"time"
 
 	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/bwrap"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/landlock"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/seatbelt"
-	"github.com/OnslaughtSnail/caelis/impl/sandbox/windows"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/bwrap"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/landlock"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/seatbelt"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/windows"
 	portsandbox "github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 

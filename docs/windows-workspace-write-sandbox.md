@@ -350,15 +350,15 @@ Security regression tests:
 Validation commands:
 
 ```powershell
-go test ./internal/adapters/sandbox/host ./impl/sandbox/host
-go test ./impl/sandbox/windows/...
+go test ./internal/adapters/sandbox/host ./internal/adapters/sandbox/hostrunner
+go test ./internal/adapters/sandbox/windows/...
 git diff --check
 ```
 
 On non-Windows builders:
 
 ```sh
-go test ./internal/adapters/sandbox/host ./impl/sandbox/host ./impl/sandbox/windows/...
+go test ./internal/adapters/sandbox/host ./internal/adapters/sandbox/hostrunner ./internal/adapters/sandbox/windows/...
 git diff --check
 ```
 

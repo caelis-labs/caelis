@@ -30,7 +30,8 @@
 - Public extension contracts live in `ports/*`; private glue lives in `internal/*`.
 - `internal/kernel` owns local turn/session orchestration, canonical projection,
   replay validation, approvals, participants, and lifecycle coordination.
-- `impl/*` provides concrete ports and must not import surfaces or `internal/kernel`.
+- `internal/adapters/*` provides concrete implementations and must not import
+  surfaces or `internal/kernel`.
 - `protocol/acp` owns ACP schema, JSON-RPC, client/server, terminal, and projector code.
 - `surfaces/*` adapt UI/CLI/ACP interactions to kernel or app services and must
   not own model, sandbox, tool, or persistence semantics.
