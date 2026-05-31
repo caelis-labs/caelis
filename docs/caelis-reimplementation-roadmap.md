@@ -1832,11 +1832,16 @@ be migrated before retiring the old stack:
      through `core/sandbox.Config` into the shared backend policy. Local stack
      rebuilds and backend runtime policy therefore receive enabled, disabled,
      or inherit explicitly instead of keeping network as surface-only settings.
-   - Still pending: writable/readable root policy beyond skill roots, richer
-     per-command network diagnostics, rich route diagnostics, production doctor
-     repair reporting, and cross-platform validation of the Windows
-     restricted-token async session API after the core-native session contract
-     migration.
+   - Migrated baseline: host sandbox file-tool access now also uses the shared
+     sandbox path policy. `ReadableRoots`, `WritableRoots`, `ReadOnlySubpaths`,
+     hidden path rules, scratch roots, and explicit readable-root narrowing are
+     enforced by the same `policyfs` adapter used by other core-native file
+     tool paths, so settings-backed roots affect host `FileSystem()` operations
+     instead of only non-host backends or skill install roots.
+   - Still pending: richer per-command network/root diagnostics, rich route
+     diagnostics, production doctor repair reporting, and cross-platform
+     validation of the Windows restricted-token async session API after the
+     core-native session contract migration.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,

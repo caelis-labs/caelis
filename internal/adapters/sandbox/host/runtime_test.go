@@ -2,6 +2,8 @@ package host
 
 import (
 	"context"
+	"errors"
+	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -234,6 +236,41 @@ func TestRuntimeFileSystemResolvesRelativePaths(t *testing.T) {
 	}
 	if string(data) != "ok" {
 		t.Fatalf("file content = %q, want ok", string(data))
+	}
+}
+
+func TestRuntimeFileSystemUsesConfiguredRootPolicy(t *testing.T) {
+	root := t.TempDir()
+	readRoot := filepath.Join(root, "read")
+	writeRoot := filepath.Join(root, "write")
+	for _, dir := range []string{readRoot, writeRoot} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(readRoot, "note.txt"), []byte("readable"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rt, err := New(context.Background(), sandbox.Config{
+		CWD:           root,
+		ReadableRoots: []string{readRoot},
+		WritableRoots: []string{writeRoot},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fsys := rt.FileSystem()
+	if _, err := fsys.ReadFile(filepath.Join(readRoot, "note.txt")); err != nil {
+		t.Fatalf("ReadFile(read root) error = %v, want allowed", err)
+	}
+	if _, err := fsys.ReadFile(filepath.Join(string(filepath.Separator), "caelis-denied-read", "note.txt")); err == nil || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("ReadFile(blocked root) error = %v, want permission", err)
+	}
+	if err := fsys.WriteFile(filepath.Join(writeRoot, "note.txt"), []byte("writable"), 0o644); err != nil {
+		t.Fatalf("WriteFile(write root) error = %v, want allowed", err)
+	}
+	if err := fsys.WriteFile(filepath.Join(string(filepath.Separator), "caelis-denied-write", "note.txt"), []byte("denied"), 0o644); err == nil || !errors.Is(err, os.ErrPermission) {
+		t.Fatalf("WriteFile(read root) error = %v, want permission", err)
 	}
 }
 

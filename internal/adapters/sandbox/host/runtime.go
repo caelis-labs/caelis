@@ -16,10 +16,13 @@ import (
 	"sync"
 
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
+	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policyfs"
 )
 
 type Runtime struct {
 	cwd      string
+	cfg      sandbox.Config
 	journal  *sessionJournal
 	mu       sync.RWMutex
 	sessions map[string]*commandSession
@@ -39,6 +42,7 @@ func New(ctx context.Context, cfg sandbox.Config) (*Runtime, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	cfg = sandbox.NormalizeConfig(cfg)
 	cwd := strings.TrimSpace(cfg.CWD)
 	if cwd == "" {
 		var err error
@@ -51,7 +55,8 @@ func New(ctx context.Context, cfg sandbox.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{cwd: abs, journal: newSessionJournal(cfg.StateDir), sessions: map[string]*commandSession{}}, nil
+	cfg.CWD = abs
+	return &Runtime{cwd: abs, cfg: cfg, journal: newSessionJournal(cfg.StateDir), sessions: map[string]*commandSession{}}, nil
 }
 
 func (r *Runtime) Descriptor() sandbox.Descriptor {
@@ -81,7 +86,10 @@ func (r *Runtime) Status() sandbox.Status {
 }
 
 func (r *Runtime) FileSystem() sandbox.FileSystem {
-	return fileSystem{cwd: r.cwd}
+	base := fileSystem{cwd: r.cwd}
+	return policyfs.New(base, func() policy.Policy {
+		return policy.Default(r.cfg, sandbox.Constraints{Permission: sandbox.PermissionWorkspaceWrite})
+	})
 }
 
 func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
