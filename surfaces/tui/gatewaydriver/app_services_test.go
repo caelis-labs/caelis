@@ -293,6 +293,83 @@ func TestBindAppServicesReplaySessionEventsUsesAppViewModel(t *testing.T) {
 	}
 }
 
+func TestAppServiceTurnHandlePublishesSessionEvents(t *testing.T) {
+	runtimeEvents := make(chan coreruntime.EventEnvelope, 1)
+	runtimeEvents <- coreruntime.EventEnvelope{
+		Cursor: "cursor-1",
+		Event: coresession.Event{
+			ID:        "event-1",
+			SessionID: "sess-app",
+			Type:      coresession.EventAssistant,
+			Message: &coremodel.Message{
+				Role:  coremodel.RoleAssistant,
+				Parts: []coremodel.Part{coremodel.NewTextPart("live answer")},
+			},
+		},
+	}
+	close(runtimeEvents)
+	svc, err := appservices.New(appservices.Config{Engine: &appServiceDriverEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := newAppServiceTurnHandle(svc, appServiceDriverTurn{events: runtimeEvents})
+	go handle.forward()
+
+	appEnv, ok := <-handle.SessionEvents()
+	if !ok {
+		t.Fatal("SessionEvents() closed before live event")
+	}
+	if appEnv.Transcript == nil || appEnv.Transcript.Text != "live answer" {
+		t.Fatalf("SessionEvents() event = %#v, want app transcript event", appEnv)
+	}
+	kernelEnv, ok := <-handle.Events()
+	if !ok {
+		t.Fatal("Events() closed before compatibility event")
+	}
+	if kernelEnv.Event.Narrative == nil || kernelEnv.Event.Narrative.Text != "live answer" {
+		t.Fatalf("Events() event = %#v, want compatibility gateway event", kernelEnv)
+	}
+}
+
+func TestAppServiceAgentTurnHandlePublishesSessionEvents(t *testing.T) {
+	svc, err := appservices.New(appservices.Config{Engine: &appServiceDriverEngine{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := newAppServiceAgentTurnHandleBase(
+		svc,
+		coresession.Ref{SessionID: "sess-app"},
+		"prompt",
+		nil,
+		"test",
+	)
+	handle.publishCore("cursor-agent", coresession.Event{
+		ID:        "event-agent",
+		SessionID: "sess-app",
+		Type:      coresession.EventAssistant,
+		Scope: &coresession.EventScope{
+			Participant: coresession.ParticipantBinding{
+				ID:    "reviewer",
+				Kind:  coresession.ParticipantACP,
+				Label: "@reviewer",
+			},
+		},
+		Message: &coremodel.Message{
+			Role:  coremodel.RoleAssistant,
+			Parts: []coremodel.Part{coremodel.NewTextPart("participant answer")},
+		},
+	})
+
+	appEnv := <-handle.SessionEvents()
+	if appEnv.Transcript == nil || appEnv.Transcript.Text != "participant answer" {
+		t.Fatalf("SessionEvents() event = %#v, want participant app transcript event", appEnv)
+	}
+	kernelEnv := <-handle.Events()
+	if kernelEnv.Event.Origin == nil || kernelEnv.Event.Origin.ParticipantID != "reviewer" {
+		t.Fatalf("Events() event = %#v, want compatibility participant origin", kernelEnv)
+	}
+}
+
 func TestBindAppServicesListSessionsUsesCanonicalUserPromptFallback(t *testing.T) {
 	ctx := context.Background()
 	engine := &appServiceDriverEngine{

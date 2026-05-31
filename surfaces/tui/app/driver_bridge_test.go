@@ -772,6 +772,50 @@ func TestExecuteLineViaDriverStreamsGatewayEventsDirectly(t *testing.T) {
 	}
 }
 
+func TestExecuteLineViaDriverPrefersAppSessionEventStream(t *testing.T) {
+	legacyEvents := make(chan kernel.EventEnvelope, 1)
+	legacyEvents <- kernel.EventEnvelope{Event: kernel.Event{
+		Kind: kernel.EventKindUserMessage,
+		Narrative: &kernel.NarrativePayload{
+			Role: kernel.NarrativeRoleUser,
+			Text: "legacy stream",
+		},
+	}}
+	close(legacyEvents)
+	appEvents := make(chan appviewmodel.SessionEventEnvelope, 1)
+	appEvents <- appviewmodel.EventEnvelopeFromSession("app-stream", coresession.Event{
+		ID:        "app-stream",
+		SessionID: "root-session",
+		Type:      coresession.EventAssistant,
+		Message:   coreTextMessage(coremodel.RoleAssistant, "app stream"),
+	})
+	close(appEvents)
+	turn := &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{events: legacyEvents},
+		appEvents:      appEvents,
+	}
+
+	driver := &bridgeSubmitDriver{turn: turn}
+	var msgs []tea.Msg
+	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	if result.Err != nil {
+		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+	}
+	if turn.eventsCalls != 0 {
+		t.Fatalf("legacy Events() calls = %d, want 0 when app event stream is available", turn.eventsCalls)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1", len(msgs))
+	}
+	env, ok := msgs[0].(kernel.EventEnvelope)
+	if !ok || env.Event.Narrative == nil || env.Event.Narrative.Text != "app stream" {
+		t.Fatalf("first msg = %#v, want app session event converted to gateway envelope", msgs[0])
+	}
+	if env.Event.Narrative.Text == "legacy stream" {
+		t.Fatalf("executeLineViaDriver() used legacy event stream")
+	}
+}
+
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.T) {
 	turn := &bridgeTestTurn{
 		events: make(chan kernel.EventEnvelope, 4),
@@ -2025,6 +2069,12 @@ type bridgeTestTurn struct {
 	events chan kernel.EventEnvelope
 }
 
+type bridgeAppEventTurn struct {
+	*bridgeTestTurn
+	appEvents   <-chan appviewmodel.SessionEventEnvelope
+	eventsCalls int
+}
+
 func (t *bridgeTestTurn) HandleID() string { return "handle-1" }
 func (t *bridgeTestTurn) RunID() string    { return "run-1" }
 func (t *bridgeTestTurn) TurnID() string   { return "turn-1" }
@@ -2032,6 +2082,13 @@ func (t *bridgeTestTurn) SessionRef() session.SessionRef {
 	return session.SessionRef{SessionID: "root-session"}
 }
 func (t *bridgeTestTurn) Events() <-chan kernel.EventEnvelope { return t.events }
+func (t *bridgeAppEventTurn) Events() <-chan kernel.EventEnvelope {
+	t.eventsCalls++
+	return t.bridgeTestTurn.Events()
+}
+func (t *bridgeAppEventTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
+	return t.appEvents
+}
 func (t *bridgeTestTurn) Submit(context.Context, kernel.SubmitRequest) error {
 	return nil
 }

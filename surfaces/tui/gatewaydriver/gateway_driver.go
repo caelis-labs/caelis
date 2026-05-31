@@ -829,12 +829,22 @@ type gatewayTurn struct {
 	handle kernel.TurnHandle
 }
 
+type sessionEventTurnHandle interface {
+	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
+}
+
 func (t gatewayTurn) HandleID() string               { return t.handle.HandleID() }
 func (t gatewayTurn) RunID() string                  { return t.handle.RunID() }
 func (t gatewayTurn) TurnID() string                 { return t.handle.TurnID() }
 func (t gatewayTurn) SessionRef() session.SessionRef { return t.handle.SessionRef() }
 func (t gatewayTurn) Events() <-chan kernel.EventEnvelope {
 	return t.handle.Events()
+}
+func (t gatewayTurn) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
+	if handle, ok := t.handle.(sessionEventTurnHandle); ok {
+		return handle.SessionEvents()
+	}
+	return nil
 }
 func (t gatewayTurn) Submit(ctx context.Context, req kernel.SubmitRequest) error {
 	return t.handle.Submit(ctx, req)

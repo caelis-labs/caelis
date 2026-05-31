@@ -12,6 +12,7 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
@@ -290,20 +291,22 @@ func (g *appServiceGateway) forward(handle *appServiceTurnHandle) {
 }
 
 type appServiceTurnHandle struct {
-	services appservices.Services
-	turn     coreruntime.Turn
-	events   chan kernel.EventEnvelope
-	done     chan struct{}
-	mu       sync.Mutex
-	history  []kernel.EventEnvelope
+	services  appservices.Services
+	turn      coreruntime.Turn
+	events    chan kernel.EventEnvelope
+	appEvents chan appviewmodel.SessionEventEnvelope
+	done      chan struct{}
+	mu        sync.Mutex
+	history   []kernel.EventEnvelope
 }
 
 func newAppServiceTurnHandle(services appservices.Services, turn coreruntime.Turn) *appServiceTurnHandle {
 	return &appServiceTurnHandle{
-		services: services,
-		turn:     turn,
-		events:   make(chan kernel.EventEnvelope, 32),
-		done:     make(chan struct{}),
+		services:  services,
+		turn:      turn,
+		events:    make(chan kernel.EventEnvelope, 32),
+		appEvents: make(chan appviewmodel.SessionEventEnvelope, 32),
+		done:      make(chan struct{}),
 	}
 }
 
@@ -329,6 +332,10 @@ func (h *appServiceTurnHandle) CreatedAt() time.Time {
 
 func (h *appServiceTurnHandle) Events() <-chan kernel.EventEnvelope {
 	return h.events
+}
+
+func (h *appServiceTurnHandle) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
+	return h.appEvents
 }
 
 func (h *appServiceTurnHandle) EventsAfter(cursor string) ([]kernel.EventEnvelope, string, error) {
@@ -386,15 +393,19 @@ func (h *appServiceTurnHandle) Close() error {
 
 func (h *appServiceTurnHandle) forward() {
 	defer close(h.events)
+	defer close(h.appEvents)
 	defer close(h.done)
 	stream, err := h.services.Events().SubscribeTurn(context.Background(), h.turn)
 	if err != nil {
-		h.events <- kernel.EventEnvelope{Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: err.Error()}}
+		h.publishAppEvent(appviewmodel.EventEnvelopeFromError(err.Error()))
+		h.publishKernelEvent(kernel.EventEnvelope{Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: err.Error()}})
 		return
 	}
 	for env := range stream {
+		appEnv := appviewmodel.CloneSessionEventEnvelope(env)
 		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
 		if !ok {
+			h.publishAppEvent(appEnv)
 			continue
 		}
 		converted.Event.HandleID = h.HandleID()
@@ -405,7 +416,19 @@ func (h *appServiceTurnHandle) forward() {
 		h.mu.Lock()
 		h.history = append(h.history, converted)
 		h.mu.Unlock()
-		h.events <- converted
+		h.publishAppEvent(appEnv)
+		h.publishKernelEvent(converted)
+	}
+}
+
+func (h *appServiceTurnHandle) publishAppEvent(env appviewmodel.SessionEventEnvelope) {
+	h.appEvents <- appviewmodel.CloneSessionEventEnvelope(env)
+}
+
+func (h *appServiceTurnHandle) publishKernelEvent(env kernel.EventEnvelope) {
+	select {
+	case h.events <- env:
+	default:
 	}
 }
 

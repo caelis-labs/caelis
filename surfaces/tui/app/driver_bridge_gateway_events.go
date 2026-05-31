@@ -9,9 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
+	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 const gatewayNarrativeBatchInterval = 16 * time.Millisecond
@@ -19,6 +21,10 @@ const gatewayNarrativeBatchInterval = 16 * time.Millisecond
 type gatewayNarrativeBatcher struct {
 	pending *kernel.EventEnvelope
 	key     string
+}
+
+type sessionEventTurn interface {
+	SessionEvents() <-chan appviewmodel.SessionEventEnvelope
 }
 
 func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender) {
@@ -29,6 +35,12 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn
 	send := sender.sendFunc()
 	if turn == nil || send == nil {
 		return
+	}
+	if appTurn, ok := turn.(sessionEventTurn); ok {
+		if appEvents := appTurn.SessionEvents(); appEvents != nil {
+			forwardAppSessionTurnEvents(ctx, driver, turn, sender, send, appEvents)
+			return
+		}
 	}
 	events := turn.Events()
 	if events == nil {
@@ -50,19 +62,48 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn
 				events = nil
 				continue
 			}
-			if batcher.enqueue(env, send) {
-				continue
-			}
-			send(env)
-			startTerminalStreamForwarder(ctx, driver, env, sender)
-			if isApprovalGatewayEvent(env.Event.Kind) {
-				if !isAutomaticApprovalEvent(env.Event.ApprovalPayload) {
-					sendApprovalPrompt(ctx, turn, env.Event.ApprovalPayload, send)
-				}
-			}
+			forwardGatewayEnvelope(ctx, driver, turn, sender, send, &batcher, env)
 		}
 	}
 	batcher.flush(send)
+}
+
+func forwardAppSessionTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), events <-chan appviewmodel.SessionEventEnvelope) {
+	ticker := time.NewTicker(gatewayNarrativeBatchInterval)
+	defer ticker.Stop()
+
+	var batcher gatewayNarrativeBatcher
+	for events != nil {
+		select {
+		case <-ctx.Done():
+			batcher.flush(send)
+			return
+		case <-ticker.C:
+			batcher.flush(send)
+		case env, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
+			if !ok {
+				continue
+			}
+			forwardGatewayEnvelope(ctx, driver, turn, sender, send, &batcher, converted)
+		}
+	}
+	batcher.flush(send)
+}
+
+func forwardGatewayEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), batcher *gatewayNarrativeBatcher, env kernel.EventEnvelope) {
+	if batcher != nil && batcher.enqueue(env, send) {
+		return
+	}
+	send(env)
+	startTerminalStreamForwarder(ctx, driver, env, sender)
+	if isApprovalGatewayEvent(env.Event.Kind) && !isAutomaticApprovalEvent(env.Event.ApprovalPayload) {
+		sendApprovalPrompt(ctx, turn, env.Event.ApprovalPayload, send)
+	}
 }
 
 func (b *gatewayNarrativeBatcher) enqueue(env kernel.EventEnvelope, send func(tea.Msg)) bool {

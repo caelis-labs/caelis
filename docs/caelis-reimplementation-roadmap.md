@@ -1383,6 +1383,13 @@ be migrated before retiring the old stack:
      transcript renderer. Old `kernel.EventEnvelope` replay remains only as the
      fallback path for non app-service driver implementations during the
      transition.
+   - Migrated baseline: app-service TUI live turns now expose
+     `internal/app/viewmodel.SessionEventEnvelope` streams for both local model
+     turns and dynamic external-ACP participant turns. The Bubble Tea bridge
+     prefers that app event stream and only converts to the current gateway
+     envelope shape at the renderer boundary; the old `kernel.EventEnvelope`
+     turn stream remains as a compatibility fallback for non app-service
+     drivers until the transcript renderer itself is ported.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and

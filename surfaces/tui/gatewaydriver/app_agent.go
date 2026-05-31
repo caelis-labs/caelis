@@ -11,6 +11,7 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
@@ -30,6 +31,7 @@ type appServiceAgentTurnHandle struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
 	events       chan kernel.EventEnvelope
+	appEvents    chan appviewmodel.SessionEventEnvelope
 	done         chan struct{}
 	mu           sync.Mutex
 	history      []kernel.EventEnvelope
@@ -58,6 +60,7 @@ func newAppServiceAgentTurnHandleBase(svc appservices.Services, ref coresession.
 		ctx:          ctx,
 		cancel:       cancel,
 		events:       make(chan kernel.EventEnvelope, 32),
+		appEvents:    make(chan appviewmodel.SessionEventEnvelope, 32),
 		done:         make(chan struct{}),
 	}
 }
@@ -84,6 +87,10 @@ func (h *appServiceAgentTurnHandle) CreatedAt() time.Time {
 
 func (h *appServiceAgentTurnHandle) Events() <-chan kernel.EventEnvelope {
 	return h.events
+}
+
+func (h *appServiceAgentTurnHandle) SessionEvents() <-chan appviewmodel.SessionEventEnvelope {
+	return h.appEvents
 }
 
 func (h *appServiceAgentTurnHandle) EventsAfter(cursor string) ([]kernel.EventEnvelope, string, error) {
@@ -135,6 +142,7 @@ func (h *appServiceAgentTurnHandle) Close() error {
 
 func (h *appServiceAgentTurnHandle) run(parent context.Context) {
 	defer close(h.events)
+	defer close(h.appEvents)
 	defer close(h.done)
 	ctx := h.ctx
 	if parent != nil {
@@ -254,32 +262,49 @@ func contentPartMessagePart(part coremodel.ContentPart) (coremodel.Part, bool) {
 }
 
 func (h *appServiceAgentTurnHandle) publishCore(cursor coresession.Cursor, event coresession.Event) {
-	env, ok := eventbridge.KernelEnvelopeFromCore(coreruntime.EventEnvelope{Cursor: cursor, Event: event})
-	if !ok {
+	if event.Type == "" {
 		return
 	}
-	env.Event.HandleID = h.HandleID()
-	env.Event.RunID = h.RunID()
-	if env.Event.TurnID == "" {
-		env.Event.TurnID = h.TurnID()
+	appEnv := appviewmodel.EventEnvelopeFromSession(strings.TrimSpace(string(cursor)), event)
+	env, ok := eventbridge.KernelEnvelopeFromCore(coreruntime.EventEnvelope{Cursor: cursor, Event: event})
+	if ok {
+		env.Event.HandleID = h.HandleID()
+		env.Event.RunID = h.RunID()
+		if env.Event.TurnID == "" {
+			env.Event.TurnID = h.TurnID()
+		}
 	}
-	h.publish(env)
+	h.publish(appEnv, env, ok)
 }
 
 func (h *appServiceAgentTurnHandle) publishError(err error) {
 	if err == nil {
 		return
 	}
-	h.publish(kernel.EventEnvelope{Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: err.Error()}})
+	h.publish(
+		appviewmodel.EventEnvelopeFromError(err.Error()),
+		kernel.EventEnvelope{Err: &kernel.Error{Kind: kernel.KindInternal, Code: kernel.CodeInternal, Message: err.Error()}},
+		true,
+	)
 }
 
-func (h *appServiceAgentTurnHandle) publish(env kernel.EventEnvelope) {
-	h.mu.Lock()
-	h.history = append(h.history, env)
-	h.mu.Unlock()
+func (h *appServiceAgentTurnHandle) publish(appEnv appviewmodel.SessionEventEnvelope, env kernel.EventEnvelope, hasKernel bool) {
+	if hasKernel {
+		h.mu.Lock()
+		h.history = append(h.history, env)
+		h.mu.Unlock()
+	}
+	select {
+	case h.appEvents <- appviewmodel.CloneSessionEventEnvelope(appEnv):
+	case <-h.ctx.Done():
+	}
+	if !hasKernel {
+		return
+	}
 	select {
 	case h.events <- env:
 	case <-h.ctx.Done():
+	default:
 	}
 }
 
