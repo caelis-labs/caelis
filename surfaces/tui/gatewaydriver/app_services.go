@@ -356,12 +356,74 @@ func coreRefFromPort(ref portsession.SessionRef) coresession.Ref {
 	}
 }
 
+func coreSessionFromPort(active portsession.Session) coresession.Session {
+	return coresession.Session{
+		Ref: coreRefFromPort(active.SessionRef),
+		Workspace: coresession.Workspace{
+			Key: strings.TrimSpace(active.SessionRef.WorkspaceKey),
+			CWD: strings.TrimSpace(active.CWD),
+		},
+		Title:        strings.TrimSpace(active.Title),
+		Meta:         maps.Clone(active.Metadata),
+		Controller:   coreControllerBindingFromPort(active.Controller),
+		Participants: coreParticipantBindingsFromPort(active.Participants),
+		CreatedAt:    active.CreatedAt,
+		UpdatedAt:    active.UpdatedAt,
+	}
+}
+
 func portRefFromCore(ref coresession.Ref) portsession.SessionRef {
 	return portsession.SessionRef{
 		AppName:      strings.TrimSpace(ref.AppName),
 		UserID:       strings.TrimSpace(ref.UserID),
 		SessionID:    strings.TrimSpace(ref.SessionID),
 		WorkspaceKey: strings.TrimSpace(ref.WorkspaceKey),
+	}
+}
+
+func coreControllerBindingFromPort(in portsession.ControllerBinding) coresession.ControllerBinding {
+	kind := coresession.ControllerKind(strings.TrimSpace(string(in.Kind)))
+	if kind == "" && strings.TrimSpace(in.AgentName) != "" {
+		kind = coresession.ControllerBuiltin
+	}
+	return coresession.ControllerBinding{
+		Kind:            kind,
+		ID:              strings.TrimSpace(in.ControllerID),
+		AgentName:       strings.TrimSpace(in.AgentName),
+		Label:           strings.TrimSpace(in.Label),
+		EpochID:         strings.TrimSpace(in.EpochID),
+		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
+		ContextSyncSeq:  in.ContextSyncSeq,
+		AttachedAt:      in.AttachedAt,
+		Source:          strings.TrimSpace(in.Source),
+	}
+}
+
+func coreParticipantBindingsFromPort(in []portsession.ParticipantBinding) []coresession.ParticipantBinding {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]coresession.ParticipantBinding, 0, len(in))
+	for _, participant := range in {
+		out = append(out, coreParticipantBindingFromPort(participant))
+	}
+	return out
+}
+
+func coreParticipantBindingFromPort(in portsession.ParticipantBinding) coresession.ParticipantBinding {
+	return coresession.ParticipantBinding{
+		ID:             strings.TrimSpace(in.ID),
+		Kind:           coresession.ParticipantKind(strings.TrimSpace(string(in.Kind))),
+		Role:           coresession.ParticipantRole(strings.TrimSpace(string(in.Role))),
+		AgentName:      strings.TrimSpace(in.AgentName),
+		Label:          strings.TrimSpace(in.Label),
+		SessionID:      strings.TrimSpace(in.SessionID),
+		Source:         strings.TrimSpace(in.Source),
+		ParentTurnID:   strings.TrimSpace(in.ParentTurnID),
+		DelegationID:   strings.TrimSpace(in.DelegationID),
+		ContextSyncSeq: in.ContextSyncSeq,
+		AttachedAt:     in.AttachedAt,
+		ControllerRef:  strings.TrimSpace(in.ControllerRef),
 	}
 }
 

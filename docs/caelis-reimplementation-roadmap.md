@@ -1400,6 +1400,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: TUI active-turn submission now uses
      `core/runtime.Submission`; old `kernel.SubmitRequest` conversion is
      contained in the gatewaydriver compatibility boundary.
+   - Migrated baseline: the TUI driver session contract now returns
+     `core/session` session/ref values; old `ports/session` session conversion
+     is contained in the gatewaydriver compatibility boundary.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1411,7 +1414,8 @@ be migrated before retiring the old stack:
    - Still pending: the current TUI driver/gateway bridge still imports the old
      `ports/session`, `ports/stream`, and public `kernel` event contracts for
      terminal stream subscriptions, approval payloads, non app-service
-     replay fallback, participants, and historical usage extraction. Retiring
+     replay fallback, participants, internal session bookkeeping, and
+     historical usage extraction. Retiring
      those imports requires moving the remaining TUI bridge protocol to
      `core/runtime`, `core/session`, and `internal/app/viewmodel` in one larger
      slice.

@@ -2275,7 +2275,7 @@ func TestGatewayDriverIgnoresStaleSessionAliasOutsideConfiguredModels(t *testing
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
-	if err := stack.Sessions.UpdateState(ctx, activeSession.SessionRef, func(state map[string]any) (map[string]any, error) {
+	if err := stack.Sessions.UpdateState(ctx, portRefFromCore(activeSession.Ref), func(state map[string]any) (map[string]any, error) {
 		next := session.CloneState(state)
 		if next == nil {
 			next = map[string]any{}

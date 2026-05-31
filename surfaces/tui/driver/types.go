@@ -6,9 +6,9 @@ import (
 
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type SubmissionMode string
@@ -156,7 +156,7 @@ type Turn interface {
 	HandleID() string
 	RunID() string
 	TurnID() string
-	SessionRef() session.SessionRef
+	SessionRef() coresession.Ref
 	Events() <-chan kernel.EventEnvelope
 	Submit(context.Context, coreruntime.Submission) error
 	Cancel() kernel.CancelResult
@@ -172,8 +172,8 @@ type Driver interface {
 	Interrupt(context.Context) error
 	ExecuteCommand(context.Context, CommandExecutionOptions) (CommandExecutionView, error)
 
-	NewSession(context.Context) (session.Session, error)
-	ResumeSession(context.Context, string) (session.Session, error)
+	NewSession(context.Context) (coresession.Session, error)
+	ResumeSession(context.Context, string) (coresession.Session, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
 	ReplayEvents(context.Context) ([]kernel.EventEnvelope, error)
 

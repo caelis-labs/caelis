@@ -79,7 +79,7 @@ func TestDiagnosticsReportsProgramSenderDropsAfterClose(t *testing.T) {
 func TestSlashNewClearsHistoryBeforeNotice(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:     tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		newSession: session.Session{SessionRef: session.SessionRef{SessionID: "new-session"}},
+		newSession: coresession.Session{Ref: coresession.Ref{SessionID: "new-session"}},
 	}
 	var msgs []tea.Msg
 	slashNew(driver, func(msg tea.Msg) { msgs = append(msgs, msg) })
@@ -330,7 +330,7 @@ func TestDefaultCommandsStayInHelpText(t *testing.T) {
 func TestDefaultCommandsAreRecognizedByDispatch(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:     tuidriver.StatusSnapshot{},
-		newSession: session.Session{SessionRef: session.SessionRef{SessionID: "new-session"}},
+		newSession: coresession.Session{Ref: coresession.Ref{SessionID: "new-session"}},
 	}
 	for _, command := range DefaultCommands() {
 		var msgs []tea.Msg
@@ -415,7 +415,7 @@ func TestSlashSettingsUsesSharedCommandExecutor(t *testing.T) {
 func TestSlashResumeClearsHistoryBeforeReplay(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
 		replay: []kernel.EventEnvelope{
 			{
 				Event: kernel.Event{
@@ -526,7 +526,7 @@ func TestSlashResumePrefersAppSessionEventReplay(t *testing.T) {
 	driver := &bridgeAppReplayDriver{
 		bridgeTestDriver: bridgeTestDriver{
 			status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-			resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+			resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
 			replay: []kernel.EventEnvelope{{
 				Event: kernel.Event{
 					Kind: kernel.EventKindUserMessage,
@@ -573,7 +573,7 @@ func TestSlashResumePrefersAppSessionEventReplay(t *testing.T) {
 func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
 		replay: []kernel.EventEnvelope{
 			{
 				Event: kernel.Event{
@@ -683,7 +683,7 @@ func TestSlashResumeReplaysSideACPFinalDialogueWithoutProcessTrace(t *testing.T)
 func TestSlashResumeReplaysProcessEventsForInterruptedTurn(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
 		replay: []kernel.EventEnvelope{
 			{
 				Event: kernel.Event{
@@ -1099,7 +1099,7 @@ func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
 func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
-		resumedSession: session.Session{SessionRef: session.SessionRef{SessionID: "resumed-session"}},
+		resumedSession: coresession.Session{Ref: coresession.Ref{SessionID: "resumed-session"}},
 		replay: []kernel.EventEnvelope{{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
@@ -2069,8 +2069,8 @@ func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
 
 type bridgeTestDriver struct {
 	status                   tuidriver.StatusSnapshot
-	newSession               session.Session
-	resumedSession           session.Session
+	newSession               coresession.Session
+	resumedSession           coresession.Session
 	replay                   []kernel.EventEnvelope
 	listAgentCalls           int
 	agentStatusCalls         int
@@ -2122,8 +2122,8 @@ type bridgeAppEventTurn struct {
 func (t *bridgeTestTurn) HandleID() string { return "handle-1" }
 func (t *bridgeTestTurn) RunID() string    { return "run-1" }
 func (t *bridgeTestTurn) TurnID() string   { return "turn-1" }
-func (t *bridgeTestTurn) SessionRef() session.SessionRef {
-	return session.SessionRef{SessionID: "root-session"}
+func (t *bridgeTestTurn) SessionRef() coresession.Ref {
+	return coresession.Ref{SessionID: "root-session"}
 }
 func (t *bridgeTestTurn) Events() <-chan kernel.EventEnvelope { return t.events }
 func (t *bridgeAppEventTurn) Events() <-chan kernel.EventEnvelope {
@@ -2273,11 +2273,11 @@ func (d *bridgeSubmitDriver) Interrupt(context.Context) error { return nil }
 func (d *bridgeSubmitDriver) ExecuteCommand(context.Context, tuidriver.CommandExecutionOptions) (tuidriver.CommandExecutionView, error) {
 	return tuidriver.CommandExecutionView{}, nil
 }
-func (d *bridgeSubmitDriver) NewSession(context.Context) (session.Session, error) {
-	return session.Session{}, nil
+func (d *bridgeSubmitDriver) NewSession(context.Context) (coresession.Session, error) {
+	return coresession.Session{}, nil
 }
-func (d *bridgeSubmitDriver) ResumeSession(context.Context, string) (session.Session, error) {
-	return session.Session{}, nil
+func (d *bridgeSubmitDriver) ResumeSession(context.Context, string) (coresession.Session, error) {
+	return coresession.Session{}, nil
 }
 func (d *bridgeSubmitDriver) ListSessions(context.Context, int) ([]tuidriver.ResumeCandidate, error) {
 	return nil, nil
@@ -2374,10 +2374,10 @@ func (d *bridgeTestDriver) CommandCatalog(context.Context) (tuidriver.CommandCat
 	}
 	return d.commandCatalog, nil
 }
-func (d *bridgeTestDriver) NewSession(context.Context) (session.Session, error) {
+func (d *bridgeTestDriver) NewSession(context.Context) (coresession.Session, error) {
 	return d.newSession, nil
 }
-func (d *bridgeTestDriver) ResumeSession(context.Context, string) (session.Session, error) {
+func (d *bridgeTestDriver) ResumeSession(context.Context, string) (coresession.Session, error) {
 	return d.resumedSession, nil
 }
 func (d *bridgeTestDriver) ListSessions(context.Context, int) ([]tuidriver.ResumeCandidate, error) {

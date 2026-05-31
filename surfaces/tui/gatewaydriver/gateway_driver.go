@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
@@ -572,23 +573,23 @@ func (d *GatewayDriver) activeCommandInterrupt() context.CancelFunc {
 	return d.activeCommandCancel
 }
 
-func (d *GatewayDriver) NewSession(ctx context.Context) (session.Session, error) {
+func (d *GatewayDriver) NewSession(ctx context.Context) (coresession.Session, error) {
 	activeSession, err := d.stack.StartSession(ctx, "", d.bindingKey)
 	if err != nil {
-		return session.Session{}, err
+		return coresession.Session{}, err
 	}
 	d.mu.Lock()
 	d.session = activeSession
 	d.hasSession = true
 	d.mu.Unlock()
 	d.refreshSessionDisplay(ctx, activeSession)
-	return activeSession, nil
+	return coreSessionFromPort(activeSession), nil
 }
 
-func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (session.Session, error) {
+func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (coresession.Session, error) {
 	gw, err := d.gateway()
 	if err != nil {
-		return session.Session{}, err
+		return coresession.Session{}, err
 	}
 	result, err := gw.ResumeSession(ctx, kernel.ResumeSessionRequest{
 		AppName:    d.stack.AppName,
@@ -602,14 +603,14 @@ func (d *GatewayDriver) ResumeSession(ctx context.Context, sessionID string) (se
 		},
 	})
 	if err != nil {
-		return session.Session{}, err
+		return coresession.Session{}, err
 	}
 	d.mu.Lock()
 	d.session = result.Session
 	d.hasSession = true
 	d.mu.Unlock()
 	d.refreshSessionDisplay(ctx, result.Session)
-	return result.Session, nil
+	return coreSessionFromPort(result.Session), nil
 }
 
 func (d *GatewayDriver) ListSessions(ctx context.Context, limit int) ([]ResumeCandidate, error) {
@@ -839,10 +840,10 @@ type coreSubmissionTurnHandle interface {
 	SubmitCore(context.Context, coreruntime.Submission) error
 }
 
-func (t gatewayTurn) HandleID() string               { return t.handle.HandleID() }
-func (t gatewayTurn) RunID() string                  { return t.handle.RunID() }
-func (t gatewayTurn) TurnID() string                 { return t.handle.TurnID() }
-func (t gatewayTurn) SessionRef() session.SessionRef { return t.handle.SessionRef() }
+func (t gatewayTurn) HandleID() string            { return t.handle.HandleID() }
+func (t gatewayTurn) RunID() string               { return t.handle.RunID() }
+func (t gatewayTurn) TurnID() string              { return t.handle.TurnID() }
+func (t gatewayTurn) SessionRef() coresession.Ref { return coreRefFromPort(t.handle.SessionRef()) }
 func (t gatewayTurn) Events() <-chan kernel.EventEnvelope {
 	return t.handle.Events()
 }
