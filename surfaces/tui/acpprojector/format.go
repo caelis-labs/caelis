@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuidiff"
 )
 
@@ -13,7 +13,7 @@ func FormatToolStart(name string, args map[string]any) string {
 	return sanitizeToolDisplayText(FormatToolArgsValue(name, args))
 }
 
-func FormatToolContent(content []session.ProtocolToolCallContent) string {
+func FormatToolContent(content []schema.ToolCallContent) string {
 	if len(content) == 0 {
 		return ""
 	}
@@ -35,7 +35,7 @@ func FormatToolContent(content []session.ProtocolToolCallContent) string {
 	return strings.Join(parts, "\n")
 }
 
-func toolDiffText(item session.ProtocolToolCallContent) string {
+func toolDiffText(item schema.ToolCallContent) string {
 	oldText := ""
 	if item.OldText != nil {
 		oldText = *item.OldText

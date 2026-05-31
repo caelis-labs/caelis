@@ -7,11 +7,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
-	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
 func dispatchSlashCommand(driver tuidriver.Driver, sender *ProgramSender, text string) TaskResultMsg {
@@ -310,15 +310,24 @@ func resumeSessionEventReplayTranscriptEvents(events []appviewmodel.SessionEvent
 	if len(events) == 0 {
 		return nil
 	}
-	envelopes := make([]kernel.EventEnvelope, 0, len(events))
+	out := make([]TranscriptEvent, 0, len(events))
 	for _, env := range events {
-		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
-		if !ok {
+		if env.Canonical == nil {
 			continue
 		}
-		envelopes = append(envelopes, converted)
+		event := *env.Canonical
+		if !shouldReplaySessionEventInTUIResume(event) {
+			continue
+		}
+		projected := ProjectSessionEventEnvelopeToTranscriptEvents(env)
+		if len(projected) == 0 {
+			if event, ok := resumeParticipantUserSessionTranscriptEvent(event); ok {
+				projected = append(projected, event)
+			}
+		}
+		out = append(out, projected...)
 	}
-	return resumeTranscriptReplayTranscriptEvents(envelopes)
+	return out
 }
 
 func resumeTranscriptReplayTranscriptEvents(events []kernel.EventEnvelope) []TranscriptEvent {
@@ -403,6 +412,48 @@ func shouldReplayEventInTUIResume(event kernel.Event) bool {
 	default:
 		return false
 	}
+}
+
+func shouldReplaySessionEventInTUIResume(event coresession.Event) bool {
+	switch event.Type {
+	case coresession.EventUser:
+		return strings.TrimSpace(coresession.EventText(event)) != ""
+	case coresession.EventPlan:
+		return len(event.Plan) > 0
+	case coresession.EventAssistant:
+		if event.Visibility == coresession.VisibilityUIOnly || event.Visibility == coresession.VisibilityOverlay {
+			return false
+		}
+		return strings.TrimSpace(coreSessionAssistantText(event)) != "" || strings.TrimSpace(coreSessionReasoningText(event)) != ""
+	default:
+		return false
+	}
+}
+
+func resumeParticipantUserSessionTranscriptEvent(event coresession.Event) (TranscriptEvent, bool) {
+	if event.Type != coresession.EventUser || coreSessionEventScope(event) != ACPProjectionParticipant {
+		return TranscriptEvent{}, false
+	}
+	text := strings.TrimSpace(coresession.EventText(event))
+	if text == "" {
+		return TranscriptEvent{}, false
+	}
+	label := "side ACP"
+	if event.Scope != nil {
+		participant := event.Scope.Participant
+		label = firstNonEmpty(participant.Label, participant.AgentName, participant.ID, label)
+	}
+	if label != "" && !strings.HasPrefix(label, "@") {
+		label = "@" + label
+	}
+	return TranscriptEvent{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		NarrativeKind: TranscriptNarrativeUser,
+		Text:          fmt.Sprintf("User to %s: %s", label, text),
+		Final:         true,
+		OccurredAt:    event.Time,
+	}, true
 }
 
 func replayableResumeAssistant(event kernel.Event) bool {

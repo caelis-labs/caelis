@@ -1386,10 +1386,17 @@ be migrated before retiring the old stack:
    - Migrated baseline: app-service TUI live turns now expose
      `internal/app/viewmodel.SessionEventEnvelope` streams for both local model
      turns and dynamic external-ACP participant turns. The Bubble Tea bridge
-     prefers that app event stream and projects it directly into
-     `TranscriptEventsMsg`; conversion to the current gateway envelope shape is
-     now limited to boundary helpers such as terminal stream follow-up,
-     approval prompts, errors, and non app-service fallback drivers.
+     prefers that app event stream and projects canonical `core/session.Event`
+     values directly into `TranscriptEventsMsg`; conversion to the current
+     gateway envelope shape is now limited to boundary helpers such as terminal
+     stream follow-up, approval prompts, errors, and non app-service fallback
+     drivers.
+   - Migrated baseline: app-service-bound TUI `/resume` replay now uses the
+     same core-session transcript projector as live app turns, including
+     participant prompt restoration, instead of first adapting replayed app
+     events into `kernel.EventEnvelope`. TUI tool-content formatting also
+     consumes the ACP schema content shape, with old protocol content converted
+     only at the legacy gateway boundary.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1400,10 +1407,11 @@ be migrated before retiring the old stack:
      parity, so the old TUI stack cannot be removed yet.
    - Still pending: the current TUI driver/gateway bridge still imports the old
      `ports/session`, `ports/stream`, and public `kernel` event contracts for
-     live turn streaming, replay, participants, transcript projection, and
-     historical usage extraction. Retiring those imports requires moving the
-     remaining TUI bridge protocol to `core/runtime`, `core/session`, and
-     `internal/app/viewmodel` in one larger slice.
+     terminal stream subscriptions, approval prompt submission, non app-service
+     replay fallback, participants, and historical usage extraction. Retiring
+     those imports requires moving the remaining TUI bridge protocol to
+     `core/runtime`, `core/session`, and `internal/app/viewmodel` in one larger
+     slice.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and
@@ -1450,7 +1458,9 @@ be migrated before retiring the old stack:
      APP-ready replay and active-turn live event streams using shared
      `internal/app/viewmodel.SessionEventEnvelope` DTOs. The app-service TUI
      gateway replay and local-turn forwarding path consume this service-level
-     projection before adapting to the existing kernel envelope shape.
+     projection directly for transcript rendering, adapting to the existing
+     kernel envelope shape only for transitional terminal and approval
+     boundaries.
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct

@@ -816,6 +816,48 @@ func TestExecuteLineViaDriverPrefersAppSessionEventStream(t *testing.T) {
 	}
 }
 
+func TestExecuteLineViaDriverProjectsAppToolEventOnce(t *testing.T) {
+	appEvents := make(chan appviewmodel.SessionEventEnvelope, 1)
+	appEvents <- appviewmodel.EventEnvelopeFromSession("tool-result", coresession.Event{
+		ID:        "tool-result",
+		SessionID: "root-session",
+		Type:      coresession.EventToolResult,
+		Tool: &coresession.ToolEvent{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Kind:   "execute",
+			Status: coresession.ToolCompleted,
+			Input:  map[string]any{"command": "printf ok"},
+			Content: []coresession.ToolContent{{
+				Type: "text",
+				Text: "ok\n",
+			}},
+		},
+	})
+	close(appEvents)
+	turn := &bridgeAppEventTurn{
+		bridgeTestTurn: &bridgeTestTurn{},
+		appEvents:      appEvents,
+	}
+
+	driver := &bridgeSubmitDriver{turn: turn}
+	var msgs []tea.Msg
+	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
+	if result.Err != nil {
+		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("executeLineViaDriver() emitted %d msgs, want one direct transcript projection", len(msgs))
+	}
+	transcript, ok := msgs[0].(TranscriptEventsMsg)
+	if !ok || len(transcript.Events) != 1 {
+		t.Fatalf("first msg = %#v, want one transcript event", msgs[0])
+	}
+	if got := transcript.Events[0]; got.ToolName != "RUN_COMMAND" || got.ToolOutput != "ok\n" {
+		t.Fatalf("tool transcript = %#v, want direct core tool projection", got)
+	}
+}
+
 func TestExecuteLineViaDriverCoalescesUIOnlyReasoningBeforeToolEvent(t *testing.T) {
 	turn := &bridgeTestTurn{
 		events: make(chan kernel.EventEnvelope, 4),

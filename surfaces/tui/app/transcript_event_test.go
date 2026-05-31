@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	coremodel "github.com/OnslaughtSnail/caelis/core/model"
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
@@ -36,6 +39,92 @@ func TestProjectGatewayEventToTranscriptEvents_AssistantAndUsage(t *testing.T) {
 	}
 	if events[2].Kind != TranscriptEventUsage || events[2].Usage == nil || events[2].Usage.TotalTokens != 15 {
 		t.Fatalf("events[2] = %#v, want usage snapshot", events[2])
+	}
+}
+
+func TestProjectCoreSessionEventToTranscriptEvents_AssistantReasoningAndText(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "core-assistant",
+		SessionID: "root-session",
+		Type:      coresession.EventAssistant,
+		Actor:     coresession.ActorRef{Kind: coresession.ActorController, Name: "local"},
+		Message: &coremodel.Message{
+			Role: coremodel.RoleAssistant,
+			Parts: []coremodel.Part{
+				coremodel.NewReasoningPart("think through it", coremodel.ReasoningVisible),
+				coremodel.NewTextPart("final answer"),
+			},
+		},
+	})
+
+	if len(events) != 2 {
+		t.Fatalf("events = %#v, want reasoning and answer transcript events", events)
+	}
+	if events[0].NarrativeKind != TranscriptNarrativeReasoning || events[0].Text != "think through it" || !events[0].Final {
+		t.Fatalf("reasoning event = %#v, want final visible reasoning", events[0])
+	}
+	if events[1].NarrativeKind != TranscriptNarrativeAssistant || events[1].Text != "final answer" || events[1].Actor != "local" {
+		t.Fatalf("assistant event = %#v, want final answer from core session event", events[1])
+	}
+}
+
+func TestProjectCoreSessionEventToTranscriptEvents_ToolResultUsesCoreContent(t *testing.T) {
+	t.Parallel()
+
+	events := ProjectCoreSessionEventToTranscriptEvents(coresession.Event{
+		ID:        "core-tool",
+		SessionID: "root-session",
+		Type:      coresession.EventToolResult,
+		Tool: &coresession.ToolEvent{
+			ID:     "call-1",
+			Name:   "RUN_COMMAND",
+			Kind:   "execute",
+			Status: coresession.ToolCompleted,
+			Input:  map[string]any{"command": "printf ok"},
+			Content: []coresession.ToolContent{{
+				Type: "text",
+				Text: "ok\n",
+			}},
+		},
+	})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one tool transcript event", events)
+	}
+	got := events[0]
+	if got.ToolCallID != "call-1" || got.ToolName != "RUN_COMMAND" || got.ToolOutput != "ok\n" || got.ToolStatus != "completed" {
+		t.Fatalf("tool transcript = %#v, want core tool content projected directly", got)
+	}
+}
+
+func TestResumeSessionEventReplayTranscriptEventsUsesCoreEvents(t *testing.T) {
+	t.Parallel()
+
+	env := appviewmodel.EventEnvelopeFromSession("cursor-1", coresession.Event{
+		ID:        "participant-user",
+		SessionID: "root-session",
+		Type:      coresession.EventUser,
+		Scope: &coresession.EventScope{
+			Participant: coresession.ParticipantBinding{
+				ID:    "codex-1",
+				Kind:  coresession.ParticipantACP,
+				Label: "@codex",
+			},
+		},
+		Message: &coremodel.Message{
+			Role:  coremodel.RoleUser,
+			Parts: []coremodel.Part{coremodel.NewTextPart("review this change")},
+		},
+	})
+	events := resumeSessionEventReplayTranscriptEvents([]appviewmodel.SessionEventEnvelope{env})
+
+	if len(events) != 1 {
+		t.Fatalf("events = %#v, want one replay transcript event", events)
+	}
+	if events[0].Scope != ACPProjectionMain || events[0].Text != "User to @codex: review this change" {
+		t.Fatalf("resume transcript = %#v, want participant prompt restored in main transcript", events[0])
 	}
 }
 

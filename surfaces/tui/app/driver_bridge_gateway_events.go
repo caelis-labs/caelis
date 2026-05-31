@@ -9,9 +9,11 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
@@ -84,6 +86,19 @@ func forwardAppSessionTurnEvents(ctx context.Context, driver tuidriver.Driver, t
 }
 
 func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), env appviewmodel.SessionEventEnvelope) {
+	if strings.TrimSpace(env.Error) != "" {
+		converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
+		if ok && converted.Err != nil {
+			send(converted)
+		}
+		return
+	}
+	if transcriptEvents := ProjectSessionEventEnvelopeToTranscriptEvents(env); len(transcriptEvents) > 0 {
+		send(TranscriptEventsMsg{Events: transcriptEvents})
+	}
+	if !appSessionEnvelopeNeedsGatewayCompatibility(env) {
+		return
+	}
 	converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
 	if !ok {
 		return
@@ -95,12 +110,40 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 	if msg, ok := gatewayApprovalReviewHintMsg(converted.Event); ok {
 		send(msg)
 	}
-	if transcriptEvents := ProjectGatewayEventToTranscriptEvents(converted.Event); len(transcriptEvents) > 0 {
-		send(TranscriptEventsMsg{Events: transcriptEvents})
+	if appSessionEnvelopeNeedsGatewayTranscriptFallback(env) {
+		if transcriptEvents := ProjectGatewayEventToTranscriptEvents(converted.Event); len(transcriptEvents) > 0 {
+			send(TranscriptEventsMsg{Events: transcriptEvents})
+		}
 	}
 	startTerminalStreamForwarder(ctx, driver, converted, sender)
 	if isApprovalGatewayEvent(converted.Event.Kind) && !isAutomaticApprovalEvent(converted.Event.ApprovalPayload) {
 		sendApprovalPrompt(ctx, turn, converted.Event.ApprovalPayload, send)
+	}
+}
+
+func appSessionEnvelopeNeedsGatewayTranscriptFallback(env appviewmodel.SessionEventEnvelope) bool {
+	if env.Canonical == nil {
+		return false
+	}
+	switch env.Canonical.Type {
+	case coresession.EventApproval:
+		return true
+	default:
+		return false
+	}
+}
+
+func appSessionEnvelopeNeedsGatewayCompatibility(env appviewmodel.SessionEventEnvelope) bool {
+	if env.Canonical == nil {
+		return false
+	}
+	switch env.Canonical.Type {
+	case coresession.EventApproval:
+		return true
+	case coresession.EventToolCall, coresession.EventToolResult:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -426,6 +469,8 @@ func protocolTextContent(raw any) string {
 		text, _ := typed["text"].(string)
 		return text
 	case session.ProtocolToolCallContent:
+		return protocolTextContent(typed.Content)
+	case schema.ToolCallContent:
 		return protocolTextContent(typed.Content)
 	default:
 		data, err := json.Marshal(raw)

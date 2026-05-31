@@ -6,6 +6,7 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 type TranscriptEventKind string
@@ -207,11 +208,11 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 				break
 			}
 			out = append(out, projectTranscriptToolCall(transcriptToolProjection{
-				Event:      ev,
 				Scope:      scope,
 				ScopeID:    scopeID,
 				Actor:      gatewayDisplayActor(ev, payload.Actor),
 				OccurredAt: occurredAt,
+				Meta:       ev.Meta,
 				CallID:     payload.CallID,
 				ToolName:   toolName,
 				ToolKind:   payload.ToolKind,
@@ -227,11 +228,11 @@ func ProjectGatewayEventToTranscriptEvents(ev kernel.Event) []TranscriptEvent {
 				break
 			}
 			event, ok := projectTranscriptToolResult(transcriptToolProjection{
-				Event:      ev,
 				Scope:      scope,
 				ScopeID:    scopeID,
 				Actor:      gatewayDisplayActor(ev, payload.Actor),
 				OccurredAt: occurredAt,
+				Meta:       ev.Meta,
 				CallID:     payload.CallID,
 				ToolName:   toolName,
 				ToolKind:   payload.ToolKind,
@@ -457,11 +458,11 @@ func gatewayProtocolNarrativeFinal(ev kernel.Event) bool {
 
 func projectACPProtocolToolCallEvent(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) TranscriptEvent {
 	return projectTranscriptToolCall(transcriptToolProjection{
-		Event:      ev,
 		Scope:      scope,
 		ScopeID:    scopeID,
 		Actor:      gatewayDisplayActor(ev, ""),
 		OccurredAt: occurredAt,
+		Meta:       ev.Meta,
 		CallID:     update.ToolCallID,
 		ToolName:   protocolUpdateToolName(ev, update),
 		ToolKind:   update.Kind,
@@ -473,11 +474,11 @@ func projectACPProtocolToolCallEvent(ev kernel.Event, update *session.ProtocolUp
 
 func projectACPProtocolToolResultEvent(ev kernel.Event, update *session.ProtocolUpdate, scope ACPProjectionScope, scopeID string, occurredAt time.Time) (TranscriptEvent, bool) {
 	return projectTranscriptToolResult(transcriptToolProjection{
-		Event:      ev,
 		Scope:      scope,
 		ScopeID:    scopeID,
 		Actor:      gatewayDisplayActor(ev, ""),
 		OccurredAt: occurredAt,
+		Meta:       ev.Meta,
 		CallID:     update.ToolCallID,
 		ToolName:   protocolUpdateToolName(ev, update),
 		ToolKind:   update.Kind,
@@ -485,7 +486,7 @@ func projectACPProtocolToolResultEvent(ev kernel.Event, update *session.Protocol
 		Status:     update.Status,
 		RawInput:   cloneAnyMap(update.RawInput),
 		RawOutput:  cloneAnyMap(update.RawOutput),
-		Content:    session.ProtocolToolCallContentOf(update),
+		Content:    schemaToolContentFromProtocol(session.ProtocolToolCallContentOf(update)),
 		Error:      protocolUpdateToolError(update),
 	}, string(kernel.ToolStatusRunning))
 }
@@ -610,21 +611,39 @@ func gatewayProtocolRawInput(ev kernel.Event, fallback map[string]any) map[strin
 	return cloneAnyMap(fallback)
 }
 
-func gatewayProtocolToolContent(ev kernel.Event, fallback []session.ProtocolToolCallContent) []session.ProtocolToolCallContent {
+func gatewayProtocolToolContent(ev kernel.Event, fallback []session.ProtocolToolCallContent) []schema.ToolCallContent {
 	if ev.Protocol != nil && ev.Protocol.Update != nil {
 		if content := session.ProtocolToolCallContentOf(ev.Protocol.Update); len(content) > 0 {
-			return content
+			return schemaToolContentFromProtocol(content)
 		}
 	}
 	if ev.Protocol != nil && ev.Protocol.ToolCall != nil {
 		if content := session.CloneProtocolToolCallContent(ev.Protocol.ToolCall.Content); len(content) > 0 {
-			return content
+			return schemaToolContentFromProtocol(content)
 		}
 	}
 	if content := session.CloneProtocolToolCallContent(fallback); len(content) > 0 {
-		return content
+		return schemaToolContentFromProtocol(content)
 	}
 	return nil
+}
+
+func schemaToolContentFromProtocol(in []session.ProtocolToolCallContent) []schema.ToolCallContent {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]schema.ToolCallContent, 0, len(in))
+	for _, item := range in {
+		out = append(out, schema.ToolCallContent{
+			Type:       strings.TrimSpace(item.Type),
+			Content:    item.Content,
+			TerminalID: strings.TrimSpace(item.TerminalID),
+			Path:       strings.TrimSpace(item.Path),
+			OldText:    item.OldText,
+			NewText:    item.NewText,
+		})
+	}
+	return out
 }
 
 func standardToolOutput(status string, isErr bool) string {
@@ -667,7 +686,7 @@ func terminalFinalWithoutContent(toolName string, toolKind string, status string
 	return isTerminalPanelToolKind(toolName, toolKind)
 }
 
-func terminalNoOutputPlaceholder(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []session.ProtocolToolCallContent, status string, isErr bool) bool {
+func terminalNoOutputPlaceholder(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []schema.ToolCallContent, status string, isErr bool) bool {
 	if !terminalFinalWithoutContent(toolName, toolKind, status, isErr) {
 		return false
 	}
@@ -692,7 +711,7 @@ func terminalRawOutputHasText(rawOutput map[string]any) bool {
 	return false
 }
 
-func terminalToolOutputText(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []session.ProtocolToolCallContent, status string, isErr bool) string {
+func terminalToolOutputText(toolName string, toolKind string, rawOutput map[string]any, meta map[string]any, content []schema.ToolCallContent, status string, isErr bool) string {
 	if !isTerminalPanelToolKind(toolName, toolKind) && !strings.EqualFold(strings.TrimSpace(toolName), "TASK") {
 		return ""
 	}
@@ -710,7 +729,7 @@ func terminalToolOutputText(toolName string, toolKind string, rawOutput map[stri
 	}
 	name := strings.ToUpper(strings.TrimSpace(toolName))
 	if name == "SPAWN" {
-		if isErr || strings.EqualFold(strings.TrimSpace(status), string(kernel.ToolStatusFailed)) {
+		if isErr || strings.EqualFold(strings.TrimSpace(status), transcriptToolStatusFailed) {
 			return firstNonEmpty(asString(rawOutput["stderr"]), asString(rawOutput["error"]))
 		}
 		if transcriptToolStatusFinal(status, isErr) {
@@ -760,7 +779,7 @@ func boolValue(value any) bool {
 	}
 }
 
-func hasStandardTerminalContent(content []session.ProtocolToolCallContent) bool {
+func hasStandardTerminalContent(content []schema.ToolCallContent) bool {
 	for _, item := range content {
 		if strings.EqualFold(strings.TrimSpace(item.Type), "terminal") && strings.TrimSpace(item.TerminalID) != "" {
 			return true
@@ -769,7 +788,7 @@ func hasStandardTerminalContent(content []session.ProtocolToolCallContent) bool 
 	return false
 }
 
-func terminalContentText(content []session.ProtocolToolCallContent) string {
+func terminalContentText(content []schema.ToolCallContent) string {
 	var out strings.Builder
 	for _, item := range content {
 		if !strings.EqualFold(strings.TrimSpace(item.Type), "terminal") {

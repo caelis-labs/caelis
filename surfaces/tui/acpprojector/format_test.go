@@ -4,14 +4,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
 func TestFormatToolContentRendersStandardDiffWithHunkHeader(t *testing.T) {
 	t.Parallel()
 
 	oldText := "context-a\ncontext-b\nold line\ncontext-c\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]schema.ToolCallContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &oldText,
@@ -44,7 +44,7 @@ func TestFormatToolContentRendersAppendDiffWithActualNewStart(t *testing.T) {
 		"line 10",
 	}, "\n") + "\n"
 	newText := oldText + "line 11\nline 12\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]schema.ToolCallContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &oldText,
@@ -60,7 +60,7 @@ func TestFormatToolContentPreservesUnchangedLinesBetweenEdits(t *testing.T) {
 	t.Parallel()
 
 	oldText := "line 1\nold a\nshared middle\nold b\nline 5\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]schema.ToolCallContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &oldText,
@@ -83,7 +83,7 @@ func TestFormatToolContentSkipsEmptyDiff(t *testing.T) {
 	t.Parallel()
 
 	text := "same\n"
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]schema.ToolCallContent{{
 		Type:    "diff",
 		Path:    "/workspace/demo.txt",
 		OldText: &text,
@@ -98,10 +98,10 @@ func TestFormatToolContentSkipsEmptyDiff(t *testing.T) {
 func TestFormatToolContentDoesNotRenderTerminalContentBodies(t *testing.T) {
 	t.Parallel()
 
-	got := FormatToolContent([]session.ProtocolToolCallContent{{
+	got := FormatToolContent([]schema.ToolCallContent{{
 		Type:       "terminal",
 		TerminalID: "call-1",
-		Content:    session.ProtocolTextContent("terminal output\n"),
+		Content:    schema.TextContent{Type: "text", Text: "terminal output\n"},
 	}})
 
 	if got != "" {
