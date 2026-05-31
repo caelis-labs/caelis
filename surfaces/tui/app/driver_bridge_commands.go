@@ -353,12 +353,7 @@ func slashStatus(driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 
 func slashStatusWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg)) TaskResultMsg {
 	ctx = contextOrBackground(ctx)
-	status, err := driver.Status(ctx)
-	if err != nil {
-		return TaskResultMsg{Err: friendlyCommandError("status", err)}
-	}
-	sendNotice(send, formatStatusSnapshot(status))
-	return TaskResultMsg{SuppressTurnDivider: true}
+	return slashSharedCommandWithContext(ctx, driver, send, "/status", sharedCommandOptions{})
 }
 
 func slashDoctorWithContext(ctx context.Context, driver tuidriver.Driver, send func(tea.Msg), args string) TaskResultMsg {

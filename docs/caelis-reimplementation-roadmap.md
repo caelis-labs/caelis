@@ -1617,10 +1617,14 @@ be migrated before retiring the old stack:
      The command registry and completion shell no longer need a TUI-local
      settings field catalog.
    - Migrated baseline: `CommandExecutionView` now carries structured settings,
-     task, controller, model-connect, and agent-management panel payloads in
+     status, settings, task, controller, model-connect, and agent-management panel payloads in
      addition to text output. This gives the future APP a direct render input
      for command-driven panels without scraping CLI-style output, and lets TUI
      keep its panel chrome surface-local.
+   - Migrated baseline: TUI `/status` now runs through the shared
+     `CommandService` path and renders the returned structured `StatusView`
+     payload as a command panel, including active ACP controller lifecycle
+     state, instead of formatting a TUI-only status snapshot.
    - Migrated baseline: `TaskService` now also exposes a surface-neutral async
      command start contract in addition to list/tail/wait/write/cancel/release,
      so ACP terminal lifecycle and future APP task panels can create sandbox

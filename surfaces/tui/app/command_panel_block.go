@@ -56,7 +56,8 @@ func (m *Model) handleCommandPanelMsg(msg CommandPanelMsg) (tea.Model, tea.Cmd) 
 }
 
 func commandExecutionHasPanel(view appviewmodel.CommandExecutionView) bool {
-	return view.SettingsPanel != nil ||
+	return view.Status != nil ||
+		view.SettingsPanel != nil ||
 		view.TaskPanel != nil ||
 		view.ResumePanel != nil ||
 		view.ApprovalPanel != nil ||
@@ -155,6 +156,8 @@ func renderCommandPanelLines(view appviewmodel.CommandExecutionView, ctx BlockRe
 
 func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme tuikit.Theme) (kind string, title string, state string, body []string, footer string) {
 	switch {
+	case view.Status != nil:
+		return "status", "Runtime Status", statusPanelState(*view.Status), statusPanelBody(*view.Status, width, theme), commandPanelFooterForCommand("status")
 	case view.SettingsPanel != nil:
 		return "settings", "Configuration", settingsPanelState(*view.SettingsPanel), settingsPanelBody(*view.SettingsPanel, view.Output, width, theme), commandPanelFooterForCommand("settings")
 	case view.TaskPanel != nil:
@@ -178,6 +181,173 @@ func commandPanelParts(view appviewmodel.CommandExecutionView, width int, theme 
 		}
 		return command, "Command", "ready", nil, ""
 	}
+}
+
+func statusPanelBody(status appviewmodel.StatusView, width int, theme tuikit.Theme) []string {
+	contentWidth := commandPanelContentWidth(width)
+	body := []string{
+		commandPanelKV(theme, contentWidth, "workspace", firstNonEmpty(statusPanelWorkspace(status), "-")),
+		commandPanelKV(theme, contentWidth, "session", statusPanelSessionLabel(status)),
+		commandPanelKV(theme, contentWidth, "model", statusPanelModelLabel(status.Model)),
+		commandPanelKV(theme, contentWidth, "mode", statusPanelModeLabel(status.Mode)),
+		commandPanelKV(theme, contentWidth, "sandbox", statusPanelSandboxLabel(status.Runtime)),
+		commandPanelKV(theme, contentWidth, "store", statusPanelStoreLabel(status.Runtime)),
+	}
+	if status.Controller != nil {
+		body = append(body, "", commandPanelSubhead(theme, "Controller"))
+		body = append(body,
+			commandPanelKV(theme, contentWidth, "agent", firstNonEmpty(status.Controller.Agent, "acp")),
+			commandPanelKV(theme, contentWidth, "model", statusPanelControllerModel(*status.Controller)),
+			commandPanelKV(theme, contentWidth, "mode", firstNonEmpty(status.Controller.Mode, "-")),
+		)
+		if remote := firstNonEmpty(status.Controller.RemoteSessionID, statusPanelControllerLifecycleRemote(*status.Controller)); remote != "" {
+			body = append(body, commandPanelKV(theme, contentWidth, "remote", remote))
+		}
+		if lifecycle := status.Controller.Lifecycle; lifecycle != nil {
+			phase := strings.TrimSpace(lifecycle.Phase)
+			if lifecycle.Recovering {
+				phase = strings.TrimSpace(firstNonEmpty(phase, "recovering") + " recovering")
+			}
+			body = append(body, commandPanelKV(theme, contentWidth, "phase", firstNonEmpty(phase, "-")))
+			if errText := strings.TrimSpace(lifecycle.Error); errText != "" {
+				body = append(body, commandPanelKV(theme, contentWidth, "error", errText))
+			}
+		}
+		body = appendCommandPanelDiagnostics(body, controllerStatusDiagnosticsAsRows(status.Controller.Diagnostics), contentWidth, theme)
+	}
+	if status.Agents.Count > 0 || status.Agents.ExternalACPCount > 0 {
+		body = append(body, commandPanelKV(theme, contentWidth, "agents", statusPanelAgentsLabel(status.Agents)))
+	}
+	if status.Resources.WarningCount > 0 || status.Resources.ErrorCount > 0 {
+		body = append(body, commandPanelKV(theme, contentWidth, "resources", fmt.Sprintf("%d warnings, %d errors", status.Resources.WarningCount, status.Resources.ErrorCount)))
+	}
+	if usage := statusPanelUsageLabel(status.Usage); usage != "" {
+		body = append(body, commandPanelKV(theme, contentWidth, "tokens", usage))
+	}
+	body = appendCommandPanelDiagnostics(body, resourceDiagnosticsAsRows(status.Resources.Diagnostics), contentWidth, theme)
+	return body
+}
+
+func statusPanelState(status appviewmodel.StatusView) string {
+	if status.Controller != nil && status.Controller.Lifecycle != nil {
+		switch {
+		case status.Controller.Lifecycle.Recovering:
+			return "recovering"
+		case status.Controller.Lifecycle.Running:
+			return "running"
+		case strings.TrimSpace(status.Controller.Lifecycle.Phase) != "":
+			return strings.TrimSpace(status.Controller.Lifecycle.Phase)
+		}
+	}
+	switch {
+	case status.Resources.ErrorCount > 0:
+		return "error"
+	case status.Model.MissingAPIKey || status.Resources.WarningCount > 0:
+		return "warning"
+	default:
+		return "ready"
+	}
+}
+
+func statusPanelWorkspace(status appviewmodel.StatusView) string {
+	if status.Session != nil {
+		return firstNonEmpty(status.Session.Workspace.CWD, status.Session.Workspace.Key)
+	}
+	return firstNonEmpty(status.Runtime.WorkspaceCWD, status.Runtime.WorkspaceKey)
+}
+
+func statusPanelSessionLabel(status appviewmodel.StatusView) string {
+	if status.Session == nil {
+		return "-"
+	}
+	label := strings.TrimSpace(status.Session.Ref.SessionID)
+	if title := strings.TrimSpace(status.Session.Title); title != "" {
+		label = strings.TrimSpace(firstNonEmpty(label, "session") + "  " + title)
+	}
+	return firstNonEmpty(label, "-")
+}
+
+func statusPanelModelLabel(status appviewmodel.ModelStatus) string {
+	choice := status.Current
+	if choice == nil {
+		for i := range status.Choices {
+			if status.Choices[i].Default {
+				choice = &status.Choices[i]
+				break
+			}
+		}
+	}
+	if choice == nil && len(status.Choices) > 0 {
+		choice = &status.Choices[0]
+	}
+	if choice == nil {
+		if status.Configured {
+			return fmt.Sprintf("%d configured", status.Count)
+		}
+		return "not configured"
+	}
+	label := modelChoiceLabel(*choice)
+	if effort := strings.TrimSpace(status.ReasoningEffort); effort != "" && !strings.Contains(label, "["+effort+"]") {
+		label += " [" + effort + "]"
+	}
+	if status.MissingAPIKey {
+		label += " · key missing"
+	}
+	return label
+}
+
+func statusPanelModeLabel(status appviewmodel.ModeStatus) string {
+	return firstNonEmpty(status.Current.Name, status.Current.ID, "-")
+}
+
+func statusPanelSandboxLabel(status appviewmodel.RuntimeStatus) string {
+	label := firstNonEmpty(status.SandboxBackend, "auto")
+	if network := strings.TrimSpace(status.SandboxNetwork); network != "" {
+		label += "  network=" + network
+	}
+	return label
+}
+
+func statusPanelStoreLabel(status appviewmodel.RuntimeStatus) string {
+	return strings.TrimSpace(firstNonEmpty(status.StoreBackend, "store") + " " + status.StoreURI)
+}
+
+func statusPanelControllerModel(status appviewmodel.ControllerStatus) string {
+	label := strings.TrimSpace(status.Model)
+	if effort := strings.TrimSpace(status.ReasoningEffort); effort != "" && !strings.Contains(label, "["+effort+"]") {
+		label = strings.TrimSpace(firstNonEmpty(label, "model") + " [" + effort + "]")
+	}
+	return firstNonEmpty(label, "-")
+}
+
+func statusPanelControllerLifecycleRemote(status appviewmodel.ControllerStatus) string {
+	if status.Lifecycle == nil {
+		return ""
+	}
+	return strings.TrimSpace(status.Lifecycle.RemoteSessionID)
+}
+
+func statusPanelAgentsLabel(status appviewmodel.AgentStatus) string {
+	parts := []string{}
+	if status.Count > 0 {
+		parts = append(parts, fmt.Sprintf("%d total", status.Count))
+	}
+	if status.ExternalACPCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d external ACP", status.ExternalACPCount))
+	}
+	return firstNonEmpty(strings.Join(parts, ", "), "-")
+}
+
+func statusPanelUsageLabel(status appviewmodel.UsageStatus) string {
+	total := appviewmodel.NormalizeTokenUsage(status.Total)
+	if appviewmodel.TokenUsageZero(total) {
+		return ""
+	}
+	label := formatCompactTokenCount(total.TotalTokens)
+	if contextWindow := status.ContextBudget.ContextWindowTokens; contextWindow > 0 {
+		label += " / " + formatCompactTokenCount(contextWindow)
+	}
+	return label
 }
 
 func settingsPanelBody(panel appviewmodel.SettingsPanelView, output string, width int, theme tuikit.Theme) []string {
@@ -757,6 +927,8 @@ func commandPanelEnsureTrailingSpace(value string) string {
 
 func commandPanelFooterForCommand(command string) string {
 	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "status":
+		return "inspect: /status  configure: /settings, /model, /approval, /controller"
 	case "settings":
 		return "edit: /settings set <field-id> <value>  run: /settings run <action-id> [confirm]"
 	case "task":
@@ -1421,6 +1593,22 @@ func connectDiagnosticsAsRows(items []appviewmodel.ModelConnectDiagnostic) []com
 	out := make([]commandPanelDiagnosticRow, 0, len(items))
 	for _, item := range items {
 		out = append(out, commandPanelDiagnosticRow{Severity: item.Severity, Source: item.Provider, Kind: item.Kind, Message: item.Message})
+	}
+	return out
+}
+
+func controllerStatusDiagnosticsAsRows(items []appviewmodel.ControllerDiagnostic) []commandPanelDiagnosticRow {
+	out := make([]commandPanelDiagnosticRow, 0, len(items))
+	for _, item := range items {
+		out = append(out, commandPanelDiagnosticRow{Severity: item.Severity, Kind: item.Kind, Message: item.Message})
+	}
+	return out
+}
+
+func resourceDiagnosticsAsRows(items []appviewmodel.ResourceDiagnostic) []commandPanelDiagnosticRow {
+	out := make([]commandPanelDiagnosticRow, 0, len(items))
+	for _, item := range items {
+		out = append(out, commandPanelDiagnosticRow{Severity: item.Severity, Source: item.ID, Kind: item.Kind, Message: item.Message})
 	}
 	return out
 }

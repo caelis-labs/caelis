@@ -746,6 +746,9 @@ func TestCommandServiceExecuteStatus(t *testing.T) {
 	if !view.Handled || view.Command != "status" {
 		t.Fatalf("status execution = %#v, want handled status", view)
 	}
+	if view.Status == nil || view.Status.Session == nil || view.Status.Session.Ref.SessionID != "sess-status" {
+		t.Fatalf("status payload = %#v, want shared StatusView payload", view.Status)
+	}
 	for _, want := range []string{
 		"status:",
 		"session: sess-status",

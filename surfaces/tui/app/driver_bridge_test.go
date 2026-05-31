@@ -1777,19 +1777,25 @@ func TestSlashModelDeleteClearsStatusWhenNoModelRemains(t *testing.T) {
 	t.Fatalf("slashModel(del) messages = %#v, want SetStatusMsg", msgs)
 }
 
-func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
+func TestSlashStatusUsesSharedCommandPanel(t *testing.T) {
+	statusView := appviewmodel.StatusView{
+		Runtime: appviewmodel.RuntimeStatus{
+			WorkspaceCWD:   "/tmp/ws",
+			StoreBackend:   "jsonl",
+			StoreURI:       "/tmp/.caelis",
+			SandboxBackend: "host",
+		},
+		Session: &appviewmodel.SessionStatus{
+			Ref: coresession.Ref{SessionID: "sess-1"},
+		},
+		Mode: appviewmodel.ModeStatus{Current: appviewmodel.ModeChoice{ID: "manual", Name: "Manual"}},
+	}
 	driver := &bridgeTestDriver{
-		status: tuidriver.StatusSnapshot{
-			SessionID:               "sess-1",
-			StoreDir:                "/tmp/.caelis",
-			Workspace:               "/tmp/ws",
-			SandboxRequestedBackend: "seatbelt",
-			SandboxResolvedBackend:  "host",
-			Route:                   "host",
-			FallbackReason:          "seatbelt is unavailable",
-			HostExecution:           true,
-			FullAccessMode:          true,
-			MissingAPIKey:           true,
+		commandView: tuidriver.CommandExecutionView{
+			Handled: true,
+			Command: "status",
+			Output:  "status:\n  session: sess-1",
+			Status:  &statusView,
 		},
 	}
 	var msgs []tea.Msg
@@ -1797,19 +1803,12 @@ func TestSlashStatusShowsGuidanceAndWarnings(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("slashStatus() emitted %d messages, want 1", len(msgs))
 	}
-	log, ok := msgs[0].(LogChunkMsg)
-	if !ok {
-		t.Fatalf("slashStatus() msg = %#v, want LogChunkMsg", msgs[0])
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/status" {
+		t.Fatalf("status command calls=%d input=%q, want shared /status command", driver.commandCalls, driver.lastCommandInput)
 	}
-	for _, want := range []string{"  Model:", "/connect", "Warning:", "API key is missing", "Commands may run on the host", "Auto-Review remains enabled"} {
-		if !strings.Contains(log.Chunk, want) {
-			t.Fatalf("slashStatus() chunk = %q, want substring %q", log.Chunk, want)
-		}
-	}
-	for _, forbidden := range []string{"Status", "Tokens", "Warnings", "warn:", "/tmp/.caelis", "Store:", "Provider:", "Session", "\n  Reason:"} {
-		if strings.Contains(log.Chunk, forbidden) {
-			t.Fatalf("slashStatus() chunk = %q, should omit %q", log.Chunk, forbidden)
-		}
+	panel, ok := msgs[0].(CommandPanelMsg)
+	if !ok || panel.View.Status == nil || panel.View.Status.Session == nil || panel.View.Status.Session.Ref.SessionID != "sess-1" {
+		t.Fatalf("slashStatus() msg = %#v, want structured status command panel", msgs[0])
 	}
 }
 

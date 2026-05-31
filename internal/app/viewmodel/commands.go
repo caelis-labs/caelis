@@ -18,6 +18,7 @@ type CommandExecutionView struct {
 	Output            string               `json:"output,omitempty"`
 	Events            []session.Event      `json:"events,omitempty"`
 	SessionRef        *session.Ref         `json:"session_ref,omitempty"`
+	Status            *StatusView          `json:"status,omitempty"`
 	SettingsPanel     *SettingsPanelView   `json:"settings_panel,omitempty"`
 	TaskPanel         *TaskPanelView       `json:"task_panel,omitempty"`
 	ResumePanel       *ResumePanelView     `json:"resume_panel,omitempty"`

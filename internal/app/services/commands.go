@@ -109,6 +109,7 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 			Handled: true,
 			Command: command,
 			Output:  formatCommandStatus(status),
+			Status:  &status,
 		}, nil
 	case "compact":
 		if strings.TrimSpace(args) != "" {

@@ -68,6 +68,52 @@ func TestCommandPanelBlockRendersSettingsPanelPayload(t *testing.T) {
 	}
 }
 
+func TestCommandPanelBlockRendersStatusPayload(t *testing.T) {
+	status := appviewmodel.StatusView{
+		Runtime: appviewmodel.RuntimeStatus{
+			WorkspaceCWD:   "/repo",
+			StoreBackend:   "jsonl",
+			StoreURI:       "/tmp/events.jsonl",
+			SandboxBackend: "host",
+		},
+		Session: &appviewmodel.SessionStatus{
+			Ref:   session.Ref{SessionID: "sess-status"},
+			Title: "work",
+		},
+		Model: appviewmodel.ModelStatus{
+			Current: &appviewmodel.ModelChoice{ID: "gpt-remote", Alias: "remote", Provider: "openai-compatible", Model: "gpt-remote"},
+		},
+		Mode: appviewmodel.ModeStatus{Current: appviewmodel.ModeChoice{ID: "manual", Name: "Manual"}},
+		Controller: &appviewmodel.ControllerStatus{
+			Agent:           "reviewer",
+			RemoteSessionID: "remote-reviewer",
+			Model:           "gpt-remote",
+			ReasoningEffort: "high",
+			Mode:            "review",
+			Lifecycle: &appviewmodel.ControllerLifecycle{
+				Phase:   "remote_session",
+				Running: true,
+			},
+		},
+		Usage: appviewmodel.UsageStatus{
+			Total:         appviewmodel.TokenUsage{TotalTokens: 12800},
+			ContextBudget: appviewmodel.ContextBudget{ContextWindowTokens: 128000},
+		},
+	}
+	block := NewCommandPanelBlock(appviewmodel.CommandExecutionView{
+		Command: "status",
+		Status:  &status,
+	})
+	model := NewModel(Config{})
+	rows := block.Render(BlockRenderContext{Width: 100, Theme: model.theme})
+	plain := renderedPlainText(rows)
+	for _, want := range []string{"STATUS", "Runtime Status", "remote_session", "sess-status", "remote", "Manual", "reviewer", "gpt-remote [high]", "12.8k / 128k"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("rendered status panel = %q, missing %q", plain, want)
+		}
+	}
+}
+
 func TestCommandPanelBlockRendersTaskActions(t *testing.T) {
 	panel := appviewmodel.TaskPanelView{
 		Supported: true,
