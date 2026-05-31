@@ -37,21 +37,22 @@ const (
 )
 
 type Services struct {
-	state         *serviceState
-	engine        coreruntime.Engine
-	sandbox       sandbox.Runtime
-	tasks         TaskResolver
-	modelProvider ModelProviderFactory
-	modelCache    *modelDiscoveryCache
-	agents        []AgentDescriptor
-	builtins      []AgentDescriptor
-	invokers      map[string]AgentInvoker
-	factory       AgentInvokerFactory
-	installer     AgentInstaller
-	resources     appresources.Catalog
-	settings      *appsettings.Manager
-	codefree      CodeFreeAuthenticator
-	applyRuntime  RuntimeApplier
+	state          *serviceState
+	engine         coreruntime.Engine
+	sandbox        sandbox.Runtime
+	tasks          TaskResolver
+	controllerRuns ControllerRunSource
+	modelProvider  ModelProviderFactory
+	modelCache     *modelDiscoveryCache
+	agents         []AgentDescriptor
+	builtins       []AgentDescriptor
+	invokers       map[string]AgentInvoker
+	factory        AgentInvokerFactory
+	installer      AgentInstaller
+	resources      appresources.Catalog
+	settings       *appsettings.Manager
+	codefree       CodeFreeAuthenticator
+	applyRuntime   RuntimeApplier
 }
 
 type serviceState struct {
@@ -66,6 +67,7 @@ type Config struct {
 	Engine         coreruntime.Engine
 	Sandbox        sandbox.Runtime
 	TaskResolver   TaskResolver
+	ControllerRuns ControllerRunSource
 	ModelProvider  ModelProviderFactory
 	Agents         []AgentDescriptor
 	BuiltinAgents  []AgentDescriptor
@@ -88,21 +90,22 @@ func New(cfg Config) (Services, error) {
 	runtimeCfg.AppName = firstNonEmpty(cfg.AppName, runtimeCfg.AppName, "caelis")
 	runtimeCfg.UserID = firstNonEmpty(cfg.UserID, runtimeCfg.UserID, "local-user")
 	return Services{
-		state:         &serviceState{runtime: runtimeCfg},
-		engine:        cfg.Engine,
-		sandbox:       cfg.Sandbox,
-		tasks:         cfg.TaskResolver,
-		modelProvider: cfg.ModelProvider,
-		modelCache:    newModelDiscoveryCache(),
-		agents:        cloneAgents(cfg.Agents),
-		builtins:      cloneAgents(cfg.BuiltinAgents),
-		invokers:      maps.Clone(cfg.Invokers),
-		factory:       cfg.InvokerFactory,
-		installer:     cfg.AgentInstaller,
-		resources:     appresources.CloneCatalog(cfg.Resources),
-		settings:      cfg.Settings,
-		codefree:      cfg.CodeFree,
-		applyRuntime:  cfg.ApplyRuntime,
+		state:          &serviceState{runtime: runtimeCfg},
+		engine:         cfg.Engine,
+		sandbox:        cfg.Sandbox,
+		tasks:          cfg.TaskResolver,
+		controllerRuns: cfg.ControllerRuns,
+		modelProvider:  cfg.ModelProvider,
+		modelCache:     newModelDiscoveryCache(),
+		agents:         cloneAgents(cfg.Agents),
+		builtins:       cloneAgents(cfg.BuiltinAgents),
+		invokers:       maps.Clone(cfg.Invokers),
+		factory:        cfg.InvokerFactory,
+		installer:      cfg.AgentInstaller,
+		resources:      appresources.CloneCatalog(cfg.Resources),
+		settings:       cfg.Settings,
+		codefree:       cfg.CodeFree,
+		applyRuntime:   cfg.ApplyRuntime,
 	}, nil
 }
 
@@ -1066,6 +1069,14 @@ func (s StatusService) View(ctx context.Context, req StatusRequest) (appviewmode
 			return appviewmodel.StatusView{}, err
 		}
 		view.Usage.ContextBudget = budget
+		controller := controllerFromSnapshot(snapshot)
+		if controller.Kind == session.ControllerACP {
+			controllerStatus, err := s.services.Controllers().statusFromSnapshot(ctx, snapshot, controller)
+			if err != nil {
+				return appviewmodel.StatusView{}, err
+			}
+			view.Controller = controllerStatusView(controllerStatus)
+		}
 	}
 	modelStatus, err := s.modelStatus(ctx, state)
 	if err != nil {

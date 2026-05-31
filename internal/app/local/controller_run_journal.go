@@ -27,24 +27,25 @@ type controllerRunJournal struct {
 }
 
 type controllerRunJournalRecord struct {
-	Kind                      string                    `json:"kind"`
-	Version                   int                       `json:"version"`
-	ID                        string                    `json:"id"`
-	SessionRef                session.Ref               `json:"session_ref"`
-	Workspace                 session.Workspace         `json:"workspace,omitempty"`
-	TurnID                    string                    `json:"turn_id,omitempty"`
-	Controller                session.ControllerBinding `json:"controller,omitempty"`
-	RemoteSessionID           string                    `json:"remote_session_id,omitempty"`
-	ControllerModel           string                    `json:"controller_model,omitempty"`
-	ControllerReasoningEffort string                    `json:"controller_reasoning_effort,omitempty"`
-	ControllerMode            string                    `json:"controller_mode,omitempty"`
-	Input                     string                    `json:"input,omitempty"`
-	ContentParts              []model.ContentPart       `json:"content_parts,omitempty"`
-	ConfigOptions             []control.ConfigOption    `json:"config_options,omitempty"`
-	Running                   bool                      `json:"running,omitempty"`
-	Error                     string                    `json:"error,omitempty"`
-	StartedAt                 time.Time                 `json:"started_at,omitempty"`
-	UpdatedAt                 time.Time                 `json:"updated_at,omitempty"`
+	Kind                      string                            `json:"kind"`
+	Version                   int                               `json:"version"`
+	ID                        string                            `json:"id"`
+	SessionRef                session.Ref                       `json:"session_ref"`
+	Workspace                 session.Workspace                 `json:"workspace,omitempty"`
+	TurnID                    string                            `json:"turn_id,omitempty"`
+	Controller                session.ControllerBinding         `json:"controller,omitempty"`
+	RemoteSessionID           string                            `json:"remote_session_id,omitempty"`
+	ControllerModel           string                            `json:"controller_model,omitempty"`
+	ControllerReasoningEffort string                            `json:"controller_reasoning_effort,omitempty"`
+	ControllerMode            string                            `json:"controller_mode,omitempty"`
+	Input                     string                            `json:"input,omitempty"`
+	ContentParts              []model.ContentPart               `json:"content_parts,omitempty"`
+	ConfigOptions             []control.ConfigOption            `json:"config_options,omitempty"`
+	Phase                     control.ControllerInvocationPhase `json:"phase,omitempty"`
+	Running                   bool                              `json:"running,omitempty"`
+	Error                     string                            `json:"error,omitempty"`
+	StartedAt                 time.Time                         `json:"started_at,omitempty"`
+	UpdatedAt                 time.Time                         `json:"updated_at,omitempty"`
 }
 
 func newControllerRunJournal(root string) *controllerRunJournal {
@@ -109,6 +110,20 @@ func (j *controllerRunJournal) delete(ctx context.Context, id string) error {
 }
 
 func (j *controllerRunJournal) readRunning(ctx context.Context) ([]controllerRunJournalRecord, error) {
+	records, err := j.readAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]controllerRunJournalRecord, 0, len(records))
+	for _, record := range records {
+		if record.Running {
+			out = append(out, record)
+		}
+	}
+	return out, nil
+}
+
+func (j *controllerRunJournal) readAll(ctx context.Context) ([]controllerRunJournalRecord, error) {
 	if j == nil {
 		return nil, nil
 	}
@@ -133,10 +148,7 @@ func (j *controllerRunJournal) readRunning(ctx context.Context) ([]controllerRun
 		if err != nil {
 			return nil, err
 		}
-		record = normalizeControllerRunJournalRecord(record)
-		if record.Running {
-			out = append(out, record)
-		}
+		out = append(out, normalizeControllerRunJournalRecord(record))
 	}
 	return out, nil
 }
@@ -179,6 +191,14 @@ func normalizeControllerRunJournalRecord(record controllerRunJournalRecord) cont
 	record.Input = strings.TrimSpace(record.Input)
 	record.ContentParts = model.CloneContentParts(record.ContentParts)
 	record.ConfigOptions = cloneControlConfigOptions(record.ConfigOptions)
+	record.Phase = control.ControllerInvocationPhase(strings.TrimSpace(string(record.Phase)))
+	if record.Phase == "" {
+		if record.Running {
+			record.Phase = control.ControllerInvocationStarted
+		} else if record.Error != "" {
+			record.Phase = control.ControllerInvocationFailed
+		}
+	}
 	record.Error = strings.TrimSpace(record.Error)
 	if record.ID == "" {
 		record.ID = controllerRunRecordID(record)

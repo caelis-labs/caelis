@@ -399,7 +399,43 @@ func controllerStatusFromApp(status appservices.ControllerStatus) appviewmodel.C
 		EffortOptions:   controllerConfigChoicesFromApp(status.EffortOptions),
 		Mode:            strings.TrimSpace(status.Mode),
 		ModeOptions:     controllerModesFromApp(status.ModeOptions),
+		Lifecycle:       controllerLifecycleFromApp(status.Lifecycle),
+		Diagnostics:     controllerDiagnosticsFromApp(status.Diagnostics),
 	}
+}
+
+func controllerLifecycleFromApp(lifecycle *appservices.ControllerLifecycle) *appviewmodel.ControllerLifecycle {
+	if lifecycle == nil {
+		return nil
+	}
+	return &appviewmodel.ControllerLifecycle{
+		RunID:           strings.TrimSpace(lifecycle.RunID),
+		Phase:           strings.TrimSpace(lifecycle.Phase),
+		TurnID:          strings.TrimSpace(lifecycle.TurnID),
+		Running:         lifecycle.Running,
+		Active:          lifecycle.Active,
+		Recovering:      lifecycle.Recovering,
+		RemoteSessionID: strings.TrimSpace(lifecycle.RemoteSessionID),
+		Error:           strings.TrimSpace(lifecycle.Error),
+		StartedAt:       lifecycle.StartedAt,
+		UpdatedAt:       lifecycle.UpdatedAt,
+	}
+}
+
+func controllerDiagnosticsFromApp(in []appservices.ControllerDiagnostic) []appviewmodel.ControllerDiagnostic {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ControllerDiagnostic, 0, len(in))
+	for _, diagnostic := range in {
+		out = append(out, appviewmodel.ControllerDiagnostic{
+			Severity: strings.TrimSpace(diagnostic.Severity),
+			Kind:     strings.TrimSpace(diagnostic.Kind),
+			Message:  strings.TrimSpace(diagnostic.Message),
+			Meta:     maps.Clone(diagnostic.Meta),
+		})
+	}
+	return out
 }
 
 func controllerConfigChoicesFromApp(choices []appservices.ControllerConfigChoice) []appviewmodel.ControllerConfigChoice {

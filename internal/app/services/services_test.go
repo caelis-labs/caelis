@@ -2368,6 +2368,70 @@ func TestControllerServicePersistsACPControllerConfigIntent(t *testing.T) {
 	}
 }
 
+func TestControllerServiceStatusIncludesLifecycleDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)
+	controller := session.ControllerBinding{
+		Kind:            session.ControllerACP,
+		ID:              "reviewer",
+		AgentName:       "reviewer",
+		EpochID:         "controller-1",
+		RemoteSessionID: "remote-reviewer",
+	}
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{
+				Ref:        session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-controller", WorkspaceKey: "repo"},
+				Controller: controller,
+			},
+			State: session.State{},
+		},
+	}
+	runs := &recordingControllerRunSource{runs: []ControllerRunStatus{{
+		ID:              "run-1",
+		Phase:           control.ControllerInvocationRemoteSession,
+		SessionRef:      session.Ref{SessionID: "sess-controller"},
+		TurnID:          "turn-1",
+		Controller:      controller,
+		RemoteSessionID: "remote-reviewer",
+		Running:         true,
+		Active:          true,
+		StartedAt:       now,
+		UpdatedAt:       now.Add(time.Second),
+	}}}
+	svc, err := New(Config{
+		Runtime:        config.Runtime{AppName: "caelis", UserID: "tester", WorkspaceKey: "repo"},
+		Engine:         engine,
+		ControllerRuns: runs,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, ok, err := svc.Controllers().Status(ctx, session.Ref{SessionID: "sess-controller"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || status.Lifecycle == nil || status.Lifecycle.RunID != "run-1" || status.Lifecycle.Phase != string(control.ControllerInvocationRemoteSession) || !status.Lifecycle.Running || !status.Lifecycle.Active {
+		t.Fatalf("controller status = %#v ok=%v, want active lifecycle", status, ok)
+	}
+	if len(status.Diagnostics) != 1 || status.Diagnostics[0].Severity != "info" || status.Diagnostics[0].Meta["turn_id"] != "turn-1" {
+		t.Fatalf("controller diagnostics = %#v, want running lifecycle diagnostic", status.Diagnostics)
+	}
+	if runs.query.SessionRef.SessionID != "sess-controller" || runs.query.Controller.ID != "reviewer" {
+		t.Fatalf("controller run query = %#v, want active controller query", runs.query)
+	}
+	view, err := svc.Status().View(ctx, StatusRequest{SessionRef: session.Ref{SessionID: "sess-controller"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Controller == nil || view.Controller.Lifecycle == nil || view.Controller.Lifecycle.RunID != "run-1" {
+		t.Fatalf("status view controller = %#v, want lifecycle projection", view.Controller)
+	}
+	if !strings.Contains(formatCommandStatus(view), "controller: reviewer remote=remote-reviewer phase=remote_session") {
+		t.Fatalf("formatted status = %q, want controller lifecycle", formatCommandStatus(view))
+	}
+}
+
 func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	engine := &recordingEngine{
 		snapshot: session.Snapshot{
@@ -4900,6 +4964,18 @@ func (i *recordingAgentInstaller) InstallableBuiltinACPAgentOptions(_ context.Co
 			Detail:  "npm install " + agent.Name,
 		})
 	}
+	return out, nil
+}
+
+type recordingControllerRunSource struct {
+	query ControllerRunQuery
+	runs  []ControllerRunStatus
+}
+
+func (s *recordingControllerRunSource) ControllerRuns(_ context.Context, query ControllerRunQuery) ([]ControllerRunStatus, error) {
+	s.query = query
+	out := make([]ControllerRunStatus, len(s.runs))
+	copy(out, s.runs)
 	return out, nil
 }
 

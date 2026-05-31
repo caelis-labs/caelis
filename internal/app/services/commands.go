@@ -1021,6 +1021,25 @@ func formatCommandStatus(status appviewmodel.StatusView) string {
 	if mode := strings.TrimSpace(status.Mode.Current.ID); mode != "" {
 		lines = append(lines, "  mode: "+mode)
 	}
+	if status.Controller != nil {
+		controller := firstNonEmpty(status.Controller.Agent, "acp")
+		if status.Controller.RemoteSessionID != "" {
+			controller += " remote=" + status.Controller.RemoteSessionID
+		}
+		if status.Controller.Lifecycle != nil && status.Controller.Lifecycle.Phase != "" {
+			controller += " phase=" + status.Controller.Lifecycle.Phase
+			if status.Controller.Lifecycle.Recovering {
+				controller += " recovering"
+			}
+		}
+		lines = append(lines, "  controller: "+controller)
+		for _, diagnostic := range status.Controller.Diagnostics {
+			if diagnostic.Message == "" {
+				continue
+			}
+			lines = append(lines, "  controller_"+firstNonEmpty(diagnostic.Severity, "info")+": "+diagnostic.Message)
+		}
+	}
 	if status.Runtime.StoreBackend != "" || status.Runtime.StoreURI != "" {
 		store := firstNonEmpty(status.Runtime.StoreBackend, "store")
 		if status.Runtime.StoreURI != "" {

@@ -9,6 +9,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/session"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
+	"github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 )
 
@@ -19,12 +20,16 @@ type controllerRunManager struct {
 	now     func() time.Time
 
 	mu     sync.Mutex
-	active map[string]struct{}
+	active map[string]controllerRunActivity
 }
 
 type controllerRunTracker struct {
 	manager *controllerRunManager
 	id      string
+}
+
+type controllerRunActivity struct {
+	recovering bool
 }
 
 func newControllerRunManager(store session.Store, configs []acpexternal.Config, stateDir string) *controllerRunManager {
@@ -52,7 +57,7 @@ func newControllerRunManager(store session.Store, configs []acpexternal.Config, 
 		configs: out,
 		journal: newControllerRunJournal(stateDir),
 		now:     func() time.Time { return time.Now().UTC() },
-		active:  map[string]struct{}{},
+		active:  map[string]controllerRunActivity{},
 	}
 }
 
@@ -87,7 +92,7 @@ func (m *controllerRunManager) StartRecovery(ctx context.Context) error {
 		if !ok || strings.TrimSpace(record.Input) == "" && len(record.ContentParts) == 0 {
 			continue
 		}
-		if !m.markActive(record.ID) {
+		if !m.markActive(record.ID, true) {
 			continue
 		}
 		go m.recover(context.Background(), record, cfg)
@@ -99,7 +104,12 @@ func (m *controllerRunManager) recover(ctx context.Context, record controllerRun
 	defer m.clearActive(record.ID)
 	client, err := acpexternal.StartProcess(ctx, cfg)
 	if err != nil {
-		_ = m.journal.delete(context.Background(), record.ID)
+		record = normalizeControllerRunJournalRecord(record)
+		record.Running = false
+		record.Phase = control.ControllerInvocationFailed
+		record.Error = strings.TrimSpace(err.Error())
+		record.UpdatedAt = m.now()
+		_ = m.journal.write(context.Background(), record)
 		return
 	}
 	defer client.Close()
@@ -145,7 +155,7 @@ func (m *controllerRunManager) configForController(controller session.Controller
 	return acpexternal.Config{}, false
 }
 
-func (m *controllerRunManager) markActive(id string) bool {
+func (m *controllerRunManager) markActive(id string, recovering bool) bool {
 	if m == nil {
 		return false
 	}
@@ -155,10 +165,13 @@ func (m *controllerRunManager) markActive(id string) bool {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.active[id]; ok {
+	if existing, ok := m.active[id]; ok {
+		if recovering && !existing.recovering {
+			m.active[id] = controllerRunActivity{recovering: true}
+		}
 		return false
 	}
-	m.active[id] = struct{}{}
+	m.active[id] = controllerRunActivity{recovering: recovering}
 	return true
 }
 
@@ -175,6 +188,53 @@ func (m *controllerRunManager) clearActive(id string) {
 	m.mu.Unlock()
 }
 
+func (m *controllerRunManager) activeState(id string) (bool, bool) {
+	if m == nil {
+		return false, false
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return false, false
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	state, ok := m.active[id]
+	return ok, ok && state.recovering
+}
+
+func (m *controllerRunManager) ControllerRuns(ctx context.Context, query services.ControllerRunQuery) ([]services.ControllerRunStatus, error) {
+	if m == nil || m.journal == nil {
+		return nil, nil
+	}
+	records, err := m.journal.readAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]services.ControllerRunStatus, 0, len(records))
+	for _, record := range records {
+		record = normalizeControllerRunJournalRecord(record)
+		if !controllerRunRecordMatches(record, query) {
+			continue
+		}
+		active, recovering := m.activeState(record.ID)
+		out = append(out, services.ControllerRunStatus{
+			ID:              strings.TrimSpace(record.ID),
+			Phase:           record.Phase,
+			SessionRef:      record.SessionRef,
+			TurnID:          strings.TrimSpace(record.TurnID),
+			Controller:      record.Controller,
+			RemoteSessionID: firstNonEmpty(record.RemoteSessionID, record.Controller.RemoteSessionID),
+			Running:         record.Running,
+			Active:          active,
+			Recovering:      recovering,
+			Error:           strings.TrimSpace(record.Error),
+			StartedAt:       record.StartedAt,
+			UpdatedAt:       record.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
 func (t *controllerRunTracker) ControllerInvocationChanged(ctx context.Context, state control.ControllerInvocationState) error {
 	if t == nil || t.manager == nil || t.manager.journal == nil {
 		return nil
@@ -184,14 +244,52 @@ func (t *controllerRunTracker) ControllerInvocationChanged(ctx context.Context, 
 	}
 	switch state.Phase {
 	case control.ControllerInvocationStarted, control.ControllerInvocationRemoteSession:
+		t.manager.markActive(t.id, false)
 		record := controllerRunRecordFromState(t.id, state)
 		record.Running = true
 		return t.manager.journal.write(ctx, record)
 	case control.ControllerInvocationCompleted, control.ControllerInvocationFailed:
+		defer t.manager.clearActive(t.id)
+		if state.Phase == control.ControllerInvocationFailed {
+			record := controllerRunRecordFromState(t.id, state)
+			record.Running = false
+			return t.manager.journal.write(ctx, record)
+		}
 		return t.manager.journal.delete(ctx, t.id)
 	default:
 		return nil
 	}
+}
+
+func controllerRunRecordMatches(record controllerRunJournalRecord, query services.ControllerRunQuery) bool {
+	query.SessionRef = session.NormalizeRef(query.SessionRef)
+	if query.SessionRef.SessionID != "" && query.SessionRef.SessionID != record.SessionRef.SessionID {
+		return false
+	}
+	query.Controller = normalizeControllerBinding(query.Controller)
+	if query.Controller.Kind != "" && record.Controller.Kind != "" && query.Controller.Kind != record.Controller.Kind {
+		return false
+	}
+	queryID := strings.ToLower(firstNonEmpty(query.Controller.EpochID, query.Controller.ID, query.Controller.AgentName, query.Controller.Label))
+	if queryID == "" {
+		return true
+	}
+	for _, value := range []string{record.Controller.EpochID, record.Controller.ID, record.Controller.AgentName, record.Controller.Label} {
+		if strings.EqualFold(strings.TrimSpace(value), queryID) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeControllerBinding(in session.ControllerBinding) session.ControllerBinding {
+	in.ID = strings.TrimSpace(in.ID)
+	in.AgentName = strings.TrimSpace(in.AgentName)
+	in.Label = strings.TrimSpace(in.Label)
+	in.EpochID = strings.TrimSpace(in.EpochID)
+	in.RemoteSessionID = strings.TrimSpace(in.RemoteSessionID)
+	in.Source = strings.TrimSpace(in.Source)
+	return in
 }
 
 func controllerRunStateID(state control.ControllerInvocationState) string {
@@ -217,6 +315,7 @@ func controllerRunRecordFromState(id string, state control.ControllerInvocationS
 		Input:                     strings.TrimSpace(state.Input),
 		ContentParts:              model.CloneContentParts(state.ContentParts),
 		ConfigOptions:             cloneControlConfigOptions(state.ConfigOptions),
+		Phase:                     state.Phase,
 		Error:                     strings.TrimSpace(state.Error),
 		StartedAt:                 state.Time,
 		UpdatedAt:                 state.Time,

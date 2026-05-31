@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/session"
+	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 )
 
@@ -24,6 +26,26 @@ type ControllerMode struct {
 	Description string `json:"description,omitempty"`
 }
 
+type ControllerLifecycle struct {
+	RunID           string    `json:"run_id,omitempty"`
+	Phase           string    `json:"phase,omitempty"`
+	TurnID          string    `json:"turn_id,omitempty"`
+	Running         bool      `json:"running,omitempty"`
+	Active          bool      `json:"active,omitempty"`
+	Recovering      bool      `json:"recovering,omitempty"`
+	RemoteSessionID string    `json:"remote_session_id,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+}
+
+type ControllerDiagnostic struct {
+	Severity string            `json:"severity,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
 type ControllerStatus struct {
 	SessionRef      session.Ref              `json:"session_ref,omitempty"`
 	Agent           string                   `json:"agent,omitempty"`
@@ -34,6 +56,32 @@ type ControllerStatus struct {
 	EffortOptions   []ControllerConfigChoice `json:"effort_options,omitempty"`
 	Mode            string                   `json:"mode,omitempty"`
 	ModeOptions     []ControllerMode         `json:"mode_options,omitempty"`
+	Lifecycle       *ControllerLifecycle     `json:"lifecycle,omitempty"`
+	Diagnostics     []ControllerDiagnostic   `json:"diagnostics,omitempty"`
+}
+
+type ControllerRunQuery struct {
+	SessionRef session.Ref               `json:"session_ref,omitempty"`
+	Controller session.ControllerBinding `json:"controller,omitempty"`
+}
+
+type ControllerRunStatus struct {
+	ID              string                            `json:"id,omitempty"`
+	Phase           control.ControllerInvocationPhase `json:"phase,omitempty"`
+	SessionRef      session.Ref                       `json:"session_ref,omitempty"`
+	TurnID          string                            `json:"turn_id,omitempty"`
+	Controller      session.ControllerBinding         `json:"controller,omitempty"`
+	RemoteSessionID string                            `json:"remote_session_id,omitempty"`
+	Running         bool                              `json:"running,omitempty"`
+	Active          bool                              `json:"active,omitempty"`
+	Recovering      bool                              `json:"recovering,omitempty"`
+	Error           string                            `json:"error,omitempty"`
+	StartedAt       time.Time                         `json:"started_at,omitempty"`
+	UpdatedAt       time.Time                         `json:"updated_at,omitempty"`
+}
+
+type ControllerRunSource interface {
+	ControllerRuns(context.Context, ControllerRunQuery) ([]ControllerRunStatus, error)
 }
 
 type ControllerHandoffRequest struct {
@@ -301,7 +349,220 @@ func (s ControllerService) statusFromSnapshot(ctx context.Context, snapshot sess
 			status.EffortOptions = efforts
 		}
 	}
+	if s.services.controllerRuns != nil {
+		runs, err := s.services.controllerRuns.ControllerRuns(ctx, ControllerRunQuery{
+			SessionRef: snapshot.Session.Ref,
+			Controller: controller,
+		})
+		if err != nil {
+			return ControllerStatus{}, err
+		}
+		status = applyControllerRuns(status, runs)
+	}
 	return status, nil
+}
+
+func applyControllerRuns(status ControllerStatus, runs []ControllerRunStatus) ControllerStatus {
+	if len(runs) == 0 {
+		return status
+	}
+	var latest *ControllerRunStatus
+	for idx := range runs {
+		run := normalizeControllerRunStatus(runs[idx])
+		if strings.TrimSpace(run.ID) == "" {
+			continue
+		}
+		if latest == nil || controllerRunAfter(run, *latest) {
+			latest = &run
+		}
+	}
+	if latest == nil {
+		return status
+	}
+	status.Lifecycle = &ControllerLifecycle{
+		RunID:           strings.TrimSpace(latest.ID),
+		Phase:           strings.TrimSpace(string(latest.Phase)),
+		TurnID:          strings.TrimSpace(latest.TurnID),
+		Running:         latest.Running,
+		Active:          latest.Active,
+		Recovering:      latest.Recovering,
+		RemoteSessionID: firstNonEmpty(strings.TrimSpace(latest.RemoteSessionID), status.RemoteSessionID),
+		Error:           strings.TrimSpace(latest.Error),
+		StartedAt:       latest.StartedAt,
+		UpdatedAt:       latest.UpdatedAt,
+	}
+	status.Diagnostics = append(status.Diagnostics, controllerRunDiagnostics(*latest)...)
+	if status.RemoteSessionID == "" {
+		status.RemoteSessionID = status.Lifecycle.RemoteSessionID
+	}
+	return status
+}
+
+func normalizeControllerRunStatus(in ControllerRunStatus) ControllerRunStatus {
+	in.ID = strings.TrimSpace(in.ID)
+	in.Phase = control.ControllerInvocationPhase(strings.TrimSpace(string(in.Phase)))
+	in.SessionRef = session.NormalizeRef(in.SessionRef)
+	in.TurnID = strings.TrimSpace(in.TurnID)
+	in.Controller = normalizeControllerBinding(in.Controller)
+	in.RemoteSessionID = strings.TrimSpace(in.RemoteSessionID)
+	in.Error = strings.TrimSpace(in.Error)
+	if in.Phase == "" {
+		if in.Running {
+			in.Phase = control.ControllerInvocationStarted
+		} else if in.Error != "" {
+			in.Phase = control.ControllerInvocationFailed
+		} else {
+			in.Phase = control.ControllerInvocationCompleted
+		}
+	}
+	return in
+}
+
+func controllerRunAfter(left ControllerRunStatus, right ControllerRunStatus) bool {
+	if !left.UpdatedAt.Equal(right.UpdatedAt) {
+		if left.UpdatedAt.IsZero() {
+			return false
+		}
+		if right.UpdatedAt.IsZero() {
+			return true
+		}
+		return left.UpdatedAt.After(right.UpdatedAt)
+	}
+	if left.Running != right.Running {
+		return left.Running
+	}
+	return strings.TrimSpace(left.ID) > strings.TrimSpace(right.ID)
+}
+
+func controllerRunDiagnostics(run ControllerRunStatus) []ControllerDiagnostic {
+	var out []ControllerDiagnostic
+	if run.Error != "" || run.Phase == control.ControllerInvocationFailed {
+		out = append(out, ControllerDiagnostic{
+			Severity: "error",
+			Kind:     "controller_lifecycle",
+			Message:  firstNonEmpty(run.Error, "remote ACP controller invocation failed"),
+			Meta:     controllerRunDiagnosticMeta(run),
+		})
+		return out
+	}
+	if run.Running {
+		severity := "info"
+		message := "remote ACP controller invocation is running"
+		if run.Recovering {
+			severity = "warning"
+			message = "remote ACP controller invocation is being recovered"
+		} else if !run.Active {
+			severity = "warning"
+			message = "remote ACP controller invocation is pending recovery"
+		}
+		out = append(out, ControllerDiagnostic{
+			Severity: severity,
+			Kind:     "controller_lifecycle",
+			Message:  message,
+			Meta:     controllerRunDiagnosticMeta(run),
+		})
+	}
+	return out
+}
+
+func controllerRunDiagnosticMeta(run ControllerRunStatus) map[string]string {
+	meta := map[string]string{}
+	if id := strings.TrimSpace(run.ID); id != "" {
+		meta["run_id"] = id
+	}
+	if phase := strings.TrimSpace(string(run.Phase)); phase != "" {
+		meta["phase"] = phase
+	}
+	if turnID := strings.TrimSpace(run.TurnID); turnID != "" {
+		meta["turn_id"] = turnID
+	}
+	if remote := strings.TrimSpace(run.RemoteSessionID); remote != "" {
+		meta["remote_session_id"] = remote
+	}
+	if agent := firstNonEmpty(run.Controller.AgentName, run.Controller.Label, run.Controller.ID); agent != "" {
+		meta["agent"] = agent
+	}
+	if len(meta) == 0 {
+		return nil
+	}
+	return meta
+}
+
+func controllerStatusView(status ControllerStatus) *appviewmodel.ControllerStatus {
+	out := appviewmodel.ControllerStatus{
+		SessionRef:      session.NormalizeRef(status.SessionRef),
+		Agent:           strings.TrimSpace(status.Agent),
+		RemoteSessionID: strings.TrimSpace(status.RemoteSessionID),
+		Model:           strings.TrimSpace(status.Model),
+		ModelOptions:    controllerStatusViewChoices(status.ModelOptions),
+		ReasoningEffort: strings.TrimSpace(status.ReasoningEffort),
+		EffortOptions:   controllerStatusViewChoices(status.EffortOptions),
+		Mode:            strings.TrimSpace(status.Mode),
+		ModeOptions:     controllerStatusViewModes(status.ModeOptions),
+		Diagnostics:     controllerStatusViewDiagnostics(status.Diagnostics),
+	}
+	if status.Lifecycle != nil {
+		lifecycle := *status.Lifecycle
+		out.Lifecycle = &appviewmodel.ControllerLifecycle{
+			RunID:           strings.TrimSpace(lifecycle.RunID),
+			Phase:           strings.TrimSpace(lifecycle.Phase),
+			TurnID:          strings.TrimSpace(lifecycle.TurnID),
+			Running:         lifecycle.Running,
+			Active:          lifecycle.Active,
+			Recovering:      lifecycle.Recovering,
+			RemoteSessionID: strings.TrimSpace(lifecycle.RemoteSessionID),
+			Error:           strings.TrimSpace(lifecycle.Error),
+			StartedAt:       lifecycle.StartedAt,
+			UpdatedAt:       lifecycle.UpdatedAt,
+		}
+	}
+	return &out
+}
+
+func controllerStatusViewChoices(in []ControllerConfigChoice) []appviewmodel.ControllerConfigChoice {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ControllerConfigChoice, 0, len(in))
+	for _, choice := range in {
+		out = append(out, appviewmodel.ControllerConfigChoice{
+			Value:       strings.TrimSpace(choice.Value),
+			Name:        strings.TrimSpace(choice.Name),
+			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
+}
+
+func controllerStatusViewModes(in []ControllerMode) []appviewmodel.ControllerMode {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ControllerMode, 0, len(in))
+	for _, mode := range in {
+		out = append(out, appviewmodel.ControllerMode{
+			ID:          strings.TrimSpace(mode.ID),
+			Name:        strings.TrimSpace(mode.Name),
+			Description: strings.TrimSpace(mode.Description),
+		})
+	}
+	return out
+}
+
+func controllerStatusViewDiagnostics(in []ControllerDiagnostic) []appviewmodel.ControllerDiagnostic {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]appviewmodel.ControllerDiagnostic, 0, len(in))
+	for _, diagnostic := range in {
+		out = append(out, appviewmodel.ControllerDiagnostic{
+			Severity: strings.TrimSpace(diagnostic.Severity),
+			Kind:     strings.TrimSpace(diagnostic.Kind),
+			Message:  strings.TrimSpace(diagnostic.Message),
+			Meta:     maps.Clone(diagnostic.Meta),
+		})
+	}
+	return out
 }
 
 func (s ControllerService) controllerModelOptions(ctx context.Context) []ControllerConfigChoice {

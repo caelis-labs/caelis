@@ -215,6 +215,7 @@ func NewWithContext(ctx context.Context, cfg Config) (*Stack, error) {
 		Engine:         engine,
 		Sandbox:        sandboxRuntime,
 		TaskResolver:   spawnTasks,
+		ControllerRuns: controllerRuns,
 		ModelProvider:  modelProviderFactory(reg),
 		Agents:         agentDescriptors(externalAgents),
 		BuiltinAgents:  pluginAgentDescriptors(appagents.BuiltinACPAgents()),

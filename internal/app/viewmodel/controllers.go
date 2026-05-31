@@ -26,6 +26,30 @@ type ControllerMode struct {
 	Description string `json:"description,omitempty"`
 }
 
+// ControllerLifecycle summarizes the active or most recent remote controller
+// invocation.
+type ControllerLifecycle struct {
+	RunID           string    `json:"run_id,omitempty"`
+	Phase           string    `json:"phase,omitempty"`
+	TurnID          string    `json:"turn_id,omitempty"`
+	Running         bool      `json:"running,omitempty"`
+	Active          bool      `json:"active,omitempty"`
+	Recovering      bool      `json:"recovering,omitempty"`
+	RemoteSessionID string    `json:"remote_session_id,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	StartedAt       time.Time `json:"started_at,omitempty"`
+	UpdatedAt       time.Time `json:"updated_at,omitempty"`
+}
+
+// ControllerDiagnostic is a surface-neutral remote controller lifecycle or
+// configuration diagnostic.
+type ControllerDiagnostic struct {
+	Severity string            `json:"severity,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Message  string            `json:"message,omitempty"`
+	Meta     map[string]string `json:"meta,omitempty"`
+}
+
 // ControllerStatus summarizes the active remote ACP controller for shared
 // surface status, slash completion, and model/mode selection.
 type ControllerStatus struct {
@@ -42,6 +66,8 @@ type ControllerStatus struct {
 	ConfigOptions        []ControllerConfigOption            `json:"config_options,omitempty"`
 	Mode                 string                              `json:"mode,omitempty"`
 	ModeOptions          []ControllerMode                    `json:"mode_options,omitempty"`
+	Lifecycle            *ControllerLifecycle                `json:"lifecycle,omitempty"`
+	Diagnostics          []ControllerDiagnostic              `json:"diagnostics,omitempty"`
 	UpdatedAt            time.Time                           `json:"updated_at,omitempty"`
 }
 

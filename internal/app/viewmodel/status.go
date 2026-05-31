@@ -8,13 +8,14 @@ import (
 )
 
 type StatusView struct {
-	Runtime   RuntimeStatus  `json:"runtime"`
-	Session   *SessionStatus `json:"session,omitempty"`
-	Model     ModelStatus    `json:"model"`
-	Mode      ModeStatus     `json:"mode"`
-	Agents    AgentStatus    `json:"agents"`
-	Resources ResourceStatus `json:"resources"`
-	Usage     UsageStatus    `json:"usage,omitempty"`
+	Runtime    RuntimeStatus     `json:"runtime"`
+	Session    *SessionStatus    `json:"session,omitempty"`
+	Model      ModelStatus       `json:"model"`
+	Mode       ModeStatus        `json:"mode"`
+	Controller *ControllerStatus `json:"controller,omitempty"`
+	Agents     AgentStatus       `json:"agents"`
+	Resources  ResourceStatus    `json:"resources"`
+	Usage      UsageStatus       `json:"usage,omitempty"`
 }
 
 type RuntimeStatus struct {

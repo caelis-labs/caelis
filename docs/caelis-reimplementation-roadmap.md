@@ -580,7 +580,9 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   also has a controller runner for ACP main-controller prompts, normalizing
   responses into controller-scoped canonical events.
 - `internal/app/services`: shared service facade for TUI, future APP, CLI, and
-  protocol surfaces.
+  protocol surfaces, including the narrow controller-run lifecycle source used
+  to project remote ACP controller diagnostics without leaking local journal
+  details into surfaces.
 - `internal/app/settings`: shared product settings document for configured
   models and settings-backed custom external ACP agent descriptors, with
   normalized upsert/list/delete operations independent of the deleted gatewayapp
@@ -606,10 +608,10 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   prompt fragments, `AGENTS.md`, and skill metadata into provider
   instructions without moving filesystem discovery into the engine.
 - `internal/app/viewmodel`: surface-neutral session transcript, pending
-  approval/action, participant, agent management, model selection, task
-  list/output, settings, event stream, and status DTOs shared by the TUI and
-  future APP, including runtime store identity needed by read-only
-  diagnostics.
+  approval/action, participant, controller lifecycle/diagnostics, agent
+  management, model selection, task list/output, settings, event stream, and
+  status DTOs shared by the TUI and future APP, including runtime store
+  identity needed by read-only diagnostics.
 - `internal/app/services.EventService`: shared replay/live-turn event stream
   projection for TUI and future APP consumers. It wraps runtime replay and
   active-turn channels into surface-neutral event envelopes with transcript,
@@ -1656,8 +1658,8 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: richer `/connect` rendering/panel parity and richer remote
-     controller lifecycle diagnostics.
+   - Still pending: richer `/connect` rendering/panel parity and visual
+     controller diagnostics panels.
 
 5. Settings, config, and model catalog
    - Migrated baseline: new app settings store, token redaction by default,
@@ -2139,20 +2141,25 @@ be migrated before retiring the old stack:
       SPAWN invocation paths because they share the same external ACP client
       configuration.
     - Migrated baseline: live remote ACP controller prompts now write a durable
-      local running journal before invoking the external controller, update it
-      once the remote ACP session id is known, and clear it after completion or
-      failure. A restarted local stack scans those running records, restarts
-      the configured ACP adapter, calls `session/resume`, continues the pending
-      controller prompt, and appends the recovered controller output to the
-      canonical session store.
+      local lifecycle journal before invoking the external controller, update
+      it once the remote ACP session id is known, clear completed records, and
+      retain failed records as diagnostics. A restarted local stack scans
+      running records, restarts the configured ACP adapter, calls
+      `session/resume`, continues the pending controller prompt, and appends
+      the recovered controller output to the canonical session store.
+    - Migrated baseline: remote ACP controller lifecycle state is exposed
+      through a narrow `ControllerRunSource` contract into shared status
+      services and `internal/app/viewmodel`, so CLI, TUI, and future APP
+      consumers can render phase, active/recovering state, remote session id,
+      and failure diagnostics without importing local recovery/journal code.
     - Migrated baseline: host async command sessions now persist process id and
       durable stdout/stderr stream files when a sandbox `StateDir` is
       available. A restarted host sandbox can reopen a still-running process as
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: richer remote controller lifecycle diagnostics remain
-      incomplete.
+    - Still pending: richer visual controller panels and long-term lifecycle
+      history are not implemented.
 
 11. Task runtime and async work
     - Migrated baseline: host async command sessions now implement the
@@ -2357,8 +2364,8 @@ be migrated before retiring the old stack:
 Recommended sequence:
 
 1. Finish the remaining large TUI surface migrations against app services,
-   especially richer `/connect` rendering/panel parity, remote controller
-   diagnostics, and visual settings/diagnostics editors.
+   especially richer `/connect` rendering/panel parity and visual
+   settings/diagnostics/controller panels.
 2. Finish sandbox backend cleanup and Windows async-session cross-platform
    validation without reintroducing the removed router/preset/tool stacks.
 3. Finish richer task lifecycle stores and visual task-panel behavior behind
