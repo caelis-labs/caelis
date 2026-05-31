@@ -1295,6 +1295,10 @@ be migrated before retiring the old stack:
     path. This removes a display-only dependency on the old sandbox port while
     keeping setup diagnostics, `/status`, and `/doctor` rendering behavior
     unchanged.
+  - Migrated baseline: the app-service TUI gateway and event bridge no longer
+    import the old agent or approval ports directly for cancel and approval
+    DTOs; they consume the public kernel aliases while the remaining old
+    ownership stays contained in the legacy kernel bridge.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and

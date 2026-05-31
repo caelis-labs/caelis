@@ -13,7 +13,6 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/agent"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
@@ -372,13 +371,13 @@ func (h *appServiceTurnHandle) Submit(ctx context.Context, req kernel.SubmitRequ
 	return h.turn.Submit(ctx, submission)
 }
 
-func (h *appServiceTurnHandle) Cancel() agent.CancelResult {
+func (h *appServiceTurnHandle) Cancel() kernel.CancelResult {
 	result := h.turn.Cancel()
-	status := agent.CancelStatusAlreadyCancelled
+	status := kernel.CancelStatusAlreadyCancelled
 	if result.Status == coreruntime.CancelCancelled {
-		status = agent.CancelStatusCancelled
+		status = kernel.CancelStatusCancelled
 	}
-	return agent.CancelResult{Status: status, Err: result.Err}
+	return kernel.CancelResult{Status: status, Err: result.Err}
 }
 
 func (h *appServiceTurnHandle) Close() error {

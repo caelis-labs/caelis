@@ -8,7 +8,6 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
-	portsapproval "github.com/OnslaughtSnail/caelis/ports/approval"
 	acpsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -302,13 +301,13 @@ func coreToolStatus(status coresession.ToolStatus) kernel.ToolStatus {
 	}
 }
 
-func coreApprovalPayload(event coresession.Event) *portsapproval.Payload {
+func coreApprovalPayload(event coresession.Event) *kernel.ApprovalPayload {
 	if event.Approval == nil {
 		return nil
 	}
-	payload := &portsapproval.Payload{
+	payload := &kernel.ApprovalPayload{
 		Reason:  strings.TrimSpace(event.Approval.Reason),
-		Status:  portsapproval.Status(event.Approval.Status),
+		Status:  kernel.ApprovalStatus(event.Approval.Status),
 		Options: coreApprovalOptions(event.Approval.Options),
 	}
 	if tool := event.Approval.Tool; tool != nil {
@@ -323,13 +322,13 @@ func coreApprovalPayload(event coresession.Event) *portsapproval.Payload {
 	return payload
 }
 
-func coreApprovalOptions(in []coresession.ApprovalOption) []portsapproval.Option {
+func coreApprovalOptions(in []coresession.ApprovalOption) []kernel.ApprovalOption {
 	if len(in) == 0 {
 		return nil
 	}
-	out := make([]portsapproval.Option, 0, len(in))
+	out := make([]kernel.ApprovalOption, 0, len(in))
 	for _, option := range in {
-		out = append(out, portsapproval.Option{
+		out = append(out, kernel.ApprovalOption{
 			ID:   strings.TrimSpace(option.ID),
 			Name: strings.TrimSpace(option.Name),
 			Kind: strings.TrimSpace(option.Kind),
