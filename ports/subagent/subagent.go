@@ -5,7 +5,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/ports/delegation"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
 // Registry exposes the spawnable ACP agents available to the runtime.
@@ -71,7 +70,6 @@ type SpawnContext struct {
 	ParentCallID      string             `json:"parent_call_id,omitempty"`
 	Mode              string             `json:"mode,omitempty"`
 	ApprovalRequester ApprovalRequester  `json:"-"`
-	Streams           stream.Sink        `json:"-"`
 }
 
 // Runner drives one spawned ACP child instance. The child itself is expected to

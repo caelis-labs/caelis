@@ -8,7 +8,6 @@ import (
 
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
 func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
@@ -959,23 +958,9 @@ func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
 	updated, _ := model.Update(start)
 	model = updated.(*Model)
 
-	req := kernel.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "spawn-space-stream",
-		ToolName:   "SPAWN",
-		RawInput:   map[string]any{"agent": "self", "prompt": prompt},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "child-task"},
-		Scope:      kernel.EventScopeMain,
-	}
 	for _, chunk := range []string{"Now", " let", " me", " write", " the", " report."} {
-		for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
-			Ref:     stream.Ref{SessionID: "root-session", TaskID: "child-task"},
-			Text:    chunk,
-			Running: true,
-		}) {
-			updated, _ = model.Update(env)
-			model = updated.(*Model)
-		}
+		updated, _ = model.Update(gatewaySpawnStreamResult("spawn-space-stream", prompt, "child-task", chunk, kernel.ToolStatusRunning, true))
+		model = updated.(*Model)
 	}
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1012,32 +997,10 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 	updated, _ := model.Update(start)
 	model = updated.(*Model)
 
-	req := kernel.StreamRequest{
-		SessionRef: session.SessionRef{SessionID: "root-session"},
-		CallID:     "spawn-stream-final",
-		ToolName:   "SPAWN",
-		RawInput:   map[string]any{"agent": "self", "prompt": prompt},
-		Ref:        stream.Ref{SessionID: "root-session", TaskID: "liam"},
-		Scope:      kernel.EventScopeMain,
-	}
-	for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
-		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
-		Text:    "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|",
-		Running: true,
-	}) {
-		updated, _ = model.Update(env)
-		model = updated.(*Model)
-	}
-	for _, env := range kernel.StreamFrameEvents(req, stream.Frame{
-		Ref:     stream.Ref{SessionID: "root-session", TaskID: "internal-task"},
-		Text:    "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示",
-		Closed:  true,
-		Running: false,
-		State:   "completed",
-	}) {
-		updated, _ = model.Update(env)
-		model = updated.(*Model)
-	}
+	updated, _ = model.Update(gatewaySpawnStreamResult("spawn-stream-final", prompt, "liam", "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|", kernel.ToolStatusRunning, true))
+	model = updated.(*Model)
+	updated, _ = model.Update(gatewaySpawnStreamResult("spawn-stream-final", prompt, "liam", "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示", kernel.ToolStatusCompleted, false))
+	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
@@ -1055,6 +1018,42 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 			t.Fatalf("rendered rows should not contain %q:\n%s", forbidden, joined)
 		}
 	}
+}
+
+func gatewaySpawnStreamResult(callID string, prompt string, taskID string, text string, status kernel.ToolStatus, running bool) kernel.EventEnvelope {
+	outputText := text
+	if !running {
+		outputText = kernel.CleanSubagentFinalOutput(text)
+	}
+	rawOutput := map[string]any{
+		"running": running,
+		"state":   strings.TrimSpace(string(status)),
+		"task_id": strings.TrimSpace(taskID),
+	}
+	if running {
+		rawOutput["text"] = text
+	} else {
+		rawOutput["final_message"] = outputText
+	}
+	return kernel.EventEnvelope{Event: kernel.Event{
+		Kind:       kernel.EventKindToolResult,
+		SessionRef: session.SessionRef{SessionID: "root-session"},
+		Meta: testRuntimeToolMeta(map[string]any{
+			"target_id": strings.TrimSpace(taskID),
+			"agent":     "self",
+			"prompt":    strings.TrimSpace(prompt),
+		}),
+		ToolResult: &kernel.ToolResultPayload{
+			CallID:    strings.TrimSpace(callID),
+			ToolName:  "SPAWN",
+			ToolKind:  "execute",
+			Status:    status,
+			Scope:     kernel.EventScopeMain,
+			RawInput:  map[string]any{"agent": "self", "prompt": prompt},
+			RawOutput: rawOutput,
+			Content:   testToolContent(outputText),
+		},
+	}}
 }
 
 func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T) {

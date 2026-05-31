@@ -169,7 +169,6 @@ func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, tur
 			send(TranscriptEventsMsg{Events: transcriptEvents})
 		}
 	}
-	startTerminalStreamForwarder(ctx, driver, converted, sender)
 	if isApprovalGatewayEvent(converted.Event.Kind) && !isAutomaticApprovalEvent(converted.Event.ApprovalPayload) {
 		sendApprovalPrompt(ctx, turn, converted.Event.ApprovalPayload, send)
 	}
@@ -202,7 +201,6 @@ func forwardGatewayEnvelope(ctx context.Context, driver tuidriver.Driver, turn t
 		return
 	}
 	send(env)
-	startTerminalStreamForwarder(ctx, driver, env, sender)
 	if isApprovalGatewayEvent(env.Event.Kind) && !isAutomaticApprovalEvent(env.Event.ApprovalPayload) {
 		sendApprovalPrompt(ctx, turn, env.Event.ApprovalPayload, send)
 	}
@@ -322,54 +320,6 @@ func updateGatewayNarrativeProtocolContent(event *kernel.Event) {
 	}
 	protocol.UpdateType = strings.TrimSpace(protocol.Update.SessionUpdate)
 	event.Protocol = &protocol
-}
-
-func startTerminalStreamForwarder(ctx context.Context, driver tuidriver.Driver, env kernel.EventEnvelope, sender *ProgramSender) {
-	ctx = contextOrBackground(ctx)
-	if sender != nil {
-		ctx = sender.bindContext(ctx)
-	}
-	send := sender.sendFunc()
-	if send == nil {
-		return
-	}
-	streamer, ok := driver.(streamDriver)
-	if !ok {
-		return
-	}
-	events, ok := streamer.SubscribeStream(ctx, env)
-	if !ok || events == nil {
-		return
-	}
-	start := func() {
-		ticker := time.NewTicker(gatewayNarrativeBatchInterval)
-		defer ticker.Stop()
-		var batcher gatewayTerminalBatcher
-		for events != nil {
-			select {
-			case <-ctx.Done():
-				batcher.flush(send)
-				return
-			case <-ticker.C:
-				batcher.flush(send)
-			case terminalEnv, ok := <-events:
-				if !ok {
-					events = nil
-					continue
-				}
-				if batcher.enqueue(terminalEnv, send) {
-					continue
-				}
-				send(terminalEnv)
-			}
-		}
-		batcher.flush(send)
-	}
-	if sender != nil {
-		sender.startForwarder(start)
-		return
-	}
-	go start()
 }
 
 type gatewayTerminalBatcher struct {

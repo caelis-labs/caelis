@@ -27,7 +27,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/assembly"
 	"github.com/OnslaughtSnail/caelis/ports/model"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
 func encryptCodeFreeAPIKeyForRuntimeTest(t *testing.T, apiKey string) string {
@@ -1811,14 +1810,13 @@ func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T)
 				return remoteStatus, nil
 			},
 		},
-		session:             activeSession,
-		hasSession:          true,
-		bindingKey:          "surface",
-		defaultSessionMode:  "auto-review",
-		sessionMode:         "auto-review",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		session:            activeSession,
+		hasSession:         true,
+		bindingKey:         "surface",
+		defaultSessionMode: "auto-review",
+		sessionMode:        "auto-review",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 
 	status, err := driver.SetSessionMode(ctx, "manual")
@@ -1885,14 +1883,13 @@ func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.
 				return remoteStatus, nil
 			},
 		},
-		session:             activeSession,
-		hasSession:          true,
-		bindingKey:          "surface",
-		defaultSessionMode:  "auto-review",
-		sessionMode:         "auto-review",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		session:            activeSession,
+		hasSession:         true,
+		bindingKey:         "surface",
+		defaultSessionMode: "auto-review",
+		sessionMode:        "auto-review",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 
 	status, err := driver.CycleSessionMode(ctx)
@@ -1985,13 +1982,12 @@ func TestGatewayDriverACPStatusPrefersRemoteModeOverLocalSessionMode(t *testing.
 				}, true, nil
 			},
 		},
-		session:             activeSession,
-		hasSession:          true,
-		defaultSessionMode:  "local-default",
-		sessionMode:         "local-default",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		session:            activeSession,
+		hasSession:         true,
+		defaultSessionMode: "local-default",
+		sessionMode:        "local-default",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 
 	status, err := driver.Status(ctx)
@@ -2042,15 +2038,14 @@ func TestGatewayDriverACPStatusKeepsAgentFallbackWithoutRemoteModel(t *testing.T
 	}
 
 	driver := &GatewayDriver{
-		stack:               gatewayDriverTestRuntimeStack(stack),
-		session:             activeSession,
-		hasSession:          true,
-		bindingKey:          "surface",
-		defaultSessionMode:  "default",
-		sessionMode:         "default",
-		defaultSandboxType:  "host",
-		sandboxType:         "host",
-		streamSubscriptions: map[string]struct{}{},
+		stack:              gatewayDriverTestRuntimeStack(stack),
+		session:            activeSession,
+		hasSession:         true,
+		bindingKey:         "surface",
+		defaultSessionMode: "default",
+		sessionMode:        "default",
+		defaultSandboxType: "host",
+		sandboxType:        "host",
 	}
 	status, err := driver.Status(ctx)
 	if err != nil {
@@ -3112,8 +3107,6 @@ type activeSubmitGatewayService struct {
 	activeSubmits []kernel.SubmitActiveTurnRequest
 	beginCalls    int
 }
-
-func (g *activeSubmitGatewayService) Streams() stream.Service { return nil }
 
 func (g *activeSubmitGatewayService) BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {
 	g.beginCalls++

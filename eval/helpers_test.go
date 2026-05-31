@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/gatewaydriver"
 )
 
@@ -40,12 +39,4 @@ func slashCandidatesHaveValue(candidates []gatewaydriver.SlashArgCandidate, valu
 		}
 	}
 	return false
-}
-
-type recordingStreams struct {
-	frames []stream.Frame
-}
-
-func (s *recordingStreams) PublishStream(frame stream.Frame) {
-	s.frames = append(s.frames, stream.CloneFrame(frame))
 }

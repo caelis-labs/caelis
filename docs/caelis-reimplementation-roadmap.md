@@ -1421,6 +1421,11 @@ be migrated before retiring the old stack:
      `ports/session` usage replay parser in gatewaydriver. Session usage shown
      by the app-service path comes from the shared core-session status
      aggregation in `internal/app/services`.
+   - Migrated baseline: the unused legacy terminal-stream compatibility path
+     has been removed from TUI and the old kernel bridge. `ports/stream`, the
+     old kernel stream projection helpers, and `GatewayDriver.SubscribeStream`
+     are gone; terminal/task output now belongs to core sandbox sessions,
+     `TaskService`, canonical task events, and the ACP terminal lifecycle.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and
@@ -1430,11 +1435,10 @@ be migrated before retiring the old stack:
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
    - Still pending: the current TUI app/gatewaydriver bridge still imports the
-     old `ports/session`, `ports/stream`, and public `kernel` event contracts for
-     terminal stream subscriptions, approval payloads, non app-service
-     replay fallback, participants, internal session bookkeeping, and
-     historical usage extraction. Retiring
-     those imports requires moving the remaining TUI bridge protocol to
+     old `ports/session` and public `kernel` event contracts for approval
+     payload fallback, non app-service replay fallback, participants, and
+     internal session bookkeeping. Retiring those imports requires moving the
+     remaining TUI bridge protocol to
      `core/runtime`, `core/session`, and `internal/app/viewmodel` in one larger
      slice.
 

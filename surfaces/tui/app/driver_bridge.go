@@ -204,10 +204,6 @@ func (s *ProgramSender) waitForwarders(timeout time.Duration) bool {
 	}
 }
 
-type streamDriver interface {
-	SubscribeStream(context.Context, kernel.EventEnvelope) (<-chan kernel.EventEnvelope, bool)
-}
-
 type lightweightStatusDriver interface {
 	LightweightStatus(context.Context) (tuidriver.StatusSnapshot, error)
 }

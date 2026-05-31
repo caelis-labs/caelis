@@ -10,7 +10,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/ports/agent"
 	"github.com/OnslaughtSnail/caelis/ports/approval"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
 type Config struct {
@@ -99,17 +98,6 @@ func resolveControlPlane(runtime agent.Runtime) agent.SessionControlPlane {
 		return control
 	}
 	return nil
-}
-
-func (g *Gateway) Streams() stream.Service {
-	if g == nil || g.runtime == nil {
-		return nil
-	}
-	provider, ok := g.runtime.(agent.StreamProvider)
-	if !ok {
-		return nil
-	}
-	return provider.Streams()
 }
 
 // Resolver returns the underlying *AssemblyResolver if the gateway's

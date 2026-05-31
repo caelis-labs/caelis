@@ -13,11 +13,9 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
 type GatewayService interface {
-	Streams() stream.Service
 	BeginTurn(context.Context, kernel.BeginTurnRequest) (kernel.BeginTurnResult, error)
 	SubmitActiveTurn(context.Context, kernel.SubmitActiveTurnRequest) error
 	Interrupt(context.Context, kernel.InterruptRequest) error

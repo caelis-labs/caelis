@@ -6,7 +6,6 @@ import (
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/ports/controller"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/ports/tool"
 )
 
@@ -115,12 +114,6 @@ type SessionControlPlane interface {
 	PromptACPParticipant(context.Context, PromptACPParticipantRequest) (RunResult, error)
 	DetachACPParticipant(context.Context, DetachACPParticipantRequest) (session.Session, error)
 	HandoffController(context.Context, HandoffControllerRequest) (session.Session, error)
-}
-
-// StreamProvider is one optional runtime capability for unified task output
-// reads and subscriptions.
-type StreamProvider interface {
-	Streams() stream.Service
 }
 
 // ControllerProvider exposes the optional controller-orchestration backend used

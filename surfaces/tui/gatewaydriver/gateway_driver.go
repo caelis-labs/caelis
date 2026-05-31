@@ -18,7 +18,6 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 )
 
 type GatewayDriver struct {
@@ -35,7 +34,6 @@ type GatewayDriver struct {
 	sandboxType         string
 	activeCommandID     uint64
 	activeCommandCancel context.CancelFunc
-	streamSubscriptions map[string]struct{}
 }
 
 func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionID string, bindingKey string, modelText string) (*GatewayDriver, error) {
@@ -47,15 +45,14 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 		ctx = context.Background()
 	}
 	driver := &GatewayDriver{
-		stack:               stack,
-		bindingKey:          key,
-		defaultModelText:    strings.TrimSpace(modelText),
-		modelText:           strings.TrimSpace(modelText),
-		defaultSessionMode:  "auto-review",
-		sessionMode:         "auto-review",
-		defaultSandboxType:  "auto",
-		sandboxType:         "auto",
-		streamSubscriptions: map[string]struct{}{},
+		stack:              stack,
+		bindingKey:         key,
+		defaultModelText:   strings.TrimSpace(modelText),
+		modelText:          strings.TrimSpace(modelText),
+		defaultSessionMode: "auto-review",
+		sessionMode:        "auto-review",
+		defaultSandboxType: "auto",
+		sandboxType:        "auto",
 	}
 	if preferredSessionID = strings.TrimSpace(preferredSessionID); preferredSessionID != "" {
 		activeCoreSession, err := driver.stack.StartSession(ctx, preferredSessionID, driver.bindingKey)
@@ -75,61 +72,6 @@ func (d *GatewayDriver) gateway() (GatewayService, error) {
 		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: stack is required")
 	}
 	return d.stack.gateway()
-}
-
-func (d *GatewayDriver) SubscribeStream(ctx context.Context, env kernel.EventEnvelope) (<-chan kernel.EventEnvelope, bool) {
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, false
-	}
-	req, ok := kernel.StreamRequestFromEvent(env)
-	if !ok {
-		return nil, false
-	}
-	streams := gw.Streams()
-	if streams == nil {
-		return nil, false
-	}
-	key := req.Key()
-	if key == "" {
-		return nil, false
-	}
-	d.mu.Lock()
-	if d.streamSubscriptions == nil {
-		d.streamSubscriptions = map[string]struct{}{}
-	}
-	if _, exists := d.streamSubscriptions[key]; exists {
-		d.mu.Unlock()
-		return nil, false
-	}
-	d.streamSubscriptions[key] = struct{}{}
-	d.mu.Unlock()
-
-	out := make(chan kernel.EventEnvelope, 32)
-	go func() {
-		defer close(out)
-		defer func() {
-			d.mu.Lock()
-			delete(d.streamSubscriptions, key)
-			d.mu.Unlock()
-		}()
-		for frame, err := range streams.Subscribe(ctx, stream.SubscribeRequest{Ref: req.Ref, Cursor: req.Cursor}) {
-			if err != nil || frame == nil {
-				return
-			}
-			if frame.Text == "" && frame.Event == nil && !frame.Closed {
-				continue
-			}
-			for _, env := range kernel.StreamFrameEvents(req, stream.CloneFrame(*frame)) {
-				select {
-				case out <- env:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}
-	}()
-	return out, true
 }
 
 func anyString(value any) string {

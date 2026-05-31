@@ -15,7 +15,6 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 	"github.com/OnslaughtSnail/caelis/kernel"
 	portsession "github.com/OnslaughtSnail/caelis/ports/session"
-	"github.com/OnslaughtSnail/caelis/ports/stream"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/eventbridge"
 )
 
@@ -35,10 +34,6 @@ func newAppServiceGateway(svc appservices.Services) *appServiceGateway {
 		services: svc,
 		active:   map[string]appServiceActiveTurn{},
 	}
-}
-
-func (g *appServiceGateway) Streams() stream.Service {
-	return nil
 }
 
 func (g *appServiceGateway) BeginTurn(ctx context.Context, req kernel.BeginTurnRequest) (kernel.BeginTurnResult, error) {

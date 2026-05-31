@@ -1100,83 +1100,6 @@ func TestExecuteLineViaDriverTreatsUnknownSlashAsUserMessage(t *testing.T) {
 	}
 }
 
-func TestExecuteLineViaDriverForwardsTerminalStreamEvents(t *testing.T) {
-	turn := &bridgeTestTurn{
-		events: make(chan kernel.EventEnvelope, 1),
-	}
-	turn.events <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
-			SessionRef: session.SessionRef{SessionID: "root-session"},
-			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				Content:  testTerminalContentWithID("seed\n", "terminal-1"),
-				Status:   kernel.ToolStatusRunning,
-			},
-			Meta: map[string]any{
-				"caelis": map[string]any{
-					"runtime": map[string]any{
-						"task": map[string]any{
-							"task_id":       "task-1",
-							"terminal_id":   "terminal-1",
-							"running":       true,
-							"state":         "running",
-							"output_cursor": int64(5),
-						},
-					},
-				},
-			},
-		},
-	}
-	close(turn.events)
-	terminalEvents := make(chan kernel.EventEnvelope, 1)
-	terminalEvents <- kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind: kernel.EventKindToolResult,
-			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				Content:  testTerminalContentWithID("streamed\n", "terminal-1"),
-				Status:   kernel.ToolStatusRunning,
-			},
-		},
-	}
-	close(terminalEvents)
-
-	driver := &bridgeSubmitDriver{turn: turn, terminalEvents: terminalEvents}
-	var msgs []tea.Msg
-	result := executeLineViaDriver(driver, &ProgramSender{Send: func(msg tea.Msg) { msgs = append(msgs, msg) }}, Submission{Text: "hello"})
-	if result.Err != nil {
-		t.Fatalf("executeLineViaDriver() err = %v", result.Err)
-	}
-	deadline := time.After(2 * time.Second)
-	for {
-		var sawStream bool
-		for _, msg := range msgs {
-			env, ok := msg.(kernel.EventEnvelope)
-			if !ok || env.Event.ToolResult == nil {
-				continue
-			}
-			if text, _ := gatewayTerminalContent(env); text == "streamed\n" {
-				sawStream = true
-			}
-		}
-		if sawStream {
-			break
-		}
-		select {
-		case <-deadline:
-			t.Fatalf("messages = %#v, want forwarded terminal stream event", msgs)
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
-	}
-	if driver.terminalSubscribeCalls != 1 {
-		t.Fatalf("terminalSubscribeCalls = %d, want 1", driver.terminalSubscribeCalls)
-	}
-}
-
 func TestSlashResumeReplaysGatewayEventsDirectly(t *testing.T) {
 	driver := &bridgeTestDriver{
 		status:         tuidriver.StatusSnapshot{Model: "gpt-4o", ModeLabel: "default"},
@@ -2336,11 +2259,9 @@ func participantCoreScope(scopeID string, actor string) *coresession.EventScope 
 }
 
 type bridgeSubmitDriver struct {
-	turn                   tuidriver.Turn
-	terminalEvents         <-chan kernel.EventEnvelope
-	terminalSubscribeCalls int
-	submitCalls            int
-	lastSubmission         tuidriver.Submission
+	turn           tuidriver.Turn
+	submitCalls    int
+	lastSubmission tuidriver.Submission
 }
 
 func (d *bridgeSubmitDriver) Status(context.Context) (tuidriver.StatusSnapshot, error) {
@@ -2351,13 +2272,6 @@ func (d *bridgeSubmitDriver) Submit(_ context.Context, sub tuidriver.Submission)
 	d.submitCalls++
 	d.lastSubmission = sub
 	return d.turn, nil
-}
-func (d *bridgeSubmitDriver) SubscribeStream(context.Context, kernel.EventEnvelope) (<-chan kernel.EventEnvelope, bool) {
-	d.terminalSubscribeCalls++
-	if d.terminalEvents == nil {
-		return nil, false
-	}
-	return d.terminalEvents, true
 }
 func (d *bridgeSubmitDriver) Interrupt(context.Context) error { return nil }
 func (d *bridgeSubmitDriver) ExecuteCommand(context.Context, tuidriver.CommandExecutionOptions) (tuidriver.CommandExecutionView, error) {
