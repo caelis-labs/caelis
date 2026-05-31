@@ -130,23 +130,24 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if len(skills) != 1 || skills[0].Value != "lint" || !strings.Contains(skills[0].Detail, "Run lint checks") {
 		t.Fatalf("CompleteSkill() = %#v, want app-service resource skill metadata", skills)
 	}
-	connected, err := stack.Connect(ModelConfig{
+	connected, err := svc.Models().Connect(ctx, appsettings.ModelConfig{
 		Alias:    "next-model",
 		Provider: "openai-compatible",
 		Model:    "gpt-next",
 		BaseURL:  "https://api.example.test/v1",
 	})
 	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
+		t.Fatalf("Models().Connect() error = %v", err)
 	}
-	if connected != "next-model" {
-		t.Fatalf("Connect() = %q, want next-model", connected)
+	if connected.Alias != "next-model" {
+		t.Fatalf("Models().Connect() alias = %q, want next-model", connected.Alias)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{Provider: "codefree", Model: "GLM-4.7"}); err != nil {
-		t.Fatalf("Connect(codefree) error = %v", err)
-	}
+	status := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/connect codefree GLM-4.7")
 	if !codeFreeAuth.ensure.OpenBrowser || codeFreeAuth.ensure.BaseURL != "https://www.srdcloud.cn" {
 		t.Fatalf("codefree ensure req = %#v, want browser auth through app service", codeFreeAuth.ensure)
+	}
+	if status.Provider != "codefree" || status.ModelName != "GLM-4.7" {
+		t.Fatalf("codefree status = %#v, want active codefree model", status)
 	}
 	if _, err := driver.CompleteSlashArg(ctx, "connect-model:codefree|https%3A%2F%2Fwww.srdcloud.cn|60||", "", 20); err != nil {
 		t.Fatalf("CompleteSlashArg(codefree model) error = %v", err)
@@ -154,8 +155,8 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if !codeFreeAuth.modelSelection.OpenBrowser || codeFreeAuth.modelSelection.BaseURL != "https://www.srdcloud.cn" {
 		t.Fatalf("codefree model auth req = %#v, want model-selection auth through app service", codeFreeAuth.modelSelection)
 	}
-	if err := stack.DeleteModel(ctx, coresession.Ref{SessionID: "sess-app"}, "next-model"); err != nil {
-		t.Fatalf("DeleteModel() error = %v", err)
+	if err := svc.Models().Delete(ctx, "next-model"); err != nil {
+		t.Fatalf("Models().Delete() error = %v", err)
 	}
 	if err := stack.CompactSession(ctx, coresession.Ref{SessionID: "sess-app"}); err != nil {
 		t.Fatalf("CompactSession() error = %v", err)
@@ -164,10 +165,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 		t.Fatalf("compact events = %#v, want app-service compact event", engine.events)
 	}
 
-	status, err := driver.UseModel(ctx, "test-model", "high")
-	if err != nil {
-		t.Fatalf("UseModel() error = %v", err)
-	}
+	status = statusAfterGatewayDriverTestCommand(t, ctx, driver, "/model use test-model high")
 	if engine.state[appservices.StateCurrentModelID] != cfg.ID || engine.state[appservices.StateCurrentReasoningEffort] != "high" {
 		t.Fatalf("session state after UseModel = %#v, want model and reasoning override", engine.state)
 	}
@@ -180,10 +178,7 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if status.StoreDir != "/tmp/caelis-app-service.sqlite" {
 		t.Fatalf("status store = %q, want app-service store URI for /doctor", status.StoreDir)
 	}
-	status, err = driver.SetSandboxBackend(ctx, "bwrap")
-	if err != nil {
-		t.Fatalf("SetSandboxBackend() error = %v", err)
-	}
+	status = statusAfterGatewayDriverTestCommand(t, ctx, driver, "/settings set sandbox.backend bwrap")
 	doc, err := manager.Document(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -194,28 +189,19 @@ func TestBindAppServicesRoutesModelModeAndStatus(t *testing.T) {
 	if status.SandboxRequestedBackend != "bwrap" || status.SandboxResolvedBackend != "host" || status.Route != "host" {
 		t.Fatalf("sandbox switch status = %#v, want persisted bwrap request with current host runtime", status)
 	}
-	status, err = driver.RepairSandbox(ctx)
-	if err != nil {
-		t.Fatalf("RepairSandbox() error = %v", err)
-	}
+	status = statusAfterGatewayDriverTestCommand(t, ctx, driver, "/settings run sandbox.repair")
 	if status.SandboxResolvedBackend != "host" || status.Route != "host" || status.SandboxSetupRequired {
 		t.Fatalf("repair sandbox status = %#v, want host no-op repair status", status)
 	}
 
-	status, err = driver.SetSessionMode(ctx, coreruntime.SessionModeManual)
-	if err != nil {
-		t.Fatalf("SetSessionMode() error = %v", err)
-	}
+	status = statusAfterGatewayDriverTestCommand(t, ctx, driver, "/approval manual")
 	if engine.state[appservices.StateSessionMode] != coreruntime.SessionModeManual {
 		t.Fatalf("session state after SetSessionMode = %#v, want manual", engine.state)
 	}
-	if status.SessionMode != coreruntime.SessionModeManual || status.ModeLabel != coreruntime.SessionModeManual {
-		t.Fatalf("status mode = %q label=%q, want manual", status.SessionMode, status.ModeLabel)
+	if status.SessionMode != coreruntime.SessionModeManual || status.ModeLabel != "Manual" {
+		t.Fatalf("status mode = %q label=%q, want manual/Manual", status.SessionMode, status.ModeLabel)
 	}
-	status, err = driver.CycleSessionMode(ctx)
-	if err != nil {
-		t.Fatalf("CycleSessionMode() error = %v", err)
-	}
+	status = statusAfterGatewayDriverTestCommand(t, ctx, driver, "/approval toggle")
 	if engine.state[appservices.StateSessionMode] != coreruntime.SessionModeAutoReview || status.SessionMode != coreruntime.SessionModeAutoReview {
 		t.Fatalf("session mode after cycle = state=%#v status=%q, want auto-review", engine.state, status.SessionMode)
 	}
@@ -1039,30 +1025,21 @@ func TestBindAppServicesHandoffACPControllerAndRoutesPrompt(t *testing.T) {
 	if status.ControllerKind != "acp" || status.ControllerLabel != "reviewer" {
 		t.Fatalf("status after handoff = %#v, want reviewer ACP controller", status)
 	}
-	modelStatus, err := driver.UseModel(ctx, "remote-model", "high")
-	if err != nil {
-		t.Fatalf("UseModel under ACP controller error = %v", err)
-	}
+	modelStatus := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/model use remote-model high")
 	if engine.state[appservices.StateControllerModel] != "remote-model" || engine.state[appservices.StateControllerReasoning] != "high" {
 		t.Fatalf("controller state after UseModel = %#v, want remote-model/high", engine.state)
 	}
 	if modelStatus.Model != "remote-model [high]" || modelStatus.Provider != "acp" {
 		t.Fatalf("status after ACP UseModel = %#v, want remote ACP model projection", modelStatus)
 	}
-	setModeStatus, err := driver.SetSessionMode(ctx, coreruntime.SessionModeManual)
-	if err != nil {
-		t.Fatalf("SetSessionMode under ACP controller error = %v", err)
-	}
+	setModeStatus := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/approval manual")
 	if engine.state[appservices.StateControllerMode] != coreruntime.SessionModeManual || setModeStatus.SessionMode != coreruntime.SessionModeManual {
 		t.Fatalf("controller mode after set = state:%#v status:%#v, want manual", engine.state, setModeStatus)
 	}
 	if _, ok := engine.state[appservices.StateSessionMode]; ok {
 		t.Fatalf("local session mode state = %#v, want unchanged under ACP controller", engine.state)
 	}
-	modeStatus, err := driver.CycleSessionMode(ctx)
-	if err != nil {
-		t.Fatalf("CycleSessionMode under ACP controller error = %v", err)
-	}
+	modeStatus := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/approval toggle")
 	if engine.state[appservices.StateControllerMode] != coreruntime.SessionModeAutoReview || modeStatus.SessionMode != coreruntime.SessionModeAutoReview {
 		t.Fatalf("controller mode after cycle = state:%#v status:%#v, want auto-review", engine.state, modeStatus)
 	}

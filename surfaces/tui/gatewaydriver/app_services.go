@@ -176,23 +176,6 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		}
 		return catalog.Skills, nil
 	}
-	stack.ConnectFn = func(cfg ModelConfig) (string, error) {
-		connected, err := svc.Models().Connect(context.Background(), modelConfigToApp(cfg))
-		if err != nil {
-			return "", err
-		}
-		if modelAliasIsAmbiguous(context.Background(), svc, connected) {
-			return strings.TrimSpace(connected.ID), nil
-		}
-		return firstNonEmpty(connected.Alias, connected.ID), nil
-	}
-	stack.PrepareConnectModelConfigFn = func(ctx context.Context, cfg ModelConfig) (ModelConfig, error) {
-		prepared, err := svc.Models().PrepareConnectConfig(ctx, modelConfigToApp(cfg))
-		if err != nil {
-			return ModelConfig{}, err
-		}
-		return modelConfigFromApp(prepared), nil
-	}
 	stack.ConnectProviderCandidatesFn = func(_ context.Context, query string, limit int) ([]SlashArgCandidate, error) {
 		return slashCandidatesFromAppConnect(svc.Models().ConnectProviderCandidates(query, limit)), nil
 	}
@@ -210,14 +193,6 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		defaults, err := svc.Models().ConnectDefaults(ctx, modelConfigToApp(cfg))
 		return connectModelDefaultsFromApp(defaults), err
 	}
-	stack.UseModelFn = func(ctx context.Context, ref coresession.Ref, modelRef string, reasoning ...string) error {
-		effort := ""
-		if len(reasoning) > 0 {
-			effort = strings.TrimSpace(reasoning[0])
-		}
-		_, err := svc.Models().Use(ctx, ref, modelRef, effort)
-		return err
-	}
 	stack.ACPControllerStatusFn = func(ctx context.Context, ref coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
 		status, ok, err := svc.Controllers().Status(ctx, ref)
 		return controllerStatusFromApp(status), ok, err
@@ -230,49 +205,8 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		status, err := svc.Controllers().SetMode(ctx, ref, mode)
 		return controllerStatusFromApp(status), err
 	}
-	stack.DeleteModelFn = func(ctx context.Context, ref coresession.Ref, modelRef string) error {
-		deleted, resolveErr := svc.Models().Resolve(ctx, modelRef)
-		if err := svc.Models().Delete(ctx, modelRef); err != nil {
-			return err
-		}
-		if resolveErr == nil && strings.TrimSpace(ref.SessionID) != "" {
-			snapshot, err := svc.Sessions().Load(ctx, ref)
-			if err == nil {
-				if currentID, _ := snapshot.State[appservices.StateCurrentModelID].(string); strings.EqualFold(strings.TrimSpace(currentID), strings.TrimSpace(deleted.ID)) {
-					_ = svc.Models().ClearSession(ctx, ref)
-				}
-			}
-		}
-		return nil
-	}
-	stack.SetSandboxBackendFn = func(ctx context.Context, backend string) (SandboxStatus, error) {
-		if _, err := svc.Settings().SetSandboxBackend(ctx, backend); err != nil {
-			status, statusErr := svc.Sandbox().Status(ctx)
-			if statusErr != nil {
-				return SandboxStatus{}, err
-			}
-			return sandboxStatusFromApp(status), err
-		}
-		status, err := svc.Sandbox().Status(ctx)
-		if err != nil {
-			return SandboxStatus{}, err
-		}
-		return sandboxStatusFromApp(status), nil
-	}
-	stack.PrepareSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
-		status, err := svc.Sandbox().Prepare(ctx)
-		return sandboxStatusFromApp(status), err
-	}
-	stack.RepairSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
-		status, err := svc.Sandbox().Repair(ctx)
-		return sandboxStatusFromApp(status), err
-	}
 	stack.PreflightSandboxFn = func(ctx context.Context, allowNonElevatedRepair bool) (SandboxStatus, error) {
 		status, err := svc.Sandbox().Preflight(ctx, allowNonElevatedRepair)
-		return sandboxStatusFromApp(status), err
-	}
-	stack.ResetSandboxFn = func(ctx context.Context) (SandboxStatus, error) {
-		status, err := svc.Sandbox().Reset(ctx)
 		return sandboxStatusFromApp(status), err
 	}
 	stack.ListACPAgentsFn = func() []ACPAgentInfo {
@@ -302,20 +236,6 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 			Trigger:    "manual",
 		})
 		return err
-	}
-	stack.SetSessionModeFn = func(ctx context.Context, ref coresession.Ref, mode string) (string, error) {
-		choice, err := svc.Modes().Set(ctx, ref, mode)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(choice.ID), nil
-	}
-	stack.CycleSessionModeFn = func(ctx context.Context, ref coresession.Ref) (string, error) {
-		choice, err := svc.Modes().Toggle(ctx, ref)
-		if err != nil {
-			return "", err
-		}
-		return strings.TrimSpace(choice.ID), nil
 	}
 	stack.ListTasksFn = func(ctx context.Context, ref coresession.Ref, opts TaskListOptions) (TaskListView, error) {
 		return svc.Tasks().List(ctx, appservices.ListTasksRequest{
@@ -568,24 +488,6 @@ func modelChoicesFromApp(choices []appsettings.ModelChoice) []ModelChoice {
 		})
 	}
 	return out
-}
-
-func modelAliasIsAmbiguous(ctx context.Context, svc appservices.Services, cfg appsettings.ModelConfig) bool {
-	alias := strings.TrimSpace(cfg.Alias)
-	if alias == "" {
-		return false
-	}
-	choices, err := svc.Models().List(ctx)
-	if err != nil {
-		return false
-	}
-	count := 0
-	for _, choice := range choices {
-		if strings.EqualFold(strings.TrimSpace(choice.Alias), alias) {
-			count++
-		}
-	}
-	return count > 1
 }
 
 func slashCandidatesFromAppConnect(candidates []appservices.ConnectCandidate) []SlashArgCandidate {

@@ -166,7 +166,7 @@ func TestGatewayDriverKeepsServiceRuntimeUsableAfterSandboxUpdate(t *testing.T) 
 	}
 	// This test only needs to force a runtime rebuild; the missing helper keeps
 	// auto landlock fallback from recursively executing this test binary in CI.
-	if _, err := stack.SetSandboxBackend(ctx, "auto"); err != nil {
+	if _, err := stack.services.Settings().SetSandboxBackend(ctx, "auto"); err != nil {
 		t.Fatalf("SetSandboxBackend(auto) error = %v", err)
 	}
 	after, err := driver.Status(ctx)
@@ -733,12 +733,7 @@ func TestGatewayDriverCompleteSlashArgUsesRealModelAliases(t *testing.T) {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "ollama",
-		Model:    "alt-model",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect ollama alt-model")
 
 	useCandidates, err := driver.CompleteSlashArg(ctx, "model use", "", 10)
 	if err != nil {
@@ -870,9 +865,7 @@ func TestGatewayDriverCompletesAndPersistsModelReasoningLevel(t *testing.T) {
 	if got := candidateValues(levels); !equalStrings(got, []string{"none", "high", "max"}) {
 		t.Fatalf("reasoning candidates = %#v, want none/high/max", levels)
 	}
-	if _, err := driver.UseModel(ctx, "deepseek/deepseek-v4-pro", "high"); err != nil {
-		t.Fatalf("UseModel(reasoning) error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/model use deepseek/deepseek-v4-pro high")
 	status, err := driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)
@@ -912,14 +905,7 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
-	status, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		APIKey:   "secret",
-	})
-	if err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
+	status := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/connect deepseek deepseek-v4-flash - secret")
 	if got := status.ContextWindowTokens; got != 1048576 {
 		t.Fatalf("status.ContextWindowTokens = %d, want 1048576", got)
 	}
@@ -997,7 +983,6 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		`"header_key":`,
 		`"token_env":`,
 		`"default_reasoning_effort":`,
-		`"reasoning_mode":`,
 		`"timeout":`,
 		`"persist_token":`,
 	} {
@@ -1017,6 +1002,7 @@ func TestGatewayDriverConnectPersistsDeepSeekModelDefaults(t *testing.T) {
 		`"token": "secret"`,
 		`"context_window_tokens": 1048576`,
 		`"reasoning_effort": "high"`,
+		`"reasoning_mode": "toggle"`,
 		`"max_output_tokens": 32768`,
 	} {
 		if !strings.Contains(raw, required) {
@@ -1043,13 +1029,7 @@ func TestGatewayDriverConnectWithTokenEnvDoesNotPersistTokenValue(t *testing.T) 
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-flash",
-		APIKey:   "env:DEEPSEEK_API_KEY",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect deepseek deepseek-v4-flash - 60 env:DEEPSEEK_API_KEY")
 
 	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
@@ -1154,13 +1134,7 @@ func TestGatewayDriverConnectCodeFreeUsesExistingOAuthCache(t *testing.T) {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
 
-	status, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "codefree",
-		Model:    "GLM-4.7",
-	})
-	if err != nil {
-		t.Fatalf("Connect(codefree) error = %v", err)
-	}
+	status := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/connect codefree GLM-4.7")
 	if status.Provider != "codefree" {
 		t.Fatalf("provider = %q, want codefree", status.Provider)
 	}
@@ -1258,15 +1232,8 @@ func TestGatewayDriverDeleteModelRemovesConfiguredAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "ollama",
-		Model:    "alt-model",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	if err := driver.DeleteModel(ctx, "ollama/alt-model"); err != nil {
-		t.Fatalf("DeleteModel() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect ollama alt-model")
+	runGatewayDriverTestCommand(t, ctx, driver, "/model del ollama/alt-model")
 	candidates, err := driver.CompleteSlashArg(ctx, "model del", "", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(model del) error = %v", err)
@@ -1302,15 +1269,8 @@ func TestGatewayDriverDeleteOnlyModelClearsAliasCandidatesAndStatus(t *testing.T
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "ollama",
-		Model:    "llama3",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	if err := driver.DeleteModel(ctx, "ollama/llama3"); err != nil {
-		t.Fatalf("DeleteModel() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect ollama llama3")
+	runGatewayDriverTestCommand(t, ctx, driver, "/model del ollama/llama3")
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(model use) error = %v", err)
@@ -1349,17 +1309,8 @@ func TestGatewayDriverUseModelResolvesCaseInsensitiveAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "minimax",
-		Model:    "MiniMax-M2.7-highspeed",
-		APIKey:   "secret",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	status, err := driver.UseModel(ctx, "minimax/minimax-m2.7-highspeed")
-	if err != nil {
-		t.Fatalf("UseModel() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect minimax MiniMax-M2.7-highspeed - 60 secret")
+	status := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/model use minimax/minimax-m2.7-highspeed")
 	if got := strings.ToLower(strings.TrimSpace(status.Model)); got != "minimax/minimax-m2.7-highspeed" {
 		t.Fatalf("status model = %q, want minimax/minimax-m2.7-highspeed", status.Model)
 	}
@@ -1610,13 +1561,16 @@ func TestGatewayDriverStatusUsesPersistedDefaultAliasOnStartup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewLocalStack() error = %v", err)
 	}
-	if _, err := stack.Connect(ModelConfig{
+	prepared, err := stack.services.Models().PrepareConnectConfig(ctx, appsettings.ModelConfig{
 		Provider: "deepseek",
-		API:      coremodel.APIDeepSeek,
 		Model:    "deepseek-v4-pro",
 		Token:    "secret",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
+	})
+	if err != nil {
+		t.Fatalf("PrepareConnectConfig() error = %v", err)
+	}
+	if _, err := stack.services.Models().Connect(ctx, prepared); err != nil {
+		t.Fatalf("Models().Connect() error = %v", err)
 	}
 
 	reloaded, err := newGatewayDriverTestStack(t, gatewayDriverTestConfig{
@@ -1774,10 +1728,7 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	if !ok {
 		t.Fatal("expected startup session")
 	}
-	status, err := driver.CycleSessionMode(ctx)
-	if err != nil {
-		t.Fatalf("CycleSessionMode() error = %v", err)
-	}
+	status := statusAfterGatewayDriverTestCommand(t, ctx, driver, "/approval toggle")
 	if strings.TrimSpace(status.SessionID) == "" {
 		t.Fatal("expected CycleSessionMode() to keep an active session")
 	}
@@ -1786,146 +1737,6 @@ func TestGatewayDriverCycleSessionModeUsesStartupSession(t *testing.T) {
 	}
 	if status.SessionMode != "manual" {
 		t.Fatalf("session mode = %q, want manual", status.SessionMode)
-	}
-}
-
-func TestGatewayDriverSetSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
-	ctx := context.Background()
-	ref := coresession.Ref{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
-	activeSession := coresession.Session{
-		Ref:       ref,
-		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
-		Controller: coresession.ControllerBinding{
-			Kind:            coresession.ControllerACP,
-			AgentName:       "codex",
-			RemoteSessionID: "remote-1",
-		},
-	}
-	remoteStatus := appviewmodel.ControllerStatus{
-		SessionRef: activeSession.Ref,
-		Agent:      "codex",
-		Model:      "remote-model",
-		Mode:       "auto-review",
-		ModeOptions: []appviewmodel.ControllerMode{
-			{ID: "auto-review", Name: "Auto Review"},
-			{ID: "manual", Name: "Manual"},
-		},
-	}
-	var localSetCalled bool
-	var setRemoteMode string
-	driver := &GatewayDriver{
-		stack: &DriverStack{
-			Workspace: activeSession.Workspace,
-			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
-				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
-			},
-			ACPControllerStatusFn: func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
-				return remoteStatus, true, nil
-			},
-			SetSessionModeFn: func(context.Context, coresession.Ref, string) (string, error) {
-				localSetCalled = true
-				return "manual", nil
-			},
-			SetACPControllerModeFn: func(_ context.Context, ref coresession.Ref, mode string) (appviewmodel.ControllerStatus, error) {
-				if ref.SessionID != activeSession.SessionID {
-					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
-				}
-				setRemoteMode = mode
-				remoteStatus.Mode = mode
-				return remoteStatus, nil
-			},
-		},
-		session:            activeSession,
-		hasSession:         true,
-		bindingKey:         "surface",
-		defaultSessionMode: "auto-review",
-		sessionMode:        "auto-review",
-		defaultSandboxType: "host",
-		sandboxType:        "host",
-	}
-
-	status, err := driver.SetSessionMode(ctx, "manual")
-	if err != nil {
-		t.Fatalf("SetSessionMode(manual) error = %v", err)
-	}
-	if localSetCalled {
-		t.Fatal("SetSessionMode() called local session mode setter under an active ACP controller")
-	}
-	if setRemoteMode != "manual" {
-		t.Fatalf("remote mode set to %q, want manual", setRemoteMode)
-	}
-	if status.SessionMode != "manual" || status.ModeLabel != "Manual" {
-		t.Fatalf("status mode = %q/%q, want manual/Manual", status.SessionMode, status.ModeLabel)
-	}
-}
-
-func TestGatewayDriverCycleSessionModeUpdatesRemoteACPControllerMode(t *testing.T) {
-	ctx := context.Background()
-	ref := coresession.Ref{AppName: "caelis", UserID: "u", SessionID: "parent", WorkspaceKey: "ws"}
-	activeSession := coresession.Session{
-		Ref:       ref,
-		Workspace: coresession.Workspace{Key: "ws", CWD: t.TempDir()},
-		Controller: coresession.ControllerBinding{
-			Kind:            coresession.ControllerACP,
-			AgentName:       "codex",
-			RemoteSessionID: "remote-1",
-		},
-	}
-	remoteStatus := appviewmodel.ControllerStatus{
-		SessionRef: activeSession.Ref,
-		Agent:      "codex",
-		Model:      "remote-model",
-		Mode:       "ask",
-		ModeOptions: []appviewmodel.ControllerMode{
-			{ID: "ask", Name: "Ask"},
-			{ID: "code", Name: "Code"},
-		},
-	}
-	var localCycleCalled bool
-	var setRemoteMode string
-	driver := &GatewayDriver{
-		stack: &DriverStack{
-			Workspace: activeSession.Workspace,
-			SessionRuntimeStateFn: func(context.Context, coresession.Ref) (SessionRuntimeState, error) {
-				return SessionRuntimeState{ModelAlias: "local/model", SessionMode: "auto-review"}, nil
-			},
-			ACPControllerStatusFn: func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {
-				return remoteStatus, true, nil
-			},
-			CycleSessionModeFn: func(context.Context, coresession.Ref) (string, error) {
-				localCycleCalled = true
-				return "manual", nil
-			},
-			SetACPControllerModeFn: func(_ context.Context, ref coresession.Ref, mode string) (appviewmodel.ControllerStatus, error) {
-				if ref.SessionID != activeSession.SessionID {
-					t.Fatalf("SetACPControllerMode ref = %#v, want session %q", ref, activeSession.SessionID)
-				}
-				setRemoteMode = mode
-				remoteStatus.Mode = mode
-				return remoteStatus, nil
-			},
-		},
-		session:            activeSession,
-		hasSession:         true,
-		bindingKey:         "surface",
-		defaultSessionMode: "auto-review",
-		sessionMode:        "auto-review",
-		defaultSandboxType: "host",
-		sandboxType:        "host",
-	}
-
-	status, err := driver.CycleSessionMode(ctx)
-	if err != nil {
-		t.Fatalf("CycleSessionMode() error = %v", err)
-	}
-	if localCycleCalled {
-		t.Fatal("CycleSessionMode() called local session mode cycle under an active ACP controller")
-	}
-	if setRemoteMode != "code" {
-		t.Fatalf("remote mode set to %q, want code", setRemoteMode)
-	}
-	if status.SessionMode != "code" || status.ModeLabel != "Code" {
-		t.Fatalf("status mode = %q/%q, want code/Code", status.SessionMode, status.ModeLabel)
 	}
 }
 
@@ -2154,13 +1965,7 @@ func TestGatewayDriverCompleteSlashArgUsesPrefixMatching(t *testing.T) {
 		t.Fatalf("model action candidates = %#v, want only del", modelActions)
 	}
 
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-pro",
-		TokenEnv: "DEEPSEEK_API_KEY",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect deepseek deepseek-v4-pro - 60 env:DEEPSEEK_API_KEY")
 	modelAliases, err := driver.CompleteSlashArg(ctx, "model use", "dee", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(model use, dee) error = %v", err)
@@ -2404,20 +2209,8 @@ func TestGatewayDriverConnectPersistsMultipleProviders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "minimax",
-		Model:    "MiniMax-M2.7-highspeed",
-		APIKey:   "minimax-secret",
-	}); err != nil {
-		t.Fatalf("Connect(minimax) error = %v", err)
-	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "deepseek",
-		Model:    "deepseek-v4-pro",
-		APIKey:   "deepseek-secret",
-	}); err != nil {
-		t.Fatalf("Connect(deepseek) error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect minimax MiniMax-M2.7-highspeed - 60 minimax-secret")
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect deepseek deepseek-v4-pro - 60 deepseek-secret")
 	candidates, err := driver.CompleteSlashArg(ctx, "model use", "", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(model use) error = %v", err)
@@ -2518,14 +2311,7 @@ func TestGatewayDriverConnectXiaomiTokenPlanCNStoresXiaomiProvider(t *testing.T)
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "xiaomi",
-		Model:    "mimo-v2.5-pro",
-		BaseURL:  connectXiaomiTokenPlanCNBaseURL,
-		APIKey:   "env:MIMO_TOKEN_PLAN_API_KEY",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2.5-pro "+connectXiaomiTokenPlanCNBaseURL+" 60 env:MIMO_TOKEN_PLAN_API_KEY")
 
 	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
@@ -2586,13 +2372,11 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	for _, cfg := range []ConnectConfig{
-		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiAPIBaseURL, APIKey: "env:XIAOMI_API_KEY"},
-		{Provider: "xiaomi", Model: "mimo-v2.5-pro", BaseURL: connectXiaomiTokenPlanCNBaseURL, APIKey: "env:MIMO_TOKEN_PLAN_API_KEY"},
+	for _, input := range []string{
+		"/connect xiaomi mimo-v2.5-pro " + connectXiaomiAPIBaseURL + " 60 env:XIAOMI_API_KEY",
+		"/connect xiaomi mimo-v2.5-pro " + connectXiaomiTokenPlanCNBaseURL + " 60 env:MIMO_TOKEN_PLAN_API_KEY",
 	} {
-		if _, err := driver.Connect(ctx, cfg); err != nil {
-			t.Fatalf("Connect(%s) error = %v", cfg.BaseURL, err)
-		}
+		runGatewayDriverTestCommand(t, ctx, driver, input)
 	}
 
 	doc, err := loadGatewayDriverTestSettings(root)
@@ -2637,12 +2421,10 @@ func TestGatewayDriverConnectXiaomiEndpointsCoexistUnderVisibleAlias(t *testing.
 	if tokenPlanCandidate.Value != "xiaomi@token-plan-cn/xiaomi/mimo-v2.5-pro" {
 		t.Fatalf("token-plan candidate value = %q, want readable token-plan profile/model id", tokenPlanCandidate.Value)
 	}
-	if _, err := driver.UseModel(ctx, "xiaomi/mimo-v2.5-pro"); err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/model use xiaomi/mimo-v2.5-pro"}); err == nil || !strings.Contains(err.Error(), "ambiguous model alias") {
 		t.Fatalf("UseModel(visible alias) error = %v, want ambiguity", err)
 	}
-	if _, err := driver.UseModel(ctx, tokenPlanCandidate.Value); err != nil {
-		t.Fatalf("UseModel(token-plan hidden id) error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/model use "+tokenPlanCandidate.Value)
 }
 
 func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
@@ -2663,14 +2445,7 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "xiaomi",
-		Model:    "mimo-v2.5-pro",
-		BaseURL:  connectXiaomiAPIBaseURL,
-		APIKey:   "env:XIAOMI_API_KEY",
-	}); err != nil {
-		t.Fatalf("Connect(first model) error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2.5-pro "+connectXiaomiAPIBaseURL+" 60 env:XIAOMI_API_KEY")
 	endpoints, err := driver.CompleteSlashArg(ctx, "connect-baseurl:xiaomi", "", 10)
 	if err != nil {
 		t.Fatalf("CompleteSlashArg(connect-baseurl:xiaomi) error = %v", err)
@@ -2685,13 +2460,7 @@ func TestGatewayDriverConnectReusesExistingEndpointAuth(t *testing.T) {
 	if !foundReusable {
 		t.Fatalf("endpoint candidates = %#v, want reusable auth marker for api cn", endpoints)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "xiaomi",
-		Model:    "mimo-v2-pro",
-		BaseURL:  connectXiaomiAPIBaseURL,
-	}); err != nil {
-		t.Fatalf("Connect(second model without key) error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect xiaomi mimo-v2-pro "+connectXiaomiAPIBaseURL+" 60 -")
 	doc, err := loadGatewayDriverTestSettings(root)
 	if err != nil {
 		t.Fatalf("LoadAppConfig() error = %v", err)
@@ -3003,7 +2772,7 @@ func TestGatewayDriverDeleteModelRejectsUnknownAlias(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if err := driver.DeleteModel(ctx, "minimax/minimax-m1"); err == nil {
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/model del minimax/minimax-m1"}); err == nil {
 		t.Fatal("DeleteModel() error = nil, want unknown alias error")
 	}
 }
@@ -3030,13 +2799,7 @@ func TestGatewayDriverConnectModelCandidatesIncludeConfiguredProviderModels(t *t
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "minimax",
-		Model:    "MiniMax-M2.7-highspeed",
-		APIKey:   "secret",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect minimax MiniMax-M2.7-highspeed - 60 secret")
 
 	models, err := driver.CompleteSlashArg(ctx, "connect-model:minimax|https%3A%2F%2Fapi.minimaxi.com%2Fanthropic|60|secret|", "", 20)
 	if err != nil {
@@ -3071,10 +2834,7 @@ func TestGatewayDriverConnectRejectsMissingAPIKeyWithActionableError(t *testing.
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "openai",
-		Model:    "gpt-4o",
-	}); err == nil || !strings.Contains(err.Error(), "env:OPENAI_API_KEY") {
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/connect openai gpt-4o"}); err == nil || !strings.Contains(err.Error(), "env:OPENAI_API_KEY") {
 		t.Fatalf("Connect() error = %v, want actionable env hint", err)
 	}
 }
@@ -3096,12 +2856,7 @@ func TestGatewayDriverConnectRejectsInvalidBaseURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "openai-compatible",
-		Model:    "gpt-4o",
-		BaseURL:  "not-a-url",
-		APIKey:   "secret",
-	}); err == nil || !strings.Contains(strings.ToLower(err.Error()), "base url is invalid") {
+	if _, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: "/connect openai-compatible gpt-4o not-a-url 60 secret"}); err == nil || !strings.Contains(strings.ToLower(err.Error()), "base url is invalid") {
 		t.Fatalf("Connect() error = %v, want invalid base URL guidance", err)
 	}
 }
@@ -3125,16 +2880,8 @@ func TestGatewayDriverStatusIncludesDoctorDiagnostics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newGatewayDriverFromTestStack() error = %v", err)
 	}
-	if _, err := driver.Connect(ctx, ConnectConfig{
-		Provider: "minimax",
-		Model:    "MiniMax-M2.7-highspeed",
-		TokenEnv: "MINIMAX_API_KEY",
-	}); err != nil {
-		t.Fatalf("Connect() error = %v", err)
-	}
-	if _, err := driver.SetSessionMode(ctx, "manual"); err != nil {
-		t.Fatalf("SetSessionMode() error = %v", err)
-	}
+	runGatewayDriverTestCommand(t, ctx, driver, "/connect minimax MiniMax-M2.7-highspeed - 60 env:MINIMAX_API_KEY")
+	runGatewayDriverTestCommand(t, ctx, driver, "/approval manual")
 	status, err := driver.Status(ctx)
 	if err != nil {
 		t.Fatalf("Status() error = %v", err)

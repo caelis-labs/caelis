@@ -13,8 +13,6 @@ import (
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
 )
 
-const commandConnectDefaultTimeoutSeconds = 60
-
 type CommandCatalogRequest struct{}
 
 type CommandExecutionRequest struct {
@@ -420,7 +418,7 @@ func (s CommandService) commandConnectConfig(args string) (appsettings.ModelConf
 	if len(fields) >= 3 {
 		cfg.BaseURL = dashAsEmpty(fields[2])
 	}
-	timeoutSeconds := commandConnectDefaultTimeoutSeconds
+	timeoutSeconds := 0
 	if len(fields) >= 4 {
 		raw := dashAsEmpty(fields[3])
 		if raw != "" {
@@ -458,7 +456,9 @@ func (s CommandService) commandConnectConfig(args string) (appsettings.ModelConf
 	if len(fields) >= 8 {
 		cfg.ReasoningLevels = parseCommandReasoningLevels(fields[7])
 	}
-	cfg.Timeout = time.Duration(timeoutSeconds) * time.Second
+	if timeoutSeconds > 0 {
+		cfg.Timeout = time.Duration(timeoutSeconds) * time.Second
+	}
 	return s.commandConnectConfigWithDefaults(cfg), nil
 }
 

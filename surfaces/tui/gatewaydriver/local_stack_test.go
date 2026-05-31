@@ -61,6 +61,25 @@ func newGatewayDriverFromTestStack(ctx context.Context, stack *gatewayDriverTest
 	return NewGatewayDriver(ctx, stack.driverStack, preferredSessionID, bindingKey, modelText)
 }
 
+func runGatewayDriverTestCommand(t *testing.T, ctx context.Context, driver *GatewayDriver, input string) CommandExecutionView {
+	t.Helper()
+	view, err := driver.ExecuteCommand(ctx, CommandExecutionOptions{Input: input})
+	if err != nil {
+		t.Fatalf("ExecuteCommand(%q) error = %v", input, err)
+	}
+	return view
+}
+
+func statusAfterGatewayDriverTestCommand(t *testing.T, ctx context.Context, driver *GatewayDriver, input string) StatusSnapshot {
+	t.Helper()
+	runGatewayDriverTestCommand(t, ctx, driver, input)
+	status, err := driver.Status(ctx)
+	if err != nil {
+		t.Fatalf("Status(after %q) error = %v", input, err)
+	}
+	return status
+}
+
 func gatewayDriverTestRuntimeStack(stack *gatewayDriverTestStack) *DriverStack {
 	if stack == nil {
 		return nil
@@ -203,28 +222,6 @@ func (s *gatewayDriverTestStack) remember(bindingKey string, ref coresession.Ref
 		s.bindings = map[string]coresession.Ref{}
 	}
 	s.bindings[key] = coresession.NormalizeRef(ref)
-}
-
-func (s *gatewayDriverTestStack) SetSandboxBackend(ctx context.Context, backend string) (SandboxStatus, error) {
-	if s == nil || s.driverStack == nil {
-		return SandboxStatus{}, fmt.Errorf("gatewaydriver test stack is unavailable")
-	}
-	return s.driverStack.SetSandboxBackend(ctx, backend)
-}
-
-func (s *gatewayDriverTestStack) Connect(cfg ModelConfig) (string, error) {
-	if s == nil {
-		return "", fmt.Errorf("gatewaydriver test stack is unavailable")
-	}
-	appCfg, err := s.services.Models().PrepareConnectConfig(context.Background(), modelConfigToApp(cfg))
-	if err != nil {
-		return "", err
-	}
-	connected, err := s.services.Models().Connect(context.Background(), appCfg)
-	if err != nil {
-		return "", err
-	}
-	return firstNonEmpty(connected.Alias, connected.ID), nil
 }
 
 func (s *gatewayDriverTestStack) ModelConfig(ref string) (ModelConfig, bool) {

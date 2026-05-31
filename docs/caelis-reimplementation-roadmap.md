@@ -1222,8 +1222,8 @@ be migrated before retiring the old stack:
      removed from `internal/cli`; production CLI code no longer imports the old
      public `kernel` facade.
    - Still pending: deeper setup diagnostics outside the shared `/doctor` and
-     home panels, and several command dispatch paths still depend on transitional
-     TUI/gatewaydriver compatibility packages.
+     home panels, plus final cleanup of residual transition fixtures that no
+     longer sit on production command dispatch paths.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1383,6 +1383,14 @@ be migrated before retiring the old stack:
      `/approval` update controller-scoped config intent in shared session state
      instead of local model/session state, and local `/model del` clears a
      deleted current session model through the shared service path.
+   - Migrated baseline: the concrete gatewaydriver direct mutation APIs for
+     connect/model/delete/session-mode/sandbox lifecycle changes have been
+     removed from `GatewayDriver` and `DriverStack`. Gatewaydriver regression
+     coverage now drives these flows through `ExecuteCommand`, while shared
+     app services remain the only writable contract behind TUI, ACP command
+     clients, CLI, and the future APP. `/connect` also avoids persisting an
+     implicit default timeout when the user did not provide one, keeping model
+     profiles focused on explicit or canonical semantics.
    - Migrated baseline: the app-service TUI binding now exposes
      `CommandService.Available()` as a shared command catalog. The TUI slash
      command refresh path prefers that catalog for service-owned and dynamic
