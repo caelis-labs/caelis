@@ -13,6 +13,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	acpexternal "github.com/OnslaughtSnail/caelis/internal/adapters/acpagent/external"
 	"github.com/OnslaughtSnail/caelis/internal/engine/control"
 )
@@ -498,6 +499,7 @@ func (s *spawnTaskSession) Write(ctx context.Context, input []byte) error {
 	s.touchLocked()
 	s.mu.Unlock()
 	s.persist(context.Background())
+	s.recordLifecycle("write")
 	s.startPrompt(prompt, true)
 	return nil
 }
@@ -522,6 +524,7 @@ func (s *spawnTaskSession) Cancel(ctx context.Context) error {
 	done := s.done
 	s.mu.Unlock()
 	s.persist(context.Background())
+	s.recordLifecycle("cancel")
 	if cancel != nil {
 		cancel()
 	}
@@ -639,8 +642,14 @@ func (s *spawnTaskSession) runPrompt(ctx context.Context, prompt string) {
 	s.pendingPrompt = ""
 	s.touchLocked()
 	s.mu.Unlock()
-	if recordAsync && len(events) > 0 && s.manager != nil && s.manager.store != nil {
-		_, _ = s.manager.store.Append(context.Background(), s.parent.Ref, events)
+	if recordAsync && s.manager != nil && s.manager.store != nil {
+		recorded := cloneEvents(events)
+		if lifecycle := s.lifecycleEvent(s.finalLifecycleAction()); lifecycle.Type != "" {
+			recorded = append(recorded, lifecycle)
+		}
+		if len(recorded) > 0 {
+			_, _ = s.manager.store.Append(context.Background(), s.parent.Ref, recorded)
+		}
 	}
 	s.persist(context.Background())
 	closeDone(done)
@@ -770,6 +779,197 @@ func (s *spawnTaskSession) persist(ctx context.Context) {
 	}
 	s.mu.RUnlock()
 	_ = s.manager.journal.write(ctx, record)
+}
+
+func (s *spawnTaskSession) recordLifecycle(action string) {
+	if s == nil || s.manager == nil || s.manager.store == nil {
+		return
+	}
+	event := s.lifecycleEvent(action)
+	if event.Type == "" {
+		return
+	}
+	_, _ = s.manager.store.Append(context.Background(), s.parent.Ref, []session.Event{event})
+}
+
+func (s *spawnTaskSession) lifecycleEvent(action string) session.Event {
+	if s == nil {
+		return session.Event{}
+	}
+	snapshot, err := s.Snapshot(context.Background())
+	if err != nil {
+		return session.Event{}
+	}
+	parent := session.CloneSession(s.parent)
+	if strings.TrimSpace(parent.SessionID) == "" || strings.TrimSpace(snapshot.Ref.ID) == "" {
+		return session.Event{}
+	}
+	participant := session.ParticipantBinding{
+		ID:           strings.TrimSpace(snapshot.Ref.ID),
+		Kind:         session.ParticipantSubagent,
+		Role:         session.ParticipantDelegated,
+		AgentName:    s.agent,
+		Label:        s.agent,
+		SessionID:    stringFromAny(snapshot.Metadata["remote_session_id"]),
+		Source:       "spawn",
+		ParentTurnID: strings.TrimSpace(s.turnID),
+		DelegationID: strings.TrimSpace(snapshot.Ref.ID),
+		AttachedAt:   snapshot.StartedAt,
+	}
+	status := spawnTaskLifecycleStatus(snapshot)
+	return session.Event{
+		SessionID:  parent.SessionID,
+		Type:       session.EventLifecycle,
+		Visibility: session.VisibilityCanonical,
+		Time:       firstNonZeroTime(snapshot.UpdatedAt, snapshot.StartedAt, time.Now().UTC()),
+		Actor:      session.ActorRef{Kind: session.ActorParticipant, ID: participant.ID, Name: firstNonEmpty(participant.Label, participant.AgentName, participant.ID)},
+		Scope: &session.EventScope{
+			TurnID:      strings.TrimSpace(s.turnID),
+			Source:      "spawn",
+			Participant: participant,
+			ACP:         session.ACPRef{SessionID: participant.SessionID},
+		},
+		Lifecycle: &session.LifecycleEvent{
+			Status: status,
+			Reason: spawnTaskLifecycleReason(action, snapshot, status),
+			Meta: map[string]any{
+				"action":  strings.TrimSpace(action),
+				"task_id": strings.TrimSpace(snapshot.Ref.ID),
+			},
+		},
+		Meta: coretool.WithRuntimeTaskMeta(nil, spawnTaskLifecycleMeta(action, snapshot)),
+	}
+}
+
+func (s *spawnTaskSession) finalLifecycleAction() string {
+	if s == nil {
+		return ""
+	}
+	snapshot, err := s.Snapshot(context.Background())
+	if err != nil {
+		return ""
+	}
+	return spawnTaskLifecycleAction(snapshot)
+}
+
+func spawnTaskLifecycleAction(snapshot sandbox.SessionSnapshot) string {
+	switch snapshot.State {
+	case sandbox.SessionCancelled:
+		return "cancelled"
+	case sandbox.SessionFailed:
+		return "failed"
+	case sandbox.SessionCompleted:
+		return "completed"
+	default:
+		if snapshot.Running {
+			return "running"
+		}
+		return "updated"
+	}
+}
+
+func spawnTaskLifecycleStatus(snapshot sandbox.SessionSnapshot) session.LifecycleStatus {
+	switch snapshot.State {
+	case sandbox.SessionCancelled:
+		return session.LifecycleCancelled
+	case sandbox.SessionFailed:
+		return session.LifecycleFailed
+	case sandbox.SessionCompleted:
+		return session.LifecycleCompleted
+	default:
+		if snapshot.Running {
+			return session.LifecycleRunning
+		}
+		if strings.TrimSpace(snapshot.Error) != "" {
+			return session.LifecycleFailed
+		}
+		return session.LifecycleCompleted
+	}
+}
+
+func spawnTaskLifecycleReason(action string, snapshot sandbox.SessionSnapshot, status session.LifecycleStatus) string {
+	parts := []string{"spawn", strings.TrimSpace(action), strings.TrimSpace(snapshot.Ref.ID), string(status)}
+	return strings.Join(nonEmptyStrings(parts), " ")
+}
+
+func spawnTaskLifecycleMeta(action string, snapshot sandbox.SessionSnapshot) map[string]any {
+	meta := map[string]any{
+		"source":         "spawn",
+		"action":         strings.TrimSpace(action),
+		"task_id":        strings.TrimSpace(snapshot.Ref.ID),
+		"task_kind":      "subagent",
+		"state":          strings.TrimSpace(string(snapshot.State)),
+		"running":        snapshot.Running,
+		"supports_input": snapshot.SupportsInput,
+		"backend":        strings.TrimSpace(string(snapshot.Ref.Backend)),
+		"command":        strings.TrimSpace(snapshot.Command),
+	}
+	for key, value := range map[string]string{
+		"agent":             stringFromAny(snapshot.Metadata["agent"]),
+		"remote_session_id": stringFromAny(snapshot.Metadata["remote_session_id"]),
+		"terminal_id":       snapshot.Terminal.ID,
+		"error":             snapshot.Error,
+	} {
+		if text := strings.TrimSpace(value); text != "" {
+			meta[key] = text
+		}
+	}
+	if snapshot.OutputPreview != nil {
+		if text := coretool.JoinRuntimeTaskStreams(snapshot.OutputPreview.Stdout, snapshot.OutputPreview.Stderr); text != "" {
+			meta["output_preview"] = text
+		}
+		if snapshot.OutputPreview.StdoutDroppedBytes > 0 || snapshot.OutputPreview.StderrDroppedBytes > 0 {
+			meta["output_truncated"] = true
+		}
+		if snapshot.OutputPreview.Cursor.Stdout > 0 {
+			meta["stdout_cursor"] = snapshot.OutputPreview.Cursor.Stdout
+		}
+		if snapshot.OutputPreview.Cursor.Stderr > 0 {
+			meta["stderr_cursor"] = snapshot.OutputPreview.Cursor.Stderr
+		}
+	}
+	if !snapshot.Running && snapshot.ExitCode != 0 {
+		meta["exit_code"] = snapshot.ExitCode
+	}
+	if !snapshot.StartedAt.IsZero() {
+		meta["started_at"] = snapshot.StartedAt.Format(time.RFC3339Nano)
+	}
+	if !snapshot.UpdatedAt.IsZero() {
+		meta["updated_at"] = snapshot.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	return meta
+}
+
+func firstNonZeroTime(values ...time.Time) time.Time {
+	for _, value := range values {
+		if !value.IsZero() {
+			return value
+		}
+	}
+	return time.Time{}
+}
+
+func nonEmptyStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if text := strings.TrimSpace(value); text != "" {
+			out = append(out, text)
+		}
+	}
+	return out
+}
+
+func stringFromAny(value any) string {
+	switch typed := value.(type) {
+	case string:
+		return strings.TrimSpace(typed)
+	case fmt.Stringer:
+		return strings.TrimSpace(typed.String())
+	case nil:
+		return ""
+	default:
+		return strings.TrimSpace(fmt.Sprint(value))
+	}
 }
 
 func (s *spawnTaskSession) supportsInputLocked() bool {

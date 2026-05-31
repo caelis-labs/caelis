@@ -1956,6 +1956,11 @@ be migrated before retiring the old stack:
      wait/write/cancel entrypoint. Async subagent completion records canonical
      participant events into the owning session instead of relying on a
      surface-only side channel.
+   - Migrated baseline: async delegated SPAWN tasks now persist canonical
+     `session.EventLifecycle` task snapshots with `caelis.runtime.task`
+     metadata for start, write/cancel, and terminal completion/failure states.
+     Shared `TaskService` history can rebuild subagent lifecycle state from the
+     session store instead of the local SPAWN journal alone.
    - Migrated baseline: async SPAWN tasks now write a core-native local journal
      containing the task snapshot, output cursor data, agent identity, and
      remote ACP session id. A restarted local stack can list/tail/wait completed
@@ -2125,6 +2130,10 @@ be migrated before retiring the old stack:
       that child ACP prompt, `task cancel` can stop it, and `task write` can
       continue a completed child ACP session while preserving canonical
       participant events.
+    - Migrated baseline: delegated SPAWN child task lifecycle is now durable
+      canonical session state. Start, write/cancel, and final child states are
+      recorded as `session.EventLifecycle` events with `caelis.runtime.task`
+      metadata, giving TUI and future APP task panels the same restore path.
     - Migrated baseline: completed async delegated subagent tasks are now
       restored after local process restart from the SPAWN task journal, so task
       lists and task output do not depend on a still-live in-memory manager.
@@ -2237,6 +2246,12 @@ be migrated before retiring the old stack:
       task action snapshots as canonical lifecycle events with runtime task
       metadata, so command-driven task history can be rebuilt from the session
       store without a live sandbox journal or TUI transcript cache.
+    - Migrated baseline: async SPAWN subagent tasks now follow the same
+      canonical lifecycle contract. The local stack records start,
+      write/cancel, and final completion/failure snapshots as
+      `session.EventLifecycle` events carrying `caelis.runtime.task`, while the
+      SPAWN journal remains a recovery/retention mechanism rather than the only
+      lifecycle source.
     - Migrated baseline: host subprocess sessions now have durable output files
       and pid-backed recovery across local runtime restarts. Reopened live host
       sessions are read-only for stdin, but can still be tailed, waited, listed,

@@ -109,6 +109,12 @@ func TestSpawnTaskManagerContinuesRecoveredRemoteTask(t *testing.T) {
 	if childEvent.Scope.Participant.SessionID != "remote-reconnect" {
 		t.Fatalf("participant session id = %q, want remote-reconnect", childEvent.Scope.Participant.SessionID)
 	}
+	if lifecycle := findTaskLifecycleEvent(stored.Events, "spawn-call", "write"); lifecycle == nil || lifecycle.Lifecycle == nil || lifecycle.Lifecycle.Status != session.LifecycleRunning {
+		t.Fatalf("stored events = %#v, want running write lifecycle for continued SPAWN task", stored.Events)
+	}
+	if lifecycle := findTaskLifecycleEvent(stored.Events, "spawn-call", "completed"); lifecycle == nil || lifecycle.Lifecycle == nil || lifecycle.Lifecycle.Status != session.LifecycleCompleted {
+		t.Fatalf("stored events = %#v, want completed lifecycle for continued SPAWN task", stored.Events)
+	}
 }
 
 func TestSpawnTaskManagerResumesRunningJournalPrompt(t *testing.T) {
@@ -210,6 +216,9 @@ func TestSpawnTaskManagerResumesRunningJournalPrompt(t *testing.T) {
 	}
 	if childEvent.Scope.Participant.SessionID != "remote-live" {
 		t.Fatalf("participant session id = %q, want remote-live", childEvent.Scope.Participant.SessionID)
+	}
+	if lifecycle := findTaskLifecycleEvent(stored.Events, "spawn-live", "completed"); lifecycle == nil || lifecycle.Lifecycle == nil || lifecycle.Lifecycle.Status != session.LifecycleCompleted {
+		t.Fatalf("stored events = %#v, want completed lifecycle for recovered SPAWN task", stored.Events)
 	}
 }
 

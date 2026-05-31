@@ -177,14 +177,23 @@ func (d *spawnDelegator) spawnTask(ctx context.Context, req loop.SpawnRequest, i
 	if err != nil {
 		return loop.SpawnResult{}, err
 	}
+	var lifecycleEvents []session.Event
+	lifecycleEvents = appendSpawnLifecycleEvent(lifecycleEvents, task.lifecycleEvent("start"))
 	wait := spawnWaitDuration(in.YieldTimeMS)
 	if wait > 0 {
 		waitCtx, cancel := context.WithTimeout(ctx, wait)
 		_, err := task.Wait(waitCtx)
 		cancel()
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			task.MarkAsync()
-			return loop.SpawnResult{Result: d.resultForTask(req, task, nil)}, nil
+			if !task.MarkAsync() {
+				lifecycleEvents = appendSpawnLifecycleEvent(lifecycleEvents, task.lifecycleEvent(task.finalLifecycleAction()))
+				events := task.Events()
+				return loop.SpawnResult{
+					Result: d.resultForTask(req, task, events),
+					Events: append(lifecycleEvents, events...),
+				}, nil
+			}
+			return loop.SpawnResult{Result: d.resultForTask(req, task, nil), Events: lifecycleEvents}, nil
 		}
 		if err != nil {
 			return loop.SpawnResult{}, err
@@ -195,10 +204,18 @@ func (d *spawnDelegator) spawnTask(ctx context.Context, req loop.SpawnRequest, i
 			return loop.SpawnResult{}, err
 		}
 	}
+	lifecycleEvents = appendSpawnLifecycleEvent(lifecycleEvents, task.lifecycleEvent(task.finalLifecycleAction()))
 	return loop.SpawnResult{
 		Result: d.resultForTask(req, task, task.Events()),
-		Events: task.Events(),
+		Events: append(lifecycleEvents, task.Events()...),
 	}, nil
+}
+
+func appendSpawnLifecycleEvent(events []session.Event, event session.Event) []session.Event {
+	if event.Type == "" {
+		return events
+	}
+	return append(events, event)
 }
 
 func (d *spawnDelegator) resultForTask(req loop.SpawnRequest, task *spawnTaskSession, events []session.Event) tool.Result {

@@ -750,6 +750,9 @@ func TestStackRunsAsyncSpawnThroughTaskWait(t *testing.T) {
 	if spawnResult == nil || spawnResult.Tool.Output["state"] != "running" || spawnResult.Tool.Output["task_id"] != "spawn-call" {
 		t.Fatalf("spawn result = %#v, want running task result", spawnResult)
 	}
+	if lifecycle := findTaskLifecycleEvent(liveEvents, "spawn-call", "start"); lifecycle == nil || lifecycle.Lifecycle == nil || lifecycle.Lifecycle.Status != session.LifecycleRunning {
+		t.Fatalf("live events = %#v, want SPAWN start lifecycle", liveEvents)
+	}
 	taskResult := findToolResult(liveEvents, tooltask.ToolName)
 	if taskResult == nil {
 		t.Fatalf("events = %#v, missing TASK wait result", liveEvents)
@@ -767,6 +770,9 @@ func TestStackRunsAsyncSpawnThroughTaskWait(t *testing.T) {
 	childEvent := findSubagentEvent(snapshot.Events, "spawn-call")
 	if childEvent == nil || session.EventText(*childEvent) != "external helper response" {
 		t.Fatalf("stored events = %#v, want canonical async subagent response", snapshot.Events)
+	}
+	if lifecycle := findTaskLifecycleEvent(snapshot.Events, "spawn-call", "completed"); lifecycle == nil || lifecycle.Lifecycle == nil || lifecycle.Lifecycle.Status != session.LifecycleCompleted {
+		t.Fatalf("stored events = %#v, want completed SPAWN task lifecycle", snapshot.Events)
 	}
 }
 
@@ -856,6 +862,9 @@ func TestStackAsyncSpawnTaskSurvivesCallerContextCancelAfterYield(t *testing.T) 
 	childEvent := findSubagentEvent(snapshot.Events, "spawn-call")
 	if childEvent == nil || session.EventText(*childEvent) != "external helper response" {
 		t.Fatalf("stored events = %#v, want canonical async subagent response after caller cancel", snapshot.Events)
+	}
+	if lifecycle := findTaskLifecycleEvent(snapshot.Events, "spawn-call", "completed"); lifecycle == nil || lifecycle.Lifecycle == nil || lifecycle.Lifecycle.Status != session.LifecycleCompleted {
+		t.Fatalf("stored events = %#v, want completed SPAWN lifecycle after caller cancel", snapshot.Events)
 	}
 }
 
@@ -2669,10 +2678,27 @@ func findToolResult(events []session.Event, name string) *session.Event {
 func findSubagentEvent(events []session.Event, delegationID string) *session.Event {
 	for idx := range events {
 		event := &events[idx]
+		if event.Type == session.EventLifecycle {
+			continue
+		}
 		if event.Scope == nil || event.Scope.Participant.Kind != session.ParticipantSubagent {
 			continue
 		}
 		if event.Scope.Participant.DelegationID == delegationID {
+			return event
+		}
+	}
+	return nil
+}
+
+func findTaskLifecycleEvent(events []session.Event, taskID string, action string) *session.Event {
+	for idx := range events {
+		event := &events[idx]
+		if event.Type != session.EventLifecycle {
+			continue
+		}
+		meta := tool.RuntimeTaskMeta(event.Meta)
+		if meta["task_id"] == taskID && meta["action"] == action {
 			return event
 		}
 	}
