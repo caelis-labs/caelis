@@ -807,12 +807,12 @@ func TestExecuteLineViaDriverPrefersAppSessionEventStream(t *testing.T) {
 	if len(msgs) != 1 {
 		t.Fatalf("executeLineViaDriver() emitted %d msgs, want 1", len(msgs))
 	}
-	env, ok := msgs[0].(kernel.EventEnvelope)
-	if !ok || env.Event.Narrative == nil || env.Event.Narrative.Text != "app stream" {
-		t.Fatalf("first msg = %#v, want app session event converted to gateway envelope", msgs[0])
+	transcript, ok := msgs[0].(TranscriptEventsMsg)
+	if !ok || !transcriptEventsContainText(transcript.Events, "app stream") {
+		t.Fatalf("first msg = %#v, want app session event projected to transcript", msgs[0])
 	}
-	if env.Event.Narrative.Text == "legacy stream" {
-		t.Fatalf("executeLineViaDriver() used legacy event stream")
+	if transcriptEventsContainText(transcript.Events, "legacy stream") {
+		t.Fatalf("executeLineViaDriver() used legacy event stream transcript")
 	}
 }
 

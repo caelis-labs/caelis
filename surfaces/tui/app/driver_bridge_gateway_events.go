@@ -69,30 +69,39 @@ func forwardGatewayTurnEvents(ctx context.Context, driver tuidriver.Driver, turn
 }
 
 func forwardAppSessionTurnEvents(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), events <-chan appviewmodel.SessionEventEnvelope) {
-	ticker := time.NewTicker(gatewayNarrativeBatchInterval)
-	defer ticker.Stop()
-
-	var batcher gatewayNarrativeBatcher
 	for events != nil {
 		select {
 		case <-ctx.Done():
-			batcher.flush(send)
 			return
-		case <-ticker.C:
-			batcher.flush(send)
 		case env, ok := <-events:
 			if !ok {
 				events = nil
 				continue
 			}
-			converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
-			if !ok {
-				continue
-			}
-			forwardGatewayEnvelope(ctx, driver, turn, sender, send, &batcher, converted)
+			forwardAppSessionEnvelope(ctx, driver, turn, sender, send, env)
 		}
 	}
-	batcher.flush(send)
+}
+
+func forwardAppSessionEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), env appviewmodel.SessionEventEnvelope) {
+	converted, ok := eventbridge.KernelEnvelopeFromAppEvent(env)
+	if !ok {
+		return
+	}
+	if converted.Err != nil {
+		send(converted)
+		return
+	}
+	if msg, ok := gatewayApprovalReviewHintMsg(converted.Event); ok {
+		send(msg)
+	}
+	if transcriptEvents := ProjectGatewayEventToTranscriptEvents(converted.Event); len(transcriptEvents) > 0 {
+		send(TranscriptEventsMsg{Events: transcriptEvents})
+	}
+	startTerminalStreamForwarder(ctx, driver, converted, sender)
+	if isApprovalGatewayEvent(converted.Event.Kind) && !isAutomaticApprovalEvent(converted.Event.ApprovalPayload) {
+		sendApprovalPrompt(ctx, turn, converted.Event.ApprovalPayload, send)
+	}
 }
 
 func forwardGatewayEnvelope(ctx context.Context, driver tuidriver.Driver, turn tuidriver.Turn, sender *ProgramSender, send func(tea.Msg), batcher *gatewayNarrativeBatcher, env kernel.EventEnvelope) {

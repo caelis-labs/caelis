@@ -134,22 +134,31 @@ func gatewayApprovalSummary(ev kernel.Event) (string, string) {
 }
 
 func (m *Model) applyAutomaticApprovalReviewHint(ev kernel.Event) tea.Cmd {
-	if m == nil || ev.ApprovalPayload == nil || !isAutomaticApprovalEvent(ev.ApprovalPayload) {
+	msg, ok := gatewayApprovalReviewHintMsg(ev)
+	if m == nil || !ok {
 		return nil
+	}
+	m.handleApprovalReviewHintMsg(msg)
+	if msg.Pending {
+		return m.resumeRunningAnimationIfNeeded()
+	}
+	return nil
+}
+
+func gatewayApprovalReviewHintMsg(ev kernel.Event) (ApprovalReviewHintMsg, bool) {
+	if ev.ApprovalPayload == nil || !isAutomaticApprovalEvent(ev.ApprovalPayload) {
+		return ApprovalReviewHintMsg{}, false
 	}
 	switch ev.ApprovalPayload.ReviewStatus {
 	case kernel.ApprovalReviewStatusInProgress:
 		tool := firstNonEmpty(strings.TrimSpace(ev.ApprovalPayload.ToolName), "approval request")
-		msg := ApprovalReviewHintMsg{Text: "Reviewing approval request: " + tool, Pending: true}
-		m.handleApprovalReviewHintMsg(msg)
-		return m.resumeRunningAnimationIfNeeded()
+		return ApprovalReviewHintMsg{Text: "Reviewing approval request: " + tool, Pending: true}, true
 	case kernel.ApprovalReviewStatusApproved,
 		kernel.ApprovalReviewStatusDenied,
 		kernel.ApprovalReviewStatusTimedOut,
 		kernel.ApprovalReviewStatusFailed:
-		m.handleApprovalReviewHintMsg(ApprovalReviewHintMsg{})
-		return nil
+		return ApprovalReviewHintMsg{}, true
 	default:
-		return nil
+		return ApprovalReviewHintMsg{}, false
 	}
 }
