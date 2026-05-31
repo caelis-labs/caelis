@@ -18,7 +18,6 @@ import (
 
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
 
@@ -44,6 +43,12 @@ type activeRunCancel struct {
 type programSenderBoundContextKey struct{}
 
 const programSenderCloseTimeout = 250 * time.Millisecond
+
+const (
+	approvalOutcomeSelected = "selected"
+	approvalOutcomeApproved = "approved"
+	approvalOutcomeRejected = "rejected"
+)
 
 func (s *ProgramSender) sendFunc() func(tea.Msg) {
 	if s == nil {
@@ -679,30 +684,6 @@ func sendApprovalItemPrompt(ctx context.Context, turn tuidriver.Turn, req *appvi
 	go awaitApprovalItemPrompt(ctx, turn, req, responses, send)
 }
 
-func isAutomaticApprovalEvent(req *kernel.ApprovalPayload) bool {
-	if req == nil {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(req.DecisionSource), "auto-review") ||
-		strings.TrimSpace(string(req.ReviewStatus)) != "" ||
-		strings.TrimSpace(req.ReviewID) != ""
-}
-
-func automaticApprovalReviewDisplayText(req *kernel.ApprovalPayload) string {
-	if req == nil {
-		return ""
-	}
-	switch req.ReviewStatus {
-	case kernel.ApprovalReviewStatusApproved, kernel.ApprovalReviewStatusDenied, kernel.ApprovalReviewStatusTimedOut, kernel.ApprovalReviewStatusFailed:
-		return firstNonEmpty(strings.TrimSpace(req.ReviewText), "Automatic approval review "+strings.TrimSpace(string(req.ReviewStatus)))
-	default:
-		if text := strings.TrimSpace(req.ReviewText); text != "" {
-			return text
-		}
-		return ""
-	}
-}
-
 func awaitApprovalItemPrompt(ctx context.Context, turn tuidriver.Turn, req *appviewmodel.ApprovalItem, responses <-chan PromptResponse, send func(tea.Msg)) {
 	ctx = contextOrBackground(ctx)
 	var response PromptResponse
@@ -734,14 +715,14 @@ func approvalDecisionFromPromptOptions(options []approvalPromptOption, response 
 			continue
 		}
 		return coreruntime.ApprovalDecision{
-			Outcome:  string(kernel.ApprovalStatusSelected),
+			Outcome:  approvalOutcomeSelected,
 			OptionID: selected,
 			Approved: approvalOptionAllows(opt.Kind, opt.Name, opt.ID),
 		}
 	}
 	switch strings.ToLower(selected) {
 	case "approve", "allow", "yes", "y":
-		return coreruntime.ApprovalDecision{Outcome: string(kernel.ApprovalStatusApproved), Approved: true}
+		return coreruntime.ApprovalDecision{Outcome: approvalOutcomeApproved, Approved: true}
 	default:
 		return rejectionApprovalDecision(options)
 	}
@@ -753,12 +734,12 @@ func rejectionApprovalDecision(options []approvalPromptOption) coreruntime.Appro
 			continue
 		}
 		return coreruntime.ApprovalDecision{
-			Outcome:  string(kernel.ApprovalStatusSelected),
+			Outcome:  approvalOutcomeSelected,
 			OptionID: strings.TrimSpace(opt.ID),
 			Approved: false,
 		}
 	}
-	return coreruntime.ApprovalDecision{Outcome: string(kernel.ApprovalStatusRejected), Approved: false}
+	return coreruntime.ApprovalDecision{Outcome: approvalOutcomeRejected, Approved: false}
 }
 
 func approvalOptionAllows(kind string, name string, id string) bool {

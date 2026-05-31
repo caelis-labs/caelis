@@ -122,6 +122,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return "surfaces/tui/gatewaydriver app-status projection must use app view-model contracts instead of public kernel usage DTOs"
 	case rel == "surfaces/tui/app/driver_bridge_status.go" && target == "kernel":
 		return "surfaces/tui/app status rendering must use app view-model contracts instead of public kernel usage DTOs"
+	case (strings.HasPrefix(rel, "surfaces/tui/app/") || strings.HasPrefix(rel, "surfaces/tui/gatewaydriver/")) &&
+		(pathIn(target, "kernel", "internal/kernel") || strings.HasPrefix(target, "ports/")):
+		return "TUI production packages must use core/app view-model contracts instead of legacy kernel or ports"
 	case strings.HasPrefix(rel, "core/"):
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
 			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"

@@ -349,6 +349,30 @@ func gatewayApprovalSummary(ev kernel.Event) (string, string) {
 	return "", ""
 }
 
+func isAutomaticApprovalEvent(req *kernel.ApprovalPayload) bool {
+	if req == nil {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(req.DecisionSource), "auto-review") ||
+		strings.TrimSpace(string(req.ReviewStatus)) != "" ||
+		strings.TrimSpace(req.ReviewID) != ""
+}
+
+func automaticApprovalReviewDisplayText(req *kernel.ApprovalPayload) string {
+	if req == nil {
+		return ""
+	}
+	switch req.ReviewStatus {
+	case kernel.ApprovalReviewStatusApproved, kernel.ApprovalReviewStatusDenied, kernel.ApprovalReviewStatusTimedOut, kernel.ApprovalReviewStatusFailed:
+		return firstNonEmpty(strings.TrimSpace(req.ReviewText), "Automatic approval review "+strings.TrimSpace(string(req.ReviewStatus)))
+	default:
+		if text := strings.TrimSpace(req.ReviewText); text != "" {
+			return text
+		}
+		return ""
+	}
+}
+
 func gatewayApprovalReviewHintMsg(ev kernel.Event) (ApprovalReviewHintMsg, bool) {
 	if ev.ApprovalPayload == nil || !isAutomaticApprovalEvent(ev.ApprovalPayload) {
 		return ApprovalReviewHintMsg{}, false

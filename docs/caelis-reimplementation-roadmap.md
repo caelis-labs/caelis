@@ -1448,6 +1448,11 @@ be migrated before retiring the old stack:
      `core/runtime` approval decisions. The shared approval view model carries
      command, sandbox-permission, justification, risk, and option data so TUI
      and the future APP can render the same prompt without `kernel.ApprovalPayload`.
+   - Migrated baseline: production TUI app and gatewaydriver packages no
+     longer import the old public `kernel` facade or broad `ports/*` contracts.
+     The production `cmd/caelis` dependency graph no longer pulls in
+     `kernel/internal/kernel`; the remaining old production dependency is the
+     explicitly tracked non-host sandbox adapter path.
    - Migrated baseline: TUI status no longer has a parallel legacy
      `ports/session` usage replay parser in gatewaydriver. Session usage shown
      by the app-service path comes from the shared core-session status
