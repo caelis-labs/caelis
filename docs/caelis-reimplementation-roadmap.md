@@ -935,6 +935,10 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared task command baseline: `TaskService` is now reachable from both
   app-level command execution and the production TUI driver path for
   list/tail/wait/write/cancel/release/start task operations.
+- Shared doctor command baseline: `CommandService` now exposes `/doctor` and
+  `/doctor fix` on top of shared status and sandbox lifecycle services, so APP,
+  ACP, and CLI command surfaces can reuse diagnostics without importing TUI
+  doctor formatting or backend-specific sandbox methods.
 - App provider configuration baseline: provider endpoint API/auth semantics now
   live in `core/model`; `internal/cli`, `internal/app/services`, and the
   service-bound TUI connect/model config path no longer import
@@ -1371,10 +1375,11 @@ be migrated before retiring the old stack:
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
-     `/connect`, `/status`, `/compact`, `/model`, `/approval`, `/resume`,
-     `/task`, and dynamic `/<agent> <prompt>` participant invocation now share
-     app-service behavior; remaining interactive commands can be added without
-     making ACP, TUI, or APP surfaces own command semantics.
+     `/connect`, `/status`, `/doctor`, `/compact`, `/model`, `/approval`,
+     `/resume`, `/task`, and dynamic `/<agent> <prompt>` participant
+     invocation now share app-service behavior; remaining interactive commands
+     can be added without making ACP, TUI, or APP surfaces own command
+     semantics.
    - Migrated baseline: `SettingsService.Panel` now provides an APP-ready
      settings composition contract that combines normalized settings, runtime
      status, model/agent counts, sandbox lifecycle status/actions, resource

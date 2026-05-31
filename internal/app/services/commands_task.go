@@ -181,7 +181,7 @@ func formatCommandTaskItem(task appviewmodel.TaskItem) string {
 	if source := strings.TrimSpace(task.Source); source != "" && !strings.EqualFold(source, "live") {
 		parts = append(parts, "source="+source)
 	}
-	return strings.Join(commandTaskNonEmpty(parts), "  ")
+	return strings.Join(commandNonEmpty(parts), "  ")
 }
 
 func commandTaskState(task appviewmodel.TaskItem) string {
@@ -240,7 +240,7 @@ func commandTaskIndentBlock(text string) []string {
 	return out
 }
 
-func commandTaskNonEmpty(values []string) []string {
+func commandNonEmpty(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
 		if value = strings.TrimSpace(value); value != "" {

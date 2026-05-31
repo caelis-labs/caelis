@@ -30,6 +30,7 @@ func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) 
 		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
 		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual]"},
 		{Name: "status", Description: "Show current runtime status"},
+		{Name: "doctor", Description: "Diagnose model, session store, resources, and sandbox readiness", InputHint: "[fix]"},
 		{Name: "task", Description: "Inspect and control live or durable tasks", InputHint: "list|tail|wait|write|cancel|release|start"},
 		{Name: "resume", Description: "Resume a previous session", InputHint: "[session id]"},
 		{Name: "compact", Description: "Compact the current conversation"},
@@ -79,6 +80,8 @@ func (s CommandService) Execute(ctx context.Context, req CommandExecutionRequest
 		return s.executeApproval(ctx, req.SessionRef, args)
 	case "connect":
 		return s.executeConnect(ctx, req.SessionRef, args)
+	case "doctor":
+		return s.executeDoctor(ctx, req.SessionRef, args)
 	case "model":
 		return s.executeModel(ctx, req.SessionRef, args)
 	case "resume":

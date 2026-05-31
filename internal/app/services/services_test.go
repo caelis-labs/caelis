@@ -569,8 +569,8 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(view.Commands) != 8 {
-		t.Fatalf("commands = %#v, want eight core commands", view.Commands)
+	if len(view.Commands) != 9 {
+		t.Fatalf("commands = %#v, want nine core commands", view.Commands)
 	}
 	agent, ok := findCommandView(view.Commands, "agent")
 	if !ok || agent.InputHint != "use|add|install|list|remove" {
@@ -583,6 +583,10 @@ func TestCommandServiceAvailableProjectsCoreCommands(t *testing.T) {
 	task, ok := findCommandView(view.Commands, "task")
 	if !ok || task.InputHint != "list|tail|wait|write|cancel|release|start" {
 		t.Fatalf("task command = %#v ok=%v, want task management hint", task, ok)
+	}
+	doctor, ok := findCommandView(view.Commands, "doctor")
+	if !ok || doctor.InputHint != "[fix]" {
+		t.Fatalf("doctor command = %#v ok=%v, want doctor hint", doctor, ok)
 	}
 }
 
@@ -671,6 +675,69 @@ func TestCommandServiceExecuteStatus(t *testing.T) {
 	}
 	if unhandled.Handled {
 		t.Fatalf("non-slash execution = %#v, want unhandled", unhandled)
+	}
+}
+
+func TestCommandServiceExecuteDoctorAndFix(t *testing.T) {
+	ctx := context.Background()
+	engine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{SessionID: "sess-doctor"}},
+	}}
+	rt := &recordingLifecycleSandboxRuntime{
+		fakeSandboxRuntime: fakeSandboxRuntime{
+			descriptor: sandbox.Descriptor{
+				Backend: sandbox.BackendWindows,
+				DefaultConstraints: sandbox.Constraints{
+					Route:   sandbox.RouteSandbox,
+					Backend: sandbox.BackendWindows,
+				},
+			},
+			status: sandbox.Status{
+				RequestedBackend: sandbox.BackendWindows,
+				ResolvedBackend:  sandbox.BackendWindows,
+				Setup: sandbox.SetupStatus{
+					Required: true,
+					Error:    "workspace setup required",
+				},
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{
+			AppName: "caelis",
+			UserID:  "tester",
+			Store: config.Store{
+				Backend: "sqlite",
+				URI:     "/tmp/caelis.db",
+			},
+			Sandbox: config.Sandbox{Backend: "windows"},
+		},
+		Engine:  engine,
+		Sandbox: rt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-doctor"},
+		Input:      "/doctor",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"doctor:", "warn model not configured", "ok session store: sqlite /tmp/caelis.db", "ok session: sess-doctor", "warn sandbox setup: workspace setup required"} {
+		if !strings.Contains(report.Output, want) {
+			t.Fatalf("doctor output = %q, missing %q", report.Output, want)
+		}
+	}
+
+	fixed, err := svc.Commands().Execute(ctx, CommandExecutionRequest{Input: "/doctor fix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rt.repairCalls != 1 || !strings.Contains(fixed.Output, "sandbox repair complete") || !strings.Contains(fixed.Output, "doctor:") {
+		t.Fatalf("doctor fix output = %q repairCalls=%d, want repair and report", fixed.Output, rt.repairCalls)
 	}
 }
 
