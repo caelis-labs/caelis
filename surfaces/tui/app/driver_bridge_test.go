@@ -1000,9 +1000,6 @@ func TestSlashConnectCallsDriverAndUpdatesStatus(t *testing.T) {
 	}
 	var msgs []tea.Msg
 	slashConnect(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "minimax MiniMax-M2 - 60 sk-test 204800 8192 low,medium")
-	if driver.connectCalls != 0 {
-		t.Fatalf("connectCalls = %d, want 0 with shared command executor", driver.connectCalls)
-	}
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/connect minimax MiniMax-M2 - 60 sk-test 204800 8192 low,medium" {
 		t.Fatalf("command calls=%d input=%q, want shared /connect command", driver.commandCalls, driver.lastCommandInput)
 	}
@@ -1115,9 +1112,6 @@ func TestSlashModelDeleteDisabledForACPController(t *testing.T) {
 	}
 	var msgs []tea.Msg
 	slashModelWithContext(context.Background(), driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
-	if driver.deleteModelCalls != 0 {
-		t.Fatalf("deleteModelCalls = %d, want 0 under ACP controller", driver.deleteModelCalls)
-	}
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/model del minimax/MiniMax-M1" {
 		t.Fatalf("command calls=%d input=%q, want shared /model command", driver.commandCalls, driver.lastCommandInput)
 	}
@@ -1727,9 +1721,6 @@ func TestSlashConnectPassesEnvironmentVariableSecretToSharedCommand(t *testing.T
 		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "connect", Output: "connected: openai/gpt-4o"},
 	}
 	slashConnect(driver, func(tea.Msg) {}, "openai gpt-4o - 60 env:OPENAI_API_KEY")
-	if driver.connectCalls != 0 {
-		t.Fatalf("connectCalls = %d, want 0 with shared command executor", driver.connectCalls)
-	}
 	if got := driver.lastCommandInput; got != "/connect openai gpt-4o - 60 env:OPENAI_API_KEY" {
 		t.Fatalf("lastCommandInput = %q, want env secret preserved for shared command", got)
 	}
@@ -1742,9 +1733,6 @@ func TestSlashModelUseCallsDriverAndUpdatesStatus(t *testing.T) {
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "use minimax/MiniMax-M2")
-	if driver.useModelCalls != 0 {
-		t.Fatalf("useModelCalls = %d, want 0 with shared command executor", driver.useModelCalls)
-	}
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/model use minimax/MiniMax-M2" {
 		t.Fatalf("command calls=%d input=%q, want shared /model use command", driver.commandCalls, driver.lastCommandInput)
 	}
@@ -1759,9 +1747,6 @@ func TestSlashModelUsePassesReasoningLevel(t *testing.T) {
 		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "model", Output: "model switched to: deepseek/deepseek-v4-pro (reasoning: high)"},
 	}
 	slashModel(driver, func(tea.Msg) {}, "use deepseek/deepseek-v4-pro high")
-	if driver.useModelCalls != 0 {
-		t.Fatalf("useModelCalls = %d, want 0 with shared command executor", driver.useModelCalls)
-	}
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/model use deepseek/deepseek-v4-pro high" {
 		t.Fatalf("command calls=%d input=%q, want shared /model use command with reasoning", driver.commandCalls, driver.lastCommandInput)
 	}
@@ -1774,9 +1759,6 @@ func TestSlashModelDeleteCallsDriverAndRefreshesStatus(t *testing.T) {
 	}
 	var msgs []tea.Msg
 	slashModel(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "del minimax/MiniMax-M1")
-	if driver.deleteModelCalls != 0 {
-		t.Fatalf("deleteModelCalls = %d, want 0 with shared command executor", driver.deleteModelCalls)
-	}
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/model del minimax/MiniMax-M1" {
 		t.Fatalf("command calls=%d input=%q, want shared /model del command", driver.commandCalls, driver.lastCommandInput)
 	}
@@ -1912,6 +1894,27 @@ func TestSlashApprovalUsesSharedCommandExecutor(t *testing.T) {
 	}
 }
 
+func TestConfigFromDriverToggleModeUsesSharedCommandExecutor(t *testing.T) {
+	driver := &bridgeTestDriver{
+		status:      tuidriver.StatusSnapshot{ModeLabel: "manual", SessionMode: "manual"},
+		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "approval", Output: "approval mode: manual"},
+	}
+	cfg := ConfigFromDriver(driver, &ProgramSender{}, Config{})
+	if cfg.ToggleMode == nil {
+		t.Fatal("ToggleMode = nil, want shared command executor binding")
+	}
+	hint, err := cfg.ToggleMode()
+	if err != nil {
+		t.Fatalf("ToggleMode() error = %v", err)
+	}
+	if driver.commandCalls != 1 || driver.lastCommandInput != "/approval toggle" {
+		t.Fatalf("toggle command calls=%d input=%q, want shared /approval toggle command", driver.commandCalls, driver.lastCommandInput)
+	}
+	if hint != "manual approval mode enabled" {
+		t.Fatalf("ToggleMode() hint = %q, want manual approval hint", hint)
+	}
+}
+
 func TestSlashCompactUsesSharedCommandExecutor(t *testing.T) {
 	driver := &bridgeTestDriver{
 		commandView: tuidriver.CommandExecutionView{Handled: true, Command: "compact", Output: "compaction completed"},
@@ -1920,9 +1923,6 @@ func TestSlashCompactUsesSharedCommandExecutor(t *testing.T) {
 	result := slashCompact(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "")
 	if result.Err != nil {
 		t.Fatalf("slashCompact() error = %v", result.Err)
-	}
-	if driver.compactCalls != 0 {
-		t.Fatalf("compactCalls = %d, want 0 with shared command executor", driver.compactCalls)
 	}
 	if driver.commandCalls != 1 || driver.lastCommandInput != "/compact" {
 		t.Fatalf("compact command calls=%d input=%q, want shared /compact command", driver.commandCalls, driver.lastCommandInput)
@@ -1938,9 +1938,6 @@ func TestSlashCompactRejectsArguments(t *testing.T) {
 	result := slashCompact(driver, func(msg tea.Msg) { msgs = append(msgs, msg) }, "note")
 	if result.Err != nil {
 		t.Fatalf("slashCompact() error = %v", result.Err)
-	}
-	if driver.compactCalls != 0 {
-		t.Fatalf("compactCalls = %d, want 0", driver.compactCalls)
 	}
 	if driver.commandCalls != 0 {
 		t.Fatalf("commandCalls = %d, want 0 for invalid /compact args", driver.commandCalls)
@@ -1985,27 +1982,14 @@ func sandboxProgressMessagesContain(messages []tea.Msg, text string) bool {
 
 type bridgeTestDriver struct {
 	status                   tuidriver.StatusSnapshot
-	connectStatus            tuidriver.StatusSnapshot
-	useModelStatus           tuidriver.StatusSnapshot
 	newSession               session.Session
 	resumedSession           session.Session
 	replay                   []kernel.EventEnvelope
-	connectCalls             int
-	useModelCalls            int
-	deleteModelCalls         int
 	listAgentCalls           int
 	agentStatusCalls         int
 	addAgentCalls            int
 	removeAgentCalls         int
 	handoffAgentCalls        int
-	prepareSandboxCalls      int
-	repairSandboxCalls       int
-	resetSandboxCalls        int
-	compactCalls             int
-	lastConnect              tuidriver.ConnectConfig
-	lastModelAlias           string
-	lastReasoningEffort      string
-	lastDeletedAlias         string
 	lastAddedAgent           string
 	lastAddOptions           tuidriver.AgentAddOptions
 	lastRemovedAgent         string
@@ -2132,29 +2116,6 @@ func (d *bridgeSubmitDriver) ListSessions(context.Context, int) ([]tuidriver.Res
 func (d *bridgeSubmitDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
 	return nil, nil
 }
-func (d *bridgeSubmitDriver) Compact(context.Context) error { return nil }
-func (d *bridgeSubmitDriver) Connect(context.Context, tuidriver.ConnectConfig) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) UseModel(context.Context, string, ...string) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) DeleteModel(context.Context, string) error { return nil }
-func (d *bridgeSubmitDriver) CycleSessionMode(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) PrepareSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) RepairSandbox(context.Context) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
-func (d *bridgeSubmitDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
-	return tuidriver.StatusSnapshot{}, nil
-}
 func (d *bridgeSubmitDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
 	return nil, nil
 }
@@ -2268,78 +2229,6 @@ func (d *bridgeTestDriver) ListSessions(context.Context, int) ([]tuidriver.Resum
 }
 func (d *bridgeTestDriver) ReplayEvents(context.Context) ([]kernel.EventEnvelope, error) {
 	return d.replay, nil
-}
-func (d *bridgeTestDriver) Compact(context.Context) error {
-	d.compactCalls++
-	return nil
-}
-func (d *bridgeTestDriver) Connect(_ context.Context, cfg tuidriver.ConnectConfig) (tuidriver.StatusSnapshot, error) {
-	d.connectCalls++
-	d.lastConnect = cfg
-	if d.connectStatus.Model != "" || d.connectStatus.Workspace != "" || d.connectStatus.ModeLabel != "" {
-		return d.connectStatus, nil
-	}
-	return d.status, nil
-}
-func (d *bridgeTestDriver) UseModel(_ context.Context, alias string, reasoningEffort ...string) (tuidriver.StatusSnapshot, error) {
-	d.useModelCalls++
-	d.lastModelAlias = alias
-	if len(reasoningEffort) > 0 {
-		d.lastReasoningEffort = reasoningEffort[0]
-	}
-	if d.useModelStatus.Model != "" || d.useModelStatus.Workspace != "" || d.useModelStatus.ModeLabel != "" {
-		return d.useModelStatus, nil
-	}
-	return d.status, nil
-}
-func (d *bridgeTestDriver) DeleteModel(_ context.Context, alias string) error {
-	d.deleteModelCalls++
-	d.lastDeletedAlias = alias
-	return nil
-}
-func (d *bridgeTestDriver) CycleSessionMode(context.Context) (tuidriver.StatusSnapshot, error) {
-	return d.status, nil
-}
-func (d *bridgeTestDriver) SetSandboxBackend(context.Context, string) (tuidriver.StatusSnapshot, error) {
-	return d.status, nil
-}
-func (d *bridgeTestDriver) PrepareSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
-	d.prepareSandboxCalls++
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "preparing current workspace ACL policy",
-		Step:    1,
-		Total:   2,
-	})
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "debug-only setup detail",
-		Debug:   true,
-	})
-	return d.status, nil
-}
-func (d *bridgeTestDriver) RepairSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
-	d.repairSandboxCalls++
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "repairing current workspace ACL policy",
-		Step:    1,
-		Total:   1,
-	})
-	return d.status, nil
-}
-func (d *bridgeTestDriver) ResetSandbox(ctx context.Context) (tuidriver.StatusSnapshot, error) {
-	d.resetSandboxCalls++
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "removing Windows sandbox ACL state",
-		Step:    3,
-		Total:   6,
-	})
-	sandbox.ReportPrepareProgress(ctx, sandbox.PrepareProgress{
-		Message: "debug-only reset detail",
-		Debug:   true,
-	})
-	return d.status, nil
-}
-func (d *bridgeTestDriver) SetSessionMode(context.Context, string) (tuidriver.StatusSnapshot, error) {
-	return d.status, nil
 }
 func (d *bridgeTestDriver) ListAgents(context.Context, int) ([]tuidriver.AgentCandidate, error) {
 	d.listAgentCalls++

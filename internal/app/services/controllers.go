@@ -241,6 +241,21 @@ func (s ControllerService) SetMode(ctx context.Context, ref session.Ref, mode st
 	return s.statusFromSnapshot(ctx, snapshot, controller)
 }
 
+func (s ControllerService) CycleMode(ctx context.Context, ref session.Ref) (ControllerStatus, error) {
+	status, ok, err := s.Status(ctx, ref)
+	if err != nil {
+		return ControllerStatus{}, err
+	}
+	if !ok {
+		return ControllerStatus{}, errors.New("app/services: no active ACP controller")
+	}
+	next, err := nextControllerMode(status)
+	if err != nil {
+		return ControllerStatus{}, err
+	}
+	return s.SetMode(ctx, ref, next.ID)
+}
+
 func (s ControllerService) activeControllerSnapshot(ctx context.Context, ref session.Ref) (session.Snapshot, session.ControllerBinding, bool, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -356,6 +371,48 @@ func controllerModeOptions() []ControllerMode {
 			ID:          strings.TrimSpace(choice.ID),
 			Name:        strings.TrimSpace(choice.Name),
 			Description: strings.TrimSpace(choice.Description),
+		})
+	}
+	return out
+}
+
+func nextControllerMode(status ControllerStatus) (ControllerMode, error) {
+	modes := compactControllerModes(status.ModeOptions)
+	if len(modes) == 0 {
+		return ControllerMode{}, errors.New("app/services: remote ACP controller did not declare session modes")
+	}
+	current := strings.TrimSpace(status.Mode)
+	if current == "" {
+		return modes[0], nil
+	}
+	for i, mode := range modes {
+		if strings.EqualFold(strings.TrimSpace(mode.ID), current) || strings.EqualFold(strings.TrimSpace(mode.Name), current) {
+			return modes[(i+1)%len(modes)], nil
+		}
+	}
+	return modes[0], nil
+}
+
+func compactControllerModes(modes []ControllerMode) []ControllerMode {
+	if len(modes) == 0 {
+		return nil
+	}
+	out := make([]ControllerMode, 0, len(modes))
+	seen := map[string]struct{}{}
+	for _, mode := range modes {
+		id := strings.TrimSpace(mode.ID)
+		if id == "" {
+			continue
+		}
+		key := strings.ToLower(id)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ControllerMode{
+			ID:          id,
+			Name:        strings.TrimSpace(mode.Name),
+			Description: strings.TrimSpace(mode.Description),
 		})
 	}
 	return out

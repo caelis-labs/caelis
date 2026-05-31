@@ -28,7 +28,7 @@ func (s CommandService) Available(ctx context.Context, _ CommandCatalogRequest) 
 		{Name: "agent", Description: "Manage ACP agents", InputHint: "use|add|install|list|remove"},
 		{Name: "connect", Description: "Configure a model provider", InputHint: "provider model [base-url] [timeout] [token] [context] [max-output] [reasoning-levels]"},
 		{Name: "model", Description: "Switch or inspect models", InputHint: "use <alias> [reasoning]|del <alias>"},
-		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual]"},
+		{Name: "approval", Description: "Inspect or switch approval mode", InputHint: "[auto-review|manual|toggle]"},
 		{Name: "status", Description: "Show current runtime status"},
 		{Name: "settings", Description: "Show shared settings and diagnostics panel", InputHint: "[run <action-id> [confirm]]"},
 		{Name: "doctor", Description: "Diagnose model, session store, resources, and sandbox readiness", InputHint: "[fix]"},
@@ -498,6 +498,17 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 		if len(fields) != 1 {
 			return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /approval [mode]")
 		}
+		if isApprovalToggleArg(fields[0]) {
+			next, err := s.services.Controllers().CycleMode(ctx, ref)
+			if err != nil {
+				return appviewmodel.CommandExecutionView{}, err
+			}
+			return appviewmodel.CommandExecutionView{
+				Handled: true,
+				Command: "approval",
+				Output:  "approval mode: " + firstNonEmpty(next.Mode, fields[0]),
+			}, nil
+		}
 		next, err := s.services.Controllers().SetMode(ctx, ref, fields[0])
 		if err != nil {
 			return appviewmodel.CommandExecutionView{}, err
@@ -521,7 +532,18 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 	}
 	fields := strings.Fields(mode)
 	if len(fields) != 1 {
-		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /approval [auto-review|manual]")
+		return appviewmodel.CommandExecutionView{}, fmt.Errorf("app/services: usage: /approval [auto-review|manual|toggle]")
+	}
+	if isApprovalToggleArg(fields[0]) {
+		next, err := s.services.Modes().Toggle(ctx, ref)
+		if err != nil {
+			return appviewmodel.CommandExecutionView{}, err
+		}
+		return appviewmodel.CommandExecutionView{
+			Handled: true,
+			Command: "approval",
+			Output:  "approval mode: " + next.ID,
+		}, nil
 	}
 	next, err := s.services.Modes().Set(ctx, ref, fields[0])
 	if err != nil {
@@ -532,6 +554,15 @@ func (s CommandService) executeApproval(ctx context.Context, ref session.Ref, ar
 		Command: "approval",
 		Output:  "approval mode: " + next.ID,
 	}, nil
+}
+
+func isApprovalToggleArg(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "toggle", "cycle", "next":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s CommandService) executeModel(ctx context.Context, ref session.Ref, args string) (appviewmodel.CommandExecutionView, error) {

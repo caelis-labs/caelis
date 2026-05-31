@@ -1311,6 +1311,16 @@ func TestCommandServiceExecuteModelAndApproval(t *testing.T) {
 	if manual.Output != "approval mode: manual" || engine.state[StateSessionMode] != coreruntime.SessionModeManual {
 		t.Fatalf("approval manual = %#v state=%#v, want manual", manual, engine.state)
 	}
+	toggled, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-command"},
+		Input:      "/approval toggle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toggled.Output != "approval mode: auto-review" || engine.state[StateSessionMode] != coreruntime.SessionModeAutoReview {
+		t.Fatalf("approval toggle = %#v state=%#v, want auto-review", toggled, engine.state)
+	}
 
 	deleted, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-command"},
@@ -1440,11 +1450,50 @@ func TestCommandServiceModelAndApprovalUseACPControllerState(t *testing.T) {
 	if _, ok := engine.state[StateSessionMode]; ok {
 		t.Fatalf("local session mode state = %#v, want unchanged under ACP controller", engine.state)
 	}
+	toggled, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
+		SessionRef: session.Ref{SessionID: "sess-controller"},
+		Input:      "/approval toggle",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toggled.Output != "approval mode: auto-review" || engine.state[StateControllerMode] != "auto-review" {
+		t.Fatalf("controller approval toggle = %#v state=%#v, want auto-review", toggled, engine.state)
+	}
 	if _, err := svc.Commands().Execute(ctx, CommandExecutionRequest{
 		SessionRef: session.Ref{SessionID: "sess-controller"},
 		Input:      "/model del remote-model",
 	}); err == nil {
 		t.Fatal("/model del under ACP controller error = nil, want usage error")
+	}
+}
+
+func TestNextControllerModeUsesDeclaredModeOrder(t *testing.T) {
+	next, err := nextControllerMode(ControllerStatus{
+		Mode: "plan",
+		ModeOptions: []ControllerMode{
+			{ID: "plan", Name: "Plan"},
+			{ID: "code", Name: "Code"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.ID != "code" {
+		t.Fatalf("next mode = %#v, want code", next)
+	}
+	next, err = nextControllerMode(ControllerStatus{
+		Mode: "Code",
+		ModeOptions: []ControllerMode{
+			{ID: "plan", Name: "Plan"},
+			{ID: "code", Name: "Code"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.ID != "plan" {
+		t.Fatalf("next mode from name = %#v, want plan", next)
 	}
 }
 

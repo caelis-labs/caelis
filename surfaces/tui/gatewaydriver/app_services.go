@@ -8,7 +8,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/config"
 	coremodel "github.com/OnslaughtSnail/caelis/core/model"
 	"github.com/OnslaughtSnail/caelis/core/plugin"
-	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	coresandbox "github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
@@ -264,15 +263,7 @@ func BindAppServices(stack *DriverStack, svc appservices.Services) *DriverStack 
 		return strings.TrimSpace(choice.ID), nil
 	}
 	stack.CycleSessionModeFn = func(ctx context.Context, ref portsession.SessionRef) (string, error) {
-		current, err := svc.Modes().CurrentID(ctx, coreRefFromPort(ref))
-		if err != nil {
-			return "", err
-		}
-		next := coreruntime.SessionModeManual
-		if current == coreruntime.SessionModeManual {
-			next = coreruntime.SessionModeAutoReview
-		}
-		choice, err := svc.Modes().Set(ctx, coreRefFromPort(ref), next)
+		choice, err := svc.Modes().Toggle(ctx, coreRefFromPort(ref))
 		if err != nil {
 			return "", err
 		}

@@ -1331,6 +1331,12 @@ be migrated before retiring the old stack:
      command refresh path prefers that catalog for service-owned and dynamic
      external-ACP commands, while keeping help/exit/quit and ACP-controller
      filtering as surface-local behavior.
+   - Migrated baseline: TUI approval-mode keyboard toggling now executes the
+     shared `/approval toggle` command instead of calling gatewaydriver session
+     mode methods directly. Local mode toggle and ACP-controller mode cycling
+     live in `ModeService` / `ControllerService`, and the Bubble Tea driver
+     contract no longer declares migrated direct config methods such as
+     connect/model/delete/compact/session-mode/sandbox lifecycle controls.
   - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
     completion shell, connect wizard Bubble Tea runtime, status bar,
     renderer, transcript reducer, tool panels, approval UI, theme system, and

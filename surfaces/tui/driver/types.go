@@ -156,21 +156,6 @@ type AgentAddOptions struct {
 	Custom  *CustomAgentConfig
 }
 
-type ConnectConfig struct {
-	Provider            string
-	EndpointID          string
-	Model               string
-	BaseURL             string
-	TimeoutSeconds      int
-	APIKey              string
-	TokenEnv            string
-	AuthType            string
-	ContextWindowTokens int
-	MaxOutputTokens     int
-	ReasoningEffort     string
-	ReasoningLevels     []string
-}
-
 type CommandExecutionOptions struct {
 	Input       string
 	Attachments []Attachment
@@ -204,16 +189,7 @@ type Driver interface {
 	ResumeSession(context.Context, string) (session.Session, error)
 	ListSessions(context.Context, int) ([]ResumeCandidate, error)
 	ReplayEvents(context.Context) ([]kernel.EventEnvelope, error)
-	Compact(context.Context) error
 
-	Connect(context.Context, ConnectConfig) (StatusSnapshot, error)
-	UseModel(context.Context, string, ...string) (StatusSnapshot, error)
-	DeleteModel(context.Context, string) error
-	CycleSessionMode(context.Context) (StatusSnapshot, error)
-	SetSandboxBackend(context.Context, string) (StatusSnapshot, error)
-	PrepareSandbox(context.Context) (StatusSnapshot, error)
-	RepairSandbox(context.Context) (StatusSnapshot, error)
-	SetSessionMode(context.Context, string) (StatusSnapshot, error)
 	ListAgents(context.Context, int) ([]AgentCandidate, error)
 	AgentStatus(context.Context) (AgentStatusSnapshot, error)
 	AddAgent(context.Context, string) (AgentStatusSnapshot, error)

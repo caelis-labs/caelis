@@ -38,7 +38,20 @@ type AgentAddOptions = tuidriver.AgentAddOptions
 
 type CustomAgentConfig = tuidriver.CustomAgentConfig
 
-type ConnectConfig = tuidriver.ConnectConfig
+type ConnectConfig struct {
+	Provider            string
+	EndpointID          string
+	Model               string
+	BaseURL             string
+	TimeoutSeconds      int
+	APIKey              string
+	TokenEnv            string
+	AuthType            string
+	ContextWindowTokens int
+	MaxOutputTokens     int
+	ReasoningEffort     string
+	ReasoningLevels     []string
+}
 
 type CommandExecutionOptions = tuidriver.CommandExecutionOptions
 

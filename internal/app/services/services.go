@@ -273,6 +273,18 @@ func (s ModeService) Set(ctx context.Context, ref session.Ref, mode string) (Mod
 	return modeChoice, nil
 }
 
+func (s ModeService) Toggle(ctx context.Context, ref session.Ref) (ModeChoice, error) {
+	current, err := s.CurrentID(ctx, ref)
+	if err != nil {
+		return ModeChoice{}, err
+	}
+	next := coreruntime.SessionModeManual
+	if current == coreruntime.SessionModeManual {
+		next = coreruntime.SessionModeAutoReview
+	}
+	return s.Set(ctx, ref, next)
+}
+
 func (s SettingsService) Document(ctx context.Context) (appsettings.Document, error) {
 	if s.services.settings == nil {
 		return appsettings.Document{Runtime: s.services.Runtime()}, nil

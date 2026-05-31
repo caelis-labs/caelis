@@ -396,11 +396,18 @@ func ConfigFromDriver(driver tuidriver.Driver, sender *ProgramSender, base Confi
 
 	if base.ToggleMode == nil {
 		base.ToggleMode = func() (string, error) {
-			status, err := driver.CycleSessionMode(ctx)
+			view, err := driver.ExecuteCommand(ctx, tuidriver.CommandExecutionOptions{Input: "/approval toggle"})
 			if err != nil {
 				return "", err
 			}
-			return modeToggleHint(status), nil
+			status, statusErr := driver.Status(ctx)
+			if statusErr == nil {
+				return modeToggleHint(status), nil
+			}
+			if output := strings.TrimSpace(view.Output); output != "" {
+				return output, nil
+			}
+			return "", statusErr
 		}
 	}
 
