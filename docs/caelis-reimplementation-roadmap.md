@@ -2022,8 +2022,11 @@ be migrated before retiring the old stack:
      argument parsing packages have been removed; built-in tool execution now
      has a single core-native implementation path through
      `internal/adapters/tools/*`.
-   - Still pending: compact/rich tool-panel display metadata still needs
-     core-native adapters.
+   - Migrated baseline: compact/rich tool-panel display metadata now has a
+     public `core/tool` runtime metadata contract for `caelis.runtime.tool`.
+     Filesystem adapters attach structured path/diff metadata through that
+     helper, and TUI transcript projection reads tool/task metadata through the
+     same core contract instead of private nested-map parsing.
 
 9. Approval and permission policy
    - The new approval path supports allow/deny/ask, ACP permission response

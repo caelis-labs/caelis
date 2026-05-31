@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
-	"maps"
 	"path"
 	"path/filepath"
 	"strings"
@@ -116,26 +115,7 @@ func jsonResult(call tool.Call, name string, payload map[string]any, meta map[st
 }
 
 func filesystemToolMeta(values map[string]any) map[string]any {
-	out := maps.Clone(values)
-	if out == nil {
-		out = map[string]any{}
-	}
-	caelis, _ := out["caelis"].(map[string]any)
-	caelis = maps.Clone(caelis)
-	if caelis == nil {
-		caelis = map[string]any{}
-	}
-	caelis["version"] = 1
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	runtimeMeta = maps.Clone(runtimeMeta)
-	if runtimeMeta == nil {
-		runtimeMeta = map[string]any{}
-	}
-	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
-	toolMeta = maps.Clone(toolMeta)
-	if toolMeta == nil {
-		toolMeta = map[string]any{}
-	}
+	toolMeta := map[string]any{}
 	for key, value := range values {
 		if key == "caelis" || value == nil {
 			continue
@@ -150,10 +130,7 @@ func filesystemToolMeta(values map[string]any) map[string]any {
 		}
 		toolMeta[key] = value
 	}
-	runtimeMeta["tool"] = toolMeta
-	caelis["runtime"] = runtimeMeta
-	out["caelis"] = caelis
-	return out
+	return tool.WithRuntimeToolMeta(values, toolMeta)
 }
 
 func checkContext(ctx context.Context) error {

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -364,15 +365,9 @@ func toolDisplayMetaOutput(toolName string, meta map[string]any) map[string]any 
 }
 
 func eventRuntimeToolMeta(meta map[string]any) map[string]any {
-	caelis, _ := meta["caelis"].(map[string]any)
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	toolMeta, _ := runtimeMeta["tool"].(map[string]any)
-	return toolMeta
+	return coretool.RuntimeToolMeta(meta)
 }
 
 func eventRuntimeTaskMeta(meta map[string]any) map[string]any {
-	caelis, _ := meta["caelis"].(map[string]any)
-	runtimeMeta, _ := caelis["runtime"].(map[string]any)
-	taskMeta, _ := runtimeMeta["task"].(map[string]any)
-	return taskMeta
+	return coretool.RuntimeTaskMeta(meta)
 }

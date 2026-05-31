@@ -350,17 +350,12 @@ func diffHunksPayload(t *testing.T, raw any) []map[string]any {
 
 func runtimeToolMetaPayload(t *testing.T, meta map[string]any) map[string]any {
 	t.Helper()
-	caelis, ok := meta["caelis"].(map[string]any)
-	if !ok {
-		t.Fatalf("meta = %#v, want caelis map", meta)
+	toolMeta := tool.RuntimeToolMeta(meta)
+	if len(toolMeta) == 0 {
+		t.Fatalf("meta = %#v, want runtime tool map", meta)
 	}
-	runtimeMeta, ok := caelis["runtime"].(map[string]any)
-	if !ok {
-		t.Fatalf("caelis meta = %#v, want runtime map", caelis)
-	}
-	toolMeta, ok := runtimeMeta["tool"].(map[string]any)
-	if !ok {
-		t.Fatalf("runtime meta = %#v, want tool map", runtimeMeta)
+	if toolMeta["schema"] != tool.RuntimeToolMetaName || toolMeta["schema_version"] != tool.RuntimeToolMetaVersion {
+		t.Fatalf("tool meta = %#v, want canonical runtime tool schema", toolMeta)
 	}
 	return toolMeta
 }
