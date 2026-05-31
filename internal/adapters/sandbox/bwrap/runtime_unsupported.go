@@ -3,19 +3,24 @@
 package bwrap
 
 import (
+	"context"
 	"fmt"
 	"runtime"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 )
 
 type Config = sandbox.Config
 
-type backendFactory struct{}
+type Factory struct{}
 
-func (backendFactory) Backend() sandbox.Backend { return sandbox.BackendBwrap }
-
-func (backendFactory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
+func (Factory) NewRuntime(ctx context.Context, cfg sandbox.Config) (sandbox.Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return New(cfg)
 }
 
@@ -24,6 +29,4 @@ func New(cfg Config) (sandbox.Runtime, error) {
 	return nil, fmt.Errorf("bwrap sandbox is only supported on linux (current=%s)", runtime.GOOS)
 }
 
-func init() {
-	sandbox.RegisterBuiltInBackendFactory(backendFactory{})
-}
+var _ sandbox.BackendFactory = Factory{}

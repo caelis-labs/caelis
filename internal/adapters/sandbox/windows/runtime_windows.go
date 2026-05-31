@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/hostrunner"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policyfs"
@@ -32,7 +33,6 @@ import (
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/windows/internal/pathutil"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/windows/internal/win32"
 	"github.com/OnslaughtSnail/caelis/internal/winproc"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 const (
@@ -72,7 +72,7 @@ type runtime struct {
 	lastWorkspaceSetupError string
 }
 
-func (r *runtime) Describe() sandbox.Descriptor {
+func (r *runtime) Descriptor() sandbox.Descriptor {
 	return sandbox.Descriptor{
 		Backend:   sandbox.BackendWindows,
 		Isolation: sandbox.IsolationProcess,
@@ -230,13 +230,12 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	now := time.Now()
 	session := &windowsSession{
 		ref: sandbox.SessionRef{
-			Backend:   sandbox.BackendWindows,
-			SessionID: sessionID,
+			ID:      sessionID,
+			Backend: sandbox.BackendWindows,
 		},
 		terminal: sandbox.TerminalRef{
-			Backend:    sandbox.BackendWindows,
-			SessionID:  sessionID,
-			TerminalID: terminalID,
+			ID:        terminalID,
+			SessionID: sessionID,
 		},
 		cmd:           cmd,
 		job:           jobObject,
@@ -260,7 +259,7 @@ func (r *runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	return session, nil
 }
 
-func (r *runtime) OpenSession(id string) (sandbox.Session, error) {
+func (r *runtime) openSession(id string) (sandbox.Session, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	session, ok := r.sessions[strings.TrimSpace(id)]
@@ -270,17 +269,19 @@ func (r *runtime) OpenSession(id string) (sandbox.Session, error) {
 	return session, nil
 }
 
-func (r *runtime) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Session, error) {
+func (r *runtime) Open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	ref = sandbox.CloneSessionRef(ref)
 	backend := normalizeBackendAlias(ref.Backend)
 	if backend != "" && backend != sandbox.BackendWindows {
 		return nil, fmt.Errorf("internal/adapters/sandbox/windows: backend %q is unsupported", ref.Backend)
 	}
-	return r.OpenSession(ref.SessionID)
-}
-
-func (r *runtime) SupportedBackends() []sandbox.Backend {
-	return []sandbox.Backend{sandbox.BackendWindows}
+	return r.openSession(ref.ID)
 }
 
 func (r *runtime) Status() sandbox.Status {
@@ -465,7 +466,7 @@ func (r *runtime) Close() error {
 	}
 	r.mu.RUnlock()
 	for _, session := range sessions {
-		_ = session.Terminate(context.Background())
+		_ = session.Cancel(context.Background())
 	}
 	return nil
 }
@@ -1179,7 +1180,7 @@ func (r *runtime) workspaceSetupCheck() (check sandbox.SetupCheck) {
 		}
 		check.Details["manual_fix_hint"] = "run `/doctor fix` in TUI or `caelis sandbox fix`"
 	}()
-	policy, err := r.inspectPolicyForRequest(sandbox.CommandRequest{Dir: r.cfg.CWD, Constraints: r.Describe().DefaultConstraints})
+	policy, err := r.inspectPolicyForRequest(sandbox.CommandRequest{Dir: r.cfg.CWD, Constraints: r.Descriptor().DefaultConstraints})
 	if err != nil {
 		check.Reason = err.Error()
 		return check
@@ -1383,20 +1384,16 @@ func (s *windowsSession) Ref() sandbox.SessionRef {
 	return sandbox.CloneSessionRef(s.ref)
 }
 
-func (s *windowsSession) Terminal() sandbox.TerminalRef {
-	return sandbox.CloneTerminalRef(s.terminal)
-}
-
-func (s *windowsSession) WriteInput(_ context.Context, input []byte) error {
+func (s *windowsSession) Write(_ context.Context, input []byte) error {
 	s.mu.RLock()
 	writer := s.stdin
 	running := s.running
 	s.mu.RUnlock()
 	if !running {
-		return fmt.Errorf("internal/adapters/sandbox/windows: session %q is not running", s.ref.SessionID)
+		return fmt.Errorf("internal/adapters/sandbox/windows: session %q is not running", s.ref.ID)
 	}
 	if writer == nil {
-		return fmt.Errorf("internal/adapters/sandbox/windows: session %q does not accept stdin", s.ref.SessionID)
+		return fmt.Errorf("internal/adapters/sandbox/windows: session %q does not accept stdin", s.ref.ID)
 	}
 	if len(input) == 0 {
 		return nil
@@ -1405,45 +1402,54 @@ func (s *windowsSession) WriteInput(_ context.Context, input []byte) error {
 	return err
 }
 
-func (s *windowsSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error) {
+func (s *windowsSession) Read(_ context.Context, cursor sandbox.OutputCursor) (sandbox.OutputSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	stdout, newStdoutMarker = cappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
-	stderr, newStderrMarker = cappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
-	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
+	stdout, newStdoutMarker := cappedOutputSince(s.stdout, s.stdoutTotal, cursor.Stdout)
+	stderr, newStderrMarker := cappedOutputSince(s.stderr, s.stderrTotal, cursor.Stderr)
+	return sandbox.OutputSnapshot{
+		Stdout: string(stdout),
+		Stderr: string(stderr),
+		Cursor: sandbox.OutputCursor{Stdout: newStdoutMarker, Stderr: newStderrMarker},
+	}, nil
 }
 
-func (s *windowsSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
+func (s *windowsSession) Snapshot(_ context.Context) (sandbox.SessionSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return sandbox.CloneSessionStatus(sandbox.SessionStatus{
-		SessionRef:    s.ref,
-		Terminal:      s.terminal,
+	state := sandbox.SessionCompleted
+	if s.running {
+		state = sandbox.SessionRunning
+	} else if s.exitCode != 0 || s.waitErr != nil {
+		state = sandbox.SessionFailed
+	}
+	errText := ""
+	if s.waitErr != nil {
+		errText = s.waitErr.Error()
+	}
+	return sandbox.SessionSnapshot{
+		Ref:           sandbox.CloneSessionRef(s.ref),
+		Terminal:      sandbox.CloneTerminalRef(s.terminal),
+		State:         state,
 		Running:       s.running,
 		SupportsInput: s.supportsInput,
 		ExitCode:      s.exitCode,
+		Error:         errText,
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
-	}), nil
+	}, nil
 }
 
-func (s *windowsSession) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
-	if timeout <= 0 {
-		return s.Status(ctx)
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+func (s *windowsSession) Wait(ctx context.Context) (sandbox.CommandResult, error) {
 	select {
 	case <-ctx.Done():
-		return sandbox.SessionStatus{}, ctx.Err()
+		return sandbox.CommandResult{}, ctx.Err()
 	case <-s.done:
-		return s.Status(ctx)
-	case <-timer.C:
-		return s.Status(ctx)
 	}
+	return s.result()
 }
 
-func (s *windowsSession) Result(_ context.Context) (sandbox.CommandResult, error) {
+func (s *windowsSession) result() (sandbox.CommandResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := sandbox.CommandResult{
@@ -1454,7 +1460,7 @@ func (s *windowsSession) Result(_ context.Context) (sandbox.CommandResult, error
 		Backend:  sandbox.BackendWindows,
 	}
 	if s.running {
-		return result, fmt.Errorf("internal/adapters/sandbox/windows: session %q is still running", s.ref.SessionID)
+		return result, fmt.Errorf("internal/adapters/sandbox/windows: session %q is still running", s.ref.ID)
 	}
 	if s.waitErr != nil {
 		result.Error = s.waitErr.Error()
@@ -1462,7 +1468,7 @@ func (s *windowsSession) Result(_ context.Context) (sandbox.CommandResult, error
 	return result, s.waitErr
 }
 
-func (s *windowsSession) Terminate(ctx context.Context) error {
+func (s *windowsSession) Cancel(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1482,18 +1488,22 @@ func (s *windowsSession) Terminate(ctx context.Context) error {
 		return terminateErr
 	case <-ctx.Done():
 		s.forceTerminated(errors.Join(
-			fmt.Errorf("internal/adapters/sandbox/windows: session %q terminated before process wait completed", s.ref.SessionID),
+			fmt.Errorf("internal/adapters/sandbox/windows: session %q terminated before process wait completed", s.ref.ID),
 			ctx.Err(),
 			terminateErr,
 		))
 		return terminateErr
 	case <-timer.C:
 		s.forceTerminated(errors.Join(
-			fmt.Errorf("internal/adapters/sandbox/windows: session %q terminated before process wait completed", s.ref.SessionID),
+			fmt.Errorf("internal/adapters/sandbox/windows: session %q terminated before process wait completed", s.ref.ID),
 			terminateErr,
 		))
 		return terminateErr
 	}
+}
+
+func (s *windowsSession) Close() error {
+	return s.Cancel(context.Background())
 }
 
 func (s *windowsSession) readStream(reader io.Reader, stream string) {

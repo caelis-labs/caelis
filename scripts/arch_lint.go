@@ -127,6 +127,8 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		return "TUI production packages must use core/app view-model contracts instead of legacy kernel or ports"
 	case pathIn(target, "impl"):
 		return "production packages must not import the retired impl taxonomy"
+	case pathIn(target, "ports/sandbox"):
+		return "production packages must use core/sandbox instead of retired ports/sandbox"
 	case strings.HasPrefix(rel, "core/"):
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
 			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"

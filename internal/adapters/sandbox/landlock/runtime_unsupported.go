@@ -5,7 +5,7 @@ package landlock
 import (
 	"fmt"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 )
 
 func newRuntime(cfg Config) (sandbox.Runtime, error) {

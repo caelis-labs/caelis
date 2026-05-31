@@ -2,15 +2,14 @@ package runnerruntime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/cmdsession"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policyfs"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 type OutputChunk struct {
@@ -70,7 +69,7 @@ func New(cfg Config) *Runtime {
 	}
 }
 
-func (r *Runtime) Describe() sandbox.Descriptor {
+func (r *Runtime) Descriptor() sandbox.Descriptor {
 	return sandbox.CloneDescriptor(r.descriptor)
 }
 
@@ -89,7 +88,7 @@ func (r *Runtime) FileSystemFor(constraints sandbox.Constraints) sandbox.FileSys
 
 func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.CommandResult, error) {
 	if r.runner == nil {
-		return sandbox.CommandResult{}, fmt.Errorf("ports/sandbox: backend %q runner is unavailable", r.backend)
+		return sandbox.CommandResult{}, fmt.Errorf("sandbox/runtime: backend %q runner is unavailable", r.backend)
 	}
 	result, err := r.runner.Run(ctx, translateRequest(req))
 	if result.Route == "" {
@@ -103,7 +102,7 @@ func (r *Runtime) Run(ctx context.Context, req sandbox.CommandRequest) (sandbox.
 
 func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbox.Session, error) {
 	if r.runner == nil {
-		return nil, fmt.Errorf("ports/sandbox: backend %q runner is unavailable", r.backend)
+		return nil, fmt.Errorf("sandbox/runtime: backend %q runner is unavailable", r.backend)
 	}
 	sessionID, err := r.runner.StartAsync(ctx, translateRequest(req))
 	if err != nil {
@@ -112,27 +111,25 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	return &session{backend: r.backend, runner: r.runner, sessionID: strings.TrimSpace(sessionID)}, nil
 }
 
-func (r *Runtime) OpenSession(id string) (sandbox.Session, error) {
-	id = strings.TrimSpace(id)
+func (r *Runtime) Open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	ref = sandbox.CloneSessionRef(ref)
+	if ref.Backend != "" && ref.Backend != r.backend {
+		return nil, fmt.Errorf("sandbox/runtime: backend %q is unsupported by %q runtime", ref.Backend, r.backend)
+	}
+	id := strings.TrimSpace(ref.ID)
 	if id == "" {
-		return nil, fmt.Errorf("ports/sandbox: session id is required")
+		return nil, fmt.Errorf("sandbox/runtime: session id is required")
 	}
 	if _, err := r.runner.GetSessionStatus(id); err != nil {
 		return nil, err
 	}
 	return &session{backend: r.backend, runner: r.runner, sessionID: id}, nil
-}
-
-func (r *Runtime) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Session, error) {
-	ref = sandbox.CloneSessionRef(ref)
-	if ref.Backend != "" && ref.Backend != r.backend {
-		return nil, fmt.Errorf("ports/sandbox: backend %q is unsupported by %q runtime", ref.Backend, r.backend)
-	}
-	return r.OpenSession(ref.SessionID)
-}
-
-func (r *Runtime) SupportedBackends() []sandbox.Backend {
-	return []sandbox.Backend{r.backend}
 }
 
 func (r *Runtime) Status() sandbox.Status {
@@ -153,50 +150,32 @@ type session struct {
 }
 
 func (s *session) Ref() sandbox.SessionRef {
-	return sandbox.SessionRef{Backend: s.backend, SessionID: s.sessionID}
+	return sandbox.SessionRef{Backend: s.backend, ID: s.sessionID}
 }
 
-func (s *session) Terminal() sandbox.TerminalRef {
-	return sandbox.TerminalRef{Backend: s.backend, SessionID: s.sessionID, TerminalID: s.sessionID}
-}
-
-func (s *session) WriteInput(_ context.Context, input []byte) error {
+func (s *session) Write(_ context.Context, input []byte) error {
 	return s.runner.WriteInput(s.sessionID, input)
 }
 
-func (s *session) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) ([]byte, []byte, int64, int64, error) {
-	stdout, stderr, nextStdout, nextStderr, err := s.runner.ReadOutput(s.sessionID, stdoutMarker, stderrMarker)
+func (s *session) Read(_ context.Context, cursor sandbox.OutputCursor) (sandbox.OutputSnapshot, error) {
+	stdout, stderr, nextStdout, nextStderr, err := s.runner.ReadOutput(s.sessionID, cursor.Stdout, cursor.Stderr)
 	stderr = sandbox.NormalizeSandboxPermissionOutput("stderr", stderr)
-	return stdout, stderr, nextStdout, nextStderr, err
+	return sandbox.OutputSnapshot{
+		Stdout: string(stdout),
+		Stderr: string(stderr),
+		Cursor: sandbox.OutputCursor{Stdout: nextStdout, Stderr: nextStderr},
+	}, err
 }
 
-func (s *session) Status(_ context.Context) (sandbox.SessionStatus, error) {
+func (s *session) Snapshot(_ context.Context) (sandbox.SessionSnapshot, error) {
 	status, err := s.runner.GetSessionStatus(s.sessionID)
 	if err != nil {
-		return sandbox.SessionStatus{}, err
+		return sandbox.SessionSnapshot{}, err
 	}
 	return translateStatus(s.backend, s.sessionID, status), nil
 }
 
-func (s *session) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
-	if timeout <= 0 {
-		return s.Status(ctx)
-	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-	if _, err := s.runner.WaitSession(waitCtx, s.sessionID, timeout); err != nil {
-		if errors.Is(err, context.DeadlineExceeded) {
-			return s.Status(ctx)
-		}
-		if plainCommandExitError(err) {
-			return s.Status(ctx)
-		}
-		return sandbox.SessionStatus{}, err
-	}
-	return s.Status(ctx)
-}
-
-func (s *session) Result(ctx context.Context) (sandbox.CommandResult, error) {
+func (s *session) Wait(ctx context.Context) (sandbox.CommandResult, error) {
 	result, err := s.runner.WaitSession(ctx, s.sessionID, 0)
 	if result.Route == "" {
 		result.Route = sandbox.RouteSandbox
@@ -207,18 +186,12 @@ func (s *session) Result(ctx context.Context) (sandbox.CommandResult, error) {
 	return sandbox.NormalizeSandboxPermissionFailure(result, err)
 }
 
-func plainCommandExitError(err error) bool {
-	if err == nil {
-		return false
-	}
-	text := strings.TrimSpace(err.Error())
-	return strings.HasPrefix(text, "exit status ") ||
-		strings.HasPrefix(text, "signal: ") ||
-		strings.HasPrefix(text, "process exited with code ")
+func (s *session) Cancel(_ context.Context) error {
+	return s.runner.TerminateSession(s.sessionID)
 }
 
-func (s *session) Terminate(_ context.Context) error {
-	return s.runner.TerminateSession(s.sessionID)
+func (s *session) Close() error {
+	return s.Cancel(context.Background())
 }
 
 func translateRequest(req sandbox.CommandRequest) Request {
@@ -244,13 +217,21 @@ func translateRequest(req sandbox.CommandRequest) Request {
 	}
 }
 
-func translateStatus(backend sandbox.Backend, sessionID string, status cmdsession.SessionStatus) sandbox.SessionStatus {
-	return sandbox.SessionStatus{
-		SessionRef:    sandbox.SessionRef{Backend: backend, SessionID: sessionID},
-		Terminal:      sandbox.TerminalRef{Backend: backend, SessionID: sessionID, TerminalID: sessionID},
+func translateStatus(backend sandbox.Backend, sessionID string, status cmdsession.SessionStatus) sandbox.SessionSnapshot {
+	state := sandbox.SessionCompleted
+	if status.State == cmdsession.SessionStateRunning {
+		state = sandbox.SessionRunning
+	} else if status.ExitCode != 0 || strings.TrimSpace(status.Error) != "" {
+		state = sandbox.SessionFailed
+	}
+	return sandbox.SessionSnapshot{
+		Ref:           sandbox.SessionRef{Backend: backend, ID: sessionID},
+		Terminal:      sandbox.TerminalRef{ID: sessionID, SessionID: sessionID},
+		State:         state,
 		Running:       status.State == cmdsession.SessionStateRunning,
 		SupportsInput: true,
 		ExitCode:      status.ExitCode,
+		Error:         strings.TrimSpace(status.Error),
 		StartedAt:     status.StartTime,
 		UpdatedAt:     status.LastActivity,
 	}

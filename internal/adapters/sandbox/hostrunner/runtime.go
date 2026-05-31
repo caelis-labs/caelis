@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/textstream"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 // Config defines one host-backed sandbox runtime.
@@ -65,7 +65,7 @@ func (r *Runtime) FileSystemFor(_ sandbox.Constraints) sandbox.FileSystem {
 	return r.fs
 }
 
-func (r *Runtime) Describe() sandbox.Descriptor {
+func (r *Runtime) Descriptor() sandbox.Descriptor {
 	return sandbox.Descriptor{
 		Backend:   sandbox.BackendHost,
 		Isolation: sandbox.IsolationHost,
@@ -196,13 +196,12 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	now := time.Now()
 	session := &hostSession{
 		ref: sandbox.SessionRef{
-			Backend:   sandbox.BackendHost,
-			SessionID: sessionID,
+			ID:      sessionID,
+			Backend: sandbox.BackendHost,
 		},
 		terminal: sandbox.TerminalRef{
-			Backend:    sandbox.BackendHost,
-			SessionID:  sessionID,
-			TerminalID: terminalID,
+			ID:        terminalID,
+			SessionID: sessionID,
 		},
 		cmd:           cmd,
 		stdin:         stdin,
@@ -226,7 +225,7 @@ func (r *Runtime) Start(ctx context.Context, req sandbox.CommandRequest) (sandbo
 	return session, nil
 }
 
-func (r *Runtime) OpenSession(id string) (sandbox.Session, error) {
+func (r *Runtime) openSession(id string) (sandbox.Session, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	session, ok := r.sessions[strings.TrimSpace(id)]
@@ -236,16 +235,18 @@ func (r *Runtime) OpenSession(id string) (sandbox.Session, error) {
 	return session, nil
 }
 
-func (r *Runtime) OpenSessionRef(ref sandbox.SessionRef) (sandbox.Session, error) {
+func (r *Runtime) Open(ctx context.Context, ref sandbox.SessionRef) (sandbox.Session, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	ref = sandbox.CloneSessionRef(ref)
 	if ref.Backend != "" && ref.Backend != sandbox.BackendHost {
 		return nil, fmt.Errorf("internal/adapters/sandbox/hostrunner: backend %q is unsupported", ref.Backend)
 	}
-	return r.OpenSession(ref.SessionID)
-}
-
-func (r *Runtime) SupportedBackends() []sandbox.Backend {
-	return []sandbox.Backend{sandbox.BackendHost}
+	return r.openSession(ref.ID)
 }
 
 func (r *Runtime) Status() sandbox.Status {
@@ -260,7 +261,7 @@ func (r *Runtime) Close() error {
 	}
 	r.mu.RUnlock()
 	for _, session := range sessions {
-		_ = session.Terminate(context.Background())
+		_ = session.Cancel(context.Background())
 	}
 	return nil
 }
@@ -300,16 +301,16 @@ func (s *hostSession) Terminal() sandbox.TerminalRef {
 	return sandbox.CloneTerminalRef(s.terminal)
 }
 
-func (s *hostSession) WriteInput(_ context.Context, input []byte) error {
+func (s *hostSession) Write(_ context.Context, input []byte) error {
 	s.mu.RLock()
 	writer := s.stdin
 	running := s.running
 	s.mu.RUnlock()
 	if !running {
-		return fmt.Errorf("internal/adapters/sandbox/hostrunner: session %q is not running", s.ref.SessionID)
+		return fmt.Errorf("internal/adapters/sandbox/hostrunner: session %q is not running", s.ref.ID)
 	}
 	if writer == nil {
-		return fmt.Errorf("internal/adapters/sandbox/hostrunner: session %q does not accept stdin", s.ref.SessionID)
+		return fmt.Errorf("internal/adapters/sandbox/hostrunner: session %q does not accept stdin", s.ref.ID)
 	}
 	if len(input) == 0 {
 		return nil
@@ -318,51 +319,57 @@ func (s *hostSession) WriteInput(_ context.Context, input []byte) error {
 	return err
 }
 
-func (s *hostSession) ReadOutput(_ context.Context, stdoutMarker, stderrMarker int64) (stdout, stderr []byte, newStdoutMarker, newStderrMarker int64, err error) {
+func (s *hostSession) Read(_ context.Context, cursor sandbox.OutputCursor) (sandbox.OutputSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	stdoutMarker := cursor.Stdout
+	stderrMarker := cursor.Stderr
 	if stdoutMarker < 0 {
 		stdoutMarker = 0
 	}
 	if stderrMarker < 0 {
 		stderrMarker = 0
 	}
-	stdout, newStdoutMarker = cappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
-	stderr, newStderrMarker = cappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
-	return stdout, stderr, newStdoutMarker, newStderrMarker, nil
+	stdout, newStdoutMarker := cappedOutputSince(s.stdout, s.stdoutTotal, stdoutMarker)
+	stderr, newStderrMarker := cappedOutputSince(s.stderr, s.stderrTotal, stderrMarker)
+	return sandbox.OutputSnapshot{
+		Stdout: string(stdout),
+		Stderr: string(stderr),
+		Cursor: sandbox.OutputCursor{Stdout: newStdoutMarker, Stderr: newStderrMarker},
+	}, nil
 }
 
-func (s *hostSession) Status(_ context.Context) (sandbox.SessionStatus, error) {
+func (s *hostSession) Snapshot(_ context.Context) (sandbox.SessionSnapshot, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return sandbox.CloneSessionStatus(sandbox.SessionStatus{
-		SessionRef:    s.ref,
-		Terminal:      s.terminal,
+	state := sandbox.SessionCompleted
+	if s.running {
+		state = sandbox.SessionRunning
+	} else if s.exitCode != 0 || s.waitErr != nil {
+		state = sandbox.SessionFailed
+	}
+	return sandbox.SessionSnapshot{
+		Ref:           sandbox.CloneSessionRef(s.ref),
+		Terminal:      sandbox.CloneTerminalRef(s.terminal),
+		State:         state,
 		Running:       s.running,
 		SupportsInput: s.supportsInput,
 		ExitCode:      s.exitCode,
 		StartedAt:     s.startedAt,
 		UpdatedAt:     s.updatedAt,
-	}), nil
+	}, nil
 }
 
-func (s *hostSession) Wait(ctx context.Context, timeout time.Duration) (sandbox.SessionStatus, error) {
-	if timeout <= 0 {
-		return s.Status(ctx)
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
+func (s *hostSession) Wait(ctx context.Context) (sandbox.CommandResult, error) {
 	select {
 	case <-ctx.Done():
-		return sandbox.SessionStatus{}, ctx.Err()
+		return sandbox.CommandResult{}, ctx.Err()
 	case <-s.done:
-		return s.Status(ctx)
-	case <-timer.C:
-		return s.Status(ctx)
 	}
+	return s.result()
 }
 
-func (s *hostSession) Result(_ context.Context) (sandbox.CommandResult, error) {
+func (s *hostSession) result() (sandbox.CommandResult, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := sandbox.CommandResult{
@@ -373,12 +380,12 @@ func (s *hostSession) Result(_ context.Context) (sandbox.CommandResult, error) {
 		Backend:  s.ref.Backend,
 	}
 	if s.running {
-		return result, fmt.Errorf("internal/adapters/sandbox/hostrunner: session %q is still running", s.ref.SessionID)
+		return result, fmt.Errorf("internal/adapters/sandbox/hostrunner: session %q is still running", s.ref.ID)
 	}
 	return result, s.waitErr
 }
 
-func (s *hostSession) Terminate(_ context.Context) error {
+func (s *hostSession) Cancel(_ context.Context) error {
 	s.mu.RLock()
 	cmd := s.cmd
 	running := s.running
@@ -388,6 +395,10 @@ func (s *hostSession) Terminate(_ context.Context) error {
 	}
 	s.cancel()
 	return killProcessTree(cmd.Process)
+}
+
+func (s *hostSession) Close() error {
+	return s.Cancel(context.Background())
 }
 
 func (s *hostSession) readStream(reader io.Reader, stream string) {
@@ -564,17 +575,19 @@ func cappedOutputSince(buf []byte, total int64, marker int64) ([]byte, int64) {
 var _ sandbox.Runtime = (*Runtime)(nil)
 var _ sandbox.Session = (*hostSession)(nil)
 
-type factory struct{}
+type Factory struct{}
 
-func (factory) Backend() sandbox.Backend { return sandbox.BackendHost }
-
-func (factory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
+func (Factory) NewRuntime(ctx context.Context, cfg sandbox.Config) (sandbox.Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return New(Config{CWD: cfg.CWD})
 }
 
-func init() {
-	sandbox.RegisterBuiltInBackendFactory(factory{})
-}
+var _ sandbox.BackendFactory = Factory{}
 
 func newID(prefix string) (string, error) {
 	buf := make([]byte, 8)

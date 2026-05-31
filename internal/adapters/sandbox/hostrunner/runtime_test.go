@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 )
 
 func TestRuntimeStartAndReopenSession(t *testing.T) {
@@ -24,23 +24,29 @@ func TestRuntimeStartAndReopenSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	if got := session.Terminal().TerminalID; got == "" {
+	snapshot, err := session.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if got := snapshot.Terminal.ID; got == "" {
 		t.Fatal("TerminalID = empty, want stable terminal anchor")
 	}
-	reopened, err := rt.OpenSession(session.Ref().SessionID)
+	reopened, err := rt.Open(context.Background(), session.Ref())
 	if err != nil {
-		t.Fatalf("OpenSession() error = %v", err)
+		t.Fatalf("Open() error = %v", err)
 	}
-	status, err := reopened.Wait(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	result, err := reopened.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	if status.Running {
-		t.Fatalf("status.Running = true, want false")
-	}
-	result, err := reopened.Result(context.Background())
+	snapshot, err = reopened.Snapshot(context.Background())
 	if err != nil {
-		t.Fatalf("Result() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if snapshot.Running {
+		t.Fatalf("status.Running = true, want false")
 	}
 	if got := result.Stdout; !strings.Contains(got, "hello world") {
 		t.Fatalf("stdout = %q, want hello world", got)
@@ -59,19 +65,21 @@ func TestRuntimeSessionWriteInput(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	time.Sleep(50 * time.Millisecond)
-	if err := session.WriteInput(context.Background(), []byte("demo\n")); err != nil {
-		t.Fatalf("WriteInput() error = %v", err)
+	if err := session.Write(context.Background(), []byte("demo\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
-	status, err := session.Wait(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	result, err := session.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	if status.Running {
-		t.Fatalf("status.Running = true, want false")
-	}
-	result, err := session.Result(context.Background())
+	snapshot, err := session.Snapshot(context.Background())
 	if err != nil {
-		t.Fatalf("Result() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if snapshot.Running {
+		t.Fatalf("status.Running = true, want false")
 	}
 	if got := result.Stdout; !strings.Contains(got, "got:demo") {
 		t.Fatalf("stdout = %q, want got:demo", got)
@@ -90,15 +98,17 @@ func TestRuntimeSessionReadOutputWithCursor(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	_, cursor1 := waitForStdoutContains(t, session, 0, "one")
-	_, err = session.Wait(context.Background(), 500*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	_, err = session.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	stdout2, _, _, _, err := session.ReadOutput(context.Background(), cursor1, 0)
+	out, err := session.Read(context.Background(), sandbox.OutputCursor{Stdout: cursor1})
 	if err != nil {
-		t.Fatalf("ReadOutput(cursor1,0) error = %v", err)
+		t.Fatalf("Read(cursor1,0) error = %v", err)
 	}
-	if got := string(stdout2); !strings.Contains(got, "two") {
+	if got := out.Stdout; !strings.Contains(got, "two") {
 		t.Fatalf("stdout2 = %q, want two", got)
 	}
 }
@@ -114,16 +124,18 @@ func TestRuntimeWaitDrainsOutputBeforeCompletion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	status, err := session.Wait(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := session.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	if status.Running {
-		t.Fatalf("status.Running = true, want false")
-	}
-	result, err := session.Result(context.Background())
+	snapshot, err := session.Snapshot(context.Background())
 	if err != nil {
-		t.Fatalf("Result() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if snapshot.Running {
+		t.Fatalf("status.Running = true, want false")
 	}
 	if got := result.Stdout; !strings.Contains(got, "line-0000\n") || !strings.Contains(got, "line-1999\n") {
 		t.Fatalf("stdout missing drained output, len=%d tail=%q", len(got), tailString(got, 80))
@@ -163,28 +175,34 @@ func TestRuntimeStartReadOutputCursorSurvivesCappedStream(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer func() { _ = session.Terminate(context.Background()) }()
+	defer func() { _ = session.Cancel(context.Background()) }()
 
 	_, cursor := waitForStdoutMarkerAtLeast(t, session, hostOutputCap)
-	if err := session.WriteInput(context.Background(), []byte("\n")); err != nil {
-		t.Fatalf("WriteInput() error = %v", err)
+	if err := session.Write(context.Background(), []byte("\n")); err != nil {
+		t.Fatalf("Write() error = %v", err)
 	}
-	status, err := session.Wait(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = session.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	if status.Running {
+	snapshot, err := session.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if snapshot.Running {
 		t.Fatal("status.Running = true, want false")
 	}
-	stdout, _, nextCursor, _, err := session.ReadOutput(context.Background(), cursor, 0)
+	out, err := session.Read(context.Background(), sandbox.OutputCursor{Stdout: cursor})
 	if err != nil {
-		t.Fatalf("ReadOutput(%d,0) error = %v", cursor, err)
+		t.Fatalf("Read(%d,0) error = %v", cursor, err)
 	}
-	if got := string(stdout); !strings.Contains(got, "tail-marker") {
-		t.Fatalf("stdout after cursor %d = %q, next cursor %d; want tail-marker", cursor, tailString(got, 120), nextCursor)
+	if got := out.Stdout; !strings.Contains(got, "tail-marker") {
+		t.Fatalf("stdout after cursor %d = %q, next cursor %d; want tail-marker", cursor, tailString(got, 120), out.Cursor.Stdout)
 	}
-	if nextCursor <= cursor {
-		t.Fatalf("next stdout cursor = %d, want > %d", nextCursor, cursor)
+	if out.Cursor.Stdout <= cursor {
+		t.Fatalf("next stdout cursor = %d, want > %d", out.Cursor.Stdout, cursor)
 	}
 }
 
@@ -199,17 +217,19 @@ func TestRuntimeStartCleansBackgroundProcessAfterShellExit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	defer func() { _ = session.Terminate(context.Background()) }()
-	status, err := session.Wait(context.Background(), 2*time.Second)
+	defer func() { _ = session.Cancel(context.Background()) }()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	result, err := session.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	if status.Running {
-		t.Fatalf("status.Running = true, want false")
-	}
-	result, err := session.Result(context.Background())
+	snapshot, err := session.Snapshot(context.Background())
 	if err != nil {
-		t.Fatalf("Result() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
+	}
+	if snapshot.Running {
+		t.Fatalf("status.Running = true, want false")
 	}
 	pid := parseBackgroundPID(t, result.Stdout)
 	waitForProcessGone(t, pid)
@@ -220,15 +240,15 @@ func waitForStdoutMarkerAtLeast(t *testing.T, session sandbox.Session, want int)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		stdout, _, cursor, _, err := session.ReadOutput(context.Background(), 0, 0)
+		out, err := session.Read(context.Background(), sandbox.OutputCursor{})
 		if err != nil {
-			t.Fatalf("ReadOutput(0,0) error = %v", err)
+			t.Fatalf("Read(0,0) error = %v", err)
 		}
-		if cursor >= int64(want) {
-			return stdout, cursor
+		if out.Cursor.Stdout >= int64(want) {
+			return []byte(out.Stdout), out.Cursor.Stdout
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("stdout cursor = %d, want >= %d", cursor, want)
+			t.Fatalf("stdout cursor = %d, want >= %d", out.Cursor.Stdout, want)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -239,15 +259,15 @@ func waitForStdoutContains(t *testing.T, session sandbox.Session, marker int64, 
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for {
-		stdout, _, cursor, _, err := session.ReadOutput(context.Background(), marker, 0)
+		out, err := session.Read(context.Background(), sandbox.OutputCursor{Stdout: marker})
 		if err != nil {
-			t.Fatalf("ReadOutput(%d,0) error = %v", marker, err)
+			t.Fatalf("Read(%d,0) error = %v", marker, err)
 		}
-		if strings.Contains(string(stdout), want) {
-			return stdout, cursor
+		if strings.Contains(out.Stdout, want) {
+			return []byte(out.Stdout), out.Cursor.Stdout
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("stdout = %q, want %s", string(stdout), want)
+			t.Fatalf("stdout = %q, want %s", out.Stdout, want)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

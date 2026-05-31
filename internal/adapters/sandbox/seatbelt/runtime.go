@@ -16,23 +16,27 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/hostrunner"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/cmdsession"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/procutil"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/runnerruntime"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 const seatbeltSandboxType = "seatbelt"
 
 type Config = sandbox.Config
 
-type backendFactory struct{}
+type Factory struct{}
 
-func (backendFactory) Backend() sandbox.Backend { return sandbox.BackendSeatbelt }
-
-func (backendFactory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
+func (Factory) NewRuntime(ctx context.Context, cfg sandbox.Config) (sandbox.Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return New(cfg)
 }
 
@@ -465,6 +469,4 @@ func asyncOutputForwarder(fn func(runnerruntime.OutputChunk)) func(cmdsession.As
 	}
 }
 
-func init() {
-	sandbox.RegisterBuiltInBackendFactory(backendFactory{})
-}
+var _ sandbox.BackendFactory = Factory{}

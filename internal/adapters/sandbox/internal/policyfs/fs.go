@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/fsboundary"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 type policyFileSystem struct {

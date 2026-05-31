@@ -1,14 +1,22 @@
 package landlock
 
-import "github.com/OnslaughtSnail/caelis/ports/sandbox"
+import (
+	"context"
+
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
+)
 
 type Config = sandbox.Config
 
-type backendFactory struct{}
+type Factory struct{}
 
-func (backendFactory) Backend() sandbox.Backend { return sandbox.BackendLandlock }
-
-func (backendFactory) Build(cfg sandbox.Config) (sandbox.Runtime, error) {
+func (Factory) NewRuntime(ctx context.Context, cfg sandbox.Config) (sandbox.Runtime, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	return New(cfg)
 }
 
@@ -16,6 +24,4 @@ func New(cfg Config) (sandbox.Runtime, error) {
 	return newRuntime(cfg)
 }
 
-func init() {
-	sandbox.RegisterBuiltInBackendFactory(backendFactory{})
-}
+var _ sandbox.BackendFactory = Factory{}

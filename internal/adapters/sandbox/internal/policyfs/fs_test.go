@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 type testFileSystem struct {
@@ -37,6 +37,12 @@ func (f testFileSystem) WriteFile(string, []byte, os.FileMode) error {
 		return nil
 	}
 	return errors.New("unexpected WriteFile")
+}
+func (f testFileSystem) MkdirAll(string, os.FileMode) error {
+	if f.allowWrite {
+		return nil
+	}
+	return errors.New("unexpected MkdirAll")
 }
 func (f testFileSystem) Glob(string) ([]string, error) {
 	return nil, errors.New("unexpected Glob")

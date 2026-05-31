@@ -19,12 +19,12 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/hostrunner"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/cmdsession"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/policy"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/procutil"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/runnerruntime"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"golang.org/x/sys/unix"
 )
 

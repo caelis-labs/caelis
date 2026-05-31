@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/cmdsession"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 type waitResultTestRunner struct {
@@ -103,12 +103,14 @@ func TestSessionWaitTreatsPlainExitReasonAsCommandStatus(t *testing.T) {
 		sessionID: async.ID,
 	}
 
-	status, err := sess.Wait(context.Background(), 5*time.Second)
-	if err != nil {
-		t.Fatalf("Wait() error = %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := sess.Wait(ctx)
+	if err == nil {
+		t.Fatal("Wait() error = nil, want command exit error")
 	}
-	if status.Running || status.ExitCode != 1 {
-		t.Fatalf("Wait() status = %+v, want exited command with code 1", status)
+	if result.ExitCode != 1 {
+		t.Fatalf("Wait() result = %+v, want command exit code 1", result)
 	}
 }
 
@@ -137,22 +139,14 @@ func TestSessionWaitDoesNotConsumeExitForResult(t *testing.T) {
 		sessionID: async.ID,
 	}
 
-	status, err := sess.Wait(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	result, err := sess.Wait(ctx)
 	if err != nil {
 		t.Fatalf("Wait() error = %v", err)
 	}
-	if status.Running {
-		t.Fatalf("Wait() status = %+v, want exited session", status)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-	defer cancel()
-	result, err := sess.Result(ctx)
-	if err != nil {
-		t.Fatalf("Result() error = %v", err)
-	}
 	if strings.TrimSpace(result.Stdout) != "ok" {
-		t.Fatalf("Result().Stdout = %q, want ok", result.Stdout)
+		t.Fatalf("Wait().Stdout = %q, want ok", result.Stdout)
 	}
 }
 
@@ -189,14 +183,14 @@ func TestSessionReadOutputPreservesSandboxCommandPermissionDiagnostics(t *testin
 		backend: sandbox.BackendBwrap,
 		runner:  &waitResultTestRunner{stderr: []byte(raw)},
 	}
-	_, stderr, _, _, err := sess.ReadOutput(context.Background(), 0, 0)
+	out, err := sess.Read(context.Background(), sandbox.OutputCursor{})
 	if err != nil {
-		t.Fatalf("ReadOutput() error = %v", err)
+		t.Fatalf("Read() error = %v", err)
 	}
-	if !strings.Contains(string(stderr), deniedPath) {
-		t.Fatalf("ReadOutput() lost command diagnostics: %q", string(stderr))
+	if !strings.Contains(out.Stderr, deniedPath) {
+		t.Fatalf("Read() lost command diagnostics: %q", out.Stderr)
 	}
-	if strings.TrimSpace(string(stderr)) != raw {
-		t.Fatalf("ReadOutput() stderr = %q, want raw command stderr %q", string(stderr), raw)
+	if strings.TrimSpace(out.Stderr) != raw {
+		t.Fatalf("Read() stderr = %q, want raw command stderr %q", out.Stderr, raw)
 	}
 }

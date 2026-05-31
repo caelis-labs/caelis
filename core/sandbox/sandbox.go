@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -69,6 +70,10 @@ const (
 	PathReadOnly  PathAccess = "read_only"
 	PathReadWrite PathAccess = "read_write"
 	PathHidden    PathAccess = "hidden"
+
+	PathAccessReadOnly  = PathReadOnly
+	PathAccessReadWrite = PathReadWrite
+	PathAccessHidden    = PathHidden
 )
 
 type PathRule struct {
@@ -119,6 +124,9 @@ type SetupScope string
 const (
 	SetupGlobal    SetupScope = "global"
 	SetupWorkspace SetupScope = "workspace"
+
+	SetupScopeGlobal    = SetupGlobal
+	SetupScopeWorkspace = SetupWorkspace
 )
 
 type SetupCheck struct {
@@ -328,11 +336,88 @@ type BackendFactory interface {
 
 func NormalizeConstraints(in Constraints) Constraints {
 	out := in
+	out.Route = Route(strings.TrimSpace(string(in.Route)))
+	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
+	out.Permission = Permission(strings.TrimSpace(string(in.Permission)))
+	out.Isolation = Isolation(strings.TrimSpace(string(in.Isolation)))
+	out.Network = Network(strings.TrimSpace(string(in.Network)))
 	out.PathRules = slices.Clone(in.PathRules)
 	for i := range out.PathRules {
 		out.PathRules[i].Path = strings.TrimSpace(out.PathRules[i].Path)
+		out.PathRules[i].Access = PathAccess(strings.TrimSpace(string(out.PathRules[i].Access)))
 	}
 	return out
+}
+
+func NormalizeConfig(cfg Config) Config {
+	cfg.CWD = strings.TrimSpace(cfg.CWD)
+	if cfg.CWD == "" {
+		if cwd, err := os.Getwd(); err == nil {
+			cfg.CWD = cwd
+		}
+	}
+	if cfg.CWD != "" {
+		if abs, err := filepath.Abs(cfg.CWD); err == nil {
+			cfg.CWD = abs
+		}
+	}
+	switch strings.ToLower(strings.TrimSpace(string(cfg.RequestedBackend))) {
+	case "", "auto", "default":
+		cfg.RequestedBackend = ""
+	case "windows", "windows-restricted-token", "windows_restricted_token", "windows-elevated", "windows_elevated", "windows elevated", "elevated":
+		cfg.RequestedBackend = BackendWindows
+	default:
+		cfg.RequestedBackend = Backend(strings.TrimSpace(string(cfg.RequestedBackend)))
+	}
+	cfg.BackendCandidates = normalizeBackendCandidates(cfg.BackendCandidates)
+	cfg.FallbackInstallHint = strings.TrimSpace(cfg.FallbackInstallHint)
+	cfg.HelperPath = strings.TrimSpace(cfg.HelperPath)
+	cfg.StateDir = strings.TrimSpace(cfg.StateDir)
+	if cfg.StateDir != "" {
+		if abs, err := filepath.Abs(cfg.StateDir); err == nil {
+			cfg.StateDir = abs
+		}
+	}
+	cfg.ReadableRoots = normalizeStringSlice(cfg.ReadableRoots)
+	cfg.WritableRoots = normalizeStringSlice(cfg.WritableRoots)
+	cfg.ReadOnlySubpaths = normalizeStringSlice(cfg.ReadOnlySubpaths)
+	return cfg
+}
+
+func CloneRequest(in CommandRequest) CommandRequest {
+	out := in
+	out.Command = strings.TrimSpace(in.Command)
+	out.Dir = strings.TrimSpace(in.Dir)
+	out.Env = maps.Clone(in.Env)
+	out.Stdin = slices.Clone(in.Stdin)
+	out.Constraints = NormalizeConstraints(in.Constraints)
+	return out
+}
+
+func CloneResult(in CommandResult, err error) (CommandResult, error) {
+	out := in
+	out.Error = strings.TrimSpace(in.Error)
+	out.Route = Route(strings.TrimSpace(string(in.Route)))
+	out.Backend = Backend(strings.TrimSpace(string(in.Backend)))
+	return out, err
+}
+
+func CloneSessionRef(in SessionRef) SessionRef {
+	return SessionRef{
+		ID:      strings.TrimSpace(in.ID),
+		Backend: Backend(strings.TrimSpace(string(in.Backend))),
+	}
+}
+
+func CloneTerminalRef(in TerminalRef) TerminalRef {
+	return TerminalRef{
+		ID:        strings.TrimSpace(in.ID),
+		SessionID: strings.TrimSpace(in.SessionID),
+	}
+}
+
+func EffectiveConstraints(req CommandRequest) Constraints {
+	return NormalizeConstraints(req.Constraints)
 }
 
 func NormalizePermissionRequest(value string) (PermissionRequest, error) {
@@ -344,6 +429,125 @@ func NormalizePermissionRequest(value string) (PermissionRequest, error) {
 	default:
 		return PermissionRequestUseDefault, fmt.Errorf("unknown sandbox_permissions value %q", value)
 	}
+}
+
+const SandboxPermissionDeniedMessage = "Sandbox permission denied. Use a writable workspace path or request elevated permissions."
+
+func NormalizeSandboxPermissionFailure(result CommandResult, err error) (CommandResult, error) {
+	return result, err
+}
+
+func NormalizeSandboxPermissionResult(result CommandResult) CommandResult {
+	return result
+}
+
+func NormalizeSandboxPermissionError(err error) error {
+	return err
+}
+
+func NormalizeSandboxPermissionOutput(_ string, data []byte) []byte {
+	return data
+}
+
+func SandboxPermissionDetail(result CommandResult, err error) (string, bool) {
+	if !isSandboxExecutionResult(result) {
+		return "", false
+	}
+	if detail := strings.TrimSpace(result.Error); detail != "" {
+		return detail, true
+	}
+	raw := sandboxPermissionRawDetail(result, err)
+	if !IsSandboxPermissionDeniedText(raw) {
+		return "", false
+	}
+	if IsSandboxACLRefreshDeniedText(raw) {
+		return raw, true
+	}
+	return SandboxPermissionDeniedMessage, true
+}
+
+func isSandboxExecutionResult(result CommandResult) bool {
+	if result.Route != RouteSandbox {
+		return false
+	}
+	switch result.Backend {
+	case "", BackendHost:
+		return false
+	default:
+		return true
+	}
+}
+
+func sandboxPermissionRawDetail(result CommandResult, err error) string {
+	var parts []string
+	appendOne := func(value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		for _, existing := range parts {
+			if existing == value {
+				return
+			}
+		}
+		parts = append(parts, value)
+	}
+	appendOne(result.Stderr)
+	appendOne(result.Stdout)
+	if err != nil {
+		appendOne(err.Error())
+	}
+	return strings.Join(parts, "\n")
+}
+
+func IsSandboxPermissionDeniedText(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	patterns := []string{
+		"read-only file system",
+		"只读文件系统",
+		"permission denied",
+		"access is denied",
+		"operation not permitted",
+		"write_dac",
+		"write dac",
+		"acl: write",
+		" dacl",
+		"could not lock config file",
+		"cannot lock config file",
+		"unable to lock config file",
+		"无法锁定配置文件",
+		"eacces",
+		"eperm",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+func IsSandboxACLRefreshDeniedText(text string) bool {
+	text = strings.ToLower(strings.TrimSpace(text))
+	if text == "" {
+		return false
+	}
+	patterns := []string{
+		"refresh sandbox acls",
+		"acl: write",
+		" dacl",
+		"write_dac",
+		"write dac",
+	}
+	for _, pattern := range patterns {
+		if strings.Contains(text, pattern) {
+			return true
+		}
+	}
+	return false
 }
 
 func HostExecutionConstraints() Constraints {
@@ -416,6 +620,52 @@ func cloneTrimmedStringMap(in map[string]string) map[string]string {
 			continue
 		}
 		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeStringSlice(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	seen := map[string]struct{}{}
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func normalizeBackendCandidates(values []Backend) []Backend {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]Backend, 0, len(values))
+	seen := map[Backend]struct{}{}
+	for _, value := range values {
+		backend := Backend(strings.TrimSpace(string(value)))
+		if backend == "" || backend == BackendHost {
+			continue
+		}
+		if _, ok := seen[backend]; ok {
+			continue
+		}
+		seen[backend] = struct{}{}
+		out = append(out, backend)
 	}
 	if len(out) == 0 {
 		return nil

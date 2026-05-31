@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/procutil"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 	"github.com/google/uuid"
 )
 

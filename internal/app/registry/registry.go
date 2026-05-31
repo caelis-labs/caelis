@@ -23,8 +23,11 @@ import (
 	modelgemini "github.com/OnslaughtSnail/caelis/internal/adapters/model/gemini"
 	modelollama "github.com/OnslaughtSnail/caelis/internal/adapters/model/ollama"
 	modelopenai "github.com/OnslaughtSnail/caelis/internal/adapters/model/openai"
+	sandboxbwrap "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/bwrap"
 	sandboxhost "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/host"
-	sandboxportadapter "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/portadapter"
+	sandboxlandlock "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/landlock"
+	sandboxseatbelt "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/seatbelt"
+	sandboxwindows "github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/windows"
 	storejsonl "github.com/OnslaughtSnail/caelis/internal/adapters/store/jsonl"
 	storememory "github.com/OnslaughtSnail/caelis/internal/adapters/store/memory"
 	storesqlite "github.com/OnslaughtSnail/caelis/internal/adapters/store/sqlite"
@@ -123,16 +126,16 @@ func RegisterDefaults(r *Registry) error {
 	}
 	for _, item := range []struct {
 		name    string
-		backend sandbox.Backend
+		factory sandbox.BackendFactory
 	}{
-		{"seatbelt", sandbox.BackendSeatbelt},
-		{"bwrap", sandbox.BackendBwrap},
-		{"landlock", sandbox.BackendLandlock},
-		{"windows", sandbox.BackendWindows},
-		{"windows-restricted-token", sandbox.BackendWindows},
-		{"windows-elevated", sandbox.BackendWindows},
+		{"seatbelt", sandboxseatbelt.Factory{}},
+		{"bwrap", sandboxbwrap.Factory{}},
+		{"landlock", sandboxlandlock.Factory{}},
+		{"windows", sandboxwindows.Factory{}},
+		{"windows-restricted-token", sandboxwindows.Factory{}},
+		{"windows-elevated", sandboxwindows.Factory{}},
 	} {
-		if err := r.RegisterSandboxBackend(item.name, sandboxportadapter.Factory{Backend: item.backend}); err != nil {
+		if err := r.RegisterSandboxBackend(item.name, item.factory); err != nil {
 			return err
 		}
 	}

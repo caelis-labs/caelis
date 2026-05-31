@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 )
 
 type Type string

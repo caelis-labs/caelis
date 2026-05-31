@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 )
 
 func TestRuntimeReportsActualHostRoute(t *testing.T) {
@@ -19,7 +19,7 @@ func TestRuntimeReportsActualHostRoute(t *testing.T) {
 		Command: "echo ok",
 		Constraints: sandbox.Constraints{
 			Route:   sandbox.RouteSandbox,
-			Backend: sandbox.BackendWindowsElevated,
+			Backend: sandbox.BackendWindows,
 		},
 	})
 	if err != nil {

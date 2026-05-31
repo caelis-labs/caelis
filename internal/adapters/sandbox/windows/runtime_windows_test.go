@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/windows/internal/acl"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/windows/internal/pathutil"
 	"github.com/OnslaughtSnail/caelis/internal/testenv"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 func TestRuntimeDescribeReportsRestrictedTokenCapabilities(t *testing.T) {
@@ -26,7 +26,7 @@ func TestRuntimeDescribeReportsRestrictedTokenCapabilities(t *testing.T) {
 	}
 	defer rt.Close()
 
-	desc := rt.Describe()
+	desc := rt.Descriptor()
 	if desc.Backend != sandbox.BackendWindows {
 		t.Fatalf("Backend = %q, want %q", desc.Backend, sandbox.BackendWindows)
 	}
@@ -65,13 +65,12 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 	waitErr := errors.New("forced termination")
 	session := &windowsSession{
 		ref: sandbox.SessionRef{
-			Backend:   sandbox.BackendWindows,
-			SessionID: "exec-test",
+			ID:      "exec-test",
+			Backend: sandbox.BackendWindows,
 		},
 		terminal: sandbox.TerminalRef{
-			Backend:    sandbox.BackendWindows,
-			SessionID:  "exec-test",
-			TerminalID: "term-test",
+			ID:        "term-test",
+			SessionID: "exec-test",
 		},
 		running:   true,
 		exitCode:  0,
@@ -81,9 +80,13 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 	}
 
 	session.forceTerminated(waitErr)
-	status, err := session.Wait(context.Background(), time.Second)
+	result, err := session.Wait(context.Background())
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("Wait() error = %v, want forced termination", err)
+	}
+	status, err := session.Snapshot(context.Background())
 	if err != nil {
-		t.Fatalf("Wait() error = %v", err)
+		t.Fatalf("Snapshot() error = %v", err)
 	}
 	if status.Running {
 		t.Fatalf("status.Running = true, want false")
@@ -91,18 +94,14 @@ func TestWindowsSessionForceTerminateMarksDone(t *testing.T) {
 	if status.ExitCode != -1 {
 		t.Fatalf("status.ExitCode = %d, want -1", status.ExitCode)
 	}
-	result, err := session.Result(context.Background())
-	if !errors.Is(err, waitErr) {
-		t.Fatalf("Result() error = %v, want forced termination", err)
-	}
 	if result.ExitCode != -1 {
 		t.Fatalf("result.ExitCode = %d, want -1", result.ExitCode)
 	}
 
 	session.forceTerminated(errors.New("second force should be ignored"))
-	result, err = session.Result(context.Background())
+	result, err = session.Wait(context.Background())
 	if !errors.Is(err, waitErr) {
-		t.Fatalf("second Result() error = %v, want first forced termination", err)
+		t.Fatalf("second Wait() error = %v, want first forced termination", err)
 	}
 	if result.ExitCode != -1 {
 		t.Fatalf("second result.ExitCode = %d, want -1", result.ExitCode)
@@ -727,13 +726,11 @@ func TestSandboxedCommandSmoke(t *testing.T) {
 		if err != nil {
 			t.Fatalf("python stdout streaming start error = %v", err)
 		}
-		status, err := session.Wait(ctx, 30*time.Second)
-		if err != nil || status.Running {
-			t.Fatalf("python stdout streaming wait err=%v status=%+v", err, status)
-		}
-		result, err = session.Result(ctx)
+		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		result, err = session.Wait(waitCtx)
+		cancel()
 		if err != nil || result.ExitCode != 0 {
-			t.Fatalf("python stdout streaming result err=%v result=%+v", err, result)
+			t.Fatalf("python stdout streaming wait err=%v result=%+v", err, result)
 		}
 		if got := strings.ReplaceAll(result.Stdout, "\r\n", "\n"); got != "requests 2.34.2\nHTTP 200\n" {
 			t.Fatalf("python stdout streaming result stdout = %q, want line breaks preserved", result.Stdout)

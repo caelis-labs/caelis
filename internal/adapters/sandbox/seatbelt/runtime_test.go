@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/cmdsession"
 	"github.com/OnslaughtSnail/caelis/internal/adapters/sandbox/internal/runnerruntime"
-	"github.com/OnslaughtSnail/caelis/ports/sandbox"
 )
 
 func TestWaitSessionTimeoutDoesNotConsumeExitForLaterResultWait(t *testing.T) {

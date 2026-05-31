@@ -1817,10 +1817,15 @@ be migrated before retiring the old stack:
      taxonomy into `internal/adapters/sandbox/*`. Production code no longer
      imports `impl/*`, and architecture lint now rejects reintroducing that
      package family.
+   - Migrated baseline: non-host sandbox adapters now implement
+     `core/sandbox` directly. The transitional `portadapter` wrapper and the
+     retired `ports/sandbox` package have been deleted, the default registry
+     registers backend factories directly, and architecture lint rejects any
+     production import of the removed sandbox port.
    - Still pending: network policy, writable/readable root policy beyond skill
      roots, rich route diagnostics, production doctor repair reporting, and
-     replacing the remaining `ports/sandbox` backend contract inside these
-     non-host adapters with the fully core-native `core/sandbox` contract.
+     cross-platform validation of the Windows restricted-token async session
+     API after the core-native session contract migration.
 
 8. Built-in tools
    - Migrated baseline: `run_command`, `task`, filesystem tools `read_file`,
