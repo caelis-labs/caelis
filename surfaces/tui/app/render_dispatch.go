@@ -5,8 +5,6 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
-
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
 type renderEventLane string
@@ -34,8 +32,6 @@ type renderEventPolicy struct {
 
 func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 	switch typed := msg.(type) {
-	case kernel.EventEnvelope:
-		return renderEventPolicyForGatewayEnvelope(typed), true
 	case TranscriptEventsMsg:
 		return renderEventPolicyForTranscriptEvents(typed), true
 	case LogChunkMsg:
@@ -64,32 +60,6 @@ func renderEventPolicyFor(msg tea.Msg) (renderEventPolicy, bool) {
 		return renderEventPolicy{lane: renderLaneTick, flushDeferredOnly: true}, true
 	default:
 		return renderEventPolicy{}, false
-	}
-}
-
-func renderEventPolicyForGatewayEnvelope(env kernel.EventEnvelope) renderEventPolicy {
-	if env.Err != nil {
-		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	}
-	switch env.Event.Kind {
-	case kernel.EventKindAssistantMessage, kernel.EventKindUserMessage:
-		if env.Event.Kind == kernel.EventKindAssistantMessage &&
-			env.Event.Narrative != nil &&
-			env.Event.Narrative.Role == kernel.NarrativeRoleAssistant &&
-			!env.Event.Narrative.Final {
-			return renderEventPolicy{lane: renderLaneMainStream, flushLogChunks: true, dismissHints: true}
-		}
-		return renderEventPolicy{lane: renderLaneMainStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	case kernel.EventKindToolCall, kernel.EventKindToolResult, kernel.EventKindApprovalRequested, kernel.EventKindApprovalReview:
-		return renderEventPolicy{lane: renderLaneToolStream, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	case kernel.EventKindPlanUpdate:
-		return renderEventPolicy{lane: renderLaneUIState, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	case kernel.EventKindParticipant:
-		return renderEventPolicy{lane: renderLaneParticipant, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	case kernel.EventKindLifecycle:
-		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
-	default:
-		return renderEventPolicy{lane: renderLaneLifecycle, flushSmoothing: true, flushLogChunks: true, dismissHints: true}
 	}
 }
 
@@ -200,12 +170,9 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	policyCmd := tea.Batch(preCmd, m.applyRenderEventPolicy(policy))
 
 	switch typed := msg.(type) {
-	case kernel.EventEnvelope:
-		model, cmd := m.handleGatewayEventEnvelope(typed)
-		return model, tea.Batch(policyCmd, cmd, m.flushImmediateViewportSyncForMsg(typed)), true
 	case TranscriptEventsMsg:
 		model, cmd := m.handleTranscriptEventsMsg(typed)
-		return model, tea.Batch(policyCmd, cmd), true
+		return model, tea.Batch(policyCmd, cmd, m.flushImmediateViewportSyncForTranscriptEvents(typed)), true
 	case LogChunkMsg:
 		if !m.deferredBatchingEnabled() {
 			model, cmd := m.handleLogChunk(typed.Chunk)
@@ -316,14 +283,13 @@ func (m *Model) dispatchRenderEvent(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-func (m *Model) flushImmediateViewportSyncForMsg(msg tea.Msg) tea.Cmd {
+func (m *Model) flushImmediateViewportSyncForTranscriptEvents(msg TranscriptEventsMsg) tea.Cmd {
 	if m == nil || !m.viewportSyncPending || m.shouldDeferStreamViewportSync() {
 		return nil
 	}
-	switch typed := msg.(type) {
-	case kernel.EventEnvelope:
-		switch typed.Event.Kind {
-		case kernel.EventKindToolCall, kernel.EventKindApprovalRequested, kernel.EventKindApprovalReview, kernel.EventKindPlanUpdate:
+	for _, event := range msg.Events {
+		switch event.Kind {
+		case TranscriptEventTool, TranscriptEventApproval, TranscriptEventPlan:
 			return m.flushPendingViewportSync()
 		}
 	}

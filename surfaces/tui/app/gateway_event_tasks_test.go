@@ -13,7 +13,7 @@ import (
 func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 	model := newGatewayEventTestModel()
 	sendReasoning := func(text string) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -23,8 +23,8 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 					Final:         true,
 					Scope:         kernel.EventScopeMain,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 	sendReasoning("两个子任务已启动")
@@ -43,7 +43,7 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 		if item.input != "" {
 			rawInput["input"] = item.input
 		}
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -54,10 +54,10 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 					Scope:    kernel.EventScopeMain,
 					RawInput: rawInput,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
-		updated, _ = model.Update(kernel.EventEnvelope{
+		updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolResult,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -73,8 +73,8 @@ func TestGatewayTaskControlsMergeIntoTaskStage(t *testing.T) {
 						"task_id": item.handle,
 					},
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -189,7 +189,7 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 			},
 		},
 	} {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -200,8 +200,8 @@ func TestGatewayTaskControlsRenderActionDetailsWithoutTaskIDs(t *testing.T) {
 					Scope:    kernel.EventScopeMain,
 					RawInput: item.raw,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -234,7 +234,7 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 		"write":  []any{"/tmp/outside"},
 	}
 
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -245,10 +245,10 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				Status:   kernel.ToolStatusRunning,
 				RawInput: permissionInput,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindApprovalReview,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -260,15 +260,15 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				ReviewStatus:   kernel.ApprovalReviewStatusInProgress,
 				DecisionSource: "auto-review",
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 	if got := ansi.Strip(model.buildHintText()); !strings.Contains(got, "Reviewing approval request: request_permissions") {
 		t.Fatalf("approval hint = %q, want pending review hint", got)
 	}
 
 	reviewText := "Automatic approval review approved (risk: medium, authorization: high): user requested it."
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolResult,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -280,10 +280,10 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				RawInput:  permissionInput,
 				RawOutput: map[string]any{"approved": true, "granted": map[string]any{"read": []any{"/tmp/outside"}, "write": []any{"/tmp/outside"}}},
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -293,10 +293,10 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				Text:  "approval-dependent work finished",
 				Final: true,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindApprovalReview,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -311,8 +311,8 @@ func TestAutomaticApprovalReviewUsesHintAndInlineTranscriptLocation(t *testing.T
 				Risk:           "medium",
 				Authorization:  "high",
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 	if got := ansi.Strip(model.buildHintText()); strings.Contains(got, "Reviewing approval request") {
 		t.Fatalf("approval hint = %q, want cleared pending review hint", got)
@@ -434,7 +434,7 @@ func TestDeniedAutomaticApprovalReviewRendersInline(t *testing.T) {
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 
@@ -493,7 +493,7 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 		{callID: "task-raw-4", input: map[string]any{"action": "wait", "task_id": "nora", "yield_time_ms": 3000}},
 		{callID: "task-raw-5", input: map[string]any{"action": "cancel", "task_id": "nora"}},
 	} {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindToolCall,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -504,11 +504,11 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 					Scope:    kernel.EventScopeMain,
 					RawInput: item.input,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindAssistantMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -518,8 +518,8 @@ func TestGatewayTaskStageCleansRawTaskFallbackRows(t *testing.T) {
 				Final: true,
 				Scope: kernel.EventScopeMain,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
@@ -604,7 +604,7 @@ func TestGatewayTaskSnapshotDoesNotRefreshCommandPanelOutput(t *testing.T) {
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -667,7 +667,7 @@ func TestGatewayTaskWaitCompletedShowsActionWithoutResultOutput(t *testing.T) {
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -691,7 +691,7 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 	model.viewport.SetWidth(46)
 	model.viewport.SetHeight(20)
 	command := "printf '%s\\n' BRANCH && git branch --show-current && printf '%s\\n' TRACKED && echo TERMINAL_ARG_TAIL_MARKER"
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -702,8 +702,8 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 				Scope:    kernel.EventScopeMain,
 				RawInput: map[string]any{"command": command},
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 	model.syncViewportContent()
 
@@ -727,7 +727,7 @@ func TestGatewayTerminalToolArgumentsRenderFullAndWrapIndented(t *testing.T) {
 func TestGatewaySpawnArgumentsRenderPromptPreviewAndExpandsFullPrompt(t *testing.T) {
 	model := newGatewayEventTestModel()
 	prompt := strings.Repeat("写一个完整参数展示测试。", 8) + "SPAWN_PROMPT_TAIL_MARKER"
-	updated, _ := model.Update(kernel.EventEnvelope{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindToolCall,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -741,8 +741,8 @@ func TestGatewaySpawnArgumentsRenderPromptPreviewAndExpandsFullPrompt(t *testing
 					"prompt": prompt,
 				},
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 	if !ok {
@@ -852,7 +852,7 @@ func TestGatewaySpawnFinalResultReplacesRunningStreamAndCleansMarkdown(t *testin
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -921,7 +921,7 @@ func TestGatewaySpawnRunningSnapshotUpgradesPromptAndHidesRawJSON(t *testing.T) 
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 
@@ -955,11 +955,11 @@ func TestGatewaySpawnRunningStreamPreservesChunkBoundarySpaces(t *testing.T) {
 			RawInput: map[string]any{"agent": "self", "prompt": prompt},
 		},
 	}}
-	updated, _ := model.Update(start)
+	updated, _ := model.Update(gatewayEventMsg(start))
 	model = updated.(*Model)
 
 	for _, chunk := range []string{"Now", " let", " me", " write", " the", " report."} {
-		updated, _ = model.Update(gatewaySpawnStreamResult("spawn-space-stream", prompt, "child-task", chunk, kernel.ToolStatusRunning, true))
+		updated, _ = model.Update(gatewayEventMsg(gatewaySpawnStreamResult("spawn-space-stream", prompt, "child-task", chunk, kernel.ToolStatusRunning, true)))
 		model = updated.(*Model)
 	}
 
@@ -994,12 +994,12 @@ func TestGatewaySpawnClosedStreamReplacesRunningOutputWithoutTaskWait(t *testing
 			RawInput: map[string]any{"agent": "self", "prompt": prompt},
 		},
 	}}
-	updated, _ := model.Update(start)
+	updated, _ := model.Update(gatewayEventMsg(start))
 	model = updated.(*Model)
 
-	updated, _ = model.Update(gatewaySpawnStreamResult("spawn-stream-final", prompt, "liam", "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|", kernel.ToolStatusRunning, true))
+	updated, _ = model.Update(gatewayEventMsg(gatewaySpawnStreamResult("spawn-stream-final", prompt, "liam", "ool_demo_showcase*.md(x6版本迭代)|**总文件数**|~80+|", kernel.ToolStatusRunning, true)))
 	model = updated.(*Model)
-	updated, _ = model.Update(gatewaySpawnStreamResult("spawn-stream-final", prompt, "liam", "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示", kernel.ToolStatusCompleted, false))
+	updated, _ = model.Update(gatewayEventMsg(gatewaySpawnStreamResult("spawn-stream-final", prompt, "liam", "### 摘要\n- `ool_demo_showcase.md` 存在\n**结论：** 目录用于 SPAWN 演示", kernel.ToolStatusCompleted, false)))
 	model = updated.(*Model)
 
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1172,7 +1172,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1190,7 +1190,7 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 		t.Fatalf("TASK write should render separately without a second SPAWN or grouped Write row:\n%s", joined)
 	}
 
-	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		Meta: testRuntimeToolMeta(map[string]any{
@@ -1213,7 +1213,8 @@ func TestGatewayTaskWriteRendersOwnPanelAndAbsorbsContinuationSpawn(t *testing.T
 			},
 			Content: testToolContent("检查完成\nhello_from_spawn.txt 内容正确"),
 		},
-	}})
+	}}))
+
 	model = updated.(*Model)
 	rows = block.Render(BlockRenderContext{Width: 160, TermWidth: 160, Theme: model.theme})
 	joined = strings.Join(renderedPlainRows(rows), "\n")
@@ -1294,7 +1295,7 @@ func TestGatewayCommandTerminalDeltasPreserveLineBreaks(t *testing.T) {
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1363,7 +1364,7 @@ func TestGatewayPlanToolRendersOnlyPlanEntries(t *testing.T) {
 			}},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
@@ -1482,7 +1483,7 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			model := newGatewayEventTestModel()
 			callID := "command-" + strings.ReplaceAll(tt.name, " ", "-")
-			updated, _ := model.Update(kernel.EventEnvelope{
+			updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolCall,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -1493,14 +1494,14 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 						Scope:    kernel.EventScopeMain,
 						RawInput: map[string]any{"command": "for i in 1 2; do echo $i; done"},
 					},
-				},
-			})
+				}}))
+
 			model = updated.(*Model)
 			var content []session.ProtocolToolCallContent
 			if tt.content != "" {
 				content = testTerminalContent(tt.content)
 			}
-			updated, _ = model.Update(kernel.EventEnvelope{
+			updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 				Event: kernel.Event{
 					Kind:       kernel.EventKindToolResult,
 					SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -1514,8 +1515,8 @@ func TestGatewayCommandPanelRendersACPTerminalContent(t *testing.T) {
 						RawOutput: tt.rawOutput,
 						Content:   content,
 					},
-				},
-			})
+				}}))
+
 			model = updated.(*Model)
 			block, ok := model.doc.Blocks()[0].(*MainACPTurnBlock)
 			if !ok {
@@ -1587,7 +1588,7 @@ func TestGatewayBASHContentlessFinalPreservesStreamedTerminalOutput(t *testing.T
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 
@@ -1655,7 +1656,7 @@ func TestGatewayParticipantBASHContentlessFinalPreservesStreamedTerminalOutput(t
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 

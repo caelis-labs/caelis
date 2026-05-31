@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/driver"
 )
@@ -184,8 +183,6 @@ func protocolTextContent(raw any) string {
 		}
 		text, _ := typed["text"].(string)
 		return text
-	case session.ProtocolToolCallContent:
-		return protocolTextContent(typed.Content)
 	case schema.ToolCallContent:
 		return protocolTextContent(typed.Content)
 	default:

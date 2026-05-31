@@ -13,13 +13,13 @@ func TestGatewayStreamingNarrativeKeepsReasoningAnswerBoundaries(t *testing.T) {
 	model := newGatewayEventTestModel()
 
 	send := func(payload *kernel.NarrativePayload) *Model {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
 				Narrative:  payload,
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 		return model
 	}
@@ -69,7 +69,7 @@ func TestGatewayParticipantStreamingChunksAppendInsteadOfReplace(t *testing.T) {
 	model := newGatewayEventTestModel()
 
 	send := func(text string) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -86,8 +86,8 @@ func TestGatewayParticipantStreamingChunksAppendInsteadOfReplace(t *testing.T) {
 					Final: false,
 					Scope: kernel.EventScopeParticipant,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 
@@ -111,7 +111,7 @@ func TestGatewayParticipantFinalCumulativeMessagePreservesInterleavedTimeline(t 
 	model := newGatewayEventTestModel()
 
 	sendAssistant := func(text string, final bool) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -128,8 +128,8 @@ func TestGatewayParticipantFinalCumulativeMessagePreservesInterleavedTimeline(t 
 					Final: final,
 					Scope: kernel.EventScopeParticipant,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 	sendTool := func(kind kernel.EventKind, status kernel.ToolStatus) {
@@ -158,7 +158,7 @@ func TestGatewayParticipantFinalCumulativeMessagePreservesInterleavedTimeline(t 
 				Scope:    kernel.EventScopeParticipant,
 			}
 		}
-		updated, _ := model.Update(kernel.EventEnvelope{Event: event})
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: event}))
 		model = updated.(*Model)
 	}
 
@@ -196,7 +196,7 @@ func TestGatewayParticipantFinalMarkdownWhitespaceReplacesSingleLiveSegment(t *t
 	model := newGatewayEventTestModel()
 
 	sendAssistant := func(text string, final bool) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -213,8 +213,8 @@ func TestGatewayParticipantFinalMarkdownWhitespaceReplacesSingleLiveSegment(t *t
 					Final: final,
 					Scope: kernel.EventScopeParticipant,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 
@@ -241,7 +241,7 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 		model = updated.(*Model)
 	}
 	sendParticipant := func(scopeID string, text string) {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -257,8 +257,8 @@ func TestGatewayParticipantPromptTurnsRenderAsSeparateBlocks(t *testing.T) {
 					Final: false,
 					Scope: kernel.EventScopeParticipant,
 				},
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 	}
 
@@ -314,7 +314,7 @@ func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing
 
 	updated, _ := model.Update(UserMessageMsg{Text: "/claude 总结一下工作"})
 	model = updated.(*Model)
-	updated, _ = model.Update(kernel.EventEnvelope{
+	updated, _ = model.Update(gatewayEventMsg(kernel.EventEnvelope{
 		Event: kernel.Event{
 			Kind:       kernel.EventKindUserMessage,
 			SessionRef: session.SessionRef{SessionID: "root-session"},
@@ -329,8 +329,8 @@ func TestGatewayParticipantUserMessageDoesNotDuplicateDisplayedPrompt(t *testing
 				Text:  "总结一下工作",
 				Scope: kernel.EventScopeParticipant,
 			},
-		},
-	})
+		}}))
+
 	model = updated.(*Model)
 
 	var userLines []string
@@ -401,13 +401,13 @@ func TestGatewayInterleavedStreamingFinalReplacesMatchingNarrativeOnly(t *testin
 	model := newGatewayEventTestModel()
 
 	send := func(payload *kernel.NarrativePayload) *Model {
-		updated, _ := model.Update(kernel.EventEnvelope{
+		updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{
 			Event: kernel.Event{
 				Kind:       kernel.EventKindAssistantMessage,
 				SessionRef: session.SessionRef{SessionID: "root-session"},
 				Narrative:  payload,
-			},
-		})
+			}}))
+
 		model = updated.(*Model)
 		return model
 	}
@@ -497,7 +497,7 @@ func TestGatewayAnchoredSubagentNarrativeDoesNotCreateStandalonePanel(t *testing
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	for _, block := range model.doc.Blocks() {
@@ -551,7 +551,7 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 			},
 		}},
 	} {
-		updated, _ := model.Update(env)
+		updated, _ := model.Update(gatewayEventMsg(env))
 		model = updated.(*Model)
 	}
 	for _, docBlock := range model.doc.Blocks() {
@@ -570,7 +570,7 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 		}
 	}
 
-	updated, _ := model.Update(kernel.EventEnvelope{Event: kernel.Event{
+	updated, _ := model.Update(gatewayEventMsg(kernel.EventEnvelope{Event: kernel.Event{
 		Kind:       kernel.EventKindToolResult,
 		SessionRef: session.SessionRef{SessionID: "root-session"},
 		ToolResult: &kernel.ToolResultPayload{
@@ -586,7 +586,8 @@ func TestGatewayAnchoredSubagentApprovalAppendsToSpawnTailUntilFinal(t *testing.
 			},
 			Content: testToolContent("created hello_claude.txt"),
 		},
-	}})
+	}}))
+
 	model = updated.(*Model)
 	block = model.doc.Blocks()[0].(*MainACPTurnBlock)
 	joined = strings.Join(renderedPlainRows(block.Render(BlockRenderContext{Width: 140, TermWidth: 140, Theme: model.theme})), "\n")

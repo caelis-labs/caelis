@@ -88,7 +88,7 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 		}
 	case coresession.EventToolCall:
 		if tool := event.Tool; tool != nil {
-			toolName := gatewayToolDisplayName(tool.Name, tool.Title, tool.Kind)
+			toolName := transcriptToolDisplayName(tool.Name, tool.Title, tool.Kind)
 			if strings.EqualFold(strings.TrimSpace(toolName), "PLAN") {
 				break
 			}
@@ -108,7 +108,7 @@ func ProjectCoreSessionEventToTranscriptEvents(event coresession.Event) []Transc
 		}
 	case coresession.EventToolResult:
 		if tool := event.Tool; tool != nil {
-			toolName := gatewayToolDisplayName(tool.Name, tool.Title, tool.Kind)
+			toolName := transcriptToolDisplayName(tool.Name, tool.Title, tool.Kind)
 			if strings.EqualFold(strings.TrimSpace(toolName), "PLAN") {
 				break
 			}

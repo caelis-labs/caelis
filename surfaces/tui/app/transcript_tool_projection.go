@@ -35,7 +35,7 @@ type transcriptToolProjection struct {
 }
 
 func projectTranscriptToolCall(input transcriptToolProjection) TranscriptEvent {
-	toolName := gatewayToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
+	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
 	status := strings.TrimSpace(input.Status)
 	if status == "" || strings.EqualFold(status, transcriptToolStatusStarted) {
 		status = transcriptToolStatusRunning
@@ -76,7 +76,7 @@ func projectTranscriptToolCall(input transcriptToolProjection) TranscriptEvent {
 }
 
 func projectTranscriptToolResult(input transcriptToolProjection, defaultSuccessStatus string) (TranscriptEvent, bool) {
-	toolName := gatewayToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
+	toolName := transcriptToolDisplayName(input.ToolName, input.ToolTitle, input.ToolKind)
 	status := strings.TrimSpace(input.Status)
 	toolErr := input.Error
 	if status == "" {

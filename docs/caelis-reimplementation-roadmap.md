@@ -1402,6 +1402,11 @@ be migrated before retiring the old stack:
      batchers and the `surfaces/tui/eventbridge` reverse bridge have been
      deleted, so production render scheduling no longer depends on
      `kernel.EventEnvelope`.
+   - Migrated baseline: the Bubble Tea render dispatch path no longer accepts
+     `kernel.EventEnvelope`, and the old gateway-event transcript projector has
+     been moved out of production code into residual test fixtures. Production
+     TUI transcript rendering now enters through `TranscriptEventsMsg` projected
+     from app view-model/core-session events.
    - Migrated baseline: the production app-service TUI submit and side-agent
      continuation paths now bypass the old `GatewayService` turn envelope and
      return core-native `tuidriver.Turn` handles directly. These handles keep
@@ -1460,13 +1465,11 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: `surfaces/tui/app` still retains old
-     `kernel.EventEnvelope` dispatch/projection code for transcript renderer
-     compatibility and terminal/tool formatting tests. The scheduler no longer
-     batches gateway envelopes, so the remaining retirement target is the
-     legacy gateway projection/dispatch compatibility entrypoint itself. That
-     requires finishing the remaining renderer protocol move to `core/runtime`,
-     `core/session`, ACP schema content, and `internal/app/viewmodel`.
+   - Still pending: `surfaces/tui/app` still has residual tests named around
+     gateway events, but those tests now enter through test-only projection
+     fixtures. The remaining product migration target is to replace those
+     fixtures with direct core-session/app-viewmodel event cases and then
+     delete the old gateway-event test vocabulary entirely.
 
 3. Future APP surface
    - Migrated baseline: `internal/app/viewmodel.StatusView` and

@@ -2,22 +2,16 @@ package tuiapp
 
 import (
 	"testing"
-
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
-func TestRenderEventPolicyForGatewayEnvelopeUsesStructuredToolLane(t *testing.T) {
-	policy, ok := renderEventPolicyFor(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind: kernel.EventKindToolCall,
-			ToolCall: &kernel.ToolCallPayload{
-				CallID:   "call-1",
-				ToolName: "READ",
-				Status:   "running",
-				Scope:    kernel.EventScopeMain,
-			},
-		},
-	})
+func TestRenderEventPolicyForTranscriptToolUsesStructuredToolLane(t *testing.T) {
+	policy, ok := renderEventPolicyFor(TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ToolCallID: "call-1",
+		ToolName:   "READ",
+		ToolStatus: transcriptToolStatusRunning,
+	}}})
 	if !ok {
 		t.Fatal("renderEventPolicyFor() = not ok, want ok")
 	}
@@ -30,23 +24,7 @@ func TestRenderEventPolicyForGatewayEnvelopeUsesStructuredToolLane(t *testing.T)
 }
 
 func TestRenderEventPolicyKeepsSmoothingForNonFinalNarrative(t *testing.T) {
-	policy, ok := renderEventPolicyFor(kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind: kernel.EventKindAssistantMessage,
-			Narrative: &kernel.NarrativePayload{
-				Role: kernel.NarrativeRoleAssistant,
-				Text: "chunk",
-			},
-		},
-	})
-	if !ok {
-		t.Fatal("renderEventPolicyFor() = not ok, want ok")
-	}
-	if policy.flushSmoothing {
-		t.Fatal("non-final assistant gateway chunk should not flush pending smoothing")
-	}
-
-	policy, ok = renderEventPolicyFor(TranscriptEventsMsg{Events: []TranscriptEvent{{
+	policy, ok := renderEventPolicyFor(TranscriptEventsMsg{Events: []TranscriptEvent{{
 		Kind:          TranscriptEventNarrative,
 		NarrativeKind: TranscriptNarrativeAssistant,
 		Text:          "chunk",

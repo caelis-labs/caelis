@@ -8,8 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
 	"github.com/OnslaughtSnail/caelis/surfaces/tui/tuikit"
 	"github.com/charmbracelet/colorprofile"
 )
@@ -321,59 +319,36 @@ func perfTickAt(kind frameTickKind, at time.Time) tea.Msg {
 	return frameTickMsg{kind: kind, at: at}
 }
 
-func perfGatewayNarrativeFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			HandleID:   "handle-1",
-			RunID:      "run-1",
-			TurnID:     "turn-1",
-			SessionRef: session.SessionRef{SessionID: "session-1"},
-			Narrative: &kernel.NarrativePayload{
-				Role:       kernel.NarrativeRoleAssistant,
-				Text:       text,
-				Visibility: string(session.VisibilityUIOnly),
-				UpdateType: string(session.ProtocolUpdateTypeAgentMessage),
-				Scope:      kernel.EventScopeMain,
-			},
-		},
-	}
+func perfGatewayNarrativeFrame(text string) TranscriptEventsMsg {
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "session-1",
+		NarrativeKind: TranscriptNarrativeAssistant,
+		Text:          text,
+	}}}
 }
 
-func perfGatewayReasoningFrame(text string) kernel.EventEnvelope {
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindAssistantMessage,
-			HandleID:   "handle-1",
-			RunID:      "run-1",
-			TurnID:     "turn-1",
-			SessionRef: session.SessionRef{SessionID: "session-1"},
-			Narrative: &kernel.NarrativePayload{
-				Role:          kernel.NarrativeRoleAssistant,
-				ReasoningText: text,
-				Visibility:    string(session.VisibilityUIOnly),
-				UpdateType:    string(session.ProtocolUpdateTypeAgentThought),
-				Scope:         kernel.EventScopeMain,
-			},
-		},
-	}
+func perfGatewayReasoningFrame(text string) TranscriptEventsMsg {
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:          TranscriptEventNarrative,
+		Scope:         ACPProjectionMain,
+		ScopeID:       "session-1",
+		NarrativeKind: TranscriptNarrativeReasoning,
+		Text:          text,
+	}}}
 }
 
-func perfTerminalFrame(text string, cursor int64) kernel.EventEnvelope {
+func perfTerminalFrame(text string, cursor int64) TranscriptEventsMsg {
 	_ = cursor
-	return kernel.EventEnvelope{
-		Event: kernel.Event{
-			Kind:       kernel.EventKindToolResult,
-			HandleID:   "handle-1",
-			RunID:      "run-1",
-			TurnID:     "turn-1",
-			SessionRef: session.SessionRef{SessionID: "session-1"},
-			ToolResult: &kernel.ToolResultPayload{
-				CallID:   "call-1",
-				ToolName: "RUN_COMMAND",
-				Status:   kernel.ToolStatusRunning,
-				Content:  testTerminalContentWithID(text, "terminal-1"),
-			},
-		},
-	}
+	return TranscriptEventsMsg{Events: []TranscriptEvent{{
+		Kind:       TranscriptEventTool,
+		Scope:      ACPProjectionMain,
+		ScopeID:    "session-1",
+		ToolCallID: "call-1",
+		ToolName:   "RUN_COMMAND",
+		ToolStatus: transcriptToolStatusRunning,
+		ToolStream: "stdout",
+		ToolOutput: text,
+	}}}
 }
