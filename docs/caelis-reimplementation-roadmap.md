@@ -1975,7 +1975,7 @@ be migrated before retiring the old stack:
      argument parsing packages have been removed; built-in tool execution now
      has a single core-native implementation path through
      `internal/adapters/tools/*`.
-   - Still pending: task lifecycle retention/compaction policy and compact/rich
+   - Still pending: configurable task retention policy plus compact/rich
      tool-panel display metadata still need core-native adapters.
 
 9. Approval and permission policy
@@ -2252,6 +2252,10 @@ be migrated before retiring the old stack:
       `session.EventLifecycle` events carrying `caelis.runtime.task`, while the
       SPAWN journal remains a recovery/retention mechanism rather than the only
       lifecycle source.
+    - Migrated baseline: compact checkpoints now retain a bounded task history
+      index in compact metadata. `TaskService` can rebuild task-panel history
+      from the latest compact event plus post-compact lifecycle/tool/subagent
+      events, giving future physical retention a canonical restore point.
     - Migrated baseline: host subprocess sessions now have durable output files
       and pid-backed recovery across local runtime restarts. Reopened live host
       sessions are read-only for stdin, but can still be tailed, waited, listed,
@@ -2260,8 +2264,8 @@ be migrated before retiring the old stack:
       bounded terminal preview data with cursors and truncation state, and the
       model-facing TASK output plus shared app task views consume the same
       runtime preview contract.
-    - Still pending: richer visual TUI/APP task panels, task lifecycle
-      retention/compaction policy, and optional indexed history stores remain
+    - Still pending: richer visual TUI/APP task panels, configurable task
+      retention policies, and optional persistent indexed history stores remain
       incomplete.
 
 12. Compaction and replay validation
@@ -2295,6 +2299,10 @@ be migrated before retiring the old stack:
       pending user input crosses the configured watermark. The compact event is
       recorded through the core engine and prefixed onto the returned turn event
       stream, so TUI and future APP consumers see the same ACP-native flow.
+    - Migrated baseline: compaction now carries a bounded canonical task index
+      for command and delegated subagent work. Repeated compactions merge the
+      previous compact task index with new lifecycle events, so task panels can
+      survive compacted history without scanning retired source events.
 
 13. Prompt, skills, and resources
     - The new discovery path reads plugin prompts, `AGENTS.md`, and skill

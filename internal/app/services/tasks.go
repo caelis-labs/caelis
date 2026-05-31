@@ -320,6 +320,7 @@ func durableTaskItemsFromEvents(events []session.Event) []appviewmodel.TaskItem 
 		if session.IsTransient(event) {
 			continue
 		}
+		items = mergeTaskItemSlices(items, durableTaskItemsFromCompactEvent(event))
 		if item, ok := durableTaskItemFromToolEvent(event); ok {
 			items = mergeTaskItemSlices(items, []appviewmodel.TaskItem{item})
 		}
@@ -332,6 +333,45 @@ func durableTaskItemsFromEvents(events []session.Event) []appviewmodel.TaskItem 
 	}
 	sortTaskItems(items)
 	return items
+}
+
+func durableTaskItemsFromCompactEvent(event session.Event) []appviewmodel.TaskItem {
+	if !isCompactCheckpoint(event) {
+		return nil
+	}
+	compact, ok := mapAny(event.Meta[compactMetaKey])
+	if !ok {
+		return nil
+	}
+	entries := compactTaskIndexEntries(compact[compactTaskIndexKey])
+	if len(entries) == 0 {
+		return nil
+	}
+	items := make([]appviewmodel.TaskItem, 0, len(entries))
+	for _, entry := range entries {
+		item, ok := taskItemFromRuntimeTaskMeta(entry, event)
+		if ok {
+			items = mergeTaskItemSlices(items, []appviewmodel.TaskItem{item})
+		}
+	}
+	return items
+}
+
+func compactTaskIndexEntries(value any) []map[string]any {
+	switch typed := value.(type) {
+	case []map[string]any:
+		return typed
+	case []any:
+		out := make([]map[string]any, 0, len(typed))
+		for _, item := range typed {
+			if mapped, ok := mapAny(item); ok {
+				out = append(out, mapped)
+			}
+		}
+		return out
+	default:
+		return nil
+	}
 }
 
 func durableTaskItemFromToolEvent(event session.Event) (appviewmodel.TaskItem, bool) {
@@ -434,13 +474,21 @@ func durableTaskItemFromLifecycleEvent(event session.Event) (appviewmodel.TaskIt
 		return appviewmodel.TaskItem{}, false
 	}
 	taskMeta := taskRuntimeMeta(event.Meta)
+	return taskItemFromRuntimeTaskMeta(taskMeta, event)
+}
+
+func taskItemFromRuntimeTaskMeta(taskMeta map[string]any, event session.Event) (appviewmodel.TaskItem, bool) {
 	taskID := stringFromAny(taskMeta["task_id"])
 	if strings.TrimSpace(taskID) == "" {
 		return appviewmodel.TaskItem{}, false
 	}
+	lifecycleStatus := ""
+	if event.Lifecycle != nil {
+		lifecycleStatus = strings.TrimSpace(string(event.Lifecycle.Status))
+	}
 	state := firstNonEmpty(
 		stringFromAny(taskMeta["state"]),
-		strings.TrimSpace(string(event.Lifecycle.Status)),
+		lifecycleStatus,
 	)
 	running, ok := firstBool(taskMeta["running"])
 	if !ok {
@@ -480,13 +528,67 @@ func durableTaskItemFromLifecycleEvent(event session.Event) (appviewmodel.TaskIt
 		StderrCursor:    firstInt64(taskMeta["stderr_cursor"]),
 		OutputPreview:   outputPreview,
 		OutputTruncated: boolFromAny(taskMeta["output_truncated"]),
-		EventID:         strings.TrimSpace(event.ID),
-		TurnID:          eventTurnID(event),
+		EventID:         firstNonEmpty(stringFromAny(taskMeta["event_id"]), strings.TrimSpace(event.ID)),
+		TurnID:          firstNonEmpty(stringFromAny(taskMeta["turn_id"]), eventTurnID(event)),
 		ExitCode:        firstInt(taskMeta["exit_code"]),
 		Error:           stringFromAny(taskMeta["error"]),
 		StartedAt:       startedAt,
 		UpdatedAt:       updatedAt,
 	}, true
+}
+
+func taskItemRetentionMeta(item appviewmodel.TaskItem) map[string]any {
+	taskID := strings.TrimSpace(item.ID)
+	if taskID == "" {
+		return nil
+	}
+	meta := map[string]any{
+		"schema":         coretool.RuntimeTaskMetaName,
+		"schema_version": coretool.RuntimeTaskMetaVersion,
+		"task_id":        taskID,
+		"source":         firstNonEmpty(strings.TrimSpace(item.Source), "history"),
+		"running":        item.Running,
+		"supports_input": item.SupportsInput,
+	}
+	for key, value := range map[string]string{
+		"task_kind":         item.Kind,
+		"title":             item.Title,
+		"backend":           item.Backend,
+		"action":            item.Action,
+		"state":             item.State,
+		"command":           item.Command,
+		"cwd":               item.CWD,
+		"terminal_id":       item.TerminalID,
+		"agent":             item.Agent,
+		"remote_session_id": item.RemoteSessionID,
+		"output_preview":    item.OutputPreview,
+		"event_id":          item.EventID,
+		"turn_id":           item.TurnID,
+		"error":             item.Error,
+	} {
+		if text := strings.TrimSpace(value); text != "" {
+			meta[key] = text
+		}
+	}
+	if item.OutputTruncated {
+		meta["output_truncated"] = true
+	}
+	if item.StdoutCursor > 0 {
+		meta["stdout_cursor"] = item.StdoutCursor
+	}
+	if item.StderrCursor > 0 {
+		meta["stderr_cursor"] = item.StderrCursor
+	}
+	if item.ExitCode != 0 {
+		meta["exit_code"] = item.ExitCode
+	}
+	if !item.StartedAt.IsZero() {
+		meta["started_at"] = item.StartedAt.Format(time.RFC3339Nano)
+	}
+	if !item.UpdatedAt.IsZero() {
+		meta["updated_at"] = item.UpdatedAt.Format(time.RFC3339Nano)
+	}
+	return meta
 }
 
 func durableTaskItemFromParticipantEvent(event session.Event) (appviewmodel.TaskItem, bool) {

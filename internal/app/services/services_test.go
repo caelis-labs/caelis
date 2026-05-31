@@ -18,6 +18,7 @@ import (
 	coreruntime "github.com/OnslaughtSnail/caelis/core/runtime"
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	"github.com/OnslaughtSnail/caelis/core/session"
+	coretool "github.com/OnslaughtSnail/caelis/core/tool"
 	appresources "github.com/OnslaughtSnail/caelis/internal/app/resources"
 	appsettings "github.com/OnslaughtSnail/caelis/internal/app/settings"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
@@ -2671,6 +2672,187 @@ func TestCompactionRecordsCoreCheckpointEvent(t *testing.T) {
 	}
 	if len(engine.events) != 1 || engine.events[0].Type != session.EventCompact {
 		t.Fatalf("recorded events = %#v, want one compact event", engine.events)
+	}
+}
+
+func TestCompactionRetainsTaskHistoryIndex(t *testing.T) {
+	now := time.Date(2026, 5, 31, 10, 0, 0, 0, time.UTC)
+	engine := &recordingEngine{
+		snapshot: session.Snapshot{
+			Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-tasks"}},
+			Events: []session.Event{
+				{
+					ID:   "evt-user",
+					Type: session.EventUser,
+					Time: now,
+					Message: &model.Message{
+						Role:  model.RoleUser,
+						Parts: []model.Part{model.NewTextPart("run checks and ask reviewer")},
+					},
+				},
+				{
+					ID:   "evt-task-start",
+					Type: session.EventLifecycle,
+					Time: now.Add(time.Second),
+					Scope: &session.EventScope{
+						TurnID: "turn-task",
+					},
+					Lifecycle: &session.LifecycleEvent{Status: session.LifecycleRunning},
+					Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+						"source":        "command",
+						"action":        "start",
+						"task_id":       "task-1",
+						"task_kind":     "command",
+						"state":         "running",
+						"running":       true,
+						"command":       "go test ./...",
+						"terminal_id":   "term-1",
+						"started_at":    now.Add(time.Second).Format(time.RFC3339Nano),
+						"updated_at":    now.Add(time.Second).Format(time.RFC3339Nano),
+						"stdout_cursor": int64(12),
+					}),
+				},
+				{
+					ID:   "evt-task-complete",
+					Type: session.EventLifecycle,
+					Time: now.Add(2 * time.Second),
+					Scope: &session.EventScope{
+						TurnID: "turn-task",
+					},
+					Lifecycle: &session.LifecycleEvent{Status: session.LifecycleCompleted},
+					Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+						"source":         "command",
+						"action":         "wait",
+						"task_id":        "task-1",
+						"task_kind":      "command",
+						"state":          "completed",
+						"running":        false,
+						"command":        "go test ./...",
+						"terminal_id":    "term-1",
+						"output_preview": "ok ./...",
+						"started_at":     now.Add(time.Second).Format(time.RFC3339Nano),
+						"updated_at":     now.Add(2 * time.Second).Format(time.RFC3339Nano),
+						"stdout_cursor":  int64(48),
+					}),
+				},
+				{
+					ID:   "evt-spawn-complete",
+					Type: session.EventLifecycle,
+					Time: now.Add(3 * time.Second),
+					Scope: &session.EventScope{
+						TurnID: "turn-spawn",
+					},
+					Lifecycle: &session.LifecycleEvent{Status: session.LifecycleCompleted},
+					Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+						"source":            "spawn",
+						"action":            "completed",
+						"task_id":           "spawn-1",
+						"task_kind":         "subagent",
+						"state":             "completed",
+						"running":           false,
+						"agent":             "reviewer",
+						"remote_session_id": "remote-1",
+						"output_preview":    "review complete",
+						"updated_at":        now.Add(3 * time.Second).Format(time.RFC3339Nano),
+					}),
+				},
+			},
+		},
+	}
+	svc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  engine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	event, err := svc.Compaction().Compact(context.Background(), CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-compact-tasks"}})
+	if err != nil {
+		t.Fatalf("Compact() error = %v", err)
+	}
+	meta, ok := event.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("compact meta = %#v, want compact metadata", event.Meta)
+	}
+	index := compactTaskIndexEntries(meta[compactTaskIndexKey])
+	if len(index) != 2 || meta["task_index_count"] != 2 {
+		t.Fatalf("task index = %#v meta=%#v, want two retained tasks", index, meta)
+	}
+
+	historyEngine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-tasks"}},
+		Events:  []session.Event{event},
+	}}
+	historySvc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  historyEngine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	history, err := historySvc.Tasks().List(context.Background(), ListTasksRequest{
+		SessionRef:     session.Ref{SessionID: "sess-compact-tasks"},
+		IncludeHistory: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !history.Supported || history.Count != 2 {
+		t.Fatalf("history = %#v, want compact-retained task list", history)
+	}
+	task, ok := findTaskItem(history.Tasks, "task-1")
+	if !ok || task.State != "completed" || task.Action != "wait" || task.StdoutCursor != 48 || task.EventID != "evt-task-complete" || !strings.Contains(task.OutputPreview, "ok ./...") {
+		t.Fatalf("task-1 = %#v ok=%t, want retained completed command task", task, ok)
+	}
+	spawn, ok := findTaskItem(history.Tasks, "spawn-1")
+	if !ok || spawn.Kind != "subagent" || spawn.Source != "spawn" || spawn.Agent != "reviewer" || spawn.RemoteSessionID != "remote-1" {
+		t.Fatalf("spawn-1 = %#v ok=%t, want retained subagent task", spawn, ok)
+	}
+
+	secondEngine := &recordingEngine{snapshot: session.Snapshot{
+		Session: session.Session{Ref: session.Ref{AppName: "caelis", UserID: "tester", SessionID: "sess-compact-tasks"}},
+		Events: []session.Event{
+			event,
+			{
+				ID:   "evt-task-two",
+				Type: session.EventLifecycle,
+				Time: now.Add(4 * time.Second),
+				Lifecycle: &session.LifecycleEvent{
+					Status: session.LifecycleRunning,
+				},
+				Meta: coretool.WithRuntimeTaskMeta(nil, map[string]any{
+					"source":     "command",
+					"action":     "start",
+					"task_id":    "task-2",
+					"task_kind":  "command",
+					"state":      "running",
+					"running":    true,
+					"command":    "make quality",
+					"updated_at": now.Add(4 * time.Second).Format(time.RFC3339Nano),
+					"started_at": now.Add(4 * time.Second).Format(time.RFC3339Nano),
+				}),
+			},
+		},
+	}}
+	secondSvc, err := New(Config{
+		Runtime: config.Runtime{AppName: "caelis", UserID: "tester"},
+		Engine:  secondEngine,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := secondSvc.Compaction().Compact(context.Background(), CompactSessionRequest{SessionRef: session.Ref{SessionID: "sess-compact-tasks"}})
+	if err != nil {
+		t.Fatalf("second Compact() error = %v", err)
+	}
+	secondMeta, ok := second.Meta[compactMetaKey].(map[string]any)
+	if !ok {
+		t.Fatalf("second compact meta = %#v, want compact metadata", second.Meta)
+	}
+	secondIndex := compactTaskIndexEntries(secondMeta[compactTaskIndexKey])
+	if len(secondIndex) != 3 || secondMeta["task_index_count"] != 3 {
+		t.Fatalf("second task index = %#v meta=%#v, want retained prior tasks plus task-2", secondIndex, secondMeta)
 	}
 }
 

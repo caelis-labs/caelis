@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	compactMetaKey         = "compact"
-	compactContractVersion = 1
-	defaultCompactMaxChars = 12000
+	compactMetaKey               = "compact"
+	compactTaskIndexKey          = "task_index"
+	compactContractVersion       = 1
+	defaultCompactMaxChars       = 12000
+	defaultCompactTaskIndexLimit = 100
 )
 
 var errCompactNoModelResponse = errors.New("app/services: compaction model stream ended without response")
@@ -54,11 +56,12 @@ func (s CompactionService) Compact(ctx context.Context, req CompactSessionReques
 		return session.Event{}, err
 	}
 	source := compactSourceEvents(snapshot.Events)
+	retention := compactRetentionEvents(snapshot.Events)
 	text, usage, meta, err := s.compactText(ctx, snapshot, source, req)
 	if err != nil {
 		return session.Event{}, err
 	}
-	event := compactEvent(snapshot.Session, source, req, text, usage, meta)
+	event := compactEvent(snapshot.Session, source, retention, req, text, usage, meta)
 	if _, err := s.services.engine.RecordEvents(ctx, snapshot.Session.Ref, []session.Event{event}); err != nil {
 		return session.Event{}, err
 	}
@@ -237,7 +240,7 @@ func normalizeCompactModelText(text string, fallback string) string {
 	return "CONTEXT CHECKPOINT\n\n" + text
 }
 
-func compactEvent(active session.Session, source []session.Event, req CompactSessionRequest, text string, usage *model.Usage, modelMeta map[string]any) session.Event {
+func compactEvent(active session.Session, source []session.Event, retention []session.Event, req CompactSessionRequest, text string, usage *model.Usage, modelMeta map[string]any) session.Event {
 	message := model.Message{
 		Role: model.RoleUser,
 		Parts: []model.Part{
@@ -250,8 +253,14 @@ func compactEvent(active session.Session, source []session.Event, req CompactSes
 	if usage != nil {
 		message.Usage = cloneModelUsage(usage)
 	}
+	compact := compactMeta(source, req, modelMeta)
+	if taskIndex := compactTaskIndex(retention); len(taskIndex) > 0 {
+		compact[compactTaskIndexKey] = taskIndex
+		compact["task_index_count"] = len(taskIndex)
+		compact["task_index_limit"] = defaultCompactTaskIndexLimit
+	}
 	meta := map[string]any{
-		compactMetaKey: compactMeta(source, req, modelMeta),
+		compactMetaKey: compact,
 	}
 	if usage != nil {
 		meta["usage"] = modelUsageMeta(*usage)
@@ -352,6 +361,51 @@ func compactSourceEvents(events []session.Event) []session.Event {
 			continue
 		}
 		out = append(out, session.CloneEvent(event))
+	}
+	return out
+}
+
+func compactRetentionEvents(events []session.Event) []session.Event {
+	if len(events) == 0 {
+		return nil
+	}
+	start := 0
+	for i := len(events) - 1; i >= 0; i-- {
+		if session.IsTransient(events[i]) {
+			continue
+		}
+		if isCompactCheckpoint(events[i]) {
+			start = i
+			break
+		}
+	}
+	out := make([]session.Event, 0, len(events)-start)
+	for _, event := range events[start:] {
+		if session.IsTransient(event) {
+			continue
+		}
+		out = append(out, session.CloneEvent(event))
+	}
+	return out
+}
+
+func compactTaskIndex(events []session.Event) []map[string]any {
+	if len(events) == 0 {
+		return nil
+	}
+	items := durableTaskItemsFromEvents(events)
+	if len(items) == 0 {
+		return nil
+	}
+	if len(items) > defaultCompactTaskIndexLimit {
+		items = items[:defaultCompactTaskIndexLimit]
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		meta := taskItemRetentionMeta(item)
+		if len(meta) > 0 {
+			out = append(out, meta)
+		}
 	}
 	return out
 }
