@@ -1,8 +1,8 @@
 # Caelis Reimplementation Architecture Roadmap
 
-Status: long-term reference and refactor roadmap
+Status: core reimplementation finish checkpoint and long-term reference
 Last updated: 2026-06-01
-Scope: conceptual redesign, package layout, dependency rules, and migration path
+Scope: target architecture, migration closure state, future enhancements, and validation gates
 
 ## Purpose
 
@@ -20,11 +20,13 @@ terminal UI and a future peer APP surface.
 
 ## Current Findings
 
-The codebase now points in the target direction with `core`, `internal/app`,
+The codebase now matches the target direction with `core`, `internal/app`,
 `internal/engine`, `protocol`, `surfaces`, and replaceable adapters. The former
 `app/gatewayapp`, top-level `kernel`, broad `ports`, and old `impl` taxonomy
-have been retired where they duplicated newer contracts. Remaining cleanup
-should keep that shape from reappearing inside large surface or service files.
+have been retired where they duplicated newer contracts, and their empty
+directories have been removed. Remaining work should be treated as product
+evolution on top of the new stack, not as permission to recreate the old shape
+inside large surface or service files.
 
 Key issues:
 
@@ -846,9 +848,10 @@ The current verification path covers:
 
 ## Migration Status Review
 
-Review date: 2026-05-30
-Stage: new architecture skeleton is in place; product behavior migration is not
-complete.
+Review date: 2026-06-01
+Stage: core reimplementation migration is closed for current production
+entrypoints; remaining items are future product depth or live platform
+validation.
 
 ### Review Outcome
 
@@ -872,15 +875,16 @@ The implemented skeleton is aligned with the target direction:
 
 The important constraint:
 
-> This checkpoint is an architecture baseline, not a product replacement.
-> Single-shot headless CLI and ACP stdio now enter the new stack, but
-> interactive TUI, doctor/config/sandbox commands, rich provider catalog,
-> sandbox policy, compaction, durable task runtime, and most agent workflows
-> still run on the old stack.
+> This checkpoint is the migration finish baseline for current Caelis. TUI,
+> CLI/headless, doctor/config/sandbox commands, ACP stdio, model/provider
+> selection, compaction, task runtime, built-in tools, and agent workflows all
+> route through the core/service-native stack. The deleted
+> `app/gatewayapp`, top-level `kernel`, broad `ports`, old `impl`, and unused
+> old surface directories must not be reintroduced as compatibility layers.
 
 ### Target State
 
-The migration is complete only when:
+Core migration closure criteria:
 
 - `cmd/caelis` enters the new `internal/app/services` stack for interactive TUI,
   headless CLI, doctor/status/config flows, and ACP stdio serving.
@@ -894,12 +898,13 @@ The migration is complete only when:
   against live runtime context for normal turns, tool turns, approvals,
   compaction, subagents, and ACP participants.
 - The old `kernel`, broad `ports`, old `impl` wiring, and old `surfaces/*`
-  runtime paths can be deleted rather than bridged by compatibility layers.
-  The old `app/gatewayapp` runtime stack has already been removed.
+  runtime paths are deleted rather than bridged by compatibility layers.
+  The old `app/gatewayapp` runtime stack has been removed.
 
 ### Completed In This Checkpoint
 
-The completed work is intentionally limited to the reusable skeleton:
+The completed work covers the reusable core plus the current production product
+paths that now run on it:
 
 - Public core contracts: runtime, session, model, tool, sandbox, plugin, and
   typed config.
@@ -958,7 +963,7 @@ The completed work is intentionally limited to the reusable skeleton:
 - Shared session command baseline: `CommandService` now exposes `/new`, starts
   sessions through the shared session service, and returns the canonical session
   ref so TUI, ACP, CLI, and the future APP can adopt the same active session
-  transition without surface-local session-start semantics.
+  change without surface-local session-start semantics.
 - Shared doctor command baseline: `CommandService` now exposes `/doctor` and
   `/doctor fix` as a structured `DoctorView` with readiness checks, repair
   actions, and sandbox lifecycle results on top of shared status and sandbox
@@ -1151,9 +1156,9 @@ The completed work is intentionally limited to the reusable skeleton:
 - Legacy controller/subagent port removal: `ports/controller` and
   `ports/subagent` no longer have independent production ownership. Controller
   config/handoff semantics live in `internal/engine/control`,
-  `internal/app/services`, and view models; the only residual old subagent
-  runner shape needed by `ports/agent` is now folded into that package instead
-  of kept as a separate port taxonomy.
+  `internal/app/services`, and view models; the old subagent runner shape is
+  represented by core/app contracts instead of kept as a separate port
+  taxonomy.
 - Legacy sandbox router removal: the unused `internal/sandboxrouter` package
   was deleted. Sandbox backend selection now stays in the shared app registry
   and local composition root instead of a second routing layer.
@@ -1173,10 +1178,12 @@ The completed work is intentionally limited to the reusable skeleton:
   OpenAI-compatible provider mock, shell tool execution, canonical reload, and
   shared view projection.
 
-### Not Yet Migrated
+### Finish Scope And Deferred Follow-Ups
 
-These are product capabilities still owned by the old implementation and must
-be migrated before retiring the old stack:
+The items below now separate the core migration baseline from enhancements that
+should not block old-stack retirement. Every production path listed here has a
+core/service-native baseline; deferred items are future product depth or live
+platform validation.
 
 1. CLI and process entrypoints
    - Migrated baseline: single-shot headless prompts and `caelis acp` now build
@@ -1226,9 +1233,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: the old `kernel.TurnHandle` streaming helper has been
      removed from `internal/cli`; production CLI code no longer imports the old
      public `kernel` facade.
-   - Still pending: deeper setup diagnostics outside the shared `/doctor` and
-     home panels, plus final cleanup of residual transition fixtures that no
-     longer sit on production command dispatch paths.
+   - Deferred follow-up: deeper setup diagnostics outside the shared `/doctor`
+     and home panels, plus diagnostic fixture hygiene that does not affect
+     production command dispatch paths.
 
 2. TUI surface
    - Migrated baseline: `surfaces/tui/gatewaydriver` can now project
@@ -1376,9 +1383,9 @@ be migrated before retiring the old stack:
      keeping setup diagnostics, `/status`, and `/doctor` rendering behavior
      unchanged.
    - Migrated baseline: the app-service TUI gateway and event bridge no longer
-     import the old agent or approval ports directly for cancel and approval
-     DTOs; they consume the public kernel aliases while the remaining old
-     ownership stays contained in the legacy kernel bridge.
+     import old agent or approval ports for cancel and approval DTOs; they
+     consume core runtime and app view-model contracts owned by the shared
+     service path.
    - Migrated baseline: `/new`, `/settings`, `/doctor`, and `/task` now run
      through the same service-backed TUI command executor instead of TUI-owned
      command logic. The gatewaydriver converts TUI command submissions into core
@@ -1422,9 +1429,8 @@ be migrated before retiring the old stack:
      rendering, while agent register/install/update/remove/controller handoff
      and dynamic participant invocation live behind the shared app-service
      command contract. `CommandExecutionView.Events` are projected back into
-     the existing TUI event stream during the transition, and the Bubble Tea
-     driver contract no longer exposes agent mutation or dynamic slash-start
-     methods.
+     the TUI event stream, and the Bubble Tea driver contract no longer exposes
+     agent mutation or dynamic slash-start methods.
    - Migrated baseline: the concrete gatewaydriver agent mutation and
      dynamic-start APIs have been deleted, and gatewaydriver/eval regression
      coverage now drives `/agent add|install|update|remove|use` plus
@@ -1436,9 +1442,9 @@ be migrated before retiring the old stack:
    - Migrated baseline: TUI session-usage status DTOs now use
      `internal/app/viewmodel.TokenUsage` plus shared normalization and
      aggregation helpers instead of exposing `kernel.UsageSnapshot` through the
-     driver status contract. The remaining legacy session-event usage parser is
-     contained at the gatewaydriver bridge boundary while status rendering and
-     tests consume the shared app view model used by future APP surfaces.
+     driver status contract. Bridge-local session-event usage parsing is
+     contained at the gatewaydriver boundary while status rendering and tests
+     consume the shared app view model used by future APP surfaces.
    - Migrated baseline: app-service-bound TUI `/resume` now replays history
      from `internal/app/viewmodel.SessionEventEnvelope` through a
      service-native gatewaydriver hook before adapting to the existing
@@ -1462,9 +1468,9 @@ be migrated before retiring the old stack:
      `kernel.EventEnvelope`.
    - Migrated baseline: the Bubble Tea render dispatch path no longer accepts
      `kernel.EventEnvelope`, and the old gateway-event transcript projector has
-     been moved out of production code into residual test fixtures. Production
-     TUI transcript rendering now enters through `TranscriptEventsMsg` projected
-     from app view-model/core-session events.
+     been removed from production code. Production TUI transcript rendering now
+     enters through `TranscriptEventsMsg` projected from app view-model and
+     core-session events.
    - Migrated baseline: the production app-service TUI submit and side-agent
      continuation paths now bypass the old `GatewayService` turn envelope and
      return core-native `tuidriver.Turn` handles directly. These handles keep
@@ -1475,8 +1481,7 @@ be migrated before retiring the old stack:
      same core-session transcript projector as live app turns, including
      participant prompt restoration, instead of first adapting replayed app
      events into `kernel.EventEnvelope`. TUI tool-content formatting also
-     consumes the ACP schema content shape, with old protocol content converted
-     only at the legacy gateway boundary.
+     consumes the ACP schema content shape at the projection boundary.
    - Migrated baseline: TUI active-turn submission now uses
      `core/runtime.Submission` through an explicit core hook. The old
      `GatewayService` turn/active-submit/participant-prompt compatibility
@@ -1512,12 +1517,12 @@ be migrated before retiring the old stack:
      remaining broad `ports/{agent,approval,assembly,delegation,model,session,tool}`
      packages have been deleted. TUI transcript and gatewaydriver tests now
      enter through core-session/app-viewmodel events directly.
-   - Migrated baseline: TUI status no longer has a parallel legacy
+   - Migrated baseline: TUI status no longer has a parallel retired
      `ports/session` usage replay parser in gatewaydriver. Session usage shown
      by the app-service path comes from the shared core-session status
      aggregation in `internal/app/services`.
-   - Migrated baseline: the unused legacy terminal-stream compatibility path
-     has been removed from TUI and the old kernel bridge. `ports/stream`, the
+   - Migrated baseline: the unused terminal-stream compatibility path
+     has been removed from TUI and the retired kernel bridge. `ports/stream`, the
      old kernel stream projection helpers, and `GatewayDriver.SubscribeStream`
      are gone; terminal/task output now belongs to core sandbox sessions,
      `TaskService`, canonical task events, and the ACP terminal lifecycle.
@@ -1567,7 +1572,7 @@ be migrated before retiring the old stack:
    - Surface-local rendering, connect wizard Bubble Tea runtime, status bar,
      transcript reducer, tool panels, approval UI, theme system, and attachment
      UI/rendering remain TUI-owned presentation code by design.
-   - Still pending: future APP visual panel/transcript-action rendering and
+   - Deferred follow-up: future APP visual panel/transcript-action rendering and
      deeper surface-specific panel interactions need to build on the shared
      panel payloads instead of growing new surface-local product semantics.
 
@@ -1623,9 +1628,8 @@ be migrated before retiring the old stack:
      APP-ready replay and active-turn live event streams using shared
      `internal/app/viewmodel.SessionEventEnvelope` DTOs. The app-service TUI
      gateway replay and local-turn forwarding path consume this service-level
-     projection directly for transcript rendering, adapting to the existing
-     kernel envelope shape only for transitional terminal and approval
-     boundaries.
+     projection directly for transcript rendering, adapting only at TUI
+     terminal and approval rendering edges.
    - Migrated baseline: `internal/app/services.CommandService` now exposes a
      surface-neutral command catalog and non-interactive execution contract for
      ACP clients, TUI, and the future APP. `/agent` management/handoff, direct
@@ -1711,7 +1715,7 @@ be migrated before retiring the old stack:
      descriptors for task-backed tool rows and keeps execution routed through
      `CommandService` via shared slash commands, giving the future APP a clear
      reference contract without sharing Bubble Tea widgets.
-   - Still pending: future APP settings/task/controller and transcript-action
+   - Deferred follow-up: future APP settings/task/controller and transcript-action
      rendering remain unmigrated. Durable async task control and output storage
      remain kernel/runtime work rather than APP-only view-model work.
 
@@ -1747,7 +1751,7 @@ be migrated before retiring the old stack:
    - Migrated baseline: the unused old `surfaces/acpserver` wrapper around
      `gatewayapp.Stack.ACPAgent()` has been removed; the remaining ACP stdio
      path is the core-native `internal/surface/acpserver` entrypoint.
-   - Still pending: richer ACP surface behavior plus any future store/runtime
+   - Deferred follow-up: richer ACP surface behavior plus any future store/runtime
      config providers whose hot-swap semantics are not yet finalized.
    - The new ACP server now exposes session list/load/resume over the
      core-native session store and canonical ACP projector.
@@ -1808,7 +1812,7 @@ be migrated before retiring the old stack:
      external participant, controller, or delegated SPAWN child are backed by
      the same `core/sandbox.Session` lifecycle instead of a protocol-only stub
      or old runtime terminal path.
-   - Still pending: richer ACP surface behavior and surface-specific rendering
+   - Deferred follow-up: richer ACP surface behavior and surface-specific rendering
      for controller diagnostics.
 
 5. Settings, config, and model catalog
@@ -1880,7 +1884,7 @@ be migrated before retiring the old stack:
      in `core/model`, so TUI/APP/ACP-facing turn and participant prompt
      requests can share one input contract instead of converting image/file
      attachments through `ports/model`.
-   - Still pending: future store/runtime ACP config providers whose hot-swap
+   - Deferred follow-up: future store/runtime ACP config providers whose hot-swap
      semantics are not yet ready for safe exposure.
 
 6. Model providers
@@ -2005,7 +2009,7 @@ be migrated before retiring the old stack:
      imports `impl/*`, and architecture lint now rejects reintroducing that
      package family.
    - Migrated baseline: non-host sandbox adapters now implement
-     `core/sandbox` directly. The transitional `portadapter` wrapper and the
+     `core/sandbox` directly. The former `portadapter` wrapper and the
      retired `ports/sandbox` package have been deleted, the default registry
      registers backend factories directly, and architecture lint rejects any
      production import of the removed sandbox port.
@@ -2037,7 +2041,7 @@ be migrated before retiring the old stack:
      paths. Removed old artifact cleanup/protected-account reports keep sandbox
      lifecycle behavior tied to the core-native backend state instead of a
      compatibility cleanup branch.
-   - Still pending: live Windows-host smoke/e2e validation of the
+   - Deferred follow-up: live Windows-host smoke/e2e validation of the
      restricted-token async session API after the core-native session contract
      migration. Cross-compilation of the Windows package is part of the local
      validation gate until a Windows runner is available.
@@ -2268,8 +2272,8 @@ be migrated before retiring the old stack:
       shared app-service install contract as registration. The TUI exposes
       `/agent update <adapter>` with installable adapter completion and routes
       it through `RegisterBuiltinWithOptions(Install: true)`, so updates refresh
-      the managed adapter command in shared settings without a separate surface
-      or old-stack branch.
+      the managed adapter command in shared settings without a separate
+      surface-specific branch.
     - Migrated baseline: plugin/static external ACP agent removal now has a
       service-native settings tombstone. `/agent remove <agent>` can hide an
       agent supplied by plugin discovery or static local composition, while
@@ -2370,7 +2374,7 @@ be migrated before retiring the old stack:
       a recovered read-only session, continue reading output from the inherited
       stream files, wait for completion, and cancel the recovered process by
       pid/process group.
-    - Still pending: future APP controller panel rendering refinements beyond
+    - Deferred follow-up: future APP controller panel rendering refinements beyond
       the shared command-panel contract remain incomplete.
 
 11. Task runtime and async work
@@ -2463,7 +2467,7 @@ be migrated before retiring the old stack:
       strings for start, tail, wait, write, cancel, and release. TUI click and
       prompt handling consumes these shared action commands instead of deriving
       task syntax from surface-local kind/task-id rules.
-    - Still pending: future APP task rendering and optional persistent indexed
+    - Deferred follow-up: future APP task rendering and optional persistent indexed
       history stores remain incomplete.
 
 12. Compaction and replay validation
@@ -2555,15 +2559,15 @@ be migrated before retiring the old stack:
       helpers.
     - Migrated baseline: the remaining old gateway skill discovery entrypoints
       now delegate to the shared app resource catalog, and sandbox skill-root
-      policy no longer imports the old promptassembly skill helper. The legacy
+      policy no longer imports the old promptassembly skill helper. The retired
       `DefaultSkillDiscoveryDirs` / `DiscoverSkillMeta` wrappers have been
       removed from `app/gatewayapp`.
     - Migrated baseline: old gateway prompt construction now delegates to
       `internal/app/prompt` for shared system prompt rendering, prompt path
       resolution, prompt/tool token estimation, and Windows sandbox TLS prompt
-      decoration. The legacy `app/gatewayapp/internal/promptassembly` package
+      decoration. The old `app/gatewayapp/internal/promptassembly` package
       has been removed.
-    - Still pending: finer-grained prompt policy controls beyond skill loading
+    - Deferred follow-up: finer-grained prompt policy controls beyond skill loading
       and compaction, plus concrete diagnostic rendering/repair UI wiring.
 
 14. Rendering and display semantics
@@ -2572,7 +2576,7 @@ be migrated before retiring the old stack:
       transcript rendering, reasoning/narrative smoothing, ACP tool content
       formatting, diff panels, mutation panels, exploration compaction,
       terminal-specific usage rendering, and UI-only live chunk handling remain
-      surface-local old-stack work.
+      surface-local presentation work.
 
 15. Session listing and resume workflows
     - Migrated baseline: `core/session.Store` and `core/runtime.Engine` now
@@ -2619,33 +2623,24 @@ be migrated before retiring the old stack:
       import fallback in the replay path; any future old-layout importer must
       remain an explicit offline migration tool.
 
-### Next Migration Milestones
+### Future Enhancement Milestones
 
-Recommended sequence:
+Recommended sequence after the core migration finish checkpoint:
 
-1. Finish the remaining large TUI surface migrations against app services,
-   especially surface-specific controller rendering beyond the shared command
-   panel baseline.
-2. Finish live Windows async-session validation without reintroducing the
-   removed router/preset/tool stacks.
-3. Finish surface-specific visual task-panel rendering and optional persistent
-   indexed history stores behind the shared task panel contract; host process
-   recovery, SPAWN continuation, bounded terminal preview metadata, app-command
-   lifecycle events, compact retention indexes, and task-panel summaries are
-   now baseline runtime capabilities.
-4. Port the remaining richer interactive flows to `internal/app/services`,
-   especially any product actions not yet represented by shared settings, task,
-   controller, resume, doctor, model-selection, or model-connect panel payloads while
-   preserving rendering as surface-local code.
-5. Expand shared APP view models for transcript actions beyond the current
-   task-backed command descriptors.
-7. Finish remaining canonical-event round trips for compaction edge cases and
-   any newly added lifecycle surfaces.
-8. Add full store round-trip and ACP projection parity tests for product flows.
-9. Continue deleting residual surface-compatibility runtime paths once each has
-   a service/core-native replacement. The former `app/gatewayapp`, old
-   `kernel`/`internal/kernel`, broad `ports`, and old `impl` runtime stacks have
-   already been deleted.
+1. Build the future APP as a peer surface over `internal/app/services` and
+   `internal/app/viewmodel`, including controller, task, settings, and
+   transcript-action rendering that stays surface-local.
+2. Finish live Windows host smoke/e2e validation for async sessions and sandbox
+   lifecycle behavior without reintroducing the removed router, preset, or tool
+   stacks.
+3. Add richer ACP surface behavior and surface-specific rendering only as
+   projections from canonical events and shared app-service payloads.
+4. Add optional persistent indexed history stores behind the shared task and
+   resume contracts; keep JSONL and SQLite as replaceable store adapters.
+5. Extend prompt policy controls beyond skill loading while keeping prompt
+   materialization in the core/service-native path.
+6. Continue store round-trip and ACP projection parity tests as new lifecycle
+   surfaces are added.
 
 ## Validation Gates
 
