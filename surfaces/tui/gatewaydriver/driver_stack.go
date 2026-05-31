@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/OnslaughtSnail/caelis/core/model"
@@ -12,18 +13,8 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/sandbox"
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
-
-type GatewayService interface {
-	Interrupt(context.Context, kernel.InterruptRequest) error
-	ControlPlaneState(context.Context, kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error)
-	HandoffController(context.Context, kernel.HandoffControllerRequest) (session.Session, error)
-	AttachParticipant(context.Context, kernel.AttachParticipantRequest) (session.Session, error)
-	DetachParticipant(context.Context, kernel.DetachParticipantRequest) (session.Session, error)
-	ActiveTurns() []kernel.ActiveTurnState
-}
 
 type BeginTurnRequest struct {
 	SessionRef   coresession.Ref
@@ -44,6 +35,12 @@ type SubmitActiveTurnRequest struct {
 	Submission coreruntime.Submission
 }
 
+type InterruptRequest struct {
+	SessionRef coresession.Ref
+	Surface    string
+	Reason     string
+}
+
 type PromptParticipantRequest struct {
 	SessionRef    coresession.Ref
 	ParticipantID string
@@ -60,6 +57,29 @@ type ResumeSessionRequest struct {
 type ListSessionCandidatesRequest struct {
 	Workspace coresession.Workspace
 	Limit     int
+}
+
+type ActiveTurnKind string
+
+const (
+	ActiveTurnKindKernel      ActiveTurnKind = "kernel"
+	ActiveTurnKindParticipant ActiveTurnKind = "participant"
+)
+
+type ActiveTurnState struct {
+	SessionRef coresession.Ref
+	Kind       ActiveTurnKind
+	HandleID   string
+	RunID      string
+	TurnID     string
+	StartedAt  time.Time
+}
+
+type ControlPlaneState struct {
+	SessionRef    coresession.Ref
+	Controller    coresession.ControllerBinding
+	Participants  []coresession.ParticipantBinding
+	HasActiveTurn bool
 }
 
 type ModelConfig struct {
@@ -203,7 +223,6 @@ type CodeFreeAuthRequest struct {
 }
 
 type DriverStack struct {
-	GatewayFn func() GatewayService
 	Sessions  session.Service
 	AppName   string
 	UserID    string
@@ -214,6 +233,9 @@ type DriverStack struct {
 	ListSessionCandidatesFn            func(context.Context, ListSessionCandidatesRequest) ([]ResumeCandidate, error)
 	BeginTurnFn                        func(context.Context, BeginTurnRequest) (BeginTurnResult, error)
 	SubmitActiveTurnFn                 func(context.Context, SubmitActiveTurnRequest) error
+	InterruptFn                        func(context.Context, InterruptRequest) error
+	ActiveTurnsFn                      func() []ActiveTurnState
+	ControlPlaneStateFn                func(context.Context, coresession.Ref) (ControlPlaneState, error)
 	PromptParticipantFn                func(context.Context, PromptParticipantRequest) (BeginTurnResult, error)
 	ACPControllerStatusFn              func(context.Context, coresession.Ref) (appviewmodel.ControllerStatus, bool, error)
 	DefaultModelAliasFn                func() string
@@ -267,17 +289,6 @@ type DriverStack struct {
 	ReleaseTaskFn                      func(context.Context, TaskOutputOptions) error
 }
 
-func (s *DriverStack) gateway() (GatewayService, error) {
-	if s == nil || s.GatewayFn == nil {
-		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: gateway dependency is unavailable")
-	}
-	gw := s.GatewayFn()
-	if gw == nil {
-		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: gateway is unavailable")
-	}
-	return gw, nil
-}
-
 func (s *DriverStack) StartSession(ctx context.Context, preferredSessionID string, bindingKey string) (coresession.Session, error) {
 	if s == nil || s.StartSessionFn == nil {
 		return coresession.Session{}, fmt.Errorf("surfaces/tui/gatewaydriver: start session dependency is unavailable")
@@ -297,6 +308,62 @@ func (s *DriverStack) ListSessionCandidates(ctx context.Context, req ListSession
 		return nil, ErrMigrationPending
 	}
 	return s.ListSessionCandidatesFn(ctx, req)
+}
+
+func (s *DriverStack) Interrupt(ctx context.Context, req InterruptRequest) error {
+	if s == nil || s.InterruptFn == nil {
+		return ErrMigrationPending
+	}
+	return s.InterruptFn(ctx, req)
+}
+
+func (s *DriverStack) ActiveTurns() []ActiveTurnState {
+	if s == nil || s.ActiveTurnsFn == nil {
+		return nil
+	}
+	return cloneActiveTurnStates(s.ActiveTurnsFn())
+}
+
+func (s *DriverStack) ControlPlaneState(ctx context.Context, ref coresession.Ref) (ControlPlaneState, error) {
+	if s == nil || s.ControlPlaneStateFn == nil {
+		return ControlPlaneState{}, ErrMigrationPending
+	}
+	return cloneControlPlaneStateResult(s.ControlPlaneStateFn(ctx, ref))
+}
+
+func cloneActiveTurnStates(in []ActiveTurnState) []ActiveTurnState {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]ActiveTurnState, 0, len(in))
+	for _, item := range in {
+		item.SessionRef = coresession.NormalizeRef(item.SessionRef)
+		item.Kind = ActiveTurnKind(strings.TrimSpace(string(item.Kind)))
+		item.HandleID = strings.TrimSpace(item.HandleID)
+		item.RunID = strings.TrimSpace(item.RunID)
+		item.TurnID = strings.TrimSpace(item.TurnID)
+		out = append(out, item)
+	}
+	return out
+}
+
+func cloneControlPlaneStateResult(in ControlPlaneState, err error) (ControlPlaneState, error) {
+	if err != nil {
+		return ControlPlaneState{}, err
+	}
+	return cloneControlPlaneState(in), nil
+}
+
+func cloneControlPlaneState(in ControlPlaneState) ControlPlaneState {
+	out := in
+	out.SessionRef = coresession.NormalizeRef(in.SessionRef)
+	if len(in.Participants) > 0 {
+		out.Participants = make([]coresession.ParticipantBinding, 0, len(in.Participants))
+		for _, participant := range in.Participants {
+			out.Participants = append(out.Participants, participant)
+		}
+	}
+	return out
 }
 
 func (s *DriverStack) ACPControllerStatus(ctx context.Context, ref coresession.Ref) (appviewmodel.ControllerStatus, bool, error) {

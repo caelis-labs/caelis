@@ -7,8 +7,7 @@ import (
 
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
-	"github.com/OnslaughtSnail/caelis/ports/session"
+	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 	tuicommands "github.com/OnslaughtSnail/caelis/surfaces/tui/commands"
 )
 
@@ -18,11 +17,7 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	if !ok {
 		return []CompletionCandidate{}, nil
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: activeSession.SessionRef})
+	state, err := d.stack.ControlPlaneState(ctx, coreRefFromPort(activeSession.SessionRef))
 	if err != nil {
 		return nil, err
 	}
@@ -59,11 +54,11 @@ func (d *GatewayDriver) CompleteMention(ctx context.Context, query string, limit
 	return out, nil
 }
 
-func isUserSideParticipant(participant kernel.ParticipantState) bool {
-	if participant.Role != session.ParticipantRoleSidecar {
+func isUserSideParticipant(participant coresession.ParticipantBinding) bool {
+	if participant.Role != coresession.ParticipantSidecar {
 		return false
 	}
-	return participant.Kind == session.ParticipantKindACP
+	return participant.Kind == coresession.ParticipantACP
 }
 
 func (d *GatewayDriver) CompleteFile(ctx context.Context, query string, limit int) ([]CompletionCandidate, error) {
@@ -336,7 +331,7 @@ func controllerCommandNames(commands []appviewmodel.ControllerCommand) []string 
 	return out
 }
 
-func acpControllerModelText(status appviewmodel.ControllerStatus, activeSession session.Session) string {
+func acpControllerModelText(status appviewmodel.ControllerStatus, activeSession portsession.Session) string {
 	return firstNonEmpty(
 		strings.TrimSpace(status.Model),
 		strings.TrimSpace(status.Agent),
@@ -582,13 +577,7 @@ func (d *GatewayDriver) completeAgentParticipants(ctx context.Context, query str
 	if !ok {
 		return nil, nil
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
-		SessionRef: activeSession.SessionRef,
-	})
+	state, err := d.stack.ControlPlaneState(ctx, coreRefFromPort(activeSession.SessionRef))
 	if err != nil {
 		return nil, err
 	}
@@ -660,7 +649,7 @@ func (d *GatewayDriver) agentCatalog(limit int) []AgentCandidate {
 	return out
 }
 
-func (d *GatewayDriver) resolveHandoffAgentName(ctx context.Context, ref session.SessionRef, input string) (string, error) {
+func (d *GatewayDriver) resolveHandoffAgentName(ctx context.Context, ref coresession.Ref, input string) (string, error) {
 	if agent, err := d.resolveAgentName(input); err == nil {
 		return agent, nil
 	}
@@ -668,11 +657,7 @@ func (d *GatewayDriver) resolveHandoffAgentName(ctx context.Context, ref session
 	if err != nil {
 		return "", err
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return "", err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := d.stack.ControlPlaneState(ctx, ref)
 	if err != nil {
 		return "", err
 	}
@@ -718,23 +703,19 @@ func (d *GatewayDriver) resolveAgentName(input string) (string, error) {
 	}
 }
 
-func (d *GatewayDriver) resolveParticipantID(ctx context.Context, ref session.SessionRef, input string) (string, error) {
+func (d *GatewayDriver) resolveParticipantID(ctx context.Context, ref coresession.Ref, input string) (string, error) {
 	input = strings.ToLower(strings.TrimSpace(input))
 	if input == "" {
 		return "", fmt.Errorf("surfaces/tui/gatewaydriver: participant id is required")
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return "", err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{SessionRef: ref})
+	state, err := d.stack.ControlPlaneState(ctx, ref)
 	if err != nil {
 		return "", err
 	}
 	var exact string
 	prefixMatches := make([]string, 0, 2)
 	for _, participant := range state.Participants {
-		if participant.Kind != session.ParticipantKindACP {
+		if participant.Kind != coresession.ParticipantACP {
 			continue
 		}
 		id := strings.TrimSpace(participant.ID)

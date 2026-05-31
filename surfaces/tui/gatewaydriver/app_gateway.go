@@ -13,8 +13,6 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
-	portsession "github.com/OnslaughtSnail/caelis/ports/session"
 )
 
 type appServiceGateway struct {
@@ -26,7 +24,7 @@ type appServiceGateway struct {
 type appServiceActiveTurn interface {
 	Turn
 	CreatedAt() time.Time
-	state() kernel.ActiveTurnState
+	state() ActiveTurnState
 }
 
 func newAppServiceGateway(svc appservices.Services) *appServiceGateway {
@@ -67,88 +65,24 @@ func (g *appServiceGateway) BeginCoreTurn(ctx context.Context, req BeginTurnRequ
 func (g *appServiceGateway) SubmitCoreActiveTurn(ctx context.Context, req SubmitActiveTurnRequest) error {
 	handle := g.activeForSession(req.SessionRef.SessionID)
 	if handle == nil {
-		return &kernel.Error{
-			Kind:    kernel.KindConflict,
-			Code:    kernel.CodeNoActiveRun,
-			Message: "no active core turn for session",
-		}
+		return errNoActiveRun
 	}
-	if handle.state().Kind != kernel.ActiveTurnKindKernel {
-		return &kernel.Error{
-			Kind:    kernel.KindConflict,
-			Code:    kernel.CodeNoActiveRun,
-			Message: "no active core turn for session",
-		}
+	if handle.state().Kind != ActiveTurnKindKernel {
+		return errNoActiveRun
 	}
 	return handle.Submit(ctx, cloneCoreSubmission(req.Submission))
 }
 
-func (g *appServiceGateway) Interrupt(ctx context.Context, req kernel.InterruptRequest) error {
-	return g.services.Turns().Interrupt(ctx, coreRefFromPort(req.SessionRef))
+func (g *appServiceGateway) InterruptCore(ctx context.Context, req InterruptRequest) error {
+	return g.services.Turns().Interrupt(ctx, req.SessionRef)
 }
 
-func (g *appServiceGateway) ControlPlaneState(ctx context.Context, req kernel.ControlPlaneStateRequest) (kernel.ControlPlaneState, error) {
-	snapshot, err := g.services.Sessions().Load(ctx, coreRefFromPort(req.SessionRef))
-	if err != nil {
-		return kernel.ControlPlaneState{}, err
-	}
-	return controlPlaneStateFromCore(snapshot, g.ActiveTurns()), nil
-}
-
-func (g *appServiceGateway) HandoffController(ctx context.Context, req kernel.HandoffControllerRequest) (portsession.Session, error) {
-	ref := coreRefFromPort(req.SessionRef)
-	target, err := handoffTargetFromRequest(req)
-	if err != nil {
-		return portsession.Session{}, err
-	}
-	if _, err := g.services.Controllers().Handoff(ctx, appservices.ControllerHandoffRequest{
-		SessionRef: ref,
-		Target:     target,
-		Source:     req.Source,
-		Reason:     req.Reason,
-	}); err != nil {
-		return portsession.Session{}, err
-	}
+func (g *appServiceGateway) CoreControlPlaneState(ctx context.Context, ref coresession.Ref) (ControlPlaneState, error) {
 	snapshot, err := g.services.Sessions().Load(ctx, ref)
 	if err != nil {
-		return portsession.Session{}, err
+		return ControlPlaneState{}, err
 	}
-	snapshot.Session.Controller = controllerFromCoreSnapshot(snapshot)
-	return portSessionFromCore(snapshot.Session), nil
-}
-
-func handoffTargetFromRequest(req kernel.HandoffControllerRequest) (string, error) {
-	switch req.Kind {
-	case "", portsession.ControllerKindKernel:
-		return "local", nil
-	case portsession.ControllerKindACP:
-		target := strings.TrimSpace(req.Agent)
-		if target == "" {
-			return "", fmt.Errorf("core app-service TUI gateway: ACP controller agent is required")
-		}
-		return target, nil
-	default:
-		return "", fmt.Errorf("core app-service TUI gateway: unsupported controller kind %q", req.Kind)
-	}
-}
-
-func (g *appServiceGateway) AttachParticipant(ctx context.Context, req kernel.AttachParticipantRequest) (portsession.Session, error) {
-	ref := coreRefFromPort(req.SessionRef)
-	snapshot, err := g.services.Sessions().Load(ctx, ref)
-	if err != nil {
-		return portsession.Session{}, err
-	}
-	participant, err := g.participantForAttach(ctx, snapshot, req)
-	if err != nil {
-		return portsession.Session{}, err
-	}
-	event := participantLifecycleEvent(participant, "attached", req.Source)
-	if _, err := g.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, []coresession.Event{event}); err != nil {
-		return portsession.Session{}, err
-	}
-	snapshot.Events = append(snapshot.Events, event)
-	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
-	return portSessionFromCore(snapshot.Session), nil
+	return controlPlaneStateFromCore(snapshot, g.ActiveCoreTurns()), nil
 }
 
 func (g *appServiceGateway) PromptCoreParticipant(ctx context.Context, req PromptParticipantRequest) (BeginTurnResult, error) {
@@ -175,31 +109,10 @@ func (g *appServiceGateway) PromptCoreParticipant(ctx context.Context, req Promp
 	}, nil
 }
 
-func (g *appServiceGateway) DetachParticipant(ctx context.Context, req kernel.DetachParticipantRequest) (portsession.Session, error) {
-	ref := coreRefFromPort(req.SessionRef)
-	snapshot, err := g.services.Sessions().Load(ctx, ref)
-	if err != nil {
-		return portsession.Session{}, err
-	}
-	participants := participantsFromCoreSnapshot(snapshot)
-	participant, ok := findCoreParticipant(participants, req.ParticipantID)
-	if !ok {
-		snapshot.Session.Participants = participants
-		return portSessionFromCore(snapshot.Session), nil
-	}
-	event := participantLifecycleEvent(participant, "detached", req.Source)
-	if _, err := g.services.Engine().RecordEvents(ctx, snapshot.Session.Ref, []coresession.Event{event}); err != nil {
-		return portsession.Session{}, err
-	}
-	snapshot.Events = append(snapshot.Events, event)
-	snapshot.Session.Participants = participantsFromCoreSnapshot(snapshot)
-	return portSessionFromCore(snapshot.Session), nil
-}
-
-func (g *appServiceGateway) ActiveTurns() []kernel.ActiveTurnState {
+func (g *appServiceGateway) ActiveCoreTurns() []ActiveTurnState {
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	out := make([]kernel.ActiveTurnState, 0, len(g.active))
+	out := make([]ActiveTurnState, 0, len(g.active))
 	for _, handle := range g.active {
 		out = append(out, handle.state())
 	}
@@ -322,10 +235,10 @@ func (h *appServiceTurnHandle) publishAppEvent(env appviewmodel.SessionEventEnve
 	h.appEvents <- appviewmodel.CloneSessionEventEnvelope(env)
 }
 
-func (h *appServiceTurnHandle) state() kernel.ActiveTurnState {
-	return kernel.ActiveTurnState{
-		SessionRef: portRefFromCore(h.SessionRef()),
-		Kind:       kernel.ActiveTurnKindKernel,
+func (h *appServiceTurnHandle) state() ActiveTurnState {
+	return ActiveTurnState{
+		SessionRef: h.SessionRef(),
+		Kind:       ActiveTurnKindKernel,
 		HandleID:   h.HandleID(),
 		RunID:      h.RunID(),
 		TurnID:     h.TurnID(),
@@ -333,22 +246,14 @@ func (h *appServiceTurnHandle) state() kernel.ActiveTurnState {
 	}
 }
 
-func unsupportedControlPlaneError(action string) error {
-	return &kernel.Error{
-		Kind:    kernel.KindUnsupported,
-		Code:    kernel.CodeControlPlaneUnsupported,
-		Message: "core app-service TUI gateway does not support " + action,
-	}
-}
-
-func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []kernel.ActiveTurnState) kernel.ControlPlaneState {
-	ref := portRefFromCore(snapshot.Session.Ref)
+func controlPlaneStateFromCore(snapshot coresession.Snapshot, active []ActiveTurnState) ControlPlaneState {
+	ref := coresession.NormalizeRef(snapshot.Session.Ref)
 	participants := participantsFromCoreSnapshot(snapshot)
 	controller := controllerFromCoreSnapshot(snapshot)
-	return kernel.ControlPlaneState{
+	return ControlPlaneState{
 		SessionRef:    ref,
-		Controller:    controllerStateFromCore(controller),
-		Participants:  participantStatesFromCore(participants),
+		Controller:    controller,
+		Participants:  participants,
 		HasActiveTurn: activeTurnForSession(active, ref.SessionID),
 	}
 }
@@ -432,49 +337,7 @@ func normalizeCoreController(in coresession.ControllerBinding) coresession.Contr
 	return in
 }
 
-func controllerStateFromCore(in coresession.ControllerBinding) kernel.ControllerState {
-	kind := portsession.ControllerKind(in.Kind)
-	if in.Kind == coresession.ControllerBuiltin {
-		kind = portsession.ControllerKindKernel
-	}
-	return kernel.ControllerState{
-		Kind:            kind,
-		ControllerID:    strings.TrimSpace(in.ID),
-		AgentName:       strings.TrimSpace(in.AgentName),
-		Label:           strings.TrimSpace(in.Label),
-		EpochID:         strings.TrimSpace(in.EpochID),
-		RemoteSessionID: strings.TrimSpace(in.RemoteSessionID),
-		ContextSyncSeq:  in.ContextSyncSeq,
-		AttachedAt:      in.AttachedAt,
-		Source:          strings.TrimSpace(in.Source),
-	}
-}
-
-func participantStatesFromCore(in []coresession.ParticipantBinding) []kernel.ParticipantState {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]kernel.ParticipantState, 0, len(in))
-	for _, participant := range in {
-		out = append(out, kernel.ParticipantState{
-			ID:             strings.TrimSpace(participant.ID),
-			Kind:           portsession.ParticipantKind(participant.Kind),
-			Role:           portsession.ParticipantRole(participant.Role),
-			AgentName:      strings.TrimSpace(participant.AgentName),
-			Label:          strings.TrimSpace(participant.Label),
-			SessionID:      strings.TrimSpace(participant.SessionID),
-			Source:         strings.TrimSpace(participant.Source),
-			ParentTurnID:   strings.TrimSpace(participant.ParentTurnID),
-			DelegationID:   strings.TrimSpace(participant.DelegationID),
-			ContextSyncSeq: participant.ContextSyncSeq,
-			AttachedAt:     participant.AttachedAt,
-			ControllerRef:  strings.TrimSpace(participant.ControllerRef),
-		})
-	}
-	return out
-}
-
-func activeTurnForSession(active []kernel.ActiveTurnState, sessionID string) bool {
+func activeTurnForSession(active []ActiveTurnState, sessionID string) bool {
 	sessionID = strings.TrimSpace(sessionID)
 	for _, item := range active {
 		if strings.TrimSpace(item.SessionRef.SessionID) == sessionID {

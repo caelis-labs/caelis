@@ -1215,12 +1215,11 @@ be migrated before retiring the old stack:
      `internal/app/services`. This gives `/status`, `/model`, and `/approval`
      a service-native driver path before the full interactive TUI entrypoint
      moves off the old stack.
-   - Migrated baseline: the same binding now supplies a thin core-runtime
-     `GatewayService` adapter for TUI submit, active-turn submission,
-     interrupt, replay, session list/resume, and minimal control-plane state.
-     Basic interactive prompts can therefore enter `internal/app/services`
-     without constructing `app/gatewayapp`, while unsupported advanced
-     participant operations fail explicitly at the adapter boundary.
+   - Migrated baseline: the same binding now supplies core-native driver hooks
+     for TUI submit, active-turn submission, interrupt, replay,
+     session list/resume, and minimal control-plane state. Basic interactive
+     prompts can therefore enter `internal/app/services` without constructing
+     `app/gatewayapp` or routing through the old gateway facade.
    - Migrated baseline: `internal/cli` now wires the production interactive
      TUI to this app-service binding for the core-native host runtime path,
      and the binding includes app settings backed model connect/delete/use
@@ -1426,6 +1425,10 @@ be migrated before retiring the old stack:
      Session list candidates are built from `core/session.SessionPage` and
      canonical session state instead of routing through
      `GatewayService.ListSessions` or `GatewayService.ResumeSession`.
+   - Migrated baseline: TUI agent status, mention completion,
+     participant resolution, active-turn detection, and interrupt now consume
+     core-native driver hooks. The old `GatewayService` facade has been
+     removed from the production TUI driver stack.
    - Migrated baseline: the public TUI driver contract no longer exposes old
      `kernel.EventEnvelope` live/replay streams or `kernel.CancelResult`.
      App-service turns use core submissions, core sessions, and core cancel
@@ -1458,9 +1461,8 @@ be migrated before retiring the old stack:
      settings panels, and live remote ACP process reconnect/lifecycle behavior
      still have old driver/app assumptions or missing service-native feature
      parity, so the old TUI stack cannot be removed yet.
-   - Still pending: `surfaces/tui/gatewaydriver` still keeps old
-     `GatewayService` control-plane, active-turn-state, interrupt, and
-     participant lifecycle adapters for the current TUI shell, and
+   - Still pending: `surfaces/tui/gatewaydriver` still carries residual
+     `ports/session` state conversion around the current TUI shell, and
      `surfaces/tui/app` still imports old gateway event/protocol types for
      transcript renderer compatibility, terminal/tool formatting, and
      participant projections. Retiring those imports requires moving the

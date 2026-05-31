@@ -162,13 +162,6 @@ func (s *gatewayDriverTestStack) StartSession(ctx context.Context, preferredSess
 	return portSessionFromCore(active), nil
 }
 
-func (s *gatewayDriverTestStack) CurrentGateway() GatewayService {
-	if s == nil || s.driverStack == nil || s.driverStack.GatewayFn == nil {
-		return nil
-	}
-	return s.driverStack.GatewayFn()
-}
-
 func (s *gatewayDriverTestStack) SetSandboxBackend(ctx context.Context, backend string) (SandboxStatus, error) {
 	if s == nil || s.driverStack == nil {
 		return SandboxStatus{}, fmt.Errorf("gatewaydriver test stack is unavailable")

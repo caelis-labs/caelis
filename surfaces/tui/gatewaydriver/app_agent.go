@@ -11,7 +11,6 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 )
 
 type appServiceAgentTurnHandle struct {
@@ -83,11 +82,7 @@ func (h *appServiceAgentTurnHandle) SessionEvents() <-chan appviewmodel.SessionE
 }
 
 func (h *appServiceAgentTurnHandle) Submit(context.Context, coreruntime.Submission) error {
-	return &kernel.Error{
-		Kind:    kernel.KindConflict,
-		Code:    kernel.CodeNoActiveRun,
-		Message: "participant turn does not accept active submissions",
-	}
+	return errNoActiveRun
 }
 
 func (h *appServiceAgentTurnHandle) Cancel() coreruntime.CancelResult {
@@ -250,67 +245,15 @@ func (h *appServiceAgentTurnHandle) publish(appEnv appviewmodel.SessionEventEnve
 	}
 }
 
-func (h *appServiceAgentTurnHandle) state() kernel.ActiveTurnState {
-	return kernel.ActiveTurnState{
-		SessionRef: portRefFromCore(h.SessionRef()),
-		Kind:       kernel.ActiveTurnKindParticipant,
+func (h *appServiceAgentTurnHandle) state() ActiveTurnState {
+	return ActiveTurnState{
+		SessionRef: h.SessionRef(),
+		Kind:       ActiveTurnKindParticipant,
 		HandleID:   h.HandleID(),
 		RunID:      h.RunID(),
 		TurnID:     h.TurnID(),
 		StartedAt:  h.CreatedAt(),
 	}
-}
-
-func (g *appServiceGateway) participantForAttach(ctx context.Context, snapshot coresession.Snapshot, req kernel.AttachParticipantRequest) (coresession.ParticipantBinding, error) {
-	descriptor, ok, err := g.resolveAgentDescriptor(ctx, req.Agent)
-	if err != nil {
-		return coresession.ParticipantBinding{}, err
-	}
-	if !ok {
-		return coresession.ParticipantBinding{}, fmt.Errorf("core app-service TUI gateway: agent %q is not configured", strings.TrimSpace(req.Agent))
-	}
-	existing := participantsFromCoreSnapshot(snapshot)
-	id := allocateCoreParticipantID(existing, descriptor.ID)
-	role := coresession.ParticipantRole(req.Role)
-	if role == "" {
-		role = coresession.ParticipantSidecar
-	}
-	label := strings.TrimSpace(req.Label)
-	if label == "" {
-		label = firstNonEmpty(descriptor.Name, descriptor.ID)
-	}
-	return coresession.ParticipantBinding{
-		ID:         id,
-		Kind:       coresession.ParticipantACP,
-		Role:       role,
-		AgentName:  strings.TrimSpace(descriptor.ID),
-		Label:      label,
-		Source:     firstNonEmpty(req.Source, "tui_agent_attach"),
-		AttachedAt: time.Now().UTC(),
-	}, nil
-}
-
-func (g *appServiceGateway) resolveAgentDescriptor(ctx context.Context, target string) (appservices.AgentDescriptor, bool, error) {
-	target = strings.ToLower(strings.TrimSpace(target))
-	if target == "" {
-		return appservices.AgentDescriptor{}, false, nil
-	}
-	agents, err := g.services.Agents().List(ctx)
-	if err != nil {
-		return appservices.AgentDescriptor{}, false, err
-	}
-	for _, agent := range agents {
-		if agent.Kind != appservices.AgentKindExternalACP {
-			continue
-		}
-		if strings.EqualFold(strings.TrimSpace(agent.ID), target) || strings.EqualFold(strings.TrimSpace(agent.Name), target) {
-			if strings.TrimSpace(agent.ID) == "" {
-				agent.ID = firstNonEmpty(agent.Name, agent.Command)
-			}
-			return agent, strings.TrimSpace(agent.ID) != "", nil
-		}
-	}
-	return appservices.AgentDescriptor{}, false, nil
 }
 
 func participantLifecycleEvent(participant coresession.ParticipantBinding, action string, source string) coresession.Event {
@@ -433,30 +376,6 @@ func findCoreParticipant(participants []coresession.ParticipantBinding, id strin
 		}
 	}
 	return coresession.ParticipantBinding{}, false
-}
-
-func allocateCoreParticipantID(existing []coresession.ParticipantBinding, base string) string {
-	base = strings.ToLower(strings.Trim(strings.TrimSpace(base), "@"))
-	base = strings.NewReplacer(" ", "-", "/", "-", "\\", "-", ":", "-").Replace(base)
-	if base == "" {
-		base = "agent"
-	}
-	used := map[string]struct{}{}
-	for _, participant := range existing {
-		id := strings.ToLower(strings.TrimSpace(participant.ID))
-		if id != "" {
-			used[id] = struct{}{}
-		}
-	}
-	if _, ok := used[base]; !ok {
-		return base
-	}
-	for i := 2; ; i++ {
-		candidate := fmt.Sprintf("%s-%d", base, i)
-		if _, ok := used[candidate]; !ok {
-			return candidate
-		}
-	}
 }
 
 func coreEventMetaString(meta map[string]any, key string) string {

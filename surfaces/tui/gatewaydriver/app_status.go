@@ -136,13 +136,11 @@ func (d *GatewayDriver) statusFromAppView(ctx context.Context) (StatusSnapshot, 
 			status.ContextWindowTokens = 0
 		}
 	}
-	if gw, err := d.gateway(); err == nil && gw != nil {
-		active := gw.ActiveTurns()
-		status.ActiveJobs = len(active)
-		status.Running = len(active) > 0
-		if kind, ok := activeTurnKindForSession(active, activeSession.SessionRef); ok {
-			status.ActiveTurnKind = kind
-		}
+	active := d.stack.ActiveTurns()
+	status.ActiveJobs = len(active)
+	status.Running = len(active) > 0
+	if kind, ok := activeTurnKindForSession(active, coreRefFromPort(activeSession.SessionRef)); ok {
+		status.ActiveTurnKind = string(kind)
 	}
 	return status, true, nil
 }

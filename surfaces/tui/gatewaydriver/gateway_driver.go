@@ -15,7 +15,6 @@ import (
 	coresession "github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	appviewmodel "github.com/OnslaughtSnail/caelis/internal/app/viewmodel"
-	"github.com/OnslaughtSnail/caelis/kernel"
 	"github.com/OnslaughtSnail/caelis/ports/session"
 )
 
@@ -64,13 +63,6 @@ func NewGatewayDriver(ctx context.Context, stack *DriverStack, preferredSessionI
 		driver.refreshSessionDisplay(ctx, activeSession)
 	}
 	return driver, nil
-}
-
-func (d *GatewayDriver) gateway() (GatewayService, error) {
-	if d == nil || d.stack == nil {
-		return nil, fmt.Errorf("surfaces/tui/gatewaydriver: stack is required")
-	}
-	return d.stack.gateway()
 }
 
 func anyString(value any) string {
@@ -343,13 +335,11 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 			status.Route = "host"
 		}
 	}
-	if gw, err := d.gateway(); err == nil && gw != nil {
-		active := gw.ActiveTurns()
-		status.ActiveJobs = len(active)
-		status.Running = len(active) > 0
-		if kind, ok := activeTurnKindForSession(active, activeSession.SessionRef); ok {
-			status.ActiveTurnKind = kind
-		}
+	active := d.stack.ActiveTurns()
+	status.ActiveJobs = len(active)
+	status.Running = len(active) > 0
+	if kind, ok := activeTurnKindForSession(active, coreRefFromPort(activeSession.SessionRef)); ok {
+		status.ActiveTurnKind = string(kind)
 	}
 	return status, nil
 }
@@ -364,11 +354,7 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	if err != nil {
 		return nil, err
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return nil, err
-	}
-	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(gw.ActiveTurns(), activeSession.SessionRef) {
+	if isBuiltInControllerSession(activeSession) && activeKernelTurnForSession(d.stack.ActiveTurns(), coreRefFromPort(activeSession.SessionRef)) {
 		coreSub := coreruntime.Submission{
 			Kind:         coreruntime.SubmissionConversation,
 			Text:         input,
@@ -416,22 +402,22 @@ func (d *GatewayDriver) Submit(ctx context.Context, submission Submission) (Turn
 	return nil, ErrMigrationPending
 }
 
-func activeKernelTurnForSession(active []kernel.ActiveTurnState, ref session.SessionRef) bool {
+func activeKernelTurnForSession(active []ActiveTurnState, ref coresession.Ref) bool {
 	kind, ok := activeTurnKindForSession(active, ref)
 	if !ok {
 		return false
 	}
-	return kind == "" || strings.EqualFold(kind, string(kernel.ActiveTurnKindKernel))
+	return kind == "" || kind == ActiveTurnKindKernel
 }
 
-func activeTurnKindForSession(active []kernel.ActiveTurnState, ref session.SessionRef) (string, bool) {
+func activeTurnKindForSession(active []ActiveTurnState, ref coresession.Ref) (ActiveTurnKind, bool) {
 	sessionID := strings.TrimSpace(ref.SessionID)
 	if sessionID == "" {
 		return "", false
 	}
 	for _, item := range active {
 		if strings.TrimSpace(item.SessionRef.SessionID) == sessionID {
-			return strings.TrimSpace(string(item.Kind)), true
+			return ActiveTurnKind(strings.TrimSpace(string(item.Kind))), true
 		}
 	}
 	return "", false
@@ -447,8 +433,7 @@ func isBuiltInControllerSession(activeSession session.Session) bool {
 }
 
 func isNoActiveRunError(err error) bool {
-	var gwErr *kernel.Error
-	return errors.As(err, &gwErr) && gwErr.Code == kernel.CodeNoActiveRun
+	return errors.Is(err, errNoActiveRun)
 }
 
 func (d *GatewayDriver) Interrupt(ctx context.Context) error {
@@ -463,13 +448,9 @@ func (d *GatewayDriver) Interrupt(ctx context.Context) error {
 		}
 		return fmt.Errorf("surfaces/tui/gatewaydriver: no active session")
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return err
-	}
-	if err := gw.Interrupt(ctx, kernel.InterruptRequest{
-		SessionRef: activeSession.SessionRef,
-		BindingKey: d.bindingKey,
+	if err := d.stack.Interrupt(ctx, InterruptRequest{
+		SessionRef: coreRefFromPort(activeSession.SessionRef),
+		Surface:    d.bindingKey,
 		Reason:     "tui interrupt",
 	}); err != nil {
 		if cancelCommand != nil {
@@ -585,26 +566,21 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	if !ok {
 		return status, nil
 	}
-	gw, err := d.gateway()
-	if err != nil {
-		return AgentStatusSnapshot{}, err
-	}
-	state, err := gw.ControlPlaneState(ctx, kernel.ControlPlaneStateRequest{
-		SessionRef: activeSession.SessionRef,
-	})
+	ref := coreRefFromPort(activeSession.SessionRef)
+	state, err := d.stack.ControlPlaneState(ctx, ref)
 	if err != nil {
 		return AgentStatusSnapshot{}, err
 	}
 	status.SessionID = activeSession.SessionID
-	status.ControllerKind = string(state.Controller.Kind)
-	status.ControllerLabel = strings.TrimSpace(firstNonEmpty(state.Controller.AgentName, state.Controller.Label, state.Controller.ControllerID, string(state.Controller.Kind)))
+	status.ControllerKind = agentControllerKindDisplay(state.Controller.Kind)
+	status.ControllerLabel = strings.TrimSpace(firstNonEmpty(state.Controller.AgentName, state.Controller.Label, state.Controller.ID, string(state.Controller.Kind)))
 	status.ControllerEpoch = strings.TrimSpace(state.Controller.EpochID)
 	status.HasActiveTurn = state.HasActiveTurn
-	if kind, ok := activeTurnKindForSession(gw.ActiveTurns(), activeSession.SessionRef); ok {
+	if kind, ok := activeTurnKindForSession(d.stack.ActiveTurns(), ref); ok {
 		status.HasActiveTurn = true
-		status.ActiveTurnKind = kind
+		status.ActiveTurnKind = string(kind)
 	}
-	if state.Controller.Kind == session.ControllerKindACP {
+	if state.Controller.Kind == coresession.ControllerACP {
 		if controllerStatus, ok, err := d.activeACPControllerStatus(ctx); err != nil {
 			return AgentStatusSnapshot{}, err
 		} else if ok {
@@ -619,7 +595,7 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	status.DelegatedParticipants = make([]AgentParticipantSnapshot, 0)
 	for _, participant := range state.Participants {
 		snapshot := agentParticipantSnapshot(participant)
-		if participant.Kind == session.ParticipantKindSubagent && participant.Role == session.ParticipantRoleDelegated {
+		if participant.Kind == coresession.ParticipantSubagent && participant.Role == coresession.ParticipantDelegated {
 			status.DelegatedParticipants = append(status.DelegatedParticipants, snapshot)
 			continue
 		}
@@ -628,7 +604,7 @@ func (d *GatewayDriver) AgentStatus(ctx context.Context) (AgentStatusSnapshot, e
 	return status, nil
 }
 
-func agentParticipantSnapshot(participant kernel.ParticipantState) AgentParticipantSnapshot {
+func agentParticipantSnapshot(participant coresession.ParticipantBinding) AgentParticipantSnapshot {
 	return AgentParticipantSnapshot{
 		ID:        strings.TrimSpace(participant.ID),
 		Label:     strings.TrimSpace(firstNonEmpty(participant.Label, participant.ID)),
@@ -636,6 +612,15 @@ func agentParticipantSnapshot(participant kernel.ParticipantState) AgentParticip
 		Kind:      string(participant.Kind),
 		Role:      string(participant.Role),
 		SessionID: strings.TrimSpace(participant.SessionID),
+	}
+}
+
+func agentControllerKindDisplay(kind coresession.ControllerKind) string {
+	switch kind {
+	case "", coresession.ControllerBuiltin:
+		return "kernel"
+	default:
+		return string(kind)
 	}
 }
 
@@ -649,7 +634,7 @@ func (d *GatewayDriver) ContinueSubagent(ctx context.Context, handle string, pro
 	if err != nil {
 		return nil, err
 	}
-	participantID, err := d.resolveParticipantID(ctx, activeSession.SessionRef, handle)
+	participantID, err := d.resolveParticipantID(ctx, coreRefFromPort(activeSession.SessionRef), handle)
 	if err != nil {
 		return nil, err
 	}
