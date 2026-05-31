@@ -120,9 +120,9 @@ func boundaryRule(rel string, importPath string, modulePath string) string {
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
 			return "core must not depend on app, impl, internal, kernel, ports, or surfaces"
 		}
-	case strings.HasPrefix(rel, "protocol/acp/projector/core/"):
+	case strings.HasPrefix(rel, "protocol/acp/projector/"):
 		if startsWithAny(target, "app/", "impl/", "internal/", "kernel/", "ports/", "surfaces/") {
-			return "protocol/acp/projector/core must depend only on core and protocol schema packages"
+			return "protocol/acp/projector must depend only on core and protocol schema packages"
 		}
 	case strings.HasPrefix(rel, "internal/engine/"):
 		if startsWithAny(target, "app/", "impl/", "internal/adapters/", "internal/app/", "internal/surface/", "surfaces/") {

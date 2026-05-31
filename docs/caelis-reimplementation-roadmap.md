@@ -725,7 +725,7 @@ replaced the old `app/gatewayapp` stack for current entrypoints:
   the currently constructed runtime supports them instead of routing those
   commands through the old stack. The app-service TUI binding now maps this
   status/lifecycle surface into the existing driver sandbox hooks.
-- `protocol/acp/projector/core`: canonical session event projection to ACP
+- `protocol/acp/projector`: canonical session event projection to ACP
   updates and permission requests. It now also projects core-native
   sandbox/task terminal markers plus `_meta.terminal_info`,
   `_meta.terminal_output`, and `_meta.terminal_exit` from canonical tool
@@ -830,7 +830,7 @@ complete.
 The implemented skeleton is aligned with the target direction:
 
 - New `core/*`, `internal/engine/*`, `internal/app/*`, `internal/adapters/*`,
-  `internal/surface/acpserver`, `protocol/acp/projector/core`, and
+  `internal/surface/acpserver`, `protocol/acp/projector`, and
   `internal/e2e` packages do not import the old `ports/*`, `kernel/*`,
   `impl/*`, `surfaces/*`, or `app/gatewayapp` stack.
 - Runtime orchestration is expressed through small contracts and concrete
@@ -1048,6 +1048,10 @@ The completed work is intentionally limited to the reusable skeleton:
   a small core-native scripted provider, allowing the old
   `impl/agent/acp` root runtime adapter plus its assembly, loader, and terminal
   helper packages to be deleted.
+- Legacy ports/session ACP projector removal: the unused SDK/ports-session ACP
+  projector has been replaced by the core-native `protocol/acp/projector`
+  package, so ACP projection no longer has a dormant old event-model
+  implementation path.
 - Legacy agent runtime/client removal: after participant invocation,
   controller handoff, SPAWN, async subagent tasks, terminal callbacks,
   compaction, approval policy, and app-service turn routing all moved onto

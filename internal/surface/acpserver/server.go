@@ -15,7 +15,7 @@ import (
 	"github.com/OnslaughtSnail/caelis/core/session"
 	appservices "github.com/OnslaughtSnail/caelis/internal/app/services"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/jsonrpc"
-	coreprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector/core"
+	acpprojector "github.com/OnslaughtSnail/caelis/protocol/acp/projector"
 	"github.com/OnslaughtSnail/caelis/protocol/acp/schema"
 )
 
@@ -33,7 +33,7 @@ type Server struct {
 	appName        string
 	userID         string
 	implementation schema.Implementation
-	projector      coreprojector.Projector
+	projector      acpprojector.Projector
 	conn           *jsonrpc.Conn
 	terminals      terminalRegistry
 }
