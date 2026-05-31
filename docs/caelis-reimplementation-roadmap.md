@@ -1417,6 +1417,10 @@ be migrated before retiring the old stack:
      command, model, mode, compaction, replay, and task hooks. Conversion to
      old `ports/session` structs is contained at the legacy gateway and driver
      state boundary.
+   - Migrated baseline: TUI status no longer has a parallel legacy
+     `ports/session` usage replay parser in gatewaydriver. Session usage shown
+     by the app-service path comes from the shared core-session status
+     aggregation in `internal/app/services`.
    - `surfaces/tui/app`, `surfaces/tui/gatewaydriver`, command registry,
      completion shell, connect wizard Bubble Tea runtime, status bar,
      renderer, transcript reducer, tool panels, approval UI, theme system, and

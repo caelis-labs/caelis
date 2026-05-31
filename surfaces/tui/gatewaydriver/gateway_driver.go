@@ -372,20 +372,6 @@ func (d *GatewayDriver) status(ctx context.Context, includeDiagnostics bool) (St
 				status.Model = formatReasoningModelDisplay(rawModelText, status.ReasoningEffort)
 			}
 		}
-		if ok {
-			if usage, err := d.sessionTokenUsageBreakdown(context.Background(), activeSession.SessionRef); err == nil {
-				status.SessionUsageTotal = usage.Total
-				status.SessionUsageMain = usage.Main
-				status.SessionUsageSubagents = usage.Subagents
-				status.SessionUsageAutoReview = usage.AutoReview
-				status.SessionUsageCompaction = usage.Compaction
-				status.SessionInputTokens = usage.Total.InputTokens
-				status.SessionCachedInputTokens = usage.Total.CachedInputTokens
-				status.SessionOutputTokens = usage.Total.OutputTokens
-				status.SessionReasoningTokens = usage.Total.ReasoningTokens
-				status.SessionTotalTokens = usage.Total.TotalTokens
-			}
-		}
 	}
 	if activeACP {
 		rawModelText = firstNonEmpty(strings.TrimSpace(acpStatus.Model), acpModelText, rawModelText)
